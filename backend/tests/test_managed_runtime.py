@@ -46,25 +46,49 @@ def _pin(monkeypatch, payload: bytes):
     return pin
 
 
-def test_checksum_mismatch_never_publishes_a_runtime(monkeypatch, tmp_path):
+def test_checksum_mismatch_is_a_runtime_download_failure(monkeypatch, tmp_path):
     from tools import managed_runtime
 
     _pin(monkeypatch, b"expected")
     monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_args, **_kwargs: _Response(b"wrong"))
 
-    with pytest.raises(managed_runtime.ManagedRuntimeError, match="checksum"):
+    with pytest.raises(managed_runtime.ManagedRuntimeDownloadError, match="checksum"):
         managed_runtime.ensure_runtime("node", root=tmp_path / "runtimes")
 
     assert not (tmp_path / "runtimes" / "node" / "test" / "arm64").exists()
 
 
-def test_download_failure_never_publishes_a_runtime(monkeypatch, tmp_path):
+def test_refused_runtime_download_is_a_runtime_download_failure(monkeypatch, tmp_path):
     from tools import managed_runtime
 
     _pin(monkeypatch, _node_archive())
     monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(urllib.error.URLError("offline")))
 
-    with pytest.raises(managed_runtime.ManagedRuntimeError, match="download failed"):
+    with pytest.raises(managed_runtime.ManagedRuntimeDownloadError, match="download failed"):
+        managed_runtime.ensure_runtime("node", root=tmp_path / "runtimes")
+
+    assert not (tmp_path / "runtimes" / "node" / "test" / "arm64").exists()
+
+
+def test_http_error_runtime_download_is_a_runtime_download_failure(monkeypatch, tmp_path):
+    from tools import managed_runtime
+
+    _pin(monkeypatch, _node_archive())
+    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(urllib.error.HTTPError("https://example.test", 503, "unavailable", {}, None)))
+
+    with pytest.raises(managed_runtime.ManagedRuntimeDownloadError, match="HTTPError"):
+        managed_runtime.ensure_runtime("node", root=tmp_path / "runtimes")
+
+    assert not (tmp_path / "runtimes" / "node" / "test" / "arm64").exists()
+
+
+def test_timeout_runtime_download_is_a_runtime_download_failure(monkeypatch, tmp_path):
+    from tools import managed_runtime
+
+    _pin(monkeypatch, _node_archive())
+    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError()))
+
+    with pytest.raises(managed_runtime.ManagedRuntimeDownloadError, match="TimeoutError"):
         managed_runtime.ensure_runtime("node", root=tmp_path / "runtimes")
 
     assert not (tmp_path / "runtimes" / "node" / "test" / "arm64").exists()

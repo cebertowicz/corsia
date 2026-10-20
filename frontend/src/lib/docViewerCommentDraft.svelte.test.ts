@@ -6,7 +6,10 @@ import { awaitsFirstMark } from './docCanvasComments';
 import type { DocComment } from '$lib/stores/docComments';
 import { createViewerCommentDraft } from './docViewerCommentDraft.svelte';
 
-vi.mock('$lib/stores/docComments', () => ({ addComment: vi.fn(async () => 'posted') }));
+vi.mock('$lib/stores/docComments', async (original) => ({
+	...await original<typeof import('$lib/stores/docComments')>(),
+	addComment: vi.fn(async () => 'posted'),
+}));
 vi.mock('$lib/stores/commentSelection', async (original) => ({
 	...await original<typeof import('$lib/stores/commentSelection')>(),
 	captureComment: vi.fn(async (selection: { quote: string }) => ({ from: 0, to: selection.quote.length, quote: selection.quote, clientId: 'client' })),

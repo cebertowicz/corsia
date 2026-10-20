@@ -50,7 +50,10 @@ def _jumped_line(title: str, node_id: str, rank: int, total: int, top_id: str, k
 
 
 def _add(db, plan_id: str, title: str, **params) -> dict:
-    body = {"kind": "task", "title": title, "acceptance_criteria": f"{title} is verified", **params}
+    body = {
+        "kind": "task", "title": title, "acceptance_criteria": f"{title} is verified",
+        "size": "unknown", **params,
+    }
     return plan_update(db, plan_id, "add", body)
 
 
@@ -227,7 +230,7 @@ def test_insert_has_no_rank_line(db):
 
     result = plan_update(db, plan.id, "insert", {
         "kind": "task", "title": "Inserted", "acceptance_criteria": "Inserted is verified",
-        "before_node_id": ready.id,
+        "size": "unknown", "before_node_id": ready.id,
     })
 
     assert "rank" not in result
@@ -246,7 +249,9 @@ def test_a_conductors_add_to_another_agents_plan_has_no_rank_line(db):
     db.commit()
     plan = owner_plan(db)
     task(db, plan.id, "Ready work")
-    body = {"kind": "task", "title": "From the conductor", "acceptance_criteria": "Done"}
+    body = {
+        "kind": "task", "title": "From the conductor", "acceptance_criteria": "Done", "size": "unknown",
+    }
 
     result = plan_update(db, plan.id, "add", body, actor=WORKSPACE_CONDUCTOR)
 

@@ -119,7 +119,7 @@ def correction_lags(histories: list[WorkflowHistory]) -> list[float]:
     lags = []
     for history in histories:
         for run in history.runs:
-            facts = [parse_ts(fact.message_at) for fact in run.corrections if fact.is_correction]
+            facts = [parse_ts(fact.source_at) for fact in run.corrections if fact.is_correction]
             if run.terminal_at and facts:
                 lags.append(max(0.0, (max(facts) - parse_ts(run.terminal_at)).total_seconds() / 86_400))
     return lags

@@ -256,14 +256,21 @@ def scope_to_thread(target: ExecutionTarget, *, thread_id: str | None, db) -> Ex
     """
     from dataclasses import replace
 
-    from llm.locality import locality_refusal, thread_project
+    from connections.account_policy import AccountAdmissionError, thread_scope
+    from llm.locality import locality_refusal
 
     row = _target_row(target.catalog_id, db=db)
     if row is None:
         return target
+    try:
+        thread = thread_scope(thread_id, db=db) if thread_id else None
+    except AccountAdmissionError:
+        thread = None
     refusal = locality_refusal(
-        # The thread's own local-only flag is read here once threads carry one.
-        row, thread_local_only=False, project_id=thread_project(thread_id, db), db=db,
+        row,
+        thread_local_only=bool(thread and thread["local_only"]),
+        project_id=thread["project_id"] if thread else None,
+        db=db,
     )
     if refusal is None:
         return target

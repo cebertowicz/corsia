@@ -217,6 +217,19 @@ def test_an_agent_cannot_write_either_setting(client, world, caplog):
     assert "private" not in row["metadata_json"]
 
 
+def test_turn_time_local_only_refuses_a_catalog_row_after_its_server_stops_being_local(world):
+    from infra.local_only import LocalityRefused, require_local_only_model
+
+    require_local_only_model(LOCAL, thread_local_only=True, db=world)
+    world.execute("UPDATE network_server_endpoints SET host=? WHERE server_id='loop'", (LAN,))
+    world.commit()
+
+    with pytest.raises(LocalityRefused) as refused:
+        require_local_only_model(LOCAL, thread_local_only=True, db=world)
+
+    assert str(refused.value).startswith("local_only_requires_local_model:")
+
+
 def test_catalog_rows_carry_the_server_fact_as_is_local(world):
     from llm.model_status import get_model_status_rows
 

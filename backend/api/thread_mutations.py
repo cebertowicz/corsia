@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from api.thread_deletion import delete_owned_thread as _delete_owned_thread
-from infra.auth import authenticate
+from infra.auth import authenticate, require_human_user
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
+from api.locality_refusal import locality_refused_response
+from infra.local_only import (
+    LocalityRefused,
+    local_only_ancestor,
+    require_local_only_model,
+    write_family_local_only,
+)
 from infra.passive_changes import append_agent_roster_transition
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
@@ -88,6 +95,8 @@ async def _patch_model(thread_id: str, user_id: str, body: dict):
             setup_selection=source == "setup",
             **({"account_id": body["account_id"]} if body.get("account_id") is not None else {}),
         )
+    except LocalityRefused as exc:
+        return locality_refused_response(exc)
     except (ModelSwitchPreparationError, ModelSwitchConflict) as exc:
         raise HTTPException(409, str(exc)) from exc
     if not isinstance(result, ModelSwitchOutcome):
@@ -201,6 +210,56 @@ def _write_metadata_patch(
             "context_boundary_changed": context_boundary_changed,
             "archive_changed": archive_changed,
         }
+
+
+def _write_local_only(thread_id: str, user_id: str, local_only: bool) -> dict | str:
+    """Write Local only on the thread and its family descendants in one transaction."""
+    with write_transaction(None, scope="thread_local_only") as db:
+        thread = get_thread_for_user(thread_id, user_id, db=db)
+        if not thread:
+            return "not_found"
+        if local_only:
+            for model in (thread["model"], thread["pending_model"]):
+                require_local_only_model(model, thread_local_only=True, db=db, thread_id=thread_id)
+        elif local_only_ancestor(thread, db=db):
+            return "ancestor_local_only"
+        write_family_local_only(thread_id, local_only, utc_now_iso(), db=db)
+        return {"local_only": local_only}
+
+
+@router.put("/threads/{thread_id}/local-only")
+async def set_local_only(
+    thread_id: str,
+    body: dict,
+    user: dict = Depends(require_human_user),
+):
+    """Set a thread's person-only Local only scope for it and every worker under it."""
+    local_only = body.get("local_only")
+    if not isinstance(local_only, bool):
+        raise HTTPException(422, "local_only must be a boolean")
+    try:
+        result = await run_in_db(_write_local_only, thread_id, user["id"], local_only)
+    except LocalityRefused as exc:
+        return locality_refused_response(exc, turning_on=True)
+    if result == "not_found":
+        raise HTTPException(404)
+    if result == "ancestor_local_only":
+        return JSONResponse(
+            status_code=409,
+            content={
+                "code": "local_only_set_by_parent",
+                "message": "This chat is Local only because the chat that started it is. "
+                "Turn Local only off there, or start a new chat.",
+            },
+        )
+    emit_product_event(
+        "session",
+        "local_only.changed",
+        thread_id=thread_id,
+        user_id=user["id"],
+        properties={"local_only": local_only},
+    )
+    return {"ok": True, **result}
 
 
 async def _patch_metadata(thread_id: str, user_id: str, body: dict):

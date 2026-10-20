@@ -1,11 +1,10 @@
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { expectQuietSave, observeSaveCue } from '../support/docSaveCue';
 import { replyField, showAllThreads } from '../support/commentDrawer';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
-test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves moved anchors', async ({ page, request }, testInfo) => {
-	test.skip((page.viewportSize()?.width ?? 0) <= 1024, 'Uses the existing desktop Comments pane.');
+async function seedCommentedDocument({ page, request }: { page: Page; request: APIRequestContext }) {
 	const title = `comment-writes-${Date.now()}`;
 	const threadId = await createSession(request, title);
 	const token = encodeURIComponent(TEST_TOKEN);
@@ -35,6 +34,12 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 			} }, splitWidth: 420,
 		}));
 	}, { threadId, docPath, title });
+	return { title, commentUrl, commentId };
+}
+
+test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves moved anchors', async ({ page, request }, testInfo) => {
+	test.skip((page.viewportSize()?.width ?? 0) <= 1024, 'Uses the existing desktop Comments pane.');
+	const { title, commentUrl, commentId } = await seedCommentedDocument({ page, request });
 	// Comments live in the canvas drawer, which starts closed on every load.
 	const openComments = async () => {
 		await page.getByRole('button', { name: /^1 open thread\b/ }).click();
@@ -83,4 +88,30 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	await expect(comment).toContainText('Agreed');
 	await expect(editor).toContainText('Prefix Before Anchor sentence.');
 	await saveEvidenceScreenshot(page, testInfo, 'document-comment-persisted', { fullPage: false });
+});
+
+test('@flow:document-comment-highlight a resolved comment loses its highlight, shows it again only while picked in the drawer, and re-opening restores it', async ({ page, request }, testInfo) => {
+	test.skip((page.viewportSize()?.width ?? 0) <= 1024, 'Uses the existing desktop Comments pane.');
+	const { title } = await seedCommentedDocument({ page, request });
+	await loginByUrl(page);
+	await page.getByText(title, { exact: true }).first().click();
+	const anchorMark = page.locator('.cm-content .cm-comment-anchor');
+	// The highlight opens the comment's popover, which focuses it: resolving it from there must end the highlight too.
+	await anchorMark.click();
+	await expect(anchorMark).toHaveClass(/cm-comment-focused/);
+	await saveEvidenceScreenshot(page, testInfo, 'highlight-1-open', { fullPage: false });
+	await page.getByRole('region', { name: /^Comment by / }).getByRole('button', { name: 'Resolve', exact: true }).click();
+	await expect(anchorMark).toHaveCount(0);
+	await saveEvidenceScreenshot(page, testInfo, 'highlight-2-resolved', { fullPage: false });
+	// Picking the resolved comment in the drawer shows which text it was.
+	await page.getByRole('button', { name: /^0 open threads\b/ }).click();
+	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
+	await showAllThreads(drawer);
+	await drawer.getByRole('button', { name: /^Go to text: / }).click();
+	await expect(anchorMark).toHaveCount(1);
+	await saveEvidenceScreenshot(page, testInfo, 'highlight-3-resolved-picked-in-drawer', { fullPage: false });
+	await drawer.getByRole('region', { name: /^Resolved comment by / }).getByRole('button', { name: /^Resolved · / }).click();
+	await drawer.getByRole('button', { name: 'Re-open', exact: true }).click();
+	await expect(anchorMark).toHaveCount(1);
+	await saveEvidenceScreenshot(page, testInfo, 'highlight-4-reopened', { fullPage: false });
 });

@@ -43,6 +43,13 @@ def project_cloud_off_text(selector: str, ready_local: list[str], *, spawn: bool
     return f"{text} Local workers run one at a time." if spawn else text
 
 
+def thread_local_only_text(selector: str, ready_local: list[str], *, spawn: bool = False) -> str:
+    """Return the agent-facing recovery text for a ``thread_local_only`` refusal."""
+    text = f"local_only_requires_local_model: {_held_clause(selector, 'thread_local_only')}. "
+    text += f"{_USE_READY_LOCAL}: {', '.join(ready_local)}." if ready_local else NO_LOCAL_READY_TEXT
+    return f"{text} Local workers run one at a time." if spawn else text
+
+
 def _held_clause(selector: str, cause: str, thread_phrase: str = THREAD_HOLD_PHRASE) -> str:
     if cause == "thread_local_only":
         return f"{selector} can't run here: {thread_phrase}"

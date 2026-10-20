@@ -24,8 +24,15 @@ export const docTheme = EditorView.theme({
 	'.cm-line': { padding: '0 2px' },
 	'&.cm-focused': { outline: 'none' },
 	'.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
+	// The selection is the strongest wash in the editor: --accent-subtle is a 12% wash that sits at about 1.1:1 on the page,
+	// too faint to see a drag, and it is also the matched-text wash below, so it is its own rule rather than that token.
+	// It still follows the accent (a project's, or the default); the share is per theme because the same percentage reads
+	// far fainter on the dark page. .cm-selectionMatch keeps the faint wash so a match never reads as the selection.
 	'&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
-		backgroundColor: 'var(--accent-subtle)'
+		backgroundColor: 'color-mix(in srgb, var(--accent) 45%, transparent)'
+	},
+	'html[data-theme="light"] &.cm-focused .cm-selectionBackground, html[data-theme="light"] & .cm-selectionBackground, html[data-theme="light"] & ::selection': {
+		backgroundColor: 'color-mix(in srgb, var(--accent) 35%, transparent)'
 	},
 	'.cm-selectionMatch': { backgroundColor: 'var(--accent-wash)' },
 	'.cm-gutters': { display: 'none' },

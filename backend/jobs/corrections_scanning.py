@@ -11,10 +11,15 @@ from core.corrections_input import (
 from core.corrections_recording import (
     COMMENT_SUBJECT_PREFIX,
     CORRECTION_EVENT,
-    DECISION_SUBJECT_PREFIX,
     MESSAGE_SUBJECT_PREFIX,
+    SOURCE_KIND_DECISION_ANSWER,
+    SOURCE_KIND_DOC_COMMENT,
+    SOURCE_KIND_MESSAGE,
     ClassifierVersion,
     CorrectionCandidate,
+    decision_answer_arrived_at_sql,
+    decision_answer_source_id,
+    decision_answer_subject_key_sql,
     is_owner_authored_message,
     owner_message_sql_predicate,
     version_match_sql,
@@ -85,7 +90,7 @@ def pending_candidate_keys(
                 **owner_filter_params,
                 **version_filter_params,
                 **_before_params(before),
-                "source_kind": "message",
+                "source_kind": SOURCE_KIND_MESSAGE,
                 "user_id": owner_user_id,
                 "scope_project": "all",
                 "scope_agent": None,
@@ -97,7 +102,7 @@ def pending_candidate_keys(
         ).fetchall()
         return [
             PendingCandidateKey(
-                rowid=row[0], source_kind="message", source_id=row[1], thread_id=row[2], project_id=row[3], created_at=row[4],
+                rowid=row[0], source_kind=SOURCE_KIND_MESSAGE, source_id=row[1], thread_id=row[2], project_id=row[3], created_at=row[4],
             )
             for row in rows
         ]
@@ -126,8 +131,8 @@ def pending_source_candidate_keys(
             **_before_params(before),
             "correction_event": CORRECTION_EVENT,
             "comment_prefix": COMMENT_SUBJECT_PREFIX,
-            "decision_prefix": DECISION_SUBJECT_PREFIX,
             "decision_type": DECISION_TYPE,
+            "source_kind": SOURCE_KIND_DECISION_ANSWER,
             "scan_limit": batch_size,
             "since_created_at": since,
         }
@@ -148,36 +153,33 @@ def pending_source_candidate_keys(
               )
             ORDER BY c.created_at DESC,c.id DESC LIMIT :scan_limit
             """,
-            {**params, "source_kind": "doc_comment"},
+            {**params, "source_kind": SOURCE_KIND_DOC_COMMENT},
         ).fetchall()
-        decision_created_at = "json_extract(metadata,'$.plan_decision.answered_at')"
+        decision_created_at = decision_answer_arrived_at_sql("d")
         decision_rows = db.execute(
             f"""
-            SELECT external_id,json_extract(metadata,'$.plan_decision.answered_at')
-            FROM artifact_identities
-            WHERE integration='local' AND type=:decision_type AND state='active'
-              AND json_extract(metadata,'$.plan_decision.state')='answered'
+            SELECT d.external_id,{decision_created_at}
+            FROM artifact_identities d
+            WHERE d.integration='local' AND d.type=:decision_type AND d.state='active'
+              AND json_extract(d.metadata,'$.plan_decision.state')='answered'
               -- A coarse prefilter, never narrower than Plans' ``answer_note``, which
               -- ``source_candidate`` applies to each selected answer.
-              AND COALESCE(json_extract(metadata,'$.plan_decision.answer.text'),'')<>''
-              AND {_before_clause('plan_decision_answer', 'external_id', decision_created_at)}
-              AND (:since_created_at IS NULL
-                   OR json_extract(metadata,'$.plan_decision.answered_at') >= :since_created_at)
+              AND COALESCE(json_extract(d.metadata,'$.plan_decision.answer.text'),'')<>''
+              AND {_before_clause(SOURCE_KIND_DECISION_ANSWER, 'd.external_id', decision_created_at)}
+              AND (:since_created_at IS NULL OR {decision_created_at} >= :since_created_at)
               AND NOT EXISTS (
                 SELECT 1 FROM outcome_events e
                 WHERE e.event_name=:correction_event
-                  AND e.subject_key=:decision_prefix || external_id || ':'
-                      || json_extract(metadata,'$.plan_decision.revision')
+                  AND e.subject_key={decision_answer_subject_key_sql('d')}
                   AND e.retracted_at IS NULL AND {version_filter}
               )
-            ORDER BY json_extract(metadata,'$.plan_decision.answered_at') DESC,external_id DESC
-            LIMIT :scan_limit
+            ORDER BY {decision_created_at} DESC,d.external_id DESC LIMIT :scan_limit
             """,
-            {**params, "source_kind": "plan_decision_answer"},
+            params,
         ).fetchall()
         return [
-            *(PendingCandidateKey(None, "doc_comment", str(row[0]), None, None, str(row[1])) for row in comment_rows),
-            *(PendingCandidateKey(None, "plan_decision_answer", str(row[0]), None, None, str(row[1])) for row in decision_rows),
+            *(PendingCandidateKey(None, SOURCE_KIND_DOC_COMMENT, str(row[0]), None, None, str(row[1])) for row in comment_rows),
+            *(PendingCandidateKey(None, SOURCE_KIND_DECISION_ANSWER, str(row[0]), None, None, str(row[1])) for row in decision_rows),
         ]
     finally:
         db.close()
@@ -190,7 +192,7 @@ def hydrate_candidates(keys: list[PendingCandidateKey]) -> list[CorrectionCandid
     db = get_db()
     try:
         candidates = (
-            _message_candidate(db, key) if key.source_kind == "message" else source_candidate(db, key.source_kind, key.source_id)
+            _message_candidate(db, key) if key.source_kind == SOURCE_KIND_MESSAGE else source_candidate(db, key.source_kind, key.source_id)
             for key in keys
         )
         return [candidate for candidate in candidates if candidate is not None]
@@ -231,9 +233,9 @@ def source_candidate(db, source_kind: str, source_id: str) -> CorrectionCandidat
     (the commented excerpt, or the decision's question and options) is one
     ``Agent`` context row before it, the shape the classifier was trained on.
     """
-    if source_kind == "doc_comment":
+    if source_kind == SOURCE_KIND_DOC_COMMENT:
         return _comment_candidate(db, source_id)
-    if source_kind == "plan_decision_answer":
+    if source_kind == SOURCE_KIND_DECISION_ANSWER:
         return _decision_candidate(db, source_id)
     raise ValueError(f"unknown correction source kind: {source_kind}")
 
@@ -256,7 +258,7 @@ def _comment_candidate(db, comment_id: str) -> CorrectionCandidate | None:
     target, body = str(row["target"]), str(row["body"])
     artifact = get_artifact(str(row["artifact_id"]), db=db) or {}
     return CorrectionCandidate(
-        "doc_comment", str(row["id"]), target, _project_of(db, target), owner_text(body), str(row["created_at"]),
+        SOURCE_KIND_DOC_COMMENT, str(row["id"]), target, _project_of(db, target), owner_text(body), str(row["created_at"]),
         context=agent_context(row["anchor_text"] or ""),
         quote=body, about=str(artifact.get("title") or artifact.get("path") or row["artifact_id"]),
     )
@@ -277,7 +279,7 @@ def _decision_candidate(db, decision_id: str) -> CorrectionCandidate | None:
     if not text or not thread_id or not isinstance(thread_id, str) or revision is None or not answered_at:
         return None
     return CorrectionCandidate(
-        "plan_decision_answer", f"{decision_id}:{revision}", thread_id, _project_of(db, thread_id),
+        SOURCE_KIND_DECISION_ANSWER, decision_answer_source_id(decision_id, revision), thread_id, _project_of(db, thread_id),
         owner_text(text), str(answered_at), context=agent_context(_question(body)),
         quote=text, about=str(body.get("title") or decision_id),
     )

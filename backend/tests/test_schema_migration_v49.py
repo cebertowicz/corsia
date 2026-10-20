@@ -31,7 +31,7 @@ def _columns(db) -> set[str]:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 130
+    assert SCHEMA_VERSION == 131
 
 
 def test_fresh_schema_has_one_mark_and_the_step_leaves_it_alone():

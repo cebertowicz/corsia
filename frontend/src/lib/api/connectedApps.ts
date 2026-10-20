@@ -107,10 +107,12 @@ export function connectedAppStateLine(app: ConnectedApp, signedOutHere = false):
 		case 'needs_sign_in': return 'Needs you to sign in';
 		case 'disconnected': return 'Disconnected';
 		case 'expired': return 'Request expired';
-		case 'failed': return `Couldn't connect: ${({ cannot_start: "app didn't start", timed_out: 'no response', protocol_error: 'not compatible', name_collision: 'clashes with another app' }[app.failure_class ?? ''] ?? 'unknown reason')}`;
+		case 'failed': return `Couldn't connect: ${({ cannot_start: "app didn't start", runtime_download_failed: 'download failed', timed_out: 'no response', protocol_error: 'not compatible', name_collision: 'clashes with another app' }[app.failure_class ?? ''] ?? 'unknown reason')}`;
 		default: return app.state;
 	}
 }
+
+export const runtimeDownloadFailureBody = "CORSIA couldn't download what this app needs to run on this computer. Check that you're connected to the internet, then press Reconnect. If it keeps happening, your network may be blocking the download.";
 
 export const needsTokenBody = (name: string): string => `${name} needs a key before agents can use it: a code ${name} gives you so other apps can use your account (${name} may call it a token or an API key). Create one in your ${name} settings.`;
 

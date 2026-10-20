@@ -153,6 +153,18 @@ describe('ConnectAppFlow', () => {
 		await vi.waitFor(() => expect(host.querySelector('input[aria-label="What it runs"]')).toBe(document.activeElement));
 	});
 
+	it('shows the runtime-download recovery without pointing to What it runs', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ id: 'files', name: 'Files', state: 'failed', failure_class: 'runtime_download_failed', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: true } }) })));
+		render();
+		press('Continue');
+		type('Name', 'Files');
+		type('What it runs', 'npx -y @example/app');
+		press('Continue');
+		press('Connect');
+		await vi.waitFor(() => expect(host.textContent).toContain("Couldn't connect: download failed"));
+		expect(host.textContent).toContain("CORSIA couldn't download what this app needs to run on this computer. Check that you're connected to the internet, then try again. If it keeps happening, your network may be blocking the download.");
+	});
+
 	it('shows working state as Connected and finishes with Done', async () => {
 		const { onClose } = await connectResult('working', { tool_count: 46 });
 		expect(host.querySelector('h2')?.textContent).toBe('Files: Connected · 46 actions');

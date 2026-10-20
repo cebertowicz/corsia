@@ -95,6 +95,7 @@ def _verdict(db, plan_id: str, operation: str, node_id: str, **extra) -> dict:
         {
             "node_id": node_id, "verification_result": "passed",
             "expected_revision": service._node_row(db, node_id)["revision"],
+            **({"size": "unknown"} if operation == "accept_with_follow_up" else {}),
             **extra,
         },
         actor=PARENT, provenance="test.verdict", mutation_id=uuid.uuid4().hex, db=db,
