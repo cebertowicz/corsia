@@ -248,7 +248,8 @@
 	/* Expanded, the ask text (`.rb-ask-full`) is its own grid item spanning every column under line 1, so it has the header's full width, not what the pill and Request review leave it. */
 	/* A narrow column, at any pointer, gives the note its own full-width row (up to four lines) above Cancel and Request changes, as the phone capsule does. */
 	/* There, a status takes its own row above the buttons too, rather than wrapping a word per line beside them. */
-	@container doc-canvas (max-width: 600px) {
+	/* 37.5rem is the document canvas's 600px narrow breakpoint at the default root size. */
+	@container doc-canvas (max-width: 37.5rem) {
 		.review-bar.ask .rb-row2 { flex-wrap: wrap; }
 		.review-bar.ask .rb-status:not(:empty) { flex-basis: 100%; }
 		.review-bar.noting :global(.rb-note) { flex: 1 0 100%; order: 1; height: auto; min-height: var(--space-6); max-height: calc(4lh + 2 * var(--space-1)); padding: var(--space-1) var(--space-2); line-height: var(--lh-normal); }
@@ -257,7 +258,7 @@
 
 	/* Solid, not glass: document text reads through any translucent fill, and the header's backdrop root stops the blur from reaching it. A touch screen at a narrow canvas gets the answer in a floating capsule at the canvas's bottom edge, with the status above its buttons (the capsule grows upward); the ask is one in-flow line. */
 	@media (any-pointer: coarse) {
-		@container doc-canvas (max-width: 600px) {
+		@container doc-canvas (max-width: 37.5rem) {
 			.review-bar { min-height: var(--rb-hit); }
 			.review-bar.ask { min-height: 0; }
 			.rb-line { min-height: var(--rb-hit); }
