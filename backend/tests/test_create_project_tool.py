@@ -99,7 +99,6 @@ def test_execute_does_not_raise_import_error(monkeypatch, tmp_path):
         "CREATE TABLE threads ("
         "  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, model TEXT,"
         "  reasoning_effort TEXT, project_id TEXT, local_only INTEGER NOT NULL DEFAULT 0,"
-        "  local_only_root_thread_id TEXT REFERENCES threads(id),"
         "  created_at TEXT, updated_at TEXT, runtime_context_epoch INTEGER DEFAULT 0,"
         "  last_context_change_seq INTEGER DEFAULT 0"
         ")"
@@ -108,12 +107,6 @@ def test_execute_does_not_raise_import_error(monkeypatch, tmp_path):
         "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
     )
     conn.execute("CREATE TABLE context_change_journal (seq INTEGER PRIMARY KEY)")
-    conn.execute(
-        "CREATE TABLE project_inference_policies ("
-        "project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE, "
-        "cloud_models_off INTEGER NOT NULL DEFAULT 0 CHECK (cloud_models_off IN (0,1))"
-        ")"
-    )
     # The conductor's model binds its vendor account from the catalog; an
     # empty catalog reads that model's vendor as unknown, so nothing binds.
     conn.execute(
@@ -331,7 +324,6 @@ def test_execute_returns_loud_collision_error(monkeypatch, tmp_path):
         "CREATE TABLE threads ("
         "  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, model TEXT,"
         "  reasoning_effort TEXT, project_id TEXT, local_only INTEGER NOT NULL DEFAULT 0,"
-        "  local_only_root_thread_id TEXT REFERENCES threads(id),"
         "  created_at TEXT, updated_at TEXT, runtime_context_epoch INTEGER DEFAULT 0,"
         "  last_context_change_seq INTEGER DEFAULT 0"
         ")"
@@ -497,7 +489,6 @@ def test_initialize_project_stores_logical_truth_and_seeds_only_project_context(
         "CREATE TABLE threads ("
         "id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, model TEXT, "
         "reasoning_effort TEXT, project_id TEXT, local_only INTEGER NOT NULL DEFAULT 0, "
-        "local_only_root_thread_id TEXT REFERENCES threads(id), "
         "created_at TEXT, updated_at TEXT, runtime_context_epoch INTEGER DEFAULT 0, "
         "last_context_change_seq INTEGER DEFAULT 0)"
     )
@@ -592,7 +583,6 @@ def test_initialize_project_registers_default_repo_policy(
             reasoning_effort TEXT,
             project_id TEXT,
             local_only INTEGER NOT NULL DEFAULT 0,
-            local_only_root_thread_id TEXT REFERENCES threads(id),
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,
@@ -684,7 +674,6 @@ async def test_project_create_api_rejects_repo_registration_during_owned_process
             reasoning_effort TEXT,
             project_id TEXT,
             local_only INTEGER NOT NULL DEFAULT 0,
-            local_only_root_thread_id TEXT REFERENCES threads(id),
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,
@@ -776,7 +765,6 @@ def test_initialize_project_removes_only_its_link_when_policy_write_fails(
             reasoning_effort TEXT,
             project_id TEXT,
             local_only INTEGER NOT NULL DEFAULT 0,
-            local_only_root_thread_id TEXT REFERENCES threads(id),
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,
@@ -866,7 +854,6 @@ def test_initialize_project_replacement_before_ownership_capture_is_not_removed(
             reasoning_effort TEXT,
             project_id TEXT,
             local_only INTEGER NOT NULL DEFAULT 0,
-            local_only_root_thread_id TEXT REFERENCES threads(id),
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,
@@ -956,7 +943,6 @@ def test_initialize_project_rechecks_source_ownership_before_commit(
             reasoning_effort TEXT,
             project_id TEXT,
             local_only INTEGER NOT NULL DEFAULT 0,
-            local_only_root_thread_id TEXT REFERENCES threads(id),
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,

@@ -9,8 +9,13 @@ from api.thread_deletion import delete_owned_thread as _delete_owned_thread
 from infra.auth import authenticate, require_human_user
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
-from infra.local_only import LocalOnlyRefused, require_local_only_model
-from prompts.cloud_off import NO_LOCAL_READY_TEXT
+from api.locality_refusal import locality_refused_response
+from infra.local_only import (
+    LocalityRefused,
+    local_only_ancestor,
+    require_local_only_model,
+    write_family_local_only,
+)
 from infra.passive_changes import append_agent_roster_transition
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
@@ -90,8 +95,8 @@ async def _patch_model(thread_id: str, user_id: str, body: dict):
             setup_selection=source == "setup",
             **({"account_id": body["account_id"]} if body.get("account_id") is not None else {}),
         )
-    except LocalOnlyRefused as exc:
-        return JSONResponse(status_code=409, content=_person_local_only_error(exc))
+    except LocalityRefused as exc:
+        return locality_refused_response(exc)
     except (ModelSwitchPreparationError, ModelSwitchConflict) as exc:
         raise HTTPException(409, str(exc)) from exc
     if not isinstance(result, ModelSwitchOutcome):
@@ -207,43 +212,18 @@ def _write_metadata_patch(
         }
 
 
-def _person_local_only_error(exc: LocalOnlyRefused, *, turning_on: bool = False) -> dict[str, str]:
-    if NO_LOCAL_READY_TEXT in exc.message:
-        message = "No local model is ready. Set up a local model in Settings, then try again."
-    elif turning_on:
-        message = "Switch this chat to a local model first, then turn on Local only."
-    else:
-        message = "This chat is Local only, so choose a local model and try again."
-    return {"code": exc.code, "message": message}
-
-
 def _write_local_only(thread_id: str, user_id: str, local_only: bool) -> dict | str:
+    """Write Local only on the thread and its family descendants in one transaction."""
     with write_transaction(None, scope="thread_local_only") as db:
         thread = get_thread_for_user(thread_id, user_id, db=db)
         if not thread:
             return "not_found"
-        root_thread_id = thread["local_only_root_thread_id"]
-        if root_thread_id:
-            root = db.execute(
-                "SELECT title,local_only FROM threads WHERE id=?", (root_thread_id,),
-            ).fetchone()
-            return {
-                "error": "child",
-                "root_thread_id": root_thread_id,
-                "root_thread_local_only": bool(root and root["local_only"]),
-            }
         if local_only:
             for model in (thread["model"], thread["pending_model"]):
-                require_local_only_model(
-                    model,
-                    thread_local_only=True,
-                    project_id=thread["project_id"] or None,
-                    db=db,
-                )
-        db.execute(
-            "UPDATE threads SET local_only=?, updated_at=? WHERE id=?",
-            (int(local_only), utc_now_iso(), thread_id),
-        )
+                require_local_only_model(model, thread_local_only=True, db=db, thread_id=thread_id)
+        elif local_only_ancestor(thread, db=db):
+            return "ancestor_local_only"
+        write_family_local_only(thread_id, local_only, utc_now_iso(), db=db)
         return {"local_only": local_only}
 
 
@@ -253,29 +233,23 @@ async def set_local_only(
     body: dict,
     user: dict = Depends(require_human_user),
 ):
-    """Set a root thread's person-only local-only model scope."""
+    """Set a thread's person-only Local only scope for it and every worker under it."""
     local_only = body.get("local_only")
     if not isinstance(local_only, bool):
         raise HTTPException(422, "local_only must be a boolean")
     try:
         result = await run_in_db(_write_local_only, thread_id, user["id"], local_only)
-    except LocalOnlyRefused as exc:
-        return JSONResponse(status_code=409, content=_person_local_only_error(exc, turning_on=True))
+    except LocalityRefused as exc:
+        return locality_refused_response(exc, turning_on=True)
     if result == "not_found":
         raise HTTPException(404)
-    if result.get("error") == "child":
-        message = (
-            "This chat is Local only because the chat that started it is. "
-            "Turn Local only off there, or start a new chat."
-            if result["root_thread_local_only"]
-            else "Only the chat that started this chat can change Local only. "
-            "Turn Local only on or off there, or start a new chat."
-        )
+    if result == "ancestor_local_only":
         return JSONResponse(
             status_code=409,
             content={
                 "code": "local_only_set_by_parent",
-                "message": message,
+                "message": "This chat is Local only because the chat that started it is. "
+                "Turn Local only off there, or start a new chat.",
             },
         )
     emit_product_event(

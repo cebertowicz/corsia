@@ -1,127 +1,118 @@
-"""Local-only thread policy at model-admission and agent-send boundaries."""
+"""Local-only thread policy at model-admission and agent-send boundaries.
+
+Each thread row stores its own effective ``local_only``. A new thread copies it
+from its parents and its creating agent; turning it on or off writes it down the
+family (``spawned_by`` / ``parent_thread_id``) in one statement, so every read
+is the plain column.
+"""
 
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
 
 from llm.locality import locality_refusal
-from prompts.cloud_off import project_cloud_off_text, thread_local_only_text
+from prompts.cloud_off import thread_local_only_text
 
 LOCAL_ONLY_REFUSAL_CODE = "local_only_requires_local_model"
 LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE = "local_only_send_needs_confirm"
 
+#: The thread and every thread under it through the family links.
+_FAMILY_SQL = (
+    "WITH RECURSIVE family(id) AS (SELECT ? UNION "
+    "SELECT thread.id FROM threads AS thread JOIN family "
+    "ON thread.spawned_by=family.id OR thread.parent_thread_id=family.id) "
+)
 
-class LocalOnlyRefused(ValueError):
-    """A typed model-admission refusal with stable agent-facing text."""
+
+@dataclass(eq=False)
+class LocalityRefused(Exception):
+    """A model binding the thread's Local only setting refuses.
+
+    Not a ``ValueError``: no layer's generic error handling may reinterpret it.
+    Each audience renders its own text from these fields.
+    """
+
+    cause: str
+    selector: str
+    ready_local_selectors: tuple[str, ...]
+    spawn: bool = False
 
     code = LOCAL_ONLY_REFUSAL_CODE
 
-    def __init__(self, message: str):
-        self.message = message
-        super().__init__(message)
+    def __str__(self) -> str:
+        return thread_local_only_text(self.selector, list(self.ready_local_selectors), spawn=self.spawn)
 
 
-def _catalog_row(model: str, *, db: sqlite3.Connection) -> dict:
+def _is_cloud(selector: str, *, db: sqlite3.Connection) -> bool:
     from llm.resolution import catalog_row
 
-    return catalog_row(model, db=db) or {"litellm_model": model}
+    row = catalog_row(selector, db=db) or {"litellm_model": selector}
+    return locality_refusal(row, thread_local_only=True, project_id=None, db=db) is not None
 
 
-def _ready_local_selectors() -> list[str]:
+def _ready_local_selectors() -> tuple[str, ...]:
     from llm.model_status import catalog_base_rows
 
-    return sorted({
+    return tuple(sorted({
         str(status["litellm_model"])
         for status in catalog_base_rows()
         if status.get("is_local") is True
         and status.get("status") == "ready"
         and status.get("litellm_model")
-    })
-
-
-def local_only_model_refusal(
-    model: str | None,
-    *,
-    thread_local_only: bool,
-    project_id: str | None,
-    db: sqlite3.Connection,
-    spawn: bool = False,
-) -> str | None:
-    """Return the governing locality refusal for one model selection."""
-    if not isinstance(model, str) or not model.strip():
-        return None
-    if not thread_local_only and not project_id:
-        return None
-    selector = model.strip()
-    reason = locality_refusal(
-        _catalog_row(selector, db=db),
-        thread_local_only=thread_local_only,
-        project_id=project_id,
-        db=db,
-    )
-    if reason is None:
-        return None
-    selectors = _ready_local_selectors()
-    if reason == "project_cloud_off":
-        return project_cloud_off_text(selector, selectors, spawn=spawn)
-    if not thread_local_only:
-        return None
-    return thread_local_only_text(selector, selectors, spawn=spawn)
-
-
-def child_local_only_root(
-    parent_ids: tuple[str | None, ...],
-    *,
-    actor_thread_id: str | None = None,
-    db: sqlite3.Connection,
-) -> tuple[str | None, bool]:
-    """Return the root link a new thread stores and whether that root is Local only.
-
-    A Local-only root among the parents and the creating agent wins, so a
-    Local-only agent cannot open a cloud-bound thread. Otherwise a child links
-    to its first parent's root; an agent alone gives no link.
-    """
-    ids = [thread_id for thread_id in dict.fromkeys((*parent_ids, actor_thread_id)) if thread_id]
-    if not ids:
-        return None, False
-    rows = {
-        str(row["thread_id"]): row
-        for row in db.execute(
-            "SELECT thread.id AS thread_id,root.id AS root_thread_id,root.local_only "
-            "FROM threads AS thread JOIN threads AS root "
-            "ON root.id=COALESCE(thread.local_only_root_thread_id,thread.id) "
-            f"WHERE thread.id IN ({','.join('?' * len(ids))})",
-            ids,
-        )
-    }
-    found = [rows[thread_id] for thread_id in ids if thread_id in rows]
-    local = next((row for row in found if row["local_only"]), None)
-    if local is not None:
-        return str(local["root_thread_id"]), True
-    parents = [rows[parent_id] for parent_id in parent_ids if parent_id in rows]
-    return (str(parents[0]["root_thread_id"]), False) if parents else (None, False)
+    }))
 
 
 def require_local_only_model(
     model: str | None,
     *,
     thread_local_only: bool,
-    project_id: str | None,
     db: sqlite3.Connection,
     spawn: bool = False,
+    thread_id: str | None = None,
 ) -> None:
-    """Raise the one typed refusal for a disallowed Local-only model binding."""
-    refusal = local_only_model_refusal(
-        model,
-        thread_local_only=thread_local_only,
-        project_id=project_id,
-        db=db,
-        spawn=spawn,
+    """Raise ``LocalityRefused`` when a Local-only thread would bind a cloud model."""
+    if not thread_local_only or not isinstance(model, str) or not model.strip():
+        return
+    selector = model.strip()
+    if not _is_cloud(selector, db=db):
+        return
+    refusal = LocalityRefused("thread_local_only", selector, _ready_local_selectors(), spawn)
+    _emit("local_only.refused", thread_id, {"cause": refusal.cause, "spawn": spawn})
+    raise refusal
+
+
+def inherited_local_only(ids: tuple[str | None, ...], *, db: sqlite3.Connection) -> bool:
+    """Whether any of a new thread's parents or its creating agent is Local only."""
+    found = [thread_id for thread_id in dict.fromkeys(ids) if thread_id]
+    if not found:
+        return False
+    row = db.execute(
+        f"SELECT MAX(local_only) FROM threads WHERE id IN ({','.join('?' * len(found))})", found,
+    ).fetchone()
+    return bool(row[0])
+
+
+def local_only_ancestor(thread: sqlite3.Row, *, db: sqlite3.Connection) -> bool:
+    """Whether any family ancestor of ``thread`` is still Local only."""
+    row = db.execute(
+        "WITH RECURSIVE ancestors(id) AS (SELECT ? UNION SELECT ? UNION "
+        "SELECT parent.id FROM threads AS parent JOIN threads AS thread "
+        "ON parent.id=thread.spawned_by OR parent.id=thread.parent_thread_id "
+        "JOIN ancestors ON thread.id=ancestors.id) "
+        "SELECT 1 FROM threads WHERE local_only=1 AND id IN (SELECT id FROM ancestors) LIMIT 1",
+        (thread["spawned_by"], thread["parent_thread_id"]),
+    ).fetchone()
+    return row is not None
+
+
+def write_family_local_only(thread_id: str, local_only: bool, now: str, *, db: sqlite3.Connection) -> None:
+    """Set ``local_only`` on a thread and every family descendant, in the caller's transaction."""
+    db.execute(
+        _FAMILY_SQL + "UPDATE threads SET local_only=?,updated_at=? "
+        "WHERE id IN (SELECT id FROM family) AND local_only<>?",
+        (thread_id, int(local_only), now, int(local_only)),
     )
-    if refusal:
-        if thread_local_only:
-            raise LocalOnlyRefused(refusal)
-        raise ValueError(refusal)
 
 
 def send_confirmation_refusal(
@@ -136,28 +127,26 @@ def send_confirmation_refusal(
         return None
     # Every recipient thread is read by its own bound model, so only its
     # locality decides; a person's chat on a cloud model is still cloud-bound.
+    # A pending switch decides over the current model: queued inputs run on it.
     recipient_model = recipient.get("pending_model") or recipient.get("model")
     recipient_name = str(recipient.get("title") or recipient.get("id") or "This recipient")
     if not isinstance(recipient_model, str) or not recipient_model.strip():
-        if no_sensitive_content is True:
-            return None
-        return (
-            f"{LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE}: {recipient_name} has no selected model and "
-            "may adopt a cloud model. Remove anything sensitive from the message (keys, secrets, "
-            "personal data, private file contents), then call again with no_sensitive_content: true."
-        )
-    refusal = local_only_model_refusal(
-        recipient_model,
-        thread_local_only=True,
-        project_id=recipient.get("project_id") or None,
-        db=db,
+        reason = "has no selected model and may adopt a cloud model"
+    elif _is_cloud(recipient_model.strip(), db=db):
+        reason = f"runs on a cloud model ({recipient_model})"
+    else:
+        return None
+    confirmed = no_sensitive_content is True
+    _emit(
+        "local_only.send_confirmed" if confirmed else "local_only.send_needs_confirm",
+        sender.get("id"), {"recipient_thread_id": recipient.get("id")},
     )
-    if refusal is None or no_sensitive_content is True:
+    if confirmed:
         return None
     return (
-        f"{LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE}: {recipient_name} runs on a cloud model "
-        f"({recipient_model}). Remove anything sensitive from the message (keys, secrets, "
-        "personal data, private file contents), then call again with no_sensitive_content: true."
+        f"{LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE}: {recipient_name} {reason}. Remove anything "
+        "sensitive from the message (keys, secrets, personal data, private file contents), "
+        "then call again with no_sensitive_content: true."
     )
 
 
@@ -178,3 +167,9 @@ def send_confirmation_error(
         )
     finally:
         db.close()
+
+
+def _emit(action: str, thread_id: str | None, properties: dict) -> None:
+    from infra.product_events import emit_product_event
+
+    emit_product_event("session", action, thread_id=thread_id, properties=properties)

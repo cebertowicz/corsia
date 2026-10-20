@@ -127,7 +127,6 @@ async def _spawn(
     model, refusal = await run_in_db(partial(eligible_delegation_model, requested_model, **scope))
     if refusal:
         return f"Error: {refusal}"
-    # create_fresh_thread admits the child model in its write transaction.
     try:
         requested_is_cc = delegation._is_cc_model(model)
     except Exception as exc:

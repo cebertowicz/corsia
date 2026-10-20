@@ -107,6 +107,17 @@ def test_create_subagent_uses_corsia_thread_id_as_parent(captured):
     }
 
 
+def test_create_chat_names_the_calling_thread(captured):
+    delegate_cli.main(["create-thread", "--title", "Peer", "--model", "claude-code/sonnet"])
+
+    assert captured[-1]["body"] == {
+        "title": "Peer",
+        "model": "claude-code/sonnet",
+        "thread_kind": "chat",
+        "from_thread_id": "sender-self",
+    }
+
+
 def test_create_spawned_by_overrides_create_from_thread_id(captured):
     delegate_cli.main([
         "create-thread",

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
-from contextlib import closing
 
 import httpx
 import pytest
@@ -27,56 +25,87 @@ def _thread(
     user_id: str = "u",
     model: str | None = "local",
     local_only: int = 0,
-    inherited_from: str | None = None,
     spawned_by: str | None = None,
+    parent_thread_id: str | None = None,
     pending_model: str | None = None,
 ) -> None:
     db.execute(
         "INSERT INTO threads("
-        "id,user_id,model,pending_model,local_only,"
-        "local_only_root_thread_id,spawned_by,created_at,updated_at"
+        "id,user_id,model,pending_model,local_only,spawned_by,parent_thread_id,created_at,updated_at"
         ") VALUES (?,?,?,?,?,?,?,?,?)",
-        (
-            thread_id,
-            user_id,
-            model,
-            pending_model,
-            local_only,
-            inherited_from,
-            spawned_by,
-            "t",
-            "t",
-        ),
+        (thread_id, user_id, model, pending_model, local_only, spawned_by, parent_thread_id, "t", "t"),
     )
 
 
-def test_model_refusal_uses_governance_wording(monkeypatch) -> None:
+def _local_only(db, thread_id: str) -> int:
+    return db.execute("SELECT local_only FROM threads WHERE id=?", (thread_id,)).fetchone()[0]
+
+
+def _skip_account_binding(monkeypatch) -> None:
+    # Import model_switches first so its module-level copy holds the real
+    # function; otherwise it would keep this stub after monkeypatch undoes it.
+    from infra import model_switches
+
+    monkeypatch.setattr(
+        "connections.account_selection.bind_model_account", lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(model_switches, "bind_model_account", lambda *_args, **_kwargs: None)
+
+
+@pytest.fixture
+def cloud_named_cloud(monkeypatch):
+    """Treat the selector ``cloud`` as a cloud model and one local model as ready."""
     from infra import local_only
 
-    db = _db()
-    monkeypatch.setattr(local_only, "locality_refusal", lambda *_args, **_kwargs: "thread_local_only")
-    monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: ["omlx@local/a", "omlx@local/b"])
+    monkeypatch.setattr(local_only, "_is_cloud", lambda selector, **_kwargs: selector == "cloud")
+    monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: ("omlx@local/a",))
+    _skip_account_binding(monkeypatch)
 
-    assert local_only.local_only_model_refusal(
-        "codex/gpt-6.1-sol", thread_local_only=True, project_id=None, db=db,
-    ) == (
+
+@pytest.fixture
+def events(monkeypatch) -> list[tuple[str, str | None, dict]]:
+    # The Local only route copies emit_product_event at import; patch that copy
+    # too, importing it first so the copy is restored afterwards.
+    from api import thread_mutations
+
+    recorded: list[tuple[str, str | None, dict]] = []
+
+    def record(_category, action, *, thread_id=None, user_id=None, properties=None) -> None:
+        recorded.append((action, thread_id, properties or {}))
+
+    monkeypatch.setattr("infra.product_events.emit_product_event", record)
+    monkeypatch.setattr(thread_mutations, "emit_product_event", record)
+    return recorded
+
+
+def test_refusal_is_typed_and_not_a_value_error() -> None:
+    from infra.local_only import LocalityRefused
+
+    refusal = LocalityRefused("thread_local_only", "codex/gpt-6.1-sol", ())
+
+    assert not isinstance(refusal, ValueError)
+    assert (refusal.cause, refusal.selector, refusal.ready_local_selectors) == (
+        "thread_local_only", "codex/gpt-6.1-sol", (),
+    )
+
+
+def test_agent_text_renders_from_the_refusal_fields() -> None:
+    from infra.local_only import LocalityRefused
+
+    refusal = LocalityRefused("thread_local_only", "codex/gpt-6.1-sol", ("omlx@local/a", "omlx@local/b"))
+
+    assert str(refusal) == (
         "local_only_requires_local_model: codex/gpt-6.1-sol can't run here: "
         "this chat is set to local models only. Use a ready local model: "
         "omlx@local/a, omlx@local/b."
     )
 
 
-def test_model_refusal_uses_governance_no_ready_wording_and_spawn_suffix(monkeypatch) -> None:
-    from infra import local_only
+def test_agent_text_with_no_local_model_ready_and_spawn_suffix() -> None:
+    from infra.local_only import LOCAL_ONLY_REFUSAL_CODE, LocalityRefused
     from prompts.cloud_off import NO_LOCAL_READY_TEXT
 
-    db = _db()
-    monkeypatch.setattr(local_only, "locality_refusal", lambda *_args, **_kwargs: "thread_local_only")
-    monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: [])
-
-    refusal = local_only.local_only_model_refusal(
-        "codex/gpt-6.1-sol", thread_local_only=True, project_id=None, db=db, spawn=True,
-    )
+    refusal = str(LocalityRefused("thread_local_only", "codex/gpt-6.1-sol", (), spawn=True))
 
     # With no local model ready, the recovery is never to stay on the refused model.
     assert refusal == (
@@ -84,39 +113,41 @@ def test_model_refusal_uses_governance_no_ready_wording_and_spawn_suffix(monkeyp
         f"this chat is set to local models only. {NO_LOCAL_READY_TEXT} "
         "Local workers run one at a time."
     )
-    assert refusal.startswith(f"{local_only.LOCAL_ONLY_REFUSAL_CODE}: ")
+    assert refusal.startswith(f"{LOCAL_ONLY_REFUSAL_CODE}: ")
     assert "thread_local_only" not in refusal
 
 
-def test_model_refusal_delegates_project_cloud_off_wording_to_locality(monkeypatch) -> None:
-    from infra import local_only
+def test_project_cloud_off_is_not_refused_at_bind_time(monkeypatch) -> None:
+    from infra import fresh_threads
 
     db = _db()
-    monkeypatch.setattr(local_only, "locality_refusal", lambda *_args, **_kwargs: "project_cloud_off")
-    monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: ["omlx@local/a"])
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('p','P','t','t')")
+    db.execute("INSERT INTO project_inference_policies(project_id,cloud_models_off) VALUES ('p',1)")
+    _skip_account_binding(monkeypatch)
 
-    assert local_only.local_only_model_refusal(
-        "codex/gpt-6.1-sol", thread_local_only=False, project_id="project", db=db, spawn=True,
-    ) == (
-        "project_cloud_off: This project uses local models only, so codex/gpt-6.1-sol "
-        "can't run here. Use a ready local model: omlx@local/a. Local workers run one at a time."
+    # Cloud-off stays a turn-time hold, as before Local only.
+    created = fresh_threads.create_fresh_thread(
+        user_id="u", thread_id="cloud-in-cloud-off", model="codex/gpt-6.1-sol", project_id="p", db=db,
     )
+
+    assert created["model"] == "codex/gpt-6.1-sol"
 
 
 def test_refusals_never_carry_a_secret(monkeypatch) -> None:
     from infra import local_only
 
     db = _db()
-    secret = "sk-local-only-sentinel"
-    monkeypatch.setattr(local_only, "_catalog_row", lambda model, **_kwargs: {
+    secret = "sk-test-not-a-real-secret"
+    monkeypatch.setattr("llm.resolution.catalog_row", lambda model, **_kwargs: {
         "litellm_model": model, "is_local": False, "api_key": secret,
         "api_base": f"https://user:{secret}@cloud.example/v1",
     })
-    monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: ["omlx@local/a"])
+    monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: ("omlx@local/a",))
 
-    model_refusal = local_only.local_only_model_refusal(
-        "codex/gpt-6.1-sol", thread_local_only=True, project_id=None, db=db, spawn=True,
-    )
+    with pytest.raises(local_only.LocalityRefused) as refused:
+        local_only.require_local_only_model(
+            "codex/gpt-6.1-sol", thread_local_only=True, db=db, spawn=True,
+        )
     send_refusal = local_only.send_confirmation_refusal(
         {"local_only": 1},
         {"id": "r", "title": "Reviewer", "model": "codex/gpt-6.1-sol"},
@@ -124,8 +155,8 @@ def test_refusals_never_carry_a_secret(monkeypatch) -> None:
         db=db,
     )
 
-    assert model_refusal and send_refusal
-    assert secret not in model_refusal
+    assert send_refusal
+    assert secret not in str(refused.value)
     assert secret not in send_refusal
 
 
@@ -155,30 +186,38 @@ def test_scope_to_thread_resolves_a_local_only_thread_through_the_canonical_reso
     assert (resolved.available, resolved.availability_reason) == (False, "thread_local_only")
 
 
-def test_child_effective_local_only_follows_its_root_without_propagation() -> None:
-    from connections.account_policy import thread_scope
+def test_turning_on_covers_family_created_before_and_off_clears_it() -> None:
+    from infra.local_only import local_only_ancestor, write_family_local_only
 
     db = _db()
-    _thread(db, "root", local_only=0)
-    _thread(db, "child", inherited_from="root", spawned_by="root")
+    _thread(db, "root")
+    _thread(db, "child", spawned_by="root")
+    _thread(db, "grandchild", parent_thread_id="child")
+    _thread(db, "actor-chat")  # opened by an agent: no family link
+    _thread(db, "other")
 
-    assert thread_scope("child", db=db)["local_only"] == 0
-    db.execute("UPDATE threads SET local_only=1 WHERE id='root'")
-    assert thread_scope("child", db=db)["local_only"] == 1
-    assert db.execute("SELECT local_only FROM threads WHERE id='child'").fetchone()[0] == 0
+    def grandchild():
+        return db.execute("SELECT * FROM threads WHERE id='grandchild'").fetchone()
+
+    write_family_local_only("root", True, "t2", db=db)
+
+    assert [_local_only(db, t) for t in ("root", "child", "grandchild", "actor-chat", "other")] == [
+        1, 1, 1, 0, 0,
+    ]
+    assert local_only_ancestor(grandchild(), db=db)
+    write_family_local_only("root", False, "t3", db=db)
+    assert [_local_only(db, t) for t in ("root", "child", "grandchild")] == [0, 0, 0]
+    assert not local_only_ancestor(grandchild(), db=db)
 
 
-def test_create_fresh_thread_refuses_cloud_child_without_writing(monkeypatch) -> None:
+def test_create_fresh_thread_refuses_cloud_child_without_writing(cloud_named_cloud, events) -> None:
     from infra import fresh_threads
+    from infra.local_only import LocalityRefused
 
     db = _db()
     _thread(db, "root", local_only=1)
-    monkeypatch.setattr(
-        "infra.local_only.local_only_model_refusal",
-        lambda model, **_kwargs: "local_only_requires_local_model" if model == "cloud" else None,
-    )
 
-    with pytest.raises(ValueError, match="local_only_requires_local_model"):
+    with pytest.raises(LocalityRefused) as refused:
         fresh_threads.create_fresh_thread(
             user_id="u",
             thread_id="refused-child",
@@ -187,21 +226,19 @@ def test_create_fresh_thread_refuses_cloud_child_without_writing(monkeypatch) ->
             db=db,
         )
 
+    assert refused.value.spawn is True
     assert db.execute("SELECT id FROM threads WHERE id='refused-child'").fetchone() is None
+    assert events == [("local_only.refused", "root", {"cause": "thread_local_only", "spawn": True})]
 
 
-def test_request_switch_refuses_cloud_for_local_only_thread(monkeypatch) -> None:
+def test_request_switch_refuses_cloud_for_local_only_thread(cloud_named_cloud) -> None:
     from infra import model_switches
+    from infra.local_only import LocalityRefused
 
     db = _db()
     _thread(db, "thread", local_only=1)
-    monkeypatch.setattr(
-        "infra.local_only.local_only_model_refusal",
-        lambda *_args, **_kwargs: "local_only_requires_local_model",
-    )
-    monkeypatch.setattr(model_switches, "bind_model_account", lambda *_args, **_kwargs: None)
 
-    with pytest.raises(ValueError, match="local_only_requires_local_model"):
+    with pytest.raises(LocalityRefused):
         model_switches.request_switch(
             "thread", "cloud", operation_id="op", requested_at="t", db=db,
         )
@@ -211,37 +248,28 @@ def test_request_switch_refuses_cloud_for_local_only_thread(monkeypatch) -> None
     ).fetchone()[0] is None
 
 
-
-def test_adopt_first_model_refuses_cloud_for_local_only_thread(monkeypatch) -> None:
+def test_adopt_first_model_refuses_cloud_for_local_only_thread(cloud_named_cloud) -> None:
     from infra import model_switch_inputs
     from infra.database import write_transaction
+    from infra.local_only import LocalityRefused
 
     db = _db()
     _thread(db, "thread", model=None, local_only=1)
-    monkeypatch.setattr(
-        "infra.local_only.local_only_model_refusal",
-        lambda *_args, **_kwargs: "local_only_requires_local_model",
-    )
 
     with write_transaction(db, scope="test") as connection:
-        with pytest.raises(ValueError, match="local_only_requires_local_model"):
+        with pytest.raises(LocalityRefused):
             model_switch_inputs.adopt_first_model(connection, "thread", "cloud", now="t")
 
     assert db.execute("SELECT model FROM threads WHERE id='thread'").fetchone()[0] is None
 
 
-def test_inheritance_uses_root_and_every_creator_candidate(monkeypatch) -> None:
+def test_new_threads_copy_local_only_from_every_parent_and_creator(cloud_named_cloud) -> None:
     from infra import fresh_threads
 
     db = _db()
     _thread(db, "root", local_only=1)
-    _thread(db, "child", local_only=1, inherited_from="root", spawned_by="root")
+    _thread(db, "child", local_only=1, spawned_by="root")
     _thread(db, "ordinary")
-    monkeypatch.setattr("infra.local_only.local_only_model_refusal", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        "connections.account_selection.bind_model_account",
-        lambda *_args, **_kwargs: None,
-    )
 
     grandchild = fresh_threads.create_fresh_thread(
         user_id="u", thread_id="grandchild", model="local", spawned_by="child", db=db,
@@ -264,27 +292,19 @@ def test_inheritance_uses_root_and_every_creator_candidate(monkeypatch) -> None:
         user_id="u", thread_id="ordinary-chat", model="cloud", actor_thread_id="ordinary", db=db,
     )
 
-    assert (grandchild["local_only"], grandchild["local_only_root_thread_id"]) == (0, "root")
-    assert (inherited_later["local_only"], inherited_later["local_only_root_thread_id"]) == (0, "root")
-    assert (unaffected["local_only"], unaffected["local_only_root_thread_id"]) == (0, "ordinary")
-    assert agent_chat["local_only_root_thread_id"] == "root"
-    assert ordinary_agent_chat["local_only_root_thread_id"] is None
+    assert [row["local_only"] for row in (grandchild, inherited_later, agent_chat)] == [1, 1, 1]
+    assert [row["local_only"] for row in (unaffected, ordinary_agent_chat)] == [0, 0]
+    assert _local_only(db, "agent-chat") == 1
 
 
-def test_local_only_agent_cannot_open_a_cloud_chat(monkeypatch) -> None:
+def test_local_only_agent_cannot_open_a_cloud_chat(cloud_named_cloud) -> None:
     from infra import fresh_threads
-    from infra.local_only import LocalOnlyRefused
+    from infra.local_only import LocalityRefused
 
     db = _db()
     _thread(db, "root", local_only=1)
-    monkeypatch.setattr(
-        "infra.local_only.local_only_model_refusal",
-        lambda model, *, thread_local_only, **_kwargs: (
-            "local_only_requires_local_model" if thread_local_only and model == "cloud" else None
-        ),
-    )
 
-    with pytest.raises(LocalOnlyRefused):
+    with pytest.raises(LocalityRefused):
         fresh_threads.create_fresh_thread(
             user_id="u", thread_id="cloud-chat", model="cloud", actor_thread_id="root", db=db,
         )
@@ -293,23 +313,18 @@ def test_local_only_agent_cannot_open_a_cloud_chat(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("lineage_field", ["spawned_by", "parent_thread_id"])
-def test_child_root_link_covers_each_parent_path(monkeypatch, lineage_field) -> None:
+def test_child_inherits_through_each_parent_path(cloud_named_cloud, lineage_field) -> None:
     from infra import fresh_threads
 
     db = _db()
     _thread(db, "root", local_only=1)
-    monkeypatch.setattr("infra.local_only.local_only_model_refusal", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        "connections.account_selection.bind_model_account",
-        lambda *_args, **_kwargs: None,
-    )
 
     child = fresh_threads.create_fresh_thread(
         user_id="u", thread_id=f"child-{lineage_field}", model="local", db=db,
         **{lineage_field: "root"},
     )
 
-    assert (child["local_only"], child["local_only_root_thread_id"]) == (0, "root")
+    assert child["local_only"] == 1
 
 
 def test_non_local_thread_can_switch_to_a_cloud_model(monkeypatch) -> None:
@@ -329,39 +344,50 @@ def test_non_local_thread_can_switch_to_a_cloud_model(monkeypatch) -> None:
     ).fetchone()[0] == "cloud"
 
 
-@pytest.mark.asyncio
-async def test_local_only_route_requires_a_person_and_owns_the_thread(
-    isolated_db,
-    monkeypatch,
-) -> None:
-    from api import thread_mutations
-    from auth_fixtures import OTHER_TOKEN, OWNER_SESSION_TOKEN, OWNER_TOKEN
+def _app(*routers) -> FastAPI:
+    app = FastAPI()
+    for router in routers:
+        app.include_router(router)
+    return app
+
+
+def _seed(*rows: dict) -> None:
     from infra.database import get_db
 
     db = get_db()
     try:
-        _thread(db, "root", user_id="steve")
-        _thread(
-            db,
-            "child",
-            user_id="steve",
-            local_only=1,
-            inherited_from="root",
-            spawned_by="root",
-        )
-        _thread(db, "foreign", user_id="leksi")
+        for row in rows:
+            _thread(db, **row)
         db.commit()
     finally:
         db.close()
 
-    monkeypatch.setattr(
-        "infra.local_only.local_only_model_refusal",
-        lambda *_args, **_kwargs: None,
+
+def _read_local_only(*thread_ids: str) -> list[int]:
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return [_local_only(db, thread_id) for thread_id in thread_ids]
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_local_only_route_requires_a_person_and_owns_the_thread(
+    isolated_db, cloud_named_cloud, events,
+) -> None:
+    from api import thread_mutations
+    from auth_fixtures import OTHER_TOKEN, OWNER_SESSION_TOKEN, OWNER_TOKEN
+
+    # The child exists before the root is turned on: no backfill is needed.
+    _seed(
+        {"thread_id": "root", "user_id": "steve"},
+        {"thread_id": "child", "user_id": "steve", "spawned_by": "root"},
+        {"thread_id": "foreign", "user_id": "leksi"},
     )
-    app = FastAPI()
-    app.include_router(thread_mutations.router)
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test",
+        transport=httpx.ASGITransport(app=_app(thread_mutations.router)), base_url="http://test",
     ) as client:
         assert (await client.put(
             "/api/threads/root/local-only?token=" + OWNER_TOKEN,
@@ -371,6 +397,7 @@ async def test_local_only_route_requires_a_person_and_owns_the_thread(
             "/api/threads/root/local-only?token=" + OWNER_SESSION_TOKEN,
             json={"local_only": True},
         )).json()["local_only"] is True
+        on = _read_local_only("root", "child")
         inherited = await client.put(
             "/api/threads/child/local-only?token=" + OWNER_SESSION_TOKEN,
             json={"local_only": False},
@@ -388,6 +415,8 @@ async def test_local_only_route_requires_a_person_and_owns_the_thread(
             json={"local_only": True},
         )
 
+    assert on == [1, 1]
+    assert _read_local_only("root", "child") == [0, 0]
     assert inherited.status_code == 409
     assert inherited.json() == {
         "code": "local_only_set_by_parent",
@@ -398,73 +427,59 @@ async def test_local_only_route_requires_a_person_and_owns_the_thread(
     }
     assert invalid.status_code == 422
     assert foreign.status_code == 404
+    assert [(action, props) for action, _thread_id, props in events] == [
+        ("local_only.changed", {"local_only": True}),
+        ("local_only.changed", {"local_only": False}),
+    ]
     assert OTHER_TOKEN  # Keep the seeded foreign-account contract explicit.
 
 
 @pytest.mark.asyncio
-async def test_local_only_route_refuses_child_of_non_local_root(isolated_db) -> None:
+async def test_local_only_route_turns_on_a_child_of_a_non_local_root(
+    isolated_db, cloud_named_cloud,
+) -> None:
     from api import thread_mutations
     from auth_fixtures import OWNER_SESSION_TOKEN
-    from infra.database import get_db
 
-    db = get_db()
-    try:
-        _thread(db, "root", user_id="steve")
-        _thread(db, "child", user_id="steve", inherited_from="root", spawned_by="root")
-        db.commit()
-    finally:
-        db.close()
-    app = FastAPI()
-    app.include_router(thread_mutations.router)
+    _seed(
+        {"thread_id": "root", "user_id": "steve"},
+        {"thread_id": "child", "user_id": "steve", "spawned_by": "root"},
+        {"thread_id": "worker", "user_id": "steve", "spawned_by": "child"},
+    )
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test",
+        transport=httpx.ASGITransport(app=_app(thread_mutations.router)), base_url="http://test",
     ) as client:
-        response = await client.put(
+        on = await client.put(
             "/api/threads/child/local-only?token=" + OWNER_SESSION_TOKEN,
             json={"local_only": True},
         )
+        after_on = _read_local_only("root", "child", "worker")
+        off = await client.put(
+            "/api/threads/child/local-only?token=" + OWNER_SESSION_TOKEN,
+            json={"local_only": False},
+        )
 
-    assert response.status_code == 409
-    assert response.json() == {
-        "code": "local_only_set_by_parent",
-        "message": "Only the chat that started this chat can change Local only. "
-        "Turn Local only on or off there, or start a new chat.",
-    }
+    assert (on.status_code, off.status_code) == (200, 200)
+    assert after_on == [0, 1, 1]
+    assert _read_local_only("root", "child", "worker") == [0, 0, 0]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("column", ["model", "pending_model"])
 async def test_local_only_route_refuses_cloud_current_or_pending_model(
-    isolated_db,
-    monkeypatch,
-    column,
+    isolated_db, cloud_named_cloud, column,
 ) -> None:
     from api import thread_mutations
     from auth_fixtures import OWNER_SESSION_TOKEN
-    from infra.database import get_db
 
-    db = get_db()
-    try:
-        _thread(
-            db,
-            "root",
-            user_id="steve",
-            model="cloud" if column == "model" else "local",
-            pending_model="cloud" if column == "pending_model" else None,
-        )
-        db.commit()
-    finally:
-        db.close()
-    monkeypatch.setattr(
-        "infra.local_only.local_only_model_refusal",
-        lambda model, **_kwargs: (
-            "local_only_requires_local_model: choose local" if model == "cloud" else None
-        ),
-    )
-    app = FastAPI()
-    app.include_router(thread_mutations.router)
+    _seed({
+        "thread_id": "root",
+        "user_id": "steve",
+        "model": "cloud" if column == "model" else "local",
+        "pending_model": "cloud" if column == "pending_model" else None,
+    })
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test",
+        transport=httpx.ASGITransport(app=_app(thread_mutations.router)), base_url="http://test",
     ) as client:
         response = await client.put(
             "/api/threads/root/local-only?token=" + OWNER_SESSION_TOKEN,
@@ -476,31 +491,20 @@ async def test_local_only_route_refuses_cloud_current_or_pending_model(
         "code": "local_only_requires_local_model",
         "message": "Switch this chat to a local model first, then turn on Local only.",
     }
+    assert _read_local_only("root") == [0]
 
 
 @pytest.mark.asyncio
 async def test_local_only_route_uses_person_copy_when_no_local_model_is_ready(
-    isolated_db, monkeypatch,
+    isolated_db, cloud_named_cloud, monkeypatch,
 ) -> None:
     from api import thread_mutations
     from auth_fixtures import OWNER_SESSION_TOKEN
-    from infra.database import get_db
-    from prompts.cloud_off import NO_LOCAL_READY_TEXT
 
-    db = get_db()
-    try:
-        _thread(db, "root", user_id="steve", model="cloud")
-        db.commit()
-    finally:
-        db.close()
-    monkeypatch.setattr(
-        "infra.local_only.local_only_model_refusal",
-        lambda *_args, **_kwargs: f"local_only_requires_local_model: {NO_LOCAL_READY_TEXT}",
-    )
-    app = FastAPI()
-    app.include_router(thread_mutations.router)
+    _seed({"thread_id": "root", "user_id": "steve", "model": "cloud"})
+    monkeypatch.setattr("infra.local_only._ready_local_selectors", lambda: ())
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test",
+        transport=httpx.ASGITransport(app=_app(thread_mutations.router)), base_url="http://test",
     ) as client:
         response = await client.put(
             "/api/threads/root/local-only?token=" + OWNER_SESSION_TOKEN,
@@ -515,36 +519,22 @@ async def test_local_only_route_uses_person_copy_when_no_local_model_is_ready(
 
 
 @pytest.mark.asyncio
-async def test_model_switch_route_returns_local_only_refusal_as_409(
-    isolated_db,
-    monkeypatch,
+async def test_model_switch_route_refuses_through_the_real_switch(
+    isolated_db, cloud_named_cloud, monkeypatch, events,
 ) -> None:
     from api import thread_mutations
     from auth_fixtures import OWNER_SESSION_TOKEN
-    from infra.database import get_db
 
-    db = get_db()
-    try:
-        _thread(db, "root", user_id="steve", local_only=1)
-        db.commit()
-    finally:
-        db.close()
-
-    async def refuse(*_args, **_kwargs):
-        from infra.local_only import LocalOnlyRefused
-
-        raise LocalOnlyRefused("local_only_requires_local_model: choose local")
+    # The thread already has a model, so the switch takes request_switch's path.
+    _seed({"thread_id": "root", "user_id": "steve", "model": "local", "local_only": 1})
 
     async def prepared(*_args):
         return None
 
     monkeypatch.setattr("connections.harness_refresh.prepare_selection", prepared)
     monkeypatch.setattr(thread_mutations, "is_dispatchable_model", lambda *_args: True)
-    monkeypatch.setattr(thread_mutations, "switch_model", refuse)
-    app = FastAPI()
-    app.include_router(thread_mutations.router)
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+        transport=httpx.ASGITransport(app=_app(thread_mutations.router), raise_app_exceptions=False),
         base_url="http://test",
     ) as client:
         response = await client.patch(
@@ -557,6 +547,60 @@ async def test_model_switch_route_returns_local_only_refusal_as_409(
         "code": "local_only_requires_local_model",
         "message": "This chat is Local only, so choose a local model and try again.",
     }
+    assert events == [("local_only.refused", "root", {"cause": "thread_local_only", "spawn": False})]
+
+
+@pytest.mark.asyncio
+async def test_thread_create_route_maps_a_refusal_to_the_person_409(isolated_db, monkeypatch) -> None:
+    from api import threads
+    from auth_fixtures import OWNER_SESSION_TOKEN
+    from infra.local_only import LocalityRefused
+
+    async def refuse(**_kwargs):
+        raise LocalityRefused("thread_local_only", "cloud", ("omlx@local/a",), spawn=True)
+
+    async def prepared(*_args):
+        return None
+
+    monkeypatch.setattr("connections.harness_refresh.prepare_selection", prepared)
+    monkeypatch.setattr(threads, "create_visible_fresh_thread", refuse)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=_app(threads.router)), base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/api/threads?token=" + OWNER_SESSION_TOKEN, json={"model": "cloud"},
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": "local_only_requires_local_model",
+        "message": "This chat is Local only, so choose a local model and try again.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_delegate_set_model_tool_returns_the_agent_text(monkeypatch) -> None:
+    from infra.local_only import LocalityRefused
+    from tools import delegation
+    from tools.delegation_model import DelegateSetModelTool
+
+    refusal = LocalityRefused("thread_local_only", "cloud", ("omlx@local/a",))
+
+    async def refuse(*_args, **_kwargs):
+        raise refusal
+
+    async def in_db(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(delegation, "_require_context", lambda _kwargs: ("caller", {"user_id": "steve"}))
+    monkeypatch.setattr(delegation, "_delegation_target_exists", lambda *_args: True)
+    monkeypatch.setattr(delegation, "eligible_delegation_model", lambda model, **_kwargs: (model, None))
+    monkeypatch.setattr("tools.delegation_model.run_in_db", in_db)
+    monkeypatch.setattr("thread.model.switch_model", refuse)
+
+    result = await DelegateSetModelTool().execute("worker", "cloud", _thread_id="caller")
+
+    assert result == f"Error: model switch rejected: {refusal}"
 
 
 @pytest.mark.asyncio
@@ -605,8 +649,7 @@ async def test_delegate_send_enforces_cloud_confirmation_at_send_time(
         return None
 
     monkeypatch.setattr(
-        "infra.local_only.local_only_model_refusal",
-        lambda model, **_kwargs: "cloud" if model == "cloud" else None,
+        "infra.local_only._is_cloud", lambda selector, **_kwargs: selector == "cloud",
     )
     monkeypatch.setattr(delegate_send, "native_send_scope_error", lambda **_kwargs: None)
     monkeypatch.setattr(delegate_send, "_prepare_plan_task", no_plan)
@@ -635,11 +678,7 @@ def test_person_chat_on_a_cloud_model_still_needs_confirmation(monkeypatch) -> N
     from infra import local_only
 
     db = _db()
-    monkeypatch.setattr(
-        local_only,
-        "local_only_model_refusal",
-        lambda *_args, **_kwargs: "cloud",
-    )
+    monkeypatch.setattr(local_only, "_is_cloud", lambda *_args, **_kwargs: True)
 
     refusal = local_only.send_confirmation_refusal(
         {"local_only": True},
@@ -659,11 +698,7 @@ def test_send_confirmation_uses_pending_model_when_present(monkeypatch) -> None:
     from infra import local_only
 
     db = _db()
-    monkeypatch.setattr(
-        local_only,
-        "local_only_model_refusal",
-        lambda model, **_kwargs: "cloud" if model == "cloud" else None,
-    )
+    monkeypatch.setattr(local_only, "_is_cloud", lambda selector, **_kwargs: selector == "cloud")
 
     refusal = local_only.send_confirmation_refusal(
         {"local_only": True},
@@ -678,13 +713,14 @@ def test_send_confirmation_uses_pending_model_when_present(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_delegate_task_relies_on_fresh_thread_admission(monkeypatch) -> None:
-    from infra.local_only import LocalOnlyRefused
+    from infra.local_only import LocalityRefused
     from tools import delegate_task
 
     sent: list[str] = []
+    refusal = LocalityRefused("thread_local_only", "cloud", ("omlx@local/a",), spawn=True)
 
     async def reject_cloud_child(**_kwargs):
-        raise LocalOnlyRefused("local_only_requires_local_model: choose local")
+        raise refusal
 
     async def send(*_args, **_kwargs):
         sent.append("turn")
@@ -703,5 +739,21 @@ async def test_delegate_task_relies_on_fresh_thread_admission(monkeypatch) -> No
         {"model": "cloud"},
     )
 
-    assert result == "Error delegating task: local_only_requires_local_model: choose local"
+    assert result == f"Error delegating task: {refusal}"
     assert sent == []
+
+
+def test_send_confirmation_records_the_refusal_and_the_confirmation(monkeypatch, events) -> None:
+    from infra import local_only
+
+    db = _db()
+    monkeypatch.setattr(local_only, "_is_cloud", lambda *_args, **_kwargs: True)
+    sender = {"id": "sender", "local_only": True}
+    recipient = {"id": "recipient", "title": "Researcher", "model": "cloud"}
+
+    assert local_only.send_confirmation_refusal(sender, recipient, no_sensitive_content=None, db=db)
+    assert local_only.send_confirmation_refusal(sender, recipient, no_sensitive_content=True, db=db) is None
+    assert events == [
+        ("local_only.send_needs_confirm", "sender", {"recipient_thread_id": "recipient"}),
+        ("local_only.send_confirmed", "sender", {"recipient_thread_id": "recipient"}),
+    ]

@@ -55,8 +55,10 @@ def cmd_create_thread(args: argparse.Namespace) -> int:
         if val:
             body[key] = val
     if not body.get("spawned_by"):
+        # The caller's own thread: a subagent's default parent, and for every
+        # kind the agent whose Local only setting the new thread inherits.
         from_thread_id = _resolve_from_thread_id(args.from_thread_id)
-        if from_thread_id and body.get("thread_kind") == "subagent":
+        if from_thread_id:
             body["from_thread_id"] = from_thread_id
     out = _request("POST", base, "/api/delegation/threads", token, body=body)
     print(json.dumps(out, indent=2))
@@ -207,7 +209,7 @@ def _add_create_thread_parser(sub: argparse._SubParsersAction) -> None:
     ct.add_argument(
         "--from-thread-id",
         dest="from_thread_id",
-        help="Sender/parent thread id (default: $CORSIA_THREAD_ID for --thread-kind subagent)",
+        help="Your own thread id (default: $CORSIA_THREAD_ID): a subagent's parent, and the creator for any kind",
     )
     ct.set_defaults(func=cmd_create_thread)
 

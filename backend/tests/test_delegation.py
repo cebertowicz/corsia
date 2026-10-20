@@ -175,7 +175,6 @@ class TestCreateThread:
                         "parent_session_id": None,
                         "spawned_by": "par-emit",
                         "local_only": 0,
-                        "local_only_root_thread_id": "par-emit",
                         "reasoning_effort": None,
                         "created_at": emitted[0][1]["session"]["created_at"],
                         "updated_at": emitted[0][1]["session"]["updated_at"],
@@ -214,23 +213,38 @@ class TestCreateThread:
         ).fetchone()
         assert row["c"] == 0
 
-    def test_local_only_model_refusal_is_409(self, client, monkeypatch):
-        import api.delegation as delegation_api
-        from infra.local_only import LocalOnlyRefused
+    def test_local_only_agent_cannot_open_a_cloud_chat_through_the_route(
+        self, client, deleg_db, monkeypatch,
+    ):
+        import infra.local_only as local_only
 
-        async def refuse(**_kwargs):
-            raise LocalOnlyRefused("local_only_requires_local_model: choose local")
-
-        monkeypatch.setattr(delegation_api, "create_visible_fresh_thread", refuse)
+        deleg_db.execute("UPDATE threads SET local_only = 1 WHERE id = 'sender-self'")
+        deleg_db.commit()
+        monkeypatch.setattr(local_only, "_is_cloud", lambda selector, **_kwargs: selector == "claude-code/sonnet")
+        monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: ("omlx@local/qwen",))
 
         response = client.post(
             "/api/delegation/threads",
             params={"token": _TOKEN},
-            json={"model": "claude-code/sonnet"},
+            json={"title": "Escape", "model": "claude-code/sonnet", "from_thread_id": "sender-self"},
         )
 
         assert response.status_code == 409
-        assert "local_only_requires_local_model" in response.json()["detail"]
+        assert response.json() == {
+            "code": "local_only_requires_local_model",
+            "message": "This chat is Local only, so choose a local model and try again.",
+        }
+        assert deleg_db.execute("SELECT COUNT(*) FROM threads WHERE title = 'Escape'").fetchone()[0] == 0
+
+    def test_create_refuses_a_caller_thread_the_user_does_not_own(self, client, deleg_db):
+        response = client.post(
+            "/api/delegation/threads",
+            params={"token": _TOKEN},
+            json={"title": "Spoof", "model": "claude-code/sonnet", "from_thread_id": "nobody"},
+        )
+
+        assert response.status_code == 403
+        assert deleg_db.execute("SELECT COUNT(*) FROM threads WHERE title = 'Spoof'").fetchone()[0] == 0
 
     def test_unrelated_value_error_is_not_a_client_error(self, client, monkeypatch):
         import api.delegation as delegation_api
@@ -275,8 +289,8 @@ class TestDelegationSendConfirmation:
 
         monkeypatch.setattr(
             local_only,
-            "local_only_model_refusal",
-            lambda model, **_kwargs: "cloud" if model == "anthropic/claude-3-5-sonnet" else None,
+            "_is_cloud",
+            lambda selector, **_kwargs: selector == "anthropic/claude-3-5-sonnet",
         )
         monkeypatch.setattr(delegation_api, "send_thread_input", deliver)
 

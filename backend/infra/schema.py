@@ -59,7 +59,6 @@ SCHEMA_SQL = f"""
         parent_thread_id TEXT REFERENCES threads(id),
         spawned_by TEXT REFERENCES threads(id),
         local_only INTEGER NOT NULL DEFAULT 0,
-        local_only_root_thread_id TEXT REFERENCES threads(id),
         bootloader_files TEXT,
         pending_compaction_trigger TEXT,
         pending_compaction_detail TEXT,

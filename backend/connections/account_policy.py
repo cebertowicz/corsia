@@ -31,11 +31,7 @@ class AccountAdmissionError(AccountError):
 def thread_scope(thread_id: str, *, db) -> dict:
     """Derive ownership and project from durable server-side thread identity."""
     row = db.execute(
-        "SELECT thread.user_id,thread.project_id,"
-        "COALESCE(root.local_only,thread.local_only) AS local_only "
-        "FROM threads AS thread LEFT JOIN threads AS root "
-        "ON root.id=thread.local_only_root_thread_id WHERE thread.id=?",
-        (thread_id,),
+        "SELECT user_id,project_id,local_only FROM threads WHERE id=?", (thread_id,),
     ).fetchone()
     if row is None:
         raise AccountAdmissionError("account_thread_missing")

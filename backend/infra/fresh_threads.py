@@ -18,7 +18,7 @@ from infra.config import WORKSPACE
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.execution_class import provider_label
-from infra.local_only import child_local_only_root, require_local_only_model
+from infra.local_only import inherited_local_only, require_local_only_model
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_message_rows
 
@@ -33,7 +33,6 @@ _SESSION_EVENT_FIELDS = (
     "parent_session_id",
     "spawned_by",
     "local_only",
-    "local_only_root_thread_id",
     "reasoning_effort",
     "created_at",
     "updated_at",
@@ -104,15 +103,14 @@ def create_fresh_thread(
     now = created_at or _now()
     with write_transaction(db, scope="create_fresh_thread") as _db:
         _ensure_project_exists(_db, project_id)
-        root_thread_id, root_local_only = child_local_only_root(
-            (spawned_by, parent_thread_id), actor_thread_id=actor_thread_id, db=_db,
-        )
+        # Any Local-only parent or creating agent makes the new thread Local only.
+        local_only = inherited_local_only((spawned_by, parent_thread_id, actor_thread_id), db=_db)
         require_local_only_model(
             model,
-            thread_local_only=root_local_only,
-            project_id=project_id,
+            thread_local_only=local_only,
             db=_db,
             spawn=True,
+            thread_id=actor_thread_id or spawned_by or parent_thread_id,
         )
         row = {
             "id": sid,
@@ -123,8 +121,7 @@ def create_fresh_thread(
             "project_id": project_id,
             "parent_thread_id": parent_thread_id,
             "spawned_by": spawned_by,
-            "local_only": 0,
-            "local_only_root_thread_id": root_thread_id,
+            "local_only": int(local_only),
             "reasoning_effort": reasoning_effort,
             "created_at": now,
             "updated_at": now,

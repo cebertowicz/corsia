@@ -56,22 +56,6 @@ def _source_and_defer_receipt(row: sqlite3.Row, destination: str, *, db) -> tupl
     return source, model_vendor(source, db=db) != model_vendor(destination, db=db)
 
 
-def _request_row(connection: sqlite3.Connection, thread_id: str) -> sqlite3.Row | None:
-    """The thread's switch state, with Local only read from its root."""
-    return connection.execute(
-        "SELECT thread.id,thread.user_id,thread.model,thread.project_id,"
-        "COALESCE(root.local_only,thread.local_only) AS local_only,"
-        "thread.execution_epoch,thread.next_input_order,thread.pending_model,"
-        "thread.pending_execution_epoch,thread.switch_after_input_order,"
-        "thread.switch_operation_id,thread.switch_status,thread.switch_actor_kind,"
-        "thread.switch_actor_id,thread.switch_reason,thread.switch_checkpoint_choice,"
-        "thread.switch_requested_at FROM threads AS thread "
-        "LEFT JOIN threads AS root ON root.id=thread.local_only_root_thread_id "
-        "WHERE thread.id=?",
-        (thread_id,),
-    ).fetchone()
-
-
 def request_switch(
     thread_id: str,
     destination_model: str,
@@ -89,17 +73,18 @@ def request_switch(
     """Freeze the FIFO boundary chosen by this request's database commit."""
     destination = _validated_request(destination_model, operation_id, requested_at, actor_kind, reason, checkpoint_choice)
     with write_transaction(db, scope="request_switch") as connection:
-        row = _request_row(connection, thread_id)
+        row = connection.execute(
+            "SELECT id,user_id,model,local_only,execution_epoch,next_input_order,pending_model,"
+            "pending_execution_epoch,switch_after_input_order,"
+            "switch_operation_id,switch_status,switch_actor_kind,switch_actor_id,switch_reason,"
+            "switch_checkpoint_choice,switch_requested_at FROM threads WHERE id=?",
+            (thread_id,),
+        ).fetchone()
         if row is None:
             raise ValueError("task does not exist")
         if user_id is not None and str(row["user_id"]) != user_id:
             raise ValueError("task is not owned by the requesting user")
-        require_local_only_model(
-            destination,
-            thread_local_only=bool(row["local_only"]),
-            project_id=row["project_id"] or None,
-            db=connection,
-        )
+        require_local_only_model(destination, thread_local_only=bool(row["local_only"]), db=connection, thread_id=thread_id)
         source, defer_receipt = _source_and_defer_receipt(row, destination, db=connection)
         bind_model_account(thread_id, destination, account_id=account_id,
                            actor_thread_id=actor_id if actor_kind == "agent" else None,
