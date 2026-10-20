@@ -347,6 +347,25 @@ def _stub_app():
     return stub
 
 
+
+@pytest.mark.parametrize("path", ["/api/devices/pair/start", "/api/devices/pair/finish"])
+def test_devices_app_counts_pairing_refusals_outside_the_pairing_network(monkeypatch, path):
+    from api import devices
+
+    emitted = []
+    monkeypatch.setattr(devices, "emit_pairing_failure", lambda *, reason: emitted.append(reason))
+    client = TestClient(
+        DevicesApp(_stub_app(), outside_enabled=lambda: True),
+        client=("198.51.100.20", 50000),
+    )
+
+    response = client.post(path, json={})
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": {"reason": "not_on_this_network"}}
+    assert emitted == ["not_on_this_network"]
+
+
 def test_devices_app_accepts_a_person_session_from_the_token_query_parameter(token_users):
     client = TestClient(DevicesApp(_stub_app()), client=_LAN_PEER)
 

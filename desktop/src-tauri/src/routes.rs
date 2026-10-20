@@ -322,12 +322,12 @@ async fn prove_identity(upstream: &mut Upstream, identity: Option<&[u8; 32]>) ->
     }
     let bytes = match Limited::new(response.into_body(), MAX_PROOF_BYTES).collect().await {
         Ok(collected) => collected.to_bytes(),
-        Err(error) if error.is::<LengthLimitError>() => return Err(refused("the identity answer is too large")),
+        Err(error) if error.is::<LengthLimitError>() => return Err(RouteError::Unreachable("the identity answer is too large".into())),
         Err(error) => return Err(RouteError::Unreachable(error.to_string())),
     };
-    let proof: IdentityProof = serde_json::from_slice(&bytes).map_err(|_| refused("malformed identity answer"))?;
-    let spki = BASE64.decode(proof.spki).map_err(|_| refused("the key is not base64"))?;
-    let signature = BASE64.decode(proof.signature).map_err(|_| refused("the signature is not base64"))?;
+    let proof: IdentityProof = serde_json::from_slice(&bytes).map_err(|_| RouteError::Unreachable("malformed identity answer".into()))?;
+    let spki = BASE64.decode(proof.spki).map_err(|_| RouteError::Unreachable("the key is not base64".into()))?;
+    let signature = BASE64.decode(proof.signature).map_err(|_| RouteError::Unreachable("the signature is not base64".into()))?;
     // A legacy record has no pairing fingerprint yet; the saved local TLS trust
     // authenticates this first key. Subsequent routes must match the persisted key.
     let fingerprint: [u8; 32] = Sha256::digest(&spki).into();

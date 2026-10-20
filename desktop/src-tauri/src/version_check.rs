@@ -72,6 +72,9 @@ pub async fn check_through_proxy(port: u16, app_version: &str) -> Result<Compat,
 }
 
 async fn compat_of(response: reqwest::Response, app_version: &str) -> Result<Compat, PairError> {
+    if response.headers().contains_key(crate::proxy::ROUTE_UNREACHABLE_HEADER) {
+        return Err(PairError::Unreachable(crate::classify::ConnectFailure::Network));
+    }
     if response.status() == StatusCode::NOT_FOUND {
         return Ok(Compat::TooOld);
     }

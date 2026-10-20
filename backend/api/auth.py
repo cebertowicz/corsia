@@ -173,7 +173,7 @@ async def login(body: LoginRequest) -> dict:
     _waiting_names.add(username)
     counted = False
     try:
-        is_account = await run_in_db(accounts.account_exists, username)
+        is_account = await run_in_db(accounts.get_user, username) is not None
         if not is_account and _waiting_attempts >= _MAX_WAITING_ATTEMPTS:
             # Held and refused like a failed check, so the answer does not say the name is made up.
             await asyncio.sleep(_HELD_SECONDS)

@@ -30,10 +30,10 @@ async def test_parallel_same_name_has_exactly_one_waiter(waiting_state, monkeypa
 
     async def database(function, *args):
         calls.append(function)
-        if function is auth.accounts.account_exists:
+        if function is auth.accounts.get_user:
             entered.set()
             await release.wait()
-            return False
+            return None
         assert function is auth.accounts.check_password
         return None
 
@@ -47,7 +47,7 @@ async def test_parallel_same_name_has_exactly_one_waiter(waiting_state, monkeypa
             duplicate = await asyncio.wait_for(client.post("/api/auth/login", json={"username": "NOBODY", "password": TEST_PASSWORD}), 1)
             assert duplicate.status_code == 429
             assert duplicate.headers["Retry-After"] == "1"
-            assert calls == [auth.accounts.account_exists]
+            assert calls == [auth.accounts.get_user]
             assert auth._waiting_names == {"nobody"}
         finally:
             release.set()

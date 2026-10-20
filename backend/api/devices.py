@@ -46,6 +46,11 @@ def _emit(action: str, *, reason: str | None = None) -> None:
     emit_product_event("devices", action, properties=properties)
 
 
+def emit_pairing_failure(*, reason: str) -> None:
+    """Record any pairing refusal through the shared Devices event emitter."""
+    _emit("pairing_failed", reason=reason)
+
+
 def _outside_address(value: object) -> str | None:
     """Validate the host setting once at its backend boundary."""
     if value is None:
@@ -157,7 +162,7 @@ async def pair_start(body: dict):
             generation=generation,
         )
     except PairingError as error:
-        _emit("pairing_failed", reason=error.reason)
+        emit_pairing_failure(reason=error.reason)
         if error.reason == "paused":
             _emit("pairing_paused")
         raise _pairing_error(error) from error
@@ -184,7 +189,7 @@ async def pair_finish(body: dict):
             identity=identity,
         )
     except PairingError as error:
-        _emit("pairing_failed", reason=error.reason)
+        emit_pairing_failure(reason=error.reason)
         if error.reason == "paused":
             _emit("pairing_paused")
         raise _pairing_error(error) from error

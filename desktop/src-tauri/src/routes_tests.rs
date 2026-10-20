@@ -49,14 +49,25 @@ struct Prover {
     status: StatusCode,
     /// Signs this authority instead of the one asked: a proof captured on one route and replayed on another.
     replayed_for: Option<String>,
+    /// A malformed response to return instead of a signed proof.
+    response_override: Option<String>,
 }
 
 impl Prover {
     fn honest(key: &HostKey) -> Self {
-        Self { pkcs8: key.pkcs8.clone(), spki: key.spki.clone(), status: StatusCode::OK, replayed_for: None }
+        Self {
+            pkcs8: key.pkcs8.clone(),
+            spki: key.spki.clone(),
+            status: StatusCode::OK,
+            replayed_for: None,
+            response_override: None,
+        }
     }
 
     fn answer(&self, body: &[u8]) -> String {
+        if let Some(response) = &self.response_override {
+            return response.clone();
+        }
         let asked: serde_json::Value = serde_json::from_slice(body).unwrap();
         let nonce = BASE64.decode(asked["nonce"].as_str().unwrap()).unwrap();
         let authority = self.replayed_for.clone().unwrap_or_else(|| asked["authority"].as_str().unwrap().to_owned());
@@ -278,6 +289,27 @@ async fn an_identity_proof_http_failure_is_unreachable_without_refusing() {
         assert!(!proxy.key_changed(), "{status}");
         assert_eq!(refusals.load(SeqCst), 0, "{status}");
         assert_eq!(outside.proofs.load(SeqCst), 1, "{status}");
+    }
+}
+
+#[tokio::test]
+async fn malformed_identity_proofs_are_unreachable_without_refusing() {
+    let host = test_tls::generated_p256_host();
+    let forwarder = test_tls::generated_ca_forwarder();
+    for response_override in [
+        "not json".into(),
+        r#"{"spki": "missing a signature"}"#.into(),
+        "x".repeat(MAX_PROOF_BYTES + 1),
+    ] {
+        let proof = Prover { response_override: Some(response_override), ..Prover::honest(&host) };
+        let outside = serve(Arc::clone(&forwarder.config), "outside", Some(proof)).await;
+        let refusals = Arc::new(AtomicUsize::new(0));
+        let config = paired(&host, Some((outside.port, system())), Some(forwarder.ca.clone()), &refusals);
+        let proxy = proxy_for(config, Arc::new(AtomicU16::new(dead_port().await))).await;
+
+        assert_eq!(get(&proxy).await.0, StatusCode::BAD_GATEWAY);
+        assert!(!proxy.key_changed());
+        assert_eq!(refusals.load(SeqCst), 0);
     }
 }
 

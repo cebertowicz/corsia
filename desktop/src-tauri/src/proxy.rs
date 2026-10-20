@@ -25,6 +25,9 @@ use crate::{
 };
 
 pub(crate) type ProxyBody = BoxBody<Bytes, Box<dyn Error + Send + Sync>>;
+/// Marks the synthetic response emitted when neither saved route reaches the paired host.
+/// Upstream responses never carry this header, so callers can distinguish them from a real server reply.
+pub(crate) const ROUTE_UNREACHABLE_HEADER: &str = "x-corsia-proxy-route-unreachable";
 type ResolveFuture = Pin<Box<dyn Future<Output = Result<(String, u16), ProxyError>> + Send>>;
 type Resolver = Arc<dyn Fn(Locator) -> ResolveFuture + Send + Sync>;
 type SharedResolve = Shared<Pin<Box<dyn Future<Output = Result<Target, ProxyError>> + Send>>>;
@@ -223,7 +226,7 @@ async fn forward(request: Request<Incoming>, state: Arc<ProxyState>) -> Result<R
     }
     match forward_trusted(request, state).await {
         Ok(response) => Ok(response),
-        Err(error) => Ok(failure(StatusCode::BAD_GATEWAY, &error)),
+        Err(error) => Ok(route_unreachable(&error)),
     }
 }
 
@@ -251,6 +254,7 @@ async fn forward_trusted(
     rewrite_request(&mut request, &authority)?;
     let request = request.map(|body| body.map_err(|error| Box::new(error) as Box<dyn Error + Send + Sync>).boxed());
     let mut response = sender.send_request(request).await.map_err(|error| error.to_string())?;
+    response.headers_mut().remove(ROUTE_UNREACHABLE_HEADER);
     if response.status() == StatusCode::SWITCHING_PROTOCOLS {
         if let Some(client_upgrade) = client_upgrade {
             let upstream_upgrade = hyper::upgrade::on(&mut response);
@@ -299,6 +303,16 @@ fn rewrite_request<B>(request: &mut Request<B>, authority: &str) -> Result<(), S
 fn failure(status: StatusCode, message: &str) -> Response<ProxyBody> {
     Response::builder()
         .status(status)
+        .body(Full::new(Bytes::copy_from_slice(message.as_bytes()))
+            .map_err(|never| match never {})
+            .boxed())
+        .expect("static response is valid")
+}
+
+fn route_unreachable(message: &str) -> Response<ProxyBody> {
+    Response::builder()
+        .status(StatusCode::BAD_GATEWAY)
+        .header(ROUTE_UNREACHABLE_HEADER, "1")
         .body(Full::new(Bytes::copy_from_slice(message.as_bytes()))
             .map_err(|never| match never {})
             .boxed())

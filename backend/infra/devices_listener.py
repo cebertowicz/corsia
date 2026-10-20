@@ -146,6 +146,11 @@ class DevicesApp:
                 await send({"type": "websocket.close", "code": 1008})
             return
         if kind == "http" and self._requires_same_network(tagged):
+            # This refusal happens before the route can emit its normal pairing
+            # failure event, so use that route's shared emitter here.
+            from api.devices import emit_pairing_failure
+
+            emit_pairing_failure(reason="not_on_this_network")
             await JSONResponse({"detail": {"reason": "not_on_this_network"}}, status_code=403)(tagged, receive, send)
             return
         if (

@@ -2269,10 +2269,25 @@ mod tests {
     #[test]
     fn a_launch_that_gets_a_refused_connection_ends_on_the_server_card_not_on_connecting() {
         let app = launch_app();
-        let closed_port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let identity = test_tls::generated_self_signed_identity();
+        let pin = identity.pin;
+        let port = tauri::async_runtime::block_on(async {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            tauri::async_runtime::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut tls = tokio_rustls::TlsAcceptor::from(identity.config).accept(stream).await.unwrap();
+                let mut request = [0; 1024];
+                let _ = tls.read(&mut request).await.unwrap();
+                tls.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n").await.unwrap();
+            });
+            port
+        });
         let saved = saved_studio(
-            remote_config::Locator::Address { host: "127.0.0.1".into(), port: closed_port },
-            remote_config::RemoteTrust::System,
+            remote_config::Locator::Address { host: "127.0.0.1".into(), port },
+            remote_config::RemoteTrust::from(&trust::Trust::Pinned { spki_sha256: pin }),
         );
         tauri::async_runtime::block_on(connect_saved_remote(app.handle().clone(), saved));
         assert_eq!(
