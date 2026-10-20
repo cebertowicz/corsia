@@ -20,12 +20,12 @@ describe('document editor theme', () => {
 		expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) ?\{[^@]*\.cm-scroller, [^{]*\.cm-scroller \* ?\{ ?transition-property: none !important;? ?\}/);
 	});
 
-	it('paints the selection from the accent, stronger than the matched-text wash and stronger on the dark page', () => {
+	it('paints the selection from the accent selection role, never a share chosen here, and keeps the matched-text wash faint', () => {
 		const view = new EditorView({ state: EditorState.create({ doc: 'body', extensions: [docTheme] }), parent: document.body });
 		const css = mountedCss().replace(/\s+/g, ' ');
 		view.destroy();
-		expect(css).toMatch(/\.cm-selectionBackground, [^{]*::selection ?\{ ?background-color: color-mix\(in srgb, var\(--accent\) 45%, transparent\)/);
-		expect(css).toMatch(/html\[data-theme="light"\] [^{]*::selection ?\{ ?background-color: color-mix\(in srgb, var\(--accent\) 35%, transparent\)/);
+		expect(css).toMatch(/::selection ?\{ ?background-color: var\(--accent-selection\)/);
+		expect(css).not.toMatch(/::selection ?\{[^}]*color-mix/);
 		expect(css).toMatch(/\.cm-selectionMatch ?\{ ?background-color: var\(--accent-wash\)/);
 	});
 });
