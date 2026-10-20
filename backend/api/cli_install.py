@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from api.provider_sources import recheck_sources_once
-from infra import build_info
+import infra.build_info as build_info
 from cli_location import login_shell_binary, package_manager_for, path_shadowed_binary, service_binary, service_path
 from connections.vendor_accounts import VENDORS
 from infra.auth import require_user

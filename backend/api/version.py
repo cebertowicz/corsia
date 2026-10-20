@@ -23,7 +23,7 @@ from pathlib import Path
 
 from fastapi import APIRouter
 
-from infra import build_info
+import infra.build_info as build_info
 
 router = APIRouter(prefix="/api", tags=["version"])
 

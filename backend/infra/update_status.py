@@ -26,7 +26,8 @@ from urllib.request import urlopen
 
 import semver
 
-from infra import build_info, platform_paths
+import infra.build_info as build_info
+from infra import platform_paths
 
 # Serving checkout root: backend/infra/update_status.py -> repo root.
 _SERVING_ROOT = Path(__file__).resolve().parent.parent.parent
