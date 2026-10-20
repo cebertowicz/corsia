@@ -25,7 +25,10 @@ def managed_omlx_executable(path: str | Path | None = None) -> str | None:
 
 def is_managed_omlx_executable(path: str | Path) -> bool:
     """Whether ``path`` resolves to the packaged oMLX CORSIA manages."""
-    executable = managed_omlx_executable()
+    try:
+        executable = managed_omlx_executable()
+    except RuntimeError:
+        return False  # a damaged bundle has no managed copy to match; status projections stay readable
     if executable is None:
         return False
     try:
