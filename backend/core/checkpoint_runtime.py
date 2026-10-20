@@ -43,6 +43,7 @@ class _Handle:
 
 
 _tasks: dict[str, _Handle] = {}
+_wakes: set[asyncio.Task[None]] = set()
 
 
 async def _invoke(
@@ -125,7 +126,6 @@ def _broadcast_changed(thread_id: str) -> None:
 async def _notify_completion(record: CheckpointRecord) -> None:
     """Invalidate the durable projection and re-drive the ordinary FIFO."""
     _broadcast_changed(record.thread_id)
-    from infra import state
     from infra.thread_execution import drive_thread
     from loguru import logger
 
@@ -145,18 +145,21 @@ async def _notify_completion(record: CheckpointRecord) -> None:
 
         placement_worker.poke()
 
+    # A failed wake belongs to its thread: the input stays in the durable FIFO
+    # for the next drive, and service health is unaffected.
     async def redrive() -> None:
         try:
             await drive_thread(record.thread_id)
-        except Exception as error:
-            state._thread_driver_failure = f"checkpoint {record.thread_id}: {error}"
+        except Exception:
             logger.exception(
                 "checkpoint completion wake failed: {}", record.thread_id,
             )
 
-    asyncio.create_task(
+    wake = asyncio.create_task(
         redrive(), name=f"checkpoint-wake:{record.thread_id}",
     )
+    _wakes.add(wake)
+    wake.add_done_callback(_wakes.discard)
 
 
 async def _execute(
@@ -360,7 +363,7 @@ async def cancel_checkpoint(checkpoint_id: str) -> CheckpointRecord:
 
 
 async def shutdown_checkpoint_tasks() -> None:
-    """Cancel and join the exact checkpoint calls owned by this process."""
+    """Cancel and join the exact checkpoint calls and wakes owned by this process."""
     handles = tuple(_tasks.items())
     for _checkpoint_id, handle in handles:
         handle.cancel_event.set()
@@ -374,6 +377,11 @@ async def shutdown_checkpoint_tasks() -> None:
         *(handle.task for _checkpoint_id, handle in handles),
         return_exceptions=True,
     )
+    # Joined calls start their wakes on the way out, so take wakes last.
+    wakes = tuple(_wakes)
+    for wake in wakes:
+        wake.cancel()
+    await asyncio.gather(*wakes, return_exceptions=True)
 
 
 async def reconcile_startup_checkpoints() -> tuple[CheckpointRecord, ...]:
