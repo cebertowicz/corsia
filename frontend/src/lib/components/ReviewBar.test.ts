@@ -11,9 +11,10 @@ import { token } from '$lib/stores/auth';
 
 const api = vi.hoisted(() => ({ fetchReviewBar: vi.fn(), answerReview: vi.fn() }));
 const planApi = vi.hoisted(() => ({ mutateUserTask: vi.fn() }));
+const ws = vi.hoisted(() => ({ on: vi.fn(() => () => {}) }));
 vi.mock('$lib/api/reviewBar', async (importOriginal) => ({ ...(await importOriginal<object>()), ...api }));
 vi.mock('$lib/api/plans', async (importOriginal) => ({ ...(await importOriginal<object>()), ...planApi }));
-vi.mock('$lib/ws', () => ({ on: vi.fn(() => () => {}) }));
+vi.mock('$lib/ws', () => ws);
 
 const counts = (comments = 0, suggestions = 0, edits = 0) => ({ comments, suggestions, edits });
 function read(comments = 0): ReviewBarRead {
@@ -39,6 +40,7 @@ beforeEach(() => {
 	api.fetchReviewBar.mockReset();
 	api.answerReview.mockReset();
 	planApi.mutateUserTask.mockReset();
+	ws.on.mockClear();
 	token.set(null);
 	submittedAnswers.set({});
 });
@@ -119,8 +121,35 @@ describe('ReviewBar', () => {
 		await vi.waitFor(() => expect(planApi.mutateUserTask).toHaveBeenCalledWith(
 			'user-token', 'plan-1', 'mark_done', 'step-1', 3, 'mark_done:step-1:3',
 		));
-		await vi.waitFor(() => expect(host.textContent).toContain('You marked this done'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Done'));
 		expect(onAnswered).toHaveBeenCalledOnce();
+	});
+
+	it('reloads the bar read after a person-step conflict', async () => {
+		token.set('user-token');
+		planApi.mutateUserTask.mockResolvedValue({ status: 'conflict', detail: 'This step changed. Refreshing the latest state.' });
+		api.fetchReviewBar
+			.mockResolvedValueOnce({ ...read(0), ask_raised: false, person_step: { node_id: 'step-1', node_title: 'Set up the workspace', node_revision: 3, plan_id: 'plan-1', owner_thread_id: 'agent-1', owner_name: 'Setup agent' } })
+			.mockResolvedValueOnce({ ...read(0), ask_raised: false });
+		await render();
+		button('Done')!.click();
+		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalledTimes(2));
+	});
+
+	it('keeps the plan-row receipt after the plans refresh removes the settled person step', async () => {
+		token.set('user-token');
+		planApi.mutateUserTask.mockResolvedValue({ status: 'success' });
+		api.fetchReviewBar
+			.mockResolvedValueOnce({ ...read(0), ask_raised: false, person_step: { node_id: 'step-1', node_title: 'Set up the workspace', node_revision: 3, plan_id: 'plan-1', owner_thread_id: 'agent-1', owner_name: 'Setup agent' } })
+			.mockResolvedValueOnce({ ...read(0), ask_raised: false });
+		await render();
+		button('Done')!.click();
+		await vi.waitFor(() => expect(host.textContent).toContain('Done'));
+		const refresh = ws.on.mock.calls.find(([event]) => event === 'plans_changed')?.[1] as (() => void);
+		refresh();
+		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalledTimes(2));
+		expect(host.textContent).toContain('Done');
+		expect(button('Approve')).toBeUndefined();
 	});
 
 	it('R1: a failed send restores the bar with the retry message and no receipt', async () => {

@@ -129,7 +129,11 @@ describe('PlanTree — same renderer contract', () => {
 		});
 		flushSync();
 
-		(rowTitled('Set up workspace')!.querySelector('.row-body') as HTMLButtonElement).click();
+		const rowButton = rowTitled('Set up workspace')!.querySelector('.row-body') as HTMLButtonElement;
+		expect(rowButton.title).toBe('Open instructions');
+		expect(rowButton.hasAttribute('aria-controls')).toBe(false);
+		expect(rowButton.hasAttribute('aria-expanded')).toBe(false);
+		rowButton.click();
 		await settle();
 
 		expect(onOpenArtifact).toHaveBeenCalledWith(instructions, 'Set up workspace');

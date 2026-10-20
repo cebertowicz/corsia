@@ -114,18 +114,12 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow_version
     """Add, reshape, or re-specify nodes through the canonical evidence paths."""
     acting = actor.thread_id if actor.kind == "thread" else None
     if operation in {"add", "insert"}:
-        from plans import artifact_links, intent_creation, user_step_instructions
-
-        instructions_artifact_id = user_step_instructions.artifact_id(params, actor, db=db)
+        from plans import intent_creation, user_step_instructions
         created, resolved_words = intent_creation.prepare(
             db, plan_id, params, workflow_version=workflow_version, operation=operation, actor=actor,
         )
         node = service.add_node(plan_id, **created, **common) if operation == "add" else mutations.insert_node(plan_id, **created, **common)
-        if instructions_artifact_id is not None:
-            artifact_links.link(
-                node.id, instructions_artifact_id, "input", actor_id=acting,
-                provenance="plans.person_step_instructions", db=db,
-            )
+        user_step_instructions.link_requested(node.id, params, actor, db=db)
         intent_creation.capture(db, plan_id, node, resolved_words, actor=actor)
         if "depends_on_node_id" in params:
             from plans import dependencies

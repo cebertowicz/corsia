@@ -5,7 +5,7 @@
 	import { indentVar } from './planIndent';
 	import { localizeInstants, nodeDisplayLabel } from './planDisplay';
 	import {
-		artifactCount, dollarLine, initiativeLine, isFinished, nextMove, ownDiffers, tokenLine,
+		artifactCount, dollarLine, initiativeLine, isFinished, nextMove, ownDiffers, personStepInstructionsDocument, tokenLine,
 		tryEnding, waitingTime, withFollowUps, workingTime,
 	} from './nodeDetailsText';
 
@@ -58,9 +58,7 @@
 	const initiative = $derived(initiativeLine(node));
 	// One total on a lineage of two or more tasks: the older line gives way to it.
 	const followUps = $derived(initiative ? null : withFollowUps(node));
-	const instructionsDocument = $derived(
-		node.assignee === 'user' && node.artifacts.some((artifact) => artifact.role === 'input' && artifact.type === 'document'),
-	);
+	const instructionsDocument = $derived(personStepInstructionsDocument(node));
 </script>
 
 {#snippet statusLine()}

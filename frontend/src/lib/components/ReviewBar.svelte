@@ -7,8 +7,7 @@
 	import MiddleName from './MiddleName.svelte';
 	import { agentColor } from '$lib/docPresence';
 	import { on } from '$lib/ws';
-	import { token as authToken } from '$lib/stores/auth';
-	import { mutateUserTask } from '$lib/api/plans';
+	import PersonStepReviewBar from './PersonStepReviewBar.svelte';
 	import { createReviewBarState, DRAFT_OPEN } from '$lib/reviewBarState.svelte';
 	import { answerSubmissionFailed, answerSubmitted } from '$lib/stores/cardAnswers';
 
@@ -42,9 +41,7 @@
 	const pending = $derived(`${round} comment${round === 1 ? '' : 's'}`);
 	const busy = $derived(bar.phase === 'sending');
 	const personStep = $derived(bar.read?.person_step ?? null);
-	let personAction = $state<'idle' | 'sending' | 'done' | 'wont_do'>('idle');
-	let personFailure = $state('');
-	const personBusy = $derived(personAction === 'sending');
+	let personReceipt = $state<'done' | 'wont_do' | null>(null);
 	/** A send keeps the layout it came from: the note stays mounted while its own send is in flight. */
 	const noting = $derived(bar.phase === 'noting' || (busy && bar.sendingFrom === 'noting'));
 	const placeholder = $derived(bar.noteRequired ? `What should ${asker} change?` : `Add a note for ${asker} (optional)`);
@@ -71,8 +68,7 @@
 	});
 	$effect(() => {
 		void artifactId;
-		personAction = 'idle';
-		personFailure = '';
+		personReceipt = null;
 	});
 	$effect(() => {
 		if (!draftOpen && bar.failure === DRAFT_OPEN) bar.failure = '';
@@ -185,28 +181,6 @@
 			window.removeEventListener('resize', update);
 		};
 	});
-	async function settlePerson(action: 'mark_done' | 'close_node') {
-		const step = personStep;
-		const bearer = get(authToken);
-		if (!step || !bearer || personBusy) return;
-		personAction = 'sending';
-		personFailure = '';
-		const outcome = await mutateUserTask(
-			bearer, step.plan_id, action, step.node_id, step.node_revision,
-			`${action}:${step.node_id}:${step.node_revision}`,
-		);
-		if (outcome.status === 'success') {
-			personAction = action === 'mark_done' ? 'done' : 'wont_do';
-			onAnswered?.();
-			return;
-		}
-		personAction = 'idle';
-		personFailure = outcome.status === 'conflict'
-			? outcome.detail ?? 'This step changed. Refreshing the latest state.'
-			: outcome.status === 'forbidden'
-				? 'You no longer have permission to change this step.'
-				: outcome.message;
-	}
 
 	function onNoteKey(event: KeyboardEvent) {
 		if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendNote(); }
@@ -214,35 +188,11 @@
 	}
 </script>
 
-{#if personStep || bar.visible}
+{#if personStep || personReceipt || bar.visible}
 	<!-- The slot outlives the phase: it grows once when the first ask arrives, and an answer or a replaced notice swaps inside it at the same height. -->
 	<div class="rb-slot" bind:this={slotEl}>
-	{#if personStep}
-		{#if personAction === 'done' || personAction === 'wont_do'}
-			<section class="review-bar receipt" aria-label="Person step answered">
-				<svg class="rb-icon" aria-hidden="true" viewBox="0 0 16 16">
-					{#if personAction === 'wont_do'}<path d="M3 13l.6-2.8 6.9-6.9a1.4 1.4 0 012 2l-6.9 6.9L3 13z" />
-					{:else}<circle cx="8" cy="8" r="6" /><path d="M5.3 8.2l1.9 1.9 3.5-3.9" />{/if}
-				</svg>
-				<span class="rb-receipt" role="status" tabindex="-1">You {personAction === 'done' ? 'marked this done' : 'won’t do this'}</span>
-			</section>
-		{:else}
-			<section class="review-bar ask" aria-label="Person step" aria-busy={personBusy}>
-				<span class="rb-head">
-					<span class="rb-line">
-						<span class="rb-lead"><Avatar name={personStep.owner_name} color={agentColor(personStep.owner_thread_id)} hidden /></span>
-						<span class="rb-ask"><strong><MiddleName name={personStep.owner_name} /></strong> needs you to do this: {personStep.node_title}</span>
-					</span>
-				</span>
-				<span class="rb-row2"><div class="rb-capsule" bind:this={capsuleEl}>
-					<span class="rb-status" class:busy={personBusy} role="status">{personBusy ? 'Recording your answer…' : personFailure}</span>
-					<div class="rb-actions">
-						<Button size="sm" variant="ghost" disabled={personBusy} onclick={() => void settlePerson('close_node')}>Won’t do</Button>
-						<Button size="sm" variant="primary" loading={personBusy} onclick={() => void settlePerson('mark_done')}>Done</Button>
-					</div>
-				</div></span>
-			</section>
-		{/if}
+	{#if personStep || personReceipt}
+		<PersonStepReviewBar {personStep} bind:receipt={personReceipt} {onAnswered} onConflict={() => void bar.load()} />
 	{:else if bar.phase === 'answered'}
 		<section class="review-bar receipt" class:changes={bar.receipt?.verdict === 'changes_requested'} aria-label="Review answered" in:swap={{ leaving: false }} out:swap={{ leaving: true }}>
 			<svg class="rb-icon" aria-hidden="true" viewBox="0 0 16 16">

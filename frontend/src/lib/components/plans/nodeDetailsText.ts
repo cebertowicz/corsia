@@ -1,5 +1,12 @@
-import type { OperatorCostAmount, OperatorExecutionCause, OperatorNode } from '$lib/api/plans';
+import type { OperatorArtifactLink, OperatorCostAmount, OperatorExecutionCause, OperatorNode } from '$lib/api/plans';
 import { formatCost } from '$lib/stores/costs';
+
+/** The linked how-to that replaces a user step's inline details. */
+export function personStepInstructionsDocument(node: OperatorNode): OperatorArtifactLink | undefined {
+	return node.assignee === 'user'
+		? node.artifacts.find((artifact) => artifact.role === 'input' && artifact.type === 'document')
+		: undefined;
+}
 
 /**
  * Who moves a waiting node next, in the reader's words. An agent moving its own

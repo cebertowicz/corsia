@@ -37,6 +37,19 @@ def artifact_id(params: dict, actor, *, db) -> str | None:
     return artifact_id
 
 
+def link_requested(node_id: str, params: dict, actor, *, db) -> None:
+    """Validate and link the optional instructions document after node creation."""
+    requested_id = artifact_id(params, actor, db=db)
+    if requested_id is None:
+        return
+    from plans import artifact_links
+
+    artifact_links.link(
+        node_id, requested_id, "input", actor_id=actor.thread_id,
+        provenance="plans.person_step_instructions", db=db,
+    )
+
+
 def read_for_artifact(artifact_id: str, *, db) -> dict | None:
     """Return the one open person step whose input is this instructions document."""
     row = db.execute(
