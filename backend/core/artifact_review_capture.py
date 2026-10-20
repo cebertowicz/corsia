@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from doceditor import review_requests
 from infra.database import get_db
 from infra.db_async import run_in_db
+
+
+logger = logging.getLogger(__name__)
 
 
 def submitted(request_id: str) -> bool:
@@ -41,7 +46,20 @@ def _escalate_in_db(request_id: str) -> None:
         db.close()
 
 
-async def review_limit_or_failure_handler(request_id: str, error=None) -> None:
+async def review_limit_or_failure_handler(request_id: str, error=None, *, reason: str | None = None) -> None:
+    if error is None:
+        logger.warning(
+            "artifact review escalation request_id=%s reason=%s",
+            request_id,
+            reason or "unknown",
+        )
+    else:
+        logger.warning(
+            "artifact review escalation request_id=%s exception=%s",
+            request_id,
+            type(error).__name__,
+            exc_info=error,
+        )
     await run_in_db(_escalate_in_db, request_id)
 
 
@@ -55,4 +73,4 @@ async def reconcile_startup_reviews(live_fork_ids) -> list[str]:
 
 async def review_end_handler(request_id: str, result=None) -> None:
     if not await run_in_db(submitted, request_id):
-        await review_limit_or_failure_handler(request_id)
+        await review_limit_or_failure_handler(request_id, reason="review_completed_without_submission")

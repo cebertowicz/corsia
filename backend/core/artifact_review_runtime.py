@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import replace
 from typing import Any
 
 from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
 from core.fork_runtime import ForkHandle, cancel_fork, forget, handles
 from core.artifact_review_capture import submitted
+
+
+logger = logging.getLogger(__name__)
+
+
+def _cold_request_unavailable(request_id: str, reason: str):
+    logger.warning("artifact review cold request request_id=%s reason=%s", request_id, reason)
+    return None
 
 
 def _instruction(row: Any, artifact: Any, note: str) -> str:
@@ -34,14 +43,14 @@ def _cold_request(request_id: str):
     try:
         row = db.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone()
         if row is None or row["cancelled_at"] or row["answered_batch_id"] or not row["fork_id"]:
-            return None
+            return _cold_request_unavailable(request_id, "row_state")
         thread = db.execute("SELECT * FROM threads WHERE id=?", (row["reviewer_thread_id"],)).fetchone()
         artifact = db.execute("SELECT * FROM artifact_identities WHERE id=?", (row["artifact_id"],)).fetchone()
         if thread is None or artifact is None:
-            return None
+            return _cold_request_unavailable(request_id, "thread_or_artifact")
         target = resolve_thread_target(str(thread["model"] or ""), thread_id=thread["id"], db=db)
         if not target.available:
-            return None
+            return _cold_request_unavailable(request_id, "target_unavailable")
         previous = current_installed(thread["id"], db=db)
         projection = render_portable_history(
             thread["id"], db=db,
@@ -49,7 +58,7 @@ def _cold_request(request_id: str):
         )
         boundary = projection.sealed_boundary
         if boundary is None:
-            return None
+            return _cold_request_unavailable(request_id, "no_sealed_boundary")
         admission = build_cold_checkpoint_admission(
             checkpoint_id=row["fork_id"], thread_id=thread["id"], trigger="agent",
             source_target=target, writer_target=target, boundary=boundary, previous=previous,
@@ -71,7 +80,9 @@ async def start(request_id: str) -> None:
     """Freeze after any active checkpoint, then register exactly one review pass."""
     prepared = await asyncio.to_thread(_cold_request, request_id)
     if prepared is None:
-        await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id)
+        await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(
+            request_id, reason="cold_request_unavailable",
+        )
         return
     row, request = prepared
     fork_id = request.checkpoint_id
@@ -134,7 +145,9 @@ async def _run(request_id: str, request: Any, cancel_event: asyncio.Event) -> No
             await await_or_cancel(await_checkpoint(active.id), cancel_event)
             prepared = await asyncio.to_thread(_cold_request, request_id)
             if prepared is None:
-                await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id)
+                await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(
+                    request_id, reason="cold_request_unavailable",
+                )
                 return
             _row, request = prepared
         from core.checkpoint_usage import bind_usage

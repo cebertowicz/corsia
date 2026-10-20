@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
+
 import pytest
 
 from infra.queries import insert_message
@@ -43,12 +46,67 @@ def _turn(db, turn_id: str, status: str, *, messages: bool) -> None:
     db.commit()
 
 
-def _prepare(monkeypatch, request_id: str):
+def _prepare(monkeypatch, request_id: str, target: ExecutionTarget = TARGET):
     from core.artifact_review_runtime import _cold_request
 
-    monkeypatch.setattr("llm.resolution.resolve_thread_target", lambda *_args, **_kwargs: TARGET)
+    monkeypatch.setattr("llm.resolution.resolve_thread_target", lambda *_args, **_kwargs: target)
     monkeypatch.setattr("core.checkpoint_render.checkpoint_binary", lambda *_args, **_kwargs: "claude")
     return _cold_request(request_id)
+
+
+def test_target_unavailable_logs_cold_request_reason(review_env, monkeypatch, caplog):
+    db, artifact_id = review_env
+    row = request(db, artifact_id)
+
+    prepared = _prepare(monkeypatch, row["id"], replace(
+        TARGET, available=False, availability_reason="fixture unavailable",
+    ))
+
+    assert prepared is None
+    assert f"artifact review cold request request_id={row['id']} reason=target_unavailable" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_run_exception_reaches_escalation_handler_log(review_env, monkeypatch, caplog):
+    from core.artifact_review_runtime import _run
+
+    db, artifact_id = review_env
+    row = request(db, artifact_id)
+    _turn(db, "completed", "completed", messages=True)
+    prepared = _prepare(monkeypatch, row["id"])
+    assert prepared is not None
+
+    async def source(request):
+        return request
+
+    async def fail_bind(*_args, **_kwargs):
+        raise RuntimeError("fixture bind failure")
+
+    monkeypatch.setattr("core.artifact_review_runtime._source", source)
+    monkeypatch.setattr("core.checkpoint_usage.bind_usage", fail_bind)
+
+    await _run(row["id"], prepared[1], asyncio.Event())
+
+    assert f"artifact review escalation request_id={row['id']} exception=RuntimeError" in caplog.text
+    assert "fixture bind failure" in caplog.text
+    fallback = stored(db, row["id"])
+    assert fallback["node_id"] is not None
+    assert fallback["fork_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_unsubmitted_completed_review_logs_its_escalation_reason(review_env, caplog):
+    from core.artifact_review_capture import review_end_handler
+
+    db, artifact_id = review_env
+    row = request(db, artifact_id)
+
+    await review_end_handler(row["id"])
+
+    assert (
+        f"artifact review escalation request_id={row['id']} "
+        "reason=review_completed_without_submission"
+    ) in caplog.text
 
 
 def test_completed_history_with_running_successor_prepares_request(review_env, monkeypatch):
