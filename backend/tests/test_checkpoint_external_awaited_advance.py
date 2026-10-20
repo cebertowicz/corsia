@@ -101,12 +101,22 @@ def _earlier_admission(
 
 
 @pytest.fixture(autouse=True)
-async def _clean_checkpoint_runtime():
+async def _clean_checkpoint_runtime(monkeypatch):
     from core import checkpoint_runtime
+    from infra import state, thread_execution
 
+    async def no_redrive(_thread_id):
+        return None
+
+    # An installed checkpoint re-drives its thread in an untracked task that
+    # outlives this test's database; a real drive then records a process-wide
+    # driver failure that turns later /api/health calls into 503s.
+    monkeypatch.setattr(thread_execution, "drive_thread", no_redrive)
+    monkeypatch.setattr(state, "_thread_driver_failure", None)
     await checkpoint_runtime.shutdown_checkpoint_tasks()
     yield
     await checkpoint_runtime.shutdown_checkpoint_tasks()
+    assert state._thread_driver_failure is None
 
 
 @pytest.mark.asyncio
