@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
 from doceditor.note_names import document_name
 from infra.passive_changes import append_thread_context_note
 from registry import models as registry_models
 
 QUOTE_CHARS = 60
+NAMED_LIMIT = 5
 
 
 def _named(suggestion: dict[str, Any]) -> str:
@@ -16,7 +18,14 @@ def _named(suggestion: dict[str, Any]) -> str:
     quote = " ".join(str(suggestion.get("anchor_text") or "").split())
     if len(quote) > QUOTE_CHARS:
         quote = quote[:QUOTE_CHARS - 1].rstrip() + "…"
-    return f"“{quote}” ({suggestion['id']})"
+    return f"“{quote}” ({suggestion['id']})" if quote else str(suggestion["id"])
+
+
+def _named_list(suggestions: list[dict[str, Any]]) -> str:
+    """The first ``NAMED_LIMIT`` named, so an accept-all keeps the note one bounded line."""
+    named = ", ".join(_named(suggestion) for suggestion in suggestions[:NAMED_LIMIT])
+    hidden = len(suggestions) - NAMED_LIMIT
+    return named + (f", and {hidden} more" if hidden > 0 else "")
 
 
 def _decision_note(
@@ -27,11 +36,8 @@ def _decision_note(
     subject = "your suggestion" if count == 1 else f"{count} of your suggestions"
     summary = f"{decided_by} {decision} {subject} on {document_name(registry_models.get_artifact(artifact_id, db=db))}"
     if decision == "accepted":
-        # The person's comment a suggestion answers stays open; resolving it is the author's (PERSON_COMMENT_RESOLVE_RULE).
-        summary += ": " + ", ".join(_named(suggestion) for suggestion in suggestions) + (
-            ". If it answers a comment of theirs, resolve that comment, naming the suggestion in your reply."
-            if count == 1 else
-            ". Where one answers a comment of theirs, resolve that comment, naming the suggestion in your reply.")
+        # Who resolves the person's comment a suggestion answers has one source; quote it, never restate it.
+        summary += f": {_named_list(suggestions)}. {PERSON_COMMENT_RESOLVE_RULE}"
     else:
         summary += "."
         if reason:

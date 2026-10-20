@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
-from doceditor import comment_actions, feedback_batches, feedback_state
+from doceditor import comment_actions, feedback_batches, feedback_state, feedback_suggestion_decisions
 from doceditor.comment_action_errors import decision_only_error
+from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
 from infra.database import get_db, write_transaction
 from infra.database_migrations import migrate_to_current
 from infra.schema import SCHEMA_VERSION
@@ -44,11 +47,8 @@ def _notes(db, thread_id: str) -> list[str]:
 
 
 def _accepted_note(suggestion: dict) -> str:
-    """Names the accepted suggestion so its author can resolve the person's comment it answers."""
-    return (
-        f"Robin accepted your suggestion on Design: “quoted source” ({suggestion['id']}). "
-        "If it answers a comment of theirs, resolve that comment, naming the suggestion in your reply."
-    )
+    """Names the accepted suggestion and quotes the one resolve rule, never a second wording of it."""
+    return f"Robin accepted your suggestion on Design: “quoted source” ({suggestion['id']}). {PERSON_COMMENT_RESOLVE_RULE}"
 
 
 def test_an_accepted_suggestion_is_named_by_its_quote_clipped_to_one_line():
@@ -58,6 +58,36 @@ def test_an_accepted_suggestion_is_named_by_its_quote_clipped_to_one_line():
     quote = named[1:named.index("”")]
     assert "\n" not in quote and len(quote) == QUOTE_CHARS and quote.endswith("…")
     assert named.endswith(" (s1)")
+    assert _named({"id": "s2", "anchor_text": "  \n"}) == "s2"
+
+
+def test_an_accept_all_note_names_at_most_the_limit_and_carries_every_id(isolated_db):
+    from doceditor.feedback_suggestion_decisions import NAMED_LIMIT
+
+    db = get_db()
+    try:
+        seed_thread(db, "owner", title="Documents")
+        seed_thread(db, "author", title="Reviewer")
+        artifact_id = seed_document(db, "owner", name="Design.md")
+        suggestions = [add_comment(db, artifact_id, replacement=f"New {n}")[0] for n in range(NAMED_LIMIT + 2)]
+
+        feedback_suggestion_decisions.record_suggestion_decisions(
+            db, suggestions, decision="accepted", decided_by="Robin", decided_by_thread_id=None,
+            decision_event_id="event-1", reason=None,
+        )
+
+        note = db.execute(
+            "SELECT summary, details_json FROM context_change_journal "
+            "WHERE object_kind='thread_context' AND object_id='author'"
+        ).fetchone()
+        named = ", ".join(f"“quoted source” ({s['id']})" for s in suggestions[:NAMED_LIMIT])
+        assert note["summary"] == (
+            f"Robin accepted {NAMED_LIMIT + 2} of your suggestions on Design: {named}, and 2 more. "
+            f"{PERSON_COMMENT_RESOLVE_RULE}"
+        )
+        assert json.loads(note["details_json"])["suggestion_ids"] == [str(s["id"]) for s in suggestions]
+    finally:
+        db.close()
 
 
 def _plan_nodes(db, thread_id: str) -> int:
