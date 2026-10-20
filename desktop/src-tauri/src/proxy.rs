@@ -21,7 +21,7 @@ use tokio::{net::TcpListener, sync::oneshot};
 
 use crate::{
     remote_config::{Locator, RemoteRecord},
-    routes::{self, Dialed, LocalDial, RouteConfig, Routes, Upstream},
+    routes::{self, Dialed, LocalDial, RouteConfig, RouteConfigError, Routes, Upstream},
 };
 
 pub(crate) type ProxyBody = BoxBody<Bytes, Box<dyn Error + Send + Sync>>;
@@ -70,7 +70,10 @@ pub async fn start_record(
     preferred_port: u16,
     on_key_changed: impl Fn() + Send + Sync + 'static,
 ) -> Result<ProxyHandle, ProxyError> {
-    let config = RouteConfig::from_record(record, on_key_changed).map_err(ProxyError::Transport)?;
+    let config = RouteConfig::from_record(record, on_key_changed).map_err(|error| match error {
+        RouteConfigError::SavedTrust => ProxyError::Unreachable(crate::classify::ConnectFailure::KeyChanged),
+        RouteConfigError::SavedIdentity(error) => ProxyError::Transport(error),
+    })?;
     start_routes(record.locator.clone(), config, preferred_port, Arc::new(|locator| Box::pin(default_resolve(locator)))).await
 }
 

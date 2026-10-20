@@ -1,11 +1,11 @@
-//! Which route carries the proxy's next connection, and the proof that the
-//! route reaches the paired host. A record with no outside address keeps the
-//! single saved route and trust exactly as before. With one, local is tried
-//! first within `LOCAL_BUDGET`, outside otherwise, and either route carries a
-//! request only once it has proven the pairing's identity: a pinned route by
-//! its TLS handshake, a system-trusted route by the host's signature. A route
-//! that answers with another key ends forwarding (`key_changed`); it is never
-//! a reason to try the other route.
+//! Which saved route carries the proxy's next connection, and the proof that
+//! it reaches the paired host. Every record tries its local route first; when
+//! an outside route is saved, the local attempt is bounded by `LOCAL_BUDGET`
+//! before that route is tried. A known identity is proven on every route: a
+//! pinned route by its TLS handshake, a system-trusted route by the host's
+//! signature. Earlier records without an identity retain their saved local
+//! trust. A route that answers with another key ends forwarding (`key_changed`)
+//! and is never a reason to try another route.
 
 use std::{
     future::Future,
@@ -74,6 +74,12 @@ pub(crate) struct RouteConfig {
     pub(crate) reprobe: Duration,
 }
 
+#[derive(Debug)]
+pub(crate) enum RouteConfigError {
+    SavedTrust,
+    SavedIdentity(String),
+}
+
 impl RouteConfig {
     /// The saved trust alone, as every record had before outside addresses.
     pub(crate) fn single(trust: Trust, on_key_changed: impl Fn() + Send + Sync + 'static) -> Self {
@@ -87,13 +93,10 @@ impl RouteConfig {
         }
     }
 
-    pub(crate) fn from_record(record: &RemoteRecord, on_key_changed: impl Fn() + Send + Sync + 'static) -> Result<Self, String> {
-        let identity = record.identity.as_deref().map(decode_identity).transpose()?;
-        Ok(Self {
-            identity,
-            outside: record.outside.clone(),
-            ..Self::single(Trust::try_from(&record.trust)?, on_key_changed)
-        })
+    pub(crate) fn from_record(record: &RemoteRecord, on_key_changed: impl Fn() + Send + Sync + 'static) -> Result<Self, RouteConfigError> {
+        let trust = Trust::try_from(&record.trust).map_err(|_| RouteConfigError::SavedTrust)?;
+        let identity = record.identity.as_deref().map(decode_identity).transpose().map_err(RouteConfigError::SavedIdentity)?;
+        Ok(Self { identity, outside: record.outside.clone(), ..Self::single(trust, on_key_changed) })
     }
 }
 
@@ -115,8 +118,9 @@ struct Outside {
 pub(crate) struct Routes {
     local: LocalDial,
     local_trust: Trust,
-    /// With an outside route, the identity both routes must prove. `None` only for a single route.
-    paired: Option<([u8; 32], Outside)>,
+    /// Earlier records have no identity; an outside route requires one.
+    identity: Option<[u8; 32]>,
+    outside: Option<Outside>,
     tls: TlsConfig,
     reprobe: Duration,
     selector: Mutex<RouteSelector>,
@@ -126,23 +130,27 @@ pub(crate) struct Routes {
 
 impl Routes {
     pub(crate) fn new(config: RouteConfig, local: LocalDial) -> Result<Self, String> {
-        let paired = match (config.outside, config.identity) {
-            (None, _) => None,
-            (Some(_), None) => return Err("an outside route needs the paired host's identity".into()),
-            (Some(outside), Some(identity)) => {
+        let RouteConfig { trust, identity, outside, on_key_changed, tls, reprobe } = config;
+        let outside = match outside {
+            Some(outside) => {
+                if identity.is_none() {
+                    return Err("an outside route needs the paired host's identity".into());
+                }
                 let (host, port) = crate::remote_host::parse_https_address(&outside.url)?;
-                Some((identity, Outside { host, port, trust: Trust::try_from(&outside.trust)? }))
+                Some(Outside { host, port, trust: Trust::try_from(&outside.trust)? })
             }
+            None => None,
         };
         Ok(Self {
             local,
-            local_trust: config.trust,
-            paired,
-            tls: config.tls,
-            reprobe: config.reprobe,
+            local_trust: trust,
+            identity,
+            outside,
+            tls,
+            reprobe,
             selector: Mutex::new(RouteSelector::new()),
             key_changed: AtomicBool::new(false),
-            on_key_changed: config.on_key_changed,
+            on_key_changed,
         })
     }
 
@@ -155,36 +163,38 @@ impl Routes {
         if self.key_changed() {
             return Err(RouteError::KeyChanged(KEY_CHANGED_MESSAGE.into()));
         }
-        let connected = match &self.paired {
-            // Today's single route: no budget and no identity proof beyond its saved trust.
-            None => match (self.local)().await {
-                Ok(dialed) => self.open(&self.local_trust, dialed).await,
-                Err(error) => Err(RouteError::Unreachable(error)),
-            },
-            Some((identity, outside)) => self.connect_paired(identity, outside).await,
-        };
+        let connected = self.connect_saved_routes().await;
         if matches!(connected, Err(RouteError::KeyChanged(_))) {
             self.refuse();
         }
         connected
     }
 
-    async fn connect_paired(self: &Arc<Self>, identity: &[u8; 32], outside: &Outside) -> Result<Upstream, RouteError> {
-        if self.selector().current() == Route::Local {
-            match tokio::time::timeout(RouteSelector::LOCAL_BUDGET, self.prove_local(identity)).await {
+    async fn connect_saved_routes(self: &Arc<Self>) -> Result<Upstream, RouteError> {
+        if self.outside.is_some() && self.selector().current() == Route::Outside {
+            self.probe_local();
+        } else if self.outside.is_some() {
+            match tokio::time::timeout(RouteSelector::LOCAL_BUDGET, self.connect_local()).await {
+                Ok(Ok(proven)) => return Ok(proven),
+                Ok(Err(RouteError::KeyChanged(error))) => return Err(RouteError::KeyChanged(error)),
                 Ok(Err(RouteError::Unreachable(_))) | Err(_) => self.selector().local_failed(Instant::now()),
-                Ok(proven) => return proven,
             }
         } else {
-            self.probe_local();
+            return self.connect_local().await;
         }
+
+        let outside = self.outside.as_ref().expect("outside route selected");
+        let identity = self.identity.as_ref().expect("outside route has an identity");
         let dialed = dial(&outside.host, outside.port).await.map_err(RouteError::Unreachable)?;
         self.prove(Route::Outside, &outside.trust, identity, dialed).await
     }
 
-    async fn prove_local(&self, identity: &[u8; 32]) -> Result<Upstream, RouteError> {
+    async fn connect_local(&self) -> Result<Upstream, RouteError> {
         let dialed = (self.local)().await.map_err(RouteError::Unreachable)?;
-        self.prove(Route::Local, &self.local_trust, identity, dialed).await
+        match &self.identity {
+            Some(identity) => self.prove(Route::Local, &self.local_trust, identity, dialed).await,
+            None => self.open(&self.local_trust, dialed).await,
+        }
     }
 
     /// While on outside, try local in the background at most once per `reprobe`; no request waits for it. Local
@@ -195,8 +205,7 @@ impl Routes {
         }
         let routes = Arc::clone(self);
         tokio::spawn(async move {
-            let Some((identity, _)) = &routes.paired else { return };
-            match tokio::time::timeout(RouteSelector::LOCAL_BUDGET, routes.prove_local(identity)).await {
+            match tokio::time::timeout(RouteSelector::LOCAL_BUDGET, routes.connect_local()).await {
                 Ok(Ok(proven)) => routes.selector().local_proven(proven.connection_spki_sha256),
                 Ok(Err(RouteError::KeyChanged(_))) => routes.refuse(),
                 Ok(Err(RouteError::Unreachable(_))) | Err(_) => {}

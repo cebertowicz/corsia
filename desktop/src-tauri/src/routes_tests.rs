@@ -194,6 +194,32 @@ async fn a_pinned_local_route_is_proven_by_its_handshake_alone() {
     assert_eq!(refusals.load(SeqCst), 0);
 }
 
+#[tokio::test]
+async fn a_known_identity_on_its_single_local_route_is_proven() {
+    let host = test_tls::generated_p256_host();
+    let local = serve(Arc::clone(&host.tls.config), "local", None).await;
+    let refusals = Arc::new(AtomicUsize::new(0));
+    let config = paired(&host, None, None, &refusals);
+    let proxy = proxy_for(config, Arc::new(AtomicU16::new(local.port))).await;
+
+    assert_eq!(get(&proxy).await, (StatusCode::OK, "local".into()));
+    assert_eq!(local.proofs.load(SeqCst), 0, "a matching pinned local key proves the identity in TLS");
+    assert_eq!(refusals.load(SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_wrong_local_key_is_key_changed_with_or_without_an_outside_route() {
+    let expected = test_tls::generated_p256_host();
+    let wrong_local = serve(test_tls::generated_self_signed_identity().config, "wrong", None).await;
+    for outside in [None, Some((dead_port().await, system()))] {
+        let refusals = Arc::new(AtomicUsize::new(0));
+        let config = paired(&expected, outside, None, &refusals);
+        let proxy = proxy_for(config, Arc::new(AtomicU16::new(wrong_local.port))).await;
+
+        assert_refused(&proxy, &wrong_local, &refusals).await;
+    }
+}
+
 #[path = "routes_proxy_tests.rs"]
 mod terminating_proxy;
 
