@@ -550,34 +550,6 @@ async def test_model_switch_route_refuses_through_the_real_switch(
 
 
 @pytest.mark.asyncio
-async def test_thread_create_route_maps_a_refusal_to_the_person_409(isolated_db, monkeypatch) -> None:
-    from api import threads
-    from auth_fixtures import OWNER_SESSION_TOKEN
-    from infra.local_only import LocalityRefused
-
-    async def refuse(**_kwargs):
-        raise LocalityRefused("thread_local_only", "cloud", ("omlx@local/a",), spawn=True)
-
-    async def prepared(*_args):
-        return None
-
-    monkeypatch.setattr("connections.harness_refresh.prepare_selection", prepared)
-    monkeypatch.setattr(threads, "create_visible_fresh_thread", refuse)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=_app(threads.router)), base_url="http://test",
-    ) as client:
-        response = await client.post(
-            "/api/threads?token=" + OWNER_SESSION_TOKEN, json={"model": "cloud"},
-        )
-
-    assert response.status_code == 409
-    assert response.json() == {
-        "code": "local_only_requires_local_model",
-        "message": "This chat is Local only, so choose a local model and try again.",
-    }
-
-
-@pytest.mark.asyncio
 async def test_delegate_set_model_tool_returns_the_agent_text(monkeypatch) -> None:
     from infra.local_only import LocalityRefused
     from tools import delegation
@@ -689,7 +661,7 @@ def test_person_chat_on_a_cloud_model_still_needs_confirmation(monkeypatch) -> N
     assert refusal == (
         "local_only_send_needs_confirm: Researcher runs on a cloud model (cloud). Remove anything "
         "sensitive from the message (keys, secrets, personal data, private file contents), then call "
-        "again with no_sensitive_content: true."
+        "again with no_sensitive_content: true (on `corsia delegate send`, add --no-sensitive-content)."
     )
 
 

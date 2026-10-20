@@ -19,9 +19,7 @@ from infra.db_async import run_in_db, run_read
 from infra.packed_rows import fetch_all
 from infra.product_events import emit_product_event
 from infra.conductor import get_all_coordination_ids
-from api.locality_refusal import locality_refused_response
 from infra.fresh_threads import create_visible_fresh_thread
-from infra.local_only import LocalityRefused
 from infra.queries import (
     get_thread_for_user,
     insert_message,
@@ -99,8 +97,6 @@ async def create_thread(token: str, body: dict):
             reasoning_effort=body.get("reasoning_effort") or None,
             created_at=now, account_id=body.get("account_id"),
         )
-    except LocalityRefused as exc:
-        return locality_refused_response(exc)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     thread_id = thread_row["id"]

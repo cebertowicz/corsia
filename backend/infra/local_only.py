@@ -146,7 +146,8 @@ def send_confirmation_refusal(
     return (
         f"{LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE}: {recipient_name} {reason}. Remove anything "
         "sensitive from the message (keys, secrets, personal data, private file contents), "
-        "then call again with no_sensitive_content: true."
+        "then call again with no_sensitive_content: true (on `corsia delegate send`, "
+        "add --no-sensitive-content)."
     )
 
 
