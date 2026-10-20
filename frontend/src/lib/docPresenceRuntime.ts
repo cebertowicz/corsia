@@ -8,7 +8,7 @@ import {
 	type DocActivityFrame,
 	type DocSpan,
 } from '$lib/docPresence';
-import { holdCommentArrival, releaseCommentArrival, releaseCommentArrivals } from '$lib/stores/docCommentArrivals';
+import { holdCommentArrival, holdCommentCall, releaseCommentArrival, releaseCommentArrivals } from '$lib/stores/docCommentArrivals';
 import { on } from '$lib/ws/events';
 import type { SelectOutcome } from '$lib/cm/typed-reveal-arrival';
 
@@ -81,7 +81,7 @@ class ArtifactArrivalCoordinator {
 		releaseCommentArrivals(this.artifactId);
 	}
 
-	private holdForLane(commentId: string): void {
+	private holdForLane(commentId: string, callId: string | null): void {
 		this.staged.add(commentId);
 		const timer = this.expected.get(commentId);
 		if (timer !== undefined) {
@@ -91,6 +91,7 @@ class ArtifactArrivalCoordinator {
 		} else if (!this.missed.delete(commentId) && !this.reducedMotion()) {
 			holdCommentArrival(this.artifactId, commentId);
 		}
+		if (callId) holdCommentCall(this.artifactId, commentId, callId);
 	}
 
 	enqueue(frame: DocActivityFrame): void {
@@ -100,7 +101,7 @@ class ArtifactArrivalCoordinator {
 			this.queues.set(frame.thread_id, queue);
 		}
 		// The comment stays out of the document's comments from here until its turn (every exit releases).
-		if (frame.kind === 'comment' && frame.comment_id) this.holdForLane(frame.comment_id);
+		if ((frame.kind === 'comment' || frame.kind === 'suggestion') && frame.comment_id) this.holdForLane(frame.comment_id, frame.call_id ?? null);
 		queue.enqueue({ frame });
 		void queue.run().catch((error) => console.error('document arrival failed', error));
 	}
@@ -124,7 +125,7 @@ class ArtifactArrivalCoordinator {
 	}
 
 	private release(arrival: RuntimeArrival): void {
-		if (arrival.frame.kind !== 'comment' || !arrival.frame.comment_id) return;
+		if ((arrival.frame.kind !== 'comment' && arrival.frame.kind !== 'suggestion') || !arrival.frame.comment_id) return;
 		this.staged.delete(arrival.frame.comment_id);
 		releaseCommentArrival(this.artifactId, arrival.frame.comment_id);
 	}

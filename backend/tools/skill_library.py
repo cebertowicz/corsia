@@ -294,10 +294,10 @@ def _update(
         return _error("library_unreachable", f"{error}; continue without it and try again later")
     skill_md = bundle.pop("SKILL.md")
     current, _problems = local_bundle(folder)
-    changed_files = _changed_paths(current, skill_md, bundle)
+    changed_files = _changed_paths(current, name, skill_md, item["description"], bundle)
     result = update_skill_bundle(
         _workspace(), name, skill_md, bundle, item["description"],
-        origin_metadata(_source(item), skill_md, "ignored", item["version"], item_manifest(item)),
+        origin_metadata(_source(item), skill_md, version=item["version"], item_manifest=item_manifest(item)),
         author_thread_id=owner_id, thread_id=owner_id, project_id=project_id, db=db,
         reason="reviewed library skill update", confirmed_files=confirmed_files,
     )

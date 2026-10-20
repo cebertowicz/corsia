@@ -122,12 +122,20 @@ def discard_confirmation(
     }
 
 
-def changed_paths(current: dict[str, bytes] | None, skill_md: bytes, bundle: dict[str, bytes]) -> list[str]:
-    """Name both arriving and upstream-dropped visible files in an update result."""
-    new_paths = {"SKILL.md", *bundle}
-    dropped = (set(current or {}) - new_paths) - {"corsia.yaml"}
-    skill_changed = current is None or current.get("SKILL.md") != skill_md
-    return sorted(set(bundle) | dropped | ({"SKILL.md"} if skill_changed else set()))
+def changed_paths(
+    current: dict[str, bytes] | None, name: str, skill_md: bytes, description: str, bundle: dict[str, bytes],
+) -> list[str]:
+    """Name visible files whose installed bytes change, arrive, or disappear in an update."""
+    from infra.skill_install import installed_skill_text
+
+    installed_skill = installed_skill_text(name, skill_md, description)
+    new_files = {"SKILL.md": installed_skill.encode("utf-8") if installed_skill is not None else skill_md, **bundle}
+    dropped = (set(current or {}) - set(new_files)) - {"corsia.yaml"}
+    changed = {
+        path for path, data in new_files.items()
+        if current is None or current.get(path) != data
+    }
+    return sorted(changed | dropped)
 
 
 def emit_action(action: str, thread_id: str, result: dict[str, Any]) -> None:
