@@ -150,8 +150,8 @@ def test_corrections_reach_their_run_through_the_correction_attribution(db) -> N
     correction(db, "m3", "loose", at="2026-10-08T00:00:00Z")
     runs, _ = runs_of(read_snapshot(db, now=NOW))
     facts = runs["run"].corrections
-    assert [(fact.source_id, fact.is_correction, fact.counter) for fact in facts] == [
-        ("m1", True, "c1"), ("m2", False, "c1")]
+    assert [(fact.source_kind, fact.source_id, fact.is_correction, fact.counter) for fact in facts] == [
+        ("message", "m1", True, "c1"), ("message", "m2", False, "c1")]
 
 
 def _definitions(db, *, can_decide: bool = True, workflow: str = "sdlc-process", owner: str = "owner") -> None:

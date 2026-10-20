@@ -38,6 +38,7 @@ def parse_ts(value: str) -> datetime:
 
 @dataclass(frozen=True)
 class CorrectionFact:
+    source_kind: str
     source_id: str
     source_at: str
     counter: str
@@ -128,11 +129,11 @@ class _Sample:
 
 def _counter(measure: PlannedMeasure, runs: Sequence[Run]) -> str | None | bool:
     """The one classifier version that counted every source on both sides, None for none, False if none did."""
-    by_source: dict[str, set[str]] = defaultdict(set)
+    by_source: dict[tuple[str, str], set[str]] = defaultdict(set)
     for run in runs:
         for fact in run.corrections:
             if run.in_window(fact.source_at, measure.window_days):
-                by_source[fact.source_id].add(fact.counter)
+                by_source[(fact.source_kind, fact.source_id)].add(fact.counter)
     if not by_source:
         return None
     common = set.intersection(*by_source.values())
