@@ -450,7 +450,7 @@ def test_registration_error_is_a_state_cause_with_fixed_copy() -> None:
     error = MicrosoftError(REGISTRATION_MISCONFIGURED)
     assert error.state_cause == REGISTRATION_MISCONFIGURED
     assert error.message.startswith("The person's own Microsoft app registration isn't configured correctly.")
-    assert error.browser_message == "Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in."
+    assert error.browser_message == "Your Microsoft app for CORSIA isn’t set up correctly. Go back to CORSIA and ask it in chat to fix the app."
     assert "provider-detail-canary" not in error.message
     assert "provider-detail-canary" not in error.browser_message
 
