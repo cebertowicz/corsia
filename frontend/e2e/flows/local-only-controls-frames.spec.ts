@@ -147,6 +147,7 @@ async function createProject(page: Page, name: string): Promise<{ id: string }> 
 	const created = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/projects' && response.request().method() === 'POST');
 	await modal.getByRole('button', { name: 'Create project' }).click();
 	const project = (await (await created).json()).project as { id: string };
+	await expect(modal).toBeHidden();
 	// Select the new project explicitly: a frame sequence can already have another project in scope.
 	await page.keyboard.press('Control+k');
 	await expect(page.locator('.palette')).toBeVisible();
