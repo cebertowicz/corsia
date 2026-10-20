@@ -8,7 +8,7 @@ from typing import Any
 from connections.google import email_screen
 from connections.google.accounts import thread_key as google_thread_key
 from connections.microsoft import client as microsoft_client, mail as microsoft_mail
-from connections.microsoft.accounts import thread_key as microsoft_thread_key
+from connections.microsoft.mail import thread_key as microsoft_thread_key
 from events.connectors import gmail_feed as feed
 
 

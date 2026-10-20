@@ -51,6 +51,25 @@ async def test_pagination_and_retry_after_are_internal(monkeypatch: pytest.Monke
 
 
 @pytest.mark.asyncio
+async def test_send_mail_accepts_empty_202_without_decoding_json(monkeypatch):
+    class EmptyAccepted(Response):
+        def json(self):
+            pytest.fail("Graph sendMail 202 has no JSON body")
+
+    FakeHttp.calls, FakeHttp.responses = [], [EmptyAccepted(202, None)]
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_: FakeHttp())
+
+    async def token(_account):
+        return "access"
+
+    monkeypatch.setattr(client, "access_token", token)
+    await mail.send("m", ["person@example.test"], "subject", "body")
+    assert FakeHttp.calls[0]["method"] == "POST"
+    assert FakeHttp.calls[0]["url"] == "https://graph.microsoft.com/v1.0/me/sendMail"
+    assert FakeHttp.calls[0]["json"]["message"]["subject"] == "subject"
+
+
+@pytest.mark.asyncio
 async def test_graph_expired_delta_has_a_specific_recovery_signal(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeHttp.calls, FakeHttp.responses = [], [Response(410, {})]
     monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
@@ -102,9 +121,11 @@ async def test_unscreened_message_withholds_provider_body(monkeypatch: pytest.Mo
 
 @pytest.mark.asyncio
 async def test_poller_initializes_then_advances_cursor(isolated_db, monkeypatch: pytest.MonkeyPatch) -> None:
-    from connections.microsoft.accounts import create_microsoft_account
-    account = str(create_microsoft_account(
-        "m@example.test", reach={"mode": "all", "project_ids": [], "outside_projects": False},
+    from connections.connected_accounts import create_account
+    from connections.microsoft.provider import MICROSOFT
+
+    account = str(create_account(
+        MICROSOFT.name, "m@example.test", reach={"mode": "all", "project_ids": [], "outside_projects": False},
         created_by=("system", "test"), account_kind="personal", provider_subject="tenant:object",
     )["id"])
     async def changes(_link: str, *, account_id: str, params=None):
@@ -172,7 +193,7 @@ async def test_graph_adapters_cover_mail_calendar_and_drive_actions(monkeypatch:
     assert page_calls[1][0] == calendar.EVENTS
     assert page_calls[2][0] == f"{files.DRIVE}/root/children"
     assert page_calls[3][0] == f"{files.DRIVE}/items/folder%2Fid/children"
-    assert any(method == "POST" and url == f"{mail.MESSAGES}/send" and body is not None for method, url, body in json_calls)
+    assert any(method == "POST" and url == "https://graph.microsoft.com/v1.0/me/sendMail" and body is not None for method, url, body in json_calls)
     assert ("POST", calendar.EVENTS, {"subject": "new"}) in json_calls
     assert ("PATCH", f"{calendar.EVENTS}/event%2Fid", {"subject": "updated"}) in json_calls
     assert ("PUT", f"{files.DRIVE}/root:/note.txt:/content", b"contents") in byte_calls

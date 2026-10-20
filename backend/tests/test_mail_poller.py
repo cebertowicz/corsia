@@ -8,7 +8,8 @@ import pytest
 from connections.connected_accounts import get_account
 from connections.google import email_screen
 from connections.microsoft import client, mail
-from connections.microsoft.accounts import create_microsoft_account
+from connections.connected_accounts import create_account
+from connections.microsoft.provider import MICROSOFT
 from events.connectors import gmail_feed, mail_poller as poller
 from google_account_helpers import only_corsia_account
 from infra.database import get_db
@@ -25,8 +26,8 @@ def isolated(isolated_db, monkeypatch):
 
 
 def connect(reach=None):
-    return str(create_microsoft_account(
-        "person@example.test", reach=reach or {"mode": "all", "project_ids": [], "outside_projects": False},
+    return str(create_account(
+        MICROSOFT.name, "person@example.test", reach=reach or {"mode": "all", "project_ids": [], "outside_projects": False},
         created_by=("system", "test"), account_kind="personal", provider_subject="tenant:object",
     )["id"])
 
@@ -241,7 +242,7 @@ async def test_delivery_reach_filter_and_unscreened_payload(monkeypatch, screen_
 
 
 async def test_remove_during_poll_cancels_only_microsoft(monkeypatch):
-    from connections.microsoft.account_actions import remove_microsoft_account
+    from connections.account_actions import remove_account
 
     microsoft = connect()
     google = str(only_corsia_account("google@example.test", created_by=("system", "test"), state="connected")["id"])
@@ -260,7 +261,7 @@ async def test_remove_during_poll_cancels_only_microsoft(monkeypatch):
     monkeypatch.setattr(gmail_feed, "added_messages", gmail_changes)
     cycle = asyncio.create_task(poller.run_cycle())
     await asyncio.wait_for(started.wait(), 5)
-    await remove_microsoft_account(microsoft, actor=("person", "test"))
+    await remove_account(microsoft, actor=("person", "test"))
     await asyncio.wait_for(cycle, 5)
     assert microsoft not in poller._inflight and microsoft not in poller._due
     assert stored(google)["history_id"] == "gmail-new"
@@ -297,7 +298,7 @@ async def test_microsoft_failure_does_not_delay_gmail(monkeypatch, cause, state)
 
 
 async def test_remove_while_screening_prevents_delivery_and_cursor(monkeypatch):
-    from connections.microsoft.account_actions import remove_microsoft_account
+    from connections.account_actions import remove_account
 
     account = connect()
     seed(account)
@@ -306,7 +307,7 @@ async def test_remove_while_screening_prevents_delivery_and_cursor(monkeypatch):
         return [graph_message(message())], "next"
 
     async def screen(*args):
-        await remove_microsoft_account(account, actor=("person", "test"))
+        await remove_account(account, actor=("person", "test"))
         return await screened()
 
     def unexpected(*args, **kwargs):

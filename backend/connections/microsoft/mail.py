@@ -20,6 +20,13 @@ class Message:
     body: str
 
 
+def thread_key(account_id: str, conversation_id: object) -> str | None:
+    """Conversation ids are mailbox-local; absent conversations have no thread key."""
+    if not isinstance(conversation_id, str) or not conversation_id:
+        return None
+    return f"microsoft:{account_id}:thread:{conversation_id}"
+
+
 def _address(value: object) -> str:
     if not isinstance(value, dict):
         return ""
@@ -59,4 +66,4 @@ async def send(account_id: str, recipients: list[str], subject: str, body: str) 
     if not recipients or not all(isinstance(item, str) and item.strip() for item in recipients):
         raise MicrosoftError(PROVIDER_UNAVAILABLE)
     payload: dict[str, object] = {"message": {"subject": subject, "body": {"contentType": "Text", "content": body}, "toRecipients": [{"emailAddress": {"address": item}} for item in recipients]}}
-    await client.graph_json("POST", f"{MESSAGES}/send", account_id=account_id, body=payload)
+    await client.graph_json("POST", "https://graph.microsoft.com/v1.0/me/sendMail", account_id=account_id, body=payload)

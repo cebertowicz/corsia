@@ -10,7 +10,7 @@ request (``input_refusal``), the account (``account_not_found``,
 from __future__ import annotations
 
 from connections.connected_accounts import (
-    ADMIN_APPROVAL_REQUIRED, CONSENT_CANCELLED, PROVIDER_UNAVAILABLE, STATE_CAUSES,
+    ADMIN_APPROVAL_REQUIRED, CONSENT_CANCELLED, PROVIDER_UNAVAILABLE, REFRESH_TOKEN_INVALID, STATE_CAUSES,
 )
 
 INPUT_REFUSAL = "input_refusal"
@@ -25,6 +25,10 @@ INTERNAL = "internal"
 _BROWSER_RETRY = "Microsoft sign-in couldn't finish. Go back to CORSIA and try again."
 # (message, browser page) per code; ``{address}`` and ``{signed_in}`` are filled from the account.
 _TEXT: dict[str, tuple[str, str]] = {
+    REFRESH_TOKEN_INVALID: (
+        "Microsoft rejected the saved sign-in. Use Sign in on this account's row in Connected apps.",
+        _BROWSER_RETRY,
+    ),
     ADMIN_APPROVAL_REQUIRED: (
         "Your organization needs to approve CORSIA before it can connect this account.",
         "Your organization needs to approve CORSIA before it can connect this account. Go back to CORSIA.",
@@ -96,6 +100,14 @@ class MicrosoftError(Exception):
 def message(cause: str) -> str:
     """The fixed message for a recorded cause."""
     return _TEXT[cause][0]
+
+
+def token_error_cause(status: int, payload: object) -> str:
+    """Map a refresh refusal to fixed causes without exposing provider text."""
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if status in (400, 401) and error in ("invalid_grant", "invalid_client", "unauthorized_client"):
+        return REFRESH_TOKEN_INVALID
+    return PROVIDER_UNAVAILABLE
 
 
 def exchange_error_cause(payload: object) -> str:

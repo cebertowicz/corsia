@@ -1,0 +1,160 @@
+"""Microsoft Graph refresh uses shared account credentials and row-local lifecycle state."""
+from __future__ import annotations
+
+import inspect
+import uuid
+
+import pytest
+
+from connections.account_actions import sign_out_account
+from connections.connected_accounts import ConnectedAccountError, create_account, get_account, resolve_credentials, store_credentials
+from connections.microsoft import client
+from connections.microsoft.errors import MicrosoftError, PROVIDER_UNAVAILABLE, REFRESH_TOKEN_INVALID
+from connections.microsoft.provider import MICROSOFT
+from infra.database import get_db
+from tools import microsoft_actions
+
+
+REACH = {"mode": "all", "project_ids": [], "outside_projects": False}
+
+
+def connect(tenant="consumers"):
+    account = str(create_account(
+        MICROSOFT.name, "mail@example.test", reach=REACH, created_by=("system", "test"),
+        account_kind="personal" if tenant == "consumers" else "work", provider_subject=f"{tenant}:{uuid.uuid4()}",
+    )["id"])
+    store_credentials(account, {
+        "access_token": "old-access", "refresh_token": "old-refresh", "client_id": "client",
+        "tenant_id": tenant, "scopes": ["User.Read", "Mail.Read"],
+    })
+    return account
+
+
+def facts(account):
+    db = get_db()
+    try:
+        return get_account(account, db=db), resolve_credentials(account, db=db)
+    finally:
+        db.close()
+
+
+class Response:
+    def __init__(self, status, body):
+        self.status_code, self.body = status, body
+
+    def json(self):
+        return self.body
+
+
+class Http:
+    def __init__(self, response, calls, before=None):
+        self.response, self.calls, self.before = response, calls, before
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def post(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        if self.before:
+            result = self.before()
+            if inspect.isawaitable(result):
+                await result
+        return self.response
+
+
+@pytest.mark.parametrize("tenant", ["consumers", "11111111-1111-4111-8111-111111111111"])
+async def test_refresh_rotates_shared_bundle_using_recorded_tenant(isolated_db, monkeypatch, tenant):
+    account, other = connect(tenant), connect()
+    calls = []
+    http = Http(Response(200, {"access_token": "new-access", "refresh_token": "new-refresh"}), calls)
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_: http)
+    assert await client.access_token(account) == "new-access"
+    assert calls[0][0] == client.authority_url(tenant)
+    assert "/common/" not in calls[0][0]
+    assert calls[0][1]["data"]["refresh_token"] == "old-refresh"
+    row, bundle = facts(account)
+    assert row["state"] == "connected"
+    assert bundle["refresh_token"] == "new-refresh" and bundle["access_token"] == "new-access"
+    assert facts(other)[1]["refresh_token"] == "old-refresh"
+
+
+async def test_failed_refresh_marks_only_refused_row_with_fixed_cause(isolated_db, monkeypatch):
+    account, other = connect(), connect()
+    http = Http(Response(400, {"error": "invalid_grant", "error_description": "private provider text"}), [])
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_: http)
+    with pytest.raises(MicrosoftError) as error:
+        await client.access_token(account)
+    assert error.value.cause == REFRESH_TOKEN_INVALID
+    assert "private provider text" not in str(error.value)
+    assert facts(account)[0]["state"] == "needs_sign_in"
+    assert facts(account)[0]["state_cause"] == REFRESH_TOKEN_INVALID
+    assert facts(other)[0]["state"] == "connected" and facts(other)[0]["state_cause"] is None
+
+
+async def test_late_refresh_failure_cannot_invalidate_replacement(isolated_db, monkeypatch):
+    account = connect()
+
+    def replace():
+        bundle = facts(account)[1]
+        store_credentials(account, {**bundle, "refresh_token": "replacement"})
+
+    http = Http(Response(400, {"error": "invalid_grant"}), [], before=replace)
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_: http)
+    with pytest.raises(MicrosoftError, match=REFRESH_TOKEN_INVALID):
+        await client.access_token(account)
+    row, bundle = facts(account)
+    assert row["state"] == "connected" and row["state_cause"] is None
+    assert bundle["refresh_token"] == "replacement"
+
+
+async def test_sign_out_refuses_refresh_before_provider(isolated_db, monkeypatch):
+    account = connect()
+    await sign_out_account(account, actor=("person", "test"))
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_: pytest.fail("signed-out account cannot refresh"))
+    with pytest.raises(MicrosoftError, match=REFRESH_TOKEN_INVALID):
+        await client.access_token(account)
+
+
+async def test_refresh_finishing_after_sign_out_cannot_restore_credentials(isolated_db, monkeypatch):
+    account = connect()
+
+    async def sign_out():
+        await sign_out_account(account, actor=("person", "test"))
+
+    http = Http(Response(200, {"access_token": "late-access", "refresh_token": "late-refresh"}), [], before=sign_out)
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_: http)
+    with pytest.raises(MicrosoftError, match=REFRESH_TOKEN_INVALID):
+        await client.access_token(account)
+    row, bundle = facts(account)
+    assert row["state"] == "signed_out" and bundle is None
+
+
+async def test_transient_refresh_failure_keeps_connected_state(isolated_db, monkeypatch):
+    account = connect()
+    http = Http(Response(503, {"error": "private provider text"}), [])
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_: http)
+    with pytest.raises(MicrosoftError, match=PROVIDER_UNAVAILABLE):
+        await client.access_token(account)
+    assert facts(account)[0]["state"] == "connected"
+
+
+def test_microsoft_account_resolution_refuses_google_unknown_and_unreached_alike(isolated_db):
+    from tests.event_routing_helpers import mk_session
+
+    thread = mk_session("graph-caller")
+    account = connect()
+    assert microsoft_actions._visible_account(account, thread)["id"] == account
+    google = str(create_account("google", "google@example.test", reach=REACH, created_by=("system", "test"))["id"])
+    unreachable = str(create_account(
+        MICROSOFT.name, "hidden@example.test", reach={"mode": "selected", "project_ids": [], "outside_projects": False},
+        created_by=("system", "test"), account_kind="personal", provider_subject="consumers:hidden",
+    )["id"])
+    errors = []
+    for selector in (google, unreachable, "unknown"):
+        with pytest.raises(ConnectedAccountError) as error:
+            microsoft_actions._visible_account(selector, thread)
+        errors.append(str(error.value))
+    assert errors == ["Microsoft account is unavailable to this thread"] * 3

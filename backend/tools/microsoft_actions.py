@@ -11,7 +11,8 @@ from typing import Any
 
 from connections.connected_accounts import ConnectedAccountError
 from connections.microsoft import calendar, files, mail
-from connections.microsoft.accounts import ACCOUNT_PARAM, resolve_for_thread, thread_key
+from connections.microsoft.mail import thread_key
+from connections.microsoft.provider import MICROSOFT
 from connections.microsoft.errors import MicrosoftError
 from connections.google import email_screen
 from connections.google.email_document import DraftRefused, addresses, compose_document, parse_document, text_arg
@@ -25,13 +26,32 @@ from tools.microsoft_account import _designated
 log = logging.getLogger(__name__)
 CLOSE_TAG = re.compile(r"</untrusted-email", re.I)
 UNSCREENED = "This message hasn't been screened yet because the local model isn't available. Try again later."
+ACCOUNT_PARAM = {"type": "string", "description": "The Microsoft account_id returned by microsoft_status."}
+
+
+def _visible_account(selector: object, thread_id: object) -> dict[str, object]:
+    from connections.connected_accounts import visible_account
+    from infra.database import get_db
+
+    if not isinstance(selector, str) or not selector or not isinstance(thread_id, str) or not thread_id:
+        raise ConnectedAccountError("Microsoft account is unavailable to this thread")
+    db = get_db()
+    try:
+        account = visible_account(selector, thread_id, db=db, provider=MICROSOFT.name)
+    finally:
+        db.close()
+    if account is None:
+        raise ConnectedAccountError("Microsoft account is unavailable to this thread")
+    if account["state"] != "connected":
+        raise ConnectedAccountError("Microsoft account needs sign-in")
+    return account
 
 
 async def _account(kwargs: dict[str, Any]) -> str:
     refusal = await _designated(kwargs)
     if refusal:
         raise ConnectedAccountError(refusal.removeprefix("Error: "))
-    row = await run_in_db(resolve_for_thread, kwargs.get("account_id"), kwargs.get("_thread_id"))
+    row = await run_in_db(_visible_account, kwargs.get("account_id"), kwargs.get("_thread_id"))
     return str(row["id"])
 
 

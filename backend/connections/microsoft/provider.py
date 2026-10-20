@@ -30,7 +30,9 @@ def _registration(client: dict[str, str]) -> tuple[str | None, str | None]:
 async def _release(account_id: str) -> None:
     """Close the removed account's waiting sign-in and its loopback listener."""
     from connections.microsoft.oauth import clear_pending  # Imported here: oauth imports the account store.
+    from events.connectors.mail_poller import cancel_account
 
+    cancel_account(account_id)
     await clear_pending(account_id)
 
 
