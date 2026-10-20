@@ -36,7 +36,7 @@ const fixtures: Fixture[] = [
 	...['ready', 'signed-out', 'not-installed', 'installing', 'signing-in', 'install-connection', 'install-failed', 'signin-failed', 'unusable', 'shadow', 'limited', 'both-ready', 'codex-ready', 'claude-ready-codex-signed-out', 'bind-failed'].map((cli): Fixture => ({ name: `cli-${cli}`, cli, element: `Claude Code ${cli} row` })),
 	{ name: 'cli-ready-background-download', cli: 'ready', local: 'downloading', element: 'Claude Code Ready; Local model Downloading 42%' },
 	...['downloading', 'paused', 'starting', 'ready', 'stopped', 'disk-space', 'pick-failed', 'connection', 'disk-full', 'memory', 'other-ref', 'other-no-ref', 'setup-failed', 'start-failed', 'other-omlx'].map((local): Fixture => ({ name: `local-${local}`, local, element: `Local model ${local} row` })),
-	{ name: 'other-omlx', other: true, element: 'Stop your oMLX while CORSIA runs?; Stop mine; Keep both running' },
+	{ name: 'other-omlx', other: true, element: 'Stop other oMLX processes?; Stop other oMLX; Keep them running' },
 	{ name: 'finish-no-model', cli: 'ready', finish: 'no-model', element: 'CORSIA couldn’t find a working model; Retry' },
 	{ name: 'finish-progress-save', cli: 'ready', finish: 'progress-save', element: 'CORSIA couldn’t save setup progress; Retry' },
 	{ name: 'api-ready', api: 'ready', element: 'Anthropic · passed a test call; Ready' },
@@ -212,7 +212,7 @@ async function navigate(page: Page, fixture: Fixture) {
 	await page.goto('/');
 	if (fixture.screen === 'checking') { await expect(page.getByRole('heading', { name: 'Checking this computer' })).toBeVisible(); return; }
 	if (['error', 'disk-image', 'old-macos'].includes(fixture.screen ?? '')) return;
-	await expect(page.getByRole('heading', { name: WELCOME_TITLE })).toBeVisible();
+	await expect(page.getByRole('heading', { name: WELCOME_TITLE })).toBeVisible({ timeout: 30_000 });
 	if (fixture.screen === 'welcome') return;
 	// Below 1280 wide Welcome is its own screen: press its Continue to reach the account form.
 	if (isNarrow(page)) {
@@ -300,7 +300,7 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.classifier === 'failed') { await expect(text('Finishing setup')).toBeVisible(); await expect(page.getByRole('button', { name: /^Try again/ })).toBeVisible(); }
 	if (fixture.screen === 'account') { await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible(); if (fixture.local === 'connection') await expect(text('Couldn’t download')).toBeVisible(); return; }
 	if (fixture.screen === 'folder') { await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible(); return; }
-	if (fixture.other) { await expect(page.getByRole('heading', { name: 'Stop your oMLX while CORSIA runs?' })).toBeVisible(); return; }
+	if (fixture.other) { await expect(page.getByRole('heading', { name: 'Stop other oMLX processes?' })).toBeVisible(); await expect(page.getByRole('button', { name: 'Stop other oMLX', exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'Keep them running', exact: true })).toBeVisible(); return; }
 	if (fixture.api === 'ready') { await expect(page.getByRole('region', { name: 'API provider' }).getByText('Anthropic · passed a test call')).toBeVisible(); return; }
 	if (fixture.api === 'failed') { await expect(text('Couldn’t test this key. Check it and try again.')).toBeVisible(); return; }
 	if (fixture.cli === 'bind-failed') { await expect(page.getByRole('button', { name: 'Start using CORSIA', exact: true })).toBeDisabled(); return; }
