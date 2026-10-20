@@ -44,6 +44,7 @@ def test_first_raw_fetch_without_a_cache_is_refreshed(monkeypatch, tmp_path):
     assert result.index_age == "just now"
     assert (tmp_path / "state" / "library" / "index.json").exists()
     assert result.refreshed is True
+    assert result.generations == {"sample": 1}
 
 
 def test_unchanged_second_raw_fetch_is_not_refreshed(monkeypatch, tmp_path):
@@ -57,6 +58,7 @@ def test_unchanged_second_raw_fetch_is_not_refreshed(monkeypatch, tmp_path):
 
     assert calls == [1, 1]
     assert unchanged.refreshed is False
+    assert unchanged.generations == {"sample": 1}
 
 
 def test_changed_raw_fetch_is_refreshed(monkeypatch, tmp_path):
@@ -72,6 +74,23 @@ def test_changed_raw_fetch_is_refreshed(monkeypatch, tmp_path):
 
     assert refreshed.skills == (changed["skills"][0],)
     assert refreshed.refreshed is True
+    assert refreshed.generations == {"sample": 2}
+
+
+def test_unrelated_index_changes_preserve_an_item_generation(monkeypatch, tmp_path):
+    _seams(monkeypatch, tmp_path)
+    initial = _index_payload()
+    changed = deepcopy(initial)
+    other = deepcopy(changed["skills"][0])
+    other["name"] = "other"
+    changed["skills"].append(other)
+    payloads = iter((initial, changed))
+    monkeypatch.setattr(index, "_fetch_index", lambda: next(payloads))
+
+    index.load_index()
+    refreshed = index.load_index()
+
+    assert refreshed.generations == {"sample": 1, "other": 1}
 
 
 def test_stale_cache_is_used_when_raw_fetch_fails(monkeypatch, tmp_path):

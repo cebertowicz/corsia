@@ -44,6 +44,8 @@ def item_manifest(item: dict[str, Any]) -> str:
             ({"path": row["path"], "sha256": row["sha256"]} for row in item["files"]),
             key=lambda row: row["path"],
         ),
+        "withdrawn": item["withdrawn"],
+        "withdrawn_reason": item["withdrawn_reason"],
     }
     encoded = json.dumps(declared, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
