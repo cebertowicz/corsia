@@ -17,7 +17,7 @@ from loguru import logger as log
 
 from core.correction_notes import local_clock
 from core.corrections_recording import is_owner_authored_message, owner_message_sql_predicate
-from llm.locality import thread_project
+from infra.queries import get_thread_project_id
 from memory.checkpoint_entry_rows import decoded_entries, entry_rank_rows_matching, hydrate_entry_rows
 from memory.checkpoint_search import caller_user_id
 from memory.task_match import Match, NodeText, TaskTerms, floor, match, task_terms
@@ -128,7 +128,7 @@ def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]
     user_id = caller_user_id(db, caller_thread_id)
     if user_id is None:
         return "no_terms", []
-    caller_project = thread_project(caller_thread_id, db)
+    caller_project = get_thread_project_id(caller_thread_id, db)
     cutoff = _start_cutoff(db, text.node_id)
 
     @cache
@@ -276,6 +276,7 @@ def _rule_candidates(db, terms, user_id, caller_thread_id) -> list[_Hit]:
         if row["thread_id"] in owned and row["field"] in RULE_FIELDS and row["canonical_state"] == "active"
         and not (row["thread_id"] == caller_thread_id and not row["historical"])
     ]
+    project = cache(lambda thread_id: get_thread_project_id(thread_id, db))
     hits = []
     for row, entry in decoded_entries(hydrate_entry_rows(db, rows)):
         if not any(ref.get("kind") == "user" for ref in entry.body.get("source_refs", []) if isinstance(ref, dict)):
@@ -284,7 +285,7 @@ def _rule_candidates(db, terms, user_id, caller_thread_id) -> list[_Hit]:
         if not found or not created_at:
             continue
         line = f'{local_clock(created_at)} · rule an agent recorded from their words (thread {str(row["thread_id"])[:8]}) · “{_excerpt(found)}” → get_checkpoints(checkpoint_id="{row["latest_id"]}")'
-        hits.append(_Hit(found, created_at, "rule", line, thread_project(str(row["thread_id"]), db)))
+        hits.append(_Hit(found, created_at, "rule", line, project(str(row["thread_id"]))))
     return hits
 
 
