@@ -9,16 +9,16 @@ Build the smallest team that lowers user attention. Persistent agents own outcom
 
 ## When a persistent owner is justified
 
-Create one for a recurring, cohesive outcome whose decisions and memory improve with use enough to save more attention than the coordination costs. A finite deliverable stays a thread. Check:
+Create one for a recurring, cohesive outcome whose decisions and memory improve with use enough to save more attention than the coordination costs. A whole product, a product area, or a recurring process (code or not) can qualify. A finite deliverable stays a thread. Check:
 
 - decisions and context are cohesive, so most work needs no handoff to another owner;
 - the trigger recurs, or the work needs a check independent of the doer;
 - memory compounds across future work;
 - continuity saves more than coordination adds.
 
-Start with the conductor and the fewest owners. Split for sustained context load, a need for independent verification, or measured failure at a boundary; merge or retire overlaps, finished responsibilities, and owners whose coordination exceeds continuity value. Name roles for stable outcomes, never a phase, model, task, or persona.
+Start with the conductor and the fewest owners. Split for sustained context load, a need for independent verification, or measured failure at a boundary; merge or retire overlaps, finished responsibilities, and owners whose coordination exceeds continuity value. Do not create an owner for every possible failure. Name roles for stable outcomes, never a phase, model, task, or persona.
 
-Cut vertically: one owner carries a domain end to end, from deciding what to do through delivery and checking. Two horizontal roles are legitimate because separation is the point: independent verification (the checker is not the doer) and coordination or release (one owner sequences approved work).
+Cut vertically: one owner carries a domain end to end, from deciding what to do through delivery and checking. Two horizontal roles are legitimate because separation is the point: independent verification (the checker is not the doer) and coordination or release (one owner sequences approved work). Cadence roles for an unowned tail must not compete with domain owners.
 
 ## One accountable owner per deliverable
 
@@ -33,7 +33,7 @@ Core context says who the owner is by default. Contributors keep authority over 
 
 ## Delegate only separable work
 
-Keep work inline when it is tightly coupled to your reasoning, needs continuous user alignment, no suitable worker is available, or a brief and independent verification would cost more than doing it. Otherwise delegate a self-contained step whose result can be checked without redoing it; System context's delegation rule sets when.
+Keep work inline when it is tightly coupled to your reasoning, needs continuous user alignment, no suitable worker is available, or a brief and independent verification would cost more than doing it. Otherwise delegate a self-contained step whose result can be checked without redoing it; System context's delegation rule sets when. You remain accountable.
 
 - Coupled mutable work has one writer. Keep or substantively review the plan; do not delegate planning and execution and forward the answer.
 - Fan out only over independent pieces (no shared files, state, or owner), no wider than you can inspect and integrate. Related or exploratory problems get one worker.
