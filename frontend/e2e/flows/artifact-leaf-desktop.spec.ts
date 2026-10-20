@@ -55,7 +55,7 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 								activeSurface: 'artifact',
 							},
 						},
-						splitWidth: 420,
+						splitWidth: null,
 					}),
 				);
 			},
@@ -76,17 +76,23 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 				const title = document.querySelector<HTMLElement>('.h-title')?.getBoundingClientRect();
 				const divider = document.querySelector<HTMLElement>('[aria-label="Resize artifact panel"]')?.getBoundingClientRect();
 				const leaf = document.querySelector<HTMLElement>('.leaf-col')?.getBoundingClientRect();
+				const split = document.querySelector<HTMLElement>('.split')?.getBoundingClientRect();
 				const main = document.querySelector<HTMLElement>('.main');
-				if (!title || !divider || !leaf || !main) throw new Error('split header geometry is unavailable');
+				if (!title || !divider || !leaf || !split || !main) throw new Error('split header geometry is unavailable');
 				return {
 					headerInset: Number.parseFloat(getComputedStyle(main).getPropertyValue('--artifact-header-inset')),
 					titleRight: title.right,
 					dividerLeft: divider.left,
+					splitWidth: split.width,
+					artifactWidth: leaf.width,
 					occupiedWidth: leaf.width + divider.width,
 				};
 			});
 			expect(geometry.headerInset).toBeCloseTo(geometry.occupiedWidth, 0);
 			expect(geometry.titleRight).toBeLessThanOrEqual(geometry.dividerLeft);
+			// This test keeps the plan pane open. The available width must preserve the
+			// 420px chat floor instead of forcing the nominal 60% artifact width.
+			expect(geometry.splitWidth - geometry.artifactWidth - 8).toBeGreaterThanOrEqual(420);
 		};
 		await expect(tab).toBeVisible();
 		await expect(page.getByText('Artifact leaf E2E')).toBeVisible();
@@ -94,13 +100,18 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		await assertHeaderTracksArtifactWidth();
 
 		const collapseButton = page.getByRole('button', { name: 'Collapse artifact panel' });
-		const [headerBox, collapseBox] = await Promise.all([
+		const [headerBox, tabBox, collapseBox] = await Promise.all([
 			page.locator('.shell-header').boundingBox(),
+			tab.boundingBox(),
 			collapseButton.boundingBox(),
 		]);
 		expect(headerBox).not.toBeNull();
+		expect(tabBox).not.toBeNull();
 		expect(collapseBox).not.toBeNull();
-		expect(collapseBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height);
+		expect(tabBox!.y).toBeGreaterThanOrEqual(headerBox!.y);
+		expect(tabBox!.y + tabBox!.height).toBeLessThanOrEqual(headerBox!.y + headerBox!.height);
+		expect(collapseBox!.y).toBeGreaterThanOrEqual(headerBox!.y);
+		expect(collapseBox!.y + collapseBox!.height).toBeLessThanOrEqual(headerBox!.y + headerBox!.height);
 
 		await divider.focus();
 		await page.keyboard.press('Home');

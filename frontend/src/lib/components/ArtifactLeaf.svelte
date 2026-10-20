@@ -359,10 +359,13 @@
 		background: var(--bg-primary);
 	}
 	.leaf.compact { flex: 1; border-left: none; }
-	/* The tab and collapse controls belong to the leaf panel, after the shared
-	   shell header. Keeping this in normal leaf flow makes that boundary explicit. */
-	.canvas-header-strip { flex: 0 0 40px; min-height: 40px; }
-	.canvas-header-strip :global(.strip) { height: 100%; padding-left: 10px; padding-right: 6px; border-bottom: 0; background: transparent; }
+	/* Expanded tabs occupy the canvas segment of the shared header. They are out of
+	   leaf flow, so the document begins directly below the header with no second band. */
+	.canvas-header-strip {
+		position: absolute; inset: 0 0 auto;
+		height: var(--header-height); z-index: 11;
+	}
+	.canvas-header-strip :global(.strip) { height: 100%; padding-left: var(--space-3); padding-right: var(--space-2); border-bottom: 0; background: transparent; }
 	.leaf-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px 20px; }
 	/* In compact the document header's own 44px row meets the app bar directly, so no band sits above the ask line (RSR-5). */
 	.leaf-body.document-canvas, .leaf-body.image-canvas { overflow: hidden; container: doc-canvas / inline-size; padding-top: 0; }
