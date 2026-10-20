@@ -8,10 +8,11 @@ the old row retire. Nothing else under the old oMLX root is moved, deleted or
 rewritten.
 
 A move is a same-volume rename when possible; otherwise a copy that is checked
-by file count and size before the source is removed. Every step can run again:
-a finished move is recognised, an interrupted copy is discarded and redone, and
-a failure leaves the source where it was, the records unchanged and the app
-usable; when no model moved, the old service is started again. Startup never waits on this: it runs as one background task.
+by file count and size before the source is removed. Every step can run again: a
+finished move is recognised, an interrupted copy is discarded and redone, and a
+managed-start failure stops CORSIA's managed server before it attempts to return
+recorded models to the earlier service. Setup records and other old oMLX files
+stay unchanged. Startup never waits on this: it runs as one background task.
 """
 
 from __future__ import annotations
@@ -105,12 +106,14 @@ def recorded_models(legacy_dir: Path) -> list[LocalModel]:
     from llm.local_model import set_up_model
     from llm.local_profiles import STARTER_MODEL
     from llm.local_setup_disk import download_complete
+    from llm.local_setup_managed import managed_omlx_paths
 
     models: list[LocalModel] = []
     setup = set_up_model()
     if setup is not None:
         models.append(setup)
-    elif download_complete(legacy_dir / STARTER_MODEL.repository, STARTER_MODEL.download_size_bytes):
+    elif any(download_complete(folder / STARTER_MODEL.repository, STARTER_MODEL.download_size_bytes)
+             for folder in (legacy_dir, managed_omlx_paths().model_dir)):
         models.append(STARTER_MODEL)
     models += [entry.model for entry in local_downloads.all() if entry.status == "available"]
     unique: dict[str, LocalModel] = {}
@@ -186,9 +189,27 @@ def move_recorded_models(legacy_dir: Path, models: list[LocalModel]) -> list[Mov
     ]
 
 
+def restore_recorded_models(legacy_dir: Path, models: list[LocalModel]) -> list[Moved]:
+    """Return recorded models to the legacy directory after managed startup fails.
+
+    This also returns models a prior interrupted upgrade completed before it
+    could write its done marker. A legacy copy already in place is left alone;
+    it is the copy the restarted service will use.
+    """
+    from llm.local_setup_managed import managed_omlx_paths
+
+    managed_dir = managed_omlx_paths().model_dir
+    return [
+        Moved(model.repository, move_model_folder(managed_dir / model.repository,
+                                                  legacy_dir / model.repository))
+        for model in models
+    ]
+
+
 def _stop_legacy_service() -> bool:
     """Stop CORSIA's old service; True once its launchd job no longer runs."""
-    from llm.local_setup_ownership import BREW_SERVICE_LABEL, launchd_jobs, retire_legacy_owned_omlx_service
+    from llm.local_setup_managed import BREW_SERVICE_LABEL, launchd_jobs
+    from llm.local_setup_ownership import retire_legacy_owned_omlx_service
 
     retire_legacy_owned_omlx_service()
     # Judge by what runs, so a service an earlier start stopped counts as stopped
@@ -230,11 +251,80 @@ async def _start_managed(setup: LocalModel | None) -> None:
         await ls._configure_model_settings(server_id, model)
 
 
+def _managed_server_id() -> str | None:
+    from llm import network_discovery
+    from llm.local_setup_managed import is_corsia_managed_server
+
+    return next((str(server["id"]) for server in network_discovery.get_servers(provider="omlx")
+                 if is_corsia_managed_server(server)), None)
+
+
+async def _stop_managed_server() -> bool:
+    """Stop only CORSIA's canonical managed server before model rollback."""
+    from infra.db_async import run_in_db
+    from llm.providers.omlx_supervisor import stop_server
+
+    try:
+        server_id = await run_in_db(_managed_server_id)
+        if server_id is None:
+            return True
+        result = await stop_server({"server_id": server_id})
+    except Exception:
+        log.exception("could not stop CORSIA's managed local model server before rollback")
+        return False
+    if result.get("ok") or result.get("message") == "Not running (no pid file)":
+        return True
+    log.error("could not stop CORSIA's managed local model server before rollback: %s",
+              result.get("message", "unknown error"))
+    return False
+
+
+async def _recover_failed_managed_start(legacy_dir: Path, models: list[LocalModel]) -> None:
+    """Stop the managed process, then try to restore and restart the earlier service."""
+    try:
+        stopped = await _stop_managed_server()
+    except Exception:
+        log.exception("could not prepare managed local model rollback")
+        stopped = False
+    if stopped:
+        try:
+            restored = await asyncio.to_thread(restore_recorded_models, legacy_dir, models)
+        except Exception:
+            log.exception("could not restore the earlier local model install")
+        else:
+            not_restored = [item.repository for item in restored if item.outcome == "failed"]
+            if not_restored:
+                log.error("could not restore local model(s): %s", ", ".join(not_restored))
+    else:
+        log.error("did not restore models while CORSIA's managed server may still be running")
+    try:
+        await asyncio.to_thread(_restart_legacy_service)
+    except Exception:
+        log.exception("could not restart CORSIA's earlier local model service")
+
+
+def _publish_upgrade_failure() -> None:
+    """Expose a managed-start failure through the canonical setup status shape."""
+    from api.cli_install import new_reference
+    from llm import local_setup
+    from llm.local_setup_results import local_setup_error
+
+    ref = new_reference()
+    local_setup._flight.result = {
+        **local_setup_error("CORSIA couldn't switch to its managed local model server. "
+                            "Check the local model status and retry."),
+        "cause": "other",
+        "ref": ref,
+        "pre_download": True,
+    }
+    log.error("local model upgrade failed after moving models reference=%s", ref)
+
+
 async def upgrade_legacy_omlx() -> list[Moved] | None:
     """Move a proven v0.3/v0.4 install's models to the managed oMLX; None when there is nothing to do.
 
-    Never raises: a failure is logged, leaves every original in place and is
-    retried at the next start.
+    Never raises: a failure is logged, attempts to restore the earlier install,
+    and is retried at the next start.
     """
     from llm import local_setup_operation
     from llm.local_model import set_up_model
@@ -264,7 +354,13 @@ async def upgrade_legacy_omlx() -> list[Moved] | None:
         moved = await asyncio.to_thread(move_recorded_models, legacy_dir, models)
         failed = [item.repository for item in moved if item.outcome == "failed"]
         if any(item.outcome in {"moved", "already"} for item in moved):
-            await _start_managed(setup)
+            try:
+                await _start_managed(setup)
+            except Exception:
+                log.exception("could not start the managed local model server; recovering the earlier install")
+                await _recover_failed_managed_start(legacy_dir, models)
+                _publish_upgrade_failure()
+                return None
         else:
             # Nothing reached the managed directory: the old service keeps serving until a later start succeeds.
             await asyncio.to_thread(_restart_legacy_service)
@@ -272,6 +368,10 @@ async def upgrade_legacy_omlx() -> list[Moved] | None:
             log.warning("%d local model(s) stayed in the earlier oMLX folder; the next start tries again", len(failed))
         else:
             await asyncio.to_thread(done_path().write_text, "upgraded\n", encoding="utf-8")
+            from infra.db_async import run_in_db
+            from llm.local_setup_runtime import retire_legacy_setup_omlx_rows
+
+            await run_in_db(retire_legacy_setup_omlx_rows)
         return moved
     except Exception:
         log.exception("could not finish moving the earlier local model install")

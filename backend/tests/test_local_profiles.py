@@ -296,7 +296,8 @@ def test_route_starts_the_flight_with_no_model_choice(client, monkeypatch):
         return {"ok": True, "in_progress": True}
 
     monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
-    # The route delegates directly to the private managed setup flight.
+    monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_processes", lambda: ())
+    # With no personal process, the route delegates to the private setup flight.
 
     assert client.post("/api/providers/local/setup").json() == {"ok": True, "in_progress": True}
     assert calls[-1] == {"no_subscription_only": False, "automatic": False}

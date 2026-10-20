@@ -157,7 +157,7 @@ describe('SetupScreen owned-job polling', () => {
 		expect(catalogCalls()).toBe(catalogBeforeTimer + 1);
 	});
 
-	it.each(['ready', 'failed', 'cancelled'] as const)('stops after a pre-account local download reaches %s', async (terminal) => {
+	it.each(['ready', 'failed', 'cancelled', 'start_failed'] as const)('stops after a pre-account local download reaches %s', async (terminal) => {
 		token.set(null); user.set(null);
 		let localState: string = 'downloading';
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -174,6 +174,7 @@ describe('SetupScreen owned-job polling', () => {
 		expect(intervalSpy).toHaveBeenCalledOnce();
 		localState = terminal;
 		await vi.advanceTimersByTimeAsync(3000); await tick();
+		if (terminal === 'start_failed') expect(host.textContent).toContain('Couldn’t start the local model');
 		expect(clearIntervalSpy).toHaveBeenCalledOnce();
 		expect(vi.getTimerCount()).toBe(0);
 	});

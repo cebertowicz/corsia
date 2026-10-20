@@ -5,6 +5,9 @@ export type LocalPick = {
 	model: LocalPickModel | null;
 	/** Why there is no model, or why it is the starter model. */
 	message: string | null;
+	/** Stable cause and reference for an actionable preparation failure. */
+	cause?: string;
+	ref?: string;
 };
 
 export const LOW_MEMORY_LOCAL_MODEL_SENTENCE = 'Local models need at least 24 GB of memory, and this computer has less.';

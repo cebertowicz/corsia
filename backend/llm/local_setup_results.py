@@ -41,6 +41,22 @@ def failure_message(exc: Exception) -> str:
     return f"Local model setup failed unexpectedly ({type(exc).__name__}); see the backend log."
 
 
+def failure_cause(exc: Exception) -> str:
+    """Classify local-flight exceptions into stable setup-status cause codes."""
+    from llm.local_setup_disk import DiskSpaceError
+    from llm.local_setup_ownership import OwnOmlxUpgradeRequired
+
+    if isinstance(exc, OwnOmlxUpgradeRequired):
+        return "own_omlx_upgrade_required"
+    if isinstance(exc, DiskSpaceError):
+        return "disk_full"
+    if isinstance(exc, MemoryError):
+        return "memory"
+    if isinstance(exc, (httpx.NetworkError, httpx.TimeoutException, ConnectionError, TimeoutError)):
+        return "connection"
+    return "other"
+
+
 class DownloadProgress:
     """When a download line is due: each new ``STEP`` percent and, when set, every ``SECONDS``.
 

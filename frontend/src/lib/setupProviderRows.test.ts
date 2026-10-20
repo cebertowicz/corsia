@@ -14,8 +14,10 @@ const flightShapes = [
 	{ state: 'failed', cause: 'disk_full', bytes_to_free: 4_000_000_000, expected: 'Couldn’t download the local model: the disk is full. Free up 4 GB, then Retry.' },
 	{ state: 'failed', cause: 'memory', expected: 'This computer doesn’t have enough memory to run the local model. Choose a subscription or API provider instead.' },
 	{ state: 'failed', cause: 'other', ref: 'setup-report-123', expected: 'CORSIA couldn’t set up the local model. Retry. Reference: setup-report-123' },
-	{ state: 'setup_failed', cause: 'other', expected: 'CORSIA couldn’t set up the local model. Retry, or save a report.' },
-	{ state: 'start_failed', cause: 'connection', expected: 'The local model downloaded but couldn’t start. Retry, or save a report.' },
+	{ state: 'failed', cause: undefined, ref: 'setup-report-234', expected: 'CORSIA couldn’t set up the local model. Retry. Reference: setup-report-234' },
+	{ state: 'setup_failed', cause: 'other', ref: 'setup-report-456', expected: 'CORSIA couldn’t set up the local model. Retry, or save a report. Reference: setup-report-456' },
+	{ state: 'start_failed', cause: 'connection', ref: 'setup-report-789', expected: 'The local model downloaded but couldn’t start. Retry, or save a report. Reference: setup-report-789' },
+	{ state: 'setup_failed', cause: 'own_omlx_upgrade_required', ref: 'setup-report-999', expected: 'Update your oMLX, then Retry. Reference: setup-report-999' }
 ] as const;
 
 function sourceFromFlight(flight: typeof flightShapes[number]) {
@@ -68,6 +70,18 @@ describe('setup provider rows', () => {
 		expect(row.action?.label).toBe('Retry');
 		row.action?.run();
 		expect(start).toHaveBeenCalledOnce();
+	});
+
+	it('keeps a request failure reference and offers its report action', () => {
+		const row = setupLocalRow({ ...actions(), pick: null, eligible: true, downloading: false, ready: false, startError: 'other', startReference: 'local-request-123' });
+
+		expect(row).toMatchObject({ meta: 'CORSIA couldn’t set up the local model. Retry. Reference: local-request-123', reportable: true });
+	});
+
+	it('shows the actionable oMLX update when preparing a pick fails for that cause', () => {
+		const row = setupLocalRow({ ...actions(), pick: { state: 'failed', model: null, message: null, cause: 'own_omlx_upgrade_required', ref: 'pick-123' }, eligible: true, downloading: false, ready: false, startError: '' });
+
+		expect(row).toMatchObject({ meta: 'Update your oMLX, then Retry. Reference: pick-123', reportable: true, action: { label: 'Retry' } });
 	});
 
 	it('explains the gate from the current working and download states', () => {

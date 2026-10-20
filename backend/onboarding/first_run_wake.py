@@ -37,7 +37,7 @@ UNAVAILABLE_READS = {
     "local_download": "corsia_api GET /api/providers/local/setup",
     "setup_handoff": "setup progress handoff saved before model binding",
     "tool_attempts": "setup progress handoff saved before model binding",
-    "other_omlx": "setup progress handoff saved before model binding",
+    "other_omlx": "server-owned foreign oMLX choice record",
     "web_search_ready": "one web_search call",
     "github_ready": "tool model_sources, once, without recheck",
     "user_profile": "preferred-name read from the workspace profile",
@@ -220,11 +220,13 @@ async def _script_setup_facts(model: str, path: str) -> dict[str, Any]:
 async def _app_setup_facts(model: str) -> dict[str, Any]:
     from infra.db_async import run_in_db, run_off_db
     from onboarding import setup_decisions
+    from llm.local_setup_foreign import foreign_omlx_answer
 
     reads = await _read_facts({
         "model_sources": lambda: run_in_db(_model_sources),
         "agents_found": lambda: asyncio.to_thread(_app_agents_found),
         "local_download": lambda: asyncio.to_thread(_app_local_download),
+        "other_omlx": lambda: asyncio.to_thread(foreign_omlx_answer),
         "web_search_ready": setup_decisions.web_search_works,
         "setup_handoff": lambda: run_in_db(_app_setup_handoff),
         "setup": lambda: _app_setup(model),
@@ -249,12 +251,10 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
                 "claude_code": tool_attempts.get("claude-code"),
                 "codex": tool_attempts.get("codex"),
             }
-        other_omlx = handoff.get("other_omlx")
     elif isinstance(handoff, dict):
-        unavailable = _unavailable("tool_attempts")
-        tool_attempts = other_omlx = unavailable
+        tool_attempts = _unavailable("tool_attempts")
     else:
-        tool_attempts = other_omlx = None
+        tool_attempts = None
     bound_model = _bound_model(model)
     return {
         "first_run_path": "app",
@@ -263,7 +263,7 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "agents_found": reads["agents_found"],
         "local_download": reads["local_download"],
         "tool_attempts": tool_attempts,
-        "other_omlx": other_omlx,
+        "other_omlx": reads["other_omlx"],
         "bound_model": bound_model,
         "web_search_ready": reads["web_search_ready"],
         "github_ready": github_ready,

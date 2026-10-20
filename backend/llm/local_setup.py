@@ -20,7 +20,7 @@ from llm.local_model import LocalModel
 from llm.local_setup_gates import host_ram_bytes, local_memory_ok  # noqa: F401  (patched through this module)
 from llm.local_setup_gates import limited_subscription_message as _limited_subscription_message
 from llm.local_setup_gates import subscription_available as _subscription_available
-from llm.local_setup_results import failure_message as _failure_message
+from llm.local_setup_results import failure_message as _failure_message, failure_cause as _failure_cause
 from llm.local_setup_results import SETUP_COMMAND, local_setup_error
 # Re-exported: the flight modules and their tests reach these through this module.
 from llm.local_setup_auth import (  # noqa: F401
@@ -53,8 +53,9 @@ from llm.local_setup_runtime import (
 )
 
 EVENT_CATEGORY = "local_setup"
-CAUSES = frozenset({"connection", "disk_full", "memory", "other"})
+CAUSES = frozenset({"connection", "disk_full", "memory", "other", "own_omlx_upgrade_required"})
 log = logging.getLogger(__name__)
+
 
 async def _wait_for_download(
     server_id: str, progress: Callable[[str], None], model: LocalModel,
@@ -70,6 +71,7 @@ async def _wait_for_download(
 
 async def _download_dir(server_id: str):
     return await local_setup_download.download_dir(server_id)
+
 
 async def _download(server_id: str, report: Callable[[str], None], model: LocalModel) -> None:
     """Check the disk oMLX downloads to, then request and follow the model's download."""
@@ -315,16 +317,6 @@ async def _run_flight(*, model: LocalModel | None = None,
     await _notify_terminal_setup_download(result)
     return local_setup_operation.finish(_flight, result)
 
-def _failure_cause(exc: Exception) -> str:
-    """Classify concrete local-flight exceptions once, at their producer."""
-    import httpx
-    if isinstance(exc, DiskSpaceError):
-        return "disk_full"
-    if isinstance(exc, MemoryError):
-        return "memory"
-    if isinstance(exc, (httpx.NetworkError, httpx.TimeoutException, ConnectionError, TimeoutError)):
-        return "connection"
-    return "other"
 
 def _stopped_following(model: LocalModel | None, events: list[str]) -> dict:
     """The result when the follow window ended while oMLX keeps downloading (setup and Settings)."""
@@ -336,9 +328,11 @@ def _stopped_following(model: LocalModel | None, events: list[str]) -> dict:
         "progress": events,
     }
 
+
 def flight_task() -> asyncio.Task | None:
     """The flight's task for lifespan shutdown to cancel and join, else None."""
     return _flight.task
+
 
 async def begin_local_setup(
     *,
@@ -392,6 +386,7 @@ async def begin_local_setup(
     _flight.task.add_done_callback(lambda _task: _notify_models_changed())
     _emit("started")
     return _in_progress_result(notice=notice)
+
 
 from llm.local_settings_download import begin as begin_settings_download  # noqa: E402
 from llm.local_setup_new_omlx import _setup_new_omlx  # noqa: E402  (reads this module's names at call time)

@@ -54,7 +54,7 @@ def retired(isolated_db, monkeypatch, tmp_path) -> str:
     """A marker-gated legacy CORSIA loopback row, retired before its model is rediscovered."""
     from llm import network_discovery as discovery
     from llm.local_setup_ownership import marker_path
-    from llm.local_setup_runtime import LOCAL_SERVER_NAME, retire_unowned_local_omlx_rows
+    from llm.local_setup_runtime import LOCAL_SERVER_NAME, retire_legacy_setup_omlx_rows
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
     marker_path().write_text("legacy\n", encoding="utf-8")
@@ -63,7 +63,7 @@ def retired(isolated_db, monkeypatch, tmp_path) -> str:
         host="127.0.0.1", port=8000, status="online", kind="managed", source="manual",
     )
     _model_row("local-model", f"omlx@{local}/{MODEL}", MODEL)
-    assert retire_unowned_local_omlx_rows() == [local]
+    assert retire_legacy_setup_omlx_rows() == [local]
     assert _resolve("local-model").available is False
     return local
 

@@ -130,9 +130,8 @@ async def _has_pending() -> bool:
     return bool(await _pending())
 
 
-
-async def resume_pending_local_download() -> asyncio.Task[None] | None:
-    """Resume durable delivery after backend startup; no outbox row means no live task."""
+async def resume_pending_local_download() -> None:
+    """Flush durable download delivery after startup when a conductor and outbox exist."""
     from infra.corsia_agent import get_corsia_agent
     from infra.db_async import run_in_db
 
@@ -140,7 +139,6 @@ async def resume_pending_local_download() -> asyncio.Task[None] | None:
     if not conductor_id or not await _has_pending():
         return None
     await _flush_pending(conductor_id)
-    return None
 
 
 async def flush_pending_local_download(conductor_id: str | None = None) -> bool:

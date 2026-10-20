@@ -1,5 +1,7 @@
 """Validated request bodies for the loopback-only setup routes."""
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from api.setup_handoff import SetupHandoff
@@ -10,8 +12,7 @@ class LocalDownloadRequest(BaseModel):
     """The person's one choice to stop another oMLX or keep both running."""
 
     model_config = ConfigDict(extra="forbid")
-    consent_existing: bool = False
-    manage_existing: bool | None = None
+    other_omlx: Literal["stop", "keep"] | None = None
 
 
 class SetupProgressUpdate(BaseModel):

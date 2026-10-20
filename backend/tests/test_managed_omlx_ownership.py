@@ -101,7 +101,7 @@ async def test_startup_local_setup_survives_a_failing_step(monkeypatch) -> None:
     monkeypatch.setattr("llm.local_setup_recovery.resume_pending_setup", resumed)
     monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", notified)
     monkeypatch.setattr("llm.local_setup_upgrade.done_path", lambda: SimpleNamespace(exists=lambda: True))
-    monkeypatch.setattr("llm.local_setup_runtime.retire_unowned_local_omlx_rows", lambda: calls.append("retire"))
+    monkeypatch.setattr("llm.local_setup_runtime.retire_legacy_setup_omlx_rows", lambda: calls.append("retire"))
     monkeypatch.setattr(local_setup_upgrade, "start_upgrade", lambda: calls.append("upgrade"))
 
     await app_startup_runtime.resume_local_setup()
@@ -203,7 +203,7 @@ def _add_through_settings(monkeypatch, hostname: str) -> str:
 
 def test_lan_omlx_added_in_settings_keeps_routing_after_retirement(isolated_db, monkeypatch, tmp_path) -> None:
     from llm import catalog, network_discovery as discovery
-    from llm.local_setup_runtime import retire_unowned_local_omlx_rows
+    from llm.local_setup_runtime import retire_legacy_setup_omlx_rows
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
     lan = _add_through_settings(monkeypatch, "192.168.1.20")
@@ -213,7 +213,7 @@ def test_lan_omlx_added_in_settings_keeps_routing_after_retirement(isolated_db, 
     _model_row("lan-model", f"omlx@{lan}/someone/model", "someone/model")
     _model_row("local-model", f"omlx@{local}/someone/local", "someone/local")
 
-    assert retire_unowned_local_omlx_rows() == []
+    assert retire_legacy_setup_omlx_rows() == []
 
     assert discovery.get_server(lan)["status"] == "online"
     assert catalog.get_model("lan-model")["id"] == "lan-model"
@@ -291,13 +291,13 @@ def test_only_state_root_row_is_corsia_managed() -> None:
     assert not is_corsia_managed_server(row, {**metadata, "base_path": "/tmp/foreign"})
 
 
-# "Stop mine" on a process launchd keeps alive, and the legacy service exclusion.
+# Process identity is produced by managed; the choice owner executes its exact set.
 
 _PS = "  101  1 /opt/homebrew/opt/omlx/bin/omlx serve --port 8000\n"
 
 
 def _fake_commands(monkeypatch, *, launchctl_list: str, record: list[list[str]]) -> None:
-    from llm import local_setup_ownership as ownership
+    from llm import local_setup_managed as managed
 
     def run(command, **_kwargs):
         record.append(list(command))
@@ -309,42 +309,46 @@ def _fake_commands(monkeypatch, *, launchctl_list: str, record: list[list[str]])
             return subprocess.CompletedProcess(command, 0, "", "")
         raise AssertionError(f"unexpected command {command}")
 
-    monkeypatch.setattr(ownership.subprocess, "run", run)
+    monkeypatch.setattr(managed.subprocess, "run", run)
+    monkeypatch.setattr(managed.psutil, "process_iter", lambda _attrs: [SimpleNamespace(info={
+        "pid": 101, "ppid": 1, "name": "Python", "cmdline": _PS.split()[2:],
+    })])
+    monkeypatch.setattr("llm.local_setup_upgrade.pending_legacy_port", lambda: None)
 
 
 def test_stop_mine_boots_out_a_launchd_job_for_this_session_only(monkeypatch) -> None:
-    from llm import local_setup_ownership as ownership
+    from llm import local_setup_foreign as foreign, local_setup_managed as managed
 
     commands: list[list[str]] = []
     _fake_commands(monkeypatch, launchctl_list="PID\tStatus\tLabel\n101\t0\thomebrew.mxcl.omlx\n", record=commands)
-    monkeypatch.setattr(ownership, "legacy_setup_owns_current_omlx", lambda: False)
-    monkeypatch.setattr(ownership.os, "kill", lambda *_a: pytest.fail("a launchd job must not be signalled"))
-    monkeypatch.setattr(ownership.os, "getuid", lambda: 501)
+    monkeypatch.setattr(foreign.os, "kill", lambda *_a: pytest.fail("a launchd job must not be signalled"))
+    monkeypatch.setattr(foreign.os, "getuid", lambda: 501)
 
-    assert ownership.foreign_omlx_process() == 101
-    assert ownership.stop_foreign_omlx_process(101) is True
-
+    processes = managed.foreign_omlx_processes()
+    assert processes is not None and [p.pid for p in processes] == [101]
+    assert foreign.stop_foreign_omlx_processes(processes) is True
     assert ["launchctl", "bootout", "gui/501/homebrew.mxcl.omlx"] in commands
     assert not any(command[0] in {"brew", "rm"} or "unload" in command or "remove" in command
                    for command in commands)
 
 
 def test_stop_mine_signals_a_plain_process(monkeypatch) -> None:
-    from llm import local_setup_ownership as ownership
+    from llm import local_setup_foreign as foreign, local_setup_managed as managed
 
     commands: list[list[str]] = []
     signals: list[tuple[int, int]] = []
     _fake_commands(monkeypatch, launchctl_list="PID\tStatus\tLabel\n-\t0\tcom.example.other\n", record=commands)
-    monkeypatch.setattr(ownership.os, "kill", lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr(foreign.os, "kill", lambda pid, sig: signals.append((pid, sig)))
 
-    assert ownership.stop_foreign_omlx_process(101) is True
-
+    processes = managed.foreign_omlx_processes()
+    assert processes is not None
+    assert foreign.stop_foreign_omlx_processes(processes) is True
     assert signals == [(101, 15)]
     assert not any(command[:2] == ["launchctl", "bootout"] for command in commands)
 
 
 def test_stop_mine_falls_back_to_a_signal_when_launchd_is_unreadable(monkeypatch) -> None:
-    from llm import local_setup_ownership as ownership
+    from llm import local_setup_foreign as foreign, local_setup_managed as managed
 
     signals: list[int] = []
 
@@ -353,21 +357,26 @@ def test_stop_mine_falls_back_to_a_signal_when_launchd_is_unreadable(monkeypatch
             return subprocess.CompletedProcess(command, 0, _PS, "")
         raise subprocess.CalledProcessError(1, command)
 
-    monkeypatch.setattr(ownership.subprocess, "run", run)
-    monkeypatch.setattr(ownership.os, "kill", lambda pid, _sig: signals.append(pid))
+    monkeypatch.setattr(managed.subprocess, "run", run)
+    monkeypatch.setattr(managed.psutil, "process_iter", lambda _attrs: [SimpleNamespace(info={
+        "pid": 101, "ppid": 1, "name": "Python", "cmdline": _PS.split()[2:],
+    })])
+    monkeypatch.setattr("llm.local_setup_upgrade.pending_legacy_port", lambda: None)
+    monkeypatch.setattr(foreign.os, "kill", lambda pid, _sig: signals.append(pid))
 
-    assert ownership.stop_foreign_omlx_process(101) is True
+    processes = managed.foreign_omlx_processes()
+    assert processes is not None
+    assert foreign.stop_foreign_omlx_processes(processes) is True
     assert signals == [101]
 
 
 def test_corsias_own_legacy_service_is_not_a_foreign_omlx(monkeypatch) -> None:
-    from llm import local_setup_ownership as ownership
+    from llm import local_setup_foreign as foreign, local_setup_managed as managed
 
     _fake_commands(monkeypatch, launchctl_list="PID\tStatus\tLabel\n101\t0\thomebrew.mxcl.omlx\n", record=[])
-    monkeypatch.setattr(ownership, "legacy_setup_owns_current_omlx", lambda: True)
-
-    assert ownership.foreign_omlx_process() is None
-    assert ownership.apply_foreign_omlx_choice(consent_existing=False, manage_existing=None) is None
+    monkeypatch.setattr("llm.local_setup_upgrade.pending_legacy_port", lambda: 8000)
+    assert managed.foreign_omlx_processes() == ()
+    assert foreign.apply_foreign_omlx_choice() is None
 
 
 def test_legacy_ownership_runs_nothing_without_the_marker(monkeypatch, tmp_path) -> None:
@@ -375,5 +384,4 @@ def test_legacy_ownership_runs_nothing_without_the_marker(monkeypatch, tmp_path)
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
     monkeypatch.setattr(ownership, "installed_omlx", lambda: pytest.fail("must not run oMLX"))
-
     assert ownership.legacy_setup_owns_current_omlx() is False

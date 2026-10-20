@@ -197,11 +197,11 @@ export async function cancelLocalDownload(t: string): Promise<{ ok: boolean; can
 	return response.json();
 }
 
-/** `manageExisting` is Welcome's choice for the person's own oMLX; leave it out where Welcome didn't show it. */
-export async function setupLocalSource(t: string, consentExisting = false, manageExisting?: boolean): Promise<LocalSetupResult> {
+/** `otherOmlx` is the person's choice for every other oMLX process; leave it null until the question appears. */
+export async function setupLocalSource(t: string, otherOmlx: 'stop' | 'keep' | null = null): Promise<LocalSetupResult> {
 	const response = await fetch('/api/providers/local/setup', {
 		method: 'POST', headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
-		body: JSON.stringify({ consent_existing: consentExisting, manage_existing: manageExisting }),
+		body: JSON.stringify({ other_omlx: otherOmlx }),
 	});
 	const body = await response.json().catch(() => null);
 	const code = body?.detail?.code ?? body?.code;

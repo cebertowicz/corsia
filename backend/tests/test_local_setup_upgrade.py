@@ -244,7 +244,7 @@ def test_a_differing_managed_copy_keeps_both(legacy) -> None:
 @pytest.fixture
 def upgrade_env(legacy, isolated_db, monkeypatch):
     """A v0.4.0 install: CORSIA's Homebrew oMLX runs as a launchd job and holds the starter."""
-    from llm import local_profiles
+    from llm import local_profiles, local_setup_managed as managed
     from llm import local_setup as ls
     from llm import local_setup_new_omlx, local_setup_ownership as ownership
     from llm.local_setup_ownership import marker_path
@@ -268,10 +268,16 @@ def upgrade_env(legacy, isolated_db, monkeypatch):
         service["running"] = True
 
     monkeypatch.setattr("llm.local_setup_upgrade._restart_legacy_service", restart)
-    monkeypatch.setattr(ownership, "launchd_jobs",
-                        lambda: {101: ownership.BREW_SERVICE_LABEL} if service["running"] else {})
-    monkeypatch.setattr(ownership, "_omlx_serve_processes",
-                        lambda: [(101, 1)] if service["running"] else [])
+    def process_iter(_attrs):
+        if not service["running"]:
+            return iter(())
+        return iter([SimpleNamespace(info={
+            "pid": 101, "ppid": 1, "name": "omlx", "cmdline": ["/brew/omlx", "serve"],
+        })])
+
+    monkeypatch.setattr(managed, "launchd_jobs",
+                        lambda: {101: managed.BREW_SERVICE_LABEL} if service["running"] else {})
+    monkeypatch.setattr(managed.psutil, "process_iter", process_iter)
 
     async def start_managed(report):
         from llm.local_setup_managed import managed_omlx_paths
@@ -312,7 +318,7 @@ async def test_v040_install_keeps_its_starter_ready_with_no_question_and_no_down
     from infra.db_async import run_in_db
     from llm import network_discovery
     from llm.local_model import set_up_model
-    from llm.local_setup_ownership import apply_foreign_omlx_choice
+    from llm.local_setup_foreign import apply_foreign_omlx_choice
     from llm.local_setup_upgrade import done_path, upgrade_legacy_omlx
     from llm.local_sources import _omlx_state
 
@@ -322,7 +328,7 @@ async def test_v040_install_keeps_its_starter_ready_with_no_question_and_no_down
     starter = f"omlx@{old}/{MODEL.model}"
     await run_in_db(_insert_model, "legacy-qwen", starter, MODEL.model)
     # CORSIA's own service is not the person's oMLX: setup asks nothing.
-    assert apply_foreign_omlx_choice(consent_existing=False, manage_existing=None) is None
+    assert apply_foreign_omlx_choice(other_omlx=None) is None
 
     moved = await upgrade_legacy_omlx()
 
@@ -345,6 +351,7 @@ async def test_v040_install_keeps_its_starter_ready_with_no_question_and_no_down
     # A second start does nothing at all.
     assert await upgrade_legacy_omlx() is None
     assert upgrade_env == ["stop service", "start managed", "discover", f"configure {MODEL.repository}"]
+
 
 
 @pytest.mark.asyncio
@@ -491,7 +498,7 @@ async def test_the_earlier_service_stays_routable_until_its_upgrade_succeeds(
         upgrade_env, legacy, monkeypatch) -> None:
     from infra.db_async import run_in_db
     from llm import network_discovery
-    from llm.local_setup_runtime import retire_unowned_local_omlx_rows
+    from llm.local_setup_runtime import retire_legacy_setup_omlx_rows
     from llm.local_setup_upgrade import done_path, upgrade_legacy_omlx
     from llm.resolution import resolve_execution_target
 
@@ -505,7 +512,7 @@ async def test_the_earlier_service_stays_routable_until_its_upgrade_succeeds(
     monkeypatch.setattr("llm.local_setup_upgrade.shutil.copytree", copy_fails)
 
     # A start whose every move fails: startup keeps the row, the old service runs again.
-    assert await run_in_db(retire_unowned_local_omlx_rows) == []
+    assert await run_in_db(retire_legacy_setup_omlx_rows) == []
     assert [item.outcome for item in await upgrade_legacy_omlx()] == ["failed"]
     assert upgrade_env == ["stop service", "restart service"]
     assert (await run_in_db(network_discovery.get_server, old))["status"] != "removed"
@@ -515,7 +522,7 @@ async def test_the_earlier_service_stays_routable_until_its_upgrade_succeeds(
     # A later start with room: the managed server registers, the row retires, the binding follows.
     monkeypatch.setattr("llm.local_setup_upgrade.shutil.copytree", real_copy)
     upgrade_env.clear()
-    assert await run_in_db(retire_unowned_local_omlx_rows) == []
+    assert await run_in_db(retire_legacy_setup_omlx_rows) == []
     assert [item.outcome for item in await upgrade_legacy_omlx()] == ["moved"]
     assert done_path().exists()
     assert (await run_in_db(network_discovery.get_server, old))["status"] == "removed"
@@ -523,14 +530,14 @@ async def test_the_earlier_service_stays_routable_until_its_upgrade_succeeds(
     assert target.available is True
     assert not target.transport_model.startswith(f"omlx@{old}/")
     # Once upgraded, startup keeps nothing back.
-    assert await run_in_db(retire_unowned_local_omlx_rows) == []
+    assert await run_in_db(retire_legacy_setup_omlx_rows) == []
 
 
 @pytest.mark.asyncio
 async def test_a_foreign_loopback_omlx_stays_routable_while_the_upgrade_is_pending(upgrade_env, legacy) -> None:
     from infra.db_async import run_in_db
     from llm import network_discovery
-    from llm.local_setup_runtime import retire_unowned_local_omlx_rows
+    from llm.local_setup_runtime import retire_legacy_setup_omlx_rows
     from llm.local_setup_upgrade import done_path
 
     old = await _legacy_row_with_binding()
@@ -539,7 +546,7 @@ async def test_a_foreign_loopback_omlx_stays_routable_while_the_upgrade_is_pendi
         host="127.0.0.1", port=9000, status="online", kind="managed")
 
     assert not done_path().exists()
-    assert await run_in_db(retire_unowned_local_omlx_rows) == []
+    assert await run_in_db(retire_legacy_setup_omlx_rows) == []
     assert (await run_in_db(network_discovery.get_server, foreign))["status"] == "online"
     assert (await run_in_db(network_discovery.get_server, old))["status"] != "removed"
 
@@ -549,10 +556,10 @@ async def test_without_corsias_install_marker_the_legacy_row_stays(legacy, isola
     from infra.db_async import run_in_db
     from llm import network_discovery
     from llm.local_setup_ownership import marker_path
-    from llm.local_setup_runtime import retire_unowned_local_omlx_rows
+    from llm.local_setup_runtime import retire_legacy_setup_omlx_rows
 
     assert not marker_path().exists()
     old = await _legacy_row_with_binding()
 
-    assert await run_in_db(retire_unowned_local_omlx_rows) == []
+    assert await run_in_db(retire_legacy_setup_omlx_rows) == []
     assert (await run_in_db(network_discovery.get_server, old))["status"] == "online"

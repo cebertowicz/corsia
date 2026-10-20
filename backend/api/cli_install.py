@@ -46,7 +46,7 @@ _SECRET_VALUE = re.compile(
 )
 
 NO_INTERNET = "no internet connection"
-DOWNLOAD_UNAVAILABLE = "the download service temporarily cannot answer"
+DOWNLOAD_UNAVAILABLE = "the download service cannot answer"
 DOWNLOAD_REFUSED = "the download site refused the request"
 DOWNLOAD_UNVERIFIED = "the download didn't verify"
 TIMED_OUT = "it took too long"
@@ -129,8 +129,6 @@ def _download_script(vendor: str) -> Path:
     except urllib.error.HTTPError as exc:
         if exc.code in (403, 404):
             reason = DOWNLOAD_REFUSED
-        elif exc.code in (408, 429):
-            reason = DOWNLOAD_UNAVAILABLE
         else:
             reason = DOWNLOAD_UNAVAILABLE
         raise InstallerFailure(reason) from exc

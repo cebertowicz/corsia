@@ -34,7 +34,6 @@ class SetupHandoff(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tools: dict[str, ToolAttempt]
-    other_omlx: Literal["none", "stopped_theirs", "kept_both"]
 
     @field_validator("tools")
     @classmethod

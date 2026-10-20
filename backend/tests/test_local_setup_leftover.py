@@ -1,4 +1,4 @@
-"""A broken leftover `omlx` entry point reads as not installed; setup installs over it."""
+"""Broken entry points require ownership before setup repairs their installation."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def test_a_slow_omlx_is_present_and_not_cached(leftover, monkeypatch):
     assert own._broken_cache == {}
 
 
-def test_setup_installs_over_a_leftover_and_links_it_over_the_stray_entry_point(leftover, monkeypatch):
+def test_setup_reinstalls_only_a_proven_owned_broken_entry_point(leftover, monkeypatch):
     _probe(monkeypatch, subprocess.CompletedProcess([], 126, "", ""))
     commands: list[list[str]] = []
 
@@ -64,11 +64,14 @@ def test_setup_installs_over_a_leftover_and_links_it_over_the_stray_entry_point(
             raise subprocess.CalledProcessError(1, command, stderr="Could not symlink bin/omlx")
 
     monkeypatch.setattr(own, "run_command", run)
-    monkeypatch.setattr(own, "command_output", lambda command: "omlx 0.7.1")
+    from llm import local_setup_managed
+
+    monkeypatch.setattr(local_setup_managed, "marker_path", lambda: leftover)
+    monkeypatch.setattr(own, "command_output", lambda command: str(leftover.parent) if "--prefix" in command else "omlx 0.7.1")
     own.ensure_omlx(lambda stage: None, needs_repair=True, broken=True)
 
-    assert commands[-1] == ["link", "--overwrite", "omlx"]
-    assert ["install", own.OMLX_FORMULA] in commands
+    assert commands[-1] == ["reinstall", own.OMLX_FORMULA]
+    assert not any("--overwrite" in command or "install" in command for command in commands)
 
 
 def test_a_real_install_failure_names_homebrew_and_the_reason(leftover, monkeypatch):
@@ -80,6 +83,7 @@ def test_a_real_install_failure_names_homebrew_and_the_reason(leftover, monkeypa
 
     monkeypatch.setattr(own, "run_command", run)
     monkeypatch.setattr(own, "command_output", lambda command: "")
+    monkeypatch.setattr(own.shutil, "which", lambda name: "/opt/bin/brew" if name == "brew" else None)
 
     with pytest.raises(RuntimeError, match=r"Homebrew couldn't install oMLX: Error: disk full\. Try again\."):
         own.ensure_omlx(lambda stage: None, needs_repair=True, broken=True)

@@ -61,9 +61,9 @@
 		const result = await retryLocalSetup(kind);
 		if (result.code === 'consent_required') {
 			toasts.showAction(
-				'CORSIA can read the existing oMLX version, settings, and local server to adopt it without changing its settings.',
-				{ label: 'Use existing oMLX', run: async () => {
-					const consented = await retryLocalSetup('setup', true);
+				'Another oMLX is running. Keep it running to set up the local model.',
+				{ label: 'Keep running', run: async () => {
+					const consented = await retryLocalSetup('setup', 'keep');
 					if (!consented.ok) toasts.show("Couldn't set up the local model.", 'error');
 				} },
 			);

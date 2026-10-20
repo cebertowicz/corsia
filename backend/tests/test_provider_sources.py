@@ -800,12 +800,16 @@ class TestRecheck:
 
     def test_local_setup_route_reuses_keep_both_after_a_pid_change_and_excludes_unmanaged_rows(
             self, isolated_db, client, monkeypatch, tmp_path):
-        from llm import local_setup_ownership, local_sources, network_discovery
+        from llm import local_setup_foreign, local_sources, network_discovery
+        from llm.local_setup_managed import OmlxProcess
 
         current = {"pid": 4242}
-        monkeypatch.setattr(local_setup_ownership, "foreign_omlx_choice_path", lambda: tmp_path / "choice.json")
-        monkeypatch.setattr(local_setup_ownership, "foreign_omlx_process", lambda: current["pid"])
-        monkeypatch.setattr(local_setup_ownership, "stop_foreign_omlx_process", lambda pid: pytest.fail(f"must not stop {pid}"))
+        process = lambda: (OmlxProcess(current["pid"], 1, None, "personal"),)
+        monkeypatch.setattr(local_setup_foreign, "foreign_omlx_choice_path", lambda: tmp_path / "choice.json")
+        monkeypatch.setattr(local_setup_foreign, "foreign_omlx_processes", process)
+        monkeypatch.setattr(
+            local_setup_foreign, "stop_foreign_omlx_processes", lambda _pids: pytest.fail("must not stop"),
+        )
         monkeypatch.setattr("llm.local_sources.installed_omlx", lambda: None)
         foreign = network_discovery.upsert_server(
             "omlx", "foreign-omlx", "Foreign", "127.0.0.1", 8000, "online", kind="managed",
@@ -817,80 +821,107 @@ class TestRecheck:
             return {"ok": True, "in_progress": True}
 
         monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
-        assert client.post("/api/providers/local/setup", json={
-            "consent_existing": True, "manage_existing": False,
-        }).status_code == 200
+        assert client.post("/api/providers/local/setup", json={"other_omlx": "keep"}).status_code == 200
         current["pid"] = 4243
         assert client.post("/api/providers/local/setup").status_code == 200
         assert _sources(client)["omlx"]["state"] == "not_installed"
         # A manually added loopback row remains routable across setup checks.
-        from llm.local_setup_runtime import retire_unowned_local_omlx_rows
+        from llm.local_setup_runtime import retire_legacy_setup_omlx_rows
 
-        assert retire_unowned_local_omlx_rows() == []
+        assert retire_legacy_setup_omlx_rows() == []
         assert f"omlx@{foreign}" in set().union(*local_sources.catalog_membership())
 
-    def test_local_setup_route_explicit_stop_supersedes_remembered_keep_for_the_same_pid(
+    def test_local_setup_route_stop_requires_the_offered_pid_snapshot(
             self, isolated_db, client, monkeypatch, tmp_path):
-        from llm import local_setup_ownership
+        from llm import local_setup_foreign
+        from llm.local_setup_managed import OmlxProcess
 
         choice = tmp_path / "choice.json"
-        choice.write_text('{"pid": 4242, "stop": false}', encoding="utf-8")
-        monkeypatch.setattr(local_setup_ownership, "foreign_omlx_choice_path", lambda: choice)
-        monkeypatch.setattr(local_setup_ownership, "foreign_omlx_process", lambda: 4242)
+        offered = (OmlxProcess(4242, 1, None, "personal"),)
+        monkeypatch.setattr(local_setup_foreign, "foreign_omlx_choice_path", lambda: choice)
+        monkeypatch.setattr(local_setup_foreign, "foreign_omlx_processes", lambda: offered)
         stops = []
-        monkeypatch.setattr(local_setup_ownership, "stop_foreign_omlx_process", lambda pid: stops.append(pid) or True)
+        monkeypatch.setattr(
+            local_setup_foreign, "stop_foreign_omlx_processes", lambda pids: stops.append(pids) or True,
+        )
 
         async def begin(**_kwargs):
             return {"ok": True}
 
         monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
-        assert client.post("/api/providers/local/setup", json={
-            "consent_existing": True, "manage_existing": True,
-        }).status_code == 200
-        assert stops == [4242]
-        assert choice.read_text(encoding="utf-8") == '{"pid": 4242, "stop": true}'
+        assert client.post("/api/providers/local/setup").json() == {"detail": {"code": "consent_required"}}
+        assert client.post("/api/providers/local/setup", json={"other_omlx": "stop"}).status_code == 200
+        assert stops == [offered]
+        assert choice.read_text(encoding="utf-8") == '{"choice": "stop", "pids": [4242], "applied": true}'
 
-    def test_local_setup_route_applies_a_preloaded_stop_choice_to_its_exact_pid_once(
+    def test_local_setup_route_keep_does_not_need_a_prior_offer(
             self, isolated_db, client, monkeypatch, tmp_path):
-        from llm import local_setup_ownership
+        from llm import local_setup_foreign
+        from llm.local_setup_managed import OmlxProcess
+
+        choice = tmp_path / "choice.json"
+        offered = (OmlxProcess(4242, 1, None, "personal"),)
+        monkeypatch.setattr(local_setup_foreign, "foreign_omlx_choice_path", lambda: choice)
+        monkeypatch.setattr(local_setup_foreign, "foreign_omlx_processes", lambda: offered)
+        monkeypatch.setattr(
+            local_setup_foreign, "stop_foreign_omlx_processes", lambda _pids: pytest.fail("must not stop"),
+        )
+
+        async def begin(**_kwargs):
+            return {"ok": True}
+
+        monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
+        assert client.post("/api/providers/local/setup", json={"other_omlx": "keep"}).status_code == 200
+        assert choice.read_text(encoding="utf-8") == '{"choice": "keep", "pids": [4242], "applied": true}'
+
+    def test_local_setup_route_applies_a_legacy_stop_choice_to_its_exact_pid_once(
+            self, isolated_db, client, monkeypatch, tmp_path):
+        from llm import local_setup_foreign
+        from llm.local_setup_managed import OmlxProcess
 
         current = {"pid": 4242}
         choice = tmp_path / "choice.json"
         choice.write_text('{"pid": 4242, "stop": true}', encoding="utf-8")
-        monkeypatch.setattr(local_setup_ownership, "foreign_omlx_choice_path", lambda: choice)
-        monkeypatch.setattr(local_setup_ownership, "foreign_omlx_process", lambda: current["pid"])
+        monkeypatch.setattr(local_setup_foreign, "foreign_omlx_choice_path", lambda: choice)
+        offered = lambda: (OmlxProcess(current["pid"], 1, None, "personal"),)
+        monkeypatch.setattr(local_setup_foreign, "foreign_omlx_processes", offered)
         stops = []
 
-        def stop(pid):
-            stops.append(pid)
-            current["pid"] = None
+        def stop(processes):
+            stops.append(processes)
             return True
 
-        monkeypatch.setattr(local_setup_ownership, "stop_foreign_omlx_process", stop)
+        monkeypatch.setattr(local_setup_foreign, "stop_foreign_omlx_processes", stop)
 
         async def begin(**_kwargs):
             return {"ok": True, "in_progress": True}
 
         monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
         assert client.post("/api/providers/local/setup").status_code == 200
-        assert stops == [4242]
+        assert stops == [offered()]
+        assert choice.read_text(encoding="utf-8") == '{"choice": "stop", "pids": [4242], "applied": true}'
 
     def test_local_setup_route_never_applies_a_remembered_choice_to_a_changed_pid(
             self, isolated_db, client, monkeypatch, tmp_path):
-        from llm import local_setup_ownership
+        from llm import local_setup_foreign
+        from llm.local_setup_managed import OmlxProcess
 
         current = {"pid": 4242}
-        monkeypatch.setattr(local_setup_ownership, "foreign_omlx_choice_path", lambda: tmp_path / "choice.json")
-        monkeypatch.setattr(local_setup_ownership, "foreign_omlx_process", lambda: current["pid"])
-        monkeypatch.setattr(local_setup_ownership, "stop_foreign_omlx_process", lambda _pid: True)
+        choice = tmp_path / "choice.json"
+        choice.write_text('{"choice": "stop", "pids": [4242], "applied": true}', encoding="utf-8")
+        monkeypatch.setattr(local_setup_foreign, "foreign_omlx_choice_path", lambda: choice)
+        monkeypatch.setattr(
+            local_setup_foreign, "foreign_omlx_processes",
+            lambda: (OmlxProcess(current["pid"], 1, None, "personal"),),
+        )
+        monkeypatch.setattr(
+            local_setup_foreign, "stop_foreign_omlx_processes", lambda _pids: pytest.fail("must not stop"),
+        )
 
         async def begin(**_kwargs):
             return {"ok": True}
 
         monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
-        assert client.post("/api/providers/local/setup", json={
-            "consent_existing": True, "manage_existing": True,
-        }).status_code == 200
         current["pid"] = 4243
         response = client.post("/api/providers/local/setup")
         assert response.status_code == 409
@@ -919,15 +950,15 @@ class TestRecheck:
         assert response.status_code == 409
         assert response.json() == {"detail": {"code": "consent_required"}}
 
-    @pytest.mark.parametrize(("body", "expected"), [
-        ({"consent_existing": True, "manage_existing": False}, (True, False)),
-        ({"consent_existing": True, "manage_existing": True}, (True, True)),
+    @pytest.mark.parametrize("body", [
+        {"other_omlx": "keep"},
+        {"other_omlx": "stop"},
     ])
-    def test_local_setup_route_applies_keep_or_stop_choice_once(self, isolated_db, client, monkeypatch, body, expected):
+    def test_local_setup_route_applies_keep_or_stop_choice_once(self, isolated_db, client, monkeypatch, body):
         choices = []
         monkeypatch.setattr(
             "api.provider_sources.apply_foreign_omlx_choice",
-            lambda **kwargs: choices.append((kwargs["consent_existing"], kwargs["manage_existing"])) or None,
+            lambda **kwargs: choices.append(kwargs["other_omlx"]) or None,
         )
 
         async def begin(**_kwargs):
@@ -937,7 +968,7 @@ class TestRecheck:
         response = client.post("/api/providers/local/setup", json=body)
 
         assert response.status_code == 200
-        assert choices == [expected]
+        assert choices == [body["other_omlx"]]
 
     @pytest.mark.parametrize("refusal", ["foreign_omlx_changed", "consent_required"])
     def test_local_setup_route_does_not_start_when_the_foreign_process_changed_or_stop_failed(
@@ -948,7 +979,7 @@ class TestRecheck:
             raise AssertionError("setup must not start after a foreign-process refusal")
 
         monkeypatch.setattr("llm.local_setup.begin_local_setup", should_not_start)
-        response = client.post("/api/providers/local/setup", json={"consent_existing": True, "manage_existing": True})
+        response = client.post("/api/providers/local/setup", json={"other_omlx": "stop"})
 
         assert response.status_code == 409
         assert response.json() == {"detail": {"code": refusal}}

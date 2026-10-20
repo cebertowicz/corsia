@@ -19,7 +19,7 @@
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
 	import { bestSetupModel, setupModelWorks, setupCatalog, bindSetupFirstModel, SetupFirstModelError, type SetupModel } from '$lib/setupFirstModel';
-	import { fetchSetupProgress, recordSetupProgress, type SetupHandoff } from '$lib/setupProgress';
+	import { fetchSetupProgress, recordSetupProgress } from '$lib/setupProgress';
 	import { saveSetupReport } from '$lib/setupReport';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
 	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
@@ -31,17 +31,19 @@
 	import { isSetupWide } from '$lib/stores/viewport';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
 	type LocalStartResult = 'started' | 'consent_required' | 'foreign_omlx_changed' | 'failed';
-	async function requestLocalStart(session: string | null, consentExisting = false, manageExisting?: boolean): Promise<LocalStartResult> {
+	type LocalStartResponse = { result: LocalStartResult; reference?: string };
+	async function requestLocalStart(session: string | null, otherOmlx: 'stop' | 'keep' | null = null): Promise<LocalStartResponse> {
 		const response = await fetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session}` } : {}) },
-			body: JSON.stringify({ consent_existing: consentExisting, manage_existing: manageExisting }),
+			body: JSON.stringify({ other_omlx: otherOmlx }),
 		});
 		const body = await response.json().catch(() => null);
 		const code = body?.detail?.code ?? body?.code;
-		if (response.status === 409 && code === 'consent_required') return 'consent_required';
-		if (response.status === 409 && code === 'foreign_omlx_changed') return 'foreign_omlx_changed';
-		return response.ok && body?.ok !== false ? 'started' : 'failed';
+		const reference = typeof body?.detail?.ref === 'string' ? body.detail.ref : typeof body?.ref === 'string' ? body.ref : undefined;
+		if (response.status === 409 && code === 'consent_required') return { result: 'consent_required', reference };
+		if (response.status === 409 && code === 'foreign_omlx_changed') return { result: 'foreign_omlx_changed', reference };
+		return { result: response.ok && body?.ok !== false ? 'started' : 'failed', reference };
 	}
 	function setupFinishRecovery(error: unknown): string {
 		const code = error instanceof SetupFirstModelError ? error.code : undefined;
@@ -66,8 +68,8 @@
 	let folder = $state('~/CORSIA'), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
-	let localPending = $state(false), localStartError = $state<'other' | 'other_omlx' | ''>(''), localBusy = $state(false), otherQuestion = $state(false);
-	let otherOmlx = $state<SetupHandoff['other_omlx']>('none'), finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
+	let localPending = $state(false), localStartError = $state<'other' | 'other_omlx' | ''>(''), localStartReference = $state(''), localBusy = $state(false), otherQuestion = $state(false);
+	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources });
 	const canConnect = shellInfo() !== null;
 	let preauthLocal = $state<LocalRowState | undefined>();
@@ -89,7 +91,7 @@
 	}
 	const jobs = $derived<SetupJob[]>([
 		...(page !== 'models' && (downloading || local?.setup_error || localStartError) ? [{ label: 'Local model', state: local?.setup_error || localStartError ? 'error' as const : 'busy' as const,
-			meta: local?.setup_error || localStartError ? 'Couldn’t download' : ['Downloading', `${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), progress: (local?.download_percent ?? 0) / 100 }] : []),
+			meta: local?.setup_error || localStartError ? (local?.local_state === 'start_failed' || local?.setup_error_code === 'start_failed' ? 'Couldn’t start the local model' : 'Couldn’t download') : ['Downloading', `${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), progress: (local?.download_percent ?? 0) / 100 }] : []),
 		...(classifier.job ? [classifier.job] : []),
 		...(accountBusy ? [{ label: 'Starting CORSIA', state: 'busy' as const }] : []),
 	]);
@@ -101,7 +103,7 @@
 			const works = catalog.some((row) => row.connection === vendor && setupModelWorks(row));
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, pill: works ? { state: 'success', label: 'Ready' } : undefined });
 		});
-		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, freeDisk: status.free_disk_gb,
+		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startReference: localStartReference, freeDisk: status.free_disk_gb,
 			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal() })));
 		const provider = tested.find((test) => bestSetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
 		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${provider.source} · passed a test call` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.',
@@ -156,10 +158,11 @@
 	}
 	async function startLocal() {
 		if (!eligible || localBusy) return;
-		localBusy = true; localStartError = '';
+		localBusy = true; localStartError = ''; localStartReference = '';
 		try {
 			const current = get(token);
-			const result = await requestLocalStart(current);
+			const { result, reference } = await requestLocalStart(current);
+			localStartReference = reference ?? '';
 			if (result === 'consent_required') otherQuestion = true;
 			else if (result === 'foreign_omlx_changed') localStartError = 'other_omlx';
 			else if (result === 'failed') localStartError = 'other';
@@ -169,14 +172,16 @@
 		finally { localBusy = false; }
 	}
 	async function chooseOther(stop: boolean) {
-		localBusy = true;
+		localBusy = true; localStartError = ''; localStartReference = '';
 		try {
 			const current = get(token);
-			const result = await requestLocalStart(current, true, stop);
-			if (result !== 'started') { localStartError = 'other_omlx'; return; }
-			otherOmlx = stop ? 'stopped_theirs' : 'kept_both'; otherQuestion = false; localPending = true;
+			const { result, reference } = await requestLocalStart(current, stop ? 'stop' : 'keep');
+			localStartReference = reference ?? '';
+			if (result === 'foreign_omlx_changed') { localStartError = 'other_omlx'; return; }
+			if (result !== 'started') { localStartError = 'other'; return; }
+			otherQuestion = false; localPending = true;
 			if (current) await refreshSources();
-		} catch { localStartError = 'other_omlx'; }
+		} catch { localStartError = 'other'; }
 		finally { localBusy = false; }
 	}
 	async function stopLocal() { const current = get(token); if (current) { await cancelLocalDownload(current); await refreshSources(); } localPending = false; }
@@ -208,9 +213,9 @@
 		finishing = true; sourceError = '';
 		try {
 			await bindSetupFirstModel(current, tested, async () => {
-				if (!await recordSetupProgress({ handoff: { tools: connectFlow.attempts, other_omlx: otherOmlx } }, current)) throw new SetupFirstModelError('progress_save');
+				if (!await recordSetupProgress({ handoff: { tools: connectFlow.attempts } }, current)) throw new SetupFirstModelError('progress_save');
 			});
-			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts, other_omlx: otherOmlx } }, current)) throw new SetupFirstModelError('progress_save');
+			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts } }, current)) throw new SetupFirstModelError('progress_save');
 			onFinished();
 		} catch (error) {
 			await refreshSources(true);
@@ -265,7 +270,7 @@
 	{:else if page === 'folder'}<SetupWorkFolder bind:folder bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} error={accountError} />
 	{:else if page === 'models'}
 		<SetupAiRows rows={aiRows} />
-		{#if otherQuestion}<div class="other-omlx"><h2>Stop your oMLX while CORSIA runs?</h2><p>CORSIA runs its own oMLX for the local model. Running both can use more memory than this computer has.</p><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(true)}>Stop mine</Button><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(false)}>Keep both running</Button></div>{/if}
+		{#if otherQuestion}<div class="other-omlx"><h2>Stop other oMLX processes?</h2><p>CORSIA runs its own oMLX for the local model. Stopping other oMLX processes can free memory. Login items start again when you next sign in. Other processes stay stopped until you start them.</p><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(true)}>Stop other oMLX</Button><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(false)}>Keep them running</Button></div>{/if}
 		{#if sourceError}<Message variant="err">{sourceError}</Message><Button variant="chip" onclick={() => void refreshSources(true)}>Retry</Button>{/if}
 	{/if}
 </SetupShell>

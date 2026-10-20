@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { installCause, installFailureCopy } from './setupConnect.svelte';
+import { createSetupConnect, installCause, installFailureCopy } from './setupConnect.svelte';
 
 describe('setup CLI installer failure copy', () => {
 	it.each([
@@ -31,5 +31,16 @@ describe('setup CLI installer failure copy', () => {
 			meta: 'Couldn’t install Claude Code. Retry, or save a report. Reference: cli-failed',
 			retry: true,
 		});
+	});
+
+	it('calls a usage-limited Claude account subscription', () => {
+		const flow = createSetupConnect({
+			token: () => null,
+			sources: () => [{ source: 'claude-code', name: 'Claude Code', state: 'ready', limited: true }],
+			refreshSources: async () => undefined,
+		});
+
+		expect(flow.row({ source: 'claude-code', name: 'Claude Code', state: 'ready', limited: true }).meta)
+			.toBe('Signed in, but your Claude subscription has reached its usage limit.');
 	});
 });

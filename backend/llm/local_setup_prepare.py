@@ -26,7 +26,6 @@ log = logging.getLogger(__name__)
 
 #: Under 24 GiB: no local model, so Welcome shows no switch.
 LOW_MEMORY = "low_memory"
-
 NOT_CHECKED = "not_checked"
 CHECKING = "checking"
 PICKED = "picked"
@@ -48,6 +47,8 @@ class _Prepare:
     state: str = NOT_CHECKED
     model: LocalModel | None = None
     message: str | None = None
+    cause: str | None = None
+    ref: str | None = None
     # The pick is the starter model because the recommender had no usable row.
     fallback: bool = False
     # The supervised CORSIA process prepare started, if it remains safe to stop.
@@ -64,8 +65,10 @@ def _running() -> bool:
     return _prepare.task is not None and not _prepare.task.done()
 
 
-def _settle(state: str, model: LocalModel | None = None, message: str | None = None, fallback: bool = False) -> None:
+def _settle(state: str, model: LocalModel | None = None, message: str | None = None, fallback: bool = False,
+            *, cause: str | None = None, ref: str | None = None) -> None:
     _prepare.state, _prepare.model, _prepare.message, _prepare.fallback = state, model, message, fallback
+    _prepare.cause, _prepare.ref = cause, ref
     if state != CHECKING:
         while _prepare.waiters:
             waiter = _prepare.waiters.pop()
@@ -78,7 +81,20 @@ def _view(state: str, model: LocalModel | None = None, message: str | None = Non
         message = NO_LOCAL_MODEL
     elif state == PICKED and model is not None and _prepare.fallback and model == STARTER_MODEL:
         message = fallback_note(model)
-    return {"state": state, "model": model.view() if model is not None else None, "message": message}
+    result = {"state": state, "model": model.view() if model is not None else None, "message": message}
+    if state == FAILED and _prepare.cause:
+        result.update(cause=_prepare.cause, ref=_prepare.ref)
+    return result
+
+
+def _fail(exc: Exception) -> None:
+    from api.cli_install import new_reference
+    from llm.local_setup_results import failure_cause
+
+    ref = new_reference()
+    cause = failure_cause(exc)
+    log.warning("Local model prepare failed reference=%s cause=%s", ref, cause, exc_info=exc)
+    _settle(FAILED, message=failure_message(exc), cause=cause, ref=ref)
 
 
 def picked_model() -> LocalModel | None:
@@ -198,8 +214,7 @@ async def _run() -> None:
         raise
     except Exception as exc:
         if _prepare.state == CHECKING:
-            log.warning("Local model prepare failed: %s", exc)
-            _settle(FAILED, message=failure_message(exc))
+            _fail(exc)
 
 
 async def join() -> None:
@@ -232,7 +247,7 @@ async def ask(server_id: str, port: int) -> LocalModel:
         _settle(NOT_CHECKED)
         raise
     except Exception as exc:
-        _settle(FAILED, message=failure_message(exc))
+        _fail(exc)
         raise
     fallback = model is None
     model = model or STARTER_MODEL

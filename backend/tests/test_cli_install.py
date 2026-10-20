@@ -74,9 +74,9 @@ def _client() -> TestClient:
     (urllib.error.URLError("offline"), "no internet connection"),
     (urllib.error.HTTPError("https:" "//example.test", 403, "forbidden", Message(), None), "the download site refused the request"),
     (urllib.error.HTTPError("https:" "//example.test", 404, "missing", Message(), None), "the download site refused the request"),
-    (urllib.error.HTTPError("https:" "//example.test", 408, "timeout", Message(), None), "the download service temporarily cannot answer"),
-    (urllib.error.HTTPError("https:" "//example.test", 429, "limited", Message(), None), "the download service temporarily cannot answer"),
-    (urllib.error.HTTPError("https:" "//example.test", 503, "down", Message(), None), "the download service temporarily cannot answer"),
+    (urllib.error.HTTPError("https:" "//example.test", 408, "timeout", Message(), None), "the download service cannot answer"),
+    (urllib.error.HTTPError("https:" "//example.test", 429, "limited", Message(), None), "the download service cannot answer"),
+    (urllib.error.HTTPError("https:" "//example.test", 503, "down", Message(), None), "the download service cannot answer"),
 ])
 def test_download_connection_failures_have_safe_reasons(monkeypatch, error, reason):
     from api import cli_install
@@ -139,7 +139,7 @@ def test_success_runs_bash_with_the_service_environment(monkeypatch, tmp_path):
     ("codex", {"timeout": True}, "it took too long"),
     ("codex", {"returncode": 1, "output": (b"installer output", b"failed")}, "the installer stopped"),
     ("claude-code", {"returncode": 1, "output": (b"Checksum verification failed", b"")}, "the download didn't verify"),
-    ("claude-code", {"returncode": 1, "output": (b"Failed to get a valid version", b"")}, "the download service temporarily cannot answer"),
+    ("claude-code", {"returncode": 1, "output": (b"Failed to get a valid version", b"")}, "the download service cannot answer"),
     ("codex", {"returncode": 1, "output": (b"Could not fetch installer", b"")}, "no internet connection"),
 ])
 def test_installer_failures_have_safe_reasons(monkeypatch, tmp_path, vendor, result, reason):

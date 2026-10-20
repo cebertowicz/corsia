@@ -27,7 +27,6 @@ HANDOFF = {
         "claude-code": {"attempt": "install_failed", "cause": "download_unavailable", "ref": "setup-42"},
         "codex": {"attempt": "none"},
     },
-    "other_omlx": "kept_both",
 }
 
 
@@ -148,7 +147,7 @@ def test_pre_account_local_download_status_exposes_only_the_safe_projection(clie
     response = client.get("/api/setup/local-download", headers=HOST)
 
     assert response.status_code == 200
-    assert response.json() == {"state": "failed", "cause": "disk_full", "bytes_to_free": 1024}
+    assert response.json() == {"state": "failed", "cause": "disk_full", "bytes_to_free": 1024, "other_omlx": "none"}
 
 
 @pytest.mark.parametrize(("result", "downloaded"), [
@@ -205,14 +204,14 @@ def test_local_download_applies_the_foreign_process_choice_before_starting(clien
     monkeypatch.setattr("llm.local_setup.begin_local_setup", started)
 
     assert client.post("/api/setup/local-download", json={}, headers=JSON_HEADERS).json() == {"code": "consent_required"}
-    kept = client.post("/api/setup/local-download", json={"consent_existing": True, "manage_existing": False}, headers=JSON_HEADERS)
+    kept = client.post("/api/setup/local-download", json={"other_omlx": "keep"}, headers=JSON_HEADERS)
     assert kept.status_code == 200 and kept.json() == {"ok": True}
-    stopped = client.post("/api/setup/local-download", json={"consent_existing": True, "manage_existing": True}, headers=JSON_HEADERS)
+    stopped = client.post("/api/setup/local-download", json={"other_omlx": "stop"}, headers=JSON_HEADERS)
     assert stopped.status_code == 200 and stopped.json() == {"ok": True}
     assert choice.call_args_list == [
-        call(consent_existing=False, manage_existing=None),
-        call(consent_existing=True, manage_existing=False),
-        call(consent_existing=True, manage_existing=True),
+        call(other_omlx=None),
+        call(other_omlx="keep"),
+        call(other_omlx="stop"),
     ]
     assert started.await_count == 2
 
@@ -241,6 +240,7 @@ def test_handoff_can_be_written_before_binding_and_never_copies_it(client):
     {**HANDOFF, "tools": {"claude-code": {"attempt": "none"}}},
     {**HANDOFF, "tools": {"claude-code": {"attempt": "install_failed"}, "codex": {"attempt": "none"}}},
     {**HANDOFF, "tools": {"claude-code": {"attempt": "none", "cause": "other"}, "codex": {"attempt": "none"}}},
+    {**HANDOFF, "other_omlx": "kept_both"},
 ])
 def test_handoff_refuses_missing_tool_or_unsafe_failure_shape(client, handoff):
     token = _create_account(client)
@@ -298,7 +298,6 @@ HANDOFF = {
         "claude-code": {"attempt": "install_failed", "cause": "download_unavailable", "ref": "setup-42"},
         "codex": {"attempt": "none"},
     },
-    "other_omlx": "kept_both",
 }
 
 

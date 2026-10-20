@@ -53,41 +53,30 @@ async def wait_for_health(port: int) -> None:
     )
 
 
-def retire_unowned_local_omlx_rows(*, keep_pending_legacy: bool = True) -> list[str]:
-    """Remove the oMLX rows an older setup registered on this Mac.
+def retire_legacy_setup_omlx_rows() -> list[str]:
+    """Retire older setup/adoption fingerprints, preserving pending legacy service rows.
 
-    v0.3/v0.4 setup registered its own loopback oMLX, or the person's that
-    "Use mine" adopted, as a ``This Mac`` row. Such a row stops routing; its
-    models leave the catalog with it, and a thread bound to one resolves to
-    the same model on the managed server once that lists it. A server the
-    person added by hand, an oMLX on another machine and an External provider
-    stay. The rule is ``is_retired_local_omlx``; this runs at startup and when
-    setup registers its server. At startup, CORSIA's own earlier service keeps its row until its
-    upgrade finishes (``pending_legacy_port``); registering the managed server
-    passes ``keep_pending_legacy=False`` and retires it. Blocking: run it on the
-    database thread.
+    The identity classifier preserves hand-added, remote and External rows.
+    Retirement withdraws catalog models and the stored key in one transaction.
+    Call on the database thread before cleaning adoption markers.
     """
     from llm import network_discovery as discovery
     from llm.local_setup_managed import is_retired_local_omlx
-    from llm.local_setup_upgrade import pending_legacy_port
 
     servers = discovery.get_servers(provider="omlx")
-    keep_port = pending_legacy_port() if keep_pending_legacy and servers else None
     retired: list[str] = []
     for server in servers:
         if not is_retired_local_omlx(server):
             continue
-        if keep_port is not None and server.get("port") == keep_port:
-            continue
         if discovery.remove_server(str(server["id"])):
             retired.append(str(server["id"]))
     if retired:
-        log.info("retired %d oMLX row(s) on this Mac that CORSIA does not manage", len(retired))
+        log.info("retired %d older local setup oMLX row(s)", len(retired))
     return retired
 
 
 async def register_managed_server(*, port: int, base_path: str, model_dir: str) -> tuple[str, str]:
-    """Create CORSIA's sole managed oMLX row and retire unowned local rows.
+    """Create CORSIA's managed row, preserving legacy routing until upgrade success.
 
     The generated credential stays in the server key store and is passed only to
     CORSIA's owned subprocess through its supervisor configuration.
@@ -98,7 +87,7 @@ async def register_managed_server(*, port: int, base_path: str, model_dir: str) 
     from llm.local_setup_managed import MANAGED_INSTANCE_ID
 
     def persist() -> tuple[str, str]:
-        retire_unowned_local_omlx_rows(keep_pending_legacy=False)
+        retire_legacy_setup_omlx_rows()
         server_id = discovery.upsert_server(
             provider="omlx", instance_id=MANAGED_INSTANCE_ID, instance_name=LOCAL_SERVER_NAME,
             host=LOCAL_HOST, port=port, status="offline", kind="managed", source="corsia",
@@ -228,7 +217,6 @@ async def apply_optimal_settings(server_id: str, model: LocalModel) -> OptimalRe
         from llm.local_model import omlx_has_recommender
         from llm.local_setup_auth import omlx_version
         from llm.providers.omlx_endpoints import OmlxAdminError, admin_request
-
 
         if not omlx_has_recommender(await asyncio.to_thread(omlx_version)):
             return OptimalResult("unsupported")

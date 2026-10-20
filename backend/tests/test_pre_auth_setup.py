@@ -166,7 +166,7 @@ def test_polling_setup_status_and_local_download_spawn_no_processes(client, monk
     def forbidden(*_args, **_kwargs):
         pytest.fail("polling must not inspect processes")
 
-    monkeypatch.setattr(setup_api, "foreign_omlx_process", forbidden)
+    monkeypatch.setattr("llm.local_setup_managed.foreign_omlx_processes", forbidden)
     monkeypatch.setattr(subprocess, "run", forbidden)
     monkeypatch.setattr(subprocess, "Popen", forbidden)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden)
@@ -182,7 +182,7 @@ def test_polling_setup_status_and_local_download_spawn_no_processes(client, monk
 def test_local_download_uses_the_single_managed_flight_when_no_foreign_process_exists(client, monkeypatch):
     from llm import local_setup
 
-    monkeypatch.setattr(setup_api, "foreign_omlx_process", lambda: None)
+    monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_processes", lambda: ())
     calls = 0
 
     async def begin_local_setup():
@@ -216,21 +216,21 @@ def test_local_download_requires_explicit_choice_before_foreign_omlx_action(clie
 def test_local_download_stops_only_the_identified_foreign_process_after_choice(client, monkeypatch):
     from llm import local_setup
 
-    choices: list[tuple[bool, bool | None]] = []
+    choices: list[str | None] = []
     monkeypatch.setattr(
         setup_api, "apply_foreign_omlx_choice",
-        lambda **kwargs: choices.append((kwargs["consent_existing"], kwargs["manage_existing"])) or None,
+        lambda **kwargs: choices.append(kwargs["other_omlx"]) or None,
     )
     async def begin_local_setup():
         return {"ok": True, "in_progress": True}
 
     monkeypatch.setattr(local_setup, "begin_local_setup", begin_local_setup)
 
-    keep_running = _post(client, "/api/setup/local-download", {"consent_existing": True, "manage_existing": False})
-    stop_foreign = _post(client, "/api/setup/local-download", {"consent_existing": True, "manage_existing": True})
+    keep_running = _post(client, "/api/setup/local-download", {"other_omlx": "keep"})
+    stop_foreign = _post(client, "/api/setup/local-download", {"other_omlx": "stop"})
 
     assert keep_running.status_code == stop_foreign.status_code == 200
-    assert choices == [(True, False), (True, True)]
+    assert choices == ["keep", "stop"]
 
 
 def test_operation_active_accepts_raw_loopback_shape_without_origin(system_client, monkeypatch):
@@ -477,7 +477,7 @@ def welcome(no_users, monkeypatch, fresh_local_setup):
     """The setup routes on a non-default bound port, as the app reaches them before any account."""
     from llm import local_setup
 
-    monkeypatch.setattr(setup_api, "foreign_omlx_process", lambda: None)
+    monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_processes", lambda: ())
     port = 43124
     headers = {"Host": f"127.0.0.1:{port}", "Content-Type": "application/json"}
     app = FastAPI()

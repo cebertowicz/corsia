@@ -29,7 +29,7 @@ from infra.auth import authenticate, require_user, token_from_request
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
 from infra.time import utc_storage_iso_to_api
-from llm.local_setup_ownership import apply_foreign_omlx_choice, foreign_omlx_process
+from llm.local_setup_foreign import apply_foreign_omlx_choice, foreign_omlx_answer, foreign_omlx_refusal
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 logger = logging.getLogger(__name__)
@@ -179,6 +179,7 @@ def _setup_status() -> dict:
         "classifier": classifier_state(CLASSIFIER_DOWNLOAD.status()),
         "ready_ai": _ready_ai(),
         "ai_check_pending": _ai_check_pending(),
+        "other_omlx": foreign_omlx_answer(),
     }
 
 
@@ -282,7 +283,7 @@ async def local_download_status(request: Request) -> dict | Response:
         return refused
     from onboarding.local_download_state import current
 
-    return current()
+    return {**current(), "other_omlx": foreign_omlx_answer()}
 
 
 @router.post("/local-download", response_model=None)
@@ -298,10 +299,9 @@ async def local_download(request: Request) -> dict | Response:
         return Response(status_code=422)
     if refusal := await asyncio.to_thread(
         apply_foreign_omlx_choice,
-        consent_existing=body.consent_existing,
-        manage_existing=body.manage_existing,
+        other_omlx=body.other_omlx,
     ):
-        return JSONResponse(status_code=409, content={"code": refusal})
+        return JSONResponse(status_code=409, content=foreign_omlx_refusal(refusal))
     from llm.local_setup import begin_local_setup
 
     return await begin_local_setup()
