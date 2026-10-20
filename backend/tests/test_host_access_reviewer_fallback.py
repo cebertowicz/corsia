@@ -695,9 +695,18 @@ async def test_a_locality_refusal_does_not_tell_the_agent_to_wait_for_the_review
     )
 
 
+def test_every_locality_refusal_has_its_own_words():
+    """A new refusal must bring its phrase, or the agent would read a bare code."""
+    from llm.locality import LOCALITY_REFUSALS
+    from prompts.cloud_off import LOCALITY_PHRASES
+
+    assert set(LOCALITY_PHRASES) == set(LOCALITY_REFUSALS)
+
+
 @pytest.mark.asyncio
-async def test_a_chat_set_to_local_models_only_refuses_the_cloud_reviewer(outage, monkeypatch):
-    """The thread's own local-only flag is wired by another lane; the reason is what travels."""
+async def test_a_thread_locality_refusal_travels_as_the_chats_own_cause(outage, monkeypatch):
+    """Threads don't carry the local-only flag at this head, so the refusal is stubbed:
+    what this pins is that the cause reaches both candidates and no account is read."""
     from llm import locality
     from host_access.errors import ReviewerUnavailableError
 

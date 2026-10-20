@@ -11,6 +11,8 @@ HOLD_PHRASE = "this project uses local models only"
 THREAD_HOLD_PHRASE = "this chat is set to local models only"
 #: The same cause as the parent reads it: "this chat" would read as the parent's own.
 WORKER_HOLD_PHRASE = "the worker is set to local models only"
+#: Each cause in ``llm.locality.LOCALITY_REFUSALS``, in the words its own policy text uses.
+LOCALITY_PHRASES = {"project_cloud_off": HOLD_PHRASE, "thread_local_only": THREAD_HOLD_PHRASE}
 
 _USE_READY_LOCAL = "Use a ready local model"
 #: With no local model ready, the only recovery is a thread already on one: never the refused model.

@@ -397,9 +397,7 @@ def test_a_cloud_off_project_blocks_a_cloud_reviewer_by_policy(accounts):
     ]
 
 
-def test_a_cloud_off_project_says_it_uses_local_models_only(accounts):
-    from prompts.cloud_off import HOLD_PHRASE
-
+def test_a_cloud_off_project_says_it_is_set_to_local_models_only(accounts):
     _one_project_cloud_off(accounts)
 
     with _client() as client:
@@ -410,7 +408,36 @@ def test_a_cloud_off_project_says_it_uses_local_models_only(accounts):
     assert status["host_access_reviewer_status"] == "ready"
     message = status["host_access_reviewer_message"]
     assert message == (
-        f"{_name()} can't review requests from {CLOUD_OFF} right now ({HOLD_PHRASE}). "
+        f"{_name()} can't review requests from {CLOUD_OFF} right now "
+        "(set to local models only). "
         "Those requests fail. Choose another model or turn on fallback."
     )
     assert ORDINARY not in message and WORKSPACE not in message
+
+
+def test_several_cloud_off_projects_share_one_sentence_and_one_locality_check(accounts, monkeypatch):
+    """The list names every project; the model's locality is read once, not per project."""
+    from llm import locality
+
+    _one_project_cloud_off(accounts)
+    locality.set_project_cloud_models_off(ORDINARY, cloud_models_off=True, db=accounts[0])
+    checks = []
+    real = locality.locality_refusal
+
+    def counted(*args, **kwargs):
+        checks.append(kwargs.get("project_id"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(locality, "locality_refusal", counted)
+
+    with _client() as client:
+        _save(client)
+        checks.clear()  # the save runs its own check; count the status read alone
+        status = _status(client)
+
+    assert len(checks) == 1
+    assert status["host_access_reviewer_message"] == (
+        f"{_name()} can't review requests from {', '.join(sorted(PROJECTS))} right now "
+        "(set to local models only). "
+        "Those requests fail. Choose another model or turn on fallback."
+    )

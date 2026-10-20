@@ -25,7 +25,6 @@ from infra.settings import (
     get_host_access_reviewer_model,
 )
 from llm import catalog as model_catalog
-from prompts.cloud_off import HOLD_PHRASE
 
 HARNESSES = ("claude-code", "codex")
 WORKSPACE_SCOPE = "agents outside a project"
@@ -37,7 +36,9 @@ _REASON_WORDS = {
     "account_model_not_discovered": "the account doesn't offer this model",
     "discovered_model_unavailable": "the account doesn't offer this model",
     "model_not_in_catalog": "not in the catalog",
-    "project_cloud_off": HOLD_PHRASE,
+    # Settings lists every such project in one sentence, so the words name no
+    # single project the way the agent-facing "this project" phrase does.
+    "project_cloud_off": "set to local models only",
 }
 
 
@@ -75,19 +76,24 @@ def _scope_block(target, project_id: str | None, scope: str, db) -> ScopeBlock |
     return None
 
 
-def _locality_block(row: dict | None, project_id: str | None, scope: str, db) -> ScopeBlock | None:
-    """The scope's block when its own locality policy forbids this reviewer model.
+def _cloud_off_refusal(row: dict | None, db) -> tuple[set[str], str | None]:
+    """The projects that turned cloud models off, and the refusal they give this reviewer.
 
     A project that turned cloud models off cannot send a lease application and
     purpose to a cloud reviewer at all, so Settings says so the same way it
-    says an account cannot review there.
+    says an account cannot review there. The model's locality is the same for
+    every such project, so it is asked once: the reads stay constant however
+    many projects there are.
     """
-    if row is None:
-        return None
-    from llm.locality import locality_refusal
+    from llm.locality import cloud_off_project_ids, locality_refusal
 
-    refusal = locality_refusal(row, thread_local_only=False, project_id=project_id, db=db)
-    return ScopeBlock(scope, refusal) if refusal else None
+    projects = cloud_off_project_ids(db=db) if row is not None else set()
+    if not projects:
+        return projects, None
+    refusal = locality_refusal(
+        row, thread_local_only=False, project_id=next(iter(projects)), db=db,
+    )
+    return projects, refusal
 
 
 def reviewer_scope_blocks(model_id: str) -> tuple[list[ScopeBlock], int]:
@@ -121,17 +127,18 @@ def reviewer_scope_blocks(model_id: str) -> tuple[list[ScopeBlock], int]:
         if not target.available:
             reason = target.availability_reason or "model_unavailable"
             return [ScopeBlock(name, reason) for _, name in scopes], len(scopes)
-        row = catalog_row(str(target.catalog_id), db=db)
+        cloud_off, refusal = _cloud_off_refusal(catalog_row(str(target.catalog_id), db=db), db)
         blocks = []
         for project, name in scopes:
             # Locality is the person's own setting and its fix differs from an
             # account's, so it is the scope's block whenever it applies, and a
             # scope never reports both.
-            block = _locality_block(row, project, name, db) or (
-                _scope_block(target, project, name, db)
-                if target.harness in HARNESSES
-                else None
-            )
+            if refusal and project in cloud_off:
+                block = ScopeBlock(name, refusal)
+            elif target.harness in HARNESSES:
+                block = _scope_block(target, project, name, db)
+            else:
+                block = None
             if block is not None:
                 blocks.append(block)
         return blocks, len(scopes)
