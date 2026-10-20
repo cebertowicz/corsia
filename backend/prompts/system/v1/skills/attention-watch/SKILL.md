@@ -1,6 +1,6 @@
 ---
 name: attention-watch
-description: Use as CORSIA (the workspace agent) on each daily health-check wake, when a watch on one of your `Watch` tasks wakes you, when an agent or project conductor replies to a finding from your daily check, when the person answers a decision you raised from it, when the person asks how much of their time agents take, and when they tell you to stop or start watching an agent — find agents that got worse for the person, confirm it a week later, send it to whoever can fix it, check again two weeks on, and tell the person only what needs them. Not for project conductors or other agents.
+description: Use as CORSIA (the workspace agent) on the daily health-check wake, when a `Watch` task wakes you, when someone answers a finding or decision from that check, when the person asks how much of their time agents take, or says to stop or start watching an agent.
 ---
 
 # Attention watch

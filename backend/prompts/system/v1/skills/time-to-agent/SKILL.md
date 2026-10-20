@@ -1,6 +1,6 @@
 ---
 name: time-to-agent
-description: Use as CORSIA (the workspace agent) or a project conductor when it is time for the weekly review of where the person's time goes (CORSIA runs it on the daily health-check wake, a conductor at its next turn, once seven days have passed since the last), when the person asks where their time goes or asks you to take a kind of recurring work off them, when they answer a suggestion from this review, and when CORSIA sends a project conductor a recurring-work finding — spot recurring work that eats their time, suggest taking it over once per kind, investigate with them to an approved charter, choose between doing it yourself, an agent or a project, and check it worked. Not for an agent that got worse for the person (skill `attention-watch`), one-off tasks, or any other agent.
+description: Use as CORSIA or a project conductor for the weekly review of where the person's time goes, when they ask where it goes or ask you to take recurring work off them, when they answer a suggestion from it, and on a recurring-work finding from CORSIA.
 ---
 
 # Time to agent
@@ -32,9 +32,8 @@ Run it when the ledger's last review is seven or more days old, on the first wak
 
    Then suggest in the person's words: name the kind, what you would do on a yes (work out how they handle it, show a plan, change nothing until they approve), and let them answer yes or no. Example: "You spend a lot of your week on supplier invoices. Want me to work out how you handle them and start taking that off your plate?" Record it, with the share, before sending. Counts are shown only on request.
 3. **Investigate.** On a yes, do your homework before any question, in order:
-   1. Build the workflow with skill `task-discipline`'s "No established workflow" method.
-   2. Fit it to the person: cross-reference what you already know about them and how they work (`USER.md`, their past work here).
-   3. Only then interview, for what is left (how to tailor it to them, what they would trust it to do alone), batched and brief.
+   1. Build the workflow with skill `workflow-design`.
+   2. Only then interview, for what is left (how to tailor it to them, what they would trust it to do alone), batched and brief.
 
    Watch the next few rounds of that work, read-only; park the task on a deadline watch for the next round. Then draft a one-page charter: the method it's built on, with the quality bar, the checks and the open question at each step; where the context lives and how to retrieve it; how fresh it must be and how often to check it; the person's approach and rules; the steps to automate; how handing over authority could go wrong for an agent in particular; and the safeguards (what needs the person's word, limits, checks). Start from what they said and did, not from what would be tidy.
 4. **Decide.** Choose the smallest fit under skill `agent-team-decomposition` and put it in the charter as a recommendation:

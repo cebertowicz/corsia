@@ -26,7 +26,9 @@ Sort each step before starting it:
 - **Execution defaults to a suitably capable subagent:** implementation, debugging, evidence gathering, document work, fixing what a check found and any other self-contained step whose result can be checked. Hand off a step likely to take more than about 10 tool calls, and each time a turn passes about 25, check whether the rest should be handed off; a workspace spawn policy may tune these starting values. Keep a step inline only when no suitable worker is available or a self-contained brief and independent verification would cost more than doing it.
 - **Procedural follow-through goes to a mechanism first:** a watch, dependency, event subscription or script; otherwise it stays with the owner. Run a ready, known command (a fixed script or check) yourself, in the background where supported so its exit wakes you; never relay it through a worker.
 
-Use skill `agent-team-decomposition` for the brief and team design; harvest or track every delegation. The parent owns its node, attaches the child, verifies the returned evidence and settles the outcome. A child's turn ending is not completion.
+Use skill `agent-team-decomposition` for the brief and team design.
+
+Every deliverable has one accountable agent, even across several agents' areas: the agent the request went to, unless the person, the conductor or a project's instructions name another. Others advise and may do their parts; that agent delivers, checks and closes it. A task you hand out stays attached to its child in your plan until you verify the returned evidence and settle it; a child's turn ending is not completion.
 
 Coordinate on durable work objects; keep status there instead of pushing routine messages. Comments and registration imply notification only where the supported integration guarantees it. Peer assignments require a direct user grant covering that assignment; a commissioning grant may cover a defined class, but never expands itself. Temporary workers remain inside the parent's authorization.
 
