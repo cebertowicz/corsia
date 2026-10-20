@@ -9,6 +9,8 @@ one F1 wake that names the held model and the recovery.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from infra.input_admission import accept_thread_input
@@ -190,7 +192,8 @@ def test_f1_for_a_locality_held_worker_names_its_cause_and_the_move(db, cause, c
 
     appended = wakes(db)
     assert len(appended) == 1
-    assert str(appended[0]["id"]).startswith("plan-wake:child_provider_refused:")
+    assert str(appended[0]["id"]).startswith("plan-wake:child_held_local_only:")
+    assert json.loads(appended[0]["metadata"])["summary"] == "Delegated worker is held: local models only"
     content = str(appended[0]["content"])
     assert f"is held: {clause}. Its plan and history are intact." in content
     assert "Move the thread to a ready local model from model_catalog (delegate_set_model)." in content

@@ -110,7 +110,7 @@ def _wake_locality(connection, parent_plan_id: str, worker: str, refused_on: str
         (worker,),
     ).fetchone()
     cause = str(head["delivery_error"]) if head is not None else "project_cloud_off"
-    _wake_parent(connection, parent_plan_id, worker, kind='child_provider_refused',
+    _wake_parent(connection, parent_plan_id, worker, kind='child_held_local_only',
                  template=parent_wake_template(cause), model=refused_on, **fields)
 
 
