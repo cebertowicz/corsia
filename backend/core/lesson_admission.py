@@ -81,6 +81,21 @@ def human_cited(entry: dict[str, Any]) -> bool:
     return bool(human_refs(entry["body"]))
 
 
+def _learning_metadata(decision: Decision) -> None:
+    target = decision.target_file
+    if not target or not decision.cause:
+        raise TrialRefused("missing-learning-metadata", "Trial admission needs target_file and cause.")
+    if target == "new":
+        if not decision.new_target_path:
+            raise TrialRefused("missing-learning-metadata", "target_file new requires new_target_path.")
+    elif decision.new_target_path:
+        raise TrialRefused("invalid-learning-metadata", "new_target_path is only allowed when target_file is new.")
+    if not decision.target_section or not decision.case:
+        raise TrialRefused("missing-learning-metadata", "Trial admission needs target_section and case (what_happened, right_call, does_not_apply, correction_subject).")
+    if decision.cause not in ("wrong_rule", "no_foundation", "rule_gap", "process_gap", "not_delivered", "not_followed", "cant_be_done"):
+        raise TrialRefused("invalid-learning-metadata", "cause must be a System correction cause.")
+
+
 def admit(
     db: sqlite3.Connection, thread_id: str, entry: dict[str, Any], place: ThreadPlace,
     decision: Decision, destination: Destination, *, now: datetime | None = None,
@@ -88,6 +103,7 @@ def admit(
     """Check one trial answer; ``TrialRefused`` says what the caller must correct."""
     trial = decision.trial
     assert trial is not None
+    _learning_metadata(decision)
     if trial.kind in PERMANENT_KINDS:
         raise TrialRefused("permanent-kind", (
             f"a trial is only for a hypothesis. A person's {trial.kind} keeps its "
@@ -256,7 +272,9 @@ def _render(
         lesson_id=identity, owner=thread_id, name=str(decision.skill_name),
         description=str(decision.skill_description), text=decision.text, trial=trial,
         source_refs=lesson_files.merged_refs(earlier, entry["body"].get("source_refs") or []),
-        originating_subjects=subjects, origin=origin,
+        originating_subjects=subjects, origin=origin, target_file=decision.target_file,
+        new_target_path=decision.new_target_path, target_section=decision.target_section,
+        cause=decision.cause, case=decision.case,
     )
     errors = validate_skill_text(text).errors
     if errors:

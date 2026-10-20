@@ -105,7 +105,9 @@ def _day(review_after: str) -> str:
 def render_trial(
     *, lesson_id: str, owner: str, name: str, description: str, text: str,
     trial: Trial, source_refs: list[dict[str, Any]], originating_subjects: tuple[str, ...] | None = None,
-    origin: dict[str, str] | None = None,
+    origin: dict[str, str] | None = None, target_file: str | None = None,
+    new_target_path: str | None = None, target_section: str | None = None, cause: str | None = None,
+    case: dict[str, str] | None = None,
 ) -> str:
     """A trial skill with no ``review_ref``: written, and not yet offered.
 
@@ -129,6 +131,16 @@ def render_trial(
         lesson["originating_subjects"] = list(originating_subjects)
     if origin:
         lesson["origin"] = dict(origin)
+    if target_file is not None:
+        lesson["target_file"] = _one_line(target_file)
+    if new_target_path is not None:
+        lesson["new_target_path"] = _one_line(new_target_path)
+    if target_section is not None:
+        lesson["target_section"] = _one_line(target_section)
+    if cause is not None:
+        lesson["cause"] = _one_line(cause)
+    if case is not None:
+        lesson["case"] = {key: _one_line(value) for key, value in case.items()}
     return _dump(
         {"name": name, "description": _one_line(description), "corsia": {LESSON_KEY: lesson}},
         body,

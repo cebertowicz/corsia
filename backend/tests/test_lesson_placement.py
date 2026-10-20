@@ -80,6 +80,12 @@ def _answer(*, trial: dict | None = None, **overrides) -> dict:
         skill_description="Use when reporting a check result on a pull request.",
         rationale="a hypothesis to try in this lane",
     )
+    answer.update({
+        "target_file": "skills/checks/SKILL.md", "target_section": "Reporting",
+        "cause": "process_gap",
+        "case": {"what_happened": "A result lacked its commit.", "right_call": "Name the commit.",
+                 "does_not_apply": "For a draft.", "correction_subject": "message:41"},
+    })
     answer["trial"] = {
         "kind": "hypothesis", "review_after": _due(days=14), "boundary": "A one-line typo fix.",
         **(trial or {}),

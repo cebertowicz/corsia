@@ -37,7 +37,8 @@ INDEX_TOKEN_BUDGET = 1_000
 REVIEW_REF_PREFIX = "plan-node:"
 _FIELDS = frozenset({
     "id", "state", "owner", "review_after", "source_refs", "review_ref",
-    "origin", "destination", "originating_subjects",
+    "origin", "destination", "originating_subjects", "target_file", "new_target_path", "target_section",
+    "cause", "case",
 })
 
 TRIAL_SCHEMA: dict[str, Any] = {
@@ -92,6 +93,11 @@ class Lesson:
     review_ref: str | None = None
     origin: dict[str, str] | None = None
     destination: dict[str, str] | None = None
+    target_file: str | None = None
+    new_target_path: str | None = None
+    target_section: str | None = None
+    cause: str | None = None
+    case: dict[str, str] | None = None
 
     @property
     def review_node_id(self) -> str | None:
@@ -228,6 +234,14 @@ def _subjects(value: object) -> tuple[str, ...] | None:
     return tuple(subjects)
 
 
+def _case(value: object) -> dict[str, str] | None:
+    keys = ("what_happened", "right_call", "does_not_apply", "correction_subject")
+    if not isinstance(value, dict) or set(value) != set(keys):
+        return None
+    cleaned = {key: _clean(value.get(key)) for key in keys}
+    return {key: text for key, text in cleaned.items() if text is not None} if all(cleaned.values()) else None
+
+
 def _pair(value: object, first: str, second: str) -> dict[str, str] | None:
     """A mapping carrying ``first`` and optionally ``second``, both text."""
     if not isinstance(value, dict) or not _clean(value.get(first)) or set(value) - {first, second}:
@@ -261,6 +275,18 @@ def lesson_errors(block: object, description: str | None, body: str) -> list[str
         errors.append("corsia.lesson.review_ref must be a non-empty string")
     if "origin" in block and _pair(block["origin"], "id", "behavioral_sha256") is None:
         errors.append("corsia.lesson.origin must be {id, behavioral_sha256}")
+    if "target_file" in block and not _clean(block.get("target_file")):
+        errors.append("corsia.lesson.target_file must be a non-empty string")
+    if "new_target_path" in block and not _clean(block.get("new_target_path")):
+        errors.append("corsia.lesson.new_target_path must be a non-empty string")
+    if "target_section" in block and not _clean(block.get("target_section")):
+        errors.append("corsia.lesson.target_section must be a non-empty string")
+    if "cause" in block and block.get("cause") not in (
+        "wrong_rule", "no_foundation", "rule_gap", "process_gap", "not_delivered", "not_followed", "cant_be_done",
+    ):
+        errors.append("corsia.lesson.cause must be a System correction cause")
+    if "case" in block and _case(block.get("case")) is None:
+        errors.append("corsia.lesson.case must name what_happened, right_call, does_not_apply and correction_subject")
     if state == "promoted" and _pair(block.get("destination"), "path", "version") is None:
         errors.append("corsia.lesson.destination {path, version} is required when promoted")
     elif "destination" in block and _pair(block["destination"], "path", "version") is None:
@@ -293,6 +319,11 @@ def parse_lesson(metadata: dict[str, Any]) -> Lesson | None:
         review_ref=_clean(block.get("review_ref")),
         origin=_pair(block.get("origin"), "id", "behavioral_sha256"),
         destination=_pair(block.get("destination"), "path", "version"),
+        target_file=_clean(block.get("target_file")),
+        new_target_path=_clean(block.get("new_target_path")),
+        target_section=_clean(block.get("target_section")),
+        cause=_clean(block.get("cause")),
+        case=_case(block.get("case")),
     )
 
 

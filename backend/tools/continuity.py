@@ -49,6 +49,16 @@ def _epoch(db, thread_id: str) -> int:
 def _live_operation(db, thread_id: str, operation: str, params: dict[str, Any]):
     epoch = _epoch(db, thread_id)
     field = params.get("field")
+    if operation == "triage":
+        from core.correction_learning import record_triage
+
+        arguments = {key: value for key, value in params.items() if key != "operation"}
+        return {"operation": operation, **record_triage(db, thread_id=thread_id, **arguments)}
+    if operation == "outcome":
+        from core.correction_learning import record_terminal_outcome
+
+        arguments = {key: value for key, value in params.items() if key != "operation"}
+        return {"operation": operation, **record_terminal_outcome(db, thread_id=thread_id, **arguments)}
     if operation == "inspect":
         entry_id = params.get("entry_id")
         if entry_id is not None:
@@ -214,6 +224,8 @@ def _trial_text(result: dict[str, Any], *, staged: bool) -> str:
 
 
 def _result_text(result: dict[str, Any], *, staged: bool) -> str:
+    if result.get("operation") in {"triage", "outcome"}:
+        return json.dumps(result, indent=2, sort_keys=True)
     if "entries" in result or "entry" in result:
         return json.dumps(result, indent=2, sort_keys=True)
     operation = result["operation"]
@@ -263,8 +275,8 @@ def _run(
         return _NEXT_ACTIONS_REFUSAL.format(_NEXT_STEP_HOME[bool(checkpoint_id)])
     db = get_db()
     try:
-        if checkpoint_id and operation == "place":
-            return "Error: place records an in-turn placement; use review here"
+        if checkpoint_id and operation in {"place", "triage", "outcome"}:
+            return f"Error: {operation} records an in-turn fact; use it outside a checkpoint"
         if not checkpoint_id and operation == "review":
             return "Error: review runs only inside a checkpoint"
         with write_transaction(db, scope="continuity_edit") as connection:
@@ -279,7 +291,7 @@ def _run(
             else:
                 result = _live_operation(connection, thread_id, operation, params)
         return _result_text(result, staged=bool(checkpoint_id))
-    except ContinuityError as exc:
+    except (ContinuityError, ValueError) as exc:
         return f"Error: {exc}"
     finally:
         db.close()
@@ -288,6 +300,10 @@ def _run(
 def _execution_error(operation: Any, params: dict[str, Any]) -> str | None:
     if operation not in _OPERATIONS:
         return f"Error: unknown operation {operation!r}"
+    if operation == "triage" and not str(params.get("subject_key") or "").strip():
+        return "Error: triage requires subject_key"
+    if operation == "outcome" and not str(params.get("subject_key") or "").strip():
+        return "Error: outcome requires subject_key"
     if operation == "add" and not params.get("field"):
         return "Error: add requires field"
     if operation == "inspect" and params.get("entry_id") is not None:
