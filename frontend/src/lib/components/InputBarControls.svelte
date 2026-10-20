@@ -124,7 +124,6 @@
 		return reasoningEffortLabel(reasoningConfig, resolvedEffort);
 	});
 	let contextSourceDetail = $state<ContextSheetSourceRow | null>(null);
-	const shouldFocusLocalOnly = $derived(focusLocalOnly);
 	// The opened source groups of the context view now on screen. This component
 	// stays mounted across preview refreshes, which can leave the sheet with no
 	// snapshot for a moment, so the record lives here, not in the list. It starts
@@ -303,7 +302,7 @@
 {/if}
 
 {#if sheetView === 'model'}
-	<InputBarModelSheet onclose={() => toggleSheet('model')} focusLocalOnly={shouldFocusLocalOnly} onfocusconsumed={onfocusconsumed} />
+	<InputBarModelSheet onclose={() => toggleSheet('model')} {focusLocalOnly} onfocusconsumed={onfocusconsumed} />
 {/if}
 
 {#if sheetView === 'context'}

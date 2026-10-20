@@ -35,7 +35,7 @@ describe('model sheet for a Local only thread', () => {
 		expect(text()).toContain('Qwen'); expect(text()).not.toContain('Claude Opus');
 	});
 	it('names the project from the thread payload, never from catalog availability', () => {
-		threads.set([{ id: 't1', project_id: 'p1', local_only: 1, local_only_from_project: true, updated_at: '2026-10-19T10:00:00.000000' } as never]);
+		threads.set([{ id: 't1', project_id: 'p1', local_only: 0, local_only_effective: true, local_only_cause: 'project', updated_at: '2026-10-19T10:00:00.000000' } as never]);
 		models.set([cloud('thread_local_only'), local]); open();
 		expect(text()).toContain('This project uses local models only.');
 		unmount(component!); component = null; host.innerHTML = '';
@@ -44,14 +44,14 @@ describe('model sheet for a Local only thread', () => {
 		expect(text()).not.toContain('This project uses local models only.');
 	});
 	it('mounts the Local only row above the model list, and its own state has no quiet line', () => {
-		threads.set([{ id: 't1', project_id: 'p1', local_only: 1, updated_at: '2026-10-19T10:00:00.000000' } as never]);
+		threads.set([{ id: 't1', project_id: 'p1', local_only: 1, local_only_effective: true, local_only_cause: 'own', updated_at: '2026-10-19T10:00:00.000000' } as never]);
 		models.set([cloud('thread_local_only'), local]); open();
 		expect(host.innerHTML.indexOf('local-only-setting')).toBeLessThan(host.innerHTML.indexOf('sheet-section-label'));
 		expect(text()).toContain('This chat and its agents use local models only.');
 		expect(host.querySelector('.model-list')?.textContent).not.toContain('use local models only');
 	});
 	it('an inherited worker keeps a quiet line under the list that names the scope', () => {
-		threads.set([{ id: 't1', project_id: 'p1', local_only: 1, local_only_inherited_from_thread_id: 'p0', local_only_inherited_from_title: 'Quarterly report', updated_at: '2026-10-19T10:00:00.000000' } as never]);
+		threads.set([{ id: 't1', project_id: 'p1', local_only: 1, local_only_effective: true, local_only_cause: 'inherited', local_only_inherited_from_thread_id: 'p0', local_only_inherited_from_title: 'Quarterly report', updated_at: '2026-10-19T10:00:00.000000' } as never]);
 		models.set([cloud('thread_local_only'), local]); open();
 		expect(host.querySelector('.model-list')?.textContent).toContain('This chat and its agents use local models only.');
 		expect(text()).toContain('Set by Quarterly report');

@@ -96,11 +96,7 @@ async function serve(page: Page, state: { current: FrameState }) {
 		if (state.current.failSave) return route.abort();
 		if (state.current.pendingSave) await new Promise<void>((resolve) => { releasePendingSave = resolve; });
 		const localOnly = Boolean(state.current.localOnly || state.current.pendingSave);
-		return route.fulfill({ json: { ok: true, local_only: localOnly, threads: [{
-			id: 'local-only-review', local_only: localOnly, local_only_effective: localOnly,
-			local_only_from_project: false, local_only_inherited_from_thread_id: null,
-			local_only_inherited_from_title: null,
-		}] } });
+		return route.fulfill({ json: { ok: true, local_only: localOnly } });
 	});
 	return { releasePendingSave: () => releasePendingSave?.() };
 }
@@ -126,7 +122,7 @@ async function openChat(page: Page, state: FrameState) {
 			// Workers retain their stored Local only value and name the inherited source too.
 			local_only: next.localOnly === true || next.inherited === true,
 			local_only_effective: next.localOnly === true || next.inherited === true || next.project === true,
-			local_only_from_project: next.project === true,
+			local_only_cause: next.inherited ? 'inherited' : next.localOnly ? 'own' : next.project ? 'project' : null,
 			local_only_inherited_from_thread_id: next.inherited ? 'parent-chat' : null,
 			local_only_inherited_from_title: next.inherited ? next.parentTitle ?? 'Research review' : null,
 		}]);
@@ -163,16 +159,16 @@ test.describe('@surface:local-only local-only header frames', () => {
 			await page.setViewportSize({ width, height });
 			await page.emulateMedia({ colorScheme: theme });
 			const frames: [string, FrameState, string][] = BEFORE
-				? [['ordinary', {}, 'This chat and its agents use local models only.']]
+				? [['ordinary', {}, 'When on, this chat and its agents use local models only.']]
 				: [
-					['ordinary', {}, 'This chat and its agents use local models only.'],
+					['ordinary', {}, 'When on, this chat and its agents use local models only.'],
 					['cloud-model', { cloudModel: true }, 'Switch this chat to a local model first.'],
 					['local-only-on', { localOnly: true }, 'This chat and its agents use local models only.'],
 					['inherited-worker', { localOnly: true, inherited: true }, 'Set by Research review'],
 					['project-local-only', { project: true }, 'Set by this project'],
 					['no-local-ready', { noLocal: true }, 'No local model is ready.'],
 					['write-in-flight', { pendingSave: true }, 'This chat and its agents use local models only.'],
-					['save-failure', { failSave: true }, "This chat and its agents use local models only."],
+					['save-failure', { failSave: true }, "When on, this chat and its agents use local models only."],
 				];
 			for (const [name, next, text] of frames) {
 				state.current = next;

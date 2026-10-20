@@ -61,7 +61,12 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
         scope = thread_scope(thread_id, db=connection) if thread_id else None
         project = scope["project_id"] if scope else project_id
         requested = get_account(account_id, db=connection) if account_id is not None else None
-        cloud_refusal = _locality_refusal(project, bool(scope and scope["local_only"]), db=connection)
+        from llm.locality import locality_cause, project_cloud_models_off
+
+        cloud_refusal = locality_cause(
+            thread_local_only=bool(scope and scope["local_only"]),
+            cloud_off=project_cloud_models_off(project, db=connection),
+        )
         result = []
         pending: dict[str, str | None] = {}
         for original in rows:
@@ -97,21 +102,6 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
         if db is None:
             connection.close()
 
-
-def _locality_refusal(project_id, thread_local_only: bool, *, db) -> str | None:
-    """The locality refusal in force for this scope, named as ``locality_refusal`` names it.
-
-    A Local only thread names its own setting, the cause that lifts first; otherwise the
-    project switch names the project.
-    """
-    from llm.locality import locality_cause, project_cloud_models_off
-
-    if thread_local_only:
-        return locality_cause(thread_local_only=True, cloud_off=False)
-    return locality_cause(
-        thread_local_only=False,
-        cloud_off=project_cloud_models_off(project_id, db=db),
-    )
 
 
 def _apply_locality(row: dict, refusal: str | None) -> None:

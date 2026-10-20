@@ -141,14 +141,19 @@ def add_local_only_payload_fields(rows: list[dict], *, db: sqlite3.Connection) -
     # a parent holds it there, by the same walk that refuses turning it off.
     inherited = local_only_sources([str(row["id"]) for row in rows], db=db)
 
-    from llm.locality import cloud_off_project_ids
+    from llm.locality import cloud_off_project_ids, locality_cause
 
     cloud_off_projects = cloud_off_project_ids(db=db)
     for row in rows:
         source = inherited.get(row["id"])
         from_project = row.get("project_id") in cloud_off_projects
-        row["local_only_from_project"] = from_project
-        row["local_only_effective"] = bool(row.get("local_only") or from_project)
+        cause = locality_cause(
+            thread_local_only=bool(row.get("local_only")), cloud_off=from_project,
+        )
+        row["local_only_effective"] = bool(cause)
+        row["local_only_cause"] = "inherited" if source else {
+            "thread_local_only": "own", "project_cloud_off": "project",
+        }.get(cause)
         row["local_only_inherited_from_thread_id"] = source[0] if source else None
         row["local_only_inherited_from_title"] = source[1] if source else None
 
@@ -161,19 +166,6 @@ def write_family_local_only(thread_id: str, local_only: bool, now: str, *, db: s
         (thread_id, int(local_only), now, int(local_only)),
     )
 
-
-def family_local_only_payload(thread_id: str, *, db: sqlite3.Connection) -> list[dict]:
-    """Return fresh Local-only payload fields for a thread family in the caller's transaction."""
-    rows = [
-        dict(row) for row in db.execute(
-            _FAMILY_SQL + "SELECT id,local_only,project_id FROM threads WHERE id IN (SELECT id FROM family)",
-            (thread_id,),
-        )
-    ]
-    add_local_only_payload_fields(rows, db=db)
-    for row in rows:
-        row.pop("project_id")
-    return rows
 
 
 def send_confirmation_refusal(

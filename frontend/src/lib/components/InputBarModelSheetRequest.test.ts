@@ -112,7 +112,7 @@ describe('full composer model-sheet requests', () => {
 
 	it('carries Local-only focus through a delayed sheet mount without a timing window', async () => {
 		vi.useFakeTimers();
-		threads.set([{ id: 'top-thread', user_id: 'u', profile: 'personal', title: 'Focus chat', model: null, local_only: 1, local_only_effective: true, local_only_from_project: false, local_only_inherited_from_thread_id: null, local_only_inherited_from_title: null, created_at: 'now', updated_at: 'now' }]);
+		threads.set([{ id: 'top-thread', user_id: 'u', profile: 'personal', title: 'Focus chat', model: null, local_only: 1, local_only_effective: true, local_only_cause: 'own', local_only_inherited_from_thread_id: null, local_only_inherited_from_title: null, created_at: 'now', updated_at: 'now' }]);
 		const { host } = render();
 		requestModelSheet({ focusLocalOnly: true });
 		vi.advanceTimersByTime(2001);
@@ -151,7 +151,7 @@ describe('full composer model-sheet requests', () => {
 
 	it('focuses an already-open sheet once and leaves a later plain open unfocused', async () => {
 		vi.useFakeTimers();
-		threads.set([{ id: 'top-thread', user_id: 'u', profile: 'personal', title: 'Focus chat', model: null, local_only: 1, local_only_effective: true, local_only_from_project: false, local_only_inherited_from_thread_id: null, local_only_inherited_from_title: null, created_at: 'now', updated_at: 'now' }]);
+		threads.set([{ id: 'top-thread', user_id: 'u', profile: 'personal', title: 'Focus chat', model: null, local_only: 1, local_only_effective: true, local_only_cause: 'own', local_only_inherited_from_thread_id: null, local_only_inherited_from_title: null, created_at: 'now', updated_at: 'now' }]);
 		const { host } = render();
 		request();
 		requestModelSheet({ focusLocalOnly: true });

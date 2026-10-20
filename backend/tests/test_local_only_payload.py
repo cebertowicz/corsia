@@ -62,7 +62,9 @@ def test_copied_column_still_names_the_local_only_parent() -> None:
     _thread(db, "parent", title="Parent", local_only=1)
     _thread(db, "child", local_only=1, spawned_by="parent")
 
-    assert _fields(_single(db, "child")) == (True, "parent", "Parent")
+    payload = _single(db, "child")
+    assert _fields(payload) == (True, "parent", "Parent")
+    assert payload["local_only_cause"] == "inherited"
 
 
 def _held_by_route(db, thread_id: str) -> bool:
@@ -77,7 +79,9 @@ def test_own_setting_after_parent_turned_off_is_unlocked() -> None:
     _thread(db, "parent", title="Parent", local_only=0)
     _thread(db, "child", local_only=1, spawned_by="parent")
 
-    assert _fields(_single(db, "child")) == (True, None, None)
+    payload = _single(db, "child")
+    assert _fields(payload) == (True, None, None)
+    assert payload["local_only_cause"] == "own"
     assert _held_by_route(db, "child") is False
 
 
@@ -87,7 +91,9 @@ def test_nearest_local_only_ancestor_is_named() -> None:
     _thread(db, "parent", title="Nearest", local_only=1, spawned_by="root")
     _thread(db, "child", local_only=1, spawned_by="parent")
 
-    assert _fields(_single(db, "child")) == (True, "parent", "Nearest")
+    payload = _single(db, "child")
+    assert _fields(payload) == (True, "parent", "Nearest")
+    assert payload["local_only_cause"] == "inherited"
 
 
 def test_project_cloud_models_off_is_effective_without_an_inherited_source() -> None:
@@ -98,7 +104,7 @@ def test_project_cloud_models_off_is_effective_without_an_inherited_source() -> 
 
     payload = _single(db, "thread")
     assert _fields(payload) == (True, None, None)
-    assert payload["local_only_from_project"] is True
+    assert payload["local_only_cause"] == "project"
 
 
 def test_own_setting_stays_effective_when_the_project_is_also_local_only() -> None:
@@ -109,7 +115,7 @@ def test_own_setting_stays_effective_when_the_project_is_also_local_only() -> No
 
     payload = _single(db, "thread")
     assert _fields(payload) == (True, None, None)
-    assert payload["local_only_from_project"] is True
+    assert payload["local_only_cause"] == "own"
 
 
 def test_no_local_only_source_is_not_effective() -> None:
@@ -118,7 +124,7 @@ def test_no_local_only_source_is_not_effective() -> None:
 
     payload = _single(db, "thread")
     assert _fields(payload) == (False, None, None)
-    assert payload["local_only_from_project"] is False
+    assert payload["local_only_cause"] is None
 
 
 def test_other_users_local_only_ancestor_is_ignored() -> None:

@@ -35,7 +35,7 @@ const open = () => { component = mount(InputBarModelSheet, { target: host }); fl
 
 describe('model sheet in a cloud-off project', () => {
 	// The thread payload names the project as the cause, as the server sends it for a chat in a cloud-off project.
-	beforeEach(() => threads.set([{ id: 't1', project_id: 'p1', updated_at: '2026-10-19T10:00:00.000000', local_only: 0, local_only_effective: true, local_only_from_project: true, local_only_inherited_from_thread_id: null, local_only_inherited_from_title: null } as never]));
+	beforeEach(() => threads.set([{ id: 't1', project_id: 'p1', updated_at: '2026-10-19T10:00:00.000000', local_only: 0, local_only_effective: true, local_only_cause: 'project', local_only_inherited_from_thread_id: null, local_only_inherited_from_title: null } as never]));
 	it('some local models ready: only local rows, then the quiet line', () => {
 		models.set([cloud('cc/opus', 'Claude Opus'), local]); open();
 		expect(text()).toContain('Qwen'); expect(text()).not.toContain('Claude Opus');

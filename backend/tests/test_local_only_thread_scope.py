@@ -342,8 +342,8 @@ def test_non_local_thread_can_switch_to_a_cloud_model(monkeypatch) -> None:
     ).fetchone()[0] == "cloud"
 
 
-def test_family_write_and_payload_exclude_cross_user_links() -> None:
-    from infra.local_only import family_local_only_payload, write_family_local_only
+def test_family_write_excludes_cross_user_links() -> None:
+    from infra.local_only import write_family_local_only
 
     db = _db()
     _thread(db, "root", user_id="u")
@@ -353,7 +353,6 @@ def test_family_write_and_payload_exclude_cross_user_links() -> None:
 
     assert _local_only(db, "root") == 1
     assert _local_only(db, "foreign-child") == 0
-    assert [row["id"] for row in family_local_only_payload("root", db=db)] == ["root"]
 
 
 def _app(*routers) -> FastAPI:
@@ -428,15 +427,8 @@ async def test_local_only_route_requires_a_person_and_owns_the_thread(
             json={"local_only": True},
         )
 
+    assert on_response.json() == {"ok": True, "local_only": True}
     assert on == [1, 1]
-    assert {row["id"]: row for row in on_response.json()["threads"]}["child"] == {
-        "id": "child",
-        "local_only": 1,
-        "local_only_effective": True,
-        "local_only_from_project": False,
-        "local_only_inherited_from_thread_id": "root",
-        "local_only_inherited_from_title": "New Chat",
-    }
     assert _read_local_only("root", "child") == [0, 0]
     assert inherited.status_code == 409
     assert inherited.json() == {
@@ -455,7 +447,7 @@ async def test_local_only_route_requires_a_person_and_owns_the_thread(
 
 
 @pytest.mark.asyncio
-async def test_local_only_route_returns_project_cause_after_turning_off(
+async def test_local_only_route_allows_turning_own_setting_off_in_cloud_off_project(
     isolated_db, cloud_named_cloud,
 ) -> None:
     from api import thread_mutations
@@ -480,14 +472,7 @@ async def test_local_only_route_returns_project_cause_after_turning_off(
         )
 
     assert response.status_code == 200
-    assert response.json()["threads"] == [{
-        "id": "root",
-        "local_only": 0,
-        "local_only_effective": True,
-        "local_only_from_project": True,
-        "local_only_inherited_from_thread_id": None,
-        "local_only_inherited_from_title": None,
-    }]
+    assert response.json() == {"ok": True, "local_only": False}
 
 
 @pytest.mark.asyncio
