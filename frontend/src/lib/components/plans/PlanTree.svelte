@@ -95,7 +95,7 @@
 	// A row the history route fetched carries no details; opening it reads the node (`PlanHistoryDetails`).
 	const historyIds = $derived(new Set(foldView.extra.map((row) => row.id)));
 	const treeNodes = $derived(foldView.extra.length > 0 ? [...shownNodes, ...foldView.extra] : shownNodes);
-	const index = $derived(indexPlanNodes(treeNodes, { maxDepth, currentNodeIds, deepFolded: foldView.deep }));
+	const index = $derived(indexPlanNodes(treeNodes, { maxDepth, currentNodeIds, deepFolded: foldView.deep, now: now.getTime() }));
 
 	const { isBranchExpanded, toggleBranch, openBranches, detailsExpanded, toggleDetails } = createRowDisclosure(
 		(nodeId) => expandBranchesByDefault || index.defaultExpandedBranches.has(nodeId),
@@ -279,12 +279,13 @@
 {/snippet}
 
 <div class="plan-tree" role="list" aria-label="Plan steps" bind:this={treeElement}>
+	<!-- Every item carries an out transition: Svelte 5 destroys a keyed batch only when all its removed items have one, so a bare Scheduled or fold row would keep a closed group's rows on screen. -->
 	{#each items as item (item.key)}
 		{#if item.kind === 'fold'}
 			<!-- A level's finished work, gathered at its bottom: still counted as
 			     done, opened in pages newest first, never a second plan view. -->
 			<div
-				class="tree-row fold-row" role="listitem"
+				class="tree-row fold-row" role="listitem" in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }}
 				data-flip-key={`${scope}${item.key}`} data-fold-level={`${scope}${item.level}`}
 				style={depthStyle(depthOffset + item.depth)} data-depth={depthOffset + item.depth}
 				aria-level={depthOffset + item.depth + 1}
@@ -305,7 +306,7 @@
 		{:else if item.kind === 'scheduled'}
 			<!-- A level's quietly scheduled tasks, gathered after its open rows: opened all at once. -->
 			<div
-				class="tree-row scheduled-row" role="listitem" data-flip-key={`${scope}${item.key}`}
+				class="tree-row scheduled-row" role="listitem" in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }} data-flip-key={`${scope}${item.key}`}
 				style={depthStyle(depthOffset + item.depth)} data-depth={depthOffset + item.depth}
 				aria-level={depthOffset + item.depth + 1}
 			>
