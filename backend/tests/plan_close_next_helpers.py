@@ -164,7 +164,9 @@ def close_params(db, operation: str, node_id: str, *, next_node_id: Any = _MISSI
     if operation in {"accept", "accept_with_follow_up"}:
         params["verification_result"] = "passed"
     if operation == "accept_with_follow_up":
-        params.update(title="Fix the follow-up", acceptance_criteria="Follow-up is verified")
+        params.update(
+            title="Fix the follow-up", acceptance_criteria="Follow-up is verified", size="unknown",
+        )
     if next_node_id is not _MISSING:
         params["next_node_id"] = next_node_id
     return params

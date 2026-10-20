@@ -109,7 +109,7 @@ def test_add_insert_immutable_fields_and_read_detail(db):
 def test_workflow_step_requires_difficulty_and_only_allows_the_three_levels(db):
     plan = service.ensure_plan("thread", "owner", db=db)
     base = {
-        "kind": "task", "title": "Build", "acceptance_criteria": "Build passes",
+        "kind": "task", "title": "Build", "acceptance_criteria": "Build passes", "size": "S",
         "workflow_ref": "sample", "workflow_step": "build",
     }
     with pytest.raises(service.PlanInputError, match="is the wanted result clear"):
@@ -125,7 +125,7 @@ def test_rerating_keeps_original_difficulty_and_current_attempt(db):
         plan.id,
         "add",
         {
-            "kind": "task", "title": "Build", "acceptance_criteria": "Build passes",
+            "kind": "task", "title": "Build", "acceptance_criteria": "Build passes", "size": "S",
             "workflow_ref": "sample", "workflow_step": "build", "difficulty": "standard",
         },
     )["node"]
@@ -206,7 +206,7 @@ def test_split_copies_workflow_fields_but_follow_up_does_not(db):
         "split",
         {
             "node_id": source["id"], "expected_revision": source["revision"],
-            "title": "Build remainder", "acceptance_criteria": "Remainder passes",
+            "title": "Build remainder", "acceptance_criteria": "Remainder passes", "size": "S",
         },
     )["node"]
     follow_up = _mutate(
@@ -215,7 +215,7 @@ def test_split_copies_workflow_fields_but_follow_up_does_not(db):
         "add_follow_up",
         {
             "node_id": source["id"], "expected_revision": source["revision"] + 1,
-            "title": "Later", "acceptance_criteria": "Later passes",
+            "title": "Later", "acceptance_criteria": "Later passes", "size": "S",
         },
     )["follow_up"]
 
@@ -223,7 +223,7 @@ def test_split_copies_workflow_fields_but_follow_up_does_not(db):
         assert split[key] == source[key]
         assert follow_up[key] is None
     assert source["size"] == "L"
-    assert split["size"] is None and follow_up["size"] is None
+    assert split["size"] == "S" and follow_up["size"] == "S"
 
 
 def test_required_step_prompts_are_report_only(db):
@@ -385,7 +385,7 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
         {
             "plan_id": plan.id, "mutation_id": "missing-difficulty", "operation": "add",
             "params": {
-                "kind": "task", "title": "Missing rating", "acceptance_criteria": "Never",
+                "kind": "task", "title": "Missing rating", "acceptance_criteria": "Never", "size": "S",
                 "parent_id": phase["id"], "workflow_ref": "sample", "workflow_step": "build",
             },
         },
@@ -395,7 +395,7 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
         {
             "plan_id": plan.id, "mutation_id": "build", "operation": "add",
             "params": {
-                "kind": "task", "title": "Build", "acceptance_criteria": "Build passes",
+                "kind": "task", "title": "Build", "acceptance_criteria": "Build passes", "size": "S",
                 "parent_id": phase["id"], "workflow_ref": "sample",
                 "workflow_step": "build", "difficulty": "standard",
             },
@@ -410,7 +410,7 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
         {
             "plan_id": plan.id, "mutation_id": "caller-version", "operation": "add",
             "params": {
-                "kind": "task", "title": "Caller version", "acceptance_criteria": "Never",
+                "kind": "task", "title": "Caller version", "acceptance_criteria": "Never", "size": "S",
                 "workflow_ref": "sample", "workflow_version": "invented",
             },
         },
