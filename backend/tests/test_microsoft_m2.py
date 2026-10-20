@@ -51,6 +51,37 @@ async def test_pagination_and_retry_after_are_internal(monkeypatch: pytest.Monke
 
 
 @pytest.mark.asyncio
+async def test_graph_401_drops_only_the_held_token_and_retries_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeHttp.calls, FakeHttp.responses = [], [Response(401, {}), Response(200, {"id": "ok"})]
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
+    tokens = iter(["stale", "fresh"])
+    async def token(_account: str) -> str: return next(tokens)
+    dropped: list[tuple[object, ...]] = []
+    async def db_call(_work: object, *args: object) -> None: dropped.append(args)
+    monkeypatch.setattr(client, "access_token", token)
+    monkeypatch.setattr(client, "run_in_db", db_call)
+    assert await client.graph_json("GET", "item", account_id="m") == {"id": "ok"}
+    assert dropped == [(client._drop_cached_access_token, "m", "stale")]
+    assert [call["headers"]["Authorization"] for call in FakeHttp.calls] == ["Bearer stale", "Bearer fresh"]
+
+
+@pytest.mark.asyncio
+async def test_graph_second_401_is_a_refusal_not_a_sign_in_flip(monkeypatch: pytest.MonkeyPatch) -> None:
+    from connections.microsoft.errors import REQUEST_REFUSED
+
+    FakeHttp.calls, FakeHttp.responses = [], [Response(401, {}), Response(401, {})]
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
+    async def token(_account: str) -> str: return "token"
+    dropped: list[tuple[object, ...]] = []
+    async def db_call(_work: object, *args: object) -> None: dropped.append(args)
+    monkeypatch.setattr(client, "access_token", token)
+    monkeypatch.setattr(client, "run_in_db", db_call)
+    with pytest.raises(MicrosoftError) as raised:
+        await client.graph_json("GET", "item", account_id="m")
+    assert raised.value.cause == REQUEST_REFUSED and len(dropped) == 1
+
+
+@pytest.mark.asyncio
 async def test_pagination_stops_after_the_requested_items(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeHttp.calls, FakeHttp.responses = [], [Response(200, {"value": [{"id": "first"}], "@odata.nextLink": "next"})]
     monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
@@ -119,7 +150,7 @@ async def test_tools_check_reach_before_provider(monkeypatch: pytest.MonkeyPatch
     async def refused(_kwargs: dict[str, Any]) -> str: raise ConnectedAccountError("Microsoft account is unavailable to this thread")
     monkeypatch.setattr(actions, "_account", refused)
     result = await actions.MicrosoftMailSearchTool().execute(_thread_id="t", account_id="m", query="x")
-    assert result.startswith("Error:")
+    assert result == "Error: Microsoft account is unavailable to this thread"
 
 
 @pytest.mark.asyncio

@@ -56,8 +56,9 @@ async def _account(kwargs: dict[str, Any]) -> str:
 def _error(exc: Exception) -> str:
     if isinstance(exc, MicrosoftError):
         return f"Error: {exc.message}"
-    if isinstance(exc, (DraftRefused, DraftStorageRefused, DraftError)):
-        return "Error: This saved draft is invalid or incomplete; nothing changed. Save it again, show the person, and wait for their reply."
+    if isinstance(exc, (ConnectedAccountError, DraftRefused, DraftStorageRefused, DraftError)):
+        # Fixed refusal copy written in CORSIA; it tells the agent what to correct.
+        return f"Error: {exc}"
     return "Error: Microsoft is unavailable. Try again later."
 
 
