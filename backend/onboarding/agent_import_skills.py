@@ -205,9 +205,19 @@ def _parse(candidate: Candidate) -> str:
         if "\x00" in texts[name]:
             return _unreadable(candidate, NOT_TEXT)
         candidate.files[name] = data
+    from core.skill_sidecar import installed_digest_part
+
     digest = hashlib.sha256()
-    for name in sorted(candidate.files):
-        digest.update(name.encode("utf-8") + b"\0" + hashlib.sha256(candidate.files[name]).digest())
+    try:
+        for name in sorted(candidate.files):
+            part = installed_digest_part(name, candidate.files[name])
+            if part is not None:
+                digest.update(name.encode("utf-8") + b"\0" + hashlib.sha256(part).digest())
+    except (UnicodeDecodeError, ValueError):
+        # An upstream corsia.yaml is never installed unchanged, but it is part of
+        # the offered bundle's content identity. Refuse an invalid one rather
+        # than letting a malformed sidecar abort the whole discovery scan.
+        return _unreadable(candidate, BAD_HEADER)
     candidate.content_sha = digest.hexdigest()
     # A key is reported before any layout problem, so fixing the layout never comes first.
     if any(contains_credential(text) for text in texts.values()):
