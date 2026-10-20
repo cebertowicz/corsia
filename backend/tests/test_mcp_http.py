@@ -408,6 +408,7 @@ async def test_unreachable_server_does_not_register_tools(tmp_path, http_mcp):
 def test_runtime_failure_classes_keep_machine_causes_without_values():
     import httpx
 
+    from tools.managed_runtime import ManagedRuntimeDownloadError
     from tools.mcp import mcp_failure_class
     from tools.mcp_config import MCPConfigError
 
@@ -418,6 +419,7 @@ def test_runtime_failure_classes_keep_machine_causes_without_values():
     assert mcp_failure_class(rejected, {}) == "protocol_error"
     assert mcp_failure_class(TimeoutError(), {}) == "timed_out"
     assert mcp_failure_class(OSError(), {"command": "fixture"}) == "cannot_start"
+    assert mcp_failure_class(ManagedRuntimeDownloadError("offline"), {"command": "npx"}) == "runtime_download_failed"
     assert mcp_failure_class(MCPConfigError("public tool name collision"), {}) == "name_collision"
 
 

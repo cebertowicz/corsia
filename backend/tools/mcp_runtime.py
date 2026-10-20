@@ -14,10 +14,11 @@ from contextlib import AsyncExitStack
 
 from loguru import logger
 
-from infra import state
+import infra.state as state
 from infra.db_async import run_in_db
 from infra.time import utc_now_iso
-from tools.mcp import connect_mcp_servers
+from tools.mcp import connect_mcp_servers, mcp_failure_class
+from tools.managed_runtime import ManagedRuntimeDownloadError
 from tools.registry import ToolRegistry
 
 _registry = ToolRegistry()
@@ -186,7 +187,7 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
             if state._agent is not None:
                 register_mcp_tools(state._agent.tools)
             return result
-        except Exception:
+        except Exception as error:
             logger.exception("connected-app runtime failed for app_id={}", app_id)
             registered = _app_stacks.get(app_id) is stack
             await _remove_connected_app(app_id)
@@ -194,7 +195,7 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
                 await stack.aclose()
             result = {
                 "state": "failed", "state_since": utc_now_iso(), "tool_count": 0,
-                "failure_class": "cannot_start",
+                "failure_class": mcp_failure_class(error, config) if isinstance(error, ManagedRuntimeDownloadError) else "cannot_start",
             }
             await _publish_app_state(app_id, result)
             return result

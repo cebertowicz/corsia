@@ -42,6 +42,7 @@
 		const app = name.trim() || 'This app';
 		switch (failureClass) {
 			case 'cannot_start': return { line: "Couldn't connect: app didn't start", recovery: "The app didn't start on this computer. Go back and compare What it runs with the app's setup instructions, then try again. If it still won't start, it may need something that isn't installed on your computer; its setup instructions say what." };
+			case 'runtime_download_failed': return { line: "Couldn't connect: download failed", recovery: "CORSIA couldn't download what this app needs to run on this computer. Check that you're connected to the internet, then try again. If it keeps happening, your network may be blocking the download." };
 			case 'timed_out': return kind === 'local'
 				? { line: "Couldn't connect: no response", recovery: "The app didn't respond within 10 seconds. Go back and compare What it runs with the app's setup instructions, then try again. It may also need something that isn't installed on your computer; its setup instructions say what." }
 				: { line: "Couldn't connect: no response", recovery: `${app} didn't respond within 10 seconds. Try again; if it keeps happening, ${app} may be down.` };

@@ -24,6 +24,10 @@ class ManagedRuntimeError(RuntimeError):
     """A download or install that must not use an unpinned fallback."""
 
 
+class ManagedRuntimeDownloadError(ManagedRuntimeError):
+    """A pinned runtime could not be fetched or verified."""
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimePin:
     version: str
@@ -138,7 +142,7 @@ def _download(url: str, destination: Path) -> str:
                 digest.update(chunk)
                 output.write(chunk)
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError) as exc:
-        raise ManagedRuntimeError(f"download failed: {type(exc).__name__}") from exc
+        raise ManagedRuntimeDownloadError(f"download failed: {type(exc).__name__}") from exc
     return digest.hexdigest()
 
 
@@ -229,7 +233,7 @@ def ensure_runtime(kind: str, *, root: Path | None = None, arch: str | None = No
             staging = Path(tempfile.mkdtemp(prefix=f".{kind}-{pin.version}-", dir=final.parent))
             archive = staging / "download"
             if _download(pin.url, archive) != pin.sha256:
-                raise ManagedRuntimeError("download checksum did not match the pinned runtime")
+                raise ManagedRuntimeDownloadError("download checksum did not match the pinned runtime")
             unpacked = staging / "runtime"
             unpacked.mkdir()
             _extract(archive, unpacked, pin)
@@ -241,6 +245,10 @@ def ensure_runtime(kind: str, *, root: Path | None = None, arch: str | None = No
             os.replace(unpacked, final)
             _make_read_execute_only(final)
             return _expected_executable(final, pin)
+        except ManagedRuntimeDownloadError:
+            if kind in {"node", "uv"}:
+                raise
+            raise ManagedRuntimeError("pinned runtime download failed") from None
         except ManagedRuntimeError:
             raise
         except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
