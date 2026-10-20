@@ -177,10 +177,11 @@ def edit_node(
             from plans import intent_words as words
             words.append(connection, node_id, intent_words, revision=updated["requirements_revision"])
         if requirements_changed:
-            from plans import admission
+            from plans import admission, plan_wake
 
             admission.release(node_id, "requirements_changed", db=connection)
             admission.reselect_and_reconcile(node_id, actor_id=actor_id, provenance=provenance, db=connection)
+            plan_wake.notify_intent_revised(connection, node_id, causing_executor=actor_id)
         _record_edit_events(
             connection, node_id, restated or requirements_changed, updated, next_title, next_dod,
             difficulty_rerated, node["size"], next_size, actor_id, provenance,

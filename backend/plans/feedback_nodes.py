@@ -331,11 +331,12 @@ def create_feedback_node(
 
 
 def _create_linked_node(db, recipient_thread_id, artifact_id, source_id, provenance,
-                        *, title, acceptance, description) -> FeedbackNodeResult:
+                        *, title, acceptance, description, intent_node_id=None) -> FeedbackNodeResult:
     plan = service.ensure_plan("thread", recipient_thread_id, db=db)
     node = service.add_node(
         plan.id, kind="task", title=title, acceptance_criteria=acceptance,
-        description=description, actor_id=None, provenance=provenance, db=db,
+        description=description, intent_node_id=intent_node_id,
+        actor_id=None, provenance=provenance, db=db,
     )
     service.transition_node(
         node.id, "active", actor_id=None, provenance=provenance, db=db,
@@ -365,5 +366,18 @@ def create_review_node(db, reviewer_thread_id: str, request: Any) -> FeedbackNod
     return _create_linked_node(
         db, reviewer_thread_id, artifact_id, request_id, REVIEW_PROVENANCE,
         title=_trim_title(full, ""), acceptance=REVIEW_ACCEPTANCE,
-        description=description(path, request),
+        description=description(path, request), intent_node_id=_requesting_intent(db, request),
     )
+
+
+def _requesting_intent(db, request) -> str | None:
+    """Resolve an optional review-request task to its canonical intent node."""
+    try:
+        requesting_node_id = request["requesting_node_id"]
+    except (IndexError, KeyError):
+        return None
+    if not requesting_node_id:
+        return None
+    from plans import intent_words
+
+    return str(intent_words.canonical(db, str(requesting_node_id))["id"])
