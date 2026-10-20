@@ -279,7 +279,7 @@ async def test_devices_tls_listener_proves_identity_with_the_key_its_tls_present
     assert base64.b64decode(proof.json()["spki"]) == spki
     presented.public_key().verify(
         base64.b64decode(proof.json()["signature"]),
-        b"corsia-identity-v1\0" + nonce + b"\0" + authority.encode() + b"\0" + base64.b64decode(proof.json()["tls_spki_sha256"]),
+        b"corsia-identity-v1\0" + nonce + b"\0" + authority.encode(),
         ec.ECDSA(hashes.SHA256()),
     )
     assert [response.status_code for response in refused] == [400, 400]

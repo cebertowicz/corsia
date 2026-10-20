@@ -46,14 +46,13 @@ fn outside_reprobe_is_bounded_and_switches_back_only_after_proof() {
 struct Prover {
     pkcs8: Vec<u8>,
     spki: Vec<u8>,
-    tls_spki_sha256: [u8; 32],
     /// Signs this authority instead of the one asked: a proof captured on one route and replayed on another.
     replayed_for: Option<String>,
 }
 
 impl Prover {
     fn honest(key: &HostKey) -> Self {
-        Self { pkcs8: key.pkcs8.clone(), spki: key.spki.clone(), tls_spki_sha256: key.tls.pin, replayed_for: None }
+        Self { pkcs8: key.pkcs8.clone(), spki: key.spki.clone(), replayed_for: None }
     }
 
     fn answer(&self, body: &[u8]) -> String {
@@ -62,8 +61,8 @@ impl Prover {
         let authority = self.replayed_for.clone().unwrap_or_else(|| asked["authority"].as_str().unwrap().to_owned());
         let rng = SystemRandom::new();
         let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &self.pkcs8, &rng).unwrap();
-        let signature = key.sign(&rng, &[IDENTITY_CONTEXT, &nonce, b"\0", authority.as_bytes(), b"\0", &self.tls_spki_sha256].concat()).unwrap();
-        serde_json::json!({ "spki": BASE64.encode(&self.spki), "tls_spki_sha256": BASE64.encode(self.tls_spki_sha256), "signature": BASE64.encode(signature.as_ref()) }).to_string()
+        let signature = key.sign(&rng, &[IDENTITY_CONTEXT, &nonce, b"\0", authority.as_bytes()].concat()).unwrap();
+        serde_json::json!({ "spki": BASE64.encode(&self.spki), "signature": BASE64.encode(signature.as_ref()) }).to_string()
     }
 }
 
@@ -195,17 +194,8 @@ async fn a_pinned_local_route_is_proven_by_its_handshake_alone() {
     assert_eq!(refusals.load(SeqCst), 0);
 }
 
-#[tokio::test]
-async fn a_relayed_host_proof_with_a_different_connection_spki_is_refused() {
-    let (host, forwarder) = (test_tls::generated_p256_host(), test_tls::generated_ca_forwarder());
-    let outside = serve(forwarder.config, "outside", Some(Prover::honest(&host))).await;
-    let refusals = Arc::new(AtomicUsize::new(0));
-    let config = paired(&host, Some((outside.port, system())), Some(forwarder.ca), &refusals);
-    let proxy = proxy_for(config, Arc::new(AtomicU16::new(dead_port().await))).await;
-
-    assert_refused(&proxy, &outside, &refusals).await;
-    assert_eq!(outside.proofs.load(SeqCst), 1, "the relay cannot reuse a host proof on its own TLS connection");
-}
+#[path = "routes_proxy_tests.rs"]
+mod terminating_proxy;
 
 /// Every refusal ends forwarding through both routes, tells the owner once, and never reaches the refused route.
 async fn assert_refused(proxy: &ProxyHandle, refused: &TestHost, refusals: &AtomicUsize) {

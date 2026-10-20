@@ -169,21 +169,23 @@ async def login(body: LoginRequest) -> dict:
             "Too many sign-in attempts. Try again shortly.",
             headers={"Retry-After": "1"},
         )
-    is_account = await run_in_db(accounts.account_exists, username)
-    if not is_account and _waiting_attempts >= _MAX_WAITING_ATTEMPTS:
-        # Held and refused like a failed check, so the answer does not say the name is made up.
-        _waiting_names.add(username)
-        try:
-            await asyncio.sleep(_HELD_SECONDS)
-        finally:
-            _waiting_names.discard(username)
-        _record_failure(username, is_account=False)
-        log.info("Sign-in refused")
-        raise HTTPException(401, _INVALID)
-
+    # Reserved before the first await, so two requests for one name can never both pass the check above.
     _waiting_names.add(username)
-    if not is_account:
-        _waiting_attempts += 1
+    counted = False
+    try:
+        is_account = await run_in_db(accounts.account_exists, username)
+        if not is_account and _waiting_attempts >= _MAX_WAITING_ATTEMPTS:
+            # Held and refused like a failed check, so the answer does not say the name is made up.
+            await asyncio.sleep(_HELD_SECONDS)
+            _record_failure(username, is_account=False)
+            log.info("Sign-in refused")
+            raise HTTPException(401, _INVALID)
+        if not is_account:
+            _waiting_attempts += 1
+            counted = True
+    except BaseException:
+        _waiting_names.discard(username)
+        raise
     try:
         async with _login_lock:
             # Re-checked under the lock: attempts that queued together must
@@ -194,7 +196,7 @@ async def login(body: LoginRequest) -> dict:
                 _record_failure(username, is_account=is_account)
     finally:
         _waiting_names.discard(username)
-        if not is_account:
+        if counted:
             _waiting_attempts -= 1
     if not user:
         log.info("Sign-in refused")

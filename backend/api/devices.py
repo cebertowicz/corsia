@@ -212,9 +212,7 @@ async def identity(body: dict):
         raise HTTPException(400, "identity proof requires a 32-byte nonce and authority")
     if authority != authority.lower() or any(ord(char) > 127 for char in authority):
         raise HTTPException(400, "identity authority must be lower-case ASCII")
-    tls_spki_sha256 = host_spki_sha256()
     return {
         "spki": base64.b64encode(host_spki_der()).decode(),
-        "tls_spki_sha256": base64.b64encode(tls_spki_sha256).decode(),
-        "signature": base64.b64encode(sign_identity_proof(nonce, authority, tls_spki_sha256=tls_spki_sha256)).decode(),
+        "signature": base64.b64encode(sign_identity_proof(nonce, authority)).decode(),
     }

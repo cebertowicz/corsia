@@ -283,12 +283,13 @@ pub(crate) async fn dial(host: &str, port: u16) -> Result<Dialed, String> {
 #[derive(Deserialize)]
 struct IdentityProof {
     spki: String,
-    tls_spki_sha256: String,
     signature: String,
 }
 
 /// Prove a system-trusted route reaches the paired host: the host signs a fresh nonce and the authority this app
-/// dialed with its stable key. Anything but a valid proof is a refusal; only a transport failure is not.
+/// dialed with its stable key. The proof is not bound to the TLS connection: system trust ends TLS at a proxy that
+/// forwards to the host, so the connection's key is the proxy's. Anything but a valid proof is a refusal; only a
+/// transport failure is not.
 async fn prove_identity(upstream: &mut Upstream, identity: Option<&[u8; 32]>) -> Result<[u8; 32], RouteError> {
     let authority = upstream.authority.to_ascii_lowercase();
     let mut nonce = [0_u8; 32];
@@ -317,21 +318,15 @@ async fn prove_identity(upstream: &mut Upstream, identity: Option<&[u8; 32]>) ->
     };
     let proof: IdentityProof = serde_json::from_slice(&bytes).map_err(|_| refused("malformed identity answer"))?;
     let spki = BASE64.decode(proof.spki).map_err(|_| refused("the key is not base64"))?;
-    let tls_spki_sha256: [u8; 32] = BASE64.decode(proof.tls_spki_sha256)
-        .map_err(|_| refused("the TLS key hash is not base64"))?
-        .try_into().map_err(|_| refused("the TLS key hash has the wrong length"))?;
-    if tls_spki_sha256 != upstream.connection_spki_sha256 {
-        return Err(refused("the proof is for a different TLS connection"));
-    }
     let signature = BASE64.decode(proof.signature).map_err(|_| refused("the signature is not base64"))?;
     // A legacy record has no pairing fingerprint yet; the saved local TLS trust
     // authenticates this first key. Subsequent routes must match the persisted key.
     let fingerprint: [u8; 32] = Sha256::digest(&spki).into();
-    verify_identity_proof(identity.unwrap_or(&fingerprint), &nonce, &authority, &spki, &tls_spki_sha256, &signature).map_err(refused)?;
+    verify_identity_proof(identity.unwrap_or(&fingerprint), &nonce, &authority, &spki, &signature).map_err(refused)?;
     Ok(fingerprint)
 }
 
-fn verify_identity_proof(identity: &[u8; 32], nonce: &[u8; 32], authority: &str, spki: &[u8], tls_spki_sha256: &[u8; 32], signature: &[u8]) -> Result<(), &'static str> {
+fn verify_identity_proof(identity: &[u8; 32], nonce: &[u8; 32], authority: &str, spki: &[u8], signature: &[u8]) -> Result<(), &'static str> {
     if Sha256::digest(spki).as_slice() != identity {
         return Err("the key is not the paired host's");
     }
@@ -339,7 +334,7 @@ fn verify_identity_proof(identity: &[u8; 32], nonce: &[u8; 32], authority: &str,
     if !rest.is_empty() {
         return Err("the key has trailing bytes");
     }
-    let message = [IDENTITY_CONTEXT, nonce.as_slice(), b"\0", authority.as_bytes(), b"\0", tls_spki_sha256].concat();
+    let message = [IDENTITY_CONTEXT, nonce.as_slice(), b"\0", authority.as_bytes()].concat();
     UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, key.subject_public_key.data.as_ref())
         .verify(&message, signature)
         .map_err(|_| "the signature does not match this nonce and address")

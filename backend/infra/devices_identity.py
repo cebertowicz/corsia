@@ -122,15 +122,18 @@ def _private_key(key_pem: bytes):
     return serialization.load_pem_private_key(key_pem, password=None)
 
 
-def sign_identity_proof(nonce: bytes, authority: str, state_root: Path = STATE_ROOT, *, tls_spki_sha256: bytes | None = None) -> bytes:
-    """Sign one caller nonce, authority, and the host TLS certificate's SPKI hash."""
+def sign_identity_proof(nonce: bytes, authority: str, state_root: Path = STATE_ROOT) -> bytes:
+    """Sign one caller nonce and the authority it dialed with the host's stable key.
+
+    Not bound to the TLS connection: a system-trusted route ends TLS at a proxy, so the key the client's
+    connection saw is the proxy's, not this host's.
+    """
     key_path, _ = ensure_host_key(state_root)
-    tls_spki_sha256 = host_spki_sha256(state_root) if tls_spki_sha256 is None else tls_spki_sha256
     key = _parsed(key_path, _private_key)
     if not isinstance(key, ec.EllipticCurvePrivateKey) or not isinstance(key.curve, ec.SECP256R1):
         # The desktop app checks proofs as P-256 ECDSA only; any other saved key cannot prove this host.
         raise ValueError("the host key is not a P-256 key")
-    payload = b"corsia-identity-v1\0" + nonce + b"\0" + authority.encode("ascii") + b"\0" + tls_spki_sha256
+    payload = b"corsia-identity-v1\0" + nonce + b"\0" + authority.encode("ascii")
     return key.sign(payload, ec.ECDSA(hashes.SHA256()))
 
 

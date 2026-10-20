@@ -90,8 +90,7 @@ def _verifies(key_path, signature, nonce, authority):
     from cryptography.hazmat.primitives.asymmetric import ec
 
     public = serialization.load_pem_private_key(key_path.read_bytes(), password=None).public_key()
-    state_root = key_path.parents[1]
-    payload = b"corsia-identity-v1\0" + nonce + b"\0" + authority.encode("ascii") + b"\0" + devices_listener.host_spki_sha256(state_root)
+    payload = b"corsia-identity-v1\0" + nonce + b"\0" + authority.encode("ascii")
     try:
         public.verify(signature, payload, ec.ECDSA(hashes.SHA256()))
     except InvalidSignature:
