@@ -9,7 +9,7 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-const REASONS: PairReason[] = ['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy', 'network', 'server', 'incompatible', 'too_old', 'local'];
+const REASONS: PairReason[] = ['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy', 'network', 'server', 'incompatible', 'too_old', 'local', 'not_local'];
 
 describe('shellInfo', () => {
 	it('is null in a browser or the phone app, where nothing injects it', () => {
@@ -85,9 +85,10 @@ describe('the approved lines', () => {
 		expect(codeRefusalLine('too_many_tries', 'Studio')).toMatch(/^Too many wrong codes\./);
 		expect(codeRefusalLine('paused', 'Studio')).toMatch(/^Pairing is paused on Studio\./);
 		expect(codeRefusalLine('busy', 'Studio')).toContain('Studio is busy');
+		expect(codeRefusalLine('not_local', 'Studio')).toBe('If this computer isn’t on the same network as the main computer, connect it to that network, then try again.');
 	});
 	it('splits refusals between the code screen and the choose screen', () => {
-		expect(REASONS.filter(refusesOnCodeScreen)).toEqual(['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy']);
+		expect(REASONS.filter(refusesOnCodeScreen)).toEqual(['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy', 'not_local']);
 	});
 	it('says what is wrong with the computer, for the choose screen', () => {
 		expect(unreachableLine('server', 'studio.local', {})).toBe('studio.local answered, but CORSIA isn’t running there.');

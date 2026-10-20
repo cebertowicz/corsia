@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,7 +16,7 @@ from core.devices_runtime import DevicesRuntime, runtime
 from infra import dns_sd
 from infra.auth import require_human_user
 from infra.devices_listener import DevicesApp, DevicesListener
-from infra.settings import set_devices_enabled
+from infra.settings import set_devices_enabled, set_devices_outside_address
 from main import app
 from tests.test_dns_sd import _DNSLibrary, _install_dns_seams
 
@@ -57,6 +58,68 @@ def test_devices_switch_has_one_person_only_writer(monkeypatch):
         require_human_user({"id": "agent", "token_kind": "agent"})
     assert agent_error.value.status_code == 403
     assert runtime.pairing.status()["state"] == "none"
+
+
+def test_outside_address_contract_vectors_are_canonical():
+    vectors = json.loads((Path(__file__).parents[2] / "testdata" / "outside-address-vectors.json").read_text())
+    for vector in vectors["accepted"]:
+        assert devices_api._outside_address(vector["input"]) == vector["normalized"]
+    for value in vectors["rejected"]:
+        with pytest.raises(HTTPException):
+            devices_api._outside_address(value)
+
+
+def test_outside_address_is_saved_by_the_devices_owner_and_returned(monkeypatch):
+    writes = []
+
+    async def fake_run_in_db(function, *args):
+        writes.append((function, args))
+
+    monkeypatch.setattr(devices_api, "_require_local_management", lambda request: None)
+    monkeypatch.setattr(devices_api, "run_in_db", fake_run_in_db)
+    monkeypatch.setattr(runtime, "outside_address", None)
+
+    response = asyncio.run(
+        devices_api.put_devices(
+            {"outside_address": "https://home.example.com:8443"},
+            request=object(),
+            _user={"id": "person", "token_kind": "session"},
+        )
+    )
+
+    assert writes == [(set_devices_outside_address, ("home.example.com:8443",))]
+    assert response["outside_address"] == "home.example.com:8443"
+    with pytest.raises(HTTPException, match="without http://"):
+        asyncio.run(
+            devices_api.put_devices(
+                {"outside_address": "http://home.example.com"},
+                request=object(),
+                _user={"id": "person", "token_kind": "session"},
+            )
+        )
+
+
+@pytest.mark.parametrize(("address", "action"), [("home.example.com", "outside_address_saved"), (None, "outside_address_cleared")])
+def test_outside_address_events_never_disclose_the_address(monkeypatch, address, action):
+    events = []
+
+    async def write_setting(*_args):
+        return None
+
+    monkeypatch.setattr(devices_api, "_require_local_management", lambda _request: None)
+    monkeypatch.setattr(devices_api, "run_in_db", write_setting)
+    monkeypatch.setattr(devices_api, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    monkeypatch.setattr(runtime, "outside_address", None)
+    asyncio.run(devices_api.put_devices({"outside_address": address}, request=object(), _user={"id": "person"}))
+    assert events == [(("devices", action), {"properties": None})]
+
+
+def test_outside_address_endpoint_returns_set_and_cleared_values():
+    client = TestClient(app)
+    set_devices_outside_address("home.example.com:8443")
+    assert client.get("/api/devices/outside-address").json() == {"outside_address": "home.example.com:8443"}
+    set_devices_outside_address(None)
+    assert client.get("/api/devices/outside-address").json() == {"outside_address": None}
 
 
 def test_direct_loopback_enable_mints_first_code_only_after_listener_starts(monkeypatch):
@@ -419,7 +482,7 @@ def test_active_code_is_redacted_outside_direct_main_loopback(monkeypatch):
     }
 
 
-_DOCUMENTED_DEVICES_KEYS = {"enabled", "listening", "announced_name", "local_hostname", "computer_name", "lan_addresses", "code"}
+_DOCUMENTED_DEVICES_KEYS = {"enabled", "listening", "announced_name", "local_hostname", "computer_name", "lan_addresses", "code", "outside_address"}
 _NAME_CONFLICT = -65548
 
 

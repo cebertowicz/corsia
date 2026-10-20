@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from contextlib import asynccontextmanager
 import json
 import os
@@ -28,6 +29,8 @@ _PUBLIC_PAIRS = frozenset({
     ("POST", "/api/auth/login"),
     ("POST", "/api/devices/pair/start"),
     ("POST", "/api/devices/pair/finish"),
+    ("GET", "/api/devices/outside-address"),
+    ("POST", "/api/devices/identity"),
 })
 _PASSWORD = "g7-disposable-listener-password"
 _ACCOUNT = {
@@ -200,7 +203,7 @@ def access_backend():
 
 
 @pytest.mark.asyncio
-async def test_devices_tls_listener_allows_only_the_six_public_pairs_and_forwards_human_session(access_backend):
+async def test_devices_tls_listener_keeps_login_public_but_refuses_pairing_on_loopback(access_backend):
     async with httpx.AsyncClient(base_url=access_backend.main_url, timeout=10, trust_env=False) as main_client, \
             httpx.AsyncClient(base_url=access_backend.remote_url, verify=False, timeout=10, trust_env=False) as remote:
         # The direct main listener remains behaviorally unchanged.
@@ -218,8 +221,8 @@ async def test_devices_tls_listener_allows_only_the_six_public_pairs_and_forward
         assert [response.status_code for response in public[:3]] == [200, 200, 200]
         assert public[3].status_code == 401
         assert public[3].json() != {"reason": "sign_in_required"}
-        assert public[4].status_code == 409
-        assert public[5].status_code == 400
+        assert [response.status_code for response in public[4:]] == [403, 403]
+        assert [response.json() for response in public[4:]] == [{"detail": {"reason": "not_on_this_network"}}] * 2
 
         for method, path in (("GET", "/api/auth/login"), ("POST", "/api/version")):
             refused = await remote.request(method, path)
@@ -246,6 +249,40 @@ async def test_devices_tls_listener_allows_only_the_six_public_pairs_and_forward
         forwarded = await remote.get("/api/models", headers={"Authorization": f"Bearer {token}"})
         assert forwarded.status_code == 200
         assert forwarded.json() == direct_models.json()
+
+
+@pytest.mark.asyncio
+async def test_devices_tls_listener_proves_identity_with_the_key_its_tls_presents(access_backend):
+    """A signed-out caller on the real listener gets a proof the desktop app can check against the TLS key."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    port = int(access_backend.remote_url.rsplit(":", 1)[1])
+    presented = x509.load_pem_x509_certificate(ssl.get_server_certificate(("127.0.0.1", port)).encode())
+    spki = presented.public_key().public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    nonce = os.urandom(32)
+    authority = "studio.example:443"
+    async with httpx.AsyncClient(base_url=access_backend.remote_url, verify=False, timeout=10, trust_env=False) as remote:
+        proof = await remote.post("/api/devices/identity", json={
+            "nonce": base64.b64encode(nonce).decode(), "authority": authority,
+        })
+        refused = [
+            await remote.post("/api/devices/identity", json={"nonce": "A" * 4000, "authority": authority}),
+            await remote.post("/api/devices/identity", json={
+                "nonce": base64.b64encode(nonce).decode(), "authority": "Studio.example:443",
+            }),
+        ]
+    assert proof.status_code == 200, proof.text
+    assert base64.b64decode(proof.json()["spki"]) == spki
+    presented.public_key().verify(
+        base64.b64decode(proof.json()["signature"]),
+        b"corsia-identity-v1\0" + nonce + b"\0" + authority.encode(),
+        ec.ECDSA(hashes.SHA256()),
+    )
+    assert [response.status_code for response in refused] == [400, 400]
 
 
 @pytest.mark.parametrize(("method", "path"), _MAIN_API_PAIRS)

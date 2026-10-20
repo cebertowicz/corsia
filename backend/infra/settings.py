@@ -9,6 +9,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 from infra.database import get_db, write_transaction
+from infra.devices_setting import DEVICE_SETTING_KEY, parse_devices_setting
 
 log = logging.getLogger(__name__)
 
@@ -160,17 +161,25 @@ def get_feature_flags() -> dict:
     return get_setting("features") or {}
 
 
-DEVICE_SETTING_KEY = "devices"
-
 
 def get_devices_enabled(*, db: sqlite3.Connection | None = None) -> bool:
     """Return the explicitly persisted Devices listener switch state."""
-    return (get_setting(DEVICE_SETTING_KEY, db=db) or {}).get("enabled") is True
+    return parse_devices_setting(get_setting(DEVICE_SETTING_KEY, db=db))[0]
+
+
+def get_devices_outside_address(*, db: sqlite3.Connection | None = None) -> str | None:
+    """Return the host's optional encrypted remote endpoint."""
+    return parse_devices_setting(get_setting(DEVICE_SETTING_KEY, db=db))[1]
 
 
 def set_devices_enabled(enabled: bool, *, db: sqlite3.Connection | None = None) -> None:
     """Persist the dedicated Devices switch through its one writer."""
-    set_setting(DEVICE_SETTING_KEY, {"enabled": enabled}, db=db)
+    save_setting_merge(DEVICE_SETTING_KEY, {"enabled": enabled}, db=db)
+
+
+def set_devices_outside_address(address: str | None, *, db: sqlite3.Connection | None = None) -> None:
+    """Persist the optional encrypted remote endpoint without replacing the switch."""
+    save_setting_merge(DEVICE_SETTING_KEY, {"outside_address": address}, db=db)
 
 
 def save_setting_merge(key: str, updates: dict, *, db: sqlite3.Connection | None = None) -> None:

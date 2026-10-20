@@ -14,7 +14,7 @@ import subprocess
 
 import pytest
 
-from infra import devices_listener
+from infra import devices_identity, devices_listener
 from infra.devices_listener import DevicesListener
 
 
@@ -100,7 +100,7 @@ async def test_real_dns_sd_announces_and_deallocates_the_actual_fallback_port(mo
         assert listener.port == fallback
         announcement = listener.announcement
         assert announcement is not None
-        key_path, cert_path = devices_listener._key_paths(key_root)
+        key_path, cert_path = devices_identity._key_paths(key_root)
         assert key_path.exists()
         assert cert_path.exists()
         assert announcement.port == fallback

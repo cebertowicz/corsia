@@ -47,6 +47,7 @@ hyper-util = { version = "0.1", features = ["tokio", "client", "server", "http1"
 sha2 = "0.10"
 hkdf = "0.12"
 hmac = "0.12"
+ring = "0.17"
 
 [dev-dependencies]
 tauri = { version = "2.10.3", features = ["macos-private-api", "test"] }

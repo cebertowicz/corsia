@@ -19,6 +19,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use source_lifecycle::{Bundled, SourceLifecycle};
 use tauri::{ipc::CapabilityBuilder, Manager};
@@ -33,6 +34,8 @@ mod pairing;
 mod proxy;
 mod release_proof;
 mod remote_config;
+mod remote_host;
+mod routes;
 mod remote_lifecycle;
 mod service_management;
 mod shell_state;
@@ -849,29 +852,79 @@ async fn connect_saved_remote<R: tauri::Runtime>(app: tauri::AppHandle<R>, saved
 }
 
 async fn enter_saved_remote<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: remote_config::RemoteRecord) -> Result<(), classify::ConnectFailure> {
-    use classify::ConnectFailure;
-    let name = saved.name.clone();
     // A retry can find the last attempt's proxy still up (a key change leaves it running); it owns the saved port.
     replace_proxy(&app.state::<RemoteRuntime>(), None);
     let app_dir = default_app_dir(app).map_err(|error| local_failure("app folder", error))?;
-    let trust = trust::Trust::try_from(&saved.trust).map_err(|_| ConnectFailure::KeyChanged)?;
-    let (host, port) = match &saved.locator {
-        remote_config::Locator::Address { host, port } => (host.clone(), *port),
-        remote_config::Locator::DnsSd { instance } => discovery::resolve(instance, Duration::from_secs(15)).await.map_err(|_| ConnectFailure::Network)?,
-    };
-    match version_check::check(&host, port, &trust, &version_check::app_version(app)).await {
-        Ok(version_check::Compat::Ok) => {}
-        Ok(version_check::Compat::Incompatible { app: app_version, host }) => return Err(ConnectFailure::Incompatible { app: app_version, host }),
-        Ok(version_check::Compat::TooOld) => return Err(ConnectFailure::TooOld),
-        Err(error) => return Err(error.connect_failure().unwrap_or(ConnectFailure::Server)),
-    }
-    let started = proxy::start(saved.locator.clone(), trust, saved.proxy_port, key_changed_callback(app, &name))
-        .await
-    .map_err(proxy_failure)?;
+    let refresh = saved.clone();
+    let started = check_through_routes(app, &saved).await?;
     let mut entry = RemoteEntry { app, app_dir: &app_dir, record: saved, forget_on_rollback: false, unregister: || Ok(()), restore: || {} };
     let proxy = remote_lifecycle::enter_remote(&mut entry, started)?;
     replace_proxy(&app.state::<RemoteRuntime>(), Some(proxy));
+    tauri::async_runtime::spawn(refresh_outside_after_launch(app_dir, refresh));
     Ok(())
+}
+
+/// Convert the host-owned bare endpoint only at the desktop boundary. Invalid input never reaches the saved route.
+fn outside_route(address: Option<&str>, has_identity: bool) -> Option<remote_config::OutsideRoute> {
+    let address = address?;
+    if !has_identity { return None; }
+    let url = format!("https://{address}");
+    if remote_host::parse_https_address(&url).is_err() {
+        log::warn!("host returned an invalid outside address; ignoring it");
+        return None;
+    }
+    Some(remote_config::OutsideRoute { url, trust: remote_config::RemoteTrust::System })
+}
+
+async fn refresh_outside_address(saved: &mut remote_config::RemoteRecord, host: &str, port: u16) {
+    let Ok(trust) = trust::Trust::try_from(&saved.trust) else { return };
+    if saved.identity.is_none() {
+        match routes::local_identity(host, port, trust.clone()).await {
+            Ok(identity) => saved.identity = Some(BASE64.encode(identity)),
+            Err(error) => {
+                log::warn!("could not learn local host identity: {}", error.into_message());
+                return;
+            }
+        }
+    }
+    match pairing::outside_address(host, port, trust).await {
+        Ok(address) => saved.outside = outside_route(address.as_deref(), saved.identity.is_some()),
+        Err(error) => log::warn!("could not refresh outside address: {error:?}"),
+    }
+}
+
+async fn refresh_outside_after_launch(app_dir: std::path::PathBuf, mut saved: remote_config::RemoteRecord) {
+    let original = saved.clone();
+    let local = match &saved.locator {
+        remote_config::Locator::Address { host, port } => Some((host.clone(), *port)),
+        remote_config::Locator::DnsSd { instance } => match discovery::resolve(instance, Duration::from_secs(15)).await {
+            Ok(address) => Some(address),
+            Err(error) => {
+                log::warn!("could not resolve local host for outside address refresh: {error:?}");
+                None
+            }
+        },
+    };
+    if let Some((host, port)) = local {
+        refresh_outside_address(&mut saved, &host, port).await;
+        if let Err(error) = remote_config::save_refreshed_remote(&app_dir, &original, saved) {
+            log::warn!("could not save refreshed outside address: {error}");
+        }
+    }
+}
+
+/// A saved route set starts through the proxy, so the version check observes the same verified connection.
+/// The set contains the local route and may also contain a saved outside route.
+async fn check_through_routes<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: &remote_config::RemoteRecord) -> Result<proxy::ProxyHandle, classify::ConnectFailure> {
+    use classify::ConnectFailure;
+    let started = proxy::start_record(saved, saved.proxy_port, key_changed_callback(app, &saved.name)).await.map_err(proxy_failure)?;
+    match version_check::check_through_proxy(started.port, &version_check::app_version(app)).await {
+        Ok(version_check::Compat::Ok) => Ok(started),
+        Ok(version_check::Compat::Incompatible { app: app_version, host }) => Err(ConnectFailure::Incompatible { app: app_version, host }),
+        Ok(version_check::Compat::TooOld) => Err(ConnectFailure::TooOld),
+        Err(_) if started.key_changed() => Err(ConnectFailure::KeyChanged),
+        Err(error) => Err(error.connect_failure().unwrap_or(ConnectFailure::Network)),
+    }
 }
 
 /// Try again on a launch failure: connect the saved remote once more. It answers at once; the shell is told the
@@ -943,6 +996,7 @@ fn remote_pair_error(error: pairing::PairError) -> RemotePairResponse {
         PairError::TooManyTries => "too_many_tries",
         PairError::Paused => "paused",
         PairError::Busy => "busy",
+        PairError::NotLocal => "not_local",
         // The host's key moved under a pairing that just trusted it. CORSIA is running there, so the server line would
         // be false; the local line is true and names the fix (a new code).
         PairError::KeyChanged => ConnectFailure::Local.reason(),
@@ -976,7 +1030,11 @@ async fn pair_remote(request: RemotePairRequest, app: &tauri::AppHandle, remote:
     let app_dir = default_app_dir(app)?;
     let locator = match request.target {
         RemoteTarget::DnsSd { instance } => remote_config::Locator::DnsSd { instance },
-        RemoteTarget::Address { host, port } => remote_config::Locator::Address { host, port: port.unwrap_or(47_901) },
+        RemoteTarget::Address { host, port } => {
+            let (host, parsed_port) = remote_host::parse_pairing_address(&host, port.unwrap_or(47_901))
+                .map_err(|_| "invalid remote address")?;
+            remote_config::Locator::Address { host, port: parsed_port }
+        },
     };
     let (host, port) = match &locator {
         remote_config::Locator::Address { host, port } => (host.clone(), *port),
@@ -995,11 +1053,18 @@ async fn pair_remote(request: RemotePairRequest, app: &tauri::AppHandle, remote:
         Ok(version_check::Compat::TooOld) => return Ok(failure_response(ConnectFailure::TooOld)),
         Err(error) => return Ok(remote_pair_error(error)),
     }
-    let started = match proxy::start(locator.clone(), paired.trust.clone(), 0, key_changed_callback(app, &paired.name)).await {
+    let record = remote_config::RemoteRecord {
+        locator,
+        trust: remote_config::RemoteTrust::from(&paired.trust),
+        name: paired.name.clone(),
+        proxy_port: 0,
+        identity: Some(BASE64.encode(paired.identity)),
+        outside: outside_route(paired.outside_address.as_deref(), true),
+    };
+    let started = match proxy::start_record(&record, 0, key_changed_callback(app, &paired.name)).await {
         Ok(started) => started,
         Err(error) => return Ok(failure_response(proxy_failure(error))),
     };
-    let record = remote_config::RemoteRecord { locator, trust: remote_config::RemoteTrust::from(&paired.trust), name: paired.name.clone(), proxy_port: 0 };
     let mut entry = RemoteEntry {
         app,
         app_dir: &app_dir,
@@ -1838,6 +1903,8 @@ mod tests {
             trust: remote_config::RemoteTrust::System,
             name: "Studio".into(),
             proxy_port: 47911,
+            identity: None,
+            outside: None,
         };
         let mut connection = shell_state::ShellState::launch(Some(&saved));
         assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local" }));
@@ -1854,6 +1921,8 @@ mod tests {
             trust: remote_config::RemoteTrust::System,
             name: "Studio".into(),
             proxy_port: 47911,
+            identity: None,
+            outside: None,
         };
         assert!(saved_proxy_origin_allows(Some(&remote), "http://127.0.0.1:47911"));
         assert!(!saved_proxy_origin_allows(Some(&remote), "http://127.0.0.1:47912"));
@@ -2077,7 +2146,14 @@ mod tests {
     }
 
     fn saved_studio(locator: remote_config::Locator, trust: remote_config::RemoteTrust) -> remote_config::RemoteRecord {
-        remote_config::RemoteRecord { locator, trust, name: "Studio".into(), proxy_port: 47911 }
+        remote_config::RemoteRecord {
+            locator,
+            trust,
+            name: "Studio".into(),
+            proxy_port: 47911,
+            identity: None,
+            outside: None,
+        }
     }
 
     fn launch_app() -> tauri::App<tauri::test::MockRuntime> {
@@ -2129,6 +2205,54 @@ mod tests {
     }
 
     #[test]
+    fn outside_address_conversion_uses_https_system_trust_and_rejects_bad_values() {
+        let route = outside_route(Some("home.example.com:8443"), true).unwrap();
+        assert_eq!(route.url, "https://home.example.com:8443");
+        assert_eq!(route.trust, remote_config::RemoteTrust::System);
+        assert!(outside_route(Some("http://home.example.com"), true).is_none());
+        assert!(outside_route(Some("home.example.com/path"), true).is_none());
+        assert!(outside_route(Some("home.example.com"), false).is_none());
+    }
+
+    /// A saved record with an outside route at `outside_port`, pinned like its local route to `identity`.
+    fn saved_with_outside(identity: [u8; 32], outside_port: u16) -> remote_config::RemoteRecord {
+        let pinned = remote_config::RemoteTrust::from(&trust::Trust::Pinned { spki_sha256: identity });
+        remote_config::RemoteRecord {
+            proxy_port: 0,
+            identity: Some(BASE64.encode(identity)),
+            outside: Some(remote_config::OutsideRoute { url: format!("https://127.0.0.1:{outside_port}"), trust: pinned.clone() }),
+            ..saved_studio(remote_config::Locator::Address { host: "127.0.0.1".into(), port: 1 }, pinned)
+        }
+    }
+
+    #[test]
+    fn a_launch_whose_outside_route_presents_another_key_ends_on_the_key_changed_card() {
+        let app = launch_app();
+        let relay = test_tls::generated_self_signed_identity();
+        let port = tauri::async_runtime::block_on(async {
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            tauri::async_runtime::spawn(async move {
+                while let Ok((stream, _)) = listener.accept().await {
+                    let _ = tokio_rustls::TlsAcceptor::from(std::sync::Arc::clone(&relay.config)).accept(stream).await;
+                }
+            });
+            port
+        });
+        tauri::async_runtime::block_on(connect_saved_remote(app.handle().clone(), saved_with_outside([5; 32], port)));
+        assert_eq!(launch_state(&app), shell_state::LaunchState::Failed { name: "Studio".into(), failure: classify::ConnectFailure::KeyChanged });
+        assert!(app.state::<RemoteRuntime>().proxy.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn a_launch_that_reaches_neither_route_ends_on_the_network_card() {
+        let app = launch_app();
+        tauri::async_runtime::block_on(connect_saved_remote(app.handle().clone(), saved_with_outside([5; 32], 1)));
+        assert_eq!(launch_state(&app), shell_state::LaunchState::Failed { name: "Studio".into(), failure: classify::ConnectFailure::Network });
+        assert!(app.state::<RemoteRuntime>().proxy.lock().unwrap().is_none());
+    }
+
+    #[test]
     fn a_pair_that_failed_after_the_code_was_used_reports_the_local_reason() {
         let RemotePairResponse::Failure { ok, reason, .. } = failure_response(classify::ConnectFailure::Local) else { panic!("a failure response") };
         assert!(!ok);
@@ -2143,15 +2267,33 @@ mod tests {
     }
 
     #[test]
-    fn a_launch_that_cannot_reach_the_remote_ends_on_the_unreachable_card_not_on_connecting() {
+    fn a_launch_that_gets_a_refused_connection_ends_on_the_server_card_not_on_connecting() {
         let app = launch_app();
-        let closed_port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let identity = test_tls::generated_self_signed_identity();
+        let pin = identity.pin;
+        let port = tauri::async_runtime::block_on(async {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            tauri::async_runtime::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut tls = tokio_rustls::TlsAcceptor::from(identity.config).accept(stream).await.unwrap();
+                let mut request = [0; 1024];
+                let _ = tls.read(&mut request).await.unwrap();
+                tls.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n").await.unwrap();
+            });
+            port
+        });
         let saved = saved_studio(
-            remote_config::Locator::Address { host: "127.0.0.1".into(), port: closed_port },
-            remote_config::RemoteTrust::System,
+            remote_config::Locator::Address { host: "127.0.0.1".into(), port },
+            remote_config::RemoteTrust::from(&trust::Trust::Pinned { spki_sha256: pin }),
         );
         tauri::async_runtime::block_on(connect_saved_remote(app.handle().clone(), saved));
-        assert!(matches!(launch_state(&app), shell_state::LaunchState::Failed { failure: classify::ConnectFailure::Network | classify::ConnectFailure::Server, .. }), "{:?}", launch_state(&app));
+        assert_eq!(
+            launch_state(&app),
+            shell_state::LaunchState::Failed { name: "Studio".into(), failure: classify::ConnectFailure::Server },
+        );
         assert!(app.state::<RemoteRuntime>().proxy.lock().unwrap().is_none());
     }
 
@@ -2206,7 +2348,7 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let record = saved_studio(remote_config::Locator::Address { host: "127.0.0.1".into(), port: 1 }, remote_config::RemoteTrust::System);
         let (unregistered, restored) = (std::cell::Cell::new(0), std::cell::Cell::new(0));
-        let proxy = tauri::async_runtime::block_on(proxy::start(record.locator.clone(), trust::Trust::System, 0, || {})).expect("a proxy");
+        let proxy = tauri::async_runtime::block_on(proxy::start_record(&record, 0, || {})).expect("a proxy");
         let mut entry = RemoteEntry {
             app: app.handle(),
             app_dir: folder.path(),
