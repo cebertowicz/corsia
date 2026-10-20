@@ -61,10 +61,13 @@
 	</section>
 {:else if personStep}
 	<section class="review-bar ask" aria-label="Person step" aria-busy={busy}>
-		<span class="rb-head"><span class="rb-line">
-			<span class="rb-lead"><Avatar name={personStep.owner_name} color={agentColor(personStep.owner_thread_id)} hidden /></span>
-			<span class="rb-ask"><strong><MiddleName name={personStep.owner_name} /></strong> needs you to do this: {personStep.node_title}</span>
-		</span></span>
+		<span class="rb-head">
+			<span class="rb-line">
+				<span class="rb-lead"><Avatar name={personStep.owner_name} color={agentColor(personStep.owner_thread_id)} hidden /></span>
+				<span class="rb-who"><strong><MiddleName name={personStep.owner_name} /></strong></span>
+			</span>
+			<p class="rb-ask-full">needs you to do this: {personStep.node_title}</p>
+		</span>
 		<span class="rb-row2"><div class="rb-capsule">
 			<span class="rb-status" class:busy role="status">{busy ? 'Recording your answer…' : failure}</span>
 			<div class="rb-actions">
@@ -82,7 +85,9 @@
 	.rb-head { display: flex; flex-direction: column; min-width: 0; }
 	.rb-line { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); min-width: 0; padding: 0; color: var(--text-primary); }
 	.rb-lead { display: contents; }
-	.rb-ask { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+	.rb-who { flex: 0 1 auto; display: flex; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.rb-who strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--fw-semibold); }
+	.rb-ask-full { margin: 0; padding: 0 0 var(--space-1); color: var(--text-secondary); line-height: var(--lh-normal); overflow-wrap: anywhere; }
 	.rb-row2 { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
 	.rb-capsule { display: contents; }
 	.rb-status { flex: 1 1 0; min-width: 0; color: var(--amber-text); }
@@ -92,5 +97,7 @@
 	.rb-receipt { flex: 1 1 0; min-width: 0; outline: none; color: var(--text-primary); font-weight: var(--fw-medium); }
 	:global(.document-header) .review-bar.ask { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
 	:global(.document-header) .review-bar.ask .rb-head { display: contents; }
-	:global(.document-header) .review-bar.ask .rb-line, :global(.document-header) .review-bar.ask .rb-row2 { grid-column: 1 / -1; }
+	/* As the review ask: who asks shares the header's first row with its icons; the ask and actions span it. */
+	:global(.document-header) .review-bar.ask .rb-line { grid-column: 1; }
+	:global(.document-header) .review-bar.ask .rb-ask-full, :global(.document-header) .review-bar.ask .rb-row2 { grid-column: 1 / -1; }
 </style>
