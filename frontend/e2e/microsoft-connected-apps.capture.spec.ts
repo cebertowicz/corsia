@@ -62,9 +62,9 @@ test.describe('Microsoft Connected apps capture', () => {
 				return route.continue();
 			});
 			await page.route('**/api/projects**', (route) => route.fulfill({ json: { projects: [] } }));
-			await page.context().grantPermissions(['clipboard-write'], { origin: 'http://127.0.0.1:5191' });
 			await page.emulateMedia({ colorScheme: theme });
 			await loginByUrl(page, { waitForComposer: false });
+			await page.context().grantPermissions(['clipboard-write'], { origin: new URL(page.url()).origin });
 			const label = testInfo.project.name.includes('mobile') ? '393' : '1440';
 			await page.setViewportSize(label === '393' ? { width: 393, height: 852 } : { width: 1440, height: 1000 });
 			await openConnectedApps(page);
