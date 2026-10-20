@@ -10,7 +10,7 @@ Subcommands:
                                    [--provider PR] [--thread-kind chat|subagent]
                                    [--spawned-by PARENT | --from-thread-id SENDER]
     corsia delegate task <message...> --model M [--title T] [--provider PR]
-    corsia delegate send <thread_id> <message...>
+    corsia delegate send <thread_id> <message...> [--no-sensitive-content]
     corsia delegate set-model <thread_id> <model> [--reason R]
     corsia delegate status <thread_id> [--messages N]
 
@@ -86,6 +86,8 @@ def cmd_send(args: argparse.Namespace) -> int:
     body = {"message": message, "from_thread_id": from_thread_id}
     if args.target_scope_id:
         body["target_scope_id"] = args.target_scope_id
+    if args.no_sensitive_content:
+        body["no_sensitive_content"] = True
     out = _request("POST", base, f"/api/delegation/threads/{args.thread_id}/send",
                    token, body=body)
     print(json.dumps(out, indent=2))
@@ -243,6 +245,11 @@ def _add_send_parser(sub: argparse._SubParsersAction) -> None:
             "Required for intentional cross-scope sends; must match the target "
             "thread's project id, or 'workspace' for workspace threads"
         ),
+    )
+    sd.add_argument(
+        "--no-sensitive-content",
+        action="store_true",
+        help="Confirm this cloud-bound send contains no sensitive content",
     )
     sd.set_defaults(func=cmd_send)
 

@@ -494,6 +494,8 @@ async def test_model_switch_route_returns_local_only_refusal_as_409(
     [
         (True, "cloud", False, True),
         (True, "cloud", True, False),
+        (True, None, False, True),
+        (True, None, True, False),
         (True, "local", False, False),
         (False, "cloud", False, False),
     ],

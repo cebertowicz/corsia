@@ -98,8 +98,15 @@ def send_confirmation_refusal(
     # Every recipient thread is read by its own bound model, so only its
     # locality decides; a person's chat on a cloud model is still cloud-bound.
     recipient_model = recipient.get("model")
+    recipient_name = str(recipient.get("title") or recipient.get("id") or "This recipient")
     if not isinstance(recipient_model, str) or not recipient_model.strip():
-        return None
+        if no_sensitive_content is True:
+            return None
+        return (
+            f"{LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE}: {recipient_name} has no selected model and "
+            "may adopt a cloud model. Remove anything sensitive from the message (keys, secrets, "
+            "personal data, private file contents), then call again with no_sensitive_content: true."
+        )
     refusal = local_only_model_refusal(
         recipient_model,
         thread_local_only=True,
@@ -108,9 +115,25 @@ def send_confirmation_refusal(
     )
     if refusal is None or no_sensitive_content is True:
         return None
-    recipient_name = str(recipient.get("title") or recipient.get("id") or "This recipient")
     return (
         f"{LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE}: {recipient_name} runs on a cloud model "
         f"({recipient_model}). Remove anything sensitive from the message (keys, secrets, "
         "personal data, private file contents), then call again with no_sensitive_content: true."
     )
+
+
+def send_confirmation_error(
+    sender: dict,
+    recipient: dict,
+    no_sensitive_content: object,
+) -> str | None:
+    """Read model locality and return the send confirmation refusal, if any."""
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return send_confirmation_refusal(
+            sender, recipient, no_sensitive_content=no_sensitive_content, db=db,
+        )
+    finally:
+        db.close()

@@ -18,6 +18,7 @@ from infra.fresh_threads import (
     SpawnVisibilityRejected,
     create_visible_fresh_thread,
 )
+from infra.local_only import send_confirmation_error
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
 from infra.runtime_truth import read_runtime_truth
@@ -32,7 +33,7 @@ def _delegated_sender(sender_id: str, user_id: str) -> dict | None:
     db = get_db()
     try:
         row = db.execute(
-            "SELECT title, project_id FROM threads WHERE id = ? AND user_id = ?",
+            "SELECT title, project_id, local_only FROM threads WHERE id = ? AND user_id = ?",
             (sender_id, user_id),
         ).fetchone()
         if row is None:
@@ -40,6 +41,7 @@ def _delegated_sender(sender_id: str, user_id: str) -> dict | None:
         return {
             "title": row["title"] or "",
             "project_id": row["project_id"] or None,
+            "local_only": bool(row["local_only"]),
             "scope": row["project_id"] or "workspace",
         }
     finally:
@@ -79,6 +81,12 @@ def _queued_send_response(thread_id: str, result: InboxQueuedInput) -> dict:
     if result.held_line is not None:
         payload["held"] = result.held_line
     return payload
+
+
+async def _send_confirmation_for_turn(sender: dict, recipient: dict, body: dict) -> str | None:
+    return await run_in_db(
+        send_confirmation_error, sender, recipient, body.get("no_sensitive_content"),
+    )
 
 
 @router.post("/threads")
@@ -124,8 +132,7 @@ async def create_thread(token: str, body: dict):
     if not is_dispatchable_model(model):
         raise HTTPException(422, dispatch_form_error(model))
 
-    now = utc_now_iso()
-    project_id = body.get("project_id") or None
+    now, project_id = utc_now_iso(), body.get("project_id") or None
     title = body.get("title") or "New Chat"
     spawned_by = (body.get("spawned_by") or "").strip() or None
     from_thread_id = (body.get("from_thread_id") or "").strip() or None
@@ -223,8 +230,9 @@ async def create_thread(token: str, body: dict):
             thread_kind=thread_kind,
             emit_spawn_chip=bool(spawned_by), account_id=body.get("account_id"),
         )
-    except SpawnVisibilityRejected as exc:
-        raise HTTPException(403, str(exc))
+    except ValueError as exc:
+        status_code = 403 if isinstance(exc, SpawnVisibilityRejected) else 400
+        raise HTTPException(status_code, str(exc)) from exc
     thread_id = thread_row["id"]
 
     emit_product_event(
@@ -273,21 +281,23 @@ async def send_turn(thread_id: str, token: str, body: dict):
         "scope": sender["scope"],
     }
 
-    target_payload = await run_in_db(_delegated_target, thread_id, user["id"])
-    if not target_payload:
+    if not (target_payload := await run_in_db(_delegated_target, thread_id, user["id"])):
         raise HTTPException(404, "Thread not found")
     thread_row = target_payload["thread_row"]
 
-    target_project_id = thread_row["project_id"] or None
     scope_check = validate_send_target_scope(
         source_project_id=sender["project_id"],
-        target_project_id=target_project_id,
+        target_project_id=thread_row["project_id"] or None,
         target_thread_id=thread_id,
         requested_target_scope_id=body.get("target_scope_id"),
         target_authority=target_payload["target_authority"],
     )
     if not scope_check["ok"]:
         raise HTTPException(409, scope_check["detail"])
+
+    confirmation_error = await _send_confirmation_for_turn(sender, thread_row, body)
+    if confirmation_error:
+        raise HTTPException(409, confirmation_error)
 
     target_kind = "subagent" if is_subagent(thread_row) else "chat"
     try:

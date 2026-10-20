@@ -174,6 +174,8 @@ class TestCreateThread:
                         "project_id": "corsia-project",
                         "parent_session_id": None,
                         "spawned_by": "par-emit",
+                        "local_only": 0,
+                        "local_only_inherited_from_thread_id": None,
                         "reasoning_effort": None,
                         "created_at": emitted[0][1]["session"]["created_at"],
                         "updated_at": emitted[0][1]["session"]["updated_at"],
@@ -212,6 +214,77 @@ class TestCreateThread:
         ).fetchone()
         assert row["c"] == 0
 
+    def test_local_only_model_refusal_is_400(self, client, monkeypatch):
+        import api.delegation as delegation_api
+
+        async def refuse(**_kwargs):
+            raise ValueError("local_only_requires_local_model: choose local")
+
+        monkeypatch.setattr(delegation_api, "create_visible_fresh_thread", refuse)
+
+        response = client.post(
+            "/api/delegation/threads",
+            params={"token": _TOKEN},
+            json={"model": "claude-code/sonnet"},
+        )
+
+        assert response.status_code == 400
+        assert "local_only_requires_local_model" in response.json()["detail"]
+
+
+class TestDelegationSendConfirmation:
+    def test_local_only_sender_requires_confirmation_before_rest_delivery(
+        self,
+        client,
+        deleg_db,
+        monkeypatch,
+    ):
+        import api.delegation as delegation_api
+        import infra.local_only as local_only
+
+        deleg_db.execute(
+            "UPDATE threads SET local_only = 1 WHERE id = 'sender-self'"
+        )
+        deleg_db.execute(
+            "INSERT INTO threads (id, user_id, model, title, created_at, updated_at) "
+            "VALUES ('cloud-target', 'u-test', 'anthropic/claude-3-5-sonnet', "
+            "'Cloud Target', 't', 't')"
+        )
+        deleg_db.commit()
+        delivered: list[str] = []
+
+        async def deliver(*_args, **_kwargs):
+            delivered.append("delivered")
+            return SimpleNamespace(driver="turn_engine", duplicate=False)
+
+        monkeypatch.setattr(
+            local_only,
+            "local_only_model_refusal",
+            lambda model, **_kwargs: "cloud" if model == "anthropic/claude-3-5-sonnet" else None,
+        )
+        monkeypatch.setattr(delegation_api, "send_thread_input", deliver)
+
+        refused = client.post(
+            "/api/delegation/threads/cloud-target/send",
+            params={"token": _TOKEN},
+            json={"message": "private material", "from_thread_id": "sender-self"},
+        )
+        assert refused.status_code == 409
+        assert "local_only_send_needs_confirm" in refused.json()["detail"]
+        assert delivered == []
+
+        confirmed = client.post(
+            "/api/delegation/threads/cloud-target/send",
+            params={"token": _TOKEN},
+            json={
+                "message": "safe summary",
+                "from_thread_id": "sender-self",
+                "no_sensitive_content": True,
+            },
+        )
+
+        assert confirmed.status_code == 200
+        assert delivered == ["delivered"]
 
 
 class TestThreadStatus:

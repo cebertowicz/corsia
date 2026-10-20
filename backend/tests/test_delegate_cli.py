@@ -38,6 +38,22 @@ def test_send_defaults_from_thread_id_from_corsia_thread_id(captured):
     }
 
 
+def test_send_marks_confirmed_cloud_content_safe(captured):
+    delegate_cli.main([
+        "send",
+        "target-thread",
+        "safe",
+        "summary",
+        "--no-sensitive-content",
+    ])
+
+    assert captured[-1]["body"] == {
+        "message": "safe summary",
+        "from_thread_id": "sender-self",
+        "no_sensitive_content": True,
+    }
+
+
 def test_send_explicit_from_thread_id_overrides_env(captured):
     delegate_cli.main([
         "send",
