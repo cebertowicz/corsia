@@ -28,7 +28,7 @@ def normalize_username(raw: str) -> str:
     return name
 
 
-def _require_password(password: str) -> None:
+def require_password(password: str) -> None:
     """Reject a password too short to be worth hashing."""
     if len(password or "") < MIN_PASSWORD_LENGTH:
         raise AccountError(

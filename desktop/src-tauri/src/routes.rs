@@ -297,8 +297,8 @@ struct IdentityProof {
 
 /// Prove a system-trusted route reaches the paired host: the host signs a fresh nonce and the authority this app
 /// dialed with its stable key. The proof is not bound to the TLS connection: system trust ends TLS at a proxy that
-/// forwards to the host, so the connection's key is the proxy's. Anything but a valid proof is a refusal; only a
-/// transport failure is not.
+/// forwards to the host, so the connection's key is the proxy's. A successful response with an invalid proof is a
+/// refusal; a non-success response means this route cannot prove the host right now.
 async fn prove_identity(upstream: &mut Upstream, identity: Option<&[u8; 32]>) -> Result<[u8; 32], RouteError> {
     let authority = upstream.authority.to_ascii_lowercase();
     let mut nonce = [0_u8; 32];
@@ -318,7 +318,7 @@ async fn prove_identity(upstream: &mut Upstream, identity: Option<&[u8; 32]>) ->
         .map_err(|error| RouteError::Unreachable(error.to_string()))?;
     let refused = |reason: &str| RouteError::KeyChanged(format!("the route did not prove the paired host: {reason}"));
     if !response.status().is_success() {
-        return Err(refused(&format!("identity answered HTTP {}", response.status())));
+        return Err(RouteError::Unreachable(format!("identity answered HTTP {}", response.status())));
     }
     let bytes = match Limited::new(response.into_body(), MAX_PROOF_BYTES).collect().await {
         Ok(collected) => collected.to_bytes(),

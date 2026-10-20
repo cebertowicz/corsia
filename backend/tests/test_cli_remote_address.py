@@ -43,5 +43,5 @@ def test_remote_address_uses_the_named_read_only_store_without_a_workspace(tmp_p
 def test_remote_address_reports_a_read_failure_without_creating_a_store(tmp_path):
     state = tmp_path / "absent"
     result = _read_address(state)
-    assert (result.returncode, result.stdout, result.stderr) == (2, "", "Remote access could not be read.\n")
+    assert (result.returncode, result.stdout, result.stderr) == (2, "", "Couldn't read the outside address.\n")
     assert not state.exists()

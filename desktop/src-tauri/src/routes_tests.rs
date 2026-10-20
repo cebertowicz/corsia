@@ -46,13 +46,14 @@ fn outside_reprobe_is_bounded_and_switches_back_only_after_proof() {
 struct Prover {
     pkcs8: Vec<u8>,
     spki: Vec<u8>,
+    status: StatusCode,
     /// Signs this authority instead of the one asked: a proof captured on one route and replayed on another.
     replayed_for: Option<String>,
 }
 
 impl Prover {
     fn honest(key: &HostKey) -> Self {
-        Self { pkcs8: key.pkcs8.clone(), spki: key.spki.clone(), replayed_for: None }
+        Self { pkcs8: key.pkcs8.clone(), spki: key.spki.clone(), status: StatusCode::OK, replayed_for: None }
     }
 
     fn answer(&self, body: &[u8]) -> String {
@@ -99,7 +100,7 @@ async fn serve(config: Arc<rustls::ServerConfig>, name: &'static str, prover: Op
                         let (status, text) = match (&prover, is_proof) {
                             (Some(prover), true) => {
                                 proofs.fetch_add(1, SeqCst);
-                                (StatusCode::OK, prover.answer(&body))
+                                (prover.status, (prover.status == StatusCode::OK).then(|| prover.answer(&body)).unwrap_or_default())
                             }
                             (None, true) => (StatusCode::NOT_FOUND, String::new()),
                             (_, false) => {
@@ -254,6 +255,30 @@ async fn a_forwarder_signing_with_another_key_is_refused() {
 
     assert_refused(&proxy, &outside, &refusals).await;
     assert_eq!(outside.proofs.load(SeqCst), 1);
+}
+
+#[tokio::test]
+async fn an_identity_proof_http_failure_is_unreachable_without_refusing() {
+    let host = test_tls::generated_p256_host();
+    let forwarder = test_tls::generated_ca_forwarder();
+    for status in [
+        StatusCode::BAD_GATEWAY,
+        StatusCode::SERVICE_UNAVAILABLE,
+        StatusCode::NOT_FOUND,
+        StatusCode::FORBIDDEN,
+        StatusCode::TOO_MANY_REQUESTS,
+    ] {
+        let proof = Prover { status, ..Prover::honest(&host) };
+        let outside = serve(Arc::clone(&forwarder.config), "outside", Some(proof)).await;
+        let refusals = Arc::new(AtomicUsize::new(0));
+        let config = paired(&host, Some((outside.port, system())), Some(forwarder.ca.clone()), &refusals);
+        let proxy = proxy_for(config, Arc::new(AtomicU16::new(dead_port().await))).await;
+
+        assert_eq!(get(&proxy).await.0, StatusCode::BAD_GATEWAY, "{status}");
+        assert!(!proxy.key_changed(), "{status}");
+        assert_eq!(refusals.load(SeqCst), 0, "{status}");
+        assert_eq!(outside.proofs.load(SeqCst), 1, "{status}");
+    }
 }
 
 #[tokio::test]

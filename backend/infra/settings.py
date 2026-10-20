@@ -163,15 +163,27 @@ def get_feature_flags() -> dict:
 DEVICE_SETTING_KEY = "devices"
 
 
+def parse_devices_setting(value: object) -> tuple[bool, str | None]:
+    """Parse stored Devices settings; callers show its outside address only while enabled."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            value = None
+    if not isinstance(value, dict):
+        return False, None
+    address = value.get("outside_address")
+    return value.get("enabled") is True, address if isinstance(address, str) and address else None
+
+
 def get_devices_enabled(*, db: sqlite3.Connection | None = None) -> bool:
     """Return the explicitly persisted Devices listener switch state."""
-    return (get_setting(DEVICE_SETTING_KEY, db=db) or {}).get("enabled") is True
+    return parse_devices_setting(get_setting(DEVICE_SETTING_KEY, db=db))[0]
 
 
 def get_devices_outside_address(*, db: sqlite3.Connection | None = None) -> str | None:
     """Return the host's optional encrypted remote endpoint."""
-    value = (get_setting(DEVICE_SETTING_KEY, db=db) or {}).get("outside_address")
-    return value if isinstance(value, str) and value else None
+    return parse_devices_setting(get_setting(DEVICE_SETTING_KEY, db=db))[1]
 
 
 def set_devices_enabled(enabled: bool, *, db: sqlite3.Connection | None = None) -> None:

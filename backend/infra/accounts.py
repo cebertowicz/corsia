@@ -32,15 +32,9 @@ import sqlite3
 from datetime import timedelta
 
 from infra import user_profile
-from infra.account_validation import (
-    AccountError,
-    FirstAccountExists,
-    USERNAME_PATTERN,
-    _require_password,
-    normalize_username,
-)
+from infra.account_validation import AccountError, FirstAccountExists, normalize_username, require_password
 from infra.database import get_db, write_transaction
-from infra.passwords import MIN_PASSWORD_LENGTH as MIN_PASSWORD_LENGTH, hash_password, verify_password
+from infra.passwords import MIN_PASSWORD_LENGTH, hash_password, verify_password
 from infra.time import utc_now, utc_now_iso
 
 
@@ -128,7 +122,7 @@ def data_owners_without_accounts(
 def _credentials(username: str, password: str) -> tuple[str, str]:
     """Return the normalized username and the password's stored hash, or raise."""
     name = normalize_username(username)
-    _require_password(password)
+    require_password(password)
     return name, hash_password(password)
 
 
@@ -268,7 +262,7 @@ def set_password(
     number of sessions revoked.
     """
     name = normalize_username(username)
-    _require_password(password)
+    require_password(password)
     encoded = hash_password(password)
     now = utc_now_iso()
     with write_transaction(db, scope="set_password") as conn:

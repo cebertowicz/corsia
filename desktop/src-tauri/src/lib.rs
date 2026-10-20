@@ -856,14 +856,12 @@ async fn enter_saved_remote<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved:
     replace_proxy(&app.state::<RemoteRuntime>(), None);
     let app_dir = default_app_dir(app).map_err(|error| local_failure("app folder", error))?;
     let mut saved = saved;
-    let refresh = Some(saved.clone());
+    let refresh = saved.clone();
     let started = check_through_routes(app, &mut saved).await?;
     let mut entry = RemoteEntry { app, app_dir: &app_dir, record: saved, forget_on_rollback: false, unregister: || Ok(()), restore: || {} };
     let proxy = remote_lifecycle::enter_remote(&mut entry, started)?;
     replace_proxy(&app.state::<RemoteRuntime>(), Some(proxy));
-    if let Some(refresh) = refresh {
-        tauri::async_runtime::spawn(refresh_outside_after_launch(app_dir, refresh));
-    }
+    tauri::async_runtime::spawn(refresh_outside_after_launch(app_dir, refresh));
     Ok(())
 }
 
