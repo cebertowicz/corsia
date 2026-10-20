@@ -395,6 +395,7 @@ describe('ConnectedAppsSettings', () => {
 });
 
 describe('WhereItWorks', () => {
+	const host = document.body;
 	it('shows the approved widening line for All projects', async () => {
 		projects.set([{ id: 'q4', name: 'Q4 launch', status: 'active', accent_color: null }, { id: 'home', name: 'Home renovation', status: 'active', accent_color: null }]);
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ projects: [{ id: 'q4', name: 'Q4 launch', status: 'active', accent_color: null }, { id: 'home', name: 'Home renovation', status: 'active', accent_color: null }] }) })));
