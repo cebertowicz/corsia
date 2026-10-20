@@ -203,7 +203,7 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     # second table.  The engine writes these only while its switch is enabled.
     "measurement.verdict.planned": {"plan": text_attr(2_000)},
     "measurement.verdict.reached": {
-        "verdict": enum_attr("keep", "revert", "changed_early"),
+        "verdict": enum_attr("keep", "revert"),
         "reason": text_attr(200), "detail": text_attr(2_000),
     },
 }
