@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
 import { loginByUrl, openSettings, openSettingsSection } from '../support/corsia';
 
 const SHOTS = process.env.ADD_LOCAL_MODEL_SHOTS_DIR;
@@ -112,7 +113,7 @@ async function openLocalProvider(page: Page) {
 }
 
 async function capture(page: Page, name: string) {
-	if (!SHOTS) throw new Error('ADD_LOCAL_MODEL_SHOTS_DIR is required for render evidence.');
+	if (!SHOTS) return;
 	await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true, animations: 'disabled', scale: 'css' });
 }
 

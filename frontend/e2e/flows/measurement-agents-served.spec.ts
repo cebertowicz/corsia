@@ -20,7 +20,8 @@
 
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { loginByUrl, openSettings } from '../support/corsia';
 import { selectProjectScope } from '../support/measurement-fixture';
 // A relative path, not the `$lib` alias: Playwright loads specs with its own TS transform,

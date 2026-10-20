@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
+import { test } from './support/test';
+import { expect } from '@playwright/test';
 import { openAppByUrl } from './support/corsia';
 
 const outputDir = process.env.CORSIA_CAPTURE_DIR ?? 'test-results/runtime-download-failure';

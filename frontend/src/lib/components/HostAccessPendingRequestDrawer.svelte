@@ -340,6 +340,17 @@
 	.decision-spacer { flex: 1; }
 
 	@media (max-width: 720px) {
+		/* Keep the first requested exception above the sticky decision footer even
+		   when a non-Apple system font takes an extra line. The drawer remains the
+		   only scroll container; this only compacts existing sheet spacing. */
+		.decision-head { padding-bottom: var(--space-2); }
+		.decision-body { gap: var(--space-3); }
+		.policy-exceptions { padding: var(--space-2); }
+		.policy-exceptions .external-warning {
+			margin: var(--space-2) 0;
+			line-height: var(--lh-snug);
+		}
+		.decision-actions { padding-top: var(--space-2); }
 		.repo-policy-context li {
 			grid-template-columns: 1fr;
 			gap: 2px;

@@ -1,6 +1,6 @@
+import { test } from "./support/test";
 import {
   expect,
-  test,
   type APIRequestContext,
   type Page,
 } from "@playwright/test";
@@ -346,6 +346,9 @@ test.describe("@surface:attention The one attention dock — /_design (PLANS-AC3
       expect(closeMetrics.right, `${label} close right`).toBeLessThanOrEqual(closeMetrics.width);
       expect(closeMetrics.bottom, `${label} close bottom`).toBeLessThanOrEqual(closeMetrics.height);
       await close.press("Enter");
+      // The bar stays on screen while the drawer plays its outro, and the next width reuses this same document, so wait
+      // for the drawer itself to be gone: otherwise the next pass sees the closing drawer as open and never opens it.
+      await expect(drawer).toBeHidden();
       await expect(frame.locator(".dock-bar").first()).toBeVisible();
     }
 
