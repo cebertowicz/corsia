@@ -10,7 +10,7 @@ import pytest
 
 from connections.connected_accounts import ConnectedAccountError
 from connections.microsoft import calendar, client, files, mail
-from connections.microsoft.errors import MicrosoftError, SERVICE_UNAVAILABLE
+from connections.microsoft.errors import MicrosoftError, REQUEST_REFUSED, SERVICE_UNAVAILABLE
 from events.connectors import mail_poller as poller
 from tools import microsoft_actions as actions
 
@@ -194,6 +194,46 @@ async def test_connected_data_failures_are_retryable_without_starting_sign_in(mo
         await client.access_token("m")
     assert refresh_error.value.cause == SERVICE_UNAVAILABLE
     assert "microsoft_connect" not in refresh_error.value.message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [405, 409, 413, 422])
+async def test_a_refused_graph_request_is_refused_not_deferred(monkeypatch: pytest.MonkeyPatch, status: int) -> None:
+    """Microsoft refusing the request itself cannot clear by waiting a minute on a connected row."""
+    FakeHttp.calls, FakeHttp.responses = [], [Response(status, {"error": {"message": "provider-canary"}})]
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
+    async def token(_account: str) -> str: return "token"
+    monkeypatch.setattr(client, "access_token", token)
+    with pytest.raises(MicrosoftError) as raised:
+        await client.graph_json("GET", "item", account_id="m")
+    assert raised.value.cause == REQUEST_REFUSED and raised.value.never_sent
+    assert raised.value.state_cause is None and "provider-canary" not in raised.value.message
+
+
+@pytest.mark.asyncio
+async def test_graph_timeout_stays_a_retry_on_a_connected_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeHttp.calls, FakeHttp.responses = [], [Response(408, {"error": {"message": "provider-canary"}})]
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
+    async def token(_account: str) -> str: return "token"
+    monkeypatch.setattr(client, "access_token", token)
+    with pytest.raises(MicrosoftError) as raised:
+        await client.graph_json("GET", "item", account_id="m")
+    assert raised.value.cause == SERVICE_UNAVAILABLE and raised.value.never_sent
+    assert raised.value.state_cause is None
+
+
+@pytest.mark.asyncio
+async def test_a_second_429_stays_a_retry_on_a_connected_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeHttp.calls, FakeHttp.responses = [], [
+        Response(429, {}, {"Retry-After": "0"}), Response(429, {}, {"Retry-After": "0"}),
+    ]
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
+    async def token(_account: str) -> str: return "token"
+    monkeypatch.setattr(client, "access_token", token)
+    with pytest.raises(MicrosoftError) as raised:
+        await client.graph_json("GET", "item", account_id="m")
+    assert raised.value.cause == SERVICE_UNAVAILABLE and raised.value.never_sent
+    assert len(FakeHttp.calls) == 2
 
 
 @pytest.mark.asyncio
