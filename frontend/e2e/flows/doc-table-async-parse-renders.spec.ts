@@ -1,5 +1,6 @@
-import { expect, test } from '@playwright/test';
-import { captureConsoleErrors, createSession, TEST_TOKEN } from '../support/corsia';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
+import { captureConsoleErrors, createSession, openAppPastLanding, TEST_TOKEN, sidebarThread } from '../support/corsia';
 
 // Regression for the doc-viewer table bug: a GFM table that sits BELOW CodeMirror's
 // initial parse budget never rendered. The live-preview block widget comes from a
@@ -42,12 +43,11 @@ test.describe('@flow:doc-table-async-parse @surface:documents a table below the 
 		}
 		expect(seed.ok(), `seed failed: ${seed.status()} ${await seed.text()}`).toBeTruthy();
 
-		await page.goto(`/?token=${tok}`);
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		await openAppPastLanding(page);
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
-		await page.getByText(sessionTitle).click({ timeout: 10_000 });
+		await sidebarThread(page, sessionTitle).click({ timeout: 10_000 });
 		const browseDocuments = page.getByRole('button', { name: 'Browse documents…' });
 		if (!(await browseDocuments.isVisible())) {
 			await page.getByRole('button', { name: 'Toggle panel' }).click();

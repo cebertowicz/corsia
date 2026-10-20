@@ -16,7 +16,6 @@ from api.system_reviewer import (
     reviewer_save_error,
 )
 from infra import bulletins, config
-from infra import state
 from infra.auth import authenticate, require_human_user, require_user
 from infra.cpu_sampler import apply_cpu_profiler, cpu_sampler_running
 from infra.db_async import run_in_db
@@ -52,8 +51,6 @@ def _debug_version_overlay_default() -> bool:
 
 @router.get("/health")
 async def health():
-    if state._thread_driver_failure is not None:
-        raise HTTPException(503, f"thread driver failed: {state._thread_driver_failure}")
     return {"status": "ok"}
 
 

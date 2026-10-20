@@ -24,6 +24,7 @@ ACCOUNT_REMOVED = "account_removed"
 INTERNAL = "internal"
 FILE_NAME_CONFLICT = "file_name_conflict"
 REQUEST_REFUSED = "request_refused"
+SERVICE_UNAVAILABLE = "service_unavailable"
 
 _BROWSER_RETRY = "Microsoft sign-in couldn’t finish. Go back to CORSIA and try again."
 # (message, browser page) per code; ``{address}`` and ``{signed_in}`` are filled from the account.
@@ -91,7 +92,11 @@ _TEXT: dict[str, tuple[str, str]] = {
         _BROWSER_RETRY,
     ),
     REQUEST_REFUSED: (
-        "Microsoft refused this request. Check the draft or event details and try again.",
+        "Microsoft refused this request. Check the ids, names or fields you passed and try again.",
+        _BROWSER_RETRY,
+    ),
+    SERVICE_UNAVAILABLE: (
+        "Microsoft didn't complete this request. The account is still connected; try again in a minute. Don't start a new sign-in.",
         _BROWSER_RETRY,
     ),
 }
@@ -134,9 +139,9 @@ def person_message(cause: str) -> str:
 def token_error_cause(status: int, payload: object) -> str:
     """Map a refresh refusal to fixed causes without exposing provider text."""
     error = payload.get("error") if isinstance(payload, dict) else None
-    if status in (400, 401) and error in ("invalid_grant", "invalid_client", "unauthorized_client"):
+    if status in (400, 401) and error in ("invalid_grant", "interaction_required", "invalid_client", "unauthorized_client"):
         return REFRESH_TOKEN_INVALID
-    return PROVIDER_UNAVAILABLE
+    return SERVICE_UNAVAILABLE
 
 
 _REGISTRATION_AADSTS_CODES = frozenset((50011, 700016, 7000218))

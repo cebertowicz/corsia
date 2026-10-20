@@ -1,5 +1,6 @@
 
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import {
 	e2eModel,
 	loginByUrl,

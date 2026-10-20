@@ -1,5 +1,6 @@
 import fs from 'node:fs';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
 import {
 	at, commentButton, composer, drag, drawer, frame, isolatedDb, newRevision, openThread, overlap, pill, postComment, rest, seedImage,

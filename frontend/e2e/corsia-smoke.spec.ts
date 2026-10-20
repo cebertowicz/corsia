@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from './support/test';
+import { expect } from '@playwright/test';
 import { createSession, loginByUrl, openSettings, saveEvidenceScreenshot, TEST_TOKEN } from './support/corsia';
 
 test.describe('@surface:auth @surface:chat @surface:navigation CORSIA shell', () => {

@@ -171,6 +171,15 @@ async def test_cancel_after_actual_spawn_reaps_client(monkeypatch, tmp_path):
     assert processes[0].returncode is not None
 
 
+async def test_client_exit_returns_while_a_descendant_holds_its_pipes(tmp_path):
+    grandchild = "import subprocess,sys;subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)']);print('opened',flush=True)"
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    result = await cli.invoke((sys.executable, '-c', grandchild), socket_dir=tmp_path, timeout=20)
+    assert loop.time() - started < 6
+    assert (result.returncode, result.stdout, result.timed_out) == (0, 'opened', False)
+
+
 async def test_timeout_reaps_actual_client(tmp_path):
     result = await cli.invoke((sys.executable, '-c', 'import time;time.sleep(30)'),
                               socket_dir=tmp_path, timeout=0.05)

@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { assistantMessages, loginByUrl, openSettings, openSettingsSection, sendChatMessage, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { setFocusMode } from '../support/focusMode';
 import { seedMockResponses } from '../support/mock';

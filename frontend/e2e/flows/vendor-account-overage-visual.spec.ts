@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
 import { loginByUrl, openSettings } from '../support/corsia';
 
 // Synthetic accounts only: the disposable backend has no vendor CLI, so the
@@ -55,6 +56,8 @@ async function openHarnessAccounts(page: Page, provider: string, account: string
 
 test.describe('@surface:providers accounts live in settings modal', () => {
 	test('the harness gear opens canonical account rows and a flip writes only that account', async ({ page }, testInfo) => {
+		// Four viewport/theme evidence passes plus the final write exceed mock mode's suite-wide 30s ceiling.
+		test.setTimeout(60_000);
 		const writes: { url: string; body: unknown }[] = [];
 		await serveAccounts(page, writes);
 		for (const [name, width, colorScheme] of [

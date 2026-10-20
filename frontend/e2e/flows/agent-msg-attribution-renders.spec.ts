@@ -1,5 +1,6 @@
 
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +8,7 @@ import {
 	captureConsoleErrors,
 	captureFailedRequests,
 	createSession,
+	openAppPastLanding,
 	saveEvidenceScreenshot,
 	TEST_SESSION_TOKEN,
 	TEST_TOKEN,
@@ -76,8 +78,7 @@ test.describe('@flow:delegation @surface:chat agent message attribution renders'
 		);
 		expect(sendResp.ok()).toBeTruthy();
 
-		await page.goto(`/?token=${encodeURIComponent(TEST_SESSION_TOKEN)}`);
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		await openAppPastLanding(page);
 		// Focus is on by default and hides finished work; this spec reads the raw transcript.
 		await focusSetting(page, false);
 
@@ -178,8 +179,7 @@ test.describe('@flow:delegation @surface:chat agent message attribution renders'
 			},
 		);
 
-		await page.goto(`/?token=${encodeURIComponent(TEST_SESSION_TOKEN)}`);
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		await openAppPastLanding(page);
 		await focusSetting(page, false);
 
 		if ((page.viewportSize()?.width ?? 0) <= 768) {

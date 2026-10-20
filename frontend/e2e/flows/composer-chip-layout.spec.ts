@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
 
 // The composer row and the model picker on a Codex account that is past its plan

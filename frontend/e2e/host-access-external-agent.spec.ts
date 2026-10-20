@@ -1,4 +1,5 @@
-import { expect, test, type Page, type TestInfo, type WebSocketRoute } from '@playwright/test';
+import { test } from './support/test';
+import { expect, type Page, type TestInfo, type WebSocketRoute } from '@playwright/test';
 
 import { externalLease } from './fixtures/external-agent-lease';
 import {
@@ -6,7 +7,7 @@ import {
 	createSession,
 	loginByUrl,
 	saveEvidenceScreenshot,
-	TEST_TOKEN,
+	TEST_SESSION_TOKEN,
 } from './support/corsia';
 import type { HostAccessExternalAgentException, HostAccessLease } from '../src/lib/api/hostAccess';
 
@@ -100,7 +101,7 @@ async function installPresentation(
 
 	await page.route('**/api/host-access/leases**', async (route) => {
 		const request = route.request();
-		expect(request.headers().authorization).toBe(`Bearer ${TEST_TOKEN}`);
+		expect(request.headers().authorization).toBe(`Bearer ${TEST_SESSION_TOKEN}`);
 		const url = new URL(request.url());
 		const action = url.pathname.match(/\/(approve|reject|revoke)$/)?.[1];
 		if (request.method() === 'POST' && action) {
@@ -137,6 +138,11 @@ async function assertInitialViewport(
 	const viewport = page.viewportSize()!;
 	const warning = dialog.locator('.external-warning');
 	const command = dialog.getByText('Command', { exact: true });
+	// The review slides in on open; its bounds are read where it comes to rest.
+	await expect.poll(async () => {
+		const rest = await dialog.boundingBox();
+		return !!rest && rest.y >= 0 && rest.y + rest.height <= viewport.height;
+	}, 'the review rests inside the viewport').toBe(true);
 	const [warningBox, commandBox, rejectBox, approveBox, footerBox, headBox] = await Promise.all([
 		warning.boundingBox(),
 		command.boundingBox(),
