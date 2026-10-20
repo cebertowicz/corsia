@@ -20,7 +20,7 @@ afterEach(() => {
 
 const account: ConnectedAccount = {
 	kind: 'account', id: 'acc 1', provider: 'google', address: 'person@example.com',
-	capabilities: ['mail', 'calendar', 'files'], state: 'connected',
+	capabilities: ['mail', 'calendar', 'files'], state: 'connected', tenant_id: null,
 	reach: { mode: 'corsia', project_ids: [], outside_projects: false },
 };
 const app = { id: 'app-1', name: 'GitHub', state: 'working', revision: 3, reach: { mode: 'all' as const, project_ids: [], outside_projects: false } };

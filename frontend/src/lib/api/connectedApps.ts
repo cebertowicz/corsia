@@ -73,6 +73,7 @@ export interface ConnectedAccount {
 	cause?: string | null;
 	/** Microsoft Application (client) ID only; no credential or key-store reference leaves the server. */
 	client_id?: string | null;
+	tenant_id?: string | null;
 	reach: AccountReach;
 }
 

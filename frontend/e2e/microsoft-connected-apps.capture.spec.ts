@@ -7,6 +7,7 @@ import { loginByUrl, openSettings, openSettingsSection } from './support/corsia'
 const outputDir = resolve(dirname(fileURLToPath(import.meta.url)), process.env.CORSIA_CAPTURE_DIR ?? 'test-results/microsoft-connected-apps');
 const captureEnabled = process.env.CORSIA_CAPTURE_MICROSOFT_CONNECTED_APPS === '1';
 const clientId = '11111111-1111-4111-8111-111111111111';
+const tenantId = '22222222-2222-4222-8222-222222222222';
 const allProjects = { mode: 'all' as const, project_ids: [], outside_projects: false };
 const onlyCorsia = { mode: 'corsia' as const, project_ids: [], outside_projects: false };
 type State = 'connected' | 'admin' | 'cancelled' | 'expired' | 'failure' | 'many';
@@ -17,7 +18,7 @@ function microsoft(state: State, id = 'microsoft-work', address = 'alex@contoso.
 		state: state === 'connected' || state === 'many' ? 'connected' as const : 'needs_sign_in' as const,
 		account_kind: address.endsWith('@outlook.example') ? 'personal' as const : 'work' as const,
 		cause: state === 'admin' ? 'admin_approval_required' : state === 'cancelled' ? 'consent_cancelled' : state === 'expired' ? 'refresh_token_invalid' : state === 'failure' ? 'provider_unavailable' : null,
-		client_id: clientId, reach: allProjects,
+		client_id: clientId, tenant_id: tenantId, reach: allProjects,
 	};
 }
 
@@ -28,7 +29,7 @@ function accounts(state: State) {
 		microsoft(state, 'microsoft-three', 'alexandria.long-project-alpha-address@contoso.example'),
 		microsoft(state, 'microsoft-four', 'alexandria.long-project-beta-address@contoso.example'),
 	];
-	return [microsoft(state), { id: 'google', provider: 'google' as const, address: 'alex@gmail.example', capabilities: ['mail', 'calendar', 'files'], state: 'connected' as const, reach: onlyCorsia }];
+	return [microsoft(state), { id: 'google', provider: 'google' as const, address: 'alex@gmail.example', capabilities: ['mail', 'calendar', 'files'], state: 'connected' as const, tenant_id: null, reach: onlyCorsia }];
 }
 
 async function capture(page: Page, testInfo: TestInfo, name: string) {
