@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import psutil
 import shutil
 import subprocess
@@ -217,6 +218,11 @@ def launchd_jobs() -> dict[int, str] | None:
 def _serve_argv(argv: list[str]) -> list[str] | None:
     if not argv:
         return None
+    # oMLX rewrites its process title to this exact value while serving. The
+    # rewritten argv carries no usable launch arguments, so it cannot prove
+    # managed ownership; it is still an oMLX process for personal/legacy rules.
+    if argv[0] == "omlx-server":
+        return argv[1:]
     executable = Path(argv[0]).name
     index = 1 if executable.lower().startswith("python") else 0
     if len(argv) > index + 1 and Path(argv[index]).name == "omlx" and argv[index + 1] == "serve":
@@ -247,13 +253,19 @@ def omlx_processes() -> tuple[OmlxProcess, ...] | None:
     from llm.local_setup_upgrade import pending_legacy_port
 
     parsed = []
+    current_uid = os.getuid()
     try:
-        for process in psutil.process_iter(["pid", "name", "ppid", "cmdline"]):
+        for process in psutil.process_iter(["pid", "name", "ppid", "cmdline", "status", "uids"]):
             info = process.info
+            if info.get("status") == psutil.STATUS_ZOMBIE:
+                continue
+            uids = info.get("uids")
+            if getattr(uids, "real", None) != current_uid:
+                continue
             cmdline = info.get("cmdline")
-            if cmdline is None:
+            if not cmdline:
                 name = str(info.get("name") or "").lower()
-                if name == "omlx" or name.startswith("python"):
+                if name in {"omlx", "omlx-server"} or name.startswith("python"):
                     return None
                 continue
             argv = _serve_argv(cmdline)

@@ -310,8 +310,10 @@ def _fake_commands(monkeypatch, *, launchctl_list: str, record: list[list[str]])
         raise AssertionError(f"unexpected command {command}")
 
     monkeypatch.setattr(managed.subprocess, "run", run)
+    monkeypatch.setattr(managed.os, "getuid", lambda: 501)
     monkeypatch.setattr(managed.psutil, "process_iter", lambda _attrs: [SimpleNamespace(info={
         "pid": 101, "ppid": 1, "name": "Python", "cmdline": _PS.split()[2:],
+        "uids": SimpleNamespace(real=501), "status": "running",
     })])
     monkeypatch.setattr("llm.local_setup_upgrade.pending_legacy_port", lambda: None)
 
@@ -326,7 +328,7 @@ def test_stop_mine_boots_out_a_launchd_job_for_this_session_only(monkeypatch) ->
 
     processes = managed.foreign_omlx_processes()
     assert processes is not None and [p.pid for p in processes] == [101]
-    assert foreign.stop_foreign_omlx_processes(processes) is True
+    assert foreign.stop_foreign_omlx_processes(processes) == "stopped"
     assert ["launchctl", "bootout", "gui/501/homebrew.mxcl.omlx"] in commands
     assert not any(command[0] in {"brew", "rm"} or "unload" in command or "remove" in command
                    for command in commands)
@@ -342,7 +344,7 @@ def test_stop_mine_signals_a_plain_process(monkeypatch) -> None:
 
     processes = managed.foreign_omlx_processes()
     assert processes is not None
-    assert foreign.stop_foreign_omlx_processes(processes) is True
+    assert foreign.stop_foreign_omlx_processes(processes) == "stopped"
     assert signals == [(101, 15)]
     assert not any(command[:2] == ["launchctl", "bootout"] for command in commands)
 
@@ -358,15 +360,17 @@ def test_stop_mine_falls_back_to_a_signal_when_launchd_is_unreadable(monkeypatch
         raise subprocess.CalledProcessError(1, command)
 
     monkeypatch.setattr(managed.subprocess, "run", run)
+    monkeypatch.setattr(managed.os, "getuid", lambda: 501)
     monkeypatch.setattr(managed.psutil, "process_iter", lambda _attrs: [SimpleNamespace(info={
         "pid": 101, "ppid": 1, "name": "Python", "cmdline": _PS.split()[2:],
+        "uids": SimpleNamespace(real=501), "status": "running",
     })])
     monkeypatch.setattr("llm.local_setup_upgrade.pending_legacy_port", lambda: None)
     monkeypatch.setattr(foreign.os, "kill", lambda pid, _sig: signals.append(pid))
 
     processes = managed.foreign_omlx_processes()
     assert processes is not None
-    assert foreign.stop_foreign_omlx_processes(processes) is True
+    assert foreign.stop_foreign_omlx_processes(processes) == "stopped"
     assert signals == [101]
 
 

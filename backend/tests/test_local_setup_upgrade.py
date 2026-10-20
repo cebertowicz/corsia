@@ -273,8 +273,10 @@ def upgrade_env(legacy, isolated_db, monkeypatch):
             return iter(())
         return iter([SimpleNamespace(info={
             "pid": 101, "ppid": 1, "name": "omlx", "cmdline": ["/brew/omlx", "serve"],
+            "uids": SimpleNamespace(real=501), "status": "running",
         })])
 
+    monkeypatch.setattr(managed.os, "getuid", lambda: 501)
     monkeypatch.setattr(managed, "launchd_jobs",
                         lambda: {101: managed.BREW_SERVICE_LABEL} if service["running"] else {})
     monkeypatch.setattr(managed.psutil, "process_iter", process_iter)

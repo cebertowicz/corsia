@@ -66,46 +66,47 @@ def _stop_process(process: OmlxProcess) -> bool:
     return True
 
 
-def stop_foreign_omlx_processes(chosen: tuple[OmlxProcess, ...]) -> bool:
+def stop_foreign_omlx_processes(chosen: tuple[OmlxProcess, ...]) -> Literal["stopped", "changed", "unknown", "failed"]:
     """Stop every chosen PID only after the whole current personal set matches it.
 
     launchd jobs are booted out for this login; plain processes receive SIGTERM.
-    No newly appeared process is covered by a previous answer.
+    No newly appeared process is covered by a previous answer. An unreadable
+    revalidation is kept distinct so setup can continue without stopping.
     """
     current = foreign_omlx_processes()
-    if current is None or set(current) != set(chosen):
-        return False
+    if current is None:
+        return "unknown"
+    if set(current) != set(chosen):
+        return "changed"
     stopped_labels: set[str] = set()
     for process in current:
         if process.label and process.label in stopped_labels:
             continue
         if not _stop_process(process):
-            return False
+            return "failed"
         if process.label:
             stopped_labels.add(process.label)
-    return True
+    return "stopped"
 
 
-def foreign_omlx_refusal(code: str) -> dict[str, str]:
-    """Give an inspection failure a log reference; choice errors need only their code."""
-    if code != "foreign_omlx_unknown":
-        return {"code": code}
+def _continue_after_unknown_inspection() -> None:
+    """Record an unreadable process list without exposing a setup state to the user."""
     from api.cli_install import new_reference
 
     ref = new_reference()
-    log.error("could not identify running oMLX processes reference=%s", ref)
-    return {"code": code, "ref": ref}
+    log.warning("could not identify running oMLX processes; continuing without stopping reference=%s", ref)
 
 
 def apply_foreign_omlx_choice(*, other_omlx: OtherOmlxChoice | None = None) -> str | None:
     """Apply one answer to the offered process set, or return an explicit refusal.
 
-    Unknown inspection blocks the action without asking about or stopping any
+    Unknown inspection continues setup without asking about or stopping any
     process. Keep both survives PID changes; Stop requires the exact offered set.
     """
     processes = foreign_omlx_processes()
     if processes is None:
-        return "foreign_omlx_unknown"
+        _continue_after_unknown_inspection()
+        return None
     if not processes:
         return None
     pids = sorted(process.pid for process in processes)
@@ -124,7 +125,11 @@ def apply_foreign_omlx_choice(*, other_omlx: OtherOmlxChoice | None = None) -> s
     elif remembered != "stop" or record.get("pids") != pids:
         _write_choice(None, pids, applied=False)
         return "consent_required"
-    if not stop_foreign_omlx_processes(processes):
+    stop_result = stop_foreign_omlx_processes(processes)
+    if stop_result == "unknown":
+        _continue_after_unknown_inspection()
+        return None
+    if stop_result != "stopped":
         return "foreign_omlx_changed"
     _write_choice("stop", pids, applied=True)
     return None

@@ -842,7 +842,7 @@ class TestRecheck:
         monkeypatch.setattr(local_setup_foreign, "foreign_omlx_processes", lambda: offered)
         stops = []
         monkeypatch.setattr(
-            local_setup_foreign, "stop_foreign_omlx_processes", lambda pids: stops.append(pids) or True,
+            local_setup_foreign, "stop_foreign_omlx_processes", lambda pids: stops.append(pids) or "stopped",
         )
 
         async def begin(**_kwargs):
@@ -889,7 +889,7 @@ class TestRecheck:
 
         def stop(processes):
             stops.append(processes)
-            return True
+            return "stopped"
 
         monkeypatch.setattr(local_setup_foreign, "stop_foreign_omlx_processes", stop)
 
@@ -937,6 +937,22 @@ class TestRecheck:
         monkeypatch.setattr("llm.local_setup.cancel_local_setup", cancel)
         assert client.post("/api/providers/local/cancel").json() == {"ok": True, "cancelled": True}
         assert calls == [True]
+
+    def test_local_setup_route_continues_when_process_inspection_is_unknown(
+            self, isolated_db, client, monkeypatch, caplog):
+        from llm import local_setup_foreign
+
+        monkeypatch.setattr(local_setup_foreign, "foreign_omlx_processes", lambda: None)
+
+        async def begin(**_kwargs):
+            return {"ok": True, "in_progress": True}
+
+        monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
+        response = client.post("/api/providers/local/setup")
+
+        assert response.status_code == 200
+        assert response.json() == {"ok": True, "in_progress": True}
+        assert "continuing without stopping reference=cli-" in caplog.text
 
     def test_local_setup_route_requires_a_choice_for_an_identified_foreign_process(self, isolated_db, client, monkeypatch):
         monkeypatch.setattr("api.provider_sources.apply_foreign_omlx_choice", lambda **_kwargs: "consent_required")

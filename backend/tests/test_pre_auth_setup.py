@@ -198,6 +198,22 @@ def test_local_download_uses_the_single_managed_flight_when_no_foreign_process_e
     assert calls == 2
 
 
+def test_local_download_continues_when_process_inspection_is_unknown(client, monkeypatch, caplog):
+    from llm import local_setup, local_setup_foreign
+
+    monkeypatch.setattr(local_setup_foreign, "foreign_omlx_processes", lambda: None)
+
+    async def begin_local_setup():
+        return {"ok": True, "in_progress": True}
+
+    monkeypatch.setattr(local_setup, "begin_local_setup", begin_local_setup)
+    response = _post(client, "/api/setup/local-download")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "in_progress": True}
+    assert "continuing without stopping reference=cli-" in caplog.text
+
+
 def test_local_download_requires_explicit_choice_before_foreign_omlx_action(client, monkeypatch):
     from llm import local_setup
 

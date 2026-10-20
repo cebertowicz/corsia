@@ -29,7 +29,7 @@ from infra.auth import authenticate, require_user, token_from_request
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
 from infra.time import utc_storage_iso_to_api
-from llm.local_setup_foreign import apply_foreign_omlx_choice, foreign_omlx_answer, foreign_omlx_refusal
+from llm.local_setup_foreign import apply_foreign_omlx_choice, foreign_omlx_answer
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 logger = logging.getLogger(__name__)
@@ -301,7 +301,7 @@ async def local_download(request: Request) -> dict | Response:
         apply_foreign_omlx_choice,
         other_omlx=body.other_omlx,
     ):
-        return JSONResponse(status_code=409, content=foreign_omlx_refusal(refusal))
+        return JSONResponse(status_code=409, content={"code": refusal})
     from llm.local_setup import begin_local_setup
 
     return await begin_local_setup()

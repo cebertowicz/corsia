@@ -9,8 +9,11 @@ from llm import local_setup_foreign as foreign, local_setup_managed as managed
 from llm import local_setup_ownership as installer
 
 
-def _process(pid, argv, *, name="Python"):
-    return SimpleNamespace(info={"pid": pid, "ppid": 1, "name": name, "cmdline": argv})
+def _process(pid, argv, *, name="Python", uid=501, status=psutil.STATUS_RUNNING):
+    return SimpleNamespace(info={
+        "pid": pid, "ppid": 1, "name": name, "cmdline": argv,
+        "uids": SimpleNamespace(real=uid), "status": status,
+    })
 
 
 @pytest.fixture
@@ -18,6 +21,7 @@ def identity(monkeypatch, tmp_path):
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
     monkeypatch.setattr("llm.local_setup_upgrade.pending_legacy_port", lambda: None)
     monkeypatch.setattr(managed, "launchd_jobs", lambda: {})
+    monkeypatch.setattr(managed.os, "getuid", lambda: 501)
     return tmp_path
 
 
@@ -32,12 +36,14 @@ def test_argv_identity_uses_the_exact_resolved_base_and_the_last_option(identity
         _process(104, ["omlx", "serve", "--model-dir", str(base)]),
         _process(105, ["omlx", "serve", "--base-path", str(base), "--base-path", "/personal"]),
         _process(106, ["echo", "omlx", "serve", "--base-path", str(base)]),
+        _process(107, ["omlx-server", "", "", ""], name="python3.11"),
     ]
     monkeypatch.setattr(managed.psutil, "process_iter", lambda _attrs: processes)
     result = managed.omlx_processes()
     assert result is not None
     assert [(p.pid, p.owner) for p in result] == [
         (101, "managed"), (102, "managed"), (103, "personal"), (104, "personal"), (105, "personal"),
+        (107, "personal"),
     ]
 
 
@@ -50,13 +56,34 @@ def test_no_process_is_distinct_from_unknown(identity, monkeypatch):
 
     monkeypatch.setattr(managed.psutil, "process_iter", unreadable)
     assert managed.foreign_omlx_processes() is None
+
+
+@pytest.mark.parametrize("name", ["python3.11", "omlx", "omlx-server"])
+@pytest.mark.parametrize("argv", [None, []])
+def test_same_user_unreadable_omlx_candidate_continues_without_stopping(identity, monkeypatch, caplog, name, argv):
+    monkeypatch.setattr(managed.psutil, "process_iter", lambda _attrs: [_process(101, argv, name=name)])
     monkeypatch.setattr(foreign, "stop_foreign_omlx_processes", lambda _p: pytest.fail("must not stop"))
-    assert foreign.apply_foreign_omlx_choice(other_omlx="stop") == "foreign_omlx_unknown"
+
+    assert foreign.apply_foreign_omlx_choice(other_omlx="stop") is None
+    assert "continuing without stopping reference=cli-" in caplog.text
     assert not foreign.foreign_omlx_choice_path().exists()
 
 
-def test_unreadable_python_argv_is_unknown(identity, monkeypatch):
-    monkeypatch.setattr(managed.psutil, "process_iter", lambda _attrs: [_process(101, None)])
+def test_zombie_and_other_user_processes_are_skipped(identity, monkeypatch):
+    processes = [
+        _process(101, None, status=psutil.STATUS_ZOMBIE),
+        _process(102, None, uid=502),
+    ]
+    monkeypatch.setattr(managed.psutil, "process_iter", lambda _attrs: processes)
+
+    assert managed.foreign_omlx_processes() == ()
+
+
+def test_enumeration_failure_remains_unknown(identity, monkeypatch):
+    def failing_iterator(_attrs):
+        raise psutil.AccessDenied()
+
+    monkeypatch.setattr(managed.psutil, "process_iter", failing_iterator)
     assert managed.foreign_omlx_processes() is None
 
 
@@ -82,14 +109,15 @@ def test_stop_never_transfers_to_a_changed_process_set(identity, monkeypatch):
     assert foreign.foreign_omlx_answer() == "none"
 
 
-def test_revalidation_failure_stops_nothing(identity, monkeypatch):
+def test_unknown_revalidation_continues_without_stopping_or_recording_success(identity, monkeypatch, caplog):
     original = (managed.OmlxProcess(101, 1, None, "personal"),)
     reads = iter([original, original, None])
     monkeypatch.setattr(foreign, "foreign_omlx_processes", lambda: next(reads))
     monkeypatch.setattr(foreign.os, "kill", lambda *_a: pytest.fail("unknown set must not stop"))
     assert foreign.apply_foreign_omlx_choice() == "consent_required"
-    assert foreign.apply_foreign_omlx_choice(other_omlx="stop") == "foreign_omlx_changed"
+    assert foreign.apply_foreign_omlx_choice(other_omlx="stop") is None
     assert foreign.foreign_omlx_answer() == "none"
+    assert "continuing without stopping reference=cli-" in caplog.text
 
 
 def test_keep_both_and_status_survive_a_pid_change_without_process_reads(identity, monkeypatch):
@@ -140,11 +168,11 @@ async def test_prepare_projects_personal_binary_update_cause_and_reference(monke
     assert view["message"] == "Update your oMLX, then Retry."
 
 
-def test_unknown_process_refusal_has_a_correlated_reference(caplog):
-    refusal = foreign.foreign_omlx_refusal("foreign_omlx_unknown")
-    assert refusal["ref"].startswith("cli-")
-    assert refusal["ref"] in caplog.text
-    assert foreign.foreign_omlx_refusal("consent_required") == {"code": "consent_required"}
+def test_stop_revalidation_keeps_unknown_distinct(identity, monkeypatch):
+    process = managed.OmlxProcess(101, 1, None, "personal")
+    monkeypatch.setattr(foreign, "foreign_omlx_processes", lambda: None)
+
+    assert foreign.stop_foreign_omlx_processes((process,)) == "unknown"
 
 
 def test_fresh_install_records_ownership_without_creating_a_legacy_upgrade(tmp_path, monkeypatch):
