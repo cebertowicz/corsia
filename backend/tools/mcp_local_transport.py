@@ -45,7 +45,12 @@ def mcp_cache_root(home: Path | None = None) -> Path:
 
 def _mcp_cache_dir(name: str, workspace: Path, state_root: Path) -> Path:
     """Return an app-private cache that cannot overlap CORSIA workspace or state."""
-    cache_dir = (mcp_cache_root() / name).resolve(strict=False)
+    cache_root = mcp_cache_root().resolve(strict=False)
+    cache_dir = (cache_root / name).resolve(strict=False)
+    # The Safehouse profile reopens this directory for writes, so it must stay a
+    # direct child of the cache root; a name resolving elsewhere would reopen it.
+    if cache_dir.parent != cache_root:
+        raise MCPConfigError("local MCP cache must be one directory inside the MCP cache root")
     if any(
         cache_dir == root or cache_dir.is_relative_to(root) or root.is_relative_to(cache_dir)
         for root in (workspace.resolve(strict=False), state_root.resolve(strict=False))

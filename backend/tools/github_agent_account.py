@@ -18,7 +18,6 @@ _PROMPT_SECONDS = 15.0
 _ACCOUNT_NAME = "Agents"
 _PROMPT_NEXT = "retry connect; if it repeats, update GitHub CLI or report its prompt format"
 _LOGIN_FAILURE_NEXT = "retry connect; if it exits again, check the GitHub CLI installation"
-_STORAGE_NEXT = "retry connect; if it repeats, check CORSIA's GitHub CLI storage"
 
 
 def _signin_with_next(signin: dict[str, Any]) -> dict[str, Any]:
@@ -28,8 +27,6 @@ def _signin_with_next(signin: dict[str, Any]) -> dict[str, Any]:
         return signin | {"next": _PROMPT_NEXT}
     if cause == "vendor_login_failed":
         return signin | {"next": _LOGIN_FAILURE_NEXT}
-    if cause == "storage_unavailable":
-        return signin | {"next": _STORAGE_NEXT}
     return signin
 
 

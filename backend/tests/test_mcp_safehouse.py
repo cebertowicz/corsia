@@ -146,6 +146,16 @@ def test_mcp_profile_denies_the_app_cache_root_but_allows_own_cache(monkeypatch,
     assert f'(allow file-write* (subpath "{own_cache}"))' in profile
 
 
+@pytest.mark.parametrize("name", ["..", "../..", "app-a/nested", "/tmp/elsewhere"])
+def test_app_cache_must_be_one_directory_inside_the_cache_root(monkeypatch, tmp_path, name):
+    from tools.mcp_config import MCPConfigError
+    from tools.mcp_local_transport import _mcp_cache_dir
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    with pytest.raises(MCPConfigError, match="one directory inside the MCP cache root"):
+        _mcp_cache_dir(name, tmp_path / "workspace", tmp_path / "state")
+
+
 def test_agent_shell_profile_denies_local_app_cache_parent(monkeypatch, tmp_path):
     from infra import config
     from tools.host_path_policy import current_protected_host_path_policy
