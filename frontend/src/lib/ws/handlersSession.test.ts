@@ -7,7 +7,10 @@ import { activeThreadId, threads } from '$lib/stores/threads';
 import { handleMessage } from './handlers';
 
 const resetHeartbeat = () => {};
-const worker = () => get(subagentMeta).get('worker')?.thread;
+const worker = () => {
+	const ref = get(subagentMeta).get('worker');
+	return ref && { ...ref.thread, model: ref.model };
+};
 
 // A worker is not in the thread list: its composer reads the worker's own row.
 beforeEach(() => {
@@ -16,8 +19,7 @@ beforeEach(() => {
 	activeModelId.set('model/parent');
 	threads.set([{ id: 'parent', model: 'model/parent', updated_at: '2026-10-20T10:00:00.000000' } as never]);
 	subagentMeta.set(new Map([['worker', {
-		childThreadId: 'worker', parentThreadId: 'parent', name: 'Worker', provider: 'cc', status: 'running',
-		thread: { model: 'model/before' },
+		childThreadId: 'worker', parentThreadId: 'parent', name: 'Worker', provider: 'cc', status: 'running', model: 'model/before',
 	}]]));
 });
 

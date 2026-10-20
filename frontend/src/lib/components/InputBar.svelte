@@ -206,10 +206,10 @@
 
 	const activeThread = $derived(selection.thread);
 	const hasReadySwitchDestination = $derived(readySwitchDestination(activeThread, $models));
-	// A thread outside the list whose row has not loaded yet (a worker opened cold, the Corsia agent)
-	// has no model to gate on: the server holds or routes the message.
-	const rowNotLoaded = $derived(boundThreadId !== null && (boundThreadId === $corsiaAgentId || !selection.isOpen));
-	const canSendToModel = $derived(!$updateRestarting && composerCanSend(activeThread, activeModel, $models, rowNotLoaded));
+	// A thread outside the list (a worker, the Corsia agent) may have no model to gate on yet:
+	// the server holds or routes the message.
+	const allowUnlistedNoModelThread = $derived(boundThreadId !== null && (boundThreadId === $corsiaAgentId || !selection.isOpen));
+	const canSendToModel = $derived(!$updateRestarting && composerCanSend(activeThread, activeModel, $models, allowUnlistedNoModelThread));
 	const hasMessageToSend = $derived(inputText.trim().length > 0 || pendingAttachments.length > 0);
 
 	function handleSendButtonClick() {

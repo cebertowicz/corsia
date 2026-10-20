@@ -70,8 +70,8 @@ beforeEach(() => {
 	reasoningEffort.set('medium');
 	threads.set([{ id: 'parent', model: PARENT_MODEL, reasoning_effort: 'medium' } as never]);
 	subagentMeta.set(new Map([['worker', {
-		childThreadId: 'worker', parentThreadId: 'parent', name: 'Worker bee', provider: 'cc', status: 'running',
-		thread: { model: WORKER_MODEL, reasoning_effort: 'none' },
+		childThreadId: 'worker', parentThreadId: 'parent', name: 'Worker bee', provider: 'cc', status: 'running', model: WORKER_MODEL,
+		thread: { reasoning_effort: 'none' },
 	}]]));
 	models.set([model(PARENT_MODEL, 'Parent-9B'), model(WORKER_MODEL, 'Worker-9B'), model(NEXT_MODEL, 'Next-9B')]);
 	globalThis.fetch = vi.fn(async () => new Response(
@@ -134,7 +134,7 @@ describe('worker composer reads and changes its own thread', () => {
 		expect(url).not.toContain('/api/threads/parent');
 		expect(init.method).toBe('PATCH');
 		expect(init.body).toBe(JSON.stringify({ model: NEXT_MODEL }));
-		await vi.waitFor(() => expect(get(subagentMeta).get('worker')?.thread?.model).toBe(NEXT_MODEL));
+		await vi.waitFor(() => expect(get(subagentMeta).get('worker')?.model).toBe(NEXT_MODEL));
 		expect(get(activeModelId)).toBe(PARENT_MODEL);
 	});
 

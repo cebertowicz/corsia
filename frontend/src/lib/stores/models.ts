@@ -3,7 +3,7 @@ import { activeModelId, getModelDispatchId, models, workspaceModels } from './mo
 import { plainErrorText } from '../plainError';
 import { activeThreadId, threads } from './threads';
 import { setContextUsage } from './contextUsageByThread';
-import { patchSubagentThread } from './subagents';
+import { setSubagentInit } from './subagents';
 import {
 	applyPendingThreadModelSwitch,
 	type PendingThreadModelSaveResult,
@@ -203,7 +203,7 @@ export function acceptThreadModelTruth(
 		if (order < 0 || (order === 0 && current.model !== model)) return false;
 	}
 	threadModelTruth.set(threadId, { model, updatedAt });
-	patchSubagentThread(threadId, { model });
+	setSubagentInit(threadId, { model });
 	threads.update((rows) => {
 		const updated = rows.map((thread) => (
 			thread.id === threadId

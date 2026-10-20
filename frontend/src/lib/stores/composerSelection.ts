@@ -31,8 +31,9 @@ export const composerSelectionFor: Readable<(threadId?: string | null) => Compos
 	([$activeThreadId, $activeModelId, $reasoningEffort, $threads, $subagentMeta]) =>
 		(threadId?: string | null): ComposerSelection => {
 			const id = threadId ?? $activeThreadId;
-			const thread: ComposerThreadRow | undefined =
-				$threads.find((row) => row.id === id) ?? ($subagentMeta.get(id ?? '')?.thread);
+			const worker = $subagentMeta.get(id ?? '');
+			const thread: ComposerThreadRow | undefined = $threads.find((row) => row.id === id)
+				?? (worker ? { ...worker.thread, model: worker.model } : undefined);
 			if (id === null || id === $activeThreadId) {
 				return { threadId: id, isOpen: true, thread, modelId: $activeModelId, effort: $reasoningEffort };
 			}

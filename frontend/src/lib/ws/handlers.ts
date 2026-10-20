@@ -8,7 +8,7 @@ import type { Message } from '../stores/threads';
 import { isDisplayedThread } from '../stores/displayedThreads';
 import { readMessageDeliveryState } from '../messageDelivery';
 import { emit } from './events';
-import { registerSubagent, setSubagentStatus, setSubagentInit, patchSubagentThread } from '../stores/subagents';
+import { registerSubagent, setSubagentStatus, setSubagentInit } from '../stores/subagents';
 import { handleAuthOk, handleSystemDraining, handleWsError } from './handlersConnection';
 import { compareMessageOrder } from '../messageHistory';
 import {
@@ -139,10 +139,7 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 		case 'subagent_meta':
 			if (data.thread_id) {
 				registerSubagent(data.parent_thread_id, data.thread_id, data.name || 'subagent', data.provider || 'cc', data.live ? 'running' : 'idle');
-				if (data.model) {
-					setSubagentInit(data.thread_id, { model: data.model });
-					patchSubagentThread(data.thread_id, { model: data.model });
-				}
+				if (data.model) setSubagentInit(data.thread_id, { model: data.model });
 			}
 			break;
 

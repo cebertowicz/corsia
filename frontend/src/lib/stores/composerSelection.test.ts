@@ -15,8 +15,8 @@ beforeEach(() => {
 		{ id: 'other', model: 'model/other', reasoning_effort: 'low' } as never,
 	]);
 	subagentMeta.set(new Map([['worker', {
-		childThreadId: 'worker', parentThreadId: 'open', name: 'Worker', provider: 'cc', status: 'running',
-		thread: { model: 'model/worker', reasoning_effort: 'none', project_id: 'project-1' },
+		childThreadId: 'worker', parentThreadId: 'open', name: 'Worker', provider: 'cc', status: 'running', model: 'model/worker',
+		thread: { reasoning_effort: 'none', project_id: 'project-1' },
 	}]]));
 });
 

@@ -28,13 +28,14 @@ export type SubStatus = 'running' | 'ready' | 'closed' | 'error' | 'idle' | 'unk
 const TERMINAL_STATUSES: ReadonlySet<SubStatus> = new Set<SubStatus>(['closed', 'error']);
 
 /**
- * The thread-row fields the composer's model and effort controls read. The thread
- * list never holds a worker, so a worker carries its own row here and the composer
- * reads it the way it reads any thread's.
+ * The thread-row fields, beyond the model, that the composer's effort and switch
+ * controls read. The thread list never holds a worker, so a worker carries them
+ * here and the composer reads them the way it reads any thread's. The worker's
+ * selected model is `SubagentRef.model`, its one copy in this store.
  */
 export type SubagentThreadFields = Partial<Pick<
 	Thread,
-	| 'model' | 'reasoning_effort' | 'project_id'
+	| 'reasoning_effort' | 'project_id'
 	| 'pending_model' | 'switch_status' | 'switch_error' | 'switch_operation_id'
 >>;
 
@@ -44,7 +45,7 @@ export interface SubagentRef {
 	name: string;
 	provider: string;
 	status: SubStatus;
-	/** What the provider reported at start; the thread's selected model is `thread.model`. */
+	/** The worker's selected model: the provider's report at start, then every accepted switch. */
 	model?: string;
 	cwd?: string;
 	thread?: SubagentThreadFields;
@@ -78,7 +79,7 @@ export function registerSubagent(
 	});
 }
 
-/** Fold selected-model, effort and switch fields into a worker's row; a thread that is no worker is ignored. */
+/** Fold effort, project and switch fields into a worker's row; a thread that is no worker is ignored. */
 export function patchSubagentThread(childId: string, fields: SubagentThreadFields): void {
 	subagentMeta.update((m) => {
 		const prev = m.get(childId);
@@ -158,7 +159,8 @@ export async function hydrateSubagentThread(
 	if (!threadId || !token) return null;
 	const version = (hydrationVersions.get(threadId) ?? 0) + 1;
 	hydrationVersions.set(threadId, version);
-	const statusBefore = get(subagentMeta).get(threadId)?.status ?? null;
+	const before = get(subagentMeta).get(threadId);
+	const statusBefore = before?.status ?? null;
 	try {
 		const res = await fetch(
 			`/api/delegation/threads/${encodeURIComponent(threadId)}/status`
@@ -178,10 +180,28 @@ export async function hydrateSubagentThread(
 		const serverParent = typeof truth?.parent_thread_id === 'string' ? truth.parent_thread_id : '';
 		if (serverParent) setSubagentParent(threadId, serverParent);
 		const current = get(subagentMeta).get(threadId);
+		// The composer reads these on a worker in any status, so they fold in before
+		// either early return. A field a live frame or the user changed while this
+		// request was in flight is newer than the response and stays.
+		const foldThreadFields = () => {
+			const now = get(subagentMeta).get(threadId);
+			if (!now) return;
+			if (typeof truth?.model === 'string' && truth.model && now.model === before?.model) {
+				setSubagentInit(threadId, { model: truth.model });
+			}
+			const fields: SubagentThreadFields = {};
+			if (now.thread?.reasoning_effort === before?.thread?.reasoning_effort) {
+				fields.reasoning_effort = typeof truth?.reasoning_effort === 'string' ? truth.reasoning_effort : null;
+			}
+			if (now.thread?.project_id === before?.thread?.project_id) {
+				fields.project_id = typeof truth?.project_id === 'string' ? truth.project_id : null;
+			}
+			patchSubagentThread(threadId, fields);
+		};
 		// A live frame that landed while this request was in flight is newer than
 		// the response, and a terminal outcome is the last word either way.
-		if (current && current.status !== statusBefore) return current.status;
-		if (current && TERMINAL_STATUSES.has(current.status)) return current.status;
+		if (current && current.status !== statusBefore) { foldThreadFields(); return current.status; }
+		if (current && TERMINAL_STATUSES.has(current.status)) { foldThreadFields(); return current.status; }
 
 		const status = statusFromRuntimeTruth(truth ?? {});
 		registerSubagent(
@@ -192,12 +212,7 @@ export async function hydrateSubagentThread(
 			(typeof truth?.driver === 'string' && truth.driver) || current?.provider || 'cc',
 			status,
 		);
-		if (typeof truth?.model === 'string') setSubagentInit(threadId, { model: truth.model });
-		patchSubagentThread(threadId, {
-			model: typeof truth?.model === 'string' && truth.model ? truth.model : null,
-			reasoning_effort: typeof truth?.reasoning_effort === 'string' ? truth.reasoning_effort : null,
-			project_id: typeof truth?.project_id === 'string' ? truth.project_id : null,
-		});
+		foldThreadFields();
 		return status;
 	} catch (error) {
 		// Declared, not silent: the chip stays `unknown` and a later mount retries.

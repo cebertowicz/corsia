@@ -283,7 +283,7 @@ describe('InputBar send and queue preparation', () => {
 		}]);
 		subagentMeta.set(new Map([['subagent-thread', {
 			childThreadId: 'subagent-thread', parentThreadId: 'active-thread', name: 'Worker',
-			provider: 'cc', status: 'running', thread: { model: 'network/worker' },
+			provider: 'cc', status: 'running', model: 'network/worker',
 		} as never]]));
 		component = mount(InputBar, {
 			target: host,

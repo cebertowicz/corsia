@@ -4,7 +4,9 @@ import {
 	_resetSubagentHydrationForTests,
 	hydrateSubagentThread,
 	hydrateSubagentThreadOnce,
+	patchSubagentThread,
 	registerSubagent,
+	setSubagentInit,
 	setSubagentStatus,
 	subagentMeta,
 } from './subagents';
@@ -173,5 +175,41 @@ describe('subagent chip hydration reads server runtime truth', () => {
 		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
 		setSubagentStatus('child-1', 'closed');
 		expect(get(subagentMeta).get('child-1')?.status).toBe('closed');
+	});
+});
+
+describe('hydration folds the worker\'s model, effort and project', () => {
+	it('lands them on a terminal worker, which the composer still reads', async () => {
+		registerSubagent('parent-1', 'child-1', 'tmp inspector', 'cc', 'closed');
+		respondWith(runtimeTruth({ model: 'cc/opus', reasoning_effort: 'high', project_id: 'project-1' }));
+		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		const ref = get(subagentMeta).get('child-1');
+		expect(ref).toMatchObject({ status: 'closed', model: 'cc/opus' });
+		expect(ref?.thread).toMatchObject({ reasoning_effort: 'high', project_id: 'project-1' });
+	});
+
+	it('lands them when a live frame moved the status mid-flight', async () => {
+		registerSubagent('parent-1', 'child-1', 'tmp inspector', 'cc', 'running');
+		vi.stubGlobal('fetch', vi.fn(async () => {
+			setSubagentStatus('child-1', 'ready');
+			return { ok: true, status: 200, json: async () => runtimeTruth({ reasoning_effort: 'low' }) };
+		}) as never);
+		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		expect(get(subagentMeta).get('child-1')?.thread?.reasoning_effort).toBe('low');
+	});
+
+	it('never overwrites a model or effort that changed while the read was in flight', async () => {
+		registerSubagent('parent-1', 'child-1', 'tmp inspector', 'cc', 'running');
+		setSubagentInit('child-1', { model: 'cc/before' });
+		patchSubagentThread('child-1', { reasoning_effort: 'low' });
+		vi.stubGlobal('fetch', vi.fn(async () => {
+			setSubagentInit('child-1', { model: 'cc/switched' });
+			patchSubagentThread('child-1', { reasoning_effort: 'high' });
+			return { ok: true, status: 200, json: async () => runtimeTruth({ model: 'cc/before', reasoning_effort: 'low' }) };
+		}) as never);
+		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		const ref = get(subagentMeta).get('child-1');
+		expect(ref?.model).toBe('cc/switched');
+		expect(ref?.thread?.reasoning_effort).toBe('high');
 	});
 });
