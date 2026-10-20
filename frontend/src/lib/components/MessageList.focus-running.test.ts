@@ -115,6 +115,22 @@ describe('Focus mode while a Turn is running', () => {
 		expect(sent).toContainEqual({ type: 'unsubscribe_session', thread_id: 'child' });
 	});
 
+	it('holds the actor with its phrase when a newer descendant takes the preview', async () => {
+		applyLifecycle('older', { turnId: 'older-turn', turnOrder: 1 }, THREAD_ID, Date.now() - 65_000);
+		registerSubagent(THREAD_ID, 'older', 'Older worker');
+		registerSubagent(THREAD_ID, 'newer', 'Newer worker');
+		activeToolsByThread.set(new Map([['older', [{ id: 'older-tool', name: 'read_file', phrase: 'Reading old task', status: 'running' }]]]) as any);
+		renderList();
+		await vi.waitFor(() => expect(host.querySelector('.live-step')?.textContent).toBe('Working · Older worker: Reading old task'), { timeout: 3000 });
+
+		applyLifecycle('newer', { turnId: 'newer-turn', turnOrder: 1 }, THREAD_ID, Date.now());
+		activeToolsByThread.update((byThread) => new Map([...byThread, ['newer', [{ id: 'newer-tool', name: 'grep', hint: '', phrase: 'Checking UI', status: 'running' }]]]));
+		flushSync();
+		// The held phrase keeps its own actor; the name never changes ahead of it.
+		expect(host.querySelector('.live-step')?.textContent).toBe('Working · Older worker: Reading old task');
+		await vi.waitFor(() => expect(host.querySelector('.live-step')?.textContent).toBe('Working · Newer worker: Checking UI'), { timeout: 3000 });
+	});
+
 	it('renders streaming tools plainly with no live fold when Focus is off', () => {
 		coreSettings.set({ features: { focus_mode: false } } as any);
 		activeToolsByThread.set(new Map([[THREAD_ID, [{ id: 'live-tool', name: 'read_file', phrase: 'Reading source', status: 'running' }]]]) as any);

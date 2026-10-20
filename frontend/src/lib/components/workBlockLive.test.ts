@@ -41,12 +41,19 @@ describe('workBlockLive', () => {
 		expect(live.step?.phrase).toBe('Writing code');
 	});
 
-	it('shows the newest child when the parent has no tool activity yet', () => {
-		const states = new Map([running('parent', null, 10), running('older', 'parent', 20), running('newer', 'parent', 30)]);
+	it('keeps a running parent between tools instead of flipping to its child', () => {
+		const states = new Map([running('parent', null, 10), running('child', 'parent', 20)]);
+		const live = workBlockLive('parent', states, tools('child', 'Running tests'), subagent('child'));
+		expect(live).toMatchObject({ ownRunning: true, actorName: null, previewFromDescendant: false, descendantIds: ['child'] });
+		expect(live.step?.threadId).toBe('parent');
+	});
+
+	it('shows the newest child once the parent is idle', () => {
+		const states = new Map([running('older', 'parent', 20), running('newer', 'parent', 30)]);
 		const live = workBlockLive('parent', states, tools('newer', 'Checking UI'), new Map([
 			...subagent('older', 'Older'), ...subagent('newer', 'Newer'),
 		]));
-		expect(live).toMatchObject({ ownRunning: true, actorName: 'Newer', previewFromDescendant: true });
+		expect(live).toMatchObject({ ownRunning: false, actorName: 'Newer', previewFromDescendant: true });
 		expect(live.step?.threadId).toBe('newer');
 	});
 

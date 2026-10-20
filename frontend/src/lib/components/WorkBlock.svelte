@@ -67,13 +67,16 @@
 	const entries = $derived(expanded ? blockEntries(entry, { complete }) : []);
 	const indexById = $derived(new Map(entry.items.map((item, index) => [item.id, index])));
 	const plainLabel = $derived(label.endsWith(NEW_SUFFIX) ? label.slice(0, -NEW_SUFFIX.length) : label);
-	// A new phrase waits out the current one's minimum hold, then crossfades in, as the plan row does.
-	const swap = createPhraseSwap(() => livePhrase);
 	const hideUnidentifiedDescendant = $derived(livePreviewFromDescendant && !liveActorName);
+	// A new phrase waits out the current one's minimum hold, then crossfades in, as the plan row does.
+	// The actor swaps with its phrase, so a held phrase is never credited to the next actor.
+	const swap = createPhraseSwap(() => JSON.stringify(hideUnidentifiedDescendant ? [null, UNKNOWN_STEP] : [liveActorName, livePhrase]));
+	const shown = $derived(JSON.parse(swap.shown) as [string | null, string]);
+	const shownActor = $derived(shown[0]);
 	// The lead stays `Working · 3 min`; an unknown or unattributed step adds nothing after it.
-	const shownPhrase = $derived(hideUnidentifiedDescendant || swap.shown === UNKNOWN_STEP ? null : swap.shown);
+	const shownPhrase = $derived(shown[1] === UNKNOWN_STEP ? null : shown[1]);
 	const liveLead = $derived(liveLabel(liveTime, null));
-	const liveText = $derived(liveLabel(liveTime, shownPhrase && liveActorName ? `${liveActorName}: ${shownPhrase}` : shownPhrase));
+	const liveText = $derived(liveLabel(liveTime, shownPhrase && shownActor ? `${shownActor}: ${shownPhrase}` : shownPhrase));
 	const ariaLabel = $derived.by(() => {
 		if (!entry.live) return runToggleName(entry, label, expanded);
 		const phrase = hideUnidentifiedDescendant ? UNKNOWN_STEP : `${liveActorName ? `${liveActorName}: ` : ''}${livePhrase}`;
@@ -109,7 +112,7 @@
 	>
 		{#if entry.live}
 			<svg class="live-spinner" class:subagent-only={!liveOwnThread} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-			<span class="live-step" class:dimmed={liveDimmed} class:fading={swap.fading} style="--fade-ms: {FADE_MS}ms" title={liveText}>{liveLead}{#if shownPhrase}{' · '}{#if liveActorName}<span class="live-actor">{liveActorName}:</span>{' '}{/if}{shownPhrase}{/if}</span>
+			<span class="live-step" class:dimmed={liveDimmed} class:fading={swap.fading} style="--fade-ms: {FADE_MS}ms" title={liveText}>{liveLead}{#if shownPhrase}{' · '}{#if shownActor}<span class="live-actor">{shownActor}:</span>{' '}{/if}{shownPhrase}{/if}</span>
 		{:else}
 			<span class="fold-label">{plainLabel}</span>
 		{/if}
@@ -162,6 +165,8 @@
 
 <style>
 	.transcript-fold { display: flex; flex-wrap: wrap; max-width: 760px; margin: 0 auto 14px; min-width: 0; align-items: center; scroll-margin-top: var(--sticky-top, 0px); }
+	/* Notes (plan-limit pauses) are rows under the block, never items beside the chip. */
+	.transcript-fold > :global(.plan-limit-paused) { flex: 0 0 100%; }
 	/* Collapsed: a glass capsule sized to its label. Expanded: the same capsule pins as the header. */
 	.fold-toggle {
 		position: sticky; top: var(--sticky-top, 0px); z-index: 4;
