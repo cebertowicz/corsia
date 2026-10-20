@@ -19,7 +19,7 @@ Keep `time-to-agent.md` directly in your thread folder, not `working/`; create i
 
 ## Weekly review
 
-Run it when the ledger's last review is seven or more days old, on the first wake or turn after that. CORSIA uses the daily health-check wake; a project conductor uses its next turn from any wake. Schedule nothing new for it. Record the date even when you find nothing. The suggestion joins that wake's single `post_update`, together with anything else you owe the person that day.
+Run it when the ledger's last review is seven or more days old, on the first wake or turn after that. CORSIA uses the daily health-check wake; a project conductor uses its next turn from any wake. Schedule nothing new for it. Record the date even when you find nothing. Raise the share of tasks that run under a workflow (Measurement, Workflows line 1). When it falls within a kind of work, not just because the mix moved, give that kind's recurring work a workflow (skill `workflow-design`). The suggestion joins that wake's single `post_update`, together with anything else you owe the person that day.
 
 ## The loop
 
