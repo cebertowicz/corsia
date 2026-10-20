@@ -249,6 +249,8 @@ def test_measurement_runs_with_an_empty_home_and_account_columns_reference_real_
     monkeypatch.setenv("CODEX_HOME", "/somewhere/on/the/host")
     env = runner._env(tmp_path)
     assert env["HOME"] == str(tmp_path / "home") and "CODEX_HOME" not in env
+    # The update-status route must never reach the host checkout's remote.
+    assert env["GIT_DIR"] == str(tmp_path / "no-repository") and not (tmp_path / "no-repository").exists()
     pools = SimpleNamespace(ids={"vendor_account": ["a1"]})
     assert [fixture_rows.pool_for(column, pools) for column in ("account_id", "pending_account_id", "vendor_account_id")] \
         == ["vendor_account"] * 3
