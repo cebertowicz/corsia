@@ -261,14 +261,16 @@ def test_first_run_routes_the_app_path_to_its_own_reference():
     assert "references/first-run-app.md" in FIRST_RUN.read_text(encoding="utf-8")
 
 
-def test_app_path_sends_the_message_then_seven_steps_and_ends_on_the_handoff():
+def test_app_path_sends_the_message_then_eight_steps_and_ends_on_the_handoff():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
     steps = app.split("## The steps, in this order", 1)[1].split("## The hand-off", 1)[0]
     titles = re.findall(r"^\d\. \*\*([^*]+)\*\*", steps, flags=re.MULTILINE)
 
     assert app.index("I'm CORSIA, your assistant.") < app.index("## The steps")
-    assert len(titles) == 7
+    assert len(titles) == 8
     assert titles[0] == "About you."
+    assert titles.index("Where your work lives.") == titles.index("Web search.") + 1
+    assert "skill `connect-tools`" in steps
     assert app.split("## The hand-off", 1)[1].strip().startswith("After the last step that applies, post exactly `" + HANDOFF + "`")
     assert "follow skill `google-setup`" in steps
     assert "no setup task list" in app
@@ -284,7 +286,7 @@ def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
 
 def test_app_path_email_step_records_the_email_app_where_the_microsoft_fact_reads_it():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
-    email = app.split("5. **Email and calendar.**", 1)[1].split("6. **GitHub", 1)[0]
+    email = app.split("6. **Email and calendar.**", 1)[1].split("7. **GitHub", 1)[0]
     for branch in ("**Gmail or Google:**", "**Outlook:**", "**Both:** Gmail first", "**Something else:**"):
         assert branch in email
     assert "`context/50-USER-PROFILE.md`, `- **Email app:** <Outlook | Other> — <what they said>`" in email

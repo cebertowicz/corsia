@@ -184,10 +184,10 @@
       "sha256": "e7dab36e3d55d8b9eb8c06ac3bb155057e87906567c199c9c800a82e48009939"
     },
     {
-      "bytes": 14568,
+      "bytes": 16958,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "b01856b8484baf989388bb2c5a6e5bf811969576a3201212a5bcda446c65aeac"
+      "sha256": "c3860070a5c4cd3348afdeea8881c43181a46e0994ffe99fbea453273327d484"
     },
     {
       "bytes": 17410,
@@ -295,7 +295,7 @@
       "bytes": 5173,
       "kind": "skill",
       "path": "skills/google-setup/SKILL.md",
-      "sha256": "2161c85e00f9d2bc4dd732323a166f548e797cb50d252ffc1e5c718061302f17"
+      "sha256": "541b7687c353603bc6e0bc57229b5d10324633485c45321908e56fdf7e021771"
     },
     {
       "bytes": 9080,
