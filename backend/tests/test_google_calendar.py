@@ -14,7 +14,7 @@ from infra.database import get_db
 from tests.test_action_gate import _admit, _bind, _draft, workspace  # noqa: F401 (fixture)
 from tests.test_google_email import mail  # noqa: F401 (fixture)
 from tests.test_google_sign_in import client_file, conductor, google  # noqa: F401 (mail dependencies)
-from connections.google.calendar_document import attendee_emails, compose_document
+from connections.calendar_document import attendee_emails, compose_document
 from tools import action_gate, google_calendar
 from tools.action_drafts import record_draft
 from tools.action_gate import Approved, Refusal
