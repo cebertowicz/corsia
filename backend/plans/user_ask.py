@@ -21,12 +21,14 @@ import plans.service as service
 from plans.node_states import open_user_block_sql
 
 NO_ASK = (
-    "work waits on the user only with something they can act on. For a choice "
-    "they can answer as asked, even one from a document, raise a decision "
-    "on this task: it holds the task by itself, so do not block it. If they "
-    "must judge the thing itself (a draft to send, a design, requirements), "
-    "register it and pass its artifact id as ask_artifact_id. Ask anything "
-    "else in chat."
+    "work waits on the user only with something they can act on; pick the "
+    "route that fits. A fact or preference only they know: ask in chat with "
+    "post_update and arm a deadline watch on this task to carry the wait. A "
+    "step only their hands can take: add a task with assignee user, how-to in "
+    "its description. A choice they can answer as asked, even one from a "
+    "document: raise a decision on this task; it holds the task by itself. "
+    "Only if they must judge the thing itself (a draft to send, a design, "
+    "requirements): register it and pass its artifact id as ask_artifact_id."
 )
 DECISION_HOLDS = (
     "this task has an open decision, which already holds it until the user "
