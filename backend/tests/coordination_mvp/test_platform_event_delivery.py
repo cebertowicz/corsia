@@ -6,9 +6,10 @@ from __future__ import annotations
 import pytest
 
 from connections import binder
-from events.envelope import normalize
+from events.envelope import EventEnvelope, normalize
 from events.platform import (
-    DEAD_LETTERED, DIGESTED, DUPLICATE, WOKE, deliver_platform_event_sync,
+    DEAD_LETTERED, DIGESTED, DUPLICATE, WOKE, _digest_details, _digest_summary,
+    deliver_platform_event_sync,
 )
 from infra.conductor import WORKSPACE_SCOPE, set_scope_coordinator
 from infra.database import get_db
@@ -57,6 +58,20 @@ def _notes(thread):
         "WHERE object_kind='thread_context' AND object_id=?", thread)
 
 
+def _digest(thread):
+    from infra.passive_digest import build_digest
+
+    db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT * FROM context_change_journal WHERE object_kind='thread_context' "
+            "AND object_id=? ORDER BY seq", (thread,),
+        ).fetchall()
+        return build_digest(rows, overflow=False, clock=None)[0]
+    finally:
+        db.close()
+
+
 class TestDeclaredRule:
     def test_default_informational_and_rule_promotes(self):
         assert normalize("gmail", _mail()).event_class == "informational"
@@ -98,6 +113,45 @@ class TestDelivery:
         assert [d.outcome for d in deliver_platform_event_sync("gmail", raw)] == [DIGESTED]
         assert [d.outcome for d in deliver_platform_event_sync("gmail", raw)] == [DUPLICATE]
         assert _notes(workspace) == 1
+
+    def test_measurement_digest_includes_bounded_facts(self, isolated_db):
+        thread = mk_session("measurement-owner")
+        assert set_scope_coordinator(WORKSPACE_SCOPE, thread)
+        assert binder.ensure_designation_rule(
+            connector="measurement", fact="scope", value="workspace",
+        ) is not None
+        raw = {
+            "scope": "workspace", "report_date": "2026-10-19",
+            "report_key": "workspace:2026-10-19", "breach": False,
+            "moves": [{"series": "attention", "value": "x" * 500}],
+        }
+
+        assert [delivery.outcome for delivery in deliver_platform_event_sync(
+            "measurement", raw,
+        )] == [DIGESTED]
+        assert _digest(thread) == (
+            "[PASSIVE CONTEXT DIGEST]\n"
+            "measurement.movement_digest from measurement: scope=workspace, "
+            "report_date=2026-10-19, report_key=workspace:2026-10-19, breach=false, "
+            "moves=[{\"series\":\"attention\",\"value\":\"" + "x" * 87 + "…"
+        )
+
+    def test_library_shaped_digest_summary_includes_actionable_facts(self):
+        envelope = EventEnvelope(
+            event_id="event-1", type="library.item_changed", connector="library",
+            facts={
+                "name": "pdf", "installed_version": "1.0.0",
+                "library_version": "1.1.0", "changed_files": ["package.json"],
+            },
+            relationships=(), artifact_ref=None, provenance={"source": "library"},
+            event_class="informational", ownerless_ok=False,
+        )
+        details = _digest_details(envelope, "name")
+
+        assert _digest_summary(envelope, details) == (
+            "library.item_changed from library: name=pdf, installed_version=1.0.0, "
+            "library_version=1.1.0, changed_files=[\"package.json\"]"
+        )
 
     def test_digest_never_wakes(self, workspace):
         raw = _mail(screen_status="screened", injection=False, needs_person="no")

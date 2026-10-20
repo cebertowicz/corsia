@@ -12,6 +12,7 @@ It names no connector (the no-bespoke-router guard keeps it that way).
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -31,6 +32,10 @@ DIGESTED = "digested"
 DEAD_LETTERED = "dead_lettered"
 DUPLICATE = "duplicate"
 FILTERED = "filtered"
+
+_DIGEST_SUMMARY_LIMIT = 400
+_DIGEST_VALUE_LIMIT = 120
+_DIGEST_BOOKKEEPING_FACTS = frozenset({"event_id", "message_id", "path"})
 
 
 @dataclass(frozen=True)
@@ -81,6 +86,30 @@ def _summary(envelope: EventEnvelope) -> str:
     return f"{envelope.type} from {envelope.provenance.get('source', 'platform')}"
 
 
+def _clip(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _digest_summary(envelope: EventEnvelope, details: dict[str, Any]) -> str:
+    """The note line: the event plus its facts, in the connector's order.
+
+    Each value is clipped so one long fact cannot hide the rest; the full
+    facts stay in the note's details.
+    """
+    facts = []
+    for key, value in details.items():
+        if key in _DIGEST_BOOKKEEPING_FACTS:
+            continue
+        rendered = value.replace("\n", "\\n") if isinstance(value, str) else json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        )
+        facts.append(f"{key}={_clip(rendered, _DIGEST_VALUE_LIMIT)}")
+    summary = _summary(envelope)
+    if facts:
+        summary = f"{summary}: {', '.join(facts)}"
+    return _clip(summary, _DIGEST_SUMMARY_LIMIT)
+
+
 def _deliver_target(
     db: sqlite3.Connection, envelope: EventEnvelope, target: Target,
     collapse_fact: str | None,
@@ -111,9 +140,10 @@ def _deliver_target(
         return PlatformDelivery(event_id, thread, WOKE)
     if _digest_seen(db, thread, event_id):
         return PlatformDelivery(event_id, thread, DUPLICATE)
+    details = _digest_details(envelope, collapse_fact)
     append_thread_context_note(
-        db, thread_id=thread, summary=_summary(envelope),
-        details=_digest_details(envelope, collapse_fact),
+        db, thread_id=thread,
+        summary=_digest_summary(envelope, details), details=details,
     )
     return PlatformDelivery(event_id, thread, DIGESTED)
 
