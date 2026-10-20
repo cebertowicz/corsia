@@ -28,10 +28,12 @@ async def _no_loaded(_config):
     return []
 
 
-def _omlx_rows(monkeypatch, servers: list[dict], managed: set[str] = frozenset()) -> None:
-    """Rows the route sees; only ids in ``managed`` satisfy the one managed-server rule."""
-    monkeypatch.setattr(provider_local_models, "get_servers", lambda **_kwargs: servers)
-    monkeypatch.setattr(provider_local_models, "is_corsia_managed_server", lambda server: server["id"] in managed)
+def _omlx_rows(monkeypatch, servers: list[dict], managed: frozenset[str] | set[str] = frozenset()) -> None:
+    """Rows the resolver sees; only ids in ``managed`` are CORSIA's own oMLX."""
+    from llm import local_sources
+
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: servers)
+    monkeypatch.setattr(local_sources, "is_corsia_managed_server", lambda server: server["id"] in managed)
     monkeypatch.setattr(provider_local_models, "run_in_db", _server_in_db)
 
 
@@ -77,24 +79,41 @@ async def test_offline_managed_omlx_is_not_selected(monkeypatch) -> None:
         await provider_local_models._server()
 
 
+@pytest.mark.parametrize("status", ["online", "offline"])
 @pytest.mark.asyncio
-async def test_two_online_managed_rows_name_that_cause(monkeypatch) -> None:
-    _corsia_server(monkeypatch, [{"id": "a", "status": "online"}, {"id": "b", "status": "online"}])
-
-    with pytest.raises(HTTPException, match="more than one"):
-        await provider_local_models._server()
-
-
-@pytest.mark.parametrize("managed_online", [True, False])
-def test_source_projection_agrees_with_the_managed_server_rule(monkeypatch, managed_online) -> None:
+async def test_every_consumer_resolves_corsias_own_omlx_alike(monkeypatch, status) -> None:
+    """Identity holds online or offline; consumers that need it running read status."""
+    from api import network_servers
     from llm import local_sources
 
-    rows = [{"id": "studio", "status": "online"}, {"id": "corsia", "status": "online" if managed_online else "offline"}]
+    rows = [{"id": "studio", "status": "online"}, {"id": "corsia", "status": status}]
+    _omlx_rows(monkeypatch, rows, {"corsia"})
     monkeypatch.setattr(local_sources, "_omlx_state", lambda _membership=None, _servers=None: {})
-    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: rows)
-    monkeypatch.setattr(local_sources, "is_corsia_managed_server", lambda server: server["id"] == "corsia")
+    monkeypatch.setattr(local_sources, "catalog_membership", lambda: ({"omlx@corsia", "omlx@studio"}, set()))
 
-    assert local_sources.omlx_source()["corsia_omlx_online"] is managed_online
+    assert local_sources.corsia_omlx_server()["id"] == "corsia"
+    assert local_sources.omlx_source()["corsia_omlx_online"] is (status == "online")
+    assert (local_sources.connected_local_server() or {}).get("id") == ("corsia" if status == "online" else None)
+
+    async def run_in_db(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(network_servers.nd, "get_servers", lambda: [dict(row, provider="omlx") for row in rows])
+    monkeypatch.setattr(network_servers, "run_in_db", run_in_db)
+    monkeypatch.setattr(network_servers, "_network_view", lambda _server_id: {})
+    monkeypatch.setattr(network_servers, "billing_views", lambda ids: {server_id: {} for server_id in ids})
+    monkeypatch.setattr(network_servers, "server_keys", lambda _ids: {})
+    monkeypatch.setattr(network_servers, "_public_server_view", lambda server, _keys: server)
+    listed = (await network_servers.list_servers())["servers"]
+    assert {server["id"]: server["corsia_omlx"] for server in listed} == {"studio": False, "corsia": True}
+
+
+def test_a_turned_off_corsia_omlx_is_not_resolved(monkeypatch) -> None:
+    from llm import local_sources
+
+    _omlx_rows(monkeypatch, [{"id": "corsia", "status": "disabled"}], {"corsia"})
+
+    assert local_sources.corsia_omlx_server() is None
 
 
 async def _known_disk_model(_config):
@@ -336,6 +355,18 @@ async def test_recommended_row_is_setups_pick_not_omlxs_first_row(monkeypatch, t
     result, _sections = await provider_local_models._recommendations()
 
     assert result["recommended_repository"] == small.repository
+
+
+@pytest.mark.asyncio
+async def test_no_recommended_row_when_nothing_fits(monkeypatch, tmp_path) -> None:
+    huge = LocalModel("Jundot/DeepSeek-V4-Flash", 1_000_000, 32_768, resident_bytes=163 * 1024**3)
+    big = LocalModel("Jundot/Qwen3.6-35B-A3B", 1_000_000, 32_768, resident_bytes=40 * 1024**3)
+    _ready_recommender(monkeypatch, tmp_path, {"best": [huge], "faster": [big]}, room_gib=9)
+
+    result, _sections = await provider_local_models._recommendations()
+
+    assert [m["fits_now"] for m in result["models"]] == [False, False]
+    assert result["recommended_repository"] is None
 
 
 @pytest.mark.asyncio

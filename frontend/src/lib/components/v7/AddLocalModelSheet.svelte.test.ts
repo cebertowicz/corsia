@@ -95,9 +95,11 @@ describe('AddLocalModelSheet', () => {
 
 	it('says nothing fits when every model needs more free memory', async () => {
 		const row = { name: 'Huge', repository: 'Jundot/Huge', download_size_gb: 12, context_window: 32768, resident_bytes: 163 * 1024 ** 3, fits_now: false, ...ready };
-		await render({ state: 'ready', memory_room_gb: 9.4, models: [row] });
+		// The backend's nothing-fits answer names no pick (test_provider_local_models covers that side).
+		await render({ state: 'ready', memory_room_gb: 9.4, recommended_repository: null, models: [row] });
 		expect(document.body.textContent).toContain('Nothing fits the 9 GB free for a model now.');
 		expect([...document.body.querySelectorAll('h3')].map((heading) => heading.textContent)).toEqual(['Needs more free memory']);
+		expect(document.body.textContent).not.toContain('Recommended');
 	});
 
 	it('marks no row Recommended when the backend names no pick', async () => {

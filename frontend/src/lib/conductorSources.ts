@@ -147,7 +147,7 @@ export type LocalModelRecommendation = {
 	disk?: { state: 'ready' | 'insufficient' | 'unknown'; free_bytes?: number; required_bytes?: number };
 };
 
-export type LocalModelDownload = { repository: string; model: string; status?: 'available' | 'failed'; speed?: number | null; server_id?: string | null; /** For an available model, why CORSIA did not load it. */ detail?: string | null };
+export type LocalModelDownload = { repository: string; model: string; status?: 'available' | 'failed'; speed?: number | null; server_id?: string | null };
 
 export type LocalModelRecommendations = {
 	state?: string;

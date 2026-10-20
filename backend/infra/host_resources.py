@@ -237,7 +237,6 @@ async def get_host_resources() -> dict[str, Any]:
         "other_used_gb": round(other_used_bytes / GIB, 2),
         "safe_free_gb": round(_room_bytes(free, total) / GIB, 2),
         "safe_reserve_gb": round(reserve / GIB, 2),
-        "pin_room_gb": round(max(0, total - reserve) / GIB, 2),
         "by_provider": breakdown,
     }
 
@@ -276,28 +275,30 @@ def not_loaded_line(size_bytes: int, safe_free_bytes: int) -> str | None:
             f"{_gb_text(safe_free_bytes)} GB free for a model now")
 
 
-def annotate_keep_loaded(models: list[dict]) -> None:
-    """Give each oMLX row what the switch and the line under it read.
+def annotate_keep_loaded(models: list[dict], failed: dict[str, str] | None = None) -> None:
+    """Give each row of CORSIA's own oMLX what the switch and the line under it read, on every read.
 
-    ``pin_fits`` says whether turning the model on may pin it. ``keep_line`` is the one
-    sentence for its state: pins full while it is loaded, or a pinned model that didn't load
-    because it doesn't fit now. A row oMLX reported no size for gets neither.
+    ``pin_fits`` says whether turning the model on may pin it. ``keep_line`` is the row's one
+    sentence about keeping it loaded, and this is its only writer: a failed keep attempt
+    (``failed``, by model id, from ``local_keep_loaded.failures``), else pins full for an
+    unpinned model the pins can't take, else a pinned model that didn't load because it
+    doesn't fit now. A row oMLX reported no size for gets only a failure line.
     """
     room, free = pin_room_bytes(), model_room_bytes()
     size_of = {m["id"]: int(m.get("size_bytes") or 0) for m in models}
     used = sum(size_of[m["id"]] for m in models if m.get("pinned"))
     for m in models:
         size = size_of[m["id"]]
-        if size <= 0:
-            continue
-        others = used - (size if m.get("pinned") else 0)
-        m["pin_fits"] = pin_fits(size, others, room)
-        if m.get("loaded") and not m.get("pinned") and not m["pin_fits"]:
-            m["keep_line"] = pins_full_line(used, room, loaded=True)
-        elif m.get("pinned") and not m.get("loaded") and not m.get("starting"):
-            line = not_loaded_line(size, free)
-            if line:
-                m["keep_line"] = line
+        if size > 0:
+            m["pin_fits"] = pin_fits(size, used - (size if m.get("pinned") else 0), room)
+        line = (failed or {}).get(m["id"])
+        if line is None and size > 0:
+            if not m.get("pinned") and not m["pin_fits"]:
+                line = pins_full_line(used, room, loaded=bool(m.get("loaded")))
+            elif m.get("pinned") and not m.get("loaded") and not m.get("starting"):
+                line = not_loaded_line(size, free)
+        if line:
+            m["keep_line"] = line
 
 
 async def check_can_load(estimated_gb: float, target_provider: str) -> dict[str, Any]:

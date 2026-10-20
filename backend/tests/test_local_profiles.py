@@ -319,7 +319,7 @@ def test_a_persons_own_omlx_never_stands_in_for_corsias_server(monkeypatch):
     managed = {"id": "corsia-managed", "provider": "omlx", "kind": "managed", "source": "corsia",
                "instance_id": "corsia-managed", "status": "online", "port": 8210}
     servers = [own, legacy]
-    monkeypatch.setattr(local_sources, "local_omlx_servers", lambda: servers)
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: servers)
     monkeypatch.setattr(local_sources, "catalog_membership",
                         lambda: ({"omlx@mine", "omlx@old", "omlx@corsia-managed"}, set()))
     started: list[str] = []

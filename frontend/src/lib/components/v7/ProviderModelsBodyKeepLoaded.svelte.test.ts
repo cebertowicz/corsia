@@ -103,15 +103,17 @@ describe('local model switch: keep this model loaded', () => {
 	});
 });
 
-describe('a server on another computer', () => {
-	it("keeps Load and Unload: this computer's memory never decides what it keeps loaded", async () => {
-		const remote = { ...localProvider, server: { ...localProvider.server, corsia_omlx: false, on_this_mac: false } } as unknown as HostProvider;
-		await render({ loaded: [row('theirs', 4, { pinned: true })], provider: remote });
-		switchOf('theirs').click();
-		await vi.waitFor(() => expect(changes().length).toBeGreaterThan(0));
-		expect(changes().map((call) => lastTwo(call.url))).toEqual(['models/unload']);
-		expect(pinWrites()).toHaveLength(0);
-	});
+describe("a person's own oMLX", () => {
+	for (const [where, on_this_mac] of [['on another computer', false], ['on this computer', true]] as const) {
+		it(`keeps Load and Unload ${where}: CORSIA never pins a model on it`, async () => {
+			const theirs = { ...localProvider, server: { ...localProvider.server, corsia_omlx: false, on_this_mac } } as unknown as HostProvider;
+			await render({ loaded: [row('theirs', 4, { pinned: true })], provider: theirs });
+			switchOf('theirs').click();
+			await vi.waitFor(() => expect(changes().length).toBeGreaterThan(0));
+			expect(changes().map((call) => lastTwo(call.url))).toEqual(['models/unload']);
+			expect(pinWrites()).toHaveLength(0);
+		});
+	}
 });
 
 describe('local model lines', () => {
@@ -129,6 +131,13 @@ describe('local model lines', () => {
 		anyway.click();
 		await vi.waitFor(() => expect(calls.some((call) => call.url.endsWith('/models/load'))).toBe(true));
 		expect(pinWrites()).toHaveLength(0);
+	});
+
+	it("shows the backend's line for a keep attempt that failed, on a model that isn't pinned, without Load anyway", async () => {
+		const notKept = "Downloaded, but couldn't keep it loaded. Turn it on to try again.";
+		await render({ available: [row('new-one', 4, { pin_fits: true, keep_line: notKept })] });
+		await vi.waitFor(() => expect(rowFor('new-one').textContent).toContain(notKept));
+		expect([...rowFor('new-one').querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Load anyway')).toBe(false);
 	});
 
 	it('shows neither line for an unpinned, unloaded model', async () => {

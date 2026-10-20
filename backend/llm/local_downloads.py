@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -101,17 +101,26 @@ def forget(model_id: str) -> None:
         _write_raw(values)
 
 
-def set_detail(model_id: str, detail: str | None) -> None:
-    """Say why a downloaded model is not loaded (None clears it); a failed or absent record is left alone."""
-    record = get(model_id)
-    if record is not None and record.status == "available" and record.detail != detail:
-        write(replace(record, detail=detail))
-
-
 def reconcile(on_disk: set[str]) -> None:
     """Forget completed Settings downloads that oMLX no longer has on disk."""
     for download in all():
         if download.status == "available" and download.model.model not in on_disk:
+            forget(download.model.model)
+
+
+def settle_listed(server_id: str, listed: set[str]) -> None:
+    """Forget failed downloads whose model CORSIA's own oMLX now lists: the failure no longer describes them.
+
+    Discovery calls this for every server it reconciles; the one place a failed Settings
+    download settles. A person's oMLX listing the same model says nothing about CORSIA's.
+    """
+    from llm.local_sources import corsia_omlx_server
+
+    own = corsia_omlx_server()
+    if own is None or own["id"] != server_id:
+        return
+    for download in all():
+        if download.status == "failed" and download.model.model in listed:
             forget(download.model.model)
 
 

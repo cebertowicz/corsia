@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from infra.database import write_transaction
+from llm.local_downloads import settle_listed
 from llm.model_metadata import extract_context_length
 from llm.omlx_capabilities import apply_metadata, capture_configured, capture_reported
 
@@ -348,6 +349,7 @@ def _reconcile_network_models(
             db, server_id, provider, seen_pmids, now,
         )
 
+    settle_listed(server_id, seen_pmids)
     result["ok"] = True
     return result
 

@@ -72,19 +72,6 @@ def test_a_download_past_its_bytes_projects_as_finishing(monkeypatch) -> None:
                      "Refreshing model catalog": True, "Loading model": True}
 
 
-def test_why_a_downloaded_model_is_not_loaded_is_kept_and_cleared(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
-    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768, "Qwen 3.8 27B")
-    local_downloads.write(local_downloads.Download(model, server_id="local-server"))
-
-    local_downloads.set_detail(model.model, "Not loaded: needs 174 GB of memory, 123 GB free")
-    assert local_downloads.get(model.model).view()["detail"] == "Not loaded: needs 174 GB of memory, 123 GB free"
-    local_downloads.set_detail(model.model, None)
-    assert local_downloads.get(model.model).detail is None
-    local_downloads.set_detail("missing-model", "ignored")
-    assert local_downloads.get("missing-model") is None
-
-
 # --- the flight after the bytes land ---------------------------------------------------------
 
 def _flight_world(monkeypatch, tmp_path, *, server_status: str):
@@ -188,50 +175,49 @@ def test_a_refresh_that_really_fails_says_the_model_is_downloaded(monkeypatch, t
     assert local_sources.omlx_source((set(), set()))["settings_download"]["downloaded"] is True
 
 
-def _failed_record_world(monkeypatch, tmp_path, *, downloaded: bool, listed: list[str],
-                         listed_on: str = "corsia-server") -> LocalModel:
+def _failed_record_world(monkeypatch, tmp_path, *, downloaded: bool) -> LocalModel:
+    from contextlib import nullcontext
+
+    from llm import catalog_network_models
+
     model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768, "Qwen 3.8 27B")
     monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
     local_downloads.write(local_downloads.Download(model, status="failed", detail="refresh failed", downloaded=downloaded))
     monkeypatch.setattr(local_sources, "_omlx_state", lambda _membership, _servers=None: {"state": "ready"})
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [{"id": "corsia-server"}, {"id": "own-server"}])
     monkeypatch.setattr(local_sources, "is_corsia_managed_server", lambda server: server["id"] == "corsia-server")
-    monkeypatch.setattr(local_sources, "list_models", lambda **_kwargs: [
-        {"litellm_model": f"omlx@{listed_on}/{name}", "enabled": True} for name in listed])
     monkeypatch.setattr("llm.local_setup.setup_kind", lambda: "settings")
     monkeypatch.setattr("llm.local_setup.setup_stage", lambda: None)
+    # Discovery's listing write, without a database: only the settle step after it is under test.
+    monkeypatch.setattr(catalog_network_models, "write_transaction", lambda *_a, **_k: nullcontext())
+    monkeypatch.setattr(catalog_network_models, "_network_model_payload", lambda *_a: {})
+    monkeypatch.setattr(catalog_network_models, "_upsert_network_model", lambda *_a: "updated")
+    monkeypatch.setattr(catalog_network_models, "_reconcile_stale_network_models", lambda *_a: 0)
     return model
 
 
-def test_a_downloaded_not_listed_record_settles_once_the_model_is_listed(monkeypatch, tmp_path) -> None:
-    model = _failed_record_world(monkeypatch, tmp_path, downloaded=True, listed=["Qwen3.8-27B-oQ4e"])
+def _discovery_lists(server_id: str, listed: list[str]) -> None:
+    from llm import catalog_network_models
 
-    # The sources read hides the failure but writes nothing; the Add model list settles the record.
-    assert "settings_download" not in local_sources.omlx_source((set(), set()))
-    assert local_downloads.get(model.model) is not None
-    local_sources.settle_listed_failures()
-    assert local_downloads.get(model.model) is None
+    catalog_network_models._reconcile_network_models(
+        server_id, {"provider": "omlx"}, [{"id": name} for name in listed], {}, "now",
+        {"discovered": 0, "updated": 0, "missing": 0})
 
 
-def test_a_failed_record_whose_model_is_not_listed_still_shows(monkeypatch, tmp_path) -> None:
+def test_a_failed_record_shows_until_discovery_of_corsias_omlx_lists_its_model(monkeypatch, tmp_path) -> None:
     for downloaded in (True, False):
-        model = _failed_record_world(monkeypatch, tmp_path, downloaded=downloaded, listed=["Other-Model-oQ4e"])
+        model = _failed_record_world(monkeypatch, tmp_path, downloaded=downloaded)
 
+        # Neither another model on CORSIA's oMLX nor the same model on a person's own oMLX settles it.
+        _discovery_lists("corsia-server", ["Other-Model-oQ4e"])
+        _discovery_lists("own-server", [model.model])
         shown = local_sources.omlx_source((set(), set()))["settings_download"]
-
         assert shown["failed"] is True and shown["downloaded"] is downloaded
         assert local_downloads.get(model.model) is not None
 
-
-def test_the_same_model_on_the_persons_own_omlx_does_not_settle_a_failed_record(monkeypatch, tmp_path) -> None:
-    for downloaded in (True, False):
-        model = _failed_record_world(monkeypatch, tmp_path, downloaded=downloaded,
-                                     listed=["Qwen3.8-27B-oQ4e"], listed_on="own-server")
-
-        shown = local_sources.omlx_source((set(), set()))["settings_download"]
-
-        assert shown["failed"] is True and shown["downloaded"] is downloaded
-        assert local_downloads.get(model.model) is not None
+        _discovery_lists("corsia-server", [model.model])
+        assert local_downloads.get(model.model) is None
+        assert "settings_download" not in local_sources.omlx_source((set(), set()))
 
 
 def test_a_download_that_never_finished_still_says_it_could_not_download(monkeypatch, tmp_path) -> None:

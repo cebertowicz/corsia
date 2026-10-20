@@ -43,7 +43,7 @@ function _catalogRowToggle(
 ): Promise<{ ok: boolean; message?: string }> | null {
 	if (p.type === 'cloud' || p.type === 'harness') return _setCatalogModelEnabled(modelId, enable);
 	if (server?.kind !== 'external') return null;
-	if (!dbId) return Promise.resolve({ ok: false, message: "This model isn't in the catalog. Refresh and try again." });
+	if (!dbId) return Promise.resolve({ ok: false, message: "Couldn't find this model. Refresh and try again." });
 	return _setCatalogModelEnabled(dbId, enable);
 }
 

@@ -67,7 +67,7 @@ export interface NetworkServer {
 	private?: boolean;
 	has_key?: boolean;
 	masked_key?: string;
-	/** True only for CORSIA's keyed loopback oMLX service. */
+	/** True only for CORSIA's own oMLX, online or not: identity, never status (read ``status`` for that). */
 	corsia_omlx?: boolean;
 	/** How the endpoint is billed; null when unset. */
 	billing?: ServerBilling | null;

@@ -8,7 +8,7 @@ from infra.db_async import run_in_db
 from infra.state.ws import notify_models_changed
 from llm import network_discovery as nd
 from llm import network_endpoints as ne
-from llm.locality import server_on_this_mac
+from llm.local_sources import corsia_omlx_server
 from llm.network_catalog_ids import add_catalog_ids
 
 log = logging.getLogger(__name__)
@@ -89,11 +89,13 @@ async def list_daemon_models(server_id: str, server: dict) -> dict:
         for m in waiting:
             m["starting"] = True
 
-    if server.get("provider") == "omlx" and await run_in_db(server_on_this_mac, server):
-        # The memory lines judge this computer's RAM, so a server on another computer gets none.
+    own = await run_in_db(corsia_omlx_server)
+    if own is not None and own["id"] == server_id:
+        # Keeping a model loaded is CORSIA's own oMLX's alone: a person's oMLX is never pinned.
         from infra.host_resources import annotate_keep_loaded
+        from llm.local_keep_loaded import failures
 
-        annotate_keep_loaded(canonical_models)
+        annotate_keep_loaded(canonical_models, failures(server_id))
 
     loaded = [
         shape_canonical_model_for_ui(m)

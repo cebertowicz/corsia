@@ -65,6 +65,36 @@ def test_a_loaded_model_the_pins_cannot_take_carries_the_pins_full_line(room) ->
     assert "keep_line" not in models[1]
 
 
+def test_an_unloaded_model_the_pins_cannot_take_carries_the_pins_full_line_too(room) -> None:
+    models = [_model("not-loaded", 8), _model("pinned-a", 14, pinned=True, loaded=True)]
+
+    annotate_keep_loaded(models)
+
+    assert models[0]["pin_fits"] is False
+    assert models[0]["keep_line"] == pins_full_line(14 * GIB, 20 * GIB)
+
+
+def test_the_pins_full_line_follows_the_pins_live(room) -> None:
+    """Turning a pin off frees the room on the very next read: no saved copy can contradict it."""
+    full = [_model("waiting", 8), _model("pinned-a", 14, pinned=True, loaded=True)]
+    freed = [_model("waiting", 8), _model("pinned-a", 14, loaded=True)]
+
+    annotate_keep_loaded(full)
+    annotate_keep_loaded(freed)
+
+    assert "keep_line" in full[0]
+    assert freed[0]["pin_fits"] is True and "keep_line" not in freed[0]
+
+
+def test_a_failed_keep_attempt_is_the_rows_line_over_the_live_verdicts(room) -> None:
+    models = [_model("failed", 8), _model("pinned-a", 14, pinned=True, loaded=True), {"id": "unsized"}]
+
+    annotate_keep_loaded(models, {"failed": "couldn't load", "unsized": "couldn't keep"})
+
+    assert models[0]["keep_line"] == "couldn't load" and models[0]["pin_fits"] is False
+    assert models[2] == {"id": "unsized", "keep_line": "couldn't keep"}
+
+
 def test_a_pinned_model_that_does_not_fit_now_carries_the_not_loaded_line(room) -> None:
     models = [_model("pinned-big", 12, pinned=True)]
 
@@ -99,9 +129,7 @@ def test_a_model_that_fits_and_is_unpinned_needs_no_line(room) -> None:
 
 
 def test_a_download_will_pin_by_the_same_rule(monkeypatch) -> None:
-    from llm import local_keep_loaded
-    from llm import network_discovery as nd
-    from llm import managed_omlx_binary
+    from llm import local_keep_loaded, local_sources
 
     async def rows(_server_id):
         return [{"id": "a", "estimated_size": 14 * GIB, "pinned": True}]
@@ -111,8 +139,8 @@ def test_a_download_will_pin_by_the_same_rule(monkeypatch) -> None:
 
     monkeypatch.setattr(local_keep_loaded, "_model_rows", rows)
     monkeypatch.setattr(local_keep_loaded, "pin_room_bytes", lambda: 20 * GIB)
-    monkeypatch.setattr(nd, "get_servers", lambda *_a: [{"id": "managed", "status": "online"}])
-    monkeypatch.setattr(managed_omlx_binary, "is_corsia_managed_server", lambda _server: True)
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [{"id": "managed", "status": "online"}])
+    monkeypatch.setattr(local_sources, "is_corsia_managed_server", lambda _server: True)
     monkeypatch.setattr("infra.db_async.run_in_db", run_in_db)
 
     def sources(size_gib):

@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { token } from '$lib/stores/auth';
 	import { get } from 'svelte/store';
-	import { localDownloadMeta, localDownloadRows, localLoadNote, type LocalDownloadRows } from '$lib/stores/localModelDownloadRows';
+	import { localDownloadMeta, localDownloadRows, type LocalDownloadRows } from '$lib/stores/localModelDownloadRows';
 	import {
 		providerModels,
 		loadProviderModelsFor,
@@ -16,8 +16,7 @@
 	import { chatPickerWarning } from './modelWarning';
 	import { omlxAdminUrl } from '$lib/stores/providerModelUtils';
 	import {
-		checkLoad, createModelsPoller, putPinned, type PreloadInfo,
-		notLoadedLine as notLoadedFor, pinsFullLine as pinsFullFor,
+		canLoadAnyway as canLoadAnywayFor, checkLoad, createModelsPoller, keepLine as keepLineFor, putPinned, type PreloadInfo,
 	} from '$lib/stores/providerModelsHost';
 	import { on } from '$lib/ws/events';
 	import type { HostProvider } from '$lib/stores/providersV7';
@@ -84,14 +83,11 @@
 	const toggleLabels = $derived<[string, string]>(
 		isHarness ? ['Hide from picker', 'Show in picker'] : catalogOnly ? ['Turn off', 'Turn on'] : ['Unload', 'Load'],
 	);
-	// The switch on a row on this computer means "keep this loaded": on while loaded or kept.
-	// Another computer's oMLX keeps Load and Unload: this computer's memory can't judge it.
-	const keepsLoaded = $derived(provider.name === 'omlx' && !catalogOnly && provider.server?.on_this_mac === true);
-	const pinsFullLine = (m: ProviderModel) => (keepsLoaded ? pinsFullFor(m) : null);
-	// A pinned model that isn't loaded and doesn't fit now: say so, and offer to load it anyway.
-	const notLoadedLine = (m: ProviderModel) => keepsLoaded && provider.server?.status === 'online'
-		? notLoadedFor(m, { finishing: localRows.finishing === m.id, note: localLoadNote(localRows, m.id) })
-		: null;
+	// The switch on a row of CORSIA's own oMLX means "keep this loaded": on while loaded or kept.
+	// A person's oMLX, here or on another computer, keeps Load and Unload: CORSIA never pins it.
+	const keepsLoaded = $derived(isCorsiaOmlx && !catalogOnly);
+	const keepLine = (m: ProviderModel) => (keepsLoaded ? keepLineFor(m, localRows.finishing === m.id) : null);
+	const canLoadAnyway = (m: ProviderModel) => keepsLoaded && canLoadAnywayFor(m, localRows.finishing === m.id);
 	async function setPinned(m: ProviderModel, pinned: boolean): Promise<boolean> {
 		const t = get(token);
 		return !!t && !!provider.server?.id && putPinned(t, provider.server.id, m.id, pinned);
@@ -298,7 +294,7 @@
 				state={m.state}
 				meta={localDownloadMeta(m.meta, localRows.speeds?.get(m.id))}
 				caps={m.caps}
-				warning={chatPickerWarning($catalogModels, m.dbId, isExternal) ?? pinsFullLine(m)}
+				warning={chatPickerWarning($catalogModels, m.dbId, isExternal) ?? keepLine(m)}
 				toggleOn={true}
 				{toggleLabels}
 				onToggle={() => handleToggleModel(m)}
@@ -342,9 +338,9 @@
 				meta={localDownloadMeta(m.meta, speed)}
 				caps={m.caps}
 				note={speed !== undefined ? 'Settings measured on Macs like this one · omlx.ai' : null}
-				warning={notLoadedLine(m) ?? localLoadNote(localRows, m.id)}
+				warning={keepLine(m)}
 				toggleOn={keepsLoaded && !!m.pinned}
-				onLoadAnyway={notLoadedLine(m) !== null ? () => handleLoadAnyway(m) : undefined}
+				onLoadAnyway={canLoadAnyway(m) ? () => handleLoadAnyway(m) : undefined}
 				{toggleLabels}
 				onToggle={() => handleToggleModel(m)}
 				onInfo={() => detailsFor = m}

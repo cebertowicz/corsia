@@ -42,31 +42,6 @@ def catalog_membership() -> tuple[set[str], set[str]]:
     return available, enabled
 
 
-def settle_listed_failures() -> None:
-    """Forget failed Settings records whose model CORSIA's own oMLX now lists.
-
-    The Add model list read calls this, so no sources read ever writes a record.
-    """
-    from llm import local_downloads
-
-    failures = [entry for entry in local_downloads.all() if entry.status == "failed"]
-    listed = _listed_on_managed(get_servers(provider="omlx")) if failures else set()
-    for entry in failures:
-        if entry.model.model in listed:
-            local_downloads.forget(entry.model.model)
-
-
-def _listed_on_managed(servers: list[dict]) -> set[str]:
-    """Model ids the catalog lists on CORSIA's own oMLX, where Settings downloads land.
-
-    A person's own oMLX listing the same model says nothing about a download into CORSIA's.
-    """
-    managed = {f"omlx@{s['id']}/" for s in servers if is_corsia_managed_server(s)}
-    return {row["litellm_model"].partition("/")[2]
-            for row in list_models(provider="omlx", include_unavailable=False)
-            if row["litellm_model"].startswith(tuple(managed))} if managed else set()
-
-
 def _source(source: str, name: str, state: str, reason: str | None = None,
             fix: str | None = None, checked_at: str | None = None) -> dict[str, Any]:
     return {"source": source, "name": name, "state": state, "prior_state": None,
@@ -115,6 +90,18 @@ async def local_server_for_install(
     return server_id, port, False
 
 
+def corsia_omlx_server(servers: list[dict] | None = None) -> dict | None:
+    """CORSIA's own oMLX server row, online or not; None when it isn't registered or is turned off.
+
+    Identity only: a caller that needs it running also reads ``status``. ``UNIQUE(provider,
+    instance_id)`` allows at most one such row, so there is no choice between several.
+    Pass the oMLX rows a caller already read to avoid reading them again.
+    """
+    rows = get_servers(provider="omlx") if servers is None else servers
+    return next((server for server in rows
+                 if is_corsia_managed_server(server) and server.get("status") != "disabled"), None)
+
+
 def local_omlx_servers(servers: list[dict] | None = None) -> list[dict]:
     """Every registered oMLX row with a loopback endpoint, regardless of its install origin.
 
@@ -133,10 +120,11 @@ def connected_local_server() -> dict | None:
 
     A person's own oMLX is never this install's server, however many models it lists.
     """
+    server = corsia_omlx_server()
+    if server is None or server.get("status") != "online":
+        return None
     available, _enabled = catalog_membership()
-    return next((server for server in local_omlx_servers()
-                 if is_corsia_managed_server(server) and server.get("status") == "online"
-                 and f"omlx@{server['id']}" in available), None)
+    return server if f"omlx@{server['id']}" in available else None
 
 
 def _omlx_state(membership: tuple[set[str], set[str]] | None = None,
@@ -220,10 +208,8 @@ def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str
 
     servers = get_servers(provider="omlx")
     result = _omlx_state(membership, servers)
-    result["corsia_omlx_online"] = any(
-        is_corsia_managed_server(server) and server.get("status") == "online"
-        for server in servers
-    )
+    own = corsia_omlx_server(servers)
+    result["corsia_omlx_online"] = own is not None and own.get("status") == "online"
     flying = result.get("local_state") in {"downloading", "starting", "failed", "setup_failed", "start_failed"}
     current_kind = setup_kind()
     kind = current_kind if flying or current_kind == "settings" else None
@@ -248,10 +234,8 @@ def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str
     else:
         from llm import local_downloads
 
-        # A failure whose model CORSIA's oMLX now lists no longer describes it; the Add model list settles the record.
-        failures = [entry for entry in local_downloads.all() if entry.status == "failed"]
-        listed = _listed_on_managed(servers) if failures else set()
-        failed = next((entry for entry in failures if entry.model.model not in listed), None)
+        # Discovery of CORSIA's oMLX forgets a failure once it lists the model.
+        failed = next((entry for entry in local_downloads.all() if entry.status == "failed"), None)
         if failed is not None:
             result["settings_download"] = {
                 "name": failed.model.display_name,

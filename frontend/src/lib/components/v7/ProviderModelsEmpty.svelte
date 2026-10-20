@@ -9,10 +9,11 @@
 	const { provider, isExternal, isHarness }: Props = $props();
 	let showLocalEmpty = $state(false);
 	const isCorsiaOmlx = $derived(provider.server?.corsia_omlx === true);
+	// "That computer" only for a server on another computer; a person's own oMLX here is just "in oMLX".
 	const localEmptyMessage = $derived(
 		isCorsiaOmlx
 			? 'No local models on this computer. Add one that fits.'
-			: `No models on ${provider.server?.instance_name ?? provider.label}. Add them in oMLX on that computer.`,
+			: `No models on ${provider.server?.instance_name ?? provider.label}. Add them in oMLX${provider.server?.on_this_mac === true ? '' : ' on that computer'}.`,
 	);
 
 	onMount(async () => {

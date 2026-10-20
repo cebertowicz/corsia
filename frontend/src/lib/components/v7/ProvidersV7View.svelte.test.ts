@@ -94,7 +94,7 @@ describe('ProvidersV7View card request', () => {
 			server: { id: 'studio', provider: 'omlx', instance_name: 'Studio', endpoints: [] } as unknown as HostProvider['server'],
 		};
 		const setupBodies: object[] = [];
-		const render = async (source: object) => {
+		const render = async (source: object, servers: object[] = []) => {
 			token.set('test-token');
 			vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
 				if (String(url).includes('/providers/sources')) return { ok: true, json: async () => ({ sources: [source] }) };
@@ -103,7 +103,7 @@ describe('ProvidersV7View card request', () => {
 					setupBodies.push(body);
 					return { ok: true, status: 200, json: async () => ({ ok: true }) };
 				}
-				return { ok: true, json: async () => ({ providers: [], servers: [], accounts: [], models: [] }) };
+				return { ok: true, json: async () => ({ providers: [], servers, accounts: [], models: [] }) };
 			}));
 			hostGroupSnapshot.set([{ key: 'lan', name: 'Studio', subname: '', netKind: 'lan', providers: [studio] } as HostGroup]);
 			component = mount(ProvidersV7View, { target: document.body });
@@ -120,7 +120,6 @@ describe('ProvidersV7View card request', () => {
 		expect(document.querySelector('[data-provider-card="local-setup"] .chev')).toBeNull();
 		(document.querySelector('[data-provider-card="local-setup"] .setup-action') as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(setupBodies.at(-1)).toEqual({}));
-		expect(document.body.textContent).not.toContain('Stop other oMLX processes?');
 		expect(get(toasts)).toHaveLength(0);
 		if (component) unmount(component);
 		component = null; document.body.innerHTML = '';
@@ -131,6 +130,17 @@ describe('ProvidersV7View card request', () => {
 		component = null; document.body.innerHTML = '';
 
 		await render({ source: 'omlx', eligible: true, corsia_omlx_online: true });
+		expect(document.querySelector('[data-provider-card="local-setup"]')).toBeNull();
+		if (component) unmount(component);
+		component = null; document.body.innerHTML = '';
+
+		// CORSIA's own oMLX registered but offline is still the local model: one row, no Set up beside it.
+		const ownOffline = {
+			id: 'corsia', provider: 'omlx', instance_name: 'Local model', status: 'offline', corsia_omlx: true,
+			endpoints: [{ host: '127.0.0.1', port: 8210 }],
+		};
+		await render({ source: 'omlx', eligible: true, corsia_omlx_online: false }, [ownOffline]);
+		await vi.waitFor(() => expect(document.querySelector('[data-server-card="corsia"]')).not.toBeNull());
 		expect(document.querySelector('[data-provider-card="local-setup"]')).toBeNull();
 	});
 

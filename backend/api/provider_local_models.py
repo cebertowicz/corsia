@@ -18,23 +18,18 @@ from llm.local_setup_auth import omlx_version
 from llm.local_setup_gates import host_ram_bytes, local_memory_ok
 from llm.local_setup_download import download_dir
 from llm.local_setup_disk import download_disk_space
-from llm.managed_omlx_binary import is_corsia_managed_server
-from llm.network_discovery import get_servers
+from llm.local_sources import corsia_omlx_server
 
 router = APIRouter(prefix="/api/providers/local", tags=["providers"])
 
 
 async def _server() -> dict[str, Any]:
-    managed = [server for server in await run_in_db(get_servers, provider="omlx")
-               if is_corsia_managed_server(server)]
-    online = [server for server in managed if server.get("status") == "online"]
-    if len(online) == 1:
-        return online[0]
-    if online:
-        raise HTTPException(409, "CORSIA found more than one of its own local model servers running. Restart CORSIA and try again.")
-    if managed:
+    server = await run_in_db(corsia_omlx_server)
+    if server is None:
+        raise HTTPException(409, "Local models aren't set up. Select Set up to continue.")
+    if server.get("status") != "online":
         raise HTTPException(409, "CORSIA's local model server isn't running. Select Set up to start it.")
-    raise HTTPException(409, "Local models aren't set up. Select Set up to continue.")
+    return server
 
 
 async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]]]:
@@ -44,10 +39,7 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
         downloads = [item.view() for item in local_downloads.all()]
         return {"state": "low_memory", "message": NO_LOCAL_MODEL, "models": [], "downloads": downloads}, {}
     server = await _server()
-    from llm.local_sources import settle_listed_failures
     from llm.providers.omlx_lifecycle import list_disk_models
-
-    await run_in_db(settle_listed_failures)
 
     try:
         disk_models = await list_disk_models({"server_id": server["id"]})
@@ -83,7 +75,10 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
         (item["disk"].get("free_bytes") for item in views if isinstance(item["disk"].get("free_bytes"), int)),
         None,
     )
+    # Recommended is only ever a model that fits now: with nothing that fits, no row is recommended.
     recommended = pick_for_setup(sections, room_bytes)
+    if recommended is not None and not fits_now(recommended, room_bytes):
+        recommended = None
     return {
         "state": "ready",
         "models": views,

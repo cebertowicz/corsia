@@ -73,8 +73,11 @@
 		return 'This computer';
 	});
 
+	const baseGroups = $derived($hostGroups.length > 0 ? $hostGroups : $liveHostGroups);
+	// CORSIA's own oMLX row, online or offline, is the local model: Set up shows only without one.
+	const hasCorsiaOmlx = $derived(baseGroups.some((group) => group.providers.some((p) => p.server?.corsia_omlx === true)));
 	const localSetupRow = $derived.by<HostProvider | null>(() => {
-		if (!localSource || localSource.corsia_omlx_online === true) return null;
+		if (!localSource || localSource.corsia_omlx_online === true || hasCorsiaOmlx) return null;
 		return {
 			name: 'local-setup', label: 'Local model', type: 'local', statusDot: setupFailed ? 'error' : 'disabled', subline: setupLine,
 			raw: { name: 'local-setup', label: 'Local model' } as ProviderEntry,
@@ -138,7 +141,7 @@
 	onDestroy(() => stopLocalSourceUpdates?.());
 
 	const groups = $derived.by<HostGroup[]>(() => {
-		const base = $hostGroups.length > 0 ? $hostGroups : $liveHostGroups;
+		const base = baseGroups;
 		if (!localSetupRow) return base;
 		const local = base.find((group) => group.key === 'this-mac');
 		if (local) return base.map((group) => group.key === 'this-mac'

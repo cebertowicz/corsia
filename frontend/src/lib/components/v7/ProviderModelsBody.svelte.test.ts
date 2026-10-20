@@ -114,14 +114,14 @@ describe('Settings model rows and account usage', () => {
 				ok: true, json: async () => ({
 					loaded: [],
 					available: [
-						{ id: 'big-model', model_id: 'big-model', repo_id: 'big-model', display_name: 'Big model', context_length: 262144, size_bytes: 16 * 1024 ** 3 },
+						{ id: 'big-model', model_id: 'big-model', repo_id: 'big-model', display_name: 'Big model', context_length: 262144, size_bytes: 16 * 1024 ** 3, keep_line: 'Not loaded: needs 174 GB of memory, 123 GB free' },
 						{ id: 'plain', model_id: 'plain', repo_id: 'plain', display_name: 'Plain model', context_length: 262144, size_bytes: 16 * 1024 ** 3 },
 					],
 				}),
 			};
 			if (url.includes('/providers/local/downloads')) return {
 				ok: true, json: async () => [
-					{ repository: 'org/big-model', model: 'big-model', status: 'available', server_id: 'local-test', detail: 'Not loaded: needs 174 GB of memory, 123 GB free' },
+					{ repository: 'org/big-model', model: 'big-model', status: 'available', server_id: 'local-test' },
 				],
 			};
 			if (url.includes('/providers/sources')) return {

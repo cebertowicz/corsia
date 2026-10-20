@@ -2,21 +2,18 @@ import type { ProviderModel } from './providerModels';
 
 /** What the local model rows ask the backend about pins and about memory: they render its verdicts, never compute them. */
 
-/** The line under a loaded model that couldn't be pinned because the pins use the room for pins (R4); the backend writes it. */
-export function pinsFullLine(m: ProviderModel): string | null {
-	return m.state === 'loaded' && !m.pinned ? m.keepLine ?? null : null;
+/**
+ * The one line under a row of CORSIA's own oMLX: Loading while a download finishes its load,
+ * else the backend's ``keepLine`` (a failed keep attempt, pins full, or a pinned model that
+ * doesn't fit now).
+ */
+export function keepLine(m: ProviderModel, finishing: boolean): string | null {
+	return finishing ? 'Loading on this computer…' : m.keepLine ?? null;
 }
 
-/**
- * The line under a pinned model that isn't loaded (R5: it doesn't fit now). Nothing shows while
- * oMLX is still loading its pins at start (``starting``) or while a download is finishing its
- * load; a backend note (couldn't keep or load it) stands when the model would fit.
- */
-export function notLoadedLine(
-	m: ProviderModel, { finishing, note }: { finishing: boolean; note: string | null },
-): string | null {
-	if (!m.pinned || m.state !== 'default' || m.starting || finishing) return null;
-	return m.keepLine ?? note;
+/** A pinned model that isn't loaded and has a line saying why may be loaded anyway. */
+export function canLoadAnyway(m: ProviderModel, finishing: boolean): boolean {
+	return !!m.pinned && m.state === 'default' && !m.starting && !finishing && !!m.keepLine;
 }
 
 /** Writes oMLX's own pin on a model; false when it could not be written. */

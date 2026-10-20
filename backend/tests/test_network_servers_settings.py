@@ -204,21 +204,20 @@ def test_lifecycle_unknown_provider_returns_clean_error(client, monkeypatch):
     assert "retired" in body["message"]
 
 
-def test_loading_a_model_clears_why_it_was_not_auto_loaded(client, tmp_path, monkeypatch):
-    from llm import local_downloads
-    from llm.local_model import LocalModel
+def test_loading_or_pinning_a_model_clears_a_failed_keep_attempt(client, monkeypatch):
+    from llm import local_keep_loaded
 
-    monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
-    model = LocalModel("Jundot/Qwen3.8-27B-oQ4e", 1_000_000, 32_768, "Qwen 3.8 27B")
-    local_downloads.write(local_downloads.Download(model, server_id="ns-test"))
-    local_downloads.set_detail(model.model, "Not loaded: needs 174 GB of memory, 123 GB free")
+    model = "Qwen3.8-27B-oQ4e"
+    monkeypatch.setitem(local_keep_loaded._FAILED, ("ns-test", model), local_keep_loaded.NOT_LOADED)
+    with patch("llm.providers.omlx.load_model", new=AsyncMock(return_value={"ok": False, "message": "no"})):
+        client.post("/api/settings/network-servers/ns-test/models/load", params=_auth(), json={"model": model})
+    assert local_keep_loaded.failures("ns-test") == {}
 
-    with patch("llm.providers.omlx.load_model", new=AsyncMock(return_value={"ok": True})), \
-            patch("llm.network_discovery.discover_and_notify", new=AsyncMock()):
-        r = client.post("/api/settings/network-servers/ns-test/models/load", params=_auth(), json={"model": model.model})
-
+    monkeypatch.setitem(local_keep_loaded._FAILED, ("ns-test", model), local_keep_loaded.NOT_KEPT)
+    with patch("llm.providers.omlx.update_model_settings", new=AsyncMock(return_value={"ok": True})):
+        r = client.put(f"/api/settings/network-servers/ns-test/models/{model}/settings", params=_auth(), json={"pinned": True})
     assert r.status_code == 200, r.text
-    assert local_downloads.get(model.model).detail is None
+    assert local_keep_loaded.failures("ns-test") == {}
 
 
 def _auth() -> dict[str, str]:
