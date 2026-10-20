@@ -1,6 +1,6 @@
 ---
 name: decision-brief
-description: Use before sending the user any substantive message — analysis, research, options, a proposal, a review result, a status update, a blocker, or a request for action or approval — to compress it to the message rule in core context, keep long form in an artifact, raise a real tradeoff through the plan decision, and bring anything to review or approve as an artifact ask. Not for a one-line answer, tool narration, or agent-to-agent messages.
+description: Use before sending the user any substantive message (analysis, options, a proposal, a review result, a status update, a blocker or a request) to compress it to the message rule in core context, keep long form in an artifact, and raise a choice through the plan decision. Not for a one-line answer, tool narration, or agent-to-agent messages.
 metadata:
   corsia-data: corsia.yaml
   corsia-format: "1"
@@ -29,7 +29,6 @@ Keep routine updates brief and consolidated. A requested report, explanation or 
 - Do not ask the user to choose what does not change behavior, external effect, cost, risk, or reversibility. Run skill `decide-or-raise` before drafting a raise.
 - Long form goes to the plan node or a registered document; the brief links it.
 - A genuine decision is a structured plan decision (draft, parent review, raise). Describing it in chat is not surfacing it.
-- Getting something reviewed or approved (a draft, document, plan, design or image) is an artifact ask on it, not a decision; related items share one artifact and one ask, and visuals are embedded inline as relative markdown images, not linked.
 - Keep unanswered decisions pending. Chase an overdue decision through its existing supported route without creating duplicates or treating silence as consent.
 
 ## Before sending
