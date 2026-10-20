@@ -1,7 +1,7 @@
 import { acceptsSend, findModelById, modelAvailability, type Model } from '$lib/stores/models';
 import type { Thread } from '$lib/stores/threads';
 
-type ReadinessThread = Pick<Thread, 'model' | 'pending_model' | 'switch_status'>;
+type ReadinessThread = Partial<Pick<Thread, 'model' | 'pending_model' | 'switch_status'>>;
 
 /** What one send did: `sent`, refused silently, or refused after the composer already told the person (`notified`). */
 export type SendOutcome = 'sent' | 'not_sent' | 'notified';

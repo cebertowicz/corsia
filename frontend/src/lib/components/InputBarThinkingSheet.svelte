@@ -1,18 +1,25 @@
 <script lang="ts">
 	import { token } from '$lib/stores/auth';
-	import { activeThreadId, reasoningEffort, saveReasoningEffort } from '$lib/stores/threads';
+	import { reasoningEffort, saveReasoningEffort } from '$lib/stores/threads';
+	import { composerSelectionFor } from '$lib/stores/composerSelection';
+	import { patchSubagentThread } from '$lib/stores/subagents';
 	import { emitProductEvent } from '$lib/product_events';
 	import type { ReasoningConfig } from '$lib/stores/models';
 	import { reasoningSegments, resolveReasoningEffort } from './inputBarReasoning';
 
 	let {
+		threadId = undefined,
 		reasoningConfig,
 	}: {
+		threadId?: string | null;
 		reasoningConfig: ReasoningConfig | null;
 	} = $props();
 
+	// The effort of the thread this composer is bound to, which is a worker's own in a worker's pane.
+	const sel = $derived($composerSelectionFor(threadId));
+
 	const segments = $derived(reasoningSegments(reasoningConfig));
-	const resolvedEffort = $derived(resolveReasoningEffort($reasoningEffort, reasoningConfig));
+	const resolvedEffort = $derived(resolveReasoningEffort(sel.effort, reasoningConfig));
 	const activeSegIndex = $derived.by(() => {
 		if (segments.length === 0) return 0;
 		const index = segments.findIndex(segment => segment.value === resolvedEffort);
@@ -25,9 +32,11 @@
 	let segTrackRect: DOMRect | null = null;
 
 	function setEffort(level: string | null) {
-		const sid = $activeThreadId;
+		const sid = sel.threadId;
 		const t = $token;
-		reasoningEffort.set(level);
+		// Only the open thread's effort lives in the store; a worker's is on its row (the list holds the rest).
+		if (sel.isOpen) reasoningEffort.set(level);
+		else if (sid) patchSubagentThread(sid, { reasoning_effort: level });
 		emitProductEvent('ui', 'thinking_toggled', {
 			thread_id: sid,
 			effort: level,

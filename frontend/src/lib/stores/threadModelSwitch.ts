@@ -1,3 +1,4 @@
+import { patchSubagentThread } from './subagents';
 import { threads } from './threads';
 
 export interface ThreadModelSwitchState {
@@ -30,16 +31,15 @@ export function applyPendingThreadModelSwitch(
 	) {
 		throw new Error('Model switch response did not include pending operation truth');
 	}
+	const pending = {
+		pending_model: body.pending_model,
+		switch_status: body.status,
+		switch_error: null,
+		switch_operation_id: body.operation_id,
+	};
+	patchSubagentThread(threadId, pending);
 	threads.update((rows) => rows.map((thread) => (
-		thread.id === threadId
-			? {
-				...thread,
-				pending_model: body.pending_model,
-				switch_status: body.status,
-				switch_error: null,
-				switch_operation_id: body.operation_id,
-			}
-			: thread
+		thread.id === threadId ? { ...thread, ...pending } : thread
 	)));
 	return {
 		kind: 'pending',

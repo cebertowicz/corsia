@@ -15,6 +15,7 @@
  */
 
 import { get, writable } from 'svelte/store';
+import type { Thread } from './threads';
 
 /**
  * `unknown` is the absence of information, never a claim about the worker.
@@ -26,14 +27,27 @@ export type SubStatus = 'running' | 'ready' | 'closed' | 'error' | 'idle' | 'unk
 /** Live frames own these; hydration may never overwrite one. */
 const TERMINAL_STATUSES: ReadonlySet<SubStatus> = new Set<SubStatus>(['closed', 'error']);
 
+/**
+ * The thread-row fields the composer's model and effort controls read. The thread
+ * list never holds a worker, so a worker carries its own row here and the composer
+ * reads it the way it reads any thread's.
+ */
+export type SubagentThreadFields = Partial<Pick<
+	Thread,
+	| 'model' | 'reasoning_effort' | 'project_id'
+	| 'pending_model' | 'switch_status' | 'switch_error' | 'switch_operation_id'
+>>;
+
 export interface SubagentRef {
 	childThreadId: string;
 	parentThreadId: string;
 	name: string;
 	provider: string;
 	status: SubStatus;
+	/** What the provider reported at start; the thread's selected model is `thread.model`. */
 	model?: string;
 	cwd?: string;
+	thread?: SubagentThreadFields;
 }
 
 export const subagentMeta = writable<Map<string, SubagentRef>>(new Map());
@@ -58,7 +72,19 @@ export function registerSubagent(
 			status,
 			model: prev?.model,
 			cwd: prev?.cwd,
+			thread: prev?.thread,
 		});
+		return n;
+	});
+}
+
+/** Fold selected-model, effort and switch fields into a worker's row; a thread that is no worker is ignored. */
+export function patchSubagentThread(childId: string, fields: SubagentThreadFields): void {
+	subagentMeta.update((m) => {
+		const prev = m.get(childId);
+		if (!prev) return m;
+		const n = new Map(m);
+		n.set(childId, { ...prev, thread: { ...prev.thread, ...fields } });
 		return n;
 	});
 }
@@ -167,6 +193,11 @@ export async function hydrateSubagentThread(
 			status,
 		);
 		if (typeof truth?.model === 'string') setSubagentInit(threadId, { model: truth.model });
+		patchSubagentThread(threadId, {
+			model: typeof truth?.model === 'string' && truth.model ? truth.model : null,
+			reasoning_effort: typeof truth?.reasoning_effort === 'string' ? truth.reasoning_effort : null,
+			project_id: typeof truth?.project_id === 'string' ? truth.project_id : null,
+		});
 		return status;
 	} catch (error) {
 		// Declared, not silent: the chip stays `unknown` and a later mount retries.

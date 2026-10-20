@@ -262,7 +262,6 @@ export async function saveThreadTitle(threadId: string, title: string, token: st
 
 export async function saveReasoningEffort(threadId: string, effort: string | null, token: string) {
 	threads.update(ss => ss.map(s => s.id === threadId ? { ...s, reasoning_effort: effort } : s));
-	reasoningEffort.set(effort);
 	try {
 		await fetch(`/api/threads/${threadId}?token=${token}`, {
 			method: 'PATCH',

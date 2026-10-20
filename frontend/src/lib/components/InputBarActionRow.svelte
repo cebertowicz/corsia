@@ -15,16 +15,12 @@
 	import { stopRequestedTurns } from '$lib/ws/send';
 	import { turnStates } from '$lib/ws/turnState';
 	import { isThreadTurnActive } from '$lib/stores/threads';
-	import { subagentGlyph, subagentModelLabel, subagentTitle } from '$lib/utils/subagentLabel';
 	import type { SheetView } from './inputBarHelpers';
-	type SubagentRef = { model?: string | null; provider?: string } | undefined;
 
 	let {
 		threadId,
 		sheetView,
 		openSheet,
-		isSubagentThread,
-		subagentRef,
 		isActiveModelReady,
 		canSendToModel,
 		queueUntilSwitch,
@@ -47,8 +43,6 @@
 		threadId: string | null;
 		sheetView: SheetView;
 		openSheet: (view: Exclude<SheetView, null>) => void;
-		isSubagentThread: boolean;
-		subagentRef: SubagentRef;
 		isActiveModelReady: boolean;
 		canSendToModel: boolean;
 		queueUntilSwitch: boolean;
@@ -190,30 +184,23 @@
 	>
 		<svg class="plus-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 	</button>
-	{#if isSubagentThread}
-		<span class="row-chip cc-model-chip" title={subagentTitle(subagentRef?.provider)}>
-			<span class="cc-glyph">{subagentGlyph(subagentRef?.provider)}</span>
-			<span class="model-chip-name">{subagentModelLabel(subagentRef?.model, subagentRef?.provider)}</span>
-		</span>
-	{:else}
-		<button
-			type="button"
-			class="row-chip model-chip"
-			class:open={sheetView === 'model'}
-			class:unloaded={!isActiveModelReady}
-			data-sheet-trigger
-			onclick={(event) => openControlSheet(event, 'model')}
-			title={isActiveModelReady
-				? activeModelName
-				: queueUntilSwitch
-					? 'Model switch in progress'
-					: 'Pick a loaded model to send'}
-		>
-			<span class="model-chip-name">{modelLabel}</span>
-			<svg class="chevron" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>
-		</button>
-	{/if}
-	{#if !isSubagentThread && supportsReasoning && effortLabel}
+	<button
+		type="button"
+		class="row-chip model-chip"
+		class:open={sheetView === 'model'}
+		class:unloaded={!isActiveModelReady}
+		data-sheet-trigger
+		onclick={(event) => openControlSheet(event, 'model')}
+		title={isActiveModelReady
+			? activeModelName
+			: queueUntilSwitch
+				? 'Model switch in progress'
+				: 'Pick a loaded model to send'}
+	>
+		<span class="model-chip-name">{modelLabel}</span>
+		<svg class="chevron" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>
+	</button>
+	{#if supportsReasoning && effortLabel}
 		<button
 			type="button"
 			class="row-chip effort-chip"
@@ -282,7 +269,7 @@
 		onpointercancel={abandonQueueHold}
 		oncontextmenu={(event) => event.preventDefault()}
 		onclick={handleSendClick}
-		disabled={(!hasMessageToSend && !isStreamingThisThread) || $connectionState !== 'connected' || (!canSendToModel && hasMessageToSend && !isSubagentThread)}
+		disabled={(!hasMessageToSend && !isStreamingThisThread) || $connectionState !== 'connected' || (!canSendToModel && hasMessageToSend)}
 		aria-label={queueArmed
 			? 'Release to queue after the current turn'
 			: isStreamingThisThread && !hasMessageToSend
@@ -292,7 +279,7 @@
 			? 'Release to queue after the current turn'
 			: queueUntilSwitch && !isStreamingThisThread
 				? 'Queues until model switch finishes'
-				: !canSendToModel && !isStreamingThisThread && !isSubagentThread
+				: !canSendToModel && !isStreamingThisThread
 					? 'Pick a loaded model to send'
 					: hasMessageToSend
 						? 'Send — hold to queue, or press Ctrl/⌘+Enter'

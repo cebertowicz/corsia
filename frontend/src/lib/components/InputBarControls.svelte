@@ -6,7 +6,8 @@
 	import InputBarThinkingSheet from './InputBarThinkingSheet.svelte';
 	import LimitHeldLine from './LimitHeldLine.svelte';
 	import { checkpointsByThread, latestCheckpoint, requestManualCheckpoint } from '$lib/stores/checkpoints';
-	import { activeThreadId, reasoningEffort, threads, type ContextUsage } from '$lib/stores/threads';
+	import { activeThreadId, threads, type ContextUsage } from '$lib/stores/threads';
+	import { composerSelectionFor } from '$lib/stores/composerSelection';
 	import {
 		contextPreviewByThread,
 		contextReading,
@@ -74,7 +75,9 @@
 		onQueueAfterTurn: () => void;
 	} = $props();
 
-	const activeModel = $derived(findModelById($models, $activeModelId));
+	// The composer's own thread's selection: for a worker's composer, the worker's, not the open thread's.
+	const selection = $derived($composerSelectionFor(threadId));
+	const activeModel = $derived(findModelById($models, selection.modelId));
 	// The chip reads as chosen under the composer's one send rule (`acceptsSend`): a usage-limit block
 	// is a normal chip, since the held line says why. Any other block (not offered, signed out,
 	// model gone) is still 'Unavailable'.
@@ -82,8 +85,8 @@
 	const modelName = $derived(
 		chipReady
 			? canonicalName(activeModel!)
-			: $activeModelId
-				? `Unavailable · ${activeModel ? canonicalName(activeModel) : $activeModelId}`
+			: selection.modelId
+				? `Unavailable · ${activeModel ? canonicalName(activeModel) : selection.modelId}`
 				: 'Select Model'
 	);
 	// Defaults to the active thread so a caller that predates the subagent
@@ -106,8 +109,7 @@
 			?? $threads.find(thread => thread.id === boundThreadId)?.title
 			?? 'this thread',
 	);
-	const isSubagentThread = $derived(subagentRef !== undefined);
-	const isCCBacked = $derived(isSubagentThread || activeModel?.backend === 'cc');
+	const isCCBacked = $derived(activeModel?.backend === 'cc');
 	const showVisionWarning = $derived(
 		hasImageAttachments &&
 		!isCCBacked &&
@@ -118,7 +120,7 @@
 
 	const reasoningConfig = $derived(activeModel?.capabilities?.reasoning_config ?? null);
 	const supportsReasoning = $derived(reasoningConfig !== null);
-	const resolvedEffort = $derived(resolveReasoningEffort($reasoningEffort, reasoningConfig));
+	const resolvedEffort = $derived(resolveReasoningEffort(selection.effort, reasoningConfig));
 	const effortLabel = $derived.by(() => {
 		if (!supportsReasoning) return '';
 		return reasoningEffortLabel(reasoningConfig, resolvedEffort);
@@ -273,7 +275,7 @@
 		<span>{activeModel?.name ?? 'Current model'} doesn't support images — switch to a vision-capable model to use image attachments.</span>
 	</div>
 {/if}
-<LimitHeldLine model={activeModel} onSwitchModel={() => openSheet('model')} />
+<LimitHeldLine threadId={boundThreadId} model={activeModel} onSwitchModel={() => openSheet('model')} />
 
 {#if sheetView === 'attachments'}
 	<div class="action-sheet">
@@ -302,7 +304,7 @@
 {/if}
 
 {#if sheetView === 'model'}
-	<InputBarModelSheet onclose={() => toggleSheet('model')} {focusLocalOnly} onfocusconsumed={onfocusconsumed} />
+	<InputBarModelSheet threadId={boundThreadId} onclose={() => toggleSheet('model')} {focusLocalOnly} onfocusconsumed={onfocusconsumed} />
 {/if}
 
 {#if sheetView === 'context'}
@@ -331,7 +333,7 @@
 {/if}
 
 {#if sheetView === 'thinking' && supportsReasoning && reasoningConfig}
-	<InputBarThinkingSheet {reasoningConfig} />
+	<InputBarThinkingSheet threadId={boundThreadId} {reasoningConfig} />
 {/if}
 </div>
 {/if}
@@ -341,8 +343,6 @@
 		threadId={boundThreadId}
 		{sheetView}
 		{openSheet}
-		{isSubagentThread}
-		{subagentRef}
 		isActiveModelReady={chipReady}
 		{canSendToModel}
 		{queueUntilSwitch}
