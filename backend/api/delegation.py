@@ -223,8 +223,6 @@ async def create_thread(token: str, body: dict):
         raise HTTPException(409, exc.message) from exc
     except SpawnVisibilityRejected as exc:
         raise HTTPException(403, str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
     thread_id = thread_row["id"]
 
     emit_product_event(

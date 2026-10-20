@@ -214,11 +214,12 @@ class TestCreateThread:
         ).fetchone()
         assert row["c"] == 0
 
-    def test_local_only_model_refusal_is_400(self, client, monkeypatch):
+    def test_local_only_model_refusal_is_409(self, client, monkeypatch):
         import api.delegation as delegation_api
+        from infra.local_only import LocalOnlyRefused
 
         async def refuse(**_kwargs):
-            raise ValueError("local_only_requires_local_model: choose local")
+            raise LocalOnlyRefused("local_only_requires_local_model: choose local")
 
         monkeypatch.setattr(delegation_api, "create_visible_fresh_thread", refuse)
 
@@ -228,8 +229,23 @@ class TestCreateThread:
             json={"model": "claude-code/sonnet"},
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 409
         assert "local_only_requires_local_model" in response.json()["detail"]
+
+    def test_unrelated_value_error_is_not_a_client_error(self, client, monkeypatch):
+        import api.delegation as delegation_api
+
+        async def fail(**_kwargs):
+            raise ValueError("task does not exist")
+
+        monkeypatch.setattr(delegation_api, "create_visible_fresh_thread", fail)
+
+        with pytest.raises(ValueError):
+            client.post(
+                "/api/delegation/threads",
+                params={"token": _TOKEN},
+                json={"model": "claude-code/sonnet"},
+            )
 
 
 class TestDelegationSendConfirmation:
