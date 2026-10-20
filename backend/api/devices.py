@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -14,7 +15,7 @@ from infra.db_async import run_in_db
 from infra.devices_listener import host_spki_der, host_spki_sha256, sign_identity_proof
 from infra.local_connection import is_direct_loopback
 from infra.product_events import emit_product_event
-from infra.settings import set_devices_enabled
+from infra.settings import get_devices_outside_address, set_devices_enabled, set_devices_outside_address
 
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
@@ -44,6 +45,23 @@ def _emit(action: str, *, reason: str | None = None) -> None:
     emit_product_event("devices", action, properties=properties)
 
 
+def _outside_address(value: object) -> str | None:
+    """Validate the host setting once at its backend boundary."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(400, "outside_address must be a string or null")
+    text = value.strip()
+    if re.match(r"^http://", text, re.IGNORECASE):
+        raise HTTPException(400, "Type the outside address without http://, like home.example.com.")
+    text = re.sub(r"^https://", "", text, flags=re.IGNORECASE).removesuffix("/")
+    if not text:
+        return None
+    if re.search(r"[\s/]", text) or not re.fullmatch(r"[^:]+(?::\d{1,5})?", text):
+        raise HTTPException(400, "Type a name, like home.example.com, or a name and port, like home.example.com:8443.")
+    return text
+
+
 def _pairing_error(error: PairingError) -> HTTPException:
     if error.reason == "too_many_pending":
         return HTTPException(429, {"reason": error.reason})
@@ -62,6 +80,11 @@ async def get_devices(request: Request, _user: dict = Depends(require_human_user
 @router.put("")
 async def put_devices(body: dict, request: Request, _user: dict = Depends(require_human_user)):
     _require_local_management(request)
+    if "outside_address" in body:
+        address = _outside_address(body["outside_address"])
+        await run_in_db(set_devices_outside_address, address)
+        runtime.outside_address = address
+        return runtime.snapshot(include_code=True)
     enabled = body.get("enabled")
     if not isinstance(enabled, bool):
         raise HTTPException(400, "enabled must be a boolean")
@@ -124,6 +147,12 @@ async def pair_start(body: dict):
     return {"exchange_id": exchange_id, "msg_s": base64.b64encode(msg_s).decode()}
 
 
+@router.get("/outside-address")
+async def outside_address():
+    """The host endpoint paired computers learn only through their local pinned route."""
+    return {"outside_address": await run_in_db(get_devices_outside_address)}
+
+
 @router.post("/pair/finish")
 async def pair_finish(body: dict):
     exchange_id = body.get("exchange_id")
@@ -143,7 +172,11 @@ async def pair_finish(body: dict):
             _emit("pairing_paused")
         raise _pairing_error(error) from error
     _emit("pairing_succeeded")
-    result = {"confirm_s": base64.b64encode(confirm_s).decode(), "name": name}
+    result = {
+        "confirm_s": base64.b64encode(confirm_s).decode(),
+        "name": name,
+        "outside_address": await run_in_db(get_devices_outside_address),
+    }
     if confirm_identity is not None:
         result["spki_sha256"] = base64.b64encode(identity).decode()
         result["confirm_identity"] = base64.b64encode(confirm_identity).decode()

@@ -69,22 +69,17 @@ def lan_addresses(*, include_link_local: bool, interface_addrs=None) -> list[str
     return [value for _, _, value in sorted(set(addresses))]
 
 
-_PUBLIC_API_ROUTES = frozenset({
-    ("GET", "/api/health"),
-    ("GET", "/api/version"),
-    ("GET", "/api/auth/status"),
-    ("POST", "/api/auth/login"),
-    ("POST", "/api/devices/pair/start"),
-    ("POST", "/api/devices/pair/finish"),
-    ("POST", "/api/devices/identity"),
-})
+_PUBLIC_API_ROUTES = frozenset({("GET", "/api/health"), ("GET", "/api/version"), ("GET", "/api/auth/status"), ("POST", "/api/auth/login"), ("POST", "/api/devices/pair/start"), ("POST", "/api/devices/pair/finish"), ("GET", "/api/devices/outside-address"), ("POST", "/api/devices/identity")})
+_LOCAL_ONLY_POST_ROUTES = frozenset({("POST", "/api/devices/pair/start"), ("POST", "/api/devices/pair/finish")})
+_FORWARDING_HEADERS = frozenset({b"forwarded", b"x-forwarded-for", b"x-real-ip"})
 
 
 class DevicesApp:
     """Tag Devices scopes and limit their HTTP access to pairing-safe routes."""
 
-    def __init__(self, app):
+    def __init__(self, app, *, outside_enabled: Callable[[], bool] | None = None):
         self._app = app
+        self._outside_enabled = outside_enabled or (lambda: False)
         self.stopping = False
 
     @staticmethod
@@ -110,37 +105,48 @@ class DevicesApp:
 
     @staticmethod
     def _may_peer_reach_devices(scope) -> bool:
-        """Return whether a peer may reach the devices listener.
-
-        The outside-peer branch is deliberately closed until the host-side
-        outside-address setting owns that admission decision.
-        """
+        """Return whether a peer may reach the devices listener."""
         try:
             peer = ipaddress.ip_address(str(scope["client"][0]).split("%", 1)[0])
         except (KeyError, TypeError, IndexError, ValueError):
             return False
         if peer.version == 6 and peer.ipv4_mapped is not None:
             peer = peer.ipv4_mapped
-        on_local_network = peer.is_loopback or peer.is_link_local or any(peer in network for network in _PEER_NETWORKS)
-        outside_peer_allowed = False  # Closed seam for the host-side outside-address setting.
-        return on_local_network or outside_peer_allowed
+        return peer.is_loopback or peer.is_link_local or any(peer in network for network in _PEER_NETWORKS)
 
     @staticmethod
     def _peer_is_on_this_network(scope) -> bool:
-        """Compatibility name for the existing local-network admission policy."""
-        return DevicesApp._may_peer_reach_devices(scope)
+        """The pairing/sign-in network: private, ULA, or link-local, never loopback."""
+        try:
+            peer = ipaddress.ip_address(str(scope["client"][0]).split("%", 1)[0])
+        except (KeyError, TypeError, IndexError, ValueError):
+            return False
+        if peer.version == 6 and peer.ipv4_mapped is not None:
+            peer = peer.ipv4_mapped
+        return not peer.is_loopback and (peer.is_link_local or any(peer in network for network in _PEER_NETWORKS))
+
+    @classmethod
+    def _requires_same_network(cls, scope) -> bool:
+        if (scope.get("method"), scope.get("path")) not in _LOCAL_ONLY_POST_ROUTES:
+            return False
+        headers = {name.lower() for name, _ in scope.get("headers", ())}
+        return bool(headers & _FORWARDING_HEADERS) or not cls._peer_is_on_this_network(scope)
 
     async def __call__(self, scope, receive, send):
         tagged = dict(scope)
         tagged["corsia_listener"] = "devices"
         path = tagged.get("path", "")
         kind = tagged.get("type")
-        if kind in {"http", "websocket"} and not self._may_peer_reach_devices(tagged):
+        may_reach = self._may_peer_reach_devices(tagged) or self._outside_enabled()
+        if kind in {"http", "websocket"} and not may_reach:
             if kind == "http":
                 await JSONResponse({"reason": "not_on_this_network"}, status_code=403)(tagged, receive, send)
             else:
                 await receive()  # websocket.connect
                 await send({"type": "websocket.close", "code": 1008})
+            return
+        if kind == "http" and self._requires_same_network(tagged):
+            await JSONResponse({"reason": "not_on_this_network"}, status_code=403)(tagged, receive, send)
             return
         if (
             kind == "http"
@@ -186,6 +192,7 @@ class DevicesListener:
     announcement: DNSServiceAnnouncement | None = None
     # Told when the announced name or its error changes after start().
     on_announcement_change: Callable[[], None] | None = None
+    outside_enabled: Callable[[], bool] | None = None
 
     @property
     def listening(self) -> dict:
@@ -210,7 +217,7 @@ class DevicesListener:
             return False
         assert port is not None
         config = uvicorn.Config(
-            DevicesApp(self.app),
+            DevicesApp(self.app, outside_enabled=self.outside_enabled),
             host="::",
             port=port,
             log_config=None,

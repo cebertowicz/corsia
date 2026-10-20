@@ -17,6 +17,10 @@ export type DevicesApi = {
 	computer_name: string;
 	lan_addresses: string[];
 	code: { state: 'none' | 'active' | 'paused'; expires_in_seconds?: number | null; value?: string };
+	/** The saved outside address, `host` or `host:port` (always reached over https). */
+	outside_address?: string | null;
+	/** The port the main CORSIA answers on; never the one to expose. */
+	main_port?: number;
 };
 
 export type DevicesView = {
@@ -32,11 +36,29 @@ export type DevicesView = {
 	code: string | null;
 	endsInSeconds: number | null;
 	addresses: string[];
+	/** The saved outside address, and the two ports the help line names (filled from the running config). */
+	outside: string | null;
+	devicesPort: number | null;
+	mainPort: number | null;
 };
+
+/**
+ * What the outside-address field accepts: `host` or `host:port`, always https. An https prefix is stripped; an http
+ * prefix is refused. Returns the address to save, or the one plain line to show.
+ */
+export function parseOutside(text: string): { address: string | null } | { error: string } {
+	const value = text.trim();
+	if (/^http:\/\//i.test(value)) return { error: 'Type the outside address without http://, like home.example.com.' };
+	const bare = value.replace(/^https:\/\//i, '').replace(/\/$/, '');
+	if (!bare) return { address: null };
+	if (/[\s/]/.test(bare) || !/^[^:]+(:\d{1,5})?$/.test(bare)) return { error: 'Type a name, like home.example.com, or a name and port, like home.example.com:8443.' };
+	return { address: bare };
+}
 
 export const EMPTY_VIEW: DevicesView = {
 	load: 'loading', enabled: false, readOnly: false, hostName: '', announced: false, busy: null,
 	listener: 'ok', pairing: 'idle', code: null, endsInSeconds: null, addresses: [],
+	outside: null, devicesPort: null, mainPort: null,
 };
 
 /** The host's name as a person knows it: the announced one, else the computer's own name (never the typed `.local` host). */
@@ -66,6 +88,9 @@ export function viewFromApi(api: DevicesApi, forcedReadOnly: boolean, hostNameOv
 		code,
 		endsInSeconds: api.code.state === 'active' ? api.code.expires_in_seconds ?? null : null,
 		addresses: typedAddresses(api),
+		outside: api.outside_address ?? null,
+		devicesPort: api.listening?.port ?? null,
+		mainPort: api.main_port ?? null,
 	};
 }
 
@@ -150,6 +175,20 @@ export function createDevices(options: Options = {}) {
 		}
 	}
 
+	/** Saves the outside address (empty clears it). Returns the refusal line, or null once saved. */
+	async function setOutside(text: string): Promise<string | null> {
+		const parsed = parseOutside(text);
+		if ('error' in parsed) return parsed.error;
+		try {
+			const api = await write('/api/devices', { method: 'PUT', body: JSON.stringify({ outside_address: parsed.address }) });
+			if (api) accept(api);
+			return null;
+		} catch {
+			await read();
+			return 'Couldn’t save the outside address. Try again.';
+		}
+	}
+
 	async function retry() {
 		if (view.load === 'failed') { view = { ...view, load: 'loading' }; await read(); return; }
 		await setEnabled(true);
@@ -180,6 +219,6 @@ export function createDevices(options: Options = {}) {
 
 	return {
 		get view() { return view; },
-		read, setEnabled, newCode, retry, start, tick,
+		read, setEnabled, setOutside, newCode, retry, start, tick,
 	};
 }

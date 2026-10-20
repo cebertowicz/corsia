@@ -1,11 +1,11 @@
 import {
-	SETTINGS_PATH, codeRefusalLine, parseAddress, refusesOnCodeScreen, remoteDiscovered, remotePair, unreachableLine,
+	SETTINGS_PATH, SETTINGS_PATH_IN_SENTENCE as openPath, codeRefusalLine, parseAddress, refusesOnCodeScreen, remoteDiscovered, remotePair, unreachableLine,
 	type PairResult, type PairTarget,
 } from '$lib/remoteShell';
 
 /** How long the boxes show as refused before they clear, so the refusal is seen and the characters never pop out. */
 export const REFUSAL_HOLD_MS = 200;
-/** How long Looking… runs on an empty list before the screen says what to check (it keeps looking). */
+/** How long the search runs on an empty list before the screen says nothing was found (it keeps looking, and Look again restarts the window). */
 export const NONE_FOUND_AFTER_MS = 5000;
 export const DISCOVERY_POLL_MS = 1000;
 
@@ -39,6 +39,8 @@ export function createSetupRemote(deps: Deps = {}) {
 	let busy = $state(false);
 	let connectedTo = $state('');
 	let waited = $state(false);
+	let typing = $state(false);
+	let waitTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const typed = $derived(parseAddress(address));
 	const target = $derived.by((): { target: PairTarget; label: string } | null => {
@@ -59,14 +61,21 @@ export function createSetupRemote(deps: Deps = {}) {
 		}
 	}
 
+	/** Opens the search window: Looking until it ends, then the nothing-found screen if no computer has answered. */
+	function armWindow() {
+		clearTimeout(waitTimer);
+		waited = false;
+		waitTimer = setTimeout(() => { waited = true; }, NONE_FOUND_AFTER_MS);
+	}
+
 	/** Starts looking; poll every second while r1 is open. Returns the stop function. */
 	function start() {
-		waited = false;
+		armWindow();
 		void poll();
 		const timer = setInterval(() => { if (stage === 'choose') void poll(); }, DISCOVERY_POLL_MS);
-		const wait = setTimeout(() => { waited = true; }, NONE_FOUND_AFTER_MS);
-		return () => { clearInterval(timer); clearTimeout(wait); };
+		return () => { clearInterval(timer); clearTimeout(waitTimer); };
 	}
+
 
 	return {
 		get stage() { return stage; },
@@ -94,16 +103,31 @@ export function createSetupRemote(deps: Deps = {}) {
 		},
 		/** The shell's title, lede and Continue for the stage. */
 		get view(): { title: string; lede?: string; primary?: { label: string; disabled?: boolean }; onPrimary?: () => void } {
-			if (stage === 'code') return { title: 'Enter the code', lede: `On ${target?.label ?? ''}: ${SETTINGS_PATH}, then turn on Let other devices connect. If it’s already on, press New code. Then type the four letters here.` };
+			if (stage === 'code') {
+				// A typed address only answers when sharing is already on, so its lede and pictures skip the turn-on step and never show the address.
+				if (target?.target.kind === 'address') return { title: 'Enter the code', lede: `On the main computer, ${openPath} and press New code. Then type the four letters here.` };
+				return { title: 'Enter the code', lede: `On ${target?.label ?? ''}: ${SETTINGS_PATH}, then turn on Let other devices connect. If it’s already on, press New code. Then type the four letters here.` };
+			}
+			// Nothing found with no address typed: the way forward is to look again; a typed address brings Continue back.
+			if (this.phase === 'none' && target === null) return { title: 'Connect to CORSIA on another computer', primary: { label: 'Look again' }, onPrimary: () => this.lookAgain() };
 			return { title: 'Connect to CORSIA on another computer', primary: { label: 'Continue', disabled: target === null }, onPrimary: () => this.toCode() };
 		},
 		get canContinue() { return target !== null; },
-		/** Looking… alone at first; the sentence on what to check once nothing has turned up for a while. */
-		get searching() { return names.length === 0 && !denied && !waited; },
-		get noneFound() { return lookedFor && names.length === 0 && !denied && waited; },
+		/** The choose screen's state: Looking, the list (Found), macOS blocking the search, or Nothing found once the window ends empty. */
+		get phase(): 'looking' | 'found' | 'denied' | 'none' {
+			if (names.length > 0) return 'found';
+			if (denied) return 'denied';
+			return lookedFor && waited ? 'none' : 'looking';
+		},
+		/** The address field appears only when asked for with "Not listed? Type its address", or when it already holds text or an error. */
+		get addressOpen() { return typing || address.trim() !== '' || chooseError !== ''; },
+		get typedTarget() { return target?.target.kind === 'address'; },
 		get invalidAddress() { return address.trim() !== '' && typed === null; },
 		start,
 		poll,
+		showAddress() { typing = true; },
+		/** Restarts the search window from Looking. */
+		lookAgain() { armWindow(); void poll(); },
 		pick(name: string) { picked = name; address = ''; chooseError = ''; },
 		toCode() {
 			if (!target) return;
@@ -111,7 +135,7 @@ export function createSetupRemote(deps: Deps = {}) {
 			stage = 'code';
 		},
 		toChoose() { stage = 'choose'; code = ''; invalid = false; refusal = ''; busy = false; },
-		reset() { stage = 'choose'; picked = null; address = ''; chooseError = ''; code = ''; invalid = false; refusal = ''; busy = false; connectedTo = ''; },
+		reset() { stage = 'choose'; typing = false; picked = null; address = ''; chooseError = ''; code = ''; invalid = false; refusal = ''; busy = false; connectedTo = ''; },
 		async submit(entered: string): Promise<PairResult | null> {
 			if (busy || !target) return null;
 			busy = true; refusal = ''; invalid = false;

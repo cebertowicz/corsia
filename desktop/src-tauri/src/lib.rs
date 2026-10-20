@@ -855,10 +855,11 @@ async fn enter_saved_remote<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved:
     // A retry can find the last attempt's proxy still up (a key change leaves it running); it owns the saved port.
     replace_proxy(&app.state::<RemoteRuntime>(), None);
     let app_dir = default_app_dir(app).map_err(|error| local_failure("app folder", error))?;
+    let mut saved = saved;
     let started = if saved.outside.is_some() {
-        check_through_routes(app, &saved).await?
+        check_through_routes(app, &mut saved).await?
     } else {
-        check_saved_route(app, &saved).await?
+        check_saved_route(app, &mut saved).await?
     };
     let mut entry = RemoteEntry { app, app_dir: &app_dir, record: saved, forget_on_rollback: false, unregister: || Ok(()), restore: || {} };
     let proxy = remote_lifecycle::enter_remote(&mut entry, started)?;
@@ -866,8 +867,27 @@ async fn enter_saved_remote<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved:
     Ok(())
 }
 
+/// Convert the host-owned bare endpoint only at the desktop boundary. Invalid input never reaches the saved route.
+fn outside_route(address: Option<&str>, has_identity: bool) -> Option<remote_config::OutsideRoute> {
+    let address = address?;
+    if !has_identity { return None; }
+    let url = format!("https://{address}");
+    if remote_host::parse_https_address(&url).is_err() {
+        log::warn!("host returned an invalid outside address; ignoring it");
+        return None;
+    }
+    Some(remote_config::OutsideRoute { url, trust: remote_config::RemoteTrust::System })
+}
+
+async fn refresh_outside_address(saved: &mut remote_config::RemoteRecord, host: &str, port: u16) {
+    let Ok(trust) = trust::Trust::try_from(&saved.trust) else { return };
+    if let Ok(address) = pairing::outside_address(host, port, trust).await {
+        saved.outside = outside_route(address.as_deref(), saved.identity.is_some());
+    }
+}
+
 /// A record with one route: check the host's version on that route, then start its proxy, as before outside routes.
-async fn check_saved_route<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: &remote_config::RemoteRecord) -> Result<proxy::ProxyHandle, classify::ConnectFailure> {
+async fn check_saved_route<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: &mut remote_config::RemoteRecord) -> Result<proxy::ProxyHandle, classify::ConnectFailure> {
     use classify::ConnectFailure;
     let trust = trust::Trust::try_from(&saved.trust).map_err(|_| ConnectFailure::KeyChanged)?;
     let (host, port) = match &saved.locator {
@@ -880,16 +900,24 @@ async fn check_saved_route<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: 
         Ok(version_check::Compat::TooOld) => return Err(ConnectFailure::TooOld),
         Err(error) => return Err(error.connect_failure().unwrap_or(ConnectFailure::Server)),
     }
+    refresh_outside_address(saved, &host, port).await;
     proxy::start_record(saved, saved.proxy_port, key_changed_callback(app, &saved.name)).await.map_err(proxy_failure)
 }
 
 /// A record with an outside route: only the proxy knows which route reaches the host and proves it, so it starts
 /// first and the version check goes through it.
-async fn check_through_routes<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: &remote_config::RemoteRecord) -> Result<proxy::ProxyHandle, classify::ConnectFailure> {
+async fn check_through_routes<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saved: &mut remote_config::RemoteRecord) -> Result<proxy::ProxyHandle, classify::ConnectFailure> {
     use classify::ConnectFailure;
     let started = proxy::start_record(saved, saved.proxy_port, key_changed_callback(app, &saved.name)).await.map_err(proxy_failure)?;
     match version_check::check_through_proxy(started.port, &version_check::app_version(app)).await {
-        Ok(version_check::Compat::Ok) => Ok(started),
+        Ok(version_check::Compat::Ok) => {
+            let local = match &saved.locator {
+                remote_config::Locator::Address { host, port } => Some((host.clone(), *port)),
+                remote_config::Locator::DnsSd { instance } => discovery::resolve(instance, Duration::from_secs(15)).await.ok(),
+            };
+            if let Some((host, port)) = local { refresh_outside_address(saved, &host, port).await; }
+            Ok(started)
+        }
         Ok(version_check::Compat::Incompatible { app: app_version, host }) => Err(ConnectFailure::Incompatible { app: app_version, host }),
         Ok(version_check::Compat::TooOld) => Err(ConnectFailure::TooOld),
         Err(_) if started.key_changed() => Err(ConnectFailure::KeyChanged),
@@ -1028,7 +1056,7 @@ async fn pair_remote(request: RemotePairRequest, app: &tauri::AppHandle, remote:
         name: paired.name.clone(),
         proxy_port: 0,
         identity: paired.identity.map(|identity| BASE64.encode(identity)),
-        outside: None,
+        outside: outside_route(paired.outside_address.as_deref(), paired.identity.is_some()),
     };
     let started = match proxy::start_record(&record, 0, key_changed_callback(app, &paired.name)).await {
         Ok(started) => started,
@@ -2171,6 +2199,16 @@ mod tests {
         tauri::async_runtime::block_on(connect_saved_remote(app.handle().clone(), saved));
         assert_eq!(launch_state(&app), shell_state::LaunchState::Failed { name: "Studio".into(), failure: classify::ConnectFailure::KeyChanged });
         assert!(app.state::<RemoteRuntime>().proxy.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn outside_address_conversion_uses_https_system_trust_and_rejects_bad_values() {
+        let route = outside_route(Some("home.example.com:8443"), true).unwrap();
+        assert_eq!(route.url, "https://home.example.com:8443");
+        assert_eq!(route.trust, remote_config::RemoteTrust::System);
+        assert!(outside_route(Some("http://home.example.com"), true).is_none());
+        assert!(outside_route(Some("home.example.com/path"), true).is_none());
+        assert!(outside_route(Some("home.example.com"), false).is_none());
     }
 
     /// A saved record with an outside route at `outside_port`, pinned like its local route to `identity`.

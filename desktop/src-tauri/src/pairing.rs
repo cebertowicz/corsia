@@ -25,6 +25,8 @@ pub struct Paired {
     pub port: u16,
     /// Stable host identity; absent only when pairing a host predating identity confirmation.
     pub identity: Option<[u8; 32]>,
+    /// Optional bare host[:port] learned while this local pinned connection was established.
+    pub outside_address: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -121,6 +123,13 @@ struct FinishResponse {
     spki_sha256: Option<String>,
     #[serde(default)]
     confirm_identity: Option<String>,
+    #[serde(default)]
+    outside_address: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OutsideAddressResponse {
+    outside_address: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -365,7 +374,25 @@ async fn finish_exchange(
         host: endpoint.host.clone(),
         port: endpoint.port,
         identity,
+        outside_address: finish.outside_address,
     })
+}
+
+/// Read the endpoint only over the paired local route, whose TLS key is pinned.
+pub async fn outside_address(host: &str, port: u16, trust: Trust) -> Result<Option<String>, PairError> {
+    let endpoint = Endpoint::new(host, port)?;
+    let response = client_for(trust, &endpoint)?
+        .get(endpoint.url("/api/devices/outside-address"))
+        .send()
+        .await?;
+    if !response.status().is_success() {
+        return Err(pair_status(response).await);
+    }
+    response
+        .json::<OutsideAddressResponse>()
+        .await
+        .map(|response| response.outside_address)
+        .map_err(|error| PairError::Protocol(format!("invalid outside-address response: {error}")))
 }
 
 /// The host's identity fingerprint, accepted only under its own confirmation over the name-bound transcript.

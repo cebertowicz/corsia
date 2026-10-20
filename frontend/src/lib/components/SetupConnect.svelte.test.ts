@@ -25,6 +25,14 @@ const button = (label: string) => buttons().find((candidate) => flat(candidate.t
 const boxes = () => Array.from(host.querySelectorAll<HTMLInputElement>('input[aria-label^="Code, character"]'));
 const paste = (text: string) => boxes()[0].dispatchEvent(Object.assign(new Event('paste', { bubbles: true, cancelable: true }), { clipboardData: { getData: () => text } }));
 const sidebar = () => flat(host.querySelector('aside')?.textContent);
+const NOT_LISTED = 'Not listed? Type its address';
+const field = () => host.querySelector<HTMLInputElement>('#remote-address');
+async function typeAddress(value: string) {
+	if (!field()) { button(NOT_LISTED)?.click(); await settle(); }
+	const input = field()!;
+	input.value = value; input.dispatchEvent(new Event('input', { bubbles: true }));
+	await settle();
+}
 
 async function mountSetup(props: Record<string, unknown> = {}) {
 	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn(), ...props } });
@@ -100,7 +108,8 @@ describe('Choose a computer (r1, r2, r3, r6)', () => {
 		discovered = { names: [] };
 		await mountSetup();
 		await openConnect();
-		expect(host.textContent).toContain('Looking…');
+		expect(host.textContent).toContain('Looking for computers on this network…');
+		expect(host.textContent).toContain('Both computers need to be on the same network.');
 		discovered = { names: ['Studio'] };
 		expect(host.textContent).not.toContain('Studio');
 		await settle(DISCOVERY_POLL_MS);
@@ -114,21 +123,75 @@ describe('Choose a computer (r1, r2, r3, r6)', () => {
 		await settle();
 		expect(host.querySelector('ul[aria-label="CORSIA on this network"] .row.current')?.textContent).toContain('Living room mini');
 		expect(button('Continue')?.disabled).toBe(false);
-		const field = host.querySelector<HTMLInputElement>('#remote-address')!;
-		field.value = 'studio.local'; field.dispatchEvent(new Event('input', { bubbles: true }));
-		await settle();
+		await typeAddress('studio.local');
 		expect(host.querySelector('ul[aria-label="CORSIA on this network"] .row.current')).toBeNull();
 		expect(button('Continue')?.disabled).toBe(false);
 	});
-	it('says what to check when nothing is found, and keeps looking', async () => {
+	it('Looking shows one line, with no address field and no way to type one', async () => {
 		discovered = { names: [] };
 		await mountSetup();
 		await openConnect();
-		expect(flat(host.textContent)).not.toContain('No other computer running CORSIA found yet.');
+		expect(flat(host.textContent)).toContain('Looking for computers on this network…');
+		expect(field()).toBeNull();
+		expect(button(NOT_LISTED)).toBeUndefined();
+		expect(button('Continue')?.disabled).toBe(true);
+	});
+	it('Found lists the computers with a quiet link that reveals the address field, which pairs by the typed address', async () => {
+		await mountSetup();
+		await openConnect();
+		expect(flat(host.textContent)).toContain('Computers on this network');
+		expect(field()).toBeNull();
+		button(NOT_LISTED)?.click();
+		await settle();
+		expect(field()).not.toBeNull();
+		expect(button(NOT_LISTED)).toBeUndefined();
+		expect(flat(host.textContent)).toContain('Or type its address');
+		expect(field()?.placeholder).toBe('Name or IP address');
+	});
+	it('Nothing found, when the search window ends, says both computers need one network, shows the row to turn on, and offers Look again as the primary', async () => {
+		discovered = { names: [] };
+		await mountSetup();
+		await openConnect();
+		expect(flat(host.textContent)).not.toContain('No computers found on this network.');
 		await settle(NONE_FOUND_AFTER_MS);
-		expect(flat(host.textContent)).toContain('No other computer running CORSIA found yet.');
-		expect(flat(host.textContent)).toContain(`On that computer: ${flat(SETTINGS_PATH)}`);
-		expect(host.textContent).toContain('Looking…');
+		expect(flat(host.querySelector('.body h2')?.textContent)).toBe('No computers found on this network.');
+		expect(flat(host.textContent)).toContain(`Both computers need to be on the same network. On the main computer, ${flat(SETTINGS_PATH).replace(/^Open/, 'open')} and turn on Let other devices connect.`);
+		const steps = host.querySelectorAll('[data-testid="host-steps"] li');
+		expect(steps).toHaveLength(1);
+		expect(steps[0].querySelector('.n')?.textContent).toBe('1');
+		expect(flat(steps[0].textContent)).toContain('Turn on Let other devices connect');
+		expect(button('Look again')).toBeTruthy();
+		expect(button('Continue')).toBeUndefined();
+		expect(button(NOT_LISTED)).toBeTruthy();
+		expect(field()).toBeNull();
+		expect(flat(host.textContent)).not.toMatch(/outside address|https:/i);
+	});
+	it('Look again restarts the search window and keeps polling; a typed address brings Continue back', async () => {
+		discovered = { names: [] };
+		await mountSetup();
+		await openConnect();
+		await settle(NONE_FOUND_AFTER_MS);
+		invoke.mockClear();
+		button('Look again')?.click();
+		await settle();
+		expect(invoke).toHaveBeenCalledWith('remote_discovered');
+		expect(flat(host.textContent)).toContain('Looking for computers on this network…');
+		expect(host.querySelector('.body h2')).toBeNull();
+		await settle(NONE_FOUND_AFTER_MS);
+		expect(flat(host.querySelector('.body h2')?.textContent)).toBe('No computers found on this network.');
+		await typeAddress('studio.local');
+		expect(button('Look again')).toBeUndefined();
+		expect(button('Continue')?.disabled).toBe(false);
+	});
+	it('a computer that appears after Nothing found turns the screen to Found', async () => {
+		discovered = { names: [] };
+		await mountSetup();
+		await openConnect();
+		await settle(NONE_FOUND_AFTER_MS);
+		discovered = { names: ['Studio'] };
+		await settle(DISCOVERY_POLL_MS);
+		expect(host.textContent).toContain('Studio');
+		expect(host.querySelector('.body h2')?.textContent).toBe('Computers on this network');
 	});
 	it('says macOS blocked the network, with one action that opens the setting', async () => {
 		discovered = { names: [], denied: true };
@@ -164,6 +227,18 @@ describe('Enter the code (r7)', () => {
 		expect(host.querySelector('[data-testid="host-steps"]')?.hasAttribute('inert')).toBe(true);
 		expect(sidebar()).toContain('Enter the code');
 	});
+	it('with a typed address, the lede names the main computer, never shows the address, and skips the turn-on picture', async () => {
+		await mountSetup();
+		await openConnect();
+		await typeAddress('home.example.com');
+		button('Continue')?.click();
+		await settle();
+		expect(flat(host.querySelector('.lede')?.textContent)).toBe(`On the main computer, ${flat(SETTINGS_PATH).replace(/^Open/, 'open')} and press New code. Then type the four letters here.`);
+		const steps = Array.from(host.querySelectorAll('[data-testid="host-steps"] li'));
+		expect(steps.map((step) => step.querySelector('.n')?.textContent)).toEqual(['1', '2']);
+		expect(steps.map((step) => flat(step.querySelector('.label')?.textContent))).toEqual([flat(SETTINGS_PATH), 'Press New code']);
+		expect(host.textContent).not.toContain('home.example.com');
+	});
 	it('pairs on the fourth character with the picked computer, with no button', async () => {
 		await mountSetup();
 		await toCodeScreen();
@@ -175,9 +250,7 @@ describe('Enter the code (r7)', () => {
 	it('pairs a typed address with its port', async () => {
 		await mountSetup();
 		await openConnect();
-		const field = host.querySelector<HTMLInputElement>('#remote-address')!;
-		field.value = '192.168.1.20:47902'; field.dispatchEvent(new Event('input', { bubbles: true }));
-		await settle();
+		await typeAddress('192.168.1.20:47902');
 		button('Continue')?.click();
 		await settle();
 		paste('K7QX');
@@ -191,6 +264,7 @@ describe('Enter the code (r7)', () => {
 		['too_many_tries', /^Too many wrong codes\. Open CORSIA › Settings › System on Alex’s Mac mini to get a new one\.$/],
 		['paused', /^Pairing is paused on Alex’s Mac mini\. Open CORSIA › Settings › System on it and press New code to start again\.$/],
 		['busy', /^Alex’s Mac mini is busy with another computer\./],
+		['not_local', /^If this computer isn’t on the same network as the main computer, connect it to that network, then try again\.$/],
 	];
 	it.each(onCodeScreen)('maps %s to its approved line, clears the boxes and puts the cursor back in the first', async (reason, line) => {
 		pairResult = { ok: false, reason };
@@ -237,10 +311,10 @@ describe('Enter the code (r7)', () => {
 		await mountSetup();
 		await openConnect();
 		await settle(NONE_FOUND_AFTER_MS);
-		expect(flat(host.textContent)).toContain('No other computer running CORSIA found yet.');
+		expect(flat(host.textContent)).toContain('No computers found on this network.');
 		const lines = Array.from(host.querySelectorAll('p')).map((paragraph) => flat(paragraph.textContent)).filter((text) => text.includes('Settings ›'));
 		expect(lines.length).toBeGreaterThan(0);
-		for (const text of lines) expect(text).toContain('Open CORSIA › Settings › System');
+		for (const text of lines) expect(text).toMatch(/[Oo]pen CORSIA › Settings › System/);
 	});
 });
 

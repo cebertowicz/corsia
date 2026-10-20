@@ -168,9 +168,20 @@ def get_devices_enabled(*, db: sqlite3.Connection | None = None) -> bool:
     return (get_setting(DEVICE_SETTING_KEY, db=db) or {}).get("enabled") is True
 
 
+def get_devices_outside_address(*, db: sqlite3.Connection | None = None) -> str | None:
+    """Return the host's optional encrypted remote endpoint."""
+    value = (get_setting(DEVICE_SETTING_KEY, db=db) or {}).get("outside_address")
+    return value if isinstance(value, str) and value else None
+
+
 def set_devices_enabled(enabled: bool, *, db: sqlite3.Connection | None = None) -> None:
     """Persist the dedicated Devices switch through its one writer."""
-    set_setting(DEVICE_SETTING_KEY, {"enabled": enabled}, db=db)
+    save_setting_merge(DEVICE_SETTING_KEY, {"enabled": enabled}, db=db)
+
+
+def set_devices_outside_address(address: str | None, *, db: sqlite3.Connection | None = None) -> None:
+    """Persist the optional encrypted remote endpoint without replacing the switch."""
+    save_setting_merge(DEVICE_SETTING_KEY, {"outside_address": address}, db=db)
 
 
 def save_setting_merge(key: str, updates: dict, *, db: sqlite3.Connection | None = None) -> None:

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { token } from '$lib/stores/auth';
 import { handleMessage } from '$lib/ws/handlers';
-import { createDevices, viewFromApi, type DevicesApi } from './devices.svelte';
+import { createDevices, parseOutside, viewFromApi, type DevicesApi } from './devices.svelte';
 
 // The fake clock lets a started reader's fetches and promise chains finish without waiting on real time.
 const settle = () => vi.advanceTimersByTimeAsync(0);
@@ -46,6 +46,14 @@ describe('viewFromApi', () => {
 	});
 	it('uses the connected computer’s name over the one the server reports', () => {
 		expect(viewFromApi(api(), true, 'Alex’s Mac mini').hostName).toBe('Alex’s Mac mini');
+	});
+});
+
+describe('parseOutside', () => {
+	it('refuses http:// with the one approved line, and strips an https:// prefix', () => {
+		expect(parseOutside('http://home.example.com')).toEqual({ error: 'Type the outside address without http://, like home.example.com.' });
+		expect(parseOutside('https://home.example.com/')).toEqual({ address: 'home.example.com' });
+		expect(parseOutside('home.example.com:8443')).toEqual({ address: 'home.example.com:8443' });
 	});
 });
 
@@ -107,7 +115,7 @@ describe('createDevices', () => {
 	it('asks for a new code with POST', async () => {
 		const devices = createDevices({ now: () => clock });
 		await devices.read();
-		responses.push(json({ code: 'W4BC', ...api({ code: { state: 'active', value: 'W4BC', expires_in_seconds: 600 } }) }));
+		responses.push(json(api({ code: { state: 'active', value: 'W4BC', expires_in_seconds: 600 } })));
 		await devices.newCode();
 		expect(calls.at(-1)).toMatchObject({ url: '/api/devices/code', method: 'POST' });
 		expect(devices.view).toMatchObject({ pairing: 'code', code: 'W4BC' });

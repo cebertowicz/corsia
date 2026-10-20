@@ -15,7 +15,7 @@ from core.devices_runtime import DevicesRuntime, runtime
 from infra import dns_sd
 from infra.auth import require_human_user
 from infra.devices_listener import DevicesApp, DevicesListener
-from infra.settings import set_devices_enabled
+from infra.settings import set_devices_enabled, set_devices_outside_address
 from main import app
 from tests.test_dns_sd import _DNSLibrary, _install_dns_seams
 
@@ -57,6 +57,44 @@ def test_devices_switch_has_one_person_only_writer(monkeypatch):
         require_human_user({"id": "agent", "token_kind": "agent"})
     assert agent_error.value.status_code == 403
     assert runtime.pairing.status()["state"] == "none"
+
+
+def test_outside_address_is_saved_by_the_devices_owner_and_returned(monkeypatch):
+    writes = []
+
+    async def fake_run_in_db(function, *args):
+        writes.append((function, args))
+
+    monkeypatch.setattr(devices_api, "_require_local_management", lambda request: None)
+    monkeypatch.setattr(devices_api, "run_in_db", fake_run_in_db)
+    monkeypatch.setattr(runtime, "outside_address", None)
+
+    response = asyncio.run(
+        devices_api.put_devices(
+            {"outside_address": "https://home.example.com:8443"},
+            request=object(),
+            _user={"id": "person", "token_kind": "session"},
+        )
+    )
+
+    assert writes == [(set_devices_outside_address, ("home.example.com:8443",))]
+    assert response["outside_address"] == "home.example.com:8443"
+    with pytest.raises(HTTPException, match="without http://"):
+        asyncio.run(
+            devices_api.put_devices(
+                {"outside_address": "http://home.example.com"},
+                request=object(),
+                _user={"id": "person", "token_kind": "session"},
+            )
+        )
+
+
+def test_outside_address_endpoint_returns_set_and_cleared_values():
+    client = TestClient(app)
+    set_devices_outside_address("home.example.com:8443")
+    assert client.get("/api/devices/outside-address").json() == {"outside_address": "home.example.com:8443"}
+    set_devices_outside_address(None)
+    assert client.get("/api/devices/outside-address").json() == {"outside_address": None}
 
 
 def test_direct_loopback_enable_mints_first_code_only_after_listener_starts(monkeypatch):
@@ -419,7 +457,7 @@ def test_active_code_is_redacted_outside_direct_main_loopback(monkeypatch):
     }
 
 
-_DOCUMENTED_DEVICES_KEYS = {"enabled", "listening", "announced_name", "local_hostname", "computer_name", "lan_addresses", "code"}
+_DOCUMENTED_DEVICES_KEYS = {"enabled", "listening", "announced_name", "local_hostname", "computer_name", "lan_addresses", "code", "outside_address"}
 _NAME_CONFLICT = -65548
 
 

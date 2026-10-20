@@ -29,6 +29,7 @@ _PUBLIC_PAIRS = frozenset({
     ("POST", "/api/auth/login"),
     ("POST", "/api/devices/pair/start"),
     ("POST", "/api/devices/pair/finish"),
+    ("GET", "/api/devices/outside-address"),
     ("POST", "/api/devices/identity"),
 })
 _PASSWORD = "g7-disposable-listener-password"
@@ -202,7 +203,7 @@ def access_backend():
 
 
 @pytest.mark.asyncio
-async def test_devices_tls_listener_allows_only_the_six_public_pairs_and_forwards_human_session(access_backend):
+async def test_devices_tls_listener_keeps_login_public_but_refuses_pairing_on_loopback(access_backend):
     async with httpx.AsyncClient(base_url=access_backend.main_url, timeout=10, trust_env=False) as main_client, \
             httpx.AsyncClient(base_url=access_backend.remote_url, verify=False, timeout=10, trust_env=False) as remote:
         # The direct main listener remains behaviorally unchanged.
@@ -220,8 +221,8 @@ async def test_devices_tls_listener_allows_only_the_six_public_pairs_and_forward
         assert [response.status_code for response in public[:3]] == [200, 200, 200]
         assert public[3].status_code == 401
         assert public[3].json() != {"reason": "sign_in_required"}
-        assert public[4].status_code == 409
-        assert public[5].status_code == 400
+        assert [response.status_code for response in public[4:]] == [403, 403]
+        assert [response.json() for response in public[4:]] == [{"reason": "not_on_this_network"}] * 2
 
         for method, path in (("GET", "/api/auth/login"), ("POST", "/api/version")):
             refused = await remote.request(method, path)

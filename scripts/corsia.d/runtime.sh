@@ -103,11 +103,14 @@ resolve_bind_host() {
 
 print_endpoints() {
     echo "  Local:     http://localhost:$BACKEND_PORT"
-    local ts_ip
-    # A loopback-only setup is not reachable over the tailnet; don't offer it.
-    [ "$(resolve_bind_host 2>/dev/null)" = 127.0.0.1 ] && return 0
-    ts_ip=$(tailscale ip -4 2>/dev/null | head -1)
-    [ -n "$ts_ip" ] && echo "  Tailscale: http://$ts_ip:$BACKEND_PORT"
+    local outside_address
+    outside_address="$(cd "$BACKEND_DIR" && "$PYTHON" -I -B -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+from infra.settings import get_devices_outside_address
+print(get_devices_outside_address() or "")
+' "$BACKEND_DIR" 2>/dev/null)" || outside_address=""
+    [ -n "$outside_address" ] && echo "  Remote access: $outside_address"
     return 0
 }
 

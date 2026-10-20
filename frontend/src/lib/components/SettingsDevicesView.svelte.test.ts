@@ -91,4 +91,9 @@ describe('SettingsDevicesView', () => {
 		Array.from(host.querySelectorAll('button')).find((b) => flat(b.textContent) === 'New code')?.click();
 		expect(onNewCode).toHaveBeenCalledOnce();
 	});
+	it('the outside address says paired computers use it away from the network, and never invites opening the home network', () => {
+		const text = show({ enabled: true, announced: true, devicesPort: 47901, mainPort: 1956 }, { onOutside: async () => null } as never);
+		expect(text).toContain('Paired computers use this when they’re away from this network. Only add an address you’ve already set up, forwarded to port 47901.');
+		expect(text).not.toMatch(/Never send|router|1956/);
+	});
 });

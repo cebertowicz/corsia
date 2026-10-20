@@ -155,8 +155,9 @@ async def lifespan(app: FastAPI):
         recovered, wakes = await restart_startup.run_startup_reconcile(logger)
         await _start_runtime_services()
         from core.devices_runtime import runtime as devices_runtime
-        from infra.settings import get_devices_enabled
-        await devices_runtime.restore(app, await run_in_db(get_devices_enabled))
+        from infra.settings import get_devices_enabled, get_devices_outside_address
+        enabled, outside_address = await asyncio.gather(run_in_db(get_devices_enabled), run_in_db(get_devices_outside_address))
+        await devices_runtime.restore(app, enabled, outside_address)
         await start_documents()
         from llm.local_model import backfill_legacy_record
         from llm.local_setup import resume_pending_setup

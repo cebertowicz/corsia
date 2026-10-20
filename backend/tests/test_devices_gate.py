@@ -42,6 +42,18 @@ def _app() -> FastAPI:
     async def health():
         return {"ok": True}
 
+    @stub.post("/api/auth/login")
+    async def login():
+        return {"ok": True}
+
+    @stub.post("/api/devices/pair/start")
+    async def pair_start():
+        return {"ok": True}
+
+    @stub.post("/api/devices/pair/finish")
+    async def pair_finish():
+        return {"ok": True}
+
     @stub.websocket("/ws")
     async def socket(websocket: WebSocket):
         await websocket.accept()
@@ -51,8 +63,8 @@ def _app() -> FastAPI:
     return stub
 
 
-def _client(peer=_LAN_PEER) -> TestClient:
-    return TestClient(DevicesApp(_app()), client=peer)
+def _client(peer=_LAN_PEER, *, outside_enabled=False) -> TestClient:
+    return TestClient(DevicesApp(_app(), outside_enabled=lambda: outside_enabled), client=peer)
 
 
 @pytest.mark.parametrize(
@@ -75,6 +87,35 @@ def test_peers_beyond_this_network_get_nothing_even_on_public_routes(sessions, p
         with client.websocket_connect("/ws"):
             pass
     assert socket.value.code == 1008
+
+
+
+@pytest.mark.parametrize("path", ["/api/devices/pair/start", "/api/devices/pair/finish"])
+@pytest.mark.parametrize(
+    ("peer", "headers"),
+    [
+        (("127.0.0.1", 50000), {}),
+        (_LAN_PEER, {"Forwarded": "for=192.168.1.20"}),
+        (("8.8.8.8", 50000), {}),
+    ],
+    ids=["loopback", "forwarded", "public"],
+)
+def test_pairing_refuses_loopback_forwarded_and_public_peers_on_each_route(sessions, path, peer, headers):
+    refused = _client(peer, outside_enabled=True).post(path, headers=headers, json={})
+
+    assert refused.status_code == 403
+    assert refused.json() == {"reason": "not_on_this_network"}
+
+
+def test_login_succeeds_over_the_forwarded_outside_route(sessions):
+    accepted = _client(("127.0.0.1", 50000), outside_enabled=True).post(
+        "/api/auth/login",
+        headers={"X-Forwarded-For": "203.0.113.1"},
+        json={},
+    )
+
+    assert accepted.status_code == 200
+    assert accepted.json() == {"ok": True}
 
 
 def test_a_scope_with_no_peer_address_is_refused():

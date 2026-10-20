@@ -16,6 +16,7 @@ import api.devices as devices_api
 from core.device_pairing import PAIRING_IDENTITY, _split_key
 from core.devices_runtime import runtime
 from infra.devices_listener import _key_paths, host_spki_sha256
+from infra.settings import set_devices_outside_address
 from main import app
 
 
@@ -238,6 +239,7 @@ def test_pair_api_finishes_verified_exchange_with_canonical_host_vector(monkeypa
         "name": name,
         "spki_sha256": _encoded(identity),
         "confirm_identity": _encoded(expected_confirm_identity),
+        "outside_address": None,
     }
     assert updates == ["updated"]
     assert not hmac.compare_digest(
@@ -276,6 +278,7 @@ def test_pair_finish_normalizes_and_caps_name_at_a_utf8_boundary(monkeypatch):
         "confirm_identity": _encoded(
             hmac.new(server_key, confirmation_transcript + b"spki:" + identity, hashlib.sha256).digest()
         ),
+        "outside_address": None,
     }
     assert len(expected_name.encode()) == 63
 
