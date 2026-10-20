@@ -253,10 +253,12 @@
 	.h-scope { min-width: 0; max-width: 24rem; overflow: hidden; text-overflow: ellipsis; }
 	/* The Local only badge: a status mark, not a pill (DESIGN-SYSTEM §0.1, §0.2): no fill or border at rest, teal icon, secondary label. */
 	.h-local-slot { display: inline-flex; flex: 0 0 86px; min-width: 0; }
-	.h-local-only { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; transition: background var(--dur-tight), color var(--dur-tight), opacity var(--dur-tight), transform var(--dur-tight); }
+	.h-local-only { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; padding: var(--space-1) var(--chip-inline-padding); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; animation: hLocalOnlyIn var(--dur-tight) var(--ease-snap); transition: background var(--dur-tight), color var(--dur-tight), opacity var(--dur-tight), transform var(--dur-tight); }
 	.h-local-only:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.h-local-only:active { transform: scale(.96); }
 	.h-local-only svg { flex: 0 0 auto; color: var(--teal); }
+	@keyframes hLocalOnlyIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+	@media (prefers-reduced-motion: reduce) { .h-local-only { animation: none; } }
 	/* An expanded document occupies the right canvas column, and ChatArtifactSplit publishes its width on main as
 	   --artifact-header-inset (unset without one). The title stays inside the chat's column, with a visible gap
 	   before the document tab strip. The header's right padding is outside this flex box, so the reservation adds
