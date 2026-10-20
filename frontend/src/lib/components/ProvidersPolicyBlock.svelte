@@ -83,7 +83,7 @@
 	{/if}
 	<h2>Accounts and rollover</h2>
 	{#if projectId && cloudModelsOff === true}
-		<p class="model-list-empty">Claude Code and Codex aren't used while Local models only is on.</p>
+		<p>Claude Code and Codex aren't used while Local models only is on.</p>
 	{:else if loading || (projectId && cloudModelsOff === null)}<p role="status">Loading providers…</p>
 	{:else if error}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
 	{:else if policy}
