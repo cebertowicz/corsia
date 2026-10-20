@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from e2e_live_faults import FaultConfiguration, FaultConfigurationError, FaultController, build_router
 from e2e_mock import mock_engine, router as mock_router, seed_mock_catalog
+from infra.config import DB_PATH, STATE_ROOT
 from main import app as production_app
 
 
@@ -27,6 +28,8 @@ async def _lifespan(_: FastAPI):
                        if _live_fault_controller is not None else nullcontext())
     with mock_engine(), checkpoint_hook:
         async with production_app.router.lifespan_context(production_app):
+            from loguru import logger
+            logger.info("E2E test roots: state_dir={} db_path={}", STATE_ROOT, DB_PATH)
             seed_mock_catalog()
             yield
 
