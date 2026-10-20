@@ -106,6 +106,80 @@ def local_only_ancestor(thread: sqlite3.Row, *, db: sqlite3.Connection) -> bool:
     return row is not None
 
 
+def local_only_ancestor_reference(
+    thread: sqlite3.Row | dict, *, db: sqlite3.Connection,
+) -> tuple[str, str | None] | None:
+    """Return the nearest same-user Local-only family ancestor, if any."""
+    row = db.execute(
+        "WITH RECURSIVE ancestors(id, depth) AS (SELECT ?, 1 UNION SELECT ?, 1 UNION "
+        "SELECT parent.id, ancestors.depth + 1 FROM threads AS parent JOIN threads AS child "
+        "ON parent.id=child.spawned_by OR parent.id=child.parent_thread_id "
+        "JOIN ancestors ON child.id=ancestors.id) "
+        "SELECT ancestor.id, ancestor.title FROM threads AS ancestor JOIN ancestors "
+        "ON ancestor.id=ancestors.id WHERE ancestor.local_only=1 "
+        "AND ancestor.user_id=? ORDER BY ancestors.depth ASC LIMIT 1",
+        (thread["spawned_by"], thread["parent_thread_id"], thread["user_id"]),
+    ).fetchone()
+    return (row["id"], row["title"]) if row is not None else None
+
+
+def add_local_only_payload_fields(rows: list[dict], *, db: sqlite3.Connection) -> None:
+    """Add effective Local-only fields to thread payload rows without per-row reads."""
+    if not rows:
+        return
+    thread_ids = [str(row["id"]) for row in rows]
+    placeholders = ",".join("?" for _ in thread_ids)
+    ancestors = db.execute(
+        "WITH RECURSIVE roots(id, user_id) AS ("
+        f"SELECT id, user_id FROM threads WHERE id IN ({placeholders})"
+        "), ancestors(root_id, id, depth) AS ("
+        "SELECT roots.id, parent.id, 1 FROM roots JOIN threads AS child ON child.id=roots.id "
+        "JOIN threads AS parent ON parent.id=child.spawned_by OR parent.id=child.parent_thread_id "
+        "UNION "
+        "SELECT ancestors.root_id, parent.id, ancestors.depth + 1 FROM ancestors "
+        "JOIN threads AS child ON child.id=ancestors.id "
+        "JOIN threads AS parent ON parent.id=child.spawned_by OR parent.id=child.parent_thread_id"
+        "), ranked AS ("
+        "SELECT ancestors.root_id, ancestor.id, ancestor.title, ancestors.depth, "
+        "ROW_NUMBER() OVER (PARTITION BY ancestors.root_id ORDER BY ancestors.depth ASC) AS rank "
+        "FROM ancestors JOIN roots ON roots.id=ancestors.root_id "
+        "JOIN threads AS ancestor ON ancestor.id=ancestors.id "
+        "WHERE ancestor.local_only=1 AND ancestor.user_id=roots.user_id"
+        ") SELECT root_id, id, title FROM ranked WHERE rank=1",
+        thread_ids,
+    ).fetchall()
+    inherited = {row["root_id"]: (row["id"], row["title"]) for row in ancestors}
+
+    from llm.locality import cloud_off_project_ids
+
+    cloud_off_projects = cloud_off_project_ids(db=db)
+    for row in rows:
+        own_setting = bool(row.get("local_only"))
+        source = None if own_setting else inherited.get(row["id"])
+        row["local_only_effective"] = bool(
+            own_setting or source or row.get("project_id") in cloud_off_projects
+        )
+        row["local_only_inherited_from_thread_id"] = source[0] if source else None
+        row["local_only_inherited_from_title"] = source[1] if source else None
+
+
+def add_single_local_only_payload_fields(
+    thread: sqlite3.Row | dict, *, db: sqlite3.Connection,
+) -> dict:
+    """Return one thread row with its Local-only payload fields added."""
+    payload = dict(thread)
+    own_setting = bool(payload.get("local_only"))
+    source = None if own_setting else local_only_ancestor_reference(payload, db=db)
+    from llm.locality import project_cloud_models_off
+
+    payload["local_only_effective"] = bool(
+        own_setting or source or project_cloud_models_off(payload.get("project_id"), db=db)
+    )
+    payload["local_only_inherited_from_thread_id"] = source[0] if source else None
+    payload["local_only_inherited_from_title"] = source[1] if source else None
+    return payload
+
+
 def write_family_local_only(thread_id: str, local_only: bool, now: str, *, db: sqlite3.Connection) -> None:
     """Set ``local_only`` on a thread and every family descendant, in the caller's transaction."""
     db.execute(
