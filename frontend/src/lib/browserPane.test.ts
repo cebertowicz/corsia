@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AnimationFrameCoalescer, clampPoint, FrameScrollShift } from './browserPane';
+import { AnimationFrameCoalescer, clampPoint, drawShifted, FrameScrollShift, SCROLL_CONFIRM_MS } from './browserPane';
 
 const frames: FrameRequestCallback[] = [];
 vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
@@ -8,7 +8,7 @@ vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
 });
 vi.stubGlobal('cancelAnimationFrame', (id: number) => { frames[id - 1] = () => {}; });
 
-afterEach(() => { frames.length = 0; vi.restoreAllMocks(); });
+afterEach(() => { frames.length = 0; vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('browser pane input helpers', () => {
 	it('clamps releases to the remote page edge', () => {
@@ -59,5 +59,56 @@ describe('browser pane input helpers', () => {
 		expect(scroll.translation.y).toBe(-80);
 		scroll.replace({scrollOffsetY: 0, scrollMaxY: 600});
 		expect(scroll.translation.y).toBe(0);
+	});
+
+	it('drops a prediction no frame confirms, so a wheel an inner scroller took cannot leave the page shifted', () => {
+		vi.useFakeTimers();
+		const expired = vi.fn();
+		const scroll = new FrameScrollShift(expired);
+		scroll.replace({ scrollOffsetY: 100, scrollMaxY: 600 });
+		scroll.shift({ x: 0, y: 120 }, 0);
+		// The inner scroller moved, so frames keep arriving with the page where it was.
+		scroll.replace({ scrollOffsetY: 100, scrollMaxY: 600 });
+		expect(scroll.translation.y).toBe(120);
+		vi.advanceTimersByTime(SCROLL_CONFIRM_MS);
+		expect(expired).toHaveBeenCalledOnce();
+		expect(scroll.translation.y).toBe(0);
+		// The rest of that gesture is not predicted; a new one after a pause is.
+		scroll.shift({ x: 0, y: 40 }, 100);
+		expect(scroll.translation.y).toBe(0);
+		scroll.shift({ x: 0, y: 40 }, 100 + SCROLL_CONFIRM_MS);
+		expect(scroll.translation.y).toBe(40);
+	});
+
+	it('restarts the wait while frames show the page moving', () => {
+		vi.useFakeTimers();
+		const expired = vi.fn();
+		const scroll = new FrameScrollShift(expired);
+		scroll.replace({ scrollOffsetY: 100, scrollMaxY: 600 });
+		scroll.shift({ x: 0, y: 180 }, 0);
+		vi.advanceTimersByTime(SCROLL_CONFIRM_MS - 50);
+		scroll.replace({ scrollOffsetY: 180, scrollMaxY: 600 });
+		vi.advanceTimersByTime(SCROLL_CONFIRM_MS - 50);
+		expect(expired).not.toHaveBeenCalled();
+		expect(scroll.translation.y).toBe(100);
+		scroll.replace({ scrollOffsetY: 280, scrollMaxY: 600 });
+		vi.advanceTimersByTime(SCROLL_CONFIRM_MS);
+		expect(expired).not.toHaveBeenCalled();
+		expect(scroll.translation.y).toBe(0);
+	});
+
+	it('fills the band a predicted scroll uncovers with the frame edge colour, not stretched pixels', () => {
+		const probe = { imageSmoothingQuality: 'low', drawImage: vi.fn(), getImageData: () => ({ data: [250, 248, 246, 255] }) };
+		vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(probe as never);
+		const fills: Array<{ style: string; rect: number[] }> = [];
+		const context = {
+			fillStyle: '', save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), rect: vi.fn(), clip: vi.fn(), drawImage: vi.fn(),
+			fillRect(...rect: number[]) { fills.push({ style: this.fillStyle, rect }); }
+		};
+		drawShifted(context as never, new Image(), 400, 800, 10, 20, 200, 400, { x: 0, y: 60 }, 0.5);
+		expect(context.drawImage).toHaveBeenCalledOnce();
+		expect(context.drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 400, 800, 10, -10, 200, 400);
+		expect(probe.drawImage).toHaveBeenCalledWith(expect.anything(), 0, 799, 400, 1, 0, 0, 1, 1);
+		expect(fills).toEqual([{ style: 'rgb(250, 248, 246)', rect: [10, 390, 200, 30] }]);
 	});
 });

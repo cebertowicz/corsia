@@ -69,8 +69,9 @@ export class BrowserPaneInput {
 	}
 
 	wheel(point: PanePoint, delta: { deltaX: number; deltaY: number }): void {
-		this.onScroll({ x: delta.deltaX, y: delta.deltaY });
+		// Queue the wheel before predicting it, so a failed redraw cannot lose the input.
 		this.continuous.push({ type: 'input_mouse', eventType: 'mouseWheel', ...point, ...delta });
+		this.onScroll({ x: delta.deltaX, y: delta.deltaY });
 	}
 
 	release(event: PointerPosition, point: PanePoint, cancelled = false): void {

@@ -3,7 +3,7 @@
 	import { openBrowserUrl } from '$lib/api/browser';
 	import { token } from '$lib/stores/auth';
 	import { theme } from '$lib/stores/theme';
-	import { clampPoint, fillShiftedEdges, FrameScrollShift } from '$lib/browserPane';
+	import { clampPoint, drawShifted, FrameScrollShift } from '$lib/browserPane';
 	import { agentColor } from '$lib/docPresence';
 	import { BrowserPaneInput, keyModifiers, keyText, wheelPixels } from '$lib/browserPaneInput';
 	import { browserTabLabel } from '$lib/browserAddress';
@@ -48,7 +48,7 @@
 	let activePointer: number | null = null;
 	let decodeGeneration = 0;
 	let decodeWarned = false;
-	const frameScroll = new FrameScrollShift();
+	const frameScroll = new FrameScrollShift(() => redraw());
 	const paneInput = new BrowserPaneInput(message => {
 		if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
 	}, delta => {
@@ -211,17 +211,7 @@
 		// top-left corner with blank space beside it, so draw only the page's part of the frame.
 		// Frame pixels per page pixel; above 1 on a high-density pane.
 		const density = Math.min(image.naturalWidth / width, image.naturalHeight / height);
-		const drawWidth = width * scale;
-		const drawHeight = height * scale;
-		const shift = frameScroll.translation;
-		context.save();
-		context.beginPath();
-		context.rect(left, top, drawWidth, drawHeight);
-		context.clip();
-		context.drawImage(image, 0, 0, width * density, height * density, left - shift.x * scale, top - shift.y * scale, drawWidth, drawHeight);
-		// Predicted scroll extends the nearest edge until the next real frame replaces it, leaving no blank band.
-		fillShiftedEdges(context, image, width * density, height * density, left, top, drawWidth, drawHeight, shift, scale);
-		context.restore();
+		drawShifted(context, image, width * density, height * density, left, top, width * scale, height * scale, frameScroll.translation, scale);
 		placeMarker();
 	}
 
@@ -287,8 +277,6 @@
 		}));
 	}
 
-	// Keyboard mapping shares the pane input helpers.
-
 	async function go(targetUrl = url) {
 		// An open browser navigates through the pane's stream, the same page target the agent acts on.
 		if (streaming && socket?.readyState === WebSocket.OPEN) {
@@ -337,6 +325,7 @@
 			clearTimeout(fitTimer);
 			agent.reset();
 			paneInput.dispose();
+			frameScroll.dispose();
 		};
 	});
 

@@ -530,8 +530,8 @@ class RecordedScreencast:
     async def run(self):
         await self.ended.wait()
 
-    def capture_at(self, width, height, *, phone=False):
-        self.log.append(("capture_at", self.endpoint, width, height, phone))
+    def capture_at(self, width, height, *, compact=False):
+        self.log.append(("capture_at", self.endpoint, width, height, compact))
 
     def hold(self):
         self.log.append(("hold", self.endpoint))
@@ -560,7 +560,7 @@ async def test_match_pane_sizes_every_screencast_on_the_thread_before_the_viewpo
 
 
 @pytest.mark.asyncio
-async def test_match_pane_marks_a_phone_screencast_for_compact_quality(monkeypatch):
+async def test_match_pane_marks_a_compact_screencast_for_compact_quality(monkeypatch):
     log = []
 
     class Owner:
@@ -574,7 +574,7 @@ async def test_match_pane_marks_a_phone_screencast_for_compact_quality(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_a_phone_appearance_that_beats_endpoint_resolution_sizes_the_later_screencast(monkeypatch):
+async def test_a_compact_appearance_that_beats_endpoint_resolution_sizes_the_later_screencast(monkeypatch):
     class Owner:
         async def run(self, *_args, **_kwargs):
             return "ok"

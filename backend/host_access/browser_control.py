@@ -116,14 +116,14 @@ def has_pane(thread_id: str) -> bool:
 def screencast_started(thread_id: str, connection_token: str, cast: PaneScreencast) -> None:
     _screencasts.setdefault(thread_id, {})[connection_token] = cast
     if (size := _capture_sizes.get(thread_id)) is not None:
-        cast.capture_at(size[0], size[1], phone=size[2])
+        cast.capture_at(size[0], size[1], compact=size[2])
 
 
-def capture_at(thread_id: str, width: int, height: int, *, phone: bool) -> None:
+def capture_at(thread_id: str, width: int, height: int, *, compact: bool) -> None:
     """Size current and not-yet-connected screencasts from the pane's latest appearance."""
-    _capture_sizes[thread_id] = (width, height, phone)
+    _capture_sizes[thread_id] = (width, height, compact)
     for cast in screencasts(thread_id):
-        cast.capture_at(width, height, phone=phone)
+        cast.capture_at(width, height, compact=compact)
 
 
 def screencast_ended(thread_id: str, connection_token: str, cast: PaneScreencast) -> None:
@@ -209,7 +209,7 @@ async def require_page_access(thread_id: str, probe: Probe, args: tuple[str, ...
 
 
 def person_input(thread_id: str) -> None:
-    """Note pane input so the password re-probe waits for the person to pause."""
+    """Note the person's pane input, so an open episode re-probes once that input pauses (AR6)."""
     episode = _episodes.get(thread_id)
     if episode is not None and episode.reprobe is not None:
         episode.last_input = asyncio.get_running_loop().time()

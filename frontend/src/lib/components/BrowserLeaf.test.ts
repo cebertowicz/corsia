@@ -72,6 +72,8 @@ beforeEach(() => {
 		beginPath() {},
 		rect() {},
 		clip() {},
+		fillRect() {},
+		getImageData() { return { data: [0, 0, 0, 255] }; },
 		clearRect(...area: number[]) { drawing.push(`clear ${area.join(',')}`); },
 		drawImage(_image: unknown, ...area: number[]) { drawing.push(`draw ${area.slice(4).join(',')}`); },
 	} as unknown as CanvasRenderingContext2D);

@@ -81,10 +81,10 @@ async def test_pane_screencast_acknowledges_each_frame_before_relaying_it(monkey
 
 
 @pytest.mark.asyncio
-async def test_phone_screencast_uses_the_pane_pixels_and_stable_compact_quality(monkeypatch):
+async def test_compact_screencast_uses_the_pane_pixels_and_stable_compact_quality(monkeypatch):
     log = []
     cast, socket, _connected = _screencast(monkeypatch, log)
-    cast.capture_at(786, 1704, phone=True)
+    cast.capture_at(786, 1704, compact=True)
     socket.incoming.put_nowait(None)
     await asyncio.wait_for(cast.run(), 1)
     assert log[1] == ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 60, "maxWidth": 786, "maxHeight": 1704})

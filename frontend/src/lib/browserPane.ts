@@ -35,25 +35,71 @@ export function clampPoint(point: PanePoint, width: number, height: number): Pan
 
 type ScrollFrame = { scrollOffsetX?: unknown; scrollOffsetY?: unknown; scrollMaxX?: unknown; scrollMaxY?: unknown };
 
-/** Predict the viewport's scroll position until the next screencast frame confirms its real offset. */
-export function fillShiftedEdges(context: CanvasRenderingContext2D, source: HTMLImageElement, sourceWidth: number, sourceHeight: number, left: number, top: number, drawWidth: number, drawHeight: number, shift: PanePoint, scale: number): void {
+/** How long a predicted scroll waits for a real frame that moves the page before it is dropped, in ms. */
+export const SCROLL_CONFIRM_MS = 300;
+
+const edgeColours = new WeakMap<HTMLImageElement, Map<string, string | null>>();
+
+/** The blended colour of one edge row or column, so an uncovered band reads as page background. Read once per frame. */
+function edgeColour(source: HTMLImageElement, sx: number, sy: number, sw: number, sh: number): string | null {
+	const key = `${sx},${sy},${sw},${sh}`;
+	const known = edgeColours.get(source) ?? new Map<string, string | null>();
+	edgeColours.set(source, known);
+	if (!known.has(key)) known.set(key, readEdgeColour(source, sx, sy, sw, sh));
+	return known.get(key) ?? null;
+}
+
+function readEdgeColour(source: HTMLImageElement, sx: number, sy: number, sw: number, sh: number): string | null {
+	const probe = document.createElement('canvas');
+	probe.width = probe.height = 1;
+	const context = probe.getContext('2d', { willReadFrequently: true });
+	if (!context) return null;
+	// High-quality downscaling blends the whole row into the one pixel instead of sampling its middle.
+	context.imageSmoothingQuality = 'high';
+	context.drawImage(source, sx, sy, sw, sh, 0, 0, 1, 1);
+	const [red, green, blue] = context.getImageData(0, 0, 1, 1).data;
+	return `rgb(${red}, ${green}, ${blue})`;
+}
+
+/** Draws the frame moved by the predicted scroll; the band it uncovers takes the colour of the frame's edge. */
+export function drawShifted(context: CanvasRenderingContext2D, source: HTMLImageElement, sourceWidth: number, sourceHeight: number, left: number, top: number, drawWidth: number, drawHeight: number, shift: PanePoint, scale: number): void {
+	context.save();
+	context.beginPath();
+	context.rect(left, top, drawWidth, drawHeight);
+	context.clip();
+	context.drawImage(source, 0, 0, sourceWidth, sourceHeight, left - shift.x * scale, top - shift.y * scale, drawWidth, drawHeight);
 	const horizontal = Math.min(drawWidth, Math.abs(shift.x * scale));
 	const vertical = Math.min(drawHeight, Math.abs(shift.y * scale));
 	if (horizontal) {
-		const sourceX = shift.x > 0 ? sourceWidth - 1 : 0;
-		const targetX = shift.x > 0 ? left + drawWidth - horizontal : left;
-		context.drawImage(source, sourceX, 0, 1, sourceHeight, targetX, top, horizontal, drawHeight);
+		const colour = edgeColour(source, shift.x > 0 ? sourceWidth - 1 : 0, 0, 1, sourceHeight);
+		if (colour) {
+			context.fillStyle = colour;
+			context.fillRect(shift.x > 0 ? left + drawWidth - horizontal : left, top, horizontal, drawHeight);
+		}
 	}
 	if (vertical) {
-		const sourceY = shift.y > 0 ? sourceHeight - 1 : 0;
-		const targetY = shift.y > 0 ? top + drawHeight - vertical : top;
-		context.drawImage(source, 0, sourceY, sourceWidth, 1, left, targetY, drawWidth, vertical);
+		const colour = edgeColour(source, 0, shift.y > 0 ? sourceHeight - 1 : 0, sourceWidth, 1);
+		if (colour) {
+			context.fillStyle = colour;
+			context.fillRect(left, shift.y > 0 ? top + drawHeight - vertical : top, drawWidth, vertical);
+		}
 	}
+	context.restore();
 }
 
+/**
+ * Predicts the viewport's scroll position until a screencast frame confirms its real offset.
+ * A prediction no frame confirms within SCROLL_CONFIRM_MS (an inner scroller or the page took the wheel) is
+ * dropped, and the rest of that gesture is not predicted; `onExpire` redraws the unshifted frame.
+ */
 export class FrameScrollShift {
 	private frame = { x: 0, y: 0, maxX: Infinity, maxY: Infinity };
 	private shown = { x: 0, y: 0 };
+	private lastShift = -Infinity;
+	private muted = false;
+	private timer: ReturnType<typeof setTimeout> | undefined;
+
+	constructor(private readonly onExpire: () => void = () => {}) {}
 
 	replace(metadata: ScrollFrame): void {
 		const previous = this.frame;
@@ -70,16 +116,45 @@ export class FrameScrollShift {
 		};
 		this.frame = { x, y, maxX, maxY };
 		this.shown = { x: Math.min(maxX, Math.max(0, x + pending.x)), y: Math.min(maxY, Math.max(0, y + pending.y)) };
+		if (this.shown.x === x && this.shown.y === y) this.settle();
+		else if (x !== previous.x || y !== previous.y) this.wait();
 	}
 
-	shift(delta: PanePoint): void {
+	shift(delta: PanePoint, now = performance.now()): void {
+		// A pause between wheel movements starts a new gesture, which is predicted again.
+		if (now - this.lastShift >= SCROLL_CONFIRM_MS) this.muted = false;
+		this.lastShift = now;
+		if (this.muted) return;
 		this.shown = {
 			x: Math.min(this.frame.maxX, Math.max(0, this.shown.x + delta.x)),
 			y: Math.min(this.frame.maxY, Math.max(0, this.shown.y + delta.y))
 		};
+		if (this.timer === undefined && (this.shown.x !== this.frame.x || this.shown.y !== this.frame.y)) this.wait();
 	}
 
 	get translation(): PanePoint {
 		return { x: this.shown.x - this.frame.x, y: this.shown.y - this.frame.y };
+	}
+
+	dispose(): void {
+		this.settle();
+	}
+
+	/** (Re)starts the wait for a frame that moves the page. */
+	private wait(): void {
+		clearTimeout(this.timer);
+		this.timer = setTimeout(() => this.expire(), SCROLL_CONFIRM_MS);
+	}
+
+	private settle(): void {
+		clearTimeout(this.timer);
+		this.timer = undefined;
+	}
+
+	private expire(): void {
+		this.settle();
+		this.muted = true;
+		this.shown = { x: this.frame.x, y: this.frame.y };
+		this.onExpire();
 	}
 }

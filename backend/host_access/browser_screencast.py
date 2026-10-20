@@ -1,7 +1,6 @@
 """The browser pane's own screencast of the shared page."""
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Callable
 
@@ -32,15 +31,15 @@ class PaneScreencast:
     """
 
     QUALITY = 80
-    # Gesture restarts delayed real frames in phone measurements; use a stable compact capture.
-    PHONE_QUALITY = 60
+    # A compact pane (a phone, or a narrow desktop pane) gets smaller JPEGs. The quality stays fixed while input
+    # moves: changing it needs a screencast restart, which delayed real frames when measured.
+    COMPACT_QUALITY = 60
 
     def __init__(self, endpoint: str, deliver: Callable[[str], object]) -> None:
         self.endpoint = endpoint
         self._deliver = deliver
         self._size: tuple[int, int] | None = None
-        self._phone = False
-        self._restart_lock = asyncio.Lock()
+        self._compact = False
         self._page: tuple[int, int] | None = None
         self._scroll_max: tuple[float, float] | None = None
         self._unmeasured = 0  # Measurements sent and not yet answered.
@@ -74,10 +73,10 @@ class PaneScreencast:
             finally:
                 self._cdp = None
 
-    def capture_at(self, width: int, height: int, *, phone: bool = False) -> None:
+    def capture_at(self, width: int, height: int, *, compact: bool = False) -> None:
         """Capture at most this many device pixels from the next start on."""
         self._size = (width, height)
-        self._phone = phone
+        self._compact = compact
 
     def hold(self) -> None:
         """Show no frame from now until the next start's measurement: the page's metrics are changing."""
@@ -88,9 +87,8 @@ class PaneScreencast:
         if (cdp := self._cdp) is None:
             return  # run() has not started capturing yet, or has ended.
         try:
-            async with self._restart_lock:
-                await cdp.send("Page.stopScreencast")
-                await self._start(cdp)
+            await cdp.send("Page.stopScreencast")
+            await self._start(cdp)
         except websockets.ConnectionClosed:
             pass  # The pane is leaving; run() ends with the closed socket.
 
@@ -108,7 +106,7 @@ class PaneScreencast:
         await cdp.send("Page.startScreencast", **params)
 
     def _quality(self) -> int:
-        return self.PHONE_QUALITY if self._phone else self.QUALITY
+        return self.COMPACT_QUALITY if self._compact else self.QUALITY
 
     def _measured(self, result: object) -> None:
         viewport = result.get("cssLayoutViewport") if isinstance(result, dict) else None

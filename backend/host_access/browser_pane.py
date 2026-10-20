@@ -130,7 +130,7 @@ async def match_pane(thread_id: str, appearance: PaneAppearance) -> None:
     # restart that follows the viewport command and sends the resized picture at once.
     # Size the JPEG to the pane's physical pixels; compact layouts use smaller JPEGs.
     browser_control.capture_at(thread_id, round(appearance.width * appearance.scale),
-                               round(appearance.height * appearance.scale), phone=appearance.width <= 480)
+                               round(appearance.height * appearance.scale), compact=appearance.width <= 480)
     owner = PROCESS_OWNER.browser_sessions()
     for args in (("set", "viewport", str(appearance.width), str(appearance.height), f"{appearance.scale:g}"),
                  ("set", "media", appearance.scheme)):
