@@ -1,7 +1,8 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { loginByUrl } from '../support/corsia';
+import { test } from '../support/test';
 
 /** Review frames use the app's actual header and model sheet with only catalog and thread policy answers faked. */
 const OUT = process.env.LOCAL_ONLY_HEADER_FRAMES_OUT;
