@@ -14,9 +14,10 @@ TASK_SIZE_REQUIRED = (
 
 def require_task_size(value: object) -> str:
     """Return a task's declared size or explain the allowed unknown fallback."""
-    if value is None:
+    size = validate_size(value)
+    if size is None:
         raise service.PlanInputError(TASK_SIZE_REQUIRED)
-    return validate_size(value)
+    return size
 
 
 def validate_size(value: object) -> str | None:
