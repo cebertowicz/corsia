@@ -6,11 +6,27 @@ import json
 import logging
 import re
 import sqlite3
+from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 
-# Explicit read-only connections also serve the bootstrap CLI, before a workspace exists.
-
 log = logging.getLogger(__name__)
+
+
+def get_db() -> sqlite3.Connection:
+    """The thread's connection. infra.database resolves a workspace on import, which the
+    bootstrap CLI reading an explicit connection does not have yet, so it loads on first use."""
+    from infra import database
+
+    return database.get_db()
+
+
+def write_transaction(
+    db: sqlite3.Connection | None, *, scope: str
+) -> AbstractContextManager[sqlite3.Connection]:
+    """infra.database.write_transaction, loaded on first use (see get_db)."""
+    from infra import database
+
+    return database.write_transaction(db, scope=scope)
 
 
 def _now() -> str:
@@ -19,10 +35,7 @@ def _now() -> str:
 
 def get_setting(key: str, *, db: sqlite3.Connection | None = None) -> dict | None:
     """Read object-valued JSON, optionally on the caller's named connection."""
-    if db is None:
-        from infra.database import get_db
-
-        db = get_db()
+    db = db if db is not None else get_db()
     row = db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
     if not row:
         return None
@@ -74,8 +87,6 @@ def get_update_schedule(
 
 def set_setting(key: str, value: dict, *, db: sqlite3.Connection | None = None) -> None:
     """Upsert JSON in the named caller's transaction or a standalone owner."""
-    from infra.database import write_transaction
-
     with write_transaction(db, scope="set_setting") as connection:
         connection.execute(
             "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
@@ -191,8 +202,6 @@ def set_devices_outside_address(address: str | None, *, db: sqlite3.Connection |
 
 def save_setting_merge(key: str, updates: dict, *, db: sqlite3.Connection | None = None) -> None:
     """Deep-merge updates into an existing setting."""
-    from infra.database import write_transaction
-
     with write_transaction(db, scope="save_setting_merge") as conn:
         current = get_setting(key, db=conn) or {}
         set_setting(key, _deep_merge(current, updates), db=conn)
@@ -205,8 +214,6 @@ def save_agent_defaults(updates: dict) -> None:
 
 def delete_agent_default(key: str) -> None:
     """Remove one agent default rather than persisting a null override."""
-    from infra.database import write_transaction
-
     with write_transaction(None, scope="delete_agent_default") as db:
         agents = get_setting("agents", db=db) or {}
         defaults = agents.get("defaults") if isinstance(agents, dict) else None
