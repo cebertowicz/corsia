@@ -41,10 +41,8 @@ _CREDENTIAL_DENIAL = "Stored secrets are closed to every agent route." + _NO_LEA
 def _sandbox_text(value: Path | str) -> str:
     return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
-
 def _sandbox_regex(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
-
 
 def generated_profile_temp_roots() -> tuple[Path, ...]:
     """Return every lexical and /private temporary root for generated profiles."""
@@ -333,6 +331,8 @@ def current_protected_host_path_policy(
     """Build the live policy without caching mutable environment paths."""
     from infra.config import STATE_ROOT
 
+    from tools.managed_runtime import application_cache_root
+
     discovered = shutil.which("safehouse")
     paths = tuple(safehouse_paths)
     if discovered is not None:
@@ -342,7 +342,7 @@ def current_protected_host_path_policy(
         state_root=STATE_ROOT,
         generated_profile=generated_profile,
         safehouse_paths=paths,
-        write_roots=tuple(write_roots),
+        write_roots=(application_cache_root(), *write_roots),
     )
 
 

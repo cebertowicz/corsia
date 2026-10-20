@@ -128,6 +128,7 @@ def _register_memory_tools(agent: CORSIAAgent) -> None:
     from tools.user_presence import UserPresenceTool
     from tools.post_update import PostUpdateTool
     from tools.lesson_report import LessonReportTool
+    from tools.skill_library import SkillLibraryTool
 
     agent.tools.register(SearchHistoryTool())
     agent.tools.register(GetCheckpointsTool())
@@ -137,6 +138,7 @@ def _register_memory_tools(agent: CORSIAAgent) -> None:
     agent.tools.register(PostUpdateTool())
     # Lesson evidence is scoped to the process-selected workspace, not a thread cwd.
     agent.tools.register(LessonReportTool(WORKSPACE))
+    agent.tools.register(SkillLibraryTool())
 
 
 def _register_project_creation_tools(agent: CORSIAAgent) -> None:

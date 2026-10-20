@@ -17,7 +17,8 @@ def save_placement(
     from core.context_source_paths import append_context_source_change
     from core.placement_proposal import marker
     from infra.config import WORKSPACE
-    from infra.guidance_git import GuidanceTarget, find_commit, save_guidance, workspace_repository
+    from infra.guidance_git import find_commit, save_guidance, workspace_repository
+    from infra.guidance_targets import GuidanceTarget
     from infra.skill_save_validation import REFUSED, invalid_skill_write
 
     encoded = {target: text.encode() for target, text in writes.items()}

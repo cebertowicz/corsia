@@ -11,7 +11,8 @@ import json
 import logging
 from pathlib import Path
 
-from infra.guidance_git import digest, guidance_target as guidance_target, save_guidance
+from infra.guidance_git import digest, save_guidance
+from infra.guidance_targets import guidance_target
 from infra.guidance_messages import saver_author
 
 

@@ -76,6 +76,7 @@ def mcp_private_state_profile(
     profile_path: Path,
     safehouse_path: Path,
     state_root: Path,
+    cache_dir: Path,
 ) -> str:
     """Render the allow-default profile from the shared protected-path inventory."""
     # Temporary floor block until a reviewed host-access path for MCP exists (#154).
@@ -96,6 +97,14 @@ def mcp_private_state_profile(
         for path in denied_roots
     ]
     path_rules.append(policy.hard_floor_sandbox_rules())
+    # Local apps execute this cache but can never replace its verified runtime
+    # siblings or parent. Reopen only the launched app's private cache directory.
+    from tools.managed_runtime import application_cache_root
+
+    path_rules.extend((
+        f'(deny file-write* (subpath "{sbpl_path(application_cache_root())}"))',
+        f'(allow file-write* (subpath "{sbpl_path(cache_dir)}"))',
+    ))
     if policy.generated_profile is not None:
         path_rules.append(
             f'(deny file-read* file-write* (literal "{sbpl_path(policy.generated_profile)}"))'

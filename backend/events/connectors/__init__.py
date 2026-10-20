@@ -140,6 +140,7 @@ def _load_builtin_manifests() -> None:
         document,
         github,
         gmail,
+        library,
         measurement,
         microsoft,
         plan,

@@ -205,9 +205,20 @@ def _parse(candidate: Candidate) -> str:
         if "\x00" in texts[name]:
             return _unreadable(candidate, NOT_TEXT)
         candidate.files[name] = data
+    from core.skill_sidecar import installed_digest_part
+
     digest = hashlib.sha256()
     for name in sorted(candidate.files):
-        digest.update(name.encode("utf-8") + b"\0" + hashlib.sha256(candidate.files[name]).digest())
+        try:
+            part = installed_digest_part(name, candidate.files[name])
+        except (UnicodeDecodeError, ValueError):
+            # An upstream sidecar is dropped at install. It still changes the
+            # offered bundle identity, but cannot make SKILL.md look invalid.
+            if name != "corsia.yaml":
+                return _unreadable(candidate, BAD_HEADER)
+            part = candidate.files[name]
+        if part is not None:
+            digest.update(name.encode("utf-8") + b"\0" + hashlib.sha256(part).digest())
     candidate.content_sha = digest.hexdigest()
     # A key is reported before any layout problem, so fixing the layout never comes first.
     if any(contains_credential(text) for text in texts.values()):

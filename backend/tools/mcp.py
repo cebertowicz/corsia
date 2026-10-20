@@ -14,7 +14,6 @@ from tools.mcp_config import (
     timeout_seconds, url_origin,
 )
 from tools.mcp_local_transport import (
-    _mcp_cache_dir,
     _mcp_denial_guidance,
     _mcp_denied_paths_in,
     mcp_oserror_detail as _mcp_oserror_detail,

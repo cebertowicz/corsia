@@ -593,7 +593,8 @@ def _log(repo: Path) -> list[str]:
 
 
 def _placement_save(workspace: Path, target: Path, text: str, expected: str | None):
-    from infra.guidance_git import GuidanceTarget, digest, save_guidance
+    from infra.guidance_git import digest, save_guidance
+    from infra.guidance_targets import GuidanceTarget
 
     return save_guidance(
         {target: text.encode()}, workspace=workspace, target=GuidanceTarget("placement"),

@@ -92,7 +92,8 @@ def _save(
     """Commit one step's files; on failure settle or defer the entry and say no."""
     from core.placement_proposal import marker
     from infra.config import WORKSPACE
-    from infra.guidance_git import GuidanceTarget, save_guidance
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import GuidanceTarget
     from infra.skill_save_validation import REFUSED
 
     trailer = marker(entry["thread_id"], entry["entry_id"], entry["revision"])
