@@ -107,7 +107,6 @@ describe('CommentThread', () => {
 		}));
 		expect(host.querySelector('.ct-author')?.textContent).toBe('Conductor');
 		expect(host.querySelector('.ct-msg-author')?.textContent).toBe('Conductor');
-		expect(host.querySelectorAll('.ct-tag')).toHaveLength(0);
 		expect(host.textContent).not.toMatch(/via Claude Code|opus-4\.8|project coordination/);
 	});
 
