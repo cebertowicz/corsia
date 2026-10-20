@@ -163,12 +163,11 @@ export async function loadConnectedAppsRows(): Promise<{ rows: ConnectedAppsRow[
 
 /** Starts the matching provider's sign-in for this account; the answer holds the link to open. */
 export function startAccountSignIn(account: Pick<ConnectedAccount, 'id' | 'provider' | 'provider_display_name'>): Promise<{ url: string; account_id: string }> {
-	const provider = account.provider === 'microsoft' ? 'Microsoft' : 'Google';
 	return response(`/api/${account.provider}/connect`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ account_id: account.id }),
-	}, `Couldn't start ${provider} sign-in. Try again.`);
+	}, `Couldn't start ${account.provider_display_name} sign-in. Try again.`);
 }
 
 export function signOutOfAccount(account: Pick<ConnectedAccount, 'id' | 'provider' | 'provider_display_name'>): Promise<AccountSignOutResult> {

@@ -69,17 +69,18 @@ describe('the account controls', () => {
 		expect(call.body).toEqual({ account_id: 'acc 1' });
 	});
 
-	it('routes Microsoft account reauthentication through Microsoft and uses its fixed fallback', async () => {
+	it('routes Microsoft account reauthentication through Microsoft and uses its display label fallback', async () => {
+		const microsoft = { ...account, id: 'microsoft-1', provider: 'microsoft' as const, provider_display_name: 'Microsoft' };
 		const fetchMock = answer({ url: 'https://login.microsoft.example/auth', account_id: 'microsoft-1' });
-		await expect(startAccountSignIn({ ...account, id: 'microsoft-1', provider: 'microsoft' })).resolves.toEqual({ url: 'https://login.microsoft.example/auth', account_id: 'microsoft-1' });
+		await expect(startAccountSignIn(microsoft)).resolves.toEqual({ url: 'https://login.microsoft.example/auth', account_id: 'microsoft-1' });
 		expect(sent(fetchMock)).toMatchObject({ path: '/api/microsoft/connect', body: { account_id: 'microsoft-1' } });
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => null }));
-		await expect(startAccountSignIn({ ...account, provider: 'microsoft' })).rejects.toThrow("Couldn't start Microsoft sign-in. Try again.");
+		await expect(startAccountSignIn(microsoft)).rejects.toThrow("Couldn't start Microsoft sign-in. Try again.");
 	});
 
-	it('uses the approved Google fallback when an account sign-in cannot start', async () => {
+	it('uses the supplied non-enum display label when an account sign-in cannot start', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => null }));
-		await expect(startAccountSignIn(account)).rejects.toThrow("Couldn't start Google sign-in. Try again.");
+		await expect(startAccountSignIn({ ...account, provider_display_name: 'Northwind mail' })).rejects.toThrow("Couldn't start Northwind mail sign-in. Try again.");
 	});
 
 	it('uses the neighbouring generic fallback when an app sign-in cannot start', async () => {
