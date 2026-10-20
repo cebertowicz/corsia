@@ -51,8 +51,7 @@ def entry_rank_rows_matching(
 ) -> list[dict]:
     """Return the ranked, bounded entry rows with no checkpoint columns.
 
-    Everything ranking and ``select`` need lives on the lean index and
-    continuity rows; :func:`hydrate_entry_rows` adds the checkpoint pointers and
+    Everything ranking needs lives on the lean index and continuity rows; :func:`hydrate_entry_rows` adds the checkpoint pointers and
     the large frozen snapshots for whichever rows survive.
     """
     params: list[object] = [match]
@@ -196,9 +195,9 @@ def decoded_entries(rows: list[dict]) -> list[tuple[dict, ContinuitySnapshotEntr
     decoded: list[tuple[dict, ContinuitySnapshotEntry]] = []
     for row in rows:
         first_order = int(row["first_generation_order"])
-        entries, unreadable = snapshots.setdefault(
-            first_order, continuity_entries(row["continuity_snapshot_json"])
-        )
+        if first_order not in snapshots:
+            snapshots[first_order] = continuity_entries(row["continuity_snapshot_json"])
+        entries, unreadable = snapshots[first_order]
         entry = next(
             (
                 candidate

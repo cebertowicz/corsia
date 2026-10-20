@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from functools import cache
 import json
 import sqlite3
 from time import perf_counter
@@ -17,7 +16,9 @@ from loguru import logger as log
 
 from core.correction_notes import local_clock
 from core.corrections_recording import is_owner_authored_message, owner_message_sql_predicate
-from infra.queries import get_thread_project_id
+from infra.checkpoint_entry_index import NO_REVISION
+from infra.product_events import emit_product_event
+from llm.locality import cloud_off_project_ids
 from memory.checkpoint_entry_rows import decoded_entries, entry_rank_rows_matching, hydrate_entry_rows
 from memory.checkpoint_search import caller_user_id
 from memory.task_match import Match, NodeText, TaskTerms, floor, match, task_terms
@@ -38,6 +39,7 @@ class _Hit:
     kind: str
     line: str
     project_id: str | None
+    local_only: bool
 
 
 def related(
@@ -52,9 +54,9 @@ def related(
     try:
         reason, hits = _related(db, text, caller_thread_id)
     except Exception as exc:  # noqa: BLE001 - advisory context must not fail its caller
-        _log_error(trigger, exc, started)
+        _log_error(trigger, exc, started, caller_thread_id)
         return []
-    _log(reason, trigger, hits, started)
+    _log(reason, trigger, hits, started, caller_thread_id)
     return [_HEADER, *(hit.line for hit in hits)] if hits else []
 
 
@@ -68,7 +70,7 @@ def attach_to_result(
     try:
         subject = _subject(db, operation, result)
     except Exception as exc:  # noqa: BLE001 - advisory context must not fail its caller
-        _log_error(operation, exc, perf_counter())
+        _log_error(operation, exc, perf_counter(), caller_thread_id)
         return
     if subject is None:
         return
@@ -88,7 +90,7 @@ def related_for_next(
     try:
         text = _node_text(db, node_id)
     except Exception as exc:  # noqa: BLE001 - advisory context must not fail its caller
-        _log_error("wake", exc, perf_counter())
+        _log_error("wake", exc, perf_counter(), caller_thread_id)
         return []
     return [] if text is None else related(db, text, caller_thread_id=caller_thread_id, trigger="wake")
 
@@ -126,14 +128,11 @@ def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]
     if len(terms.terms) < 2 or not terms.title_terms:
         return "no_terms", []
     user_id = caller_user_id(db, caller_thread_id)
-    if user_id is None:
+    caller = db.execute("SELECT project_id,local_only FROM threads WHERE id=?", (caller_thread_id,)).fetchone()
+    if user_id is None or caller is None:
         return "no_terms", []
-    caller_project = get_thread_project_id(caller_thread_id, db)
     cutoff = _start_cutoff(db, text.node_id)
-
-    @cache
-    def local(project: str | None) -> bool:
-        return _local_source(db, project, caller_project)
+    cloud_off = cloud_off_project_ids(db=db)
 
     candidates = [*_message_candidates(db, terms, user_id, caller_thread_id),
                   *_comment_candidates(db, terms, user_id),
@@ -141,7 +140,7 @@ def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]
                   *_rule_candidates(db, terms, user_id, caller_thread_id)]
     candidates = [
         hit for hit in candidates
-        if _before(hit.created_at, cutoff) and local(hit.project_id)
+        if _before(hit.created_at, cutoff) and _deliverable(hit, caller, cloud_off)
     ]
     if not candidates:
         return "below_floor", []
@@ -185,7 +184,7 @@ def _owned_threads(alias: str) -> str:
 def _message_candidates(db, terms, user_id, caller_thread_id) -> list[_Hit]:
     owner_filter, owner_params = owner_message_sql_predicate("m")
     rows = db.execute(
-        f"""SELECT m.id,m.thread_id,m.content,m.role,m.metadata,m.created_at,t.title,t.project_id
+        f"""SELECT m.id,m.thread_id,m.content,m.role,m.metadata,m.created_at,t.title,t.project_id,t.local_only
             FROM messages_fts JOIN messages m ON m.rowid=messages_fts.rowid
             JOIN threads t ON t.id=m.thread_id
             WHERE messages_fts MATCH ? AND {owner_filter} AND m.delivery_state='delivered'
@@ -204,7 +203,7 @@ def _message_candidates(db, terms, user_id, caller_thread_id) -> list[_Hit]:
         found = match(terms, str(row["content"]))
         if found:
             line = f'{local_clock(str(row["created_at"]))} · message in “{row["title"]}” · “{_excerpt(found)}” → get_thread_history(thread_id="{row["thread_id"]}")'
-            hits.append(_Hit(found, str(row["created_at"]), "message", line, row["project_id"]))
+            hits.append(_Hit(found, str(row["created_at"]), "message", line, row["project_id"], bool(row["local_only"])))
     return hits
 
 
@@ -214,7 +213,7 @@ def _comment_candidates(db, terms, user_id) -> list[_Hit]:
     shared, params = _shared_terms("c.body", terms)
     rows = db.execute(
         f"""SELECT * FROM (
-              SELECT c.id,c.artifact_id,c.body,c.created_at,ai.title,ai.path,t.project_id,{shared} AS shared
+              SELECT c.id,c.artifact_id,c.body,c.created_at,ai.title,ai.path,t.project_id,t.local_only,{shared} AS shared
               FROM doc_comments c JOIN threads t ON t.id=({comment_target_sql('c')})
               LEFT JOIN artifact_identities ai ON ai.id=c.artifact_id
               WHERE c.author_kind='user' AND {_owned_threads('t')})
@@ -227,7 +226,7 @@ def _comment_candidates(db, terms, user_id) -> list[_Hit]:
         if found:
             about = row["title"] or row["path"] or row["artifact_id"]
             line = f'{local_clock(str(row["created_at"]))} · comment on “{about}” · “{_excerpt(found)}”'
-            hits.append(_Hit(found, str(row["created_at"]), "comment", line, row["project_id"]))
+            hits.append(_Hit(found, str(row["created_at"]), "comment", line, row["project_id"], bool(row["local_only"])))
     return hits
 
 
@@ -237,7 +236,7 @@ def _decision_candidates(db, terms, user_id) -> list[_Hit]:
     shared, params = _shared_terms("json_extract(ai.metadata,'$.plan_decision.answer.text')", terms)
     rows = db.execute(
         f"""SELECT * FROM (
-              SELECT ai.external_id,ai.metadata,t.project_id,{shared} AS shared,
+              SELECT ai.external_id,ai.metadata,t.project_id,t.local_only,{shared} AS shared,
                      json_extract(ai.metadata,'$.plan_decision.answered_at') AS answered_at
               FROM artifact_identities ai
               JOIN threads t ON t.id=json_extract(ai.metadata,'$.plan_decision.thread_id')
@@ -262,21 +261,22 @@ def _decision_candidates(db, terms, user_id) -> list[_Hit]:
         found = match(terms, text)
         if found:
             line = f'{local_clock(created_at)} · answer to decision “{body.get("title") or row["external_id"]}” · “{_excerpt(found)}”'
-            hits.append(_Hit(found, created_at, "decision", line, row["project_id"]))
+            hits.append(_Hit(found, created_at, "decision", line, row["project_id"], bool(row["local_only"])))
     return hits
 
 
 def _rule_candidates(db, terms, user_id, caller_thread_id) -> list[_Hit]:
     rows = entry_rank_rows_matching(db, _fts_terms(terms), user_id, None, SOURCE_CANDIDATES, SOURCE_CANDIDATES)
-    owned = _owned_thread_ids(db, user_id, {str(row["thread_id"]) for row in rows})
+    owned = _owned_threads_by_id(db, user_id, {str(row["thread_id"]) for row in rows})
     # Every eligible row is decoded: whether the person is the source is only in
     # the snapshot body, so cutting to the best few first could hide their rule.
+    # Search keeps an entry's best-matching revision; only the current one is quoted.
     rows = [
         row for row in rows
         if row["thread_id"] in owned and row["field"] in RULE_FIELDS and row["canonical_state"] == "active"
+        and row["revision"] in (NO_REVISION, row["canonical_revision"])
         and not (row["thread_id"] == caller_thread_id and not row["historical"])
     ]
-    project = cache(lambda thread_id: get_thread_project_id(thread_id, db))
     hits = []
     for row, entry in decoded_entries(hydrate_entry_rows(db, rows)):
         if not any(ref.get("kind") == "user" for ref in entry.body.get("source_refs", []) if isinstance(ref, dict)):
@@ -285,22 +285,27 @@ def _rule_candidates(db, terms, user_id, caller_thread_id) -> list[_Hit]:
         if not found or not created_at:
             continue
         line = f'{local_clock(created_at)} · rule an agent recorded from their words (thread {str(row["thread_id"])[:8]}) · “{_excerpt(found)}” → get_checkpoints(checkpoint_id="{row["latest_id"]}")'
-        hits.append(_Hit(found, created_at, "rule", line, project(str(row["thread_id"]))))
+        source = owned[str(row["thread_id"])]
+        hits.append(_Hit(found, created_at, "rule", line, source["project_id"], bool(source["local_only"])))
     return hits
 
 
-def _owned_thread_ids(db, user_id: str, thread_ids: set[str]) -> set[str]:
+def _owned_threads_by_id(db, user_id: str, thread_ids: set[str]) -> dict[str, sqlite3.Row]:
     if not thread_ids:
-        return set()
+        return {}
     marks = ",".join("?" for _ in thread_ids)
-    rows = db.execute(f"SELECT t.id FROM threads t WHERE t.id IN ({marks}) AND {_owned_threads('t')}", [*thread_ids, user_id]).fetchall()
-    return {str(row["id"]) for row in rows}
+    rows = db.execute(
+        f"SELECT t.id,t.project_id,t.local_only FROM threads t WHERE t.id IN ({marks}) AND {_owned_threads('t')}",
+        [*thread_ids, user_id],
+    ).fetchall()
+    return {str(row["id"]): row for row in rows}
 
 
-def _local_source(db, source_project: str | None, caller_project: str | None) -> bool:
-    from llm.locality import project_cloud_models_off
-
-    return not project_cloud_models_off(source_project, db=db) or source_project == caller_project
+def _deliverable(hit: _Hit, caller: sqlite3.Row, cloud_off: set[str]) -> bool:
+    """Words from a Local only chat or a cloud-off project reach only a caller under the same restriction."""
+    if hit.local_only and not caller["local_only"]:
+        return False
+    return hit.project_id not in cloud_off or hit.project_id == caller["project_id"]
 
 
 def _before(created_at: str, cutoff: str | None) -> bool:
@@ -331,9 +336,20 @@ def _kind_counts(hits: list[_Hit]) -> str:
     return ",".join(f"{kind}:{sum(hit.kind == kind for hit in hits)}" for kind in ("message", "comment", "decision", "rule"))
 
 
-def _log(reason: str, trigger: str, hits: list[_Hit], started: float) -> None:
-    log.info("prior_words reason={} trigger={} hits={} kinds={} ms={:.1f}", reason, trigger, len(hits), _kind_counts(hits), (perf_counter() - started) * 1000)
+def _log(reason: str, trigger: str, hits: list[_Hit], started: float, thread_id: str) -> None:
+    ms = (perf_counter() - started) * 1000
+    log.info("prior_words reason={} trigger={} hits={} kinds={} ms={:.1f}", reason, trigger, len(hits), _kind_counts(hits), ms)
+    _emit(reason, trigger, hits, ms, thread_id)
 
 
-def _log_error(trigger: str, exc: Exception, started: float) -> None:
-    log.opt(exception=exc).warning("prior_words reason=error trigger={} hits=0 kinds=message:0,comment:0,decision:0,rule:0 ms={:.1f} error={}: {}", trigger, (perf_counter() - started) * 1000, type(exc).__name__, exc)
+def _log_error(trigger: str, exc: Exception, started: float, thread_id: str) -> None:
+    ms = (perf_counter() - started) * 1000
+    log.opt(exception=exc).warning("prior_words reason=error trigger={} hits=0 kinds=message:0,comment:0,decision:0,rule:0 ms={:.1f} error={}: {}", trigger, ms, type(exc).__name__, exc)
+    _emit("error", trigger, [], ms, thread_id)
+
+
+def _emit(reason: str, trigger: str, hits: list[_Hit], ms: float, thread_id: str) -> None:
+    """Record each lookup's outcome as counts only; no words leave the lookup."""
+    emit_product_event("prior_words", reason, thread_id=thread_id, properties={
+        "trigger": trigger, "hits": len(hits), "kinds": _kind_counts(hits), "ms": round(ms, 1),
+    })

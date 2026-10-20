@@ -149,21 +149,116 @@ def test_many_one_term_decision_answers_do_not_hide_a_match(db):
     assert len(lines) == 2 and "answer to decision" in lines[1]
 
 
-def test_locality_is_read_once_per_project(db):
+def test_locality_is_read_once_per_lookup(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
     from memory.node_start_recall import SOURCE_CANDIDATES
 
-    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('one','one','2026-01-01','2026-01-01')")
-    db.execute("UPDATE threads SET project_id='one'")
     for index in range(SOURCE_CANDIDATES):
-        _message(db, f"message-{index}", "past", "Export account ledger with CSV format.", seq=index + 1)
+        project = f"project-{index}"
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,'2026-01-01','2026-01-01')", (project, project))
+        mk_session(f"past-{index}")
+        db.execute("UPDATE threads SET project_id=? WHERE id=?", (project, f"past-{index}"))
+        _install_checkpoint(db, thread_id=f"past-{index}", narrative="Rule", continuity=[{
+            "entry_id": 1, "field": "active_constraints", "revision": 1,
+            "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+        }])
+        _message(db, f"message-{index}", f"past-{index}", "Export account ledger with CSV format.")
     reads: list[str] = []
-    db.set_trace_callback(lambda sql: reads.append(sql) if "project_inference_policies" in sql else None)
+    db.set_trace_callback(lambda sql: reads.append(sql) if "project_inference_policies" in sql or "FROM threads WHERE id=" in sql else None)
 
     lines = _related(db)
 
     db.set_trace_callback(None)
     assert len(lines) == 4
-    assert len(reads) == 1
+    assert len(reads) == 2  # the cloud-off projects, and the caller's own row
+
+
+def test_local_only_chat_words_reach_only_a_local_only_caller(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    db.execute("UPDATE threads SET local_only=1 WHERE id='past'")
+    db.commit()
+    _install_checkpoint(db, thread_id="past", narrative="Rule", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "revision": 1,
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+    }])
+    _message(db, "private", "past", "Export account ledger with CSV format.")
+
+    assert _related(db) == []
+    db.execute("UPDATE threads SET local_only=1 WHERE id='caller'")
+    db.commit()
+    assert sorted(line.split(" · ")[1].split(" ")[0] for line in _related(db)[1:]) == ["message", "rule"]
+
+
+def test_cloud_off_rule_stays_in_its_project(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+    from llm.locality import set_project_cloud_models_off
+
+    db.executemany(
+        "INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,?,?)",
+        [("one", "one", "2026-01-01", "2026-01-01"), ("two", "two", "2026-01-01", "2026-01-01")],
+    )
+    db.execute("UPDATE threads SET project_id='one' WHERE id='past'")
+    db.execute("UPDATE threads SET project_id='two' WHERE id='caller'")
+    set_project_cloud_models_off("one", cloud_models_off=True, db=db)
+    _install_checkpoint(db, thread_id="past", narrative="Rule", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "revision": 1,
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+    }])
+
+    assert _related(db) == []
+    db.execute("UPDATE threads SET project_id='one' WHERE id='caller'")
+    db.commit()
+    assert any("rule an agent recorded" in line for line in _related(db))
+
+
+def test_replaced_wording_of_an_active_rule_is_not_quoted(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    user = [{"kind": "user", "reference": "message"}]
+    _install_checkpoint(db, thread_id="past", narrative="First", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "revision": 1,
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": user},
+    }])
+    _install_checkpoint(db, thread_id="past", narrative="Second", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "revision": 2,
+        "body": {"statement": "Ledger downloads stay JSON only.", "source_refs": user},
+    }])
+
+    assert _related(db) == []
+
+
+def test_rules_from_one_checkpoint_decode_its_snapshot_once(db, monkeypatch):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+    from memory import checkpoint_entry_rows
+
+    user = [{"kind": "user", "reference": "message"}]
+    _install_checkpoint(db, thread_id="past", narrative="Rules", continuity=[
+        {"entry_id": index, "field": "active_constraints", "revision": 1, "body": {"statement": f"Export account ledger as CSV format {index}.", "source_refs": user}}
+        for index in range(1, 6)
+    ])
+    decode = checkpoint_entry_rows.continuity_entries
+    calls: list[str] = []
+    monkeypatch.setattr(checkpoint_entry_rows, "continuity_entries", lambda raw: calls.append(raw) or decode(raw))
+
+    assert any("rule an agent recorded" in line for line in _related(db))
+    assert len(calls) == 1
+
+
+def test_each_lookup_emits_a_counts_only_product_event(db, monkeypatch):
+    from memory import node_start_recall
+
+    events: list[tuple] = []
+    monkeypatch.setattr(node_start_recall, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    _message(db, "words", "past", "Export account ledger with CSV format.")
+
+    _related(db)
+
+    (args, kwargs), = events
+    assert args == ("prior_words", "delivered")
+    assert kwargs["thread_id"] == "caller"
+    assert kwargs["properties"]["hits"] == 1 and kwargs["properties"]["kinds"].startswith("message:1")
+    assert "Export" not in json.dumps(kwargs)
 
 
 def test_only_user_sourced_active_rule_is_quoted(db):
