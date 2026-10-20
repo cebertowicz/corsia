@@ -74,7 +74,7 @@ describe('SetupScreen account recovery', () => {
 		fill('#setup-name', 'Ada'); fill('#setup-username', 'ada'); fill('#setup-password', 'password1'); fill('#setup-confirm-password', 'password1');
 		await settle(); click('Continue'); await settle();
 		click('Continue'); await settle();
-		expect(host.textContent).toContain('Couldn’t create your account. Retry.');
+		expect(host.textContent).toContain('Couldn’t create your account. Try again.');
 		click('Save a report'); await settle();
 		expect(invoke).toHaveBeenCalledWith('save_setup_report');
 	});
@@ -82,10 +82,10 @@ describe('SetupScreen account recovery', () => {
 
 describe('SetupScreen local-start recovery', () => {
 	it.each([
-		['a changed foreign oMLX', [json({ code: 'foreign_omlx_changed' }, 409)], 'Another oMLX is running. Quit your other oMLX, then Retry.'],
-		['an unrecognized refusal without exposing its message', [json({ message: 'private route detail' }, 500)], 'CORSIA couldn’t set up the local model. Retry.'],
-		['an unrecognized refusal with a reference', [json({ message: 'private route detail', ref: 'local-start-123' }, 500)], 'CORSIA couldn’t set up the local model. Retry. Reference: local-start-123'],
-		['an unreachable local backend', [new Error('network down')], 'CORSIA couldn’t set up the local model. Retry.'],
+		['a changed foreign oMLX', [json({ code: 'foreign_omlx_changed' }, 409)], 'Another oMLX is running. Quit your other oMLX, then try again.'],
+		['an unrecognized refusal without exposing its message', [json({ message: 'private route detail' }, 500)], 'CORSIA couldn’t set up the local model. Try again.'],
+		['an unrecognized refusal with a reference', [json({ message: 'private route detail', ref: 'local-start-123' }, 500)], 'CORSIA couldn’t set up the local model. Try again. Reference: local-start-123'],
+		['an unreachable local backend', [new Error('network down')], 'CORSIA couldn’t set up the local model. Try again.'],
 	] as const)('shows the local row recovery for %s', async (_name, localReplies, expected) => {
 		await openModels({ localEligible: true, localReplies: [...localReplies] });
 		await vi.waitFor(() => expect(host.textContent).toContain(expected));
@@ -100,7 +100,7 @@ describe('SetupScreen local-start recovery', () => {
 	it('shows generic recovery when the person’s other-oMLX choice cannot start setup', async () => {
 		await openModels({ localEligible: true, localReplies: [json({ code: 'consent_required' }, 409), json({ message: 'private route detail' }, 500)] });
 		click('Keep them running');
-		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t set up the local model. Retry.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t set up the local model. Try again.'));
 		expect(host.textContent).not.toContain('private route detail');
 	});
 });
@@ -111,16 +111,16 @@ describe('SetupScreen completion recovery', () => {
 		bindSetupFirstModel.mockResolvedValueOnce({ model: 'claude-code/sonnet', source: 'claude-code' });
 		await openModels({ progressFails: true });
 		click('Start using CORSIA');
-		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t save setup progress. Retry.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t save setup progress. Try again.'));
 	});
 
 	it.each([
-		['no model', 'no_model', 'CORSIA couldn’t find a working model. Connect a provider or choose one that is ready, then Retry.'],
-		['incomplete model binding', 'binding_incomplete', 'CORSIA couldn’t save the selected model. Retry.'],
-		['catalog refusal', 'catalog_refused', 'CORSIA couldn’t save the selected model. Check the provider setup, then Retry.'],
-		['catalog unavailable', 'catalog_unavailable', 'CORSIA couldn’t check your available models. Retry.'],
-		['agent unavailable', 'agent_unavailable', 'CORSIA couldn’t reach its agent. Retry.'],
-		['progress save', 'progress_save', 'CORSIA couldn’t save setup progress. Retry.'],
+		['no model', 'no_model', 'CORSIA couldn’t find a working model. Connect a provider or choose one that is ready, then try again.'],
+		['incomplete model binding', 'binding_incomplete', 'CORSIA couldn’t save the selected model. Try again.'],
+		['catalog refusal', 'catalog_refused', 'CORSIA couldn’t save the selected model. Check the provider setup, then try again.'],
+		['catalog unavailable', 'catalog_unavailable', 'CORSIA couldn’t check your available models. Try again.'],
+		['agent unavailable', 'agent_unavailable', 'CORSIA couldn’t reach its agent. Try again.'],
+		['progress save', 'progress_save', 'CORSIA couldn’t save setup progress. Try again.'],
 	] as const)('shows named recovery copy for %s', async (_name, code, expected) => {
 		bindSetupFirstModel.mockReset();
 		bindSetupFirstModel.mockRejectedValueOnce(new SetupFirstModelError(code));

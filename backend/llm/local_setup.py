@@ -137,7 +137,7 @@ def record_resume_failure(ref: str) -> None:
     local_setup_operation.write(operation)
     restore_terminal_flight(operation)
     finish_flight({"ok": False, "state": "failed", "cause": "other", "ref": ref,
-                   "message": "CORSIA couldn't resume the local model outcome. Retry, or save a report."})
+                   "message": "CORSIA couldn't resume the local model outcome. Try again, or save a report."})
 
 
 def finish_flight(result: dict) -> dict:

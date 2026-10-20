@@ -28,6 +28,9 @@ def identity(monkeypatch, tmp_path):
 def test_only_supervisor_records_prove_identity_even_after_title_rewrite(identity, monkeypatch, isolated_db):
     from llm.providers import omlx_supervisor as supervisor
 
+    monkeypatch.setattr(supervisor.process.psutil, "Process", lambda _pid: SimpleNamespace(
+        create_time=lambda: 123.5, is_running=lambda: True, status=lambda: psutil.STATUS_RUNNING,
+    ))
     supervisor._write_pid("owned-a", 101)
     supervisor._write_pid("owned-rewritten", 107)
     base = managed.managed_omlx_paths().base_path

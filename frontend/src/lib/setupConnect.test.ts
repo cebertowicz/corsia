@@ -28,7 +28,7 @@ describe('setup CLI installer failure copy', () => {
 
 	it('ends generic installer failure copy with its opaque reference and no trailing punctuation', () => {
 		expect(installFailureCopy('Claude Code', 'download_unverified', 'cli-failed')).toEqual({
-			meta: 'Couldn’t install Claude Code. Retry, or save a report. Reference: cli-failed',
+			meta: 'Couldn’t install Claude Code. Try again, or save a report. Reference: cli-failed',
 			retry: true,
 		});
 	});

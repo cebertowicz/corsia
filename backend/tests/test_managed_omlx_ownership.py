@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 from types import SimpleNamespace
 
@@ -227,11 +228,11 @@ def test_supervisor_spawn_record_survives_a_new_identity_read(monkeypatch, tmp_p
     from llm.providers import omlx_supervisor as supervisor
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
-    supervisor._write_pid("managed", 107)
+    supervisor._write_pid("managed", os.getpid())
     assert supervisor._pid_path("managed").parent == tmp_path / "managed-omlx"
-    assert supervisor.is_corsia_process(107)
+    assert supervisor.is_corsia_process(os.getpid())
     supervisor._clear_pid("managed")
-    assert not supervisor.is_corsia_process(107)
+    assert not supervisor.is_corsia_process(os.getpid())
 
 
 # Process identity is produced by managed; the choice owner executes its exact set.

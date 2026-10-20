@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import errno
+import json
 import os
 import shutil
 import socket
 import subprocess
 from pathlib import Path
+
+import psutil
 
 from llm.managed_omlx_binary import managed_omlx_executable
 
@@ -21,18 +24,30 @@ def log_path(runtime_dir: Path, server_id: str) -> Path:
 
 
 def read_pid(runtime_dir: Path, server_id: str) -> int | None:
-    path = pid_path(runtime_dir, server_id)
-    if not path.exists():
-        return None
+    """Return only the recorded live process; discard stale and legacy PID files."""
     try:
-        return int(path.read_text().strip())
-    except (OSError, ValueError):
-        return None
+        record = json.loads(pid_path(runtime_dir, server_id).read_text())
+        pid = record["pid"]
+        if type(pid) is int and pid > 0:
+            proc = psutil.Process(pid)
+            if (proc.create_time() == record["create_time"] and proc.is_running()
+                    and proc.status() != psutil.STATUS_ZOMBIE):
+                return pid
+    except (OSError, ValueError, TypeError, KeyError, psutil.Error):
+        pass
+    clear_pid(runtime_dir, server_id)
+    return None
 
 
 def write_pid(runtime_dir: Path, server_id: str, pid: int) -> None:
+    """Bind the supervisor's spawn record to this process's creation time."""
+    try:
+        created = psutil.Process(pid).create_time()
+    except psutil.Error:
+        clear_pid(runtime_dir, server_id)
+        return
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    pid_path(runtime_dir, server_id).write_text(str(pid))
+    pid_path(runtime_dir, server_id).write_text(json.dumps({"pid": pid, "create_time": created}))
 
 
 def clear_pid(runtime_dir: Path, server_id: str) -> None:

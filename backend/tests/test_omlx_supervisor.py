@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import subprocess
@@ -9,6 +10,7 @@ import sys
 import time
 from pathlib import Path
 
+import psutil
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,6 +23,7 @@ def isolated_runtime(tmp_path, monkeypatch):
     from infra import config as cfg
     monkeypatch.setattr(cfg, "RUNTIME_DIR", tmp_path)
     monkeypatch.setattr(sup, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(sup, "_identity_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -90,21 +93,52 @@ def test_pid_roundtrip(isolated_runtime):
     from llm.providers.omlx_supervisor import _read_pid, _write_pid, _clear_pid
     sid = "ns-pid-test"
     assert _read_pid(sid) is None
-    _write_pid(sid, 4242)
-    assert _read_pid(sid) == 4242
+    _write_pid(sid, os.getpid())
+    assert _read_pid(sid) == os.getpid()
     _clear_pid(sid)
     assert _read_pid(sid) is None
     _clear_pid(sid)
 
 
 def test_reconcile_clears_stale_pid(isolated_runtime):
-    from llm.providers.omlx_supervisor import reconcile, _write_pid, _read_pid
+    from llm.providers.omlx_supervisor import reconcile, _pid_path, _read_pid
     sid = "ns-reconcile-stale"
-    _write_pid(sid, 999999)
+    _pid_path(sid).write_text(json.dumps({"pid": 999999, "create_time": 1.0}))
     res = reconcile({"server_id": sid})
     assert res["adopted"] is False
     assert res["cleared"] is True
     assert _read_pid(sid) is None
+
+
+@pytest.mark.parametrize("record_kind", ["different_creation_time", "legacy_pid_only"])
+def test_stale_record_never_adopts_or_signals_live_process(isolated_runtime, record_kind):
+    from llm.providers import omlx_supervisor as sup
+
+    proc = subprocess.Popen(["sleep", "60"])
+    sid = "unrelated-live-process"
+    path = sup._pid_path(sid)
+
+    def write_stale_record():
+        path.write_text(str(proc.pid) if record_kind == "legacy_pid_only" else json.dumps({
+            "pid": proc.pid, "create_time": psutil.Process(proc.pid).create_time() - 1,
+        }))
+
+    try:
+        write_stale_record()
+        assert not sup.is_corsia_process(proc.pid)
+        assert not path.exists()
+        write_stale_record()
+        result = sup.reconcile({"server_id": sid})
+        assert result == {"adopted": False, "cleared": True, "pid": None}
+        assert not path.exists()
+        write_stale_record()
+        result = asyncio.run(sup.stop_server({"server_id": sid}))
+        assert result["already_stopped"]
+        assert not path.exists()
+        assert proc.poll() is None
+    finally:
+        proc.terminate()
+        proc.wait(timeout=2)
 
 
 def test_reconcile_adopts_live_pid(isolated_runtime):
@@ -147,7 +181,7 @@ def test_stop_server_does_not_signal_reused_pid(isolated_runtime, monkeypatch):
     from llm.providers import omlx_supervisor as sup
 
     sid = "ns-stop-pid-reuse"
-    sup._write_pid(sid, 4242)
+    sup._write_pid(sid, os.getpid())
     signals = []
     exit_checks = 0
 
@@ -177,7 +211,7 @@ def test_stop_server_confirms_forced_exit_before_clearing_pid(
     from llm.providers import omlx_supervisor as sup
 
     sid = "ns-stop-forced-exit"
-    sup._write_pid(sid, 4242)
+    sup._write_pid(sid, os.getpid())
     signals = []
     observations = iter([False, True])
 
@@ -207,9 +241,9 @@ def test_stop_server_no_pid_file(isolated_runtime):
 
 
 def test_stop_server_dead_pid_idempotent(isolated_runtime):
-    from llm.providers.omlx_supervisor import stop_server, _write_pid, _read_pid
+    from llm.providers.omlx_supervisor import stop_server, _pid_path, _read_pid
     sid = "ns-stop-stale"
-    _write_pid(sid, 999999)
+    _pid_path(sid).write_text(json.dumps({"pid": 999999, "create_time": 1.0}))
     result = asyncio.run(stop_server({"server_id": sid}))
     assert result["ok"] is True
     assert result.get("already_stopped") is True

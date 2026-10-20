@@ -47,13 +47,13 @@
 	}
 	function setupFinishRecovery(error: unknown): string {
 		const code = error instanceof SetupFirstModelError ? error.code : undefined;
-		if (code === 'no_model') return 'CORSIA couldn’t find a working model. Connect a provider or choose one that is ready, then Retry.';
-		if (code === 'binding_incomplete') return 'CORSIA couldn’t save the selected model. Retry.';
-		if (code === 'catalog_refused') return 'CORSIA couldn’t save the selected model. Check the provider setup, then Retry.';
-		if (code === 'catalog_unavailable') return 'CORSIA couldn’t check your available models. Retry.';
-		if (code === 'agent_unavailable') return 'CORSIA couldn’t reach its agent. Retry.';
-		if (code === 'progress_save') return 'CORSIA couldn’t save setup progress. Retry.';
-		return 'CORSIA couldn’t finish model setup. Retry.';
+		if (code === 'no_model') return 'CORSIA couldn’t find a working model. Connect a provider or choose one that is ready, then try again.';
+		if (code === 'binding_incomplete') return 'CORSIA couldn’t save the selected model. Try again.';
+		if (code === 'catalog_refused') return 'CORSIA couldn’t save the selected model. Check the provider setup, then try again.';
+		if (code === 'catalog_unavailable') return 'CORSIA couldn’t check your available models. Try again.';
+		if (code === 'agent_unavailable') return 'CORSIA couldn’t reach its agent. Try again.';
+		if (code === 'progress_save') return 'CORSIA couldn’t save setup progress. Try again.';
+		return 'CORSIA couldn’t finish model setup. Try again.';
 	}
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'account' | 'folder' | 'models' | 'hard-stop' | 'error' | 'connect';
@@ -115,7 +115,7 @@
 	const view = $derived.by((): View => {
 		if (page === 'connect') return remote.view;
 		if (page === 'checking') return { title: 'Checking this computer' };
-		if (page === 'error') return { title: 'CORSIA couldn’t start', lede: reportError || statusError || 'Something went wrong while starting. Retry, or save a report to send.', primary: { label: 'Retry' }, onPrimary: resume ? resumeSetup : readStatus };
+		if (page === 'error') return { title: 'CORSIA couldn’t start', lede: reportError || statusError || 'Something went wrong while starting. Try again, or save a report to send.', primary: { label: 'Retry' }, onPrimary: resume ? resumeSetup : readStatus };
 		if (page === 'hard-stop') {
 			if (status.macos_supported === false) return { title: 'Update macOS to open CORSIA', lede: 'CORSIA needs macOS 15 or later. Update in System Settings › General › Software Update, then open CORSIA again.' };
 			return { title: 'Move CORSIA to Applications', lede: 'Drag CORSIA into your Applications folder, then open it from there. It can’t update itself from the disk image.' };
@@ -140,7 +140,7 @@
 			if (status.macos_supported === false || status.app_location === 'disk_image') { page = 'hard-stop'; return; }
 			page = 'account'; void classifier.start();
 			if (eligible) { await localPick.start(); await startLocal(); await readLocalProgress(); }
-		} catch { statusError = 'Something went wrong while starting. Retry, or save a report to send.'; page = 'error'; }
+		} catch { statusError = 'Something went wrong while starting. Try again, or save a report to send.'; page = 'error'; }
 	}
 	async function checkLocal() { await localPick.start(); if (get(token)) await refreshSources(); else await readLocalProgress(); }
 	async function readLocalProgress() {
@@ -193,11 +193,11 @@
 			const response = await fetch('/api/setup/first-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null }) });
 			if (response.status === 409) { accountExists = true; accountError = 'This computer already has a CORSIA account. Sign in instead.'; page = 'account'; return; }
 			const result = await response.json().catch(() => null);
-			if (!response.ok) { accountError = typeof result?.detail === 'string' ? result.detail : 'Couldn’t create your account. Retry.'; return; }
+			if (!response.ok) { accountError = typeof result?.detail === 'string' ? result.detail : 'Couldn’t create your account. Try again.'; return; }
 			onAccountCreated(); token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() }); connect();
 			password = ''; confirmation = ''; page = 'models';
 			await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
-		} catch { accountError = 'Couldn’t create your account. Retry.'; }
+		} catch { accountError = 'Couldn’t create your account. Try again.'; }
 		finally { accountBusy = false; }
 	}
 	async function refreshSources(strict = false) {
@@ -206,7 +206,7 @@
 			sources = await (strict ? recheckSources(current) : fetchSources(current));
 			catalog = (await setupCatalog(current)).models;
 			localPending = false; sourceError = '';
-		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Retry.'; }
+		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
 	}
 	async function finishSetup() {
 		const current = get(token); if (!current || finishing) return;

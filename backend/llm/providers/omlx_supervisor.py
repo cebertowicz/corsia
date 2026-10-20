@@ -51,11 +51,8 @@ def _identity_dir():
 def is_corsia_process(pid: int) -> bool:
     """Match an observed process to the supervisor's durable spawn records, regardless of argv."""
     for path in _identity_dir().glob("omlx-*.pid"):
-        try:
-            if int(path.read_text().strip()) == pid:
-                return True
-        except (OSError, ValueError):
-            continue
+        if process.read_pid(path.parent, path.stem.removeprefix("omlx-")) == pid:
+            return True
     return False
 
 
@@ -174,7 +171,7 @@ def _failed_boot_result(
     port: int,
     pid: int,
 ) -> dict[str, Any]:
-    if _process_alive(pid):
+    if _read_pid(server_id) == pid:
         try:
             os.kill(pid, signal.SIGTERM)
         except (OSError, ProcessLookupError) as exc:
@@ -270,9 +267,10 @@ async def stop_server(cfg: dict) -> dict[str, Any]:
     if not sid:
         return {"ok": False, "message": "stop_server: missing server_id in cfg"}
 
+    had_record = _pid_path(sid).exists()
     pid = _read_pid(sid)
     if not pid:
-        return {"ok": False, "message": "Not running (no pid file)"}
+        return {"ok": had_record, "already_stopped": had_record, "message": "Not running"}
 
     if not _process_alive(pid):
         _clear_pid(sid)
@@ -297,6 +295,8 @@ async def stop_server(cfg: dict) -> dict[str, Any]:
     if not exited:
         exited = _process_exited(pid)
 
+    if not exited and _read_pid(sid) != pid:
+        exited = True
     if not exited:
         try:
             os.kill(pid, signal.SIGKILL)
@@ -320,9 +320,10 @@ def reconcile(cfg: dict) -> dict[str, Any]:
     sid = cfg.get("server_id")
     if not sid:
         return {"adopted": False, "cleared": False, "pid": None}
+    had_record = _pid_path(sid).exists()
     pid = _read_pid(sid)
     if pid is None:
-        return {"adopted": False, "cleared": False, "pid": None}
+        return {"adopted": False, "cleared": had_record, "pid": None}
     if _process_alive(pid):
         host, port = _resolve_endpoint_via_freshness(cfg)
         if host and port:

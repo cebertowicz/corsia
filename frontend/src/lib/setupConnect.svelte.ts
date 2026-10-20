@@ -33,7 +33,7 @@ export function installFailureCopy(cli: string, cause?: InstallFailureCause | nu
 	if (installCause(cause) === 'connection') {
 		return { meta: `Couldn’t download ${cli}. Check your internet connection, then retry.`, retry: true };
 	}
-	return { meta: `Couldn’t install ${cli}. Retry, or save a report.${reference}`, retry: true };
+	return { meta: `Couldn’t install ${cli}. Try again, or save a report.${reference}`, retry: true };
 }
 
 /** Install once on Set up, then sign in; retain setup-only attempts for the handoff. */

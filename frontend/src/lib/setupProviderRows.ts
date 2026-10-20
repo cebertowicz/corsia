@@ -15,15 +15,15 @@ function withReference(message: string, reference?: string): string {
 }
 
 export function localSetupRecovery({ cause, outcome, reference, bytesToFree, size }: LocalSetupFailure): string {
-	if (cause === 'own_omlx_upgrade_required') return withReference('Update your oMLX, then Retry.', reference);
-	if (outcome === 'setup_failed' || cause === 'setup_failed') return withReference('CORSIA couldn’t set up the local model. Retry, or save a report.', reference);
-	if (outcome === 'start_failed' || cause === 'start_failed') return withReference('The local model downloaded but couldn’t start. Retry, or save a report.', reference);
-	if (cause === 'disk_full') return `Couldn’t download the local model: the disk is full. Free up ${bytesToFree ? `${Math.ceil(bytesToFree / 1e9)} GB` : size}, then Retry.`;
-	if (cause === 'connection') return 'Couldn’t download the local model because the connection was lost. Check your internet connection, then Retry.';
+	if (cause === 'own_omlx_upgrade_required') return withReference('Update your oMLX, then try again.', reference);
+	if (outcome === 'setup_failed' || cause === 'setup_failed') return withReference('CORSIA couldn’t set up the local model. Try again, or save a report.', reference);
+	if (outcome === 'start_failed' || cause === 'start_failed') return withReference('The local model downloaded but couldn’t start. Try again, or save a report.', reference);
+	if (cause === 'disk_full') return `Couldn’t download the local model: the disk is full. Free up ${bytesToFree ? `${Math.ceil(bytesToFree / 1e9)} GB` : size}, then try again.`;
+	if (cause === 'connection') return 'Couldn’t download the local model because the connection was lost. Check your internet connection, then try again.';
 	if (cause === 'memory') return 'This computer doesn’t have enough memory to run the local model. Choose a subscription or API provider instead.';
-	if (cause === 'other_omlx') return 'Another oMLX is running. Quit your other oMLX, then Retry.';
-	if (cause === 'other') return withReference('CORSIA couldn’t set up the local model. Retry.', reference);
-	return withReference('CORSIA couldn’t set up the local model. Retry.', reference);
+	if (cause === 'other_omlx') return 'Another oMLX is running. Quit your other oMLX, then try again.';
+	if (cause === 'other') return withReference('CORSIA couldn’t set up the local model. Try again.', reference);
+	return withReference('CORSIA couldn’t set up the local model. Try again.', reference);
 }
 
 /** Present one local lifecycle and one cause-specific recovery action. */
@@ -47,9 +47,9 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 		return { ...row, meta, error: true, reportable: Boolean(startError) || cause === 'other' || cause === undefined || outcome === 'start_failed' || cause === 'start_failed' || outcome === 'setup_failed' || cause === 'setup_failed', action: { label: 'Retry', run: start } };
 	}
 	if (pick?.state === 'failed') {
-		const message = pick.cause === 'memory' ? 'Couldn’t find a local model that fits this computer. Retry.'
-			: pick.cause === 'own_omlx_upgrade_required' ? 'Update your oMLX, then Retry.'
-			: 'CORSIA couldn’t set up the local model. Retry, or save a report.';
+		const message = pick.cause === 'memory' ? 'Couldn’t find a local model that fits this computer. Try again.'
+			: pick.cause === 'own_omlx_upgrade_required' ? 'Update your oMLX, then try again.'
+			: 'CORSIA couldn’t set up the local model. Try again, or save a report.';
 		return { ...row, meta: withReference(message, pick.ref), error: true, reportable: true, action: { label: 'Retry', run: check } };
 	}
 	return { ...row, meta: `Free and private. Runs on this computer, even offline.${size ? ` ${size} download.` : ''}`, action: { label: 'Download', run: start } };

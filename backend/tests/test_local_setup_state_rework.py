@@ -1,6 +1,7 @@
 """State and upgrade regressions across the setup flight's consumers."""
 
 import asyncio
+import os
 from dataclasses import replace
 from unittest.mock import AsyncMock
 
@@ -88,17 +89,18 @@ async def test_existing_registered_local_model_is_visible_and_setup_and_prepare_
 async def test_failed_boot_retains_identity_until_the_supervised_process_exits(flight, monkeypatch):
     from llm.providers import omlx_supervisor as supervisor
 
-    supervisor._write_pid("boot-failed", 107)
+    pid = os.getpid()
+    supervisor._write_pid("boot-failed", pid)
     monkeypatch.setattr(supervisor, "_process_alive", lambda _pid: True)
     monkeypatch.setattr(supervisor, "_process_exited", lambda _pid: False)
     monkeypatch.setattr(supervisor.os, "kill", lambda *_args: None)
     monkeypatch.setattr(supervisor, "_tail_log", lambda *_a, **_k: "")
     monkeypatch.setattr(supervisor, "_port_owner_pid", lambda *_args: None)
     monkeypatch.setattr(supervisor, "_spawn_process", lambda *_args: pytest.fail("must not lose a live spawn"))
-    assert supervisor._failed_boot_result("boot-failed", "127.0.0.1", 8210, 107)["ok"] is False
-    assert supervisor.is_corsia_process(107)
+    assert supervisor._failed_boot_result("boot-failed", "127.0.0.1", 8210, pid)["ok"] is False
+    assert supervisor.is_corsia_process(pid)
     assert (await supervisor.start_server({"server_id": "boot-failed", "host": "127.0.0.1", "port": 8210}))["ok"] is False
-    assert supervisor.is_corsia_process(107)
+    assert supervisor.is_corsia_process(pid)
 
 
 def test_unreleased_boolean_choice_shape_does_not_apply(flight):
