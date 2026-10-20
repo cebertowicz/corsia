@@ -330,6 +330,17 @@ describe('ConnectedAppsSettings', () => {
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Microsoft — alex@contoso.example"]')).not.toBeNull());
 	});
 
+	it('names Microsoft when a needs-sign-in account has no known cause', async () => {
+		const microsoft = { ...googleAccount, id: 'microsoft-unknown', provider: 'microsoft' as const, provider_display_name: 'Microsoft', address: 'alex@contoso.example', state: 'needs_sign_in' as const, account_kind: 'work' as const, cause: null };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: [microsoft] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Microsoft — alex@contoso.example"]')).not.toBeNull());
+		(host.querySelector('[data-connected-account-id="microsoft-unknown"] button') as HTMLButtonElement).click();
+		flushSync();
+		expect(host.textContent).toContain('Microsoft signed you out, so agents can’t use this account until you sign in again.');
+		expect(host.textContent).not.toContain('Google signed you out');
+	});
+
 	it('renders Microsoft admin approval, cancellation, refresh and provider failure with the correct next actions', async () => {
 		const admin = { ...googleAccount, id: 'microsoft-admin', provider: 'microsoft' as const, provider_display_name: 'Microsoft', address: 'alex@contoso.example', state: 'needs_sign_in' as const, account_kind: 'work' as const, cause: 'admin_approval_required', client_id: '11111111-1111-4111-8111-111111111111', tenant_id: null };
 		const cancelled = { ...admin, id: 'microsoft-cancelled', cause: 'consent_cancelled' };
@@ -366,7 +377,7 @@ describe('ConnectedAppsSettings', () => {
 		open(registration.id);
 		const registrationRow = host.querySelector(`[data-connected-account-id="${registration.id}"]`) as HTMLElement;
 		expect(registrationRow.textContent).toContain('Microsoft app needs fixing · All projects');
-		expect(registrationRow.textContent).toContain("Your Microsoft app for CORSIA isn't set up right. Ask CORSIA to fix it, then press Sign in.");
+		expect(registrationRow.textContent).toContain('Your Microsoft app for CORSIA isn’t set up right. Ask CORSIA to fix it, then press Sign in.');
 		const signIn = [...registrationRow.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Sign in');
 		expect(signIn?.className).toContain('primary');
 		expect(registrationRow.textContent).toContain('Where it works…');
@@ -445,6 +456,27 @@ describe('ConnectedAppsSettings', () => {
 		expect(host.textContent).toContain('Actions are unavailable while offline.');
 		for (const label of ['Where it works…', 'Sign out', 'Remove']) expect([...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === label)?.disabled).toBe(true);
 		expect(host.textContent).not.toContain('network failed');
+	});
+
+	it('does not show the Google manual step after Microsoft manual-only sign-out', async () => {
+		const microsoft = { ...googleAccount, id: 'microsoft-manual-sign-out', provider: 'microsoft' as const, provider_display_name: 'Microsoft', address: 'alex@contoso.example', account_kind: 'work' as const, tenant_id: '22222222-2222-4222-8222-222222222222' };
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const path = String(input);
+			if (path.includes('/api/projects')) return { ok: true, json: async () => ({ projects: [] }) };
+			if (path.includes('/sign-out')) return { ok: true, json: async () => ({ row: { ...microsoft, state: 'signed_out' }, revocation: 'manual_only' }) };
+			return { ok: true, json: async () => ({ servers: [], accounts: [microsoft] }) };
+		}));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Microsoft — alex@contoso.example"]')).not.toBeNull());
+		(host.querySelector('[data-connected-account-id="microsoft-manual-sign-out"] button') as HTMLButtonElement).click();
+		flushSync();
+		([...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Sign out') as HTMLButtonElement).click();
+		flushSync();
+		([...document.body.querySelectorAll('button')].filter((button) => button.textContent?.trim() === 'Sign out').at(-1) as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.textContent).toContain('Signed out'));
+		expect(host.textContent).not.toContain('Google');
+		expect(host.textContent).not.toContain('You’re signed out here');
+		expect(host.querySelector('a')).toBeNull();
 	});
 
 	it('shows the manual Google Account step only when account sign-out reports a provider failure', async () => {

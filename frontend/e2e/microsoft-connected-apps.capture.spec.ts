@@ -51,14 +51,21 @@ test.describe('Microsoft Connected apps capture', () => {
 	for (const theme of ['light', 'dark'] as const) {
 		test(`captures Microsoft account states in ${theme}`, async ({ page }, testInfo) => {
 			let state: State = 'connected';
+			let includeGoogleAccount = true;
 			let failNextList = false;
 			await page.route('**/api/mcp/servers**', async (route) => {
 				if (route.request().method() !== 'GET') return route.continue();
 				if (failNextList) { failNextList = false; return route.fulfill({ status: 503, json: { detail: 'offline' } }); }
-				return route.fulfill({ json: { accounts: accounts(state), servers: [], sign_in_here: false } });
+				const accountRows = accounts(state);
+				return route.fulfill({ json: { accounts: includeGoogleAccount ? accountRows : accountRows.filter((account) => account.provider === 'microsoft'), servers: [], sign_in_here: false } });
 			});
 			await page.route('**/api/mcp/accounts/**', async (route) => {
 				if (route.request().method() === 'DELETE') return route.fulfill({ json: { id: 'microsoft-work', removed: true, revocation: 'manual_only' } });
+				if (route.request().method() === 'POST' && route.request().url().includes('/sign-out')) return route.fulfill({ json: { row: { ...microsoft('connected'), state: 'signed_out' }, revocation: 'manual_only' } });
+				return route.continue();
+			});
+			await page.route('**/api/mcp/accounts/microsoft-work/sign-out**', async (route) => {
+				if (route.request().method() === 'POST') return route.fulfill({ json: { row: { ...microsoft('connected'), state: 'signed_out' }, revocation: 'manual_only' } });
 				return route.continue();
 			});
 			await page.route('**/api/projects**', (route) => route.fulfill({ json: { projects: [] } }));
@@ -108,12 +115,26 @@ test.describe('Microsoft Connected apps capture', () => {
 			state = 'registration';
 			await page.reload(); await openConnectedApps(page); await open();
 			await expect(page.getByText('Microsoft app needs fixing · All projects')).toBeVisible();
-			await expect(page.getByText("Your Microsoft app for CORSIA isn't set up right. Ask CORSIA to fix it, then press Sign in.")).toBeVisible();
+			await expect(page.getByText('Your Microsoft app for CORSIA isn’t set up right. Ask CORSIA to fix it, then press Sign in.')).toBeVisible();
 			await expect(page.getByRole('button', { name: 'Sign in' })).toHaveClass(/primary/);
 			await expect(page.getByRole('button', { name: 'Copy message for IT' })).toHaveCount(0);
 			await expect(page.getByRole('link', { name: 'Manage Microsoft permissions' })).toHaveCount(0);
 			await capture(page, testInfo, `ms-registration-misconfigured-${label}-${theme}`);
 
+			includeGoogleAccount = false;
+			state = 'connected';
+			await page.reload(); await openConnectedApps(page); await open();
+			await page.getByRole('button', { name: 'Sign out' }).click();
+			const signOutDialog = page.locator('.modal').filter({ hasText: 'Sign out of Microsoft — alex@contoso.example?' });
+			await signOutDialog.getByRole('button', { name: 'Sign out' }).click();
+			const connectedApps = page.locator('.connected-apps');
+			await expect(connectedApps).toContainText('Signed out');
+			await expect(connectedApps).not.toContainText('Google');
+			await expect(connectedApps).not.toContainText('You’re signed out here');
+			await expect(page.getByRole('link', { name: 'Manage Microsoft permissions' })).toHaveCount(0);
+			await capture(page, testInfo, `ms-signed-out-${label}-${theme}`);
+
+			includeGoogleAccount = true;
 			state = 'connected';
 			await page.reload(); await openConnectedApps(page); await open();
 			await page.getByRole('button', { name: 'Remove' }).click();
