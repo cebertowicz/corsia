@@ -63,7 +63,7 @@ function stopped(headline: string, body: string): FailureCopy {
 
 function diskCopy(detail: string | null): FailureCopy {
 	const disk = diskNumbers(detail);
-	const body = disk ? `Needs ${disk.neededGb} GB free; this Mac has ${disk.freeGb} GB. ${RAN_ON}` : RAN_ON;
+	const body = disk ? `Needs ${disk.neededGb} GB free; this computer has ${disk.freeGb} GB. ${RAN_ON}` : RAN_ON;
 	return {
 		title: "Update didn't start",
 		headline: 'Not enough disk space for a safety backup.',
@@ -137,11 +137,11 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 		case 'index_locked':
 			return refusal(
 				"Another program is using CORSIA's files.",
-				`Wait for it to finish, then try again. If it doesn't clear, ask your workspace conductor to remove the leftover lock. ${RAN_ON}`,
+				`Wait for it to finish, then try again. If it doesn't clear, ask the CORSIA agent to remove the leftover lock. ${RAN_ON}`,
 				'Try again',
 			);
 		case 'checkout_detached':
-			return refusal("This copy of CORSIA can't update itself because it isn't set up to follow updates.", `Ask your workspace conductor to switch it back. ${RAN_ON}`, null);
+			return refusal("This copy of CORSIA can't update itself because it isn't set up to follow updates.", `Ask the CORSIA agent to switch it back. ${RAN_ON}`, null);
 		case 'checkout_dirty':
 			return refusal('This copy of CORSIA has local changes.', `Save or discard them, then try again. ${RAN_ON}`, 'Try again');
 		case 'restart_pending':

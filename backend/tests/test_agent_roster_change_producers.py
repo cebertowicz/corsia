@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 
 import pytest
@@ -161,7 +167,7 @@ def test_multiple_roster_changes_materialize_one_complete_current_map(
                 "Self: this thread (thread) has no registered responsibility.",
                 "Other agents in scope:",
                 "- Release Owner (owner) [project] — Owns releases.",
-                "Workspace conductor: not reachable (none designated).",
+                "CORSIA agent: not reachable (none designated).",
                 "Use agent_roster for paths, domains, and coordination notes.",
             ]
         )
@@ -252,7 +258,8 @@ def test_unrelated_metadata_write_survives_corrupt_workspace_conductor_setting(
     isolated_db,
 ):
     from api.thread_mutations import _write_metadata_patch
-    from infra.conductor import ConductorSettingError, get_conductor
+    from infra.conductor import get_scope_coordinator
+    from infra.corsia_agent import CorsiaAgentSettingError
     from infra.database import get_db
 
     _insert_thread("owner")
@@ -260,7 +267,7 @@ def test_unrelated_metadata_write_survives_corrupt_workspace_conductor_setting(
     try:
         db.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
-            ("workspace_conductor_session_id", "{not-json", "t"),
+            ("corsia_agent_thread_id", "{not-json", "t"),
         )
         db.commit()
     finally:
@@ -280,8 +287,8 @@ def test_unrelated_metadata_write_survives_corrupt_workspace_conductor_setting(
     assert [change["object_id"] for change in _roster_changes()] == [
         "user:user:workspace"
     ]
-    with pytest.raises(ConductorSettingError, match="workspace conductor"):
-        get_conductor()
+    with pytest.raises(CorsiaAgentSettingError, match="CORSIA agent"):
+        get_corsia_agent()
 
 
 def test_project_metadata_write_skips_workspace_conductor_lookup(
@@ -296,7 +303,7 @@ def test_project_metadata_write_skips_workspace_conductor_lookup(
     try:
         db.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
-            ("workspace_conductor_session_id", "{not-json", "t"),
+            ("corsia_agent_thread_id", "{not-json", "t"),
         )
         db.commit()
     finally:
@@ -305,7 +312,7 @@ def test_project_metadata_write_skips_workspace_conductor_lookup(
     def _unexpected_lookup(*_args, **_kwargs):
         pytest.fail("project roster writes must not read workspace conductor state")
 
-    monkeypatch.setattr("infra.conductor.get_conductor", _unexpected_lookup)
+    monkeypatch.setattr("infra.conductor.get_scope_coordinator", _unexpected_lookup)
 
     assert _write_metadata_patch(
         "owner", "user", {"title": "Project owner renamed"}, "t1"
@@ -396,7 +403,7 @@ async def test_automatic_title_journals_only_visible_owner(isolated_db, monkeypa
     try:
         db.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
-            ("workspace_conductor_session_id", "{not-json", "t"),
+            ("corsia_agent_thread_id", "{not-json", "t"),
         )
         db.commit()
     finally:
@@ -409,7 +416,7 @@ async def test_automatic_title_journals_only_visible_owner(isolated_db, monkeypa
         return None
 
     monkeypatch.setattr("ws.post_turn.generate_thread_title", _title)
-    await ensure_thread_title("owner", "release", _send)
+    await ensure_thread_title("owner", _send)
 
     db = get_db()
     try:
@@ -447,7 +454,7 @@ def test_project_digest_refreshes_when_workspace_conductor_is_designated_or_rena
     isolated_db, monkeypatch,
 ):
     from api.thread_mutations import _write_metadata_patch
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
     from infra.database import get_db
 
     _insert_project("project")
@@ -461,9 +468,9 @@ def test_project_digest_refreshes_when_workspace_conductor_is_designated_or_rena
     try:
         monkeypatch.setattr("infra.passive_changes.clock_event", lambda *_args: None)
 
-        assert set_conductor("workspace", "contact", db=db) is True
+        assert set_corsia_agent("contact", db=db) is True
         assert [change["object_id"] for change in _roster_changes()] == [
-            "user:user:workspace-conductor-contact"
+            "user:user:corsia-agent-contact"
         ]
         designated_map = _project_roster_digest(db, "project-agent")
         second_project_map = _project_roster_digest(db, "project-agent-two")
@@ -479,13 +486,13 @@ def test_project_digest_refreshes_when_workspace_conductor_is_designated_or_rena
         assert "Original Contact" not in renamed_map
         assert "Workspace Other" not in renamed_map
 
-        assert set_conductor("workspace", "next-contact", db=db) is True
+        assert set_corsia_agent("next-contact", db=db) is True
         switched_map = _project_roster_digest(db, "project-agent")
         assert "Next Contact (next-contact) [workspace]" in switched_map
         assert "Renamed Contact" not in switched_map
         assert "Workspace Other" not in switched_map
 
-        assert set_conductor("workspace", None, db=db) is True
+        assert set_corsia_agent(None, db=db) is True
         cleared_map = _project_roster_digest(db, "project-agent-two")
         assert "Next Contact" not in cleared_map
         assert "Workspace Other" not in cleared_map
@@ -497,7 +504,7 @@ async def test_project_digest_refreshes_when_workspace_contact_responsibility_ch
     isolated_db, monkeypatch,
 ):
     from api.agents import update_agent
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
     from infra.database import get_db
 
     _insert_project("project")
@@ -506,7 +513,7 @@ async def test_project_digest_refreshes_when_workspace_contact_responsibility_ch
     db = get_db()
     try:
         monkeypatch.setattr("infra.passive_changes.clock_event", lambda *_args: None)
-        assert set_conductor("workspace", "contact", db=db) is True
+        assert set_corsia_agent("contact", db=db) is True
         _project_roster_digest(db, "project-agent")
 
         assert await update_agent(
@@ -523,7 +530,7 @@ def test_project_digest_refreshes_when_workspace_contact_is_archived(
     isolated_db, monkeypatch,
 ):
     from api.thread_mutations import _write_metadata_patch
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
     from infra.database import get_db
 
     _insert_project("project")
@@ -533,7 +540,7 @@ def test_project_digest_refreshes_when_workspace_contact_is_archived(
     db = get_db()
     try:
         monkeypatch.setattr("infra.passive_changes.clock_event", lambda *_args: None)
-        assert set_conductor("workspace", "contact", db=db) is True
+        assert set_corsia_agent("contact", db=db) is True
         assert "Workspace Contact (contact) [workspace]" in _project_roster_digest(
             db, "project-agent",
         )

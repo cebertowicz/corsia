@@ -1,19 +1,18 @@
 """User-attention HTTP surface (coordination MVP S6b).
 
 Thin endpoints over the tested attention lifecycle (S6a), parent disposition
-(S5b), and review-profile execution (S5a). No new backend concept — these wire
-the existing model functions for the launch UI:
+(S5b), and review-profile execution (S5a):
 
-- ``GET  /api/attention/raised``            — the Requires-user list (optionally scoped to a thread)
+- ``GET  /api/attention/raised``            — raised rows, optionally scoped to a thread
 - ``GET  /api/attention/rollup``            — pull-only parent roll-up (no badge/wake)
 - ``GET  /api/attention/{id}/review``       — the review-profile result for a card
 - ``POST /api/attention/{id}/clear``        — clearing actions (S6a)
 - ``GET  /api/attention/queue``             — the one queue the user works through
 - ``POST /api/attention/{id}/dispose``      — parent disposition (S5b)
 
-There is one pile and one "needs you" concept (PLANS-AC29). `/queue` returns the
-rows a typed renderer can actually draw, head-first; `/raised` and `/rollup`
-return exactly the rows it cannot, so nothing is hidden by an unproven claim.
+``/raised`` and ``/dispose`` currently have no product consumer. Their lifecycle
+semantics remain covered by backend tests while #921 decides whether raised rows
+receive a typed surface or stop being raised.
 """
 
 from __future__ import annotations
@@ -116,6 +115,7 @@ def _summarize(item: dict) -> dict:
         "defer_condition": meta.get("defer_condition"),
         "owner_thread": item.get("owner_thread"),
         "levels": item.get("levels", []),
+        "hold_ids": item.get("hold_ids", []),
     }
 
 
@@ -158,6 +158,9 @@ def _queue_for(user_id: str, *, db=None) -> list[dict]:
 
     A decision is listed only where Activity would count it, so the dock and
     Activity's awaiting count never disagree about an archived plan or project.
+    Annotation marks a non-ask item whose every live link is paused, so the dock
+    never shows it until resume; a paused document or image ask never reaches
+    here, because ``list_raised`` already drops it.
     """
     _db = db or get_db()
     try:
@@ -247,6 +250,7 @@ class ClearBody(BaseModel):
     reason: str | None = None
     verdict: str | None = None
     note: str | None = None
+    hold_ids: list[str] | None = None
 
 
 @router.post("/{artifact_id}/clear")
@@ -262,7 +266,8 @@ async def post_clear(artifact_id: str, body: ClearBody):
     try:
         result = await run_in_db(lambda: attention.clear_attention(
             artifact_id, outcome=body.outcome, condition=body.condition,
-            reason=body.reason, verdict=body.verdict, note=body.note, drives=woken,
+            reason=body.reason, verdict=body.verdict, note=body.note,
+            hold_ids=body.hold_ids, require_hold_ids=True, drives=woken,
         ))
     except review_bar.AnswerRefused as exc:
         status = 409 if exc.code == "ask_stale" else 422
@@ -286,6 +291,7 @@ class DisposeBody(BaseModel):
     condition: dict | None = None
     replacement_id: str | None = None
     actor_thread: str | None = None
+    hold_ids: list[str] | None = None
 
 
 @router.post("/{artifact_id}/dispose")
@@ -299,14 +305,22 @@ async def post_dispose(artifact_id: str, body: DisposeBody):
     if body.actor_thread is not None and not await run_in_db(
             lambda: owns_thread(body.actor_thread, user["id"])):
         raise HTTPException(status_code=403, detail="actor_thread not accessible")
+    woken: list[str] = []
     try:
         result = await run_in_db(lambda: D.dispose(
             artifact_id, body.outcome, reason=body.reason, answer=body.answer,
             authority=body.authority, override_blocking=body.override_blocking,
             new_owner=body.new_owner, condition=body.condition,
-            replacement_id=body.replacement_id, actor_thread=body.actor_thread))
+            replacement_id=body.replacement_id, actor_thread=body.actor_thread,
+            hold_ids=body.hold_ids, require_hold_ids=True, drives=woken))
     except D.BlockingProfileError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except review_bar.AnswerRefused as exc:
+        status = 409 if exc.code == "ask_stale" else 422
+        raise HTTPException(
+            status_code=status, detail={"code": exc.code, "message": str(exc)},
+        ) from exc
     except D.DispositionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await public.drive_threads(woken)
     return asdict(result)

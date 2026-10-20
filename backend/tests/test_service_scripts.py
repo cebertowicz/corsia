@@ -5,11 +5,13 @@ from pathlib import Path
 import plistlib
 import re
 import stat
+import subprocess
 import sys
 
 import pytest
 
 from service_script_fixtures import (  # noqa: F401
+    fake_checkout,
     isolated_launch_agents_dir,
     run_bash as _run_bash,
 )
@@ -123,6 +125,7 @@ exit 1
     launched_environment = capture.read_text().splitlines()
     assert "CORSIA_TEST_MODE=1" not in launched_environment
     assert "CORSIA_ALLOW_HOME_WORKSPACE_IN_CI=1" not in launched_environment
+    assert "CORSIA_DEVICES_DISABLE=1" in launched_environment
 
 
 def test_drain_does_not_cancel_an_unconfirmed_lost_start_response(
@@ -2616,6 +2619,7 @@ def test_rendered_launchd_service_has_explicit_shutdown_budget(
     env_file.write_text(
         "CORSIA_RESTART_CALLER_TOKEN=must-not-render\n"
         "CORSIA_RESTART_CURL=/tmp/must-not-render\n"
+        "CORSIA_DEVICES_DISABLE=1\n"
         "VISIBLE_SETTING=preserved\n"
     )
     result = _run_bash(
@@ -2649,6 +2653,7 @@ render_service_plist generation-test
     assert environment["VISIBLE_SETTING"] == "preserved"
     assert "CORSIA_RESTART_CALLER_TOKEN" not in environment
     assert "CORSIA_RESTART_CURL" not in environment
+    assert "CORSIA_DEVICES_DISABLE" not in environment
 
 
 def test_rendered_launchd_service_keeps_key_variables_for_the_key_store_migration(
@@ -3908,12 +3913,15 @@ def test_owned_redeploy_sources_updated_script_in_same_shell_with_original_tuple
     home.mkdir()
     updated_script = checkout / "scripts" / "corsia"
     updated_script.parent.mkdir(parents=True)
-    # The prefix sources account helpers and validates its own backend roots, so
-    # the updated checkout carries the same backend shape as a real redeploy.
+    # The prefix sources the account and app-mode helpers and validates its own
+    # backend roots, so the updated checkout carries the same shape as a real
+    # redeploy.
     helpers = updated_script.parent / "corsia.d"
     helpers.mkdir()
-    accounts_helper = source_script.parent / "corsia.d" / "accounts.sh"
-    (helpers / "accounts.sh").write_text(accounts_helper.read_text())
+    for helper in ("accounts.sh", "app_mode.sh"):
+        (helpers / helper).write_text(
+            (source_script.parent / "corsia.d" / helper).read_text()
+        )
     (checkout / "backend").symlink_to(
         source_script.parents[1] / "backend", target_is_directory=True
     )
@@ -4071,3 +4079,122 @@ service_restart
     assert "cancel-drain" not in traced
     assert "ingress remains held" in result.stderr
     assert "ingress remains drained" not in result.stderr
+
+
+# --- App-owned install guard -------------------------------------------------
+
+
+def _app_owned_env(tmp_path: Path, service_json: str | None) -> dict[str, str]:
+    """Isolated HOME whose app folder holds ``service_json`` (None: no file)."""
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    if service_json is not None:
+        app_dir = home / "Library" / "Application Support" / "CORSIA"
+        app_dir.mkdir(parents=True)
+        (app_dir / "service.json").write_text(service_json)
+    return {"HOME": str(home), "CORSIA_STATE_DIR": str(state)}
+
+
+def _guard(tmp_path: Path, service_json: str | None, *, app_mode: bool = False):
+    return _run_bash(
+        """
+fail() { printf 'FAIL: %s\\n' "$*" >&2; }
+BACKEND_DIR="$PWD/backend"
+PYTHON="$PYTHON_BIN"
+source scripts/corsia.d/runtime.sh
+"""
+        + ("is_app_mode() { return 0; }\n" if app_mode else "is_app_mode() { return 1; }\n")
+        + """refuse_if_app_owns_install || exit 1
+echo PROCEEDED
+""",
+        env={**_app_owned_env(tmp_path, service_json), "PYTHON_BIN": sys.executable},
+    )
+
+
+def test_app_owned_install_refuses_when_state_dir_matches(tmp_path: Path) -> None:
+    link = tmp_path / "state-link"
+    link.symlink_to(tmp_path / "state", target_is_directory=True)
+    # A symlinked spelling of the same directory still counts as the same root.
+    result = _guard(tmp_path, json.dumps({"state_dir": str(link), "port": 3001}))
+
+    assert result.returncode != 0
+    assert "PROCEEDED" not in result.stdout
+    assert "CORSIA app owns this install" in result.stderr
+    assert "Use the CORSIA app" in result.stderr
+
+
+def test_app_owned_install_proceeds_for_a_different_state_dir(tmp_path: Path) -> None:
+    other = tmp_path / "other-state"
+    other.mkdir()
+    result = _guard(tmp_path, json.dumps({"state_dir": str(other)}))
+
+    assert result.returncode == 0, result.stderr
+    assert "PROCEEDED" in result.stdout
+
+
+def test_app_owned_install_proceeds_without_the_file_or_the_key(tmp_path: Path) -> None:
+    missing = _guard(tmp_path / "a", None)
+    keyless = _guard(tmp_path / "b", json.dumps({"workspace": "/w", "port": 3001}))
+
+    for result in (missing, keyless):
+        assert result.returncode == 0, result.stderr
+        assert "PROCEEDED" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["{not json", "[]", json.dumps({"state_dir": 5}), json.dumps({"state_dir": "rel"})],
+)
+def test_app_owned_install_fails_closed_on_an_unreadable_file(
+    tmp_path: Path, content: str
+) -> None:
+    result = _guard(tmp_path, content)
+
+    assert result.returncode != 0
+    assert "PROCEEDED" not in result.stdout
+    assert "service.json" in result.stderr
+
+
+def test_app_mode_is_never_refused(tmp_path: Path) -> None:
+    result = _guard(
+        tmp_path,
+        json.dumps({"state_dir": str(tmp_path / "state")}),
+        app_mode=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "PROCEEDED" in result.stdout
+
+
+@pytest.mark.parametrize("verb", ["start", "restart"])
+def test_start_and_restart_refuse_before_any_effect(tmp_path: Path, verb: str) -> None:
+    """Both verbs hit the guard ahead of the service and legacy branches."""
+    checkout = fake_checkout(tmp_path / "checkout")
+    env = _app_owned_env(
+        tmp_path, json.dumps({"state_dir": str(tmp_path / "state")})
+    )
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    launchctl = fake_bin / "launchctl"
+    launchctl.write_text("#!/bin/sh\nexit 1\n")
+    launchctl.chmod(0o755)
+    env.update(
+        {
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "BACKEND_PORT": "3999",
+            "CORSIA_WORKSPACE": str(tmp_path / "workspace"),
+        }
+    )
+    proc = subprocess.run(
+        ["bash", str(checkout / "scripts" / "corsia"), verb],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
+
+    assert proc.returncode != 0
+    assert "CORSIA app owns this install" in proc.stdout + proc.stderr
+    assert "Restarting CORSIA" not in proc.stdout
+    assert "Starting CORSIA" not in proc.stdout

@@ -10,11 +10,11 @@ from connections import vendor_accounts as accounts
 from connections.account_policy import public_account
 from connections.account_profiles import account_label, profile_for
 from connections.account_selection import rebind_idle_account
-from connections.conductor_account import (
+from connections.corsia_agent_account import (
     FirstRunBind,
-    NotWorkspaceConductor,
-    bind_conductor_account,
-    require_conductor,
+    NotCorsiaAgent,
+    bind_corsia_agent_account,
+    require_corsia_agent,
 )
 
 from infra.auth import require_user
@@ -242,7 +242,7 @@ async def start_vendor_signin(account_id: str, body: SigninStart | None = None,
                               user: dict = Depends(require_user)):
     bind = None
     if body is not None and body.bind_thread_id is not None:
-        await _conductor_call(require_conductor, body.bind_thread_id, user["id"])
+        await _corsia_agent_call(require_corsia_agent, body.bind_thread_id, user["id"])
         bind = FirstRunBind(body.bind_thread_id, user["id"])
     return await _control(account_controls.start_signin, account_id, bind=bind)
 
@@ -298,14 +298,14 @@ async def put_thread_account(thread_id: str, body: AccountBinding, user: dict = 
     return await _call(rebind_idle_account, thread_id, body.account_id, user_id=user["id"])
 
 
-async def _conductor_call(fn, *args, **kwargs):
+async def _corsia_agent_call(fn, *args, **kwargs):
     try:
         return await run_in_db(fn, *args, **kwargs)
-    except NotWorkspaceConductor as error:
-        raise HTTPException(404, "Workspace conductor thread not found") from error
+    except NotCorsiaAgent as error:
+        raise HTTPException(404, "CORSIA agent thread not found") from error
 
 
-@router.post("/threads/{thread_id}/conductor-account")
-async def bind_conductor_thread_account(thread_id: str, body: AccountBinding, user: dict = Depends(require_user)):
-    """Bind the model-less workspace conductor to a Ready account: ``{bound, reason}``, writing nothing when refused."""
-    return await _conductor_call(bind_conductor_account, thread_id, body.account_id, user_id=user["id"])
+@router.post("/threads/{thread_id}/corsia-agent-account")
+async def bind_corsia_agent_thread_account(thread_id: str, body: AccountBinding, user: dict = Depends(require_user)):
+    """Bind the model-less CORSIA agent to a Ready account: ``{bound, reason}``, writing nothing when refused."""
+    return await _corsia_agent_call(bind_corsia_agent_account, thread_id, body.account_id, user_id=user["id"])

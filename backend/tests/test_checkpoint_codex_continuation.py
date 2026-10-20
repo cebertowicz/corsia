@@ -237,7 +237,7 @@ async def test_rejected_checkpoint_continuation_preserves_durable_warm_source(
         lambda _sid, **kwargs: retired.append(kwargs.get("keep_thread_id")),
     )
     monkeypatch.setattr(
-        "llm.resolution.resolve_execution_target", lambda _model: target,
+        "llm.resolution.resolve_execution_target", lambda _model, **_k: target,
     )
 
     try:
@@ -338,7 +338,7 @@ async def test_accepted_checkpoint_continuation_retires_cache_then_warm_source(
         lambda _sid, **kwargs: kept.append(kwargs.get("keep_thread_id")),
     )
     monkeypatch.setattr(
-        "llm.resolution.resolve_execution_target", lambda _model: target,
+        "llm.resolution.resolve_execution_target", lambda _model, **_k: target,
     )
     try:
         result = await transitions.resume_same_turn_after_checkpoint_locked(
@@ -414,7 +414,7 @@ async def test_checkpoint_continuation_retires_artifacts_off_the_event_loop(
     monkeypatch.setattr(runtime, "_spawn_app_server_turn", start_provider)
     monkeypatch.setattr(runtime, "_spawn_binary", lambda binary, _db: binary)
     monkeypatch.setattr(
-        "llm.resolution.resolve_execution_target", lambda _model: target,
+        "llm.resolution.resolve_execution_target", lambda _model, **_k: target,
     )
     try:
         result = await transitions.resume_same_turn_after_checkpoint_locked(

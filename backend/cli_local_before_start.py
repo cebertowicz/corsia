@@ -119,8 +119,7 @@ async def _discover(stages: _Stages) -> None:
 
 async def _setup(force_local: bool) -> int:
     from llm import local_setup
-    from llm.local_profiles import DEFAULT_PROFILE
-    from llm.local_setup_gates import limited_subscription_message, profile_eligibility, subscription_available
+    from llm.local_setup_gates import limited_subscription_message, local_memory_ok, subscription_available
 
     stages = _Stages()
     heartbeat = asyncio.create_task(stages.heartbeat())
@@ -135,11 +134,10 @@ async def _setup(force_local: bool) -> int:
         notice = None if force_local else await limited_subscription_message()
         if notice:
             print(f"     {notice}", flush=True)
-        eligibility = await asyncio.to_thread(profile_eligibility, DEFAULT_PROFILE)
-        if not eligibility.eligible:
+        if not await asyncio.to_thread(local_memory_ok):
             return _needs_provider(limited=bool(notice), forced_local=force_local)
         _installer_mode()
-        result = await local_setup._run_flight(eligibility, on_stage=stages, profile=DEFAULT_PROFILE)
+        result = await local_setup._run_flight(on_stage=stages)
     finally:
         heartbeat.cancel()
     if result.get("downloading"):

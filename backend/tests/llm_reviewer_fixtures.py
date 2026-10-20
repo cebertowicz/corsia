@@ -144,6 +144,9 @@ def _isolated_db(tmp_path, monkeypatch):
     (project / "PRODUCT-STANDARDS.md").write_text(
         "# Product standards\n\nTest contract.\n"
     )
+    (project / "COPY-STANDARD.md").write_text(
+        "# Copy standard\n\nTest contract.\n"
+    )
     (project / "llm-anti-patterns.md").write_text("# LLM anti-pattern catalog\n")
 
     from reviewer import on_pr_review as reviewer

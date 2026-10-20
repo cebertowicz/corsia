@@ -344,7 +344,7 @@ render_env_file_vars() {
             CORSIA_WORKSPACE|CORSIA_STATE_DIR)
                 warn "$ENV_FILE sets $key — $key is resolved by infra.config and rendered separately" >&2
                 continue ;;
-            CORSIA_TEST_MODE|CORSIA_ALLOW_HOME_WORKSPACE_IN_CI)
+            CORSIA_TEST_MODE|CORSIA_ALLOW_HOME_WORKSPACE_IN_CI|CORSIA_DEVICES_DISABLE)
                 warn "$ENV_FILE sets $key — ignored: test-only safety bypasses cannot configure the production service" >&2
                 continue ;;
             BACKEND_PORT|CORSIA_E2E_MODEL|CORSIA_SERVICE_GENERATION|\

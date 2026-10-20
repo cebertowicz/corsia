@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 test.use({ video: { mode: 'on', size: { width: 1280, height: 900 } } });
@@ -11,6 +13,17 @@ const surfaces = [
 	['1280x900-light', 1280, 900, 'light'],
 	['1280x900-dark', 1280, 900, 'dark'],
 ] as const;
+
+async function recordMotionFrame(page: Page, path: string, moves: string) {
+	await page.screenshot({ path, scale: 'css' });
+	console.log(`setup-motion recording: ${moves}`);
+}
+
+function assertDistinctFrames(paths: string[]) {
+	const python = process.env.CORSIA_E2E_BACKEND_PYTHON;
+	if (!python) throw new Error('CORSIA_E2E_BACKEND_PYTHON is required for the setup motion pixel check');
+	execFileSync(python, [resolve(process.cwd(), 'scripts/setup-motion-pixdiff.py'), ...paths], { stdio: 'inherit' });
+}
 
 function sourcesFor(state: SetupState) {
 	switch (state) {
@@ -34,13 +47,19 @@ async function serveSetupState(page: Page, state: SetupState | (() => SetupState
 		await route.fulfill({ json: { has_users: false } });
 	});
 	await page.route('**/api/setup/status', async (route) => {
-		await route.fulfill({ json: { apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30, work_folder: '~/CORSIA' } });
+		await route.fulfill({ json: { apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' } });
+	});
+	await page.route('**/api/setup/local-model', async (route) => {
+		await route.fulfill({ json: { state: 'picked', model: { name: 'Qwen 3.8', repository: 'example/qwen', download_size_bytes: 30_000_000_000, download_size_gb: 30, context_window: 65536 }, message: null } });
 	});
 	await page.route('**/api/setup/local-download', async (route) => {
 		await route.fulfill({ json: { ok: true, in_progress: currentState() === 'downloading' } });
 	});
 	await page.route('**/api/setup/first-account', async (route) => {
 		await route.fulfill({ json: { token: 'setup-evidence-token', user: { id: 'setup-evidence', name: 'First Person' } } });
+	});
+	await page.route('**/api/corsia-agent**', async (route) => {
+		await route.fulfill({ json: { target: { thread_id: 'corsia-agent' } } });
 	});
 	await page.route('**/api/providers/sources/recheck', async (route) => {
 		await route.fulfill({ json: { sources: sourcesFor(currentState()) } });
@@ -157,18 +176,30 @@ type LabelSample = {
 	outgoing: { x: number; width: number } | null;
 };
 
-async function outgoingLabelSample(page: Page, outgoingLabel: string): Promise<LabelSample> {
-	return page.locator('.pane > footer').evaluate((footer, label) => {
+// Waits in the page for the outgoing label's own fade to reach the fraction, then samples in the same task:
+// a node-side wait plus a second round trip can land after a 120 ms outro has already unmounted the label.
+async function outgoingLabelSample(page: Page, outgoingLabel: string, fraction = 0): Promise<LabelSample> {
+	return page.locator('.pane > footer').evaluate(async (footer, [label, targetFraction]) => {
 		const button = footer.querySelector<HTMLElement>('.btn.pill');
 		if (!button) throw new Error('Missing setup pill');
+		const findOutgoing = () =>
+			Array.from(footer.querySelectorAll<HTMLElement>('.primary-label')).find((element) => element.textContent === label);
+		const fade = findOutgoing()?.getAnimations().find((animation) => animation.playState === 'running');
+		if (fade && Number(targetFraction) > 0) {
+			const duration = Number(fade.effect?.getComputedTiming().duration ?? 0);
+			await new Promise<void>((resolve) => {
+				const reached = () => Number(fade.currentTime ?? duration) >= duration * Number(targetFraction) || fade.playState !== 'running';
+				const step = () => (reached() ? resolve() : requestAnimationFrame(step));
+				step();
+			});
+		}
 		const buttonRect = button.getBoundingClientRect();
-		const outgoing = Array.from(footer.querySelectorAll<HTMLElement>('.primary-label')).find((element) => element.textContent === label);
-		const outgoingRect = outgoing?.getBoundingClientRect();
+		const outgoingRect = findOutgoing()?.getBoundingClientRect();
 		return {
 			button: { x: buttonRect.x, width: buttonRect.width, overflow: getComputedStyle(button).overflow },
 			outgoing: outgoingRect ? { x: outgoingRect.x, width: outgoingRect.width } : null,
 		};
-	}, outgoingLabel);
+	}, [outgoingLabel, fraction] as const);
 }
 
 function expectOutgoingLabelCenteredAndClipped(sample: LabelSample) {
@@ -200,12 +231,12 @@ async function recordPillWidthTransition<T>(page: Page, outgoingLabel: string, n
 	await expect(page.locator('.pane > footer .primary-label').filter({ hasText: nextLabel })).toHaveCount(1);
 	await expect.poll(() => button.evaluate((element) => element.getAnimations().some((animation) => animation instanceof CSSTransition && animation.transitionProperty === 'width' && animation.playState === 'running'))).toBe(true);
 	const startSample = await outgoingLabelSample(page, outgoingLabel);
+	// Sampled in the page alongside the mid capture, so a slow screenshot cannot outlast the fade.
+	const laterSamples = Promise.all([outgoingLabelSample(page, outgoingLabel, 0.5), outgoingLabelSample(page, outgoingLabel, 0.85)]);
 	await waitForWidthTransitionFraction(button, 0.5);
 	const mid = await button.evaluate((element) => element.getBoundingClientRect().width);
-	const midSample = await outgoingLabelSample(page, outgoingLabel);
 	await captureMid();
-	await waitForWidthTransitionFraction(button, 0.85);
-	const lateSample = await outgoingLabelSample(page, outgoingLabel);
+	const [midSample, lateSample] = await laterSamples;
 	for (const sample of [startSample, midSample, lateSample]) expectOutgoingLabelCenteredAndClipped(sample);
 	const crossfade = await crossfadePromise;
 	await expect.poll(() => button.evaluate((element) => element.getAnimations({ subtree: true }).every((animation) => animation.playState !== 'running'))).toBe(true);
@@ -227,7 +258,7 @@ async function openModelStep(page: Page) {
 	await page.locator('input[autocomplete="new-password"]').nth(0).fill('correct-password');
 	await page.locator('input[autocomplete="new-password"]').nth(1).fill('correct-password');
 	await page.getByRole('button', { name: 'Continue' }).click();
-	await expect(page.getByRole('heading', { name: 'Choose an AI model' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Connect an AI' })).toBeVisible();
 	await waitForPaneAnimationsSettled(page);
 	await waitForRailAnimationsSettled(page);
 }
@@ -244,7 +275,7 @@ async function assertSetupState(page: Page, state: SetupState) {
 	await expect(start).toBeDisabled();
 	if (state === 'downloading') {
 		await expect(page.getByText('Downloading in the background')).toBeVisible();
-		const job = page.locator('.job-row:not([inert])');
+		const job = page.locator('.job-row:not([inert])').filter({ hasText: 'Qwen 3.8' });
 		await waitForJobSettled(page, job);
 		await expect(job).toHaveCSS('opacity', '1');
 		await expect.poll(() => job.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(0);
@@ -253,8 +284,8 @@ async function assertSetupState(page: Page, state: SetupState) {
 		await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
 		await expect(page.getByLabel('Setup progress').getByText('Couldn’t download', { exact: true })).toBeVisible();
 	} else {
-		await expect(page.getByText('Not installed', { exact: true })).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Check again' })).toBeVisible();
+		await expect(page.getByText('CORSIA installs Claude Code for you.')).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Set up' })).toBeVisible();
 	}
 }
 
@@ -283,13 +314,18 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		await openModelStep(page);
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 		await assertSetupState(page, 'not-installed');
-		await page.screenshot({ path: testInfo.outputPath('setup-model-not-installed-light-1280x900.png'), scale: 'css' });
+		const notInstalledFrame = testInfo.outputPath('setup-model-not-installed-light-1280x900.png');
+		await recordMotionFrame(page, notInstalledFrame, 'CLI row changes from Set up to downloading');
 
 		state = 'downloading';
-		await page.getByRole('button', { name: 'Check again' }).click();
+		await page.evaluate(async () => {
+			const events = await import('/src/lib/ws/events.ts');
+			events.emit('models_updated', {});
+		});
 		await expect(page.getByText('This computer', { exact: true })).toBeVisible();
 		await assertSetupState(page, 'downloading');
-		await page.screenshot({ path: testInfo.outputPath('setup-model-this-computer-downloading-light-1280x900.png'), scale: 'css' });
+		const downloadingFrame = testInfo.outputPath('setup-model-this-computer-downloading-light-1280x900.png');
+		await recordMotionFrame(page, downloadingFrame, 'background row expands and progress appears');
 
 		state = 'ready';
 		await page.evaluate(async () => {
@@ -298,9 +334,10 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		});
 		await assertSetupState(page, 'ready');
 		await waitForRailAnimationsSettled(page);
-		await page.screenshot({ path: testInfo.outputPath('setup-model-this-computer-ready-light-1280x900.png'), scale: 'css' });
+		const readyFrame = testInfo.outputPath('setup-model-this-computer-ready-light-1280x900.png');
+		await recordMotionFrame(page, readyFrame, 'background row changes from progress to Ready');
 		await page.getByRole('button', { name: 'Start using CORSIA' }).click();
-		await expect(page.getByRole('heading', { name: 'Choose an AI model' })).not.toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Connect an AI' })).not.toBeVisible();
 	});
 
 	test('records Get started moving the local download into the background rail', async ({ page }, testInfo) => {
@@ -316,12 +353,13 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		await shell.evaluate((element) => element.setAttribute('data-persistence-probe', 'welcome'));
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 		await expect(page.getByLabel('Setup progress').getByText('Welcome', { exact: true }).locator('..').locator('..').locator('svg')).toBeVisible();
-		await page.screenshot({ path: testInfo.outputPath('setup-welcome-current-rail-light-1280x900.png'), scale: 'css' });
+		const welcomeFrame = testInfo.outputPath('setup-welcome-current-rail-light-1280x900.png');
+		await recordMotionFrame(page, welcomeFrame, 'Get started advances the setup step and starts the background row');
 		await page.getByRole('button', { name: 'Get started' }).click();
 		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
 		await expect(shell).toHaveAttribute('data-persistence-probe', 'welcome');
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-		const job = page.locator('.job-row:not([inert])');
+		const job = page.locator('.job-row:not([inert])').filter({ hasText: 'Qwen 3.8' });
 		const motion = await page.evaluate(async () => {
 			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 			const region = document.querySelector<HTMLElement>('.job-region');
@@ -332,7 +370,8 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 			await new Promise<void>((resolve) => window.setTimeout(resolve, duration / 2));
 			return { halfHeight: region.getBoundingClientRect().height, leadStateCount };
 		});
-		await page.screenshot({ path: testInfo.outputPath('setup-model-get-started-background-job-halfway-light-1280x900.png'), scale: 'css' });
+		const halfwayFrame = testInfo.outputPath('setup-model-get-started-background-job-halfway-light-1280x900.png');
+		await recordMotionFrame(page, halfwayFrame, 'background row grows toward its settled height');
 		await waitForJobSettled(page, job);
 		const fullHeight = await page.locator('.job-region').evaluate((element) => element.getBoundingClientRect().height);
 		expect(motion.halfHeight).toBeGreaterThan(0);
@@ -341,7 +380,9 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		await expect(job).toHaveCSS('opacity', '1');
 		await expect.poll(() => job.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(0);
 		await expect(job.getByText('Qwen 3.8', { exact: true })).toBeVisible();
-		await page.screenshot({ path: testInfo.outputPath('setup-model-get-started-background-job-light-1280x900.png'), scale: 'css' });
+		const settledFrame = testInfo.outputPath('setup-model-get-started-background-job-light-1280x900.png');
+		await recordMotionFrame(page, settledFrame, 'background row is fully visible with download progress');
+		assertDistinctFrames([welcomeFrame, settledFrame]);
 	});
 
 	test('records stacked, focused pane crossfades through setup at supported sizes', async ({ page }, testInfo) => {
@@ -402,7 +443,7 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 			expectMonotonicWidthTransition(accountToModelsTransition.widths);
 			const accountToModels = accountToModelsTransition.crossfade.scenes;
 			expect(accountToModels).toHaveLength(2);
-			expect(accountToModels.map((scene) => scene.title).sort()).toEqual(['Choose an AI model', 'Create your account']);
+			expect(accountToModels.map((scene) => scene.title).sort()).toEqual(['Connect an AI', 'Create your account']);
 			for (const scene of accountToModels) {
 				expect(scene.opacity).toBeGreaterThan(0);
 				expect(scene.opacity).toBeLessThan(1);
@@ -410,9 +451,9 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 				expect(scene.footerY).toBe(accountToModels[0].footerY);
 			}
 			expect(accountToModels.find((scene) => scene.title === 'Create your account')?.inert).toBe(true);
-			expect(accountToModels.find((scene) => scene.title === 'Choose an AI model')?.inert).toBe(false);
+			expect(accountToModels.find((scene) => scene.title === 'Connect an AI')?.inert).toBe(false);
 			expectSinglePersistentPill(accountToModelsTransition.crossfade.footer, ['Continue', 'Start using CORSIA']);
-			await expect(page.getByRole('heading', { name: 'Choose an AI model' })).toBeFocused();
+			await expect(page.getByRole('heading', { name: 'Connect an AI' })).toBeFocused();
 		}
 	});
 
@@ -429,30 +470,36 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		await page.screenshot({ path: testInfo.outputPath('setup-welcome-visible-dark-1280x900.png'), scale: 'css' });
 	});
 
-	test('keeps reduced-motion setup changes as fade-only pane crossfades', async ({ page }) => {
+	test('uses tight reduced-motion crossfades without moving or resizing setup scenes', async ({ page }) => {
 		await serveSetupState(page, 'ready');
 		await page.setViewportSize({ width: 1280, height: 900 });
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.goto('/');
 		await page.locator('html').evaluate((element) => element.style.setProperty('--dur-tight', '1000ms'));
 		await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible();
-		await waitForPaneAnimationsSettled(page);
-		const initialWidth = await page.locator('.pane > footer .btn.pill').evaluate((element) => element.getBoundingClientRect().width);
 		await page.getByRole('button', { name: 'Get started' }).click();
-		await page.waitForTimeout(500);
-		const reducedMotionMidWidth = await page.locator('.pane > footer .btn.pill').evaluate((element) => element.getBoundingClientRect().width);
-		const scenes = await waitForPaneCrossfade(page);
-		expect(scenes).toHaveLength(2);
-		for (const scene of scenes) {
-			expect(scene.opacity).toBeGreaterThan(0);
-			expect(scene.opacity).toBeLessThan(1);
-			expect(scene.transform).toBe('none');
-			expect(scene.box).toEqual(scenes[0].box);
-		}
-		const reducedMotionEndWidth = await page.locator('.pane > footer .btn.pill').evaluate((element) => element.getBoundingClientRect().width);
-		expect(reducedMotionMidWidth).toBeCloseTo(reducedMotionEndWidth, 3);
-		expect(reducedMotionEndWidth).not.toBeCloseTo(initialWidth, 3);
+		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
 		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeFocused();
+		await expect.poll(() => page.locator('.pane-scenes').evaluate((scenes) => scenes.querySelectorAll<HTMLElement>('.pane-scene').length)).toBe(2);
+		const crossfades = await page.locator('.pane-scenes').evaluate((scenes) =>
+			Array.from(scenes.querySelectorAll<HTMLElement>('.pane-scene')).flatMap((scene) =>
+				scene.getAnimations().filter((animation) => animation.playState === 'running').map((animation) => ({
+					duration: Number(animation.effect?.getComputedTiming().duration ?? 0),
+					properties: animation.effect instanceof KeyframeEffect
+						? [...new Set(animation.effect.getKeyframes().flatMap((frame) => Object.keys(frame)))]
+						: [],
+				})),
+			),
+		);
+		expect(crossfades.some((animation) => animation.duration > 0)).toBe(true);
+		for (const animation of crossfades) {
+			expect(animation.properties).not.toContain('transform');
+			expect(animation.properties).not.toContain('height');
+		}
+		await expect.poll(() => page.locator('.pane').evaluate((pane) => pane.getAnimations({ subtree: true }).filter((animation) => animation.playState === 'running').length)).toBe(0);
+		await expect(page.locator('.pane-scene')).toHaveCount(1);
+		await expect(page.locator('.pane-scene')).toHaveCSS('opacity', '1');
+		await expect(page.locator('.pane-scene')).toHaveCSS('transform', 'none');
 	});
 
 	// Below 800px is explicitly unsupported; supported-size transition proof is recorded above.
@@ -462,7 +509,7 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		await page.setViewportSize({ width: 1280, height: 900 });
 		await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 		await openModelStep(page);
-		const job = page.locator('.job-row:not([inert])');
+		const job = page.locator('.job-row:not([inert])').filter({ hasText: 'Qwen 3.8' });
 		await waitForJobSettled(page, job);
 		await assertDoneChecksSettled(page);
 		await expect(job).toHaveCSS('opacity', '1');

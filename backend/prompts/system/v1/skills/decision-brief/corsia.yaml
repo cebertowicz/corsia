@@ -1,0 +1,29 @@
+handler:
+  kind: instruction
+workflow:
+  steps:
+    - id: product-chain
+      title: Product-thinking chain recorded
+      required: false          # skip with reason when the decision is not about product behavior
+      difficulty: {default: standard, hard_if: "no approved objective covers the choice"}
+    - id: long-form
+      title: Analysis and evidence in an artifact
+      required: false          # skip with reason when the decision carries everything needed
+      check: artifact holding options, trade-offs and evidence
+      after: [product-chain]
+      difficulty: {default: standard}
+    - id: brief
+      title: Brief message to the user
+      required: true
+      check: message answers first in one line, at most five items, no internal IDs
+      after: [long-form]
+      difficulty: {default: routine}
+    - id: decision
+      title: Plan decision raised
+      required: true
+      check: plan decision raised with options and one recommendation (pick one) or a pre-ticked set (pick any), answerable as asked without reading the linked document; if they must judge the thing itself, make it an artifact ask instead
+      after: [brief]
+      difficulty: {default: routine}
+      quality:
+        - {name: decided-as-framed, good: "answered with a listed option, or for pick any any ticked set or none; no replacement decision raised first", observed: signal, when: completion}
+        - {name: not-reversed, good: "no correction against the decision task within 30 days", observed: signal, when: "lagging:30"}

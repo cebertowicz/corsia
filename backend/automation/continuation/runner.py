@@ -217,6 +217,16 @@ async def _run_batch(
         )
 
 
+async def _drive_scripts(now_iso: str, db) -> None:
+    """System phase: start due model-free script runs, never failing the sweep."""
+    from automation import script_runner
+
+    try:
+        await script_runner.drive(now_iso, db=db)
+    except Exception:  # noqa: BLE001 - liveness must outlive a script fault
+        logger.exception("continuation script phase failed")
+
+
 async def sweep(
     now_iso: str,
     *,
@@ -244,6 +254,7 @@ async def sweep(
     # System phase, not a trigger source: release every stored account limit
     # whose reset has passed. It also recovers any release across a restart.
     await drive_limit_releases(state.parse_iso(now_iso))
+    await _drive_scripts(now_iso, db)
     await public.drive_threads(
         await run_in_db_unless_owned(db, _prepare, now_iso, active_sources, db),
     )

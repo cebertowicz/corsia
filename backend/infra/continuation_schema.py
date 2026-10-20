@@ -38,7 +38,7 @@ CONTINUATION_SCHEMA_SQL = """
         id TEXT PRIMARY KEY,
         thread_id TEXT NOT NULL REFERENCES threads(id),
         scope_id TEXT NOT NULL,
-        kind TEXT NOT NULL CHECK (kind IN ('clock', 'cadence')),
+        kind TEXT NOT NULL CHECK (kind IN ('clock', 'cadence', 'script')),
         spec TEXT NOT NULL,
         next_run_at TEXT NOT NULL,
         last_run_at TEXT,
@@ -49,7 +49,15 @@ CONTINUATION_SCHEMA_SQL = """
         payload_json TEXT,
         created_by_actor TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        script_path TEXT,
+        script_sha256 TEXT,
+        timeout_seconds INTEGER,
+        running_since TEXT,
+        last_status TEXT,
+        last_error TEXT,
+        noted_at TEXT,
+        last_measures TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_automation_schedules_due
         ON automation_schedules(state, next_run_at);

@@ -1,6 +1,10 @@
 <script lang="ts">
 	import type { UpdateCard } from '$lib/api/threadUpdates';
 	import type { OperatorNode } from '$lib/api/plans';
+	import { readFoldedNode } from '$lib/api/plansFolded';
+	import { token } from '$lib/stores/auth';
+	import { get } from 'svelte/store';
+	import { untrack } from 'svelte';
 	import { focusPlanNode } from '$lib/planNodeFocus';
 	import { emitProductEvent } from '$lib/product_events';
 	import { planKeySet, planQuery } from '$lib/stores/planQuery.svelte';
@@ -45,9 +49,29 @@
 		return loading ? 'loading' : errored ? 'error' : null;
 	};
 
-	/** Retry the thread read and any child plan read that failed. */
+	// The thread read lists only open work, so a finished task is folded out of it: read that one node on demand.
+	type Folded = { status: 'loading' } | { status: 'error' } | { status: 'missing' } | { status: 'ready'; node: OperatorNode };
+	let folded = $state<Record<string, Folded>>({});
+
+	async function loadFolded(nodeId: string): Promise<void> {
+		folded[nodeId] = { status: 'loading' };
+		const bearer = get(token);
+		const plans = read.payload?.plans ?? [];
+		let result: Folded = { status: bearer ? 'missing' : 'error' };
+		for (const entry of bearer ? plans : []) {
+			const outcome = await readFoldedNode(bearer!, entry.plan.id, nodeId);
+			if (outcome.status === 'fresh') { result = { status: 'ready', node: outcome.payload }; break; }
+			if (outcome.status !== 'not-found') result = { status: 'error' };
+		}
+		folded[nodeId] = result;
+	}
+
+	/** Retry the thread read and any read that failed. */
 	function retryReads(): void {
 		read.retry();
+		for (const card of cards) {
+			if (card.node_id && folded[card.node_id]?.status === 'error') void loadFolded(card.node_id);
+		}
 		for (const step of childSteps) {
 			const key: OperatorKey = { kind: 'child', id: step.child!.thread_id };
 			const entry = children.state(key);
@@ -75,8 +99,24 @@
 		if (detail) return { state: 'detail' as const, detail, stepId: null };
 		const where = holder(card.node_id);
 		if (where === 'loading' || where === 'error') return { state: where };
-		return where ? { state: 'outside' as const, stepId: where.stepId } : { state: 'unplaced' as const };
+		if (where) return { state: 'outside' as const, stepId: where.stepId };
+		const found = folded[card.node_id];
+		if (!found || found.status === 'loading') return { state: 'loading' as const };
+		if (found.status === 'error') return { state: 'error' as const };
+		if (found.status === 'missing') return { state: 'unplaced' as const };
+		const foldedDetail = taskDetail(indexNodes([...planNodes, found.node]), card.node_id);
+		return foldedDetail ? { state: 'detail' as const, detail: foldedDetail, stepId: null } : { state: 'unplaced' as const };
 	}
+
+	// A task neither this read nor a nested plan holds is folded: fetch it once its row is open.
+	$effect(() => {
+		if (!readReady) return;
+		for (const card of cards) {
+			const nodeId = card.node_id;
+			if (!nodeId || !openCards.has(card.id) || byId.has(nodeId) || holder(nodeId) !== null || folded[nodeId]) continue;
+			untrack(() => { void loadFolded(nodeId); });
+		}
+	});
 
 	let toggleButton: HTMLButtonElement | undefined;
 	// A row that loses its button because no plan holds its task must not drop keyboard focus to the page.
@@ -154,11 +194,11 @@
 
 <style>
 	.passive-outcomes { max-width: 760px; margin: 0 auto 14px; color: var(--text-secondary); font-size: var(--text-footnote); }
-	.passive-toggle { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 7px; padding: 8px 4px; border: 0; background: transparent; color: inherit; font: inherit; font-weight: var(--fw-medium); text-align: left; cursor: pointer; }
+	.passive-toggle { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 7px; padding: 8px 8px 8px 4px; border: 0; background: transparent; color: inherit; font: inherit; font-weight: var(--fw-medium); text-align: left; cursor: pointer; }
 	.outcome-icon { color: var(--green-text); flex: 0 0 auto; }
 	.outcome-icon.closed { color: var(--text-tertiary); }
 	.outcome-icon.failed, .failed-count { color: var(--red-text); }
-	.passive-chevron { margin-left: auto; flex: 0 0 auto; transition: transform var(--dur-tight); }
+	.passive-chevron { margin-left: auto; flex: 0 0 auto; color: var(--text-tertiary); transition: transform var(--dur-tight); }
 	.passive-chevron.expanded { transform: rotate(90deg); }
 	ul { list-style: none; margin: 0 0 0 22px; padding: 0 4px; }
 	li { padding: 0; }
@@ -178,11 +218,11 @@
 	.crumb-gap { display: none; }
 	.text { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-secondary); overflow-wrap: anywhere; }
 	.skeleton { width: 60%; height: 12px; border-radius: var(--radius-2xs); background: var(--bg-hover); }
-	.link { padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
+	.link { padding: 0; border: 0; background: transparent; color: var(--accent-text); font: inherit; cursor: pointer; }
 	.link:hover { text-decoration: underline; }
 	.open-plan { min-height: 28px; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-	.row:focus-visible, .passive-toggle:focus-visible, .link:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; border-radius: var(--radius-2xs); }
+	.row:focus-visible, .passive-toggle:focus-visible, .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-2xs); }
 	@media (pointer: coarse) {
 		.row { min-height: 44px; }
 		.open-plan { min-height: 44px; }

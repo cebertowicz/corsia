@@ -24,6 +24,7 @@
 	import { runHasMore, type RunLoad, type RunStub } from '$lib/focusRuns';
 	import { needsWakeRetry } from './pendingWakeRetry';
 	import { isHumanMessage } from './transcriptRowKinds';
+	import { NEAR_BOTTOM_PX } from '$lib/nearBottom';
 
 	let { messagesEl = $bindable(), userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
 		messagesEl: HTMLDivElement | undefined;
@@ -169,7 +170,6 @@
 			? buildTranscriptPresentation([presentation.pendingContextDigest], focusMode, null, 'run:pending-context') : []),
 		...buildTranscriptPresentation(pendingDeliveryMessages.filter((msg) => !focusMode || isHumanMessage(msg)), focusMode),
 	]);
-	const NEAR_BOTTOM_PX = 80;
 	// Programmatic scrolling ends on any real gesture; never undo a user's reread.
 	let pendingReleaseFrame: number | null = null;
 	// A deferred pin abandons itself when a newer gesture takes over.
@@ -354,15 +354,15 @@
 	   sticky chrome then pins at `--sticky-top`, 8px under the header. */
 	.messages {
 		flex: 1; overflow-y: auto;
-		--sticky-top: calc(var(--header-height, 0px) + 8px);
-		--messages-lead: calc(var(--header-height) + 24px);
+		--sticky-top: calc(var(--header-bottom) + 8px);
+		--messages-lead: calc(var(--header-bottom) + 24px);
 		padding: 0 16px calc(var(--input-bar-height, 100px) + 16px);
 	}
 	.messages::before { content: ''; display: block; flex: none; height: var(--messages-lead); }
 	@media (max-width: 768px) {
 		.messages {
-			--sticky-top: calc(var(--header-height, 0px) + env(safe-area-inset-top, 0px) + 8px);
-			--messages-lead: var(--messages-pad-top, calc(var(--header-height) + 24px + env(safe-area-inset-top, 0px)));
+			--sticky-top: calc(var(--header-bottom) + 8px);
+			--messages-lead: var(--messages-pad-top, calc(var(--header-bottom) + 24px));
 			padding-left: 12px;
 			padding-right: 12px;
 			padding-bottom: calc(var(--input-bar-height, 100px) + var(--kb-toolbar-inset, 0px) + var(--empty-parallax-offset, 0px) + 16px);

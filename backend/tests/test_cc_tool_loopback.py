@@ -1036,7 +1036,7 @@ async def test_rejected_resume_does_not_replace_an_unsettled_process(monkeypatch
     )
     monkeypatch.setattr(cc_feed_transition, "require_cc_provider_fit", lambda *_: None)
     monkeypatch.setattr(
-        "llm.resolution.resolve_execution_target", lambda _catalog_id: target,
+        "llm.resolution.resolve_execution_target", lambda _catalog_id, **_k: target,
     )
 
     try:

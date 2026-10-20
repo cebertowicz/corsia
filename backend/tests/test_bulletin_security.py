@@ -135,7 +135,7 @@ def test_signed_bad_document_does_not_block_valid_candidate(monkeypatch: pytest.
         "broken.md.sig": private.sign(malformed),
     }
     _use_feed(monkeypatch, _feed(files, ["broken.md", "valid.md"]))
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     calls = _record_delivery(monkeypatch)
     assert asyncio.run(bulletin_live.check_live_bulletins())
     assert [call[0][1] for call in calls] == ["system.bulletins"]
@@ -180,7 +180,7 @@ def test_withdrawal_wins_and_in_place_update_has_no_conditional_request(monkeypa
     files = {"withdraw.md": original, "withdraw.md.sig": private.sign(original)}
     requests: list[httpx.Request] = []
     _use_feed(monkeypatch, _feed(files, ["withdraw.md"], requests))
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     calls = _record_delivery(monkeypatch)
     assert asyncio.run(bulletin_live.check_live_bulletins())
     db = get_db()
@@ -216,7 +216,7 @@ def test_delivery_race_and_withdrawal_preserve_conductor_disposition(monkeypatch
     private = _key(monkeypatch)
     document = _document("race")
     _use_feed(monkeypatch, _feed({"race.md": document, "race.md.sig": private.sign(document)}, ["race.md"]))
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     tool = BulletinDispositionTool()
 
     async def mark_acted() -> None:
@@ -257,7 +257,7 @@ def test_deferred_system_change_remains_unreconciled(monkeypatch: pytest.MonkeyP
     _clear()
     current = bulletins.SystemIdentity("2", "new", (("a", "new"),))
     monkeypatch.setattr(bulletins, "system_identity", lambda: current)
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     db = get_db()
     try:
         with write_transaction(db, scope="test_pending_system_change"):
@@ -302,7 +302,7 @@ def test_system_change_dispatch_failure_is_dead_lettered(monkeypatch: pytest.Mon
     _clear()
     current = bulletins.SystemIdentity("2", "new", (("a", "new"),))
     monkeypatch.setattr(bulletins, "system_identity", lambda: current)
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     db = get_db()
     try:
         with write_transaction(db, scope="test_system_change_failure"):
@@ -332,7 +332,7 @@ def test_withdrawal_of_pending_bulletin_is_silent(monkeypatch: pytest.MonkeyPatc
     private = _key(monkeypatch)
     document = _document("pending")
     _use_feed(monkeypatch, _feed({"pending.md": document, "pending.md.sig": private.sign(document)}, ["pending.md"]))
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     calls = []
 
     async def refused(*args, **_kwargs):
@@ -360,7 +360,7 @@ def test_lost_ledger_write_retries_with_one_delivery_id(monkeypatch: pytest.Monk
     private = _key(monkeypatch)
     document = _document("retry")
     _use_feed(monkeypatch, _feed({"retry.md": document, "retry.md.sig": private.sign(document)}, ["retry.md"]))
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     delivery_ids = []
 
     async def accepted(*_args, **kwargs):
@@ -396,7 +396,7 @@ def test_conductor_deferred_live_bulletin_is_not_redelivered(monkeypatch: pytest
     private = _key(monkeypatch)
     document = _document("deferred")
     _use_feed(monkeypatch, _feed({"deferred.md": document, "deferred.md.sig": private.sign(document)}, ["deferred.md"]))
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     calls = _record_delivery(monkeypatch)
 
     assert asyncio.run(bulletin_live.check_live_bulletins())
@@ -418,7 +418,7 @@ def test_bulletin_dispatch_and_disposition_emit_product_events(monkeypatch: pyte
     private = _key(monkeypatch)
     document = _document("events")
     _use_feed(monkeypatch, _feed({"events.md": document, "events.md.sig": private.sign(document)}, ["events.md"]))
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     _record_delivery(monkeypatch)
     emitted = []
     monkeypatch.setattr(

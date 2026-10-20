@@ -2,15 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { canvasHeader } from '$lib/stores/canvasHeader';
 import { syncCanvasHeader } from '$lib/homeCanvasHeader';
-import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
 
 type Input = Parameters<typeof syncCanvasHeader>[0];
 
 function makeInput(overrides: Partial<Input> = {}): Input {
 	return {
-		projectSettingsOpen: false,
 		threadSettingsOpen: false,
-		workspaceSettingsOpen: false,
 		compactArtifact: null,
 		contextAttachTarget: null,
 		activeView: 'chat',
@@ -18,7 +15,6 @@ function makeInput(overrides: Partial<Input> = {}): Input {
 		activeThreadId: null,
 		conductorThreadId: null,
 		threads: [],
-		closeProjectSettings: () => {},
 		closeThreadSettings: () => {},
 		closeSettings: () => {},
 		closeDocuments: () => {},
@@ -128,13 +124,52 @@ describe('syncCanvasHeader — no doc', () => {
 	});
 
 	it('returns settings header in settings view', () => {
-		syncCanvasHeader(makeInput({ activeView: 'settings' }));
-		expect(get(canvasHeader)?.title).toBe('Settings');
+		const closeSettings = vi.fn();
+		syncCanvasHeader(makeInput({ activeView: 'settings', closeSettings }));
+		const h = get(canvasHeader);
+		expect(h?.title).toBe('Settings');
+		h?.onBack?.();
+		expect(closeSettings).toHaveBeenCalledOnce();
 	});
 
-	it('names a designated hidden thread as conductor settings', () => {
+	it('names a drilled Settings page and goes up one level from it', () => {
+		const onBack = vi.fn();
+		const closeSettings = vi.fn();
+		syncCanvasHeader(makeInput({
+			activeView: 'settings',
+			settingsDrill: { title: 'Alpha', backLabel: 'Projects', onBack },
+			closeSettings,
+		}));
+		const h = get(canvasHeader);
+		expect(h).toMatchObject({ title: 'Alpha', backLabel: 'Projects' });
+		h?.onBack?.();
+		expect(onBack).toHaveBeenCalledOnce();
+		expect(closeSettings).not.toHaveBeenCalled();
+	});
+
+	it('labels Documents back as Settings when a context pick started there', () => {
+		syncCanvasHeader(makeInput({
+			activeView: 'documents',
+			contextAttachTarget: { scope: 'workspace', returnTo: 'settings', returnSection: 'context' },
+		}));
+		expect(get(canvasHeader)?.backLabel).toBe('Settings');
+	});
+
+	it('names the workspace scope\'s designated hidden thread as CORSIA settings', () => {
 		syncCanvasHeader(makeInput({
 			threadSettingsOpen: true,
+			uiScopeName: null,
+			activeThreadId: 'agent-1',
+			conductorThreadId: 'agent-1',
+		}));
+		expect(get(canvasHeader)?.title).toBe('CORSIA settings');
+		expect(get(canvasHeader)?.backLabel).toBe('CORSIA');
+	});
+
+	it('keeps Conductor for a project scope\'s designated hidden thread', () => {
+		syncCanvasHeader(makeInput({
+			threadSettingsOpen: true,
+			uiScopeName: 'Alpha',
 			activeThreadId: 'conductor-1',
 			conductorThreadId: 'conductor-1',
 		}));
@@ -160,16 +195,6 @@ describe('syncCanvasHeader — no doc', () => {
 		expect(h?.backLabel).toBe('CTX stability review');
 		h?.onBack?.();
 		expect(closeThreadSettings).toHaveBeenCalledOnce();
-	});
-
-	it('returns workspace settings header with back to Workspace Activity', () => {
-		workspaceSettingsOpen.set(true);
-		syncCanvasHeader(makeInput({ workspaceSettingsOpen: true, activeView: 'activity' }));
-		const h = get(canvasHeader);
-		expect(h?.title).toBe('Workspace settings');
-		expect(h?.backLabel).toBe('Workspace');
-		h?.onBack?.();
-		expect(get(workspaceSettingsOpen)).toBe(false);
 	});
 });
 

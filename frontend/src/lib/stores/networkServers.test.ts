@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { token } from './auth';
 import {
-	addNetworkServer, networkServers, parseModelIds, removeNetworkServer, setNetworkServerBilling, setNetworkServerEnabled, testNetworkServer,
+	addNetworkServer, networkServers, parseModelIds, removeNetworkServer, setNetworkServerBilling, setNetworkServerEnabled, setNetworkServerPrivate, testNetworkServer,
 	updateNetworkServer, type NetworkServer,
 } from './networkServers';
 
@@ -130,6 +130,24 @@ describe('setNetworkServerEnabled', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => response(404, { detail: 'Server not found' })));
 
 		expect(await setNetworkServerEnabled('ns-gone', true)).toEqual({ ok: false, message: 'Server not found' });
+	});
+});
+
+describe('setNetworkServerPrivate', () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	it('preserves the server-written reason for the shared setting formatter', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => response(404, { detail: 'Server not found' })));
+		expect(await setNetworkServerPrivate('ns-gone', true)).toEqual({ ok: false, detail: 'Server not found', reached: true });
+	});
+
+	it('distinguishes an absent or machine-readable reason from an unreachable request', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => response(500, {})));
+		expect(await setNetworkServerPrivate('ns-1', true)).toEqual({ ok: false, detail: undefined, reached: true });
+		vi.stubGlobal('fetch', vi.fn(async () => response(403, { detail: 'Only the signed-in person can change where models run. Change it in CORSIA while signed in.' })));
+		expect(await setNetworkServerPrivate('ns-1', true)).toEqual({ ok: false, detail: 'Only the signed-in person can change where models run. Change it in CORSIA while signed in.', reached: true });
+		vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+		expect(await setNetworkServerPrivate('ns-1', false)).toEqual({ ok: false, reached: false });
 	});
 });
 

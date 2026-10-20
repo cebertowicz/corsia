@@ -291,6 +291,9 @@ FRONTEND_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_VIDEO_UPLOAD_BYTES = 500 * 1024 * 1024
+# The public address of CORSIA's OAuth client metadata document (docs/client-metadata/). Empty until the
+# document is published: sign-in then registers with a pasted client ID, else dynamic registration.
+CLIENT_METADATA_URL = os.environ.get("CORSIA_CLIENT_METADATA_URL", "").strip()
 # Decoding and re-encoding an image that exceeds its provider's limits holds
 # the decoded pixels plus encoded copies in memory; bound how many run at once.
 MAX_CONCURRENT_IMAGE_NORMALIZATIONS = 2

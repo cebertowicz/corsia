@@ -64,6 +64,13 @@ function parseColor(v: string): { rgb: RGB; a: number } {
 		const p = rgba[1].split(',').map((x) => parseFloat(x));
 		return { rgb: [p[0], p[1], p[2]], a: p[3] ?? 1 };
 	}
+	// The accent roles are authored the way `accentRoles()` writes them: a colour mixed with transparent, which
+	// composites over its surface exactly as `over()` below does.
+	const mix = /^color-mix\(in srgb,\s*#([0-9a-f]{6})\s+(\d+(?:\.\d+)?)%,\s*transparent\)$/i.exec(v.trim());
+	if (mix) {
+		const n = parseInt(mix[1], 16);
+		return { rgb: [(n >> 16) & 255, (n >> 8) & 255, n & 255], a: parseFloat(mix[2]) / 100 };
+	}
 	throw new Error(`unparseable colour: ${v}`);
 }
 
@@ -102,14 +109,15 @@ function backgrounds(vars: Record<string, string>, tints: string[]): Record<stri
 	return out;
 }
 
-const ALL_TINTS = ['--violet-bg', '--accent-bg', '--accent-bg-hover', '--green-bg', '--red-bg', '--amber-bg', 'row-hover'];
+const ALL_TINTS = ['--accent-wash', '--accent-bg-hover', '--green-bg', '--red-bg', '--amber-bg', 'row-hover'];
 // text token -> tinted rows it is rendered on, beyond the neutral surfaces
 const TEXT: Record<string, string[]> = {
 	'--text-primary': ALL_TINTS,
 	'--text-secondary': ALL_TINTS,
 	'--text-muted': ALL_TINTS,
 	'--text-tertiary': ALL_TINTS,
-	'--violet-text': ['--violet-bg', '--accent-bg', '--accent-bg-hover'],
+	'--accent-text': ['--accent-wash', '--accent-bg-hover'],
+	'--purple-text': ['--purple-bg'],
 	'--green-text': ['--green-bg'],
 	'--red-text': ['--red-bg'],
 	'--amber-text': ['--amber-bg'],

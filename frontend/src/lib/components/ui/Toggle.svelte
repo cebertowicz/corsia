@@ -3,14 +3,18 @@
 		checked: boolean;
 		onchange: (next: boolean) => void;
 		ariaLabel?: string;
+		/** The id of the text that says why the switch is locked or what it does; read after its name. */
+		describedBy?: string;
 		disabled?: boolean;
+		/** The choice holds and cannot change right now (a start in progress): full colour, no dimming, no tap. */
+		locked?: boolean;
 		size?: 'sm' | 'md';
 	}
 
-	const { checked, onchange, ariaLabel, disabled = false, size = 'md' }: Props = $props();
+	const { checked, onchange, ariaLabel, describedBy, disabled = false, locked = false, size = 'md' }: Props = $props();
 
 	function handle() {
-		if (disabled) return;
+		if (disabled || locked) return;
 		onchange(!checked);
 	}
 </script>
@@ -19,9 +23,12 @@
 	type="button"
 	class="tg {size}"
 	class:on={checked}
+	class:locked
+	aria-disabled={locked || undefined}
 	{disabled}
 	aria-pressed={checked}
 	aria-label={ariaLabel}
+	aria-describedby={describedBy}
 	onclick={handle}
 ></button>
 
@@ -32,7 +39,8 @@
 		--knob: 12px;
 		width: var(--w); height: var(--h);
 		background: var(--bg-tertiary);
-		border: 1px solid var(--border);
+		/* An off switch reads as a control, not a faint field: a darker outline. */
+		border: 1px solid var(--text-tertiary);
 		border-radius: var(--radius-pill);
 		position: relative;
 		cursor: pointer;
@@ -55,8 +63,8 @@
 		transition: all var(--dur-tight) var(--ease-snap);
 	}
 	.tg.on {
-		background: linear-gradient(180deg, var(--violet-2, var(--violet)), var(--violet));
-		border-color: var(--violet);
+		background: linear-gradient(180deg, var(--accent-hover, var(--accent)), var(--accent));
+		border-color: var(--accent);
 	}
 	.tg.on::after {
 		left: calc(var(--w) - var(--knob) - 2.5px);
@@ -66,8 +74,9 @@
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
+	.tg.locked { cursor: default; }
 	.tg:focus-visible {
-		outline: 2px solid var(--violet);
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 </style>

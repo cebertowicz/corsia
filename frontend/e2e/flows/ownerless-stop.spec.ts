@@ -7,6 +7,7 @@ import {
 	saveEvidenceScreenshot, TEST_TOKEN, watchSessionSubscriptions,
 } from '../support/corsia';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
+import { setFocusMode } from '../support/focusMode';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -56,9 +57,15 @@ async function openThread(page: Page, title: string, threadId: string, login = f
 	await subscriptions.waitForSubscribed(threadId);
 }
 
+// Focus is on by default and groups the assistant answer; this spec covers the ordinary transcript.
+test.afterEach(async ({ request }) => {
+	await setFocusMode(request, true);
+});
+
 test('@flow:chat @surface:chat ownerless Stop clears both tabs and permits the next answer', async ({ page, context, request }, testInfo) => {
 	const title = `e2e ownerless Stop ${Date.now()}`;
 	const threadId = await createSession(request, title);
+	await setFocusMode(request, false);
 	await openThread(page, title, threadId, true);
 	seedOwnerlessTurn(threadId);
 	await openThread(page, title, threadId);

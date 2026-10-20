@@ -94,10 +94,10 @@ def admit(
             "permanent home and never expires: call again without trial, with the "
             "q1 and q2 that say who needs it and when"
         ))
-    if decision.duplicate_of:
+    if decision.duplicate_of and (destination.path is None or not destination.path.exists()):
         raise TrialRefused("invalid-output", (
-            "duplicate_of and trial do not go together: a rule a destination "
-            "already states is not a hypothesis. Drop one and call again"
+            "duplicate_of and trial do not go together unless it names an existing "
+            "watch or trial lesson; choose its skill_name or drop duplicate_of"
         ))
     due = parse_instant(trial.review_after)
     if due is None or due <= (now or datetime.now(timezone.utc)):
@@ -120,7 +120,11 @@ def admit(
         raise TrialRefused("invalid-output", (
             "skill_name must be a new lowercase-hyphenated name for the trial skill"
         ))
-    identity, text = _render(thread_id, capture_id, entry, decision, destination.path)
+    capture = None
+    if place.tray is not None:
+        path = lesson_files.capture_path(place.tray, capture_id)
+        capture = lesson_files.read_capture(path.read_text(encoding="utf-8")) if path.exists() else None
+    identity, text = _render(thread_id, capture_id, entry, decision, destination.path, capture)
     offered = _offered_elsewhere(db, place, str(decision.skill_name), destination.path)
     line = _index_line(decision, destination.path)
     from core.lesson_index import fits_budget
@@ -218,6 +222,7 @@ def _on_trial(row: sqlite3.Row) -> bool:
 
 def _render(
     thread_id: str, capture_id: str, entry: dict[str, Any], decision: Decision, path: Path,
+    capture: lesson_files.CaptureFile | None,
 ) -> tuple[str, str]:
     """The trial's identity and its file text, against what the path holds now.
 
@@ -229,7 +234,12 @@ def _render(
 
     trial = decision.trial
     assert trial is not None
+    from core.lesson_corrections import merge_subjects
+
     identity, origin, earlier = capture_id, None, ()
+    subjects = merge_subjects(
+        capture.originating_subjects if capture is not None else (), decision.originating_subjects,
+    )
     if path.exists():
         current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))
         if current is None or current.lesson.owner != thread_id:
@@ -237,15 +247,16 @@ def _render(
                 f"skill_name {decision.skill_name} is already a skill that is not "
                 "your trial lesson; choose a new name"
             ))
-        if current.lesson.state == "trial":
+        if current.lesson.state in ("watch", "trial"):
             identity, earlier = current.lesson.id, current.lesson.source_refs
+            subjects = merge_subjects(current.lesson.originating_subjects, subjects)
         elif current.lesson.id != capture_id:
             origin = {"id": current.lesson.id, "behavioral_sha256": current.behavioral_sha256}
     text = lesson_files.render_trial(
         lesson_id=identity, owner=thread_id, name=str(decision.skill_name),
         description=str(decision.skill_description), text=decision.text, trial=trial,
         source_refs=lesson_files.merged_refs(earlier, entry["body"].get("source_refs") or []),
-        origin=origin,
+        originating_subjects=subjects, origin=origin,
     )
     errors = validate_skill_text(text).errors
     if errors:

@@ -8,8 +8,8 @@ from typing import Any
 
 from loguru import logger as log
 
-from events.connectors import github_reviewer_gate, github_reviewer_notifications
-from events import reviewer_gate_state
+from events.connectors import github_reviewer_fork_hold, github_reviewer_gate, github_reviewer_notifications
+from events import reviewer_gate_retry_log, reviewer_gate_state
 from infra.product_events import emit_product_event
 
 
@@ -148,6 +148,8 @@ def on_check_suite_completed(
             "reviewer-gate: PR #{} sha={} — check_suite conclusion={!r}, not green",
             pr_number, head_sha[:8], conclusion,
         )
+        if conclusion == "action_required":
+            github_reviewer_fork_hold.hold_runs_awaiting_approval(repo, pr_number, head_sha)
         return
 
     _evaluate_review_gate(repo, head_sha, pr_number, internal_event, loop)
@@ -160,7 +162,7 @@ def on_pull_request_ready_for_review(
     internal_event: str,
     loop: asyncio.AbstractEventLoop | None = None,
 ) -> None:
-    """Re-evaluate the gate when a draft PR becomes ready for review."""
+    """Re-evaluate the gate when a draft PR becomes ready or a fork head is approved."""
     if not pr_number or not repo or not head_sha:
         log.debug("reviewer-gate: ready event missing required fields, skipping")
         return
@@ -251,6 +253,8 @@ def _evaluate_ready_pr(
             return
         _report_mergeability_unresolved(repo, pr_number, head_sha, loop)
         return
+    if github_reviewer_fork_hold.holds_review(repo, pr_number, head_sha, pr_info):
+        return
     if github_reviewer_gate.hold_pr_until_reviewable(repo, pr_number, head_sha, pr_info):
         return
 
@@ -330,21 +334,7 @@ def _dispatch_mergeability_retry(
     ))
     _PENDING_RETRIES.add(task)
     task.add_done_callback(_PENDING_RETRIES.discard)
-    task.add_done_callback(partial(_log_mergeability_retry_failure, pr_number, head_sha))
-
-
-def _log_mergeability_retry_failure(
-    pr_number: int,
-    head_sha: str,
-    task: asyncio.Task[None],
-) -> None:
-    """Retrieve and identify any delayed retry failure after task completion."""
-    try:
-        task.result()
-    except asyncio.CancelledError:
-        log.info("reviewer-gate: delayed retry cancelled for PR #{} sha={}", pr_number, head_sha[:8])
-    except Exception:
-        log.exception("reviewer-gate: delayed retry raised for PR #{} sha={}", pr_number, head_sha[:8])
+    task.add_done_callback(partial(reviewer_gate_retry_log.log_retry_failure, pr_number, head_sha))
 
 
 def _report_mergeability_unresolved(

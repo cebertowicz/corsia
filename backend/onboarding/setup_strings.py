@@ -14,7 +14,50 @@ from __future__ import annotations
 # The consent hash binds the rendered title, context and option A label, so a changed word
 # here needs a new consent review.
 
-# --- task "Set up your first agent or project" ------------------------------------
+# --- task "Getting started": bring over what other AI tools know -----------
+
+# AGENT_IMPORT option A authorizes one read of the person's other AI tools
+# (onboarding.agent_import); its consent hash binds the rendered title, context and
+# option A label like FIND_PROJECTS'. {tools} names the found tools, {verb} is
+# "is" for one and "are" for several, {connections} is AGENT_IMPORT_CONNECTIONS
+# or empty, {settings} AGENT_IMPORT_OTHER_SETTINGS when {connections} is set (those apps
+# are read from the tools' settings) else AGENT_IMPORT_SETTINGS, {where} one of
+# AGENT_IMPORT_CLOUD, AGENT_IMPORT_LOCAL and AGENT_IMPORT_OTHER.
+AGENT_IMPORT = {
+    "title": "Bring over what your other AI tools know",
+    "context": (
+        "{tools} {verb} on this computer. I can read what they remember about you and how you like to "
+        "work, the skills you keep in them{connections}, so you don't have to set them up again. "
+        "I only read: nothing changes in them, and you choose what I keep. I never read your chats "
+        "with them, {settings}, or any key or password. {where}"
+    ),
+    "tradeoff": (
+        "It takes about a minute. Not now means a few more questions here, and your skills stay "
+        "where they are until you ask."
+    ),
+    "options": (
+        ("Read them", "Then you pick what comes over."),
+        ("Not now", "Ask me any time."),
+    ),
+    "rationale": "You've already taught them how you work; this saves teaching it again.",
+}
+# Only ready Claude Code or Codex tools hold connections this release can bring over.
+AGENT_IMPORT_CONNECTIONS = ", and the connected apps that {tools} {verb}"
+AGENT_IMPORT_SETTINGS = "their settings"
+AGENT_IMPORT_OTHER_SETTINGS = "their other settings"
+AGENT_IMPORT_CLOUD = "What I read goes to {provider}, the model I run on."
+AGENT_IMPORT_LOCAL = "What I read stays on this computer: I run on a local model."
+# Any other model, an External endpoint included: who serves it is not known here.
+AGENT_IMPORT_OTHER = "What I read goes to {model}, the model I run on, and may leave this computer."
+# The provider each cloud harness or API names, by catalog provider.
+AGENT_IMPORT_PROVIDERS = {
+    "claude-code": "Claude, by Anthropic",
+    "anthropic": "Claude, by Anthropic",
+    "codex": "GPT, by OpenAI",
+    "openai": "GPT, by OpenAI",
+}
+
+# --- task "Set up your first project" ------------------------------------
 
 FIND_PROJECTS = {
     "title": "Look for the projects you already work on?",
@@ -40,7 +83,7 @@ FIND_PROJECTS = {
 OMLX = {
     "title": "Change one oMLX setting for CORSIA?",
     "context": (
-        "Your oMLX runs the local models on this Mac. It's set to work on {current} requests at "
+        "Your oMLX runs the local models on this computer. It's set to work on {current} requests at "
         "once. At {recommended}, oMLX finishes one request before it starts the next, so each one "
         "gets the model's full speed and memory instead of sharing them. I'd change only this "
         "one setting."
@@ -59,6 +102,55 @@ OMLX = {
         "all day."
     ),
 }
+
+# While the person lets CORSIA manage their oMLX, the decision lists every change:
+# {changes} is OMLX_GROUP_GLOBAL and OMLX_GROUP_MODEL joined by "; ", each of OMLX_ROW.
+OMLX_MANAGED = {
+    "title": "Change your oMLX's settings for CORSIA?",
+    "context": (
+        "You let CORSIA manage your oMLX. I'd change these settings, each shown as current → new: "
+        "{changes}. They change for every app that uses this oMLX. Your key, sign-in, network "
+        "settings, port, folders, default model and other models stay as they are."
+    ),
+    "tradeoff": (
+        "Other apps that use your oMLX get these settings too. Stopping management in Settings "
+        "puts every value back."
+    ),
+    "yes_label": "Change them",
+    "yes_detail": "I'll apply them now and tell you if oMLX needs a restart.",
+    "no_label": "Leave them as they are",
+    "no_detail": "CORSIA still works with your current settings.",
+    "rationale": "They match how CORSIA sets up an oMLX it installs.",
+}
+OMLX_GROUP_GLOBAL = "oMLX-wide, {rows}"
+OMLX_GROUP_MODEL = "for {model}, {rows}"
+OMLX_ROW = "{label}: {current} → {recommended}"
+# What Settings' "Stop managing" puts back, one line per recorded value ("CORSIA puts back …").
+OMLX_RESTORE = "{label} to {value}"
+OMLX_RESTORE_MODEL = "{label} for {model} to {value}"
+# oMLX's own admin-page names, so the person finds each one there.
+OMLX_LABELS = {
+    "max_concurrent_requests": "Max Concurrent Requests",
+    "prefill_priority": "Prefill Priority",
+    "max_context_window": "Ctx Window",
+    "max_tokens": "Max Tokens",
+    "turboquant_kv_enabled": "TurboQuant KV Cache",
+    "turboquant_kv_bits": "TurboQuant bits per channel",
+    "turboquant_skip_last": "TurboQuant skip last layer",
+    "mtp_enabled": "Native MTP",
+    "enable_thinking": "Thinking",
+}
+OMLX_DEFAULT = "oMLX default"
+
+
+def omlx_value(value: object) -> str:
+    """A setting's value as the person reads it: unset is oMLX's default, a switch on or off."""
+    if value is None:
+        return OMLX_DEFAULT
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    return str(value)
+
 
 # --- task "Set up GitHub" ----------------------------------------------------------
 

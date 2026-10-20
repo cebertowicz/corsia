@@ -12,6 +12,7 @@ import { decodeOperatorEnvelope } from './plansDecode';
 
 export * from './activityIndexTypes';
 export * from './plansCostTypes';
+export * from './plansExecutionTypes';
 export * from './plansTypes';
 export type { OperatorFoldLevel } from './plansFolded';
 
@@ -199,7 +200,7 @@ export interface ThreadPlanStateEntry {
 	state: ThreadPlanState;
 	/** The plan header's own label for the marker's title; null when the plan row alone decided. */
 	label_key: string | null;
-	/** The plan is paused, even when what the user owes outranks it (pause contract rule 5). */
+	/** The plan is paused, even when an independent access request outranks the pause. */
 	paused: boolean;
 	/** Every item represented by the row's single highest-precedence mark. */
 	attention_items: ThreadAttentionItem[];

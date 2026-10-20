@@ -169,11 +169,19 @@ def list_repo_worktrees(repo_root: Path) -> list[Path]:
         return []
     worktrees: list[Path] = []
     cache: dict = {}
+    plain_parent = not parent.is_symlink()
     try:
         entries = parent.iterdir()
         for entry in entries:
-            if repo_worktree_root(entry, repo_root, cache=cache) == entry.resolve(strict=False):
-                worktrees.append(entry.resolve(strict=False))
+            # Under a resolved, non-symlink parent a non-symlink entry is its own
+            # canonical path; any other entry is resolved exactly once.
+            resolved = (
+                entry if plain_parent and not entry.is_symlink()
+                else entry.resolve(strict=False)
+            )
+            cache[("sandbox-resolved-path", str(entry))] = resolved
+            if repo_worktree_root(entry, repo_root, cache=cache) == resolved:
+                worktrees.append(resolved)
     except OSError:
         return []
     return sorted(worktrees)

@@ -16,11 +16,11 @@ const headers = (t: string, json = false): Record<string, string> => ({
 });
 
 export type BindReason = 'not_ready' | 'limited' | 'no_usable_model' | 'unchecked' | 'stale'
-	| 'not_permitted' | 'conductor_started' | 'account_missing';
+	| 'not_permitted' | 'corsia_agent_started' | 'account_missing';
 export interface BindResult { bound: boolean; reason: BindReason | null }
 
 export async function bindConductorAccount(t: string, threadId: string, accountId: string): Promise<BindResult> {
-	const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/conductor-account`, {
+	const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/corsia-agent-account`, {
 		method: 'POST', headers: headers(t, true), body: JSON.stringify({ account_id: accountId }),
 	});
 	if (!response.ok) throw new Error(`bind ${response.status}`);
@@ -55,38 +55,56 @@ export async function linkCli(t: string, vendor: string): Promise<{ ok: boolean;
 	return { ok: response.ok && body?.ok === true, outcome: body?.outcome ?? null };
 }
 
-export type CliInstallState = 'idle' | 'running' | 'done' | 'failed';
-export interface CliInstall { state: CliInstallState; reason: string | null }
+export type CliInstallState = 'idle' | 'running' | 'done' | 'failed' | 'cancelled';
+export interface CliInstall { state: CliInstallState; reason: string | null; path_shadowed_by: string | null }
 
 function cliInstallOf(body: Record<string, unknown> | null): CliInstall {
 	return {
 		state: (body?.state as CliInstallState) ?? 'failed',
 		reason: (body?.reason as string | null) ?? null,
+		path_shadowed_by: (body?.path_shadowed_by as string | null) ?? null,
 	};
 }
 
-export type CliInstallRefusal = 'already_installed' | 'invisible_binary';
+export type CliInstallRefusal = 'already_installed' | 'invisible_binary' | 'not_installed' | 'package_managed';
 
 /**
  * Start one vendor CLI installation; callers poll its bounded per-vendor flight. A CLI that is
  * already there is not a failure: the refusal says which, and the card's state is what's stale.
  */
-export async function startCliInstall(t: string, vendor: string): Promise<CliInstallRefusal | null> {
-	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/install`, {
+async function startCliJob(t: string, vendor: string, operation: 'install' | 'update'): Promise<CliInstallRefusal | null> {
+	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/${operation}`, {
 		method: 'POST', headers: headers(t),
 	});
 	if (response.status === 409) {
 		const reason = (await response.json().catch(() => null))?.reason;
-		if (reason === 'already_installed' || reason === 'invisible_binary') return reason;
+		if (reason === 'already_installed' || reason === 'invisible_binary' || reason === 'not_installed' || reason === 'package_managed') return reason;
 	}
-	if (!response.ok) throw new Error(`CLI install ${response.status}`);
+	if (!response.ok) throw new Error(`CLI ${operation} ${response.status}`);
 	return null;
+}
+
+/** Start one vendor CLI installation; callers poll its bounded per-vendor flight. */
+export function startCliInstall(t: string, vendor: string): Promise<CliInstallRefusal | null> {
+	return startCliJob(t, vendor, 'install');
+}
+
+/** Rerun a vendor's official installer for a discovered-but-unusable CLI. */
+export function startCliUpdate(t: string, vendor: string): Promise<CliInstallRefusal | null> {
+	return startCliJob(t, vendor, 'update');
 }
 
 /** Read a vendor CLI installation's current state without starting another installer. */
 export async function getCliInstall(t: string, vendor: string): Promise<CliInstall> {
 	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/install`, { headers: headers(t) });
 	if (!response.ok) throw new Error(`CLI install ${response.status}`);
+	return cliInstallOf(await response.json().catch(() => null));
+}
+
+/** Stop a running vendor CLI installation; the answer is the state it settled in ('done' when it had just finished). */
+export async function cancelCliInstall(t: string, vendor: string): Promise<CliInstall> {
+	const response = await fetch(`/api/providers/cli/${encodeURIComponent(vendor)}/install`, { method: 'DELETE', headers: headers(t) });
+	if (!response.ok) throw new Error(`CLI install cancel ${response.status}`);
 	return cliInstallOf(await response.json().catch(() => null));
 }
 

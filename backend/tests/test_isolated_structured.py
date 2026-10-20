@@ -144,6 +144,7 @@ def _assert_telemetry(telemetry, target, **expected: Any) -> None:
         "harness": target.harness,
         "transport_model": target.transport_model,
         "reported_model": target.expected_reported_model,
+        "expected_reported_model": target.expected_reported_model,
         "prompt_tokens": None,
         "completion_tokens": None,
         "cache_creation_tokens": None,

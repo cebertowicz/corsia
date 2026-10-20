@@ -24,7 +24,7 @@
 	.msg.err {
 		background: var(--red-bg);
 		border-color: color-mix(in srgb, var(--red) 30%, transparent);
-		color: var(--red);
+		color: var(--red-text);
 	}
 	.msg.ok {
 		background: var(--green-bg);
@@ -32,8 +32,8 @@
 		color: var(--green-text, var(--green));
 	}
 	.msg.info {
-		background: var(--violet-bg);
-		border-color: var(--violet-line);
+		background: var(--accent-wash);
+		border-color: var(--accent-line);
 		color: var(--text-primary);
 	}
 	.msg.warn {

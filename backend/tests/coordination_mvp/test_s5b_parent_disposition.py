@@ -10,6 +10,14 @@ without archiving the artifact.
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
+from infra import corsia_agent
+
 import pytest
 
 from parent_review import disposition as D
@@ -56,7 +64,7 @@ class TestApproveToUserGate:
     def test_authorized_conductor_override_allows_approve_with_audit(self, isolated_db):
         from infra import conductor
         cond = mk_session("workspace-conductor")
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, cond)
+        corsia_agent.set_corsia_agent(cond)
         _user_raise("ur-bad", _BAD)
         result = dispose("ur-bad", D.APPROVE_TO_USER, override_blocking=True,
                          authority="conductor", reason="time-critical exception",
@@ -101,7 +109,7 @@ class TestReroute:
     def _conductor(self) -> str:
         from infra import conductor
         cond = mk_session("workspace-conductor")
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, cond)
+        corsia_agent.set_corsia_agent(cond)
         return cond
 
     def test_authorized_conductor_reroute_changes_owner(self, isolated_db):

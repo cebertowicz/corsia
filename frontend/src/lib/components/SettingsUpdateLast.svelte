@@ -23,7 +23,7 @@
 	<div class="body">
 		<span class="headline">{copy.headline}</span>
 		{#if copy.body}<span class="detail">{copy.body}</span>{/if}
-		{#if failure.conductorTold}<span class="detail">Your workspace conductor has been told.</span>{/if}
+		{#if failure.conductorTold}<span class="detail">The CORSIA agent has been told.</span>{/if}
 		{#if hasDetails}
 			<details>
 				<summary>Details</summary>
@@ -45,7 +45,7 @@
 	.headline { color: var(--text-primary); }
 	.detail { color: var(--text-tertiary); }
 	.service-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
-	summary { cursor: pointer; color: var(--accent); }
+	summary { cursor: pointer; color: var(--accent-text); }
 	pre { max-height: 180px; overflow: auto; margin: var(--space-2) 0 0; white-space: pre-wrap; color: var(--text-tertiary); font: var(--text-caption)/1.45 var(--font-mono, monospace); }
 	@media (max-width: 768px) { .service-row { flex-wrap: wrap; gap: var(--space-2); } .service-actions { width: 100%; margin-left: 0; justify-content: flex-end; } }
 </style>

@@ -81,7 +81,7 @@
 		background: var(--glass-thick);
 	}
 	.pane-scope { font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-secondary); }
-	.pane-scope.accent { color: var(--accent); }
+	.pane-scope.accent { color: var(--accent-text); }
 
 	@media (min-width: 1025px) {
 		.pane.overlay {
@@ -104,8 +104,8 @@
 		}
 		.pane.open, .pane.dragging { display: flex; }
 		.pane-top {
-			height: calc(var(--header-height, 56px) + env(safe-area-inset-top, 0px));
-			padding-top: env(safe-area-inset-top, 0px);
+			height: var(--header-bottom);
+			padding-top: var(--safe-top);
 		}
 	}
 </style>

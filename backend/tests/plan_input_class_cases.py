@@ -453,6 +453,19 @@ def _user_block_on_decision_artifact(db, scene):
     return _user_block(db, scene, ask_artifact_id=str(ask))
 
 
+def _user_block_on_document_asked_elsewhere(db, scene):
+    """Another task already holds the one open review request on this document."""
+    ask = document_ask(db, "root")
+    _user_block(db, scene, ask_artifact_id=ask)()
+    return partial(
+        _mutate, db, scene.plan_id, "block_node", {
+            "node_id": scene.own, "reason_key": "review", "reason": "Review it",
+            "owner_kind": "user", "ask_artifact_id": ask,
+            "expected_revision": _revision(db, scene.own),
+        }, _mid(),
+    )
+
+
 def _user_block_on_non_document(db, scene):
     ask = _artifact(db, external_id="user-ask-pr", owner="root")
     return _user_block(db, scene, ask_artifact_id=ask)
@@ -489,11 +502,19 @@ _CASES = {
     # --- plans/node_creation.py ---
     ("node_creation.py", '"size requires schema version 91"'): _size_before_migration,
     # --- plans/size_fields.py ---
+    ("size_fields.py", "TASK_SIZE_REQUIRED"): _operation(
+        "add", {"kind": "task", "title": "T", "acceptance_criteria": "DOD"},
+        default_task_size=False,
+    ),
     (
         "size_fields.py",
         'f"size must be one of: {\', \'.join(SIZE_CLASSES)}. {SIZE_MEANING} {SIZE_SCALE_DESCRIPTION}."',
     ): _operation(
         "add", {"kind": "task", "title": "T", "acceptance_criteria": "DOD", "size": "large"},
+    ),
+    # --- plans/mutations.py ---
+    ("mutations.py", "TASK_SIZE_REQUIRED"): _operation(
+        "edit", {"node_id": NODE, "expected_revision": REV, "size": None},
     ),
     # --- plans/user_ask.py ---
     ("user_ask.py", "DECISION_HOLDS"): _user_block_on_open_decision,
@@ -522,6 +543,9 @@ _CASES = {
         '"a decision is not blocked on; raise it, and it holds its task by itself"',
     ): _user_block_on_decision_artifact,
     ("user_ask.py", "NOT_ASKABLE"): _user_block_on_non_document,
+    ("one_open_ask.py", 'f"this document already has an open review request on {held}, waiting for " '
+                        '"the user\'s answer. It is theirs to answer, so do not resolve it; ask again " '
+                        '"once they have answered it"'): _user_block_on_document_asked_elsewhere,
     # --- plans/node_creation.py ---
     ("node_creation.py", 'f"invalid plan node kind: {kind}"'): _operation(
         "add", {"kind": "epic", "title": "T", "acceptance_criteria": "DOD"},

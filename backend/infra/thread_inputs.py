@@ -224,7 +224,7 @@ def _claimable_prefix(
     from infra.send_target import lifted_hold_ids
 
     rows = still_claimable(connection, thread_id, rows)
-    lifted = lifted_hold_ids(rows, model, db=connection)
+    lifted = lifted_hold_ids(rows, model, db=connection, thread_id=thread_id)
     rows = _deliverable_prefix(rows, lifted)
     if not rows or not any(starts_turn(row) for row in rows):
         return None

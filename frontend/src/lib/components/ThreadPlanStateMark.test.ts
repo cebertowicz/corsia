@@ -231,14 +231,14 @@ describe('ThreadPlanStateMark', () => {
 	});
 
 
-	it('keeps the pause separate when the user owes a review', () => {
+	it('keeps an independent access request visible while its plan is paused', () => {
 		render({
-			state: 'blocked_on_you', label_key: 'needs_you', paused: true,
-			attention_items: [{ kind: 'review', title: 'Review the result', node_id: 'node-4' }],
+			state: 'blocked_on_you', label_key: 'waiting', paused: true,
+			attention_items: [{ kind: 'access', title: 'Read diagnostics', node_id: null }],
 		});
 		const mark = host.querySelector<HTMLElement>('.plan-state');
-		expect(mark?.textContent).toBe('Review');
-		expect(mark?.title).toBe('Blocked on you · Plan: Needs you · Paused');
+		expect(mark?.textContent).toBe('Allow access');
+		expect(mark?.title).toBe('Blocked on you · Plan: Waiting · Paused');
 		expect(host.querySelector('.paused-glyph')).toBeNull();
 	});
 
@@ -294,6 +294,8 @@ describe('ThreadPlanStateMark', () => {
 		const phoneTarget = source.match(/@media \(max-width: 768px\)[\s\S]*\.plan-state\[role="button"\]::before\s*\{([^}]*)\}/)?.[1] ?? '';
 		expect(phoneTarget).toMatch(/width:\s*max\(calc\(100% \+ 20px\), 44px\);/);
 		expect(phoneTarget).toMatch(/height:\s*max\(100%, 44px\);/);
+		// A row's second line keeps its box, so the row's own tap is never taken.
+		expect(source).toMatch(/\.plan-state\.line\[role="button"\]::before\s*\{\s*content:\s*none;\s*\}/);
 		expect(source).toMatch(/\.plan-state:focus-visible/);
 	});
 

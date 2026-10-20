@@ -24,10 +24,15 @@ export const docTheme = EditorView.theme({
 	'.cm-line': { padding: '0 2px' },
 	'&.cm-focused': { outline: 'none' },
 	'.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
-	'&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
-		backgroundColor: 'var(--accent-subtle)'
-	},
-	'.cm-selectionMatch': { backgroundColor: 'var(--accent-bg)' },
+	// The selection is the strongest wash in the editor: --accent-subtle is a 12% wash that sits at about 1.1:1 on the page,
+	// too faint to see a drag, and it is also the matched-text wash below, so it is its own token rather than that one.
+	// --accent-selection follows the accent (a project's, or the default) and comes from accentRoles() with every other
+	// accent role: the share that reads against the page is per accent and theme, since the same percentage of a pale
+	// colour reads far fainter than of a deep one. .cm-selectionMatch keeps the faint wash so a match never reads as
+	// the selection. The editor draws no selection layer of its own (no drawSelection), so the native ::selection is
+	// the only selection there is.
+	'::selection': { backgroundColor: 'var(--accent-selection)' },
+	'.cm-selectionMatch': { backgroundColor: 'var(--accent-wash)' },
 	'.cm-gutters': { display: 'none' },
 
 	'.cm-md-h1': { fontSize: '1.7em', fontWeight: '600', lineHeight: '1.25', letterSpacing: '-0.01em' },
@@ -40,7 +45,7 @@ export const docTheme = EditorView.theme({
 	'.cm-md-quote': {
 		color: 'var(--text-secondary)',
 		fontStyle: 'italic',
-		borderLeft: '3px solid var(--violet-line)',
+		borderLeft: '3px solid var(--accent-line)',
 		paddingLeft: '14px'
 	},
 	'.cm-md-code': {
@@ -58,14 +63,14 @@ export const docTheme = EditorView.theme({
 		borderRadius: 'var(--radius-xs)',
 		padding: '0.05em 0.35em'
 	},
-	'.cm-md-link': { color: 'var(--accent)', textDecoration: 'underline', textDecorationColor: 'var(--violet-line)' },
+	'.cm-md-link': { color: 'var(--accent)', textDecoration: 'underline', textDecorationColor: 'var(--accent-line)' },
 	'.cm-md-link-open': { transition: 'text-decoration-color 150ms' },
 	'@media (hover: hover) and (pointer: fine)': { '.cm-md-link-open': { cursor: 'pointer' }, '.cm-md-link-open:hover': { textDecorationColor: 'var(--accent)' } },
-	'@media (pointer: coarse)': { '.cm-md-link-open:active': { backgroundColor: 'var(--accent-bg)' } },
+	'@media (pointer: coarse)': { '.cm-md-link-open:active': { backgroundColor: 'var(--accent-wash)' } },
 	'.cm-md-bullet': { color: 'var(--text-tertiary)' },
 	'.cm-md-task-control': { display: 'inline-flex', width: '28px', height: '28px', margin: '-3px 4px -3px 0', verticalAlign: 'middle', alignItems: 'center', justifyContent: 'center' },
 	'.cm-md-task-checkbox': { width: '18px', height: '18px', margin: '0', accentColor: 'var(--accent)', cursor: 'pointer' },
-	'.cm-md-task-control:hover .cm-md-task-checkbox': { outline: '2px solid var(--accent-bg)', outlineOffset: '2px' },
+	'.cm-md-task-control:hover .cm-md-task-checkbox': { outline: '2px solid var(--accent-wash)', outlineOffset: '2px' },
 	'.cm-md-task-checkbox:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '2px' },
 	'.cm-md-task-checkbox:disabled': { cursor: 'default', opacity: '0.65' },
 	'.cm-md-task-done': { textDecoration: 'line-through', color: 'var(--text-tertiary)' },
@@ -75,6 +80,8 @@ export const docTheme = EditorView.theme({
 	// against the editor's height map and a click lands on the line underneath.
 	// The diagram widget's spacing is beside the shared .mermaid-diagram rule in app.css.
 	'.cm-md-table': { margin: '0', padding: '0.6em 0' },
+	// Without this, a drag that starts inside a widget is turned into a caret on the editor, so no text in a table or diagram can be selected.
+	'.cm-md-table, .cm-md-table *, .cm-md-mermaid, .cm-md-mermaid *': { userSelect: 'text', WebkitUserModify: 'read-only' },
 	'.cm-md-table .table-wrap': { margin: '0' },
 	// An image sits at its own size, scaled down to the column and never up; padding, not margin, as above.
 	'.cm-md-image': { padding: '0.4em 0' },
@@ -97,6 +104,12 @@ export const docTheme = EditorView.theme({
 		backgroundColor: 'color-mix(in srgb, var(--amber) 26%, transparent)',
 		borderBottomColor: 'var(--amber)'
 	},
+	// A whole table or diagram: the same amber as an outline on the block, since a block has no text to underline.
+	'.cm-comment-block': { outline: 'medium solid color-mix(in srgb, var(--amber) 42%, transparent)', outlineOffset: 'calc(var(--space-1) * -1)', transition: 'outline-color var(--dur-tight)' },
+	'.cm-comment-block-pending': { outline: 'medium dashed var(--amber)', outlineOffset: 'calc(var(--space-1) * -1)' },
+	'.cm-comment-block-focused': { outlineColor: 'var(--amber)' },
+	// A mark on a whole table cell: the same underline, as a cell's own bottom edge.
+	'.cm-md-table td.cm-comment-anchor, .cm-md-table th.cm-comment-anchor': { borderBottomWidth: 'medium' },
 	// Markers live in a rail the content padding reserves (--doc-rail: 24px for a fine pointer,
 	// 44px for a coarse or unknown one, decided by railWidth() and set by the rail and the viewer;
 	// the document header takes the same inset, and every CSS fallback is the unknown-pointer 44px). The rail is a

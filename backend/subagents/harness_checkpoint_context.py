@@ -227,7 +227,7 @@ def read_external_checkpoint_context(
     from infra.database import get_db
     from infra.runtime_truth import provider_boundary_snapshot, registered_checkpoint_id
     from llm.reasoning_config import effective_reasoning_effort
-    from llm.resolution import resolve_execution_target
+    from llm.resolution import resolve_thread_target
     from registry.models import find_for_thread
     from subagents.codex_runtime_support import resolve_working_dir
 
@@ -239,7 +239,7 @@ def read_external_checkpoint_context(
         ).fetchone()
         if thread_row is None or str(thread_row["model"] or "") != target_catalog_id:
             return None
-        target = resolve_execution_target(target_catalog_id, db=db)
+        target = resolve_thread_target(target_catalog_id, thread_id=thread_id, db=db)
         if target.harness != harness or not target.available:
             return None
         previous = current_installed(thread_id, db=db)

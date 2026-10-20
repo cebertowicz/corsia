@@ -179,6 +179,79 @@ describe('ChatPanel first-page failure', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('Worked · 2 steps · 8 min'));
 	});
 
+	it('aborts the first page of the thread the user left, without an error state', async () => {
+		threads.set([{ id: 'thread-a', title: 'Thread A' }, { id: 'thread-b', title: 'Thread B' }] as never);
+		const signals = new Map<string, AbortSignal>();
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url.includes('/thread-a/messages?')) {
+				const signal = init?.signal as AbortSignal;
+				signals.set('thread-a', signal);
+				// A slow link: nothing arrives until the read is abandoned.
+				return new Promise((_, reject) => signal.addEventListener('abort', () => (
+					reject(new DOMException('The operation was aborted.', 'AbortError'))
+				)));
+			}
+			if (url.includes('/thread-b/messages?')) {
+				signals.set('thread-b', init?.signal as AbortSignal);
+				return { ok: true, status: 200, json: async () => ({
+					messages: [{ id: 'b1', thread_id: 'thread-b', role: 'user', content: 'hello b', created_at: '2026-08-01T00:00:00Z' }],
+					has_more: false, oldest_id: 'b1', turn_summaries: {},
+				}) };
+			}
+			return { ok: true, status: 200, json: async () => ({ thread_kind: 'chat' }) };
+		}) as unknown as typeof fetch;
+
+		mountChatPanel();
+		flushSync();
+		const leaving = (component as Record<string, any>).selectThread('thread-a');
+		await vi.waitFor(() => expect(signals.has('thread-a')).toBe(true));
+		await (component as Record<string, any>).selectThread('thread-b');
+		await leaving;
+		flushSync();
+
+		expect(signals.get('thread-a')?.aborted).toBe(true);
+		expect(signals.get('thread-b')?.aborted).toBe(false);
+		expect(host.textContent).toContain('hello b');
+		expect(host.textContent).not.toContain("Couldn't load this thread");
+		expect(vi.mocked(console.error).mock.calls.some(([text]) => String(text).includes('thread-a'))).toBe(false);
+	});
+
+	it('a stale open resuming after a newer read never aborts it, and the first page paints', async () => {
+		threads.set([{ id: 'thread-a', title: 'Thread A' }] as never);
+		activeThreadId.set('thread-a');
+		const signals: AbortSignal[] = [];
+		globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (!String(input).includes('/thread-a/messages?')) {
+				return { ok: true, status: 200, json: async () => ({ thread_kind: 'chat' }) };
+			}
+			const signal = init?.signal as AbortSignal;
+			signals.push(signal);
+			// Both reads are still in flight when the stale open resumes.
+			return new Promise((resolve, reject) => {
+				signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+				setTimeout(() => resolve({ ok: true, status: 200, json: async () => ({
+					messages: [{ id: 'a1', thread_id: 'thread-a', role: 'user', content: 'hello a', created_at: '2026-08-01T00:00:00Z' }],
+					has_more: false, oldest_id: 'a1', turn_summaries: {},
+				}) }), 20);
+			});
+		}) as unknown as typeof fetch;
+
+		mountChatPanel();
+		flushSync();
+		const panel = component as Record<string, any>;
+		// selectThread takes its generation, then suspends at its first await;
+		// a refresh starts the current read in that gap.
+		const opening = panel.selectThread('thread-a');
+		const refreshing = panel.fetchThreadMessages('thread-a');
+		await Promise.all([opening, refreshing]);
+		flushSync();
+
+		expect(signals[0]?.aborted).toBe(false);
+		await vi.waitFor(() => expect(host.textContent).toContain('hello a'));
+		expect(host.textContent).not.toContain("Couldn't load this thread");
+	});
+
 	it('keeps this thread rows when a refresh of the SAME thread fails', async () => {
 		messages.set([
 			{

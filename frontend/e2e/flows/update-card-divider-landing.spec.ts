@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { setFocusMode } from '../support/focusMode';
 import { injectMessage } from '../support/mock';
 import {
 	createSession,
@@ -87,8 +88,13 @@ async function openSidebarIfNarrow(page: Page): Promise<void> {
 }
 
 test.describe('@surface:chat update-card landing', () => {
-	test.beforeEach(({}, testInfo) => {
+	// Focus is on by default and lists update cards inside its collapsed outcomes; these flows cover the transcript cards.
+	test.beforeEach(async ({ request }, testInfo) => {
 		test.skip(testInfo.project.name === 'chromium-mobile', 'This flow sets its own desktop and 393px viewports.');
+		await setFocusMode(request, false);
+	});
+	test.afterEach(async ({ request }) => {
+		await setFocusMode(request, true);
 	});
 
 	test('a normal row remains at the live edge when cards return late on desktop', async ({ page, request }) => {

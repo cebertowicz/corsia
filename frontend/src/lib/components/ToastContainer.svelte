@@ -199,7 +199,7 @@
 	}
 
 	.toast-icon--update {
-		color: var(--violet-text, var(--violet));
+		color: var(--accent-text, var(--accent));
 	}
 
 	/* A toast with a body: one inset clears the rounded ends, the mark sits on the title line, and Details and close centre on the text block. */
@@ -210,7 +210,7 @@
 	.toast--button { cursor: pointer; justify-content: center; text-align: center; }
 	.toast--button .toast-line { flex: 0 1 auto; }
 	.toast--button:focus-visible,
-	.toast--compact:focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; }
+	.toast--compact:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 	/* Minimized progress: the mark and its word in a fab-height pill that is one tap target. */
 	.toast--pinned.toast--compact {

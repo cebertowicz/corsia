@@ -47,17 +47,15 @@ export interface HostGroup {
 	providers: HostProvider[];
 }
 
-// Network/resources/inventory loading owns this snapshot. `hostGroups` below is the
-// canonical display owner and derives the account-sensitive harness card text from it.
+// Network/resources/inventory loading owns this snapshot. `hostGroups` below is the canonical display
+// owner: harness card text follows accounts, and each server row is read live from `networkServers`.
 export const hostGroupSnapshot = writable<HostGroup[]>([]);
-export const hostGroups = derived(
-	[hostGroupSnapshot, vendorAccounts],
-	([$snapshot, $accounts]) => $snapshot.map((group) => ({
-		...group,
-		providers: group.providers.map((provider) => provider.type === 'harness' && provider.harnessModelCount != null
-			? { ...provider, subline: _harnessSubline(provider.name, provider.harnessModelCount, $accounts) }
-			: provider),
-	})),
+export const hostGroups = derived([hostGroupSnapshot, vendorAccounts, networkServers], ([$snapshot, $accounts, $servers]) =>
+	$snapshot.map((group) => ({ ...group, providers: group.providers.map((provider) => {
+		const live = provider.server ? { ...provider, server: $servers.find((row) => row.id === provider.server?.id) ?? provider.server } : provider;
+		return live.type === 'harness' && live.harnessModelCount != null
+			? { ...live, subline: _harnessSubline(live.name, live.harnessModelCount, $accounts) } : live;
+	}) })),
 );
 export const hostGroupsLoading = writable(false);
 /** Set when the Claude Code and Codex cards could not load, so an absent card is never read as "no models". */
@@ -238,7 +236,7 @@ export function groupByHost(
 
 function _thisMacSubname(r: HostResources | null): string {
 	if (!r) return 'localhost';
-	return `${r.total_gb.toFixed(0)} GB total · ${r.free_gb.toFixed(0)} GB free`;
+	return `${r.total_gb.toFixed(0)} GB memory`;
 }
 
 function _remoteHostSubname(s: NetworkServer): string {

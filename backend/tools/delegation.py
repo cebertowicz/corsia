@@ -81,7 +81,7 @@ def _current_thread_context(thread_id: str) -> dict[str, Any] | None:
     try:
         row = db.execute(
             "SELECT id, user_id, profile, project_id, title, agent_enabled, agent_status, "
-            "lifecycle_state, archived_reason, spawned_by FROM threads WHERE id = ?",
+            "lifecycle_state, archived_reason, spawned_by, local_only FROM threads WHERE id = ?",
             (thread_id,),
         ).fetchone()
         return dict(row) if row else None
@@ -310,7 +310,7 @@ def _checkpoint_status(checkpoint) -> dict[str, Any]:
 
 
 def _read_delegate_status(thread_id: str, user_id: str, message_count: int):
-    from infra.conductor import get_conductor_scopes
+    from infra.conductor import get_coordination_scopes
     from infra.checkpoint_queries import latest_for_thread
     from infra.database import get_db
 
@@ -337,7 +337,7 @@ def _read_delegate_status(thread_id: str, user_id: str, message_count: int):
         return (
             thread,
             dict(active) if active else None,
-            get_conductor_scopes(thread_id, db=db),
+            get_coordination_scopes(thread_id, db=db),
             [_recent_message(row) for row in reversed(recent)],
             None if checkpoint is None else _checkpoint_status(checkpoint),
         )

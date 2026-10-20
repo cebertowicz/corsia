@@ -8,6 +8,14 @@ directly into the shared app DB, then drives them through HTTP.
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
+from infra import corsia_agent
+
 import sys
 import os
 import uuid
@@ -48,6 +56,46 @@ def _seed(external_id: str, snapshot: dict, *, owner: str = "owner-thr",
             {"integration": "local", "type": "user-raise", "external_id": external_id},
             parent, db=db)
     db.commit()
+
+
+def _seed_ask(external_id: str) -> tuple[str, str, str, str]:
+    """Create an ask through the public plan boundary and return its current hold."""
+    from infra.database import get_db
+    from plans import service
+    from plans.boundary import PlanActor, mutate
+    from registry import models
+
+    owner = f"owner-{uuid.uuid4().hex[:8]}"
+    db = get_db()
+    db.execute(
+        "INSERT INTO threads (id,user_id,title,model,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+        (owner, "steve", "Plan owner", "test/model", "t", "t"),
+    )
+    models.register_artifact(
+        integration="workspace", type="document", external_id=external_id,
+        parent_thread_id=owner, title="Review the brief", db=db,
+    )
+    artifact_id = str(db.execute(
+        "SELECT id FROM artifact_identities WHERE external_id=?", (external_id,),
+    ).fetchone()["id"])
+    plan = service.ensure_plan("thread", owner, db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Review brief", acceptance_criteria="Reviewed", db=db,
+    )
+    mutate(
+        plan.id, "block_node", {
+            "node_id": node.id, "reason_key": "review", "reason": "Review the brief",
+            "owner_kind": "user", "ask_artifact_id": artifact_id,
+            "expected_revision": service._node_row(db, node.id)["revision"],
+        }, actor=PlanActor(owner, "steve", None), provenance="test.attention",
+        mutation_id=uuid.uuid4().hex, db=db,
+    )
+    hold_id = str(db.execute(
+        "SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node.id,),
+    ).fetchone()["id"])
+    db.commit()
+    db.close()
+    return plan.id, node.id, artifact_id, hold_id
 
 
 def _eid() -> str:
@@ -112,7 +160,7 @@ class TestDispositionGate:
                   "actor_thread": "steve-actor"})
         assert self_assert.status_code == 409
         # A real workspace conductor as actor is authorized.
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, "ws-cond")
+        corsia_agent.set_corsia_agent("ws-cond")
         db.close()
         ok = integration_client.post(
             f"/api/attention/{aid}/dispose",
@@ -210,11 +258,14 @@ class TestClearing:
             mutation_id=uuid.uuid4().hex, db=db,
         )
         db.commit()
+        hold_id = str(db.execute(
+            "SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node.id,),
+        ).fetchone()["id"])
         db.close()
 
         response = integration_client.post(
             f"/api/attention/{aid}/clear",
-            json={"token": _TOKEN, "outcome": "acknowledge"},
+            json={"token": _TOKEN, "outcome": "acknowledge", "hold_ids": [hold_id]},
         )
 
         assert response.status_code == 200
@@ -236,6 +287,77 @@ class TestClearing:
             json={"token": _TOKEN, "outcome": "defer",
                   "condition": {"type": "deadline", "value": "2026-06-27T09:00:00Z"}})
         assert ok.status_code == 200 and ok.json()["attention_state"] == "deferred"
+
+
+    @pytest.mark.parametrize("outcome", ["acknowledge", "dismiss", "defer"])
+    def test_stale_pile_clear_does_not_end_a_same_task_replacement(
+        self, integration_client, outcome,
+    ):
+        from infra.database import get_db
+        from plans import service
+        from plans.boundary import PlanActor, mutate
+
+        external_id = f"stale-{uuid.uuid4().hex[:8]}.md"
+        plan_id, node_id, _artifact_id, old_hold = _seed_ask(external_id)
+        db = get_db()
+        owner = service._plan_row(db, plan_id)["owner_id"]
+        mutate(
+            plan_id, "block_node", {
+                "node_id": node_id, "reason_key": "review", "reason": "Review the revision",
+                "owner_kind": "user", "ask_artifact_id": _artifact_id,
+                "expected_revision": service._node_row(db, node_id)["revision"],
+            }, actor=PlanActor(owner, "steve", None), provenance="test.attention",
+            mutation_id=uuid.uuid4().hex, db=db,
+        )
+        replacement = str(db.execute(
+            "SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node_id,),
+        ).fetchone()["id"])
+        db.commit()
+        db.close()
+
+        body = {"token": _TOKEN, "outcome": outcome, "hold_ids": [old_hold]}
+        if outcome == "defer":
+            body["condition"] = {"type": "deadline", "value": "2026-10-01T16:00:00Z"}
+        response = integration_client.post(f"/api/attention/{external_id}/clear", json=body)
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "ask_stale"
+        db = get_db()
+        assert db.execute(
+            "SELECT cleared_at FROM plan_node_holds WHERE id=?", (replacement,),
+        ).fetchone()["cleared_at"] is None
+        db.close()
+
+
+class TestDispositionStaleness:
+    def test_dispose_approval_on_an_ended_ask_is_ask_stale(self, integration_client):
+        from infra.database import get_db
+        from plans import service
+        from plans.boundary import PlanActor, mutate
+
+        external_id = f"ended-{uuid.uuid4().hex[:8]}.md"
+        plan_id, node_id, _artifact_id, hold_id = _seed_ask(external_id)
+        db = get_db()
+        owner = service._plan_row(db, plan_id)["owner_id"]
+        mutate(
+            plan_id, "resolve_blocker", {
+                "node_id": node_id, "hold_id": hold_id,
+                "expected_revision": service._node_row(db, node_id)["revision"],
+            }, actor=PlanActor(owner, "steve", None), provenance="test.attention",
+            mutation_id=uuid.uuid4().hex, db=db,
+        )
+        db.commit()
+        db.close()
+
+        response = integration_client.post(
+            f"/api/attention/{external_id}/dispose",
+            json={"token": _TOKEN, "outcome": "approve_to_user", "hold_ids": [hold_id]},
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == {
+            "code": "ask_stale", "message": "This review request has ended.",
+        }
 
 
 class TestRollupAndConductor:

@@ -6,11 +6,14 @@ export interface ToastAnchor {
 	width: number;
 }
 
+/** Narrower than this, a column cannot hold a toast: a drawer or pane has slid it almost off screen. */
+const MIN_ANCHOR_WIDTH = 240;
+
 function measureAnchor(node: HTMLElement): ToastAnchor | null {
 	const rect = node.getBoundingClientRect();
 	const left = Math.max(0, rect.left);
 	const right = Math.min(window.innerWidth, rect.right);
-	if (right - left <= 0) return null;
+	if (right - left < MIN_ANCHOR_WIDTH) return null;
 	return { x: (left + right) / 2, width: right - left };
 }
 

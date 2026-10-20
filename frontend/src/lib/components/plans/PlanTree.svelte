@@ -177,8 +177,9 @@
 
 </script>
 
+<!-- A row's ask opens while it is open: raised, or deferred by a pause or a put-off. -->
 {#snippet row(node: OperatorNode, nest: number, view?: ScheduledView)}
-		{@const ask = node.artifacts.find((artifact) => artifact.role === 'attention' && artifact.attention_state === 'raised')}
+		{@const ask = node.artifacts.find((artifact) => artifact.role === 'attention' && (artifact.attention_state === 'raised' || artifact.attention_state === 'deferred'))}
 		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<div
 			class="tree-row" role="listitem"
@@ -343,7 +344,7 @@
 		--plan-row-line-height: calc(var(--text-subhead) * var(--lh-normal));
 		--plan-row-action-height: 28px;
 		display: flex; flex-wrap: nowrap; align-items: center; gap: var(--space-2); min-height: 38px;
-		padding: 6px 8px 6px calc(4px + var(--indent)); border-radius: var(--radius-xs);
+		padding: 6px 8px 6px calc(8px + var(--indent)); border-radius: var(--radius-xs);
 		width: 100%;
 	}
 	/* The fold face keeps its whole width, so the actions sit beside the
@@ -354,7 +355,7 @@
 	@media (pointer: coarse) {
 		.tree-row.has-menu { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 	}
-	.drill-row { border: 0; background: transparent; color: var(--violet-text); font-size: var(--text-footnote); text-align: left; cursor: pointer; }
+	.drill-row { border: 0; background: transparent; color: var(--accent-text); font-size: var(--text-footnote); text-align: left; cursor: pointer; }
 	/* Hover colour is for a pointer: a tap on touch leaves :hover stuck on the last thing tapped. */
 	@media (hover: hover) {
 		.drill-row:hover { color: var(--text-primary); background: var(--bg-hover); }
@@ -377,7 +378,7 @@
 	@media (hover: hover) {
 		button.row-body:hover { background: var(--bg-hover); }
 	}
-	button.row-body:focus-visible, .drill-row:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+	button.row-body:focus-visible, .drill-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	/* The one line above tasks that share a moment, at their left edge. */
 	.time-line {
 		padding: 6px 8px 0 calc(4px + var(--indent)); overflow: hidden; color: var(--text-secondary);

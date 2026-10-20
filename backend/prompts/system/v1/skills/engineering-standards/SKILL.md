@@ -1,9 +1,6 @@
 ---
 name: engineering-standards
 description: Use when diagnosing, debugging, writing, reviewing, or refactoring code or runtime behavior — trace conceptual forks and root causes, establish intent before calling behavior a defect, and prevent default engineering failures.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Engineering standards
@@ -43,7 +40,7 @@ When apparently equivalent cases behave differently, or an unchanged retry gives
 
 Observed behavior proves what happens, not that it was chosen. Before filing a defect or proposing to change code you did not write, inspect the implementing comments, tests asserting the behavior, and the introducing change or requirement. Record the intent evidence. If it is documented as deliberate, it is a design disagreement: address it to the owner, name the tradeoff you would change, and identify what authority could supersede the old choice. If intent is unknown, say so.
 
-Treat every finding (reviewer, test, investigation) as evidence, not an instruction to implement its remedy. Group related findings, find the shared cause, evaluate the blast radius of the problem and the proposed fix, and choose the smallest coherent solution. Do not bolt machinery on per finding.
+Treat every finding (reviewer, test, investigation) as evidence, not an instruction to implement its remedy. Apply it with skill `apply-feedback`, choosing the smallest coherent solution; do not bolt machinery on per finding.
 
 ## Default failures to prevent
 

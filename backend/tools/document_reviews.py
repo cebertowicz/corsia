@@ -17,7 +17,9 @@ from tools.documents import _json, _resolve_doc_target
 TOOL_DESCRIPTION = (
     "Ask an agent whose scope this document touches to review it. Queues a review "
     "task in the reviewer's plan; its comments on this document reach the owner "
-    "and settle the task. The reviewer comments; it does not do the work. `reviewer` "
+    "and settle the task. The reviewer comments; it does not do the work. Ask only about a "
+    "section that changes the reviewer's area: name that section and your question in `note`. "
+    "The reviewer reads only that section and leaves its changes as suggestions. `reviewer` "
     "is a thread ID from `agent_roster`; the document's owner cannot be the reviewer."
 )
 TARGET_REFUSAL = "exactly one of doc_path / artifact_id is required"

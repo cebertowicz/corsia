@@ -342,7 +342,7 @@ async def system_update_status(
     result["server_time"] = datetime.now(timezone.utc).isoformat()
     from infra.settings import get_update_schedule
 
-    result["schedule"] = await asyncio.to_thread(get_update_schedule)
+    result["schedule"] = await run_in_db(get_update_schedule)
     operation = await run_in_db(self_restart.latest_update_operation)
     if operation is not None:
         activated = await run_in_db(staged_update_activated, operation)
@@ -370,9 +370,7 @@ async def update_schedule(body: dict, user: dict = Depends(require_user)):
 
 
 @router.post("/system/update-operations/{operation_id}/outcome-seen")
-async def system_update_outcome_seen(
-    operation_id: str, user: dict = Depends(require_human_user)
-):
+async def system_update_outcome_seen(operation_id: str, user: dict = Depends(require_human_user)):
     """Mark one settled Update's outcome as shown; the first client to do so wins."""
     from automation.update_outcome import mark_outcome_seen
     from infra.db_async import run_in_db

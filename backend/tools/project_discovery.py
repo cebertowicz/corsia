@@ -36,7 +36,7 @@ class ProjectDiscoveryListTool(Tool):
             "the ordered setup decisions CORSIA built from facts it read (raise "
             "each unchanged, from its task_title's task), and "
             "setup_task_settlements. There the consent is the find-projects decision "
-            "for 'Set up your first agent or project': pass its id. "
+            "for 'Set up your first project': pass its id. "
             "Pass self_check_passed=false when corsia_api could not be reached."
         )
 
@@ -65,6 +65,7 @@ class ProjectDiscoveryListTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         from onboarding import project_discovery
+        from onboarding.consent import ConsentRefused
         from tools.delegation import _require_context
 
         context = _require_context(kwargs)
@@ -107,7 +108,7 @@ class ProjectDiscoveryListTool(Tool):
             try:
                 with public.plan_transaction(db):
                     project_discovery.consume_consent(db, decision_id, actor, wordings)
-            except project_discovery.ConsentRefused as refusal:
+            except ConsentRefused as refusal:
                 return str(refusal)
             finally:
                 db.close()

@@ -1,4 +1,4 @@
-"""Conductor-only roster update tool; no API token is exposed to the model."""
+"""Roster update tool for the CORSIA agent and project conductors; no API token is exposed to the model."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def _actor_user_id(db, actor_thread_id: str) -> str:
 
 
 class AgentRosterEntryTool(Tool):
-    """Read any thread's roster entry and revision in the conductor's scope."""
+    """Read any thread's roster entry and revision in the caller's coordination scope."""
 
     self_describing_errors = True
 
@@ -36,7 +36,7 @@ class AgentRosterEntryTool(Tool):
     def description(self) -> str:
         return (
             "Read the current roster fields and roster-only updated_at revision for one "
-            "thread in the designated conductor's scope, including an "
+            "thread in your coordination scope (the CORSIA agent's workspace or a project conductor's project), including an "
             "inactive or not-yet-promoted thread. Use before agent_roster_update."
         )
 
@@ -67,6 +67,7 @@ class AgentRosterEntryTool(Tool):
                 return {
                     "thread_id": thread_id,
                     "updated_at": target["agent_roster_updated_at"],
+                    "name": target["title"],
                     "agent_enabled": bool(target["agent_enabled"]),
                     "active": target["agent_status"] == "active",
                     "responsibility": target["agent_responsibility"],
@@ -80,11 +81,11 @@ class AgentRosterEntryTool(Tool):
         try:
             return json.dumps(await run_in_db(_read), sort_keys=True)
         except RosterChangeError as exc:
-            return f"Error: {exc}. Check the target thread and conductor designation."
+            return f"Error: {exc}. Check the target thread and coordination designation."
 
 
 class AgentRosterUpdateTool(Tool):
-    """Edit an agent in the conductor's designated scope."""
+    """Edit an agent in the caller's coordination scope."""
 
     self_describing_errors = True
 
@@ -96,7 +97,7 @@ class AgentRosterUpdateTool(Tool):
     def description(self) -> str:
         return (
             "Update, promote, deactivate, or demote a thread in the current "
-            "designated conductor scope. Server-side scope and designation "
+            "coordination scope (the CORSIA agent's workspace or a project conductor's project). Server-side scope and designation "
             "checks run with the roster write; no raw API credential is needed. "
             "Omitted fields retain their current values. Returns whether the "
             "roster changed. Use only for a roster change the user authorized."
@@ -113,6 +114,10 @@ class AgentRosterUpdateTool(Tool):
                 "expected_updated_at": {
                     "type": "string", "minLength": 1,
                     "description": "The target's roster updated_at from a fresh agent_roster_entry read.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "The agent's display name (its thread title), 1-80 characters.",
                 },
                 "responsibility": {"type": "string"},
                 "responsibility_paths": {
@@ -132,7 +137,7 @@ class AgentRosterUpdateTool(Tool):
     ) -> str:
         actor_thread_id = kwargs.get("_thread_id")
         if not isinstance(actor_thread_id, str) or not actor_thread_id:
-            return "Error: current thread identity is unavailable; retry from a live conductor turn."
+            return "Error: current thread identity is unavailable; retry from a live CORSIA agent or conductor turn."
         from infra.database import get_db
 
         def _change() -> dict[str, Any]:
@@ -150,5 +155,5 @@ class AgentRosterUpdateTool(Tool):
         try:
             result = await run_in_db(_change)
         except RosterChangeError as exc:
-            return f"Error: {exc}. Check the current conductor designation, target scope, and roster fields."
+            return f"Error: {exc}. Check the current coordination designation, target scope, and roster fields."
         return json.dumps(result, sort_keys=True)

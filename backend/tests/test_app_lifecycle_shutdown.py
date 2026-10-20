@@ -47,6 +47,10 @@ def _isolate_lifespan(monkeypatch) -> None:
     import tools.mcp_runtime as mcp_runtime
     from tools.registry import ToolRegistry
 
+    # llm.local_sources binds get_servers at import. Importing it first keeps the
+    # stub below from becoming its permanent binding when startup imports it.
+    import llm.local_sources  # noqa: F401
+
     class _NoopProcessOwner(_ProcessOwnerTestContract):
         async def terminate_turn(
             self,
@@ -73,13 +77,14 @@ def _isolate_lifespan(monkeypatch) -> None:
     monkeypatch.setattr(frontend_build, "ensure_frontend_built", lambda: None)
     monkeypatch.setattr(app_startup_runtime, "rearm_idle_checkpoints", _noop)
     monkeypatch.setattr(app_startup_runtime, "nightly_job_loop", _noop)
+    monkeypatch.setattr(app_startup_runtime, "_start_current_corrections_classifier", lambda: None)
     monkeypatch.setattr(app_lifecycle, "shutdown_pool", lambda: None)
     monkeypatch.setattr("infra.key_store_providers.provider_keys", lambda: {})
     monkeypatch.setattr("llm.lifecycle.get_local_providers", lambda: [])
-    monkeypatch.setattr(network_discovery, "get_servers", lambda: [])
+    monkeypatch.setattr(network_discovery, "get_servers", lambda **_filters: [])
     monkeypatch.setattr(network_discovery, "health_sweep_loop", _noop)
     monkeypatch.setattr(harness_models, "_REFRESH_TASKS", {})
-    monkeypatch.setattr(mcp_runtime, "_stack", None)
+    monkeypatch.setattr(mcp_runtime, "_stack", None, raising=False)
     monkeypatch.setattr(mcp_runtime, "_stopped", False)
     monkeypatch.setattr(mcp_runtime, "_lock", asyncio.Lock())
     monkeypatch.setattr(mcp_runtime, "_registry", ToolRegistry())
@@ -836,6 +841,7 @@ async def test_normal_shutdown_joins_all_owned_work_before_storage(
         "network health",
         "turn-buffer sweeper",
         "plan liveness",
+        "corrections classifier",
     }
     started = {name: asyncio.Event() for name in worker_names}
     stopped: set[str] = set()
@@ -906,6 +912,10 @@ async def test_normal_shutdown_joins_all_owned_work_before_storage(
         turn_buffers,
         "start_sweeper",
         lambda: asyncio.create_task(block("turn-buffer sweeper")),
+    )
+    monkeypatch.setattr(
+        "jobs.corrections_realtime._startup_worker",
+        lambda: block("corrections classifier"),
     )
 
     async def shutdown_refreshes() -> None:

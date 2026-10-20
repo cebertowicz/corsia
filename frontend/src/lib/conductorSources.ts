@@ -9,7 +9,7 @@ export interface SourceAccount {
 	identified: boolean;
 	state: SourceAccountState;
 	resets_at: string | null;
-	conductor_binding: boolean;
+	corsia_agent_binding: boolean;
 }
 
 /** One row of `GET /api/providers/sources` (#3308): one state and one fix. */
@@ -24,18 +24,27 @@ export interface ModelSource {
 	limited?: boolean;
 	resets_at?: string | null;
 	eligible?: boolean;
-	estimated_context_window?: number;
-	/** The starter model's download size, formatted by the backend. */
-	download_size?: string;
+	/** The picked local model's context window; null before there is a pick. */
+	context_window?: number | null;
+	/** The picked local model's download size, formatted by the backend; null before there is a pick. */
+	download_size?: string | null;
 	setup_stage?: string;
 	/** A download is running (the starter model for the person's own oMLX, or the full setup). */
 	setup_downloading?: boolean;
 	/** Which download is running or failed: the starter model for the person's own oMLX, or the full setup. */
-	setup_kind?: 'starter' | 'setup';
+	setup_kind?: 'starter' | 'setup' | 'settings';
+	/** A Settings-initiated local download; its repository is retained so a durable failure can retry the same recommendation. */
+	settings_download?: { name: string; repository: string | null; percent: number | null; failed: boolean };
 	/** The starter download's last reported percent; absent before one is known. */
 	download_percent?: number | null;
+	/** Remaining transfer time from measured throughput; absent until there is a sample. */
+	download_eta_seconds?: number | null;
+	/** True only when measured bytes have stopped advancing. */
+	download_stalled?: boolean;
 	/** Why the local server isn't ready, as a code; `reason` is only its wording. */
 	reason_code?: 'not_running' | 'no_models' | null;
+	/** Set when an unusable CLI belongs to Homebrew or npm; setup leaves it to that manager. */
+	cli_package_manager?: 'homebrew' | 'npm';
 	/** Set when the CLI is installed but the service cannot see it; Fix links it. */
 	invisible_binary?: string | null;
 	/** A failed local setup's reason, kept until the next attempt. */
@@ -43,6 +52,24 @@ export interface ModelSource {
 	accounts?: SourceAccount[];
 	/** The conductor's bound account when it can no longer run here: removed, or turned off for the project. */
 	lost_binding?: { label: string; reason: 'removed' | 'turned_off' } | null;
+	/** Only for the person's own oMLX: whether CORSIA manages it (J9). */
+	omlx_management?: OwnOmlxManagement | null;
+}
+
+/** `restore_failed` is a Stop managing that didn't finish; `restores` name what it puts back. */
+export interface OwnOmlxManagement {
+	state: 'managed' | 'not_managed' | 'restore_failed';
+	/** Their oMLX's version while it is too old to say which model fits. */
+	cannot_check: string | null;
+	/** The oldest oMLX release that can recommend a local model. */
+	required_version: string;
+	restores: string[];
+	/** Stopping removes the admin key CORSIA read to manage it. */
+	forgets_key: boolean;
+	/** Why CORSIA downloaded the starter model into their oMLX: it recommended none. */
+	starter_note?: string | null;
+	/** That starter model's name, which labels its background download. */
+	starter_name?: string | null;
 }
 
 /** The harness sources: Claude Code and Codex. */
@@ -66,14 +93,25 @@ export function anyReady(sources: ModelSource[]): boolean {
 	return sources.some(sourceIsReady);
 }
 
+export type LocalPickerRetry = 'starter' | 'setup' | 'settings';
+
 /** What the model picker's Local group says about a download in progress or a failed setup; null when neither. */
-export function localPickerStatus(source: ModelSource | undefined): { line: string; retry: 'starter' | 'setup' | null } | null {
+export function localPickerStatus(source: ModelSource | undefined): { line: string; retry: LocalPickerRetry | null } | null {
 	if (!source) return null;
+	const settings = source.settings_download;
+	if (settings && !settings.failed) {
+		return { line: `Downloading ${settings.name} · ${settings.percent ?? 0}%`, retry: null };
+	}
+	if (settings?.failed) return {
+		line: `Couldn't download ${settings.name}.`,
+		retry: settings.repository ? 'settings' : null,
+	};
 	if (source.setup_stage || source.setup_downloading) {
 		const percent = source.download_percent ?? null;
+		if (source.download_stalled) return { line: percent === null ? 'Download paused' : `Download paused at ${percent}%`, retry: null };
 		return { line: percent === null ? 'Downloading' : `Downloading ${percent}%`, retry: null };
 	}
-	if (source.setup_error) return { line: 'Setup failed', retry: source.setup_kind ?? null };
+	if (source.setup_error) return { line: 'Setup failed', retry: source.setup_kind === 'settings' ? null : source.setup_kind ?? null };
 	return null;
 }
 
@@ -90,12 +128,105 @@ export async function fetchSources(t: string): Promise<ModelSource[]> {
 	}));
 }
 
-export async function setupLocalSource(t: string): Promise<{ ok: boolean; in_progress?: boolean; stage?: string; message?: string; next_action?: string; progress?: string[] }> {
-	const response = await fetch('/api/providers/local/setup', {
+export type LocalSetupResult = {
+	ok: boolean;
+	in_progress?: boolean;
+	stage?: string;
+	message?: string;
+	next_action?: string;
+	progress?: string[];
+	code?: 'consent_required';
+};
+
+export type LocalModelRecommendation = {
+	name: string;
+	repository: string;
+	download_size_gb: number;
+	context_window: number;
+	/** Structured oMLX recommender facts; display wording belongs to localModelRecommendationMeta. */
+	quantization_bits?: number;
+	relative_speed?: number;
+	disk?: { state: 'ready' | 'insufficient' | 'unknown'; free_bytes?: number; required_bytes?: number };
+};
+
+export type LocalModelDownload = { repository: string; model: string; status?: 'available' | 'failed'; speed?: number | null; server_id?: string | null };
+
+export type LocalModelRecommendations = {
+	state?: string;
+	message?: string;
+	sections?: Record<string, LocalModelRecommendation[]>;
+	/** Durable Settings download records for the add-model sheet. */
+	downloads?: LocalModelDownload[];
+	/** Host facts returned with recommendations so the sheet names the same machine it evaluated. */
+	memory_gb?: number;
+	disk_free_gb?: number;
+};
+
+async function localRouteError(response: Response, fallback: string): Promise<Error> {
+	const body = await response.json().catch(() => null);
+	return new Error(typeof body?.detail === 'string' ? body.detail : fallback);
+}
+
+/** Settings' local-model recommendations, checked by oMLX for this computer. */
+export async function fetchLocalModelRecommendations(t: string): Promise<LocalModelRecommendations> {
+	const response = await fetch('/api/providers/local/recommendations', { headers: { Authorization: `Bearer ${t}` } });
+	if (!response.ok) throw await localRouteError(response, "Couldn't check which models fit this computer.");
+	return response.json();
+}
+
+/** Settings' cheap durable local-download projection. */
+export async function fetchLocalModelDownloads(t: string): Promise<LocalModelDownload[]> {
+	const response = await fetch('/api/providers/local/downloads', { headers: { Authorization: `Bearer ${t}` } });
+	if (!response.ok) throw await localRouteError(response, "Couldn't read local model downloads. Try again.");
+	return response.json();
+}
+
+/** Start a Settings-selected local model download. */
+export async function startLocalModelDownload(t: string, repository: string): Promise<void> {
+	const response = await fetch('/api/providers/local/downloads', {
+		method: 'POST',
+		headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ repository }),
+	});
+	if (!response.ok) throw await localRouteError(response, "Couldn't start the download. Try again.");
+}
+
+/** Delete a completed Settings-selected local model download. */
+export async function deleteLocalModelDownload(t: string, repository: string): Promise<void> {
+	const response = await fetch(`/api/providers/local/downloads/${encodeURIComponent(repository)}`, {
+		method: 'DELETE',
+		headers: { Authorization: `Bearer ${t}` },
+	});
+	if (!response.ok) throw await localRouteError(response, "Couldn't delete the download. Try again.");
+}
+
+export async function cancelLocalDownload(t: string): Promise<{ ok: boolean; cancelled: boolean }> {
+	const response = await fetch('/api/providers/local/cancel', {
 		method: 'POST', headers: { Authorization: `Bearer ${t}` },
 	});
-	if (!response.ok) throw new Error(`local setup ${response.status}`);
+	if (!response.ok) throw new Error(`local cancel ${response.status}`);
 	return response.json();
+}
+
+/** `manageExisting` is Welcome's choice for the person's own oMLX; leave it out where Welcome didn't show it. */
+export async function setupLocalSource(t: string, consentExisting = false, manageExisting?: boolean): Promise<LocalSetupResult> {
+	const response = await fetch('/api/providers/local/setup', {
+		method: 'POST', headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ consent_existing: consentExisting, manage_existing: manageExisting }),
+	});
+	const body = await response.json().catch(() => null);
+	const code = body?.detail?.code ?? body?.code;
+	if (response.status === 409 && code === 'consent_required') return { ok: false, code };
+	if (!response.ok) throw new Error(`local setup ${response.status}`);
+	return body;
+}
+
+/** Settings' Let CORSIA manage it or Stop managing, for the person's own oMLX; a refusal's message is safe to show. */
+export async function changeOwnOmlxManagement(t: string, action: 'start' | 'stop'): Promise<{ ok: boolean; message?: string }> {
+	const response = await fetch(`/api/providers/sources/omlx/management/${action}`, { method: 'POST', headers: { Authorization: `Bearer ${t}` } });
+	const body = await response.json().catch(() => null);
+	if (response.ok) return { ok: body?.ok !== false, message: typeof body?.message === 'string' ? body.message : undefined };
+	return { ok: false, message: typeof body?.detail === 'string' ? body.detail : undefined };
 }
 
 /** Re-run every source check once; concurrent callers share the server's run. */

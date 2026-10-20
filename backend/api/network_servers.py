@@ -10,20 +10,21 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
 from api.network_server_billing import billing_views, router as network_server_billing_router
 from api.network_server_jobs import router as network_server_jobs_router
 from api.network_server_lifecycle import router as network_server_lifecycle_router
 from api.key_session_guard import audit_key_write, require_person_for_key
+from api.locality_policy_guard import require_person_for_locality
 from api.providers import mask_key
+from api.network_daemon_models import (
+    list_daemon_models, notify_cached_model_loaded, notify_cached_model_unloaded,
+)
 from api.network_server_helpers import (
     _add_omlx_server,
     add_external_server,
-    list_daemon_models,
     update_external_server,
-    notify_cached_model_loaded,
-    notify_cached_model_unloaded,
 )
 from infra.auth import require_user
 from infra.db_async import run_in_db
@@ -32,6 +33,7 @@ from infra.product_events import emit_product_event
 from infra.state.ws import notify_models_changed
 from llm import network_discovery as nd
 from llm import network_endpoints as ne
+from llm.locality import server_locality
 from llm.providers import for_provider
 
 # Every route here, including the included job and lifecycle routers, can
@@ -55,11 +57,16 @@ _SECRET_META_KEYS = ("api_key", "token", "secret")
 def _public_server_view(row: dict, keys: dict[str, str] | None = None) -> dict:
     """Return ``row`` without credential-bearing metadata, annotated for the UI."""
     # Unreadable metadata is logged by the one parser; the view then shows none.
-    meta = nd.parse_server_metadata(str(row.get("id")), row.pop("metadata_json", None)) or {}
+    stored_metadata = row.pop("metadata_json", None)
+    meta = nd.parse_server_metadata(str(row.get("id")), stored_metadata) or {}
     for field in _SECRET_META_KEYS:
         meta.pop(field, None)
     stored = (keys if keys is not None else server_keys([str(row.get("id"))])).get(str(row.get("id")))
     row["metadata"] = meta
+    # Locality comes from the one owner; endpoints the route already loaded are not read again.
+    facts = server_locality({**row, "metadata_json": stored_metadata}, row.get("endpoints"))
+    row["private"] = facts.private
+    row["on_this_mac"] = facts.on_this_mac
     row["has_key"] = bool(stored)
     row["masked_key"] = mask_key(stored) if stored else ""
     return row
@@ -169,8 +176,7 @@ async def server_detail(server_id: str):
 
     network = await run_in_db(_network_view, server_id)
     return {
-        **_public_server_view(server),
-        **network,
+        **_public_server_view({**server, **network}),
         **(await run_in_db(billing_views, [server_id]))[server_id],
         "loaded_models": loaded,
         "available_models": disk,
@@ -266,6 +272,29 @@ async def remove_server(server_id: str):
 
 class EnabledBody(BaseModel):
     enabled: bool
+
+
+class PrivateBody(BaseModel):
+    private: StrictBool
+
+
+@router.put("/{server_id}/private")
+async def set_server_private(
+    server_id: str, body: PrivateBody, user: dict = Depends(require_user),
+):
+    """Set the person's private-network mark without replacing server metadata."""
+    require_person_for_locality(user, subject="server_private", name=server_id)
+    server = await run_in_db(nd.get_server, server_id)
+    if not server:
+        raise HTTPException(404, detail="Server not found")
+    await run_in_db(nd.set_server_metadata, server_id, private=body.private)
+    # The mark decides which rows a cloud-off project may use: refresh catalogs, resume held heads.
+    notify_models_changed()
+    emit_product_event(
+        "server", "private.changed",
+        properties={"server_id": server_id, "private": body.private},
+    )
+    return {"server_id": server_id, "private": body.private}
 
 
 @router.put("/{server_id}/enabled")

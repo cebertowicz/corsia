@@ -2,10 +2,10 @@
 
 A task held for the user with nothing to act on reads red while the user's
 queue is empty, so the plan looks stalled and no one moves it. An agent's
-``block_node`` on the user therefore names its ask. A real tradeoff is a raised
-decision, which already holds its source task (``plans.wait_causes``), so a
-block beside one is refused. Something to review or approve is a registered
-artifact the plan's thread owns: the block links it to the task with the existing
+``block_node`` on the user therefore names its ask. A choice answerable
+as asked, even one from a document, is a raised decision, which already holds
+its source task (``plans.wait_causes``), so a block beside one is refused.
+Anything the user must judge itself is a registered artifact the plan's thread owns: the block links it to the task with the existing
 ``attention`` role and raises it in the user's one attention pile. When the
 user clears that ask, the holds it placed clear and the agent is told
 (``cleared``). ``shared/planning/plans-simplify-2026-09-29.md``.
@@ -13,18 +13,20 @@ user clears that ask, the holds it placed clear and the agent is told
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 
+import plans.ask_endings as ask_endings
+import plans.operator_display_state as operator_display_state
 import plans.service as service
 from plans.node_states import open_user_block_sql
 
 NO_ASK = (
-    "work waits on the user only with something they can act on. For "
-    "something to review or approve, register the document or image and pass "
-    "its artifact id as ask_artifact_id. For a real tradeoff with nothing to "
-    "review, raise a decision on this task: it holds the task by itself, so do "
-    "not block it. Ask anything else in chat."
+    "work waits on the user only with something they can act on. For a choice "
+    "they can answer as asked, even one from a document, raise a decision "
+    "on this task: it holds the task by itself, so do not block it. If they "
+    "must judge the thing itself (a draft to send, a design, requirements), "
+    "register it and pass its artifact id as ask_artifact_id. Ask anything "
+    "else in chat."
 )
 DECISION_HOLDS = (
     "this task has an open decision, which already holds it until the user "
@@ -39,13 +41,32 @@ NOT_ASKABLE = (
 #: The user outcomes that end an ask, as the agent is told them. Defer keeps
 #: the task held.
 _ENDS_ASK = {
-    "answer": "answered", "acknowledge": "acknowledged",
-    "dismiss": "dismissed", "supersede": "replaced",
-    "retire": "retired",
+    "answer": ("resolved_by_user", "answered"), "acknowledge": ("resolved_by_user", "acknowledged"),
+    "dismiss": ("resolved_by_user", "dismissed"), "supersede": ("replaced", "replaced"),
+    "retire": ("retired", "retired"), "reject_with_reason": ("rejected", "rejected"),
+    "request_revision": ("revision_requested", "asked for a revision of"),
+    "answer_internally": ("answered_internally", "answered"),
 }
-_PROVENANCE = "user.ask_cleared"
+ASK_ENDINGS = ask_endings.ASK_ENDINGS
 #: What an agent may ask the user to review: the viewers that carry a review bar.
 ASKABLE_TYPES = ("document", "image")
+
+
+def askable_sql(alias: str) -> str:
+    """Whether the artifact row ``alias`` is a type a review request can name."""
+    return f"{alias}.type IN ({','.join(repr(kind) for kind in ASKABLE_TYPES)})"
+
+
+def ask_linked_sql(alias: str) -> str:
+    """Whether the artifact row ``alias`` is askable and linked to a task for attention.
+
+    Such an artifact's raised state belongs to its open requests
+    (``open_asks_sql``), never to its registry metadata.
+    """
+    return (
+        f"({askable_sql(alias)} AND EXISTS (SELECT 1 FROM plan_node_artifact_links al"
+        f" WHERE al.artifact_id={alias}.id AND al.role='attention'))"
+    )
 
 
 @dataclass(frozen=True)
@@ -59,21 +80,130 @@ class AskRelease:
     detail: dict
 
 
+#: Which open review requests ``open_asks_sql`` selects: ``?`` binds the
+#: artifact or the task; ``all`` binds nothing.
+_OPEN_ASKS_BY = {"artifact": " AND l.artifact_id=?", "node": " AND h.node_id=?", "all": ""}
+
+
+def open_asks_sql(columns: str, *, joins: str = "", by: str = "artifact") -> str:
+    """The one definition of open review requests: a SELECT of ``columns``.
+
+    A user block owned by the artifact on a task linked to it for attention.
+    It has no task-state filter: every way a task ends withdraws its requests
+    (``withdraw_node_asks``), so an open one always has a live task to release.
+    A deleted or purged owner's open tasks are closed before its plan is
+    archived (``delegation_child_lifecycle.end_open_work``), and migration 120
+    withdraws what older archives left open.
+    ``by`` picks one document's, one task's or every request (``_OPEN_ASKS_BY``);
+    ``l``, ``n``, ``p`` and ``h`` name the link, task, plan and hold. Each scope
+    reads ``idx_plan_holds_active_node``, never the clearance history.
+    """
+    return (
+        f"SELECT {columns} FROM plan_node_artifact_links l"
+        " JOIN plan_nodes n ON n.id = l.node_id"
+        " JOIN plans p ON p.id = n.plan_id"
+        " JOIN plan_node_holds h ON h.node_id = n.id"
+        f" {joins} WHERE l.role='attention'"
+        f" AND {open_user_block_sql('h')} AND h.owner_id=l.artifact_id{_OPEN_ASKS_BY[by]}"
+    )
+
+
 def raised_asks(db, artifact_id: str) -> list:
     """The user holds that wait on this artifact, newest first, with their asking agent."""
     return db.execute(
-        f"""SELECT h.id AS hold_id, h.reason, h.created_at AS raised_at,
-                  n.id AS node_id, p.owner_id AS asker_id, t.title AS asker_name
-             FROM plan_node_artifact_links l
-             JOIN plan_nodes n ON n.id = l.node_id
-             JOIN plans p ON p.id = n.plan_id
-             JOIN plan_node_holds h ON h.node_id = n.id
-             LEFT JOIN threads t ON t.id = p.owner_id AND p.owner_kind = 'thread'
-            WHERE l.artifact_id=? AND l.role='attention'
-              AND {open_user_block_sql('h')} AND h.owner_id=l.artifact_id
-            ORDER BY h.created_at DESC, h.id DESC""",
+        open_asks_sql(
+            "h.id AS hold_id, h.reason, h.created_at AS raised_at,"
+            " n.id AS node_id, p.owner_id AS asker_id, t.title AS asker_name",
+            joins="LEFT JOIN threads t ON t.id = p.owner_id AND p.owner_kind = 'thread'",
+        ) + " ORDER BY h.created_at DESC, h.id DESC",
         (artifact_id,),
     ).fetchall()
+
+
+def open_ask_artifacts(db, artifact_id: str | None = None) -> list[dict]:
+    """The open review requests, or one document's, oldest first, as ``open_asks_sql`` defines them.
+
+    Registry callers use this solely to derive their presentation; they never
+    own or mutate a hold.
+    """
+    sql = open_asks_sql(
+        "l.artifact_id, h.id AS hold_id", by="all" if artifact_id is None else "artifact",
+    ) + " ORDER BY h.created_at, h.id"
+    return [dict(row) for row in db.execute(sql, () if artifact_id is None else (artifact_id,))]
+
+
+def ask_attention_state_sql(artifact_id_sql: str, *, node_id_sql: str | None = None) -> str:
+    """Return the one SQL scalar for an ask's derived attention state.
+
+    ``node_id_sql`` keeps link projections scoped to their own asking node;
+    without it, the scalar summarizes every open ask for the artifact.
+    """
+    node_scope = "" if node_id_sql is None else f" AND ask.node_id={node_id_sql}"
+    asks = open_asks_sql("h.id AS hold_id, h.node_id, h.owner_id, p.state AS plan_state", by="all")
+    where = f"ask.owner_id={artifact_id_sql}{node_scope}"
+    return f"""CASE
+        WHEN EXISTS (
+            SELECT 1 FROM ({asks}) ask
+            LEFT JOIN plan_ask_deferrals deferred ON deferred.hold_id=ask.hold_id
+            WHERE {where} AND deferred.hold_id IS NULL
+              AND NOT {operator_display_state.ask_deferred_sql('ask.node_id', plan_state_sql='ask.plan_state')}
+        ) THEN 'raised'
+        WHEN EXISTS (SELECT 1 FROM ({asks}) ask WHERE {where}) THEN 'deferred'
+        ELSE 'cleared'
+    END"""
+
+
+def ask_attention_state(db, artifact_id: str) -> str | None:
+    """Return an ask-linked artifact's derived state, or ``None`` for non-asks."""
+    linked = db.execute(
+        "SELECT 1 FROM artifact_identities i WHERE i.id=?"
+        f" AND {ask_linked_sql('i')}", (artifact_id,),
+    ).fetchone()
+    if linked is None:
+        return None
+    state = db.execute(
+        f"SELECT {ask_attention_state_sql('?')}", (artifact_id, artifact_id),
+    ).fetchone()[0]
+    return str(state)
+
+
+def _open_ask_rows(db, artifact_id: str) -> list:
+    return db.execute(
+        open_asks_sql("h.id AS hold_id, n.plan_id", by="artifact"), (artifact_id,),
+    ).fetchall()
+
+
+def defer_asks(db, artifact_id: str) -> int:
+    """Defer every current ask hold for an artifact without revising its nodes.
+
+    Defers every open ask on the artifact and ignores hold_ids.
+    """
+    rows = _open_ask_rows(db, artifact_id)
+    now = service._now()
+    for row in rows:
+        db.execute(
+            """INSERT INTO plan_ask_deferrals (hold_id,deferred_at) VALUES (?,?)
+               ON CONFLICT(hold_id) DO UPDATE SET deferred_at=excluded.deferred_at""",
+            (str(row["hold_id"]), now),
+        )
+    _report_touched(db, rows)
+    return len(rows)
+
+
+def undefer_asks(db, artifact_id: str) -> int:
+    """Re-raise every current ask hold for an artifact without revising its nodes."""
+    rows = _open_ask_rows(db, artifact_id)
+    for row in rows:
+        db.execute("DELETE FROM plan_ask_deferrals WHERE hold_id=?", (str(row["hold_id"]),))
+    _report_touched(db, rows)
+    return len(rows)
+
+
+def _report_touched(db, rows: list) -> None:
+    if rows:
+        from plans import notifications
+
+        notifications.report_touched({str(row["plan_id"]) for row in rows}, db=db)
 
 
 def is_user_block(operation: str, params) -> bool:
@@ -106,93 +236,6 @@ def user_ask_hold_sql(event_id_expr: str, column: str) -> str:
         " AND ask.owner_kind='user' AND ask.owner_id IS NOT NULL)"
     )
 
-
-def ask_holds(db, hold_ids) -> dict[str, dict]:
-    """The user asks among ``hold_ids``, by hold id, read by primary key in two batches.
-
-    Each is ``{artifact_id, open, raised_in, answer}``: the artifact asked about,
-    whether the ask is still open, where the agent raised it (``turn_id``,
-    ``tool_invocation_id``, ``provider_call_id``; empty for a hold placed before
-    they were recorded) and what a clearing review recorded (``verdict``,
-    ``feedback_counts``; empty when it recorded none). A hold that is not a user
-    ask, or does not exist, is absent.
-    """
-    ids = list(dict.fromkeys(hold_ids))
-    if not ids:
-        return {}
-    marks = ",".join("?" * len(ids))
-    rows = db.execute(
-        f"""SELECT h.id, h.node_id, h.owner_id, h.clearance_event_id,
-                   {open_user_block_sql('h')} AS is_open
-              FROM plan_node_holds h
-             WHERE h.id IN ({marks}) AND h.kind='blocked' AND h.owner_kind='user'
-               AND h.owner_id IS NOT NULL""",
-        ids,
-    ).fetchall()
-    cleared = [r["clearance_event_id"] for r in rows if r["clearance_event_id"]]
-    # holds.clear_write keeps the release detail under its own ``detail`` key.
-    answers = {
-        event_id: detail
-        for event_id, payload in _event_payloads(db, cleared).items()
-        if isinstance(detail := payload.get("detail"), dict)
-    }
-    placed = _placed_raised_in(db, [r["id"] for r in rows], {r["node_id"] for r in rows})
-    return {
-        r["id"]: {
-            "artifact_id": r["owner_id"],
-            "open": bool(r["is_open"]),
-            "raised_in": placed.get(r["id"], {}),
-            "answer": {
-                k: v for k, v in answers.get(r["clearance_event_id"], {}).items()
-                if k in ("verdict", "feedback_counts")
-            },
-        }
-        for r in rows
-    }
-
-
-def _event_payloads(db, event_ids: list[str]) -> dict[str, dict]:
-    if not event_ids:
-        return {}
-    marks = ",".join("?" * len(event_ids))
-    found = {}
-    for row in db.execute(
-        f"SELECT id, payload_json FROM plan_node_events WHERE id IN ({marks})", event_ids,
-    ):
-        payload = _decoded(row["payload_json"])
-        if payload is not None:
-            found[row["id"]] = payload
-    return found
-
-
-def _decoded(raw) -> dict | None:
-    try:
-        payload = json.loads(raw)
-    except (TypeError, ValueError):
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _placed_raised_in(db, hold_ids: list[str], node_ids) -> dict[str, dict]:
-    """Where each hold was raised, from its ``hold_placed`` event, found by the task's event index."""
-    if not node_ids:
-        return {}
-    marks = ",".join("?" * len(node_ids))
-    wanted = set(hold_ids)
-    found: dict[str, dict] = {}
-    for row in db.execute(
-        f"""SELECT payload_json FROM plan_node_events
-             WHERE node_id IN ({marks}) AND event='hold_placed'""",
-        sorted(node_ids),
-    ):
-        payload = _decoded(row["payload_json"])
-        if payload is None or payload.get("hold_id") not in wanted:
-            continue
-        raised_in = payload.get("raised_in")
-        found[payload["hold_id"]] = {
-            k: v for k, v in raised_in.items() if isinstance(v, str) and v
-        } if isinstance(raised_in, dict) else {}
-    return found
 
 
 def require(db, plan, node_id: str, params, actor) -> str | None:
@@ -240,17 +283,36 @@ def require(db, plan, node_id: str, params, actor) -> str | None:
 
 
 def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenance: str) -> None:
-    """Link the ask to its task and put it in the user's attention pile."""
+    """Link an ask to its task; its open hold determines pile visibility."""
     from plans import artifact_links
-    from registry import attention
 
     artifact_links.link(
         node_id, artifact_id, "attention", actor_id=actor_id, provenance=provenance, db=db,
     )
-    attention.raise_attention(artifact_id, db=db)
 
 
-def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | None = None) -> int:
+def withdraw_node_asks(
+    db, node_id: str, *, actor_id: str | None, provenance: str,
+) -> int:
+    """Withdraw the open asks a terminal or archived task no longer owns."""
+    from plans import holds
+
+    rows = db.execute(
+        open_asks_sql("h.id AS hold_id", by="node") + " ORDER BY h.created_at, h.id",
+        (node_id,),
+    ).fetchall()
+    for row in rows:
+        holds.clear_write(
+            node_id, str(row["hold_id"]), expected_kind="blocked", actor_id=actor_id,
+            provenance=provenance, detail=ask_endings.detail(why="task_ended", actor_id=actor_id), db=db,
+        )
+    return len(rows)
+
+
+def cleared(
+    artifact_id: str, outcome: str, *, db=None, release: AskRelease | None = None,
+    released_executors: set[str] | None = None,
+) -> int:
     """Release the tasks this ask held once its attention lifecycle ends.
 
     Returns how many holds cleared. Idempotent: a second clear finds none.
@@ -262,115 +324,13 @@ def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | No
     if outcome not in _ENDS_ASK:
         return 0
     with service._connection(db) as connection, service._write(connection):
-        return _release(
-            connection, artifact_id, _ENDS_ASK[outcome],
-            retired=outcome == "retire", release=release,
+        why, wake_verb = _ENDS_ASK[outcome]
+        from plans import user_ask_release
+
+        cleared_count, executors = user_ask_release.release(
+            connection, artifact_id, why, wake_verb=wake_verb,
+            retired=outcome == "retire", ask_release=release,
         )
-
-
-def _release(
-    db, artifact_id: str, done: str, *, retired: bool = False, release: AskRelease | None = None,
-) -> int:
-    from plans import admission_projection, holds, plan_wake
-    from plans.plan_events import append_owner_event
-    from plans.user_steering import CHANGE_KIND
-    from prompts import plan_wakes as wakes
-
-    rows = db.execute(
-        f"""SELECT h.id AS hold_id, n.id AS node_id, n.plan_id, n.kind, n.title,
-                  n.revision, n.executor_thread_id, n.owner_thread_id,
-                  p.owner_kind, p.owner_id,
-                  EXISTS (SELECT 1 FROM plan_node_holds other
-                          WHERE other.node_id=n.id AND other.id<>h.id
-                            AND other.cleared_at IS NULL) AS other_holds,
-                  i.title AS ask
-             FROM plan_node_artifact_links l
-             JOIN plan_nodes n ON n.id = l.node_id
-             JOIN plans p ON p.id = n.plan_id
-             JOIN plan_node_holds h ON h.node_id = n.id
-             JOIN artifact_identities i ON i.id = l.artifact_id
-            WHERE l.artifact_id=? AND l.role='attention'
-              AND {open_user_block_sql('h')} AND h.owner_id=l.artifact_id
-            ORDER BY h.created_at, h.id""",
-        (artifact_id,),
-    ).fetchall()
-    causes = [
-        holds.clear_write(
-            row["node_id"], row["hold_id"], expected_kind="blocked",
-            actor_id=None, provenance=_PROVENANCE, db=db,
-            detail=release.detail if release else None,
-        )
-        for row in rows
-    ]
-    executors = {row["hold_id"]: admission_projection.executor_of(row, row) for row in rows}
-    handoffs = _reconcile_for_askers(db, rows, executors)
-    for row, (cause_id, cause_at) in zip(rows, causes):
-        summary = _release_summary(row, done, retired=retired, release=release)
-        executor = executors[row["hold_id"]]
-        wake_id = None if executor is None else plan_wake.append(
-            db,
-            recipient=executor,
-            kind=plan_wake.ASK_RELEASED,
-            subject_id=str(row["node_id"]),
-            revision=int(row["revision"]),
-            about=str(row["hold_id"]),
-            plan_id=str(row["plan_id"]),
-            content=plan_wake.with_next(
-                db, str(row["plan_id"]), executor,
-                wakes.WAKE_ASK_RELEASED.format(summary=summary),
-                **handoffs.pop((str(row["plan_id"]), executor), {}),
-            ),
-            open_node_id=str(row["node_id"]),
-        )
-        append_owner_event(
-            db,
-            plan_id=str(row["plan_id"]),
-            event_id=cause_id,
-            actor_id=None,
-            event_type=CHANGE_KIND,
-            summary=summary,
-            details={
-                "node_id": str(row["node_id"]),
-                "action": "ask_cleared",
-                "ask_wake_id": wake_id,
-            },
-            created_at=cause_at,
-        )
-    return len(rows)
-
-
-def _reconcile_for_askers(db, rows, executors: dict) -> dict[tuple[str, str], dict]:
-    """Reconcile each plan an answer released, and return the askers' handoff facts.
-
-    The ask wake is the asker's result of this write, so reconcile is told not
-    to wake the asker again (``causing_executor``), and runs before the wake so
-    its next block is the state the asker returns to. Standing in for the
-    work-selected wake, the asker's first wake on each plan also carries what
-    that wake would have: its facts, keyed by plan and asker (``selected_fact``).
-    """
-    from plans import admission, plan_wake
-
-    handoffs: dict[tuple[str, str], dict] = {}
-    for plan_id in dict.fromkeys(str(row["plan_id"]) for row in rows):
-        causing = next(
-            executors[row["hold_id"]] for row in rows if str(row["plan_id"]) == plan_id
-        )
-        reconciled = admission.reconcile_plan(
-            plan_id, actor_id=None, provenance=_PROVENANCE, causing_executor=causing, db=db,
-        )
-        if causing is not None:
-            handoffs[(plan_id, causing)] = plan_wake.selected_fact(db, reconciled, causing)
-    return handoffs
-
-
-def _release_summary(row, done: str, *, retired: bool, release: AskRelease | None) -> str:
-    """Return the one-line answer the wake and its receipt carry."""
-    from prompts import plan_wakes as wakes
-
-    detail = release.detail if release is not None else {}
-    return wakes.ask_release_summary(
-        ask=str(row["ask"] or "your ask"), done=done, retired=retired,
-        kind=str(row["kind"]), title=str(row["title"]), node_id=str(row["node_id"]),
-        verdict=detail.get("verdict"), note=detail.get("note"),
-        other_holds=bool(row["other_holds"]),
-    )
+        if released_executors is not None:
+            released_executors.update(executors)
+        return cleared_count

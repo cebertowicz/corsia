@@ -10,12 +10,12 @@ from host_access.credential_sanitizer import CredentialSafeText, sanitize_creden
 from host_access.source_redaction import sanitize_source
 from infra.constants import READ_FILE_OUTPUT_CHAR_CAP
 from infra.db_async import run_in_db, run_off_db
+from infra.guidance_targets import guidance_target
 from tools.base import Tool
 from tools.filesystem_binary import open_bound_binary
 from tools.file_write_completion import (
     GUIDANCE_PARAMETERS,
     announce_published_write,
-    guidance_target,
     managed_write,
     save_guided_write_and_announce,
 )

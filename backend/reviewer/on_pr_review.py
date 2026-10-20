@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 import time
-from pathlib import Path
-from typing import Any, Literal, TypedDict
+from typing import Any
 
 from infra.config import WORKSPACE
 from infra.product_events import emit_product_event
@@ -19,12 +19,14 @@ from reviewer.reviewer_categories import (
     LABEL_REVIEW_LOCAL,
     LABEL_REVIEW_PARALLEL,
 )
+from reviewer.reviewer_events import emit_finding_events
 from reviewer.reviewer_exact_source import exact_review_diff
 from reviewer.reviewer_context import (
     ReviewerContextManifest,
     resolve_reviewer_context,
     reviewer_context_to_prompt_text,
     reviewer_standards_registry,
+    reviewer_version_digest,
 )
 from reviewer.reviewer_parser import parse_findings
 from reviewer.reviewer_runner import (
@@ -33,9 +35,8 @@ from reviewer.reviewer_runner import (
     configured_primary_label,
     run_cc_review,
 )
-from prompts.reviewer import build_reviewer_prompt
-from reviewer.prd_contract import PRD_DIR, load_approved_contract, prd_filename
-from reviewer.prd_map import prds_for_changed_paths
+from prompts.reviewer import build_reviewer_prompt, reviewer_prompt_version_text
+from reviewer.reviewer_prd_context import resolve_prd_contracts
 from reviewer.pr_handoff import (
     _PR_HANDOFF_MAX_CHARS,
     _PR_HANDOFF_TITLE_MAX_CHARS,
@@ -53,6 +54,12 @@ from reviewer.reviewer_threads import (
     build_review_history,
     classify_review_findings,
 )
+from reviewer.reviewer_types import (
+    ReviewComments,
+    ReviewerResult,
+    ReviewerVerdict,
+    reviewer_verdict,
+)
 
 log = logging.getLogger(__name__)
 
@@ -61,32 +68,16 @@ _PROJECT_ROOT = str(WORKSPACE / "projects" / "corsia" / "source" / "corsia")
 
 
 # UX/IA remains a separate screenshot-based vision-audit modality.
-_CODE_REVIEW_STANDARDS = ["development-doctrine", "eng-arch", "product"]
+_CODE_REVIEW_STANDARDS = ["development-doctrine", "eng-arch", "product", "copy"]
 
 
-class ReviewerVerdict(TypedDict):
-    """Terminal reviewer verdict delivered back to the PR owner."""
+@dataclass(frozen=True)
+class _ReviewContext:
+    """Reviewer prompt context and its stable standards attribution."""
 
-    verdict: Literal["clean", "code_fail"]
-    required_action: Literal["none", "approach_reset"]
-    summary: str
-    block_count: int
-    flag_count: int
-    nit_count: int
-    finding_count: int
-    model_label: str
-
-
-class ReviewerSkipped(TypedDict):
-    """Explicit non-review success result for override-skipped PRs."""
-
-    verdict: Literal["skipped"]
-    summary: str
-    model_label: str
-
-
-ReviewerResult = ReviewerVerdict | ReviewerSkipped
-ReviewComments = tuple[list[dict[str, Any]], list[dict[str, Any]]]
+    text: str
+    reviewer_version: str
+    reviewer_standards: list[str]
 
 
 def on_pr_review(event_type: str, payload: dict[str, Any]) -> ReviewerResult | None:
@@ -210,9 +201,9 @@ def _run_cc(
 
     diff = _review_diff(payload, head_sha)
 
-    context_text = _build_context(diff, pr_number, repo, payload=payload)
+    context = _build_context(diff, pr_number, repo, payload=payload)
     result = run_cc_review(
-        diff, context_text, pr_number, repo, head_sha,
+        diff, context.text, pr_number, repo, head_sha,
         working_dir=_PROJECT_ROOT, base_ref=base_ref,
         base_sha=_base_sha(payload),
         review_history=build_review_history(prior[0] + prior[1]),
@@ -224,6 +215,8 @@ def _run_cc(
     return _process_findings(
         raw_output, pr_number, repo, head_sha, label_used,
         fallback_file=next(iter(extract_changed_files_from_diff(diff)), ""),
+        reviewer_version=context.reviewer_version,
+        reviewer_standards=context.reviewer_standards,
     )
 
 
@@ -242,15 +235,17 @@ def _run_local(
     set_pending(repo, head_sha, "Review in progress (qwen3.6-27B Dense)")
     diff = _review_diff(payload, head_sha)
 
-    context_text = _build_context(diff, pr_number, repo, payload=payload)
+    context = _build_context(diff, pr_number, repo, payload=payload)
     prompt = build_reviewer_prompt(
-        diff, context_text, model_label="qwen3.6-27B Dense",
+        diff, context.text, model_label="qwen3.6-27B Dense",
         review_history=build_review_history(prior[0] + prior[1]),
     )
     raw_output = invoke_local_model(prompt)
     return _process_findings(
         raw_output, pr_number, repo, head_sha, "qwen3.6-27B Dense",
         fallback_file=next(iter(extract_changed_files_from_diff(diff)), ""),
+        reviewer_version=context.reviewer_version,
+        reviewer_standards=context.reviewer_standards,
     )
 
 
@@ -266,10 +261,10 @@ def _run_parallel(
 
     diff = _review_diff(payload, head_sha)
 
-    context_text = _build_context(diff, pr_number, repo, payload=payload)
+    context = _build_context(diff, pr_number, repo, payload=payload)
 
     cc_result = run_cc_review(
-        diff, context_text, pr_number, repo, head_sha,
+        diff, context.text, pr_number, repo, head_sha,
         working_dir=_PROJECT_ROOT, base_ref=base_ref,
         base_sha=_base_sha(payload),
         review_history=build_review_history(prior[0] + prior[1]),
@@ -278,7 +273,7 @@ def _run_parallel(
     local_output = None
     if is_27b_loaded():
         local_prompt = build_reviewer_prompt(
-            diff, context_text, model_label="qwen3.6-27B Dense",
+            diff, context.text, model_label="qwen3.6-27B Dense",
             review_history=build_review_history(prior[0] + prior[1]),
         )
         try:
@@ -299,32 +294,28 @@ def _run_parallel(
         return _process_findings(
             cc_result[0], pr_number, repo, head_sha, cc_result[1],
             fallback_file=next(iter(extract_changed_files_from_diff(diff)), ""),
+            reviewer_version=context.reviewer_version,
+            reviewer_standards=context.reviewer_standards,
         )
     return None
 
 
 def _process_findings(
     raw_output: str, pr_number: int, repo: str, head_sha: str, model_label: str,
-    *, fallback_file: str = "",
+    *,
+    fallback_file: str = "",
+    reviewer_version: str,
+    reviewer_standards: list[str],
 ) -> ReviewerVerdict:
     """Parse findings, dedup against prior review state, and post updates."""
     raw_findings = parse_findings(raw_output)
-    findings = prepare_findings_for_publication(
-        raw_findings, fallback_file=fallback_file,
+    findings = prepare_findings_for_publication(raw_findings, fallback_file=fallback_file)
+    required_action, summary, block_count, flag_count, nit_count = format_status_summary(
+        findings, model_label,
     )
-    required_action, summary, block_count, flag_count, nit_count = (
-        format_status_summary(findings, model_label)
+    emit_finding_events(
+        emit_product_event, raw_findings, pr_number, reviewer_version, reviewer_standards,
     )
-
-    for f in raw_findings:
-        emit_product_event(
-            "reviewer", "finding.created",
-            properties={
-                "pr_number": pr_number, "category": f["category"],
-                "severity": f["severity"], "file": f["file"],
-                "cited_section": f.get("cited_section"),
-            },
-        )
 
     # Publication uses a fresh snapshot after the potentially long model call;
     # the pre-run snapshot exists only to give the model bounded trajectory.
@@ -370,18 +361,22 @@ def _process_findings(
             "new_count": len(new_threads),
             "unchanged_count": unchanged_count,
             "resolved_count": len(resolve_replies),
+            "reviewer_version": reviewer_version,
+            "reviewer_standards": reviewer_standards,
         },
     )
-    return {
-        "verdict": verdict,
-        "required_action": required_action,
-        "summary": summary,
-        "block_count": block_count,
-        "flag_count": flag_count,
-        "nit_count": nit_count,
-        "finding_count": len(findings),
-        "model_label": model_label,
-    }
+    return reviewer_verdict(
+        verdict=verdict,
+        required_action=required_action,
+        summary=summary,
+        block_count=block_count,
+        flag_count=flag_count,
+        nit_count=nit_count,
+        finding_count=len(findings),
+        model_label=model_label,
+        reviewer_version=reviewer_version,
+        reviewer_standards=reviewer_standards,
+    )
 
 
 def _build_context(
@@ -390,52 +385,42 @@ def _build_context(
     repo: str,
     *,
     payload: dict[str, Any] | None = None,
-) -> str:
-    """Build standards, anti-pattern, and applicable approved-PRD context."""
-    manifest = ReviewerContextManifest(
-        anti_patterns=True,
-        standards=_CODE_REVIEW_STANDARDS,
-    )
-    resolved = resolve_reviewer_context(manifest, _WORKSPACE_ROOT)
-    _require_standards(resolved)
-    resolved.extend(_resolve_prd_contracts(diff, pr_number, repo))
+) -> _ReviewContext:
+    """Build prompt context and version from one resolved standards snapshot."""
+    manifest = ReviewerContextManifest(anti_patterns=True, standards=_CODE_REVIEW_STANDARDS)
+    standards = resolve_reviewer_context(manifest, _WORKSPACE_ROOT)
+    _require_standards(standards)
+    standards_text = reviewer_context_to_prompt_text(standards)
+    reviewer_standards = _resolved_standard_keys(standards)
+    resolved = [*standards, *_resolve_prd_contracts(diff, pr_number, repo)]
     context_text = reviewer_context_to_prompt_text(resolved)
     handoff = _pr_handoff_context(payload)
-    return f"{context_text}\n\n{handoff}" if handoff else context_text
+    return _ReviewContext(
+        text=f"{context_text}\n\n{handoff}" if handoff else context_text,
+        reviewer_version=reviewer_version_digest(reviewer_prompt_version_text(), standards_text),
+        reviewer_standards=reviewer_standards,
+    )
 
+
+def _resolved_standard_keys(resolved: list[tuple[str, str]]) -> list[str]:
+    """Return registry keys represented by the resolved standards entries."""
+    registry = reviewer_standards_registry()
+    return [
+        key for key, relative_path in registry.items()
+        if any(path.endswith(relative_path) for path, _ in resolved)
+    ]
 
 
 def _resolve_prd_contracts(
     diff: str, pr_number: int, repo: str,
 ) -> list[tuple[str, str]]:
     """Resolve approved PRD contracts and report non-blocking coverage gaps."""
-    changed_files = extract_changed_files_from_diff(diff)
-    slugs = prds_for_changed_paths(changed_files, _WORKSPACE_ROOT)
-
-    out: list[tuple[str, str]] = []
-    for slug in slugs:
-        contract = load_approved_contract(slug, _WORKSPACE_ROOT)
-        if contract is not None:
-            prd_path = str(
-                Path(_WORKSPACE_ROOT) / PRD_DIR / prd_filename(slug)
-            )
-            out.append((prd_path, contract))
-
-    if not out:
-        log.info(
-            "reviewer: PR #%d — no approved PRD contract for changed paths "
-            "(coverage gap; running on standards + anti-patterns)", pr_number,
-        )
-        emit_product_event(
-            "reviewer", "prd_coverage_gap",
-            properties={
-                "pr_number": pr_number,
-                "repo": repo,
-                "mapped_slugs": slugs,
-                "changed_file_count": len(changed_files),
-            },
-        )
-    return out
+    contracts = resolve_prd_contracts(
+        diff, pr_number, repo, _WORKSPACE_ROOT, emit=emit_product_event,
+    )
+    if not contracts:
+        log.info("reviewer: PR #%d — no approved PRD contract for changed paths", pr_number)
+    return contracts
 
 
 def _require_standards(resolved: list[tuple[str, str]]) -> None:

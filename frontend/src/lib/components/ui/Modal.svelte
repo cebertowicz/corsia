@@ -134,7 +134,7 @@
 		background: var(--glass-scrim);
 		z-index: 100;
 		display: flex; align-items: center; justify-content: center;
-		padding-top:    max(32px, env(safe-area-inset-top, 0px) + 8px);
+		padding-top:    max(32px, var(--safe-top) + 8px);
 		padding-bottom: max(32px, env(safe-area-inset-bottom, 0px) + 8px);
 		padding-left: 32px; padding-right: 32px;
 	}
@@ -157,7 +157,6 @@
 	.head {
 		display: flex; align-items: center; gap: 12px;
 		padding: 18px 22px;
-		border-bottom: 1px solid var(--border-subtle);
 	}
 	.title {
 		font-size: var(--text-body); font-weight: 600; flex: 1;
@@ -169,22 +168,22 @@
 	.body { padding: 18px 22px; overflow-y: auto; flex: 1; }
 
 	.foot {
-		display: flex; align-items: center; gap: 8px;
+		display: flex; align-items: center; justify-content: flex-end; gap: 8px;
 		padding: 14px 22px;
-		border-top: 1px solid var(--border-subtle);
 	}
 
 	@media (max-width: 720px) {
 		.bg {
-			padding-top:    max(12px, env(safe-area-inset-top, 0px) + 4px);
+			padding-top:    max(12px, var(--safe-top) + 4px);
 			padding-bottom: max(12px, env(safe-area-inset-bottom, 0px) + 4px);
 			padding-left: 12px; padding-right: 12px;
 		}
-		.modal { max-height: 92vh; max-height: 92dvh; }
+		/* Fill only the room inside the safe-area padding, so the footer clears the home indicator. */
+		.modal { max-height: 100%; }
 	}
 	@media (max-width: 480px) {
 		.bg {
-			padding-top:    max(8px, env(safe-area-inset-top, 0px));
+			padding-top:    max(8px, var(--safe-top));
 			padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
 			padding-left: 8px; padding-right: 8px;
 		}

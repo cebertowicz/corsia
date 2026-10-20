@@ -22,14 +22,15 @@ def checkpoint_usage(volume: object) -> dict[str, int | None] | None:
 class CodexCheckpointCapture:
     """The output of one disposable process, including unfinished text deltas."""
 
-    def __init__(self, *, on_usage=None, model="") -> None:
+    def __init__(self, *, on_usage=None) -> None:
         self.terminal: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self.bodies: list[str] = []
         self.partial = ""
         self.usage: dict[str, int | None] | None = None
         self.calls: dict[tuple[str, int], dict[str, Any]] = {}
         self.diagnostic: str | None = None
-        self.on_usage, self.model = on_usage, model
+        # The fork reports no model of its own; the writer keys the target's expected one.
+        self.on_usage = on_usage
         self.published: dict[tuple[str, int], dict[str, Any]] = {}
 
     async def publish_calls(self) -> None:
@@ -37,7 +38,7 @@ class CodexCheckpointCapture:
         if self.on_usage is not None:
             for key, measured in tuple(self.calls.items()):
                 if self.published.get(key) != measured:
-                    await self.on_usage(f"{key[0]}:{key[1]}", self.model, measured)
+                    await self.on_usage(f"{key[0]}:{key[1]}", None, measured)
                     self.published[key] = dict(measured)
 
     def record_call(self, turn_id: str, ordinal: int, usage: dict[str, Any]) -> None:
@@ -72,7 +73,7 @@ class CodexCheckpointCapture:
         elif kind == "result":
             self.usage = checkpoint_usage(event.get("token_volume")) or self.usage
             if not self.calls and self.on_usage is not None:
-                await self.on_usage("aggregate", self.model, self.usage or {})
+                await self.on_usage("aggregate", None, self.usage or {})
             if not self.terminal.done():
                 self.terminal.set_result(None)
         elif kind == "turn_failed":

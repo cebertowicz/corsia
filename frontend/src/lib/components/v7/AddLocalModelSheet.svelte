@@ -1,0 +1,129 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { token } from '$lib/stores/auth';
+	import { get } from 'svelte/store';
+	import { fetchLocalModelRecommendations, startLocalModelDownload, type LocalModelRecommendation } from '$lib/conductorSources';
+	import { localModelRecommendationMeta } from '$lib/stores/localModelRecommendationMeta';
+	import Modal from '$lib/components/ui/Modal.svelte';
+	import ListRow from '$lib/components/ui/ListRow.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
+	import Spinner from '$lib/components/ui/Spinner.svelte';
+
+	interface Props { onClose: () => void; onStarted?: () => void; }
+	const { onClose, onStarted }: Props = $props();
+	let loading = $state(true);
+	let error = $state('');
+	let sections = $state<Record<string, LocalModelRecommendation[]>>({});
+	let downloaded = $state(new Set<string>());
+	let memoryGb = $state<number | null>(null);
+	let diskFreeGb = $state<number | null>(null);
+	let starting = $state('');
+
+	async function load() {
+		loading = true; error = '';
+		const t = get(token);
+		if (!t) {
+			error = "Couldn't check which models fit this computer.";
+			loading = false;
+			return;
+		}
+		try {
+			const body = await fetchLocalModelRecommendations(t);
+			if (body?.state !== 'ready') throw new Error(body?.message ?? "Couldn't check which models fit this computer.");
+			sections = body.sections && typeof body.sections === 'object' ? body.sections : {};
+			downloaded = new Set((body.downloads ?? []).filter((entry) => entry.status === 'available').map((entry) => entry.repository));
+			memoryGb = typeof body.memory_gb === 'number' ? body.memory_gb : null;
+			diskFreeGb = typeof body.disk_free_gb === 'number' ? body.disk_free_gb : null;
+		} catch (caught) { error = caught instanceof Error ? caught.message : "Couldn't check which models fit this computer."; }
+		finally { loading = false; }
+	}
+	async function download(repository: string) {
+		const t = get(token);
+		if (!t) {
+			error = "Couldn't start the download. Try again.";
+			return;
+		}
+		starting = repository;
+		try {
+			await startLocalModelDownload(t, repository);
+			onStarted?.(); onClose();
+		} catch (caught) { error = caught instanceof Error ? caught.message : "Couldn't start the download. Try again."; }
+		finally { starting = ''; }
+	}
+	function diskNeed(model: LocalModelRecommendation): string | null {
+		if (model.disk?.state !== 'insufficient') return null;
+		const required = model.disk.required_bytes;
+		return required ? `Needs ${Math.ceil(required / 1000 ** 3)} GB of disk` : 'Needs more disk space';
+	}
+
+	// oMLX recommender section keys; `unlock` (models needing more memory) is not offered.
+	const SECTION_HEADINGS: Record<string, string | null> = {
+		best: null, faster: 'Faster', precise: 'More precise', bigger: 'Larger, less room for context',
+	};
+	const shownSections = $derived(Object.entries(sections).filter(([section, models]) => section !== 'unlock' && models.length));
+
+	function sectionHeading(section: string): string | null {
+		return section in SECTION_HEADINGS ? SECTION_HEADINGS[section] : 'More models';
+	}
+
+	function meta(model: LocalModelRecommendation): string[] {
+		return localModelRecommendationMeta(model);
+	}
+
+	function joinedMeta(model: LocalModelRecommendation): string[] {
+		// Keep separators with their neighbours so narrow sheets never strand a dot at line end.
+		return [meta(model).join('\u00a0·\u00a0')];
+	}
+
+	onMount(load);
+</script>
+
+<Modal title="Add model" size="sm" {onClose}>
+	{#if loading}
+		<div class="notice"><Spinner /> Checking which models fit this computer…</div>
+	{:else if error}
+		<div class="notice error">{error}<Button size="sm" variant="secondary" onclick={load}>Try again</Button></div>
+	{:else if shownSections.length === 0}
+		<div class="notice">No recommended models fit this computer.</div>
+	{:else}
+		<div class="section-line">Picked for this computer{memoryGb === null ? '' : ` · ${memoryGb} GB`}{diskFreeGb === null ? '' : ` · ${diskFreeGb} GB disk free`}</div>
+		{#each shownSections as [section, models]}
+			{#if models.length}
+				{#if sectionHeading(section)}<h3>{sectionHeading(section)}</h3>{/if}
+				{#each models as model, index (model.repository)}
+					<div class:insufficient={Boolean(diskNeed(model))}>
+					<ListRow meta={joinedMeta(model)}>
+						{#snippet children()}
+							<span class="model-name">{model.name}</span>
+							{#if section === 'best' && index === 0}<span class="recommended">Recommended</span>{/if}
+							<!-- Disk space appears below the canonical meta row. -->
+						{/snippet}
+						{#snippet detail()}
+							{#if diskNeed(model)}<span class="disk-need">{diskNeed(model)}</span>{/if}
+						{/snippet}
+						{#snippet actions()}
+							{#if downloaded.has(model.repository)}
+								<span class="downloaded">Downloaded</span>
+							{:else if !diskNeed(model)}
+								<Button size="sm" variant={section === 'best' && index === 0 ? 'primary' : 'chip'} loading={starting === model.repository} disabled={Boolean(starting)} onclick={() => download(model.repository)}>Download</Button>
+							{/if}
+						{/snippet}
+					</ListRow>
+					</div>
+				{/each}
+			{/if}
+		{/each}
+	{/if}
+</Modal>
+
+<style>
+	.notice { display: flex; align-items: center; gap: var(--space-2); color: var(--text-secondary); padding: var(--space-3) 0; }
+	.notice.error { color: var(--red); justify-content: space-between; }
+	.section-line { color: var(--text-secondary); font-size: var(--text-footnote); margin: 0 0 var(--space-2); }
+	h3 { color: var(--text-tertiary); font-size: var(--text-caption); font-weight: 600; margin: var(--space-3) 0 var(--space-2); }
+	.model-name { color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-regular); }
+	.recommended { display: inline; color: var(--accent-text); font-size: var(--text-footnote); font-weight: 600; margin-left: var(--space-1); }
+	.disk-need { display: block; color: var(--text-tertiary); font-size: var(--text-footnote); margin-top: var(--space-1); }
+	.insufficient { opacity: 0.58; }
+	.downloaded { color: var(--text-secondary); font-size: var(--text-footnote); }
+</style>

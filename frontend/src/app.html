@@ -18,8 +18,9 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
 	<meta name="mobile-web-app-capable" content="yes" />
 	<meta name="apple-mobile-web-app-capable" content="yes" />
-	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-	<meta name="theme-color" content="#0a0a0b" id="theme-color-meta" />
+	<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+	<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" class="theme-color-meta" />
+	<meta name="theme-color" content="#0a0a0b" media="(prefers-color-scheme: dark)" class="theme-color-meta" />
 	<link rel="manifest" href="/manifest.json" />
 	<link rel="icon" type="image/png" sizes="192x192" href="/icons/corsia-192.png" />
 	<link rel="icon" type="image/png" sizes="512x512" href="/icons/corsia-512.png" />
@@ -30,10 +31,10 @@
 
 		(function () {
 			const COLORS = { dark: '#0a0a0b', light: '#ffffff' };
-			const themeMeta = document.getElementById('theme-color-meta');
+			const themeMetas = Array.from(document.querySelectorAll('meta.theme-color-meta'));
 			function apply() {
 				const t = document.documentElement.dataset.theme || 'dark';
-				if (themeMeta && COLORS[t]) themeMeta.setAttribute('content', COLORS[t]);
+				if (COLORS[t]) themeMetas.forEach((m) => m.setAttribute('content', COLORS[t]));
 			}
 			apply();
 			new MutationObserver(apply).observe(document.documentElement, {
@@ -42,10 +43,10 @@
 
 			window.addEventListener('pageshow', function (e) {
 				if (!e.persisted) return;
-				const cur = themeMeta && themeMeta.getAttribute('content');
-				if (themeMeta && cur) {
-					themeMeta.setAttribute('content', '#000000');
-					requestAnimationFrame(() => themeMeta.setAttribute('content', cur));
+				const cur = COLORS[document.documentElement.dataset.theme || 'dark'];
+				if (themeMetas.length && cur) {
+					themeMetas.forEach((m) => m.setAttribute('content', '#000000'));
+					requestAnimationFrame(() => themeMetas.forEach((m) => m.setAttribute('content', cur)));
 				}
 				document.documentElement.setAttribute('data-resuming', '1');
 				requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -57,8 +58,6 @@
 	%sveltekit.head%
 </head>
 <body>
-	<!-- iOS 27 colors an installed app's status bar from a real fixed element at the top edge; without one it lays its own blur over the header. -->
-	<div id="status-bar-color" aria-hidden="true"></div>
 	%sveltekit.body%
 	<script>
 		if ('serviceWorker' in navigator) {

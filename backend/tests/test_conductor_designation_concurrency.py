@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 import sqlite3
 import threading
@@ -104,7 +110,7 @@ def test_concurrent_designation_invalidates_the_conductor_each_write_replaced(
     tmp_path,
     scope,
 ):
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
 
     db_path = tmp_path / "designation.db"
     control = _connection(db_path)
@@ -152,7 +158,7 @@ def test_concurrent_designation_invalidates_the_conductor_each_write_replaced(
         control.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
             (
-                "workspace_conductor_session_id",
+                "corsia_agent_thread_id",
                 json.dumps({"session_id": "old"}),
                 "t",
             ),
@@ -169,7 +175,7 @@ def test_concurrent_designation_invalidates_the_conductor_each_write_replaced(
         wrapped = _ReadBarrierConnection(connection, read_barrier, scope)
         try:
             start_barrier.wait(timeout=2)
-            results[thread_id] = set_conductor(scope, thread_id, db=wrapped)
+            results[thread_id] = set_scope_coordinator(scope, thread_id, db=wrapped)
         except BaseException as error:
             failures.append(error)
         finally:
@@ -189,7 +195,7 @@ def test_concurrent_designation_invalidates_the_conductor_each_write_replaced(
     assert results == {"writer-a": True, "writer-b": True}
     if scope == "workspace":
         value = control.execute(
-            "SELECT value FROM settings WHERE key='workspace_conductor_session_id'"
+            "SELECT value FROM settings WHERE key='corsia_agent_thread_id'"
         ).fetchone()["value"]
         final_conductor = json.loads(value)["session_id"]
     else:
@@ -218,7 +224,7 @@ def test_concurrent_designation_invalidates_the_conductor_each_write_replaced(
 def test_caller_deferred_transaction_acquires_write_lock_before_designation_read(
     tmp_path,
 ):
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
 
     connection = _connection(tmp_path / "caller-transaction.db")
     connection.executescript(
@@ -259,7 +265,7 @@ def test_caller_deferred_transaction_acquires_write_lock_before_designation_read
     connection.execute(
         "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
         (
-            "workspace_conductor_session_id",
+            "corsia_agent_thread_id",
             json.dumps({"session_id": "old"}),
             "t",
         ),
@@ -275,7 +281,7 @@ def test_caller_deferred_transaction_acquires_write_lock_before_designation_read
     contender.execute("PRAGMA busy_timeout=0")
     wrapped = _RecordingConnection(connection, contender)
 
-    assert set_conductor("workspace", "new", db=wrapped)
+    assert set_corsia_agent("new", db=wrapped)
 
     lock_index = wrapped.statements.index("update settings set value=value where 0")
     read_index = next(

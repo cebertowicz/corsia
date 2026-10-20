@@ -213,6 +213,8 @@ def test_admission_prices_only_rows_with_proven_buckets_and_contract(isolated_db
     assert result["not_api_priced_records"] == 2
     assert {item["kind"]: item["records"] for item in result["excluded"]} == {
         "contract_unproven": 3, "tokens_unreported": 1, "tokens_inconsistent": 1, "no_list_price": 1}
+    no_list_price = next(item for item in result["excluded"] if item["kind"] == "no_list_price")
+    assert no_list_price["models"] == [{"label": "opus (version not recorded)", "records": 1}]
     assert period["per_outcome"] == pytest.approx(period["dollars"] / 2)
 
 
@@ -337,16 +339,45 @@ def test_a_record_is_classified_by_its_resolved_model_identity_not_its_raw_selec
     assert result["excluded"] == []
 
 
+def test_checkpoint_and_turn_resolve_and_price_the_same_concrete_claude_identity(isolated_db):
+    from api.cost_identity import IdentityResolver
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        resolve = IdentityResolver(db)
+        checkpoint = resolve({"model": "claude-code/claude-sonnet-5-5"})
+        turn = resolve({
+            "model": "claude-code/sonnet", "manifest_harness": "claude-code",
+            "manifest_model": "claude-sonnet-5-5", "manifest_source": "catalog",
+        })
+    finally:
+        db.close()
+    assert checkpoint.key == turn.key == "claude-code/claude-sonnet-5-5"
+    assert price_identity(checkpoint.key) == "claude-sonnet-5-5"
+
+
 RECEIPT_ID = "0123456789abcdef01234567"  # the 24-hex shape of turn-usage and checkpoint receipts
 
 
 @pytest.mark.parametrize(
     ("usage_id", "model", "source", "cache_read", "expected"),
     [
-        (RECEIPT_ID, "codex/gpt-6.1-sol", CODEX, 5, "ok"),                     # post-contract writer, proven by id shape
+        (RECEIPT_ID, "codex/gpt-6.1-sol", CODEX, 5, "ok"),                     # post-contract turn writer, proven by id shape
         (RECEIPT_ID, "codex/gpt-6.1-sol", CODEX, 0, "ok"),
-        ("8f3a9c1e-b2d", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),  # direct uuid4()[:12] write: era unknown
+        (RECEIPT_ID, "codex/gpt-6.1-sol", "checkpoint", 5, "ok"),             # post-contract checkpoint writer
+        (RECEIPT_ID, "claude-code/claude-sonnet-5-5", "checkpoint", 5, "ok"),
+        (RECEIPT_ID, "claude-code/claude-sonnet-5-5", "host_access_action_review", 5, "ok"),
+        (RECEIPT_ID, "codex/gpt-6.1-sol", "host_access_application_review", 5, "ok"),
+        ("direct-id", "external@provider/model", "checkpoint", 0, "ok"),  # zero-cache native checkpoint remains admitted
+        ("direct-id", "claude-sonnet-4-5", "host_access_action_review", 0, "ok"),  # bare Claude identity has no receipt contract
+        ("8f3a9c1e-b2d", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),  # old direct writer: format proves nothing
+        ("8f3a9c1e-b2d", "gpt-5", CODEX, 0, "contract_unproven"),  # a Codex-source row stays unproven whatever its model
+        ("8f3a9c1e-b2d", "claude-code/claude-sonnet-5-5", "host_access_action_review", 5, "ok"),  # reviewer copied disjoint buckets since its first row
+        ("8f3a9c1e-b2d", "codex/gpt-6.1-sol", "host_access_application_review", 5, "ok"),  # a fully reported Codex reviewer row is from_codex
+        ("8f3a9c1e-b2d", "claude-code/claude-sonnet-5-5", "conversation", 5, "contract_unproven"),
         ("0123456789ABCDEF01234567", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),  # not a lowercase hex digest
+        ("0123456789ABCDEF01234567", "codex/gpt-6.1-sol", "checkpoint", 0, "contract_unproven"),
         ("0123456789abcdef0123456", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),   # wrong length
         (None, "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),
         (RECEIPT_ID, "codex/gpt-6.1-sol", CC, 0, "contract_unproven"),         # contradictory source: still Unknown

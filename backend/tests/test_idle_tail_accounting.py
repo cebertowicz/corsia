@@ -108,6 +108,7 @@ def test_large_tail_reaches_admission(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda *_a, **_k: SimpleNamespace(
             harness="claude-code",
             available=True,
+            availability_reason=None,
             context_window=200_000,
             catalog_id=CC_MODEL,
             expected_reported_model=None,

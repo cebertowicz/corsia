@@ -18,11 +18,11 @@ export type ScopeGroupId = (typeof SCOPE_GROUPS)[number]['id'];
 
 /** Categorical colours for the bar and the group labels; names and counts carry the meaning too. */
 export const GROUP_COLOR: Record<ScopeGroupId, string> = {
-	system: 'var(--violet)',
+	system: 'var(--purple)',
 	workspace: 'var(--sky)',
 	project: 'var(--teal)',
-	agent: 'var(--violet-2)',
-	thread: 'var(--violet-2)',
+	agent: 'var(--purple-2)',
+	thread: 'var(--purple-2)',
 	tools: 'var(--orange)',
 	history: 'var(--green)',
 	other: 'var(--text-tertiary)',
@@ -99,6 +99,7 @@ interface ListedSkill {
 	scopeId: string;
 	role: string;
 	trial: boolean;
+	listed: string;
 	tokens: number | null;
 }
 
@@ -120,6 +121,7 @@ function listedSkills(metadata: Record<string, unknown> | undefined): ListedSkil
 			scopeId: text(row.scope_id),
 			role: text(row.role),
 			trial: typeof row.lesson_id === 'string' && row.lesson_id.length > 0,
+			listed: text(row.listed),
 			tokens,
 		});
 	}
@@ -142,7 +144,11 @@ export function expandSkillsIndex(
 	if (listed === null || listed.some((skill) => skill.tokens === null)) return null;
 	const rows: ContextSheetSourceRow[] = listed.map((skill) => {
 		const category = scopeName(skill.scope, isAgent);
-		const tags = [...(skill.role ? ['agents only'] : []), ...(skill.trial ? ['trial'] : [])];
+		const tags = [
+			...(skill.role ? ['agents only'] : []),
+			...(skill.trial ? ['trial'] : []),
+			...(skill.listed === 'name' ? ['name only'] : []),
+		];
 		return {
 			...index,
 			id: `skill:${skill.scope}:${skill.scopeId}:${skill.role}:${skill.name}`,

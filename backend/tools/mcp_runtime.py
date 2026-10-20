@@ -9,86 +9,258 @@ next explicit start: a reload that lands during or after shutdown opens nothing.
 """
 
 import asyncio
+import time
 from contextlib import AsyncExitStack
 
+from loguru import logger
+
 from infra import state
-from tools.mcp import connect_mcp_servers
+from infra.db_async import run_in_db
+from infra.time import utc_now_iso
+from tools.mcp import connect_mcp_servers, mcp_failure_class
+from tools.managed_runtime import ManagedRuntimeDownloadError
 from tools.registry import ToolRegistry
 
 _registry = ToolRegistry()
-_stack: AsyncExitStack | None = None
-_connected: set[str] = set()
+# Connections are tracked per durable connected-app id below.
 _stopped = False
 _lock = asyncio.Lock()
+_app_stacks: dict[str, AsyncExitStack] = {}
+_app_tools: dict[str, set[str]] = {}
+_app_servers: dict[str, str] = {}
+_app_configs: dict[str, tuple[str, dict[str, object]]] = {}
+_app_states: dict[str, dict[str, object]] = {}
+_reconnect_at: dict[str, float] = {}
 
 
-async def start_mcp_runtime(config: dict) -> dict[str, str]:
-    """Create the one shared session set at startup, including an empty config."""
-    global _stack, _stopped
-    async with _lock:
-        if _stack is not None:
-            raise RuntimeError("MCP runtime already started")
-        _stopped = False
-        _stack = AsyncExitStack()
-        try:
-            return await _connect_new(config)
-        except BaseException:
-            await _close()
-            raise
+class MCPReconnectRateLimitError(RuntimeError):
+    """A connected app was already restarted within its ten-second window."""
 
 
-async def _connect_new(config: dict) -> dict[str, str]:
-    """Connect configured servers that are not yet connected into the live set."""
-    pending = {name: server for name, server in config.items() if name not in _connected}
-    errors = await connect_mcp_servers(pending, _registry, _stack)
-    _connected.update(name for name in pending if name not in errors)
-    return errors
+# Connected-app runtime below is the sole MCP launch path. Legacy settings-backed
+# start/reload helpers were intentionally removed with the connected-app migration.
+
+async def _publish_app_state(app_id: str, result: dict[str, object]) -> None:
+    """Store and passively publish a changed app runtime state once."""
+    previous = _app_states.get(app_id)
+    _app_states[app_id] = result
+    if previous is not None and (
+        previous.get("state"), previous.get("failure_class"), previous.get("tool_count"),
+    ) == (
+        result.get("state"), result.get("failure_class"), result.get("tool_count"),
+    ):
+        return
+    from connections.app_notices import record_runtime_app_state
+
+    await run_in_db(record_runtime_app_state, app_id, result)
 
 
-async def reload_mcp_runtime(config: dict) -> dict[str, str]:
-    """Add newly configured servers without disturbing sessions already in use.
+async def _prepare_managed_runtime(config: dict) -> None:
+    """Fetch a missing approved stdio runtime before the MCP connect deadline starts."""
+    command = config.get("command")
+    if not isinstance(command, str):
+        return
+    configured_env = config.get("env")
+    path = configured_env.get("PATH") if isinstance(configured_env, dict) else None
+    if path is not None and not isinstance(path, str):
+        path = None
+    from tools.managed_runtime import ensure_runtime, runtime_fetch_plan
 
-    Existing sessions stay open, so no in-flight call loses its session and the
-    drain contract in ``stop_mcp_runtime`` is untouched. After a stop nothing is
-    opened: each server not yet connected reports that the runtime is stopped.
+    plan = runtime_fetch_plan(command, path=path)
+    if plan is not None:
+        kind, _pin = plan
+        await asyncio.to_thread(ensure_runtime, kind)
 
-    The import is a deliberate trade: the new tools reach the cached native agent
-    at once, so a conversation that is already live sees them on its next turn
-    (the onboarding conductor sets up an MCP connection and uses it in the same
-    conversation). That turn sends a different tool block, so each live
-    conversation loses its cached prompt prefix once. Nothing churns after
-    that: the advertised tool list is sorted by name
-    (``tools.catalog.advertised_tool_definitions``), so later turns match
-    byte for byte and cache again.
-    """
-    global _stack
-    async with _lock:
-        if _stopped:
-            return {name: "MCP runtime is stopped" for name in config if name not in _connected}
-        if _stack is None:
-            _stack = AsyncExitStack()
-        errors = await _connect_new(config)
+
+async def _remove_connected_app(app_id: str) -> None:
+    """Withdraw one app's wrappers and session without disturbing other apps."""
+    names = _app_tools.pop(app_id, set())
+    for name in names:
+        _registry.unregister(name)
         if state._agent is not None:
-            register_mcp_tools(state._agent.tools)
-        return errors
+            state._agent.tools.unregister(name)
+    server = _app_servers.pop(app_id, None)
+    if server is not None:
+        getattr(_registry, "mcp_server_configs", {}).pop(server, None)
+        getattr(_registry, "mcp_server_states", {}).pop(server, None)
+    stack = _app_stacks.pop(app_id, None)
+    _app_configs.pop(app_id, None)
+    if stack is not None:
+        await stack.aclose()
+
+
+async def _await_sign_in(app_id: str) -> dict[str, object]:
+    """The person signed out or the provider ended the sign-in: withdraw the tools and wait for Sign in."""
+    await _remove_connected_app(app_id)
+    result = {"state": "needs_sign_in", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+    await _publish_app_state(app_id, result)
+    return result
+
+
+async def _remove_app_runtime(app_id: str) -> dict[str, object]:
+    """Discard one app's live state."""
+    await _remove_connected_app(app_id)
+    _app_states.pop(app_id, None)
+    _reconnect_at.pop(app_id, None)
+    return {"state": "disconnected", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+
+
+def _admit_reconnect(app_id: str) -> None:
+    """Allow one unsaved forced restart of an app per ten seconds."""
+    now = time.monotonic()
+    if now - _reconnect_at.get(app_id, float("-inf")) < 10:
+        raise MCPReconnectRateLimitError("This app was just reconnected; try again in 10 seconds.")
+    _reconnect_at[app_id] = now
+
+
+def _needs_token_result(config: dict, missing_keys: list[object]) -> dict[str, object] | None:
+    """Return the durable missing-token state when this app cannot connect yet."""
+    needs_token = (
+        config.get("needs_token") is True
+        and not config.get("secret_env")
+        and not config.get("secret_headers")
+    ) or bool(missing_keys)
+    if not needs_token:
+        return None
+    return {"state": "needs_token", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+
+
+async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, object]:
+    """Connect, restart, reconnect or remove exactly one stable-id connected app.
+
+    This is the one owner of an app's session. ``connect`` keeps a running session whose stored
+    config is unchanged (startup, approve, a person's add). ``restart`` replaces the session at
+    once and follows a write a person just committed: a saved config or key, or a completed
+    sign-in. ``reconnect`` is the same replacement asked for with nothing saved (the Reconnect
+    button or an agent), so it alone is limited to one per ten seconds. An app that is not
+    approved never loads a config here: ``runtime_app_config`` refuses a waiting or expired one.
+    """
+    async with _lock:
+        if action == "remove":
+            return await _remove_app_runtime(app_id)
+        if _stopped:
+            return {"state": "failed", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": "cannot_start"}
+        if action == "sign_out":
+            return await _await_sign_in(app_id)
+        from connections.app_reach import load_missing_app_key_refs, load_runtime_app_config
+
+        if action == "reconnect":
+            _admit_reconnect(app_id)
+        if action in {"restart", "reconnect"}:
+            await _remove_connected_app(app_id)
+        name, config = await run_in_db(load_runtime_app_config, app_id)
+        if app_id in _app_stacks:
+            if _app_configs.get(app_id) == (name, config):
+                return _app_states[app_id]
+            await _remove_connected_app(app_id)
+        connecting = {"state": "connecting", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+        await _publish_app_state(app_id, connecting)
+        stack: AsyncExitStack | None = None
+        try:
+            result = _needs_token_result(config, await run_in_db(load_missing_app_key_refs, app_id))
+            if result is not None:
+                await _publish_app_state(app_id, result)
+                return result
+            await _prepare_managed_runtime(config)
+            _app_servers[app_id] = name
+            stack = AsyncExitStack()
+            errors = await connect_mcp_servers({name: config}, _registry, stack)
+            if error := errors.get(name):
+                await stack.aclose()
+                _app_servers.pop(app_id, None)
+                failure = getattr(error, "failure_class", "protocol_error")
+                result = {
+                    "state": "needs_sign_in" if failure == "needs_sign_in" else "failed",
+                    "state_since": utc_now_iso(), "tool_count": 0,
+                    "failure_class": None if failure == "needs_sign_in" else failure,
+                }
+            else:
+                names = {
+                    name for name in _registry.tool_names
+                    if getattr(_registry.get(name), "mcp_app_id", None) == app_id
+                }
+                _app_stacks[app_id] = stack
+                _app_tools[app_id] = names
+                _app_configs[app_id] = (name, config)
+                result = {"state": "working", "state_since": utc_now_iso(), "tool_count": len(names), "failure_class": None}
+            await _publish_app_state(app_id, result)
+            if state._agent is not None:
+                register_mcp_tools(state._agent.tools)
+            return result
+        except Exception as error:
+            logger.exception("connected-app runtime failed for app_id={}", app_id)
+            registered = _app_stacks.get(app_id) is stack
+            await _remove_connected_app(app_id)
+            if stack is not None and not registered:
+                await stack.aclose()
+            result = {
+                "state": "failed", "state_since": utc_now_iso(), "tool_count": 0,
+                "failure_class": mcp_failure_class(error, config) if isinstance(error, ManagedRuntimeDownloadError) else "cannot_start",
+            }
+            await _publish_app_state(app_id, result)
+            return result
+
+
+async def start_connected_app_runtime() -> dict[str, dict[str, object]]:
+    """Start every approved durable app from the sole connected-app launch path."""
+    global _stopped
+    from connections.app_reach import load_runtime_app_ids
+
+    async with _lock:
+        _stopped = False
+    import tools.mcp_oauth_secrets as mcp_oauth_secrets
+    import tools.mcp_oauth_store as mcp_oauth_store
+
+    mcp_oauth_secrets.install()
+    await run_in_db(mcp_oauth_store.register_stored)
+    results = {}
+    for app_id in await run_in_db(load_runtime_app_ids):
+        results[app_id] = await apply_connected_app_runtime("connect", app_id)
+    return results
+
+
+def connected_app_state(app_id: str) -> dict[str, object]:
+    """Return bounded live state for the Connected Apps management route."""
+    return _app_states.get(app_id, {"state": "disconnected", "state_since": None, "tool_count": 0, "failure_class": None})
 
 
 def register_mcp_tools(registry: ToolRegistry) -> None:
     """Populate native and harness registries from the completed startup snapshot."""
+    registry.mcp_server_configs = getattr(_registry, "mcp_server_configs", {})
+    registry.mcp_server_states = getattr(_registry, "mcp_server_states", {})
     for name in _registry.tool_names:
         if registry.has(name) and registry.get(name) is not _registry.get(name):
             raise RuntimeError("Configured MCP tool collides with an existing tool")
         registry.register(_registry.get(name))
 
 
+def tool_server_index() -> dict[str, str]:
+    """Map each live MCP tool's public name to the server it belongs to."""
+    index = {}
+    for name in _registry.tool_names:
+        server = getattr(_registry.get(name), "mcp_server_name", None)
+        if isinstance(server, str) and server:
+            index[name] = server
+    return index
+
+
 async def _close() -> None:
-    """Close the live sessions and discard the snapshot; the caller holds the lock."""
-    global _stack, _registry
-    stack, _stack = _stack, None
-    _connected.clear()
+    """Close every connected-app session and reset the registry under the lock."""
+    global _registry
+    app_stacks = tuple(_app_stacks.values())
+    if state._agent is not None:
+        for name in _registry.tool_names:
+            if state._agent.tools.get(name) is _registry.get(name):
+                state._agent.tools.unregister(name)
+    _app_stacks.clear()
+    _app_tools.clear()
+    _app_servers.clear()
+    _app_configs.clear()
+    _app_states.clear()
+    _reconnect_at.clear()
     try:
-        if stack is not None:
-            await stack.aclose()
+        for app_stack in app_stacks:
+            await app_stack.aclose()
     finally:
         _registry = ToolRegistry()
 

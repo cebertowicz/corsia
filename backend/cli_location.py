@@ -13,12 +13,15 @@ import shutil
 import signal
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 BINARIES = {"claude-code": "claude", "codex": "codex", "omlx": "omlx"}
+PackageManager = Literal["homebrew", "npm"]
 
 _BEGIN = "__CORSIA_BEGIN__"
 _END = "__CORSIA_END__"
 _SHELL_TIMEOUT_SECONDS = 5
+_manager_prefixes: dict[tuple[str, ...], Path] = {}
 
 
 def service_path() -> str:
@@ -39,13 +42,61 @@ def service_binary(vendor: str) -> str | None:
     return shutil.which(binary, path=service_path()) if binary else None
 
 
-def shell_binary(binary: str) -> str | None:
-    """Ask the person's login shell where a binary is; raises TimeoutError if it hangs."""
+def _command_prefix(command: list[str]) -> Path | None:
+    """Return one package-manager prefix, caching only successful probes by binary path."""
+    key = tuple(command)
+    if key in _manager_prefixes:
+        return _manager_prefixes[key]
+    try:
+        output = subprocess.run(
+            command, check=True, capture_output=True, text=True, timeout=_SHELL_TIMEOUT_SECONDS,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if not output:
+        return None
+    prefix = Path(output).resolve()
+    _manager_prefixes[key] = prefix
+    return prefix
+
+
+def package_manager_for(vendor: str, binary: str | None = None) -> PackageManager | None:
+    """Name the package manager that owns the service-resolved CLI, if it can be proven."""
+    current = binary or service_binary(vendor)
+    if not current:
+        return None
+    resolved = Path(current).resolve()
+    npm = shutil.which("npm", path=service_path())
+    npm_root = _command_prefix([npm, "root", "-g"]) if npm else None
+    if npm_root and resolved.is_relative_to(npm_root):
+        return "npm"
+    brew = shutil.which("brew", path=service_path())
+    brew_prefix = _command_prefix([brew, "--prefix"]) if brew else None
+    if brew_prefix and resolved.is_relative_to(brew_prefix):
+        return "homebrew"
+    return None
+
+
+def path_shadowed_binary(vendor: str) -> str | None:
+    """Return the older service-resolved copy when the official installer wrote another one first."""
+    current = service_binary(vendor)
+    binary = BINARIES.get(vendor)
+    if not current or not binary or package_manager_for(vendor, current):
+        return None
+    installed = Path.home() / ".local" / "bin" / binary
+    if not installed.is_file():
+        return None
+    used = Path(current).resolve()
+    return str(used) if installed.resolve() != used else None
+
+
+def _shell_value(command: str) -> str | None:
+    """Read one marked value from the person's login shell."""
     shell = os.environ.get("SHELL") or "/bin/zsh"
-    command = f"printf '%s\\n' {_BEGIN}; command -v {binary}; printf '%s\\n' {_END}"
+    wrapped = f"printf '%s\\n' {_BEGIN}; {command}; printf '%s\\n' {_END}"
     try:
         process = subprocess.Popen(
-            [shell, "-ilc", command], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            [shell, "-ilc", wrapped], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, start_new_session=True,
         )
         output, _ = process.communicate(timeout=_SHELL_TIMEOUT_SECONDS)
@@ -60,6 +111,16 @@ def shell_binary(binary: str) -> str | None:
     except IndexError:
         return None
     return candidate or None
+
+
+def shell_binary(binary: str) -> str | None:
+    """Ask the person's login shell where a binary is; raises TimeoutError if it hangs."""
+    return _shell_value(f"command -v {binary}")
+
+
+def login_shell_path() -> str | None:
+    """Return the person's login-shell PATH once, without sourcing it into this process."""
+    return _shell_value("printf '%s\\n' \"$PATH\"")
 
 
 def validated_binary(binary: str, candidate: str | None, home: Path) -> Path | None:

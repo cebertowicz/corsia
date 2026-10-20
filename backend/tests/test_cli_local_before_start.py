@@ -9,11 +9,13 @@ import pytest
 
 import cli_local_before_start as before_start
 import cli_sources
-from llm import local_setup, local_setup_ownership
-from llm.local_setup_gates import Eligibility, SubscriptionSource
+from llm import local_setup, local_setup_download, local_setup_ownership
+from llm.local_model import LocalModel
+from llm.local_setup_gates import SubscriptionSource
 from llm.local_setup_results import DownloadProgress
 
-SIZE = local_setup.format_size(local_setup.DEFAULT_PROFILE.download_size_bytes)
+MODEL = LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 262_144)
+SIZE = local_setup.format_size(MODEL.download_size_bytes)
 
 
 @pytest.fixture
@@ -31,8 +33,7 @@ def entry(monkeypatch, tmp_path):
     monkeypatch.setattr(before_start, "_discover", discover)
     monkeypatch.setattr(before_start, "_quiet_logs", lambda: tmp_path / "install.log")
     monkeypatch.setattr("llm.local_setup_gates.limited_subscription_message", no_limit)
-    monkeypatch.setattr("llm.local_setup_gates.profile_eligibility",
-                        lambda *_args: Eligibility(40960, True))
+    monkeypatch.setattr("llm.local_setup_gates.local_memory_ok", lambda *_args: True)
     for name in ("STREAM_COMMAND_OUTPUT",):
         monkeypatch.setattr(local_setup_ownership, name, getattr(local_setup_ownership, name))
     for name in ("DOWNLOAD_WAIT_SECONDS", "DOWNLOAD_FOLLOW_SECONDS"):
@@ -50,8 +51,10 @@ def _subscription(monkeypatch, source):
 
 
 def _flight(monkeypatch, calls, result, stages=()):
-    async def run_flight(eligibility, *, profile, into_own_omlx=False, on_stage=None):
-        calls.append(f"flight {profile.id}")
+    async def run_flight(*, model=None, into_own_omlx=False, on_stage=None):
+        # The installer never names a model: the flight takes oMLX's pick.
+        assert model is None and not into_own_omlx
+        calls.append("flight")
         for stage in stages:
             on_stage(stage)
         return result
@@ -74,7 +77,7 @@ def test_no_subscription_runs_the_shared_flight_in_installer_mode(monkeypatch, e
             stages=["Installing", "Installing oMLX", f"Downloading m ({SIZE}, 5%)"])
 
     assert before_start.run_before_start(force_local=False) == 0
-    assert entry == ["discover", "flight starter"]
+    assert entry == ["discover", "flight"]
     out = capsys.readouterr().out.splitlines()
     assert out == [
         "     Checking Claude Code and Codex",
@@ -95,7 +98,7 @@ def test_local_flag_skips_the_subscription_check(monkeypatch, entry):
     _flight(monkeypatch, entry, {"ok": True})
 
     assert before_start.run_before_start(force_local=True) == 0
-    assert entry == ["discover", "flight starter"]
+    assert entry == ["discover", "flight"]
 
 
 @pytest.mark.parametrize(("result", "why"), [
@@ -125,8 +128,7 @@ SIGN_IN_LINES = [
 
 
 def _ineligible(monkeypatch):
-    monkeypatch.setattr("llm.local_setup_gates.profile_eligibility",
-                        lambda *_args: Eligibility(0, False))
+    monkeypatch.setattr("llm.local_setup_gates.local_memory_ok", lambda *_args: False)
 
 
 def test_an_ineligible_mac_without_a_sign_in_says_how_to_get_one(monkeypatch, entry, capsys):
@@ -250,13 +252,13 @@ def test_installer_download_reports_every_five_percent_and_every_ten_seconds(mon
 
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
     monkeypatch.setattr(local_setup.asyncio, "sleep", pause)
-    monkeypatch.setattr(local_setup.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(local_setup_download.time, "monotonic", lambda: now[0])
     monkeypatch.setattr(DownloadProgress, "STEP", 5)
     monkeypatch.setattr(DownloadProgress, "SECONDS", 10.0)
 
-    asyncio.run(local_setup._wait_for_download("s", reports.append, local_setup.DEFAULT_PROFILE))
+    asyncio.run(local_setup._wait_for_download("s", reports.append, MODEL))
 
-    model = local_setup.DEFAULT_PROFILE.model
+    model = MODEL.model
     # Polls land every 6 s: 2% (no step yet), 6% (the 5% step), 7% at 6 s (quiet),
     # 7% at 12 s (the 10-second line), 11% (the 10% step), done.
     assert reports == [

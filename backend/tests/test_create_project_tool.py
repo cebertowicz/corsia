@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import asyncio
 import json
 import os
@@ -92,8 +98,8 @@ def test_execute_does_not_raise_import_error(monkeypatch, tmp_path):
     conn.execute(
         "CREATE TABLE threads ("
         "  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, model TEXT,"
-        "  reasoning_effort TEXT, project_id TEXT, created_at TEXT, updated_at TEXT,"
-        "  runtime_context_epoch INTEGER DEFAULT 0,"
+        "  reasoning_effort TEXT, project_id TEXT, local_only INTEGER NOT NULL DEFAULT 0,"
+        "  created_at TEXT, updated_at TEXT, runtime_context_epoch INTEGER DEFAULT 0,"
         "  last_context_change_seq INTEGER DEFAULT 0"
         ")"
     )
@@ -249,7 +255,7 @@ def test_project_create_tool_designates_project_conductor_for_calling_thread(
 ):
     from api import project_scaffolding as api_scaffolding
     from infra import accounts
-    from infra.conductor import get_conductor
+    from infra.conductor import get_scope_coordinator
     from infra.database import get_db
     from tools.projects import CreateProjectTool
 
@@ -280,7 +286,7 @@ def test_project_create_tool_designates_project_conductor_for_calling_thread(
 
     db = get_db()
     try:
-        conductor_id = get_conductor(payload["project_id"], db=db)
+        conductor_id = get_project_conductor(payload["project_id"], db=db)
         row = db.execute(
             "SELECT user_id,title,project_id,model FROM threads WHERE id=?",
             (conductor_id,),
@@ -317,8 +323,8 @@ def test_execute_returns_loud_collision_error(monkeypatch, tmp_path):
     conn.execute(
         "CREATE TABLE threads ("
         "  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, model TEXT,"
-        "  reasoning_effort TEXT, project_id TEXT, created_at TEXT, updated_at TEXT,"
-        "  runtime_context_epoch INTEGER DEFAULT 0,"
+        "  reasoning_effort TEXT, project_id TEXT, local_only INTEGER NOT NULL DEFAULT 0,"
+        "  created_at TEXT, updated_at TEXT, runtime_context_epoch INTEGER DEFAULT 0,"
         "  last_context_change_seq INTEGER DEFAULT 0"
         ")"
     )
@@ -482,8 +488,8 @@ def test_initialize_project_stores_logical_truth_and_seeds_only_project_context(
     conn.execute(
         "CREATE TABLE threads ("
         "id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, model TEXT, "
-        "reasoning_effort TEXT, project_id TEXT, created_at TEXT, updated_at TEXT, "
-        "runtime_context_epoch INTEGER DEFAULT 0, "
+        "reasoning_effort TEXT, project_id TEXT, local_only INTEGER NOT NULL DEFAULT 0, "
+        "created_at TEXT, updated_at TEXT, runtime_context_epoch INTEGER DEFAULT 0, "
         "last_context_change_seq INTEGER DEFAULT 0)"
     )
     conn.execute(
@@ -576,6 +582,7 @@ def test_initialize_project_registers_default_repo_policy(
             model TEXT,
             reasoning_effort TEXT,
             project_id TEXT,
+            local_only INTEGER NOT NULL DEFAULT 0,
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,
@@ -666,6 +673,7 @@ async def test_project_create_api_rejects_repo_registration_during_owned_process
             model TEXT,
             reasoning_effort TEXT,
             project_id TEXT,
+            local_only INTEGER NOT NULL DEFAULT 0,
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,
@@ -756,6 +764,7 @@ def test_initialize_project_removes_only_its_link_when_policy_write_fails(
             model TEXT,
             reasoning_effort TEXT,
             project_id TEXT,
+            local_only INTEGER NOT NULL DEFAULT 0,
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,
@@ -844,6 +853,7 @@ def test_initialize_project_replacement_before_ownership_capture_is_not_removed(
             model TEXT,
             reasoning_effort TEXT,
             project_id TEXT,
+            local_only INTEGER NOT NULL DEFAULT 0,
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,
@@ -932,6 +942,7 @@ def test_initialize_project_rechecks_source_ownership_before_commit(
             model TEXT,
             reasoning_effort TEXT,
             project_id TEXT,
+            local_only INTEGER NOT NULL DEFAULT 0,
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,

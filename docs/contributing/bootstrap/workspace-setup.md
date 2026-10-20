@@ -270,34 +270,26 @@ not the manifest icons, for its home-screen icon.
 ## 4. Install the desktop app — mixed
 
 `desktop/` is a Tauri 2 shell (`desktop/src-tauri/tauri.conf.json`,
-`Cargo.toml`: `tauri = "2.10.3"`, `tauri-build = "2.5.6"`). It renders no
-CORSIA UI itself — it is a native macOS window (traffic-light overlay,
-sidebar vibrancy, draggable title bar) that loads whatever server URL you
-give it. On first launch it shows a small picker page
-(`desktop/dist-shell/index.html`); the URL you paste there is persisted to
-the app's own local config file and reused on every later launch
-(`desktop/src-tauri/src/lib.rs`: `set_server_url`, `get_server_url`,
-`config_path` — under the identifier `com.cebertowicz.corsia` from
-`tauri.conf.json`). There is a second, `dev`-labeled bundle config,
-`tauri.dev.conf.json` (identifier `com.cebertowicz.corsia.dev`), for
-running a development build side by side with a release one.
+`Cargo.toml`: `tauri = "2.10.3"`, `tauri-build = "2.5.6"`). The release
+bundle includes its own CORSIA backend and starts it on loopback when the app
+opens. The static startup surface in `desktop/dist-shell/index.html` waits for
+`/api/health`, then navigates the native window to that local CORSIA UI. It
+never asks for, saves, or connects to a remote server URL. The app uses
+`CORSIA_STATE_DIR` when set; otherwise its bundled backend uses the normal
+macOS CORSIA state root. `CORSIA_DESKTOP_PORT` can request a preferred local
+port; if it is occupied the shell selects an available loopback port. There is
+a second, `dev`-labeled bundle config, `tauri.dev.conf.json` (identifier
+`com.cebertowicz.corsia.dev`), for running a development build side by side
+with a release one.
 
-**Run it.** Building follows the ordinary Tauri 2 CLI (`cargo install
-tauri-cli`, then `cargo tauri build` run against `desktop/src-tauri`, or
-`cargo tauri dev` with `--config tauri.dev.conf.json` for the dev-labeled
-build). No `sudo` is needed.
+**Run it.** Use `desktop/scripts/build-macos-bundle.sh` for a packaged build
+and `desktop/scripts/smoke-macos-bundle.sh` for its local bundle smoke check.
+The release workflow is `.github/workflows/release-macos.yml`.
 
-**Not verified — left out.** The repository has no packaged build script,
-CI workflow, or written release/signing/distribution instructions for this
-app (no `desktop/package.json`, no workflow references `tauri`). The command
-above is the standard Tauri 2 build path implied by `Cargo.toml` and
-`tauri.conf.json`, not a documented repo procedure — treat it as a starting
-point and report friction (§9).
-
-**Walk it.** Open the built app and paste the same URL you used for phone
-access above (`http://localhost:<port>` on this Mac, or the tailnet address
-from §3 for another machine) into the first-launch picker. This is a native
-window; nothing here is reachable through a browser tool.
+**Walk it.** Open the built app. It starts its bundled local service and lands
+on CORSIA's Welcome journey on fresh state; if startup fails, the shell shows
+the service-log location and offers Try again. This is a native window; nothing
+here is reachable through a browser tool.
 
 ## 5. launchd service configuration — walk it
 

@@ -313,11 +313,12 @@ def _maybe_reraise(artifact_ref: dict, db) -> None:
     """Re-raise a deferred item atomically with the caller's expiry wake."""
     state = attention.get_attention_state(artifact_ref["external_id"], db=db)
     if state == attention.ATTENTION_DEFERRED:
-        from registry import models
-        models.update_metadata(
-            artifact_ref["integration"], artifact_ref["type"],
-            artifact_ref["external_id"],
-            {"attention_state": attention.ATTENTION_RAISED}, db=db)
+        row = db.execute(
+            "SELECT * FROM artifact_identities WHERE integration=? AND type=? AND external_id=?",
+            (artifact_ref["integration"], artifact_ref["type"], artifact_ref["external_id"]),
+        ).fetchone()
+        if row is not None:
+            attention.record_attention(db, row, {"attention_state": attention.ATTENTION_RAISED})
 
 
 def _parse_utc(value: str) -> datetime:

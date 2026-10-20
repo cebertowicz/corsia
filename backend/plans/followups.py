@@ -25,6 +25,7 @@ def add_follow_up(
     *,
     title: str,
     acceptance_criteria: str,
+    size: str | None = None,
     actor_id: str | None = None,
     provenance: str = "plan_service",
     expected_revision: int | None = None,
@@ -55,7 +56,7 @@ def add_follow_up(
             parent_id=_unsettled_parent(connection, source["parent_id"]),
             order_key=None, description=description,
             workflow_ref=None, workflow_version=None, workflow_step=None,
-            difficulty=None, size=None, checkpoint_exception=False, assignee=source["assignee"],
+            difficulty=None, size=size, checkpoint_exception=False, assignee=source["assignee"],
             spawn_kind=spawn_kind,
             watchdog_budget_seconds=source["watchdog_budget_seconds"],
             follow_up_of=node_id,
@@ -71,6 +72,7 @@ def accept_with_follow_up(
     *,
     title: str,
     acceptance_criteria: str,
+    size: str | None = None,
     actor_id: str | None = None,
     provenance: str = "plan_service",
     verification_result: str | None = None,
@@ -93,7 +95,7 @@ def accept_with_follow_up(
             verified_by=verified_by,
         )
         follow_up = add_follow_up(
-            node_id, title=title, acceptance_criteria=acceptance_criteria,
+            node_id, title=title, acceptance_criteria=acceptance_criteria, size=size,
             actor_id=actor_id, provenance=provenance,
             inherit_commitment=True, db=connection,
         )

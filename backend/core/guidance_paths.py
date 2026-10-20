@@ -1,6 +1,6 @@
 """Which saved files are guidance history (issue #2272, design §8 "0a Commit on save").
 
-Guidance is ``skills/<name>/SKILL.md`` and ``skills/<name>/evals/**`` in the
+Guidance is ``skills/<name>/SKILL.md``, its ``corsia.yaml`` sidecar and ``skills/<name>/evals/**`` in the
 workspace, a project or a thread tray, plus every path the context-source
 loaders load (:func:`context_source_paths.classify_context_source` is that
 authority). System package content never matches, and neither does a path
@@ -24,7 +24,7 @@ from core.context_source_paths import (
 
 _TIERS = {"workspace_context": "workspace", "project_context": "project", "thread_context": "agent"}
 # Pathspecs that only bound the sweep's status walk; each candidate is still classified.
-_SHAPES = ("skills/*/SKILL.md", "skills/*/evals/**", "context/*.md", "context/roles/*/*.md")
+_SHAPES = ("skills/*/SKILL.md", "skills/*/corsia.yaml", "skills/*/evals/**", "context/*.md", "context/roles/*/*.md")
 
 
 def _skill_tier(parts: tuple[str, ...]) -> str | None:
@@ -35,7 +35,7 @@ def _skill_tier(parts: tuple[str, ...]) -> str | None:
         parts, tier = parts[2:], "agent"
     if len(parts) < 3 or parts[0] != "skills" or parts[1] in ("", ".", ".."):
         return None
-    return tier if parts[2] == ("SKILL.md" if len(parts) == 3 else "evals") else None
+    return tier if parts[2] in (("SKILL.md", "corsia.yaml") if len(parts) == 3 else ("evals",)) else None
 
 
 def _real_file(absolute: Path, root: Path) -> bool:

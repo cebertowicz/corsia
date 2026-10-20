@@ -7,7 +7,7 @@ import pytest
 from infra import thread_updates
 from plans import holds, service, update_cards
 from plans.boundary import mutate
-from tests.plan_ask_helpers import with_actionable_user_ask
+from tests.plan_ask_helpers import document_ask, with_actionable_user_ask
 from tests.test_attention_queue import _mid
 from tests.test_plan_archival import OWNER, _plan, _row, _task, db  # noqa: F401
 
@@ -76,6 +76,7 @@ def _review_then_accept_followup(db, node_id: str) -> None:
             "expected_revision": _row(db, node_id)["revision"],
             "title": "Follow up",
             "acceptance_criteria": "Follow up DOD",
+            "size": "unknown",
         },
         actor=OWNER,
         provenance="test.plan_update_cards",
@@ -84,7 +85,9 @@ def _review_then_accept_followup(db, node_id: str) -> None:
     )
 
 
-def _block(db, plan_id: str, node_id: str, *, reason_key: str = "needs_user") -> str:
+def _block(
+    db, plan_id: str, node_id: str, *, reason_key: str = "needs_user", ask: str | None = None,
+) -> str:
     params = with_actionable_user_ask(
         db,
         plan_id,
@@ -95,6 +98,7 @@ def _block(db, plan_id: str, node_id: str, *, reason_key: str = "needs_user") ->
             "owner_kind": "user",
             "reason": "A user decision is required",
             "reason_key": reason_key,
+            **({"ask_artifact_id": ask} if ask is not None else {}),
         },
         OWNER,
     )
@@ -268,8 +272,11 @@ def test_an_open_matching_block_is_suppressed_but_a_cleared_one_is_new_news(db):
         provenance="test.plan_update_cards",
         db=db,
     )
-    _block(db, plan.id, node.id, reason_key="decision")
-    _block(db, plan.id, node.id, reason_key="decision")
+    # Asking again about the same document re-blocks on the still-open ask; a
+    # different document would replace that ask, which is new news.
+    ask = document_ask(db, "root")
+    _block(db, plan.id, node.id, reason_key="decision", ask=ask)
+    _block(db, plan.id, node.id, reason_key="decision", ask=ask)
 
     assert [card["kind"] for card in _cards(db)] == ["blocked", "blocked"]
 

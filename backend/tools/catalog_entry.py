@@ -15,7 +15,7 @@ ToolCategory = Literal[
     "history",
     "memory",
     "projects",
-    "conductor",
+    "coordination",
     "delegation",
     "plans",
     "automations",
@@ -24,6 +24,7 @@ ToolCategory = Literal[
     "connection_admin",
     "host_access",
     "discovery",
+    "google",
 ]
 
 

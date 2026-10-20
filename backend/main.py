@@ -10,6 +10,7 @@ from app_lifecycle import lifespan
 
 from infra import config  # noqa: F401
 from infra.access_log import install_access_log_redaction
+from infra.json_gzip import JsonGZipMiddleware
 from infra.config import FRONTEND_DIR
 from infra.product_events import emit_product_event
 from infra.request_timing import RequestTimingMiddleware
@@ -37,6 +38,7 @@ from api import (
     project_repos_router,
     fs_browse_router,
     provider_sources_router,
+    provider_local_models_router,
     provider_cli_link_router,
     providers_router,
     provider_policy_router,
@@ -44,6 +46,7 @@ from api import (
     discovered_models_router,
     network_servers_router,
     version_router,
+    devices_router,
     webhooks_router,
     files_router,
     files_revision_router,
@@ -51,6 +54,7 @@ from api import (
     doc_comment_thread_views_router,
     cc_attach_router,
     conductor_router,
+    corsia_agent_router,
     context_bootloader_router,
     delegation_router,
     delegation_docs_router,
@@ -69,6 +73,7 @@ from api.registry_pane import router as registry_pane_router
 from api.registry_ownership import router as registry_ownership_router
 from api.doc_reviews import router as doc_reviews_router
 from api.cli_install import router as cli_install_router
+from api.google import router as google_router
 from api.keys import router as keys_router
 
 
@@ -82,6 +87,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(JsonGZipMiddleware)
 app.add_middleware(RequestTimingMiddleware)
 
 
@@ -109,6 +115,7 @@ async def _emit_error_api(request: Request, exc: Exception):
 app.include_router(system_router)
 app.include_router(system_perf_router)
 app.include_router(keys_router)
+app.include_router(google_router)
 app.include_router(uploads_router)
 app.include_router(turns_router)
 app.include_router(drain_router)
@@ -134,17 +141,20 @@ app.include_router(providers_router)
 app.include_router(vendor_accounts_router)
 app.include_router(provider_policy_router)
 app.include_router(provider_sources_router)
+app.include_router(provider_local_models_router)
 app.include_router(provider_cli_link_router)
 app.include_router(cli_install_router)
 app.include_router(discovered_models_router)
 app.include_router(network_servers_router)
 app.include_router(version_router)
+app.include_router(devices_router)
 app.include_router(registry_router)
 app.include_router(registry_pane_router)
 app.include_router(registry_ownership_router)
 app.include_router(attention_router)
 app.include_router(cc_attach_router)
 app.include_router(conductor_router)
+app.include_router(corsia_agent_router)
 app.include_router(context_bootloader_router)
 app.include_router(delegation_router)
 app.include_router(delegation_docs_router)
@@ -182,8 +192,14 @@ async def serve_frontend(path: str):
             {"status": "CORSIA UI backend running",
              "frontend": "not built yet — export CORSIA_BACKEND_URL, then use vite dev"},
         )
-    file_path = FRONTEND_DIR / path
-    if file_path.is_file():
+    # Only files inside the build are served; any other path gets the app page.
+    root = FRONTEND_DIR.resolve()
+    try:
+        file_path = (root / path).resolve()
+        servable = file_path.is_relative_to(root) and file_path.is_file()
+    except ValueError:  # an embedded NUL byte; real I/O faults still raise
+        servable = False
+    if servable:
         import mimetypes
         content_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
         content = file_path.read_bytes()

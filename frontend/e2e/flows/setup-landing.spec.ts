@@ -3,7 +3,8 @@ import { chatComposer, lastAssistantMessage, sendChatMessage, TEST_SESSION_TOKEN
 import { seedMockResponses } from '../support/mock';
 
 // What is mocked: the setup routes only (/api/auth/status, /api/setup/status,
-// /api/setup/local-download, /api/setup/first-account, /api/providers/sources*),
+// /api/setup/local-model, /api/setup/local-download, /api/setup/first-account,
+// /api/providers/sources*),
 // so the screen is reachable on a workspace that already has an account and each
 // model source can be shown ready. What is real: the signed-in app shell, conductor
 // landing, thread, composer, websocket and the mocked-provider turn all run against
@@ -19,7 +20,8 @@ const readySources = [
 
 async function serveReadySetup(page: Page, sources: readonly Record<string, unknown>[]) {
 	await page.route('**/api/auth/status', (route) => route.fulfill({ json: { has_users: false } }));
-	await page.route('**/api/setup/status', (route) => route.fulfill({ json: { apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30, work_folder: '~/CORSIA' } }));
+	await page.route('**/api/setup/status', (route) => route.fulfill({ json: { apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' } }));
+	await page.route('**/api/setup/local-model', (route) => route.fulfill({ json: { state: 'picked', model: { name: 'Qwen 3.8', repository: 'example/qwen', download_size_bytes: 30_000_000_000, download_size_gb: 30, context_window: 65536 }, message: null } }));
 	await page.route('**/api/setup/local-download', (route) => route.fulfill({ json: { ok: true, in_progress: false } }));
 	await page.route('**/api/setup/first-account', (route) => route.fulfill({ json: { token: TEST_SESSION_TOKEN, user: { id: 'e2e', name: 'First Person' } } }));
 	await page.route('**/api/providers/sources/recheck', (route) => route.fulfill({ json: { sources } }));
@@ -44,13 +46,14 @@ test.describe('@surface:first-run setup landing', () => {
 			await page.locator('input[autocomplete="new-password"]').nth(0).fill('correct-password');
 			await page.locator('input[autocomplete="new-password"]').nth(1).fill('correct-password');
 			await page.getByRole('button', { name: 'Continue' }).click();
-			await expect(page.getByRole('heading', { name: 'Choose an AI model' })).toBeVisible();
+			// SetupScreen.svelte: the model step is titled "Connect an AI".
+			await expect(page.getByRole('heading', { name: 'Connect an AI' })).toBeVisible();
 			const start = page.getByRole('button', { name: 'Start using CORSIA' });
 			await expect(start).toBeEnabled();
 			await start.click();
 
 			// Landing: the setup flow is gone and the real app shell is up with a usable composer.
-			await expect(page.getByRole('heading', { name: 'Choose an AI model' })).toHaveCount(0);
+			await expect(page.getByRole('heading', { name: 'Connect an AI' })).toHaveCount(0);
 			await expect(page.getByRole('button', { name: 'Start using CORSIA' })).toHaveCount(0);
 			await expect(page.getByRole('button', { name: 'Get started' })).toHaveCount(0);
 			await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible({ timeout: 20_000 });
@@ -58,7 +61,7 @@ test.describe('@surface:first-run setup landing', () => {
 			await expect(composer).toBeVisible({ timeout: 20_000 });
 			await expect(composer).toBeEnabled();
 			await expect(page.locator('.auth-gate')).toHaveCount(0);
-			// The conductor opens with a model chosen (not the 'Select Model' placeholder) and a live socket.
+			// The CORSIA agent opens with a model chosen (not the 'Select Model' placeholder) and a live socket.
 			await waitForWsConnected(page);
 			await shot(page, `landing-${slug}-${project}`);
 

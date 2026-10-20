@@ -2,6 +2,8 @@
 	import { renderMarkdown } from '$lib/markdown';
 	import { formatTime } from '$lib/time';
 	import { externalModelDisplayName } from '$lib/modelDisplayName';
+	import { models, type Model } from '$lib/stores/models';
+	import { canonicalName } from '$lib/stores/modelGroups';
 	import MessageArtifactCards from './MessageArtifactCards.svelte';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
 
@@ -51,7 +53,7 @@
 			status: 'done' as const,
 		}));
 	});
-	const footerLabel = $derived(messageFooterLabel(msg.metadata));
+	const footerLabel = $derived(messageFooterLabel(msg.metadata, $models));
 
 	function modelTail(id: string): string {
 		if (id.includes('/')) return id.split('/').pop() ?? id;
@@ -83,23 +85,25 @@
 		return null;
 	}
 
-	function modelLabel(metadata: any): string | null {
+	function modelLabel(metadata: any, catalog: Model[]): string | null {
 		const model = String(metadata?.model ?? '');
 		const modelName = metadata?.model_name ? String(metadata.model_name) : '';
-		if (modelName && !modelName.includes('/') && !modelName.includes('@')) {
-			return modelName;
-		}
+		if (modelName && !modelName.includes('/') && !modelName.includes('@')) return modelName;
 		if (!model && !modelName) return null;
 		const raw = model || modelName;
-		if (raw.startsWith('claude-code/') || raw.startsWith('codex/')) {
-			return formatExternalModelName(raw);
+		if (raw.startsWith('claude-code/') || raw.startsWith('codex/')) return formatExternalModelName(raw);
+		if (raw.startsWith('omlx@')) {
+			const stored = catalog.find((entry) => entry.litellm_model === raw || entry.id === raw);
+			return stored ? canonicalName(stored) : modelTail(raw);
 		}
 		return modelTail(raw);
 	}
 
-	function messageFooterLabel(metadata: any): string | null {
+	function messageFooterLabel(metadata: any, catalog: Model[]): string | null {
 		const harness = harnessLabel(metadata);
-		const model = modelLabel(metadata);
+		const model = modelLabel(metadata, catalog);
+		// Native history displays its stored catalog identity, falling back to its model tail.
+		if (String(metadata?.model ?? metadata?.model_name ?? '').startsWith('omlx@') && model) return model;
 		if (harness && model) return `${harness} · ${model}`;
 		return model ?? harness;
 	}
@@ -153,10 +157,8 @@
 
 		<div class="msg-footer">
 			<span class="msg-time">{formatTime(msg.created_at)}</span>
-			{#if msg.metadata?.for_user}
-				<span class="for-you-marker" title="Update for you"><span class="for-you-dot" aria-hidden="true"></span>Update</span>
-			{/if}
 			{#if footerLabel}
+				<span class="meta-separator" aria-hidden="true">·</span>
 				<span class="msg-model-badge" title={msg.metadata?.model ?? msg.metadata?.model_name}>
 					{footerLabel}
 				</span>
@@ -202,16 +204,10 @@
 
 	.msg-footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 	.msg-time { font-size: var(--text-caption); color: var(--text-secondary); opacity: 0.7; }
-	.for-you-marker { display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-caption); color: var(--text-secondary); }
-	.for-you-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-	.msg-model-badge {
-		font-size: var(--text-caption); color: var(--text-tertiary); background: var(--bg-secondary);
-		padding: 1px 6px; border-radius: var(--radius-sm); white-space: nowrap;
-		opacity: 0.7; transition: opacity var(--dur-standard);
-	}
-		.msg-model-badge:hover { opacity: 1; }
+	.msg-model-badge { font-size: var(--text-caption); color: var(--text-secondary); white-space: nowrap; }
+	.meta-separator { color: var(--text-tertiary); }
 	.typewriter-cursor {
-		display: inline; color: var(--accent); font-weight: 300;
+		display: inline; color: var(--accent-text); font-weight: 300;
 		animation: blink-cursor 0.8s step-end infinite;
 	}
 	@keyframes blink-cursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }

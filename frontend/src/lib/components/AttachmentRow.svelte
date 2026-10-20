@@ -44,7 +44,7 @@
 		const state: MessageCardState | undefined = cardState ?? (card.available ? undefined : 'unavailable');
 		if (!state) return null;
 		if (state === 'needs_review') return 'ask';
-		return state === 'replaced' || state === 'unavailable' ? 'muted' : 'verdict';
+		return state === 'closed' || state === 'replaced' || state === 'withdrawn' || state === 'unavailable' ? 'muted' : 'verdict';
 	});
 	// A verdict that carries feedback shows its counts in the task's place (C3); otherwise the task, then the file
 	// name, which repeats the title for a file titled by its name: omit it, comparing the full strings.
@@ -88,7 +88,7 @@
 			onerror={() => (broken = true)}
 		/>
 	{:else}
-		<ArtifactGlyph icon={card.icon} tile={variant === 'row' ? TILE.row : 0} muted={!card.available} />
+		<ArtifactGlyph icon={card.icon} tile={variant === 'row' ? TILE.row : 0} />
 	{/if}
 	<span class="text">
 		<span class="head">
@@ -127,6 +127,7 @@
 		type="button"
 		class="tile {variant} press-tint"
 		class:thumbed={Boolean(thumbSrc)}
+		class:needs-you={tone === 'ask'}
 		data-artifact-id={card.artifact_id}
 		data-card-kind={card.kind}
 		data-card-state={cardState ?? ''}
@@ -164,6 +165,9 @@
 	}
 	/* The tile is flush with the prose; the tint stays inside the row's edge and never bleeds outward. */
 	.tile.row { width: 100%; padding: var(--space-2) var(--space-2) var(--space-2) 2px; border-radius: var(--radius-sm); }
+	/* An open ask is the same frosted card as the pinned question and the composer. It is a
+	   needs-you object, not a worked artifact chip or a canvas review control. */
+	.tile.row.needs-you { border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--glass-thin); box-shadow: var(--glass-rim), var(--shadow-chip); }
 	/* A chip is the row condensed, in the token chip's geometry without its remove mark: a pill holding the bare coloured
 	   glyph and the title, filled so it reads as a thing and not as prose. 32 px tall; on touch 36 px (DS D31), the
 	   whole chip being the hit area. A thumbnail keeps its own small image as the leading mark. */
@@ -184,7 +188,7 @@
 	}
 	/* Inset: the message clips at the prose edge and the phone's chip strip scrolls, so an outward ring would be cut off.
 	   The row's 2 px left padding (always there, so focus moves nothing) is the room the ring takes beside the tile. */
-	button.tile:focus-visible { outline: 2px solid var(--violet); outline-offset: -2px; }
+	button.tile:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	@media (pointer: coarse) {
 		.tile.row { min-height: 44px; }
 		.tile.chip { min-height: 36px; }
@@ -235,10 +239,10 @@
 	.ctx.counted .name { overflow: visible; }
 	.when { flex: 0 0 auto; font-size: var(--text-footnote); line-height: var(--lh-tight); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 	.state { display: inline-flex; align-items: center; gap: var(--space-1); animation: state-in var(--dur-tight) var(--ease-snap); }
-	/* An open ask is "needs you": the accent, as the attention dock beneath it (DS D3); amber is kept for warnings. */
-	.state.ask { color: var(--violet-text); }
+	/* An open ask is "needs you": amber, as in the sidebar, the plan and the attention dock. */
+	.state.ask { color: var(--amber-text); }
 	.state.muted { color: var(--text-tertiary); }
-	.dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: var(--radius-circle); background: var(--accent); }
+	.dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: var(--radius-circle); background: var(--amber); }
 	.sep { color: var(--text-tertiary); }
 	.chevron { flex: 0 0 auto; width: 16px; color: var(--text-tertiary); }
 	/* A retired artifact keeps its name but is visibly out of reach: muted glyph, a dashed tile edge in the

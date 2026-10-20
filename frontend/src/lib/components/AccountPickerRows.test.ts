@@ -18,7 +18,7 @@ import AccountPickerRows from './AccountPickerRows.svelte';
 import { token } from '$lib/stores/auth';
 import { activeModelId } from '$lib/stores/models';
 import { activeThreadId } from '$lib/stores/threads';
-import { workspaceConductorId } from '$lib/utils/conductor';
+import { corsiaAgentId } from '$lib/utils/conductor';
 import type { PickerAccount } from '$lib/stores/accountPicker';
 
 const ROW = {
@@ -45,7 +45,7 @@ beforeEach(() => {
 	reloadAccounts.mockClear();
 	reloadModels.mockClear();
 	vi.stubGlobal('fetch', fetchMock);
-	workspaceConductorId.set('cond-1');
+	corsiaAgentId.set('cond-1');
 	activeThreadId.set('cond-1');
 });
 
@@ -55,18 +55,18 @@ afterEach(() => {
 	host.remove();
 	vi.unstubAllGlobals();
 	token.set(null);
-	workspaceConductorId.set(null);
+	corsiaAgentId.set(null);
 	activeThreadId.set(null);
 	activeModelId.set(null);
 });
 
 describe('AccountPickerRows on the model-less conductor', () => {
-	it('binds through the conductor-account step, not the pin route, and reads the binding and catalog again', async () => {
+	it('binds through the corsia-agent-account step, not the pin route, and reads the binding and catalog again', async () => {
 		activeModelId.set(null);
 		fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ bound: true, reason: null }), { status: 200 }));
 		await choose();
 		await vi.waitFor(() => expect(reloadModels).toHaveBeenCalled());
-		expect(fetchMock.mock.calls[0][0]).toBe('/api/threads/cond-1/conductor-account');
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/threads/cond-1/corsia-agent-account');
 		expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({ account_id: 'acc-2' });
 		expect(pin).not.toHaveBeenCalled();
 		expect(reloadAccounts).toHaveBeenCalled();
@@ -87,7 +87,7 @@ describe('AccountPickerRows on the model-less conductor', () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	it('still pins on a thread that is not the workspace conductor', async () => {
+	it('still pins on a thread that is not the CORSIA agent', async () => {
 		activeModelId.set(null);
 		activeThreadId.set('other');
 		await choose();

@@ -55,7 +55,7 @@ def db():
     )
     connection.execute(
         "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
-        ("workspace_conductor_session_id", json.dumps({"session_id": "workspace-conductor"}), "t"),
+        ("corsia_agent_thread_id", json.dumps({"session_id": "workspace-conductor"}), "t"),
     )
     connection.commit()
     try:
@@ -67,7 +67,7 @@ def db():
 def _add(db, plan_id: str, actor: PlanActor, **params):
     return mutate(
         plan_id, "add", {"kind": "task", "title": "Refresh lane context",
-        "acceptance_criteria": "Current", **params}, actor=actor,
+        "acceptance_criteria": "Current", "size": "unknown", **params}, actor=actor,
         provenance="test.conductor_add", mutation_id=uuid.uuid4().hex, db=db,
     ).result["node"]
 
@@ -122,7 +122,9 @@ def test_only_a_conductor_may_append_a_top_level_task_to_a_foreign_plan(
     parent = service.add_node(plan.id, kind="task", title="Parent", acceptance_criteria="Done", db=db)
     db.commit()
     params = {key: parent.id if value == "placeholder" else value for key, value in params.items()}
-    values = {"kind": "task", "title": "No", "acceptance_criteria": "Never", **params}
+    values = {
+        "kind": "task", "title": "No", "acceptance_criteria": "Never", "size": "unknown", **params,
+    }
 
     kind, message = refusal
     with pytest.raises(kind, match=message):

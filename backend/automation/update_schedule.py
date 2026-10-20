@@ -164,7 +164,7 @@ async def run_scheduled_tick(now: datetime | None = None) -> str | None:
     from infra.update_status import update_status
 
     local_now = now or datetime.now().astimezone()
-    schedule = await asyncio.to_thread(get_update_schedule, include_owner=True)
+    schedule = await run_in_db(get_update_schedule, include_owner=True)
     if should_drop_tonight(schedule, now=local_now):
         if await run_in_db(claim_tonight, schedule):
             due_at = _tonight_due_at(schedule, local_now)

@@ -140,7 +140,7 @@
 		font-size: var(--text-footnote);
 	}
 	.lede a {
-		color: var(--link, var(--violet));
+		color: var(--link, var(--accent));
 	}
 	.state {
 		font-size: var(--text-subhead);

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { setFocusMode } from '../support/focusMode';
 import { syntheticPng } from '../support/syntheticImages';
 
 /**
@@ -113,14 +114,6 @@ function recordAsk(artifact: Artifact, { retire = false }: { retire?: boolean } 
 	});
 }
 
-async function setFocusMode(request: APIRequestContext, enabled: boolean): Promise<void> {
-	const updated = await request.patch('/api/settings', {
-		headers: { Authorization: `Bearer ${TEST_TOKEN}` },
-		data: { features: { focus_mode: enabled } },
-	});
-	expect(updated.ok(), await updated.text()).toBeTruthy();
-}
-
 type Surface = readonly [label: string, width: number, theme: 'light' | 'dark'];
 const SURFACES: readonly Surface[] = [
 	['1440 light', 1440, 'light'],
@@ -148,6 +141,11 @@ async function screenshot(page: Page, name: string): Promise<void> {
 	fs.mkdirSync(directory, { recursive: true });
 	await page.screenshot({ path: path.join(directory, `${name}.png`), animations: 'disabled' });
 }
+
+// Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
+test.afterEach(async ({ request }) => {
+	await setFocusMode(request, true);
+});
 
 for (const [label, width, theme] of SURFACES) {
 	test.describe(label, () => {

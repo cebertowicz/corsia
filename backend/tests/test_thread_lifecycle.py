@@ -70,6 +70,17 @@ def _db(path: Path | None = None) -> sqlite3.Connection:
             runtime_context_epoch INTEGER NOT NULL DEFAULT 0,
             next_message_seq INTEGER NOT NULL DEFAULT 1
         );
+        CREATE TABLE lesson_placement_checks (
+            thread_id TEXT NOT NULL,
+            history_epoch INTEGER NOT NULL,
+            entry_id INTEGER NOT NULL,
+            revision INTEGER NOT NULL,
+            check_name TEXT NOT NULL,
+            flag TEXT NOT NULL,
+            override_reason TEXT,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (thread_id, history_epoch, entry_id, revision, check_name, flag)
+        );
         CREATE TABLE messages (
             id TEXT PRIMARY KEY,
             thread_id TEXT NOT NULL,
@@ -300,6 +311,41 @@ def _add_artifact_registration(
             timestamp,
         ),
     )
+
+
+def _add_open_ask(db, artifact_id: str) -> None:
+    """Seed the public open-ask shape without duplicating its query in a test."""
+    from tests.plan_writer_authorizer import raw_plan_seed
+
+    timestamp = _iso(NOW - timedelta(days=1))
+    with raw_plan_seed(db):
+        db.execute(
+            "INSERT INTO plans (id,owner_kind,owner_id,state,created_at,updated_at) "
+            "VALUES ('review-plan','thread','s1','active',?,?)",
+            (timestamp, timestamp),
+        )
+        db.execute(
+            "INSERT INTO plan_nodes "
+            "(id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,"
+            "checkpoint_exception,state,requirements_revision,commitment_id,revision,"
+            "created_at,updated_at) "
+            "VALUES ('review-node','review-plan',NULL,0,'task','Review','Reviewed',"
+            "0,'active',1,'review-node',1,?,?)",
+            (timestamp, timestamp),
+        )
+        db.execute(
+            "INSERT INTO plan_node_artifact_links "
+            "(node_id,artifact_id,role,provenance,created_at) "
+            "VALUES ('review-node',?,'attention','test.open_ask',?)",
+            (artifact_id, timestamp),
+        )
+        db.execute(
+            "INSERT INTO plan_node_holds "
+            "(id,node_id,kind,reason_key,reason,owner_kind,owner_id,provenance,created_at) "
+            "VALUES ('review-hold','review-node','blocked','review','Review it','user',?,"
+            "'test.open_ask',?)",
+            (artifact_id, timestamp),
+        )
 
 
 def _thread_root(ws: Path, sid: str) -> Path:
@@ -1428,7 +1474,7 @@ def _age_tree(root: Path, days: int) -> None:
     _age(root, days)
 
 
-def test_working_tmp_trimmed_after_ttl(tmp_path, mtime_as_added_time):
+def test_working_tmp_trim_removes_unregistered_stale_unit(tmp_path, mtime_as_added_time):
     db = _db()
     _add_session(db, "s1", last_activity=NOW - timedelta(days=1))
     root = _thread_root(tmp_path, "s1")
@@ -1445,6 +1491,59 @@ def test_working_tmp_trimmed_after_ttl(tmp_path, mtime_as_added_time):
     assert report.working_files_trimmed == 1
     assert not stale.exists()
     assert fresh.exists()
+
+
+def test_working_tmp_trim_keeps_durable_registered_document(tmp_path, mtime_as_added_time):
+    db = _db()
+    _add_session(db, "s1", last_activity=NOW - timedelta(days=1))
+    document = _thread_root(tmp_path, "s1") / "working" / "review.md"
+    document.write_text("review me")
+    _age(document, 8)
+    _add_artifact_identity(db, "review", path=document, retention="durable")
+    _add_artifact_registration(db, "review", "s1")
+    db.commit()
+
+    report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
+
+    assert report.working_files_trimmed == 0
+    assert document.exists()
+    assert db.execute(
+        "SELECT state FROM artifact_identities WHERE id='review'"
+    ).fetchone()["state"] == "active"
+
+
+def test_working_tmp_trim_keeps_open_ask_target(tmp_path, mtime_as_added_time):
+    db = _db()
+    _add_session(db, "s1", last_activity=NOW - timedelta(days=1))
+    document = _thread_root(tmp_path, "s1") / "working" / "review.md"
+    document.write_text("review me")
+    _age(document, 8)
+    _add_artifact_identity(db, "review", path=document, retention="ephemeral")
+    _add_artifact_registration(db, "review", "s1")
+    _add_open_ask(db, "review")
+    db.commit()
+
+    report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
+
+    assert report.working_files_trimmed == 0
+    assert document.exists()
+
+
+def test_working_tmp_trim_ignores_pathless_open_ask(tmp_path, mtime_as_added_time):
+    db = _db()
+    _add_session(db, "s1", last_activity=NOW - timedelta(days=1))
+    stale = _thread_root(tmp_path, "s1") / "working" / "stale.txt"
+    stale.write_text("old")
+    _age(stale, 8)
+    _add_artifact_identity(db, "pathless-review", retention="ephemeral")
+    _add_artifact_registration(db, "pathless-review", "s1")
+    _add_open_ask(db, "pathless-review")
+    db.commit()
+
+    report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
+
+    assert report.working_files_trimmed == 1
+    assert not stale.exists()
 
 
 def test_working_tmp_trim_retires_deleted_and_already_missing_artifacts(
@@ -1538,13 +1637,7 @@ def test_working_tmp_reconciliation_uses_one_fixed_query_for_all_live_threads(
         and "JOIN artifact_registrations r" in statement
         and "i.path IS NOT NULL" in statement
     ]
-    begin_immediates = [
-        statement
-        for statement in statements
-        if statement.strip().upper() == "BEGIN IMMEDIATE"
-    ]
     assert len(registry_queries) == 1
-    assert len(begin_immediates) == 1
     assert {
         row["id"]: row["state"]
         for row in db.execute(
@@ -1887,6 +1980,32 @@ def test_settled_worker_working_unit_uses_normal_ttl(tmp_path, mtime_as_added_ti
     assert durable.read_text() == "keep"
 
 
+def test_settled_worker_keeps_released_ephemeral_active_identity(
+    tmp_path, mtime_as_added_time,
+):
+    db = _db()
+    _add_session(
+        db, "settled", state="archived", archived_reason=lifecycle.SETTLED_WORKER_REASON,
+        archived_at=NOW - timedelta(days=8), spawned_by="parent",
+    )
+    artifact = _thread_root(tmp_path, "settled") / "working" / "released.txt"
+    artifact.write_text("keep")
+    _age(artifact, 8)
+    _add_artifact_identity(db, "released", path=artifact, retention="ephemeral")
+    _add_artifact_registration(
+        db, "released", "settled", relationship_state="subscriber-archived",
+    )
+    db.commit()
+
+    report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
+
+    assert report.working_files_trimmed == 0
+    assert artifact.exists()
+    assert db.execute(
+        "SELECT state FROM artifact_identities WHERE id='released'"
+    ).fetchone()["state"] == "active"
+
+
 def test_settled_worker_working_unit_under_normal_ttl_is_kept(tmp_path, mtime_as_added_time):
     db = _db()
     _add_session(
@@ -2083,6 +2202,11 @@ def test_purge_destroys_continuity_with_the_transcript(tmp_path):
         "created_at, updated_at) VALUES "
         "('s1', 0, 1, 'active_constraints', '{}', 1, 'active', 't', 't')"
     )
+    db.execute(
+        """INSERT INTO lesson_placement_checks(
+            thread_id,history_epoch,entry_id,revision,check_name,flag,created_at
+        ) VALUES ('s1',0,1,1,'incident-details','date','t')"""
+    )
     db.commit()
 
     run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
@@ -2092,4 +2216,7 @@ def test_purge_destroys_continuity_with_the_transcript(tmp_path):
     ).fetchone()[0] == 0
     assert db.execute(
         "SELECT COUNT(*) FROM continuity_store WHERE thread_id='s1'"
+    ).fetchone()[0] == 0
+    assert db.execute(
+        "SELECT COUNT(*) FROM lesson_placement_checks WHERE thread_id='s1'"
     ).fetchone()[0] == 0

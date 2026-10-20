@@ -7,7 +7,10 @@ read), the email saved at install, and whether web search works. Strings live in
 ``setup_strings``.
 
 The find-projects decision's option A is the session-read consent;
-``consent_wordings`` renders what that consent must match.
+``consent_wordings`` renders what that consent must match. The import decision's
+option A is the consent to read the person's other AI tools, built only when one
+is found and the model the CORSIA agent runs on is known; it goes first.
+``agent_import_wordings`` renders every card that may authorize that read now.
 
 Each payload carries ``task_title``, the seeded task it is raised from; the
 conductor uses it to find ``source_node_id`` and never passes it on.
@@ -15,9 +18,10 @@ conductor uses it to find ``source_node_id`` and never passes it on.
 
 from __future__ import annotations
 
+import itertools
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from infra import onboarding_events as tasks
@@ -35,8 +39,11 @@ class Facts:
     """What the decisions are built from.
 
     ``omlx_differences`` is None when the person has no oMLX of their own or its
-    settings are unknown, and empty when they already match. ``email`` is the
-    address the person confirmed at install, or empty.
+    settings are unknown, and empty when they already match. ``omlx_managed`` is
+    whether they let CORSIA manage it, so every difference is offered;
+    ``omlx_use_mine`` whether they chose Use mine, so none is. With neither (an
+    install that never showed the choice) only concurrent requests is offered.
+    ``email`` is the address the person confirmed at install, or empty.
     """
 
     omlx_differences: tuple[dict[str, Any], ...] | None = None
@@ -44,6 +51,19 @@ class Facts:
     self_check_passed: bool = True
     session_apps: tuple[str, ...] = ()
     email: str = ""
+    omlx_managed: bool = False
+    omlx_use_mine: bool = False
+    agent_import: ImportCard | None = None
+
+
+@dataclass(frozen=True)
+class ImportCard:
+    """The import card's inputs: found tools, the ready Claude Code or Codex among them,
+    and who receives the read: a known provider's name, else the model's name (empty when local)."""
+
+    tools: tuple[str, ...]
+    connections: tuple[str, ...] = ()
+    provider: str = ""
 
 
 def _safe(value: object) -> str:
@@ -108,6 +128,45 @@ def find_projects(session_apps: tuple[str, ...]) -> dict[str, Any] | None:
                      apps=_join(list(session_apps)))
 
 
+def agent_import(card: ImportCard | None) -> dict[str, Any] | None:
+    """The consent to read the person's other AI tools, or None when none was found."""
+    if card is None or not card.tools:
+        return None
+    connections = text.AGENT_IMPORT_CONNECTIONS.format(
+        tools=_join(list(card.connections)), verb="uses" if len(card.connections) == 1 else "use",
+    ) if card.connections else ""
+    settings = text.AGENT_IMPORT_OTHER_SETTINGS if card.connections else text.AGENT_IMPORT_SETTINGS
+    if not card.provider:
+        where = text.AGENT_IMPORT_LOCAL
+    elif card.provider in text.AGENT_IMPORT_PROVIDERS.values():
+        where = text.AGENT_IMPORT_CLOUD.format(provider=card.provider)
+    else:
+        where = text.AGENT_IMPORT_OTHER.format(model=_safe(card.provider))
+    return _decision(tasks.TASK_START, text.AGENT_IMPORT, options=_lettered(text.AGENT_IMPORT),
+                     recommendation="A", tools=_join(list(card.tools)),
+                     verb="is" if len(card.tools) == 1 else "are", connections=connections,
+                     settings=settings, where=where)
+
+
+def agent_import_wordings(card: ImportCard | None) -> list[tuple[tuple[str, str, str], tuple[str, ...]]]:
+    """Each card that may authorize the read now, with the tools it names.
+
+    The card names every found tool, or a narrower set the person asked for;
+    each is rendered from current facts exactly as it is built.
+    """
+    if card is None:
+        return []
+    wordings = []
+    for size in range(len(card.tools), 0, -1):
+        for tools in itertools.combinations(card.tools, size):
+            rendered = agent_import(replace(
+                card, tools=tools, connections=tuple(name for name in card.connections if name in tools),
+            ))
+            if rendered is not None:
+                wordings.append(((rendered["title"], rendered["context"], rendered["options"][0]["label"]), tools))
+    return wordings
+
+
 def consent_wordings(session_apps: tuple[str, ...]) -> list[tuple[str, str, str]]:
     """(title, context, option A label) of the decision that may authorize the read now.
 
@@ -126,9 +185,29 @@ def _github(email: str) -> dict[str, Any]:
                      sign_up_with=agents_email(email) or text.ASK_FOR_ADDRESS)
 
 
-def _omlx(facts: Facts) -> dict[str, Any] | None:
-    if not facts.self_check_passed:
+def _omlx_row(row: dict[str, Any]) -> str:
+    return text.OMLX_ROW.format(label=text.OMLX_LABELS.get(row["setting"], _safe(row["setting"])),
+                                current=_safe(text.omlx_value(row["current"])),
+                                recommended=_safe(text.omlx_value(row["recommended"])))
+
+
+def _managed_omlx(rows: tuple[dict[str, Any], ...]) -> dict[str, Any]:
+    """Every setting CORSIA would change on the oMLX it manages, each as current → new."""
+    server_wide = [_omlx_row(row) for row in rows if "model" not in row]
+    model_rows = [row for row in rows if "model" in row]
+    groups = [text.OMLX_GROUP_GLOBAL.format(rows=", ".join(server_wide))] if server_wide else []
+    if model_rows:
+        groups.append(text.OMLX_GROUP_MODEL.format(
+            model=_safe(model_rows[0]["model"]), rows=", ".join(_omlx_row(row) for row in model_rows)))
+    return _pick_one(tasks.TASK_CONFIG, text.OMLX_MANAGED, "A", changes="; ".join(groups))
+
+
+def omlx_decision(facts: Facts) -> dict[str, Any] | None:
+    """The oMLX settings decision, or None when nothing differs, the self-check failed, or under Use mine."""
+    if not facts.self_check_passed or facts.omlx_use_mine:
         return None
+    if facts.omlx_managed:
+        return _managed_omlx(facts.omlx_differences) if facts.omlx_differences else None
     entry = next((row for row in facts.omlx_differences or () if row["setting"] == OMLX_SETTING), None)
     if entry is None:
         return None
@@ -138,9 +217,11 @@ def _omlx(facts: Facts) -> dict[str, Any] | None:
 
 def build_decisions(facts: Facts) -> list[dict[str, Any]]:
     """The complete decisions to raise, in setup-task order, each as-is."""
-    omlx = _omlx(facts)
+    omlx = omlx_decision(facts)
     projects = find_projects(facts.session_apps)
+    imported = agent_import(facts.agent_import)
     return [
+        *([imported] if imported else []),
         *([omlx] if omlx else []),
         _github(facts.email),
         *([projects] if projects else []),
@@ -185,26 +266,76 @@ def _saved_email() -> str:
     return profile_email(config.WORKSPACE)
 
 
-async def read_facts(*, self_check_passed: bool = True, probe_web_search: bool = True) -> Facts:
+def model_provider(model: str) -> str | None:
+    """Who receives what the CORSIA agent reads on ``model``: '' when it is local, else
+    a known provider's name or the model's own; None when the model cannot be resolved.
+    An External endpoint is not local: it may front a cloud API."""
+    from llm.pricing import is_local_model
+    from llm.resolution import ModelUnavailableError, resolve_execution_target
+
+    try:
+        target = resolve_execution_target(model)
+    except (ModelUnavailableError, ValueError):
+        return None
+    if is_local_model(model):
+        return ""
+    return (text.AGENT_IMPORT_PROVIDERS.get(target.provider)
+            or text.AGENT_IMPORT_PROVIDERS.get(target.harness) or target.display_name)
+
+
+def import_card(model: str, ready_sources: set[str]) -> ImportCard | None:
+    """The import card's inputs from stats alone, or None with no tool or no known model."""
+    from onboarding import agent_import as reader
+    from onboarding.project_discovery import Roots
+
+    found = reader.found_tools(Roots.for_user())
+    provider = model_provider(model) if found else None
+    if provider is None:
+        return None
+    return ImportCard(
+        tuple(reader.LABELS[tool] for tool in found),
+        tuple(reader.LABELS[tool] for tool in found
+              if tool in (reader.CLAUDE_CODE, reader.CODEX) and tool in ready_sources),
+        provider,
+    )
+
+
+def ready_sources(rows: list[dict[str, Any]]) -> set[str]:
+    return {str(row["source"]) for row in rows if row.get("state") == "ready" and row.get("source")}
+
+
+async def read_facts(*, self_check_passed: bool = True, probe_web_search: bool = True,
+                     agent_model: str | None = None) -> Facts:
     """Read the facts. With CORSIA's own API unreachable, oMLX is left out.
 
     Without ``probe_web_search`` no search runs and web search reads as not working,
     so its decision stays for the conductor to settle after testing it itself.
+    The import card is built only for ``agent_model``, the model the CORSIA agent
+    raising it runs on.
     """
     from infra.db_async import run_in_db, run_off_db
+    from llm import own_omlx_management
 
     from onboarding.project_discovery import Roots, session_apps
 
     omlx: tuple[dict[str, Any], ...] | None = None
+    managed = use_mine = False
     sessions = tuple(await run_off_db(session_apps, Roots.for_user()))
-    if self_check_passed:
+    rows: list[dict[str, Any]] = []
+    if self_check_passed or agent_model:
         from api.provider_sources import list_sources
 
-        for row in await run_in_db(list_sources):
+        rows = await run_in_db(list_sources)
+    if self_check_passed:
+        for row in rows:
             if row.get("source") == "omlx" and row.get("omlx_settings") is not None:
                 omlx = tuple((row["omlx_settings"] or {}).get("differences") or ())
+                managed = (row.get("omlx_management") or {}).get("state") == "managed"
+                use_mine = await run_off_db(own_omlx_management.uses_mine)
     works = await web_search_works() if probe_web_search else False
-    return Facts(omlx, works, self_check_passed, sessions, await run_off_db(_saved_email))
+    card = await run_in_db(import_card, agent_model, ready_sources(rows)) if agent_model else None
+    return Facts(omlx, works, self_check_passed, sessions, await run_off_db(_saved_email), managed, use_mine,
+                 card)
 
 
 async def setup_plan(*, self_check_passed: bool = True, probe_web_search: bool = True) -> dict[str, Any]:

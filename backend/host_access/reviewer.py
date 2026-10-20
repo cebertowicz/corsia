@@ -237,6 +237,7 @@ async def review_application(
     telemetry = ReviewTelemetry(
         "application", review_telemetry.usage_thread_id(application_payload, usage_thread_id),
         reviewer_fallback=getattr(target, "reviewer_fallback", False),
+        account_id=target.account_id,
     )
     terminal: ReviewTerminal = "transport_failure"
     try:
@@ -287,6 +288,7 @@ async def review_action(
     runner = invoke or invoke_isolated_structured
     telemetry = ReviewTelemetry(
         "action", review_telemetry.usage_thread_id(application_payload, usage_thread_id),
+        account_id=target.account_id,
     )
     terminal: ReviewTerminal = "transport_failure"
     try:

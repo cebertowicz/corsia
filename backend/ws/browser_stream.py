@@ -1,4 +1,4 @@
-"""Authenticated relay between the browser pane and agent-browser's loopback stream."""
+"""Authenticated relay between the browser pane and the shared page it shows."""
 from __future__ import annotations
 
 import asyncio
@@ -6,22 +6,24 @@ import contextlib
 import json
 import logging
 import secrets
+from functools import partial
 from typing import Callable
 
-import websockets
 from fastapi import WebSocket, WebSocketDisconnect
 from websockets.exceptions import WebSocketException
 
 from host_access import browser_control, browser_pane
+from host_access.browser_domain import url_domain
 from host_access.browser_session_state import BrowserSessionError
 from host_access.processes import ProcessOwnerError
-from infra.auth import authenticate
+from infra.auth import authenticate, narrow_to_listener
 from infra.database import get_db
-from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
 from ws.browser_frames import PaneFrames
 
 log = logging.getLogger(__name__)
+# Seconds before each re-establishment of a pane's page-address watch; it is not retried further.
+METADATA_RETRY_DELAYS = (0.5, 1.0, 2.0)
 
 
 async def browser_stream_endpoint(ws: WebSocket, thread_id: str) -> None:
@@ -33,25 +35,25 @@ async def browser_stream_endpoint(ws: WebSocket, thread_id: str) -> None:
     if not _user_owns_thread(thread_id, user["id"]):
         await ws.close(code=1008)
         return
-    outcome = await browser_pane.stream_port(thread_id)
-    if outcome.no_session:
+    if not await browser_pane.is_open(thread_id):
         await ws.send_json({"type": "browser_state", "state": "no_browser_yet"})
         await ws.close()
         return
-    if outcome.error:
-        await ws.send_json({"type": "browser_state", "state": "error", "reason": outcome.error})
-        await ws.close()
-        return
     try:
-        async with websockets.connect(f"ws://127.0.0.1:{outcome.port}", max_size=None, close_timeout=1) as stream:
-            await _relay(ws, stream, thread_id, user["id"])
+        await _relay(ws, thread_id, user["id"])
     except WebSocketDisconnect:
         pass
+    except (BrowserSessionError, ProcessOwnerError) as exc:
+        await _close_with_error(ws, str(exc))
     except (OSError, WebSocketException):
-        # The pane may already be gone; its own close handler then clears its control state.
-        with contextlib.suppress(Exception):
-            await ws.send_json({"type": "browser_state", "state": "error", "reason": "browser stream connection failed"})
-            await ws.close()
+        await _close_with_error(ws, "browser stream connection failed")
+
+
+async def _close_with_error(ws: WebSocket, reason: str) -> None:
+    # The pane may already be gone; its own close handler then clears its control state.
+    with contextlib.suppress(Exception):
+        await ws.send_json({"type": "browser_state", "state": "error", "reason": reason})
+        await ws.close()
 
 
 async def _authenticate_pane_stream(ws: WebSocket) -> dict | None:
@@ -59,7 +61,7 @@ async def _authenticate_pane_stream(ws: WebSocket) -> dict | None:
     try:
         message = await asyncio.wait_for(ws.receive_json(), timeout=10)
         token = message.get("token", "") if isinstance(message, dict) else ""
-        user = authenticate(token)
+        user = narrow_to_listener(ws, authenticate(token))
     except WebSocketDisconnect:
         return None  # The pane left first; there is no socket left to close.
     except (TimeoutError, ValueError):
@@ -78,8 +80,8 @@ def _user_owns_thread(thread_id: str, user_id: str) -> bool:
         db.close()
 
 
-async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
-    """Proxy frames and accept input only from this connection's control holder."""
+async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
+    """Relay shared page frames and pane input for one authenticated connection."""
     connection_token = secrets.token_urlsafe(18)
 
     frames = PaneFrames()
@@ -90,17 +92,12 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
         if not frames.control(message):
             overflow.set()
 
-    async def send_control() -> None:
-        report({
-            "type": "control",
-            "has_control": browser_control.holds_control(thread_id, connection_token),
-        })
+    browser_control.pane_connected(thread_id, connection_token, report,
+                                   partial(browser_pane.password_probe, thread_id, connection_token))
 
-    async def from_stream() -> None:
-        async for message in stream:
-            if not frames.offer(message):
-                overflow.set()
-                return
+    async def from_page() -> None:
+        # A frame only replaces the unsent frame, so frames never fill the bounded queue.
+        await browser_pane.screencast(thread_id, connection_token, frames.offer)
 
     async def from_pane() -> None:
         while True:
@@ -110,29 +107,40 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
             except (TypeError, ValueError):
                 continue
             kind = data.get("type") if isinstance(data, dict) else None
-            if kind == "take_over":
-                if browser_control.take_control(thread_id, connection_token):
-                    emit_product_event("browser_pane", "take_over", thread_id=thread_id, user_id=user_id)
-                await send_control()
-            elif kind == "hand_back":
-                if browser_control.hand_back(thread_id, connection_token):
-                    emit_product_event("browser_pane", "hand_back", thread_id=thread_id, user_id=user_id)
-                await send_control()
-            elif kind == "navigate":
+            if kind == "navigate":
                 _request_navigate(thread_id, connection_token, data, report)
             elif kind == "appearance":
                 _request_match(thread_id, connection_token, data)
-            elif (kind in {"input_mouse", "input_keyboard"}
-                  and browser_control.holds_control(thread_id, connection_token)):
-                await stream.send(message)
+            elif kind == "input_mouse":
+                # CDP serializes pointer and key delivery on the page target, so typing cannot
+                # overtake the click that focuses its field.
+                await browser_pane.mouse_event(thread_id, data, connection_token)
+                browser_control.person_input(thread_id)
+            elif kind == "input_keyboard":
+                await browser_pane.key_event(thread_id, data, connection_token)
+                browser_control.person_input(thread_id)
+
+    async def metadata_events() -> None:
+        async def emit(message: dict) -> None:
+            report(message)
+        # The address is the person's cue on a password page, so a lost watch is re-established a few
+        # times and then ends the stream visibly rather than leaving a stale address on screen.
+        for attempt, delay in enumerate(METADATA_RETRY_DELAYS, start=1):
+            try:
+                await browser_pane.watch_page_metadata(thread_id, connection_token, emit)
+            except (BrowserSessionError, ProcessOwnerError, OSError, WebSocketException) as exc:
+                log.warning("browser pane %s lost its page address watch (attempt %d of %d): %s",
+                            thread_id, attempt, len(METADATA_RETRY_DELAYS), exc)
+            await asyncio.sleep(delay)
+        raise BrowserSessionError("The pane stopped following the page's address")
 
     tasks: set[asyncio.Task] = set()
     try:
-        await stream.send(json.dumps({"type": "screencast_start"}))
-        await send_control()
+        # Shared panes have no control-holder state.
         tasks = {
-            asyncio.create_task(from_stream()),
+            asyncio.create_task(from_page()),
             asyncio.create_task(from_pane()),
+            asyncio.create_task(metadata_events()),
             asyncio.create_task(frames.send(pane.send_text)),
             asyncio.create_task(_close_on_overflow(pane, overflow)),
         }
@@ -150,8 +158,8 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
         # A closed connection's size must never land after a newer pane's.
         if (queued := _latest_appearance.get(thread_id)) and queued[0] == connection_token:
             del _latest_appearance[thread_id]
-        if browser_control.hand_back(thread_id, connection_token):
-            emit_product_event("browser_pane", "hand_back", thread_id=thread_id, user_id=user_id)
+        browser_pane.clear_page_endpoint(thread_id, connection_token)
+        browser_control.pane_disconnected(thread_id, connection_token)
 
 
 async def _close_on_overflow(pane: WebSocket, overflow: asyncio.Event) -> None:
@@ -204,8 +212,7 @@ async def _run_pending(thread_id: str) -> None:
         elif (queued := _latest_appearance.pop(thread_id, None)) is not None:
             connection_token, appearance = queued
             try:
-                await browser_pane.match_pane(thread_id, appearance, connection_token)
-                await browser_pane.repaint(thread_id, connection_token)
+                await browser_pane.match_pane(thread_id, appearance)
             except (BrowserSessionError, ProcessOwnerError) as exc:
                 log.warning("browser pane %s kept its old appearance: %s", thread_id, exc)
         else:
@@ -213,9 +220,7 @@ async def _run_pending(thread_id: str) -> None:
 
 
 async def _navigate(thread_id: str, connection_token: str, data: dict) -> dict:
-    """Open a URL, or go back, forward or reload, only for the connection that holds control."""
-    if not browser_control.holds_control(thread_id, connection_token):
-        return {"type": "navigate_result", "error": "Take over to navigate"}
+    """Open a URL, or go back, forward or reload from an authenticated pane connection."""
     action, url = data.get("action"), data.get("url")
     if action is None and not browser_control.is_http_url(url):
         return {"type": "navigate_result", "error": "Browser URL must be http or https"}
@@ -225,7 +230,16 @@ async def _navigate(thread_id: str, connection_token: str, data: dict) -> dict:
         if action is None:
             result = await browser_pane.open_url(thread_id, str(url), connection_token)
         else:
-            result = await browser_pane.go(thread_id, action, connection_token)
+            result = await browser_pane.go(thread_id, action)
     except (BrowserSessionError, ProcessOwnerError) as exc:
         return {"type": "navigate_result", "error": str(exc)}
-    return {"type": "navigate_result", "error": result if result.startswith("Error:") else None}
+    if result.startswith("Error:"):
+        return {"type": "navigate_result", "error": result}
+    try:
+        current_url, title = await browser_pane.page_info(thread_id)
+    except (BrowserSessionError, ProcessOwnerError) as exc:
+        # The navigation succeeded but its session ended before the labels were read; the
+        # metadata watch labels whatever page a reopened pane shows.
+        log.warning("browser pane %s navigated but could not read the page labels: %s", thread_id, exc)
+        current_url, title = (str(url) if action is None else None), None
+    return {"type": "navigate_result", "error": None, "url": current_url, "domain": url_domain(current_url), "title": title}

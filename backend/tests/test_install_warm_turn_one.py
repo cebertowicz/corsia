@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -38,14 +44,14 @@ def _seed_omlx(*model_ids: str) -> None:
 @pytest.fixture
 def fresh_install(isolated_db):
     from infra import accounts
-    from infra.conductor import WORKSPACE_SCOPE, get_conductor
+    from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
     from infra.database import write_transaction
 
     with write_transaction(None, scope="test_install_warm") as db:
         db.execute("DELETE FROM auth_tokens")
         db.execute("DELETE FROM users")
     accounts.create_user("newcomer", SECRET_ENOUGH)
-    conductor_id = get_conductor(WORKSPACE_SCOPE)
+    conductor_id = get_corsia_agent()
     assert conductor_id
     return conductor_id
 

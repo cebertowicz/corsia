@@ -7,18 +7,12 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 import uuid
 
+from automation.restart_rule import HOLD_PHASES, IN_FLIGHT_TTL_SECONDS
+from automation.restart_rule import parse as _parse
+from automation.restart_rule import row_is_active
 from automation.restart_tokens import revoke_lifecycle_token_for_terminal_operation
 from infra.database import get_db, write_transaction
 
-IN_FLIGHT_TTL_SECONDS = 600
-HOLD_PHASES = frozenset({
-    "holding",
-    "steering",
-    "draining",
-    "ready",
-    "restarting",
-    "resuming",
-})
 ABORTABLE_PHASES = frozenset({
     "holding",
     "steering",
@@ -37,29 +31,8 @@ def _now_iso() -> str:
     return _now().isoformat()
 
 
-def _parse(ts: str) -> datetime | None:
-    try:
-        parsed = datetime.fromisoformat(ts)
-    except (TypeError, ValueError):
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
-
 def _row_is_active(row, *, now: datetime | None = None) -> bool:
-    """Operational holds never expire; only legacy pre-bounce rows use the TTL."""
-    if str(row["status"]) != "in_flight":
-        return False
-    phase = row["phase"] if "phase" in row.keys() else None
-    if phase in HOLD_PHASES:
-        return True
-    if phase:
-        return False
-    started = _parse(row["requested_at"])
-    if started is None:
-        return True
-    return ((now or _now()) - started).total_seconds() < IN_FLIGHT_TTL_SECONDS
+    return row_is_active(row, now=now or _now())
 
 
 def _active_row(connection) -> dict | None:
@@ -145,7 +118,7 @@ def usual_update_seconds(*, db=None) -> int | None:
 
 
 def mark_conductor_told(operation_id: str, *, db=None) -> bool:
-    """Record exactly one successful workspace-conductor notification."""
+    """Record exactly one successful corsia-agent notification."""
     with write_transaction(db, scope="restart_operation") as connection:
         cur = connection.execute(
             "UPDATE self_restart_requests SET conductor_told_at=?,updated_at=? "

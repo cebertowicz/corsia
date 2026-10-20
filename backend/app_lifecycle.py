@@ -143,11 +143,10 @@ async def lifespan(app: FastAPI):
         from api.usage_rollup import schedule_refresh as schedule_usage_rollup_refresh
         from automation import restart_startup
         from doceditor.live_runtime import start_documents
-        from infra.settings import get_mcp_servers
         from llm.lifecycle import autostart_local_providers
-        from tools.mcp_runtime import start_mcp_runtime
+        from tools.mcp_runtime import start_connected_app_runtime
 
-        await start_mcp_runtime(await run_in_db(get_mcp_servers))
+        await start_connected_app_runtime()
 
         startup_tasks[0] = asyncio.create_task(autostart_local_providers())
         startup_tasks[1] = asyncio.create_task(_startup_cloud_discovery())
@@ -155,7 +154,14 @@ async def lifespan(app: FastAPI):
         startup_tasks[3] = asyncio.create_task(_startup_harness_discovery())
         recovered, wakes = await restart_startup.run_startup_reconcile(logger)
         await _start_runtime_services()
+        from core.devices_runtime import runtime as devices_runtime
+        from infra.settings import get_devices_enabled
+        await devices_runtime.restore(app, await run_in_db(get_devices_enabled))
         await start_documents()
+        from llm.local_model import backfill_legacy_record
+        from llm.local_setup import resume_pending_setup
+        await asyncio.to_thread(backfill_legacy_record)
+        await resume_pending_setup()
         schedule_usage_rollup_refresh()
         startup_tasks[4] = asyncio.create_task(
             restart_startup.run_startup_drive(
@@ -318,25 +324,25 @@ async def _shutdown_runtime_services(
     from loguru import logger as _log_shutdown
 
     pending_cancel = await _shutdown_owned_tasks(startup_tasks, _log_shutdown)
+    from app_shutdown_runtime import shutdown_devices
 
+    devices_failure, pending_cancel = await shutdown_devices(
+        _log_shutdown, pending_cancel, _run_cleanup_owner,
+    )
     host_access_failure, host_access_cancel = await _shutdown_host_access(
         _log_shutdown,
     )
     pending_cancel = pending_cancel or host_access_cancel
-
     checkpoint_failure, checkpoint_cancel = await _shutdown_checkpoints(
         _log_shutdown,
     )
     pending_cancel = pending_cancel or checkpoint_cancel
-
     (rollup_failure, refresh_failure), refresh_cancel = await shutdown_refresh_owners(
         _log_shutdown, _run_cleanup_owner,
     )
     pending_cancel = pending_cancel or refresh_cancel
-
     native_cancel = await shutdown_native_turns(_log_shutdown)
     pending_cancel = pending_cancel or native_cancel
-
     harness_failure, harness_cancel = await _shutdown_harnesses(_log_shutdown)
     pending_cancel = pending_cancel or harness_cancel
 
@@ -380,7 +386,7 @@ async def _shutdown_runtime_services(
         (
             checkpoint_failure, checkpoint_count_failure, host_access_count_failure,
             process_count_failure, rollup_failure, refresh_failure, harness_failure,
-            process_failure, host_access_failure, mcp_failure, handoff_failure,
+            process_failure, host_access_failure, devices_failure, mcp_failure, handoff_failure,
         ),
         process_failure=process_failure,
         pending_cancel=pending_cancel,

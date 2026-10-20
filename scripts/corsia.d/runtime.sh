@@ -19,6 +19,42 @@ require_no_extra_lifecycle_args() {
     done
 }
 
+# Once the CORSIA app adopts an install it runs its own service on that state
+# root and records it in service.json (its app folder, service_file). A second
+# backend on the same state root would share one database, so start and restart
+# from a source checkout refuse. The app runs this same script on that root and
+# is never refused. A missing file, or one without state_dir, leaves the install
+# unclaimed; a file that cannot be read is treated as claimed.
+refuse_if_app_owns_install() {
+    is_app_mode && return 0
+    local verdict
+    verdict="$(cd "$BACKEND_DIR" && "$PYTHON" -I -B -c '
+import os, sys
+sys.path.insert(0, sys.argv[1])
+from infra.platform_paths import app_metadata_dir
+from infra.service_file import SERVICE_FILE, service_file_state_dir
+path = app_metadata_dir() / SERVICE_FILE
+try:
+    claimed = service_file_state_dir(path)
+except ValueError:
+    print("unreadable", path)
+else:
+    if claimed is not None and str(claimed) == os.path.realpath(sys.argv[2]):
+        print("owned", path)
+' "$BACKEND_DIR" "$CORSIA_STATE_DIR" 2>/dev/null)" || verdict="unreadable service.json"
+    case "$verdict" in
+        owned*)
+            fail "The CORSIA app owns this install (${verdict#owned }). Use the CORSIA app to start or restart it."
+            return 1
+            ;;
+        unreadable*)
+            fail "Cannot read the CORSIA app's ${verdict#unreadable }, so this install may belong to the app. Use the CORSIA app, or fix that file."
+            return 1
+            ;;
+    esac
+    return 0
+}
+
 is_backend_running() { curl -sf --max-time 3 "http://127.0.0.1:$BACKEND_PORT/api/health" > /dev/null 2>&1; }
 
 # A healthy backend must publish readiness within one minute. Provider catalog
@@ -83,15 +119,23 @@ open_after_start() {
     open_browser
 }
 
-open_browser() {
-    local url="http://localhost:$BACKEND_PORT" version commit
-    echo "     ready at $url"
+# The installed release as a person reads it. A packaged app replaces it with
+# its bundle version (corsia.d/app_mode.sh).
+installed_release_label() {
+    local version commit
     version="$(git -C "$CORSIA_DIR" describe --tags --always 2>/dev/null)" || version=unknown
     commit="$(git -C "$CORSIA_DIR" rev-parse --short HEAD 2>/dev/null)" || commit=unknown
+    echo "CORSIA $version (commit $commit)"
+}
+
+open_browser() {
+    local url="http://localhost:$BACKEND_PORT" release
+    echo "     ready at $url"
+    release="$(installed_release_label)"
     if command -v open > /dev/null 2>&1 && open "$url"; then
-        echo "     Opening your browser…  Installed CORSIA $version (commit $commit)."
+        echo "     Opening your browser…  Installed $release."
     else
-        echo "     Open $url in your browser.  Installed CORSIA $version (commit $commit)."
+        echo "     Open $url in your browser.  Installed $release."
     fi
 }
 
@@ -604,7 +648,7 @@ start_backend() {
     cd "$BACKEND_DIR"
     env -u CORSIA_RESTART_BACKEND_PORT -u CORSIA_RESTART_OPERATION_ID \
         -u CORSIA_TEST_MODE -u CORSIA_ALLOW_HOME_WORKSPACE_IN_CI \
-        BACKEND_PORT="$BACKEND_PORT" \
+        CORSIA_DEVICES_DISABLE=1 BACKEND_PORT="$BACKEND_PORT" \
         nohup "$PYTHON" -m uvicorn main:app --host "$bind" --port "$BACKEND_PORT" > "$BACKEND_LOG" 2>&1 &
 }
 

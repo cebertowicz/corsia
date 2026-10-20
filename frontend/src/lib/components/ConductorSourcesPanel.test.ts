@@ -14,7 +14,7 @@ vi.mock('$lib/stores/models', async (importOriginal) => {
 });
 
 function account(state: SourceAccount['state'], extra: Partial<SourceAccount> = {}): SourceAccount {
-	return { account_id: 'acc-1', label: 'me@example.com', label_verified: true, identified: true, state, resets_at: null, conductor_binding: false, ...extra };
+	return { account_id: 'acc-1', label: 'me@example.com', label_verified: true, identified: true, state, resets_at: null, corsia_agent_binding: false, ...extra };
 }
 
 function claude(state: ModelSource['state'], accounts: SourceAccount[] = []): ModelSource {
@@ -81,7 +81,7 @@ describe('first-run line', () => {
 	it('with a ready model: points at the picker and shows no button or link', async () => {
 		listed = [claude('ready', [account('ready')])];
 		await render();
-		expect(text()).toBe('Pick a model from the picker below to start your conductor.');
+		expect(text()).toBe('Pick a model from the picker below to start CORSIA.');
 		expect(host.querySelectorAll('button')).toHaveLength(0);
 		expect(saveThreadModel).not.toHaveBeenCalled();
 	});

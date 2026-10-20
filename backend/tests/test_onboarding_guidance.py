@@ -70,6 +70,42 @@ def test_first_run_hands_phone_access_to_the_remote_access_reference():
     assert "report the actual output" in remote
 
 
+def test_remote_access_never_reuses_or_adds_to_a_funnel_port():
+    remote = REMOTE_ACCESS.read_text(encoding="utf-8")
+    facts = remote.split("## Facts that shape every step", 1)[1].split("## Commands", 1)[0]
+    states = remote.split("## States", 1)[1].split("## When CORSIA's port changes", 1)[0]
+    row_1 = next(line for line in states.splitlines() if line.startswith("| 1 |"))
+    row_5 = next(line for line in states.splitlines() if line.startswith("| 5 |"))
+    row_0a = next(line for line in states.splitlines() if line.startswith("| 0a |"))
+    row_1b = next(line for line in states.splitlines() if line.startswith("| 1b |"))
+    internet_check = remote.split("## Internet check, once per install", 1)[1]
+
+    # A webhook path mapped by `tailscale funnel --set-path` targets CORSIA's port
+    # but is public; neither may count as CORSIA's mapping.
+    assert "its `/` path targets `http://127.0.0.1:[port]`" in facts
+    assert "and Funnel is off for its https port" in facts
+    assert "`AllowFunnel`" in facts
+    assert "no `AllowFunnel`, or no entry for that port, means off" in facts
+    assert "When you cannot tell whether Funnel is on for a port, treat it as on" in facts
+    assert "with Funnel off" in row_5
+    assert "Never pick a port with Funnel on" in row_5
+    assert "open to the internet (Funnel), so CORSIA uses port [https port]" in states
+    assert "A `/` on a port with Funnel on that targets the old port is row 0a's case." in remote
+
+    # Row 1 routes into 0a and 0a exits to row 5 without looping back to row 1.
+    assert "or to row 0a when it answers through a port with Funnel on" in row_1
+    assert "Then go to row 5 without checking the address again" in row_0a
+    # Installs the earlier flow already exposed get CORSIA's `/` taken off,
+    # leaving the port's other paths, once this reference changes.
+    assert "tailscale serve --https=[Funnel port] --set-path=/ off" in remote
+    assert "confirm `/` is gone and the port's other paths are unchanged" in row_0a
+    assert "it carries no `Internet check done` note" in internet_check
+    assert "goes to row 0a" in internet_check
+    assert "Whatever the outcome, add the note `Internet check done`" in internet_check
+    # An unreadable configuration closes with its own reason, not "ports in use".
+    assert "`Couldn't read Tailscale settings`" in row_1b
+
+
 def test_settings_keys_is_spelled_by_the_one_constant():
     from infra.ui_labels import SETTINGS_KEYS
 
@@ -160,4 +196,73 @@ def test_every_settings_link_in_first_run_opens_a_real_section_and_anchor():
 def test_first_run_stays_within_its_body_size():
     # Its size after the fuller conductor-role intro and the MCP import consent step (#690),
     # rounded up; #674 tracks the real cap.
-    assert len(FIRST_RUN.read_bytes()) <= 17400
+    assert len(FIRST_RUN.read_bytes()) <= 17600  # +the router to first-run-app.md
+
+
+LOCAL_MODEL_OFFER = BOOTSTRAP_SKILL.parent / "references/local-model-offer.md"
+
+
+def test_local_model_offer_reads_a_running_setup_before_offering_and_never_waits_on_it():
+    offer = LOCAL_MODEL_OFFER.read_text(encoding="utf-8")
+    running = offer.split("## Setup already running", 1)[1]
+
+    assert offer.index("`state` is `running` or `downloading`") < offer.index("2. Ask once")
+    assert "make no offer" in offer
+    # A succeeded flight's result outlives its connection (kept in memory until restart),
+    # so it only stops the offer while a local model is still connected.
+    assert "if none is, that result is old: carry on as if it were absent" in offer
+    assert "never holds up a setup task" in running
+    assert "at the end of each later setup task" in running
+    assert "`succeeded`" in running and "`failed`" in running and "Each is said once." in running
+    assert "never post `result.next_action`" in running
+    assert "re-read it after each later task" in FIRST_RUN.read_text(encoding="utf-8")
+
+
+def test_local_model_offer_reads_omlx_s_pick_and_never_sends_a_profile():
+    offer = LOCAL_MODEL_OFFER.read_text(encoding="utf-8")
+
+    # Setup takes the model oMLX recommender picks.
+    for state in ("low_memory", "own_omlx", "picked", "not_checked", "checking", "failed"):
+        assert f"`{state}`" in offer
+    assert "make the offer without a name or size" in offer
+    assert "CORSIA's starter model, not oMLX's pick, so pass the `message` on" in offer
+    # Onboarding copy says "computer"; "Mac" is only for Apple facts.
+    assert "Mac" not in offer
+    assert "with body `{}`" in offer
+
+
+FIRST_RUN_APP = BOOTSTRAP_SKILL.parent / "references/first-run-app.md"
+HANDOFF = "That's everything. So, what's taking up your time this week?"
+
+
+def test_first_run_routes_the_app_path_to_its_own_reference():
+    assert "`first_run_path`" in FIRST_RUN.read_text(encoding="utf-8")
+    assert "references/first-run-app.md" in FIRST_RUN.read_text(encoding="utf-8")
+
+
+def test_app_path_sends_the_message_then_seven_steps_and_ends_on_the_handoff():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    steps = app.split("## The steps, in this order", 1)[1].split("## The hand-off", 1)[0]
+    titles = re.findall(r"^\d\. \*\*([^*]+)\*\*", steps, flags=re.MULTILINE)
+
+    assert app.index("I'm CORSIA, your assistant.") < app.index("## The steps")
+    assert len(titles) == 7
+    assert titles[0] == "About you."
+    assert app.split("## The hand-off", 1)[1].strip().startswith("After the last step that applies, post exactly `" + HANDOFF + "`")
+    assert "follow skill `google-setup`" in steps
+    assert "no setup task list" in app
+    assert "Read nothing until a yes" in steps
+
+
+def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    assert "`model_sources` `recheck: true`" in app
+    # A running flight sets only setup_stage; a backgrounded one sets setup_downloading
+    # (test_local_source_sends_the_download_percent_as_a_number). The setup screen reads both.
+    assert "`setup_stage` set or `setup_downloading` true is still setting up, not failed: say nothing about it" in app
+
+
+def test_app_path_reads_no_other_app_settings_before_a_yes():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    assert "mcp_sources" not in app
+    assert "none of another app's settings" in app

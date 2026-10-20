@@ -10,6 +10,7 @@ import {
 	waitForWsConnected,
 } from '../support/corsia';
 import { releaseMockGate, seedMockResponses } from '../support/mock';
+import { setFocusMode } from '../support/focusMode';
 
 type MessagesAddedReceipt = {
 	sessionId: string;
@@ -41,11 +42,17 @@ function watchMessagesAdded(page: Page): MessagesAddedReceipt[] {
 }
 
 test.describe('@flow:chat @surface:chat same-boundary mid-turn Send', () => {
+	// Focus is on by default and replaces the live reasoning header; this spec covers the ordinary live reply.
+	test.afterEach(async ({ request }) => {
+		await setFocusMode(request, true);
+	});
+
 	test('batches B and C after A while waiting input stays below the live reply', async ({ page, request }, testInfo) => {
 		const consoleErrors = captureConsoleErrors(page);
 		const sessionTitle = `e2e same-boundary batch ${Date.now()}`;
 		const completionGate = `wave-h-turn-a-${Date.now()}`;
 		const sessionId = await createSession(request, sessionTitle);
+		await setFocusMode(request, false);
 		const messagesAddedReceipts = watchMessagesAdded(page);
 
 		await page.goto(`/?token=${TEST_TOKEN}`);

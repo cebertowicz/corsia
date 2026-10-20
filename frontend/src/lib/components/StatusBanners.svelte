@@ -105,7 +105,7 @@
 	   just below the header but keeps its height in the flow (the negative margin cancels the offset), so the
 	   content still moves down by the banner height, as before, and no view's first line sits under a banner. */
 	.status-banners {
-		--status-banners-offset: calc(var(--header-height) + env(safe-area-inset-top, 0px));
+		--status-banners-offset: var(--header-bottom);
 		position: relative; z-index: 9;
 		margin-top: var(--status-banners-offset); margin-bottom: calc(-1 * var(--status-banners-offset));
 		flex-shrink: 0;
@@ -128,7 +128,7 @@
 	}
 	.dismiss-btn:hover { background: rgba(255,255,255,0.3); }
 	.drain-banner {
-		background: var(--accent-subtle); color: var(--accent);
+		background: var(--accent-subtle); color: var(--accent-text);
 		padding: 6px 16px; font-size: var(--text-subhead); font-weight: 500;
 		display: flex; align-items: center; gap: 8px;
 		justify-content: center; flex-shrink: 0;

@@ -305,7 +305,7 @@ def test_compact_wait_ranges_keep_earliest_display_and_latest_overdue_clock(
 
 def test_compact_semantic_matrix_matches_full_projection(db):
     from plans import activity_projection, artifact_links, decisions, operator_projection
-    from registry import attention, models
+    from registry import models
 
     def add_thread(thread_id: str, title: str, *, user_id: str = "user"):
         db.execute(
@@ -359,7 +359,13 @@ def test_compact_semantic_matrix_matches_full_projection(db):
         attention_task.id, artifact["id"], "attention", actor_id="raised-attention",
         provenance="test.activity_index", db=db,
     )
-    attention.raise_attention(artifact["id"], db=db)
+    # A document ask is raised by its open user hold, not by artifact metadata.
+    holds.block_hold(
+        attention_task.id, reason_key="review", reason="Read the note", owner_kind="user",
+        owner_id=artifact["id"],
+        expected_revision=service._node_row(db, attention_task.id)["revision"],
+        actor_id="raised-attention", provenance="test.activity_index", db=db,
+    )
 
     empty = add_thread("empty", "Empty")
     assert empty.id

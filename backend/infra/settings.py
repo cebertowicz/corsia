@@ -114,12 +114,6 @@ def get_host_access_reviewer_model(*, db=None) -> str | None:
     return _exact_agent_default("host_access_reviewer_model", db=db)
 
 
-def get_corrections_checker_model(*, db=None) -> str | None:
-    """Return the exact configured catalog ID for correction recording."""
-    return _exact_agent_default("corrections_checker_model", db=db)
-
-
-
 def _exact_agent_default(key: str, *, db=None) -> str | None:
     if db is None:
         defaults = get_agent_defaults()
@@ -164,6 +158,19 @@ def get_mcp_servers() -> dict:
 def get_feature_flags() -> dict:
     """Get feature flags. Defaults to True when not explicitly configured."""
     return get_setting("features") or {}
+
+
+DEVICE_SETTING_KEY = "devices"
+
+
+def get_devices_enabled(*, db: sqlite3.Connection | None = None) -> bool:
+    """Return the explicitly persisted Devices listener switch state."""
+    return (get_setting(DEVICE_SETTING_KEY, db=db) or {}).get("enabled") is True
+
+
+def set_devices_enabled(enabled: bool, *, db: sqlite3.Connection | None = None) -> None:
+    """Persist the dedicated Devices switch through its one writer."""
+    set_setting(DEVICE_SETTING_KEY, {"enabled": enabled}, db=db)
 
 
 def save_setting_merge(key: str, updates: dict, *, db: sqlite3.Connection | None = None) -> None:

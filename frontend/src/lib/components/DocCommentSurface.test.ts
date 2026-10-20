@@ -126,9 +126,36 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.activeElement).toBe(host.querySelector('[data-drawer-focus-home]'));
 	});
 
+	it('shows no Place again footer when every unplaced comment is detached, though its card stays in the drawer', () => {
+		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true, detached: true }], placementRecovery: { onReload: vi.fn(() => true), unplacedCount: 1, replaceableCount: 0 } });
+		expect(host.querySelector('[data-doc-comments-drawer] [data-drawer-placement]')).toBeNull();
+		expect(host.querySelector('[aria-label="Reload comment placements"]')).toBeNull();
+		expect(host.querySelector('[data-doc-comments-drawer]')?.textContent).not.toContain("couldn't be placed");
+	});
+
+	it('counts every unplaced comment like the header, and after Place again never claims a detached one was placed', async () => {
+		// Two unplaced, one detached: the footer agrees with the header pill (2), and placing the other leaves 1, not "Comments placed".
+		const reloading = writable(false), counts = writable({ unplaced: 2, replaceable: 1 });
+		const liveReloading = fromStore(reloading), liveCounts = fromStore(counts);
+		render({
+			state: { kind: 'list' },
+			comments: [{ ...suggestion, orphaned: true }, { ...suggestion, id: 'detached', orphaned: true, detached: true }],
+			get placementRecovery() { return { onReload: () => true, unplacedCount: liveCounts.current.unplaced, replaceableCount: liveCounts.current.replaceable, reloading: liveReloading.current }; },
+		});
+		expect(host.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe("2 comments couldn't be placed");
+		host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
+		reloading.set(true); flushSync();
+		counts.set({ unplaced: 1, replaceable: 0 }); flushSync();
+		reloading.set(false); flushSync();
+		await tick();
+		expect(host.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe("1 comment still couldn't be placed");
+		expect(host.querySelector('[aria-label="Reload comment placements"]')).toBeNull();
+		expect(document.activeElement).toBe(host.querySelector('[data-drawer-focus-home]'));
+	});
+
 	it('moves orphan placement recovery into the comments drawer with its existing live-state wiring', () => {
 		const reload = vi.fn(() => true);
-		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: reload, orphanedCount: 1 } });
+		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: reload, unplacedCount: 1, replaceableCount: 1 } });
 		const footer = host.querySelector<HTMLElement>('[data-doc-comments-drawer] [data-drawer-placement]')!;
 		expect(footer.querySelector('[role="status"]')?.textContent).toBe("1 comment couldn't be placed");
 		const button = footer.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
@@ -143,7 +170,7 @@ describe('DocCommentSurface suggestions', () => {
 		render({
 			state: { kind: 'list' },
 			comments: [{ ...suggestion, orphaned: true }],
-			get placementRecovery() { return { onReload: () => true, orphanedCount: 1, reloading: live.current }; },
+			get placementRecovery() { return { onReload: () => true, unplacedCount: 1, replaceableCount: 1, reloading: live.current }; },
 		});
 		const button = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
 		button.focus();
@@ -160,7 +187,7 @@ describe('DocCommentSurface suggestions', () => {
 		render({
 			state: { kind: 'list' },
 			comments: [{ ...suggestion, orphaned: true }],
-			get placementRecovery() { return { onReload: () => true, orphanedCount: 1, reloading: live.current }; },
+			get placementRecovery() { return { onReload: () => true, unplacedCount: 1, replaceableCount: 1, reloading: live.current }; },
 		});
 		const retry = async () => {
 			host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
@@ -184,7 +211,7 @@ describe('DocCommentSurface suggestions', () => {
 		render({
 			get state() { return liveState.current; },
 			comments: [{ ...suggestion, orphaned: true }],
-			get placementRecovery() { return { onReload: () => { reloading.set(true); return true; }, orphanedCount: 1, reloading: liveReloading.current, reloadError: liveReloadError.current }; },
+			get placementRecovery() { return { onReload: () => { reloading.set(true); return true; }, unplacedCount: 1, replaceableCount: 1, reloading: liveReloading.current, reloadError: liveReloadError.current }; },
 		});
 		host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
 		state.set(null); flushSync();
@@ -201,7 +228,7 @@ describe('DocCommentSurface suggestions', () => {
 		render({
 			state: { kind: 'list' },
 			get comments() { return liveComments.current; },
-			get placementRecovery() { return { onReload: () => true, orphanedCount: liveComments.current.filter(comment => comment.orphaned && !comment.resolved).length, reloading: liveReloading.current }; },
+			get placementRecovery() { const count = liveComments.current.filter(comment => comment.orphaned && !comment.resolved).length; return { onReload: () => true, unplacedCount: count, replaceableCount: count, reloading: liveReloading.current }; },
 		});
 		host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
 		reloading.set(true); flushSync();
@@ -220,7 +247,7 @@ describe('DocCommentSurface suggestions', () => {
 		const liveOrphanedCount = fromStore(orphanedCount);
 		render({
 			state: { kind: 'list' },
-			get placementRecovery() { return { onReload: () => true, orphanedCount: liveOrphanedCount.current, reloading: liveReloading.current }; },
+			get placementRecovery() { return { onReload: () => true, unplacedCount: liveOrphanedCount.current, replaceableCount: liveOrphanedCount.current, reloading: liveReloading.current }; },
 		});
 		host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
 		reloading.set(true); flushSync();
@@ -234,7 +261,7 @@ describe('DocCommentSurface suggestions', () => {
 	});
 
 	it('keeps a disconnected placement retry focusable and names its live status', () => {
-		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: vi.fn(), orphanedCount: 1, unavailable: true, connectionDescriptionId: 'live-connection-artifact' } });
+		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: vi.fn(), unplacedCount: 1, replaceableCount: 1, unavailable: true, connectionDescriptionId: 'live-connection-artifact' } });
 		const button = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
 		expect(button.disabled).toBe(false);
 		expect(button.getAttribute('aria-disabled')).toBe('true');
@@ -342,8 +369,7 @@ describe('DocCommentSurface suggestions', () => {
 			const { set, onClose } = renderFollowing({ ...suggestion, replacement: null });
 			await vi.waitFor(() => expect(popover().style.left).toBe('548px'));
 			const before = placed();
-			host.querySelector<HTMLButtonElement>('.ct-reply-open')!.click(); flushSync();
-			const input = host.querySelector<HTMLInputElement>('.ct-input')!;
+			const input = host.querySelector<HTMLTextAreaElement>('.ct-input')!;
 			input.value = 'A half-written reply';
 			input.dispatchEvent(new Event('input', { bubbles: true }));
 			flushSync();
@@ -404,9 +430,9 @@ describe('DocCommentSurface suggestions', () => {
 	it('focuses Reply without turning input clicks into text navigation', async () => {
 		const onFocus = vi.fn();
 		render({ state: { kind: 'list' }, comments: [{ ...suggestion, replacement: null }], onFocus });
-		host.querySelector<HTMLButtonElement>('.ct-reply-open')!.click();
+		host.querySelector<HTMLTextAreaElement>('.ct-input')!.focus();
 		await vi.waitFor(() => expect(document.activeElement?.classList.contains('ct-input')).toBe(true));
-		host.querySelector<HTMLInputElement>('.ct-input')!.click();
+		host.querySelector<HTMLTextAreaElement>('.ct-input')!.click();
 		expect(onFocus).not.toHaveBeenCalled();
 	});
 	it('consumes drawer Escape once and restores its opener without reaching the document', () => {
@@ -710,8 +736,6 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		const state = fromStore(comments);
 		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
 		render({ state: { kind: 'list' }, get comments() { return state.current; } });
-		host.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] .ct-act.reply')!.click();
-		await vi.waitFor(() => expect(host.querySelector('[data-comment-id="comment-1"] textarea')).not.toBeNull());
 		const field = host.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
 		field.value = 'half a reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
 		expect(host.querySelector('.drawer-heading')?.textContent).toContain('2 open');
@@ -754,8 +778,6 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		const onResolve = vi.fn();
 		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
 		render({ state: { kind: 'list' }, get comments() { return state.current; }, onResolve });
-		host.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] .ct-act.reply')!.click();
-		await vi.waitFor(() => expect(host.querySelector('[data-comment-id="comment-1"] textarea')).not.toBeNull());
 		const field = host.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
 		field.value = 'half a reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
 		comments.set([{ ...plain, resolved: true }]); flushSync();

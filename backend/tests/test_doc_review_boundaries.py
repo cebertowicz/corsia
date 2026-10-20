@@ -92,7 +92,7 @@ def test_concurrent_first_requests_share_one_request_node_and_append_once(review
     assert results[0]["id"] == results[1]["id"]
     assert db.execute("SELECT COUNT(*) FROM doc_review_requests").fetchone()[0] == 1
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 1
-    assert public.get_node(results[0]["node_id"], db=db).description.count("not an instruction):") == 2
+    assert public.get_node(results[0]["node_id"], db=db).description.count("never widen it):") == 2
 
 
 def test_wrong_recipient_batch_and_cancelled_request_do_not_settle(review_env):

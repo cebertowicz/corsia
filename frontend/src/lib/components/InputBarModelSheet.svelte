@@ -11,23 +11,27 @@
 	import PickerAccountHeader from './PickerAccountHeader.svelte';
 	import PickerModelGroupHeader from './PickerModelGroupHeader.svelte';
 	import { choosePickerAccount } from '$lib/stores/pickerAccountChoice';
-	import { workspaceConductorId } from '$lib/utils/conductor';
-	import { requestProviderCard } from '$lib/stores/settingsNavigation';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
+	import { corsiaAgentId } from '$lib/utils/conductor';
+	import { openProjectSettings, requestProviderCard, requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
-	import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
 	import PickerLocalStatus from './PickerLocalStatus.svelte';
-	import { localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
+	import AddLocalModelSheet from './v7/AddLocalModelSheet.svelte';
+	import { canAddLocalModel, localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
+	import type { LocalPickerRetry } from '$lib/conductorSources';
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
 
-	const groups = $derived(groupModels($models, $activeModelId));
+	const cloudModelsOff = $derived($models.some((model) => model.status_reason === 'project_cloud_off'));
+	const pickerModels = $derived(cloudModelsOff ? $models.filter((model) => model.status_reason !== 'project_cloud_off') : $models);
+	const groups = $derived(groupModels(pickerModels, $activeModelId));
 	// Ready groups start open, unusable ones stay collapsed until tapped; account-backed model rows
 	// stay visible, while their account list opens only on demand, the same for every vendor and state.
 	let opened = $state<Record<string, boolean>>({});
 	let accountOpened = $state<Record<string, boolean>>({});
 	let accountChoiceBusy = false;
 	let usageShown = $state<Record<string, boolean>>({});
+	let showAddLocal = $state(false);
+	let settingsRetrying = $state(false);
 	let { onclose = () => {} }: { onclose?: () => void } = $props();
 	const isOpen = (group: ModelGroup, hasAccounts: boolean) => opened[group.key] ?? (group.state === 'ready' || hasAccounts);
 	// A collapsed group nobody can pick from still shows the thread's current model, disabled.
@@ -51,31 +55,45 @@
 		void loadPickerPolicy(activeThread?.project_id);
 	});
 
-	// A starter download, or a failed setup, shows in the Local group while the picker is open.
-	const isLocalGroup = (group: ModelGroup) => group.rows.some((model) => getModelDispatchId(model).startsWith('omlx@'));
-	const hasLocalGroup = $derived(groups.some(isLocalGroup));
+	// Starter, setup, and Settings download states show in the Local group while the picker is open.
+	// The group that hosts this computer's oMLX setup status is keyed on the oMLX row, not on `is_local`: a trusted device's group says "Local" but is not this computer.
+	const hostsLocalSetup = (group: ModelGroup) => group.rows.some((model) => getModelDispatchId(model).startsWith('omlx@'));
+	const hasLocalSetupGroup = $derived(groups.some(hostsLocalSetup));
+	const hasReadyGroup = $derived(groups.some((group) => group.state === 'ready'));
 	$effect(() => watchLocalStatus());
-	async function retryLocal(kind: 'starter' | 'setup') {
-		if (!(await retryLocalSetup(kind))) toasts.show("Couldn't set up the local model.", 'error');
+	async function retryLocal(kind: LocalPickerRetry) {
+		const result = await retryLocalSetup(kind);
+		if (result.code === 'consent_required') {
+			toasts.showAction(
+				'CORSIA can read the existing oMLX version, settings, and local server to adopt it without changing its settings.',
+				{ label: 'Use existing oMLX', run: async () => {
+					const consented = await retryLocalSetup('setup', true);
+					if (!consented.ok) toasts.show("Couldn't set up the local model.", 'error');
+				} },
+			);
+		} else if (!result.ok) {
+			toasts.show(kind === 'settings' ? result.message ?? "Couldn't retry the local model download. Try again." : "Couldn't set up the local model.", 'error');
+		}
+	}
+
+	async function retrySettingsDownload() {
+		if (settingsRetrying) return;
+		settingsRetrying = true;
+		try { await retryLocal('settings'); } finally { settingsRetrying = false; }
 	}
 
 	async function chooseAccount(row: PickerAccount) {
 		if (accountChoiceBusy) return;
 		accountChoiceBusy = true;
-		const result = await choosePickerAccount($activeThreadId, $activeModelId, $workspaceConductorId, row);
+		const result = await choosePickerAccount($activeThreadId, $activeModelId, $corsiaAgentId, row);
 		accountChoiceBusy = false;
 		if (!result.ok) toasts.show(result.message, 'error');
 	}
 
 	function openRolloverSettings() {
 		threadSettingsOpen.set(false);
-		if (activeThread?.project_id) {
-			workspaceSettingsOpen.set(false);
-			projectSettingsOpen.set(true);
-		} else {
-			projectSettingsOpen.set(false);
-			workspaceSettingsOpen.set(true);
-		}
+		if (activeThread?.project_id) openProjectSettings(activeThread.project_id, 'project-provider-policy');
+		else requestSettingsSection('providers', 'workspace-provider-policy');
 		onclose();
 	}
 
@@ -140,7 +158,10 @@
 	<div class="sheet-section">
 		<div class="sheet-section-label">Model</div>
 		<div class="model-list">
-			{#if groups.length === 0 && !$localStatus}
+			{#if cloudModelsOff && !hasReadyGroup}
+				<div class="model-list-empty">This project uses local models only, and no local model is ready.<br /><button type="button" class="add-local-link" onclick={() => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy')}>Open project settings</button></div>
+			{/if}
+			{#if groups.length === 0 && !cloudModelsOff && !$localStatus}
 				<div class="model-list-empty">No available models</div>
 			{:else}
 				{#each groups as group (group.key)}
@@ -195,7 +216,7 @@
 							name={group.name}
 							groupKey={group.key}
 							count={group.rows.length}
-							local={isLocalGroup(group) && usable}
+							local={group.rows.some((model) => model.is_local === true) && usable}
 							open={open}
 							status={headStatus}
 							subtitle={subtitle}
@@ -208,7 +229,13 @@
 
 
 							{/if}
-						{#if $localStatus && isLocalGroup(group)}<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />{/if}
+						{#if $localStatus && hostsLocalSetup(group)}
+								{#if $localStatus.retry === 'settings'}
+									<div class="local-settings-status"><span class="text" aria-live="polite">{$localStatus.line}</span><button type="button" disabled={settingsRetrying} onclick={retrySettingsDownload}>{settingsRetrying ? 'Trying again…' : 'Try again'}</button></div>
+								{:else}
+									<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />
+								{/if}
+							{/if}
 						{#if shown.length > 0}
 							<div class="model-group-rows" id={`model-group-${group.key}`}>
 								{#each shown as model (model.id)}
@@ -260,16 +287,27 @@
 						{/if}
 					</section>
 				{/each}
-				{#if $localStatus && !hasLocalGroup}
+				{#if cloudModelsOff && hasReadyGroup}<div class="model-list-empty">This project uses local models only.</div>{/if}
+				{#if !hasLocalSetupGroup && ($localStatus || $canAddLocalModel)}
 					<section class="model-group" aria-label="Local">
 						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />
-						<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />
+						{#if $localStatus}
+								{#if $localStatus.retry === 'settings'}
+									<div class="local-settings-status"><span class="text" aria-live="polite">{$localStatus.line}</span><button type="button" disabled={settingsRetrying} onclick={retrySettingsDownload}>{settingsRetrying ? 'Trying again…' : 'Try again'}</button></div>
+								{:else}
+									<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />
+								{/if}
+							{:else}<button type="button" class="add-local-link" onclick={() => showAddLocal = true}>Add a local model</button>{/if}
 					</section>
 				{/if}
 			{/if}
 		</div>
 	</div>
 </div>
+
+{#if showAddLocal}
+	<AddLocalModelSheet onClose={() => showAddLocal = false} />
+{/if}
 
 <style>
 	.cached-marker {
@@ -282,7 +320,7 @@
 
 	.switch-marker {
 		font-size: var(--text-caption);
-		color: var(--accent);
+		color: var(--accent-text);
 	}
 
 	.switch-marker.failed {
@@ -298,6 +336,11 @@
 		max-width: 100%;
 	}
 
+	.add-local-link { padding: var(--space-2) var(--space-3); color: var(--accent-text); background: transparent; border: 0; font: inherit; cursor: pointer; }
+	.local-settings-status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) var(--space-3) var(--space-2) var(--space-8); color: var(--text-tertiary); font-size: var(--text-caption); }
+	.local-settings-status .text { min-width: 0; overflow-wrap: anywhere; }
+	.local-settings-status button { border: 0; border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); color: var(--text-primary); background: var(--bg-secondary); font: inherit; cursor: pointer; }
+	.local-settings-status button:disabled { cursor: default; opacity: .6; }
 	.model-group + .model-group {
 		margin-top: 4px;
 	}
@@ -340,7 +383,7 @@
 	}
 
 	.rollover-settings { padding: 2px 10px 6px 32px; }
-	.rollover-settings button { padding: 0; color: var(--accent); font: inherit; font-size: var(--text-footnote); background: none; border: 0; cursor: pointer; }
+	.rollover-settings button { padding: 0; color: var(--accent-text); font: inherit; font-size: var(--text-footnote); background: none; border: 0; cursor: pointer; }
 
 	.row-note {
 		min-width: 0;

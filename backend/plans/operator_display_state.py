@@ -42,6 +42,58 @@ def review_kind_from_facts(
     return "human_review" if assignee == "user" or owner_kind != "thread" else "parent_agent"
 
 
+def plan_defers_asks(plan_state: str) -> bool:
+    """A paused plan defers every ask it owns on the person until resume (``ask_deferred``).
+
+    Admission still reads a raised review or decision as such and the person can
+    still answer it; only the attention it raises (needs-you marks, counts, the
+    dock) is deferred. Independent host-access requests are not plan-owned.
+    """
+    return plan_state == "paused"
+
+
+def plan_paused(execution: dict) -> bool:
+    """``plan_defers_asks`` for a node row: a paused plan puts this cause on every row."""
+    return any(cause.get("reason_key") == "plan_paused" for cause in execution["causes"])
+
+
+def node_paused(execution: dict) -> bool:
+    """Whether this row carries the user-controlled pause from steering facts."""
+    from plans import user_steering
+
+    pause = user_steering.placed_pause(execution["causes"])
+    return pause is not None and user_steering.is_user_pause(pause)
+
+
+def ask_deferred(*, plan_paused: bool = False, node_paused: bool = False) -> bool:
+    """The one rule for suppressing a plan-owned ask's attention until resume."""
+    return plan_paused or node_paused
+
+
+def review_deferred(
+    condition: str, review_kind: str | None, *, plan_paused: bool, node_paused: bool,
+) -> bool:
+    """Display and bucket consequence of ``ask_deferred`` for a row in human review."""
+    return (
+        ask_deferred(plan_paused=plan_paused, node_paused=node_paused)
+        and condition == "review" and review_kind in _HUMAN_REVIEWS
+    )
+
+
+def node_paused_sql(node_id_sql: str) -> str:
+    """SQL twin of ``node_paused``: the node carries an uncleared user pause hold."""
+    return f"""EXISTS (
+        SELECT 1 FROM plan_node_holds pause
+         WHERE pause.node_id={node_id_sql} AND pause.cleared_at IS NULL
+           AND pause.kind='paused' AND pause.owner_kind='user'
+    )"""
+
+
+def ask_deferred_sql(node_id_sql: str, *, plan_state_sql: str) -> str:
+    """SQL twin of ``ask_deferred`` for a linked plan node and its plan."""
+    return f"({plan_state_sql}='paused' OR {node_paused_sql(node_id_sql)})"
+
+
 def needs_user_from_facts(
     state: str,
     condition: str,
@@ -49,9 +101,14 @@ def needs_user_from_facts(
     review_kind: str | None,
     *,
     has_attention: bool,
+    plan_paused: bool = False,
+    node_paused: bool = False,
 ) -> bool:
-    """Return whether compact node facts expose a concrete user action."""
-    if state in TERMINAL_DISPLAY:
+    """Return whether compact node facts expose a concrete user action now.
+
+    Every plan-owned ask is deferred under a plan or item pause (``ask_deferred``).
+    """
+    if state in TERMINAL_DISPLAY or ask_deferred(plan_paused=plan_paused, node_paused=node_paused):
         return False
     return bool(
         (assignee == "user" and condition == "ready")
@@ -69,6 +126,8 @@ def display_from_facts(
     child_working: bool = False,
     executor_stopped: bool = False,
     worker_needs_input: bool = False,
+    plan_paused: bool = False,
+    node_paused: bool = False,
 ) -> dict[str, str]:
     """Reduce compact lifecycle facts into the canonical four-state display."""
     if state in TERMINAL_DISPLAY:
@@ -77,6 +136,8 @@ def display_from_facts(
         return {"label_key": "needs_you", "tone_key": "human-review"}
     if worker_needs_input:
         return {"label_key": "needs_agent_input", "tone_key": "waiting"}
+    if review_deferred(condition, review_kind, plan_paused=plan_paused, node_paused=node_paused):
+        return {"label_key": "waiting", "tone_key": "waiting"}
     if condition == "review":
         kind = review_kind or "parent_agent"
         return {

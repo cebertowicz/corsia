@@ -56,11 +56,12 @@ VALID_CATEGORIES: tuple[str, ...] = (
     "style/readability",
     "style/dead-code",
     APPROACH_CHURN_CATEGORY,
-    # Standards-contract violations — cite the obligation ID (EAS#/PS#/UX#)
+    # Standards-contract violations — cite the obligation ID (EAS#/PS#/UX#/C#)
     # in ``cited_section``. Block/Flag/Nit reuse the existing severities 1:1.
     "standards/eng-arch",
     "standards/product",
     "standards/ux-ia",
+    "standards/copy",
     # PRD-conformance — the diff vs the applicable approved PRD §0.0. Cite the
     # PRD requirement ID (e.g. CONNECTIONS-FR1.1) in ``cited_section``, or the
     # PRD slug + §0.0 heading when no stable ID exists.
@@ -74,6 +75,8 @@ VALID_CATEGORIES_SET = frozenset(VALID_CATEGORIES)
 LABEL_REVIEW_LOCAL = "qa/review-local"
 LABEL_REVIEW_PARALLEL = "qa/review-parallel"
 LABEL_OVERRIDE = "qa/override-reviewer"
+# A maintainer adds it to approve the automated review of a fork pull request head.
+LABEL_REVIEW = "review"
 
 STATUS_CHECK_CONTEXT = "qa/llm-reviewer"
 STATUS_PRESENCE_CONTEXT = "qa/llm-reviewer-present"

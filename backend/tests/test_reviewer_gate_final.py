@@ -8,6 +8,7 @@ from unittest.mock import ANY, patch
 
 import pytest
 from events.connectors import github_reviewer_notifications
+from reviewer.reviewer_types import reviewer_verdict
 from reviewer_gate_fixtures import (  # noqa: F401
     _DEFAULT_PR_INFO,
     _call_on_backend_loop,
@@ -598,8 +599,8 @@ class TestMergeableGate:
             "number": 42,
             "mergeable": True,
             "draft": True,
-            "base": {"ref": "dev", "sha": "base123def"},
-            "head": {"sha": "abc123def"},
+            "base": {"ref": "dev", "sha": "base123def", "repo": {"full_name": "owner/repo"}},
+            "head": {"sha": "abc123def", "repo": {"full_name": "owner/repo"}},
             "labels": [{"name": "ready"}],
             "title": "Contain reviewer scope",
             "body": "## Scope\nOnly review the changed release slice.",
@@ -616,6 +617,8 @@ class TestMergeableGate:
             "baseRefName": "dev",
             "baseRefOid": "base123def",
             "headRefOid": "abc123def",
+            "headRepoFullName": "owner/repo",
+            "baseRepoFullName": "owner/repo",
             "labels": [{"name": "ready"}],
             "title": "Contain reviewer scope",
             "body": "## Scope\nOnly review the changed release slice.",
@@ -665,15 +668,18 @@ class TestIngressGateTriggerLeg:
                 asyncio.get_running_loop()
             ) or True
         )
-        verdict = {
-            "verdict": "clean",
-            "summary": "0 block, 0 flag, 0 nit -- reviewed by codex",
-            "block_count": 0,
-            "flag_count": 0,
-            "nit_count": 0,
-            "finding_count": 0,
-            "model_label": "codex",
-        }
+        verdict = reviewer_verdict(
+            verdict="clean",
+            required_action="none",
+            summary="0 block, 0 flag, 0 nit -- reviewed by codex",
+            block_count=0,
+            flag_count=0,
+            nit_count=0,
+            finding_count=0,
+            model_label="codex",
+            reviewer_version="test-version",
+            reviewer_standards=["product"],
+        )
 
         with patch("events.ingress.route_leg", new=AsyncMock(return_value=None)), \
              patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \

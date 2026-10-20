@@ -69,13 +69,21 @@ def thread_claude_dir(thread_id: str, *, turn_id: str | None = None, db) -> str:
     return resolve_claude_dir(thread_launch_homes(thread_id, 'claude-code', turn_id=turn_id, db=db).claude_dir)
 
 
+OPERATION_KINDS = ('checkpoint', 'detached')
+
+
+def is_operation_session(session) -> bool:
+    """Whether the operation owner bound this session for its own explicit account."""
+    return getattr(session, 'vendor_operation_kind', None) in OPERATION_KINDS
+
+
 def session_homes(session, provider: str, account: dict | None) -> LaunchHomes:
     """Describe the process's actual paths, never fill missing paths from current choice."""
     return LaunchHomes(account['id'] if account else None, bool(account and account['source_home']),
                        claude_dir=getattr(session, 'claude_dir', None) if provider == 'claude-code' else None,
                        codex_source=getattr(session, 'source_codex_home', None) if provider == 'codex' else None,
                        codex_runtime=getattr(session, 'codex_home', None) if provider == 'codex' else None,
-                       isolated=getattr(session, 'vendor_operation_kind', None) in ('checkpoint', 'detached'),
+                       isolated=is_operation_session(session),
                        warm_home=getattr(session, 'vendor_warm_home', None))
 
 

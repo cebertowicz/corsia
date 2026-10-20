@@ -15,12 +15,14 @@
 		ariaLabel,
 		heading = null,
 		headingMeta = null,
+		contextLabel = null,
 		leading,
 		doneLabel = 'Done',
 		onClose,
 		children,
 		initialFocusSelector = '[data-drawer-autofocus]',
 		fill = false,
+		flushBottom = false,
 		followKeyboard = false,
 		headless = false,
 		opaque = false,
@@ -31,6 +33,7 @@
 		open = true,
 		onClosed = () => {},
 		covered = false,
+		panel = $bindable(null),
 	}: {
 		ariaLabel: string;
 		/**
@@ -40,6 +43,8 @@
 		heading?: string | null;
 		/** A short fact beside the title, such as a count; shown smaller in the accent colour. */
 		headingMeta?: string | null;
+		/** Context beside Done when content owns the drawer title. */
+		contextLabel?: string | null;
 		/** An action at the leading edge; with one, the title centres between it and Done. */
 		leading?: Snippet;
 		/** Visible text of the dismiss control; it is also its accessible name. */
@@ -49,6 +54,8 @@
 		initialFocusSelector?: string;
 		/** Make the content a column bounded by the drawer, so one child can shrink and scroll while the rest stay in view. */
 		fill?: boolean;
+		/** Let a child-owned sticky footer reach the edge of the scroll region. The child owns its safe-area inset. */
+		flushBottom?: boolean;
 		/**
 		 * Sit on the visible part of the screen, above an on-screen keyboard, for a
 		 * drawer whose text field must stay in view while typing. It reads the
@@ -74,6 +81,8 @@
 		 * underneath, its place kept, but out of sight and reach, with no scrim over what covers it, until uncovered.
 		 */
 		covered?: boolean;
+		/** The sheet's own element, for a caller that has to measure where it rests. */
+		panel?: HTMLElement | null;
 	} = $props();
 
 	let box = $state<ColumnBox | null>(null);
@@ -81,7 +90,6 @@
 		if (!within) { box = null; return; }
 		return trackColumnBox(within, (next) => { box = next; });
 	});
-	let panel = $state<HTMLElement | null>(null);
 	const drag = createSheetDrag({
 		detent: () => detent,
 		height: () => panel?.clientHeight ?? 480,
@@ -175,11 +183,11 @@
 				</div>
 				{#if !headless}<div class="drawer-head" class:centered={!!leading}>
 					{#if leading}<span class="drawer-lead">{@render leading()}</span>{/if}
-					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else}<span class="drawer-head-spacer"></span>{/if}
+					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else if contextLabel}<span class="drawer-context" title={contextLabel}>{contextLabel}</span>{:else}<span class="drawer-head-spacer"></span>{/if}
 					<button class="drawer-done" type="button" onclick={onClose}>{doneLabel}</button>
 				</div>{/if}
 			</div>
-			<div class="drawer-body" class:fill>
+			<div class="drawer-body" class:fill class:flush-bottom={flushBottom}>
 				{@render children()}
 			</div>
 		</div>
@@ -216,7 +224,7 @@
 		height: var(--doc-visual-viewport-height, 100dvh);
 	}
 	.follow-keyboard .drawer-panel {
-		max-height: min(82dvh, calc(var(--doc-visual-viewport-height, 100dvh) - max(16px, env(safe-area-inset-top, 0px))));
+		max-height: min(82dvh, calc(var(--doc-visual-viewport-height, 100dvh) - max(16px, var(--safe-top))));
 	}
 	.drawer-motion {
 		width: 100%;
@@ -227,7 +235,7 @@
 	.drawer-panel {
 		--drawer-drag-y: 0px;
 		width: 100%;
-		max-height: min(82dvh, calc(100dvh - max(16px, env(safe-area-inset-top, 0px))));
+		max-height: min(82dvh, calc(100dvh - max(16px, var(--safe-top))));
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
@@ -248,7 +256,7 @@
 		transition: none;
 	}
 	.drawer-panel.opaque { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
-	.drawer-panel.half { max-height: min(46dvh, calc(100dvh - max(16px, env(safe-area-inset-top, 0px)))); }
+	.drawer-panel.half { max-height: min(46dvh, calc(100dvh - max(16px, var(--safe-top)))); }
 	.within .drawer-panel.half { max-height: calc(var(--drawer-h) * 0.46); }
 	.drawer-panel:focus {
 		outline: none;
@@ -302,7 +310,7 @@
 		font-size: var(--text-caption);
 		font-weight: var(--fw-semibold);
 		font-variant-numeric: tabular-nums;
-		color: var(--accent);
+		color: var(--accent-text);
 	}
 	/* A leading action centres the title between it and Done. */
 	.drawer-head.centered { display: grid; grid-template-columns: 1fr minmax(0, auto) 1fr; }
@@ -316,12 +324,13 @@
 	.drawer-lead { justify-self: start; }
 	.drawer-head.centered .drawer-done { justify-self: end; }
 	/* Holds Done at the trailing edge when the content owns the title. */
-	.drawer-head-spacer { flex: 1; }
+	.drawer-head-spacer, .drawer-context { flex: 1; min-width: 0; }
+	.drawer-context { overflow: hidden; color: var(--text-tertiary); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
 	.drawer-done {
 		font: inherit;
 		font-size: var(--text-subhead);
 		font-weight: var(--fw-semibold);
-		color: var(--accent);
+		color: var(--accent-text);
 		background: none;
 		border: none;
 		padding: 6px 8px;
@@ -339,6 +348,7 @@
 		scrollbar-gutter: stable;
 		padding: 0 var(--space-4) max(var(--space-4), env(safe-area-inset-bottom, 0px));
 	}
+	.drawer-body.flush-bottom { padding-bottom: 0; }
 	.drawer-body.fill { display: flex; flex-direction: column; overflow: hidden; }
 	@media (max-width: 620px) {
 		/* Touch minimum for the only dismiss control in the chrome. */

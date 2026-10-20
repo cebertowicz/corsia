@@ -117,8 +117,8 @@ def install_resolved_omlx_session(
     )
     monkeypatch.setattr(
         api_runtime,
-        "resolve_execution_target",
-        lambda _selected, *, db: target,
+        "resolve_thread_target",
+        lambda _selected, *, thread_id, db: target,
         raising=False,
     )
 

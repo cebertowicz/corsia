@@ -41,9 +41,9 @@ def test_routes_reads_through_shared_client_and_sorts_by_p95(api, monkeypatch, c
     def request(method, base, path, token, body=None, query=None):
         api.append((method, base, path, token, query))
         return {"rows": [
-            ["2026-09-25", "GET", "/api/fast", "2xx", 1, 3.0, _bucketed(3)],
-            ["2026-09-25", "GET", "/api/slow", "2xx", 1, 900.0, _bucketed(900)],
-            ["2026-09-25", "GET", "/other", "2xx", 1, 5_000.0, _bucketed(5_000)],
+            ["2026-09-25", "GET", "/api/fast", "2xx", 1, 3.0, _bucketed(3), 3_000, 3_000],
+            ["2026-09-25", "GET", "/api/slow", "2xx", 1, 900.0, _bucketed(900), 900_000, 900_000],
+            ["2026-09-25", "GET", "/other", "2xx", 1, 5_000.0, _bucketed(5_000), 5_000_000, 5_000_000],
         ]}
 
     monkeypatch.setattr(cli_perf.corsia_api, "request", request)

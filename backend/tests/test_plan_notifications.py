@@ -189,7 +189,7 @@ def test_actor_bound_mutation_notifies_once_and_failed_or_replayed_writes_are_si
     request = {
         "kind": "task",
         "title": "Implement",
-        "acceptance_criteria": "Focused tests pass",
+        "acceptance_criteria": "Focused tests pass", "size": "unknown",
     }
 
     deferred = mutate(
@@ -252,7 +252,7 @@ def test_committed_mutation_result_survives_broadcast_failure(db, monkeypatch):
         {
             "kind": "task",
             "title": "Committed",
-            "acceptance_criteria": "Mutation result returns",
+            "acceptance_criteria": "Mutation result returns", "size": "unknown",
         },
         actor=actor,
         provenance="test",
@@ -293,7 +293,7 @@ def test_api_mutation_via_real_db_worker_reaches_registered_socket(
                 "params": {
                     "kind": "task",
                     "title": "Deliver",
-                    "acceptance_criteria": "Socket receives the nudge",
+                    "acceptance_criteria": "Socket receives the nudge", "size": "unknown",
                 },
             },
         )
@@ -331,7 +331,7 @@ async def test_tool_mutation_via_real_db_worker_reaches_registered_socket(
         params={
             "kind": "task",
             "title": "Deliver",
-            "acceptance_criteria": "Socket receives the nudge",
+            "acceptance_criteria": "Socket receives the nudge", "size": "unknown",
         },
     )
     await asyncio.sleep(0)
@@ -364,7 +364,7 @@ async def test_plan_writer_thread_delivers_one_frame_on_the_application_loop(
                 {
                     "kind": "task",
                     "title": "Deliver from a worker",
-                    "acceptance_criteria": "The plan pane receives one frame",
+                    "acceptance_criteria": "The plan pane receives one frame", "size": "unknown",
                 },
                 actor=PlanActor("parent", "user-1", "project-1"),
                 provenance="test.worker_thread",

@@ -78,7 +78,7 @@
 	}
 
 	.btn.md { height: 32px; padding: 0 13px; font-size: var(--text-subhead); }
-	.btn.sm { height: 28px; padding: 0 10px; font-size: var(--text-footnote); }
+	.btn.sm { height: 28px; padding: 0 var(--button-pad-x-sm); font-size: var(--text-footnote); }
 
 	.btn.secondary {
 		background: var(--bg-secondary);
@@ -86,29 +86,31 @@
 		color: var(--text-secondary);
 	}
 	.btn.secondary:hover:not(:disabled) {
-		background: var(--violet-bg);
-		border-color: var(--violet-line);
-		color: var(--violet-text, var(--violet));
+		background: var(--accent-wash);
+		border-color: var(--accent-line);
+		color: var(--accent-text, var(--accent));
 	}
 
+	/* The one solid accent fill per view, inked like every other accent fill (send, compose, your messages). */
 	.btn.primary {
-		background: var(--violet-bg);
-		border-color: var(--violet-line);
-		color: var(--violet-text, var(--violet));
+		background: var(--accent-fill);
+		border-color: var(--accent-fill);
+		color: var(--accent-on-fill);
 	}
 	.btn.primary:hover:not(:disabled) {
-		background: color-mix(in srgb, var(--violet) 18%, transparent);
-		border-color: var(--violet);
+		background: color-mix(in srgb, var(--accent-fill) 88%, var(--text-primary));
+		border-color: color-mix(in srgb, var(--accent-fill) 88%, var(--text-primary));
 	}
 
 	.btn.danger {
 		background: var(--red-bg);
 		border-color: color-mix(in srgb, var(--red) 30%, transparent);
-		color: var(--red);
+		color: var(--red-text);
 	}
 	.btn.danger:hover:not(:disabled) {
 		background: color-mix(in srgb, var(--red) 18%, transparent);
 		border-color: var(--red);
+		color: var(--red-text);
 	}
 
 	.btn.ghost {

@@ -32,6 +32,7 @@ from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.queries import get_project, get_thread_for_user
 from registry import models, pinning, service
+from registry.identity_bridge import OWNER_REGISTRATION_STATES
 from registry.removal_events import (
     broadcast_artifact_removal_event,
     emit_artifact_removal_event,
@@ -182,10 +183,11 @@ async def register_artifact(token: str, body: RegisterBody):
     })
     # Register never re-homes (A2.5): report the surviving owner + conflict so a
     # rescue caller learns it is a passive subscriber, not the new owner.
-    current_owner = row["parent_thread_id"] if row else None
+    owned = row is not None and row["relationship_state"] in OWNER_REGISTRATION_STATES
+    current_owner = row["parent_thread_id"] if owned else None
     conflict = current_owner is not None and current_owner != body.parent_thread_id
     relationship_state = (
-        "subscriber-recent" if row is None or conflict else "owner-active"
+        "subscriber-recent" if current_owner is None or conflict else "owner-active"
     )
     return {
         "ok": True,

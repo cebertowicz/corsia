@@ -81,6 +81,94 @@ async def test_set_with_the_password_saves_and_never_shows_the_value(client, cap
 
 
 @pytest.mark.asyncio
+async def test_mcp_key_write_restarts_only_its_stable_app(client, monkeypatch):
+    from connections.app_lifecycle import create_app
+    from infra.database import get_db
+    from infra.db_async import run_in_db
+    from tools.mcp_secrets import entry_name
+    import tools.connected_apps_runtime as connected_runtime
+
+    def setup_app() -> tuple[dict[str, object], str]:
+        db = get_db()
+        try:
+            app = create_app(
+                "GitHub", {"command": "github", "key_refs": [{"kind": "env", "name": "GITHUB_TOKEN"}]},
+                {"mode": "all", "project_ids": [], "outside_projects": False}, db=db,
+            )
+            key_name = entry_name(app["id"], "secret_env", "GITHUB_TOKEN")
+            return app, key_name
+        finally:
+            db.close()
+
+    app, key_name = await run_in_db(setup_app)
+    entry = await run_in_db(key_store.entry_metadata, key_name)
+    assert entry["name"] == key_name
+    assert entry["label"] == "GitHub key"
+    assert entry["is_set"] is False
+    calls = []
+
+    async def reconnect(action: str, app_id: str) -> dict[str, object]:
+        calls.append((action, app_id))
+        return {"state": "connected"}
+
+    monkeypatch.setattr(connected_runtime, "apply_connected_app_runtime", reconnect)
+    response = await client.put(
+        f"/api/keys/{key_name}/value", headers=_auth(), json={"value": VALUE, "password": TEST_PASSWORD},
+    )
+
+    assert response.status_code == 200, response.text
+    assert calls == [("restart", app["id"])]
+
+    def persisted_config_text() -> str:
+        db = get_db()
+        try:
+            return "".join(
+                row[0] for row in db.execute("SELECT config_json FROM connected_apps").fetchall()
+            ) + "".join(row[0] for row in db.execute("SELECT value FROM settings").fetchall())
+        finally:
+            db.close()
+
+    assert VALUE not in await run_in_db(persisted_config_text)
+
+
+@pytest.mark.asyncio
+async def test_mcp_key_write_restarts_the_app_without_the_reconnect_limit(client, monkeypatch):
+    from connections.app_lifecycle import create_app
+    from infra.database import get_db
+    from infra.db_async import run_in_db
+    from tools.mcp_secrets import entry_name
+    import tools.connected_apps_runtime as connected_runtime
+
+    def setup_app() -> tuple[dict[str, object], str]:
+        db = get_db()
+        try:
+            app = create_app(
+                "GitHub", {"command": "github", "key_refs": [{"kind": "env", "name": "GITHUB_TOKEN"}]},
+                {"mode": "all", "project_ids": [], "outside_projects": False}, db=db,
+            )
+            return app, entry_name(app["id"], "secret_env", "GITHUB_TOKEN")
+        finally:
+            db.close()
+
+    app, key_name = await run_in_db(setup_app)
+    actions: list[tuple[str, str]] = []
+
+    async def runtime(action: str, app_id: str) -> dict[str, object]:
+        actions.append((action, app_id))
+        return {"state": "working", "state_since": "now", "tool_count": 1, "failure_class": None}
+
+    monkeypatch.setattr(connected_runtime, "apply_connected_app_runtime", runtime)
+
+    response = await client.put(
+        f"/api/keys/{key_name}/value", headers=_auth(), json={"value": VALUE, "password": TEST_PASSWORD},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["key"]["is_set"] is True
+    assert actions == [("restart", app["id"])]
+
+
+@pytest.mark.asyncio
 async def test_set_leaves_the_settings_table_alone_and_a_refused_set_changes_nothing(client):
     from infra.settings import get_setting, set_setting
 

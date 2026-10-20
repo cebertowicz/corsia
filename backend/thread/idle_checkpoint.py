@@ -49,15 +49,19 @@ class IdleCheckpointPreparation:
     request: CheckpointRequest
 
 
-def _resolved_target(db, model: str):
-    from llm.resolution import ModelUnavailableError, resolve_execution_target
+def _resolved_target(db, model: str, thread_id: str):
+    """The fold's target through the thread's own resolver, or the skip that refuses it."""
+    from llm.locality import LOCALITY_REFUSALS
+    from llm.resolution import ModelUnavailableError, resolve_thread_target
 
     try:
-        target = resolve_execution_target(model, db=db)
+        target = resolve_thread_target(model, thread_id=thread_id, db=db)
     except ModelUnavailableError:
-        return None
+        return IdleCheckpointSkip(IdleCheckpointReason.TARGET_UNAVAILABLE)
+    if target.availability_reason in LOCALITY_REFUSALS:
+        return IdleCheckpointSkip(IdleCheckpointReason.LOCALITY, cause=target.availability_reason)
     if not target.available or not target.context_window:
-        return None
+        return IdleCheckpointSkip(IdleCheckpointReason.TARGET_UNAVAILABLE)
     return target
 
 
@@ -123,9 +127,9 @@ def read_idle_context(
             return IdleCheckpointSkip(IdleCheckpointReason.STALE)
         if active_for_thread(due.thread_id, db=connection) is not None:
             return IdleCheckpointSkip(IdleCheckpointReason.TURN_RUNNING)
-        target = _resolved_target(connection, source_model)
-        if target is None:
-            return IdleCheckpointSkip(IdleCheckpointReason.TARGET_UNAVAILABLE)
+        target = _resolved_target(connection, source_model, due.thread_id)
+        if isinstance(target, IdleCheckpointSkip):
+            return target
         previous = current_installed(due.thread_id, db=connection)
         previous_boundary = (
             HistoryBoundary.of_checkpoint(previous)

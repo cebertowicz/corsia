@@ -7,10 +7,11 @@ from infra.time import utc_now_iso
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
-from infra.auth import authenticate
+from api.locality_refusal import agent_locality_refused_response
+from infra.auth import authenticate, owns_thread
 from infra.database import get_db
 from infra.db_async import run_in_db
-from infra.conductor import get_conductor_scopes
+from infra.conductor import get_coordination_scopes
 from infra.delegation import DelegationModelRequired, require_explicit_thread_model
 from infra.delegation_scope import target_scope_authority, validate_send_target_scope
 from infra.execution_class import is_subagent
@@ -18,6 +19,7 @@ from infra.fresh_threads import (
     SpawnVisibilityRejected,
     create_visible_fresh_thread,
 )
+from infra.local_only import LocalityRefused, send_confirmation_error
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
 from infra.runtime_truth import read_runtime_truth
@@ -32,14 +34,16 @@ def _delegated_sender(sender_id: str, user_id: str) -> dict | None:
     db = get_db()
     try:
         row = db.execute(
-            "SELECT title, project_id FROM threads WHERE id = ? AND user_id = ?",
+            "SELECT title, project_id, local_only FROM threads WHERE id = ? AND user_id = ?",
             (sender_id, user_id),
         ).fetchone()
         if row is None:
             return None
         return {
+            "id": sender_id,
             "title": row["title"] or "",
             "project_id": row["project_id"] or None,
+            "local_only": bool(row["local_only"]),
             "scope": row["project_id"] or "workspace",
         }
     finally:
@@ -81,29 +85,30 @@ def _queued_send_response(thread_id: str, result: InboxQueuedInput) -> dict:
     return payload
 
 
+async def _calling_agent(from_thread_id: str | None, user_id: str) -> str | None:
+    """The caller's own thread, owned by the authenticated user; it governs what it may open."""
+    if from_thread_id and not await run_in_db(owns_thread, from_thread_id, user_id):
+        raise HTTPException(
+            403, "from_thread_id: thread not found or not owned by the authenticated user",
+        )
+    return from_thread_id
+
+
+async def _require_send_confirmation(sender: dict, recipient: dict, body: dict) -> None:
+    error = await run_in_db(
+        send_confirmation_error, sender, recipient, body.get("no_sensitive_content"),
+    )
+    if error:
+        raise HTTPException(409, error)
+
+
 @router.post("/threads")
 async def create_thread(token: str, body: dict):
-    """Create a new thread for delegated work.
+    """Create a visible chat or hidden child with an explicit model.
 
-    Body: ``{title?, project_id?, model?, provider?, thread_kind?, spawned_by?,
-             from_thread_id?}``
-
-    Thread kind:
-        ``thread_kind=chat`` (default) — visible in the sidebar; intended for
-        threads the user will interact with directly.
-
-        ``thread_kind=subagent`` — hidden from the sidebar; intended for child
-        workers that will primarily interface with another agent, not the user.
-        A subagent MUST have a parent: pass ``spawned_by`` or
-        ``from_thread_id`` (the spawning thread's CORSIA_THREAD_ID). If
-        neither is resolvable the route returns 422 so the orphan never silently
-        accumulates (issue #536).
-
-    Model resolution:
-        Required ``model``; omitted or blank → 422 before creation, with no fallback.
-
-    ``provider`` is informational only; the model id already encodes its
-    provider prefix (e.g. ``claude-code/opus``).
+    Subagents require ``spawned_by`` or ``from_thread_id``; a chat's
+    ``spawned_by`` is kept as its ``parent_thread_id``. ``provider`` is
+    informational because the exact model id identifies its provider.
     """
     user = authenticate(token)
     if not user:
@@ -128,7 +133,7 @@ async def create_thread(token: str, body: dict):
     project_id = body.get("project_id") or None
     title = body.get("title") or "New Chat"
     spawned_by = (body.get("spawned_by") or "").strip() or None
-    from_thread_id = (body.get("from_thread_id") or "").strip() or None
+    from_thread_id = await _calling_agent((body.get("from_thread_id") or "").strip() or None, user["id"])
     parent_thread_id: str | None = None
 
     # A subagent that has no parent is an invisible orphan: hidden from the
@@ -219,12 +224,14 @@ async def create_thread(token: str, body: dict):
             project_id=project_id,
             spawned_by=spawned_by,
             parent_thread_id=parent_thread_id,
-            created_at=now,
+            created_at=now, actor_thread_id=from_thread_id,
             thread_kind=thread_kind,
             emit_spawn_chip=bool(spawned_by), account_id=body.get("account_id"),
         )
+    except LocalityRefused as exc:
+        return agent_locality_refused_response(exc)
     except SpawnVisibilityRejected as exc:
-        raise HTTPException(403, str(exc))
+        raise HTTPException(403, str(exc)) from exc
     thread_id = thread_row["id"]
 
     emit_product_event(
@@ -289,6 +296,8 @@ async def send_turn(thread_id: str, token: str, body: dict):
     if not scope_check["ok"]:
         raise HTTPException(409, scope_check["detail"])
 
+    await _require_send_confirmation(sender, thread_row, body)
+
     target_kind = "subagent" if is_subagent(thread_row) else "chat"
     try:
         result = await send_thread_input(
@@ -352,7 +361,7 @@ async def thread_status(thread_id: str, token: str, messages: int = 5):
             "WHERE thread_id = ? ORDER BY created_at DESC LIMIT ?",
             (thread_id, n),
         ).fetchall() if n else []
-        conductor_scopes = get_conductor_scopes(thread_id, db=db)
+        conductor_scopes = get_coordination_scopes(thread_id, db=db)
         db.close()
         return dict(thread_row), (dict(active) if active else None), \
             conductor_scopes, \

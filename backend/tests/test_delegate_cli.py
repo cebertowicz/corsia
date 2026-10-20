@@ -38,6 +38,22 @@ def test_send_defaults_from_thread_id_from_corsia_thread_id(captured):
     }
 
 
+def test_send_marks_confirmed_cloud_content_safe(captured):
+    delegate_cli.main([
+        "send",
+        "target-thread",
+        "safe",
+        "summary",
+        "--no-sensitive-content",
+    ])
+
+    assert captured[-1]["body"] == {
+        "message": "safe summary",
+        "from_thread_id": "sender-self",
+        "no_sensitive_content": True,
+    }
+
+
 def test_send_explicit_from_thread_id_overrides_env(captured):
     delegate_cli.main([
         "send",
@@ -87,6 +103,17 @@ def test_create_subagent_uses_corsia_thread_id_as_parent(captured):
         "title": "Worker",
         "model": "claude-code/sonnet",
         "thread_kind": "subagent",
+        "from_thread_id": "sender-self",
+    }
+
+
+def test_create_chat_names_the_calling_thread(captured):
+    delegate_cli.main(["create-thread", "--title", "Peer", "--model", "claude-code/sonnet"])
+
+    assert captured[-1]["body"] == {
+        "title": "Peer",
+        "model": "claude-code/sonnet",
+        "thread_kind": "chat",
         "from_thread_id": "sender-self",
     }
 

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 MARKER_NAME = "local_setup_installed_omlx"
+CONSENT_MARKER_NAME = "local_setup_existing_omlx_consented"
 OMLX_FORMULA = "jundot/omlx/omlx"
 DEFAULT_PORT = 8000
 
@@ -30,11 +31,39 @@ def marker_path() -> Path:
     return Path(STATE_ROOT) / MARKER_NAME
 
 
+def consent_marker_path() -> Path:
+    from infra.config import STATE_ROOT
+
+    return Path(STATE_ROOT) / CONSENT_MARKER_NAME
+
+
 def mark_installed_by_setup() -> None:
     """Record, durably, that local setup itself installed oMLX."""
     path = marker_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("installed by corsia local setup\n", encoding="utf-8")
+
+
+def record_existing_omlx_consent(*, manage: bool | None = None) -> None:
+    """Remember consent to inspect the pre-existing oMLX in this CORSIA state root.
+
+    ``manage`` is the person's choice between the two (``own_omlx_management``):
+    True is "Let CORSIA manage it", also consent to read that oMLX's admin key and
+    change the settings shown first; False is "Use mine", where the key is never
+    read and nothing is offered or written. None is a consent given where those
+    choices weren't shown, which records neither.
+    """
+    path = consent_marker_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("consented to existing oMLX\n", encoding="utf-8")
+    if manage is None:
+        return
+    from llm import own_omlx_management
+
+    if manage:
+        own_omlx_management.consent()
+    else:
+        own_omlx_management.choose_use_mine()
 
 
 _BROKEN_RETURN_CODES = (126, 127)
@@ -67,6 +96,21 @@ def _is_broken_leftover(path: str) -> bool:
     _broken_cache.clear()
     _broken_cache[key] = broken
     return broken
+
+
+def existing_omlx_requires_consent() -> bool:
+    """Whether setup must ask before inspecting a pre-existing oMLX.
+
+    This deliberately checks only PATH and CORSIA's ownership/consent markers.
+    In particular, it must not execute oMLX before the person has consented;
+    a broken leftover follows the same consent journey and is repaired after
+    that consent by local setup.
+    """
+    return bool(
+        shutil.which("omlx")
+        and not marker_path().exists()
+        and not consent_marker_path().exists()
+    )
 
 
 def installed_omlx() -> str | None:
@@ -226,34 +270,58 @@ def _present_bytes(folder: Path) -> int:
     return total
 
 
-def require_free_disk(download_bytes: int, model_dir: Path | None, repository: str) -> None:
-    """Raise DiskSpaceError when ``model_dir``'s volume lacks room for what is still to download.
+def download_complete(folder: Path, download_bytes: int) -> bool:
+    """Whether ``folder`` holds a finished download: every expected byte, and no partial file.
 
-    ``model_dir`` is the directory oMLX reports it downloads to. oMLX writes into
-    ``<model_dir>/<repository>`` and resumes there, skipping files it already holds
-    (oMLX ``omlx/admin/hf_downloader.py``, ``retry_download`` and ``start_download``), so the
-    bytes already present are credited and the 10% margin applies to the remainder only.
-    The nearest existing parent stands in until oMLX has created the directory. With no
-    ``model_dir``, or when free space can't be read, the check is skipped with a warning
-    (oMLX reports a full disk itself).
+    A cancelled or failed download leaves its folder behind (oMLX resumes there), so the
+    folder existing proves nothing. Partial files carry Hugging Face's ``.incomplete``
+    suffix until they are renamed into place.
+    """
+    if not folder.is_dir():
+        return False
+    for _root, _dirs, files in os.walk(folder):
+        if any(name.endswith(".incomplete") for name in files):
+            return False
+    return _present_bytes(folder) >= download_bytes
+
+
+def download_disk_space(download_bytes: int, model_dir: Path | None, repository: str) -> dict[str, int | str]:
+    """Describe the actual remaining download space requirement without guessing.
+
+    oMLX resumes inside ``<model_dir>/<repository>``, so present partial bytes are
+    credited and the existing 10% safety margin applies only to the remainder.
     """
     if model_dir is None:
-        log.warning("Free disk space check skipped: oMLX reported no model directory")
-        return
+        return {"state": "unknown"}
     path = model_dir
     try:
         while not path.exists() and path != path.parent:
             path = path.parent
         free = shutil.disk_usage(path).free
         remaining = max(0, download_bytes - _present_bytes(model_dir / repository))
-    except OSError as exc:
-        log.warning("Free disk space check skipped for %s: %s", path, exc)
+    except OSError:
+        return {"state": "unknown"}
+    required = int(remaining * 1.1)
+    return {
+        "state": "ready" if free >= required else "insufficient",
+        "free_bytes": free,
+        "remaining_bytes": remaining,
+        "required_bytes": required,
+    }
+
+
+def require_free_disk(download_bytes: int, model_dir: Path | None, repository: str) -> None:
+    """Raise DiskSpaceError when oMLX's download volume lacks room for the remainder."""
+    space = download_disk_space(download_bytes, model_dir, repository)
+    if space["state"] == "unknown":
+        log.warning("Free disk space check skipped: oMLX download directory is unavailable")
         return
-    needed = int(remaining * 1.1)
-    if free < needed:
+    free = int(space["free_bytes"])
+    needed = int(space["required_bytes"])
+    if space["state"] == "insufficient":
         short = (needed - free) / 1000**3
         raise DiskSpaceError(
-            f"This download needs {needed / 1000**3:.0f} GB of free disk space and this Mac has "
+            f"This download needs {needed / 1000**3:.0f} GB of free disk space and this computer has "
             f"{free / 1000**3:.0f} GB. Free up about {short:.0f} GB, then run local setup again.")
 
 

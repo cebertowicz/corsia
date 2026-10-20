@@ -4,11 +4,11 @@ Use this when the person picked a folder they already work in, or described work
 
 The objective is a project that runs the way this person actually works and gets better at it, not a generic template. So you learn how they work, and what good practice is for this kind of work, **before** you design anything.
 
-## If you are the workspace conductor
+## If you are the CORSIA agent
 
 1. **Show what was found** (the import decision's option that names projects), newest first, at most 10: name, path, last used, which tool, whether it is a git repo. Nothing found: `I didn't find any. Tell me a folder, or describe what you're working on.`
 2. **Raise `Which should I set up first?`** with the top three as A–C and Other for any listed or typed path. Context: `I'll create the project and hand it to its own conductor. Nothing starts until you approve how it should run.`
-3. **On the answer** (or a folder the person named in `Set up your first agent or project`), call `project_create` with `name`, `description` and `repo_path`. If the name is taken, offer to attach the folder to the existing project. Do not read the folder yourself.
+3. **On the answer** (or a folder the person named in `Set up your first project`), call `project_create` with `name`, `description` and `repo_path`. If the name is taken, offer to attach the folder to the existing project. Do not read the folder yourself.
 4. **Hand off once.** One `delegate_send` to the returned `conductor_thread_id`: the person's pick, the listing row or their description, and `Set this project up; follow references/project-import.md.` After a `queued` handoff, call `delegate_status` with the `conductor_thread_id` (load pack `delegation` if needed); only when it succeeds with `model` equal to `""` say the project's conductor is waiting for a model, and add their task `Pick a model for [project]`. Not done until that conductor reports its proposal.
 
 ## If you are the new project's conductor
@@ -25,7 +25,7 @@ Add these as your own plan tasks before you start, so the person can watch them:
    5. What would you hand to agents right away, what do you want to see before it happens, and what should they never do?
    6. What practices or standards do you hold this work to (reviews, testing, approvals, style)?
 
-   Answers may arrive over several messages; follow up once on anything vague. Write the person's role and how they like to work into the workspace `USER.md` (if you can't write it, send the workspace conductor the lines to add). Their role and decision rights for this project go in the charter (SKILL step 2).
+   Answers may arrive over several messages; follow up once on anything vague. Write the person's role and how they like to work into the workspace `USER.md` (if you can't write it, send the CORSIA agent the lines to add). Their role and decision rights for this project go in the charter (SKILL step 2).
 
 3. **Research how this work is done well.** For this kind of work (for example a web app, a research program, a sales pipeline), look up current, credible practice: how strong teams structure it, what they check before calling something done, common failure modes. Cite sources. Note where the person's current process already matches and where it differs; differences are suggestions, never imposed.
 

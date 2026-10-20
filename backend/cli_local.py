@@ -8,7 +8,7 @@ import time
 import urllib.error
 
 from cli_sources import READ_TIMEOUT_SECONDS, RouteMissing, _read_token, request_json
-from llm.local_profiles import setup_command
+from llm.local_setup_results import SETUP_COMMAND
 
 SETUP_ROUTE = "/api/providers/local/setup"
 SETUP_TIMEOUT_SECONDS = 60
@@ -44,16 +44,16 @@ def _print_still_downloading(result: dict, command: str) -> int:
     return EXIT_STILL_DOWNLOADING
 
 
-def _refusal(error: urllib.error.HTTPError) -> str | None:
-    """The server's reason for refusing a profile (HTTP 400), else None."""
-    if error.code != 400:
-        return None
+def _consent_required(error: urllib.error.HTTPError) -> bool:
+    """Whether local setup needs consent that only the app can collect."""
+    if error.code != 409:
+        return False
     try:
         detail = json.loads(error.read().decode() or "null")
     except (OSError, ValueError):
-        return None
-    reason = detail.get("detail") if isinstance(detail, dict) else None
-    return reason if isinstance(reason, str) else None
+        return False
+    payload = detail.get("detail") if isinstance(detail, dict) else None
+    return isinstance(payload, dict) and payload.get("code") == "consent_required"
 
 
 def _print_skipped(result: dict) -> int:
@@ -112,8 +112,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         from cli_local_before_start import run_before_start
 
         return run_before_start(force_local=not args.if_no_subscription)
-    profile = getattr(args, "profile", None)
-    command = setup_command(profile)
+    command = SETUP_COMMAND
     token = _read_token()
     if not token:
         return _print_terminal_error({
@@ -123,12 +122,14 @@ def cmd_setup(args: argparse.Namespace) -> int:
     try:
         result = request_json(
             "POST", SETUP_ROUTE, token, SETUP_TIMEOUT_SECONDS,
-            {"no_subscription_only": args.if_no_subscription, "automatic": args.automatic, "profile": profile},
+            {"no_subscription_only": args.if_no_subscription, "automatic": args.automatic},
         )
     except urllib.error.HTTPError as error:
-        refusal = _refusal(error)
-        if refusal:
-            return _print_terminal_error({"message": refusal})
+        if _consent_required(error):
+            return _print_terminal_error({
+                "message": "CORSIA needs your permission to inspect the existing oMLX.",
+                "next_action": "Open the CORSIA app and choose Use it in local model setup.",
+            })
         return _print_terminal_error({
             "message": f"Local setup could not start on the backend: {error}",
             "next_action": f"Run `{command}` again after the backend is available.",
@@ -164,10 +165,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
 def build_parser(sub: argparse._SubParsersAction) -> None:
     local = sub.add_parser("local", help="Set up a local model")
     local_sub = local.add_subparsers(dest="local_cmd", required=True)
-    setup = local_sub.add_parser("setup", help="Install and configure a local model")
-    setup.add_argument(
-        "--profile", metavar="ID",
-        help="Local model profile to set up (GET /api/providers/local/setup recommends one); omitted, the default",
+    setup = local_sub.add_parser(
+        "setup", help="Install oMLX and the local model its recommender picks for this Mac",
     )
     setup.add_argument(
         "--if-no-subscription", action="store_true",

@@ -33,6 +33,7 @@ describe('composerCanSend', () => {
 		const thread = { model: null, pending_model: null, switch_status: null };
 		expect(composerCanSend(thread, undefined, models)).toBe(true);
 		expect(composerCanSend(undefined, undefined, models)).toBe(false);
+		expect(composerCanSend(undefined, undefined, models, true)).toBe(true);
 	});
 
 	it('sends into a pending switch only when its destination can run', () => {

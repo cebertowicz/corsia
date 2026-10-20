@@ -1,13 +1,19 @@
 """Conductor API authentication, permanent route boundaries and bounded output."""
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import asyncio
 import json
 
 import pytest
 from fastapi import FastAPI
 
-from infra.conductor import set_conductor
+from infra.conductor import set_scope_coordinator
 from infra.database import get_db
 from infra.internal_principal import current_internal_user, internal_request
 from tests.registry_helpers import make_session
@@ -23,8 +29,8 @@ def _actors():
         conductor = make_session(db, prefix="conductor")
         ordinary = make_session(db, prefix="ordinary")
         project = make_session(db, prefix="project", project_id="other")
-        assert set_conductor("workspace", conductor, db=db)
-        assert set_conductor("other", project, db=db)
+        assert set_corsia_agent(conductor, db=db)
+        assert set_project_conductor("other", project, db=db)
         return conductor, ordinary, project
     finally:
         db.close()
@@ -51,7 +57,7 @@ async def test_real_handlers_without_a_credential(isolated_db):
 
 BLOCKLIST_ROWS = {
     "B1": 1, "B2": 1, "B3": 1, "B4": 3, "B5": 2, "B6": 1, "B8": 4,
-    "B9": 1, "B10": 1, "B11": 10, "B12": 1,
+    "B9": 1, "B10": 1, "B11": 11, "B12": 1, "B15": 1, "B16": 1,
 }
 
 
@@ -98,6 +104,31 @@ async def test_registered_routes_are_open_unless_blocklisted(isolated_db):
 
 
 @pytest.mark.asyncio
+async def test_connected_app_refusals_surface_a_safe_remedy(isolated_db):
+    conductor, _, _ = _actors()
+    tool = CorsiaApiTool()
+
+    refused = json.loads(await tool.execute(
+        "POST", "/api/mcp/servers",
+        body={
+            "name": "test-app", "config": {"command": "test"}, "key_refs": [],
+            "reach": {"mode": "all", "project_ids": [], "outside_projects": False},
+        },
+        _thread_id=conductor,
+    ))
+
+    assert refused == {
+        "status": 403,
+        "error": "API request failed; check the route schema, target and current state",
+        "remedy": "Connected-app reach comes from your current thread; remove reach and retry.",
+    }
+    person_only = await tool.execute(
+        "POST", "/api/mcp/servers/test-app/approve", _thread_id=conductor,
+    )
+    assert "only the signed-in person may approve or decline a connected-app proposal" in person_only
+
+
+@pytest.mark.asyncio
 async def test_previously_refused_settings_read_succeeds(isolated_db):
     # first-run.md tells the conductor to read the reviewer status here; it was off-limits.
     # (`/api/system/settings`, named in the brief, is not a registered route: it 404s.)
@@ -125,6 +156,10 @@ async def test_previously_refused_settings_read_succeeds(isolated_db):
     ("POST", "/api/plans/p/mutations"), ("DELETE", "/api/threads/t"),
     ("POST", "/api/artifacts/a/comments/root/viewed"),
     ("DELETE", "/api/security/alert"),
+    ("PUT", "/api/corsia-agent"),
+    ("POST", "/api/threads/t/messages/m/retry"), ("POST", "/api/threads/t/messages/m/cancel"),
+    ("POST", "/api/mcp/servers/s/sign-in"), ("GET", "/api/mcp/servers/s/sign-in"),
+    ("DELETE", "/api/mcp/servers/s/sign-in"), ("POST", "/api/mcp/servers/s/sign-out"),
 ])
 def test_each_blocklist_family_is_refused(method, path):
     assert off_limits(path, method), (method, path)
@@ -152,6 +187,9 @@ def test_every_blocklist_row_has_a_refused_representative():
         ("POST", "/api/threads/t/seen"), ("POST", "/api/plans/operator/threads/t/seen"),
         ("POST", "/api/artifacts/a/comments/c/viewed"), ("POST", "/api/doc-reviews"),
         ("DELETE", "/api/security/alert"),
+        ("POST", "/api/threads/t/messages/m/retry"),
+        ("POST", "/api/mcp/servers/app/approve"),
+        ("POST", "/api/mcp/servers/app/sign-in"),
     ]:
         for index, (_, method_pattern, path_pattern, _) in enumerate(OFF_LIMITS_ROWS):
             if re.fullmatch(method_pattern, method) and re.search(path_pattern, path):
@@ -212,7 +250,7 @@ async def test_person_session_routes_refuse_the_conductor(isolated_db):
 @pytest.mark.parametrize("method,path", [
     ("POST", "/api/keys/{name}/check"), ("POST", "/api/vendor-accounts/{account_id}/verify"),
     ("POST", "/api/vendor-accounts/{account_id}/signin/check"),
-    ("POST", "/api/threads/{thread_id}/conductor-account"),
+    ("POST", "/api/threads/{thread_id}/corsia-agent-account"),
     ("PUT", "/api/threads/{thread_id}/vendor-account"), ("PUT", "/api/settings/providers/{name}"),
     ("GET", "/api/security/alert"), ("GET", "/api/settings"), ("PATCH", "/api/settings"),
     ("GET", "/api/settings/providers"), ("GET", "/api/settings/network-servers/{server_id}/settings"),
@@ -282,11 +320,12 @@ async def test_key_check_and_value_vendor_verify_and_signin(isolated_db):
     ("PUT", "/api/conductor", {}, {"thread_id": None}),
     ("PUT", "/api/conductor", {"scope": "workspace"}, {"thread_id": "{target}"}),
     ("PUT", "/api/conductor", {"scope": "other"}, {"thread_id": "{target}"}),
+    ("PUT", "/api/corsia-agent", {}, {"thread_id": "{target}"}),
 ])
 async def test_human_seen_state_and_conductor_designation_denied(
     isolated_db, monkeypatch, method, path, query, body,
 ):
-    from infra.conductor import get_conductor
+    from infra.conductor import get_scope_coordinator
     import api.conductor as conductor_routes
     import api.plans as plan_routes
     import api.thread_seen as seen_routes
@@ -300,14 +339,14 @@ async def test_human_seen_state_and_conductor_designation_denied(
 
     monkeypatch.setattr(seen_routes, "_mark_reported", mutation)
     monkeypatch.setattr(plan_routes, "_thread_view_operation", mutation)
-    monkeypatch.setattr(conductor_routes, "set_conductor", mutation)
+    monkeypatch.setattr(conductor_routes, "set_scope_coordinator", mutation)
     body = {key: ordinary if value == "{target}" else value for key, value in body.items()}
     result = await CorsiaApiTool().execute(
         method, path.format(target=ordinary), query=query, body=body, _thread_id=conductor,
     )
     assert "off-limits" in result, result
     assert not reached
-    assert get_conductor("workspace") == conductor
+    assert get_corsia_agent() == conductor
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,5 @@
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SidebarThreadRow from './SidebarThreadRow.svelte';
 import { checkpointsByThread, type CheckpointStatus } from '$lib/stores/checkpoints';
@@ -7,6 +7,7 @@ import { threadPlanStates } from '$lib/stores/threadPlanStates';
 import { _resetTurnStateForTests, applyLifecycle } from '$lib/ws/turnState';
 import type { Thread } from '$lib/stores/threads';
 import type { ThreadPlanStateEntry } from '$lib/api/plans';
+import * as productEvents from '$lib/product_events';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -33,7 +34,7 @@ function setCheckpoint(
 	}]]));
 }
 
-function render(renaming = false): void {
+function render(renaming = false, onOpenAttention?: (threadId: string, title: string) => void): void {
 	component = mount(SidebarThreadRow, {
 		target: host,
 		props: {
@@ -52,6 +53,7 @@ function render(renaming = false): void {
 			onTouchStart: () => {},
 			onTouchEnd: () => {},
 			onSelect: () => {},
+			onOpenAttention,
 			onOpenContextMenu: () => {},
 			onPin: () => {},
 			onArchive: () => {},
@@ -79,6 +81,7 @@ afterEach(() => {
 	checkpointsByThread.set(new Map());
 	threadPlanStates.set({});
 	_resetTurnStateForTests();
+	vi.restoreAllMocks();
 });
 
 describe('SidebarThreadRow update summary', () => {
@@ -98,6 +101,59 @@ describe('SidebarThreadRow update summary', () => {
 	it('keeps a row single-line when no update summary exists', () => {
 		render();
 		expect(host.querySelector('.thread-update-summary')).toBeNull();
+	});
+
+	it('puts the owed mark on the second line, naming its one item, with the mark\'s action and analytics', () => {
+		const onOpenAttention = vi.fn();
+		const analytics = vi.spyOn(productEvents, 'emitProductEvent').mockImplementation(() => {});
+		threadPlanStates.set({ [thread.id]: {
+			state: 'needs_input', label_key: null, paused: false,
+			attention_items: [{ kind: 'decision', title: 'Choose a model', node_id: 'n' }],
+			latest_update: { kind: 'marked', summary: 'An update the owed line replaces' },
+		} });
+		render(false, onOpenAttention);
+
+		const marks = host.querySelectorAll<HTMLElement>('.plan-state');
+		expect(marks).toHaveLength(1);
+		const control = marks[0];
+		expect(control.classList.contains('line')).toBe(true);
+		expect(host.querySelector('.thread-title-row .plan-state')).toBeNull();
+		expect(host.querySelector('.thread-update-summary')).toBeNull();
+		expect(control.textContent).toBe('Needs you · Choose a model');
+		expect(control.getAttribute('aria-label')).toBe('Needs you · Choose a model: 1 item');
+		control.click();
+		expect(onOpenAttention).toHaveBeenCalledWith(thread.id, 'Decide');
+		expect(analytics).toHaveBeenCalledTimes(1);
+		expect(analytics).toHaveBeenCalledWith('sidebar', 'attention_opened', expect.objectContaining({
+			thread_id: thread.id, state: 'needs_input', word: 'Decide', count: 1,
+		}));
+	});
+
+	it('keeps the count with several owed items, in the mark\'s own word', () => {
+		threadPlanStates.set({ [thread.id]: {
+			state: 'needs_input', label_key: null, paused: false,
+			attention_items: [
+				{ kind: 'decision', title: 'Choose a model', node_id: 'a' },
+				{ kind: 'decision', title: 'Pick a region', node_id: 'b' },
+				{ kind: 'decision', title: 'Name the project', node_id: 'c' },
+			],
+		} });
+		render();
+
+		expect(host.querySelector('.plan-state.line')?.textContent).toBe('Needs you · 3 to decide');
+	});
+
+	it('renders static Needs you text when the user owes an unitemized move', () => {
+		threadPlanStates.set({ [thread.id]: {
+			state: 'blocked_on_you', label_key: null, paused: false, attention_items: [],
+		} });
+		render();
+
+		const line = host.querySelector<HTMLElement>('.plan-state.line.blocked_on_you');
+		expect(line?.classList.contains('static')).toBe(true);
+		expect(line?.getAttribute('role')).toBeNull();
+		expect(line?.textContent).toBe('Needs you');
+		expect(host.querySelector('.thread-title-row .plan-state')).toBeNull();
 	});
 });
 
@@ -181,8 +237,10 @@ describe('SidebarThreadRow motion truth', () => {
 	it('shows the blue spinner while its own Turn runs', () => {
 		renderWithActivity('active');
 
-		const spinner = host.querySelector<SVGElement>('.thread-title-row .spinner');
-		expect(spinner?.getAttribute('stroke')).toBe('var(--accent)');
+		// The spinner occupies the trailing column so it stays vertically centred
+		// whether the row has one line or an update summary.
+		const spinner = host.querySelector<SVGElement>('.thread-item > .spinner');
+		expect(spinner?.getAttribute('stroke')).toBe('var(--status-in-progress)');
 		expect(spinner?.getAttribute('aria-label')).toBe('Working');
 	});
 
@@ -190,7 +248,7 @@ describe('SidebarThreadRow motion truth', () => {
 		applyLifecycle('subagent-of-thread-ctx', { turnId: 'turn-sub', turnOrder: 3 }, 'thread-ctx');
 		renderWithActivity();
 
-		const spinner = host.querySelector<SVGElement>('.thread-title-row .spinner');
+		const spinner = host.querySelector<SVGElement>('.thread-item > .spinner');
 		expect(spinner?.getAttribute('stroke')).toBe('var(--text-tertiary)');
 		expect(spinner?.getAttribute('aria-label')).toBe('Subagent working');
 		expect(host.querySelector('.update-dot')).toBeNull();

@@ -164,29 +164,37 @@ async def _execute(
     provider_request: ProviderCheckpointRequest,
     cancel_event: asyncio.Event,
 ) -> CheckpointRecord:
+    # This task owns the attempt and ends its row terminal before it exits.
+    # Only process shutdown after capture, or a failure write that itself
+    # raises, leaves a row for reconcile_startup_checkpoints.
     try:
-        try:
-            if cancel_event.is_set():
-                raise asyncio.CancelledError
-            if provider_request.target.harness in {'claude-code', 'codex'}:
-                from core.checkpoint_account import admit_checkpoint
+        if cancel_event.is_set():
+            raise asyncio.CancelledError
+        if provider_request.target.harness in {'claude-code', 'codex'}:
+            from core.checkpoint_account import admit_checkpoint
 
-                provider_request = admit_checkpoint(provider_request)
-            result = await invoke_with_cold_correction(
-                provider_request, cancel_event, _invoke,
-            )
-            if cancel_event.is_set():
-                raise asyncio.CancelledError
-        except asyncio.CancelledError:
-            await run_in_db(
-                checkpoint_store.cancel,
-                checkpoint_id,
-                ended_at=utc_now_iso(),
-            )
-            return await _read(checkpoint_id)
-        except Exception as error:
-            return await _terminal_failure(checkpoint_id, error)
-        return await _capture_and_install(checkpoint_id, result)
+            provider_request = admit_checkpoint(provider_request)
+        result = await invoke_with_cold_correction(
+            provider_request, cancel_event, _invoke,
+        )
+        if cancel_event.is_set():
+            raise asyncio.CancelledError
+        try:
+            return await _capture_and_install(checkpoint_id, result)
+        except Exception:
+            from loguru import logger
+
+            logger.exception("checkpoint capture or install raised: {}", checkpoint_id)
+            raise
+    except asyncio.CancelledError:
+        await run_in_db(
+            checkpoint_store.cancel,
+            checkpoint_id,
+            ended_at=utc_now_iso(),
+        )
+        return await _read(checkpoint_id)
+    except Exception as error:
+        return await _terminal_failure(checkpoint_id, error)
     finally:
         record = await _read(checkpoint_id)
         await _notify_completion(record)

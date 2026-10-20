@@ -14,8 +14,30 @@ from uuid import NAMESPACE_URL, uuid5
 from infra.fs_durability import fsync_directory as _fsync_directory
 
 APPLICATION_ID = "com.cebertowicz.corsia"
+# The packaged app's folder under Application Support. Held equal to the Rust
+# shell's APP_FOLDER and the launcher's CORSIA_APP_FOLDER by a parity test.
+APP_FOLDER = "CORSIA"
 STATE_DIRECTORY = "state"
 BOOTSTRAP_VERSION = 2
+_UNSET = object()
+
+
+def app_bundle_root(path: str | Path | None = None) -> Path | None:
+    """Return the ``.app`` bundle this code runs from, or None outside one.
+
+    App mode is a path check on the resolved module location
+    (``<X>.app/Contents/Resources/backend/...``), never an environment
+    variable, so a source install's environment cannot claim it.
+    """
+    resolved = Path(__file__ if path is None else path).resolve()
+    for parent in resolved.parents:
+        if (
+            parent.name == "Resources"
+            and parent.parent.name == "Contents"
+            and parent.parent.parent.suffix == ".app"
+        ):
+            return parent.parent.parent
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,20 +115,29 @@ class RuntimePaths:
         return self.workspace.root
 
 
+def app_metadata_dir(home: Path | None = None) -> Path:
+    """Return the packaged app's folder, which holds ``service.json``."""
+    home_dir = Path.home() if home is None else Path(home)
+    return _resolved(home_dir / "Library" / "Application Support" / APP_FOLDER)
+
+
 def default_state_root(
     *,
     env: Mapping[str, str] | None = None,
     platform: str | None = None,
     home: Path | None = None,
     application_id: str | None = None,
+    app_bundle: Path | None | object = _UNSET,
 ) -> Path:
     """Return the configured or platform-default operational state root.
 
-    ``CORSIA_STATE_DIR`` is an exact root override. Otherwise CORSIA keeps
-    operational state in an application-specific ``state`` child beneath
-    Application Support on macOS, LocalAppData on Windows, or the XDG state
-    directory on other platforms (falling back to ``~/.local/state``). The
-    child leaves room for application metadata beside operational state.
+    ``CORSIA_STATE_DIR`` is an exact root override. Otherwise the root is the
+    ``state`` child of an application folder: on macOS
+    ``~/Library/Application Support/<folder>/state``, where the folder is
+    ``CORSIA`` for the packaged app and the application id for a source
+    install, so a missed adoption check never opens the other install's data.
+    Windows and other platforms use LocalAppData and the XDG state directory
+    (falling back to ``~/.local/state``).
     """
     environment = os.environ if env is None else env
     platform_name = sys.platform if platform is None else platform
@@ -120,7 +151,11 @@ def default_state_root(
         return _resolved(override)
 
     if platform_name == "darwin":
-        base = home_dir / "Library" / "Application Support"
+        bundle = app_bundle_root() if app_bundle is _UNSET else app_bundle
+        folder = APP_FOLDER if bundle is not None else app_id
+        return _resolved(
+            home_dir / "Library" / "Application Support" / folder / STATE_DIRECTORY
+        )
     elif platform_name.startswith("win"):
         local_app_data = environment.get("LOCALAPPDATA")
         base = (
@@ -140,6 +175,39 @@ def runtime_db_paths(state_root: Path) -> tuple[Path, Path, Path]:
         Path(state_root) / "analytics.duckdb",
         Path(state_root) / "uploads",
     )
+
+
+_PREVIEW_LAYOUT_APP_METADATA = frozenset({"service.json"})
+
+
+def move_preview_layout(app_dir: Path, state_root: Path) -> list[str]:
+    """Move a pre-release flat app folder's state into its ``state`` child once.
+
+    A preview app kept ``corsia.db`` directly in the app folder. When that
+    database exists and the state root does not, every entry except the app's
+    explicit metadata is renamed into the new state root (same volume, so each
+    move is atomic). Returns the moved names; anything else returns an empty
+    list untouched. The entries gather in a hidden sibling first, so an
+    interrupted move is finished by the next call instead of leaving an empty
+    state root.
+    """
+    app_dir = Path(app_dir)
+    state_root = Path(state_root)
+    if state_root.parent != app_dir or state_root.exists():
+        return []
+    staging = app_dir / f".{state_root.name}.moving"
+    if not ((app_dir / "corsia.db").is_file() or staging.is_dir()):
+        return []
+    staging.mkdir(exist_ok=True)
+    moved = []
+    for source in sorted(app_dir.iterdir(), key=lambda path: path.name):
+        if source.name in _PREVIEW_LAYOUT_APP_METADATA or source == staging:
+            continue
+        os.rename(source, staging / source.name)
+        moved.append(source.name)
+    os.rename(staging, state_root)
+    _fsync_directory(app_dir)
+    return moved
 
 
 def load_bootstrap(path: Path) -> RuntimePaths | LegacyRuntimePaths:

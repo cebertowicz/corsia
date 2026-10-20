@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+
 #: What a thread is told when a plan result it did not cause reaches it. Each
 #: line is followed by the same `next` block a close returns.
 WAKE_TASK_CLOSED = "[CORSIA plan] {title} was closed by another actor."
@@ -280,6 +281,7 @@ WAKE_CHIPS = {
     "plan.child_friction_threshold": "Delegated step keeps failing",
     "plan.child_turn_errored": "Delegated worker's turn ended in error",
     "plan.child_provider_refused": "Delegated worker hit a provider limit",
+    "plan.child_held_local_only": "Delegated worker is held: local models only",
     "plan.child_stopped_open": "Delegated worker stopped with work open",
     "plan.child_stopped_on_user": "Delegated worker is held by the user",
     "plan.child_silent": "Delegated worker has gone silent",

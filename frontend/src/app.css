@@ -45,6 +45,13 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* In an installed Home Screen web app, iOS reports 100vh as the full screen height while the
+   layout viewport (innerHeight, 100dvh) is shorter, so a 100vh shell runs past the visible bottom
+   edge. Size the shell to the layout viewport there only; a browser tab keeps 100vh. */
+@media (display-mode: standalone) {
+  html, body { height: 100dvh; }
+}
+
 body { max-width: 100vw; }
 #svelte { max-width: 100vw; overflow-x: hidden; }
 
@@ -53,25 +60,19 @@ body { max-width: 100vw; }
    The phone value is set in the max-width: 768px :root block below. */
 :root { --header-top-base: var(--bg-secondary); }
 
-/* Installed touch app only: iOS 27 samples this element's background-color for the status bar
-   (it ignores theme-color, gradients and pseudo-elements) instead of blurring over the header.
-   It is the opaque base of the header's top color and sits under the status bar, so the header
-   looks unchanged; z-index 0 keeps it beneath open sheets, since iOS reads its color, not its
-   pixels. */
-#status-bar-color { display: none; }
-@media (display-mode: standalone) and (pointer: coarse) {
-	#status-bar-color {
-		display: block; position: fixed; top: 0; left: 0; right: 0; height: 1px;
-		z-index: 0; pointer-events: none;
-		background-color: var(--header-top-base);
-	}
-}
-
 @media (max-width: 768px) {
 	html, body { background: var(--bg-primary); }
 	:root {
 		--header-top-base: var(--bg-primary);
 		--header-height: 64px;
+		/* On iOS 27 a Home Screen web app gets the system's soft top-edge blur over its top safe
+		   area, fading out by about 36px below it. A page cannot remove it there: a full-width
+		   opaque fixed top container, the condition WebKit's source gives for hiding it, made no
+		   difference. So every phone top row moves down by this clearance: the old row centre
+		   (safe-top + 18px) plus 28px puts the top of an 18px icon at safe-top + 37px, below the
+		   blur. min() makes it 0 with no top inset (Safari tab), where nothing changes. */
+		--edge-blur-clearance: min(28px, var(--safe-top));
+		--header-bottom: calc(var(--header-height) + var(--safe-top) + var(--edge-blur-clearance));
 		--text-caption:  11px;
 		--text-footnote: 13px;
 		--text-subhead:  15px;
@@ -99,7 +100,7 @@ body { max-width: 100vw; }
 .md-content ul { margin: 0 0 12px; padding-left: 3.5em; list-style-position: outside; }
 .md-content ol { margin: 0 0 12px; padding-left: 3.5em; list-style-position: outside; }
 .md-content li { margin-bottom: 4px; }
-.md-content a { color: var(--accent); text-decoration: none; }
+.md-content a { color: var(--accent-text); text-decoration: none; }
 .md-content a:hover { text-decoration: underline; }
 .md-content strong { font-weight: 600; }
 .md-content code {
@@ -140,8 +141,12 @@ body { max-width: 100vw; }
 	opacity: 0; transition: opacity var(--dur-tight);
 }
 .md-content .code-block:hover .copy-btn { opacity: 1; }
+/* Long messages use a text fence so they wrap instead of becoming a sideways-scrolling code line. */
+.md-content .text-code-block pre, .md-content .text-code-block code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.md-content .text-code-block pre { overflow-x: hidden; }
 .md-content .copy-btn:hover { background: var(--bg-active); color: var(--text-primary); }
 .md-content .code-lang + .copy-btn + pre { padding-top: 28px; }
+@media (hover: none) { .md-content .copy-btn { opacity: 1; } }
 .md-content .hl-keyword { color: var(--hl-keyword); font-weight: 500; }
 .md-content .hl-string { color: var(--hl-string); }
 .md-content .hl-comment { color: var(--hl-comment); font-style: italic; }

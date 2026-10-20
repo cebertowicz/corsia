@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { activeThread, activeThreadId, isNavAgent } from '$lib/stores/threads';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
-	import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
+	import { openProjectSettings as showProjectSettings, openWorkspaceSettings as showWorkspaceSettings } from '$lib/stores/settingsNavigation';
 	import { sidebarCollapsed } from '$lib/stores/ui';
 	import { uiScope } from '$lib/stores/uiScope';
 	import { measurementScopeTitle } from '$lib/stores/measurementScopeTitle';
@@ -26,6 +25,7 @@
 	const h = $derived($canvasHeader);
 	const isTakeover = $derived(h != null);
 	const scopeTitle = $derived($uiScope?.name ?? 'Workspace');
+	const designatedName = $derived($uiScope ? 'Conductor' : 'CORSIA');
 	const isConductorThread = $derived(conductorThreadId != null && $activeThreadId === conductorThreadId);
 
 	// isConductor only when no thread is active at all (home/conductor landing).
@@ -61,21 +61,15 @@
 	function run(fn: () => void) { overflowOpen = false; fn(); }
 	function openThreadSettings() {
 		haptic();
-		projectSettingsOpen.set(false);
-		workspaceSettingsOpen.set(false);
 		threadSettingsOpen.update((open) => !open);
 	}
 	function openProjectSettings() {
 		haptic();
-		threadSettingsOpen.set(false);
-		workspaceSettingsOpen.set(false);
-		projectSettingsOpen.set(true);
+		if ($uiScope) showProjectSettings($uiScope.id);
 	}
 	function openWorkspaceSettings() {
 		haptic();
-		threadSettingsOpen.set(false);
-		projectSettingsOpen.set(false);
-		workspaceSettingsOpen.set(true);
+		showWorkspaceSettings();
 	}
 </script>
 
@@ -97,7 +91,7 @@
 	{:else if isConductor}
 		<svg class="h-cond-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 5 5 1.8-5 1.8L12 17l-1.8-5-5-1.8 5-1.8z"/></svg>
 		<span class="h-scope">{scopeTitle}</span>
-		<span class="h-cond-tag">conductor</span>
+		<span class="h-cond-tag">{$uiScope ? 'conductor' : 'CORSIA'}</span>
 	{:else if $activeThread}
 		{#if isNavAgent($activeThread)}
 			<svg class="h-cond-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Agent"><path d="M12 3l1.8 5 5 1.8-5 1.8L12 17l-1.8-5-5-1.8 5-1.8z"/></svg>
@@ -109,19 +103,21 @@
 {/snippet}
 
 <header class="shell-header" class:shell-inset={$sidebarCollapsed} data-tauri-drag-region use:toastTopSurface>
-	<div class="h-zone h-left">
-		<button class="h-icon" onclick={toggleSidebar} title="Toggle sidebar" aria-label="Toggle sidebar">
-			<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
-		</button>
-		{#if isTakeover && h?.onBack}
-			<button class="h-back" onclick={back} title={h?.backLabel ?? 'Back'} aria-label={h?.backLabel ?? 'Back'}>
-				<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-				<span class="h-back-label">{h?.backLabel ?? 'Back'}</span>
+	<div class="h-leading">
+		<div class="h-zone h-left">
+			<button class="h-icon" onclick={toggleSidebar} title="Toggle sidebar" aria-label="Toggle sidebar">
+				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
 			</button>
-		{/if}
-	</div>
+			{#if isTakeover && h?.onBack}
+				<button class="h-back" onclick={back} title={h?.backLabel ?? 'Back'} aria-label={h?.backLabel ?? 'Back'}>
+					<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+					<span class="h-back-label">{h?.backLabel ?? 'Back'}</span>
+				</button>
+			{/if}
+		</div>
 
-	<span class="h-title">{@render titleInner()}</span>
+		<span class="h-title">{@render titleInner()}</span>
+	</div>
 
 	<div class="h-zone h-right">
 		{#if isTakeover && h?.actions?.length}
@@ -140,14 +136,14 @@
 			</button>
 		{/if}
 		{#if activeView === 'chat' && !isTakeover && ($activeThread || isConductorThread)}
-			<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? 'Conductor settings' : 'Thread settings'} aria-label={isConductorThread ? 'Conductor settings' : 'Thread settings'}>
+			<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? `${designatedName} settings` : 'Thread settings'} aria-label={isConductorThread ? `${designatedName} settings` : 'Thread settings'}>
 				{@render gearIcon()}
 			</button>
-		{:else if activeView === 'activity' && $uiScope && !$projectSettingsOpen}
+		{:else if activeView === 'activity' && $uiScope}
 			<button class="h-icon" onclick={openProjectSettings} title="Project settings" aria-label="Project settings">
 				{@render gearIcon()}
 			</button>
-		{:else if activeView === 'activity' && !$uiScope && !$workspaceSettingsOpen}
+		{:else if activeView === 'activity' && !$uiScope}
 			<button class="h-icon" onclick={openWorkspaceSettings} title="Workspace settings" aria-label="Workspace settings">
 				{@render gearIcon()}
 			</button>
@@ -175,7 +171,8 @@
 		position: absolute; top: 0; left: 0; right: 0;
 		z-index: 10;
 		height: var(--header-height);
-		padding: 0 12px 0 max(12px, env(titlebar-area-x, 12px));
+		--header-inline-end: 12px;
+		padding: 0 var(--header-inline-end) 0 max(12px, env(titlebar-area-x, 12px));
 		display: flex; align-items: center; gap: 8px;
 		flex-shrink: 0;
 		box-shadow: var(--glass-rim);
@@ -199,6 +196,7 @@
 	.shell-header :global(button) { -webkit-app-region: no-drag; app-region: no-drag; }
 
 	.h-zone { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+	.h-leading { display: flex; align-items: center; min-width: 0; flex: 1; gap: 8px; }
 	.h-right { margin-left: auto; }
 
 	.h-icon {
@@ -207,8 +205,11 @@
 		background: none; border: none; cursor: pointer; color: var(--text-secondary);
 		transition: background var(--dur-tight), color var(--dur-tight);
 	}
-	.h-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
-	.h-icon.active { background: var(--violet-bg); color: var(--violet-text); }
+	@media (hover: hover) {
+		.h-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+		.h-back:hover { background: var(--bg-hover); color: var(--text-primary); }
+	}
+	.h-icon.active { background: var(--accent-wash); color: var(--accent-text); }
 	.h-icon:active { scale: 0.94; }
 
 	.h-back {
@@ -219,7 +220,6 @@
 		font-size: var(--text-subhead); font-weight: var(--fw-medium);
 		transition: background var(--dur-tight), color var(--dur-tight);
 	}
-	.h-back:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.h-back svg { flex-shrink: 0; }
 	.h-back-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -230,8 +230,15 @@
 		letter-spacing: var(--ls-title); color: var(--text-primary);
 		white-space: nowrap; overflow: hidden;
 	}
-	.h-scope { overflow: hidden; text-overflow: ellipsis; }
-	.h-cond-glyph { color: var(--accent); flex-shrink: 0; }
+	/* A long scoped title yields to the fixed header controls instead of pushing them away. */
+	.h-scope { min-width: 0; max-width: 24rem; overflow: hidden; text-overflow: ellipsis; }
+	/* An expanded document occupies the right canvas column, and ChatArtifactSplit publishes its width on main as
+	   --artifact-header-inset (unset without one). The title stays inside the chat's column, with a visible gap
+	   before the document tab strip. The header's right padding is outside this flex box, so the reservation adds
+	   it back. With the inset unset, neither rule binds: the cap exceeds the box and the gap is zero. */
+	.h-leading { max-width: calc(100% - var(--artifact-header-inset, 0px) + var(--header-inline-end)); }
+	.h-title { margin-right: min(var(--space-2), var(--artifact-header-inset, 0px)); }
+	.h-cond-glyph { color: var(--accent-text); flex-shrink: 0; }
 	.h-cond-tag { color: var(--text-tertiary); font-weight: var(--fw-medium); flex-shrink: 0; }
 	.h-cond-tag::before { content: '· '; }
 
@@ -242,13 +249,13 @@
 		white-space: nowrap; transition: background var(--dur-tight), color var(--dur-tight);
 	}
 	.h-act:hover { background: var(--bg-hover); color: var(--text-primary); }
-	.h-act.active { background: var(--accent-subtle, color-mix(in srgb, var(--accent) 14%, transparent)); color: var(--accent); }
+	.h-act.active { background: var(--accent-subtle, color-mix(in srgb, var(--accent) 14%, transparent)); color: var(--accent-text); }
 
 	.h-overflow { display: none; align-items: center; justify-content: center; width: 34px; height: 32px; border-radius: var(--radius-sm); background: none; border: none; cursor: pointer; color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
 	.h-overflow:hover, .h-overflow.open { background: var(--bg-hover); color: var(--text-primary); }
 	.h-overflow-backdrop { position: fixed; inset: 0; z-index: 59; background: transparent; border: none; }
 	.h-overflow-sheet {
-		position: absolute; top: calc(var(--header-height) - 4px); right: 10px; z-index: 60;
+		position: absolute; top: calc(var(--header-bottom) - 4px); right: 10px; z-index: 60;
 		min-width: 168px; padding: 6px; display: flex; flex-direction: column; gap: 1px;
 		background: var(--glass-regular-thick, var(--bg-secondary));
 		backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
@@ -259,28 +266,44 @@
 	@keyframes hSheetIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 	.h-ov-item { text-align: left; padding: 9px 11px; border-radius: var(--radius-xs); background: none; border: none; cursor: pointer; color: var(--text-secondary); font-size: var(--text-subhead); font-weight: var(--fw-medium); transition: background var(--dur-tight), color var(--dur-tight); }
 	.h-ov-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-	.h-ov-item.active { color: var(--accent); }
+	.h-ov-item.active { color: var(--accent-text); }
 
 	@media (max-width: 1100px) { .h-act.wide-only { display: none; } }
 
 	@media (max-width: 768px) {
 		.shell-header {
 			transform: translateY(var(--empty-parallax-offset, 0));
-			height: calc(var(--header-height) + env(safe-area-inset-top, 0px));
-			padding-top: max(8px, calc(env(safe-area-inset-top, 0px) - 28px));
+			height: var(--header-bottom);
+			/* Moves the row down by exactly the clearance --header-bottom adds (app.css), so it
+			   keeps its place relative to the bottom edge, below the iOS 27 top-edge blur.
+			   ::before reads it to find the row. */
+			--header-pad-top: max(8px, calc(var(--safe-top) - 28px + var(--edge-blur-clearance)));
+			padding-top: var(--header-pad-top);
 			padding-left: max(10px, env(safe-area-inset-left, 0px));
 			padding-right: max(10px, env(safe-area-inset-right, 0px));
 			box-shadow: none;
 			display: grid; grid-template-columns: auto 1fr auto; gap: 4px;
 		}
+		/* The blur stays on this masked layer so it fades out with no hard edge.
+		   Wherever the mask is below 1 the transcript shows through, so the mask stays opaque
+		   down to the bottom of the row's glyphs and then fades out linearly to the header
+		   bottom, over the same length as the fade below the row had before. The row is
+		   centred in the box below the padding, at 50% + pad / 2, and its 18px icons and the
+		   title end 9px below that centre.
+		   The tint keeps its old profile below the clearance strip: the strip (0 to c) stays
+		   at the first stop, and the old 50% and 80% stops of the old height (100% - c) sit
+		   at c + 50% and c + 80% of it, i.e. 50% + c/2 and 80% + c/5. With no top inset c is
+		   0 and these are the old tint stops. */
 		.shell-header::before {
 			background-image: linear-gradient(
 				180deg,
-				color-mix(in srgb, var(--header-top-base) 70%, transparent) 0%,
-				color-mix(in srgb, var(--header-top-base) 45%, transparent) 50%,
-				color-mix(in srgb, var(--header-top-base) 15%, transparent) 80%,
+				color-mix(in srgb, var(--header-top-base) 70%, transparent) var(--edge-blur-clearance),
+				color-mix(in srgb, var(--header-top-base) 45%, transparent) calc(50% + var(--edge-blur-clearance) / 2),
+				color-mix(in srgb, var(--header-top-base) 15%, transparent) calc(80% + var(--edge-blur-clearance) / 5),
 				transparent 100%
 			);
+			-webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,1) calc(50% + var(--header-pad-top) / 2 + 9px), transparent 100%);
+			mask-image: linear-gradient(180deg, rgba(0,0,0,1) calc(50% + var(--header-pad-top) / 2 + 9px), transparent 100%);
 		}
 		.h-left { justify-self: start; }
 		.h-right { justify-self: end; margin-left: 0; }

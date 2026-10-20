@@ -100,6 +100,7 @@ def _request(thread_id: str, turn_id: str, checkpoint_id: str = "cp-1"):
 def test_idle_target_refuses_only_unavailable_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from core.checkpoint_types import IdleCheckpointReason
     from llm import resolution
     from thread import idle_checkpoint
 
@@ -107,14 +108,15 @@ def test_idle_target_refuses_only_unavailable_models(
         raise resolution.ModelUnavailableError("missing", "not connected")
 
     monkeypatch.setattr(resolution, "resolve_execution_target", unavailable)
-    assert idle_checkpoint._resolved_target(object(), "missing") is None
+    skipped = idle_checkpoint._resolved_target(object(), "missing", "thread-1")
+    assert skipped.reason is IdleCheckpointReason.TARGET_UNAVAILABLE
 
     def malformed(*_args, **_kwargs):
         raise ValueError("invalid model metadata")
 
     monkeypatch.setattr(resolution, "resolve_execution_target", malformed)
     with pytest.raises(ValueError, match="invalid model metadata"):
-        idle_checkpoint._resolved_target(object(), "broken")
+        idle_checkpoint._resolved_target(object(), "broken", "thread-1")
 
 
 def test_fresh_schema_has_checked_pending_marker_and_due_index() -> None:

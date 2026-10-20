@@ -155,7 +155,12 @@ async def create_validated_comment(request, client_id):
             prepare = lambda live: image_anchor(live, request.quote, request.near)
         else:
             prepare = lambda live: quote_anchor(live, request.quote, request.near)
-    return await create_comment_owned(
+    result = await create_comment_owned(
         path=request.path, artifact_id=request.artifact_id, client_id=client_id,
         author=request.author, user_id=request.user_id, prepare=prepare, worker=partial(create_in_db, request),
     )
+    if request.author_kind == "user":
+        from jobs.corrections_recording import notify_doc_comment
+
+        notify_doc_comment(str(result[0]["id"]))
+    return result

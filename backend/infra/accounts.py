@@ -146,15 +146,18 @@ def _credentials(username: str, password: str) -> tuple[str, str]:
 
 def _create_account(
     name: str, encoded: str, *, db: sqlite3.Connection | None, first_run_wake: bool,
-    require_first: bool, claim_data_owner: bool = False, before_commit=None,
+    require_first: bool = False, first_run_path: str = "script", claim_data_owner: bool = False,
+    before_commit=None,
 ):
-    """Insert the account (and the first one's conductor) in one transaction.
+    """Insert the account (and the first one's CORSIA agent) in one transaction.
 
     ``before_commit`` runs as its last step. Returns the effects owed after
     the commit, for the caller to run once it has seen the commit succeed.
     """
+    if first_run_path not in {"app", "script"}:
+        raise AccountError("first_run_path must be 'app' or 'script'")
     now = utc_now_iso()
-    woke = False
+    woke = start_setup_task = False
     with write_transaction(db, scope="create_user") as conn:
         had_users = has_users(conn)
         if require_first and had_users:
@@ -173,11 +176,12 @@ def _create_account(
             (name, encoded, now, now),
         )
         if not had_users:
-            from infra.conductor import WORKSPACE_SCOPE, ensure_scope_conductor
+            from infra.corsia_agent import ensure_corsia_agent
 
-            conductor_id = ensure_scope_conductor(
-                WORKSPACE_SCOPE, name, model=None, db=conn,
-            )
+            conductor_id = ensure_corsia_agent(name, model=None, db=conn)
+            from infra.setup_progress import start_after_account
+
+            start_after_account(first_run_path, db=conn)
             if not data_owners_without_accounts(conn):
                 from infra import config
                 from registry.shared_ownership_assignment import enforce_scaffold_ownership
@@ -188,8 +192,13 @@ def _create_account(
                     enqueue_first_run_wake, seed_first_run_setup_plan,
                 )
 
-                seed_first_run_setup_plan(conductor_id, name, db=conn)
-                woke = enqueue_first_run_wake(conductor_id, db=conn)
+                from onboarding.first_run_wake import app_reference_served
+
+                start_setup_task = first_run_path != "app" or not app_reference_served()
+                if start_setup_task:
+                    first_run_path = "script"  # seeded tasks mean the wake follows the script path
+                    seed_first_run_setup_plan(conductor_id, name, db=conn)
+                woke = enqueue_first_run_wake(conductor_id, first_run_path=first_run_path, db=conn)
         if before_commit is not None:
             before_commit()
 
@@ -198,7 +207,7 @@ def _create_account(
             return
         from infra import onboarding_events
 
-        if woke:
+        if woke and start_setup_task:
             onboarding_events.start_first_run_task(conductor_id, name)
         onboarding_events.emit("account_created")
         if woke:
@@ -209,28 +218,26 @@ def _create_account(
 
 def create_user(
     username: str, password: str, *, db: sqlite3.Connection | None = None,
-    first_run_wake: bool = True, require_first: bool = False,
+    first_run_wake: bool = True,
 ) -> str:
     """Create an account and return its id. Raises if the name is taken.
 
-    The first account also gets the workspace conductor; ``first_run_wake``
-    queues that conductor's first-run wake in the same transaction. Only a
-    caller with no person waiting on the conductor (the eval harness)
+    The first account also gets the CORSIA agent; ``first_run_wake``
+    queues that agent's first-run wake in the same transaction. Only a
+    caller with no person waiting on the CORSIA agent (the eval harness)
     passes False. ``require_first`` atomically refuses if another account
     already exists. Callers that create the install's first account on behalf of
     a person use :func:`create_first_account`, which also enforces the
     data-owner rule.
     """
     name, encoded = _credentials(username, password)
-    _create_account(
-        name, encoded, db=db, first_run_wake=first_run_wake, require_first=require_first,
-    )()
+    _create_account(name, encoded, db=db, first_run_wake=first_run_wake)()
     return name
 
 
 def create_first_account(
     username: str, password: str, *, call_name: str | None = None, email: str = "",
-    first_run_wake: bool = True,
+    first_run_wake: bool = True, first_run_path: str = "script",
 ) -> str:
     """Create the install's first account: the one owner behind ``corsia user add`` and setup.
 
@@ -241,7 +248,6 @@ def create_first_account(
     first; an unwritable profile folder raises ``OSError`` with no account made.
     """
     from infra import config
-
     if call_name is not None and not user_profile.one_line(call_name):
         raise AccountError("name is required")
     name, encoded = _credentials(username, password)
@@ -253,7 +259,8 @@ def create_first_account(
     try:
         announce = _create_account(
             name, encoded, db=None, first_run_wake=first_run_wake, require_first=True,
-            claim_data_owner=True, before_commit=staged.publish if staged else None,
+            first_run_path=first_run_path, claim_data_owner=True,
+            before_commit=staged.publish if staged else None,
         )
     except BaseException:
         if staged:
@@ -381,16 +388,13 @@ def resolve_token(
     Keep credential provenance so human-only decisions cannot mistake an API
     or service credential for a browser session. No credential value escapes.
     """
-    if not token:
+    return resolve_token_digest(token_digest(token), db) if token else None
+
+
+def resolve_token_digest(digest: str, db: sqlite3.Connection | None = None) -> dict | None:
+    """:func:`resolve_token` by digest, for a check that outlives the request (a sign-in callback)."""
+    sql = "SELECT user_id, kind, expires_at FROM auth_tokens WHERE token_hash = ?"
+    row = _db(db).execute(sql, (digest,)).fetchone()
+    if row is None or (row["expires_at"] and row["expires_at"] <= utc_now_iso()):
         return None
-    row = _db(db).execute(
-        "SELECT user_id, kind, expires_at FROM auth_tokens WHERE token_hash = ?",
-        (token_digest(token),),
-    ).fetchone()
-    if row is None:
-        return None
-    if row["expires_at"] and row["expires_at"] <= utc_now_iso():
-        return None
-    return {
-        "id": row["user_id"], "name": row["user_id"], "token_kind": row["kind"],
-    }
+    return {"id": row["user_id"], "name": row["user_id"], "token_kind": row["kind"]}

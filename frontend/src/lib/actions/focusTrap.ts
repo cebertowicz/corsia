@@ -71,7 +71,14 @@ export function focusTrap(node: HTMLElement, options: FocusTrapOptions = {}) {
 		destroy() {
 			mounted = false;
 			node.removeEventListener('keydown', onKeydown);
-			if (previousFocus?.isConnected) previousFocus.focus();
+			// Hand focus back only to a real control, and only if the person's focus is still
+			// ours to give: on <body> or inside the trap. <body>.focus() blurs whatever holds
+			// focus, and a trap that outlives an outro (the dock drawer's 260ms) would
+			// otherwise pull focus off the control that already took it back.
+			const active = document.activeElement;
+			const focusMoved = active instanceof HTMLElement && active !== document.body && !node.contains(active);
+			if (focusMoved) return;
+			if (previousFocus && previousFocus !== document.body && previousFocus.isConnected) previousFocus.focus();
 		},
 	};
 }

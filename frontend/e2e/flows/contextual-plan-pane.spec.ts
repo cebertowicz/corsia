@@ -8,6 +8,7 @@ import {
   EMPTY_DISTRIBUTION,
   operatorNode,
   planDisplay,
+  withPlanContract,
 } from "../../src/lib/__tests__/fixtures/operatorPlan";
 
 function node(overrides: Parameters<typeof operatorNode>[0] = {}) {
@@ -30,6 +31,29 @@ function envelope(
     total?: number;
   } = {},
 ) {
+  const done = options.done ?? 1;
+  // The contract fields the decoder requires (oversize, folds, root_count) come from the shared fixture helper.
+  const entry = withPlanContract({
+    plan: {
+      id: `plan-${threadId}`,
+      owner_kind: "thread",
+      owner_id: threadId,
+      state: "active",
+      revision: 1,
+      updated_at: "2026-08-13T00:00:00Z",
+    },
+    owner: { label: "Conversation", project_id: null, thread_id: threadId },
+    progress: {
+      done,
+      total: options.total ?? nodes.length,
+      open: nodes.length - done,
+      liveness: "advancing",
+    },
+    display: planDisplay("working", "active"),
+    current_node_ids: options.current ?? [],
+    next_node_ids: options.next ?? [],
+    nodes,
+  });
   return {
     contract_version: 2,
     as_of: "2026-08-13T00:00:00Z",
@@ -38,31 +62,16 @@ function envelope(
     attention: { awaiting_count: 0 },
     plans: [
       {
-        plan: {
-          id: `plan-${threadId}`,
-          owner_kind: "thread",
-          owner_id: threadId,
-          state: "active",
-          revision: 1,
-          updated_at: "2026-08-13T00:00:00Z",
-        },
-        owner: { label: "Conversation", project_id: null, thread_id: threadId },
+        ...entry,
         progress: {
-          done: options.done ?? 1,
-          total: options.total ?? nodes.length,
-          open: nodes.length - (options.done ?? 1),
-          liveness: "advancing",
+          ...entry.progress,
           distribution: {
             ...EMPTY_DISTRIBUTION,
-            done: options.done ?? 1,
+            done,
             active: options.current?.length ?? 0,
             pending_ready: options.next?.length ?? 0,
           },
         },
-        display: planDisplay("working", "active"),
-        current_node_ids: options.current ?? [],
-        next_node_ids: options.next ?? [],
-        nodes,
       },
     ],
   };
@@ -157,9 +166,11 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
       await page.waitForTimeout(510);
       const menu = page.getByRole("menu", { name: `Actions for ${taskTitle}` });
       await expect(menu).toBeVisible();
+      // The menu scales in; judge the targets once the entrance settles.
       for (const item of await menu.getByRole("menuitem").all()) {
-        const box = await item.boundingBox();
-        expect(box?.height).toBeGreaterThanOrEqual(44);
+        await expect
+          .poll(async () => (await item.boundingBox())?.height ?? 0)
+          .toBeGreaterThanOrEqual(44);
       }
       await saveEvidenceScreenshot(page, testInfo, "task-actions-390px", { fullPage: false });
       await row.dispatchEvent("pointerup", { pointerType: "touch" });
@@ -257,7 +268,8 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
         role: "assistant",
         content: "Child is inspecting the projection contract.",
         created_at: "2026-08-13T00:00:01Z",
-        metadata: null,
+        // Focus shows only what the agent said to the person; every other assistant row is work.
+        metadata: { for_user: true },
       },
     ];
 
@@ -352,7 +364,8 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
     ).toBeVisible();
 
     // Settled work is always visible; there is no separate toggle to reveal it.
-    await status("Map current behavior", "Finished");
+    // A settled row names its outcome ("Done"), and its subline repeats the word with the date.
+    await expect(row("Map current behavior").locator(".row-status")).toHaveText("Done");
 
     const inlineToggle = row(delegatedTitle).getByRole("button", {
       name: "active subagent, 1 subtask left",

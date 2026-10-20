@@ -48,6 +48,8 @@
 	);
 	// An unresolved lookup stays clickable: a failed fetch must not read as
 	// "no conductor" — only the API's explicit absent answer disables the entry.
+	// The workspace scope's occupant is the CORSIA agent; a project's is its conductor.
+	let entryLabel = $derived($uiScope ? 'Conductor' : 'CORSIA');
 	let conductorClickable = $derived(conductorThreadId !== null || !conductorKnownAbsent);
 	let conductorState = $derived(conductorThreadId ? $threadActivity[conductorThreadId] : undefined);
 	let conductorBusy = $derived(conductorState === 'active');
@@ -170,16 +172,16 @@
 		onpointerup={clearHold}
 		onpointercancel={clearHold}
 		title={conductorThreadId
-			? "Conductor — this scope's main thread"
+			? `${entryLabel} — this scope's main thread`
 			: conductorKnownAbsent
-				? 'No conductor for this scope'
-				: 'Open conductor chat'}
+				? `No ${entryLabel === 'CORSIA' ? 'CORSIA agent' : 'conductor'} for this scope`
+				: `Open ${entryLabel === 'CORSIA' ? 'CORSIA' : 'conductor'} chat`}
 	>
 		<button
 			type="button"
 			class="scoped-item-trigger"
 			disabled={!conductorClickable}
-			aria-label={`Conductor${conductorSummary ? `. Latest update: ${conductorSummary}` : ''}`}
+			aria-label={`${entryLabel}${conductorSummary ? `. Latest update: ${conductorSummary}` : ''}`}
 		>
 			{#if conductorThreadId && $threadPlanStates[conductorThreadId]?.paused}
 				<ThreadPausedMark />
@@ -187,7 +189,7 @@
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 5 5 1.8-5 1.8L12 17l-1.8-5-5-1.8 5-1.8z"/></svg>
 			{/if}
 			<div class="agent-copy">
-				<span class="lbl">Conductor</span>
+				<span class="lbl">{entryLabel}</span>
 				{#if conductorSummary}
 					<span class="update-summary" title={conductorSummary}>{conductorSummary}</span>
 				{/if}
@@ -197,7 +199,7 @@
 			<ThreadPlanStateMark threadId={conductorThreadId} {onOpenAttention} onOpenThread={goConductor} />
 		{/if}
 		{#if conductorBusy}
-			<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+			<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--status-in-progress)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 		{:else if conductorThreadId && $descendantRunning.has(conductorThreadId)}
 			<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="3" role="img" aria-label="Subagent working"><title>Subagent working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 		{/if}
@@ -263,7 +265,7 @@
 			</div>
 			<ThreadPlanStateMark threadId={agent.id} {onOpenAttention} onOpenThread={selectAgent} />
 			{#if activity === 'active'}
-				<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+				<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--status-in-progress)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 			{:else if $descendantRunning.has(agent.id)}
 				<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="3" role="img" aria-label="Subagent working"><title>Subagent working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 			{/if}
@@ -291,7 +293,6 @@
 		display: flex; flex-direction: column; gap: 1px;
 		padding: 6px 8px 8px;
 		margin: 0 0 2px;
-		border-bottom: 1px solid var(--border-subtle);
 	}
 	.scoped-item {
 		display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
@@ -312,7 +313,7 @@
 		font: inherit; font-size: inherit; color: inherit; text-align: left; cursor: pointer;
 	}
 	.scoped-item-trigger:disabled { cursor: default; }
-	.scoped-item.identity .scoped-item-trigger > svg:first-child { color: var(--accent); opacity: 1; }
+	.scoped-item.identity .scoped-item-trigger > svg:first-child { color: var(--accent-text); opacity: 1; }
 	.agent-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 	.lbl, .update-summary { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.lbl { font-size: var(--text-subhead); }
@@ -332,12 +333,8 @@
 	.scoped-item.conductor .lbl { font-weight: 600; color: var(--text-primary); }
 	.scoped-item.conductor.disabled .lbl { color: var(--text-tertiary); }
 	.scoped-item.conductor.disabled svg { color: var(--text-tertiary); opacity: 0.8; }
-	.scoped-item.conductor svg { color: var(--accent); opacity: 1; }
-	.scoped-item.active { background: var(--violet-bg); }
-	.scoped-item.active::before {
-		content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 2px;
-		background: var(--accent); border-radius: 0 2px 2px 0;
-	}
+	.scoped-item.conductor svg { color: var(--accent-text); opacity: 1; }
+	.scoped-item.active { background: var(--accent-wash); }
 	.drawer-toggle {
 		display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0;
 		padding: 7px 10px; border: none; border-radius: var(--radius-sm);
@@ -352,7 +349,7 @@
 	.drawer-separator { flex-shrink: 0; color: var(--text-tertiary); }
 	.drawer-attention {
 		flex-shrink: 0; max-width: 52%; overflow: hidden; text-overflow: ellipsis;
-		white-space: nowrap; color: var(--accent); font-weight: 600;
+		white-space: nowrap; color: var(--accent-text); font-weight: 600;
 	}
 	@keyframes spin { to { transform: rotate(360deg); } }
 
