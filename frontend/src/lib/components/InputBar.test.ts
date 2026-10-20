@@ -285,8 +285,13 @@ describe('InputBar send and queue preparation', () => {
 		acceptThreadModelTruth('subagent-thread', 'network/worker', '2026-10-20T10:00:00.000000');
 		subagentMeta.set(new Map([['subagent-thread', {
 			childThreadId: 'subagent-thread', parentThreadId: 'active-thread', name: 'Worker',
-			provider: 'cc', status: 'running', model: 'provider-report-at-start',
+			provider: 'cc', status: 'running',
 		} as never]]));
+		// The worker's own catalog, read on mount, lists its model.
+		vi.stubGlobal('fetch', vi.fn(async () => ({
+			ok: true,
+			json: async () => ({ models: get(models) }),
+		})));
 		component = mount(InputBar, {
 			target: host,
 			props: { threadId: 'subagent-thread', onSend: vi.fn() },

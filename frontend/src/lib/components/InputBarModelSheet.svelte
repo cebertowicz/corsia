@@ -3,7 +3,7 @@
 	import { composerSelectionFor } from '$lib/stores/composerSelection';
 	import { threadLocalOnly } from '$lib/stores/threadLocalOnly';
 	import { loadCheckpoints } from '$lib/stores/checkpoints';
-	import { beginThreadModelSwitch, finishThreadModelSwitch, getModelDispatchId, modelMatchesId, models, modelAvailability, saveThreadModel, setActiveModel, type Model } from '$lib/stores/models';
+	import { beginThreadModelSwitch, finishThreadModelSwitch, getModelDispatchId, modelMatchesId, modelAvailability, saveThreadModel, setActiveModel, type Model } from '$lib/stores/models';
 	import { accountSegments, canonicalName, groupModels, groupStatusSegments, rowNote, usageBreakdown, type ModelGroup } from '$lib/stores/modelGroups';
 	import { loadPickerPolicy, pickerAccounts, policyFor, vendorRows, type PickerAccount } from '$lib/stores/accountPicker';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
@@ -29,13 +29,13 @@
 	const activeThread = $derived(sel.thread);
 	// The project switch and a thread's Local only hide cloud rows through this one filter (the causes in LOCALITY_REFUSALS).
 	const localityOff = (model: Model) => model.status_reason === 'project_cloud_off' || model.status_reason === 'thread_local_only';
-	const cloudModelsOff = $derived($models.some(localityOff));
+	const cloudModelsOff = $derived(sel.models.some(localityOff));
 	const threadPolicy = $derived(threadLocalOnly(activeThread));
 	// A new chat has no thread payload yet, so its scope's catalog is the only source for the project switch.
-	const projectCloudOff = $derived(activeThread ? threadPolicy.cause === 'project' : $models.some((model) => model.status_reason === 'project_cloud_off'));
+	const projectCloudOff = $derived(activeThread ? threadPolicy.cause === 'project' : sel.models.some((model) => model.status_reason === 'project_cloud_off'));
 	const inheritedLocalOnly = $derived(threadPolicy.cause === 'inherited');
 	const openProjectPolicy = () => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy');
-	const pickerModels = $derived(cloudModelsOff ? $models.filter((model) => !localityOff(model)) : $models);
+	const pickerModels = $derived(cloudModelsOff ? sel.models.filter((model) => !localityOff(model)) : sel.models);
 	const groups = $derived(groupModels(pickerModels, sel.modelId));
 	// Ready groups start open, unusable ones stay collapsed until tapped; account-backed model rows
 	// stay visible, while their account list opens only on demand, the same for every vendor and state.
@@ -58,7 +58,7 @@
 	// over a catalog with account-run rows; a catalog of local or external models has none.
 	let accountsRequested = false;
 	$effect(() => {
-		if (accountsRequested || !$models.some((model) => model.runs_on?.length)) return;
+		if (accountsRequested || !sel.models.some((model) => model.runs_on?.length)) return;
 		accountsRequested = true;
 		void loadVendorAccounts();
 		void loadPickerPolicy(activeThread?.project_id);
@@ -172,9 +172,9 @@
 				<div class="model-list-empty">No available models</div>
 			{:else}
 				{#each groups as group (group.key)}
-					{@const vendor = vendorRows(group.key, $models, $vendorAccounts)}
+					{@const vendor = vendorRows(group.key, sel.models, $vendorAccounts)}
 					{@const policy = $policyFor(activeThread?.project_id, group.key)}
-					{@const accountRows = pickerAccounts(group.key, $models, $vendorAccounts, policy, sel.modelId)}
+					{@const accountRows = pickerAccounts(group.key, sel.models, $vendorAccounts, policy, sel.modelId)}
 					{@const accountBacked = group.rows.some((model) => model.runs_on !== undefined)}
 					{@const open = isOpen(group, accountRows.length > 0)}
 					{@const usable = group.state === 'ready'}

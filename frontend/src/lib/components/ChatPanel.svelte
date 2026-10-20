@@ -3,12 +3,12 @@
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
 	import { threads, activeThreadId, activeThread, messages, isStreaming, reasoningEffort } from '$lib/stores/threads';
-	import { activeModelId, bindActiveThreadModel } from '$lib/stores/models';
+	import { activeModelId, bindActiveThreadModel, threadModelVersion } from '$lib/stores/models';
 	import { corsiaAgentId } from '$lib/utils/conductor';
 	import ConductorSourcesPanel from './ConductorSourcesPanel.svelte';
 	import { loadCheckpoints } from '$lib/stores/checkpoints';
 	import { beginThreadEntry } from '$lib/stores/contextUsageByThread';
-	import { hydrateSubagentThread, subagentMeta } from '$lib/stores/subagents';
+	import { hydrateSubagentThread } from '$lib/stores/subagents';
 	import { clearWarmKeysForThread, warmActiveThread } from '$lib/chatWarm';
 	import { subscribeChatPanelEvents } from './chatPanelEvents';
 	import { startPresence, stopPresence } from '$lib/ws/presence';
@@ -281,7 +281,8 @@
 	// Every navigation path binds the composer to the opened thread's saved model.
 	$effect(() => {
 		const id = $activeThreadId;
-		if (id) bindActiveThreadModel(id, $threads, $subagentMeta.get(id)?.model);
+		void $threadModelVersion; // a worker's model arrives as a read after the thread opens
+		if (id) bindActiveThreadModel(id, $threads);
 	});
 	$effect(() => {
 		if ($activeThreadId && $token)

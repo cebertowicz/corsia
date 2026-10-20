@@ -20,7 +20,7 @@
 	} from './inputBarHelpers';
 	import { createComposerDrafts, sendAndRestoreDraft, type ComposerDraft } from './composerDrafts';
 	import { composerCanSend, hasReadySwitchDestination as readySwitchDestination, type SendOutcome } from './composerSendReadiness';
-	import { findModelById, loadModels, models } from '$lib/stores/models';
+	import { findModelById, loadModels, loadThreadCatalog } from '$lib/stores/models';
 	import { on, sendMessage, stopTurn } from '$lib/ws';
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
@@ -69,7 +69,9 @@
 
 		const hasImageAttachments = $derived(pendingAttachments.some(a => a.is_image));
 		const selection = $derived($composerSelectionFor(threadId));
-		const activeModel = $derived(findModelById($models, selection.modelId));
+		const activeModel = $derived(findModelById(selection.models, selection.modelId));
+		const catalogThreadId = $derived(!selection.isOpen ? selection.threadId : null); // another thread's composer reads its own catalog
+		$effect(() => { if (catalogThreadId) void loadThreadCatalog(catalogThreadId); });
 		$effect(() => {
 		if (!sheetView) return;
 		const onPointerDown = (e: PointerEvent) => {
@@ -205,11 +207,10 @@
 	}
 
 	const activeThread = $derived(selection.thread);
-	const hasReadySwitchDestination = $derived(readySwitchDestination(activeThread, $models));
-	// A thread outside the list (a worker, the Corsia agent) may have no model to gate on yet:
-	// the server holds or routes the message.
+	const hasReadySwitchDestination = $derived(readySwitchDestination(activeThread, selection.models));
+	// A thread outside the list (a worker, the Corsia agent) may have no model to gate on: the server holds or routes it.
 	const allowUnlistedNoModelThread = $derived(boundThreadId !== null && (boundThreadId === $corsiaAgentId || !selection.isOpen));
-	const canSendToModel = $derived(!$updateRestarting && composerCanSend(activeThread, activeModel, $models, allowUnlistedNoModelThread));
+	const canSendToModel = $derived(!$updateRestarting && composerCanSend(activeThread, activeModel, selection.models, allowUnlistedNoModelThread));
 	const hasMessageToSend = $derived(inputText.trim().length > 0 || pendingAttachments.length > 0);
 
 	function handleSendButtonClick() {

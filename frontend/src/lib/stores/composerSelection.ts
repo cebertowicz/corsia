@@ -1,6 +1,7 @@
 import { derived, type Readable } from 'svelte/store';
-import { activeModelId } from './modelsState';
-import { threadModelFor } from './models';
+import { activeModelId, models, threadCatalogs, workspaceModels } from './modelsState';
+import { threadModelFor, threadModelVersion, type Model } from './models';
+import { unknownStatus } from './modelsLoad';
 import { subagentMeta, subagentThreadRows } from './subagents';
 import { activeThreadId, reasoningEffort, threads, type Thread } from './threads';
 
@@ -20,6 +21,8 @@ export interface ComposerSelection {
 	thread: ComposerThreadRow | undefined;
 	modelId: string | null;
 	effort: string | null;
+	/** The catalog read on this thread's account; a thread not yet read has every status unknown. */
+	models: Model[];
 }
 
 /**
@@ -28,19 +31,20 @@ export interface ComposerSelection {
  * An omitted id means the open thread.
  */
 export const composerSelectionFor: Readable<(threadId?: string | null) => ComposerSelection> = derived(
-	[activeThreadId, activeModelId, reasoningEffort, threads, subagentMeta, subagentThreadRows],
-	([$activeThreadId, $activeModelId, $reasoningEffort, $threads, $subagentMeta, $workerRows]) =>
+	[activeThreadId, activeModelId, reasoningEffort, threads, subagentMeta, subagentThreadRows, threadModelVersion, models, threadCatalogs, workspaceModels],
+	([$activeThreadId, $activeModelId, $reasoningEffort, $threads, $subagentMeta, $workerRows, , $models, $catalogs, $workspaceModels]) =>
 		(threadId?: string | null): ComposerSelection => {
 			const id = threadId ?? $activeThreadId;
 			const worker = $subagentMeta.get(id ?? '');
 			const thread: ComposerThreadRow | undefined = $threads.find((row) => row.id === id)
 				?? (worker ? { ...$workerRows.get(worker.childThreadId), model: threadModelFor(worker.childThreadId) } : undefined);
 			if (id === null || id === $activeThreadId) {
-				return { threadId: id, isOpen: true, thread, modelId: $activeModelId, effort: $reasoningEffort };
+				return { threadId: id, isOpen: true, thread, modelId: $activeModelId, effort: $reasoningEffort, models: $models };
 			}
 			return {
 				threadId: id, isOpen: false, thread,
 				modelId: thread?.model ?? null, effort: thread?.reasoning_effort ?? null,
+				models: $catalogs.get(id) ?? unknownStatus($workspaceModels),
 			};
 		},
 );

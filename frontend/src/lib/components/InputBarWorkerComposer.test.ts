@@ -8,6 +8,7 @@ import { connectionState } from '$lib/stores/connection';
 import { _resetCheckpointsForTests } from '$lib/stores/checkpoints';
 import { clearAllContextUsage } from '$lib/stores/contextUsageByThread';
 import { _resetThreadModelTruthForTests, acceptThreadModelTruth, activeModelId, finishThreadModelSwitch, models, threadModelFor } from '$lib/stores/models';
+import { threadCatalogs } from '$lib/stores/modelsState';
 import { subagentMeta, subagentThreadRows } from '$lib/stores/subagents';
 import { activeThreadId, reasoningEffort, threads } from '$lib/stores/threads';
 
@@ -71,10 +72,12 @@ beforeEach(() => {
 	reasoningEffort.set('medium');
 	threads.set([{ id: 'parent', model: PARENT_MODEL, reasoning_effort: 'medium' } as never]);
 	subagentMeta.set(new Map([['worker', {
-		childThreadId: 'worker', parentThreadId: 'parent', name: 'Worker bee', provider: 'cc', status: 'running', model: 'provider-report-at-start',
+		childThreadId: 'worker', parentThreadId: 'parent', name: 'Worker bee', provider: 'cc', status: 'running',
 	}]]));
 	subagentThreadRows.set(new Map([['worker', { reasoning_effort: 'none' }]]));
-	models.set([model(PARENT_MODEL, 'Parent-9B'), model(WORKER_MODEL, 'Worker-9B'), model(NEXT_MODEL, 'Next-9B')]);
+	const catalog = [model(PARENT_MODEL, 'Parent-9B'), model(WORKER_MODEL, 'Worker-9B'), model(NEXT_MODEL, 'Next-9B')];
+	models.set(catalog);
+	threadCatalogs.set(new Map([['worker', catalog]]));
 	globalThis.fetch = vi.fn(async () => new Response(
 		JSON.stringify({ model: NEXT_MODEL, model_updated_at: '2026-10-20T10:00:01.000000' }),
 		{ status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -95,6 +98,7 @@ afterEach(() => {
 	subagentMeta.set(new Map());
 	subagentThreadRows.set(new Map());
 	models.set([]);
+	threadCatalogs.set(new Map());
 	clearAllContextUsage();
 });
 
@@ -104,6 +108,30 @@ describe('worker composer reads and changes its own thread', () => {
 
 		expect(host.querySelector('button.model-chip .model-chip-name')?.textContent?.trim()).toBe('Worker-9B');
 		expect(host.querySelector('button.effort-chip')?.textContent?.trim()).toBe('OFF');
+	});
+
+	it("reads the worker's own catalog, not the open thread's, for its model and send state", () => {
+		// On the parent's account the worker's model is blocked; on the worker's own it is ready.
+		models.set([model(PARENT_MODEL, 'Parent-9B'), { ...model(WORKER_MODEL, 'Worker-9B'), status: 'unavailable' as never }]);
+		mountControls({});
+		expect(host.querySelector('button.model-chip .model-chip-name')?.textContent?.trim()).toBe('Worker-9B');
+
+		unmount(component!);
+		component = null;
+		host.replaceChildren();
+		threadCatalogs.set(new Map([['worker', [{ ...model(WORKER_MODEL, 'Worker-9B'), status: 'unavailable' as never }]]]));
+		mountControls({});
+		expect(host.querySelector('button.model-chip .model-chip-name')?.textContent?.trim()).toBe('Unavailable · Worker-9B');
+	});
+
+	it("reads the worker's catalog when its model sheet opens", async () => {
+		mountControls({});
+		host.querySelector<HTMLButtonElement>('button.model-chip')!.click();
+		flushSync();
+
+		await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+		const [url] = vi.mocked(globalThis.fetch).mock.calls[0] as [string, RequestInit];
+		expect(url).toContain('thread_id=worker');
 	});
 
 	it("shows the open thread's selection on the open thread's composer", () => {

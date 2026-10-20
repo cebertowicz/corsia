@@ -12,6 +12,7 @@ import {
 	models,
 	reconcileThreadModelSnapshots,
 	setActiveModel,
+	threadModelFor,
 } from '$lib/stores/models';
 import {
 	activeThreadId,
@@ -543,7 +544,7 @@ describe('ChatPanel session model hydration', () => {
 
 		await panel.selectThread('sol-child');
 
-		expect(get(subagentMeta).get('sol-child')?.model).toBe('codex/gpt-5.6-sol');
+		expect(threadModelFor('sol-child')).toBe('codex/gpt-5.6-sol');
 		expect(get(activeModelId)).toBe('codex/gpt-5.6-sol');
 	});
 

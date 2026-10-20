@@ -2,8 +2,8 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { composerSelectionFor } from './composerSelection';
-import { _resetThreadModelTruthForTests, acceptThreadModelTruth } from './models';
-import { activeModelId } from './modelsState';
+import { _resetThreadModelTruthForTests, acceptThreadModelTruth, seedThreadModelTruth, type Model } from './models';
+import { activeModelId, models, threadCatalogs, workspaceModels } from './modelsState';
 import { subagentMeta, subagentThreadRows } from './subagents';
 import { activeThreadId, reasoningEffort, threads } from './threads';
 
@@ -18,7 +18,7 @@ beforeEach(() => {
 		{ id: 'other', model: 'model/other', reasoning_effort: 'low' } as never,
 	]);
 	subagentMeta.set(new Map([['worker', {
-		childThreadId: 'worker', parentThreadId: 'open', name: 'Worker', provider: 'cc', status: 'running', model: 'provider-report-at-start',
+		childThreadId: 'worker', parentThreadId: 'open', name: 'Worker', provider: 'cc', status: 'running',
 	}]]));
 	subagentThreadRows.set(new Map([['worker', { reasoning_effort: 'none', project_id: 'project-1' }]]));
 });
@@ -30,6 +30,9 @@ afterEach(() => {
 	threads.set([]);
 	subagentMeta.set(new Map());
 	subagentThreadRows.set(new Map());
+	models.set([]);
+	workspaceModels.set([]);
+	threadCatalogs.set(new Map());
 	_resetThreadModelTruthForTests();
 });
 
@@ -74,5 +77,45 @@ describe('composerSelectionFor', () => {
 
 		expect(get(composerSelectionFor)('worker')).toMatchObject({ isOpen: true, modelId: 'model/worker-open' });
 		expect(get(composerSelectionFor)('open')).toMatchObject({ isOpen: false, modelId: 'model/open' });
+	});
+
+	it("re-reads a worker's model when only the thread truth changed", () => {
+		threads.set([{ id: 'open', model: 'model/open', updated_at: '2026-10-20T09:00:00' } as never]);
+		const seen: Array<string | null> = [];
+		const stop = composerSelectionFor.subscribe((read) => seen.push(read('worker').modelId));
+
+		acceptThreadModelTruth('worker', 'model/next', '2026-10-20T10:05:00.000000');
+		stop();
+
+		expect(seen[0]).toBe('model/worker');
+		expect(seen.at(-1)).toBe('model/next');
+	});
+
+	it("follows a worker's model as the server reports it, until a timed model outranks it", () => {
+		_resetThreadModelTruthForTests();
+		seedThreadModelTruth('worker', 'model/first');
+		expect(get(composerSelectionFor)('worker').modelId).toBe('model/first');
+
+		seedThreadModelTruth('worker', 'model/second');
+		expect(get(composerSelectionFor)('worker').modelId).toBe('model/second');
+
+		threads.set([{ id: 'open', model: 'model/open', updated_at: '2026-10-20T09:00:00' } as never]);
+		acceptThreadModelTruth('worker', 'model/accepted', '2026-10-20T10:06:00.000000');
+		seedThreadModelTruth('worker', 'model/stale-report');
+		expect(get(composerSelectionFor)('worker').modelId).toBe('model/accepted');
+	});
+
+	it("gives the open thread the open catalog and a worker its own, unknown until read", () => {
+		const row = (id: string, status: string) => ({ id, status, litellm_model: id }) as unknown as Model;
+		models.set([row('model/open', 'ready')]);
+		workspaceModels.set([row('model/worker', 'ready')]);
+
+		expect(get(composerSelectionFor)('open').models.map((m) => m.id)).toEqual(['model/open']);
+		expect(get(composerSelectionFor)('worker').models).toEqual([
+			expect.objectContaining({ id: 'model/worker', status: 'unavailable', status_reason: 'status_unknown' }),
+		]);
+
+		threadCatalogs.set(new Map([['worker', [row('model/worker', 'ready')]]]));
+		expect(get(composerSelectionFor)('worker').models).toEqual([expect.objectContaining({ status: 'ready' })]);
 	});
 });

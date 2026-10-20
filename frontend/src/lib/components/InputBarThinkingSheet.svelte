@@ -41,8 +41,8 @@
 			reasoning_shape: reasoningConfig?.type ?? null,
 		});
 		if (sid && t) {
-			void saveReasoningEffort(sid, level, t).then((saved) => {
-				if (!saved) toasts.show("Couldn't save the thinking level.", 'error');
+			void saveReasoningEffort(sid, level, t).then((failure) => {
+				if (failure) toasts.show(failure, 'error');
 			});
 		} else if (sel.isOpen) reasoningEffort.set(level);
 	}

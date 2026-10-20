@@ -35,10 +35,10 @@ describe('subagentMeta', () => {
 
 	it('init info merges and survives re-registration', () => {
 		registerSubagent('p', 'c', 's');
-		setSubagentInit('c', { model: 'opus', cwd: '/x' });
+		setSubagentInit('c', { cwd: '/x' });
 		registerSubagent('p', 'c', 's', 'cc', 'closed');
 		const ref = get(subagentMeta).get('c');
-		expect(ref?.model).toBe('opus');
+		expect(ref?.cwd).toBe('/x');
 		expect(ref?.status).toBe('closed');
 	});
 

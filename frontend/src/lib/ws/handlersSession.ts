@@ -1,6 +1,6 @@
 import { threads } from '../stores/threads';
 import { acceptThreadModelTruth, seedThreadModelTruth } from '../stores/models';
-import { patchSubagentThread, registerSubagent, setSubagentInit } from '../stores/subagents';
+import { patchSubagentThread, registerSubagent } from '../stores/subagents';
 import { acceptsThreadAccountFrame, threadAccountFields } from '../stores/threadVendorAccounts';
 import { threadFrameFields, threadSwitchFields } from './threadFrameFields';
 
@@ -61,5 +61,4 @@ export function handleSubagentMeta(data: any) {
 	if (!data.thread_id) return;
 	if (data.model) seedThreadModelTruth(data.thread_id, data.model);
 	registerSubagent(data.parent_thread_id, data.thread_id, data.name || 'subagent', data.provider || 'cc', data.live ? 'running' : 'idle');
-	if (data.model) setSubagentInit(data.thread_id, { model: data.model });
 }

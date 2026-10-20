@@ -11,6 +11,7 @@ import {
 	subagentMeta,
 	subagentThreadRows,
 } from './subagents';
+import { _resetThreadModelTruthForTests, acceptThreadModelTruth, threadModelFor } from './models';
 
 /**
  * A reload empties an in-memory map. What the SERVER knows about a worker
@@ -47,6 +48,7 @@ beforeEach(() => {
 	subagentMeta.set(new Map());
 	subagentThreadRows.set(new Map());
 	_resetSubagentHydrationForTests();
+	_resetThreadModelTruthForTests();
 });
 
 afterEach(() => {
@@ -65,8 +67,18 @@ describe('subagent chip hydration reads server runtime truth', () => {
 			name: 'tmp inspector',
 			provider: 'cc',
 			status: 'running',
-			model: 'cc/opus',
 		});
+	});
+
+	it("holds the worker's saved model with every thread's, where its composer reads it", async () => {
+		respondWith(runtimeTruth({ model: 'claude-code/opus' }));
+		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		expect(threadModelFor('child-1')).toBe('claude-code/opus');
+		expect(acceptThreadModelTruth('child-1', 'claude-code/sonnet', '2026-10-20T10:00:00.000000')).toBe(true);
+
+		respondWith(runtimeTruth({ model: 'claude-code/opus' }));
+		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		expect(threadModelFor('child-1')).toBe('claude-code/sonnet');
 	});
 
 	it('a live process between turns is ready', async () => {

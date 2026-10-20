@@ -16,6 +16,7 @@
 
 import { get, writable } from 'svelte/store';
 import type { Thread } from './threads';
+import { seedThreadModelTruth } from './threadModelTruth';
 
 /**
  * `unknown` is the absence of information, never a claim about the worker.
@@ -46,7 +47,6 @@ export interface SubagentRef {
 	name: string;
 	provider: string;
 	status: SubStatus;
-	model?: string;
 	cwd?: string;
 }
 
@@ -73,7 +73,6 @@ export function registerSubagent(
 			name,
 			provider,
 			status,
-			model: prev?.model,
 			cwd: prev?.cwd,
 		});
 		return n;
@@ -96,7 +95,7 @@ export function setSubagentStatus(childId: string, status: SubStatus): void {
 	});
 }
 
-export function setSubagentInit(childId: string, init: { model?: string; cwd?: string }): void {
+export function setSubagentInit(childId: string, init: { cwd?: string }): void {
 	subagentMeta.update((m) => {
 		const prev = m.get(childId);
 		if (!prev) return m;
@@ -209,7 +208,7 @@ export async function hydrateSubagentThread(
 			(typeof truth?.driver === 'string' && truth.driver) || current?.provider || 'cc',
 			status,
 		);
-		if (typeof truth?.model === 'string') setSubagentInit(threadId, { model: truth.model });
+		if (typeof truth?.model === 'string') seedThreadModelTruth(threadId, truth.model);
 		foldThreadFields();
 		return status;
 	} catch (error) {

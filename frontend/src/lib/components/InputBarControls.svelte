@@ -18,7 +18,8 @@
 		measuredHydratedThreads,
 		previewIdentity,
 	} from '$lib/stores/contextUsageByThread';
-	import { acceptsSend, activeModelId, findModelById, loadModels, models } from '$lib/stores/models';
+	import { acceptsSend, activeModelId, findModelById } from '$lib/stores/models';
+	import { loadComposerModels } from '$lib/stores/modelsLoad';
 	import { canonicalName } from '$lib/stores/modelGroups';
 	import { subagentMeta } from '$lib/stores/subagents';
 	import { reasoningEffortLabel, resolveReasoningEffort } from './inputBarReasoning';
@@ -77,7 +78,7 @@
 
 	// The composer's own thread's selection: for a worker's composer, the worker's, not the open thread's.
 	const selection = $derived($composerSelectionFor(threadId));
-	const activeModel = $derived(findModelById($models, selection.modelId));
+	const activeModel = $derived(findModelById(selection.models, selection.modelId));
 	// The chip reads as chosen under the composer's one send rule (`acceptsSend`): a usage-limit block
 	// is a normal chip, since the held line says why. Any other block (not offered, signed out,
 	// model gone) is still 'Unavailable'.
@@ -169,7 +170,7 @@
 			? previewIdentity(boundThreadId, previewModelId, boundUsage, latestCheckpoint(checkpointState))
 			: null,
 	);
-	const measuredReading = $derived(measuredFor(boundUsage, boundThreadId, previewModelId, $models));
+	const measuredReading = $derived(measuredFor(boundUsage, boundThreadId, previewModelId, selection.models));
 	// The preview read for this thread, model and measured turn, if any; a
 	// newer measured turn or another model leaves it unowned and unshown.
 	const ownedPreview = $derived(
@@ -212,7 +213,7 @@
 		});
 	});
 	function openSheet(view: Exclude<SheetView, null>) {
-		if (sheetView !== view && view === 'model') loadModels({ refreshUsage: true });
+		if (sheetView !== view && view === 'model') void loadComposerModels(boundThreadId, { refreshUsage: true });
 		toggleSheet(view);
 	}
 	function documentName(source: ContextSheetSourceRow): string {

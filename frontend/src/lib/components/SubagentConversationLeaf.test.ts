@@ -49,12 +49,13 @@ function response(messages: unknown[] = [], turn_summaries: Record<string, unkno
 
 // The leaf's composer reads a next-turn estimate on entry when the child has no
 // stored reading, and the leaf reads the worker's own model and effort from its
-// status; these tests count only the leaf's own history reads.
+// status and its own catalog; these tests count only the leaf's own history reads.
 const PREVIEW_PATH = '/context-snapshot/next-turn';
 const STATUS_PATH = '/api/delegation/threads/';
+const CATALOG_PATH = '/api/models';
 
 function isHistoryRead(url: unknown): boolean {
-	return !String(url).includes(PREVIEW_PATH) && !String(url).includes(STATUS_PATH);
+	return ![PREVIEW_PATH, STATUS_PATH, CATALOG_PATH].some((path) => String(url).includes(path));
 }
 
 function historyCalls(mock: unknown): number {

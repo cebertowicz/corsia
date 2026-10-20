@@ -133,7 +133,7 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			break;
 
 		case 'subagent_init':
-			if (data.thread_id) setSubagentInit(data.thread_id, { model: data.model, cwd: data.cwd });
+			if (data.thread_id) setSubagentInit(data.thread_id, { cwd: data.cwd });
 			break;
 
 		case 'subagent_meta':
