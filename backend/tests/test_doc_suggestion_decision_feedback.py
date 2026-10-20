@@ -61,15 +61,13 @@ def test_an_accepted_suggestion_is_named_by_its_quote_clipped_to_one_line():
     assert _named({"id": "s2", "anchor_text": "  \n"}) == "s2"
 
 
-def test_an_accept_all_note_names_at_most_the_limit_and_carries_every_id(isolated_db):
-    from doceditor.feedback_suggestion_decisions import NAMED_LIMIT
-
+def test_an_accept_all_note_names_every_suggestion_and_keeps_the_persons_line_short(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner", title="Documents")
         seed_thread(db, "author", title="Reviewer")
         artifact_id = seed_document(db, "owner", name="Design.md")
-        suggestions = [add_comment(db, artifact_id, replacement=f"New {n}")[0] for n in range(NAMED_LIMIT + 2)]
+        suggestions = [add_comment(db, artifact_id, replacement=f"New {n}")[0] for n in range(7)]
 
         feedback_suggestion_decisions.record_suggestion_decisions(
             db, suggestions, decision="accepted", decided_by="Robin", decided_by_thread_id=None,
@@ -80,12 +78,13 @@ def test_an_accept_all_note_names_at_most_the_limit_and_carries_every_id(isolate
             "SELECT summary, details_json FROM context_change_journal "
             "WHERE object_kind='thread_context' AND object_id='author'"
         ).fetchone()
-        named = ", ".join(f"“quoted source” ({s['id']})" for s in suggestions[:NAMED_LIMIT])
+        named = ", ".join(f"“quoted source” ({s['id']})" for s in suggestions)
         assert note["summary"] == (
-            f"Robin accepted {NAMED_LIMIT + 2} of your suggestions on Design: {named}, and 2 more. "
-            f"{PERSON_COMMENT_RESOLVE_RULE}"
+            f"Robin accepted 7 of your suggestions on Design: {named}. {PERSON_COMMENT_RESOLVE_RULE}"
         )
-        assert json.loads(note["details_json"])["suggestion_ids"] == [str(s["id"]) for s in suggestions]
+        details = json.loads(note["details_json"])
+        assert details["chip"] == "Robin accepted 7 of your suggestions on Design."
+        assert "suggestion_ids" not in details
     finally:
         db.close()
 

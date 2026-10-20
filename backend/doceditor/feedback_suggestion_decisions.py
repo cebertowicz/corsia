@@ -10,7 +10,6 @@ from infra.passive_changes import append_thread_context_note
 from registry import models as registry_models
 
 QUOTE_CHARS = 60
-NAMED_LIMIT = 5
 
 
 def _named(suggestion: dict[str, Any]) -> str:
@@ -21,13 +20,6 @@ def _named(suggestion: dict[str, Any]) -> str:
     return f"“{quote}” ({suggestion['id']})" if quote else str(suggestion["id"])
 
 
-def _named_list(suggestions: list[dict[str, Any]]) -> str:
-    """The first ``NAMED_LIMIT`` named, so an accept-all keeps the note one bounded line."""
-    named = ", ".join(_named(suggestion) for suggestion in suggestions[:NAMED_LIMIT])
-    hidden = len(suggestions) - NAMED_LIMIT
-    return named + (f", and {hidden} more" if hidden > 0 else "")
-
-
 def _decision_note(
     db, *, recipient_id: str, artifact_id: str, decided_by: str, suggestions: list[dict[str, Any]],
     decision_event_id: str, decision: str, reason: str | None,
@@ -35,9 +27,12 @@ def _decision_note(
     count = len(suggestions)
     subject = "your suggestion" if count == 1 else f"{count} of your suggestions"
     summary = f"{decided_by} {decision} {subject} on {document_name(registry_models.get_artifact(artifact_id, db=db))}"
+    details: dict[str, Any] = {"decision_event_id": decision_event_id, "artifact_id": artifact_id}
     if decision == "accepted":
+        # The agent reads every name; the person's transcript line stays the decision alone.
+        details["chip"] = summary + "."
         # Who resolves the person's comment a suggestion answers has one source; quote it, never restate it.
-        summary += f": {_named_list(suggestions)}. {PERSON_COMMENT_RESOLVE_RULE}"
+        summary += f": {', '.join(_named(suggestion) for suggestion in suggestions)}. {PERSON_COMMENT_RESOLVE_RULE}"
     else:
         summary += "."
         if reason:
@@ -46,10 +41,7 @@ def _decision_note(
         db,
         thread_id=recipient_id,
         summary=summary,
-        details={
-            "decision_event_id": decision_event_id, "artifact_id": artifact_id,
-            "suggestion_ids": [str(suggestion["id"]) for suggestion in suggestions],
-        },
+        details=details,
     )
 
 
