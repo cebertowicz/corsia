@@ -364,7 +364,9 @@ async function capture(page: Page, fixture: Fixture, theme: string, width: numbe
 // The mock backend's own row is `Mock Test Model`; product code and the mock seed are untouched.
 const FRAME_MODEL_NAME = 'Sonnet 5.5';
 const STRAY_MOCK_REPLY = 'This is a test response.';
-/** Rename the bound mock model in the catalog the page reads, and leave the mock backend's stray default reply out of the thread. */
+// The mock model reports no usage, so the first-run turn leaves a system notice that a real model never would.
+const MOCK_USAGE_NOTICE = 'usage.recording_failed';
+/** Rename the bound mock model in the catalog the page reads, and leave the mock backend's stray default reply and usage notice out of the thread. */
 async function presentFirstRun(page: Page, threadId: string) {
 	await page.route((url) => url.pathname === '/api/models', async (route) => {
 		const response = await route.fetch();
@@ -375,7 +377,7 @@ async function presentFirstRun(page: Page, threadId: string) {
 	await page.route((url) => url.pathname === `/api/threads/${threadId}/messages`, async (route) => {
 		const response = await route.fetch();
 		const body = await response.json();
-		const messages = (body.messages ?? []).filter((message: { content?: unknown }) => message.content !== STRAY_MOCK_REPLY);
+		const messages = (body.messages ?? []).filter((message: { content?: unknown; metadata?: { event_type?: unknown } }) => message.content !== STRAY_MOCK_REPLY && message.metadata?.event_type !== MOCK_USAGE_NOTICE);
 		await route.fulfill({ response, json: { ...body, messages } });
 	});
 }
@@ -384,6 +386,7 @@ async function expectCleanFirstRun(page: Page) {
 	await expect(page.locator('button.model-chip .model-chip-name')).toHaveText(FRAME_MODEL_NAME);
 	await expect(page.getByText('Mock Test Model')).toHaveCount(0);
 	await expect(page.getByText(STRAY_MOCK_REPLY)).toHaveCount(0);
+	await expect(page.getByText('Recording Failed')).toHaveCount(0);
 	const head = execSync('git rev-parse --short=7 HEAD', { encoding: 'utf8' }).trim();
 	expect(execSync('git status --porcelain', { encoding: 'utf8' }).trim(), 'the checkout is clean, so the build stamp carries no dirty mark').toBe('');
 	await expect.poll(async () => (await page.locator('.version-overlay').textContent()) ?? '').toMatch(new RegExp(`^b ${head} · f ${head} · \\d\\d:\\d\\d$`));
@@ -415,16 +418,20 @@ test('setup redesign complete state frames @setup-redesign', async ({ browser, r
 		}
 	}
 	await writeManifest();
-	// A run limited to named states leaves the first-run chat frames, which the setup screens don't change, as they were, unless CORSIA_SETUP_FRAME_CHAT asks for them too.
-	if (process.env.CORSIA_SETUP_FRAME_STATES && !process.env.CORSIA_SETUP_FRAME_CHAT) return;
+	// The first-run chat frames are one email case per run: each case is its own conversation, so it needs a fresh backend (the CORSIA agent's thread is made with the account).
+	// CORSIA_SETUP_EMAIL_CASE names the case (gmail, outlook, both or other); without it the run renders the setup screens only. The gmail run also renders the opening.
+	const emailCase = process.env.CORSIA_SETUP_EMAIL_CASE;
+	if (!emailCase) return;
 	await setFocusMode(request, false);
 	const emailQuestion = 'Which email do you use: Gmail (a work Gmail counts), Outlook, or something else?';
 	const emailScenarios = [
-		{ name: 'first-run-email-gmail', answer: 'Gmail', next: 'I can look after your email and calendar. To connect them, I\'ll set up your own private Google project in a browser you can watch, and you sign in and click Allow. Google will also ask for your Drive, Docs and Sheets, so you won\'t have to sign in again later. Two things to expect: Google will warn that the app isn\'t verified. That\'s normal for a private project like yours; choose "Advanced", then "Go to CORSIA (unsafe)". It\'s your own project, so you\'re the only one it can reach. And the project gets published as "In production", because a project left in Testing stops letting me in after 7 days. Go ahead?', profile: 'none' },
-		{ name: 'first-run-email-outlook', answer: 'Outlook', next: 'I can\'t connect Outlook or other email yet. I\'ve noted yours, and I\'ll offer it here as soon as I can.', profile: '- **Email app:** Outlook — Outlook' },
-		{ name: 'first-run-email-both', answer: 'Gmail and Outlook', next: 'I can look after your email and calendar. To connect them, I\'ll set up your own private Google project in a browser you can watch, and you sign in and click Allow. Google will also ask for your Drive, Docs and Sheets, so you won\'t have to sign in again later. Two things to expect: Google will warn that the app isn\'t verified. That\'s normal for a private project like yours; choose "Advanced", then "Go to CORSIA (unsafe)". It\'s your own project, so you\'re the only one it can reach. And the project gets published as "In production", because a project left in Testing stops letting me in after 7 days. Go ahead?', profile: '- **Email app:** Outlook — Gmail and Outlook' },
-		{ name: 'first-run-email-other', answer: 'Proton Mail', next: 'I can\'t connect that email, but I\'ve noted which one you use.', profile: '- **Email app:** Other — Proton Mail' },
+		{ name: 'first-run-email-gmail', answer: 'Gmail', next: 'I can look after your email and calendar. To connect them, I\'ll set up your own private Google project in a browser you can watch, and you sign in and click Allow. Google will also ask for your Drive, Docs and Sheets, so you won\'t have to sign in again later. Two things to expect: Google will warn that the app isn\'t verified. That\'s normal for a private project like yours; choose "Advanced", then "Go to CORSIA (unsafe)". It\'s your own project, so you\'re the only one it can reach. And the project gets published as "In production", because a project left in Testing stops letting me in after 7 days. Go ahead?', element: 'Fresh conversation: the answer “Gmail”, then CORSIA’s offer to set up your own Google project, ending “Go ahead?”' },
+		{ name: 'first-run-email-outlook', answer: 'Outlook', next: 'I can\'t connect Outlook or other email yet. I\'ve noted yours, and I\'ll offer it here as soon as I can.', element: 'Fresh conversation: the answer “Outlook”, then “I can’t connect Outlook or other email yet.”' },
+		{ name: 'first-run-email-both', answer: 'Gmail and Outlook', next: 'I can look after your email and calendar. To connect them, I\'ll set up your own private Google project in a browser you can watch, and you sign in and click Allow. Google will also ask for your Drive, Docs and Sheets, so you won\'t have to sign in again later. Two things to expect: Google will warn that the app isn\'t verified. That\'s normal for a private project like yours; choose "Advanced", then "Go to CORSIA (unsafe)". It\'s your own project, so you\'re the only one it can reach. And the project gets published as "In production", because a project left in Testing stops letting me in after 7 days. Go ahead?', element: 'Fresh conversation: the answer “Gmail and Outlook”, then CORSIA’s offer to set up your own Google project, ending “Go ahead?”' },
+		{ name: 'first-run-email-other', answer: 'Proton Mail', next: 'I can\'t connect that email, but I\'ve noted which one you use.', element: 'Fresh conversation: the answer “Proton Mail”, then “I can’t connect that email, but I’ve noted which one you use.”' },
 	] as const;
+	const cases = emailScenarios.filter((row) => row.name === `first-run-email-${emailCase}`);
+	expect(cases, 'CORSIA_SETUP_EMAIL_CASE is gmail, outlook, both or other').toHaveLength(1);
 	const threadId = await corsiaAgentThread(request);
 	const binding = await request.patch(`/api/threads/${threadId}`, { params: { token: TEST_TOKEN }, data: { model: 'mock/test-model', source: 'setup' } });
 	expect(binding.ok(), await binding.text()).toBeTruthy();
@@ -436,7 +443,7 @@ First, a few things to set up here, one at a time. Any of them can wait: say "no
 	const openingLead = "I'm CORSIA, your assistant. My job is to give you back your time. I'm a bit different from most AI assistants: I measure how much of your time your work here takes, the AI agents working for you included, and I work to bring that number down. You can see it any time in Measurement. I keep everything here set up and running, and I take care of the everyday, like email, your calendar and research.";
 	await injectMessage(request, threadId, { role: 'assistant', content: opening }, TEST_TOKEN);
 	for (const theme of ['light', 'dark']) {
-		if (theme === 'light') {
+		if (theme === 'light' && emailCase === 'gmail') {
 			const context = await browser.newContext({ colorScheme: 'light', reducedMotion: 'reduce', viewport: { width: 1280, height: 900 } });
 			const page = await context.newPage();
 			await presentFirstRun(page, threadId);
@@ -461,24 +468,28 @@ First, a few things to set up here, one at a time. Any of them can wait: say "no
 			console.log(`FRAME ${file}: scripted first-run opening and bound composer model`);
 			await context.close();
 		}
-		for (const scenario of emailScenarios) {
+		for (const scenario of cases) {
+			// This backend holds only this case's conversation: the opening, then the question once, this answer and CORSIA's one reply.
+			if (theme === 'light') for (const message of [{ role: 'assistant', content: emailQuestion }, { role: 'user', content: scenario.answer }, { role: 'assistant', content: scenario.next }]) await injectMessage(request, threadId, message, TEST_TOKEN);
 			const emailContext = await browser.newContext({ colorScheme: theme as 'light' | 'dark', reducedMotion: 'reduce', viewport: { width: 1280, height: 900 } });
 			const emailPage = await emailContext.newPage();
 			await presentFirstRun(emailPage, threadId);
-			await injectMessage(request, threadId, { role: 'assistant', content: emailQuestion }, TEST_TOKEN);
-			await injectMessage(request, threadId, { role: 'user', content: scenario.answer }, TEST_TOKEN);
-			await injectMessage(request, threadId, { role: 'assistant', content: scenario.next }, TEST_TOKEN);
 			await openAppByUrl(emailPage);
-			await expect(emailPage.getByText(emailQuestion, { exact: true }).last()).toBeVisible();
-			await expect(emailPage.getByText(scenario.answer, { exact: true }).last()).toBeVisible();
-			await expect(emailPage.getByText(scenario.next, { exact: true }).last()).toBeVisible();
-			await emailPage.getByText(scenario.next, { exact: true }).last().scrollIntoViewIfNeeded();
+			await expect(emailPage.getByText(openingLead, { exact: true })).toHaveCount(1);
+			await expect(emailPage.getByText(emailQuestion, { exact: true }), 'the email question appears once').toHaveCount(1);
+			await expect(emailPage.getByText(scenario.answer, { exact: true })).toHaveCount(1);
+			await expect(emailPage.getByText(scenario.next, { exact: true })).toHaveCount(1);
+			for (const other of emailScenarios.filter((row) => row.name !== scenario.name)) {
+				await expect(emailPage.getByText(other.answer, { exact: true }), `${other.name}'s answer is not in ${scenario.name}`).toHaveCount(0);
+				if (other.next !== scenario.next) await expect(emailPage.getByText(other.next, { exact: true }), `${other.name}'s reply is not in ${scenario.name}`).toHaveCount(0);
+			}
+			await emailPage.getByText(scenario.next, { exact: true }).scrollIntoViewIfNeeded();
 			await expectCleanFirstRun(emailPage);
 			const emailFile = `${scenario.name}-${theme}-1280x900.png`;
 			const emailPath = resolve(assets!, emailFile);
 			await emailPage.screenshot({ path: emailPath, scale: 'css' });
-			records.push({ file: emailFile, state: scenario.name, element: `Email app profile: ${scenario.profile}`, assertion: 'email step-5 question, answer, and next line visible; composer shows Sonnet 5.5; no stray mock reply; clean dev header at the committed head', sha256: fileSha256(emailPath) });
-			console.log(`FRAME ${emailFile}: ${scenario.profile}`);
+			records.push({ file: emailFile, state: scenario.name, element: scenario.element, assertion: 'a fresh conversation: opening, the email question once, this case\'s answer and CORSIA\'s one reply, and no other case\'s answer or reply; composer shows Sonnet 5.5; no stray mock reply; clean dev header at the committed head', sha256: fileSha256(emailPath) });
+			console.log(`FRAME ${emailFile}: ${scenario.element}`);
 			await emailContext.close();
 		}
 	}
