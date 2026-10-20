@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from infra.db_async import run_off_db
+from loguru import logger
 from tools.base import Tool
 from tools.skill_library_common import (
     LibraryIndexError as _LibraryIndexError,
@@ -175,9 +176,10 @@ def _search(query: str, owner_id: str, project_id: str | None, db) -> dict[str, 
     from library.items import search_items, source_ref
 
     index = _index()
-    from library.producer import request_refresh
+    if index.refreshed:
+        from library.producer import request_refresh
 
-    request_refresh()
+        request_refresh()
     origins = _installed_library_origins(owner_id, db)
     results = []
     for item in search_items(index.skills, query):
@@ -338,8 +340,8 @@ def _remove(
                 actor_thread_id=owner_id, authority="library", reason="library skill removed",
                 source_path="tools.skill_library", db=db,
             )
-        except ValueError:
-            pass
+        except ValueError as error:
+            logger.warning("library artifact release failed for {}/{}: {}", owner_id, name, error)
         return {"outcome": "removed", "name": name}
     return _write_result(result)
 

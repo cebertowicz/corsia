@@ -300,7 +300,7 @@ def remove_skill_bundle(
         saved = save_guidance(
             {},
             workspace=workspace,
-            target=GuidanceTarget(f"skill, {'agent' if scope == 'thread' else scope}"),
+            target=GuidanceTarget(f"skill, {'agent' if scope == 'thread' else scope} scope"),
             author=saver_author(thread_id=author_thread_id),
             reason=reason,
             deletes=deletes,

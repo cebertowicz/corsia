@@ -41,7 +41,7 @@ def test_library_tool_is_deferred_memory_and_registered(tmp_path):
 def test_search_reports_age_state_and_the_no_match_recovery(monkeypatch):
     from tools import skill_library
 
-    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(skills=(_item(),), index_age="2 hours ago"))
+    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(skills=(_item(),), index_age="2 hours ago", refreshed=False))
     monkeypatch.setattr(skill_library, "_installed_library_origins", lambda *_args: {})
     from library import producer
 
@@ -60,6 +60,25 @@ def test_search_reports_age_state_and_the_no_match_recovery(monkeypatch):
     }
     assert none["results"] == []
     assert "skill-creator" in none["hint"]
+
+
+def test_search_refreshes_notices_only_after_a_raw_index_refresh(monkeypatch):
+    from library import producer
+    from tools import skill_library
+
+    refreshes = []
+    monkeypatch.setattr(producer, "request_refresh", lambda: refreshes.append(True))
+    monkeypatch.setattr(skill_library, "_installed_library_origins", lambda *_args: {})
+    monkeypatch.setattr(
+        skill_library, "_index", lambda: SimpleNamespace(skills=(_item(),), index_age="just now", refreshed=False),
+    )
+    skill_library._search("pdf", "owner", None, object())
+    monkeypatch.setattr(
+        skill_library, "_index", lambda: SimpleNamespace(skills=(_item(),), index_age="just now", refreshed=True),
+    )
+    skill_library._search("pdf", "owner", None, object())
+
+    assert refreshes == [True]
 
 
 def test_search_stays_under_200ms_with_one_owner_query_for_1000_items_and_30_copies(isolated_db, tmp_path, monkeypatch):
@@ -86,7 +105,7 @@ def test_search_stays_under_200ms_with_one_owner_query_for_1000_items_and_30_cop
             parent_thread_id=owner, path=str(folder / "SKILL.md"),
         )
     index = tuple({**_item(), "name": f"copy-{number}"} for number in range(1000))
-    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(skills=index, index_age="just now"))
+    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(skills=index, index_age="just now", refreshed=False))
     db = get_db()
     statements: list[str] = []
     db.set_trace_callback(statements.append)

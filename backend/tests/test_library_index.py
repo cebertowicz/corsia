@@ -43,6 +43,20 @@ def test_fresh_fetch_caches_validated_skills(monkeypatch, tmp_path):
     assert result.skills == (payload["skills"][0],)
     assert result.index_age == "just now"
     assert (tmp_path / "state" / "library" / "index.json").exists()
+    assert result.refreshed is True
+
+
+def test_fresh_cache_skips_a_second_raw_fetch(monkeypatch, tmp_path):
+    _seams(monkeypatch, tmp_path)
+    payload = _index_payload()
+    calls = []
+    monkeypatch.setattr(index, "_fetch_index", lambda: calls.append(1) or payload)
+
+    index.load_index()
+    cached = index.load_index()
+
+    assert calls == [1]
+    assert cached.refreshed is False
 
 
 def test_stale_cache_is_used_when_raw_fetch_fails(monkeypatch, tmp_path):

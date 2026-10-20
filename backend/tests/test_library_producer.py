@@ -108,7 +108,7 @@ def test_producer_reads_installed_artifacts_and_delivers_each_change_once(isolat
     first = producer.produce_once()
     repeat = producer.produce_once()
 
-    assert (first, repeat) == (1, 1)
+    assert (first, repeat) == (1, 0)
     assert _count("SELECT COUNT(*) FROM context_change_journal WHERE object_id=?", owner) == 1
 
 

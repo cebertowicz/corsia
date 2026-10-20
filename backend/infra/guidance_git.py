@@ -276,9 +276,7 @@ def save_guidance(
 ) -> SaveResult:
     """Save writes and compare-and-swap deletes in one guidance-history commit.
 
-    ``binary_safe_history`` is deliberately opt-in for reviewed bundles that
-    promise every file is recoverable in guidance history. Ordinary guidance
-    keeps its text-only policy and its existing text digest semantics.
+    Binary-safe reviewed bundles use raw SHA-256 and a 1 MB file ceiling; ordinary guidance is text-only.
     """
     if (refused := refused_save(writes)) is not None:
         return refused
@@ -333,7 +331,10 @@ def _save(
         return SaveResult(outcome, why, line=line)
 
     if target.fault:
-        return unrecorded("failed", target.fault, f"Saved. History may be missing: {target.fault}.")
+        line = f"Not saved: {target.fault}." if atomic else f"Saved. History may be missing: {target.fault}."
+        return unrecorded("failed", target.fault, line)
+    if binary_safe_history and any(data is not None and len(data) > MAX_GUIDANCE_BYTES for data in writes.values()):
+        return SaveResult("refused", "binary-too-large", line="Not saved: reviewed bundle files must be at most 1 MB.")
     if not binary_safe_history and not all(_is_text(data) for data in writes.values()):
         return unrecorded("ordinary", "not text up to 1 MB", None)
     repo, why = workspace_repository(workspace, create=True)

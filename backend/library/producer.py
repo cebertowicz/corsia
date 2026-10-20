@@ -57,7 +57,9 @@ def produce_once() -> int:
         if payload is None:
             continue
         deliveries = deliver_platform_event_sync(LIBRARY_CONNECTOR, payload)
-        delivered += len(deliveries)
+        from events.platform import DUPLICATE
+
+        delivered += sum(delivery.outcome != DUPLICATE for delivery in deliveries)
     return delivered
 
 
