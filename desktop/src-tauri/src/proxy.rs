@@ -23,8 +23,6 @@ use crate::{
     remote_config::{Locator, RemoteRecord},
     routes::{self, Dialed, LocalDial, RouteConfig, Routes, Upstream},
 };
-#[cfg(test)]
-use crate::trust::Trust;
 
 pub(crate) type ProxyBody = BoxBody<Bytes, Box<dyn Error + Send + Sync>>;
 type ResolveFuture = Pin<Box<dyn Future<Output = Result<(String, u16), ProxyError>> + Send>>;
@@ -69,7 +67,7 @@ impl Drop for ProxyHandle {
 #[cfg(test)]
 pub async fn start(
     locator: Locator,
-    trust: Trust,
+    trust: crate::trust::Trust,
     preferred_port: u16,
     on_key_changed: impl Fn() + Send + Sync + 'static,
 ) -> Result<ProxyHandle, ProxyError> {
@@ -96,7 +94,7 @@ pub async fn start_record(
 #[cfg(test)]
 pub async fn start_with_resolver(
     locator: Locator,
-    trust: Trust,
+    trust: crate::trust::Trust,
     preferred_port: u16,
     on_key_changed: impl Fn() + Send + Sync + 'static,
     resolver: Resolver,
@@ -342,7 +340,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{pairing::RemoteHost, routes::KEY_CHANGED_MESSAGE};
+    use crate::{pairing::RemoteHost, routes::KEY_CHANGED_MESSAGE, trust::Trust};
     use hyper::{body::Frame, header::{CONNECTION, UPGRADE}, upgrade};
     use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, task::JoinHandle};
 
