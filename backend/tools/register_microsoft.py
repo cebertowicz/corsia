@@ -5,9 +5,11 @@ from __future__ import annotations
 def register(agent: object) -> None:
     from tools.microsoft_account import MicrosoftConnectTool, MicrosoftStatusTool
     from tools.microsoft_actions import (
-        MicrosoftCalendarCreateTool, MicrosoftCalendarDraftTool, MicrosoftCalendarListTool, MicrosoftCalendarUpdateTool,
-        MicrosoftFilesListTool, MicrosoftFilesReadTool, MicrosoftFilesUploadTool,
+        MicrosoftCalendarListTool, MicrosoftFilesListTool, MicrosoftFilesReadTool, MicrosoftFilesUploadTool,
         MicrosoftMailDraftTool, MicrosoftMailReadTool, MicrosoftMailSearchTool, MicrosoftMailSendTool,
+    )
+    from tools.microsoft_calendar_invites import (
+        MicrosoftCalendarCreateTool, MicrosoftCalendarDraftTool, MicrosoftCalendarUpdateTool,
     )
     for tool_type in (
         MicrosoftConnectTool, MicrosoftStatusTool, MicrosoftMailDraftTool, MicrosoftMailSearchTool, MicrosoftMailReadTool,

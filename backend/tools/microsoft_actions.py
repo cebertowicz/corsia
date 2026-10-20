@@ -191,8 +191,6 @@ class MicrosoftMailDraftTool(Tool):
 
 MAIL_STILL_SENDING = "Not sent: an earlier Microsoft send did not finish, so it may already have gone out. Check the person's Sent mail before saving a new draft."
 MAIL_UNCONFIRMED = "Microsoft did not confirm the send, so the email may have gone out. Do not send this draft again: check the person's Sent mail first."
-CALENDAR_STILL_SENDING = "Not sent: an earlier Microsoft calendar change did not finish, so it may already have happened. Check the person's calendar before saving a new draft."
-CALENDAR_UNCONFIRMED = "Microsoft did not confirm the calendar change, so the event may exist. Do not send this draft again: check the person's calendar first."
 
 
 class MicrosoftMailSendTool(Tool):
@@ -237,80 +235,3 @@ class MicrosoftMailSendTool(Tool):
             )
         except (MicrosoftError, ConnectedAccountError, DraftError) as exc:
             return _error(exc)
-
-
-class MicrosoftCalendarDraftTool(Tool):
-    self_describing_errors = True
-    name = "microsoft_calendar_draft"
-    description = "Save a Microsoft calendar create or update draft for review."
-    parameters = {"type": "object", "additionalProperties": False, "required": ["account_id", "operation", "event"], "properties": {"account_id": ACCOUNT_PARAM, "operation": {"type": "string", "enum": ["create", "update"]}, "event_id": {"type": "string"}, "event": {"type": "object"}}}
-    async def execute(self, **kwargs: Any) -> str:
-        try:
-            account = await _account(kwargs)
-            thread_id = kwargs.get("_thread_id")
-            if not isinstance(thread_id, str) or not thread_id or not isinstance(kwargs.get("event"), dict): return "Error: event and current thread identity are required."
-            operation = kwargs.get("operation")
-            if operation == "create" and kwargs.get("event_id") is not None:
-                return "Error: event_id is only valid for update."
-            if operation == "update" and (not isinstance(kwargs.get("event_id"), str) or not kwargs["event_id"].strip()):
-                return "Error: event_id is required for update."
-            data = json.dumps({"operation": operation, "event_id": kwargs.get("event_id"), "event": kwargs["event"]}, separators=(",", ":"))
-            saved = await save_draft(
-                thread_id=thread_id, kind="invite", extension=".json", prefix="calendar-invites",
-                account_id=account, target={"account_id": account, "operation": operation}, text=data,
-                draft_id=kwargs.get("draft_id"), context=kwargs,
-                description="Microsoft calendar draft; the person reviews it before anything is sent.",
-            )
-            row = await run_in_db(open_draft, thread_id, saved["draft_id"], "invite")
-            return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": row["path"], "account_id": account, "operation": operation, "next": f"Show the person this calendar change and wait for their reply. After approval, call microsoft_calendar_{operation} with this account_id, draft_id, and revision."})
-        except (MicrosoftError, ConnectedAccountError, DraftError, DraftStorageRefused) as exc: return _error(exc)
-
-
-class _GatedCalendarTool(Tool):
-    self_describing_errors = True
-    operation = ""
-    async def execute(self, **kwargs: Any) -> str:
-        draft_id, revision = kwargs.get("draft_id"), kwargs.get("revision")
-        if not isinstance(draft_id, str) or not isinstance(revision, str): return "Error: Pass the account_id, draft_id, and revision microsoft_calendar_draft returned."
-        verdict = await check_action("invite", draft_id, revision)
-        if not isinstance(verdict, Approved): return f"Error: {verdict.text}"
-        try:
-            target, payload = json.loads(verdict.draft.get("target_json") or "{}"), json.loads(verdict.data)
-            draft_operation = payload.get("operation") if isinstance(payload, dict) else None
-            if draft_operation not in {"create", "update"} or not isinstance(payload.get("event"), dict):
-                return "Error: This saved calendar draft is invalid or incomplete; nothing changed. Save a new draft with microsoft_calendar_draft, show the person, and wait for their reply."
-            if draft_operation != self.operation:
-                return f"Error: This draft is for {draft_operation}, not {self.operation}. Call microsoft_calendar_{draft_operation} with the same account_id, draft_id, and revision."
-            if kwargs.get("account_id") != target.get("account_id"):
-                return f"Error: account_id does not match this draft. Call microsoft_calendar_{self.operation} again with the account_id returned by microsoft_calendar_draft; to use another account, save a new draft with that account_id."
-            account = await _account(kwargs)
-            if self.operation == "update" and (not isinstance(payload.get("event_id"), str) or not payload["event_id"].strip()):
-                return "Error: This saved calendar draft is invalid or incomplete; nothing changed. Save a new draft with microsoft_calendar_draft, show the person, and wait for their reply."
-            async def send(token: str) -> dict[str, object]:
-                if self.operation == "create":
-                    return await calendar.create_event(account, payload["event"], token=token)
-                return await calendar.update_event(account, payload["event_id"], payload["event"], token=token)
-            return await deliver_claimed(
-                draft_id,
-                acquire=lambda: client.access_token(account),
-                provider_errors=(MicrosoftError,),
-                send=send,
-                result_id=lambda result: result.get("id") if isinstance(result, dict) else None,
-                success=lambda result, _external_id: json.dumps(result),
-                sign_in_error=lambda exc: exc.message if isinstance(exc, MicrosoftError) else "Microsoft sign-in is unavailable. Try again later.",
-                request_error=lambda exc: exc.message if isinstance(exc, MicrosoftError) else "Microsoft could not send this request.",
-                never_sent=lambda exc: isinstance(exc, MicrosoftError) and exc.never_sent,
-                still_sending=CALENDAR_STILL_SENDING,
-                claim_error="Not sent: could not check the calendar draft. Try again.",
-                unconfirmed=CALENDAR_UNCONFIRMED,
-                label=f"microsoft_calendar_{self.operation}",
-            )
-        except (MicrosoftError, ConnectedAccountError, DraftError, ValueError, KeyError, TypeError) as exc: return _error(exc)
-
-
-class MicrosoftCalendarCreateTool(_GatedCalendarTool):
-    name = "microsoft_calendar_create"; description = "Create a reviewed Microsoft calendar draft."; operation = "create"
-    parameters = {"type": "object", "additionalProperties": False, "required": ["account_id", "draft_id", "revision"], "properties": {"account_id": ACCOUNT_PARAM, "draft_id": {"type": "string"}, "revision": {"type": "string"}}}
-class MicrosoftCalendarUpdateTool(_GatedCalendarTool):
-    name = "microsoft_calendar_update"; description = "Update a reviewed Microsoft calendar draft."; operation = "update"
-    parameters = {"type": "object", "additionalProperties": False, "required": ["account_id", "draft_id", "revision"], "properties": {"account_id": ACCOUNT_PARAM, "draft_id": {"type": "string"}, "revision": {"type": "string"}}}

@@ -15,9 +15,8 @@ from urllib.parse import quote
 
 from connections.google import client as google_client
 from connections.google.accounts import ACCOUNT_PARAM, resolve_for_thread
-from connections.google.calendar_document import (
-    OFFSET_REQUIRED, attendee_emails, compose_document, event_summaries, one_line_text, parse_time,
-)
+from connections.calendar_document import OFFSET_REQUIRED, attendee_emails, compose_document, one_line_text, parse_time
+from connections.google.calendar_document import event_summaries
 from connections.google.client import GoogleError, GoogleRequestFailed
 from infra import config
 from infra.db_async import run_in_db
