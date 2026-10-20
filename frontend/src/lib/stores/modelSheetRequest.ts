@@ -1,19 +1,27 @@
 import { get, writable } from 'svelte/store';
 
-/** Bumped to ask the composer to open its model sheet from elsewhere (the
- * conductor's sources panel "Choose another", #3287). */
-const modelSheetRequest = writable(0);
-
-export function requestModelSheet(): void {
-	modelSheetRequest.update((count) => count + 1);
+interface ModelSheetRequest {
+	id: number;
+	focusLocalOnly: boolean;
 }
 
-/** Call `open` on each request made after subscribing; returns the unsubscribe. */
-export function onModelSheetRequest(open: () => void): () => void {
-	let seen = get(modelSheetRequest);
+/** Bumped to ask the composer to open its model sheet from elsewhere (the
+ * conductor's sources panel "Choose another", #3287). */
+const modelSheetRequest = writable<ModelSheetRequest>({ id: 0, focusLocalOnly: false });
+
+export function requestModelSheet(options: { focusLocalOnly?: boolean } = {}): void {
+	modelSheetRequest.update(({ id }) => ({
+		id: id + 1,
+		focusLocalOnly: options.focusLocalOnly === true,
+	}));
+}
+
+/** Call `open` on each request made after subscribing; its focus intent travels with that request. */
+export function onModelSheetRequest(open: (request: ModelSheetRequest) => void): () => void {
+	let seen = get(modelSheetRequest).id;
 	return modelSheetRequest.subscribe((request) => {
-		if (request === seen) return;
-		seen = request;
-		open();
+		if (request.id === seen) return;
+		seen = request.id;
+		open(request);
 	});
 }

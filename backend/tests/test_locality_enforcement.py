@@ -59,6 +59,20 @@ def _row(**fields):
     return {"status": "ready", "status_reason": None, "is_local": False, "litellm_model": fields["id"], **fields}
 
 
+@pytest.mark.parametrize(("thread_local_only", "cloud_off", "expected"), [
+    (False, False, None),
+    (False, True, "project_cloud_off"),
+    (True, False, "thread_local_only"),
+    (True, True, "thread_local_only"),
+])
+def test_locality_cause_prioritizes_the_thread(
+    thread_local_only: bool, cloud_off: bool, expected: str | None,
+) -> None:
+    from llm.locality import locality_cause
+
+    assert locality_cause(thread_local_only=thread_local_only, cloud_off=cloud_off) == expected
+
+
 def test_project_accounts_overlays_cloud_rows_only_in_a_cloud_off_project(world):
     from llm.account_catalog import project_accounts
 
@@ -79,6 +93,33 @@ def test_project_accounts_overlays_cloud_rows_only_in_a_cloud_off_project(world)
     on = {r["id"]: r for r in project_accounts(rows, project_id=CLOUD_ON, db=world)}
     assert all(r["status_reason"] != "project_cloud_off" for r in on.values())
     assert on[CLOUD]["status"] == "ready" and on[LOCAL]["status"] == "ready"
+
+
+def test_project_accounts_marks_cloud_rows_for_a_local_only_thread_alone(world):
+    from llm.account_catalog import project_accounts
+
+    for thread_id, local_only, project in (("lo", 1, CLOUD_ON), ("plain", 0, CLOUD_ON), ("both", 1, CLOUD_OFF)):
+        world.execute("INSERT INTO threads(id,user_id,model,project_id,local_only,created_at,updated_at) "
+                      "VALUES (?,?,?,?,?,'t','t')", (thread_id, "user", LOCAL, project, local_only))
+    world.commit()
+    rows = [
+        _row(id="codex/test", connection="codex", runnable={"status": "ready", "status_reason": None}),
+        _row(id=CLOUD, connection="openai"),
+        _row(id=LOCAL, connection="omlx", is_local=True),
+    ]
+
+    def read(thread_id):
+        return {r["id"]: r for r in project_accounts(rows, thread_id=thread_id, db=world)}
+
+    local_only = read("lo")
+    for cloud in ("codex/test", CLOUD):
+        assert (local_only[cloud]["status"], local_only[cloud]["status_reason"]) == ("unavailable", "thread_local_only")
+    assert local_only["codex/test"]["runnable"] == {"status": "unavailable", "status_reason": "thread_local_only"}
+    assert (local_only[LOCAL]["status"], local_only[LOCAL]["status_reason"]) == ("ready", None)
+
+    ordinary = read("plain")
+    assert [(r["status"], r["status_reason"]) for r in ordinary.values()] == [("ready", None)] * 3
+    assert read("both")[CLOUD]["status_reason"] == "thread_local_only"
 
 
 @pytest.mark.asyncio

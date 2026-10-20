@@ -160,10 +160,10 @@
       "sha256": "d43c234e3a0c5213b63ffde54a3efac22648b1aeb3d795f548b722b17cc03882"
     },
     {
-      "bytes": 2766,
+      "bytes": 3121,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/browser-person-steps.md",
-      "sha256": "2a6b6df1b4b545683daa4eded9421b1625d356d275aabcc7fa5cb4aa7f1b9d88"
+      "sha256": "e7dab36e3d55d8b9eb8c06ac3bb155057e87906567c199c9c800a82e48009939"
     },
     {
       "bytes": 14568,
@@ -214,10 +214,10 @@
       "sha256": "d47dff72abeba9631215f76969db69855bccaa48f2fd95abb62d95f550478042"
     },
     {
-      "bytes": 3564,
+      "bytes": 3767,
       "kind": "skill",
       "path": "skills/connect-tools/SKILL.md",
-      "sha256": "62b46585ca89e453847622b0c2a48af1fe379fefe30e9c6f4ea34c4852524d5b"
+      "sha256": "d6df6eec158108ae85010486907e81880a599a921dbfa3723ebb1df2305aa74f"
     },
     {
       "bytes": 4409,
@@ -284,6 +284,18 @@
       "kind": "skill",
       "path": "skills/memory-placement/SKILL.md",
       "sha256": "b6e513e6b01040266b7eaa974c751e819f5fb5da7e9c966951e2c35c61d0df9a"
+    },
+    {
+      "bytes": 5343,
+      "kind": "skill",
+      "path": "skills/microsoft-setup/SKILL.md",
+      "sha256": "4c804375b3fd68ca17c9e10fab6cad7881241bc573de7313d61b179e6e11a96d"
+    },
+    {
+      "bytes": 1727,
+      "kind": "skill",
+      "path": "skills/microsoft-setup/references/stop-messages.md",
+      "sha256": "262f798b849166a2eb630f71739632cddbf53141da62033b1b30e61797730495"
     },
     {
       "bytes": 2630,
