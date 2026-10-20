@@ -421,6 +421,7 @@ async def test_tool_placement_merges_relative_destination_with_resolved_trial_ta
 
     merged = lesson_files.read_trial(existing.read_text())
     assert merged is not None and merged.name == "existing-check"
+    assert merged.lesson.target_file == "skills/checks/SKILL.md"
     assert [ref["reference"] for ref in merged.lesson.source_refs] == ["turn-7", "turn-relative"]
     assert not _skill(env, "incoming-check").exists()
 

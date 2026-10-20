@@ -146,9 +146,9 @@ def _entry(source: ContextSourceEntry, *, model: str | None) -> dict[str, Any]:
         # is deliberately narrower: it is the file identity shared by read
         # receipts and correction targets.
         from infra.config import WORKSPACE
-        from tools.filesystem_gate import join_and_resolve
+        from tools.filesystem_gate import canonical_target_path
 
-        entry["path"] = str(join_and_resolve(path, workspace=WORKSPACE))
+        entry["path"] = canonical_target_path(path, workspace=WORKSPACE)
     lessons = (source.metadata or {}).get("lessons")
     if source.source_id == SKILLS_INDEX_SOURCE_ID and isinstance(lessons, list):
         # Offered trial lessons by version; no key means the install predates them.

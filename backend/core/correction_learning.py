@@ -29,7 +29,7 @@ def loaded_targets(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
     ledger adds on-demand files. Both are evidence that the agent saw a file.
     """
     from infra.config import WORKSPACE
-    from tools.filesystem_gate import join_and_resolve
+    from tools.filesystem_gate import canonical_target_path
 
     turn = db.execute(
         """SELECT id,context_manifest_id FROM active_turns
@@ -51,11 +51,11 @@ def loaded_targets(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
                 continue
             path = entry.get("path")
             if isinstance(path, str) and path:
-                resolved = str(join_and_resolve(path, workspace=WORKSPACE))
+                resolved = canonical_target_path(path, workspace=WORKSPACE)
                 if resolved not in found:
                     found.append(resolved)
     for row in db.execute("SELECT path FROM guidance_loads WHERE turn_id=? ORDER BY created_at,id", (turn["id"],)):
-        path = str(join_and_resolve(str(row["path"]), workspace=WORKSPACE))
+        path = canonical_target_path(str(row["path"]), workspace=WORKSPACE)
         if path not in found:
             found.append(path)
     return tuple(found)
@@ -64,14 +64,14 @@ def loaded_targets(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
 def serious_proposed(db: sqlite3.Connection, thread_id: str) -> bool:
     """Detect the durable, named tool effects that require Serious by default."""
     from infra.turn_provenance import TurnProvenanceError, turn_provenance
-    from tools.catalog import has_serious_effect, serious_effect_names
+    from tools.catalog import has_serious_effect, serious_effect_recorded_names
 
     active = db.execute(
         "SELECT id,started_at FROM active_turns WHERE thread_id=? AND status='running' "
         "ORDER BY started_at DESC LIMIT 1",
         (thread_id,),
     ).fetchone()
-    names = serious_effect_names()
+    names = serious_effect_recorded_names()
     if active is None or not names:
         return False
     marks = ",".join("?" for _ in names)
@@ -131,9 +131,9 @@ def record_triage(
     if not isinstance(target_file, str) or not target_file.strip():
         raise ValueError("target_file is required")
     from infra.config import WORKSPACE
-    from tools.filesystem_gate import join_and_resolve
+    from tools.filesystem_gate import canonical_target_path
 
-    target = str(join_and_resolve(target_file.strip(), workspace=WORKSPACE))
+    target = canonical_target_path(target_file.strip(), workspace=WORKSPACE)
     valid_targets = loaded_targets(db, thread_id)
     if target not in valid_targets:
         choices = ", ".join(valid_targets) or "(no manifest or load-receipt files recorded)"

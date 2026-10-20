@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+import json
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
@@ -148,13 +150,29 @@ def test_relative_manifest_and_resolved_read_share_one_target_path(tmp_path: Pat
     _record_manifest(db, source)
     _record_skill_read(db, monkeypatch, path.resolve())
 
-    assert loaded_targets(db, THREAD) == (str(path.resolve()),)
+    assert loaded_targets(db, THREAD) == ("skills/example/SKILL.md",)
     result = record_triage(
         db, thread_id=THREAD, subject_key=SUBJECT, tier="note", cause="process_gap",
         new_work="no", new_work_signal=None, target_file="skills/example/SKILL.md",
     )
 
-    assert result["target_file"] == str(path.resolve())
+    assert result["target_file"] == "skills/example/SKILL.md"
+    row = db.execute(
+        "SELECT attributes FROM outcome_events WHERE event_name='learning_loop.correction_triage'",
+    ).fetchone()
+    assert json.loads(row["attributes"])["target_file"] == "skills/example/SKILL.md"
+
+
+def test_target_path_keeps_outside_workspace_files_absolute(tmp_path: Path) -> None:
+    from tools.filesystem_gate import canonical_target_path
+
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside" / "SKILL.md"
+    workspace.mkdir()
+    outside.parent.mkdir()
+    outside.write_text("# Outside\n", encoding="utf-8")
+
+    assert canonical_target_path(str(outside), workspace=workspace) == str(outside.resolve())
 
 
 def test_serious_effect_query_ignores_tool_rows_before_the_active_turn() -> None:
@@ -173,6 +191,40 @@ def test_serious_effect_query_ignores_tool_rows_before_the_active_turn() -> None
         msg_id="tool-current-turn", db=db, created_at="2026-10-20T00:00:01+00:00",
     )
 
+    assert serious_proposed(db, THREAD) is True
+
+
+@pytest.mark.asyncio
+async def test_prefixed_serious_effect_from_native_result_writer_is_detected() -> None:
+    from core.native_tool_result import handle_native_tool_complete
+    from infra.queries import insert_message
+
+    db = _db()
+    insert_message(
+        THREAD, "assistant", "", {"turn_id": TURN, "llm_tool_calls": [{
+            "id": "call-email", "type": "function",
+            "function": {"name": "mcp__corsia__email_send", "arguments": "{}"},
+        }]}, msg_id="step-email", db=db,
+    )
+
+    async def run_in_db(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    async def emit(_event):
+        return None
+
+    handler = SimpleNamespace(
+        tool_step_id="step-email", thread_id=THREAD, turn_id=TURN,
+        tool_calls=[{"id": "call-email", "result": None}], _emit=emit,
+    )
+    row = await handle_native_tool_complete(
+        handler,
+        {"id": "call-email", "name": "mcp__corsia__email_send", "result": "sent"},
+        (run_in_db, lambda *_args, **_kwargs: nullcontext(db)),
+    )
+
+    metadata = json.loads(db.execute("SELECT metadata FROM messages WHERE id=?", (row.message_id,)).fetchone()[0])
+    assert metadata["name"] == "mcp__corsia__email_send"
     assert serious_proposed(db, THREAD) is True
 
 

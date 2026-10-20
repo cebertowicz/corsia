@@ -104,10 +104,10 @@ def _learning_metadata(decision: Decision) -> None:
 
 def _target(decision: Decision) -> str:
     from infra.config import WORKSPACE
-    from tools.filesystem_gate import join_and_resolve
+    from tools.filesystem_gate import canonical_target_path
 
     raw = decision.new_target_path if decision.target_file == "new" else decision.target_file
-    return str(join_and_resolve(str(raw), workspace=WORKSPACE))
+    return canonical_target_path(str(raw), workspace=WORKSPACE)
 
 
 def _target_trials(decision: Decision) -> tuple[list[tuple[Path, Any]], list[tuple[Path, Any]]]:
@@ -132,10 +132,10 @@ def _target_trials(decision: Decision) -> tuple[list[tuple[Path, Any]], list[tup
 
 def _target_from_lesson(current: Any) -> str | None:
     from infra.config import WORKSPACE
-    from tools.filesystem_gate import join_and_resolve
+    from tools.filesystem_gate import canonical_target_path
 
     raw = current.lesson.new_target_path if current.lesson.target_file == "new" else current.lesson.target_file
-    return str(join_and_resolve(str(raw), workspace=WORKSPACE)) if raw else None
+    return canonical_target_path(str(raw), workspace=WORKSPACE) if raw else None
 
 
 def _trial_row(path: Path, current: Any) -> dict[str, str]:
