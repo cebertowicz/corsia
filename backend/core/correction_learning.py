@@ -16,7 +16,6 @@ CAUSES = (
 )
 NEW_WORK_SIGNALS = ("task_kind", "agent", "workflow_version")
 TERMINAL_OUTCOMES = ("fixed", "instruction", "watch", "lesson", "workflow", "dropped")
-SERIOUS_TOOL_NAMES = ("email_send", "calendar_send_invite", "git_push", "github_pr_merge")
 
 
 def _now() -> str:
@@ -45,9 +44,11 @@ def loaded_targets(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
         except (TypeError, ValueError):
             entries = []
         for entry in entries if isinstance(entries, list) else []:
-            reference = entry.get("stable_reference") if isinstance(entry, dict) else None
-            if isinstance(reference, str) and "/" in reference and reference not in found:
-                found.append(reference)
+            if not isinstance(entry, dict) or entry.get("version_kind") == "generated":
+                continue
+            path = entry.get("path")
+            if isinstance(path, str) and path and path not in found:
+                found.append(path)
     for row in db.execute("SELECT path FROM guidance_loads WHERE turn_id=? ORDER BY created_at,id", (turn["id"],)):
         path = str(row["path"])
         if path not in found:
@@ -57,14 +58,32 @@ def loaded_targets(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
 
 def serious_proposed(db: sqlite3.Connection, thread_id: str) -> bool:
     """Detect the durable, named tool effects that require Serious by default."""
-    marks = ",".join("?" for _ in SERIOUS_TOOL_NAMES)
-    row = db.execute(
-        f"""SELECT 1 FROM messages WHERE thread_id=? AND role='tool'
-            AND active_turn_id=(SELECT id FROM active_turns WHERE thread_id=? AND status='running')
-            AND json_extract(metadata, '$.name') IN ({marks}) LIMIT 1""",
-        (thread_id, thread_id, *SERIOUS_TOOL_NAMES),
+    from infra.turn_provenance import TurnProvenanceError, turn_provenance
+    from tools.catalog import has_serious_effect
+
+    active = db.execute(
+        "SELECT id FROM active_turns WHERE thread_id=? AND status='running' "
+        "ORDER BY started_at DESC LIMIT 1",
+        (thread_id,),
     ).fetchone()
-    return row is not None
+    if active is None:
+        return False
+    for row in db.execute(
+        "SELECT id,active_turn_id,metadata FROM messages WHERE thread_id=? AND role='tool'",
+        (thread_id,),
+    ):
+        try:
+            metadata = json.loads(row["metadata"] or "{}")
+            if not isinstance(metadata, dict):
+                continue
+            turn_id, _ = turn_provenance({
+                "id": row["id"], "active_turn_id": row["active_turn_id"], "_meta": metadata,
+            })
+        except (TypeError, ValueError, TurnProvenanceError):
+            continue
+        if turn_id == active["id"] and has_serious_effect(metadata.get("name")):
+            return True
+    return False
 
 
 def _require(value: object, choices: tuple[str, ...], field: str) -> str:

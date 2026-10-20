@@ -20,6 +20,7 @@ from infra.continuity_store import (
 )
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
+from tools import continuity_learning, continuity_runtime
 from tools.base import Tool
 from tools.continuity_schema import (
     _FIELD_SCHEMAS,
@@ -31,34 +32,12 @@ from tools.continuity_schema import (
 )
 
 
-def _require_context(kwargs: dict[str, Any]):
-    from tools.delegation import _require_context as require_context
-
-    return require_context(kwargs)
-
-
-def _epoch(db, thread_id: str) -> int:
-    row = db.execute(
-        "SELECT history_epoch FROM threads WHERE id=?", (thread_id,)
-    ).fetchone()
-    if row is None:
-        raise ContinuityError(f"thread {thread_id} does not exist")
-    return int(row["history_epoch"])
-
-
 def _live_operation(db, thread_id: str, operation: str, params: dict[str, Any]):
-    epoch = _epoch(db, thread_id)
+    learning = continuity_learning.live_operation(db, thread_id, operation, params)
+    if learning is not None:
+        return learning
+    epoch = continuity_runtime.epoch(db, thread_id)
     field = params.get("field")
-    if operation == "triage":
-        from core.correction_learning import record_triage
-
-        arguments = {key: value for key, value in params.items() if key != "operation"}
-        return {"operation": operation, **record_triage(db, thread_id=thread_id, **arguments)}
-    if operation == "outcome":
-        from core.correction_learning import record_terminal_outcome
-
-        arguments = {key: value for key, value in params.items() if key != "operation"}
-        return {"operation": operation, **record_terminal_outcome(db, thread_id=thread_id, **arguments)}
     if operation == "inspect":
         entry_id = params.get("entry_id")
         if entry_id is not None:
@@ -197,8 +176,11 @@ def _queue(db, thread_id: str, epoch: int, entry_id: int, placement: Any, verdic
         thread_id=thread_id, entry_id=entry_id, revision=revision,
         outcome="selected", reason=f"{verdict}-in-turn",
     )
-    return {"operation": "place", "entry_id": entry_id, "verdict": verdict,
-            "hold": stored.get("hold"), "placement": stored["placement"]}
+    return {
+        "operation": "place", "entry_id": entry_id, "verdict": verdict,
+        "hold": stored.get("hold"), "placement": stored["placement"],
+        "admission": stored.get("admission", {}),
+    }
 
 
 def _trial_text(result: dict[str, Any], *, staged: bool) -> str:
@@ -210,11 +192,20 @@ def _trial_text(result: dict[str, Any], *, staged: bool) -> str:
     lead = f"Staged entry {entry_id} verdict select" if staged else f"Entry {entry_id} queued"
     if hold is None:
         answer = result["placement"]
+        admission = result.get("admission", {})
+        open_trials = admission.get("open_trials", [])
+        existing = ""
+        if open_trials:
+            existing = " Open trials with this target: " + ", ".join(
+                f"{row['name']} ({row['cause']})" for row in open_trials
+            ) + "."
+        skill_name = admission.get("merged_into") or answer["skill_name"]
+        action = "updates" if admission.get("merged_into") else "writes"
         return (
-            f"{lead}: CORSIA writes the trial skill {answer['skill_name']}, opens your "
+            f"{lead}: CORSIA {action} the trial skill {skill_name}, opens your "
             f"review task for {answer['trial']['review_after'][:10]} and retires the "
             "entry. It is not in this conversation's skills list; it appears when the "
-            "list is next rebuilt."
+            f"list is next rebuilt.{existing}"
         )
     return (
         f"{lead} as a captured hypothesis, not offered as guidance: {HOLD_REASONS[hold]}. "
@@ -224,8 +215,9 @@ def _trial_text(result: dict[str, Any], *, staged: bool) -> str:
 
 
 def _result_text(result: dict[str, Any], *, staged: bool) -> str:
-    if result.get("operation") in {"triage", "outcome"}:
-        return json.dumps(result, indent=2, sort_keys=True)
+    learning = continuity_learning.result_text(result)
+    if learning is not None:
+        return learning
     if "entries" in result or "entry" in result:
         return json.dumps(result, indent=2, sort_keys=True)
     operation = result["operation"]
@@ -257,13 +249,6 @@ def _result_text(result: dict[str, Any], *, staged: bool) -> str:
     return f"Entry {entry_id} {verb}."
 
 
-_NEXT_ACTIONS_REFUSAL = "Error: next_actions takes no new entries. {} Drop a finished one here."
-_NEXT_STEP_HOME = (  # (turn, checkpoint): a checkpoint cannot reach the plan
-    "A next step belongs on the plan: use plan_update to add or change it.",
-    "Name the step in progress and the exact next action in your narrative.",
-)
-
-
 def _run(
     thread_id: str,
     operation: str,
@@ -272,7 +257,7 @@ def _run(
 ) -> str:
     """Apply one transaction, returning individual refusals as tool results."""
     if operation == "add" and params.get("field") == "next_actions":
-        return _NEXT_ACTIONS_REFUSAL.format(_NEXT_STEP_HOME[bool(checkpoint_id)])
+        return continuity_runtime.next_actions_refusal(checkpoint_id)
     db = get_db()
     try:
         if checkpoint_id and operation in {"place", "triage", "outcome"}:
@@ -300,10 +285,9 @@ def _run(
 def _execution_error(operation: Any, params: dict[str, Any]) -> str | None:
     if operation not in _OPERATIONS:
         return f"Error: unknown operation {operation!r}"
-    if operation == "triage" and not str(params.get("subject_key") or "").strip():
-        return "Error: triage requires subject_key"
-    if operation == "outcome" and not str(params.get("subject_key") or "").strip():
-        return "Error: outcome requires subject_key"
+    learning = continuity_learning.execution_error(operation, params)
+    if learning is not None:
+        return learning
     if operation == "add" and not params.get("field"):
         return "Error: add requires field"
     if operation == "inspect" and params.get("entry_id") is not None:
@@ -398,7 +382,7 @@ class ContinuityEditTool(Tool):
         error = _execution_error(operation, kwargs)
         if error is not None:
             return error
-        context = _require_context(kwargs)
+        context = continuity_runtime.require_context(kwargs)
         if isinstance(context, str):
             return context
         thread_id, _ = context

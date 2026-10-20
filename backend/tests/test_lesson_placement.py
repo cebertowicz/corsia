@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
+import uuid
 from typing import Any
 
 import pytest
@@ -136,6 +137,31 @@ def _state(env: Env, entry: int) -> tuple[str, str | None]:
 
 def _skill(env: Env, name: str = "cite-the-head") -> Path:
     return env.tray / "skills" / name / "SKILL.md"
+
+
+def _external_trial(
+    env: Env, name: str, *, cause: str = "process_gap", state: str = "trial",
+) -> Path:
+    """Seed a same-owner trial outside this thread's tray for tool-path discovery."""
+    from core.lesson_files import render_trial
+    from core.lesson_trials import Trial
+
+    path = env.workspace / "skills" / name / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text(render_trial(
+        lesson_id=str(uuid.uuid4()), owner=THREAD, name=name,
+        description="Use when reporting a check result on a pull request.",
+        text="Name the exact commit a check ran on.",
+        trial=Trial("hypothesis", _due(days=14), state=state, boundary="A one-line typo fix."),
+        source_refs=TURN, target_file="skills/checks/SKILL.md", target_section="Reporting",
+        cause=cause,
+        case={
+            "what_happened": "A result lacked its commit.",
+            "right_call": "Name the commit.", "does_not_apply": "For a draft.",
+            "correction_subject": "message:external",
+        },
+    ), encoding="utf-8")
+    return path
 
 
 def _offered(env: Env) -> list[dict]:
@@ -363,6 +389,66 @@ async def test_a_retired_lesson_tried_again_is_a_new_lesson_naming_its_origin(en
     [review] = _open(_reviews(env, f"lesson:{new.lesson.id}:"))
     assert new.lesson.review_ref == f"plan-node:{review['id']}"
     assert [lesson["id"] for lesson in _offered(env)] == [new.lesson.id]
+
+
+async def test_tool_placement_merges_the_same_target_section_and_cause_across_locations(
+    env: Env,
+) -> None:
+    existing = _external_trial(env, "existing-check")
+    entry = _entry(env, [{"kind": "turn", "reference": "turn-merge"}])
+
+    reply = _place(env, entry, _answer(skill_name="incoming-check"))
+    await _drain(env.worker)
+
+    merged = lesson_files.read_trial(existing.read_text())
+    assert merged is not None and merged.name == "existing-check"
+    assert [ref["reference"] for ref in merged.lesson.source_refs] == ["turn-7", "turn-merge"]
+    assert not _skill(env, "incoming-check").exists()
+    assert "Open trials with this target: existing-check (process_gap)." in reply
+
+
+async def test_tool_placement_creates_a_different_cause_and_lists_the_open_trial(
+    env: Env,
+) -> None:
+    _external_trial(env, "existing-check")
+    entry = _entry(env)
+
+    reply = _place(env, entry, _answer(skill_name="wrong-rule-check", cause="wrong_rule"))
+    await _drain(env.worker)
+
+    created = lesson_files.read_trial(_skill(env, "wrong-rule-check").read_text())
+    assert created is not None and created.lesson.cause == "wrong_rule"
+    assert "Open trials with this target: existing-check (process_gap)." in reply
+
+
+async def test_tool_placement_admits_a_retired_target_match_with_target_changed(
+    env: Env,
+) -> None:
+    _external_trial(env, "retired-check", state="retired")
+    entry = _entry(env)
+
+    reply = _place(
+        env, entry, _answer(skill_name="replacement-check", new_evidence="target_changed"),
+    )
+    await _drain(env.worker)
+
+    replacement = lesson_files.read_trial(_skill(env, "replacement-check").read_text())
+    assert replacement is not None and replacement.lesson.state == "trial"
+
+
+async def test_tool_placement_refusal_names_the_retired_trial_without_new_evidence(
+    env: Env,
+) -> None:
+    _external_trial(env, "retired-check", state="retired")
+    entry = _entry(env)
+
+    reply = _place(env, entry, _answer(skill_name="replacement-check"))
+
+    assert reply == (
+        "Error: retired trial 'retired-check' has the same target, section, and cause; "
+        "set new_evidence to target_changed or case_differs to admit a new trial"
+    )
+    assert not _skill(env, "replacement-check").exists()
 
 
 async def test_a_checkpoint_stages_a_trial_and_its_install_hands_it_to_the_worker(

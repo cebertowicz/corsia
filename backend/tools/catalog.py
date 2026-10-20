@@ -114,6 +114,12 @@ def is_reachable(name: str) -> bool:
     return _reachable(TOOL_CATALOG.get(name))
 
 
+def has_serious_effect(name: str | None) -> bool:
+    """Return whether a harness-recorded tool effect proposes Serious triage."""
+    entry = TOOL_CATALOG.get(normalize_tool_name(name)) if name else None
+    return bool(entry and entry.serious_effect)
+
+
 def tool_pack(name: str) -> str | None:
     """Return the pack id of a reachable non-core tool, else ``None``."""
     entry = TOOL_CATALOG.get(name)

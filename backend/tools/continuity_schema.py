@@ -16,9 +16,16 @@ from core.placement_decide import ANSWER_SCHEMA
 from core.placement_room import OPERATION_SCHEMA
 from infra.continuity_store import ContinuityError, validate_entry_body
 from infra.placement_marks import PLACE_VERDICTS, REVIEW_VERDICTS
+from tools.continuity_learning_schema import (
+    LEARNING_FIELD_SCHEMAS,
+    LEARNING_OPERATION_DESCRIPTION,
+    LEARNING_OPERATION_FIELDS,
+    LEARNING_OPERATIONS,
+    LEARNING_REQUIRED_FIELDS,
+)
 
 
-_OPERATIONS = ("inspect", "add", "replace", "drop", "review", "place", "triage", "outcome")
+_OPERATIONS = ("inspect", "add", "replace", "drop", "review", "place", *LEARNING_OPERATIONS)
 
 #: Which verdicts each placement operation takes.
 VERDICTS = {"review": REVIEW_VERDICTS, "place": PLACE_VERDICTS}
@@ -185,8 +192,7 @@ def _clause(
 
 
 _OPERATION_FIELDS = {
-    "triage": {"subject_key", "tier", "cause", "new_work", "new_work_signal", "target_file", "serious_lowered_reason"},
-    "outcome": {"subject_key", "outcome", "reason", "lesson_id", "workflow_version"},
+    **LEARNING_OPERATION_FIELDS,
     "inspect": {"entry_id", "field"},
     "add": {"field", "body"},
     "replace": {"entry_id", "body", "field"},
@@ -197,8 +203,7 @@ _OPERATION_FIELDS = {
     "place": {"entry_id", "verdict", "destination", "quote", "placement"},
 }
 _REQUIRED_FIELDS = {
-    "triage": ("subject_key", "tier", "cause", "new_work", "target_file"),
-    "outcome": ("subject_key", "outcome"),
+    **LEARNING_REQUIRED_FIELDS,
     "inspect": (),
     "add": ("field", "body"),
     "replace": ("entry_id", "body"),
@@ -266,8 +271,8 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "string",
         "enum": list(_OPERATIONS),
         "description": (
-            "triage records one immutable correction triage fact; outcome records its one "
-            "terminal outcome. inspect lists current entries and ids; add records a new entry; "
+            LEARNING_OPERATION_DESCRIPTION
+            + "inspect lists current entries and ids; add records a new entry; "
             "replace rewrites one by id; drop retires one by id. review is "
             "only for a checkpoint's placement review; place records that you "
             "placed a lesson yourself: written or already retires the entry "
@@ -276,36 +281,7 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
             "trial skill with a review date."
         ),
     },
-    "subject_key": {
-        "type": "string", "minLength": 1,
-        "description": "The immutable correction subject named by the correction note.",
-    },
-    "tier": {
-        "type": "string", "enum": ["not_correction", "instruction", "note", "miss", "serious"],
-        "description": "The System correction tier.",
-    },
-    "cause": {
-        "type": "string", "enum": ["wrong_rule", "no_foundation", "rule_gap", "process_gap", "not_delivered", "not_followed", "cant_be_done"],
-        "description": "The first matching System correction cause.",
-    },
-    "new_work": {"type": "string", "enum": ["yes", "no"]},
-    "new_work_signal": {
-        "type": "string", "enum": ["task_kind", "agent", "workflow_version"],
-        "description": "Required when new_work is yes; omitted otherwise.",
-    },
-    "target_file": {
-        "type": "string", "minLength": 1,
-        "description": "triage: a file loaded in this turn; trial admission: the changed file or new.",
-    },
-    "serious_lowered_reason": {
-        "type": "string", "minLength": 1,
-        "description": "Why an automatically proposed Serious tier was lowered, if applicable.",
-    },
-    "outcome": {
-        "type": "string", "enum": ["fixed", "instruction", "watch", "lesson", "workflow", "dropped"],
-    },
-    "lesson_id": {"type": "string", "minLength": 1},
-    "workflow_version": {"type": "string", "minLength": 1},
+    **LEARNING_FIELD_SCHEMAS,
     "field": {
         "type": "string",
         "enum": list(ENTRY_FIELDS),

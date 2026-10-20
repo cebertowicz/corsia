@@ -140,6 +140,12 @@ def _entry(source: ContextSourceEntry, *, model: str | None) -> dict[str, Any]:
         "version_kind": kind,
         "version_reason": reason,
     }
+    path = (source.metadata or {}).get("path")
+    if isinstance(path, str) and path and kind != "generated":
+        # References identify every source, including generated rows. The path
+        # is deliberately narrower: it is the file identity shared by read
+        # receipts and correction targets.
+        entry["path"] = path
     lessons = (source.metadata or {}).get("lessons")
     if source.source_id == SKILLS_INDEX_SOURCE_ID and isinstance(lessons, list):
         # Offered trial lessons by version; no key means the install predates them.
