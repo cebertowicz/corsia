@@ -80,7 +80,7 @@
 			{#if error}<p class="local-only-error" role="alert">{error}</p>{/if}
 		</div>
 		<div class="local-only-control">
-			<Toggle checked={on} disabled={locked || needsLocalModel || needsModelSwitch} locked={saving} ariaLabel="Local only" describedBy="local-only-description" onchange={change} />
+			<Toggle checked={on} disabled={needsLocalModel || needsModelSwitch} locked={locked || saving} ariaLabel="Local only" describedBy="local-only-description" onchange={change} />
 			{#if saving}<span class="local-only-saving" aria-live="polite">Saving…</span>{/if}
 		</div>
 	</div>

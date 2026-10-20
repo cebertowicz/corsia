@@ -77,8 +77,8 @@ describe('Local only switch row states', () => {
 		models.set([local, marked('thread_local_only')]);
 		const onleave = vi.fn();
 		mountRow({ onleave });
-		expect(toggle().getAttribute('aria-pressed')).toBe('true'); expect(toggle().disabled).toBe(true);
-		expect(toggle().getAttribute('aria-describedby')).toBe('local-only-description');
+		expect(toggle().getAttribute('aria-pressed')).toBe('true'); expect(toggle().disabled).toBe(false);
+		expect(toggle().getAttribute('aria-disabled')).toBe('true'); expect(toggle().getAttribute('aria-describedby')).toBe('local-only-description');
 		expect(text()).toContain('Set by Quarterly report');
 		link('Set by Quarterly report')!.click();
 		expect(get(openSubagentRequest)).toBe('p0'); expect(onleave).toHaveBeenCalledOnce();
@@ -87,7 +87,8 @@ describe('Local only switch row states', () => {
 		models.set([local, marked('project_cloud_off')]);
 		const onleave = vi.fn();
 		mountRow({ onleave });
-		expect(toggle().getAttribute('aria-pressed')).toBe('true'); expect(toggle().disabled).toBe(true);
+		expect(toggle().getAttribute('aria-pressed')).toBe('true'); expect(toggle().disabled).toBe(false);
+		expect(toggle().getAttribute('aria-disabled')).toBe('true');
 		link('Set by this project')!.click();
 		expect(get(settingsNavigation)).toMatchObject({ section: 'projects', project: 'p1', anchor: 'project-provider-policy' });
 		expect(onleave).toHaveBeenCalledOnce();
@@ -95,7 +96,8 @@ describe('Local only switch row states', () => {
 	it('inherited, with the parent since turned off, stays on and locked', () => {
 		thread({ local_only: 1, local_only_inherited_from_thread_id: 'p0', local_only_inherited_from_title: 'Quarterly report', local_only_effective: true });
 		mountRow();
-		expect(toggle().getAttribute('aria-pressed')).toBe('true'); expect(toggle().disabled).toBe(true);
+		expect(toggle().getAttribute('aria-pressed')).toBe('true'); expect(toggle().disabled).toBe(false);
+		expect(toggle().getAttribute('aria-disabled')).toBe('true');
 	});
 	it('renders no row without a thread', () => {
 		activeThreadId.set(null); mountRow();
