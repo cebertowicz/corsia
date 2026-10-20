@@ -28,7 +28,6 @@
 	import { uiScope } from '$lib/stores/uiScope';
 	import { openProjectSettings, requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { toasts } from '$lib/stores/toast';
-	import { onModelSheetRequest } from '$lib/stores/modelSheetRequest';
 	import {
 		contextSheetUsageSummary,
 		type ContextSheetSourceRow,
@@ -47,6 +46,8 @@
 		hasMessageToSend,
 		canSendToModel,
 		queueUntilSwitch,
+		focusLocalOnly = false,
+		onfocusconsumed = () => {},
 		onAttachFile,
 		onAttachCamera,
 		onAttachPhotos,
@@ -64,6 +65,8 @@
 		hasMessageToSend: boolean;
 		canSendToModel: boolean;
 		queueUntilSwitch: boolean;
+		focusLocalOnly?: boolean;
+		onfocusconsumed?: () => void;
 		onAttachFile: () => void;
 		onAttachCamera: () => void;
 		onAttachPhotos: () => void;
@@ -210,11 +213,6 @@
 		if (sheetView !== view && view === 'model') loadModels({ refreshUsage: true });
 		toggleSheet(view);
 	}
-	// Another surface asks for the model sheet; a leaf composer has its own thread.
-	$effect(() => (threadId ? undefined : onModelSheetRequest(() => {
-		if (sheetView !== 'model') openSheet('model');
-	})));
-
 	function documentName(source: ContextSheetSourceRow): string {
 		const parts = source.stableReference.split(/[\\/]/).filter(Boolean);
 		return parts.at(-1) ?? source.label ?? 'Document';
@@ -304,7 +302,7 @@
 {/if}
 
 {#if sheetView === 'model'}
-	<InputBarModelSheet onclose={() => toggleSheet('model')} />
+	<InputBarModelSheet onclose={() => toggleSheet('model')} {focusLocalOnly} onfocusconsumed={onfocusconsumed} />
 {/if}
 
 {#if sheetView === 'context'}

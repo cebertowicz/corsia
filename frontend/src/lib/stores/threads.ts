@@ -24,6 +24,12 @@ export interface Thread extends ThreadModelSwitchState {
 	created_at: string;
 	updated_at: string;
 	last_message?: string;
+	/** Local only payload fields; `threadLocalOnly` is their one reader. */
+	local_only?: number | boolean | null;
+	local_only_effective?: boolean | null;
+	local_only_cause?: 'inherited' | 'own' | 'project' | null;
+	local_only_inherited_from_thread_id?: string | null;
+	local_only_inherited_from_title?: string | null;
 }
 
 /**

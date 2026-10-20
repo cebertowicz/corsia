@@ -101,7 +101,7 @@
 .action-spacer { flex: 1; }
 .row-chip {
 	display: inline-flex; align-items: center; gap: 3px;
-	padding: 4px 6px;
+	padding: var(--space-1) var(--chip-inline-padding);
 	font-family: inherit;
 	background: none;
 	border: none;

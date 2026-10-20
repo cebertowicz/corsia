@@ -52,21 +52,18 @@
 	let inputAreaEl = $state<HTMLDivElement | undefined>(undefined);
 	let isMultiLine = $state(false);
 
-		const isTouchDevice = typeof window !== 'undefined' &&
-			('ontouchstart' in window || navigator.maxTouchPoints > 0);
+		const isTouchDevice = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
 
 		let sheetView = $state<SheetView>(null);
-		function toggleSheet(view: Exclude<SheetView, null>) {
-			sheetView = sheetView === view ? null : view;
-		}
+		let focusLocalOnly = $state(false);
+		function toggleSheet(view: Exclude<SheetView, null>) { sheetView = sheetView === view ? null : view; }
 		function closeSheet() { sheetView = null; }
 
-	// Only the top composer owns requests from another surface.
-	$effect(() => threadId === undefined ? onModelSheetRequest(() => {
-		if (sheetView === 'model') return;
-		void loadModels({ refreshUsage: true });
-		sheetView = 'model';
-	}) : undefined);
+		// The top composer owns the sheet state and focus request for every bound control.
+		$effect(() => threadId === undefined ? onModelSheetRequest((request) => {
+			focusLocalOnly = request.focusLocalOnly;
+			if (sheetView !== 'model') { void loadModels({ refreshUsage: true }); sheetView = 'model'; }
+		}) : undefined);
 
 		const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
 
@@ -371,6 +368,8 @@
 		hasMessageToSend={hasMessageToSend}
 		{canSendToModel}
 		queueUntilSwitch={hasReadySwitchDestination}
+		{focusLocalOnly}
+		onfocusconsumed={() => focusLocalOnly = false}
 		onAttachFile={() => fileInputsRef?.openFile()}
 		onAttachCamera={() => fileInputsRef?.openCamera()}
 		onAttachPhotos={() => fileInputsRef?.openPhotos()}

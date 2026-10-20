@@ -8,6 +8,7 @@
 	import CloudModelsOffSetting from './CloudModelsOffSetting.svelte';
 	import { requestSettingsSection, settingsAnchor } from '$lib/stores/settingsNavigation';
 	import { HARNESSES } from '$lib/stores/harnessMembership';
+	import { loadThreads } from '$lib/stores/threadsLoad';
 
 	let { projectId, onSignIn }: { projectId?: string; onSignIn?: (provider: string) => void } = $props();
 	let policy = $state<ProviderPolicy | null>(null);
@@ -84,7 +85,7 @@
 <section class="providers-policy" aria-label={projectId ? 'Project providers' : 'Workspace providers'} data-settings-anchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'} use:settingsAnchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'}>
 	{#if projectId}
 		<h2>Models</h2>
-		<CloudModelsOffSetting {projectId} onCloudModelsOffState={(value) => { cloudModelsOff = value; }} />
+		<CloudModelsOffSetting {projectId} onCloudModelsOffState={(value) => { cloudModelsOff = value; }} onCloudModelsOffSaved={() => { void loadThreads(); }} />
 	{/if}
 	<h2>Accounts and rollover</h2>
 	{#if loading || (projectId && cloudModelsOff === null)}<p role="status">Loading providers…</p>
