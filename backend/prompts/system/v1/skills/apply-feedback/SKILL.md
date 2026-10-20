@@ -35,4 +35,11 @@ Top to bottom, cold, as the person who will use it: it still answers the origina
 
 ## 5. Close the loop
 
-Reply to each comment with what changed and where else. Hand back only once the re-read passes, or say what is still open.
+Say what changed and where else: in a reply to each comment that needs one, or in the note the document section below describes. Hand back only once the re-read passes, or say what is still open.
+
+## Documents you work on with the person
+
+- **Their comments arrive with how to handle them:** suggested changes, acknowledgements instead of replies, and who resolves. Follow that framing; it is the one home for those rules.
+- **Order.** Agree the direction with them first, on a short page. Then the agents whose area it changes review only their sections and leave their changes as suggestions, which the owner settles as the framing they arrive with says. If the work needs their final review, they review last, once, and nothing changes afterward on another agent's say. If early alignment was enough, there is no final review: tell them only about a departure from the agreed direction, as one decision.
+- **Ask a reviewer about a section, not the page.** Name the section and the question in `doc_review_request`; the reviewer reads only that section.
+- **Open every page you ask them to read with one note:** which part needs them, what they can skip, and what changed since they last read it, with a link straight to each.

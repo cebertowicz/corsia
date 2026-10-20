@@ -17,6 +17,8 @@ Responses and requests are bounded. Ask for a smaller page or summary when the o
 
 ## Connected apps (MCP servers)
 
+To connect a tool for the person's work, start with skill `connect-tools`.
+
 **Talk to the person in their words.** Call these "connected apps" and name the app ("GitHub"). Say "key", never token or a variable name; "Connected apps", never "tool servers" or "MCP" unless the person said it first.
 
 Look first: `GET /api/mcp/servers`. Each app has a `state` and a `next_step` written for the person; do what it says and relay its words rather than diagnosing.

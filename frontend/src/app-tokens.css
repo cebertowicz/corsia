@@ -145,6 +145,7 @@
   --accent-line: color-mix(in srgb, #007faa 30%, transparent);
   --accent-fill: var(--accent);
   --accent-on-fill: #ffffff;
+  --accent-selection: color-mix(in srgb, #007faa 45%, transparent);
   --violet-brand: #8b5cf6;
   --teal: #2dd4bf;
   --teal-bg: rgba(45, 212, 191, 0.10);
@@ -234,6 +235,7 @@
   --accent-line: color-mix(in srgb, #007faa 30%, transparent);
   --accent-fill: var(--accent);
   --accent-on-fill: #ffffff;
+  --accent-selection: color-mix(in srgb, #007faa 35%, transparent);
   --teal: #0d9488;
   --teal-bg: rgba(13, 148, 136, 0.08);
   --teal-line: rgba(13, 148, 136, 0.32);
