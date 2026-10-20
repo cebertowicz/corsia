@@ -266,14 +266,14 @@ def _decision_candidates(db, terms, user_id) -> list[_Hit]:
 
 
 def _rule_candidates(db, terms, user_id, caller_thread_id) -> list[_Hit]:
-    rows = entry_rank_rows_matching(db, _fts_terms(terms), user_id, None, SOURCE_CANDIDATES, SOURCE_CANDIDATES)
+    rows = entry_rank_rows_matching(db, _fts_terms(terms), user_id, None, SOURCE_CANDIDATES, SOURCE_CANDIDATES, RULE_FIELDS)
     owned = _owned_threads_by_id(db, user_id, {str(row["thread_id"]) for row in rows})
     # Every eligible row is decoded: whether the person is the source is only in
     # the snapshot body, so cutting to the best few first could hide their rule.
     # Search keeps an entry's best-matching revision; only the current one is quoted.
     rows = [
         row for row in rows
-        if row["thread_id"] in owned and row["field"] in RULE_FIELDS and row["canonical_state"] == "active"
+        if row["thread_id"] in owned and row["canonical_state"] == "active"
         and row["revision"] in (NO_REVISION, row["canonical_revision"])
         and not (row["thread_id"] == caller_thread_id and not row["historical"])
     ]

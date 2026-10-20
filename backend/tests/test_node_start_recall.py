@@ -149,6 +149,24 @@ def test_many_one_term_decision_answers_do_not_hide_a_match(db):
     assert len(lines) == 2 and "answer to decision" in lines[1]
 
 
+def test_many_closer_matching_facts_do_not_hide_a_rule(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+    from memory.node_start_recall import SOURCE_CANDIDATES
+
+    facts = [{
+        "entry_id": index, "field": "facts", "revision": 1,
+        "body": {"statement": "Export account ledger CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+    } for index in range(1, SOURCE_CANDIDATES + 2)]
+    rule = {
+        "entry_id": SOURCE_CANDIDATES + 2, "field": "active_constraints", "revision": 1,
+        "body": {"statement": "When a release is near, export the account ledger in CSV format, never spreadsheets.",
+                 "source_refs": [{"kind": "user", "reference": "message"}]},
+    }
+    _install_checkpoint(db, thread_id="past", narrative="Rules", continuity=[*facts, rule])
+
+    assert any("rule an agent recorded" in line for line in _related(db))
+
+
 def test_locality_is_read_once_per_lookup(db):
     from checkpoint_retrieval_fixtures import _install_checkpoint
     from memory.node_start_recall import SOURCE_CANDIDATES

@@ -48,14 +48,19 @@ def entry_rank_rows_matching(
     thread_id: str | None,
     candidate_limit: int,
     per_thread: int,
+    fields: frozenset[str] | None = None,
 ) -> list[dict]:
     """Return the ranked, bounded entry rows with no checkpoint columns.
 
     Everything ranking needs lives on the lean index and continuity rows; :func:`hydrate_entry_rows` adds the checkpoint pointers and
-    the large frozen snapshots for whichever rows survive.
+    the large frozen snapshots for whichever rows survive. ``fields`` limits the match before the
+    candidate limit, so entries in other fields cannot fill the window.
     """
     params: list[object] = [match]
     scope = scope_clause(thread_id, params)
+    if fields:
+        scope += f"AND entry.field IN ({','.join('?' for _ in fields)}) "
+        params.extend(sorted(fields))
     params.extend((user_id, max(1, per_thread) * 20, candidate_limit))
     # Both window sorts carry only the narrow ranking keys of every match; the
     # wide columns (search_text, canonical body) are joined back for the bounded
