@@ -14,10 +14,13 @@ from uuid import uuid4
 from history.types import HistoryBoundary
 from infra.provider_usage import TokenUsage, checkpoint_receipt, from_anthropic
 from llm.resolution import ExecutionTarget
-from subagents.cc_invocation import ClaudeInvocation, build_claude_cmd
+from core import checkpoint_cc_commands
+from subagents.cc_invocation import ClaudeInvocation
 from subagents.cc_sessions import resolve_claude_dir
 from subagents.provider_context_limits import is_provider_context_limit
 
+
+from core.fork_runtime import ForkKind
 from core.checkpoint_types import (
     CHECKPOINT_CONTEXT_TRUNCATED,
     ColdInputCallback,
@@ -42,6 +45,8 @@ class CCWarmSource:
     claude_dir: str | None
     restored_seed_text: str | None = None
     vendor_account_receipt: object | None = None
+    #: The live session's tool list, re-advertised so the resumed prefix stays cached.
+    tool_definitions: tuple[dict[str, Any], ...] | None = None
 
 
 def _transcript_path(provider_id: str, claude_dir: str) -> str | None:
@@ -65,7 +70,9 @@ def _identity_from_live(live: Any):
     transcript = _transcript_path(provider_id, claude_dir or resolve_claude_dir()) if provider_id else None
     if transcript is None:
         return None
-    return provider_id, invocation, claude_dir, transcript, getattr(session, 'vendor_account_receipt', None)
+    definitions = getattr(live, "tool_definitions", None)
+    return (provider_id, invocation, claude_dir, transcript, getattr(session, 'vendor_account_receipt', None),
+            tuple(definitions) if definitions is not None else None)
 
 
 async def _live_identity(thread_id: str):
@@ -97,7 +104,7 @@ def _registered_identity(thread_id: str):
     transcript = _transcript_path(provider_id, claude_dir)
     if transcript is None:
         return None
-    return provider_id, invocation, claude_dir, transcript, receipt
+    return provider_id, invocation, claude_dir, transcript, receipt, None
 
 
 def _read_prefix(path: Path, prefix_bytes: int | None) -> bytes:
@@ -153,7 +160,7 @@ async def capture_warm_source(
         invocation,
         claude_dir,
         restored_seed_text,
-        identity[4] if len(identity) == 5 else None,
+        *(tuple(identity[4:]) + (None, None))[:2],
     )
 
 
@@ -163,6 +170,12 @@ def _checkpoint_env(source: CCWarmSource | None, request: ProviderCheckpointRequ
     env = clean_claude_env()
     env["CORSIA_THREAD_ID"] = request.thread_id
     env["CORSIA_CHECKPOINT_ID"] = request.checkpoint_id
+    env["CORSIA_FORK_ID"] = request.checkpoint_id
+    from core.fork_runtime import running_fork
+
+    handle = running_fork(request.thread_id, request.checkpoint_id)
+    if handle is not None:
+        env["CORSIA_FORK_TOOL_TOKEN"] = handle.tool_token
     env["CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"] = "1"
     env["CLAUDE_CODE_DISABLE_TERMINAL_TITLE"] = "1"
     if source is None:
@@ -200,38 +213,6 @@ def _snapshot(source: CCWarmSource) -> tuple[str, Path]:
         stream.write(prefix)
     return snapshot_id, snapshot
 
-
-def _warm_command(
-    source: CCWarmSource,
-    request: ProviderCheckpointRequest,
-    snapshot_id: str,
-) -> list[str]:
-    invocation = replace(
-        source.invocation,
-        binary=request.binary or source.invocation.binary,
-        resume_session_id=snapshot_id,
-    )
-    return build_claude_cmd(
-        invocation,
-        stream_input=True,
-        extra_args=["--fork-session", "--no-session-persistence"],
-    )
-
-
-def _cold_command(request: ProviderCheckpointRequest) -> list[str]:
-    if not request.binary:
-        raise ValueError("Claude Code checkpoint requires its harness binary")
-    invocation = ClaudeInvocation(
-        binary=request.binary,
-        permission_mode="bypassPermissions",
-        mcp_config=request.mcp_config,
-        working_dir=request.working_dir,
-        model=request.target.transport_model,
-        effort=request.reasoning_effort,
-    )
-    return build_claude_cmd(
-        invocation, stream_input=True, extra_args=["--no-session-persistence"]
-    )
 
 
 def _assistant_text(record: dict[str, Any]) -> str:
@@ -334,10 +315,28 @@ def _result_after_process(
     return ProviderCheckpointResult(result.raw_body, result.usage, combined)
 
 
-async def invoke_checkpoint(
+async def invoke_checkpoint(request, cancel_event, *, kind: ForkKind,
+                            on_cold_input=None, on_tool_executor=None):
+    from core.fork_cc_bridge import bind_bridge
+
+    kind.step_limit("claude-code", request)
+    with bind_bridge(request, kind, cancel_event) as (request, handle):
+        async def bind_executor(executor):
+            handle.tool_executor = executor
+            if on_tool_executor is not None:
+                await on_tool_executor(executor)
+
+        return await _invoke_checkpoint(
+            request, cancel_event, kind=kind, on_cold_input=on_cold_input,
+            on_tool_executor=bind_executor,
+        )
+
+
+async def _invoke_checkpoint(
     request: ProviderCheckpointRequest,
     cancel_event: asyncio.Event,
     *,
+    kind: ForkKind,
     on_cold_input: ColdInputCallback | None = None,
     on_tool_executor=None,
 ) -> ProviderCheckpointResult:
@@ -347,6 +346,7 @@ async def invoke_checkpoint(
     from core.checkpoint_account import admit_checkpoint
 
     request = admit_checkpoint(request)
+    request = replace(request, instruction=kind.instruction(request))
     source = request.warm_source
     if source is not None and not isinstance(source, CCWarmSource):
         raise TypeError("Claude checkpoint received another harness's warm source")
@@ -359,7 +359,7 @@ async def invoke_checkpoint(
     restored_seed = None
     try:
         if source is None:
-            argv = _cold_command(request)
+            argv = checkpoint_cc_commands.cold_command(request, kind)
             cwd = request.working_dir
         else:
             if source.restored_seed_text is not None:
@@ -373,7 +373,7 @@ async def invoke_checkpoint(
                     invocation=replace(source.invocation, seed_file=str(restored_seed)),
                 )
             snapshot_id, snapshot = _snapshot(source)
-            argv = _warm_command(source, request, snapshot_id)
+            argv = checkpoint_cc_commands.warm_command(source, request, kind, snapshot_id)
             cwd = source.invocation.working_dir or request.working_dir
         spawned_at = time.monotonic()
         process = await _spawn_process(

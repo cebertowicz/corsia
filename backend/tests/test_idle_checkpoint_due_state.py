@@ -998,6 +998,7 @@ async def test_idle_native_fold_forks_its_receipt_warm(
 
     No cold correction rides along, and the generic harness capture never runs.
     """
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
     from core.checkpoint_native_fork import NativeWarmSource, _messages_and_tools
     from infra.idle_checkpoints import IdleCheckpointDue
     from thread import idle_checkpoint
@@ -1031,7 +1032,7 @@ async def test_idle_native_fold_forks_its_receipt_warm(
     assert isinstance(provider.warm_source, NativeWarmSource)
     assert provider.warm_source.boundary == context.boundary
     assert provider.warm_source.prefix_messages == receipt.messages
-    messages, tools, _seq = await _messages_and_tools(provider, None)
+    messages, tools, _seq = await _messages_and_tools(provider, None, CHECKPOINT_KIND)
     assert messages[:-1] == list(receipt.messages)
     assert messages[-1] == {"role": "user", "content": provider.instruction}
     assert tools == list(receipt.tools)

@@ -10,6 +10,8 @@ from typing import Any
 
 from history.types import HistoryBoundary
 from core.checkpoint_account import admit_checkpoint, bind_checkpoint_session
+
+from core.fork_runtime import ForkKind
 from llm.resolution import ExecutionTarget
 from core.checkpoint_codex_result import (
     CodexCheckpointCapture, checkpoint_usage as _checkpoint_usage,
@@ -183,17 +185,30 @@ def _copy_rollout(source: CodexWarmSource, isolated_home: Path) -> None:
     )
 
 
-def _checkpoint_tools(request: ProviderCheckpointRequest, cwd: str):
+def _checkpoint_tools(request: ProviderCheckpointRequest, cwd: str, kind: ForkKind):
     """Use the exact cold surface frozen at fit, or rebuild warm callbacks."""
-    if request.tool_registry is not None:
-        return request.tool_registry, request.dynamic_tool_specs
-    from subagents.harness_tool_bridge import (
-        build_tool_registry,
-        dynamic_tool_definitions,
-    )
+    from core.fork_tools import allowed_definitions
+    from subagents.harness_tool_bridge import build_tool_registry, dynamic_tool_definitions
+    from tools.catalog import fork_tool_definitions
 
+    if request.warm_source is not None:
+        # A warm resume keeps the source's tool list so its cached prefix
+        # holds; the kind's allowlist is enforced at execution instead.
+        registry = request.tool_registry or build_tool_registry(cwd)
+        return registry, dynamic_tool_definitions(registry)
+    if request.tool_registry is not None:
+        definitions = (
+            fork_tool_definitions(request.tool_registry, kind.tool_allowlist)
+            if hasattr(request.tool_registry, "get_definitions") else request.dynamic_tool_specs
+        )
+        return request.tool_registry, allowed_definitions(definitions, kind)
     registry = build_tool_registry(cwd)
-    return registry, dynamic_tool_definitions(registry)
+    definitions = allowed_definitions(
+        fork_tool_definitions(registry, kind.tool_allowlist)
+        if hasattr(registry, "get_definitions") else dynamic_tool_definitions(registry),
+        kind,
+    )
+    return registry, definitions
 
 
 def _checkpoint_session(
@@ -207,11 +222,19 @@ def _checkpoint_session(
     on_exit: Any,
     cold_input=None,
     checkpoint_tool_result_fits=None,
+    kind: ForkKind,
+    cancel_event: asyncio.Event | None = None,
+    on_raw_message=None,
 ):
     from subagents.codex_app_server import CodexAppServerSession
     from subagents.codex_runtime_spawn import _compaction_overrides
 
-    registry, definitions = _checkpoint_tools(request, cwd)
+    from core.fork_tools import ForkToolBoundary
+
+    registry, definitions = _checkpoint_tools(request, cwd, kind)
+    boundary = ForkToolBoundary(
+        kind, request, registry, cancel_event or asyncio.Event(), checkpoint_tool_result_fits,
+    )
     return bind_checkpoint_session(request, CodexAppServerSession(
         binary=request.binary or "",
         task=cold_input.as_prompt(request.instruction) if cold_input else request.instruction,
@@ -223,6 +246,7 @@ def _checkpoint_session(
         tool_registry=registry,
         corsia_thread_id=request.thread_id,
         checkpoint_id=request.checkpoint_id,
+        on_raw_message=on_raw_message,
         # Managed tool receipts read the rollout, and Codex gives an ephemeral
         # thread none. The temporary isolated home keeps the writer disposable.
         ephemeral=False,
@@ -236,16 +260,16 @@ def _checkpoint_session(
         ),
         on_event=on_event,
         on_exit=on_exit,
-        checkpoint_tool_result_fits=checkpoint_tool_result_fits,
+        checkpoint_tool_result_fits=boundary,
     ))
 
 
-def _fit_cold_request(request: ProviderCheckpointRequest, cwd: str):
+def _fit_cold_request(request: ProviderCheckpointRequest, cwd: str, *, kind: ForkKind):
     from core.checkpoint_render import _codex_cold_surface, fit_cold_checkpoint_input
 
+    registry, definitions = _checkpoint_tools(request, cwd, kind)
     surface, registry, definitions, developer = _codex_cold_surface(
-        cwd, writer=request.target, registry=request.tool_registry,
-        definitions=request.dynamic_tool_specs if request.tool_registry is not None else None,
+        cwd, writer=request.target, registry=registry, definitions=definitions,
         developer=request.developer_instructions,
     )
     request = replace(
@@ -262,6 +286,7 @@ async def _run_app_server_checkpoint(
     source_home: Path, isolated_home: Path,
     cwd: str, cancel_event: asyncio.Event,
     cold_input=None,
+    kind: ForkKind,
 ) -> ProviderCheckpointResult:
     from core.checkpoint_codex_context import CodexCheckpointContext, frozen_context_tokens
     from core.token_estimation import measure_request
@@ -298,6 +323,13 @@ async def _run_app_server_checkpoint(
         refusal = WarmForkUnusable if source is not None else ProviderCheckpointRejected
         raise refusal("Codex checkpoint initial input exceeds selected context window")
 
+    from core.fork_codex_control import CompletedItemLimit
+
+    item_limit = CompletedItemLimit(kind, request)
+
+    async def on_raw_message(frame):
+        await item_limit.observe(session, frame)
+
     async def on_event(event):
         if event.get("kind") != "call_usage" or event.get("turn_id") == session.active_turn_id:
             await capture.on_event(event)
@@ -312,40 +344,27 @@ async def _run_app_server_checkpoint(
         on_exit=capture.on_exit,
         cold_input=cold_input,
         checkpoint_tool_result_fits=tool_boundary,
+        kind=kind,
+        cancel_event=cancel_event,
+        on_raw_message=on_raw_message,
     )
-    async def run() -> None:
-        if cancel_event.is_set():
-            raise asyncio.CancelledError
-        if not await session.start():
-            raise ProviderCheckpointRejected("Codex checkpoint was not accepted")
-        await capture.terminal
+    from core.fork_codex_control import run_session
 
-    operation = asyncio.create_task(run())
-    stopped = asyncio.create_task(cancel_event.wait())
-    try:
-        await asyncio.wait({operation, stopped}, return_when=asyncio.FIRST_COMPLETED)
-        if cancel_event.is_set():
-            operation.cancel()
-            await asyncio.gather(operation, return_exceptions=True)
-            raise asyncio.CancelledError
-        await operation
-    finally:
-        stopped.cancel()
-        await asyncio.gather(stopped, return_exceptions=True)
-        await session.terminate()
-    return capture.result()
+    return await run_session(session, capture, item_limit, cancel_event)
 
 
 async def invoke_checkpoint(
     request: ProviderCheckpointRequest,
     cancel_event: asyncio.Event,
     *,
+    kind: ForkKind,
     on_cold_input: ColdInputCallback | None = None,
 ) -> ProviderCheckpointResult:
     """Run one Codex process; any captured body is authoritative."""
     if request.target.harness != "codex":
         raise TypeError("Codex adapter requires a Codex target")
     request = admit_checkpoint(request)
+    request = replace(request, instruction=kind.instruction(request))
     source = request.warm_source
     if source is not None and not isinstance(source, CodexWarmSource):
         raise TypeError("Codex checkpoint received another harness's warm source")
@@ -355,7 +374,7 @@ async def invoke_checkpoint(
     if source is None:
         source_home = Path(request.vendor_launch.codex_source or request.vendor_launch.warm_home)
         cwd = request.working_dir
-        request, cold_input = await asyncio.to_thread(_fit_cold_request, request, cwd)
+        request, cold_input = await asyncio.to_thread(_fit_cold_request, request, cwd, kind=kind)
         if on_cold_input is not None:
             await on_cold_input(cold_input.first_included_seq)
     else:
@@ -375,4 +394,5 @@ async def invoke_checkpoint(
             cwd=cwd,
             cancel_event=cancel_event,
             cold_input=cold_input,
+            kind=kind,
         )

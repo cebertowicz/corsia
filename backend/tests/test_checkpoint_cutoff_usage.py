@@ -3,6 +3,7 @@
 import json
 
 import pytest
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 
 @pytest.mark.parametrize("terminal", [False, True])
@@ -103,7 +104,7 @@ async def test_native_completed_effect_failure_records_checkpoint_usage_once(iso
     monkeypatch.setattr(native, "_provider_params", lambda model: {"model": model})
     with pytest.raises(CompletedToolFailure):
         await native.invoke_checkpoint(
-            replace(_request(_source(native)), on_usage=paid), asyncio.Event(),
+            replace(_request(_source(native)), on_usage=paid), asyncio.Event(), kind=CHECKPOINT_KIND,
         )
 
     assert tool.calls == 1

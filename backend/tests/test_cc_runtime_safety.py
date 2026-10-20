@@ -10,6 +10,7 @@ from cc_runtime_fixtures import (  # noqa: F401
     child_db,
     fake_claude_oneshot,
 )
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from subagents.cc_runtime_helpers import CCWorkingDirMissing
 
 
@@ -219,7 +220,7 @@ async def test_detached_checkpoint_does_not_touch_live_or_durable_cc_state(
         working_dir="/tmp",
         binary="/fake/claude",
     )
-    result = await checkpoint_fork.invoke_checkpoint(request, asyncio.Event())
+    result = await checkpoint_fork.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
     assert result.raw_body == checkpoint_body
     assert rt._LIVE.ids() == ("parent",)

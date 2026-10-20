@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 
 @pytest.mark.asyncio
@@ -499,7 +500,7 @@ async def test_model_switch_target_cold_without_bridge_reaches_denied_tool_comma
     monkeypatch.setattr(cc, "_spawn_process", spawn)
 
     admission = await model_checkpoint.prepare_target_checkpoint(request, "checkpoint-1")
-    result = await cc.invoke_checkpoint(admission.provider_request, asyncio.Event())
+    result = await cc.invoke_checkpoint(admission.provider_request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert spawn.await_args is not None
     argv = spawn.await_args.args[0]
 

@@ -347,6 +347,10 @@ async def list_cc_tools(
     token: str = Header("", alias="X-CORSIA-Tool-Token"),
 ):
     """List the exact tool definitions frozen onto one authenticated live handle."""
+    if request.headers.get("X-CORSIA-Fork-Id"):
+        from core.fork_cc_bridge import authenticate, definitions
+
+        return {"tools": list(definitions(authenticate(request, thread_id, token)))}
     live = _tool_live(request, thread_id, token)
     definitions = getattr(live, "tool_definitions", None)
     if definitions is None:
@@ -363,6 +367,13 @@ async def execute_cc_tool(
     checkpoint_id: str = Header("", alias="X-CORSIA-Checkpoint-Id"),
 ):
     """Execute one authenticated Claude Code tool call under its live handle."""
+    if request.headers.get("X-CORSIA-Fork-Id"):
+        from core.fork_cc_bridge import authenticate, result_stream
+
+        authenticate(request, thread_id, token)
+        return _DeferredStartStreamingResponse(
+            result_stream(request, thread_id, token, body), media_type="text/plain",
+        )
     live = _tool_live(request, thread_id, token)
     checkpoint_id = checkpoint_id.strip() if isinstance(checkpoint_id, str) else ""
     if checkpoint_id:

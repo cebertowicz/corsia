@@ -230,6 +230,7 @@ async def _complete_native_idle_checkpoint(
     preparation: IdleCheckpointPreparation,
 ) -> CheckpointAdmission | IdleCheckpointSkip:
     """Fork the receipt's live prefix warm, or skip before any row exists."""
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
     from core.checkpoint_native_fork import capture_live_warm_source, warm_input_fits
     from core.checkpoint_warm_request import complete_warm_admission
 
@@ -254,7 +255,7 @@ async def _complete_native_idle_checkpoint(
         binary=context.binary,
         warm_source=source,
     )
-    if not await warm_input_fits(admission.provider_request):
+    if not await warm_input_fits(admission.provider_request, kind=CHECKPOINT_KIND):
         return _warm_refused("input_too_large")
     return admission
 

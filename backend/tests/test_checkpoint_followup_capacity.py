@@ -6,6 +6,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 
 @pytest.mark.asyncio
@@ -48,7 +49,7 @@ async def test_native_checkpoint_aggregate_results_cannot_exceed_selected_window
     monkeypatch.setattr(native, "_get_agent", agent)
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda model: {"model": model})
-    result = await native.invoke_checkpoint(request, asyncio.Event())
+    result = await native.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     # The results that overflow the wall are answered with a short error, so the
     # fork's next call still fits and writes its checkpoint (#2514).
     assert len(writes) == 2
@@ -161,6 +162,7 @@ async def test_codex_context_limit_preserves_streamed_partial_output(
         source_home=tmp_path, isolated_home=tmp_path, cwd=str(tmp_path),
         cancel_event=asyncio.Event(),
         cold_input=SimpleNamespace(input_tokens=10),
+        kind=CHECKPOINT_KIND,
     )
     if not (prior or body):  # No narrative is a named failure.
         from core.checkpoint_types import ProviderCheckpointRejected
@@ -273,7 +275,7 @@ async def test_native_first_input_nonfit_is_not_partial_completion(monkeypatch):
     monkeypatch.setattr(native, "_provider_params", lambda _model: {})
     monkeypatch.setattr(native, "_chat_completion", completion)
     with pytest.raises(ProviderCheckpointRejected, match="initial.*input"):
-        await native.invoke_checkpoint(request, asyncio.Event())
+        await native.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     completion.assert_not_awaited()
 
 
@@ -305,7 +307,7 @@ async def test_native_provider_context_limit_is_degraded_not_error_prose(monkeyp
     monkeypatch.setattr(native, "_get_agent", agent)
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda _model: {})
-    result = await native.invoke_checkpoint(_request(_source(native)), asyncio.Event())
+    result = await native.invoke_checkpoint(_request(_source(native)), asyncio.Event(), kind=CHECKPOINT_KIND)
     assert result.raw_body == "Retain this partial checkpoint."
     assert result.diagnostic == "checkpoint_context_truncated"
     assert responses == []

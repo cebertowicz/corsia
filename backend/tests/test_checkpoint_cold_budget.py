@@ -8,6 +8,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 from core.checkpoint_fit import ColdFoldInputTooLarge
 from core.checkpoint_render import build_cold_checkpoint_admission
@@ -137,7 +138,7 @@ async def test_native_oversized_tool_surface_never_reaches_provider(monkeypatch)
     admission = _admission(monkeypatch, "native")
     refused = False
     try:
-        await native.invoke_checkpoint(admission.provider_request, asyncio.Event())
+        await native.invoke_checkpoint(admission.provider_request, asyncio.Event(), kind=CHECKPOINT_KIND)
     except ColdFoldInputTooLarge:
         refused = True
 
@@ -246,7 +247,7 @@ async def test_cc_reads_its_loaded_surface_before_one_generation(monkeypatch):
         included.append(first_seq)
 
     result = await cc.invoke_checkpoint(
-        admission.provider_request, asyncio.Event(), on_cold_input=record_input,
+        admission.provider_request, asyncio.Event(), on_cold_input=record_input, kind=CHECKPOINT_KIND,
     )
 
     assert len(launches) == 1
@@ -270,7 +271,7 @@ async def test_cc_refuses_unproved_or_oversized_prefix_without_generation(monkey
     cc, process, _launches = _claude_process(monkeypatch, **values)
     admission = _admission(monkeypatch, "claude-code")
     with pytest.raises((ProviderCheckpointRejected, ColdFoldInputTooLarge)):
-        await cc.invoke_checkpoint(admission.provider_request, asyncio.Event())
+        await cc.invoke_checkpoint(admission.provider_request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert process.user_inputs == []
     assert process.terminated
 
@@ -332,7 +333,7 @@ async def test_cc_cancel_while_reading_prefix_terminates_only_its_writer(monkeyp
     cc, process, _launches = _claude_process(monkeypatch, respond=False)
     admission = _admission(monkeypatch, "claude-code")
     cancel = asyncio.Event()
-    operation = asyncio.create_task(cc.invoke_checkpoint(admission.provider_request, cancel))
+    operation = asyncio.create_task(cc.invoke_checkpoint(admission.provider_request, cancel, kind=CHECKPOINT_KIND))
     try:
         await asyncio.wait_for(process.context_requested.wait(), 1)
         cancel.set()
@@ -355,7 +356,7 @@ async def test_cc_silent_process_times_out_without_generating(monkeypatch):
     monkeypatch.setattr("core.checkpoint_cc_cold._CONTEXT_ADMISSION_TIMEOUT_S", 0.05)
     cc, process, _launches = _claude_process(monkeypatch, respond=False, init_mcp_status=None)
     with pytest.raises(ProviderCheckpointRejected, match=r"cold context admission timed out.*init status: not received.*elapsed from process spawn: [0-9.]+s"):
-        await cc.invoke_checkpoint(_admission(monkeypatch, "claude-code").provider_request, asyncio.Event())
+        await cc.invoke_checkpoint(_admission(monkeypatch, "claude-code").provider_request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert process.context_requested.is_set()
     assert process.user_inputs == []
     assert process.terminated
@@ -391,7 +392,7 @@ async def test_cc_configured_mcp_failure_refuses_tool_free_generation(monkeypatc
     cc, process, _launches = _claude_process(monkeypatch, mcp_tokens=0, init_mcp_status=None, mcp_status="pending")
     request = replace(_admission(monkeypatch, "claude-code").provider_request, mcp_config="fixture-mcp.json")
     with pytest.raises(ProviderCheckpointRejected, match=r"MCP tools.*MCP status: pending.*elapsed from process spawn: [0-9.]+s"):
-        await cc.invoke_checkpoint(request, asyncio.Event())
+        await cc.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert process.user_inputs == []
     assert process.terminated
 
@@ -404,7 +405,7 @@ async def test_cc_exit_before_context_reports_init_status_and_exchange_time(monk
     process.stdout.feed_data(b'{"type":"system","subtype":"init","mcp_servers":[{"name":"corsia","status":"starting"}]}\n')
     process.stdout.feed_eof()
     with pytest.raises(ProviderCheckpointRejected, match=r"exited before cold context admission.*init status: starting.*elapsed from process spawn: [0-9.]+s"):
-        await cc.invoke_checkpoint(_admission(monkeypatch, "claude-code").provider_request, asyncio.Event())
+        await cc.invoke_checkpoint(_admission(monkeypatch, "claude-code").provider_request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert process.user_inputs == []
     assert process.terminated
 
@@ -418,7 +419,7 @@ async def test_cc_missing_or_invalid_context_never_sends_generation(monkeypatch,
     process.stdout.feed_data(response)
     process.stdout.feed_eof()
     with pytest.raises(ProviderCheckpointRejected):
-        await cc.invoke_checkpoint(_admission(monkeypatch, "claude-code").provider_request, asyncio.Event())
+        await cc.invoke_checkpoint(_admission(monkeypatch, "claude-code").provider_request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert process.user_inputs == []
     assert process.terminated
 
@@ -436,6 +437,6 @@ async def test_cc_ignores_uncorrelated_context_and_honors_smaller_reported_windo
             },
         }) + "\n").encode())
     with pytest.raises(ColdFoldInputTooLarge):
-        await cc.invoke_checkpoint(_admission(monkeypatch, "claude-code").provider_request, asyncio.Event())
+        await cc.invoke_checkpoint(_admission(monkeypatch, "claude-code").provider_request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert process.user_inputs == []
     assert process.terminated

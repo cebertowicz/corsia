@@ -12,6 +12,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
+from core import checkpoint_cc_commands
 
 from core.checkpoint_types import ProviderCheckpointRequest
 from history.types import HistoryBoundary
@@ -728,10 +730,10 @@ async def test_cc_tool_boundary_capture_freezes_matching_row_and_live_launch(
         snapshot_id, snapshot = cc._snapshot(source)
         try:
             assert snapshot.read_bytes() == transcript.read_bytes()[:source.transcript_bytes]
-            command = cc._warm_command(
+            command = checkpoint_cc_commands.warm_command(
                 source,
                 _request(_target("claude-code"), source, binary="claude"),
-                snapshot_id,
+                CHECKPOINT_KIND, snapshot_id,
             )
             assert command[command.index("--append-system-prompt-file") + 1] == str(seed_file)
             assert command[command.index("--mcp-config") + 1] == str(mcp_config)
@@ -807,7 +809,7 @@ async def test_cc_preserves_launch_and_accepts_error_envelope_body(
 
     monkeypatch.setattr(cc, "_spawn_process", spawn)
     result = await cc.invoke_checkpoint(
-        _request(_target("claude-code"), source, binary="claude"), asyncio.Event()
+        _request(_target("claude-code"), source, binary="claude"), asyncio.Event(), kind=CHECKPOINT_KIND
     )
     assert result.raw_body == "usable checkpoint"
     assert observed["snapshot"] == transcript.read_bytes()
@@ -1401,7 +1403,7 @@ async def test_codex_durable_capture_and_exact_rollout_resume(tmp_path, monkeypa
         "subagents.codex_app_server.CodexAppServerSession", Session,
     )
     result = await codex.invoke_checkpoint(
-        _request(_target("codex"), source, binary="codex"), asyncio.Event()
+        _request(_target("codex"), source, binary="codex"), asyncio.Event(), kind=CHECKPOINT_KIND
     )
     assert result.raw_body == "codex checkpoint"
     assert result.usage == {
@@ -1487,6 +1489,7 @@ async def test_codex_cold_writer_thread_arms_managed_tool_receipts(tmp_path, ven
         request, None, source_home=tmp_path / "source", isolated_home=isolated_home,
         cwd=str(tmp_path), on_event=None, on_exit=None,
         checkpoint_tool_result_fits=lambda *_args: True,
+        kind=CHECKPOINT_KIND,
     )
     rollout = isolated_home / "sessions" / "rollout-writer.jsonl"
 
@@ -1531,7 +1534,7 @@ async def test_codex_cold_checkpoint_starts_callback_session_in_disposable_home(
     )
 
     result = await codex.invoke_checkpoint(
-        _request(_target("codex"), None, binary="codex"), asyncio.Event()
+        _request(_target("codex"), None, binary="codex"), asyncio.Event(), kind=CHECKPOINT_KIND
     )
 
     assert result.raw_body == "cold checkpoint"
@@ -1613,7 +1616,7 @@ async def test_codex_checkpoint_uses_callback_capable_app_server(
         lambda _registry: definitions,
     )
     result = await codex.invoke_checkpoint(
-        _request(_target("codex"), source, binary="codex"), asyncio.Event()
+        _request(_target("codex"), source, binary="codex"), asyncio.Event(), kind=CHECKPOINT_KIND
     )
 
     assert result.raw_body == "checkpoint body"
@@ -1654,6 +1657,7 @@ async def test_checkpoint_session_runs_dynamic_tool_without_foreground_step(
         request, None,
         source_home=tmp_path / "source", isolated_home=tmp_path / "isolated",
         cwd=str(tmp_path), on_event=None, on_exit=None,
+        kind=CHECKPOINT_KIND,
     )
     execute = AsyncMock(return_value="checkpoint tool result")
     monkeypatch.setattr("subagents.harness_tool_bridge.execute_tool", execute)
@@ -1769,7 +1773,7 @@ async def test_checkpoint_cancel_terminates_exact_provider_handle(
         )
 
     cancel = asyncio.Event()
-    operation = asyncio.create_task(module.invoke_checkpoint(request, cancel))
+    operation = asyncio.create_task(module.invoke_checkpoint(request, cancel, kind=CHECKPOINT_KIND))
     await asyncio.wait_for(started.wait(), timeout=30)
     assert not operation.done()
     cancel.set()

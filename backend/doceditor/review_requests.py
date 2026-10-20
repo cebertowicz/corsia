@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from core.agent_roster_queries import agent_rows
 from doceditor import feedback_delivery
+from doceditor.review_feedback import submit_fork_feedback, withdraw_fork_feedback
 from doceditor.comments import validate_client_id
 from infra.auth import is_owner_sentinel, may_access_artifact
 from infra.corsia_agent import CorsiaAgentSettingError, get_corsia_agent
@@ -40,6 +41,7 @@ DEFAULT_REQUEST_ERROR_CODE = "review_request_refused"
 CANCEL_REASON = "Review request cancelled by its requester or document owner."
 #: Outcome of a request whose review task ended before any batch reached the owner.
 ENDED_WITHOUT_COMMENTS = "ended_without_comments"
+IN_REVIEW_REFUSAL = "A review is already in progress; retry with the same client_id."
 
 
 class ReviewRequestError(ValueError):
@@ -154,6 +156,10 @@ def _repeat(db, row, actor: ReviewActor, note: str | None, key: str) -> dict:
     keys.append(key)
     db.execute("UPDATE doc_review_requests SET client_ids=? WHERE id=?", (json.dumps(keys), row["id"]))
     if note:
+        if row["node_id"] is None:
+            # A fork has already frozen its instruction; silently accepting a
+            # later note would claim the reviewer saw it when it could not.
+            raise ReviewRequestError(IN_REVIEW_REFUSAL)
         public.append_review_note(db, row["node_id"], {
             **dict(row), "note": note, "requester_display": actor.display,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -186,25 +192,28 @@ def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: Rev
         latest = _latest(connection, artifact_id, reviewer_thread_id)
         if latest is not None and outcome(connection, latest) == "open":
             return _repeat(connection, latest, requester, note, key)
+        from doceditor.review_fork_intent import requesting_node_id
+
         request_id = str(uuid.uuid4())
+        intent_node = requesting_node_id(connection, requester)
         request = {
             "id": request_id, "artifact_id": artifact_id,
             "requester_kind": requester.kind, "requester_id": requester.id,
             "reviewer_thread_id": reviewer_thread_id, "note": note,
+            "fork_id": str(uuid.uuid4()),
             "created_at": datetime.now(timezone.utc).isoformat(), "requester_display": requester.display,
         }
         connection.execute(
             """INSERT INTO doc_review_requests(id,artifact_id,requester_kind,requester_id,
-               reviewer_thread_id,note,client_ids,created_at) VALUES (?,?,?,?,?,?,?,?)""",
-            (request["id"], artifact_id, requester.kind, requester.id, reviewer_thread_id, note, json.dumps([key]), request["created_at"]),
+               reviewer_thread_id,note,client_ids,fork_id,requesting_node_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (request["id"], artifact_id, requester.kind, requester.id, reviewer_thread_id,
+             note, json.dumps([key]), request["fork_id"], intent_node, request["created_at"]),
         )
-        node = public.create_review_node(connection, reviewer_thread_id, request)
-        connection.execute("UPDATE doc_review_requests SET node_id=? WHERE id=?", (node.node_id, request["id"]))
-        # Recheck under the same write lock after the final Plans effect.
+        # Recheck admission under the same write lock. A request is fork-first:
+        # Plans is reserved for terminal fallback only.
         _reviewer(connection, artifact, reviewer_thread_id, requester)
         result = _get(connection, request_id)
         _changed(connection, result, artifact)
-        after_commit(connection, lambda: public.notify_after_commit((public.get_node(node.node_id, db=connection).plan_id,), db=connection))
         return result
 
 
@@ -218,6 +227,8 @@ def outcome(db, row) -> str:
         return "cancelled"
     if row["answered_batch_id"]:
         return "commented"
+    if row["node_id"] is None:
+        return "open" if row["fork_id"] else ENDED_WITHOUT_COMMENTS
     return "open" if public.review_is_open(db, row["node_id"]) else ENDED_WITHOUT_COMMENTS
 
 
@@ -244,6 +255,51 @@ def may_cancel(db, artifact, row, actor: ReviewActor) -> bool:
     return get_thread_for_user(owner_id, actor.user_id, db=db) is not None
 
 
+def escalate_fork(db, request_id: str) -> dict | None:
+    """Turn an unfinished fork into the established reviewer node exactly once."""
+    with write_transaction(db, scope="escalate_document_review_fork") as connection:
+        row = connection.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone()
+        if (row is None or row["cancelled_at"] or row["answered_batch_id"]
+                or row["node_id"] is not None or not row["fork_id"]):
+            return None
+        requester = connection.execute("SELECT title FROM threads WHERE id=?", (row["requester_id"],)).fetchone()
+        comments = connection.execute(
+            "SELECT DISTINCT c.id FROM doc_comments c "
+            "JOIN doc_feedback_batch_items i ON i.comment_id=c.id "
+            "JOIN doc_feedback_batches b ON b.id=i.batch_id "
+            "WHERE b.review_request_id=? AND b.state IN ('open','undelivered') ORDER BY c.id",
+            (request_id,),
+        ).fetchall()
+        continuation = "Continue the requested review; comments already staged: " + (
+            ", ".join(str(comment["id"]) for comment in comments) or "none"
+        )
+        if row["requesting_node_id"]:
+            continuation += f". Requesting intent node: {row['requesting_node_id']}."
+        request = {
+            **dict(row), "intent_node_id": row["requesting_node_id"],
+            "requester_display": (requester["title"] if requester else None) or row["requester_id"],
+            "note": f"{row['note'] or ''}\n\n{continuation}".strip(),
+        }
+        node = public.create_review_node(connection, row["reviewer_thread_id"], request)
+        connection.execute(
+            "UPDATE doc_review_requests SET node_id=?,fork_id=NULL WHERE id=?",
+            (node.node_id, request_id),
+        )
+        # Staged comments wait for the reviewer's own continuation: a request
+        # batch's closes_at is now the earliest reviewer Turn start that may
+        # close it (feedback_batches.close_for_turn_end); no quiet timer does.
+        now = datetime.now(timezone.utc).isoformat()
+        connection.execute(
+            "UPDATE doc_feedback_batches SET closes_at=?,updated_at=? WHERE review_request_id=? AND state='open'",
+            (now, now, request_id),
+        )
+        artifact = models.get_artifact(row["artifact_id"], db=connection)
+        if artifact is not None:
+            _changed(connection, request, artifact)
+        after_commit(connection, lambda: public.notify_after_commit((public.get_node(node.node_id, db=connection).plan_id,), db=connection))
+        return _get(connection, request_id)
+
+
 def cancel(db, request_id: str, actor: ReviewActor) -> dict:
     with write_transaction(db, scope="cancel_document_review") as connection:
         row = connection.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone()
@@ -255,7 +311,13 @@ def cancel(db, request_id: str, actor: ReviewActor) -> dict:
         if outcome(connection, row) != "open":
             return _view(connection, row)
         connection.execute("UPDATE doc_review_requests SET cancelled_at=? WHERE id=?", (datetime.now(timezone.utc).isoformat(), request_id))
-        public.close_review_node(connection, row["node_id"], reason=CANCEL_REASON)
+        if row["node_id"] is not None:
+            public.close_review_node(connection, row["node_id"], reason=CANCEL_REASON)
+        else:
+            from core.artifact_review_runtime import cancel as cancel_fork
+
+            after_commit(connection, lambda: cancel_fork(str(row["fork_id"])))
+        withdraw_fork_feedback(connection, request_id)
         result = _get(connection, request_id)
         _changed(connection, result, artifact)
         return result
@@ -277,15 +339,20 @@ def settle_for_batch(db, batch) -> tuple[str, ...]:
     artifact = models.get_artifact(batch["artifact_id"], db=db)
     if artifact is None or batch["recipient_id"] != artifact["parent_thread_id"]:
         return ()
-    row = _latest(db, batch["artifact_id"], batch["author_id"])
+    request_id = batch["review_request_id"]
+    row = (db.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone()
+           if request_id else _latest(db, batch["artifact_id"], batch["author_id"]))
     if row is None or row["cancelled_at"] or row["answered_batch_id"]:
         return ()
-    still_open = public.review_is_open(db, row["node_id"])
+    if not request_id and row["fork_id"] and row["node_id"] is None:
+        return ()
+    node_id = row["node_id"]
+    still_open = node_id is not None and public.review_is_open(db, node_id)
     db.execute("UPDATE doc_review_requests SET answered_batch_id=? WHERE id=?", (batch["id"], row["id"]))
     woken: list[str] = []
     if still_open:
         with public.collect_wake_recipients(db, woken):
-            public.settle_review_node(db, row["node_id"], evidence=f"Document review comments delivered to the owner in batch {batch['id']}.", provenance="document.review_request")
+            public.settle_review_node(db, node_id, evidence=f"Document review comments delivered to the owner in batch {batch['id']}.", provenance="document.review_request")
     _changed(db, dict(row), artifact)
     return tuple(woken)
 

@@ -25,6 +25,7 @@ from connections.models import upsert_connection
 from connections.vendor_accounts import add_account, default_account, get_account, set_account_state
 from core.checkpoint_account import admit_checkpoint, require_checkpoint_write
 from core.checkpoint_cold_fallback import invoke_with_cold_correction
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from core.checkpoint_types import (
     ProviderCheckpointRequest,
     ProviderCheckpointResult,
@@ -426,7 +427,7 @@ async def test_actual_execute_freezes_before_cold_await_and_spend_stays_on_write
     async def notify(_record):
         pass
     monkeypatch.setattr(checkpoint_runtime, '_invoke', invoke)
-    monkeypatch.setattr(checkpoint_runtime, '_capture_and_install', capture)
+    monkeypatch.setattr(checkpoint_runtime, 'CHECKPOINT_KIND', replace(CHECKPOINT_KIND, end_handler=capture))
     monkeypatch.setattr(checkpoint_runtime, '_notify_completion', notify)
     result = await checkpoint_runtime._execute('checkpoint', request, asyncio.Event())
     assert result.status == ('failed' if change == 'login' else 'captured'), getattr(result, 'error', None)
@@ -746,7 +747,7 @@ async def test_checkpoint_claude_spawn_uses_writer_home_and_rechecks_before_stdi
     monkeypatch.setattr(checkpoint_cc_fork, '_result_after_process', lambda *a: ProviderCheckpointResult('body', None))
     request = ProviderCheckpointRequest('checkpoint', 'destination', _target('claude-code'), 'instruction', None,
         str(tmp_path), binary='/synthetic/claude', vendor_account_id=row['id'], vendor_account_bound=True)
-    result = await checkpoint_cc_fork.invoke_checkpoint(request, asyncio.Event())
+    result = await checkpoint_cc_fork.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert result.raw_body == 'body' and len(seen) == 1
     assert seen[0][2]['CLAUDE_CONFIG_DIR'] == row['source_home']
 
@@ -839,7 +840,7 @@ async def test_actual_codex_operation_turn_writer_uses_temporary_own_home_and_lo
             model=target.catalog_id) as (frozen, home):
         if operation == 'checkpoint':
             session = _checkpoint_session(frozen, None, source_home=Path(row['source_home']),
-                isolated_home=home, cwd=str(tmp_path), on_event=noop, on_exit=noop)
+                isolated_home=home, cwd=str(tmp_path), on_event=noop, on_exit=noop, kind=CHECKPOINT_KIND)
         else:
             session = _new_codex_invocation_session(target, frozen,
                 SimpleNamespace(on_event=noop, on_exit=noop, on_raw_message=noop),
@@ -993,7 +994,7 @@ async def test_checkpoint_writer_account_blocks_before_home_or_process(vendors, 
     monkeypatch.setattr("llm.codex_rollout_files.default_codex_sessions_root", lambda: home.append("ambient"))
     adapter = checkpoint_cc_fork if provider == "claude-code" else checkpoint_codex_fork
     with pytest.raises(AccountAdmissionError) as rejected:
-        await adapter.invoke_checkpoint(request, asyncio.Event())
+        await adapter.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert rejected.value.reason == ("account_project_denied" if unknown else "account_model_not_discovered")
     spawn.assert_not_awaited()
     codex_run.assert_not_awaited()
@@ -1295,7 +1296,7 @@ async def test_added_account_warm_checkpoint_reaches_a_disposable_launch(vendors
 
     monkeypatch.setattr(adapter, '_checkpoint_session', disposable_launch)
     with pytest.raises(ProviderCheckpointRejected):
-        await adapter.invoke_checkpoint(request, asyncio.Event())
+        await adapter.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert facts, 'the adapter never reached a disposable checkpoint launch'
     assert facts['pre_isolation'] == row['runtime_home']  # the rollout's own home, not the login tree
     assert facts['account_id'] == get_account(row['id'], db=db)['id']
@@ -1428,7 +1429,7 @@ async def test_registered_old_login_source_refuses_new_default_before_copy_or_sp
     monkeypatch.setattr(adapter, '_snapshot' if provider == 'claude-code' else '_copy_rollout', forbidden)
     monkeypatch.setattr(adapter, '_spawn_process' if provider == 'claude-code' else '_checkpoint_session', forbidden)
     with pytest.raises(WarmForkUnusable, match='warm_fork_login_mismatch'):
-        await adapter.invoke_checkpoint(request, asyncio.Event())
+        await adapter.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert effects == []
     assert path.read_text().count('session_meta') == 1
 

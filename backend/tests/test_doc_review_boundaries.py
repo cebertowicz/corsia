@@ -10,7 +10,7 @@ import pytest
 from doc_feedback_helpers import add_comment, seed_thread
 from infra.database import write_transaction
 from plans import public
-from test_doc_review_requests import request, review_env, stored  # noqa: F401
+from test_doc_review_requests import request, review_env, stored, staged_comment  # noqa: F401
 
 
 def test_create_settle_cancel_emit_one_artifact_frame_after_commit_and_none_on_rollback(review_env, monkeypatch):
@@ -24,7 +24,7 @@ def test_create_settle_cancel_emit_one_artifact_frame_after_commit_and_none_on_r
     monkeypatch.setattr(state, "broadcast_to_user", broadcast)
     first = request(db, aid)
     assert len(frames) == 1
-    add_comment(db, aid, author_id="reviewer", submit=True)
+    staged_comment(db, aid, first["id"], submit=True)
     assert len(frames) == 2
     second = request(db, aid, reviewer="second", key="second")
     assert len(frames) == 3
@@ -42,33 +42,35 @@ def test_create_settle_cancel_emit_one_artifact_frame_after_commit_and_none_on_r
     assert len(frames) == 5
     with pytest.raises(RuntimeError, match="rollback"):
         with write_transaction(db, scope="test_settlement_rollback"):
-            add_comment(db, aid, author_id="reviewer", submit=True)
+            staged_comment(db, aid, third["id"], submit=True)
             raise RuntimeError("rollback")
     assert len(frames) == 5
     assert reviews.outcome(db, stored(db, third["id"])) == "open"
-    assert public.get_node(third["node_id"], db=db).state == "active"
+    assert third["node_id"] is None
     with pytest.raises(RuntimeError, match="rollback"):
         with write_transaction(db, scope="test_cancel_rollback"):
             reviews.cancel(db, third["id"], actor)
             raise RuntimeError("rollback")
     assert len(frames) == 5
     assert reviews.outcome(db, stored(db, third["id"])) == "open"
-    assert public.get_node(third["node_id"], db=db).state == "active"
+    assert third["node_id"] is None
 
 
 @pytest.mark.parametrize("lifecycle", ["archived", "purged", "deleted"])
 def test_reviewer_gone_before_commit_rolls_back_request_and_node(review_env, monkeypatch, lifecycle):
     db, aid = review_env
     from doceditor import review_requests as reviews
-    original = public.create_review_node
-    def disappear(connection, reviewer, row):
-        result = original(connection, reviewer, row)
-        if lifecycle == "deleted":
-            connection.execute("DELETE FROM threads WHERE id=?", (reviewer,))
-        else:
-            connection.execute("UPDATE threads SET lifecycle_state=?,archived_reason='user' WHERE id=?", (lifecycle, reviewer))
-        return result
-    monkeypatch.setattr(public, "create_review_node", disappear)
+    original = reviews._reviewer
+    calls = []
+    def disappear(connection, artifact, reviewer, actor):
+        calls.append(reviewer)
+        if len(calls) == 2:
+            if lifecycle == "deleted":
+                connection.execute("DELETE FROM threads WHERE id=?", (reviewer,))
+            else:
+                connection.execute("UPDATE threads SET lifecycle_state=?,archived_reason='user' WHERE id=?", (lifecycle, reviewer))
+        return original(connection, artifact, reviewer, actor)
+    monkeypatch.setattr(reviews, "_reviewer", disappear)
     with pytest.raises(reviews.ReviewRequestError):
         request(db, aid)
     assert db.execute("SELECT COUNT(*) FROM doc_review_requests").fetchone()[0] == 0
@@ -84,15 +86,15 @@ def test_concurrent_first_requests_share_one_request_node_and_append_once(review
         connection.row_factory = sqlite3.Row
         try:
             barrier.wait(timeout=10)
-            return request(connection, aid, key=key)
+            return request(connection, aid, key=key, note=None)
         finally:
             connection.close()
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(create, ("first-key", "second-key")))
     assert results[0]["id"] == results[1]["id"]
     assert db.execute("SELECT COUNT(*) FROM doc_review_requests").fetchone()[0] == 1
-    assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 1
-    assert public.get_node(results[0]["node_id"], db=db).description.count("never widen it):") == 2
+    assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
+    assert results[0]["fork_id"] == results[1]["fork_id"]
 
 
 def test_wrong_recipient_batch_and_cancelled_request_do_not_settle(review_env):
@@ -116,7 +118,7 @@ def test_review_requested_node_accepts_and_terminal_node_cancel_preserves_verdic
     db, aid = review_env
     from doceditor import review_requests as reviews
     from plans import review_evidence
-    row = request(db, aid)
+    row = reviews.escalate_fork(db, request(db, aid)["id"])
     with write_transaction(db, scope="test_review_requested"):
         review_evidence.submit(row["node_id"], evidence="Comments ready", expected_revision=None, actor_id=None, provenance="test", db=db)
     add_comment(db, aid, author_id="reviewer", submit=True)

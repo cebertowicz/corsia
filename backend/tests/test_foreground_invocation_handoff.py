@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from infra.state.context import _current_tool_invocation_id, tool_invocation_context
 from tools.registry import _is_reserved_execution_param
 from tools.tool_execution_context import inject_context, strip_reserved_context
@@ -133,6 +134,7 @@ async def test_checkpoint_native_clears_inherited_foreground_invocation(monkeypa
     with tool_invocation_context("outer"):
         assert await checkpoint.run_tool_calls(
             SimpleNamespace(tools=Tools()), response, [], asyncio.Event(), request, [],
+            kind=CHECKPOINT_KIND,
         )
         assert _current_tool_invocation_id.get() == "outer"
     assert observed == [None]

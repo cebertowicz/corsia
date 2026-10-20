@@ -1,10 +1,9 @@
 """Which documents a reviewer is still watching, and since when (DCOL-FR10.2, FR10.6).
 
 A review request keeps its reviewer hearing about a document until the review
-task ends or seven days pass without the reviewer commenting on or editing
-it. Plans owns
-whether the task is open, so each request that survives the cheap SQL window
-is asked once through ``plans.public.review_is_open``.
+ends or seven days pass without the reviewer commenting on or editing it.
+A node-less fork is open until submission or withdrawal; escalated review
+nodes use ``plans.public.review_is_open`` after the cheap SQL window.
 """
 
 from __future__ import annotations
@@ -27,11 +26,11 @@ def watched_reviews(db: sqlite3.Connection, thread_id: str, now: datetime | None
         return {}
     horizon = ((now or datetime.now(timezone.utc)) - timedelta(days=WATCH_DAYS)).isoformat()
     rows = db.execute(
-        # The join drops a request whose review node no longer exists, which review_is_open would refuse.
         "SELECT request.artifact_id, request.node_id, request.created_at FROM doc_review_requests AS request "
-        "JOIN plan_nodes AS node ON node.id=request.node_id "
+        "LEFT JOIN plan_nodes AS node ON node.id=request.node_id "
         "WHERE request.reviewer_thread_id=:thread_id AND request.cancelled_at IS NULL "
-        "AND request.answered_batch_id IS NULL AND request.node_id IS NOT NULL "
+        "AND request.answered_batch_id IS NULL "
+        "AND (node.id IS NOT NULL OR (request.node_id IS NULL AND request.fork_id IS NOT NULL)) "
         # Only unsettled requests are read; each stops at its first activity inside the window.
         "AND (julianday(request.created_at)>=julianday(:horizon) OR EXISTS ("
         " SELECT 1 FROM doc_comments AS comment "
@@ -47,7 +46,7 @@ def watched_reviews(db: sqlite3.Connection, thread_id: str, now: datetime | None
     ).fetchall()
     since: dict[str, str] = {}
     for row in rows:
-        if plans_public.review_is_open(db, str(row["node_id"])):
+        if row["node_id"] is None or plans_public.review_is_open(db, str(row["node_id"])):
             since.setdefault(str(row["artifact_id"]), str(row["created_at"]))
     return since
 

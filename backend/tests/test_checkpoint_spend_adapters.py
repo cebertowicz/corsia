@@ -5,6 +5,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 
 @pytest.mark.asyncio
@@ -35,7 +36,7 @@ async def test_native_reports_paid_call_before_tool_failure(monkeypatch):
     monkeypatch.setattr(native, "_provider_params", lambda model: {"model": model})
     request = replace(_request(_source(native)), on_usage=usage)
     with pytest.raises(RuntimeError, match="tool failed"):
-        await native.invoke_checkpoint(request, asyncio.Event())
+        await native.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert observed[0][2]["total_tokens"] == 150
 
 

@@ -8,6 +8,7 @@ from dataclasses import replace
 
 import pytest
 
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from core.checkpoint_types import (
     CheckpointRequest,
     ProviderCheckpointRequest,
@@ -502,7 +503,7 @@ async def test_task_exit_before_capture_is_failed(isolated_db, monkeypatch):
         raise RuntimeError("capture persistence failed")
 
     monkeypatch.setattr(runtime, "_invoke", invoke)
-    monkeypatch.setattr(runtime, "_capture_and_install", capture_failure)
+    monkeypatch.setattr(runtime, "CHECKPOINT_KIND", replace(CHECKPOINT_KIND, end_handler=capture_failure))
     await runtime.request_checkpoint(
         _checkpoint("thread-1", "cp-1"), _provider("thread-1", "cp-1")
     )

@@ -25,8 +25,8 @@ def journal_reviewed_edit(
 ) -> bool:
     """Append ``content_edited`` when the bytes changed while a review of the document is open.
 
-    "Open" is Plans' answer (``review_is_open``), the same one the reviewer watch
-    reads, so no row is written that no reader would ever admit.
+    Active forks and Plans' open escalated nodes use the same definition as
+    the reviewer watch, so no row is written that no reader would ever admit.
     """
     if not new_sha256 or new_sha256 == previous_sha256:
         return False
@@ -34,13 +34,13 @@ def journal_reviewed_edit(
 
     artifact_id = str(artifact["id"])
     unsettled = db.execute(
-        # The join drops a request whose review node no longer exists, as the reviewer watch does.
         "SELECT request.node_id FROM doc_review_requests AS request "
-        "JOIN plan_nodes AS node ON node.id=request.node_id WHERE request.artifact_id=? "
-        "AND request.cancelled_at IS NULL AND request.answered_batch_id IS NULL",
+        "LEFT JOIN plan_nodes AS node ON node.id=request.node_id WHERE request.artifact_id=? "
+        "AND request.cancelled_at IS NULL AND request.answered_batch_id IS NULL "
+        "AND (node.id IS NOT NULL OR (request.node_id IS NULL AND request.fork_id IS NOT NULL))",
         (artifact_id,),
     ).fetchall()
-    if not any(plans_public.review_is_open(db, str(row["node_id"])) for row in unsettled):
+    if not any(row["node_id"] is None or plans_public.review_is_open(db, str(row["node_id"])) for row in unsettled):
         return False
     actor = None if actor_thread_id in (None, UI_THREAD) else actor_thread_id
     models.record_artifact_change(

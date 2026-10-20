@@ -6,19 +6,19 @@ import asyncio
 import hashlib
 import json
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from history.types import HistoryBoundary
 from subagents.provider_context_limits import is_provider_context_limit
 
 from core.checkpoint_native_tools import (
-    CHECKPOINT_TOOL_NAME,
     await_or_cancel as _await_or_cancel,
     input_fits_off_loop as _input_fits,
     input_room,
     run_tool_calls as _run_tool_calls,
 )
+from core.fork_runtime import ForkKind, ForkStepLimitError
 from core.checkpoint_types import (
     CHECKPOINT_CONTEXT_TRUNCATED,
     CHECKPOINT_TOOL_ROUND_TRIP_TOKENS,
@@ -138,6 +138,7 @@ def _fit_cold_input(
 async def _messages_and_tools(
     request: ProviderCheckpointRequest,
     agent: Any,
+    kind: ForkKind,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int | None]:
     source = request.warm_source
     if source is not None:
@@ -146,17 +147,18 @@ async def _messages_and_tools(
         messages = [dict(message) for message in source.prefix_messages]
         messages.append({"role": "user", "content": request.instruction})
         return messages, [dict(tool) for tool in source.tool_definitions], None
-    from tools.catalog import advertised_tool_definitions
-
     # A cold fork has no live prefix to keep byte-stable for provider caching
     # (unlike the warm branch above), so it can advertise only the one tool
     # its loop will ever execute. Offering the full catalog only invites a
     # call the loop can just refuse (#2116): that round trip bills output
     # tokens for the refusal instead of narrative text, and can exhaust a
     # tightly-fit cold input before any narrative is produced.
+    from tools.catalog import fork_tool_definitions
+
+    definitions = fork_tool_definitions(agent.tools, kind.tool_allowlist)
     tools = [
-        tool for tool in advertised_tool_definitions(agent.tools)
-        if tool.get("function", {}).get("name") == CHECKPOINT_TOOL_NAME
+        tool for tool in definitions
+        if tool.get("function", {}).get("name") in kind.tool_allowlist
     ]
     fitted = await asyncio.to_thread(_fit_cold_input, request, tools)
     return (
@@ -169,13 +171,15 @@ async def _messages_and_tools(
     )
 
 
-async def warm_input_fits(request: ProviderCheckpointRequest) -> bool:
+async def warm_input_fits(
+    request: ProviderCheckpointRequest, kind: ForkKind,
+) -> bool:
     """Whether a warm fork's first input fits, checked before it is admitted.
 
     It keeps one tool round trip of room: the fork's tool-call reply joins its
     input before the call that writes the narrative.
     """
-    messages, tools, _first_included_seq = await _messages_and_tools(request, None)
+    messages, tools, _first_included_seq = await _messages_and_tools(request, None, kind)
     return await _input_fits(request, messages, tools, CHECKPOINT_TOOL_ROUND_TRIP_TOKENS)
 
 
@@ -237,13 +241,16 @@ async def invoke_checkpoint(
     request: ProviderCheckpointRequest,
     cancel_event: asyncio.Event,
     *,
+    kind: ForkKind,
     on_cold_input: ColdInputCallback | None = None,
 ) -> ProviderCheckpointResult:
     """Run one Native tool loop; captured text wins over terminal metadata."""
     if request.target.harness != "native":
         raise TypeError("Native adapter requires a Native target")
+    # Warm prefixes stay byte-stable; the kind instruction is appended after it.
+    request = replace(request, instruction=kind.instruction(request))
     agent = await _get_agent()
-    messages, tools, first_included_seq = await _messages_and_tools(request, agent)
+    messages, tools, first_included_seq = await _messages_and_tools(request, agent, kind)
     if request.warm_source is None and on_cold_input is not None:
         await on_cold_input(first_included_seq)
     if cancel_event.is_set():
@@ -254,55 +261,59 @@ async def invoke_checkpoint(
     response: Any = None
     partial_bodies: list[str] = []
 
-    from infra.continuity_staging import checkpoint_execution_scope
     from infra import state
 
+    step_limit = kind.step_limit("native", agent)
+    if step_limit is None:
+        raise ForkStepLimitError(f"fork kind {kind.name!r} has no Native step limit")
     thread_token = state._current_thread_id.set(request.thread_id)
     try:
-        with checkpoint_execution_scope(request.checkpoint_id):
-            for _iteration in range(agent.max_iterations):
-                if cancel_event.is_set():
-                    raise asyncio.CancelledError
-                first_reserve = CHECKPOINT_TOOL_ROUND_TRIP_TOKENS if _iteration == 0 else 0
-                if not await _input_fits(request, messages, tools, first_reserve):
-                    if _iteration == 0:
-                        raise _initial_input_refusal(request)
+        for _iteration in range(step_limit):
+            if cancel_event.is_set():
+                raise asyncio.CancelledError
+            first_reserve = CHECKPOINT_TOOL_ROUND_TRIP_TOKENS if _iteration == 0 else 0
+            if not await _input_fits(request, messages, tools, first_reserve):
+                if _iteration == 0:
+                    raise _initial_input_refusal(request)
+                return await _truncated_result(
+                    partial_bodies, usage_calls, "i_loop_input_over_bound", _iteration,
+                    request, messages, tools, response,
+                )
+            response = await _complete(request, messages, tools, model, provider, cancel_event)
+            usage_calls.append(dict(response.usage or {}))
+            if request.on_usage is not None:
+                await request.on_usage(str(_iteration), model, usage_calls[-1])
+            if response.finish_reason == "error":
+                if (response.error_kind == "provider_context_overflow"
+                        or is_provider_context_limit(response.content)):
                     return await _truncated_result(
-                        partial_bodies, usage_calls, "i_loop_input_over_bound", _iteration,
-                        request, messages, tools, response,
+                        partial_bodies, usage_calls, "ii_provider_context_limit",
+                        _iteration, request, messages, tools, response,
                     )
-                response = await _complete(request, messages, tools, model, provider, cancel_event)
-                usage_calls.append(dict(response.usage or {}))
-                if request.on_usage is not None:
-                    await request.on_usage(str(_iteration), model, usage_calls[-1])
-                if response.finish_reason == "error":
-                    if (response.error_kind == "provider_context_overflow"
-                            or is_provider_context_limit(response.content)):
-                        return await _truncated_result(
-                            partial_bodies, usage_calls, "ii_provider_context_limit",
-                            _iteration, request, messages, tools, response,
-                        )
-                    raise ProviderCheckpointRejected(
-                        response.content or "Native checkpoint provider call failed"
+                raise ProviderCheckpointRejected(
+                    response.content or "Native checkpoint provider call failed"
+                )
+            if response.has_tool_calls:
+                if isinstance(response.content, str) and response.content.strip():
+                    partial_bodies.append(response.content)
+                fits = await _run_tool_calls(
+                    agent, response, messages, cancel_event, request, tools,
+                    kind=kind,
+                )
+                if not fits:
+                    if cancel_event.is_set():
+                        raise asyncio.CancelledError
+                    return await _truncated_result(
+                        partial_bodies, usage_calls, "iii_tool_results_over_bound",
+                        _iteration, request, messages, tools, response,
                     )
-                if response.has_tool_calls:
-                    if isinstance(response.content, str) and response.content.strip():
-                        partial_bodies.append(response.content)
-                    fits = await _run_tool_calls(agent, response, messages, cancel_event, request, tools)
-                    if not fits:
-                        if cancel_event.is_set():
-                            raise asyncio.CancelledError
-                        return await _truncated_result(
-                            partial_bodies, usage_calls, "iii_tool_results_over_bound",
-                            _iteration, request, messages, tools, response,
-                        )
-                    continue
-                body = response.content
-                if not (isinstance(body, str) and body.strip()):
-                    body = response.reasoning_content
-                if isinstance(body, str) and body.strip():
-                    return ProviderCheckpointResult(body, {"calls": usage_calls})
-                break
+                continue
+            body = response.content
+            if not (isinstance(body, str) and body.strip()):
+                body = response.reasoning_content
+            if isinstance(body, str) and body.strip():
+                return ProviderCheckpointResult(body, {"calls": usage_calls})
+            break
     finally:
         state._current_thread_id.reset(thread_token)
     raise ProviderCheckpointRejected("Native checkpoint produced no body")

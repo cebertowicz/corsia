@@ -6,6 +6,7 @@ import sqlite3
 import pytest
 
 from doc_feedback_helpers import seed_thread
+from doceditor.review_requests import escalate_fork
 from test_doc_review_adapters import client, payload  # noqa: F401
 from test_doc_review_requests import request, review_env  # noqa: F401
 
@@ -254,6 +255,7 @@ def test_ended_review_remains_named_without_cancel_or_requested_picker_state(cli
     from plans import public
     db, aid = review_env
     row = request(db, aid)
+    row = escalate_fork(db, row["id"])
     public.transition_node(row["node_id"], end, db=db)
     db.commit()
     body = client.get(f"/api/artifacts/{aid}/reviews", params={"thread_id": "requester"}).json()
@@ -277,6 +279,7 @@ def test_later_comments_remove_the_named_ended_row_from_the_http_list(client, re
     from plans import public
     db, aid = review_env
     row = request(db, aid)
+    row = escalate_fork(db, row["id"])
     public.transition_node(row["node_id"], "closed", db=db)
     db.commit()
     assert client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"][0]["outcome"] == "ended_without_comments"
@@ -289,6 +292,7 @@ def test_silent_end_through_real_plan_http_contract(client, review_env):
     client.app.include_router(plans.router)
     db, aid = review_env
     row = request(db, aid)
+    row = escalate_fork(db, row["id"])
     operator = client.get("/api/plans/operator/threads/reviewer")
     assert operator.status_code == 200
     plan = next(p for p in operator.json()["plans"] if any(n["id"] == row["node_id"] for n in p["nodes"]))

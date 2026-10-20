@@ -342,7 +342,7 @@ class CodexAppServerSession:
         write-bearing subagent that reaches ``thread/start`` without any write
         tool would silently discover it mid-task; refuse the launch instead.
         """
-        if self.control_only or self.task is None:
+        if self.control_only or self.task is None or self.checkpoint_id is not None:
             return
         if not self._is_write_capable():
             raise CodexWriteSurfaceError(

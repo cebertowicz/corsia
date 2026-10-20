@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from tools.recorded_call import CompletedToolFailure
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 
 @pytest.mark.asyncio
@@ -177,7 +178,7 @@ async def test_native_checkpoint_stops_after_completed_settlement_failure(isolat
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda model: {"model": model})
     with pytest.raises(CompletedToolFailure) as raised:
-        await native.invoke_checkpoint(replace(_request(_source(native)), on_usage=paid), asyncio.Event())
+        await native.invoke_checkpoint(replace(_request(_source(native)), on_usage=paid), asyncio.Event(), kind=CHECKPOINT_KIND)
     [completed] = raised.value.completed
     assert completed.provider_tool_call_id == "private-call"
     assert completed.checkpoint_id == "checkpoint-1"

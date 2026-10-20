@@ -7,6 +7,7 @@ DOC_FEEDBACK_SCHEMA_SQL = """
         author_kind TEXT NOT NULL CHECK (author_kind IN ('agent','user')),
         author_id TEXT NOT NULL,
         recipient_id TEXT NOT NULL,
+        review_request_id TEXT REFERENCES doc_review_requests(id),
         state TEXT NOT NULL DEFAULT 'open'
             CHECK (state IN ('open','delivered','undelivered')),
         opened_at TEXT NOT NULL,
@@ -29,8 +30,11 @@ DOC_FEEDBACK_SCHEMA_SQL = """
         updated_at TEXT NOT NULL
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_feedback_batches_open
+        ON doc_feedback_batches(author_kind, author_id, artifact_id, recipient_id, review_request_id)
+        WHERE state='open' AND review_request_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_feedback_batches_open_unscoped
         ON doc_feedback_batches(author_kind, author_id, artifact_id, recipient_id)
-        WHERE state='open';
+        WHERE state='open' AND review_request_id IS NULL;
     CREATE INDEX IF NOT EXISTS idx_doc_feedback_batches_due
         ON doc_feedback_batches(state, closes_at);
     CREATE INDEX IF NOT EXISTS idx_doc_feedback_batches_author

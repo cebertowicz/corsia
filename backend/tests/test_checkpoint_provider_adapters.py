@@ -11,6 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from core import checkpoint_cc_commands
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from core.checkpoint_types import ProviderCheckpointRequest
 from core.checkpoint_fit import ColdFoldInput
 from history.types import HistoryBoundary
@@ -145,7 +147,7 @@ async def test_native_warm_initial_fit_reserves_max_output_before_provider_call(
     monkeypatch.setattr(native, "_provider_params", lambda _model: {"model": "wire"})
 
     with pytest.raises(WarmForkUnusable):
-        await native.invoke_checkpoint(request, asyncio.Event())
+        await native.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
 
 @pytest.mark.asyncio
@@ -179,6 +181,7 @@ async def test_native_checkpoint_refuses_non_continuity_tools_and_keeps_continui
         asyncio.Event(),
         _request(None),
         [],
+        kind=CHECKPOINT_KIND,
     )
 
     assert result is True
@@ -248,7 +251,7 @@ async def test_native_cold_fork_never_offers_a_tool_it_can_only_refuse(monkeypat
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda _model: {"model": "wire"})
 
-    result = await native.invoke_checkpoint(_request(None), asyncio.Event())
+    result = await native.invoke_checkpoint(_request(None), asyncio.Event(), kind=CHECKPOINT_KIND)
 
     from core.checkpoint_render import usable_result
 
@@ -315,7 +318,7 @@ async def test_native_cold_fold_at_its_allowance_completes_edit_then_narrative(m
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda _model: {"model": "wire"})
 
-    result = await native.invoke_checkpoint(request, asyncio.Event())
+    result = await native.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
     first = calls[0]
     fitted = cold_input_tokens(first["messages"], request.target) + cold_input_tokens(
@@ -401,7 +404,7 @@ async def test_native_warm_capture_reuses_prefix_tools_and_tool_loop(monkeypatch
 
     outer = state._current_thread_id.set("outer-thread")
     try:
-        result = await native.invoke_checkpoint(_request(source), asyncio.Event())
+        result = await native.invoke_checkpoint(_request(source), asyncio.Event(), kind=CHECKPOINT_KIND)
         assert state._current_thread_id.get(None) == "outer-thread"
     finally:
         state._current_thread_id.reset(outer)
@@ -442,7 +445,7 @@ async def test_native_provider_failure_cannot_be_installed_as_checkpoint(monkeyp
     monkeypatch.setattr(native, "_provider_params", lambda _model: {})
 
     with pytest.raises(ProviderCheckpointRejected, match="Cannot load selected model"):
-        await native.invoke_checkpoint(_request(_source(native)), asyncio.Event())
+        await native.invoke_checkpoint(_request(_source(native)), asyncio.Event(), kind=CHECKPOINT_KIND)
 
 
 @pytest.mark.asyncio
@@ -465,7 +468,7 @@ async def test_native_checkpoint_cancel_cancels_exact_provider_call(monkeypatch)
     monkeypatch.setattr(native, "_provider_params", lambda _model: {})
     cancel = asyncio.Event()
     operation = asyncio.create_task(
-        native.invoke_checkpoint(_request(_source(native)), cancel)
+        native.invoke_checkpoint(_request(_source(native)), cancel, kind=CHECKPOINT_KIND)
     )
     await asyncio.sleep(0)
     cancel.set()
@@ -497,12 +500,12 @@ async def test_cc_usable_body_retains_process_exit_diagnostic(monkeypatch, vendo
 
         return FakeProcess(stdout, returncode=7, stderr=b"quota/auth process terminal")
 
-    monkeypatch.setattr(cc, "_cold_command", lambda _request: ["claude"])
+    monkeypatch.setattr(checkpoint_cc_commands, "cold_command", lambda _request, _kind: ["claude"])
     monkeypatch.setattr(cc, "_checkpoint_env", lambda *_args: {})
     monkeypatch.setattr(cc, "_spawn_process", spawn)
     request = replace(_request(None), target=_target("claude-code"))
 
-    result = await cc.invoke_checkpoint(request, asyncio.Event())
+    result = await cc.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
     assert result.raw_body == "paid body"
     assert result.diagnostic == "quota/auth process terminal"
@@ -531,12 +534,12 @@ async def test_cc_process_context_limit_retains_partial_body(monkeypatch, vendor
 
         return FakeProcess(stdout, returncode=1, stderr=b"Prompt is too long")
 
-    monkeypatch.setattr(cc, "_cold_command", lambda _request: ["claude"])
+    monkeypatch.setattr(checkpoint_cc_commands, "cold_command", lambda _request, _kind: ["claude"])
     monkeypatch.setattr(cc, "_checkpoint_env", lambda *_args: {})
     monkeypatch.setattr(cc, "_spawn_process", spawn)
     request = replace(_request(None), target=_target("claude-code"))
 
-    result = await cc.invoke_checkpoint(request, asyncio.Event())
+    result = await cc.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert result.raw_body == "partial body"
     assert result.diagnostic == "checkpoint_context_truncated"
 
@@ -576,7 +579,7 @@ def test_cc_warm_command_preserves_vetted_live_launch_files(tmp_path):
         binary="current-claude",
     )
 
-    command = cc._warm_command(source, request, "snapshot-session")
+    command = checkpoint_cc_commands.warm_command(source, request, CHECKPOINT_KIND, "snapshot-session")
 
     assert command[0] == "current-claude"
     assert command[command.index("--resume") + 1] == "snapshot-session"
@@ -615,7 +618,7 @@ async def test_cc_registered_warm_recreates_then_removes_seed(tmp_path, monkeypa
 
     monkeypatch.setattr(cc, "_spawn_process", spawn)
     request = replace(_request(source), target=_target("claude-code"), binary="claude")
-    result = await cc.invoke_checkpoint(request, asyncio.Event())
+    result = await cc.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
     assert result.raw_body == "checkpoint"
     assert observed["text"] == "restored seed"
@@ -668,6 +671,7 @@ async def test_codex_usable_body_retains_process_exit_diagnostic(
         cwd=str(tmp_path),
         cancel_event=asyncio.Event(),
         cold_input=ColdFoldInput((), 10, None, 0),
+        kind=CHECKPOINT_KIND,
     )
 
     assert result.raw_body == "paid body"

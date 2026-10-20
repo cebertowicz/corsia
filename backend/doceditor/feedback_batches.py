@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-import uuid
+from doceditor.feedback_batch_identity import open_batch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -36,38 +36,6 @@ def _after(value: str, seconds: int) -> str:
 
 def _new_deadline(author_kind: str, now: str) -> str:
     return _after(now, AGENT_QUIET if author_kind == "agent" else USER_IDLE)
-
-
-def _open_batch(
-    db,
-    *,
-    author_kind: str,
-    author_id: str,
-    artifact_id: str,
-    recipient_id: str,
-    now: str,
-) -> str:
-    """Return the canonical open batch for one author, artifact, and recipient."""
-    row = db.execute(
-        """SELECT id FROM doc_feedback_batches
-           WHERE author_kind=? AND author_id=? AND artifact_id=?
-             AND recipient_id=? AND state='open'""",
-        (author_kind, author_id, artifact_id, recipient_id),
-    ).fetchone()
-    if row is not None:
-        return str(row["id"])
-    batch_id = str(uuid.uuid4())
-    db.execute(
-        """INSERT INTO doc_feedback_batches
-           (id,artifact_id,author_kind,author_id,recipient_id,state,
-            opened_at,last_item_at,closes_at,item_count,created_at,updated_at)
-           VALUES (?,?,?,?,?,'open',?,?,?,0,?,?)""",
-        (
-            batch_id, artifact_id, author_kind, author_id, recipient_id,
-            now, now, _new_deadline(author_kind, now), now, now,
-        ),
-    )
-    return batch_id
 
 
 def _touch_batch(
@@ -108,16 +76,20 @@ def _add_comment_item(
     return True
 
 
-def _join_open_batch(db, comment: dict[str, Any], recipient_id: str) -> str:
+def _join_open_batch(
+    db, comment: dict[str, Any], recipient_id: str, review_request_id: str | None = None,
+) -> str:
     author_kind = str(comment["author_kind"])
     now = str(comment["created_at"])
-    batch_id = _open_batch(
+    batch_id = open_batch(
         db,
         author_kind=author_kind,
         author_id=feedback_comments.author_id(comment),
         artifact_id=str(comment["artifact_id"]),
         recipient_id=recipient_id,
         now=now,
+        closes_at=_new_deadline(author_kind, now),
+        review_request_id=review_request_id,
     )
     _add_comment_item(
         db,
@@ -142,13 +114,14 @@ def record_reopen(
         return None
     at = now or _now()
     recipient_id, = feedback_comments.recipients(db, comment, document_owner_only=True)
-    batch_id = _open_batch(
+    batch_id = open_batch(
         db,
         author_kind="user",
         author_id=USER_AUTHOR_ID,
         artifact_id=str(comment["artifact_id"]),
         recipient_id=recipient_id,
         now=at,
+        closes_at=_new_deadline("user", at),
     )
     _add_comment_item(
         db,
@@ -181,13 +154,14 @@ def record_edit(
         raise ValueError("edit feedback author_kind must be 'agent' or 'user'")
     now = at or _now()
 
-    batch_id = _open_batch(
+    batch_id = open_batch(
         db,
         author_kind=author_kind,
         author_id=author_id,
         artifact_id=artifact_id,
         recipient_id=recipient_id,
         now=now,
+        closes_at=_new_deadline(author_kind, now),
     )
     item_delta = feedback_edits.record_edit_item(
         db,
@@ -209,6 +183,7 @@ def record_comment(
     *,
     created: bool,
     submit: bool = False,
+    review_request_id: str | None = None,
 ) -> dict[str, Any]:
     """Attach a newly inserted comment to recipient batches in the caller's write."""
     batch_ids: list[str] = []
@@ -221,7 +196,15 @@ def record_comment(
     if created:
         feedback_comments.make_user_document_durable(db, comment)
         feedback_comments.emit_comment_created(db, comment)
-        batch_ids = [_join_open_batch(db, comment, recipient) for recipient in feedback_comments.recipients(db, comment)]
+        batch_ids = [
+            _join_open_batch(db, comment, recipient, review_request_id)
+            for recipient in feedback_comments.recipients(db, comment)
+        ]
+        if submit and comment["author_kind"] == "agent" and review_request_id is not None:
+            pending, woken, failures = review_requests.submit_fork_feedback(
+                db, review_request_id, feedback_comments.author_id(comment), comment["artifact_id"],
+            )
+            return {"batch_ids": batch_ids, "woken": woken, "undelivered": failures}
         if submit and comment["author_kind"] == "agent":
             woken = close_for_document(
                 db,
@@ -303,7 +286,11 @@ def close_for_document(
     """Close all matching open recipient batches for one document."""
     rows = db.execute(
         """SELECT id FROM doc_feedback_batches WHERE state='open'
-           AND author_kind=? AND author_id=? AND artifact_id=? ORDER BY opened_at,id""",
+           AND author_kind=? AND author_id=? AND artifact_id=?
+           AND (review_request_id IS NULL OR EXISTS (
+               SELECT 1 FROM doc_review_requests r
+               WHERE r.id=review_request_id AND r.node_id IS NOT NULL
+           )) ORDER BY opened_at,id""",
         (author_kind, author_id, artifact_id),
     ).fetchall()
     woken: list[str] = []
@@ -314,12 +301,23 @@ def close_for_document(
 
 
 def close_for_turn_end(db, thread_id: str) -> list[str]:
-    """Close an agent thread's open batches in the terminal write transaction."""
+    """Close an agent thread's open batches in the terminal write transaction.
+
+    An escalated review's staged batch closes only from a Turn that started at
+    or after its escalation (its ``closes_at``), so a Turn already running when
+    the fork gave up cannot deliver it before the reviewer has continued.
+    """
     rows = db.execute(
         """SELECT id FROM doc_feedback_batches
            WHERE state='open' AND author_kind='agent' AND author_id=?
-           ORDER BY opened_at,id""",
-        (thread_id,),
+           AND (review_request_id IS NULL OR (EXISTS (
+               SELECT 1 FROM doc_review_requests r
+               WHERE r.id=review_request_id AND r.node_id IS NOT NULL
+           ) AND julianday(closes_at)<=(
+               SELECT julianday(started_at) FROM active_turns WHERE thread_id=?
+               ORDER BY turn_order DESC LIMIT 1
+           ))) ORDER BY opened_at,id""",
+        (thread_id, thread_id),
     ).fetchall()
     woken: list[str] = []
     for row in rows:
@@ -329,12 +327,17 @@ def close_for_turn_end(db, thread_id: str) -> list[str]:
 
 
 def close_due(now: str, *, db=None) -> list[str]:
-    """Deliver every due batch; one that raises rolls back alone, is logged, and retries next pass."""
+    """Deliver every due batch; one that raises rolls back alone, is logged, and retries next pass.
+
+    A review request's batch never closes on a timer: only its reviewer's
+    submit or continuing Turn delivers it.
+    """
     deliveries: list[tuple[str, str]] = []
     with write_transaction(db, scope="close_due_doc_feedback") as connection:
         rows = connection.execute(
             """SELECT id,artifact_id,author_kind,closed_reason FROM doc_feedback_batches
-               WHERE state='open' AND closes_at<=? ORDER BY closes_at,id""",
+               WHERE state='open' AND closes_at<=? AND review_request_id IS NULL
+               ORDER BY closes_at,id""",
             (now,),
         ).fetchall()
         woken: list[str] = []

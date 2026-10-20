@@ -290,7 +290,7 @@ async def test_cc_checkpoint_tool_skips_canonical_turn_lineage(monkeypatch):
         return await operation()
 
     task = asyncio.create_task(asyncio.Event().wait())
-    monkeypatch.setitem(runtime._tasks, "cp-1", runtime._Handle(
+    monkeypatch.setitem(runtime._tasks, "cp-1", runtime.ForkHandle(
         task, asyncio.Event(), "cc-thread", run,
     ))
     try:

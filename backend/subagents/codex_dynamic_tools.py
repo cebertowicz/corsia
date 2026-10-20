@@ -74,6 +74,10 @@ async def execute_dynamic_tool(session, name: str, arguments: dict, params: dict
     # Capability follows the selected catalog entry, not a transport alias.
     model_identity = session.catalog_model_id or session.model
     model_kwargs = {"model": model_identity} if model_identity else {}
+    from core.fork_tools import ForkToolBoundary
+
+    if isinstance(boundary, ForkToolBoundary):
+        checkpoint_kwargs["fork_policy"] = boundary
     content = await execute_tool(
         session.tool_registry, thread_id=session.corsia_thread_id,
         turn_identity=session.corsia_turn_identity,

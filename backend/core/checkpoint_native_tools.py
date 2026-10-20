@@ -7,7 +7,7 @@ import json
 from typing import Any, NamedTuple
 
 from core.checkpoint_types import ProviderCheckpointRequest
-from infra.state.context import tool_invocation_context
+from core.fork_runtime import ForkKind
 from tools.recorded_call import (
     CompletedToolCall,
     CompletedToolFailure,
@@ -34,8 +34,10 @@ async def await_or_cancel(awaitable, cancel_event: asyncio.Event):
             raise asyncio.CancelledError
         return await operation
     finally:
-        stopped.cancel()
-        await asyncio.gather(stopped, return_exceptions=True)
+        for task in (operation, stopped):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(operation, stopped, return_exceptions=True)
 
 
 def _tool_call_dicts(response) -> list[dict[str, Any]]:
@@ -104,20 +106,7 @@ async def input_fits_off_loop(request, messages, tools, reserve: int = 0) -> boo
     return await asyncio.to_thread(input_fits, request, messages, tools, reserve)
 
 
-async def run_tool_calls(
-    agent: Any,
-    response: Any,
-    messages: list[dict[str, Any]],
-    cancel_event: asyncio.Event,
-    request: ProviderCheckpointRequest,
-    tools: list[dict[str, Any]],
-) -> bool:
-    """Run a Native checkpoint batch while retaining every completed effect.
-
-    A result that would not fit the remaining room is never sent: its effect
-    stands, and the fork sees a short error telling it to write the
-    checkpoint (#2514). Only when even that does not fit does the batch fail.
-    """
+def _append_assistant_message(messages: list[dict[str, Any]], response: Any) -> None:
     messages.append(
         {
             "role": "assistant",
@@ -130,19 +119,37 @@ async def run_tool_calls(
             ),
         }
     )
+
+
+async def run_tool_calls(
+    agent: Any,
+    response: Any,
+    messages: list[dict[str, Any]],
+    cancel_event: asyncio.Event,
+    request: ProviderCheckpointRequest,
+    tools: list[dict[str, Any]],
+    *,
+    kind: ForkKind,
+) -> bool:
+    """Run a Native checkpoint batch while retaining every completed effect.
+
+    A result that would not fit the remaining room is never sent: its effect
+    stands, and the fork sees a short error telling it to write the
+    checkpoint (#2514). Only when even that does not fit does the batch fail.
+    """
+    _append_assistant_message(messages, response)
     completed: list[CompletedToolCall] = []
     try:
         if not await input_fits_off_loop(request, messages, tools):
             return False
         for call in response.tool_calls:
-            if call.name != CHECKPOINT_TOOL_NAME:
-                result = "Native checkpoints may only use continuity_edit."
+            if call.name not in kind.tool_allowlist:
+                result = kind.tool_refusal
             else:
                 try:
-                    with tool_invocation_context(None, checkpoint_id=request.checkpoint_id):
-                        result = await await_or_cancel(
-                            agent.tools.execute(call.name, call.arguments), cancel_event
-                        )
+                    result = await kind.tool_executor(
+                        agent, call.name, call.arguments, cancel_event, request,
+                    )
                 except CompletedToolFailure as failure:
                     enrich_completed_failure(
                         failure,
@@ -171,8 +178,7 @@ async def run_tool_calls(
                 room = await asyncio.to_thread(input_room, request, messages, tools)
                 reply["content"] = (
                     f"Error: this result ({len(result)} characters) is "
-                    f"{room.counted - room.bound} tokens over the remaining checkpoint "
-                    "room and was not sent; write the checkpoint now."
+                    + kind.over_room_text.format(excess=room.counted - room.bound)
                 )
                 if not await input_fits_off_loop(request, messages, tools):
                     return False

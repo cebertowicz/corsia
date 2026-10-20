@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from collections.abc import Callable
 from typing import Any
 
-from core.checkpoint_capture import (
-    capture_and_install as _capture_and_install,
-    read_checkpoint as _read,
-    terminal_failure as _terminal_failure,
-)
+from core.checkpoint_capture import read_checkpoint as _read
 from core.checkpoint_cold_fallback import invoke_with_cold_correction
 from core.checkpoint_fold_gate import refuse_limited_target as _refuse_limited_target
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from core.checkpoint_types import (
     CheckpointNotAdmitted,
     CheckpointRecord,
@@ -33,16 +30,8 @@ from infra.db_async import run_in_db
 from infra.time import utc_now_iso
 
 
+from core.fork_runtime import ForkHandle, handles as _tasks
 
-@dataclass(slots=True)
-class _Handle:
-    task: asyncio.Task[CheckpointRecord]
-    cancel_event: asyncio.Event
-    thread_id: str
-    tool_executor: Any = None
-
-
-_tasks: dict[str, _Handle] = {}
 _wakes: set[asyncio.Task[None]] = set()
 
 
@@ -92,10 +81,12 @@ async def _invoke(
             handle.tool_executor = executor
 
         return await invoke_checkpoint(
-            request, cancel_event, on_cold_input=record_input,
-            on_tool_executor=bind_executor,
+            request, cancel_event, kind=CHECKPOINT_KIND,
+            on_cold_input=record_input, on_tool_executor=bind_executor,
         )
-    return await invoke_checkpoint(request, cancel_event, on_cold_input=record_input)
+    return await invoke_checkpoint(
+        request, cancel_event, kind=CHECKPOINT_KIND, on_cold_input=record_input,
+    )
 
 
 async def execute_checkpoint_tool(
@@ -183,7 +174,7 @@ async def _execute(
         if cancel_event.is_set():
             raise asyncio.CancelledError
         try:
-            return await _capture_and_install(checkpoint_id, result)
+            return await CHECKPOINT_KIND.end_handler(checkpoint_id, result)
         except Exception:
             from loguru import logger
 
@@ -197,7 +188,7 @@ async def _execute(
         )
         return await _read(checkpoint_id)
     except Exception as error:
-        return await _terminal_failure(checkpoint_id, error)
+        return await CHECKPOINT_KIND.limit_or_failure_handler(checkpoint_id, error)
     finally:
         record = await _read(checkpoint_id)
         await _notify_completion(record)
@@ -235,7 +226,9 @@ def _launch_checkpoint(
         _execute(request.id, provider_request, cancel_event),
         name=f"checkpoint:{request.id}",
     )
-    _tasks[request.id] = _Handle(task, cancel_event, request.thread_id)
+    _tasks[request.id] = ForkHandle(
+        task, cancel_event, request.thread_id, kind=CHECKPOINT_KIND, request=provider_request,
+    )
     task.add_done_callback(lambda done: _forget(request.id, done))
     _broadcast_changed(request.thread_id)
 
@@ -363,18 +356,25 @@ async def cancel_checkpoint(checkpoint_id: str) -> CheckpointRecord:
 
 
 async def shutdown_checkpoint_tasks() -> None:
-    """Cancel and join the exact checkpoint calls and wakes owned by this process."""
+    """Cancel and join the exact fork calls and wakes owned by this process.
+
+    Every fork stops before its provider transport; only checkpoints have a
+    checkpoint row to cancel. A review fork's request is escalated at the next
+    startup (``artifact_review_capture.reconcile_startup_reviews``).
+    """
     handles = tuple(_tasks.items())
-    for _checkpoint_id, handle in handles:
+    for _fork_id, handle in handles:
         handle.cancel_event.set()
-    for checkpoint_id, _handle in handles:
+    for checkpoint_id, handle in handles:
+        if handle.kind is not CHECKPOINT_KIND:
+            continue
         await run_in_db(
             checkpoint_store.cancel,
             checkpoint_id,
             ended_at=utc_now_iso(),
         )
     await asyncio.gather(
-        *(handle.task for _checkpoint_id, handle in handles),
+        *(handle.task for _fork_id, handle in handles),
         return_exceptions=True,
     )
     # Joined calls start their wakes on the way out, so take wakes last.
@@ -397,4 +397,4 @@ async def reconcile_startup_checkpoints() -> tuple[CheckpointRecord, ...]:
 
 def checkpoint_task_count() -> int:
     """Expose live cancellation-handle count for lifecycle verification."""
-    return len(_tasks)
+    return sum(1 for handle in _tasks.values() if handle.kind is CHECKPOINT_KIND)

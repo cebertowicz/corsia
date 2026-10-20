@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
+
 from tools.recorded_call import (
     CompletedToolCall,
     CompletedToolFailure,
@@ -146,7 +148,7 @@ async def test_checkpoint_native_tool_loop_failure_keeps_cause(monkeypatch, capl
     with caplog.at_level(logging.ERROR, logger="tools.recorded_call"):
         with pytest.raises(CompletedToolFailure) as failure:
             await checkpoint_native_tools.run_tool_calls(
-                agent, response, [], asyncio.Event(), request, [],
+                agent, response, [], asyncio.Event(), request, [], kind=CHECKPOINT_KIND,
             )
 
     error = failure.value

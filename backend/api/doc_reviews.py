@@ -65,6 +65,10 @@ async def _create(body: ReviewCreate, actor: reviews.ReviewActor):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     await public.drive_threads(woken)
+    if result.get("fork_id") and result.get("node_id") is None:
+        from core.artifact_review_runtime import start
+
+        await start(result["id"])
     return {"request": result}
 
 

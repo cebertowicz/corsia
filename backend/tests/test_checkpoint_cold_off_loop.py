@@ -66,7 +66,9 @@ async def test_native_cold_tool_count_and_fit_run_off_the_loop(monkeypatch):
         warm_source=None, instruction="fold", target="writer", max_output_tokens=16_384,
     )
 
-    messages, sent_tools, first_seq = await fork._messages_and_tools(request, agent)
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
+
+    messages, sent_tools, first_seq = await fork._messages_and_tools(request, agent, CHECKPOINT_KIND)
 
     assert counted and counted[0] != loop_thread
     assert fitted and fitted[0] != loop_thread

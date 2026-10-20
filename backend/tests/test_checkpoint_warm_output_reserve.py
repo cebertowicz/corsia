@@ -7,6 +7,7 @@ from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 from core.checkpoint_types import (
     CHECKPOINT_OUTPUT_TOKENS,
@@ -100,7 +101,7 @@ async def _codex_initial(monkeypatch, tmp_path, *, warm: bool, tokens: int):
     cold_input = None if warm else Mock(input_tokens=tokens)
     await codex._run_app_server_checkpoint(
         request, source, source_home=tmp_path, isolated_home=tmp_path, cwd=str(tmp_path),
-        cancel_event=asyncio.Event(), cold_input=cold_input,
+        cancel_event=asyncio.Event(), cold_input=cold_input, kind=CHECKPOINT_KIND,
     )
 
 

@@ -15,9 +15,9 @@ from tools.delegation import _require_context, _tool_schema
 from tools.documents import _json, _resolve_doc_target
 
 TOOL_DESCRIPTION = (
-    "Ask an agent whose scope this document touches to review it. Queues a review "
-    "task in the reviewer's plan; its comments on this document reach the owner "
-    "and settle the task. The reviewer comments; it does not do the work. Ask only about a "
+    "Ask an agent whose scope this document touches to review it. Runs a short private "
+    "review without interrupting the reviewer; its comments on this document reach the owner. "
+    "If the review cannot finish, it becomes a reviewer plan task. The reviewer comments; it does not do the work. Ask only about a "
     "section that changes the reviewer's area: name that section and your question in `note`. "
     "The reviewer reads only that section and leaves its changes as suggestions. `reviewer` "
     "is a thread ID from `agent_roster`; the document's owner cannot be the reviewer."
@@ -110,4 +110,8 @@ class DocReviewRequestTool(Tool):
         except (ValueError, PermissionError) as exc:
             return f"Error: {exc}"
         await public.drive_threads(woken)
+        if result.get("fork_id") and result.get("node_id") is None:
+            from core.artifact_review_runtime import start
+
+            await start(result["id"])
         return _json({"request": result})

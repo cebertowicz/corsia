@@ -1,7 +1,8 @@
 """Canonical DB create/feedback transaction for validated comment adapters."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from doceditor.review_fork_context import current_request_id
 
 from doceditor import comments, doc_images, feedback_batches, image_regions
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
@@ -36,6 +37,7 @@ class CommentInput:
     live_capture: bool = False
     registration: dict | None = None
     submit: bool = False
+    review_request_id: str | None = field(default_factory=current_request_id)
     # A checked (x, y, w, h) in fractions of the image (DCOL-FR13.3).
     region: tuple[float, float, float, float] | None = None
 
@@ -109,7 +111,10 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 review=request.review, replacement=request.replacement, client_id=identifier,
                 region=request.region, image_rev=image_rev, image_src=image_src, db=connection,
             )
-            feedback = feedback_batches.record_comment(connection, row, created=created, submit=request.submit)
+            feedback = feedback_batches.record_comment(
+                connection, row, created=created, submit=request.submit,
+                review_request_id=request.review_request_id,
+            )
         return row, registered, feedback
     except BaseException:
         receipt.failed(identifier, db, artifact_id=request.artifact_id, author=request.author)

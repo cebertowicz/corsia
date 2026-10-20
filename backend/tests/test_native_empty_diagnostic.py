@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from core import checkpoint_native_fork as native
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from core.checkpoint_native_tools import CHECKPOINT_TOOL_NAME, InputRoom, input_fits, input_room
 from core.checkpoint_types import CHECKPOINT_CONTEXT_TRUNCATED, ProviderCheckpointRejected
 from llm.router import LLMResponse, ToolCallRequest
@@ -51,7 +52,7 @@ async def _run(monkeypatch, replies, *, loop_fits=True, tool_fits=True, seen=Non
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda _model: {"model": "wire"})
     request = _request(None)
-    result = await native.invoke_checkpoint(request, asyncio.Event())
+    result = await native.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     return request, result
 
 
@@ -149,9 +150,9 @@ async def test_warm_fork_needs_a_tool_round_trip_of_room_before_it_is_admitted(m
 
     # Counted equals the bound: it fits, but leaves no room for a tool-call reply.
     assert input_fits(request, messages, []) is True
-    assert await native.warm_input_fits(request) is False
+    assert await native.warm_input_fits(request, kind=CHECKPOINT_KIND) is False
     roomy = replace(source, provider_input_tokens=bound - 50 - CHECKPOINT_TOOL_ROUND_TRIP_TOKENS)
-    assert await native.warm_input_fits(replace(request, warm_source=roomy)) is True
+    assert await native.warm_input_fits(replace(request, warm_source=roomy), kind=CHECKPOINT_KIND) is True
 
 
 def test_warm_source_without_a_provider_anchor_is_named_not_over_bound():
@@ -220,7 +221,7 @@ async def test_pressure_warm_fork_at_soft_zone_entry_is_admitted_warm(monkeypatc
         ),
     )
 
-    assert await native.warm_input_fits(request) is True
+    assert await native.warm_input_fits(request, kind=CHECKPOINT_KIND) is True
 
 
 async def _run_warm(monkeypatch, reply_tokens):
@@ -258,7 +259,7 @@ async def _run_warm(monkeypatch, reply_tokens):
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda _model: {"model": "wire"})
     request = replace(_request(source), instruction=instruction)
-    return await native.invoke_checkpoint(request, asyncio.Event())
+    return await native.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
 
 def _bulky_tool_reply(chars: int) -> LLMResponse:

@@ -1,456 +1,303 @@
-"""N8a: requests share the trusted, non-preemptive Plans lifecycle."""
+"""Fork-first document review lifecycle and feedback-isolation tests."""
 from __future__ import annotations
 
 import json
 
 import pytest
 
-from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
-from doceditor import feedback_batches, feedback_delivery
+from doc_feedback_helpers import seed_document, seed_thread
+from doceditor import comments, feedback_batches
 from infra.database import get_db, write_transaction
+from infra.time import utc_now_iso
 from plans import public
 
 
 @pytest.fixture
-def review_env(isolated_db):
+def review_env(isolated_db, monkeypatch):
+    from doceditor import live_runtime
+
+    # Review-fork tests exercise durable background writes, not a live editor's
+    # owner-loop path; a manager retained by an unrelated prior test is stale.
+    monkeypatch.setattr(live_runtime, "_manager", None)
     db = get_db()
-    for tid in ("owner", "requester", "reviewer", "second"):
-        seed_thread(db, tid, title=tid.title())
-        db.execute("UPDATE threads SET agent_enabled=1,agent_responsibility='Review documents' WHERE id=?", (tid,))
-    aid = seed_document(db, "owner", name="PRD.md")
-    yield db, aid
+    for thread_id in ("owner", "requester", "reviewer", "second"):
+        seed_thread(db, thread_id, title=thread_id.title())
+        db.execute(
+            "UPDATE threads SET agent_enabled=1,agent_responsibility='Review documents' WHERE id=?",
+            (thread_id,),
+        )
+    artifact_id = seed_document(db, "owner", name="PRD.md")
+    yield db, artifact_id
     db.close()
 
 
-def request(db, aid, *, kind="agent", reviewer="reviewer", note="Check claims", key="review-key"):
-    from doceditor import review_requests as reviews
-    actor = reviews.ReviewActor(kind, "owner-token" if kind == "user" else "requester", "requester", "owner-token", "Steve" if kind == "user" else "Requester")
-    return reviews.request_review(db, aid, reviewer, actor, note, key)
+def request(db, artifact_id, *, kind="agent", reviewer="reviewer", note="Check claims", key="review-key"):
+    from doceditor import review_requests
+
+    actor = review_requests.ReviewActor(
+        kind, "owner-token" if kind == "user" else "requester", "requester", "owner-token",
+        "Reviewer requester" if kind == "user" else "Requester",
+    )
+    return review_requests.request_review(db, artifact_id, reviewer, actor, note, key)
 
 
-def stored(db, rid):
-    return dict(db.execute("SELECT * FROM doc_review_requests WHERE id=?", (rid,)).fetchone())
+def stored(db, request_id):
+    return dict(db.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone())
 
 
-@pytest.mark.parametrize("kind", ["user", "agent"])
-def test_request_creates_linked_provenanced_queued_node_without_preemption(review_env, kind):
-    db, aid = review_env
-    plan = public.ensure_plan("thread", "reviewer", db=db)
-    running = public.add_node(plan.id, kind="task", title="Current task", acceptance_criteria="Done", db=db)
-    public.transition_node(running.id, "active", db=db)
-    public.reconcile_plan(plan.id, actor_id=None, provenance="test", db=db)
-    db.commit()
-    result = request(db, aid, kind=kind)
-    node = public.get_node(result["node_id"], db=db)
-    assert node.state == "active"
-    link = db.execute("SELECT * FROM plan_node_artifact_links WHERE node_id=?", (node.id,)).fetchone()
-    assert (link["artifact_id"], link["role"], link["provenance"], link["source_event_id"]) == (aid, "input", "document.review_request", result["id"])
-    selected = db.execute("SELECT node_id FROM plan_node_attempts WHERE released_at IS NULL AND executor_thread_id='reviewer'").fetchall()
-    assert [r["node_id"] for r in selected] == [running.id]
-    assert node.acceptance_criteria == "Your comments on this document reach its owner."
+def staged_comment(db, artifact_id, request_id, *, submit=False):
+    with write_transaction(db, scope="test_fork_review_comment") as connection:
+        row, created = comments.create_with_status(
+            artifact_id, body="The claim needs evidence.", author="Reviewer",
+            author_kind="agent", author_thread_id="reviewer", review=True,
+            client_id=f"comment-{request_id}", db=connection,
+        )
+        feedback_batches.record_comment(
+            connection, row, created=created, review_request_id=request_id, submit=submit,
+        )
 
 
-def test_repeat_keys_append_note_once_with_provenance_and_constant_framing(review_env, monkeypatch):
-    db, aid = review_env
-    monkeypatch.setattr(feedback_batches, "AGENT_QUIET", 180)
-    first = request(db, aid)
-    again = request(db, aid)
-    assert first["id"] == again["id"]
-    request(db, aid, note="Check evidence", key="second-key")
-    request(db, aid, note="Check evidence", key="second-key")
-    node = public.get_node(first["node_id"], db=db)
-    assert node.description.count("Requester's note (context from Requester,") == 2
-    assert node.description.count("never widen it):") == 2
-    assert node.description.count("Check evidence") == 1
-    assert "doc_comment_create" in node.description and "submit: true" in node.description and "review: true" in node.description
-    assert "about three minutes" in node.description
-    assert all(word not in node.description for word in ("workspace approval", "Steve approves", "train/documents"))
-    assert json.loads(stored(db, first["id"])["client_ids"]) == ["review-key", "second-key"]
-    assert db.execute("SELECT COUNT(*) FROM doc_review_requests").fetchone()[0] == 1
+def reviewer_turn(db, started_at):
+    """Start the reviewer's next Turn at ``started_at``, ending any running one."""
+    with write_transaction(db, scope="test_reviewer_turn") as connection:
+        connection.execute(
+            "UPDATE active_turns SET status='completed',ended_at=? WHERE thread_id='reviewer'"
+            " AND status='running'", (started_at,),
+        )
+        connection.execute(
+            """INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch)
+               VALUES (?,'reviewer',0,'test-model','running',?,'boot')""",
+            (f"turn-{started_at}", started_at),
+        )
 
 
-@pytest.mark.parametrize("target", ["owner", "unlisted", "nonagent", "cross-scope"])
-def test_owner_and_nonvisible_reviewers_are_refused_without_writes(review_env, target):
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    if target in {"nonagent", "cross-scope"}:
-        seed_thread(db, target)
-        if target == "cross-scope":
-            db.execute("UPDATE threads SET user_id='foreign' WHERE id=?", (target,))
-        db.commit()
-    with pytest.raises(reviews.ReviewRequestError) as caught:
-        request(db, aid, reviewer=target)
-    expected = reviews.OWNER_REFUSAL if target == "owner" else reviews.ROSTER_REFUSAL.format(id=target)
-    assert str(caught.value) == expected
-    assert db.execute("SELECT COUNT(*) FROM doc_review_requests").fetchone()[0] == 0
+def close_reviewer_turn(db):
+    with write_transaction(db, scope="test_reviewer_turn_end") as connection:
+        return feedback_batches.close_for_turn_end(connection, "reviewer")
+
+
+def test_request_is_node_less_and_persists_a_running_fork(review_env):
+    db, artifact_id = review_env
+
+    result = request(db, artifact_id)
+
+    assert result["fork_id"] and result["node_id"] is None
+    assert result["requesting_node_id"] is None
+    assert result["outcome"] == "open"
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
 
 
-def test_unavailable_catalog_target_uses_public_addressability_reason(review_env, monkeypatch):
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    from types import SimpleNamespace
-    monkeypatch.setattr(feedback_delivery, "resolve_execution_target", lambda *a, **kw: SimpleNamespace(available=False))
-    with pytest.raises(reviews.ReviewRequestError, match="owner_unaddressable") as caught:
-        request(db, aid)
-    assert caught.value.code == "owner_unaddressable"
-    assert db.execute("SELECT COUNT(*) FROM doc_review_requests").fetchone()[0] == 0
+def test_same_key_is_idempotent_but_a_late_new_note_is_refused(review_env):
+    from doceditor import review_requests
+
+    db, artifact_id = review_env
+    first = request(db, artifact_id)
+
+    assert request(db, artifact_id) == first
+    with pytest.raises(review_requests.ReviewRequestError, match="already in progress"):
+        request(db, artifact_id, note="Check evidence", key="second-key")
+    assert json.loads(stored(db, first["id"])["client_ids"]) == ["review-key"]
 
 
-def test_delivered_batch_settles_once_with_evidence_attempt_release_and_next_selection(review_env):
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    result = request(db, aid)
-    node = public.get_node(result["node_id"], db=db)
-    next_node = public.add_node(node.plan_id, kind="task", title="Next task", acceptance_criteria="Done", db=db)
-    public.transition_node(next_node.id, "active", db=db)
-    db.commit()
-    add_comment(db, aid, author_id="reviewer", submit=True)
-    batch = batches(db)[0]
-    assert stored(db, result["id"])["answered_batch_id"] == batch["id"]
-    assert reviews.outcome(db, stored(db, result["id"])) == "commented"
-    assert public.get_node(node.id, db=db).state == "accepted"
-    evidence = public.latest_review_evidence(node.id, requirements_revision=node.requirements_revision, db=db)
-    assert batch["id"] in evidence["evidence"]
-    assert db.execute("SELECT released_at FROM plan_node_attempts WHERE node_id=?", (node.id,)).fetchone()[0]
-    assert db.execute("SELECT node_id FROM plan_node_attempts WHERE released_at IS NULL AND executor_thread_id='reviewer'").fetchone()[0] == next_node.id
-    with write_transaction(db, scope="test_repeat_settle"):
-        reviews.settle_for_batch(db, batch)
-    assert db.execute("SELECT COUNT(*) FROM plan_node_events WHERE node_id=? AND new_state='accepted'", (node.id,)).fetchone()[0] == 1
+def test_submit_settles_node_less_request_and_leaves_reviewer_unselected(review_env):
+    from doceditor import review_requests
 
+    db, artifact_id = review_env
+    result = request(db, artifact_id)
+    staged_comment(db, artifact_id, result["id"])
 
-def test_undelivered_batch_stays_open_then_retry_settles(review_env):
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    result = request(db, aid)
-    db.execute("UPDATE threads SET lifecycle_state='archived',archived_reason='user' WHERE id='owner'")
-    db.commit()
-    add_comment(db, aid, author_id="reviewer", submit=True)
-    assert batches(db)[0]["state"] == "undelivered"
-    assert reviews.outcome(db, stored(db, result["id"])) == "open"
-    db.execute("UPDATE threads SET lifecycle_state='active' WHERE id='owner'")
-    db.commit()
-    feedback_batches.retry_batch(db, batches(db)[0]["id"])
-    assert reviews.outcome(db, stored(db, result["id"])) == "commented"
-    assert public.get_node(result["node_id"], db=db).state == "accepted"
-
-
-def test_comments_after_the_task_ended_reach_the_owner_and_count(review_env):
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    result = request(db, aid)
-    public.close_review_node(db, result["node_id"], reason="Already finished")
-    revision = public.get_node(result["node_id"], db=db).revision
-    add_comment(db, aid, author_id="reviewer", submit=True)
-    assert batches(db)[0]["state"] == "delivered"
-    late = stored(db, result["id"])
-    assert late["answered_batch_id"] == batches(db)[0]["id"]
-    assert reviews.outcome(db, late) == "commented"
-    assert reviews.for_document(db, aid) == []
-    assert public.get_node(result["node_id"], db=db).revision == revision
-
-
-def test_only_the_first_late_batch_answers_a_request(review_env):
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    first = request(db, aid)
-    public.transition_node(first["node_id"], "closed", db=db)
-    db.commit()
-    add_comment(db, aid, author_id="reviewer", submit=True)
-    answered = stored(db, first["id"])
-    add_comment(db, aid, author_id="reviewer", submit=True, client_id="another-note")
-    assert len(batches(db)) == 2
-    assert stored(db, first["id"]) == answered
-    assert answered["answered_batch_id"] == batches(db)[0]["id"]
-    assert reviews.outcome(db, answered) == "commented"
-
-
-def test_comments_after_a_new_request_answer_the_new_one_only(review_env):
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    first = request(db, aid)
-    public.transition_node(first["node_id"], "closed", db=db)
-    db.commit()
-    second = request(db, aid, key="again")
-    add_comment(db, aid, author_id="reviewer", submit=True)
-    assert reviews.outcome(db, stored(db, first["id"])) == reviews.ENDED_WITHOUT_COMMENTS
-    assert stored(db, second["id"])["answered_batch_id"] == batches(db)[0]["id"]
-    assert reviews.outcome(db, stored(db, second["id"])) == "commented"
-
-
-@pytest.mark.parametrize("end", ["closed", "failed"])
-def test_review_task_ending_without_a_batch_reads_without_comments(review_env, end):
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    result = request(db, aid)
-    before = stored(db, result["id"])
-    public.transition_node(result["node_id"], end, db=db)
-    db.commit()
-    assert stored(db, result["id"]) == before
-    listed = reviews.for_document(db, aid)
-    assert [(r["id"], r["outcome"]) for r in listed] == [(result["id"], reviews.ENDED_WITHOUT_COMMENTS)]
-
-
-def test_reviewer_marking_the_task_done_without_comments_reads_without_comments(review_env):
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    result = request(db, aid)
-    from plans import review_evidence
-    with write_transaction(db, scope="test_mark_done") as connection:
-        review_evidence.submit(result["node_id"], evidence="Read it; nothing to add.", expected_revision=None, actor_id="reviewer", provenance="test", db=connection)
-        public.transition_node(result["node_id"], "accepted", verification_result="passed", verified_by="reviewer", db=connection)
-    assert reviews.outcome(db, stored(db, result["id"])) == reviews.ENDED_WITHOUT_COMMENTS
-
-
-def test_a_rejected_review_stays_open_through_its_revision(review_env):
-    from doceditor import review_requests as reviews
-    from plans import rejection, review_evidence
-    db, aid = review_env
-    result = request(db, aid)
-    with write_transaction(db, scope="test_submit_review") as connection:
-        review_evidence.submit(result["node_id"], evidence="Read it.", expected_revision=None, actor_id="reviewer", provenance="test", db=connection)
-    submitted = public.get_node(result["node_id"], db=db).revision
-    rejection.dispatch_reject(result["node_id"], {"feedback": "Comment on section 2 too", "expected_revision": submitted},
-                              {"db": db, "actor_id": None, "provenance": "test"}, executor=None)
-    db.commit()
-    assert reviews.outcome(db, stored(db, result["id"])) == "open"
-    assert request(db, aid, note="Also check section 3", key="while-revising")["id"] == result["id"]
-    revision = db.execute("SELECT id FROM plan_nodes WHERE follow_up_of=?", (result["node_id"],)).fetchone()["id"]
-    assert "Also check section 3" in public.get_node(revision, db=db).description
-    assert "Also check section 3" not in public.get_node(result["node_id"], db=db).description
-    add_comment(db, aid, author_id="reviewer", submit=True)
-    assert stored(db, result["id"])["answered_batch_id"] == batches(db)[0]["id"]
-    assert public.get_node(revision, db=db).state == "accepted"
-
-
-def test_a_rejected_review_ends_when_its_revision_ends(review_env):
-    from doceditor import review_requests as reviews
-    from plans import rejection, review_evidence
-    db, aid = review_env
-    result = request(db, aid)
-    with write_transaction(db, scope="test_submit_review") as connection:
-        review_evidence.submit(result["node_id"], evidence="Read it.", expected_revision=None, actor_id="reviewer", provenance="test", db=connection)
-    submitted = public.get_node(result["node_id"], db=db).revision
-    rejection.dispatch_reject(result["node_id"], {"feedback": "Comment on section 2 too", "expected_revision": submitted},
-                              {"db": db, "actor_id": None, "provenance": "test"}, executor=None)
-    revision = db.execute("SELECT id FROM plan_nodes WHERE follow_up_of=?", (result["node_id"],)).fetchone()["id"]
-    public.transition_node(revision, "closed", db=db)
-    db.commit()
-    assert reviews.outcome(db, stored(db, result["id"])) == reviews.ENDED_WITHOUT_COMMENTS
-
-
-def _submit_and_reject(db, node_id, *, pick_up):
-    """Reject to the reviewer; ``pick_up`` has the reviewer start the revision."""
-    from plans import admission, rejection, review_evidence
-    with write_transaction(db, scope="test_submit_review") as connection:
-        review_evidence.submit(node_id, evidence="Read it.", expected_revision=None, actor_id="reviewer", provenance="test", db=connection)
-    submitted = public.get_node(node_id, db=db).revision
-    rejection.dispatch_reject(node_id, {"feedback": "Comment on section 2 too", "expected_revision": submitted},
-                              {"db": db, "actor_id": "requester", "provenance": "test"}, executor="requester")
-    revision = db.execute("SELECT id FROM plan_nodes WHERE follow_up_of=?", (node_id,)).fetchone()["id"]
-    if pick_up:
-        admission.activate(revision, expected_revision=public.get_node(revision, db=db).revision,
-                           actor_id="reviewer", provenance="test", db=db)
-    db.commit()
-    return revision
-
-
-def test_comments_settle_a_revision_handed_to_the_reviewer_and_release_its_slot(review_env):
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    result = request(db, aid)
-    revision = _submit_and_reject(db, result["node_id"], pick_up=True)
-    assert db.execute("SELECT COUNT(*) FROM plan_node_attempts WHERE node_id=? AND released_at IS NULL", (revision,)).fetchone()[0] == 1
-    add_comment(db, aid, author_id="reviewer", submit=True)
-    assert public.get_node(revision, db=db).state == "accepted"
-    assert reviews.outcome(db, stored(db, result["id"])) == "commented"
-    assert db.execute("SELECT COUNT(*) FROM plan_node_attempts WHERE node_id=? AND released_at IS NULL", (revision,)).fetchone()[0] == 0
-
-
-def test_a_review_rejected_twice_follows_the_chain_to_its_latest_revision(review_env):
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    result = request(db, aid)
-    first = _submit_and_reject(db, result["node_id"], pick_up=True)
-    second = _submit_and_reject(db, first, pick_up=False)
-    assert reviews.outcome(db, stored(db, result["id"])) == "open"
-    add_comment(db, aid, author_id="reviewer", submit=True)
-    assert public.get_node(second, db=db).state == "accepted"
-    assert reviews.outcome(db, stored(db, result["id"])) == "commented"
-
-
-def test_delivered_and_cancelled_requests_keep_their_own_outcome(review_env):
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    delivered = request(db, aid)
-    add_comment(db, aid, author_id="reviewer", submit=True)
-    assert stored(db, delivered["id"])["answered_batch_id"] == batches(db)[0]["id"]
-    cancelled = request(db, aid, reviewer="second", key="second-reviewer")
-    actor = reviews.ReviewActor("agent", "requester", "requester", "owner-token", "Requester")
-    assert reviews.cancel(db, cancelled["id"], actor)["outcome"] == "cancelled"
-    add_comment(db, aid, author_id="second", submit=True)
-    assert stored(db, cancelled["id"])["answered_batch_id"] is None
-    assert reviews.for_document(db, aid) == []
-
-
-def test_a_new_request_replaces_the_ended_one_in_the_document_list(review_env):
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    first = request(db, aid)
-    public.transition_node(first["node_id"], "closed", db=db)
-    db.commit()
-    again = request(db, aid, key="again")
-    assert again["id"] != first["id"]
-    assert [(r["id"], r["outcome"]) for r in reviews.for_document(db, aid)] == [(again["id"], "open")]
-
-
-def test_nonterminal_settlement_failure_rolls_back_delivery_and_request(review_env, monkeypatch):
-    db, aid = review_env
-    result = request(db, aid)
-    add_comment(db, aid, author_id="reviewer")
-    batch_id = batches(db)[0]["id"]
-    def fail(*args, **kwargs):
-        raise RuntimeError("injected settlement failure")
-    monkeypatch.setattr(public, "settle_review_node", fail)
-    with pytest.raises(RuntimeError, match="injected settlement failure"):
-        feedback_batches.close_batch(db, batch_id, "submit")
-    assert batches(db)[0]["state"] == "open"
-    assert stored(db, result["id"])["answered_batch_id"] is None
-    assert public.get_node(result["node_id"], db=db).state == "active"
-    assert db.execute("SELECT COUNT(*) FROM plan_node_artifact_links WHERE provenance='document.feedback_batch'").fetchone()[0] == 0
-
-
-def test_cancel_closes_selected_node_and_terminal_cancel_is_noop(review_env):
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    result = request(db, aid)
-    actor = reviews.ReviewActor("agent", "requester", "requester", "owner-token", "Requester")
-    cancelled = reviews.cancel(db, result["id"], actor)
-    assert cancelled["outcome"] == "cancelled" and cancelled["cancelled_at"]
-    assert public.get_node(result["node_id"], db=db).state == "closed"
-    assert db.execute("SELECT released_at FROM plan_node_attempts WHERE node_id=?", (result["node_id"],)).fetchone()[0]
-    assert reviews.cancel(db, result["id"], actor) == cancelled
-    opened = request(db, aid, key="terminal-open")
-    public.close_review_node(db, opened["node_id"], reason="Already closed")
-    terminal = public.get_node(opened["node_id"], db=db)
-    assert reviews.outcome(db, stored(db, opened["id"])) == reviews.ENDED_WITHOUT_COMMENTS
-    ended = reviews.cancel(db, opened["id"], actor)
-    assert ended == {**stored(db, opened["id"]), "outcome": reviews.ENDED_WITHOUT_COMMENTS}
-    assert public.get_node(terminal.id, db=db).revision == terminal.revision
-
-
-def test_two_reviewers_settle_independently_and_no_findings_comment_counts(review_env):
-    from doceditor import comments
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    first = request(db, aid)
-    second = request(db, aid, reviewer="second", key="second-reviewer")
-    with write_transaction(db, scope="test_no_findings"):
-        row, created = comments.create_with_status(aid, body="No findings.", author="Reviewer", author_kind="agent", author_thread_id="reviewer", review=True, client_id="no-findings", db=db)
-        feedback_batches.record_comment(db, row, created=created, submit=True)
-    assert reviews.outcome(db, stored(db, first["id"])) == "commented"
-    assert reviews.outcome(db, stored(db, second["id"])) == "open"
-    add_comment(db, aid, author_id="second", submit=True)
-    assert reviews.outcome(db, stored(db, second["id"])) == "commented"
-
-
-def _stop_review(db, node_id, stop):
-    from plans import holds, lifecycle, service
-    node = public.get_node(node_id, db=db)
-    if stop == "paused plan":
-        lifecycle.transition(
-            node.plan_id, "paused", actor_id="user:test", provenance="test",
-            expected_revision=service._plan_row(db, node.plan_id)["revision"], db=db,
+    with write_transaction(db, scope="test_submit_fork_feedback"):
+        pending, woken, undelivered = review_requests.submit_fork_feedback(
+            db, result["id"], "reviewer", artifact_id,
         )
-    else:
-        holds.pause(
-            node_id, "Not now", expected_revision=node.revision,
-            actor_id="user:test", provenance="test", db=db,
+
+    assert pending and not undelivered
+    assert stored(db, result["id"])["answered_batch_id"]
+    assert review_requests.outcome(db, stored(db, result["id"])) == "commented"
+    assert "reviewer" not in woken
+    assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE owner_thread_id='reviewer'").fetchone()[0] == 0
+
+
+def test_withdrawal_resolves_seen_and_replied_comments_without_delivering(review_env, monkeypatch):
+    """D1: a comment people already saw and answered is resolved, never deleted."""
+    from doceditor import comment_notifications, review_requests
+
+    db, artifact_id = review_env
+    first = request(db, artifact_id)
+    staged_comment(db, artifact_id, first["id"])
+    root = db.execute("SELECT id FROM doc_comments WHERE body='The claim needs evidence.'").fetchone()["id"]
+    reply = comments.create(artifact_id, body="Which claim?", author="Steve", parent_id=root, db=db)
+    with write_transaction(db, scope="test_thread_view") as connection:
+        connection.execute(
+            "INSERT INTO doc_comment_thread_views (user_id,root_id,seen_at,seen_reply_id) VALUES (?,?,?,?)",
+            ("owner-token", root, reply["created_at"], reply["id"]),
         )
-    db.commit()
+    changed = []
+    monkeypatch.setattr(
+        comment_notifications, "announce_after_commit",
+        lambda _connection, changed_artifact: changed.append(changed_artifact),
+    )
+    actor = review_requests.ReviewActor("agent", "requester", "requester", "owner-token", "Requester")
 
+    assert review_requests.cancel(db, first["id"], actor)["outcome"] == "cancelled"
 
-def _resume_review(db, node_id, stop):
-    from plans import holds, lifecycle, service
-    node = public.get_node(node_id, db=db)
-    if stop == "paused plan":
-        lifecycle.transition(
-            node.plan_id, "active", actor_id="user:test", provenance="test",
-            expected_revision=service._plan_row(db, node.plan_id)["revision"], db=db,
-        )
-    else:
-        hold = db.execute(
-            "SELECT id,kind FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node_id,),
-        ).fetchone()
-        holds.clear(
-            node_id, hold["id"], expected_kind=hold["kind"], expected_revision=node.revision,
-            actor_id="user:test", provenance="test", db=db,
-        )
-    db.commit()
-
-
-def _mark_done_as_reviewer(db, node_id):
-    from plans.boundary import PlanActor, mutate
-    node = public.get_node(node_id, db=db)
-    mutate(node.plan_id, "mark_done", {
-        "node_id": node_id, "expected_revision": node.revision,
-        "evidence": "Comments delivered to the owner while stopped (see the note).",
-    }, actor=PlanActor("reviewer", "owner-token", None), provenance="test",
-        mutation_id=f"done-{node_id}", db=db)
-    db.commit()
-
-
-@pytest.mark.parametrize("stop", ["paused plan", "paused step"])
-def test_a_stopped_reviewers_comments_reach_the_owner_and_the_review_waits(review_env, stop):
-    # 2026-10-14: comments coming due for a reviewer whose plan was paused
-    # raised through the delivery pass and stalled every wake source on it.
-    from doceditor import review_requests as reviews
-    db, aid = review_env
-    result = request(db, aid)
-    _stop_review(db, result["node_id"], stop)
-    before = public.get_node(result["node_id"], db=db).state
-    add_comment(db, aid, author_id="reviewer")
-
-    feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db)
-    db.commit()
-
-    assert batches(db)[0]["state"] == "delivered"
-    assert reviews.outcome(db, stored(db, result["id"])) == "commented"
-    assert public.get_node(result["node_id"], db=db).state == before
+    kept = db.execute("SELECT resolved FROM doc_comments WHERE id=?", (root,)).fetchone()
+    assert kept is not None and kept["resolved"] == 1
+    assert db.execute("SELECT COUNT(*) FROM doc_comments WHERE id=?", (reply["id"],)).fetchone()[0] == 1
+    assert db.execute("SELECT COUNT(*) FROM doc_comment_thread_views WHERE root_id=?", (root,)).fetchone()[0] == 1
+    assert artifact_id in changed
     assert db.execute(
-        "SELECT COUNT(*) FROM plan_node_events WHERE node_id=? AND new_state='accepted'",
-        (result["node_id"],),
+        "SELECT COUNT(*) FROM doc_feedback_batches WHERE review_request_id=?", (first["id"],),
     ).fetchone()[0] == 0
-    # Nothing settles it after resume, so the task must stop promising that it
-    # settles by itself and tell its owner to finish it with the delivery.
-    node = public.get_node(result["node_id"], db=db)
-    assert f"batch {batches(db)[0]['id']}" in node.description
-    assert "mark it done" in node.description
-
-    _resume_review(db, result["node_id"], stop)
-    _mark_done_as_reviewer(db, result["node_id"])
-    assert public.get_node(result["node_id"], db=db).state == "accepted"
+    assert stored(db, first["id"])["answered_batch_id"] is None
 
 
-def test_one_batch_that_fails_to_close_does_not_hold_back_the_others(review_env, monkeypatch):
-    db, aid = review_env
-    other = seed_document(db, "owner", name="Spec.md")
-    add_comment(db, aid, author_id="reviewer")
-    add_comment(db, other, author_id="reviewer")
-    failing = next(b["id"] for b in batches(db) if b["artifact_id"] == aid)
-    real = feedback_batches.close_batch
+def test_withdrawal_drops_only_this_forks_undelivered_batches(review_env):
+    from doceditor import review_requests
 
-    def close_batch(connection, batch_id, reason):
-        if batch_id == failing:
-            raise RuntimeError("injected close failure")
-        return real(connection, batch_id, reason)
+    db, artifact_id = review_env
+    first = request(db, artifact_id)
+    staged_comment(db, artifact_id, first["id"])
+    # An unrelated reviewer batch must survive a fork withdrawal.
+    with write_transaction(db, scope="test_unrelated_comment") as connection:
+        row, created = comments.create_with_status(
+            artifact_id, body="Unrelated feedback.", author="Reviewer", author_kind="agent",
+            author_thread_id="reviewer", review=True, client_id="unrelated", db=connection,
+        )
+        feedback_batches.record_comment(connection, row, created=created)
+    actor = review_requests.ReviewActor("agent", "requester", "requester", "owner-token", "Requester")
 
-    monkeypatch.setattr(feedback_batches, "close_batch", close_batch)
-    feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db)
-    db.commit()
+    cancelled = review_requests.cancel(db, first["id"], actor)
 
-    states = {b["artifact_id"]: b["state"] for b in batches(db)}
-    assert states == {aid: "open", other: "delivered"}
-    monkeypatch.setattr(feedback_batches, "close_batch", real)
-    feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db)
-    assert {b["state"] for b in batches(db)} == {"delivered"}
+    assert cancelled["outcome"] == "cancelled"
+    assert db.execute("SELECT resolved FROM doc_comments WHERE body='The claim needs evidence.'").fetchone()[0] == 1
+    assert db.execute("SELECT resolved FROM doc_comments WHERE body='Unrelated feedback.'").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM doc_comments WHERE body='Unrelated feedback.'").fetchone()[0] == 1
+    assert db.execute(
+        "SELECT COUNT(*) FROM doc_feedback_batches WHERE review_request_id=?", (first["id"],),
+    ).fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
+
+
+def test_terminal_fork_escalates_once_to_the_existing_review_node(review_env):
+    from doceditor import review_requests
+
+    db, artifact_id = review_env
+    result = request(db, artifact_id)
+
+    escalated = review_requests.escalate_fork(db, result["id"])
+
+    assert escalated and escalated["node_id"]
+    assert escalated["fork_id"] is None
+    assert public.get_node(escalated["node_id"], db=db).state == "active"
+    assert review_requests.escalate_fork(db, result["id"]) is None
+
+
+def test_escalation_preserves_comments_and_passes_requesting_intent(review_env, monkeypatch):
+    from doceditor import review_requests
+
+    db, artifact_id = review_env
+    result = request(db, artifact_id)
+    staged_comment(db, artifact_id, result["id"])
+    seen = []
+    create = public.create_review_node
+
+    def capture(connection, reviewer, request_):
+        seen.append(request_)
+        return create(connection, reviewer, request_)
+
+    monkeypatch.setattr(public, "create_review_node", capture)
+    escalated = review_requests.escalate_fork(db, result["id"])
+    comment = db.execute("SELECT id FROM doc_comments WHERE body='The claim needs evidence.'").fetchone()
+    assert comment is not None
+    assert seen[0]["intent_node_id"] == result["requesting_node_id"]
+    node = public.get_node(escalated["node_id"], db=db)
+    assert comment["id"] in node.description and "Check claims" in node.description
+    assert db.execute("SELECT state FROM doc_feedback_batches WHERE review_request_id=?", (result["id"],)).fetchone()[0] == "open"
+    reviewer_turn(db, utc_now_iso())
+    close_reviewer_turn(db)
+    assert stored(db, result["id"])["answered_batch_id"]
+
+
+def test_escalated_comments_wait_for_the_reviewers_own_continuation(review_env):
+    """D2: neither the quiet timer nor a Turn already running delivers them."""
+    from doceditor import review_requests
+
+    db, artifact_id = review_env
+    result = request(db, artifact_id)
+    staged_comment(db, artifact_id, result["id"])
+    reviewer_turn(db, utc_now_iso())  # running before the fork gives up
+    escalated = review_requests.escalate_fork(db, result["id"])
+
+    feedback_batches.close_due("9999-12-31T00:00:00+00:00", db=db)
+    close_reviewer_turn(db)
+
+    batch = db.execute(
+        "SELECT state FROM doc_feedback_batches WHERE review_request_id=?", (result["id"],),
+    ).fetchone()
+    assert batch["state"] == "open"
+    assert stored(db, result["id"])["answered_batch_id"] is None
+    assert public.review_is_open(db, escalated["node_id"])
+
+    reviewer_turn(db, utc_now_iso())
+    close_reviewer_turn(db)
+    answered = stored(db, result["id"])["answered_batch_id"]
+    assert answered
+    assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (answered,)).fetchone()[0] == "delivered"
+    assert not public.review_is_open(db, escalated["node_id"])
+    reviewer_turn(db, utc_now_iso())
+    assert close_reviewer_turn(db) == []
+    assert stored(db, result["id"])["answered_batch_id"] == answered
+
+
+def test_escalated_comments_deliver_on_the_reviewers_submit(review_env):
+    """D2: the reviewer's own submit after escalation delivers and settles once."""
+    from doceditor import review_requests
+
+    db, artifact_id = review_env
+    result = request(db, artifact_id)
+    staged_comment(db, artifact_id, result["id"])
+    escalated = review_requests.escalate_fork(db, result["id"])
+
+    with write_transaction(db, scope="test_submit_escalated") as connection:
+        feedback_batches.close_for_document(
+            connection, author_kind="agent", author_id="reviewer",
+            artifact_id=artifact_id, reason="submit",
+        )
+
+    assert stored(db, result["id"])["answered_batch_id"]
+    assert not public.review_is_open(db, escalated["node_id"])
+
+
+def test_clean_submit_ends_without_comments_and_never_escalates(review_env):
+    """D4: a fork that submits nothing ends clean, with a receipt, and no node."""
+    from doceditor import review_requests
+    from core import artifact_review_capture
+
+    db, artifact_id = review_env
+    result = request(db, artifact_id)
+
+    with write_transaction(db, scope="test_clean_submit"):
+        pending, _woken, undelivered = review_requests.submit_fork_feedback(
+            db, result["id"], "reviewer", artifact_id,
+        )
+
+    assert not pending and not undelivered
+    row = stored(db, result["id"])
+    assert review_requests.outcome(db, row) == "ended_without_comments"
+    assert artifact_review_capture.submitted(result["id"])
+    assert review_requests.escalate_fork(db, result["id"]) is None
+    assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
+    receipt = db.execute(
+        "SELECT COUNT(*) FROM context_change_journal WHERE object_kind='thread_context'"
+        " AND object_id='reviewer' AND summary LIKE '%no comments were left%'",
+    ).fetchone()[0]
+    assert receipt == 1
+
+
+def test_schema_scopes_open_batches_by_review_request(review_env):
+    db, artifact_id = review_env
+    first = request(db, artifact_id)
+    staged_comment(db, artifact_id, first["id"])
+    batch = db.execute("SELECT review_request_id FROM doc_feedback_batches").fetchone()
+    assert batch["review_request_id"] == first["id"]

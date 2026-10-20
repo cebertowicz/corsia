@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 from core.checkpoint_types import ProviderCheckpointRequest
 from llm.resolution import ExecutionTarget
@@ -185,7 +186,7 @@ def test_luna_131k_fits_the_actual_default_tool_surface(monkeypatch, tmp_path):
     from core.checkpoint_codex_fork import _fit_cold_request
 
     request = _admission(monkeypatch, "codex", window=131_072).provider_request
-    frozen, fitted = _fit_cold_request(request, str(tmp_path))
+    frozen, fitted = _fit_cold_request(request, str(tmp_path), kind=CHECKPOINT_KIND)
 
     assert any(tool["name"] == "continuity_edit" for tool in frozen.dynamic_tool_specs)
     assert fitted.input_tokens <= 108_135
@@ -317,7 +318,7 @@ async def test_codex_cold_adapter_uses_the_surface_admission_counted(
         developer_instructions="frozen developer surface",
     )
 
-    result = await codex.invoke_checkpoint(request, asyncio.Event())
+    result = await codex.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
     assert result.raw_body == "checkpoint"
     assert observed["tool_registry"] is registry
@@ -411,7 +412,7 @@ async def test_codex_checkpoint_keeps_body_after_unrelated_terminal_failure(
         binary="codex",
     )
 
-    result = await codex.invoke_checkpoint(request, asyncio.Event())
+    result = await codex.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
     assert result.raw_body == "usable paid checkpoint"
     assert result.diagnostic == "unrelated terminal failure"
@@ -458,6 +459,6 @@ async def test_codex_context_limit_retains_partial_checkpoint(
         binary="codex",
     )
 
-    result = await codex.invoke_checkpoint(request, asyncio.Event())
+    result = await codex.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert result.raw_body == "incomplete checkpoint"
     assert result.diagnostic == CHECKPOINT_CONTEXT_TRUNCATED

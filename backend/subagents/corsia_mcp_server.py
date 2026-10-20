@@ -115,7 +115,10 @@ def _mcp_tool_definitions(definitions: tuple[dict, ...] | list[dict]):
 def _http_client(token: str, checkpoint_id: str | None = None) -> httpx.AsyncClient:
     """Create a loopback-only client that ignores ambient proxy settings."""
     headers = {"X-CORSIA-Tool-Token": token}
-    if checkpoint_id:
+    if fork_id := os.environ.get("CORSIA_FORK_ID"):
+        headers["X-CORSIA-Fork-Id"] = fork_id
+        headers["X-CORSIA-Tool-Token"] = os.environ.get("CORSIA_FORK_TOOL_TOKEN", token)
+    elif checkpoint_id:
         headers["X-CORSIA-Checkpoint-Id"] = checkpoint_id
     return httpx.AsyncClient(
         headers=headers,

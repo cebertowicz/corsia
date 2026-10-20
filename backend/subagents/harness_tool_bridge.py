@@ -332,6 +332,7 @@ async def execute_tool(
     provider_tool_call_id: str | None = None,
     assistant_step_id: str | None = None,
     checkpoint_id: str | None = None,
+    fork_policy: Any = None,
     model: str | None = None,
     name: str,
     arguments: dict[str, Any],
@@ -342,9 +343,12 @@ async def execute_tool(
     turn_token = state._current_turn_identity.set(turn_identity)
     completion = None
     try:
-        with state.tool_invocation_context(invocation_id, checkpoint_id=checkpoint_id,
+        with state.tool_invocation_context(invocation_id, checkpoint_id=checkpoint_id if fork_policy is None else None,
                                            provider_call_id=provider_tool_call_id):
-            content = await _execute_registry_tool(registry, name, arguments, checkpoint_id)
+            if fork_policy is None:
+                content = await _execute_registry_tool(registry, name, arguments, checkpoint_id)
+            else:
+                content = await fork_policy.execute(name, arguments)
         completion = CompletedToolCall(
             name=name, result=content, arguments=dict(arguments), thread_id=thread_id,
             turn_id=turn_identity.turn_id if turn_identity else None,

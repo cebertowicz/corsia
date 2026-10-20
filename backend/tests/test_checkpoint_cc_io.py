@@ -6,6 +6,7 @@ import sys
 from dataclasses import replace
 
 import pytest
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 from native_checkpoint_fixtures import seed_vendor_checkpoint_thread
 from test_checkpoint_external_adapters import _request, _target
@@ -143,7 +144,7 @@ async def test_cc_cutoff_drains_partial_stdout_and_never_releases_oversized_resu
 
         monkeypatch.setattr(cc, "_spawn_process", spawn)
         operation = asyncio.create_task(cc.invoke_checkpoint(
-            request, asyncio.Event(), on_tool_executor=register,
+            request, asyncio.Event(), on_tool_executor=register, kind=CHECKPOINT_KIND,
         ))
     else:
         operation = asyncio.create_task(communicate_checkpoint(
