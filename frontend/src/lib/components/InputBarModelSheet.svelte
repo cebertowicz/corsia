@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { token } from '$lib/stores/auth';
-	import { activeThreadId, threadLocalOnly, threads } from '$lib/stores/threads';
+	import { activeThreadId, threads } from '$lib/stores/threads';
+	import { threadLocalOnly } from '$lib/stores/threadLocalOnly';
 	import { loadCheckpoints } from '$lib/stores/checkpoints';
 	import { activeModelId, beginThreadModelSwitch, finishThreadModelSwitch, getModelDispatchId, modelMatchesId, models, modelAvailability, saveThreadModel, setActiveModel, type Model } from '$lib/stores/models';
 	import { accountSegments, canonicalName, groupModels, groupStatusSegments, rowNote, usageBreakdown, type ModelGroup } from '$lib/stores/modelGroups';
@@ -16,6 +17,7 @@
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import PickerLocalStatus from './PickerLocalStatus.svelte';
 	import LocalOnlySwitchRow from './LocalOnlySwitchRow.svelte';
+	import PickerLocalOnlyNote from './PickerLocalOnlyNote.svelte';
 	import AddLocalModelSheet from './v7/AddLocalModelSheet.svelte';
 	import { canAddLocalModel, localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
 	import type { LocalPickerRetry } from '$lib/conductorSources';
@@ -27,6 +29,7 @@
 	const cloudModelsOff = $derived($models.some(localityOff));
 	const projectCloudOff = $derived($models.some((model) => model.status_reason === 'project_cloud_off'));
 	const inheritedLocalOnly = $derived(threadLocalOnly($threads.find((thread) => thread.id === $activeThreadId)).inheritedFromThreadId != null);
+	const openProjectPolicy = () => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy');
 	const pickerModels = $derived(cloudModelsOff ? $models.filter((model) => !localityOff(model)) : $models);
 	const groups = $derived(groupModels(pickerModels, $activeModelId));
 	// Ready groups start open, unusable ones stay collapsed until tapped; account-backed model rows
@@ -158,21 +161,12 @@
 	}
 </script>
 
-
 <div class="action-sheet model-sheet">
 	<LocalOnlySwitchRow onsetuplocal={() => showAddLocal = true} onleave={onclose} />
 	<div class="sheet-section">
 		<div class="sheet-section-label">Model</div>
 		<div class="model-list">
-			{#if cloudModelsOff && !hasReadyGroup}
-				<div class="model-list-empty">
-					{#if projectCloudOff}
-						This project uses local models only, and no local model is ready.<br /><button type="button" class="add-local-link" onclick={() => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy')}>Open project settings</button>
-					{:else}
-						No local model is ready.<br /><button type="button" class="add-local-link" onclick={() => showAddLocal = true}>Set up a local model</button>
-					{/if}
-				</div>
-			{/if}
+			{#if cloudModelsOff && !hasReadyGroup}<PickerLocalOnlyNote kind="empty" {projectCloudOff} onsetuplocal={() => showAddLocal = true} onprojectsettings={openProjectPolicy} />{/if}
 			{#if groups.length === 0 && !cloudModelsOff && !$localStatus}
 				<div class="model-list-empty">No available models</div>
 			{:else}
@@ -239,7 +233,6 @@
 						/>
 						{#if open && accountRows.length > 0}<AccountPickerRows rows={accountRows} />{/if}
 
-
 							{/if}
 						{#if $localStatus && hostsLocalSetup(group)}
 								{#if $localStatus.retry === 'settings'}
@@ -299,8 +292,7 @@
 						{/if}
 					</section>
 				{/each}
-				{#if projectCloudOff && hasReadyGroup}<div class="model-list-empty">This project uses local models only.</div>{/if}
-				{#if !projectCloudOff && inheritedLocalOnly && hasReadyGroup}<div class="model-list-empty">This chat and its workers use local models only.</div>{/if}
+				{#if cloudModelsOff && hasReadyGroup}<PickerLocalOnlyNote kind="quiet" {projectCloudOff} inherited={inheritedLocalOnly} onsetuplocal={() => showAddLocal = true} onprojectsettings={openProjectPolicy} />{/if}
 				{#if !hasLocalSetupGroup && ($localStatus || $canAddLocalModel)}
 					<section class="model-group" aria-label="Local">
 						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />
@@ -357,7 +349,6 @@
 	.model-group + .model-group {
 		margin-top: 4px;
 	}
-
 
 	.model-group.signed-out .model-group-rows {
 		opacity: .52;

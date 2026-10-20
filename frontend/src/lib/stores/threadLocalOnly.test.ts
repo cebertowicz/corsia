@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
-import { saveThreadLocalOnly, threadLocalOnly, threads, type Thread } from './threads';
+import { threads, type Thread } from './threads';
+import { saveThreadLocalOnly, threadLocalOnly } from './threadLocalOnly';
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
 	return {

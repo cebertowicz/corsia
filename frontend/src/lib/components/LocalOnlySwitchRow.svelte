@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import Toggle from './ui/Toggle.svelte';
 	import { token } from '$lib/stores/auth';
-	import { activeThreadId, saveThreadLocalOnly, threadLocalOnly, threads } from '$lib/stores/threads';
+	import { activeThreadId, threads } from '$lib/stores/threads';
+	import { saveThreadLocalOnly, threadLocalOnly } from '$lib/stores/threadLocalOnly';
 	import { activeModelId, loadModels, modelMatchesId, models } from '$lib/stores/models';
 	import { previewLocalOnly } from '$lib/stores/localOnlyPreview';
 	import { onLocalOnlyFocusRequest } from '$lib/stores/modelSheetRequest';

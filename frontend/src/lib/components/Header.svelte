@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { activeThread, activeThreadId, isNavAgent, threadLocalOnly } from '$lib/stores/threads';
+	import { activeThread, activeThreadId, isNavAgent } from '$lib/stores/threads';
+	import { threadLocalOnly } from '$lib/stores/threadLocalOnly';
 	import { models } from '$lib/stores/models';
 	import { requestModelSheet } from '$lib/stores/modelSheetRequest';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
@@ -252,7 +253,7 @@
 	.h-scope { min-width: 0; max-width: 24rem; overflow: hidden; text-overflow: ellipsis; }
 	/* The Local only badge: a status mark, not a pill (DESIGN-SYSTEM §0.1, §0.2): no fill or border at rest, teal icon, secondary label. */
 	.h-local-slot { display: inline-flex; flex: 0 0 86px; min-width: 0; }
-	.h-local-only { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 4px 6px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; transition: background var(--dur-tight), color var(--dur-tight), opacity var(--dur-tight), transform var(--dur-tight); }
+	.h-local-only { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; transition: background var(--dur-tight), color var(--dur-tight), opacity var(--dur-tight), transform var(--dur-tight); }
 	.h-local-only:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.h-local-only:active { transform: scale(.96); }
 	.h-local-only svg { flex: 0 0 auto; color: var(--teal); }
@@ -335,10 +336,10 @@
 		   the existing overflow:hidden + text-overflow:ellipsis on .h-scope fires. */
 		.h-title { justify-self: center; text-align: center; width: 100%; min-width: 0; }
 		/* At 393 the badge is its icon alone in a 44px hit area; the label stays for screen readers. */
-		.h-local-slot { flex-basis: 44px; }
-		.h-local-only { width: 44px; height: 44px; padding: 0; justify-content: center; }
+		.h-local-slot { flex-basis: var(--touch-target); }
+		.h-local-only { width: var(--touch-target); height: var(--touch-target); padding: 0; justify-content: center; }
 		.h-local-only:hover { background: transparent; color: var(--text-secondary); }
-		.h-local-only span { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+		.h-local-only span { position: absolute; width: 0; height: 0; padding: 0; overflow: hidden; white-space: nowrap; }
 		.h-icon { width: 44px; height: 44px; }
 		.h-back-label { display: none; }
 		.h-act.overflowable { display: none; }
