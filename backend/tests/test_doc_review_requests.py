@@ -481,5 +481,20 @@ def test_review_node_carries_the_requesting_nodes_canonical_intent_when_present(
         },
     )
 
+    direct = feedback_nodes.create_review_node(
+        db, "third", {
+            "id": "review-direct-intent", "artifact_id": aid, "requester_display": "Requester", "note": "",
+            "requesting_node_id": canonical.id,
+        },
+    )
+    unknown = feedback_nodes.create_review_node(
+        db, "fourth", {
+            "id": "review-unknown-intent", "artifact_id": aid, "requester_display": "Requester", "note": "",
+            "requesting_node_id": "no-such-node",
+        },
+    )
+
     assert public.get_node(without.node_id, db=db).intent_node_id is None
     assert public.get_node(with_request.node_id, db=db).intent_node_id == canonical.id
+    assert public.get_node(direct.node_id, db=db).intent_node_id == canonical.id
+    assert public.get_node(unknown.node_id, db=db).intent_node_id is None

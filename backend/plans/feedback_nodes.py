@@ -371,7 +371,11 @@ def create_review_node(db, reviewer_thread_id: str, request: Any) -> FeedbackNod
 
 
 def _requesting_intent(db, request) -> str | None:
-    """Resolve an optional review-request task to its canonical intent node."""
+    """Resolve an optional review-request task to its canonical intent node.
+
+    The reference is another lane's column, so an unknown node leaves the
+    review without intent rather than losing the review.
+    """
     try:
         requesting_node_id = request["requesting_node_id"]
     except (IndexError, KeyError):
@@ -380,4 +384,7 @@ def _requesting_intent(db, request) -> str | None:
         return None
     from plans import intent_words
 
-    return str(intent_words.canonical(db, str(requesting_node_id))["id"])
+    try:
+        return str(intent_words.canonical(db, str(requesting_node_id))["id"])
+    except service.PlanError:
+        return None
