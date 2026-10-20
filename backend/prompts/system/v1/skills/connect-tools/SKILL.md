@@ -27,6 +27,12 @@ Pick the method yourself, cheapest and most dependable first:
 
 When a method can't do what the work needs, use the next one. Setting up or reconnecting a connected app is in skill `coordination-api`, for agents that have the API tool. Email, calendar and files ship for Google (skill `google-setup`) and Microsoft (skill `microsoft-setup`); only the CORSIA thread runs those, so anywhere else ask the person to connect the account there.
 
+## Asking to approve one
+
+- Name the publisher only after checking it on the maker's own site or repository, through web search or opened in the browser, never from the package's description of itself. If you can't check it, say it's community-made.
+- Say what will run and that every agent here can use it. For a program on this computer, add `It runs as you on this computer, so it can open your files and accounts the way you can, except CORSIA's private data and your stored keys.` If CORSIA installs a runtime or CLI for it, say in one line what, from whom, and that only CORSIA's agents use that copy.
+- A CLI acts with the person's whole account there: say which account it uses, and before its first write confirm that account and that writes are expected. Never read its stored sign-in.
+
 ## To hear about changes
 
 In this order: the tool tells CORSIA itself (a webhook, or a reader CORSIA ships); then a small script that checks for changes; then checking on a timer, as a last resort.
@@ -51,7 +57,7 @@ Say so plainly and work around it. Quote what the tool reported, never a limit y
 
 ## Done means
 
-- The agent that will use the connection has read something real through it.
+- CORSIA shows it working in Connected apps (for a CLI, the CLI answers), and the agent that will use it has read something real through it. Your own claim doesn't count.
 - The connection is noted where other agents look (skill `memory-placement`, unless your tools already list it), so they reuse it instead of connecting again.
 - If the work needs to hear about changes, the first one has arrived.
 
