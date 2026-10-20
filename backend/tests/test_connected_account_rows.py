@@ -100,7 +100,7 @@ def test_two_accounts_are_two_rows_with_their_own_state_and_reach_and_no_secrets
     assert rows[first] == {
         "kind": "account", "id": first, "provider": GOOGLE_PROVIDER, "provider_display_name": "Google", "address": "person@example.com",
         "capabilities": ["mail", "calendar", "files"], "state": "connected", "reach": ONLY_CORSIA_REACH,
-        "account_kind": None, "cause": None, "client_id": None, "tenant_id": None,
+        "account_kind": None, "cause": None, "scopes": [], "client_id": None, "tenant_id": None,
     }
     # A row that lost its sign-in says so, with its own reach, whatever its stored state.
     assert rows[second]["state"] == "needs_sign_in" and rows[second]["reach"] == ALL

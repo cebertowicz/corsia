@@ -14,6 +14,7 @@
 	import SettingsRow from './SettingsRow.svelte';
 	import WhereItWorks from './WhereItWorks.svelte';
 	import ConnectAppFlow from './ConnectAppFlow.svelte';
+	import AccountManualNotice from './AccountManualNotice.svelte';
 	type AccountAddress = { localPrefix: string; localSuffix: string; domain: string };
 	const accountName = (account: ConnectedAccount) => `${account.provider_display_name} — ${account.address}`;
 	const accountAnchor = (id: string) => `connected-account-${id}`;
@@ -130,7 +131,7 @@
 	}
 	function adminApprovalMessage(account: ConnectedAccount): string {
 		if (!account.client_id) return '';
-		return `Please approve my CORSIA app for my account, ${account.address}. It is my own Microsoft app registration, Application (client) ID ${account.client_id}, and requests delegated Microsoft Graph access to Mail.ReadWrite, Mail.Send, Calendars.ReadWrite, Files.ReadWrite, offline_access and User.Read.`;
+		return `Please approve my CORSIA app for my account, ${account.address}. It is my own Microsoft app registration, Application (client) ID ${account.client_id}, and requests delegated Microsoft Graph access to ${account.scopes?.join(', ') ?? ''}.`;
 	}
 	async function copyAdminMessage(account: ConnectedAccount): Promise<void> {
 		const message = adminApprovalMessage(account);
@@ -316,7 +317,7 @@
 									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
 									<p class="capabilities"><span class="capability-label">Reaches</span><span>{capabilityLabels(row)}</span></p>
 									{#if microsoftCause(row, 'admin_approval_required')}<p class="impact">Your organization needs to approve CORSIA before it can connect this account. Send this to your IT admin, then press Sign in.</p>{:else if microsoftCause(row, 'consent_cancelled')}<p class="impact">Sign-in was cancelled. Press Sign in to try again.</p>{:else if microsoftCause(row, 'refresh_token_invalid')}<p class="impact">Microsoft signed you out, so agents can’t use this account until you sign in again.</p>{:else if microsoftCause(row, 'provider_unavailable')}<p class="impact">Microsoft had a problem with sign-in. Try again.</p>{:else if microsoftCause(row, 'registration_misconfigured')}<p class="impact">Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in.</p>{:else if row.state === 'needs_sign_in'}<p class="impact">{row.provider_display_name} signed you out, so agents can’t use this account until you sign in again.</p>{/if}
-									{#if manualStep?.provider === 'google' && manualStep.id === row.id}<p class="impact">You’re signed out here, but CORSIA couldn’t reach Google, so Google may still list CORSIA as allowed. To remove it, open your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account</a> and remove CORSIA.</p>{/if}
+									{#if manualStep?.id === row.id}<AccountManualNotice account={manualStep} />{/if}
 									{#if offline}<p class="offline-action-note" role="status">Actions are unavailable while offline.</p>{/if}
 									<div class="actions account-actions">
 										{#if microsoftCause(row, 'admin_approval_required')}<span class="account-action"><Button variant="primary" size="sm" disabled={offline || !adminApprovalMessage(row)} onclick={() => void copyAdminMessage(row)}>Copy message for IT</Button></span><span class="account-action" class:deep-link-focus={linkedAccountId === row.id && !offline} data-chat-link-focus={linkedAccountId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>Sign in</Button></span>{:else if accountNeedsSignIn(row)}<span class="account-action" class:deep-link-focus={linkedAccountId === row.id && !offline} data-chat-link-focus={linkedAccountId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant={microsoftCause(row, 'registration_misconfigured') ? 'ghost' : 'primary'} size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>{microsoftCause(row, 'provider_unavailable') ? 'Try again' : 'Sign in'}</Button></span>{/if}
@@ -354,7 +355,7 @@
 		{/if}
 	{/if}
 </section>
-{#if removedManualStep}{#if removedManualStep.provider === 'microsoft'}<p class="manual-removal" role="status">Microsoft may still list CORSIA as allowed for {removedManualStep.address}. <a href={removedManualStep.account_kind === 'personal' ? 'https://account.live.com/consent/Manage' : 'https://myapps.microsoft.com'} target="_blank" rel="noopener" onclick={() => removedManualStep = null}>Manage Microsoft permissions</a></p>{:else if removedManualStep.provider === 'google'}<p class="manual-removal" role="status">CORSIA removed {accountName(removedManualStep)} here, but couldn’t reach Google. To remove it there, open your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account</a> and remove CORSIA.</p>{/if}{/if}
+{#if removedManualStep}<AccountManualNotice account={removedManualStep} removed onDismiss={() => removedManualStep = null} />{/if}
 {#if whereRow}<WhereItWorks app={whereRow} approve={whereApprove} onClose={() => whereRow = null} onSaved={(row) => { if (whereApprove && !isAccount(row)) approved(row); else replace(row); whereRow = null; }} />{/if}
 {#if connectAppOpen}<ConnectAppFlow onClose={() => connectAppOpen = false} onConnected={(app) => { rows = [...rows, { ...app, kind: 'hosted_app' }]; }} onSignIn={(app) => { openId = app.id; signInAfterApprove = app.id; }} />{/if}
 {#if confirmingOut}<ConfirmDialog open title={`Sign out of ${accountName(confirmingOut)}?`} description="Agents will no longer be able to use this account, including in conversations already running. You can sign in again any time." confirmLabel="Sign out" onConfirm={() => signOut(confirmingOut!)} onCancel={() => confirmingOut = null} />{/if}
@@ -381,9 +382,7 @@
 	.key-detail { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; margin: 0 0 var(--space-2); }
 	.error { color: var(--red); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
 	.copied { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
-	.manual-removal { margin: var(--space-3) var(--space-2) 0; color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.impact { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
-	.manual-removal a, .impact a { color: var(--accent-text); text-decoration: none; } .manual-removal a:hover, .impact a:hover { text-decoration: underline; }
 	.capabilities { display: flex; gap: var(--space-2); margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-caption); line-height: var(--lh-normal); }
 	.capability-label { color: var(--text-tertiary); }
 	.account-closed-name, .account-open-name { min-width: 0; font-size: var(--text-subhead); color: var(--text-primary); }

@@ -11,9 +11,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from connections.account_state import MANUAL_ONLY
-
-#: The audit cause when a provider has no app-only revocation to call.
+#: The credential-bundle field holding granted or requested scope names.
 SCOPES_FIELD = "scopes"
 
 
@@ -42,6 +40,8 @@ class AccountProvider:
     #: ``(client_id, tenant_id)`` GUIDs its row may show (each None when it has none). None when
     #: the provider has no per-account registration: the row shows neither.
     registration: Callable[[dict[str, str]], tuple[str | None, str | None]] | None = None
+    #: The stable scope names a row may display; configured by the provider rather than duplicated in a UI.
+    display_scopes: tuple[str, ...] = ()
 
     @property
     def required_fields(self) -> frozenset[str]:

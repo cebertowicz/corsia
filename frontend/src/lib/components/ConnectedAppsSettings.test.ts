@@ -478,7 +478,7 @@ describe('ConnectedAppsSettings', () => {
 		expect(host.textContent).not.toContain('network failed');
 	});
 
-	it('does not show the Google manual step after Microsoft manual-only sign-out', async () => {
+	it('shows the Microsoft permissions step after Microsoft manual-only sign-out', async () => {
 		const microsoft = { ...googleAccount, id: 'microsoft-manual-sign-out', provider: 'microsoft' as const, provider_display_name: 'Microsoft', address: 'alex@contoso.example', account_kind: 'work' as const, tenant_id: '22222222-2222-4222-8222-222222222222' };
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const path = String(input);
@@ -494,9 +494,9 @@ describe('ConnectedAppsSettings', () => {
 		flushSync();
 		([...document.body.querySelectorAll('button')].filter((button) => button.textContent?.trim() === 'Sign out').at(-1) as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(host.textContent).toContain('Signed out'));
-		expect(host.textContent).not.toContain('Google');
-		expect(host.textContent).not.toContain('You’re signed out here');
-		expect(host.querySelector('a')).toBeNull();
+		expect(host.textContent).toContain('Microsoft may still list CORSIA as allowed for alex@contoso.example.');
+		const link = [...host.querySelectorAll<HTMLAnchorElement>('a')].find((anchor) => anchor.textContent === 'Manage Microsoft permissions');
+		expect(link?.href).toBe('https://myapps.microsoft.com/');
 	});
 
 	it('shows the manual Google Account step only when account sign-out reports a provider failure', async () => {

@@ -8,10 +8,11 @@ but do not alter a row's state.
 """
 from __future__ import annotations
 
-from connections.connected_accounts import (
+from connections.account_state import (
     ADMIN_APPROVAL_REQUIRED, CONSENT_CANCELLED, PROVIDER_UNAVAILABLE, REFRESH_TOKEN_INVALID,
     REGISTRATION_MISCONFIGURED, STATE_CAUSES,
 )
+from connections.microsoft.config import SCOPES
 
 INPUT_REFUSAL = "input_refusal"
 ACCOUNT_NOT_FOUND = "account_not_found"
@@ -21,8 +22,9 @@ ALREADY_NEEDS_SIGN_IN = "already_needs_sign_in"
 DIFFERENT_ACCOUNT = "different_account"
 ACCOUNT_REMOVED = "account_removed"
 INTERNAL = "internal"
+FILE_NAME_CONFLICT = "file_name_conflict"
 
-_BROWSER_RETRY = "Microsoft sign-in couldn't finish. Go back to CORSIA and try again."
+_BROWSER_RETRY = "Microsoft sign-in couldn’t finish. Go back to CORSIA and try again."
 # (message, browser page) per code; ``{address}`` and ``{signed_in}`` are filled from the account.
 _TEXT: dict[str, tuple[str, str]] = {
     REFRESH_TOKEN_INVALID: (
@@ -42,10 +44,10 @@ _TEXT: dict[str, tuple[str, str]] = {
         "Microsoft had a problem with sign-in. Go back to CORSIA and try again.",
     ),
     REGISTRATION_MISCONFIGURED: (
-        "The person's own Microsoft app registration isn't configured correctly. Check that the app exists in the registration "
+        "The person’s own Microsoft app registration isn’t configured correctly. Check that the app exists in the registration "
         "tenant and its supported account type matches this connection; Authentication has http://localhost under Mobile "
         "and desktop applications and Allow public client flows is Yes; and Microsoft Graph delegated permissions are "
-        "Mail.ReadWrite, Mail.Send, Calendars.ReadWrite, Files.ReadWrite, offline_access, and User.Read. Do not create "
+        f"{', '.join(SCOPES)}. Do not create "
         "a client secret. Fix the registration through the microsoft-setup steps, then call microsoft_connect again.",
         "Your Microsoft app for CORSIA isn’t set up correctly. Go back to CORSIA and ask it in chat to fix the app.",
     ),
@@ -73,14 +75,18 @@ _TEXT: dict[str, tuple[str, str]] = {
     DIFFERENT_ACCOUNT: (
         "You signed in as {signed_in}, but this sign-in is for {address}. Call microsoft_connect again and "
         "sign in as {address}.",
-        "That's a different Microsoft account. Go back to CORSIA and sign in again as {address}.",
+        "That’s a different Microsoft account. Go back to CORSIA and sign in again as {address}.",
     ),
     ACCOUNT_REMOVED: (
         "That Microsoft account was removed during its sign-in. Call microsoft_connect to add it again.",
         "This Microsoft account was removed from CORSIA. Go back to CORSIA and connect it again.",
     ),
     INTERNAL: (
-        "Microsoft sign-in couldn't finish. Call microsoft_connect for a new link.",
+        "Microsoft sign-in couldn’t finish. Call microsoft_connect for a new link.",
+        _BROWSER_RETRY,
+    ),
+    FILE_NAME_CONFLICT: (
+        "A file with that name already exists; choose another name.",
         _BROWSER_RETRY,
     ),
 }

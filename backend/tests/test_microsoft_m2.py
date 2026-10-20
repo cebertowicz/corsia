@@ -51,6 +51,30 @@ async def test_pagination_and_retry_after_are_internal(monkeypatch: pytest.Monke
 
 
 @pytest.mark.asyncio
+async def test_pagination_stops_after_the_requested_items(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeHttp.calls, FakeHttp.responses = [], [Response(200, {"value": [{"id": "first"}], "@odata.nextLink": "next"})]
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
+    async def token(_account: str) -> str: return "token"
+    monkeypatch.setattr(client, "access_token", token)
+    assert [row["id"] for row in await client.graph_pages("start", account_id="m", max_items=1)] == ["first"]
+    assert [call["url"] for call in FakeHttp.calls] == ["start"]
+
+
+@pytest.mark.asyncio
+async def test_upload_conflict_is_a_fixed_named_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    from connections.microsoft.errors import FILE_NAME_CONFLICT
+
+    FakeHttp.calls, FakeHttp.responses = [], [Response(409, {"error": {"message": "provider-canary"}})]
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
+    async def token(_account: str) -> str: return "token"
+    monkeypatch.setattr(client, "access_token", token)
+    with pytest.raises(MicrosoftError) as raised:
+        await client.graph_bytes("PUT", "upload", account_id="m", content=b"note", params={"@microsoft.graph.conflictBehavior": "fail"}, conflict_cause=FILE_NAME_CONFLICT)
+    assert (raised.value.cause, raised.value.message) == (FILE_NAME_CONFLICT, "A file with that name already exists; choose another name.")
+    assert FakeHttp.calls[0]["params"] == {"@microsoft.graph.conflictBehavior": "fail"}
+
+
+@pytest.mark.asyncio
 async def test_send_mail_accepts_empty_202_without_decoding_json(monkeypatch):
     class EmptyAccepted(Response):
         def json(self):
@@ -159,7 +183,7 @@ async def test_graph_adapters_cover_mail_calendar_and_drive_actions(monkeypatch:
     json_calls: list[tuple[str, str, dict[str, object] | None]] = []
     byte_calls: list[tuple[str, str, bytes]] = []
 
-    async def pages(url: str, *, account_id: str, params: dict[str, object] | None = None) -> list[dict[str, object]]:
+    async def pages(url: str, *, account_id: str, params: dict[str, object] | None = None, max_items: int | None = None) -> list[dict[str, object]]:
         assert account_id == "m"
         page_calls.append((url, params))
         return [{"id": "id", "subject": "subject", "start": {}, "end": {}, "name": "name"}]
@@ -169,7 +193,7 @@ async def test_graph_adapters_cover_mail_calendar_and_drive_actions(monkeypatch:
         json_calls.append((method, url, body))
         return {"id": "id", "subject": "subject", "start": {}, "end": {}, "name": "name"}
 
-    async def graph_bytes(method: str, url: str, *, account_id: str, content: bytes) -> dict[str, object]:
+    async def graph_bytes(method: str, url: str, *, account_id: str, content: bytes, **_kwargs: object) -> dict[str, object]:
         assert account_id == "m"
         byte_calls.append((method, url, content))
         return {"id": "id", "name": "name"}

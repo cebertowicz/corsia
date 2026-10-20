@@ -212,17 +212,22 @@ async def graph_json(
     raise MicrosoftError(PROVIDER_UNAVAILABLE)
 
 
-async def graph_bytes(method: str, url: str, *, account_id: str, content: bytes) -> Any:
+async def graph_bytes(
+    method: str, url: str, *, account_id: str, content: bytes, params: dict[str, object] | None = None,
+    conflict_cause: str | None = None,
+) -> Any:
     """Upload opaque bytes through Graph without logging their contents."""
     bearer = await access_token(account_id)
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
             response = await http.request(
                 method, url, headers={"Authorization": f"Bearer {bearer}", "Content-Type": "text/plain; charset=utf-8"},
-                content=content,
+                content=content, params=params,
             )
     except httpx.HTTPError:
         raise MicrosoftError(PROVIDER_UNAVAILABLE) from None
+    if response.status_code == 409 and conflict_cause is not None:
+        raise MicrosoftError(conflict_cause)
     await _check_graph(response, account_id)
     try:
         return response.json()
@@ -230,18 +235,23 @@ async def graph_bytes(method: str, url: str, *, account_id: str, content: bytes)
         raise MicrosoftError(PROVIDER_UNAVAILABLE) from None
 
 
-async def graph_pages(url: str, *, account_id: str, params: dict[str, object] | None = None) -> list[dict[str, object]]:
-    """Collect Graph pages, refusing malformed provider bodies."""
+async def graph_pages(
+    url: str, *, account_id: str, params: dict[str, object] | None = None, max_items: int | None = None,
+) -> list[dict[str, object]]:
+    """Collect no more than the requested Graph items, refusing malformed provider bodies."""
+    if max_items is not None and max_items < 1:
+        raise MicrosoftError(PROVIDER_UNAVAILABLE)
     items: list[dict[str, object]] = []
     next_url: str | None = url
-    while next_url:
+    while next_url and (max_items is None or len(items) < max_items):
         page = await graph_json("GET", next_url, account_id=account_id, params=params)
         if not isinstance(page, dict):
             raise MicrosoftError(PROVIDER_UNAVAILABLE)
         value = page.get("value")
         if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
             raise MicrosoftError(PROVIDER_UNAVAILABLE)
-        items.extend(value)
+        remaining = None if max_items is None else max_items - len(items)
+        items.extend(value if remaining is None else value[:remaining])
         candidate = page.get("@odata.nextLink")
         next_url = candidate if isinstance(candidate, str) and candidate else None
         params = None

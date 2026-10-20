@@ -50,9 +50,9 @@ def _message(value: object) -> Message:
 async def search(account_id: str, query: str, maximum: int) -> list[Message]:
     pages = await client.graph_pages(
         MESSAGES, account_id=account_id,
-        params={"$search": f'\"{query}\"', "$top": min(maximum, 25), "$select": MESSAGE_FIELDS},
+        params={"$search": f'\"{query}\"', "$top": min(maximum, 25), "$select": MESSAGE_FIELDS}, max_items=maximum,
     )
-    return [_message(item) for item in pages][:maximum]
+    return [_message(item) for item in pages]
 
 
 async def fetch(account_id: str, message_id: str) -> Message:

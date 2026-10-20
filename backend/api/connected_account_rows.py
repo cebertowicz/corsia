@@ -40,10 +40,11 @@ def account_row(account: dict[str, object], *, db: sqlite3.Connection) -> dict[s
     state = str(account["state"])
     if state == "connected" and resolve_credentials(str(account["id"]), db=db) is None:
         state = "needs_sign_in"
+    provider = provider_of(str(account["provider"]))
     return {
-        "kind": "account", "id": account["id"], "provider": account["provider"], "provider_display_name": provider_of(str(account["provider"])).display_name, "address": account["address"],
+        "kind": "account", "id": account["id"], "provider": account["provider"], "provider_display_name": provider.display_name, "address": account["address"],
         "capabilities": account["capabilities"], "state": state, "reach": account["reach"],
-        "account_kind": account["account_kind"], "cause": account["state_cause"],
+        "account_kind": account["account_kind"], "cause": account["state_cause"], "scopes": list(provider.display_scopes),
         **account_registration(str(account["id"]), db=db),
     }
 

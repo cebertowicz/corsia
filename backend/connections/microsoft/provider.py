@@ -12,6 +12,7 @@ from __future__ import annotations
 import uuid
 
 from connections.account_provider import AccountProvider
+from connections.microsoft.config import SCOPES
 
 
 def _guid(value: object) -> str | None:
@@ -40,5 +41,5 @@ MICROSOFT = AccountProvider(
     name="microsoft", display_name="Microsoft", capabilities=("mail", "calendar", "files"),
     bundle_fields=frozenset(("access_token", "refresh_token", "client_id", "tenant_id")), scopes_required=True,
     client_fields=frozenset(("client_id", "tenant_id")), account_kinds=frozenset(("personal", "work")),
-    subject_required=True, release=_release, registration=_registration,
+    subject_required=True, release=_release, registration=_registration, display_scopes=SCOPES,
 )

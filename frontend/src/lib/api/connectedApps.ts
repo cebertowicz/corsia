@@ -71,6 +71,8 @@ export interface ConnectedAccount {
 	address: string;
 	/** Stable ids; the screen words them: `mail` is Email, `calendar` Calendar, `files` Files. */
 	capabilities: ('mail' | 'calendar' | 'files')[];
+	/** Server-owned configured permission names, safe to display in the Microsoft IT message. */
+	scopes?: string[];
 	state: AccountState;
 	account_kind?: 'personal' | 'work' | null;
 	cause?: string | null;

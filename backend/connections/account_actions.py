@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import sqlite3
 
-from connections.account_provider import MANUAL_ONLY, AccountProvider
+from connections.account_provider import AccountProvider
+from connections.account_state import MANUAL_ONLY, emit_lifecycle_event, record_audit, set_audit_cause, set_state
 from connections.app_reach import AppReach, AppReachError, normalize_reach
 from connections.connected_accounts import (
     Actor, ConnectedAccountError, _account_reach, _check_actor, get_account, provider_of, resolve_credentials, take_refresh_token,
 )
-from connections.account_state import emit_lifecycle_event, record_audit, set_audit_cause, set_state
 from infra import key_store
 from infra.database import write_transaction
 from infra.db_async import run_in_db
