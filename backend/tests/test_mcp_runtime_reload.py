@@ -488,3 +488,32 @@ def test_slow_first_runtime_download_happens_before_the_connect_deadline(runtime
 
     assert result["state"] == "working"
     assert prepared == ["node"]
+
+
+def test_runtime_download_failure_reconnects_without_cached_failure(runtime, monkeypatch):
+    from tools.managed_runtime import ManagedRuntimeDownloadError
+
+    mcp_runtime, _tools, _gate = runtime
+    _runtime_db(monkeypatch, mcp_runtime, {
+        "app-1": ("Local", {"connected_app_id": "app-1", "command": "npx"}),
+    })
+    attempts = 0
+
+    def fetch_plan(_command, *, path=None):
+        return "node", object()
+
+    def fetch_runtime(_kind):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise ManagedRuntimeDownloadError("download failed: URLError")
+
+    monkeypatch.setattr("tools.managed_runtime.runtime_fetch_plan", fetch_plan)
+    monkeypatch.setattr("tools.managed_runtime.ensure_runtime", fetch_runtime)
+
+    failed = asyncio.run(mcp_runtime.apply_connected_app_runtime("connect", "app-1"))
+    working = asyncio.run(mcp_runtime.apply_connected_app_runtime("reconnect", "app-1"))
+
+    assert failed["failure_class"] == "runtime_download_failed"
+    assert working["state"] == "working"
+    assert attempts == 2

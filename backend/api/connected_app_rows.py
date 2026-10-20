@@ -83,10 +83,11 @@ def _agent_next_step(
     if state == "failed":
         detail = {
             "cannot_start": "app didn't start",
+            "runtime_download_failed": "download failed",
             "timed_out": "no response",
             "protocol_error": "not compatible",
             "name_collision": "clashes with another app",
-        }.get(failure_class, "an unknown reason")
+        }.get(failure_class if isinstance(failure_class, str) else "", "an unknown reason")
         return (
             f"Reconnect {label} once. If it fails again, tell the person: {label} couldn't connect: {detail}. "
             f"I tried once more and it still didn't connect. Open {label} in {place} to see why."

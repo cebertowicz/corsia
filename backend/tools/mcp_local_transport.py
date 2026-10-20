@@ -117,7 +117,7 @@ def safehouse_stdio_parameters(
     from mcp import StdioServerParameters
 
     from infra.config import STATE_ROOT, WORKSPACE
-    from tools.managed_runtime import ManagedRuntimeError, command_bin_dir, command_path
+    from tools.managed_runtime import ManagedRuntimeDownloadError, ManagedRuntimeError, command_bin_dir, command_path
     from tools.safehouse_launch import direct_safehouse_argv, mcp_envelope_dir, mcp_private_state_profile, write_no_proctitle_shim
     from tools.shell_guard import _safehouse_executable, safehouse_version_error
 
@@ -144,6 +144,8 @@ def safehouse_stdio_parameters(
     user_command = shutil.which(command, path=command_path_value)
     try:
         resolved_command = user_command or command_path(command, path=command_path_value)
+    except ManagedRuntimeDownloadError:
+        raise
     except ManagedRuntimeError as error:
         raise MCPConfigError(_mcp_setup_refusal(str(error))) from None
     if resolved_command is None:
