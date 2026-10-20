@@ -2,7 +2,9 @@
 
 Every emitted item is a webhook-shaped delivery through GitHub admission.  The
 issue-event reader is shared by normal polling and startup catch-up so both use
-the same bounded cursor traversal and never replay historic labels.
+the same bounded cursor traversal and never replay historic labels.  A repo's
+first poll only seeds its cursor, heads and closed markers.  Every read, the
+head-check aggregator's included, passes one budget and backoff gate.
 """
 from __future__ import annotations
 
@@ -23,10 +25,20 @@ WEBHOOK_QUIET = timedelta(minutes=30)
 ACTIVE_INTERVAL, IDLE_INTERVAL = 60, 300
 _status: dict[str, Any] = {"state": "starting", "reason": None, "counted_reads": 0,
                            "backoff": False, "backoff_until": None, "degraded": None}
+# One writer per repo state: the poll and an aggregator read never interleave a save.
+_locks: dict[str, asyncio.Lock] = {}
 
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _stamp(moment: datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _lock(repo: str) -> asyncio.Lock:
+    return _locks.setdefault(repo, asyncio.Lock())
 
 
 def _repo_state(repo: str) -> dict[str, Any]:
@@ -60,20 +72,20 @@ def _parse_time(value: str | None) -> datetime | None:
 
 def _recent_webhook(repo: str, now: datetime) -> bool:
     from infra.webhook_delivery_log import repo_delivered_since
-    return repo_delivered_since(repo, (now - WEBHOOK_QUIET).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    return repo_delivered_since(repo, _stamp(now - WEBHOOK_QUIET))
 
 
 def _startup_boundary(repo: str, state: dict[str, Any]) -> str | None:
     """Return max(saved event time, latest webhook minus ten minutes), never stored."""
     from infra.webhook_delivery_log import repo_last_delivered_at
     delivered = _parse_time(repo_last_delivered_at(repo))
-    webhook_floor = (delivered - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ") if delivered else None
+    webhook_floor = _stamp(delivered - timedelta(minutes=10)) if delivered else None
     saved = state.get("issues_cursor_at")
     return max(filter(None, (saved if _parse_time(saved) else None, webhook_floor)), default=None)
 
 
 def _prune_reads(state: dict[str, Any], now: datetime) -> list[str]:
-    floor = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    floor = _stamp(now - timedelta(hours=1))
     reads = [stamp for stamp in state.get("reads", []) if isinstance(stamp, str) and stamp >= floor]
     state["reads"] = reads
     _status["counted_reads"] = len(reads)
@@ -83,16 +95,17 @@ def _prune_reads(state: dict[str, Any], now: datetime) -> list[str]:
 def _counted(response: feed.GhResponse, state: dict[str, Any], now: datetime) -> None:
     reads = _prune_reads(state, now)
     if response.status != 304:
-        reads.append(now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        reads.append(_stamp(now))
     state["reads"] = reads
     _status["counted_reads"] = len(reads)
     remaining = response.headers.get("x-ratelimit-remaining")
     if remaining and remaining.isdigit() and int(remaining) < 1000:
-        until = now + timedelta(seconds=IDLE_INTERVAL)
-        _status.update(backoff=True, backoff_until=until.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        _status.update(backoff=True, backoff_until=_stamp(now + timedelta(seconds=IDLE_INTERVAL)))
 
 
-async def _get(runner: feed.GhRunner, path: str, state: dict[str, Any], now: datetime) -> feed.GhResponse | None:
+async def _get(runner: feed.GhRunner, path: str, state: dict[str, Any], now: datetime, *,
+               send_etag: bool = True, keep_etag: bool = True) -> feed.GhResponse | None:
+    """The one gated read: None when the hourly budget or a rate backoff stops it."""
     if len(_prune_reads(state, now)) >= MAX_HOURLY_READS:
         _status.update(state="degraded", degraded="budget_exhausted")
         return None
@@ -102,12 +115,23 @@ async def _get(runner: feed.GhRunner, path: str, state: dict[str, Any], now: dat
         return None
     if until is not None:
         _status.update(backoff=False, backoff_until=None)
-    etag = state.get("etags", {}).get(path)
+    etag = state.get("etags", {}).get(path) if send_etag else None
     response = await asyncio.to_thread(feed.gh_get, runner, path, {"If-None-Match": etag} if etag else None)
-    if response.headers.get("etag"):
+    if keep_etag and response.headers.get("etag"):
         state.setdefault("etags", {})[path] = response.headers["etag"]
     _counted(response, state, now)
     return response
+
+
+async def gated_read(runner: feed.GhRunner, repo: str, path: str,
+                     now: datetime | None = None) -> feed.GhResponse | None:
+    """One unconditional read for another connector, counted in this poller's budget."""
+    async with _lock(repo):
+        state = _repo_state(repo)
+        response = await _get(runner, path, state, now or _now(), send_etag=False, keep_etag=False)
+        if response is not None:
+            _save_state(repo, state)
+        return response
 
 
 def _payload(repo: str, action: str, pull: dict[str, Any]) -> dict[str, Any]:
@@ -124,34 +148,66 @@ def _rows(body: Any, key: str) -> list[dict[str, Any]]:
     return [value for value in values if isinstance(value, dict)]
 
 
+def _commit_cursor(state: dict[str, Any], newest: dict[str, Any] | None, now: datetime,
+                   path: str, etag: str | None) -> None:
+    """Advance the issue cursor; page one's ETag is kept only with the cursor it describes."""
+    if newest is not None:
+        state["issues_cursor"] = str(newest["id"])
+        state["issues_cursor_at"] = str(newest.get("created_at") or _stamp(now))
+    else:
+        state.setdefault("issues_cursor_at", _stamp(now))
+    if etag:
+        state.setdefault("etags", {})[path] = etag
+
+
 async def _issue_events(runner: feed.GhRunner, repo: str, state: dict[str, Any], now: datetime,
                         *, boundary: str | None = None, persist: bool = True) -> bool:
-    """Traverse at most three pages until saved id or temporary time floor.
+    """Traverse at most three pages until the saved id or a time floor.
 
-    Candidates are held until a stop is proven; a lost cursor emits no historic
-    events and advances to now.  A successful startup boundary is never saved.
+    With no cursor and no floor, a poll only seeds the cursor and catch-up does
+    nothing.  Candidates are held until a stop is proven; a 304, a non-200 or a
+    budget/backoff stop leaves every cursor field as it was.  Only three complete
+    pages without a stop mark the cursor lost, which emits no history and
+    advances to now.  A startup boundary is never saved.
     """
-    cursor, candidates, newest = state.get("issues_cursor"), [], None
-    reached = cursor is None and boundary is None
+    cursor = state.get("issues_cursor")
+    floor = boundary if boundary is not None else (None if cursor else state.get("issues_cursor_at"))
+    first = f"repos/{repo}/issues/events?per_page=100&page=1"
+    if cursor is None and floor is None:
+        if not persist:
+            return False
+        response = await _get(runner, first, state, now, keep_etag=False)
+        if response is not None and response.status == 200:
+            seed = next((row for row in _rows(response.body, "") if row.get("id") is not None), None)
+            _commit_cursor(state, seed, now, first, response.headers.get("etag"))
+        return False
+    candidates, newest, first_etag, reached = [], None, None, False
     for page in range(1, 4):
-        response = await _get(runner, f"repos/{repo}/issues/events?per_page=100&page={page}", state, now)
-        if response is None or response.status == 304:
-            break
-        for row in _rows(response.body, ""):
+        response = await _get(runner, f"repos/{repo}/issues/events?per_page=100&page={page}", state, now,
+                              send_etag=page == 1, keep_etag=False)
+        if response is None or response.status != 200:
+            return False
+        if page == 1:
+            first_etag = response.headers.get("etag")
+        rows = _rows(response.body, "")
+        for row in rows:
             event_id = str(row.get("id")) if row.get("id") is not None else None
             if newest is None and event_id is not None:
                 newest = row
-            if event_id == cursor or (boundary and str(row.get("created_at") or "") <= boundary):
+            if event_id == cursor or (floor and str(row.get("created_at") or "") <= floor):
                 reached = True
                 break
             candidates.append(row)
+        # A short page ends the list, so every event above a time floor has been seen.
+        reached = reached or bool(floor and len(rows) < 100)
         if reached:
             break
-    if not reached and (cursor or boundary):
+    if not reached:
         _status.update(state="degraded", degraded="cursor_lost")
-        state["issues_cursor_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-        if newest and newest.get("id") is not None:
-            state["issues_cursor"] = str(newest["id"])
+        if newest is None:
+            state.pop("issues_cursor", None)
+        _commit_cursor(state, newest, now, first, first_etag)
+        state["issues_cursor_at"] = _stamp(now)
         _save_state(repo, state)
         return False
     changed = False
@@ -164,71 +220,115 @@ async def _issue_events(runner: feed.GhRunner, repo: str, state: dict[str, Any],
             "action": "labeled", "repository": {"full_name": repo}, "issue": issue}
         await _admit(event, payload, f"labeled:{repo}:{row.get('id')}")
         changed = True
-    if persist and newest is not None:
-        state["issues_cursor"] = str(newest.get("id"))
-        state["issues_cursor_at"] = str(newest.get("created_at") or now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    if persist:
+        _commit_cursor(state, newest, now, first, first_etag)
     return changed
+
+
+async def _open_pulls(runner: feed.GhRunner, repo: str, state: dict[str, Any], now: datetime) -> bool | None:
+    """Emit opened/synchronize against the saved heads; None when the gate stopped the read."""
+    response = await _get(runner, f"repos/{repo}/pulls?state=open&sort=updated&direction=desc&per_page=100", state, now)
+    if response is None:
+        return None
+    if response.status != 200:  # 304: the saved heads still describe the open set
+        return False
+    seeding, previous, current, changed = "heads" not in state, state.get("heads", {}), {}, False
+    for pull in _rows(response.body, ""):
+        number, head = pull.get("number"), (pull.get("head") or {}).get("sha")
+        if not isinstance(number, int) or not isinstance(head, str):
+            continue
+        current[str(number)] = head
+        old = previous.get(str(number))
+        if seeding or old == head:
+            continue
+        if old is None:
+            await _admit("pull_request", _payload(repo, "opened", pull), f"opened:{repo}#{number}")
+        else:
+            event = _payload(repo, "synchronize", pull)
+            event["before"] = old
+            await _admit("pull_request", event, f"synchronize:{repo}#{number}:{head}")
+        changed = True
+    state["heads"] = current
+    return changed
+
+
+async def _closed_pulls(runner: feed.GhRunner, repo: str, state: dict[str, Any], now: datetime) -> bool | None:
+    response = await _get(runner, f"repos/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=30", state, now)
+    if response is None:
+        return None
+    if response.status != 200:
+        return False
+    seeding, seen, changed = "closed" not in state, dict(state.get("closed", {})), False
+    for pull in _rows(response.body, ""):
+        number, marker = pull.get("number"), str(pull.get("updated_at") or pull.get("closed_at") or "")
+        if not isinstance(number, int) or not marker or seen.get(str(number)) == marker:
+            continue
+        seen[str(number)] = marker
+        if seeding:
+            continue
+        action = "closed" if pull.get("state") == "closed" else "reopened"
+        await _admit("pull_request", _payload(repo, action, pull), f"{action}:{repo}#{number}:{marker}")
+        changed = True
+    state["closed"] = seen
+    return changed
+
+
+async def _pending_heads(runner: feed.GhRunner, repo: str, state: dict[str, Any], now: datetime) -> None:
+    """Admit completed suites for heads that left the pending set.
+
+    Any incomplete run read keeps the saved pending set and reads no suites; a
+    head whose suite read the gate stops stays pending for the next poll.
+    """
+    cached, pending = state.get("runs", {}), set()
+    for status in ("in_progress", "queued"):
+        response = await _get(runner, f"repos/{repo}/actions/runs?status={status}", state, now)
+        if response is None or response.status not in (200, 304) or (response.status == 304 and status not in cached):
+            return
+        if response.status == 200:
+            cached[status] = sorted({str(row["head_sha"]) for row in _rows(response.body, "workflow_runs")
+                                     if row.get("head_sha")})
+            state["runs"] = cached
+        pending.update(cached[status])
+    settled = sorted(set(state.get("pending", [])) - pending)
+    for index, sha in enumerate(settled):
+        suites = await _get(runner, f"repos/{repo}/commits/{sha}/check-suites", state, now,
+                            send_etag=False, keep_etag=False)
+        if suites is None:
+            pending.update(settled[index:])
+            break
+        for suite in _rows(suites.body, "check_suites"):
+            if suite.get("status") == "completed":
+                await _admit("check_suite", {"action": "completed", "repository": {"full_name": repo}, "check_suite": suite},
+                             f"check_suite:{repo}:{suite.get('id')}:{suite.get('updated_at')}")
+    state["pending"] = sorted(pending)
 
 
 async def _poll_repo(runner: feed.GhRunner, repo: str, now: datetime) -> bool:
     """Poll one fallback repo; a fresh webhook leaves every saved field unchanged."""
     if _recent_webhook(repo, now):
         return False
-    state = _repo_state(repo)
-    changed = await _issue_events(runner, repo, state, now)
-    open_response = await _get(runner, f"repos/{repo}/pulls?state=open&sort=updated&direction=desc&per_page=100", state, now)
-    if open_response is None:
+    async with _lock(repo):
+        state = _repo_state(repo)
+        changed = await _issue_events(runner, repo, state, now)
+        for read in (_open_pulls, _closed_pulls):
+            result = await read(runner, repo, state, now)
+            if result is None:
+                _save_state(repo, state)
+                return changed
+            changed = changed or result
+        await _pending_heads(runner, repo, state, now)
+        if changed:
+            state["changed_at"] = _stamp(now)
         _save_state(repo, state)
-        return changed
-    previous, current = state.get("heads", {}), {}
-    for pull in _rows(open_response.body, ""):
-        number, head = pull.get("number"), (pull.get("head") or {}).get("sha")
-        if not isinstance(number, int) or not isinstance(head, str):
-            continue
-        current[str(number)] = head
-        old = previous.get(str(number))
-        if old is None:
-            await _admit("pull_request", _payload(repo, "opened", pull), f"opened:{repo}#{number}")
-            changed = True
-        elif old != head:
-            event = _payload(repo, "synchronize", pull)
-            event["before"] = old
-            await _admit("pull_request", event, f"synchronize:{repo}#{number}:{head}")
-            changed = True
-    state["heads"] = current
-    closed = await _get(runner, f"repos/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=30", state, now)
-    if closed is not None:
-        seen = state.get("closed", {})
-        for pull in _rows(closed.body, ""):
-            number, marker = pull.get("number"), str(pull.get("updated_at") or pull.get("closed_at") or "")
-            if not isinstance(number, int) or not marker or seen.get(str(number)) == marker:
-                continue
-            action = "closed" if pull.get("state") == "closed" else "reopened"
-            await _admit("pull_request", _payload(repo, action, pull), f"{action}:{repo}#{number}:{marker}")
-            seen[str(number)] = marker
-            changed = True
-        state["closed"] = seen
-    pending: set[str] = set()
-    for status in ("in_progress", "queued"):
-        runs = await _get(runner, f"repos/{repo}/actions/runs?status={status}", state, now)
-        pending.update(str(row["head_sha"]) for row in _rows(runs.body if runs else {}, "workflow_runs") if row.get("head_sha"))
-    for sha in set(state.get("pending", [])) - pending:
-        suites = await _get(runner, f"repos/{repo}/commits/{sha}/check-suites", state, now)
-        for suite in _rows(suites.body if suites else {}, "check_suites"):
-            if suite.get("status") == "completed":
-                await _admit("check_suite", {"action": "completed", "repository": {"full_name": repo}, "check_suite": suite}, f"check_suite:{repo}:{suite.get('id')}")
-    state["pending"] = sorted(pending)
-    if changed:
-        state["changed_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    _save_state(repo, state)
-    return changed or bool(pending)
+        return changed or bool(state.get("pending"))
 
 
 async def _startup_catchup(runner: feed.GhRunner, repo: str, now: datetime) -> bool:
     """Process only the startup overlap, without storing the temporary boundary."""
-    state = _repo_state(repo)
-    boundary = _startup_boundary(repo, state)
-    return await _issue_events(runner, repo, state, now, boundary=boundary, persist=False)
+    async with _lock(repo):
+        state = _repo_state(repo)
+        boundary = _startup_boundary(repo, state)
+        return await _issue_events(runner, repo, state, now, boundary=boundary, persist=False)
 
 
 async def poll_once(runner: feed.GhRunner, repositories: frozenset[str] | None = None,

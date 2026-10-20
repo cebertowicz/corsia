@@ -2,7 +2,9 @@
 
 This module owns only the connector-side aggregation.  It deliberately has no
 router dependency: the injected sink is the future generic event intake, while
-the default sink makes the currently unwired integration visible in logs.
+the default sink makes the currently unwired integration visible in logs.  Its
+reads pass the repo-activity poller's budget and backoff gate, and the
+admission hook stays off unless explicitly enabled.
 """
 from __future__ import annotations
 
@@ -10,13 +12,17 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from events.connectors import github_notifications_feed as feed
+from events.connectors import github_repo_activity as poller
 
 log = logging.getLogger(__name__)
 DEBOUNCE_SECONDS = 30
+ENABLE_ENV = "CORSIA_GITHUB_HEAD_CHECKS_ENABLE"
 # No GitHub declarations file exists on dev; this is the local declaration until
 # the package adopts the shipped declarations schema.
 HEAD_CHECKS_COMPLETED_DECLARATION = {
@@ -54,11 +60,12 @@ class LoggingSink:
         return _LoggedResult()
 
 
+@dataclass
 class _LoggedResult:
-    accepted = False
-    duplicate = False
-    refusal = None
-    rules_matched: list[str] = []
+    accepted: bool = False
+    duplicate: bool = False
+    refusal: Refusal | None = None
+    rules_matched: list[str] = field(default_factory=list)
 
 
 def _object(value: Any) -> dict[str, Any]:
@@ -73,23 +80,13 @@ def _pr_number(payload: dict[str, Any]) -> int | None:
     return None
 
 
-def _suite_key(suite: dict[str, Any]) -> tuple[str, str]:
-    app = _object(suite.get("app"))
-    run = _object(suite.get("workflow_run"))
-    return (str(app.get("id") or app.get("slug") or "unknown"),
-            str(run.get("workflow_id") or suite.get("name") or suite.get("id")))
+def _current_suites(body: Any) -> list[dict[str, Any]]:
+    """REST suites have independent identities, even when they share an app.
 
-
-def _latest_suites(suites: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    latest: dict[tuple[str, str], dict[str, Any]] = {}
-    for suite in suites:
-        key = _suite_key(suite)
-        previous = latest.get(key)
-        if previous is None or (str(suite.get("updated_at", "")), suite.get("id", 0)) >= (
-            str(previous.get("updated_at", "")), previous.get("id", 0)
-        ):
-            latest[key] = suite
-    return list(latest.values())
+    The REST shape names no workflow; a re-run reuses the suite and moves its
+    ``updated_at``. Every returned suite must complete before the head settles.
+    """
+    return [suite for suite in _object(body).get("check_suites", []) if isinstance(suite, dict)]
 
 
 def _conclusion(suites: list[dict[str, Any]]) -> str:
@@ -104,8 +101,7 @@ def _conclusion(suites: list[dict[str, Any]]) -> str:
 
 
 def _event_id(repo: str, head_sha: str, suites: list[dict[str, Any]]) -> str:
-    pairs = sorted((str(suite.get("id")), suite.get("run_attempt", suite.get("attempt", 1)))
-                   for suite in suites)
+    pairs = sorted((str(suite.get("id")), str(suite.get("updated_at") or "")) for suite in suites)
     encoded = json.dumps([repo, head_sha, pairs], separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(encoded.encode()).hexdigest()
 
@@ -137,14 +133,14 @@ class HeadCheckAggregator:
             await self.sleep(DEBOUNCE_SECONDS)
             repo, head_sha = key
             try:
-                response = await asyncio.to_thread(
-                    feed.gh_get, self.runner, f"repos/{repo}/commits/{head_sha}/check-suites"
-                )
+                response = await poller.gated_read(self.runner, repo, f"repos/{repo}/commits/{head_sha}/check-suites")
             except Exception:
                 log.exception("github-head-checks: aggregate read failed for %s@%s", *key)
                 return
-            suites = [item for item in _object(response.body).get("check_suites", []) if isinstance(item, dict)]
-            latest = _latest_suites(suites)
+            if response is None or response.status != 200:
+                log.info("github-head-checks: aggregate read held for %s@%s", *key)
+                return
+            latest = _current_suites(response.body)
             if not latest or any(suite.get("status") != "completed" for suite in latest):
                 return
             branch, pr_number = self._facts.get(key, (None, None))
@@ -161,9 +157,19 @@ class HeadCheckAggregator:
 _default: HeadCheckAggregator | None = None
 
 
+def hook_disabled_reason() -> str | None:
+    """Off by default; the poller's switches (config off, test mode) also hold it."""
+    reason = poller.disabled_reason()
+    if reason:
+        return reason
+    return None if os.environ.get(ENABLE_ENV) == "1" else "not_enabled"
+
+
 def observe_admitted_check_suite(payload: dict[str, Any]) -> None:
     """Hook for admitted ``check_suite.completed`` deliveries."""
     global _default
+    if hook_disabled_reason():
+        return
     if _default is None:
         from reviewer.gh_api import run_gh
         _default = HeadCheckAggregator(run_gh, LoggingSink())
