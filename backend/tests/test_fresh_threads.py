@@ -64,6 +64,7 @@ def fresh_db(tmp_path, monkeypatch):
             title TEXT, model TEXT,
             project_id TEXT, parent_thread_id TEXT,
             spawned_by TEXT REFERENCES threads(id),
+            local_only INTEGER NOT NULL DEFAULT 0,
             created_at TEXT, updated_at TEXT,
             history_epoch INTEGER NOT NULL DEFAULT 0,
             next_message_seq INTEGER NOT NULL DEFAULT 1,
@@ -134,6 +135,44 @@ def fresh_db(tmp_path, monkeypatch):
 class _ImmediateRunInDb:
     async def __call__(self, fn, *args, **kwargs):
         return fn(*args, **kwargs)
+
+
+def test_local_only_child_inherits_parent_scope(fresh_db, monkeypatch):
+    """A worker created from a local-only thread stores Local only itself."""
+    from infra import fresh_threads
+
+    fresh_db.execute(
+        "INSERT INTO threads(id,user_id,created_at,updated_at,local_only) VALUES (?,?,?,?,1)",
+        ("parent", "u-test", "t", "t"),
+    )
+    monkeypatch.setattr("infra.local_only._is_cloud", lambda *_args, **_kwargs: False)
+    child = fresh_threads.create_fresh_thread(
+        user_id="u-test", thread_id="child", model="claude-code/sonnet",
+        spawned_by="parent", db=fresh_db,
+    )
+
+    assert child["local_only"] == 1
+
+
+def test_local_only_child_refuses_non_local_initial_model(fresh_db, monkeypatch):
+    """Creation rejects a non-local model before the child row is written."""
+    from infra import fresh_threads
+
+    fresh_db.execute(
+        "INSERT INTO threads(id,user_id,created_at,updated_at,local_only) VALUES (?,?,?,?,1)",
+        ("parent", "u-test", "t", "t"),
+    )
+    from infra.local_only import LocalityRefused
+
+    monkeypatch.setattr("infra.local_only._is_cloud", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("infra.local_only._ready_local_selectors", lambda: ())
+
+    with pytest.raises(LocalityRefused):
+        fresh_threads.create_fresh_thread(
+            user_id="u-test", thread_id="child", model="claude-code/sonnet",
+            spawned_by="parent", db=fresh_db,
+        )
+    assert fresh_db.execute("SELECT id FROM threads WHERE id='child'").fetchone() is None
 
 
 def test_fresh_thread_starts_after_existing_context_changes(fresh_db):

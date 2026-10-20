@@ -288,6 +288,17 @@ describe('ConnectedAppsSettings', () => {
 		expect(host.querySelector('[data-settings-row="Slack"] .sub')?.textContent).toBe("Couldn't connect: app didn't start · All projects");
 	});
 
+	it('shows the runtime-download failure and keeps Reconnect as its recovery', async () => {
+		const failed = { ...awaiting, id: 'files', name: 'Files', state: 'failed', failure_class: 'runtime_download_failed' };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [failed] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.textContent).toContain("Couldn't connect: download failed"));
+		(host.querySelector('[data-settings-row="Files"] button.open') as HTMLButtonElement).click();
+		flushSync();
+		expect(host.textContent).toContain("CORSIA couldn't download what this app needs to run on this computer. Check that you're connected to the internet, then press Reconnect. If it keeps happening, your network may be blocking the download.");
+		expect(host.textContent).toContain('Reconnect');
+	});
+
 	it('gives a row at most one solid action and keeps the others as text', async () => {
 		const connected = { ...awaiting, id: 'notes', name: 'Notes', state: 'working' };
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [awaiting, connected] }) })));

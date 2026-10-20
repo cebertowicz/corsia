@@ -35,7 +35,7 @@ def test_fresh_schema_has_turn_owned_pending_usage_receipts() -> None:
     try:
         db.executescript(SCHEMA_SQL)
 
-        assert SCHEMA_VERSION == 131
+        assert SCHEMA_VERSION == 132
         column = next(
             row for row in db.execute("PRAGMA table_info(active_turns)")
             if row[1] == "usage_receipts_json"

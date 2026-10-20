@@ -94,7 +94,7 @@ export function startArrivalSelect(view: EditorView, request: ArrivalSelect): Pr
 function typeInsert(view: EditorView, request: ArrivalSelect, from: number, to: number): Promise<SelectOutcome> {
 	const callId = request.callId ?? request.key;
 	view.dispatch({ effects: previewSlot.of({
-		callId, threadId: request.threadId, name: request.name, slot: 0, from, to, text: request.insert!, mode: 'suggest',
+		callId, threadId: request.threadId, name: request.name, slot: 0, from, to, text: request.insert!, mode: 'suggest', commentId: request.key,
 	}) });
 	// A claimed preview outlives this (the suggestion owns it); one nothing claimed, because the card never showed, goes.
 	setTimeout(() => { if (view.dom.isConnected) view.dispatch({ effects: endPreview.of({ callId }) }); }, CLAIM_GRACE_MS);

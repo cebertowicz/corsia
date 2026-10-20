@@ -1,12 +1,12 @@
-"""Schema 130 -> 131: Microsoft connected-account metadata and fixed audit causes."""
+"""Schema 131 -> 132: Microsoft connected-account metadata and fixed audit causes."""
 from __future__ import annotations
 
 import sqlite3
 
 
-# This is deliberately the v130 table shape. Future connected-account fields
+# This is deliberately the v131 table shape. Future connected-account fields
 # must use their own migration rather than changing this historical fixture.
-_CONNECTED_ACCOUNTS_V130_SQL = """
+_CONNECTED_ACCOUNTS_V131_SQL = """
     CREATE TABLE connected_accounts_new (
         id TEXT PRIMARY KEY,
         provider TEXT NOT NULL,
@@ -35,7 +35,7 @@ _CONNECTED_ACCOUNTS_V130_SQL = """
 """
 
 
-_AUDIT_V130_SQL = """
+_AUDIT_V131_SQL = """
     CREATE TABLE connected_account_audit_new (
         id INTEGER PRIMARY KEY,
         created_at TEXT NOT NULL,
@@ -51,16 +51,16 @@ _AUDIT_V130_SQL = """
 """
 
 
-def migrate_130_to_131(conn: sqlite3.Connection) -> None:
-    """Rebuild account tables to add Microsoft metadata without changing historical v130.
+def migrate_131_to_132(conn: sqlite3.Connection) -> None:
+    """Rebuild account tables to add Microsoft metadata without changing historical v131.
 
     The account row must be rebuilt because SQLite cannot add the new checked
-    columns in the same shape as a fresh v130 database. Reach rows are held in
+    columns in the same shape as a fresh v131 database. Reach rows are held in
     memory while their foreign-key table is recreated, then restored unchanged.
     """
     reach_rows = list(conn.execute("SELECT account_id,project_id FROM connected_account_reach"))
     conn.execute("DROP TABLE connected_account_reach")
-    conn.execute(_CONNECTED_ACCOUNTS_V130_SQL)
+    conn.execute(_CONNECTED_ACCOUNTS_V131_SQL)
     conn.execute("""
         INSERT INTO connected_accounts_new(
             id,provider,provider_subject,account_kind,state_cause,address,capabilities_json,state,reach_mode,
@@ -85,7 +85,7 @@ def migrate_130_to_131(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX idx_connected_account_reach_project ON connected_account_reach(project_id, account_id)")
     conn.executemany("INSERT INTO connected_account_reach(account_id,project_id) VALUES (?,?)", reach_rows)
 
-    conn.execute(_AUDIT_V130_SQL)
+    conn.execute(_AUDIT_V131_SQL)
     conn.execute("""
         INSERT INTO connected_account_audit_new(id,created_at,account_id,actor_kind,actor_id,action,revocation_cause)
         SELECT id,created_at,account_id,actor_kind,actor_id,action,revocation_cause FROM connected_account_audit

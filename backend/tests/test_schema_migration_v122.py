@@ -16,7 +16,7 @@ def _columns(db: sqlite3.Connection) -> list[str]:
 
 
 def test_v121_registers_the_email_screens_step() -> None:
-    assert SCHEMA_VERSION == 131
+    assert SCHEMA_VERSION == 132
     assert MIGRATIONS[121] is migrate_121_to_122
 
 

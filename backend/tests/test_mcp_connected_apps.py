@@ -137,6 +137,7 @@ def test_agent_state_guidance_uses_the_persons_connected_apps_words():
         ) == expected
     for failure_class, plain_cause in {
         "cannot_start": "app didn't start",
+        "runtime_download_failed": "download failed",
         "timed_out": "no response",
         "protocol_error": "not compatible",
         "name_collision": "clashes with another app",
