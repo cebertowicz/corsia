@@ -13,10 +13,10 @@
       "sha256": "c060283fe1bcfc602f3988ca0fc6cb0b3d931c2f58bca3a1f3874a9ce5c9c0b9"
     },
     {
-      "bytes": 3478,
+      "bytes": 3726,
       "kind": "context",
       "path": "context/30-VERIFICATION-COMPLETION.md",
-      "sha256": "2ac0f6a1e66262f6c6e8272d48f236edee50fe95b5999fafed16dbb5daabc7a3"
+      "sha256": "f49e7ddd29ff79ed5aa6d7a86dc1665a2563774562fbef1453d8369cd4871435"
     },
     {
       "bytes": 3028,
@@ -128,6 +128,12 @@
       "kind": "skill",
       "path": "skills/agent-team-decomposition/SKILL.md",
       "sha256": "23827a97c54bd33200a196356b1f39259ba4c640bb173694ebda1585fa15fa55"
+    },
+    {
+      "bytes": 4623,
+      "kind": "skill",
+      "path": "skills/apply-feedback/SKILL.md",
+      "sha256": "2c423ef16bdd790564740829eaaba9c8ef258fa4fa019e54295329b811d9230b"
     },
     {
       "bytes": 19066,
