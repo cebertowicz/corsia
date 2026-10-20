@@ -145,6 +145,7 @@ def _load_builtin_manifests() -> None:
         gmail,
         library,
         measurement,
+        microsoft,
         plan,
     )
 

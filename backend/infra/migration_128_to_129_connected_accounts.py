@@ -7,13 +7,59 @@ import sqlite3
 import uuid
 
 from connections.connected_accounts import (
-    GOOGLE_CAPABILITIES,
     GOOGLE_PROVIDER,
     ONLY_CORSIA,
     credential_key,
 )
 from infra import key_store, key_store_values
-from infra.connected_accounts_schema import CONNECTED_ACCOUNTS_SCHEMA_SQL
+
+# What a migrated Google row reached at v129, frozen with the schema below.
+_GOOGLE_CAPABILITIES_V129 = ("mail", "calendar", "files")
+
+# Historical schema is deliberately frozen here: later account columns belong to
+# their own forward step and must not appear in a 128 -> 129 upgrade.
+CONNECTED_ACCOUNTS_SCHEMA_V129_SQL = """
+    CREATE TABLE IF NOT EXISTS connected_accounts (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        provider_subject TEXT,
+        address TEXT NOT NULL,
+        capabilities_json TEXT NOT NULL CHECK(json_valid(capabilities_json)),
+        state TEXT NOT NULL CHECK(state IN ('connected', 'needs_sign_in', 'signed_out')),
+        reach_mode TEXT NOT NULL CHECK(reach_mode IN ('all', 'selected', 'corsia')),
+        outside_projects INTEGER NOT NULL DEFAULT 0 CHECK(outside_projects IN (0, 1)),
+        credential_key TEXT NOT NULL UNIQUE,
+        cursor_json TEXT,
+        created_by_kind TEXT NOT NULL CHECK(created_by_kind IN ('person', 'agent', 'system')),
+        created_by_id TEXT NOT NULL,
+        signed_in_by_kind TEXT CHECK(signed_in_by_kind IN ('person', 'agent', 'system')),
+        signed_in_by_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK((signed_in_by_kind IS NULL) = (signed_in_by_id IS NULL)),
+        UNIQUE(provider, provider_subject)
+    );
+    CREATE INDEX IF NOT EXISTS idx_connected_accounts_provider ON connected_accounts(provider, state);
+    CREATE TABLE IF NOT EXISTS connected_account_reach (
+        account_id TEXT NOT NULL REFERENCES connected_accounts(id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        PRIMARY KEY(account_id, project_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_connected_account_reach_project ON connected_account_reach(project_id, account_id);
+    CREATE TABLE IF NOT EXISTS connected_account_audit (
+        id INTEGER PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        actor_kind TEXT NOT NULL CHECK(actor_kind IN ('person', 'agent', 'system')),
+        actor_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK(action IN ('connect', 'sign_in', 'sign_out', 'remove')),
+        revocation_cause TEXT CHECK(revocation_cause IS NULL OR revocation_cause IN (
+            'revoked', 'provider_unreachable', 'provider_timeout', 'provider_rejected',
+            'provider_unexpected', 'not_signed_in'
+        ))
+    );
+    CREATE INDEX IF NOT EXISTS idx_connected_account_audit_account ON connected_account_audit(account_id, id);
+"""
 from infra.settings import get_setting
 from infra.time import utc_now_iso
 
@@ -61,7 +107,7 @@ def migrate_128_to_129(conn: sqlite3.Connection) -> None:
     before commit only the legacy entries resolve; after commit only the account
     bundle resolves. A failed bundle write therefore leaves the old path intact.
     """
-    for statement in CONNECTED_ACCOUNTS_SCHEMA_SQL.split(";"):
+    for statement in CONNECTED_ACCOUNTS_SCHEMA_V129_SQL.split(";"):
         if statement.strip():
             conn.execute(statement)
 
@@ -86,7 +132,7 @@ def migrate_128_to_129(conn: sqlite3.Connection) -> None:
         "created_at,updated_at"
         ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (account_id, GOOGLE_PROVIDER, None, address.strip(),
-         json.dumps(GOOGLE_CAPABILITIES, separators=(",", ":")), state, ONLY_CORSIA, 0, key,
+         json.dumps(_GOOGLE_CAPABILITIES_V129, separators=(",", ":")), state, ONLY_CORSIA, 0, key,
          json.dumps(cursor, separators=(",", ":"), sort_keys=True) if cursor is not None else None,
          "system", "legacy_google_migration", "system", "legacy_google_migration", now, now),
     )
