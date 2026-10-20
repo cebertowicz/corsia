@@ -9,6 +9,9 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 import pytest
+from fastapi import HTTPException
+from starlette.requests import Request
+from api import microsoft as microsoft_api
 from api.connected_account_rows import list_account_rows
 from connections import account_actions, connected_accounts
 from connections.app_reach import AppReach
@@ -117,6 +120,15 @@ async def _finish(url: str, **query: str) -> tuple[int, bytes]:
     return await _callback(found["redirect_uri"], state=found["state"], **(query or {"code": "authorization-code"}))
 
 
+async def _request(body: object) -> Request:
+    encoded = json.dumps(body).encode()
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": encoded, "more_body": False}
+
+    return Request({"type": "http", "method": "POST", "path": "/api/microsoft/connect", "headers": []}, receive)
+
+
 async def _connect(fake: FakeMicrosoft, *, kind: str = "work", tenant: str | None = TENANT_A) -> str:
     url, account_id = await oauth.start_sign_in(CLIENT_ID, kind, tenant, actor=("system", "test"), reach=EVERYWHERE)
     query = _query(url)
@@ -128,6 +140,7 @@ async def _connect(fake: FakeMicrosoft, *, kind: str = "work", tenant: str | Non
     assert status == 200
     assert fake.forms[-1]["redirect_uri"] == query["redirect_uri"]
     return account_id
+
 
 
 def _accounts() -> list[dict[str, object]]:
@@ -146,9 +159,61 @@ def _bundle(account_id: str) -> dict[str, object] | None:
         db.close()
 
 
+async def test_connect_route_passes_account_id_to_shared_sign_in(monkeypatch) -> None:
+    started: dict[str, object] = {}
+
+    async def start_sign_in(client_id, kind, tenant_id, **kwargs):
+        started.update(client_id=client_id, kind=kind, tenant_id=tenant_id, **kwargs)
+        return "https://login.microsoft.example/auth", "shared-account"
+
+    monkeypatch.setattr(oauth, "start_sign_in", start_sign_in)
+
+    result = await microsoft_api.connect(
+        await _request({"account_id": "existing-account", "client_id": CLIENT_ID, "kind": "work", "tenant_id": TENANT_A}),
+        {"token_kind": "session", "id": "person"},
+    )
+
+    assert result == {"url": "https://login.microsoft.example/auth", "account_id": "shared-account"}
+    assert started["account_id"] == "existing-account"
+    assert started["client_id"] == CLIENT_ID
+
+
+async def test_connect_route_keeps_safe_not_found_contract(monkeypatch) -> None:
+    async def start_sign_in(*_args, **_kwargs):
+        raise MicrosoftError(ACCOUNT_NOT_FOUND)
+
+    monkeypatch.setattr(oauth, "start_sign_in", start_sign_in)
+
+    with pytest.raises(HTTPException) as raised:
+        await microsoft_api.connect(await _request({"account_id": "missing"}), {"token_kind": "session", "id": "person"})
+
+    assert raised.value.status_code == 404
+    assert raised.value.detail == {"cause": ACCOUNT_NOT_FOUND, "message": "That account isn't connected."}
+
+
+async def test_person_connect_and_status_use_registration_fix_copy(monkeypatch) -> None:
+    async def start_sign_in(*_args, **_kwargs):
+        raise MicrosoftError(REGISTRATION_MISCONFIGURED)
+
+    async def database_call(*_args, **_kwargs):
+        return {"status": "not_connected", "cause": REGISTRATION_MISCONFIGURED, "message": message(REGISTRATION_MISCONFIGURED)}
+
+    monkeypatch.setattr(oauth, "start_sign_in", start_sign_in)
+    with pytest.raises(HTTPException) as raised:
+        await microsoft_api.connect(await _request({}), {"token_kind": "session", "id": "person"})
+    assert raised.value.status_code == 400
+    assert raised.value.detail == "Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in."
+
+    monkeypatch.setattr(microsoft_api, "run_in_db", database_call)
+    assert await microsoft_api.status({"token_kind": "session", "id": "person"}) == {
+        "status": "not_connected",
+        "cause": REGISTRATION_MISCONFIGURED,
+        "message": "Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in.",
+    }
+
+
 def test_scopes_are_exactly_the_graph_ones_without_openid_or_profile() -> None:
     assert oauth.SCOPES == ("Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Files.ReadWrite", "offline_access", "User.Read")
-
 
 async def test_pkce_authority_and_guid_input_refusal(microsoft, isolated_db) -> None:
     url, account_id = await oauth.start_sign_in(CLIENT_ID, "personal", actor=("system", "test"), reach=EVERYWHERE)
@@ -166,6 +231,8 @@ def test_every_failure_is_a_fixed_code_with_a_real_message() -> None:
     error = MicrosoftError(ADMIN_APPROVAL_REQUIRED)
     assert (error.cause, error.state_cause) == (ADMIN_APPROVAL_REQUIRED, ADMIN_APPROVAL_REQUIRED)
     assert error.message == "Your organization needs to approve CORSIA before it can connect this account."
+    assert MicrosoftError(PROVIDER_UNAVAILABLE).browser_message == "Microsoft had a problem with sign-in. Go back to CORSIA and try again."
+    assert error.browser_message == "Your organization needs to approve CORSIA before it can connect this account. Go back to CORSIA."
     assert MicrosoftError(INPUT_REFUSAL).state_cause is None and MicrosoftError(INTERNAL).state_cause is None
 
 
@@ -382,8 +449,8 @@ async def test_registration_error_is_a_latest_add_result_and_a_row_state_cause(m
 def test_registration_error_is_a_state_cause_with_fixed_copy() -> None:
     error = MicrosoftError(REGISTRATION_MISCONFIGURED)
     assert error.state_cause == REGISTRATION_MISCONFIGURED
-    assert error.message.startswith("The person's own Microsoft app registration isn't set up right.")
-    assert error.browser_message == "Your Microsoft app for CORSIA isn't set up right. Go back to CORSIA and ask it to fix the app."
+    assert error.message.startswith("The person's own Microsoft app registration isn't configured correctly.")
+    assert error.browser_message == "Your Microsoft app for CORSIA isn’t set up correctly. Go back to CORSIA and ask it in chat to fix the app."
     assert "provider-detail-canary" not in error.message
     assert "provider-detail-canary" not in error.browser_message
 
@@ -608,7 +675,7 @@ async def test_rows_show_microsoft_and_google_side_by_side_with_registration_gui
         db.close()
 
     assert rows[work] == {
-        "kind": "account", "id": work, "provider": MICROSOFT_PROVIDER, "address": "same@example.test",
+        "kind": "account", "id": work, "provider": MICROSOFT_PROVIDER, "provider_display_name": "Microsoft", "address": "same@example.test",
         "capabilities": ["mail", "calendar", "files"], "state": "connected", "reach": selected.as_dict(),
         "account_kind": "work", "cause": None, "client_id": CLIENT_ID, "tenant_id": TENANT_A,
     }

@@ -20,7 +20,8 @@ from auth_fixtures import OWNER_SESSION_TOKEN
 from fastapi import FastAPI
 
 from api import google as google_api
-from connections.connected_accounts import GOOGLE_PROVIDER, list_accounts, resolve_credentials
+from connections.connected_accounts import GOOGLE_PROVIDER, MICROSOFT_PROVIDER, create_account, list_accounts, resolve_credentials
+from connections.app_reach import AppReach
 from connections.google import client as google_client
 from connections.google import oauth
 from infra import key_store
@@ -745,13 +746,22 @@ async def test_the_mail_and_calendar_resolver_answers_an_out_of_reach_account_li
 
 async def test_person_google_routes_remain_unfiltered(google, conductor, client_file):
     account_id = await _connect(google, conductor, client_file)
+    microsoft_id = str(create_account(
+        MICROSOFT_PROVIDER, "wrong-provider@contoso.example",
+        reach=AppReach(mode="all", project_ids=frozenset(), outside_projects=False),
+        created_by=("person", "person"), provider_subject="tenant:object", account_kind="work",
+    )["id"])
     async with _http() as http:
         status = await http.get("/api/google/status", headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"})
         reconnect = await http.post(
             "/api/google/connect", headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"}, json={"account_id": account_id},
         )
+        wrong_provider = await http.post(
+            "/api/google/connect", headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"}, json={"account_id": microsoft_id},
+        )
     assert [account["account_id"] for account in status.json()["accounts"]] == [account_id]
     assert reconnect.status_code == 400 and "already connected" in reconnect.text
+    assert wrong_provider.status_code == 404 and wrong_provider.json()["detail"] == oauth.UNKNOWN_ACCOUNT
 
 
 def test_concurrent_begins_never_exceed_the_pending_limit(monkeypatch):
