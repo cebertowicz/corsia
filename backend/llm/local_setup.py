@@ -17,6 +17,7 @@ from llm import local_setup_download, local_setup_operation
 from llm.local_model import LocalModel
 from llm.local_profiles import format_size
 from llm.local_setup_disk import require_free_disk
+from llm.local_setup_results import setup_fix
 
 STATES = frozenset({"starting", "downloading", "ready", "stopped", "setup_failed", "start_failed", "failed"})
 EVENT_CATEGORY = "local_setup"
@@ -242,6 +243,7 @@ def setup_status() -> dict[str, Any]:
         result, downloaded=_flight.downloaded,
     )
     match = re.search(r"(\d{1,3})%", stage) if stage else None
+    failed = result or {}
     return {
         "state": state, "model": model.repository if model else None,
         "percent": min(100, int(match.group(1))) if match else None,
@@ -251,6 +253,8 @@ def setup_status() -> dict[str, Any]:
         "cause": result.get("cause") if result else None,
         "ref": result.get("ref") if result else None,
         "bytes_to_free": result.get("bytes_to_free") if result else None,
+        "fix": setup_fix(failed.get("cause"), failed.get("bytes_to_free"))
+        if state in {"failed", "setup_failed", "start_failed"} else None,
     }
 
 

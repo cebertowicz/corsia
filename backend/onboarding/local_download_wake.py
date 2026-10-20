@@ -14,7 +14,7 @@ import re
 
 from llm import local_setup_operation
 from llm.local_setup import terminal_outcome
-from llm.local_setup_results import CAUSES
+from llm.local_setup_results import CAUSES, setup_fix
 
 log = logging.getLogger(__name__)
 EVENT = "onboarding.local_download"
@@ -44,19 +44,6 @@ def _first_run_rendered(conductor_id: str) -> bool:
         db.close()
 
 
-def _fix(cause: str, ref: str | None, bytes_to_free: int | None) -> str:
-    if cause == "disk_full":
-        amount = f"Free {bytes_to_free} bytes," if isinstance(bytes_to_free, int) and bytes_to_free > 0 else "Free space,"
-        return amount + " then retry in Settings."
-    if cause == "connection":
-        return "Check the connection, then retry in Settings."
-    if cause == "memory":
-        return "Choose a subscription or API provider instead."
-    if cause == "own_omlx_upgrade_required":
-        return "Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then retry."
-    return f"Retry in Settings. Reference: {ref}." if ref and _REF.fullmatch(ref) else "Retry in Settings."
-
-
 def _payload(outcome: str, *, model: str | None, cause: object, ref: str | None, bytes_to_free: int | None) -> dict:
     detail: dict = {"outcome": outcome}
     if outcome == "ready":
@@ -65,7 +52,9 @@ def _payload(outcome: str, *, model: str | None, cause: object, ref: str | None,
         detail["model"] = model[:512]
         return detail
     cause = str(cause) if cause in CAUSES else "other"
-    detail.update(cause=cause, fix=_fix(cause, ref, bytes_to_free))
+    detail.update(cause=cause, fix=setup_fix(cause, bytes_to_free))
+    if ref and _REF.fullmatch(ref):
+        detail["ref"] = ref
     if isinstance(bytes_to_free, int) and not isinstance(bytes_to_free, bool) and bytes_to_free > 0:
         detail["bytes_to_free"] = bytes_to_free
     return detail

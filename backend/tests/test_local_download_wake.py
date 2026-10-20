@@ -48,7 +48,9 @@ async def test_terminal_outcome_finished_before_first_run_render_persists_then_d
     assert await wake.flush_pending_local_download("conductor") is True
     assert delivered.await_count == 1
     assert delivered.await_args.kwargs["delivery_id"] == "local-download:flight-1:failed"
-    assert "Free 2048 bytes, then retry in Settings." in delivered.await_args.kwargs["notice"]
+    notice = delivered.await_args.kwargs["notice"]
+    assert "Free 2048 bytes, then retry in Settings › Providers, where Retry is." in notice
+    assert '"ref": "setup-42"' in notice
     assert records.read().notified is True
     assert await wake.flush_pending_local_download("conductor") is False
     assert delivered.await_count == 1
@@ -174,3 +176,24 @@ def test_wake_does_not_classify_start_path_other_omlx_as_a_flight_cause():
 
     payload = local_download_wake._payload("failed", model=None, cause="other_omlx", ref=None, bytes_to_free=None)
     assert payload["cause"] == "other"
+
+
+@pytest.mark.parametrize("cause", ["disk_full", "connection", "memory", "own_omlx_upgrade_required", "other"])
+def test_wake_and_status_route_share_one_fix(wake, cause):
+    from llm import local_setup
+
+    payload = wake._payload("failed", model=None, cause=cause, ref="local-9", bytes_to_free=None)
+    local_setup._flight.result = {"ok": False, "cause": cause, "ref": "local-9"}
+    status = local_setup.setup_status()
+
+    assert status["state"] == "failed"
+    assert status["fix"] == payload["fix"]
+    assert status["ref"] == payload["ref"] == "local-9"
+
+
+def test_status_carries_a_fix_only_for_a_failed_setup(wake):
+    from llm import local_setup
+
+    assert local_setup.setup_status()["fix"] is None
+    local_setup._flight.result = {"ok": True}
+    assert local_setup.setup_status()["fix"] is None

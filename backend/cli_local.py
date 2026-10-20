@@ -84,13 +84,7 @@ def _follow_server_setup(token: str, command: str) -> int:
         if state == "downloading":
             return _print_still_downloading(flight, command)
         if state in {"failed", "setup_failed", "start_failed", "stopped"}:
-            cause = flight.get("cause")
-            message = {
-                "disk_full": f"Free {flight.get('bytes_to_free') or 'disk space'} bytes, then retry.",
-                "connection": "Check the connection, then retry.",
-                "memory": "Choose a subscription or API provider instead.",
-                "own_omlx_upgrade_required": "Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX.",
-            }.get(cause, "Local setup stopped." if state == "stopped" else "Local setup failed. Retry, or save a report.")
+            message = "Local setup stopped." if state == "stopped" else flight.get("fix") or "Local setup failed."
             if flight.get("ref"):
                 message += f" Reference: {flight['ref']}"
             return _print_terminal_error({"message": message, "next_action": f"Run `{command}` again."})

@@ -222,8 +222,22 @@ def test_local_model_offer_reads_a_running_setup_before_offering_and_never_waits
     for state in ("ready", "stopped", "setup_failed", "start_failed", "failed"):
         assert f"`{state}`" in running
     assert "say once what failed" in running
-    assert "Never invent a `stage`, `result` or failure message field" in running
+    assert "plain words, plus `ref` when present" in running
+    assert "eta_seconds" not in offer
     assert "re-read it after each later task" in FIRST_RUN.read_text(encoding="utf-8")
+
+
+def test_local_model_offer_names_what_stop_and_keep_do_and_never_reads_a_wake_flight_twice():
+    offer = LOCAL_MODEL_OFFER.read_text(encoding="utf-8")
+    running = offer.split("## Setup already running", 1)[1]
+
+    assert "Stopping it ends it now, so anything using it stops too" in offer
+    assert "Keeping it runs two copies, which uses more memory" in offer
+    assert "on a second one, offer to keep both instead" in offer
+    assert "setup ended without a model" in offer
+    assert "For `cause: memory` offer no retry" in running
+    assert "never read it again unless the person asks" in running
+    assert "A download you started in step 3" in running
 
 
 def test_local_model_offer_reads_omlx_s_pick_and_never_sends_a_profile():
