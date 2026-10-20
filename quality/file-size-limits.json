@@ -56,7 +56,7 @@
     "frontend/src/routes/_design/+page.svelte": 608
   },
   "function_limits": {
-    "backend/api/delegation.py::create_thread": 154,
+    "backend/api/delegation.py::create_thread": 142,
     "backend/api/project_repos.py::detach_repo": 87,
     "backend/api/project_scaffolding.py::_initialize_project": 93,
     "backend/connections/harness_models.py::store_success": 133,

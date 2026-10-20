@@ -98,7 +98,7 @@ def child_db(tmp_path, monkeypatch):
             parent_thread_id TEXT REFERENCES threads(id),
             spawned_by TEXT REFERENCES threads(id),
             local_only INTEGER NOT NULL DEFAULT 0,
-            local_only_inherited_from_thread_id TEXT REFERENCES threads(id),
+            local_only_root_thread_id TEXT REFERENCES threads(id),
             history_epoch INTEGER NOT NULL DEFAULT 0,
             next_message_seq INTEGER NOT NULL DEFAULT 1,
             last_context_change_seq INTEGER NOT NULL DEFAULT 0

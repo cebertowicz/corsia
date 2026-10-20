@@ -175,7 +175,7 @@ class TestCreateThread:
                         "parent_session_id": None,
                         "spawned_by": "par-emit",
                         "local_only": 0,
-                        "local_only_inherited_from_thread_id": None,
+                        "local_only_root_thread_id": "par-emit",
                         "reasoning_effort": None,
                         "created_at": emitted[0][1]["session"]["created_at"],
                         "updated_at": emitted[0][1]["session"]["updated_at"],

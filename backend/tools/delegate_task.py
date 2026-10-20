@@ -127,10 +127,7 @@ async def _spawn(
     model, refusal = await run_in_db(partial(eligible_delegation_model, requested_model, **scope))
     if refusal:
         return f"Error: {refusal}"
-    # The worker inherits Local only, so a cloud model is refused before anything starts.
-    local_refusal = await run_in_db(_local_only_refusal, parent, model)
-    if local_refusal:
-        return f"Error: {local_refusal}"
+    # create_fresh_thread admits the child model in its write transaction.
     try:
         requested_is_cc = delegation._is_cc_model(model)
     except Exception as exc:
@@ -184,21 +181,7 @@ async def _spawn(
     }
 
 
-def _local_only_refusal(parent, model):
-    from infra.database import get_db
-    from infra.local_only import local_only_model_refusal
-
-    db = get_db()
-    try:
-        return local_only_model_refusal(
-            model,
-            thread_local_only=bool(parent.get("local_only")),
-            project_id=parent.get("project_id") or None,
-            db=db,
-            spawn=True,
-        )
-    finally:
-        db.close()
+# Child model admission is centralized in infra.fresh_threads.create_fresh_thread.
 
 
 async def _hand_over(

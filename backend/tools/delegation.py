@@ -80,8 +80,8 @@ def _current_thread_context(thread_id: str) -> dict[str, Any] | None:
     db = get_db()
     try:
         row = db.execute(
-            "SELECT id, user_id, profile, project_id, title, agent_enabled, agent_status, "
-            "lifecycle_state, archived_reason, spawned_by, local_only FROM threads WHERE id = ?",
+            "SELECT thread.id,thread.user_id,thread.profile,thread.project_id,thread.title,thread.agent_enabled,thread.agent_status,thread.lifecycle_state,thread.archived_reason,"
+            "thread.spawned_by,COALESCE(root.local_only,thread.local_only) AS local_only FROM threads AS thread LEFT JOIN threads AS root ON root.id=thread.local_only_root_thread_id WHERE thread.id=?",
             (thread_id,),
         ).fetchone()
         return dict(row) if row else None

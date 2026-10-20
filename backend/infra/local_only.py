@@ -11,6 +11,16 @@ LOCAL_ONLY_REFUSAL_CODE = "local_only_requires_local_model"
 LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE = "local_only_send_needs_confirm"
 
 
+class LocalOnlyRefused(ValueError):
+    """A typed model-admission refusal with stable agent-facing text."""
+
+    code = LOCAL_ONLY_REFUSAL_CODE
+
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(message)
+
+
 def _catalog_row(model: str, *, db: sqlite3.Connection) -> dict:
     from llm.resolution import catalog_row
 
@@ -59,30 +69,44 @@ def local_only_model_refusal(
     return thread_local_only_text(selector, selectors, spawn=spawn)
 
 
-def inherited_local_only(
+def child_local_only_root(
     parent_ids: tuple[str | None, ...], *, db: sqlite3.Connection,
-) -> tuple[bool, str | None]:
-    """Resolve a local-only creator to the root thread a person can change."""
+) -> str | None:
+    """Return the root link a child stores, whether its root is Local only or not."""
     for parent_id in dict.fromkeys(parent_ids):
         if not parent_id:
             continue
         parent = db.execute(
-            "SELECT id,local_only,local_only_inherited_from_thread_id FROM threads WHERE id=?",
+            "SELECT COALESCE(local_only_root_thread_id,id) AS root_thread_id "
+            "FROM threads WHERE id=?",
             (parent_id,),
         ).fetchone()
-        if parent and parent["local_only"]:
-            return True, parent["local_only_inherited_from_thread_id"] or parent["id"]
-    return False, None
+        if parent:
+            return str(parent["root_thread_id"])
+    return None
 
 
-def thread_model_refusal(row: sqlite3.Row, model: str | None, *, db: sqlite3.Connection) -> str | None:
-    """Apply a persisted thread's local-only scope to one model selection."""
-    return local_only_model_refusal(
+def require_local_only_model(
+    model: str | None,
+    *,
+    thread_local_only: bool,
+    project_id: str | None,
+    db: sqlite3.Connection,
+    spawn: bool = False,
+) -> None:
+    """Raise the one typed refusal for a disallowed Local-only model binding."""
+    refusal = local_only_model_refusal(
         model,
-        thread_local_only=bool(row["local_only"]),
-        project_id=row["project_id"] or None,
+        thread_local_only=thread_local_only,
+        project_id=project_id,
         db=db,
+        spawn=spawn,
     )
+    if refusal:
+        if thread_local_only:
+            raise LocalOnlyRefused(refusal)
+        raise ValueError(refusal)
+
 
 
 def send_confirmation_refusal(
@@ -97,7 +121,7 @@ def send_confirmation_refusal(
         return None
     # Every recipient thread is read by its own bound model, so only its
     # locality decides; a person's chat on a cloud model is still cloud-bound.
-    recipient_model = recipient.get("model")
+    recipient_model = recipient.get("pending_model") or recipient.get("model")
     recipient_name = str(recipient.get("title") or recipient.get("id") or "This recipient")
     if not isinstance(recipient_model, str) or not recipient_model.strip():
         if no_sensitive_content is True:
@@ -128,6 +152,8 @@ def send_confirmation_error(
     no_sensitive_content: object,
 ) -> str | None:
     """Read model locality and return the send confirmation refusal, if any."""
+    if not sender.get("local_only"):
+        return None
     from infra.database import get_db
 
     db = get_db()

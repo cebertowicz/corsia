@@ -18,7 +18,7 @@ from infra.config import WORKSPACE
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.execution_class import provider_label
-from infra.local_only import inherited_local_only, local_only_model_refusal
+from infra.local_only import child_local_only_root, require_local_only_model
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_message_rows
 
@@ -33,7 +33,7 @@ _SESSION_EVENT_FIELDS = (
     "parent_session_id",
     "spawned_by",
     "local_only",
-    "local_only_inherited_from_thread_id",
+    "local_only_root_thread_id",
     "reasoning_effort",
     "created_at",
     "updated_at",
@@ -104,17 +104,21 @@ def create_fresh_thread(
     now = created_at or _now()
     with write_transaction(db, scope="create_fresh_thread") as _db:
         _ensure_project_exists(_db, project_id)
-        local_only, inherited_from = inherited_local_only(
-            (spawned_by, parent_thread_id, actor_thread_id), db=_db,
+        root_thread_id = child_local_only_root(
+            (spawned_by, parent_thread_id), db=_db,
         )
-        refusal = local_only_model_refusal(
+        root = (
+            _db.execute("SELECT local_only FROM threads WHERE id=?", (root_thread_id,)).fetchone()
+            if root_thread_id
+            else None
+        )
+        require_local_only_model(
             model,
-            thread_local_only=local_only,
+            thread_local_only=bool(root and root["local_only"]),
             project_id=project_id,
             db=_db,
+            spawn=True,
         )
-        if refusal:
-            raise ValueError(refusal)
         row = {
             "id": sid,
             "user_id": user_id,
@@ -124,8 +128,8 @@ def create_fresh_thread(
             "project_id": project_id,
             "parent_thread_id": parent_thread_id,
             "spawned_by": spawned_by,
-            "local_only": int(local_only),
-            "local_only_inherited_from_thread_id": inherited_from if local_only else None,
+            "local_only": 0,
+            "local_only_root_thread_id": root_thread_id,
             "reasoning_effort": reasoning_effort,
             "created_at": now,
             "updated_at": now,

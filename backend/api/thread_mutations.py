@@ -9,7 +9,8 @@ from api.thread_deletion import delete_owned_thread as _delete_owned_thread
 from infra.auth import authenticate, require_human_user
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
-from infra.local_only import local_only_model_refusal
+from infra.local_only import LocalOnlyRefused, require_local_only_model
+from prompts.cloud_off import NO_LOCAL_READY_TEXT
 from infra.passive_changes import append_agent_roster_transition
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
@@ -89,7 +90,9 @@ async def _patch_model(thread_id: str, user_id: str, body: dict):
             setup_selection=source == "setup",
             **({"account_id": body["account_id"]} if body.get("account_id") is not None else {}),
         )
-    except (ModelSwitchPreparationError, ModelSwitchConflict, ValueError) as exc:
+    except LocalOnlyRefused as exc:
+        return JSONResponse(status_code=409, content=_person_local_only_error(exc))
+    except (ModelSwitchPreparationError, ModelSwitchConflict) as exc:
         raise HTTPException(409, str(exc)) from exc
     if not isinstance(result, ModelSwitchOutcome):
         from infra.model_switch_types import SwitchRequest
@@ -204,36 +207,42 @@ def _write_metadata_patch(
         }
 
 
+def _person_local_only_error(exc: LocalOnlyRefused) -> dict[str, str]:
+    if NO_LOCAL_READY_TEXT in exc.message:
+        message = "No local model is ready. Load one in Settings, then try again."
+    else:
+        message = "This chat is Local only, so choose a local model and try again."
+    return {"code": exc.code, "message": message}
+
+
 def _write_local_only(thread_id: str, user_id: str, local_only: bool) -> dict | str:
     with write_transaction(None, scope="thread_local_only") as db:
         thread = get_thread_for_user(thread_id, user_id, db=db)
         if not thread:
             return "not_found"
-        inherited_from = thread["local_only_inherited_from_thread_id"]
-        if inherited_from:
+        root_thread_id = thread["local_only_root_thread_id"]
+        if root_thread_id:
             root = db.execute(
-                "SELECT title FROM threads WHERE id=?", (inherited_from,),
+                "SELECT title,local_only FROM threads WHERE id=?", (root_thread_id,),
             ).fetchone()
             return {
-                "error": "inherited",
-                "root_thread_id": inherited_from,
-                "root_thread_title": (root["title"] if root else "Untitled"),
+                "error": "child",
+                "root_thread_id": root_thread_id,
+                "root_thread_local_only": bool(root and root["local_only"]),
             }
         if local_only:
             for model in (thread["model"], thread["pending_model"]):
-                refusal = local_only_model_refusal(
+                require_local_only_model(
                     model,
                     thread_local_only=True,
                     project_id=thread["project_id"] or None,
                     db=db,
                 )
-                if refusal:
-                    return {"error": "local_only_refusal", "detail": refusal}
         db.execute(
             "UPDATE threads SET local_only=?, updated_at=? WHERE id=?",
             (int(local_only), utc_now_iso(), thread_id),
         )
-        return {"local_only": local_only, "local_only_inherited_from_thread_id": None}
+        return {"local_only": local_only}
 
 
 @router.put("/threads/{thread_id}/local-only")
@@ -246,23 +255,34 @@ async def set_local_only(
     local_only = body.get("local_only")
     if not isinstance(local_only, bool):
         raise HTTPException(422, "local_only must be a boolean")
-    result = await run_in_db(_write_local_only, thread_id, user["id"], local_only)
+    try:
+        result = await run_in_db(_write_local_only, thread_id, user["id"], local_only)
+    except LocalOnlyRefused as exc:
+        return JSONResponse(status_code=409, content=_person_local_only_error(exc))
     if result == "not_found":
         raise HTTPException(404)
-    if result.get("error") == "inherited":
+    if result.get("error") == "child":
+        message = (
+            "This chat is Local only because the chat that started it is. "
+            "Turn Local only off there, or start a new chat."
+            if result["root_thread_local_only"]
+            else "Only the chat that started this chat can change Local only. "
+            "Turn Local only on or off there, or start a new chat."
+        )
         return JSONResponse(
             status_code=409,
             content={
-                "detail": (
-                    "This thread inherited Local only from "
-                    f"{result['root_thread_title']} and can't turn it off. Start a new thread "
-                    "for work that needs a cloud model."
-                ),
-                "root_thread_id": result["root_thread_id"],
+                "code": "local_only_requires_local_model",
+                "message": message,
             },
         )
-    if result.get("error") == "local_only_refusal":
-        raise HTTPException(409, result["detail"])
+    emit_product_event(
+        "session",
+        "local_only.changed",
+        thread_id=thread_id,
+        user_id=user["id"],
+        properties={"local_only": local_only},
+    )
     return {"ok": True, **result}
 
 

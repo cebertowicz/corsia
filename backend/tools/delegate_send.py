@@ -10,6 +10,7 @@ from functools import partial
 import logging
 from typing import Any
 
+from infra.local_only import send_confirmation_error
 from infra.send_service import SendRejected
 from infra.send_types import InboxQueuedInput
 import tools.delegation as delegation
@@ -108,7 +109,7 @@ class DelegateSendTool(Tool):
         if scope_error:
             return scope_error
         confirmation_error = await delegation.run_in_db(
-            _send_confirmation_error,
+            send_confirmation_error,
             current,
             target,
             kwargs.get("no_sensitive_content"),
@@ -154,17 +155,7 @@ class DelegateSendTool(Tool):
         return delegation._json(sent)
 
 
-def _send_confirmation_error(sender, recipient, no_sensitive_content):
-    from infra.local_only import send_confirmation_refusal
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        return send_confirmation_refusal(
-            sender, recipient, no_sensitive_content=no_sensitive_content, db=db,
-        )
-    finally:
-        db.close()
+# Send confirmation is centralized in infra.local_only.
 
 
 async def _answer_needs(from_thread_id: str, thread_id: str, node_id: str, kwargs) -> dict:

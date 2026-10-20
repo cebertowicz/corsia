@@ -18,7 +18,7 @@ from infra.fresh_threads import (
     SpawnVisibilityRejected,
     create_visible_fresh_thread,
 )
-from infra.local_only import send_confirmation_error
+from infra.local_only import LocalOnlyRefused, send_confirmation_error
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
 from infra.runtime_truth import read_runtime_truth
@@ -33,7 +33,11 @@ def _delegated_sender(sender_id: str, user_id: str) -> dict | None:
     db = get_db()
     try:
         row = db.execute(
-            "SELECT title, project_id, local_only FROM threads WHERE id = ? AND user_id = ?",
+            "SELECT thread.title,thread.project_id,"
+            "COALESCE(root.local_only,thread.local_only) AS local_only "
+            "FROM threads AS thread LEFT JOIN threads AS root "
+            "ON root.id=thread.local_only_root_thread_id "
+            "WHERE thread.id=? AND thread.user_id=?",
             (sender_id, user_id),
         ).fetchone()
         if row is None:
@@ -91,27 +95,11 @@ async def _send_confirmation_for_turn(sender: dict, recipient: dict, body: dict)
 
 @router.post("/threads")
 async def create_thread(token: str, body: dict):
-    """Create a new thread for delegated work.
+    """Create a visible chat or hidden child with an explicit model.
 
-    Body: ``{title?, project_id?, model?, provider?, thread_kind?, spawned_by?,
-             from_thread_id?}``
-
-    Thread kind:
-        ``thread_kind=chat`` (default) — visible in the sidebar; intended for
-        threads the user will interact with directly.
-
-        ``thread_kind=subagent`` — hidden from the sidebar; intended for child
-        workers that will primarily interface with another agent, not the user.
-        A subagent MUST have a parent: pass ``spawned_by`` or
-        ``from_thread_id`` (the spawning thread's CORSIA_THREAD_ID). If
-        neither is resolvable the route returns 422 so the orphan never silently
-        accumulates (issue #536).
-
-    Model resolution:
-        Required ``model``; omitted or blank → 422 before creation, with no fallback.
-
-    ``provider`` is informational only; the model id already encodes its
-    provider prefix (e.g. ``claude-code/opus``).
+    Subagents require ``spawned_by`` or ``from_thread_id``; chat callers may
+    preserve parent lineage through ``parent_thread_id``. ``provider`` is
+    informational because the exact model id identifies its provider.
     """
     user = authenticate(token)
     if not user:
@@ -132,7 +120,8 @@ async def create_thread(token: str, body: dict):
     if not is_dispatchable_model(model):
         raise HTTPException(422, dispatch_form_error(model))
 
-    now, project_id = utc_now_iso(), body.get("project_id") or None
+    now = utc_now_iso()
+    project_id = body.get("project_id") or None
     title = body.get("title") or "New Chat"
     spawned_by = (body.get("spawned_by") or "").strip() or None
     from_thread_id = (body.get("from_thread_id") or "").strip() or None
@@ -230,9 +219,12 @@ async def create_thread(token: str, body: dict):
             thread_kind=thread_kind,
             emit_spawn_chip=bool(spawned_by), account_id=body.get("account_id"),
         )
+    except LocalOnlyRefused as exc:
+        raise HTTPException(409, exc.message) from exc
+    except SpawnVisibilityRejected as exc:
+        raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
-        status_code = 403 if isinstance(exc, SpawnVisibilityRejected) else 400
-        raise HTTPException(status_code, str(exc)) from exc
+        raise HTTPException(400, str(exc)) from exc
     thread_id = thread_row["id"]
 
     emit_product_event(
@@ -252,7 +244,6 @@ async def send_turn(thread_id: str, token: str, body: dict):
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
-
     message = (body.get("message") or "").strip()
     if not message:
         raise HTTPException(400, "Missing 'message' in request body")
@@ -281,7 +272,8 @@ async def send_turn(thread_id: str, token: str, body: dict):
         "scope": sender["scope"],
     }
 
-    if not (target_payload := await run_in_db(_delegated_target, thread_id, user["id"])):
+    target_payload = await run_in_db(_delegated_target, thread_id, user["id"])
+    if not target_payload:
         raise HTTPException(404, "Thread not found")
     thread_row = target_payload["thread_row"]
 

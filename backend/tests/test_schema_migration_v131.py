@@ -19,7 +19,7 @@ def test_v130_adds_local_only_scope_columns() -> None:
     migrate_130_to_131(db)
 
     columns = {row[1] for row in db.execute("PRAGMA table_info(threads)")}
-    assert {"local_only", "local_only_inherited_from_thread_id"} <= columns
+    assert {"local_only", "local_only_root_thread_id"} <= columns
     assert db.execute("SELECT local_only FROM threads").fetchone() is None
 
 
@@ -35,7 +35,7 @@ def test_v130_is_safe_for_a_current_shape_rewound_in_a_fixture() -> None:
     db = sqlite3.connect(":memory:")
     db.execute(
         "CREATE TABLE threads (id TEXT PRIMARY KEY, local_only INTEGER NOT NULL DEFAULT 0, "
-        "local_only_inherited_from_thread_id TEXT)"
+        "local_only_root_thread_id TEXT)"
     )
 
     migrate_130_to_131(db)
