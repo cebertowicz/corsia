@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
@@ -17,7 +18,8 @@ from connections.connected_accounts import (
 from connections.microsoft import account_store, client, oauth
 from connections.microsoft.errors import (
     ACCOUNT_NOT_FOUND, ADMIN_APPROVAL_REQUIRED, CONSENT_CANCELLED, DIFFERENT_ACCOUNT, INPUT_REFUSAL, INTERNAL,
-    PROVIDER_UNAVAILABLE, REGISTRATION_MISCONFIGURED, MicrosoftError, exchange_error_cause, message,
+    PROVIDER_UNAVAILABLE, REFRESH_TOKEN_INVALID, REGISTRATION_MISCONFIGURED, MicrosoftError, exchange_error_cause,
+    message,
 )
 from google_account_helpers import make_only_corsia
 from infra.database import get_db
@@ -31,6 +33,9 @@ ACCESS = "access-token-canary"
 EVERYWHERE = AppReach(mode="all", project_ids=frozenset(), outside_projects=False)
 PERSON = ("person", "person")
 _REAL_CLIENT = httpx.AsyncClient
+MSA_ORGANIZATION_ERROR = json.loads(
+    (Path(__file__).parent / "fixtures" / "microsoft" / "organization_msa_unsupported.json").read_text()
+)
 
 
 class FakeMicrosoft:
@@ -40,7 +45,9 @@ class FakeMicrosoft:
         self.token_error = False
         self.me: dict[str, object] = {"id": "object-a", "mail": "same@example.test"}
         self.me_status = 200
+        self.organization_status = 200
         self.organizations: list[dict[str, str]] = [{"id": TENANT_A}]
+        self.organization_error: dict[str, object] = {"error": {"code": "Error", "message": "graph-canary"}}
         self.forms: list[dict[str, str]] = []
         self.token_urls: list[str] = []
         self.graph_auth: list[str] = []
@@ -51,7 +58,8 @@ class FakeMicrosoft:
             if request.url.path.endswith("/me"):
                 return httpx.Response(self.me_status, json=self.me if self.me_status == 200 else {"error": "graph-canary"})
             if request.url.path.endswith("/organization"):
-                return httpx.Response(200, json={"value": self.organizations})
+                body = {"value": self.organizations} if self.organization_status == 200 else self.organization_error
+                return httpx.Response(self.organization_status, json=body)
             return httpx.Response(404)
         form = {key: value[0] for key, value in parse_qs(request.content.decode()).items()}
         self.forms.append(form)
@@ -180,15 +188,77 @@ async def test_graph_falls_back_to_the_user_principal_name(microsoft, isolated_d
     assert [row["address"] for row in _accounts()] == ["upn@example.test"]
 
 
-@pytest.mark.parametrize(("organizations", "kind", "subject"), [
-    ([{"id": TENANT_B}], "work", f"{TENANT_B}:object-a"),
-    ([], "personal", "9188040d-6c67-4c5b-b112-36a304b66dad:object-a"),
-])
-async def test_both_reads_the_organization_to_tell_work_from_personal(microsoft, isolated_db, organizations, kind, subject) -> None:
-    microsoft.organizations = organizations
+async def test_both_reads_the_organization_to_tell_work_from_personal(microsoft, isolated_db) -> None:
+    microsoft.organizations = [{"id": TENANT_B}]
     await _connect(microsoft, kind="both", tenant=None)
     [row] = _accounts()
-    assert (row["account_kind"], row["provider_subject"]) == (kind, subject)
+    assert (row["account_kind"], row["provider_subject"]) == ("work", f"{TENANT_B}:object-a")
+
+
+async def test_both_treats_only_graphs_msa_organization_response_as_personal(microsoft, isolated_db) -> None:
+    microsoft.organization_status = 400
+    microsoft.organization_error = MSA_ORGANIZATION_ERROR
+
+    await _connect(microsoft, kind="both", tenant=None)
+
+    [row] = _accounts()
+    assert (row["account_kind"], row["provider_subject"]) == ("personal", "9188040d-6c67-4c5b-b112-36a304b66dad:object-a")
+
+
+async def test_both_rejects_a_different_bad_request_without_persisting_an_account(microsoft, isolated_db) -> None:
+    microsoft.organization_status = 400
+    microsoft.organization_error = {"error": {"code": "BadRequest", "message": "different Graph failure"}}
+    url, _ = await oauth.start_sign_in(CLIENT_ID, "both", actor=("system", "test"), reach=EVERYWHERE)
+
+    result, page = await _finish(url)
+
+    assert result == 400
+    assert _page_has(page, MicrosoftError(PROVIDER_UNAVAILABLE).browser_message)
+    assert _accounts() == []
+
+
+@pytest.mark.parametrize("status", (401, 403, 404, 500))
+async def test_both_rejects_other_organization_failures_without_persisting_an_account(microsoft, isolated_db, status) -> None:
+    microsoft.organization_status = status
+    url, _ = await oauth.start_sign_in(CLIENT_ID, "both", actor=("system", "test"), reach=EVERYWHERE)
+
+    result, page = await _finish(url)
+
+    assert result == 400
+    assert _page_has(page, MicrosoftError(PROVIDER_UNAVAILABLE).browser_message)
+    assert _accounts() == []
+
+
+async def test_microsoft_lifecycle_events_are_emitted_once(microsoft, isolated_db, monkeypatch) -> None:
+    from connections import account_state
+
+    events: list[tuple[str, str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        account_state, "emit_product_event",
+        lambda category, action, **kwargs: events.append((category, action, kwargs["properties"])),
+    )
+    account_id = await _connect(microsoft)
+    microsoft.token_error = True
+    with pytest.raises(MicrosoftError, match=REFRESH_TOKEN_INVALID):
+        await client.access_token(account_id)
+    await account_actions.sign_out_account(account_id, actor=PERSON)
+    await account_actions.remove_account(account_id, actor=PERSON)
+    failed_url, _ = await oauth.start_sign_in(CLIENT_ID, "both", actor=("system", "test"), reach=EVERYWHERE)
+    failed_status, _ = await _finish(failed_url, error="access_denied", error_subcode="cancel")
+
+    assert failed_status == 400
+    assert [(category, action) for category, action, _ in events] == [
+        ("connected_account", "connect_started"),
+        ("connected_account", "connect_succeeded"),
+        ("connected_account", "connect_failed"),
+        ("connected_account", "signed_out"),
+        ("connected_account", "removed"),
+        ("connected_account", "connect_started"),
+        ("connected_account", "connect_failed"),
+    ]
+    assert all(event["provider"] == MICROSOFT_PROVIDER for _, _, event in events)
+    assert events[2][2]["cause"] == REFRESH_TOKEN_INVALID
+    assert events[-1][2]["cause"] == CONSENT_CANCELLED
 
 
 async def test_a_graph_failure_adds_no_row_and_echoes_nothing(microsoft, isolated_db) -> None:
@@ -288,7 +358,7 @@ def test_redirect_registration_errors_are_fixed_and_redacted(query) -> None:
     assert "provider-detail-canary" not in error.browser_message
 
 
-async def test_registration_error_is_a_latest_add_result_not_a_row_state_cause(microsoft, isolated_db, agent_adds) -> None:
+async def test_registration_error_is_a_latest_add_result_and_a_row_state_cause(microsoft, isolated_db, agent_adds) -> None:
     add_url, _ = await oauth.start_sign_in(CLIENT_ID, "work", TENANT_A, actor=("agent", "thread-a"), adding_thread_id="thread-a")
     add_status, add_page = await _finish(add_url, error="invalid_client", error_description="AADSTS50011 provider-detail-canary")
     assert add_status == 400
@@ -304,14 +374,16 @@ async def test_registration_error_is_a_latest_add_result_not_a_row_state_cause(m
     again_status, again_page = await _finish(again_url, error="invalid_client", error_description="AADSTS50011 provider-detail-canary")
     assert again_status == 400
     status = oauth.accounts_status(account_id=account_id)
-    assert (status["state"], status["cause"]) == ("signed_out", None)
+    assert (status["state"], status["cause"]) == ("needs_sign_in", REGISTRATION_MISCONFIGURED)
     assert _page_has(again_page, MicrosoftError(REGISTRATION_MISCONFIGURED).browser_message)
     assert b"provider-detail-canary" not in again_page
 
 
-def test_registration_error_is_not_a_state_cause() -> None:
+def test_registration_error_is_a_state_cause_with_fixed_copy() -> None:
     error = MicrosoftError(REGISTRATION_MISCONFIGURED)
-    assert error.state_cause is None
+    assert error.state_cause == REGISTRATION_MISCONFIGURED
+    assert error.message.startswith("The person's own Microsoft app registration isn't set up right.")
+    assert error.browser_message == "Your Microsoft app for CORSIA isn't set up right. Go back to CORSIA and ask it to fix the app."
     assert "provider-detail-canary" not in error.message
     assert "provider-detail-canary" not in error.browser_message
 
@@ -468,6 +540,30 @@ async def test_cancelling_sign_in_again_leaves_the_row_needing_sign_in(microsoft
     [row] = _accounts()
     assert (row["state"], row["state_cause"]) == ("needs_sign_in", CONSENT_CANCELLED)
     assert _bundle(account_id) is None
+
+
+async def test_failed_sign_in_again_emits_once_when_existing_credentials_still_work(microsoft, isolated_db, monkeypatch) -> None:
+    from connections import account_state
+
+    events: list[tuple[str, str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        account_state, "emit_product_event",
+        lambda category, action, **kwargs: events.append((category, action, kwargs["properties"])),
+    )
+    account_id = await _connect(microsoft)
+    url, _ = await oauth.start_sign_in(None, None, actor=PERSON, account_id=account_id)
+    events.clear()
+    microsoft.token_error = True
+
+    status, _ = await _finish(url)
+
+    assert status == 400
+    [row] = _accounts()
+    assert (row["state"], row["state_cause"]) == ("connected", None)
+    assert _bundle(account_id) is not None
+    assert [(category, action, properties["cause"]) for category, action, properties in events] == [
+        ("connected_account", "connect_failed", PROVIDER_UNAVAILABLE)
+    ]
 
 
 async def test_remove_deletes_row_and_pending_without_session_revocation(microsoft, isolated_db) -> None:

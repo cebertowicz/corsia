@@ -174,6 +174,33 @@ async def test_a_refused_refresh_signs_out_only_that_account(google, conductor, 
         await google_client.get_json(first, LABELS)
 
 
+async def test_google_lifecycle_events_are_emitted_once(google, conductor, client_file, monkeypatch):
+    from connections import account_state
+
+    events: list[tuple[str, str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        account_state, "emit_product_event",
+        lambda category, action, **kwargs: events.append((category, action, kwargs["properties"])),
+    )
+    account_id = await _add(google, conductor, client_file, "person@example.com")
+    await account_actions.sign_out_account(account_id, actor=PERSON)
+    await account_actions.remove_account(account_id, actor=PERSON)
+    _, state = await _start(google, conductor, client_file)
+    with pytest.raises(google_client.GoogleSignInError):
+        await oauth.complete_sign_in(None, state)
+
+    assert [(category, action) for category, action, _ in events] == [
+        ("connected_account", "connect_started"),
+        ("connected_account", "connect_succeeded"),
+        ("connected_account", "signed_out"),
+        ("connected_account", "removed"),
+        ("connected_account", "connect_started"),
+        ("connected_account", "connect_failed"),
+    ]
+    assert all(event["provider"] == GOOGLE_PROVIDER for _, _, event in events)
+    assert events[-1][2]["cause"] == "consent_cancelled"
+
+
 async def test_sign_out_leaves_no_usable_credential_and_audits_the_revoke(google, conductor, client_file):
     account_id = await _add(google, conductor, client_file, "person@example.com")
     token = _bundle(account_id)["refresh_token"]

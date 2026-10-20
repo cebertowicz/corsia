@@ -9,7 +9,8 @@ but do not alter a row's state.
 from __future__ import annotations
 
 from connections.connected_accounts import (
-    ADMIN_APPROVAL_REQUIRED, CONSENT_CANCELLED, PROVIDER_UNAVAILABLE, REFRESH_TOKEN_INVALID, STATE_CAUSES,
+    ADMIN_APPROVAL_REQUIRED, CONSENT_CANCELLED, PROVIDER_UNAVAILABLE, REFRESH_TOKEN_INVALID,
+    REGISTRATION_MISCONFIGURED, STATE_CAUSES,
 )
 
 INPUT_REFUSAL = "input_refusal"
@@ -20,7 +21,6 @@ ALREADY_NEEDS_SIGN_IN = "already_needs_sign_in"
 DIFFERENT_ACCOUNT = "different_account"
 ACCOUNT_REMOVED = "account_removed"
 INTERNAL = "internal"
-REGISTRATION_MISCONFIGURED = "registration_misconfigured"
 
 _BROWSER_RETRY = "Microsoft sign-in couldn't finish. Go back to CORSIA and try again."
 # (message, browser page) per code; ``{address}`` and ``{signed_in}`` are filled from the account.
@@ -42,13 +42,12 @@ _TEXT: dict[str, tuple[str, str]] = {
         "Microsoft had a problem with sign-in. Go back to CORSIA and try again.",
     ),
     REGISTRATION_MISCONFIGURED: (
-        "CORSIA's Microsoft app isn't set up right. Check that the app exists in the registration tenant and "
-        "its supported account type matches this connection; Authentication has http://localhost under Mobile and "
-        "desktop applications and Allow public client flows is Yes; and Microsoft Graph delegated permissions are "
-        "Mail.ReadWrite, Mail.Send, Calendars.ReadWrite, Files.ReadWrite, offline_access, and User.Read. Do not "
-        "create a client secret. Fix the registration through the microsoft-setup steps, then call "
-        "microsoft_connect again.",
-        "CORSIA's Microsoft app isn't set up right. Go back to CORSIA to fix it.",
+        "The person's own Microsoft app registration isn't set up right. Check that the app exists in the registration "
+        "tenant and its supported account type matches this connection; Authentication has http://localhost under Mobile "
+        "and desktop applications and Allow public client flows is Yes; and Microsoft Graph delegated permissions are "
+        "Mail.ReadWrite, Mail.Send, Calendars.ReadWrite, Files.ReadWrite, offline_access, and User.Read. Do not create "
+        "a client secret. Fix the registration through the microsoft-setup steps, then call microsoft_connect again.",
+        "Your Microsoft app for CORSIA isn't set up right. Go back to CORSIA and ask it to fix the app.",
     ),
     INPUT_REFUSAL: (
         "microsoft_connect needs client_id as the Application (client) ID GUID, kind as personal, work or both, "

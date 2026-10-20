@@ -11,8 +11,9 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from connections.account_state import MANUAL_ONLY
+
 #: The audit cause when a provider has no app-only revocation to call.
-MANUAL_ONLY = "manual_only"
 SCOPES_FIELD = "scopes"
 
 

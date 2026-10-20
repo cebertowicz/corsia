@@ -19,7 +19,7 @@ from connections.app_reach import AppReach, AppReachError, normalize_reach
 from connections.connected_accounts import (
     Actor, ConnectedAccountError, _account_reach, _check_actor, get_account, provider_of, resolve_credentials, take_refresh_token,
 )
-from connections.account_state import record_audit, set_audit_cause, set_state
+from connections.account_state import emit_lifecycle_event, record_audit, set_audit_cause, set_state
 from infra import key_store
 from infra.database import write_transaction
 from infra.db_async import run_in_db
@@ -93,6 +93,7 @@ async def sign_out_account(account_id: str, *, actor: Actor) -> dict[str, object
     _check_actor(actor)
     spec, audit_id, refresh_token = await run_in_db(_sign_out_locally, account_id, actor)
     cause = await _revoke_and_audit(spec, audit_id, refresh_token)
+    emit_lifecycle_event("signed_out", account_id, spec.name)
     return {"account_id": account_id, "state": "signed_out", "revocation": cause}
 
 
@@ -103,6 +104,7 @@ async def remove_account(account_id: str, *, actor: Actor) -> dict[str, object]:
     if spec.release is not None:
         await spec.release(account_id)
     cause = await _revoke_and_audit(spec, audit_id, refresh_token)
+    emit_lifecycle_event("removed", account_id, spec.name)
     return {"account_id": account_id, "removed": True, "revocation": cause}
 
 
