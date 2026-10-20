@@ -1,14 +1,16 @@
 """Structural guards for the bundled ``corsia-default`` coordination model.
 
 The package at ``docs/coordination-models/corsia-default`` ships charter and
-safety templates, pinned starter-kit references and declared KPIs. Three
+safety templates, pinned starter-kit references and declared KPIs. Four
 invariants keep it installable by a conductor:
 
 1. every fill placeholder in the templates is covered by a manifest parameter
    (its ``parameters[].id`` or one of its ``parameters[].fills`` entries);
-2. every ``files[]`` pin still matches the file's byte length and sha256, with
+2. the pack envelope declares its schema and a semver version, while legacy
+   installed copies carrying bare integer ``0`` remain readable;
+3. every ``files[]`` pin still matches the file's byte length and sha256, with
    non-ref paths relative to the package and ``ref: true`` paths repo-relative;
-3. the manifest's ``notes`` list holds strings only.
+4. the manifest's ``notes`` list holds strings only.
 
 Each break case runs on a ``tmp_path`` copy of the package with one deliberate
 defect, so the guards are shown to fire without touching the repository.
@@ -32,6 +34,12 @@ _TEMPLATES = ("context/PROJECT.md.tmpl", "context/SAFETY-INVARIANTS.md.tmpl")
 
 _PLACEHOLDER_RE = re.compile(r"<([^<>\n]+)>")
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+_SEMVER_RE = re.compile(
+    r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+    r"(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
 # Words that name the template-filling convention itself, not project content.
 _META_WORDS = frozenset({"parameter", "placeholder", "source"})
 
@@ -41,6 +49,16 @@ def _load_manifest(package_dir: Path) -> dict[str, Any]:
     with (package_dir / "manifest.yaml").open(encoding="utf-8") as handle:
         loaded = yaml.safe_load(handle)
     return loaded if isinstance(loaded, dict) else {}
+
+
+def _version_failures(manifest: dict[str, Any]) -> list[str]:
+    """Reject invalid pack versions while accepting installed legacy version 0."""
+    version = manifest.get("version")
+    if type(version) is int and version == 0:
+        return []
+    if isinstance(version, str) and _SEMVER_RE.fullmatch(version):
+        return []
+    return [f"manifest version {version!r} is neither semver nor legacy bare 0"]
 
 
 def _is_hint(token: str, in_comment: bool) -> bool:
@@ -142,6 +160,38 @@ def _copy_package(tmp_path: Path) -> Path:
 def test_placeholders_are_covered() -> None:
     """The shipped package covers every fill placeholder."""
     assert _coverage_failures(PACKAGE_DIR) == []
+
+
+def test_manifest_has_a_valid_pack_envelope() -> None:
+    """The shipped package declares the standard schema and a semver version."""
+    manifest = _load_manifest(PACKAGE_DIR)
+    assert manifest.get("schema") == "corsia.pack/1"
+    assert isinstance(manifest.get("version"), str)
+    assert _version_failures(manifest) == []
+
+
+def test_legacy_bare_zero_version_remains_readable(tmp_path: Path) -> None:
+    """Installed copies from before the envelope use the accepted bare-zero marker."""
+    package = _copy_package(tmp_path)
+    manifest = package / "manifest.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace('version: "0.1.0"', "version: 0"),
+        encoding="utf-8",
+    )
+    assert _version_failures(_load_manifest(package)) == []
+
+
+def test_invalid_version_is_rejected(tmp_path: Path) -> None:
+    """A version that is neither semver nor the legacy marker is rejected."""
+    package = _copy_package(tmp_path)
+    manifest = package / "manifest.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace('version: "0.1.0"', 'version: "0.1"'),
+        encoding="utf-8",
+    )
+    assert _version_failures(_load_manifest(package)) == [
+        "manifest version '0.1' is neither semver nor legacy bare 0"
+    ]
 
 
 def test_pins_match_their_files() -> None:
