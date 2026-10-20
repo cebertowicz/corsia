@@ -551,6 +551,7 @@ class TestMergeableGate:
         gate_mod = _reload_gate
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=None), \
+             patch.object(gate_mod.github_reviewer_gate, "MERGEABILITY_POLL_INTERVAL_S", 0.0), \
              patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
              patch.object(gate_mod, "_run_reviewer") as mock_run, \
              patch.object(gate_mod, "emit_product_event"):
@@ -572,6 +573,7 @@ class TestMergeableGate:
 
         with patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
              patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=None), \
+             patch.object(gate_mod.github_reviewer_gate, "MERGEABILITY_POLL_INTERVAL_S", 0.0), \
              patch.object(gate_mod, "_run_reviewer") as mock_run, \
              patch.object(
                  github_reviewer_notifications, "notify_pr_info_unreadable",
