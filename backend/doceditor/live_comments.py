@@ -28,13 +28,20 @@ def candidate_ranges(live, fork) -> dict[str, tuple[int, int]]:
     return ranges
 
 
-async def positions(entry, artifact_id: str, *, reload: bool = False) -> dict:
-    """Resolve and capture ranges, digest and vector together without yielding."""
+async def positions(entry, artifact_id: str, *, reload: bool = False, probe: bool = False) -> dict:
+    """Resolve and capture ranges, digest and vector together without yielding.
+
+    A probe is a read-only reload: the same resolution, answered with where each comment would be
+    placed, and nothing tracked, stored or announced.
+    """
     rows = await run_in_db(comments.list_for_artifact, artifact_id)
     live = entry.live
-    resolve_threads(rows, live.text, ranges=None if reload else live.ranges)
+    resolve_threads(rows, live.text, ranges=None if reload or probe else live.ranges)
     placed = [row for row in rows
               if not row.get("orphaned") and row.get("anchor_text") and not row["parent_id"] and not row["review"]]
+    if probe:
+        return {"ranges": [{"id": row["id"], "from_off": row["from_off"], "to_off": row["to_off"]} for row in placed],
+                "digest": live.digest, "vector": live.doc.get_state()}
     for row in placed:
         live.track_range(row["id"], row["from_off"], row["to_off"])
     # An orphaned row keeps its collapsed live range for a later resolution; naming it would report a place.

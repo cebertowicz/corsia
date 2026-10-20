@@ -29,7 +29,7 @@
 	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
 	/** A document's image comments (DCOL-FR13.6): grouped under each thumbnail, with cards carrying tag number and colour; `src` is null when the image has no file. */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, widgetLabel, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, placementRecovery = { orphanedCount: 0 }, covered = false, onDrawerShown, onSheetModalChange, onRevealDraft }: {
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, widgetLabel, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, placementRecovery = { replaceableCount: 0 }, covered = false, onDrawerShown, onSheetModalChange, onRevealDraft }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */

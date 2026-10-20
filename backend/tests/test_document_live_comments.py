@@ -192,3 +192,50 @@ async def test_reload_frame_names_only_ranges_its_resolution_placed(ownership_sc
     finally:
         document_control._subscriptions.pop(socket, None)
         await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_probe_names_what_a_reload_would_place_and_changes_nothing(ownership_scope, tmp_path, monkeypatch):
+    from ws import document_control
+    from doceditor import comment_notifications
+    scope = ownership_scope
+    manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
+    quote, (first, second, reply) = _duplicate_quotes(scope, entry)
+    socket = Socket()
+    user = {"id": scope["db"].execute("SELECT user_id FROM threads WHERE id=?", (scope["owner"],)).fetchone()[0]}
+    actor = WriteActor(scope["owner"], "project-alpha", direct_user=True)
+    document_control._subscriptions[socket] = {entry.artifact_id: document_control.Subscription(entry, actor, True, user["id"])}
+    base = {"type": "doc_positions", "artifact_id": entry.artifact_id, "store_id": entry.live.store.store_id}
+    announced = []
+    monkeypatch.setattr(document_control, "_broadcast", lambda *args, **kwargs: announced.append(args))
+    monkeypatch.setattr(comment_notifications, "broadcast_doc_comment_changed", lambda *args, **kwargs: announced.append(args))
+    rows_of = lambda: [tuple(row) for row in scope["db"].execute(
+        "SELECT id, from_off, to_off, anchor_prefix, anchor_suffix, resolved, acked, body FROM doc_comments ORDER BY id")]
+    try:
+        _delete_first_line(entry, quote)
+        _delete_first_line(entry, quote)
+        assert quote not in entry.live.text
+        # Text gone: only the comment whose text survives can be placed, whatever a reload would do.
+        await document_control.handle_frame(socket, user, {**base, "seq": 1, "reload": True, "probe": True})
+        gone = await socket.next("doc_positions")
+        assert {span["id"] for span in gone["ranges"]} == {reply["id"]}
+
+        # Text restored where it was: both quotes could be placed again, but nothing has placed them yet.
+        _edit(entry, entry.live.text.index("\n\nreply"), 0, f"\n\n{quote}\n\n{quote}")
+        assert entry.live.ranges[first["id"]][0] == entry.live.ranges[first["id"]][1]
+        before = (dict(entry.live.ranges), entry.live.snapshot, rows_of(), len(announced))
+        await document_control.handle_frame(socket, user, {**base, "seq": 2, "reload": True, "probe": True})
+        probed = await socket.next("doc_positions")
+        assert {span["id"] for span in probed["ranges"]} == {first["id"], second["id"], reply["id"]}
+        assert socket.sent.empty()
+        assert (dict(entry.live.ranges), entry.live.snapshot, rows_of(), len(announced)) == before
+
+        # A real reload then places exactly what the probe named.
+        await document_control.handle_frame(socket, user, {**base, "seq": 3, "reload": True})
+        placed = await socket.next("doc_positions")
+        assert {span["id"]: (span["from_off"], span["to_off"]) for span in placed["ranges"]} == {
+            span["id"]: (span["from_off"], span["to_off"]) for span in probed["ranges"]}
+        assert entry.live.ranges[first["id"]][0] < entry.live.ranges[first["id"]][1]
+    finally:
+        document_control._subscriptions.pop(socket, None)
+        await manager.close()

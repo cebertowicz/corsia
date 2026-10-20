@@ -39,7 +39,8 @@ function live(text: string, storeId = 'store') {
 	const serverText = () => server.getText('text').toString();
 	return {
 		server, session, sent, frame, ack, serverText,
-		asks: () => sent.filter(f => f.type === 'doc_positions'),
+		asks: () => sent.filter(f => f.type === 'doc_positions' && !f.probe),
+		probes: () => sent.filter(f => f.type === 'doc_positions' && f.probe),
 		updates: () => sent.filter(f => f.type === 'doc_update'),
 		/** The server merges a browser message. */
 		merge: (message: Record<string, any>) => Y.applyUpdate(server, decodeUpdate(message.update)),

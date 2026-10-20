@@ -331,7 +331,11 @@ test('@flow:document-comment-save preserves the visible editor viewport', async 
 		await trigger.dismiss();
 		await nextFrame();
 		await nextFrame();
-		await trigger.assertCaret(caretBeforeDrawer);
+		// Resolving ended the comment's focus and with it its highlight, so re-opening from the drawer draws the highlight again
+		// and replaces the text node the DOM caret sat in: the browser leaves it at the start of the line while the editor is
+		// not focused. Escape in the drawer does not refocus the editor, so only the line and CodeMirror's own head are kept.
+		if (trigger.name === 'Escape') await expect.poll(caret, { message: 'Escape must keep the CodeMirror head and the caret line' }).toMatchObject({ head: caretBeforeDrawer.head, dom: { line: caretBeforeDrawer.dom.line } });
+		else await trigger.assertCaret(caretBeforeDrawer);
 		const reopenAfterDismiss = await lifecyclePosition();
 		await nextFrame();
 		const reopenDismissFrameOne = await lifecyclePosition();

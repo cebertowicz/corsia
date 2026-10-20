@@ -157,10 +157,19 @@ describe('inline suggestions in the highlight ranges', () => {
 
 describe('comment surface status', () => {
 	it('counts orphaned cards and reports the placement reload state', () => {
-		expect(commentSurfaceStatus([])).toEqual({ commentCount: 0, orphanedCount: 0, placementReloading: false, placementReloadError: false });
+		expect(commentSurfaceStatus([])).toEqual({ commentCount: 0, orphanedCount: 0, replaceableCount: 0, placementReloading: false, placementReloadError: false });
 		expect(commentSurfaceStatus([
 			comment('a', 0, 'x', { orphaned: true }), comment('b', 0, 'x', { placementReloading: true }), comment('c', 0, 'x', { placementReloadError: true }),
-		])).toEqual({ commentCount: 3, orphanedCount: 1, placementReloading: true, placementReloadError: true });
+		])).toEqual({ commentCount: 3, orphanedCount: 1, replaceableCount: 1, placementReloading: true, placementReloadError: true });
+	});
+
+	it('counts for Place again only the orphaned cards the server could place: detached ones stay in the group, not the footer', () => {
+		const status = commentSurfaceStatus([
+			comment('detached', 0, 'x', { orphaned: true, replaceable: false }), comment('unknown', 0, 'x', { orphaned: true }),
+			comment('found', 0, 'x', { orphaned: true, replaceable: true }), comment('done', 0, 'x', { orphaned: true, resolved: true }),
+			comment('placed', 0, 'x', { replaceable: false }),
+		]);
+		expect(status).toMatchObject({ orphanedCount: 3, replaceableCount: 2 });
 	});
 
 	it('counts only open threads for the header pill', () => {

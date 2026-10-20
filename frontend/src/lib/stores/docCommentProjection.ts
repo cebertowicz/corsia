@@ -41,6 +41,11 @@ export interface DocComment {
 	/** The latest user-requested live placement reload was refused. */
 	placementReloadError?: boolean;
 	drawn?: boolean;
+	/**
+	 * Live documents only: whether the server's re-anchor rule could place this unplaced comment again, from the last
+	 * probe of the text it saw. Unset until a probe answers, or after one fails; unset reads as re-placeable.
+	 */
+	replaceable?: boolean;
 	/** A comment on part of an image (DCOL-FR13.3); null for a text comment. */
 	region?: ImageRegion | null;
 	/** Its number on that image (FR13.4). */
@@ -79,6 +84,14 @@ export function fromServer(r: ServerComment): DocComment {
 		replies: (r.replies ?? []).map((x) => ({ id: x.id, author: x.author, authorKind: x.author_kind, text: x.body, at: relLabel(x.created_at), createdAt: x.created_at })),
 		...regionFromServer(r)
 	};
+}
+
+export function rangeFor(c: DocComment, fullText: string): { from: number; to: number } | null {
+	if (
+		c.from != null && c.to != null && c.to > c.from && c.to <= fullText.length
+		&& fullText.slice(c.from, c.to) === c.anchor
+	) return { from: c.from, to: c.to };
+	return null;
 }
 
 export function regionFromServer(r: ServerComment): Pick<DocComment, 'region' | 'regionNumber' | 'regionStale' | 'imageSrc'> {

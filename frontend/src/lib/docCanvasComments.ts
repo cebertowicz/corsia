@@ -63,12 +63,15 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 /**
  * Shared comment state for the document surface: the header receives open-thread and orphaned counts; the drawer's
  * placement recovery also receives the live reload state. The orphaned count is the list's 'Text changed' group, so a
- * resolved thread is never in it: a decided suggestion is resolved, and Accept replaced its quote by design.
+ * resolved thread is never in it: a decided suggestion is resolved, and Accept replaced its quote by design. The
+ * recovery's count is the part of that group Place again could place, which the server's probe decides; a comment it
+ * has not answered for counts, as the footer did before probes.
  */
 export function commentSurfaceStatus(comments: DocComment[]) {
 	return {
 		commentCount: comments.filter((comment) => !comment.resolved).length,
 		orphanedCount: comments.filter((comment) => comment.orphaned && !comment.resolved).length,
+		replaceableCount: comments.filter((comment) => comment.orphaned && !comment.resolved && comment.replaceable !== false).length,
 		placementReloading: comments.some((comment) => comment.placementReloading),
 		placementReloadError: comments.some((comment) => comment.placementReloadError),
 	};

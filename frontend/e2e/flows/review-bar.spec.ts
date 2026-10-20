@@ -491,9 +491,9 @@ journey('keeps an orphan-heavy review ask compact without losing recovery', [
 	const comments = page.locator('.comment-status');
 	await comments.click();
 	const drawer = page.getByRole('region', { name: 'Document comments' });
-	const recovery = drawer.locator('[data-drawer-placement]');
-	await expect(recovery.getByRole('status')).toHaveText("22 comments couldn't be placed");
-	await expect(recovery.getByRole('button', { name: 'Reload comment placements' })).toBeVisible();
+	// Every quote is gone from the document, so Place again has nothing to place: the cards say so and the footer stays away.
+	await expect(drawer.getByText(/^Text changed:/)).toHaveCount(22);
+	await expect(drawer.locator('[data-drawer-placement]')).toHaveCount(0);
 	await settled(page);
 	// Drawer geometry is covered by its focused recovery journey; this flow records the phone layout annotation below.
 	await shot(page, `orphan-heavy-${mode}-${theme}`, info);
