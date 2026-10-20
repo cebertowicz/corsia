@@ -15,6 +15,10 @@ from core import checkpoint_runtime
 from infra import state
 from infra.config import RUNTIME_DIR
 
+# A hang guard, not a latency budget: several waits span a cold lifespan startup
+# (about 0.75s unloaded), which a 1s bound fails whenever the host is busy.
+_HANG_GUARD_SECONDS = 20
+
 
 class _ProcessOwnerTestContract:
     """Minimal managed-process owner surface required by lifespan startup."""
@@ -440,11 +444,11 @@ async def test_startup_continuity_waits_for_required_harness_discovery(
 
     task = asyncio.create_task(run_lifespan())
     try:
-        await asyncio.wait_for(discovery_started.wait(), timeout=1.0)
+        await asyncio.wait_for(discovery_started.wait(), timeout=_HANG_GUARD_SECONDS)
         assert not task.done()
         assert events == []
         discovery_release.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await asyncio.wait_for(task, timeout=_HANG_GUARD_SECONDS)
     finally:
         discovery_release.set()
         if not task.done():
@@ -531,12 +535,12 @@ async def test_checkpoint_tasks_join_before_provider_and_storage_teardown(
 
     lifespan_task = asyncio.create_task(run_lifespan())
     try:
-        await asyncio.wait_for(checkpoint_started.wait(), timeout=1.0)
+        await asyncio.wait_for(checkpoint_started.wait(), timeout=_HANG_GUARD_SECONDS)
         assert events == ["serving", "checkpoint_started"]
         assert not lifespan_task.done()
 
         checkpoint_release.set()
-        await asyncio.wait_for(lifespan_task, timeout=1.0)
+        await asyncio.wait_for(lifespan_task, timeout=_HANG_GUARD_SECONDS)
     finally:
         checkpoint_release.set()
         if not lifespan_task.done():
@@ -762,7 +766,7 @@ async def test_checkpoint_cleanup_defers_caller_cancellation(monkeypatch):
     _record_tail(monkeypatch, events)
 
     lifespan_task = asyncio.create_task(run_lifespan())
-    await asyncio.wait_for(checkpoint_started.wait(), timeout=1.0)
+    await asyncio.wait_for(checkpoint_started.wait(), timeout=_HANG_GUARD_SECONDS)
     lifespan_task.cancel("checkpoint cleanup cancelled")
     await asyncio.sleep(0)
     assert not lifespan_task.done()
@@ -772,7 +776,7 @@ async def test_checkpoint_cleanup_defers_caller_cancellation(monkeypatch):
         asyncio.CancelledError,
         match="checkpoint cleanup cancelled",
     ):
-        await asyncio.wait_for(lifespan_task, timeout=1.0)
+        await asyncio.wait_for(lifespan_task, timeout=_HANG_GUARD_SECONDS)
 
     assert events == [
         "serving",
@@ -1358,7 +1362,7 @@ async def test_native_snapshot_does_not_signal_a_pre_call_successor(
 
     lifespan_task = asyncio.create_task(run_lifespan())
     try:
-        await asyncio.wait_for(first_cleanup_started.wait(), timeout=1.0)
+        await asyncio.wait_for(first_cleanup_started.wait(), timeout=_HANG_GUARD_SECONDS)
         if replaced_owner == "cancel_handle":
             state._active_turns["replaced"] = successor_cancel
             state._active_turn_tasks["replaced"] = successor_task
@@ -1369,7 +1373,7 @@ async def test_native_snapshot_does_not_signal_a_pre_call_successor(
         first_cleanup_release.set()
 
         with pytest.raises(RuntimeError, match="shutdown retained live owners"):
-            await asyncio.wait_for(lifespan_task, timeout=1.0)
+            await asyncio.wait_for(lifespan_task, timeout=_HANG_GUARD_SECONDS)
 
         if replaced_owner == "cancel_handle":
             assert not successor_cancel.is_set()
@@ -1435,7 +1439,7 @@ async def test_refresh_shutdown_preserves_successor_and_reports_incomplete_join(
     shutdown_task = asyncio.create_task(harness_models.shutdown_refresh_tasks())
     successor = asyncio.create_task(asyncio.Event().wait())
     try:
-        await asyncio.wait_for(cleanup_started.wait(), timeout=1.0)
+        await asyncio.wait_for(cleanup_started.wait(), timeout=_HANG_GUARD_SECONDS)
         harness_models._REFRESH_TASKS["codex"] = successor
         if shutdown_outcome == "caller_cancel":
             shutdown_task.cancel("refresh shutdown cancelled")
@@ -1449,7 +1453,7 @@ async def test_refresh_shutdown_preserves_successor_and_reports_incomplete_join(
             else (RuntimeError, "harness refresh tasks remain")
         )
         with pytest.raises(expected[0], match=expected[1]):
-            await asyncio.wait_for(shutdown_task, timeout=1.0)
+            await asyncio.wait_for(shutdown_task, timeout=_HANG_GUARD_SECONDS)
 
         assert old_task.done()
         assert harness_models._REFRESH_TASKS["codex"] is successor
@@ -1506,13 +1510,13 @@ async def test_network_startup_owns_and_joins_stubborn_discovery_child(
 
     lifespan_task = asyncio.create_task(run_lifespan())
     try:
-        await asyncio.wait_for(cleanup_started.wait(), timeout=1.0)
+        await asyncio.wait_for(cleanup_started.wait(), timeout=_HANG_GUARD_SECONDS)
         await asyncio.sleep(0)
         assert not lifespan_task.done()
         assert events == []
 
         cleanup_release.set()
-        await asyncio.wait_for(lifespan_task, timeout=1.0)
+        await asyncio.wait_for(lifespan_task, timeout=_HANG_GUARD_SECONDS)
     finally:
         cleanup_release.set()
         if not lifespan_task.done():
@@ -1719,8 +1723,8 @@ async def test_startup_rollup_refresh_does_not_delay_lifespan_yield(monkeypatch)
     monkeypatch.setattr(usage_rollup, "_refresh", refresh)
     lifespan_task = asyncio.create_task(run_lifespan())
     try:
-        await asyncio.wait_for(refresh_started.wait(), timeout=1.0)
-        await asyncio.wait_for(yielded.wait(), timeout=1.0)
+        await asyncio.wait_for(refresh_started.wait(), timeout=_HANG_GUARD_SECONDS)
+        await asyncio.wait_for(yielded.wait(), timeout=_HANG_GUARD_SECONDS)
     finally:
         release_refresh.set()
         await asyncio.gather(lifespan_task, return_exceptions=True)
@@ -1744,7 +1748,7 @@ async def test_startup_and_measurement_dependencies_share_one_rollup_refresh(mon
     monkeypatch.setattr(usage_rollup, "_refresh", refresh)
     try:
         async with app_lifecycle.lifespan(FastAPI()):
-            await asyncio.wait_for(refresh_started.wait(), timeout=1.0)
+            await asyncio.wait_for(refresh_started.wait(), timeout=_HANG_GUARD_SECONDS)
             startup_task = usage_rollup._refreshing[asyncio.get_running_loop()]
             await asyncio.gather(*(usage_rollup.refresh_on_request() for _ in range(5)))
             assert calls == 1
@@ -1778,5 +1782,5 @@ async def test_shutdown_joins_rollup_refresh_before_database_pool_closes(monkeyp
         async with app_lifecycle.lifespan(FastAPI()):
             await refresh_started.wait()
 
-    await asyncio.wait_for(exercise(), timeout=1.0)
+    await asyncio.wait_for(exercise(), timeout=_HANG_GUARD_SECONDS)
     assert events == ["refresh_finished", "pool_closed"]
