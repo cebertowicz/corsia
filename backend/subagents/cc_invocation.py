@@ -10,6 +10,24 @@ from dataclasses import asdict, dataclass
 from subagents.managed_launch import claude_project_discovery_args
 
 
+def claude_review_profile_args() -> list[str]:
+    """Return the fixed Claude Code tool profile for a confined review child.
+
+    The caller supplies the reviewed paths with ``--add-dir``. Keeping this
+    profile separate from normal managed-session construction prevents a review
+    child from inheriting CORSIA MCP access or the normal broad tool set.
+    """
+    return [
+        "--restricted",
+        "--safe-mode",
+        "--setting-sources", "",
+        "--strict-mcp-config",
+        "--permission-mode", "dontAsk",
+        "--allowedTools", "Read", "Grep", "Glob",
+        "--disallowedTools", "Bash", "WebFetch", "WebSearch", "Write", "Edit", "Task",
+    ]
+
+
 @dataclass(frozen=True, slots=True)
 class ClaudeInvocation:
     """Everything that decides what a ``claude -p`` command line looks like."""
