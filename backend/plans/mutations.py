@@ -182,7 +182,7 @@ def edit_node(
             admission.release(node_id, "requirements_changed", db=connection)
             admission.reselect_and_reconcile(node_id, actor_id=actor_id, provenance=provenance, db=connection)
         _record_edit_events(
-            connection, node_id, requirements_changed, updated, next_title, next_dod,
+            connection, node_id, restated or requirements_changed, updated, next_title, next_dod,
             difficulty_rerated, node["size"], next_size, actor_id, provenance,
         )
         return service._node_from_row(connection, updated)

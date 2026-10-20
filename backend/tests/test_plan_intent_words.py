@@ -238,7 +238,7 @@ def test_agent_only_turn_records_agent_origin_and_still_needs_person_authority(d
     }
 
 
-def test_editing_intent_or_words_restates_but_description_does_not(db):
+def test_editing_intent_or_words_bumps_the_revision_but_description_does_not(db):
     _init_messages_fts(db)
     plan = service.ensure_plan("thread", "root", db=db)
     accept_thread_input(
@@ -278,10 +278,12 @@ def test_editing_intent_or_words_restates_but_description_does_not(db):
         description_edit["requirements_revision"],
     ) == (2, 3, 3)
     restatements = db.execute(
-        "SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='node_restated' ORDER BY rowid",
+        """SELECT json_extract(payload_json,'$.requirements_revision') FROM plan_node_events
+           WHERE node_id=? AND event='node_restated' ORDER BY rowid""",
         (created["id"],),
     ).fetchall()
-    assert len(restatements) == 2
+    # A description edit stays in the history without restating requirements.
+    assert [row[0] for row in restatements] == [2, 3, 3]
 
 
 def test_creation_paths_inherit_the_canonical_intent_and_exempt_the_gate(db):
