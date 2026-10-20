@@ -38,7 +38,7 @@
 	let open = $state(false);
 	let search = $state('');
 	let activeIndex = $state(0);
-	let input = $state<HTMLInputElement | undefined>(undefined);
+	// Popover moves focus to the search field through its initialFocus selector.
 	let listbox = $state<HTMLElement | undefined>(undefined);
 	let trigger = $state<HTMLButtonElement | undefined>(undefined);
 
@@ -92,11 +92,9 @@
 		return projects.find((row) => row.id === project)?.name ?? 'Selected project';
 	});
 
-	async function show() {
+	function show() {
 		open = true;
 		activeIndex = 0;
-		await tick();
-		input?.focus();
 	}
 	function hide() {
 		open = false;
@@ -128,7 +126,6 @@
 		else if (event.key === 'Home') { event.preventDefault(); activeIndex = 0; scrollActiveIntoView(); }
 		else if (event.key === 'End') { event.preventDefault(); activeIndex = Math.max(options.length - 1, 0); scrollActiveIntoView(); }
 		else if (event.key === 'Enter') { event.preventDefault(); choose(activeOption); }
-		else if (event.key === 'Escape') { event.preventDefault(); hide(); }
 	}
 </script>
 
@@ -146,12 +143,11 @@
 	</button>
 
 	{#if open}
-		<button class="picker-backdrop" tabindex="-1" aria-label="Close scope picker" onclick={hide}></button>
-		<Popover anchor={trigger} open onClose={hide} placement="bottom-end" width="min(420px, calc(100vw - 32px))">
+		<!-- Popover owns outside-pointer dismissal and focus restoration. -->
+		<Popover anchor={trigger} open onClose={hide} placement="bottom-end" width="min(420px, calc(100vw - 32px))" initialFocus=".picker-search" surfaceRole={null}>
 			{#snippet children()}
 				<div class="picker-panel">
 					<input
-						bind:this={input}
 						bind:value={search}
 						class="picker-search"
 						type="search"
@@ -214,14 +210,9 @@
 	}
 	.picker-trigger:hover { background: var(--bg-hover); }
 	.picker-label { overflow-wrap: anywhere; text-align: left; }
-	.picker-backdrop { position: fixed; inset: 0; z-index: 39; border: none; background: transparent; padding: 0; cursor: default; }
-	:global(.popover:has(.picker-panel)) { max-height: none; overflow: visible; padding: 0; border: 0; background: transparent; box-shadow: none; }
-	.picker-panel {
-		display: flex; flex-direction: column; gap: 6px; box-sizing: border-box;
-		width: 100%; padding: 8px;
-		background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius);
-		box-shadow: var(--shadow-chip, 0 8px 32px rgba(0, 0, 0, .32));
-	}
+	/* Popover owns the overlay surface; the picker only lays out its contents. */
+	.picker-panel { display: flex; flex-direction: column; gap: 6px; }
+
 	.picker-search {
 		box-sizing: border-box; width: 100%; padding: 6px 8px; color: var(--text-primary);
 		background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); font-size: var(--text-footnote);
@@ -249,5 +240,9 @@
 	/* The browser's own placeholder grey measured 4.41:1 in light and 3.99:1 in dark against the
 	   field, so the sheet names the token instead of leaving the hint colour to the user agent. */
 	.picker-search::placeholder { color: var(--text-secondary); opacity: 1; }
-	/* The shared Popover positions this panel from its trigger and clamps it to the viewport. */
+	/* At the narrow phone width, the scope control fills the controls column like its peers. */
+	@media (max-width: 393px) {
+		.scope-picker { display: flex; width: 100%; }
+		.picker-trigger { justify-content: space-between; width: 100%; max-width: none; }
+	}
 </style>

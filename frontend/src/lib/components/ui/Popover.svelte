@@ -8,7 +8,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
-	let { anchor, open, onClose, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, children }: {
+	let { anchor, open, onClose, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, surfaceRole = 'dialog', children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
@@ -26,6 +26,8 @@
 		avoidRect?: () => DOMRect | null;
 		/** A selector for what takes focus on open, when present; otherwise the first focusable element does. */
 		initialFocus?: string;
+		/** Omit the wrapper role when a child supplies the popup's semantic role, such as a listbox. */
+		surfaceRole?: 'dialog' | null;
 		children: import('svelte').Snippet;
 	} = $props();
 	let surface = $state<HTMLElement>();
@@ -118,7 +120,7 @@
 
 {#if open}
 	<!-- Portaled to `document.body` so no pane clips it or paints over it; `bounds` still keeps it on its canvas. -->
-	<div class="popover" class:fill data-popover use:portal bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${hidden ? `${style} visibility: hidden;` : style}`} role="dialog" aria-hidden={hidden || undefined}>{@render children()}</div>
+	<div class="popover" class:fill data-popover use:portal bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${hidden ? `${style} visibility: hidden;` : style}`} role={surfaceRole ?? undefined} aria-hidden={hidden || undefined}>{@render children()}</div>
 {/if}
 
 <style>
