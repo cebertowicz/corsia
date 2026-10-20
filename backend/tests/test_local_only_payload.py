@@ -132,3 +132,26 @@ def test_list_and_single_thread_reads_include_local_only_payload_fields(monkeypa
     _thread(single_db, "parent", title="Parent", local_only=1)
     _thread(single_db, "child", spawned_by="parent")
     assert _fields(_single(single_db, "child")) == (True, "parent", "Parent")
+
+
+
+def test_cyclic_family_links_are_bounded_in_the_list_read(monkeypatch) -> None:
+    from api import threads
+    from connections import harness_refresh
+
+    db = _db()
+    _thread(db, "a", title="A", parent_thread_id="b")
+    _thread(db, "b", title="B", local_only=1, parent_thread_id="a")
+
+    async def read_inline(fn):
+        return fn()
+
+    monkeypatch.setattr(threads, "authenticate", lambda _token: {"id": "u"})
+    monkeypatch.setattr(threads, "get_db", lambda: db)
+    monkeypatch.setattr(threads, "get_all_coordination_ids", lambda *, db: [])
+    monkeypatch.setattr(threads, "run_read", read_inline)
+    monkeypatch.setattr(harness_refresh, "schedule_refresh_for_selections", lambda _models: None)
+
+    listed = {row["id"]: row for row in asyncio.run(threads.list_threads("token"))["threads"]}
+    assert _fields(listed["a"]) == (True, "b", "B")
+    assert _fields(listed["b"]) == (True, None, None)
