@@ -57,7 +57,8 @@
       "../bundle/python": "python",
       "../bundle/backend": "backend",
       "../bundle/frontend": "frontend",
-      "../bundle/scripts": "scripts"
+      "../bundle/scripts": "scripts",
+      "../bundle/updater-endpoint.json": "updater-endpoint.json"
     },
     "icon": [
       "icons/icon.icns",

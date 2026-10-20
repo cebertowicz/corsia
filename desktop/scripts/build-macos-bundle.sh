@@ -122,6 +122,8 @@ command -v cargo >/dev/null || fail "scoped Rust cargo is required"
 
 rm -rf "$BUILD_ROOT" "$BUNDLE_ROOT"
 mkdir -p "$BUILD_ROOT/downloads" "$BUNDLE_ROOT/bin"
+bash "$ROOT/desktop/scripts/write-updater-endpoint-resource.sh" \
+  "$ROOT/desktop/src-tauri/tauri.conf.json" "$BUNDLE_ROOT/updater-endpoint.json"
 fetch_verified "$PYTHON_URL" "$BUILD_ROOT/downloads/$PYTHON_ARCHIVE" "$PYTHON_SHA256"
 tar -xzf "$BUILD_ROOT/downloads/$PYTHON_ARCHIVE" -C "$BUNDLE_ROOT"
 readonly PYTHON="$BUNDLE_ROOT/python/bin/python3"
