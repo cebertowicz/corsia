@@ -269,7 +269,8 @@ def test_app_path_sends_the_message_then_eight_steps_and_ends_on_the_handoff():
     assert app.index("I'm CORSIA, your assistant.") < app.index("## The steps")
     assert len(titles) == 8
     assert titles[0] == "About you."
-    assert titles.index("Where your work lives.") == titles.index("Web search.") + 1
+    assert titles.index("Web search.") < titles.index("Where your work lives.")
+    assert titles.index("Email and calendar.") < titles.index("Where your work lives.")
     assert "skill `connect-tools`" in steps
     assert app.split("## The hand-off", 1)[1].strip().startswith("After the last step that applies, post exactly `" + HANDOFF + "`")
     assert "follow skill `google-setup`" in steps
@@ -286,7 +287,7 @@ def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
 
 def test_app_path_email_step_records_the_email_app_where_the_microsoft_fact_reads_it():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
-    email = app.split("6. **Email and calendar.**", 1)[1].split("7. **GitHub", 1)[0]
+    email = app.split("5. **Email and calendar.**", 1)[1].split("6. **Where your work lives", 1)[0]
     for branch in ("**Gmail or Google:**", "**Outlook:**", "**Both:** Gmail first", "**Something else:**"):
         assert branch in email
     assert "`context/50-USER-PROFILE.md`, `- **Email app:** <Outlook | Other> — <what they said>`" in email

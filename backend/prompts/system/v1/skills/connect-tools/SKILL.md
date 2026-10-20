@@ -57,7 +57,7 @@ Say so plainly and work around it. Quote what the tool reported, never a limit y
 
 ## Done means
 
-- CORSIA shows it working in Connected apps (for a CLI, the CLI answers), and the agent that will use it has read something real through it. Your own claim doesn't count.
+- The agent that will use the connection has read something real through it.
 - The connection is noted where other agents look (skill `memory-placement`, unless your tools already list it), so they reuse it instead of connecting again.
 - If the work needs to hear about changes, the first one has arrived.
 
