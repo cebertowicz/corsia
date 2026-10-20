@@ -21,7 +21,7 @@ workflow:
     - id: decision
       title: Plan decision raised
       required: true
-      check: plan decision raised with options and one recommendation (pick one) or a pre-ticked set (pick any), answerable without opening anything; if it is not, make it an artifact ask instead
+      check: plan decision raised with options and one recommendation (pick one) or a pre-ticked set (pick any), answerable as asked without reading the linked document; if they must judge the thing itself, make it an artifact ask instead
       after: [brief]
       difficulty: {default: routine}
       quality:
