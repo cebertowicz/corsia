@@ -76,6 +76,7 @@ def mcp_private_state_profile(
     profile_path: Path,
     safehouse_path: Path,
     state_root: Path,
+    peer_cache_dirs: tuple[Path, ...] = (),
 ) -> str:
     """Render the allow-default profile from the shared protected-path inventory."""
     # Temporary floor block until a reviewed host-access path for MCP exists (#154).
@@ -100,6 +101,13 @@ def mcp_private_state_profile(
     from tools.managed_runtime import runtime_cache_root
 
     path_rules.append(f'(deny file-write* (subpath "{sbpl_path(runtime_cache_root())}"))')
+    # Each local app may populate only its own cache. Its profile excludes the
+    # other configured apps' trees, while the shell policy closes the shared
+    # parent to agents entirely.
+    path_rules.extend(
+        f'(deny file-write* (subpath "{sbpl_path(peer_cache_dir)}"))'
+        for peer_cache_dir in peer_cache_dirs
+    )
     if policy.generated_profile is not None:
         path_rules.append(
             f'(deny file-read* file-write* (literal "{sbpl_path(policy.generated_profile)}"))'

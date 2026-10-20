@@ -36,17 +36,35 @@ def _mcp_app_id(name: str) -> str:
     return hashlib.sha256(name.encode("utf-8")).hexdigest()
 
 
-def _mcp_cache_dir(name: str, workspace: Path, state_root: Path) -> Path:
-    """Return an app-private cache that cannot overlap CORSIA workspace or state."""
+def mcp_cache_root(home: Path | None = None) -> Path:
+    """Return the parent of every app-private local-MCP cache."""
     from infra.platform_paths import APPLICATION_ID
 
-    cache_dir = (Path.home() / "Library" / "Caches" / APPLICATION_ID / "mcp" / name).resolve(strict=False)
+    return (Path.home() if home is None else Path(home)) / "Library" / "Caches" / APPLICATION_ID / "mcp"
+
+
+def _mcp_cache_dir(name: str, workspace: Path, state_root: Path) -> Path:
+    """Return an app-private cache that cannot overlap CORSIA workspace or state."""
+    cache_dir = (mcp_cache_root() / name).resolve(strict=False)
     if any(
         cache_dir == root or cache_dir.is_relative_to(root) or root.is_relative_to(cache_dir)
         for root in (workspace.resolve(strict=False), state_root.resolve(strict=False))
     ):
         raise MCPConfigError("local MCP cache must be outside CORSIA workspace and state")
     return cache_dir
+
+
+def peer_cache_dirs(name: str, configs: dict, workspace: Path, state_root: Path) -> tuple[Path, ...]:
+    """Return caches the named local app must not be able to write."""
+    cache_dirs = {
+        app_name: _mcp_cache_dir(config.get("connected_app_id") or _mcp_app_id(app_name), workspace, state_root)
+        for app_name, config in configs.items()
+        if isinstance(config, dict) and config.get("command")
+        and isinstance(config.get("connected_app_id", _mcp_app_id(app_name)), str)
+        and config.get("connected_app_id", _mcp_app_id(app_name))
+    }
+    return tuple(cache_dir for app_name, cache_dir in cache_dirs.items()
+                 if app_name != name and cache_dir != cache_dirs.get(name))
 
 
 def _mcp_denial_guidance(text: str) -> str | None:
@@ -78,7 +96,14 @@ def mcp_oserror_detail(error: OSError) -> str:
     return _mcp_denial_guidance(str(error)) or str(error)
 
 
-def safehouse_stdio_parameters(name: str, config: dict, command: str, args: list[str], env: dict[str, str]):
+def safehouse_stdio_parameters(
+    name: str,
+    config: dict,
+    command: str,
+    args: list[str],
+    env: dict[str, str],
+    peer_cache_dirs: tuple[Path, ...] = (),
+):
     """Build a fail-closed direct-exec Safehouse launch for one local app."""
     from mcp import StdioServerParameters
 
@@ -134,7 +159,9 @@ def safehouse_stdio_parameters(name: str, config: dict, command: str, args: list
     try:
         safehouse_path = _safehouse_executable()
         with os.fdopen(descriptor, "w", encoding="utf-8") as profile:
-            profile.write(mcp_private_state_profile(profile_path, safehouse_path, Path(STATE_ROOT)))
+            profile.write(mcp_private_state_profile(
+                profile_path, safehouse_path, Path(STATE_ROOT), peer_cache_dirs,
+            ))
         argv = direct_safehouse_argv(
             resolved_command, args, cwd, profile_path,
             env_pass_names=set(server_env) | _SAFEHOUSE_INHERITED_ENV,

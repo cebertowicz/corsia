@@ -332,17 +332,17 @@ def current_protected_host_path_policy(
     paths = tuple(safehouse_paths)
     if discovered is not None:
         paths = (*paths, Path(discovered))
-    # The cache holds verified executables that local-app profiles may read and
-    # execute. Agent shells must not be able to replace them between verification
-    # and launch, even though this is deliberately outside private state.
+    # Local apps may read/execute this verified cache, but agent shells cannot
+    # replace it between verification and launch.
     from tools.managed_runtime import runtime_cache_root
+    from tools.mcp_local_transport import mcp_cache_root
 
     return ProtectedHostPathPolicy(
         home=Path.home(),
         state_root=STATE_ROOT,
         generated_profile=generated_profile,
         safehouse_paths=paths,
-        write_roots=(runtime_cache_root(), *write_roots),
+        write_roots=(runtime_cache_root(), mcp_cache_root(), *write_roots),
     )
 
 

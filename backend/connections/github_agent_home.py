@@ -161,3 +161,17 @@ def token_source_is_plaintext(token_source: str, home: Path) -> bool:
     except OSError:
         return False
     return str(token_file) in token_source
+
+
+def token_source_is_keychain(token_source: str) -> bool:
+    """Whether gh reported the macOS Keychain-backed storage CORSIA requires."""
+    return token_source.strip().casefold() == "keyring"
+
+
+def remove_plaintext_token(home: str) -> bool:
+    """Delete the only plaintext gh fallback without reading its token."""
+    try:
+        Path(home, "hosts.yml").unlink(missing_ok=True)
+    except OSError:
+        return False
+    return True

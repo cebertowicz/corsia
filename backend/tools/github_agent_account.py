@@ -18,6 +18,7 @@ _PROMPT_SECONDS = 15.0
 _ACCOUNT_NAME = "Agents"
 _PROMPT_NEXT = "retry connect; if it repeats, update GitHub CLI or report its prompt format"
 _LOGIN_FAILURE_NEXT = "retry connect; if it exits again, check the GitHub CLI installation"
+_KEYCHAIN_NEXT = "GitHub CLI couldn't store its sign-in in your Keychain, so I removed it. It's on my list."
 
 
 def _signin_with_next(signin: dict[str, Any]) -> dict[str, Any]:
@@ -27,6 +28,8 @@ def _signin_with_next(signin: dict[str, Any]) -> dict[str, Any]:
         return signin | {"next": _PROMPT_NEXT}
     if cause == "vendor_login_failed":
         return signin | {"next": _LOGIN_FAILURE_NEXT}
+    if cause == "keychain_unavailable":
+        return signin | {"next": _KEYCHAIN_NEXT}
     return signin
 
 

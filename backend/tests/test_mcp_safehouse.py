@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -37,6 +38,7 @@ for line in sys.stdin:
             {"name": "read_private_link", "description": "probe linked private files", "inputSchema": {"type": "object", "properties": {}}},
             {"name": "manage_child", "description": "spawn signal and wait", "inputSchema": {"type": "object", "properties": {}}},
             {"name": "write_shell_envelope", "description": "attempt generated profile rewrite", "inputSchema": {"type": "object", "properties": {}}},
+            {"name": "write_path", "description": "attempt a configured cache write", "inputSchema": {"type": "object", "properties": {}}},
         ]})
     elif method == "tools/call":
         name = request["params"]["name"]
@@ -44,14 +46,14 @@ for line in sys.stdin:
             child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
             child.send_signal(signal.SIGTERM)
             respond(request["id"], text(json.dumps({"returncode": child.wait(timeout=5)})))
-        elif name == "write_shell_envelope":
-            target = os.environ["MCP_ENVELOPE_WRITE_TARGET"]
+        elif name in {"write_shell_envelope", "write_path"}:
+            target = os.environ["MCP_ENVELOPE_WRITE_TARGET" if name == "write_shell_envelope" else "MCP_WRITE_TARGET"]
             try:
                 open(target, "w", encoding="utf-8").write("(allow default)")
             except OSError as error:
                 respond(request["id"], text(str(error), is_error=True))
             else:
-                respond(request["id"], text(f"unexpected generated profile write: {target}"))
+                respond(request["id"], text(f"wrote: {target}"))
         else:
             reports = []
             denied = False
@@ -127,6 +129,33 @@ def test_mcp_profile_denies_lexical_and_resolved_state_roots(monkeypatch, tmp_pa
     assert f'(deny file-write* (subpath "{runtime_cache_root()}"))' in profile
     assert '(deny process-info*)' in profile
     assert '(allow signal (target same-sandbox))' in profile
+
+
+def test_mcp_profile_denies_peer_cache_but_not_own_cache(monkeypatch, tmp_path):
+    from tools.mcp_local_transport import mcp_cache_root
+    from tools.safehouse_launch import mcp_private_state_profile
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    own_cache = mcp_cache_root() / "app-a"
+    peer_cache = mcp_cache_root() / "app-b"
+    profile = mcp_private_state_profile(
+        tmp_path / "generated.sb", tmp_path / "safehouse", tmp_path / "state", (peer_cache,),
+    )
+
+    assert f'(deny file-write* (subpath "{peer_cache}"))' in profile
+    assert f'(deny file-write* (subpath "{own_cache}"))' not in profile
+
+
+def test_agent_shell_profile_denies_local_app_cache_parent(monkeypatch, tmp_path):
+    from infra import config
+    from tools.host_path_policy import current_protected_host_path_policy
+    from tools.mcp_local_transport import mcp_cache_root
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(config, "STATE_ROOT", tmp_path / "state")
+    policy = current_protected_host_path_policy()
+
+    assert f'(deny file-write* (subpath "{mcp_cache_root()}"))' in policy.sandbox_rules()
 
 
 def test_mcp_envelope_dir_is_agent_shell_denied(monkeypatch, tmp_path):
@@ -303,11 +332,90 @@ async def test_local_mcp_safehouse_real_launches(monkeypatch, tmp_path, name, co
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_local_mcp_safehouse_blocks_cross_app_cache_writes(monkeypatch, tmp_path):
+    _require_safehouse()
+    workspace, state = _configure_roots(monkeypatch, tmp_path)
+    from tools.mcp_local_transport import _mcp_app_id, _mcp_cache_dir
+
+    app = tmp_path / "server.py"
+    app.write_text(_PYTHON_SERVER, encoding="utf-8")
+    app_a_cache = _mcp_cache_dir(_mcp_app_id("app_a"), workspace, state)
+    registry = ToolRegistry()
+    async with AsyncExitStack() as stack:
+        errors = await connect_mcp_servers(
+            {
+                "app_a": {"command": sys.executable, "args": [str(app)], "env": {
+                    "MCP_WRITE_TARGET": str(app_a_cache / "self-write"),
+                }},
+                "app_b": {"command": sys.executable, "args": [str(app)], "env": {
+                    "MCP_WRITE_TARGET": str(app_a_cache / "cross-write"),
+                }},
+            },
+            registry,
+            stack,
+        )
+        assert errors == {}
+        assert "wrote:" in await registry.get("mcp_app_a_write_path").execute()
+        assert "Operation not permitted" in await registry.get("mcp_app_b_write_path").execute()
+    assert (app_a_cache / "self-write").exists()
+    assert not (app_a_cache / "cross-write").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("target_name", ("runtime", "launch-parent", "launch-tree"))
+def test_agent_shell_safehouse_refuses_runtime_and_launch_cache_writes(monkeypatch, tmp_path, target_name):
+    _require_safehouse()
+    from tools.managed_runtime import runtime_cache_root
+    from tools.mcp_local_transport import mcp_cache_root
+    from tools.shell_guard import _terminal_boundary_profile, safehouse_argv
+
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    launch_parent = mcp_cache_root()
+    launch_tree = launch_parent / "app-a"
+    runtime = runtime_cache_root()
+    for directory in (launch_parent, launch_tree, runtime):
+        directory.mkdir(parents=True, exist_ok=True)
+    targets = {
+        "runtime": runtime / "agent-write",
+        "launch-parent": launch_parent / "agent-write",
+        "launch-tree": launch_tree / "agent-write",
+    }
+    profile_path = tmp_path / "agent.sb"
+    profile_path.write_text(_terminal_boundary_profile(profile_path, workspace, leased=False), encoding="utf-8")
+
+    result = subprocess.run(
+        safehouse_argv(f'printf denied > "{targets[target_name]}"', workspace, profile_path),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "Operation not permitted" in result.stdout + result.stderr
+    assert not targets[target_name].exists()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_local_mcp_safehouse_uvx_launch(monkeypatch, tmp_path):
     _require_safehouse()
-    if shutil.which("uvx") is None:
-        pytest.fail("uvx is required for the L3 Safehouse proof")
+    # Ignore any runner uvx so this launch proves C6 fetches its own pinned,
+    # checksum-verified uv runtime without a test-specific CI installation.
     _configure_roots(monkeypatch, tmp_path)
+    from tools import safehouse_launch
+    from tools.managed_runtime import runtime_cache_root
+
+    launched = []
+    direct_launch = safehouse_launch.direct_safehouse_argv
+
+    def capture_launch(command, *args, **kwargs):
+        launched.append(Path(command).resolve(strict=False))
+        return direct_launch(command, *args, **kwargs)
+
+    monkeypatch.setattr(safehouse_launch, "direct_safehouse_argv", capture_launch)
     package = tmp_path / "uvx-package"
     package.mkdir()
     (package / "pyproject.toml").write_text(
@@ -316,5 +424,12 @@ async def test_local_mcp_safehouse_uvx_launch(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     (package / "mcp_floor_uvx.py").write_text(_PYTHON_SERVER + "\ndef main():\n    pass\n", encoding="utf-8")
-    registry = await _connect("uvx", {"command": "uvx", "args": ["--from", str(package), "mcp-floor-uvx"]})
+    registry = await _connect("uvx", {
+        "command": "uvx",
+        "args": ["--from", str(package), "mcp-floor-uvx"],
+        "env": {"PATH": str(tmp_path / "no-host-uvx")},
+    })
     assert await registry.get("mcp_uvx_manage_child").execute()
+    assert len(launched) == 1
+    assert launched[0].name == "uvx"
+    assert launched[0].is_relative_to(runtime_cache_root())

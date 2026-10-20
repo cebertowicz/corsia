@@ -145,14 +145,13 @@ _PROFILES: dict[str, AccountProfile] = {
         clean_env=_codex_env, default_warm_home=_codex_warm_home,
         validate_hint=None, workspace_default=False, sign_out=_vendor_sign_out,
         paid_capacity=_codex_paid_capacity),
-    # The agents' own GitHub account. ``--insecure-storage`` keeps the token in the home's
-    # hosts.yml, never the person's keychain: only there do the read-only shell grant and the
-    # credential fingerprint cover it. ``workflow`` lets agents push workflow changes.
+    # The agents' own GitHub account. GitHub CLI stores its token in the macOS
+    # Keychain; a plaintext hosts.yml fallback is removed after sign-in.
     "github": AccountProfile(
         provider="github", label="the agents' GitHub account", home_variable="GH_CONFIG_DIR",
         home_root=github_agent_home.home_root,
         commands={"login": ("auth", "login", "--hostname", "github.com", "--git-protocol", "https",
-                            "--web", "--insecure-storage", "--scopes", "workflow"),
+                            "--web", "--scopes", "workflow"),
                   "status": ("auth", "status", "--hostname", "github.com", "--active", "--json", "hosts"),
                   "logout": ("auth", "logout", "--hostname", "github.com")},
         missing_cause="github_executable_missing", in_progress_cause="github_signin_in_progress",
