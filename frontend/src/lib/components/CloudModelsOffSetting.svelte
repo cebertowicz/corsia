@@ -23,7 +23,7 @@
 			onCloudModelsOffState?.(off);
 		} else {
 			loadFailed = true;
-			error = result.reached === false ? "Couldn't load this setting. Check your connection." : "Couldn't load this setting.";
+			error = result.reached === false ? 'Couldn’t load this setting. Check your connection.' : 'Couldn’t load this setting.';
 			// The setting is unknown, so its switch stays hidden; account controls show as they would without it.
 			onCloudModelsOffState?.(false);
 		}

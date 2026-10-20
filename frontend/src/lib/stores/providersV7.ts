@@ -48,15 +48,20 @@ export interface HostGroup {
 }
 
 // Network/resources/inventory loading owns this snapshot. `hostGroups` below is the
-// canonical display owner and derives the account-sensitive harness card text from it.
+// canonical display owner: it derives the account-sensitive harness card text, and reads
+// each server from `networkServers`, so a saved server field shows without a reload.
 export const hostGroupSnapshot = writable<HostGroup[]>([]);
 export const hostGroups = derived(
-	[hostGroupSnapshot, vendorAccounts],
-	([$snapshot, $accounts]) => $snapshot.map((group) => ({
+	[hostGroupSnapshot, vendorAccounts, networkServers],
+	([$snapshot, $accounts, $servers]) => $snapshot.map((group) => ({
 		...group,
-		providers: group.providers.map((provider) => provider.type === 'harness' && provider.harnessModelCount != null
-			? { ...provider, subline: _harnessSubline(provider.name, provider.harnessModelCount, $accounts) }
-			: provider),
+		providers: group.providers.map((provider) => {
+			const server = provider.server && ($servers.find((row) => row.id === provider.server?.id) ?? provider.server);
+			const live = server === provider.server ? provider : { ...provider, server };
+			return live.type === 'harness' && live.harnessModelCount != null
+				? { ...live, subline: _harnessSubline(live.name, live.harnessModelCount, $accounts) }
+				: live;
+		}),
 	})),
 );
 export const hostGroupsLoading = writable(false);

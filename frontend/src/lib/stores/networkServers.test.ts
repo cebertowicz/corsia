@@ -144,8 +144,8 @@ describe('setNetworkServerPrivate', () => {
 	it('distinguishes an absent or machine-readable reason from an unreachable request', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => response(500, {})));
 		expect(await setNetworkServerPrivate('ns-1', true)).toEqual({ ok: false, detail: undefined, reached: true });
-		vi.stubGlobal('fetch', vi.fn(async () => response(403, { detail: 'person_session_required' })));
-		expect(await setNetworkServerPrivate('ns-1', true)).toEqual({ ok: false, detail: 'person_session_required', reached: true });
+		vi.stubGlobal('fetch', vi.fn(async () => response(403, { detail: 'Only the signed-in person can change where models run. Change it in CORSIA while signed in.' })));
+		expect(await setNetworkServerPrivate('ns-1', true)).toEqual({ ok: false, detail: 'Only the signed-in person can change where models run. Change it in CORSIA while signed in.', reached: true });
 		vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
 		expect(await setNetworkServerPrivate('ns-1', false)).toEqual({ ok: false, reached: false });
 	});

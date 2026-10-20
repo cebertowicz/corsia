@@ -7,6 +7,7 @@
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
 	import CloudModelsOffSetting from './CloudModelsOffSetting.svelte';
 	import { requestSettingsSection, settingsAnchor } from '$lib/stores/settingsNavigation';
+	import { HARNESSES } from '$lib/stores/harnessMembership';
 
 	let { projectId, onSignIn }: { projectId?: string; onSignIn?: (provider: string) => void } = $props();
 	let policy = $state<ProviderPolicy | null>(null);
@@ -17,8 +18,7 @@
 	// `null` stays loading until the project's persisted Local models only setting settles.
 	let cloudModelsOff = $state<boolean | null>(null);
 	const accountProviders = $derived(policy?.providers?.filter((provider) => provider.capabilities.units === 'accounts') ?? []);
-	const PROVIDER_NAMES: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex' };
-	// Every account provider the policy lists, so a new one is named without a copy change.
+	// Every account provider the policy lists, named by the harness owner.
 	const cloudOffLine = $derived(accountProviders.length
 		? `${new Intl.ListFormat('en', { type: 'conjunction' }).format(accountProviders.map(providerName))} ${accountProviders.length === 1 ? "isn't" : "aren't"} used while Local models only is on.`
 		: '');
@@ -54,7 +54,7 @@
 		}
 	}
 	function providerName(provider: ProviderEntry) {
-		return PROVIDER_NAMES[provider.provider_key] ?? provider.provider_key;
+		return HARNESSES.find((harness) => harness.name === provider.provider_key)?.label ?? provider.provider_key;
 	}
 	function accountFor(unitId: string) {
 		return $vendorAccounts.find((account) => account.id === unitId);

@@ -304,13 +304,13 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 				Object.assign(state, { models: catalogs.someLocal, cloudOff: false, failSave: true });
 				region = await openProjectProviders(page, await begin(width, height, theme));
 				await region.getByRole('button', { name: 'Local models only', exact: true }).click();
-				await expect(region.getByText("Couldn't save this change. Check your connection and try again.")).toBeVisible();
+				await expect(region.getByText('Couldn’t save this change. Check your connection and try again.')).toBeVisible();
 				await shot('project-save-failed', size, theme);
 
 				Object.assign(state, { models: catalogs.someLocal, cloudOff: true, failSave: true });
 				region = await openProjectProviders(page, await begin(width, height, theme));
 				await region.getByRole('button', { name: 'Local models only', exact: true }).click();
-				await expect(region.getByText("Couldn't save this change. Check your connection and try again.")).toBeVisible();
+				await expect(region.getByText('Couldn’t save this change. Check your connection and try again.')).toBeVisible();
 				await shot('project-save-failed-off', size, theme);
 				state.failSave = false;
 
@@ -359,7 +359,7 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 					await openEndpoints(page, label);
 					if (act === 'fail') {
 						await page.getByRole('button', { name: 'Trusted device', exact: true }).click();
-						await expect(page.getByText("Couldn't save this change. Check your connection and try again.")).toBeVisible();
+						await expect(page.getByText('Couldn’t save this change. Check your connection and try again.')).toBeVisible();
 					}
 					await shot(name, size, theme);
 				}

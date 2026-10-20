@@ -79,7 +79,7 @@ describe('CloudModelsOffSetting', () => {
 	it('save failed: uses the shared retry wording and keeps the saved switch state', async () => {
 		stub(false, 'fail'); await mountSetting();
 		toggle().click(); flushSync();
-		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Your permission changed. Try again."));
+		await vi.waitFor(() => expect(text()).toContain('Couldn’t save this change. Your permission changed.'));
 		expect(host.querySelector('.status.error')).not.toBeNull();
 		expect((toggle() as HTMLButtonElement).getAttribute('aria-pressed')).toBe('false');
 	});
@@ -90,7 +90,7 @@ describe('CloudModelsOffSetting', () => {
 			: { ok: true, json: async () => ({ cloud_models_off: true }) })));
 		component = mount(CloudModelsOffSetting, { target: host, props: { projectId: 'p1' } });
 		flushSync();
-		await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain("Couldn't load this setting."));
+		await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t load this setting.'));
 		expect(text()).not.toContain('subscriptions');
 		expect(toggle()).toBeNull();
 		(Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'Try again') as HTMLButtonElement).click();
@@ -101,13 +101,13 @@ describe('CloudModelsOffSetting', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline'); }));
 		component = mount(CloudModelsOffSetting, { target: host, props: { projectId: 'p1' } });
 		flushSync();
-		await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain("Couldn't load this setting. Check your connection."));
+		await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t load this setting. Check your connection.'));
 	});
 	it('save failed turning it off: the same line, and the switch stays on', async () => {
 		stub(true, 'fail'); await mountSetting();
 		expect(toggle().getAttribute('aria-pressed')).toBe('true');
 		toggle().click(); flushSync();
-		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Your permission changed. Try again."));
+		await vi.waitFor(() => expect(text()).toContain('Couldn’t save this change. Your permission changed.'));
 		expect(toggle().getAttribute('aria-pressed')).toBe('true');
 	});
 });

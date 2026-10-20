@@ -2,7 +2,8 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProviderEndpointsTab from './ProviderEndpointsTab.svelte';
 import { token } from '$lib/stores/auth';
-import type { NetworkServer } from '$lib/stores/networkServers';
+import { get } from 'svelte/store';
+import { networkServers, type NetworkServer } from '$lib/stores/networkServers';
 
 const DESCRIPTION = 'Its models count as local, so local-only chats and projects can use them. Turn this on only if this is your own secure, trusted device and the models run on it, not on a service it forwards to.';
 const THIS_COMPUTER = 'This computer';
@@ -28,7 +29,7 @@ function render(s: NetworkServer, put: 'ok' | 'fail' = 'ok') {
 }
 
 beforeEach(() => { host = document.createElement('div'); document.body.appendChild(host); token.set('tok'); bodies = []; });
-afterEach(() => { if (component) unmount(component); component = null; host.remove(); token.set(null); vi.unstubAllGlobals(); });
+afterEach(() => { if (component) unmount(component); component = null; host.remove(); token.set(null); networkServers.set([]); vi.unstubAllGlobals(); });
 
 describe('ProviderEndpointsTab trusted device', () => {
 	it('another machine, off: switch and description', () => {
@@ -49,23 +50,24 @@ describe('ProviderEndpointsTab trusted device', () => {
 		render(server({ provider: 'external', kind: 'external', endpoints: [endpoint('127.0.0.1', 'local')], on_this_mac: false }));
 		expect(toggle()).not.toBeNull(); expect(text()).toContain(THIS_COMPUTER); expect(host.querySelector('.ep-kind.local')).toBeNull();
 	});
-	it('offline server: the switch still works', async () => {
+	it('offline server: the switch still saves into the server list the modal reads', async () => {
+		networkServers.set([server({ status: 'offline' })]);
 		render(server({ status: 'offline' }));
 		toggle()!.click(); flushSync();
 		await vi.waitFor(() => expect(bodies).toEqual([{ private: true }]));
-		await vi.waitFor(() => expect(toggle()?.getAttribute('aria-pressed')).toBe('true'));
+		await vi.waitFor(() => expect(get(networkServers)[0].private).toBe(true));
 	});
-	it('save failed: uses the shared retry wording and the switch stays off', async () => {
+	it('save failed: uses the shared failure wording with the reason, and the switch stays off', async () => {
 		render(server({}), 'fail');
 		toggle()!.click(); flushSync();
-		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Your permission changed. Try again."));
+		await vi.waitFor(() => expect(text()).toContain('Couldn’t save this change. Your permission changed.'));
 		expect(host.querySelector('.status.error')).not.toBeNull();
 		expect(toggle()?.getAttribute('aria-pressed')).toBe('false');
 	});
 	it('save failed turning it off: the same line, and the switch stays on', async () => {
 		render(server({ private: true }), 'fail');
 		toggle()!.click(); flushSync();
-		await vi.waitFor(() => expect(text()).toContain("Couldn't save this change. Your permission changed. Try again."));
+		await vi.waitFor(() => expect(text()).toContain('Couldn’t save this change. Your permission changed.'));
 		expect(toggle()?.getAttribute('aria-pressed')).toBe('true');
 	});
 });

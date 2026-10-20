@@ -4,11 +4,7 @@
 	import Toggle from '../ui/Toggle.svelte';
 
 	let { server }: { server: NetworkServer } = $props();
-	// The modal's server comes from the host-group snapshot, which a save does not refresh,
-	// so hold what the person just saved until the next snapshot brings the server's own value.
-	let saved = $state<boolean | null>(null);
-	$effect(() => { void server.private; saved = null; });
-	const privateMachine = $derived(saved ?? server.private ?? false);
+	const privateMachine = $derived(server.private ?? false);
 	let busy = $state(false);
 	let error = $state('');
 	const canMarkPrivate = $derived(server.on_this_mac !== true);
@@ -16,8 +12,7 @@
 		if (busy) return;
 		busy = true; error = '';
 		const result = await setNetworkServerPrivate(server.id, value);
-		if (result.ok) saved = value;
-		else error = saveFailureText(result.detail, result.reached);
+		if (!result.ok) error = saveFailureText(result.detail, result.reached);
 		busy = false;
 	}
 </script>

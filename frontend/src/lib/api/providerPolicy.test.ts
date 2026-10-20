@@ -15,8 +15,8 @@ describe('saveCloudModelsOff failure text', () => {
 	});
 
 	it('passes a code through as detail and marks an unreachable server', async () => {
-		vi.stubGlobal('fetch', vi.fn(async () => response(403, { detail: 'person_session_required' })));
-		expect(await saveCloudModelsOff('p1', true)).toMatchObject({ ok: false, detail: 'person_session_required', reached: true });
+		vi.stubGlobal('fetch', vi.fn(async () => response(403, { detail: 'Only the signed-in person can change where models run. Change it in CORSIA while signed in.' })));
+		expect(await saveCloudModelsOff('p1', true)).toMatchObject({ ok: false, detail: 'Only the signed-in person can change where models run. Change it in CORSIA while signed in.', reached: true });
 		vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
 		expect(await saveCloudModelsOff('p1', false)).toMatchObject({ ok: false, reached: false });
 	});
