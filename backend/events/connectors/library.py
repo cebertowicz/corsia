@@ -28,6 +28,7 @@ _FACTS = (
     "installed_version",
     "library_version",
     "item_manifest",
+    "library_index_generation",
     "installed_at",
     "changed_files",
     "edited",
@@ -67,7 +68,7 @@ MANIFEST = register(ConnectorManifest(
     event_types={
         ITEM_CHANGED_EVENT: EventTypeDecl(
             ITEM_CHANGED_EVENT,
-            ("external_id", "item_manifest", "installed_at"),
+            ("external_id", "item_manifest", "library_index_generation", "installed_at"),
             _FILTERABLE,
             artifact_type=INSTALLED_SKILL_TYPE,
             artifact_integration=LIBRARY_INTEGRATION,
@@ -76,7 +77,7 @@ MANIFEST = register(ConnectorManifest(
         ),
         ITEM_WITHDRAWN_EVENT: EventTypeDecl(
             ITEM_WITHDRAWN_EVENT,
-            ("external_id", "item_manifest", "installed_at"),
+            ("external_id", "item_manifest", "library_index_generation", "installed_at"),
             _FILTERABLE,
             artifact_type=INSTALLED_SKILL_TYPE,
             artifact_integration=LIBRARY_INTEGRATION,
