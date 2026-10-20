@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 from llm.locality import locality_refusal
-from prompts.cloud_off import project_cloud_off_text
+from prompts.cloud_off import project_cloud_off_text, thread_local_only_text
 
 LOCAL_ONLY_REFUSAL_CODE = "local_only_requires_local_model"
 LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE = "local_only_send_needs_confirm"
@@ -56,17 +56,7 @@ def local_only_model_refusal(
         return project_cloud_off_text(selector, selectors, spawn=spawn)
     if not thread_local_only:
         return None
-    text = f"This thread is Local only, so it can't use {selector}: {reason}. "
-    if selectors:
-        text += f"Use a ready local model: {', '.join(selectors)}."
-    else:
-        text += (
-            "No local model is ready now. Stay on your current model and do the work inline, "
-            "or check model_catalog later."
-        )
-    if spawn:
-        text += " Local workers run one at a time."
-    return f"{LOCAL_ONLY_REFUSAL_CODE}: {text}"
+    return thread_local_only_text(selector, selectors, spawn=spawn)
 
 
 def inherited_local_only(

@@ -60,27 +60,32 @@ def test_model_refusal_uses_governance_wording(monkeypatch) -> None:
     assert local_only.local_only_model_refusal(
         "codex/gpt-6.1-sol", thread_local_only=True, project_id=None, db=db,
     ) == (
-        "local_only_requires_local_model: This thread is Local only, so it can't use "
-        "codex/gpt-6.1-sol: thread_local_only. Use a ready local model: "
+        "local_only_requires_local_model: codex/gpt-6.1-sol can't run here: "
+        "this chat is set to local models only. Use a ready local model: "
         "omlx@local/a, omlx@local/b."
     )
 
 
 def test_model_refusal_uses_governance_no_ready_wording_and_spawn_suffix(monkeypatch) -> None:
     from infra import local_only
+    from prompts.cloud_off import NO_LOCAL_READY_TEXT
 
     db = _db()
     monkeypatch.setattr(local_only, "locality_refusal", lambda *_args, **_kwargs: "thread_local_only")
     monkeypatch.setattr(local_only, "_ready_local_selectors", lambda: [])
 
-    assert local_only.local_only_model_refusal(
+    refusal = local_only.local_only_model_refusal(
         "codex/gpt-6.1-sol", thread_local_only=True, project_id=None, db=db, spawn=True,
-    ) == (
-        "local_only_requires_local_model: This thread is Local only, so it can't use "
-        "codex/gpt-6.1-sol: thread_local_only. No local model is ready now. Stay on your "
-        "current model and do the work inline, or check model_catalog later. "
+    )
+
+    # With no local model ready, the recovery is never to stay on the refused model.
+    assert refusal == (
+        "local_only_requires_local_model: codex/gpt-6.1-sol can't run here: "
+        f"this chat is set to local models only. {NO_LOCAL_READY_TEXT} "
         "Local workers run one at a time."
     )
+    assert refusal.startswith(f"{local_only.LOCAL_ONLY_REFUSAL_CODE}: ")
+    assert "thread_local_only" not in refusal
 
 
 def test_model_refusal_delegates_project_cloud_off_wording_to_locality(monkeypatch) -> None:
