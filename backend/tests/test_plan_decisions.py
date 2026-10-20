@@ -140,8 +140,8 @@ def _draft(db, plan, source, actor=None, **overrides):
     ).result["decision"]
 
 
-def test_decision_review_task_without_intent_is_readable_as_no_intent(db):
-    """Server-created decision review work stays outside the plan-tool intent gate."""
+def test_decision_review_task_references_its_source_intent(db):
+    """Server-created decision review work carries its source task by reference."""
     plan, source = _delegated(db)
 
     decision = _draft(db, plan, source)
@@ -149,14 +149,32 @@ def test_decision_review_task_without_intent_is_readable_as_no_intent(db):
         actor=_thread_actor(), node_id=decision["node_id"], db=db,
     )
 
+    assert service.get_node(decision["node_id"], db=db).intent_node_id == source.id
     assert detail["intent"] is None
     assert detail["intent_words"] == []
+    assert detail["canonical_intent"]["node_id"] == source.id
     assert public.intent_of(decision["node_id"], db=db) == {
-        "node_id": decision["node_id"], "title": decision["title"],
+        "node_id": source.id, "title": source.title,
         "requirements_revision": 1, "intent": None,
-        "acceptance_criteria": "The user answers this decision and the answer is recorded on this plan.",
-        "intent_words": [],
+        "acceptance_criteria": "Implement decisions DOD", "intent_words": [],
     }
+
+
+def test_decision_review_task_resolves_an_inherited_source_to_its_canonical_intent(db):
+    plan, _unused_source = _delegated(db)
+    canonical = service.add_node(
+        plan.id, kind="task", title="Canonical task", intent="Keep the scope narrow",
+        acceptance_criteria="The scoped task is complete", db=db,
+    )
+    source = service.add_node(
+        plan.id, kind="task", title="Inherited source", intent_node_id=canonical.id,
+        acceptance_criteria="The inherited task is complete", db=db,
+    )
+
+    decision = _draft(db, plan, source)
+
+    assert service.get_node(decision["node_id"], db=db).intent_node_id == canonical.id
+    assert public.intent_of(decision["node_id"], db=db)["node_id"] == canonical.id
 
 
 def _reviewed(db, plan, source, **overrides):

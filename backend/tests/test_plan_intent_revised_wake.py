@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from plans import holds, mutations, service
+from plans import admission, holds, mutations, service, system_user_steps
 from tests.child_parent_notice_helpers import seeded_db, wakes
 
 
@@ -92,6 +92,29 @@ def test_editor_recipient_is_not_woken(db):
 
     _edit(db, source.id, actor="worker", intent="Worker's own correction")
 
+    assert wakes(db, "worker") == []
+
+
+def test_user_step_created_from_one_selected_task_does_not_add_an_agent_wake(db):
+    plan = service.ensure_plan("thread", "parent", db=db)
+    source = service.add_node(
+        plan.id, kind="task", title="Source", intent="Initial intent",
+        acceptance_criteria="Initial criteria", db=db,
+    )
+    service.transition_node(source.id, "active", actor_id="parent", db=db)
+    assert admission.reconcile_plan(
+        plan.id, actor_id="parent", provenance="test", db=db,
+    ).selected == ((source.id, "parent"),)
+
+    step = system_user_steps.open_user_step(
+        db, "parent", key="browser", title="Enter password", description="Browser handover",
+        provenance="test.browser",
+    )
+    assert service.get_node(step, db=db).intent_node_id == source.id
+
+    _edit(db, source.id, intent="Updated parent intent")
+
+    assert len(wakes(db, "parent")) == 1
     assert wakes(db, "worker") == []
 
 

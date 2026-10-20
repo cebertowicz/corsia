@@ -158,6 +158,31 @@ def append(connection: sqlite3.Connection, node_id: str, words: Iterable[dict[st
         )
 
 
+def bounded_text(value: str, limit: int) -> str:
+    """Keep one Unicode string within a byte limit without splitting a character."""
+    return value.encode()[:limit].decode(errors="ignore")
+
+
+def document_comment_words(items: Iterable[dict[str, Any]]) -> list[dict[str, str]]:
+    """Project loaded person document comments into bounded origin words."""
+    return [
+        {
+            "author": "person", "role": "origin", "source_kind": "doc_comment",
+            "source_id": str(item["id"]),
+            "quote": bounded_text(str(item["body"]), MAX_QUOTE_BYTES),
+        }
+        for item in items if item["kind"] == "comment"
+    ]
+
+
+def document_comment_intent(items: Iterable[dict[str, Any]]) -> str:
+    """Make one bounded task reading from loaded person document comments."""
+    comments = [str(item["body"]) for item in items if item["kind"] == "comment"]
+    return validate_intent(bounded_text(
+        "User document feedback: " + "\n".join(comments), MAX_INTENT_BYTES,
+    ))
+
+
 def has_person_origin(connection: sqlite3.Connection, turn_id: str | None) -> bool:
     if turn_id is None:
         return False

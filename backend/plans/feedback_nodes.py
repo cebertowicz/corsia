@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
-from plans import admission, artifact_links, service
+from plans import admission, artifact_links, intent_words, service
 from registry.identity_metadata import last_written_sha256, sha256_file
 from registry.shared_edit_classification import combine_capped_diffs, capped_unified_diff
 
@@ -323,21 +323,29 @@ def create_feedback_node(
     if not loaded:
         raise EmptyFeedbackBatchError(f"feedback batch {batch_id} has no renderable items")
     author, document = feedback_display(db, batch, loaded)
+    words = (
+        intent_words.document_comment_words(loaded)
+        if _batch_value(batch, "author_kind") == "user"
+        else ()
+    )
     return _create_linked_node(
         db, recipient_thread_id, artifact_id, batch_id, PROVENANCE,
         title=_title(author, document, loaded), acceptance=_acceptance(loaded),
         description=_description(batch, loaded),
+        intent=intent_words.document_comment_intent(loaded) if words else None, words=words,
     )
 
 
 def _create_linked_node(db, recipient_thread_id, artifact_id, source_id, provenance,
-                        *, title, acceptance, description, intent_node_id=None) -> FeedbackNodeResult:
+                        *, title, acceptance, description, intent=None, intent_node_id=None,
+                        words=()) -> FeedbackNodeResult:
     plan = service.ensure_plan("thread", recipient_thread_id, db=db)
     node = service.add_node(
         plan.id, kind="task", title=title, acceptance_criteria=acceptance,
-        description=description, intent_node_id=intent_node_id,
+        description=description, intent=intent, intent_node_id=intent_node_id,
         actor_id=None, provenance=provenance, db=db,
     )
+    intent_words.append(db, node.id, words, revision=node.requirements_revision)
     service.transition_node(
         node.id, "active", actor_id=None, provenance=provenance, db=db,
     )
