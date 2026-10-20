@@ -59,4 +59,4 @@ Then tell the person in one line what you can now see and still can't.
 
 ## Recurring work with no ready connection
 
-Package what you built so other agents here reuse it unchanged. Sharing it beyond this computer needs the person's approval.
+Package what you built as a skill with its scripts (skill `skill-creator`), so other agents here reuse it unchanged. It holds no account details or keys; it reads them from the connection. Sharing it beyond this computer needs the person's approval.

@@ -20,13 +20,13 @@ Test the weakest assumption with the smallest pilot inside authority and cost li
 
 ## Every run
 
-- A run is one task in the plan, marked with its workflow (`workflow_ref`).
-- It records which version of the workflow it followed.
+- A run is one task in the plan, marked with its workflow (`workflow_ref`) when you add it; it can't be added later. Its steps are child tasks of it, each naming its `workflow_step`.
+- The plan records which version of the workflow the run followed; you don't pass or restate it.
 - It ends by checking the whole result against what went in, and says what happens to anything that fails that check.
 
 ## Save it
 
-Save it as a skill (skill `skill-creator`) with its steps listed as declared workflow steps, so the shared library can share it later: steps only, never the person's examples or details.
+Save it as a skill (skill `skill-creator`), with its steps in the skill's `corsia.yaml`, so the shared library can carry it later. Write it to fit any project: name each limit by what it controls (a spending cap, the approved recipients) and keep the values, the person's examples and anything that identifies them in this project's notes, never in the skill.
 
 ## Improve it
 
