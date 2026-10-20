@@ -54,6 +54,23 @@ async def _publish_app_state(app_id: str, result: dict[str, object]) -> None:
     await run_in_db(record_runtime_app_state, app_id, result)
 
 
+async def _prepare_managed_runtime(config: dict) -> None:
+    """Fetch a missing approved stdio runtime before the MCP connect deadline starts."""
+    command = config.get("command")
+    if not isinstance(command, str):
+        return
+    configured_env = config.get("env")
+    path = configured_env.get("PATH") if isinstance(configured_env, dict) else None
+    if path is not None and not isinstance(path, str):
+        path = None
+    from tools.managed_runtime import ensure_runtime, runtime_fetch_plan
+
+    plan = runtime_fetch_plan(command, path=path)
+    if plan is not None:
+        kind, _pin = plan
+        await asyncio.to_thread(ensure_runtime, kind)
+
+
 async def _remove_connected_app(app_id: str) -> None:
     """Withdraw one app's wrappers and session without disturbing other apps."""
     names = _app_tools.pop(app_id, set())
@@ -95,6 +112,18 @@ def _admit_reconnect(app_id: str) -> None:
     _reconnect_at[app_id] = now
 
 
+def _needs_token_result(config: dict, missing_keys: list[object]) -> dict[str, object] | None:
+    """Return the durable missing-token state when this app cannot connect yet."""
+    needs_token = (
+        config.get("needs_token") is True
+        and not config.get("secret_env")
+        and not config.get("secret_headers")
+    ) or bool(missing_keys)
+    if not needs_token:
+        return None
+    return {"state": "needs_token", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+
+
 async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, object]:
     """Connect, restart, reconnect or remove exactly one stable-id connected app.
 
@@ -127,17 +156,11 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
         await _publish_app_state(app_id, connecting)
         stack: AsyncExitStack | None = None
         try:
-            missing_keys = await run_in_db(load_missing_app_key_refs, app_id)
-            token_without_key_ref = config.get("needs_token") is True and not (
-                config.get("secret_env") or config.get("secret_headers")
-            )
-            if token_without_key_ref or missing_keys:
-                result = {
-                    "state": "needs_token", "state_since": utc_now_iso(), "tool_count": 0,
-                    "failure_class": None,
-                }
+            result = _needs_token_result(config, await run_in_db(load_missing_app_key_refs, app_id))
+            if result is not None:
                 await _publish_app_state(app_id, result)
                 return result
+            await _prepare_managed_runtime(config)
             _app_servers[app_id] = name
             stack = AsyncExitStack()
             errors = await connect_mcp_servers({name: config}, _registry, stack)

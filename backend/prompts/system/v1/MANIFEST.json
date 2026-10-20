@@ -298,10 +298,10 @@
       "sha256": "489f66ee0b51dd45f37e12d673bb508866ed19147670b0c1a9b5e7696398e996"
     },
     {
-      "bytes": 2996,
+      "bytes": 3154,
       "kind": "skill",
       "path": "skills/skill-creator/SKILL.md",
-      "sha256": "c565ccecd94bfce733268c2918817e0a77329adb249a68077dd87e46439f421b"
+      "sha256": "a6cf9bc8558c748f61d1397990e88c7f46e202b206e2290ab866bfb96048c1c7"
     },
     {
       "bytes": 9312,

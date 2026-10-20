@@ -257,11 +257,13 @@ describe('the hold on a pending comment', () => {
 		expect(shown()).toEqual([]);
 	});
 
-	it('suggestions and the user own comments are never held', async () => {
+	it('an agent suggestion is held until its turn, and the user own comments never are', async () => {
 		wire.rows = [serverComment('s1', 50, 0, 5), serverComment('u1', 20, 6, 9, 'you')];
 		post('agent-a', 's1', Date.now(), 'suggestion');
 		await settle();
 		await changeFrame();
+		expect(shown()).toEqual(['u1']);
+		await vi.advanceTimersByTimeAsync(commentArrivalDelay(5, 50));
 		expect(shown().sort()).toEqual(['s1', 'u1']);
 	});
 });

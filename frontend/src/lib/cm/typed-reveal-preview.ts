@@ -33,6 +33,8 @@ export interface Preview {
 	selectKey: string | null;
 	/** A suggestion's id once it is committed: the suggestion draws the insert, and this keeps typing it. */
 	claimId: string | null;
+	/** The suggestion this preview was started for, when its arrival knew it: claimed by id wherever the suggestion is placed. */
+	commentId: string | null;
 }
 
 /** A slot's text so far, placed at [from, to) in this editor's text; a null range only updates a placed slot. */
@@ -40,6 +42,8 @@ export interface PreviewSlot {
 	callId: string; threadId: string; name: string; slot: number; from: number | null; to: number | null; text: string;
 	/** An edit when absent. */
 	mode?: PreviewMode;
+	/** The committed suggestion this slot types, when known (an arrival's own typing). */
+	commentId?: string;
 }
 export const previewSlot = StateEffect.define<PreviewSlot>();
 /** The call ended for any reason: its preview goes at once. */
@@ -94,7 +98,8 @@ export function withPreviewSlot(lanes: readonly Lane[], value: PreviewSlot,
 	// A comment's body is never drawn.
 	const text = mode === 'comment' ? '' : value.text;
 	const preview: Preview = { callId: value.callId, slot: value.slot, mode, from, to, text,
-		typed: Math.min(existing?.typed ?? 0, text.length), selectKey, claimId: null };
+		typed: Math.min(existing?.typed ?? 0, text.length), selectKey, claimId: null,
+		commentId: value.commentId ?? existing?.commentId ?? null };
 	const previews = existing ? lane.previews.map((other) => other === existing ? preview : other) : [...lane.previews, preview];
 	const next: Lane = { ...lane, name: value.name, select, previews, generation: lane.generation + (grew ? 1 : 0), quiet: false };
 	return [...lanes.filter((other) => other !== own), next];
