@@ -170,7 +170,6 @@
 			? buildTranscriptPresentation([presentation.pendingContextDigest], focusMode, null, 'run:pending-context') : []),
 		...buildTranscriptPresentation(pendingDeliveryMessages.filter((msg) => !focusMode || isHumanMessage(msg)), focusMode),
 	]);
-	// Chat and documents share the imported live-edge threshold.
 	// Programmatic scrolling ends on any real gesture; never undo a user's reread.
 	let pendingReleaseFrame: number | null = null;
 	// A deferred pin abandons itself when a newer gesture takes over.

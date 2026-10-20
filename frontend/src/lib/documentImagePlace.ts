@@ -106,12 +106,15 @@ function anchorReader(root: HTMLElement, scroller: HTMLElement, view: EditorView
 	};
 }
 
-/** True when a non-user transaction preserves every prior character and adds text after it. */
+/** True when a non-user transaction only inserts text at the end of the document, judged by where it changes it. */
 function isRemoteAppend(transaction: Transaction): boolean {
 	if (!transaction.docChanged || transaction.annotation(Transaction.userEvent) !== undefined) return false;
-	const previous = transaction.startState.doc;
-	return transaction.newDoc.length > previous.length
-		&& transaction.newDoc.sliceString(0, previous.length) === previous.toString();
+	const end = transaction.startState.doc.length;
+	let append = true;
+	transaction.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+		if (fromA !== end || toA !== end || inserted.length === 0) append = false;
+	});
+	return append;
 }
 
 /**

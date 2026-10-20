@@ -292,10 +292,10 @@ for (const [width, height] of LAYOUTS) {
 
 			await readNearEnd(live.reader, 200);
 			const before = await anchorLine(live.reader);
-			await append(live.writer, `\n\n${BLOCK(3)}`);
-			await expect(live.reader.locator('.cm-content')).toContainText('Inserted paragraph 2');
+			await append(live.writer, `\n\nSecond append arriving below a reader farther up. ${BLOCK(3)}`);
+			await expect(live.reader.locator('.cm-content')).toContainText('Second append arriving below a reader farther up.');
 			const after = await anchorLine(live.reader);
-			expect(after.line, 'a reader farther from the end keeps the same top line').toBe(before.line);
+			expect(after.text, 'a reader farther from the end keeps the same top line').toBe(before.text);
 			expect(Math.abs(after.top - before.top), 'the held top line stays in place').toBeLessThanOrEqual(3);
 		} finally {
 			await live.close();
