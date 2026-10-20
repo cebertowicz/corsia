@@ -1,8 +1,10 @@
 """Fail-closed checks for CORSIA's on-demand executable cache."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import io
+import threading
 from pathlib import Path
 import stat
 import tarfile
@@ -123,6 +125,16 @@ def test_safe_tar_member_refuses_escaping_paths(member):
     assert not _safe_tar_member(member)
 
 
+def test_safe_tar_member_refuses_escaping_hardlink():
+    from tools.managed_runtime import _safe_tar_member
+
+    member = tarfile.TarInfo("node/bin/link")
+    member.type = tarfile.LNKTYPE
+    member.linkname = "../x"
+
+    assert not _safe_tar_member(member)
+
+
 def test_extract_refuses_unsafe_zip_symlink(tmp_path):
     from tools import managed_runtime
 
@@ -152,6 +164,39 @@ def test_invalid_read_only_install_is_replaced(monkeypatch, tmp_path):
 
     assert executable.is_file()
     assert managed_runtime.runtime_is_installed("node", root=tmp_path / "runtimes")
+
+
+def test_concurrent_installs_share_one_runtime_download(monkeypatch, tmp_path):
+    from tools import managed_runtime
+
+    payload = _node_archive()
+    _pin(monkeypatch, payload)
+    download_started = threading.Event()
+    release_download = threading.Event()
+    downloads = 0
+    download_lock = threading.Lock()
+
+    def delayed_download(*_args, **_kwargs):
+        nonlocal downloads
+        with download_lock:
+            downloads += 1
+            first = downloads == 1
+        if first:
+            download_started.set()
+            assert release_download.wait(timeout=5)
+        return _Response(payload)
+
+    monkeypatch.setattr(managed_runtime.urllib.request, "urlopen", delayed_download)
+    root = tmp_path / "runtimes"
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(managed_runtime.ensure_runtime, "node", root=root)
+        assert download_started.wait(timeout=5)
+        second = executor.submit(managed_runtime.ensure_runtime, "node", root=root)
+        release_download.set()
+        first_path, second_path = first.result(timeout=5), second.result(timeout=5)
+
+    assert first_path == second_path
+    assert downloads == 1
 
 
 def test_download_byte_cap_is_reported(monkeypatch, tmp_path):

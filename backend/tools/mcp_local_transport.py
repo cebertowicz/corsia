@@ -92,6 +92,20 @@ def mcp_oserror_detail(error: OSError) -> str:
     return _mcp_denial_guidance(str(error)) or str(error)
 
 
+def _uv_runtime_env(command: str, runtime_bin: Path | None) -> dict[str, str]:
+    """Pin uv to an unprotected bundled base interpreter without a managed download."""
+    if command not in {"uv", "uvx"} or runtime_bin is None:
+        return {}
+    from tools.host_path_policy import current_protected_host_path_policy
+
+    base_python = Path(os.path.realpath(getattr(sys, "_base_executable", sys.executable)))
+    policy = current_protected_host_path_policy()
+    env = {"UV_NO_MANAGED_PYTHON": "1"}
+    if not any(base_python.is_relative_to(root) for root in (policy.state_root, *policy.private_roots)):
+        env["UV_PYTHON"] = str(base_python)
+    return env
+
+
 def safehouse_stdio_parameters(
     name: str,
     config: dict,
@@ -149,9 +163,7 @@ def safehouse_stdio_parameters(
         "XDG_CACHE_HOME": str(cache_dir / "xdg"),
         "NODE_OPTIONS": node_options,
     }
-    if command in {"uv", "uvx"} and runtime_bin is not None:
-        # A direct bundled interpreter plus this switch forbids uv's managed-Python download.
-        server_env |= {"UV_PYTHON": sys.executable, "UV_NO_MANAGED_PYTHON": "1"}
+    server_env.update(_uv_runtime_env(command, runtime_bin))
     descriptor, raw_profile = tempfile.mkstemp(
         dir=mcp_envelope_dir(Path(STATE_ROOT)), prefix="corsia-mcp-envelope-", suffix=".sb",
     )

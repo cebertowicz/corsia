@@ -11,6 +11,7 @@ import shutil
 import stat
 import tarfile
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -56,6 +57,8 @@ _COMMAND_RUNTIME = {"node": "node", "npx": "node", "uv": "uv", "uvx": "uv", "gh"
 # malformed response before it can hold the connected-app lifecycle lock indefinitely.
 _MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
 _DOWNLOAD_DEADLINE_SECONDS = 5 * 60
+_RUNTIME_LOCKS: dict[str, threading.Lock] = {}
+_RUNTIME_LOCKS_GUARD = threading.Lock()
 
 
 def macos_arch(machine: str | None = None) -> str:
@@ -149,7 +152,9 @@ def _safe_tar_member(member: tarfile.TarInfo) -> bool:
         return False
     if not (member.issym() or member.islnk()):
         return True
-    target = Path(member.name).parent / member.linkname
+    target = Path(member.linkname)
+    if member.issym():
+        target = Path(member.name).parent / target
     if target.is_absolute():
         return False
     depth = 0
@@ -201,41 +206,48 @@ def _make_writable(path: Path) -> None:
     path.chmod(0o755)
 
 
+def _runtime_lock(kind: str) -> threading.Lock:
+    """Return the one process-local install lock for a pinned runtime kind."""
+    with _RUNTIME_LOCKS_GUARD:
+        return _RUNTIME_LOCKS.setdefault(kind, threading.Lock())
+
+
 def ensure_runtime(kind: str, *, root: Path | None = None, arch: str | None = None) -> Path:
     """Fetch one pinned runtime atomically, or return its verified executable."""
     selected, pin = _pin(kind, arch)
     base = root or runtime_cache_root()
     final = _install_dir(kind, selected, pin, base)
-    if _valid_install(final, kind, selected, pin):
-        return _expected_executable(final, pin)
-    staging: Path | None = None
-    try:
-        if final.exists():
-            _make_writable(final)
-            shutil.rmtree(final)
-        final.parent.mkdir(parents=True, exist_ok=True)
-        staging = Path(tempfile.mkdtemp(prefix=f".{kind}-{pin.version}-", dir=final.parent))
-        archive = staging / "download"
-        if _download(pin.url, archive) != pin.sha256:
-            raise ManagedRuntimeError("download checksum did not match the pinned runtime")
-        unpacked = staging / "runtime"
-        unpacked.mkdir()
-        _extract(archive, unpacked, pin)
-        executable = _expected_executable(unpacked, pin)
-        if not executable.is_file():
-            raise ManagedRuntimeError("download did not contain the pinned executable")
-        executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-        _marker_path(unpacked).write_text(json.dumps({"kind": kind, "arch": selected, **asdict(pin)}, sort_keys=True), encoding="utf-8")
-        os.replace(unpacked, final)
-        _make_read_execute_only(final)
-        return _expected_executable(final, pin)
-    except ManagedRuntimeError:
-        raise
-    except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
-        raise ManagedRuntimeError(f"pinned runtime install failed: {type(exc).__name__}") from exc
-    finally:
-        if staging is not None:
-            shutil.rmtree(staging, ignore_errors=True)
+    with _runtime_lock(kind):
+        if _valid_install(final, kind, selected, pin):
+            return _expected_executable(final, pin)
+        staging: Path | None = None
+        try:
+            if final.exists():
+                _make_writable(final)
+                shutil.rmtree(final)
+            final.parent.mkdir(parents=True, exist_ok=True)
+            staging = Path(tempfile.mkdtemp(prefix=f".{kind}-{pin.version}-", dir=final.parent))
+            archive = staging / "download"
+            if _download(pin.url, archive) != pin.sha256:
+                raise ManagedRuntimeError("download checksum did not match the pinned runtime")
+            unpacked = staging / "runtime"
+            unpacked.mkdir()
+            _extract(archive, unpacked, pin)
+            executable = _expected_executable(unpacked, pin)
+            if not executable.is_file():
+                raise ManagedRuntimeError("download did not contain the pinned executable")
+            executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            _marker_path(unpacked).write_text(json.dumps({"kind": kind, "arch": selected, **asdict(pin)}, sort_keys=True), encoding="utf-8")
+            os.replace(unpacked, final)
+            _make_read_execute_only(final)
+            return _expected_executable(final, pin)
+        except ManagedRuntimeError:
+            raise
+        except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
+            raise ManagedRuntimeError(f"pinned runtime install failed: {type(exc).__name__}") from exc
+        finally:
+            if staging is not None:
+                shutil.rmtree(staging, ignore_errors=True)
 
 
 def command_path(command: str, *, path: str | None = None, root: Path | None = None) -> str | None:

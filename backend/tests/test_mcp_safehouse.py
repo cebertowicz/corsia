@@ -174,6 +174,36 @@ def test_configured_app_path_keeps_system_dirs_after_its_own(monkeypatch, tmp_pa
     assert params.env["PATH"].split(":") == [own, "/bin", "/usr/bin", "/usr/sbin", "/sbin"]
 
 
+@pytest.mark.parametrize("base_in_private_root", (False, True))
+def test_uvx_uses_only_an_unprotected_base_python(monkeypatch, tmp_path, base_in_private_root):
+    from tools import mcp_local_transport as transport
+
+    _configure_roots(monkeypatch, tmp_path)
+    home = tmp_path / "home"
+    venv_python = home / ".corsia" / ".venv" / "bin" / "python"
+    base_python = venv_python if base_in_private_root else tmp_path / "python3.11"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(transport.sys, "executable", str(venv_python))
+    monkeypatch.setattr(transport.sys, "_base_executable", str(base_python), raising=False)
+    monkeypatch.setattr(transport.shutil, "which", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("tools.managed_runtime.command_path", lambda *_args, **_kwargs: "/runtime/uvx")
+    monkeypatch.setattr("tools.managed_runtime.command_bin_dir", lambda *_args, **_kwargs: Path("/runtime"))
+    monkeypatch.setattr("tools.shell_guard.safehouse_version_error", lambda: None)
+    monkeypatch.setattr("tools.shell_guard._safehouse_executable", lambda: tmp_path / "safehouse")
+    monkeypatch.setattr("tools.safehouse_launch.mcp_private_state_profile", lambda *_args: "(version 1)")
+
+    params, profile = transport.safehouse_stdio_parameters(
+        "app", {"connected_app_id": "app"}, "uvx", [], {},
+    )
+    profile.unlink(missing_ok=True)
+
+    assert params.env["UV_NO_MANAGED_PYTHON"] == "1"
+    if base_in_private_root:
+        assert "UV_PYTHON" not in params.env
+    else:
+        assert params.env["UV_PYTHON"] == str(base_python)
+
+
 def test_agent_shell_profile_denies_local_app_cache_parent(monkeypatch, tmp_path):
     from infra import config
     from tools.host_path_policy import current_protected_host_path_policy
