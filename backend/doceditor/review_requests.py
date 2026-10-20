@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from core.agent_roster_queries import agent_rows
 from doceditor import feedback_delivery
+from doceditor.review_lifecycle import FALLBACK_STATES, is_open, transition
 from doceditor.review_feedback import submit_fork_feedback, withdraw_fork_feedback
 from doceditor.comments import validate_client_id
 from infra.auth import is_owner_sentinel, may_access_artifact
@@ -41,7 +42,7 @@ DEFAULT_REQUEST_ERROR_CODE = "review_request_refused"
 CANCEL_REASON = "Review request cancelled by its requester or document owner."
 #: Outcome of a request whose review task ended before any batch reached the owner.
 ENDED_WITHOUT_COMMENTS = "ended_without_comments"
-IN_REVIEW_REFUSAL = "A review is already in progress; retry with the same client_id."
+IN_REVIEW_REFUSAL = "A review is already in progress. Wait for it, or withdraw it and request a new review with your note."
 
 
 class ReviewRequestError(ValueError):
@@ -137,7 +138,7 @@ def _view(db, row) -> dict:
     return {**dict(row), "outcome": outcome(db, row)}
 
 
-def _get(db, request_id: str) -> dict:
+def get_request(db, request_id: str) -> dict:
     return _view(db, db.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone())
 
 
@@ -156,7 +157,7 @@ def _repeat(db, row, actor: ReviewActor, note: str | None, key: str) -> dict:
     keys.append(key)
     db.execute("UPDATE doc_review_requests SET client_ids=? WHERE id=?", (json.dumps(keys), row["id"]))
     if note:
-        if row["node_id"] is None:
+        if row["state"] == "forked":
             # A fork has already frozen its instruction; silently accepting a
             # later note would claim the reviewer saw it when it could not.
             raise ReviewRequestError(IN_REVIEW_REFUSAL)
@@ -164,7 +165,7 @@ def _repeat(db, row, actor: ReviewActor, note: str | None, key: str) -> dict:
             **dict(row), "note": note, "requester_display": actor.display,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
-    return _get(db, row["id"])
+    return get_request(db, row["id"])
 
 
 def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: ReviewActor,
@@ -186,16 +187,11 @@ def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: Rev
         ).fetchone()
         if prior is not None:
             return _view(connection, prior)
-        # At most one open request per reviewer and document. Openness comes from
-        # Plans, so no index can express it; the write lock serializes this check
-        # and the insert below.
+        # The write lock serializes the pending request check and insert.
         latest = _latest(connection, artifact_id, reviewer_thread_id)
-        if latest is not None and outcome(connection, latest) == "open":
+        if latest is not None and is_open(connection, latest):
             return _repeat(connection, latest, requester, note, key)
-        from doceditor.review_fork_intent import requesting_node_id
-
         request_id = str(uuid.uuid4())
-        intent_node = requesting_node_id(connection, requester)
         request = {
             "id": request_id, "artifact_id": artifact_id,
             "requester_kind": requester.kind, "requester_id": requester.id,
@@ -205,38 +201,35 @@ def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: Rev
         }
         connection.execute(
             """INSERT INTO doc_review_requests(id,artifact_id,requester_kind,requester_id,
-               reviewer_thread_id,note,client_ids,fork_id,requesting_node_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+               reviewer_thread_id,note,client_ids,fork_id,state,state_changed_at,created_at)
+               VALUES (?,?,?,?,?,?,?,?,'forked',?,?)""",
             (request["id"], artifact_id, requester.kind, requester.id, reviewer_thread_id,
-             note, json.dumps([key]), request["fork_id"], intent_node, request["created_at"]),
+             note, json.dumps([key]), request["fork_id"], request["created_at"], request["created_at"]),
         )
         # Recheck admission under the same write lock. A request is fork-first:
         # Plans is reserved for terminal fallback only.
         _reviewer(connection, artifact, reviewer_thread_id, requester)
-        result = _get(connection, request_id)
+        result = get_request(connection, request_id)
         _changed(connection, result, artifact)
         return result
 
 
 def outcome(db, row) -> str:
-    """``cancelled``, ``commented``, ``open`` or ``ended_without_comments``.
-
-    The row stores only its own events (cancelled, answered); whether the review
-    is still open comes from Plans alone.
-    """
-    if row["cancelled_at"]:
+    """Compatibility labels derived from the explicit request lifecycle."""
+    if row["state"] == "withdrawn":
         return "cancelled"
-    if row["answered_batch_id"]:
-        return "commented"
-    if row["node_id"] is None:
-        return "open" if row["fork_id"] else ENDED_WITHOUT_COMMENTS
-    return "open" if public.review_is_open(db, row["node_id"]) else ENDED_WITHOUT_COMMENTS
+    if row["state"] == "submitted":
+        return "commented" if row["answered_batch_id"] else ENDED_WITHOUT_COMMENTS
+    if row["state"] == "failed":
+        return "failed"
+    return "open" if is_open(db, row) else ENDED_WITHOUT_COMMENTS
 
 
 def for_document(db, artifact_id: str) -> list[dict]:
     """Each reviewer's latest request, while it is open or ended without comments."""
     rows = db.execute(
         "SELECT * FROM doc_review_requests r WHERE artifact_id=?"
-        " AND cancelled_at IS NULL AND answered_batch_id IS NULL"
+        " AND (state IN ('forked','handed_back','failed') OR (state='submitted' AND answered_batch_id IS NULL))"
         " AND NOT EXISTS (SELECT 1 FROM doc_review_requests later WHERE later.artifact_id=r.artifact_id"
         " AND later.reviewer_thread_id=r.reviewer_thread_id AND later.created_at>r.created_at)"
         " ORDER BY created_at,id", (artifact_id,))
@@ -255,12 +248,11 @@ def may_cancel(db, artifact, row, actor: ReviewActor) -> bool:
     return get_thread_for_user(owner_id, actor.user_id, db=db) is not None
 
 
-def escalate_fork(db, request_id: str) -> dict | None:
+def escalate_fork(db, request_id: str, *, reason: str = "limit") -> dict | None:
     """Turn an unfinished fork into the established reviewer node exactly once."""
     with write_transaction(db, scope="escalate_document_review_fork") as connection:
         row = connection.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone()
-        if (row is None or row["cancelled_at"] or row["answered_batch_id"]
-                or row["node_id"] is not None or not row["fork_id"]):
+        if row is None or row["state"] != "forked":
             return None
         requester = connection.execute("SELECT title FROM threads WHERE id=?", (row["requester_id"],)).fetchone()
         comments = connection.execute(
@@ -273,10 +265,10 @@ def escalate_fork(db, request_id: str) -> dict | None:
         continuation = "Continue the requested review; comments already staged: " + (
             ", ".join(str(comment["id"]) for comment in comments) or "none"
         )
-        if row["requesting_node_id"]:
-            continuation += f". Requesting intent node: {row['requesting_node_id']}."
+        state = "handed_back" if reason == "limit" else "failed"
+        continuation += f". Fork outcome: {state} ({reason})."
         request = {
-            **dict(row), "intent_node_id": row["requesting_node_id"],
+            **dict(row),
             "requester_display": (requester["title"] if requester else None) or row["requester_id"],
             "note": f"{row['note'] or ''}\n\n{continuation}".strip(),
         }
@@ -285,19 +277,12 @@ def escalate_fork(db, request_id: str) -> dict | None:
             "UPDATE doc_review_requests SET node_id=?,fork_id=NULL WHERE id=?",
             (node.node_id, request_id),
         )
-        # Staged comments wait for the reviewer's own continuation: a request
-        # batch's closes_at is now the earliest reviewer Turn start that may
-        # close it (feedback_batches.close_for_turn_end); no quiet timer does.
-        now = datetime.now(timezone.utc).isoformat()
-        connection.execute(
-            "UPDATE doc_feedback_batches SET closes_at=?,updated_at=? WHERE review_request_id=? AND state='open'",
-            (now, now, request_id),
-        )
+        transition(connection, request_id, state, reason=reason)
         artifact = models.get_artifact(row["artifact_id"], db=connection)
         if artifact is not None:
             _changed(connection, request, artifact)
         after_commit(connection, lambda: public.notify_after_commit((public.get_node(node.node_id, db=connection).plan_id,), db=connection))
-        return _get(connection, request_id)
+        return get_request(connection, request_id)
 
 
 def cancel(db, request_id: str, actor: ReviewActor) -> dict:
@@ -308,17 +293,18 @@ def cancel(db, request_id: str, actor: ReviewActor) -> dict:
         artifact = _artifact(connection, row["artifact_id"], actor)
         if not may_cancel(connection, artifact, row, actor):
             raise PermissionError(CANCEL_REFUSAL)
-        if outcome(connection, row) != "open":
+        if not is_open(connection, row):
             return _view(connection, row)
+        transition(connection, request_id, "withdrawn")
         connection.execute("UPDATE doc_review_requests SET cancelled_at=? WHERE id=?", (datetime.now(timezone.utc).isoformat(), request_id))
-        if row["node_id"] is not None:
+        if row["state"] in FALLBACK_STATES:
             public.close_review_node(connection, row["node_id"], reason=CANCEL_REASON)
         else:
             from core.artifact_review_runtime import cancel as cancel_fork
 
             after_commit(connection, lambda: cancel_fork(str(row["fork_id"])))
         withdraw_fork_feedback(connection, request_id)
-        result = _get(connection, request_id)
+        result = get_request(connection, request_id)
         _changed(connection, result, artifact)
         return result
 
@@ -342,12 +328,13 @@ def settle_for_batch(db, batch) -> tuple[str, ...]:
     request_id = batch["review_request_id"]
     row = (db.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone()
            if request_id else _latest(db, batch["artifact_id"], batch["author_id"]))
-    if row is None or row["cancelled_at"] or row["answered_batch_id"]:
+    if row is None or row["state"] not in {"forked", *FALLBACK_STATES}:
         return ()
-    if not request_id and row["fork_id"] and row["node_id"] is None:
+    if not request_id and row["state"] == "forked":
         return ()
     node_id = row["node_id"]
-    still_open = node_id is not None and public.review_is_open(db, node_id)
+    still_open = row["state"] in FALLBACK_STATES and is_open(db, row)
+    transition(db, row["id"], "submitted")
     db.execute("UPDATE doc_review_requests SET answered_batch_id=? WHERE id=?", (batch["id"], row["id"]))
     woken: list[str] = []
     if still_open:

@@ -10,7 +10,7 @@ export interface DocumentReview {
 	requester_name: string;
 	created_at: string;
 	may_cancel: boolean;
-	outcome: 'open' | 'ended_without_comments';
+	outcome: 'open' | 'ended_without_comments' | 'failed';
 }
 export interface DocumentReviewer {
 	id: string;

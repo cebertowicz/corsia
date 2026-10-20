@@ -77,7 +77,7 @@ def _admission(thread_id: str, checkpoint_id: str, turn: TurnIdentity):
         started_at="t1",
     )
     provider = ProviderCheckpointRequest(
-        checkpoint_id=checkpoint_id,
+        fork_id=checkpoint_id,
         thread_id=thread_id,
         target=target,
         instruction="Write one checkpoint.",

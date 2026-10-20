@@ -50,6 +50,15 @@ def create_request(actor: reviews.ReviewActor, *, reviewer: str, note: str | Non
         db.close()
 
 
+def refresh_request(request_id: str) -> dict:
+    """Return the durable outcome after preparation may have handed work back."""
+    db = get_db()
+    try:
+        return reviews.get_request(db, request_id)
+    finally:
+        db.close()
+
+
 def cancel_request(actor: reviews.ReviewActor, request_id: str) -> tuple[dict, list[str]]:
     db = get_db()
     try:
@@ -87,8 +96,8 @@ class DocReviewRequestTool(Tool):
                 "Reviewer thread ID from agent_roster; must be an active agent in your visible roster.")},
             "note": {"type": ["string", "null"], "maxLength": 500},
             "client_id": {"type": "string", "maxLength": 64, "description": (
-                "Stable retry key. Reuse it when retrying this request; a new key on an open "
-                "request appends a supplied note once.")},
+                "Stable retry key. Reuse it to retrieve the same request. To change a review "
+                "already running, withdraw it and request again with your note.")},
         }, ["reviewer", "client_id"])
 
     async def execute(self, **kwargs: Any) -> str:
@@ -110,8 +119,9 @@ class DocReviewRequestTool(Tool):
         except (ValueError, PermissionError) as exc:
             return f"Error: {exc}"
         await public.drive_threads(woken)
-        if result.get("fork_id") and result.get("node_id") is None:
+        if result["state"] == "forked":
             from core.artifact_review_runtime import start
 
             await start(result["id"])
+            result = await run_in_db(refresh_request, result["id"])
         return _json({"request": result})

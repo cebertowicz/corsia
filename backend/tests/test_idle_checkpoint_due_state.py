@@ -746,7 +746,7 @@ async def test_cancelled_runtime_launches_a_committed_idle_admission(
         preserve_thinking_default=True,
     )
     provider = ProviderCheckpointRequest(
-        checkpoint_id=request.id,
+        fork_id=request.id,
         thread_id=request.thread_id,
         target=target,
         instruction="checkpoint",

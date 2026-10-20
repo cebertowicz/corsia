@@ -266,6 +266,13 @@ describe('document review toolbar and popover', () => {
 		expect(toastShow).not.toHaveBeenCalled();
 		expect(fetchMock.mock.calls.length).toBe(calls);
 	});
+	it('names an interrupted review and keeps its continuation cancellable', async () => {
+		rows = [row('review-failure', { outcome: 'failed' })]; render(); await settle();
+		expect(document.body.querySelector('.reviewer-group')?.getAttribute('aria-label')).toBe('Reviewers: Quality Gate (interrupted; reviewer has the task)');
+		await picker();
+		expect(document.body.textContent).toContain('Interrupted; reviewer has the task');
+		expect(button('Cancel request to Quality Gate')).toBeTruthy();
+	});
 	it('refetches on an artifact change and on a plan change, and cleans its listeners up', async () => {
 		rows = [row()]; render(); await settle();
 		const calls = fetchMock.mock.calls.length;

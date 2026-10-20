@@ -63,7 +63,7 @@ def test_read_cannot_bypass_document_scope_with_an_owned_parent(review_env):
     staged_comment(db, aid, row["id"])
     comment = db.execute("SELECT id FROM doc_comments WHERE artifact_id=?", (aid,)).fetchone()
     with pytest.raises(PermissionError, match="only read its requested document"):
-        authorize_tool(SimpleNamespace(checkpoint_id=row["fork_id"], thread_id="reviewer", working_dir="/workspace"),
+        authorize_tool(SimpleNamespace(fork_id=row["fork_id"], thread_id="reviewer", working_dir="/workspace"),
                        "read_file", {"path": "/workspace/shared/unrelated.md", "parent_id": comment["id"]})
 
 
@@ -76,7 +76,7 @@ async def test_cc_bridge_owns_token_allowlist_exact_call_and_cancel(review_env):
     db, aid = review_env
     row = request(db, aid)
     provider = replace(
-        _request(None), checkpoint_id=row["fork_id"], thread_id="reviewer", mcp_config="fixture",
+        _request(None), fork_id=row["fork_id"], thread_id="reviewer", mcp_config="fixture",
     )
     with bind_bridge(provider, ARTIFACT_REVIEW_KIND, asyncio.Event()) as (_request_, handle):
         http = Request({"type": "http", "client": ("127.0.0.1", 42),
@@ -121,7 +121,7 @@ async def test_codex_counts_only_distinct_owned_completed_items_and_terminates()
 
     def frame(item, thread="owned", turn="turn", method="item/completed"):
         return {"method": method, "params": {"threadId": thread, "turnId": turn,
-                "item": {"id": item, "type": "reasoning"}}}
+                "item": {"id": item, "type": "dynamicToolCall"}}}
 
     await limit.observe(session, frame("old", turn="previous"))
     await limit.observe(session, frame("foreign", thread="other"))
@@ -186,7 +186,7 @@ async def test_codex_missing_completed_identity_wakes_and_closes_waiting_session
         session, CodexCheckpointCapture(), limit, asyncio.Event(),
     ))
     await started.wait()
-    await limit.observe(session, {"method": "item/completed", "params": {"item": {}}})
+    await limit.observe(session, {"method": "item/completed", "params": {"item": {"type": "dynamicToolCall"}}})
     with pytest.raises(ForkItemLimitReached, match="fork_completed_item_missing_identity"):
         await asyncio.wait_for(task, 1)
     assert closed == [True]
@@ -208,7 +208,7 @@ async def test_busy_reviewer_pass_writes_as_reviewer_without_turn_or_node(review
     registry = ToolRegistry()
     registry.register(DocCommentCreateTool())
     registry.register(DocFeedbackSendTool())
-    provider = replace(_request(None), checkpoint_id=row["fork_id"], thread_id="reviewer")
+    provider = replace(_request(None), fork_id=row["fork_id"], thread_id="reviewer")
     replies = iter([
         LLMResponse(content="", tool_calls=[ToolCallRequest(id="comment", name="doc_comment_create", arguments={
             "artifact_id": aid, "body": "The claim needs evidence.", "review": True, "client_id": "fork-proof",
@@ -305,11 +305,12 @@ def test_startup_escalates_each_orphaned_review_once(review_env):
         review_requests.submit_fork_feedback(db, answered["id"], "third", aid)
     before = {rid: stored(db, rid) for rid in (cancelled["id"], answered["id"])}
 
-    assert asyncio.run(reconcile_startup_reviews(frozenset())) == [orphan["id"]]
-    assert asyncio.run(reconcile_startup_reviews(frozenset())) == []
+    assert asyncio.run(reconcile_startup_reviews(frozenset(), before="9999-01-01T00:00:00+00:00")) == [orphan["id"]]
+    assert asyncio.run(reconcile_startup_reviews(frozenset(), before="9999-01-01T00:00:00+00:00")) == []
 
     escalated = stored(db, orphan["id"])
     assert escalated["node_id"] and escalated["fork_id"] is None
+    assert escalated["state"] == "failed" and escalated["reason"] == "process_interrupted"
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 1
     assert {rid: stored(db, rid) for rid in before} == before
 
@@ -321,7 +322,7 @@ async def test_review_request_with_a_live_fork_is_not_escalated_at_startup(revie
     db, aid = review_env
     live = request(db, aid)
 
-    assert await reconcile_startup_reviews(frozenset({live["fork_id"]})) == []
+    assert await reconcile_startup_reviews(frozenset({live["fork_id"]}), before="9999-01-01T00:00:00+00:00") == []
     assert stored(db, live["id"])["node_id"] is None
 
 
@@ -368,7 +369,7 @@ async def test_review_fork_usage_records_each_call_once_unattributed(review_env,
 
     db, aid = review_env
     row = request(db, aid)
-    provider = replace(_request(None), checkpoint_id=row["fork_id"], thread_id="reviewer")
+    provider = replace(_request(None), fork_id=row["fork_id"], thread_id="reviewer")
     read_binding = []
     monkeypatch.setattr(public, "binding_at_call_start", lambda thread: read_binding.append(thread))
     measured = {
@@ -394,6 +395,7 @@ async def test_review_fork_usage_records_each_call_once_unattributed(review_env,
     assert all(usage["total_tokens"] == 150 and usage["turn_id"] is None for usage in rows)
     assert all(usage[field] is None for usage in rows for field in PLAN_FIELDS)
     assert read_binding == []
+    assert all(usage["source"] == "artifact_review" for usage in rows)
 
 
 @pytest.mark.asyncio
@@ -446,7 +448,7 @@ async def test_warm_cc_review_advertises_the_source_tool_list(review_env, frozen
     row = request(db, aid)
     source_tools = ({"type": "function", "function": {"name": "write_file", "parameters": {}}},)
     warm = SimpleNamespace(tool_definitions=source_tools if frozen else None)
-    provider = replace(_request(None), checkpoint_id=row["fork_id"], thread_id="reviewer", warm_source=warm)
+    provider = replace(_request(None), fork_id=row["fork_id"], thread_id="reviewer", warm_source=warm)
     with bind_bridge(provider, ARTIFACT_REVIEW_KIND, asyncio.Event()) as (_request_, handle):
         advertised = definitions(handle)
         expected = source_tools if frozen else dynamic_tool_definitions(handle.tool_registry)

@@ -82,7 +82,7 @@ def _admission(
             started_at="t1",
         ),
         ProviderCheckpointRequest(
-            checkpoint_id=checkpoint_id,
+            fork_id=checkpoint_id,
             thread_id=thread_id,
             target=target,
             instruction="Write one checkpoint.",

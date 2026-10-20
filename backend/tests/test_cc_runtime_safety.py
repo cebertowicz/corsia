@@ -211,7 +211,7 @@ async def test_detached_checkpoint_does_not_touch_live_or_durable_cc_state(
 
     monkeypatch.setattr(checkpoint_fork, "_spawn_process", spawn)
     request = ProviderCheckpointRequest(
-        checkpoint_id="checkpoint-isolation",
+        fork_id="checkpoint-isolation",
         thread_id="parent",
         target=cc_target("fable"),
         instruction="quoted checkpoint input",

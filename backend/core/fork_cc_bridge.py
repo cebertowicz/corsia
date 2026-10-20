@@ -16,11 +16,11 @@ from core.fork_tools import ForkToolBoundary, allowed_definitions
 def bind_bridge(request, kind, cancel_event):
     from subagents.harness_tool_bridge import build_tool_registry, write_cc_mcp_config
 
-    handle = running_fork(request.thread_id, request.checkpoint_id)
+    handle = running_fork(request.thread_id, request.fork_id)
     owns_handle = handle is None
     if owns_handle:
         handle = ForkHandle(asyncio.current_task(), cancel_event, request.thread_id)
-        handles[request.checkpoint_id] = handle
+        handles[request.fork_id] = handle
     config = None
     try:
         handle.kind, handle.request = kind, request
@@ -29,7 +29,7 @@ def bind_bridge(request, kind, cancel_event):
         config = write_cc_mcp_config(
             thread_id=request.thread_id,
             tool_token=handle.tool_token,
-            fork_id=request.checkpoint_id,
+            fork_id=request.fork_id,
         )
         configured = request.mcp_config is not None or request.tool_registry is not None
         yield replace(request, mcp_config=config) if configured else request, handle
@@ -38,8 +38,8 @@ def bind_bridge(request, kind, cancel_event):
         handle.tool_executor = None
         if config:
             Path(config).unlink(missing_ok=True)
-        if owns_handle and handles.get(request.checkpoint_id) is handle:
-            handles.pop(request.checkpoint_id, None)
+        if owns_handle and handles.get(request.fork_id) is handle:
+            handles.pop(request.fork_id, None)
 
 
 def authenticate(request, thread_id, token):
@@ -101,7 +101,7 @@ async def execute(handle, body):
 
         return await execute_tool(
             handle.tool_registry, thread_id=handle.thread_id,
-            checkpoint_id=handle.request.checkpoint_id, name=name, arguments=arguments,
+            checkpoint_id=handle.request.fork_id, name=name, arguments=arguments,
             fork_policy=ForkToolBoundary(
                 handle.kind, handle.request, handle.tool_registry, handle.cancel_event, None,
             ), harness="claude-code", model=handle.request.target.catalog_id,

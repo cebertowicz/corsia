@@ -164,7 +164,7 @@ def test_native_cold_loop_counts_like_its_admission():
     tools = [{"type": "function", "function": {"name": "noop"}}]
     counted = cold_input_tokens(messages, LOCAL) + cold_input_tokens(tools, LOCAL)
     request = ProviderCheckpointRequest(
-        checkpoint_id="checkpoint-1", thread_id="thread-1",
+        fork_id="checkpoint-1", thread_id="thread-1",
         target=replace(LOCAL, context_window=counted + 99),
         instruction="checkpoint", reasoning_effort=None, working_dir="/work",
         max_output_tokens=100,

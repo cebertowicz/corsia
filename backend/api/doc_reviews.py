@@ -12,7 +12,7 @@ from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
 from plans import public
 from tools.document_reviews import (
-    SESSION_REFUSAL, SESSION_REQUIRED, cancel_request, create_request,
+    SESSION_REFUSAL, SESSION_REQUIRED, cancel_request, create_request, refresh_request,
 )
 
 router = APIRouter(prefix="/api", tags=["doc-reviews"])
@@ -65,10 +65,11 @@ async def _create(body: ReviewCreate, actor: reviews.ReviewActor):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     await public.drive_threads(woken)
-    if result.get("fork_id") and result.get("node_id") is None:
+    if result["state"] == "forked":
         from core.artifact_review_runtime import start
 
         await start(result["id"])
+        result = await run_in_db(refresh_request, result["id"])
     return {"request": result}
 
 

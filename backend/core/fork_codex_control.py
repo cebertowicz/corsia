@@ -6,7 +6,11 @@ import asyncio
 
 
 class ForkItemLimitReached(RuntimeError):
-    """The fork exhausted its configured completed-item budget."""
+    """The fork exhausted its tool-call budget, or a tool identity was missing."""
+
+    def __init__(self, message: str, *, identity_missing: bool = False):
+        super().__init__(message)
+        self.identity_missing = identity_missing
 
 
 class CompletedItemLimit:
@@ -23,7 +27,12 @@ class CompletedItemLimit:
         params = frame.get("params") or {}
         if not session._is_active_provider_boundary(params.get("threadId"), params.get("turnId")):
             return
-        item_id = (params.get("item") or {}).get("id")
+        item = params.get("item") or {}
+        # Reasoning and agent messages consume no tools and must not starve
+        # an ordinary review's list/read/comment/submit journey.
+        if item.get("type") not in {"dynamicToolCall", "mcpToolCall"}:
+            return
+        item_id = item.get("id")
         if not isinstance(item_id, str) or not item_id:
             self.identity_missing = True
             session.revoke_dynamic_tool_admission()
@@ -38,9 +47,9 @@ class CompletedItemLimit:
 
     def failure(self):
         if self.identity_missing:
-            return ForkItemLimitReached("fork_completed_item_missing_identity")
+            return ForkItemLimitReached("fork_completed_item_missing_identity", identity_missing=True)
         return ForkItemLimitReached(
-            f"fork_step_limit_reached: {self.kind_name} completed {self.limit} Codex items"
+            f"fork_step_limit_reached: {self.kind_name} completed {self.limit} Codex tool calls"
         )
 
 
@@ -51,7 +60,7 @@ async def run_session(session, capture, item_limit, cancel_event):
         if cancel_event.is_set():
             raise asyncio.CancelledError
         if not await session.start():
-            raise ProviderCheckpointRejected("Codex checkpoint was not accepted")
+            raise ProviderCheckpointRejected(f"Codex {item_limit.kind_name} was not accepted")
         await capture.terminal
 
     operation = asyncio.create_task(run())

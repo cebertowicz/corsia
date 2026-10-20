@@ -383,7 +383,7 @@ def build_cold_checkpoint_admission(
         started_at=utc_now_iso(),
     )
     provider = ProviderCheckpointRequest(
-        checkpoint_id=checkpoint_id,
+        fork_id=checkpoint_id,
         thread_id=thread_id,
         target=writer_target,
         instruction=instruction,

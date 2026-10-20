@@ -120,7 +120,7 @@ async def _start_checkpoint(monkeypatch, target, tmp_path, identity, *, owned=Tr
         originating_turn_id=identity.turn_id if owned else None,
         first_included_seq=2, started_at="t2",
     ), ProviderCheckpointRequest(
-        checkpoint_id="new-checkpoint", thread_id="held-thread", target=target,
+        fork_id="new-checkpoint", thread_id="held-thread", target=target,
         instruction="checkpoint", reasoning_effort=None, working_dir=str(tmp_path),
     ))
     return release, waiting, await_original

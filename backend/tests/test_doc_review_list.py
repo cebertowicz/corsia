@@ -264,14 +264,34 @@ def test_ended_review_remains_named_without_cancel_or_requested_picker_state(cli
     assert shown["outcome"] == "ended_without_comments"
     assert shown["reviewer_name"] == "Reviewer" and shown["requester_name"] == "Requester"
     assert shown["may_cancel"] is False
-    assert "state" not in shown and "settled_batch_id" not in shown
+    assert shown["state"] == "handed_back" and shown["reason"] == "limit"
+    assert "settled_batch_id" not in shown
     choices = {choice["id"]: choice for choice in body["reviewers"]}
     assert choices["reviewer"]["requested"] is False
     repeated = client.post("/api/doc-reviews", json=payload(aid, thread_id="requester", client_id="after-end"))
     assert repeated.status_code == 200
     refreshed = client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"]
-    assert [(r["id"], r["outcome"]) for r in refreshed] == [(repeated.json()["request"]["id"], "open")]
+    # This fixture has no runnable review source: the new request's preparation
+    # fails visibly and preserves the work in a live reviewer task.
+    assert [(r["id"], r["outcome"]) for r in refreshed] == [(repeated.json()["request"]["id"], "failed")]
+    assert refreshed[0]["reason"] and refreshed[0]["node_id"]
+    assert repeated.json()["request"]["outcome"] == "failed"
     assert refreshed[0]["id"] != row["id"]
+
+
+def test_clean_fork_without_comments_remains_named_in_http_list(client, review_env):
+    from doceditor import review_requests as reviews
+    from infra.database import write_transaction
+
+    db, aid = review_env
+    row = request(db, aid)
+    with write_transaction(db, scope="test_empty_review"):
+        reviews.submit_fork_feedback(db, row["id"], "reviewer", aid)
+    body = client.get(f"/api/artifacts/{aid}/reviews", params={"thread_id": "requester"}).json()
+    shown = body["reviews"][0]
+    assert (shown["id"], shown["outcome"], shown["may_cancel"]) == (row["id"], "ended_without_comments", False)
+    assert shown["state"] == "submitted"
+    assert next(choice for choice in body["reviewers"] if choice["id"] == "reviewer")["requested"] is False
 
 
 def test_later_comments_remove_the_named_ended_row_from_the_http_list(client, review_env):

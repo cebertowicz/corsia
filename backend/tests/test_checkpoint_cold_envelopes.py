@@ -204,7 +204,7 @@ def test_cc_cold_env_enforces_output_cap_without_changing_warm_env(
         "subagents.cc_env.apply_claude_config_dir", lambda _env, _root: None,
     )
     request = ProviderCheckpointRequest(
-        checkpoint_id="checkpoint-1",
+        fork_id="checkpoint-1",
         thread_id="thread-1",
         target=_target("claude-code"),
         instruction="checkpoint",
@@ -305,7 +305,7 @@ async def test_codex_cold_adapter_uses_the_surface_admission_counted(
         "subagents.codex_app_server.CodexAppServerSession", Session,
     )
     request = ProviderCheckpointRequest(
-        checkpoint_id="checkpoint-1",
+        fork_id="checkpoint-1",
         thread_id="thread-1",
         target=_target("codex"),
         instruction="checkpoint",
@@ -402,7 +402,7 @@ async def test_codex_checkpoint_keeps_body_after_unrelated_terminal_failure(
         "subagents.codex_app_server.CodexAppServerSession", Session,
     )
     request = ProviderCheckpointRequest(
-        checkpoint_id="checkpoint-1",
+        fork_id="checkpoint-1",
         thread_id="thread-1",
         target=_target("codex"),
         instruction="checkpoint",
@@ -449,7 +449,7 @@ async def test_codex_context_limit_retains_partial_checkpoint(
         "subagents.codex_app_server.CodexAppServerSession", Session,
     )
     request = ProviderCheckpointRequest(
-        checkpoint_id="checkpoint-1",
+        fork_id="checkpoint-1",
         thread_id="thread-1",
         target=_target("codex"),
         instruction="checkpoint",

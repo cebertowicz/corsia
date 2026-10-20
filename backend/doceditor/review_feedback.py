@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from doceditor import feedback_batches
+from doceditor.review_lifecycle import transition
 from infra.passive_changes import append_thread_context_note
 
 
@@ -43,8 +44,12 @@ def submit_fork_feedback(db, request_id: str, reviewer_thread_id: str,
     request = db.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone()
     if request is None or request["reviewer_thread_id"] != reviewer_thread_id:
         raise PermissionError("review fork no longer owns this request")
-    if request["artifact_id"] != artifact_id or request["cancelled_at"]:
+    if request["artifact_id"] != artifact_id or request["state"] == "withdrawn":
         raise ValueError("review request is no longer open")
+    if request["state"] == "submitted":
+        return False, [], []
+    if request["state"] != "forked":
+        raise ValueError("review fork no longer owns this request")
     rows = db.execute(
         """SELECT id,state FROM doc_feedback_batches WHERE review_request_id=?
            AND author_kind='agent' AND author_id=? AND artifact_id=? ORDER BY opened_at,id""",
@@ -76,16 +81,12 @@ def submit_fork_feedback(db, request_id: str, reviewer_thread_id: str,
         ).fetchall()
         summary = "; ".join(str(row["body"])[:200] for row in comments)
     else:
-        # A clean review ends clean: with no fork and no node the request reads
-        # ended_without_comments, and nothing escalates it.
-        db.execute(
-            "UPDATE doc_review_requests SET fork_id=NULL WHERE id=? AND node_id IS NULL", (request_id,),
-        )
+        transition(db, request_id, "submitted")
         summary = "no comments were left"
     append_thread_context_note(
         db, thread_id=reviewer_thread_id,
         summary=f"Document review submitted for {artifact_id}: {summary}",
         details={"kind": "artifact_review_receipt", "request_id": request_id,
-                 "artifact_id": artifact_id, "requirements_revision": request["requirements_revision"]},
+                 "artifact_id": artifact_id},
     )
     return pending, woken, undelivered

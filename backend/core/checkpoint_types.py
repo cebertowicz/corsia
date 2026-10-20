@@ -10,7 +10,7 @@ from typing import Any, Literal, TypeAlias
 from history.types import PortableHistoryProjection
 from llm.resolution import ExecutionTarget
 
-CheckpointTrigger = Literal["manual", "pressure", "model_switch", "idle", "agent"]
+CheckpointTrigger = Literal["manual", "pressure", "model_switch", "idle", "agent", "artifact_review"]
 ColdInputCallback: TypeAlias = Callable[[int | None], Awaitable[None]]
 # (call key, model the vendor reported for the call or None, measured usage)
 CheckpointUsageCallback: TypeAlias = Callable[[str, str | None, dict[str, Any]], Awaitable[None]]
@@ -266,9 +266,9 @@ class ColdCheckpointSource:
 
 @dataclass(frozen=True, slots=True)
 class ProviderCheckpointRequest:
-    """One frozen checkpoint source owned by a disposable provider invocation."""
+    """Frozen input for either checkpoint or artifact-review provider forks."""
 
-    checkpoint_id: str
+    fork_id: str
     thread_id: str
     target: ExecutionTarget
     instruction: str
@@ -296,6 +296,11 @@ class ProviderCheckpointRequest:
     # window cannot hold the block still fits this instruction, and the review
     # is never a reason to fail a checkpoint.
     instruction_without_review: str | None = None
+
+    @property
+    def checkpoint_id(self) -> str:
+        """Checkpoint-specific consumers retain their terminology at that seam."""
+        return self.fork_id
 
 
 @dataclass(frozen=True, slots=True)

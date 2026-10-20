@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -12,19 +11,13 @@ from typing import Any
 from uuid import uuid4
 
 from history.types import HistoryBoundary
-from infra.provider_usage import TokenUsage, checkpoint_receipt, from_anthropic
 from llm.resolution import ExecutionTarget
 from core import checkpoint_cc_commands
 from subagents.cc_invocation import ClaudeInvocation
 from subagents.cc_sessions import resolve_claude_dir
-from subagents.provider_context_limits import is_provider_context_limit
-
-
 from core.fork_runtime import ForkKind
 from core.checkpoint_types import (
-    CHECKPOINT_CONTEXT_TRUNCATED,
     ColdInputCallback,
-    ProviderCheckpointRejected,
     ProviderCheckpointRequest,
     ProviderCheckpointResult,
 )
@@ -169,8 +162,7 @@ def _checkpoint_env(source: CCWarmSource | None, request: ProviderCheckpointRequ
 
     env = clean_claude_env()
     env["CORSIA_THREAD_ID"] = request.thread_id
-    env["CORSIA_CHECKPOINT_ID"] = request.checkpoint_id
-    env["CORSIA_FORK_ID"] = request.checkpoint_id
+    env["CORSIA_FORK_ID"] = request.fork_id
     from core.fork_runtime import running_fork
 
     handle = running_fork(request.thread_id, request.checkpoint_id)
@@ -215,104 +207,11 @@ def _snapshot(source: CCWarmSource) -> tuple[str, Path]:
 
 
 
-def _assistant_text(record: dict[str, Any]) -> str:
-    message = record.get("message")
-    content = message.get("content") if isinstance(message, dict) else None
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return ""
-    return "\n".join(
-        block["text"]
-        for block in content
-        if isinstance(block, dict)
-        and isinstance(block.get("text"), str)
-        and block["text"].strip()
-    )
-
-
-def _result_body(record: dict[str, Any], *, has_body: bool) -> str:
-    if record.get("type") == "assistant":
-        return _assistant_text(record)
-    if record.get("type") != "result":
-        return ""
-    terminal = record.get("result")
-    if record.get("is_error") is True and is_provider_context_limit(record):
-        return ""  # Provider error text is not checkpoint narrative.
-    if not has_body and isinstance(terminal, str):
-        return terminal
-    return ""
-
-
-def _result(stdout: bytes, *, truncated: bool = False) -> ProviderCheckpointResult:
-    bodies: list[str] = []
-    usage, diagnostic = None, None
-    calls: dict[str, TokenUsage] = {}
-    for line in stdout.splitlines():
-        try:
-            record = json.loads(line)
-        except (TypeError, json.JSONDecodeError):
-            continue
-        if not isinstance(record, dict):
-            continue
-        part = _result_body(record, has_body=bool(bodies))
-        if part.strip():
-            bodies.append(part)
-        if record.get("type") == "assistant":
-            message = record.get("message") or {}
-            measured = from_anthropic(message.get("usage")) if isinstance(message, dict) else None
-            if measured is not None:
-                # Repeated completed frames update the same provider call.
-                calls[str(message.get("id") or f"unidentified-{len(calls)}")] = measured
-        if record.get("type") == "result":
-            usage = (
-                record.get("usage") if isinstance(record.get("usage"), dict) else usage
-            )
-            if record.get("is_error") is True:
-                terminal = record.get("result")
-                diagnostic = str(terminal) if terminal is not None else "result error"
-                truncated = truncated or is_provider_context_limit(record)
-    if not (body := "\n".join(bodies)).strip():  # Fail named, never as an empty success.
-        detail = f"{CHECKPOINT_CONTEXT_TRUNCATED}: {diagnostic or 'no narrative'}" if truncated else None
-        raise ProviderCheckpointRejected(detail or "Claude Code checkpoint produced no body")
-    measured = from_anthropic(usage)
-    if measured is None and calls:
-        measured = sum(calls.values(), TokenUsage())
-    return ProviderCheckpointResult(
-        body, checkpoint_receipt(measured),
-        CHECKPOINT_CONTEXT_TRUNCATED if truncated else diagnostic,
-    )
-
-
-def _process_diagnostic(stderr: bytes | str, returncode: int | None) -> str | None:
-    detail = (
-        stderr.decode("utf-8", "replace").strip()
-        if isinstance(stderr, bytes)
-        else str(stderr or "").strip()
-    )
-    if detail or returncode in {None, 0}:
-        return detail or None
-    return f"Claude Code checkpoint process exited with code {returncode}"
-
-
-def _result_after_process(
-    stdout: bytes,
-    diagnostic: str | None,
-    returncode: int | None,
-) -> ProviderCheckpointResult:
-    truncated = bool(diagnostic and returncode not in {None, 0}
-                     and is_provider_context_limit(diagnostic))
-    try:
-        result = _result(stdout, truncated=truncated)
-    except ProviderCheckpointRejected as error:
-        if diagnostic and str(error) == "Claude Code checkpoint produced no body":
-            raise ProviderCheckpointRejected(diagnostic) from error
-        raise
-    if (result.diagnostic == CHECKPOINT_CONTEXT_TRUNCATED
-            or not diagnostic or diagnostic == result.diagnostic):
-        return result
-    combined = f"{result.diagnostic}; {diagnostic}" if result.diagnostic else diagnostic
-    return ProviderCheckpointResult(result.raw_body, result.usage, combined)
+from core.checkpoint_cc_result import (
+    result as _result,
+    result_after_process as _result_after_process,
+    process_diagnostic as _process_diagnostic,
+)
 
 
 async def invoke_checkpoint(request, cancel_event, *, kind: ForkKind,
@@ -340,16 +239,15 @@ async def _invoke_checkpoint(
     on_cold_input: ColdInputCallback | None = None,
     on_tool_executor=None,
 ) -> ProviderCheckpointResult:
-    """Run one CC process; any captured body is authoritative."""
+    """Run either disposable fork kind through one Claude Code process."""
     if request.target.harness != "claude-code":
         raise TypeError("Claude adapter requires a Claude Code target")
     from core.checkpoint_account import admit_checkpoint
 
     request = admit_checkpoint(request)
-    request = replace(request, instruction=kind.instruction(request))
     source = request.warm_source
     if source is not None and not isinstance(source, CCWarmSource):
-        raise TypeError("Claude checkpoint received another harness's warm source")
+        raise TypeError(f"Claude {kind.name} received another harness's warm source")
     from core.checkpoint_account import require_checkpoint_write
     from connections.account_operation import require_same_operation_home
 
@@ -390,9 +288,9 @@ async def _invoke_checkpoint(
             spawned_at=spawned_at,
         )
         if output.truncated:
-            return _result(output.stdout, truncated=True)
-        diagnostic = output.failure or _process_diagnostic(output.stderr, process.returncode)
-        return _result_after_process(output.stdout, diagnostic, process.returncode)
+            return _result(output.stdout, truncated=True, kind_name=kind.name)
+        diagnostic = output.failure or _process_diagnostic(output.stderr, process.returncode, kind_name=kind.name)
+        return _result_after_process(output.stdout, diagnostic, process.returncode, kind_name=kind.name)
     finally:
         if snapshot is not None:
             snapshot.unlink(missing_ok=True)

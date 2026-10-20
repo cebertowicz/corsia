@@ -236,8 +236,7 @@ def main() -> None:
     token = os.environ.get("CORSIA_CC_TOOL_TOKEN")
     if not endpoint or not token:
         raise SystemExit("CORSIA MCP loopback URL/token are required")
-    checkpoint_id = os.environ.get("CORSIA_CHECKPOINT_ID") or None
-    asyncio.run(_run_stdio_server(endpoint, token, checkpoint_id))
+    asyncio.run(_run_stdio_server(endpoint, token))
 
 
 if __name__ == "__main__":

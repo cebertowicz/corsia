@@ -44,7 +44,7 @@ def _provider() -> ProviderCheckpointRequest:
         supports_reasoning=True, preserve_thinking_default=True,
     )
     return ProviderCheckpointRequest(
-        checkpoint_id="agent-cp", thread_id=THREAD, target=target,
+        fork_id="agent-cp", thread_id=THREAD, target=target,
         instruction="checkpoint", reasoning_effort=None, working_dir="/tmp",
     )
 

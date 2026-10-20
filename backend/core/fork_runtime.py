@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Any
 
 
-ForkInstruction = Callable[[Any], str]
 ForkHandler = Callable[..., Awaitable[Any]]
 ForkToolExecutor = Callable[..., Awaitable[str]]
 ForkStepLimit = int | None | Callable[[Any], int | None]
@@ -17,6 +16,10 @@ FORK_HARNESSES = frozenset({"native", "claude-code", "codex"})
 
 class ForkKindDefinitionError(ValueError):
     """A kind omitted a policy every harness must enforce."""
+
+
+class ForkStepLimitReached(RuntimeError):
+    """The fork exhausted the configured job budget."""
 
 
 class ForkStepLimitError(ValueError):
@@ -28,7 +31,6 @@ class ForkKind:
     """The policy that varies between otherwise identical disposable forks."""
 
     name: str
-    instruction: ForkInstruction
     tool_allowlist: frozenset[str]
     tool_refusal: str
     #: Tail of a tool result that no longer fits, formatted with ``excess`` tokens.
@@ -62,6 +64,11 @@ class ForkKind:
                 f"fork kind {self.name!r} has invalid {harness} step limit: {result!r}"
             )
         return result
+
+
+def native_iteration_limit(agent: Any) -> int:
+    """Checkpoint Native calls retain the ordinary agent iteration bound."""
+    return agent.max_iterations
 
 
 @dataclass(slots=True)

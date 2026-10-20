@@ -223,7 +223,7 @@ def _checkpoint_request(window: int, instruction: str = "Summarize."):
     from core.checkpoint_types import CHECKPOINT_OUTPUT_TOKENS, ProviderCheckpointRequest
 
     return ProviderCheckpointRequest(
-        checkpoint_id="cp-1", thread_id="thread-1",
+        fork_id="cp-1", thread_id="thread-1",
         target=SimpleNamespace(context_window=window),
         instruction=instruction, reasoning_effort=None, working_dir=".",
         max_output_tokens=CHECKPOINT_OUTPUT_TOKENS,

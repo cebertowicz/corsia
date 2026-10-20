@@ -22,7 +22,8 @@ def checkpoint_usage(volume: object) -> dict[str, int | None] | None:
 class CodexCheckpointCapture:
     """The output of one disposable process, including unfinished text deltas."""
 
-    def __init__(self, *, on_usage=None) -> None:
+    def __init__(self, *, on_usage=None, kind_name: str = "checkpoint") -> None:
+        self.kind_name = kind_name
         self.terminal: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self.bodies: list[str] = []
         self.partial = ""
@@ -57,7 +58,7 @@ class CodexCheckpointCapture:
 
     def truncate(self) -> None:
         """Finish capture through the existing degraded-completion outcome."""
-        self._failure("fork input outgrew its checkpoint window", truncated=True)
+        self._failure(f"fork input outgrew its {self.kind_name} window", truncated=True)
 
     async def on_event(self, event: dict[str, Any]) -> None:
         """Replace streamed copies at item completion; keep earlier fragments."""
@@ -78,7 +79,7 @@ class CodexCheckpointCapture:
                 self.terminal.set_result(None)
         elif kind == "turn_failed":
             self._failure(
-                str(event.get("message") or event.get("cause") or "Codex checkpoint failed"),
+                str(event.get("message") or event.get("cause") or f"Codex {self.kind_name} failed"),
                 truncated=is_provider_context_limit(event),
             )
 
@@ -91,9 +92,9 @@ class CodexCheckpointCapture:
                 self.terminal.set_exception(stderr)
             return
         detail = stderr if isinstance(stderr, str) else str(stderr)
-        failure = detail.strip() or "Codex checkpoint process exited"
+        failure = detail.strip() or f"Codex {self.kind_name} process exited"
         if code not in {None, 0} and not detail.strip():
-            failure = f"Codex checkpoint process exited with code {code}"
+            failure = f"Codex {self.kind_name} process exited with code {code}"
         self._failure(failure, truncated=is_provider_context_limit(failure))
 
     def result(self) -> ProviderCheckpointResult:
@@ -103,6 +104,6 @@ class CodexCheckpointCapture:
         else:
             body = self.partial or (self.bodies[-1] if self.bodies else "")
             if not body.strip():
-                raise ProviderCheckpointRejected("Codex checkpoint produced no body")
+                raise ProviderCheckpointRejected(f"Codex {self.kind_name} produced no body")
         usage = {"calls": list(self.calls.values())} if self.calls else self.usage
         return ProviderCheckpointResult(body, usage, self.diagnostic)

@@ -245,7 +245,7 @@ def _checkpoint_session(
         dynamic_tools=definitions,
         tool_registry=registry,
         corsia_thread_id=request.thread_id,
-        checkpoint_id=request.checkpoint_id,
+        checkpoint_id=request.fork_id,
         on_raw_message=on_raw_message,
         # Managed tool receipts read the rollout, and Codex gives an ephemeral
         # thread none. The temporary isolated home keeps the writer disposable.
@@ -293,7 +293,7 @@ async def _run_app_server_checkpoint(
 
     if source is None:
         if cold_input is None:
-            raise ValueError("cold checkpoint requires its fitted input")
+            raise ValueError(f"cold {kind.name} requires its fitted input")
         initial_tokens = cold_input.input_tokens
     else:
         initial_tokens = await asyncio.to_thread(
@@ -305,7 +305,7 @@ async def _run_app_server_checkpoint(
         )
         initial_tokens += measure_request(request.instruction, target=request.target).tokens
     context = CodexCheckpointContext(request.target, initial_tokens)
-    capture = CodexCheckpointCapture(on_usage=request.on_usage)
+    capture = CodexCheckpointCapture(on_usage=request.on_usage, kind_name=kind.name)
 
     async def tool_boundary(reply, usage=None):
         if usage is not None:
@@ -321,7 +321,7 @@ async def _run_app_server_checkpoint(
     if not (context.fits and warm_room):
         # Only a warm fork can be corrected to cold; a cold overflow is terminal.
         refusal = WarmForkUnusable if source is not None else ProviderCheckpointRejected
-        raise refusal("Codex checkpoint initial input exceeds selected context window")
+        raise refusal(f"Codex {kind.name} initial input exceeds selected context window")
 
     from core.fork_codex_control import CompletedItemLimit
 
@@ -360,14 +360,13 @@ async def invoke_checkpoint(
     kind: ForkKind,
     on_cold_input: ColdInputCallback | None = None,
 ) -> ProviderCheckpointResult:
-    """Run one Codex process; any captured body is authoritative."""
+    """Run either disposable fork kind through one Codex process."""
     if request.target.harness != "codex":
         raise TypeError("Codex adapter requires a Codex target")
     request = admit_checkpoint(request)
-    request = replace(request, instruction=kind.instruction(request))
     source = request.warm_source
     if source is not None and not isinstance(source, CodexWarmSource):
-        raise TypeError("Codex checkpoint received another harness's warm source")
+        raise TypeError(f"Codex {kind.name} received another harness's warm source")
     if cancel_event.is_set():
         raise asyncio.CancelledError
     cold_input = None

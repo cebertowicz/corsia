@@ -744,7 +744,7 @@ async def test_checkpoint_claude_spawn_uses_writer_home_and_rechecks_before_stdi
         return SimpleNamespace(stdout=b'synthetic', stderr=b'', truncated=False, failure=None)
     monkeypatch.setattr(checkpoint_cc_fork, '_spawn_process', spawn)
     monkeypatch.setattr(checkpoint_cc_io, 'communicate_checkpoint', communicate)
-    monkeypatch.setattr(checkpoint_cc_fork, '_result_after_process', lambda *a: ProviderCheckpointResult('body', None))
+    monkeypatch.setattr(checkpoint_cc_fork, '_result_after_process', lambda *a, **kw: ProviderCheckpointResult('body', None))
     request = ProviderCheckpointRequest('checkpoint', 'destination', _target('claude-code'), 'instruction', None,
         str(tmp_path), binary='/synthetic/claude', vendor_account_id=row['id'], vendor_account_bound=True)
     result = await checkpoint_cc_fork.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)

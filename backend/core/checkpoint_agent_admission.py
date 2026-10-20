@@ -242,7 +242,7 @@ async def prepare_external_checkpoint(
         started_at=utc_now_iso(),
     )
     provider = ProviderCheckpointRequest(
-        checkpoint_id=checkpoint_id,
+        fork_id=checkpoint_id,
         thread_id=thread_id,
         target=context.target,
         instruction=build_checkpoint_system_prompt(),

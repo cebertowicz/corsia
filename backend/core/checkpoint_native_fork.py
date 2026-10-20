@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import json
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any
 
 from history.types import HistoryBoundary
@@ -18,7 +18,7 @@ from core.checkpoint_native_tools import (
     input_room,
     run_tool_calls as _run_tool_calls,
 )
-from core.fork_runtime import ForkKind, ForkStepLimitError
+from core.fork_runtime import ForkKind, ForkStepLimitError, ForkStepLimitReached
 from core.checkpoint_types import (
     CHECKPOINT_CONTEXT_TRUNCATED,
     CHECKPOINT_TOOL_ROUND_TRIP_TOKENS,
@@ -143,7 +143,7 @@ async def _messages_and_tools(
     source = request.warm_source
     if source is not None:
         if not isinstance(source, NativeWarmSource):
-            raise TypeError("Native checkpoint received another harness's warm source")
+            raise TypeError(f"Native {kind.name} received another harness's warm source")
         messages = [dict(message) for message in source.prefix_messages]
         messages.append({"role": "user", "content": request.instruction})
         return messages, [dict(tool) for tool in source.tool_definitions], None
@@ -228,13 +228,13 @@ async def _truncated_result(
     )
 
 
-def _initial_input_refusal(request: ProviderCheckpointRequest) -> ProviderCheckpointRejected:
+def _initial_input_refusal(request: ProviderCheckpointRequest, kind: ForkKind) -> ProviderCheckpointRejected:
     """Refuse an initial overflow; only a warm fork can be corrected to cold.
 
     A fitted cold input that still does not fit is terminal.
     """
     refusal = WarmForkUnusable if request.warm_source is not None else ProviderCheckpointRejected
-    return refusal("Native checkpoint initial input exceeds selected context window")
+    return refusal(f"Native {kind.name} initial input exceeds selected context window")
 
 
 async def invoke_checkpoint(
@@ -244,11 +244,9 @@ async def invoke_checkpoint(
     kind: ForkKind,
     on_cold_input: ColdInputCallback | None = None,
 ) -> ProviderCheckpointResult:
-    """Run one Native tool loop; captured text wins over terminal metadata."""
+    """Run a disposable fork of either kind through the Native tool loop."""
     if request.target.harness != "native":
         raise TypeError("Native adapter requires a Native target")
-    # Warm prefixes stay byte-stable; the kind instruction is appended after it.
-    request = replace(request, instruction=kind.instruction(request))
     agent = await _get_agent()
     messages, tools, first_included_seq = await _messages_and_tools(request, agent, kind)
     if request.warm_source is None and on_cold_input is not None:
@@ -274,7 +272,7 @@ async def invoke_checkpoint(
             first_reserve = CHECKPOINT_TOOL_ROUND_TRIP_TOKENS if _iteration == 0 else 0
             if not await _input_fits(request, messages, tools, first_reserve):
                 if _iteration == 0:
-                    raise _initial_input_refusal(request)
+                    raise _initial_input_refusal(request, kind)
                 return await _truncated_result(
                     partial_bodies, usage_calls, "i_loop_input_over_bound", _iteration,
                     request, messages, tools, response,
@@ -291,7 +289,7 @@ async def invoke_checkpoint(
                         _iteration, request, messages, tools, response,
                     )
                 raise ProviderCheckpointRejected(
-                    response.content or "Native checkpoint provider call failed"
+                    response.content or f"Native {kind.name} provider call failed"
                 )
             if response.has_tool_calls:
                 if isinstance(response.content, str) and response.content.strip():
@@ -314,6 +312,8 @@ async def invoke_checkpoint(
             if isinstance(body, str) and body.strip():
                 return ProviderCheckpointResult(body, {"calls": usage_calls})
             break
+        else:
+            raise ForkStepLimitReached(f"{kind.name} reached its Native step limit")
     finally:
         state._current_thread_id.reset(thread_token)
-    raise ProviderCheckpointRejected("Native checkpoint produced no body")
+    raise ProviderCheckpointRejected(f"Native {kind.name} produced no body")

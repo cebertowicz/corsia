@@ -13,12 +13,9 @@ REVIEW_TOOL_ALLOWLIST = frozenset({
 })
 
 
-def _review_instruction(request: Any) -> str:
-    return request.instruction
-
-
-def _native_step_limit(agent: Any) -> int:
-    return agent.max_iterations
+# One ordinary review: list, read, several comment turns, submit, and a
+# terminal reply. Twelve steps leaves room for a second read/comment pass.
+REVIEW_STEP_BUDGET = 12
 
 
 async def execute_review_tool(
@@ -40,7 +37,6 @@ async def execute_review_tool(
 
 ARTIFACT_REVIEW_KIND = ForkKind(
     name="artifact_review",
-    instruction=_review_instruction,
     tool_allowlist=REVIEW_TOOL_ALLOWLIST,
     tool_refusal="Artifact reviews may only read the document, create review comments, and submit them.",
     over_room_text=(
@@ -48,7 +44,7 @@ ARTIFACT_REVIEW_KIND = ForkKind(
         "leave your comments and call doc_feedback_send now."
     ),
     tool_executor=execute_review_tool,
-    step_limits={"native": _native_step_limit, "claude-code": 3, "codex": 3},
+    step_limits={harness: REVIEW_STEP_BUDGET for harness in ("native", "claude-code", "codex")},
     end_handler=review_end_handler,
     limit_or_failure_handler=review_limit_or_failure_handler,
 )

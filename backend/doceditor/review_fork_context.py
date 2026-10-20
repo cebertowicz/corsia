@@ -36,10 +36,10 @@ def authorize_tool(request, name: str, arguments: dict) -> str:
         row = db.execute(
             "SELECT r.*,a.path FROM doc_review_requests r "
             "JOIN artifact_identities a ON a.id=r.artifact_id WHERE r.fork_id=?",
-            (request.checkpoint_id,),
+            (request.fork_id,),
         ).fetchone()
         if (row is None or row["reviewer_thread_id"] != request.thread_id
-                or row["cancelled_at"] or row["answered_batch_id"]):
+                or row["state"] != "forked"):
             raise PermissionError("review fork no longer owns this request")
         if parent_id := arguments.get("parent_id"):
             parent = db.execute("SELECT artifact_id FROM doc_comments WHERE id=?", (parent_id,)).fetchone()

@@ -66,7 +66,7 @@ def _provider(thread_id: str, checkpoint_id: str) -> ProviderCheckpointRequest:
         preserve_thinking_default=True,
     )
     return ProviderCheckpointRequest(
-        checkpoint_id=checkpoint_id,
+        fork_id=checkpoint_id,
         thread_id=thread_id,
         target=target,
         instruction="checkpoint",

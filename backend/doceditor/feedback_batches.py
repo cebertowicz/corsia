@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from doceditor.feedback_batch_identity import open_batch
+from doceditor.feedback_turn_closing import close_for_turn_end
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -289,39 +290,13 @@ def close_for_document(
            AND author_kind=? AND author_id=? AND artifact_id=?
            AND (review_request_id IS NULL OR EXISTS (
                SELECT 1 FROM doc_review_requests r
-               WHERE r.id=review_request_id AND r.node_id IS NOT NULL
+               WHERE r.id=review_request_id AND r.state IN ('handed_back','failed')
            )) ORDER BY opened_at,id""",
         (author_kind, author_id, artifact_id),
     ).fetchall()
     woken: list[str] = []
     for row in rows:
         _closed, selected = close_batch(db, row["id"], reason)
-        woken.extend(selected)
-    return woken
-
-
-def close_for_turn_end(db, thread_id: str) -> list[str]:
-    """Close an agent thread's open batches in the terminal write transaction.
-
-    An escalated review's staged batch closes only from a Turn that started at
-    or after its escalation (its ``closes_at``), so a Turn already running when
-    the fork gave up cannot deliver it before the reviewer has continued.
-    """
-    rows = db.execute(
-        """SELECT id FROM doc_feedback_batches
-           WHERE state='open' AND author_kind='agent' AND author_id=?
-           AND (review_request_id IS NULL OR (EXISTS (
-               SELECT 1 FROM doc_review_requests r
-               WHERE r.id=review_request_id AND r.node_id IS NOT NULL
-           ) AND julianday(closes_at)<=(
-               SELECT julianday(started_at) FROM active_turns WHERE thread_id=?
-               ORDER BY turn_order DESC LIMIT 1
-           ))) ORDER BY opened_at,id""",
-        (thread_id, thread_id),
-    ).fetchall()
-    woken: list[str] = []
-    for row in rows:
-        _closed, selected = close_batch(db, row["id"], "turn_end")
         woken.extend(selected)
     return woken
 
@@ -336,7 +311,10 @@ def close_due(now: str, *, db=None) -> list[str]:
     with write_transaction(db, scope="close_due_doc_feedback") as connection:
         rows = connection.execute(
             """SELECT id,artifact_id,author_kind,closed_reason FROM doc_feedback_batches
-               WHERE state='open' AND closes_at<=? AND review_request_id IS NULL
+               WHERE state='open' AND closes_at<=? AND (review_request_id IS NULL OR EXISTS (
+                   SELECT 1 FROM doc_review_requests r WHERE r.id=review_request_id
+                   AND r.state='submitted'
+               ))
                ORDER BY closes_at,id""",
             (now,),
         ).fetchall()

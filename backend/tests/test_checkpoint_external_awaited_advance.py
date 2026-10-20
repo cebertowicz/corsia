@@ -89,7 +89,7 @@ def _earlier_admission(
     return CheckpointAdmission(
         request,
         ProviderCheckpointRequest(
-            checkpoint_id=checkpoint_id,
+            fork_id=checkpoint_id,
             thread_id=thread_id,
             target=target,
             instruction="Write one checkpoint.",

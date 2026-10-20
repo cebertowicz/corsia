@@ -31,7 +31,7 @@ WARM_SOURCE = object()
 
 def _warm_request(harness: str, *, cold_builder=None) -> ProviderCheckpointRequest:
     return ProviderCheckpointRequest(
-        checkpoint_id="checkpoint-1", thread_id="thread-1",
+        fork_id="checkpoint-1", thread_id="thread-1",
         target=_target(harness), instruction="checkpoint",
         reasoning_effort=None, working_dir="/work",
         warm_source=WARM_SOURCE, same_model_cold=cold_builder,
@@ -43,7 +43,7 @@ def _cold_admission(**overrides):
     from native_checkpoint_fixtures import cold_source
 
     fields = {
-        "checkpoint_id": "checkpoint-1", "thread_id": "thread-1",
+        "fork_id": "checkpoint-1", "thread_id": "thread-1",
         "target": _target("native"), "instruction": "checkpoint",
         "reasoning_effort": None, "working_dir": "/work",
         "cold_source": cold_source(),
@@ -188,7 +188,7 @@ async def test_correction_refuses_a_builder_that_leaves_the_row(monkeypatch):
         await fallback.invoke_with_cold_correction(
             _warm_request(
                 "native",
-                cold_builder=lambda: _cold_admission(checkpoint_id="other"),
+                cold_builder=lambda: _cold_admission(fork_id="other"),
             ),
             asyncio.Event(), invoke,
         )

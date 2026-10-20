@@ -1,10 +1,4 @@
-"""Review-request records; Plans remains the only work tracker.
-
-A row stores each fact once: who asked whom, the review task (``node_id``),
-when the request was cancelled, and which delivered batch answered it.
-Whether the review is still open is never stored; Plans owns it through the
-review task's lifecycle (``plans.public.review_is_open``).
-"""
+"""Request-owned review lifecycle; Plans owns handed-back work tasks."""
 
 DOC_REVIEW_REVIEWER_INDEX_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_doc_review_requests_reviewer "
@@ -21,8 +15,10 @@ DOC_REVIEW_SCHEMA_SQL = """
         note TEXT CHECK (note IS NULL OR length(note)<=500),
         client_ids TEXT NOT NULL CHECK (json_valid(client_ids) AND json_type(client_ids)='array'),
         fork_id TEXT,
-        requesting_node_id TEXT REFERENCES plan_nodes(id),
-        requirements_revision INTEGER,
+        state TEXT NOT NULL DEFAULT 'handed_back'
+            CHECK (state IN ('forked','submitted','withdrawn','handed_back','failed')),
+        state_changed_at TEXT,
+        reason TEXT,
         node_id TEXT REFERENCES plan_nodes(id),
         cancelled_at TEXT,
         answered_batch_id TEXT REFERENCES doc_feedback_batches(id),

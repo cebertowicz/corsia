@@ -30,17 +30,15 @@ def journal_reviewed_edit(
     """
     if not new_sha256 or new_sha256 == previous_sha256:
         return False
-    from plans import public as plans_public
+    from doceditor.review_lifecycle import is_open
 
     artifact_id = str(artifact["id"])
     unsettled = db.execute(
-        "SELECT request.node_id FROM doc_review_requests AS request "
-        "LEFT JOIN plan_nodes AS node ON node.id=request.node_id WHERE request.artifact_id=? "
-        "AND request.cancelled_at IS NULL AND request.answered_batch_id IS NULL "
-        "AND (node.id IS NOT NULL OR (request.node_id IS NULL AND request.fork_id IS NOT NULL))",
+        "SELECT request.* FROM doc_review_requests AS request WHERE request.artifact_id=? "
+        "AND request.state IN ('forked','handed_back','failed')",
         (artifact_id,),
     ).fetchall()
-    if not any(row["node_id"] is None or plans_public.review_is_open(db, str(row["node_id"])) for row in unsettled):
+    if not any(is_open(db, row) for row in unsettled):
         return False
     actor = None if actor_thread_id in (None, UI_THREAD) else actor_thread_id
     models.record_artifact_change(

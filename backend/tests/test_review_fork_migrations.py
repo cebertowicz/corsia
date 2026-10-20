@@ -12,8 +12,11 @@ def test_review_fork_ladder_preserves_legacy_rows_and_is_idempotent():
     db = sqlite3.connect(":memory:")
     try:
         db.executescript("""
-            CREATE TABLE doc_review_requests (id TEXT PRIMARY KEY, node_id TEXT);
-            INSERT INTO doc_review_requests VALUES ('legacy', 'review-node');
+            CREATE TABLE doc_review_requests (
+                id TEXT PRIMARY KEY, node_id TEXT, cancelled_at TEXT,
+                answered_batch_id TEXT, created_at TEXT
+            );
+            INSERT INTO doc_review_requests VALUES ('legacy', 'review-node', NULL, NULL, '2026-01-01');
             CREATE TABLE doc_feedback_batches (
                 id TEXT PRIMARY KEY, author_kind TEXT, author_id TEXT,
                 artifact_id TEXT, recipient_id TEXT, state TEXT
@@ -26,9 +29,11 @@ def test_review_fork_ladder_preserves_legacy_rows_and_is_idempotent():
         for _ in range(2):
             migrate_132_to_133(db)
             migrate_133_to_134(db)
-        assert db.execute("SELECT * FROM doc_review_requests").fetchone() == (
-            "legacy", "review-node", None, None, None,
+        assert db.execute("SELECT id,node_id,fork_id,state,state_changed_at,reason FROM doc_review_requests").fetchone() == (
+            "legacy", "review-node", None, "handed_back", "2026-01-01", None,
         )
+        columns = {row[1] for row in db.execute("PRAGMA table_info(doc_review_requests)")}
+        assert not {"requesting_node_id", "requirements_revision"} & columns
         assert db.execute("SELECT review_request_id FROM doc_feedback_batches").fetchone() == (None,)
         db.execute("INSERT INTO doc_feedback_batches VALUES ('fork','agent','reviewer','doc','owner','open','request')")
         with pytest.raises(sqlite3.IntegrityError):

@@ -83,7 +83,7 @@ def _checkpoint(thread_id: str, checkpoint_id: str) -> CheckpointRequest:
 
 def _provider(thread_id: str, checkpoint_id: str) -> ProviderCheckpointRequest:
     return ProviderCheckpointRequest(
-        checkpoint_id=checkpoint_id,
+        fork_id=checkpoint_id,
         thread_id=thread_id,
         target=_target(),
         instruction="Write one checkpoint.",

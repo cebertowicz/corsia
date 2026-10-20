@@ -82,7 +82,8 @@ def test_request_is_node_less_and_persists_a_running_fork(review_env):
     result = request(db, artifact_id)
 
     assert result["fork_id"] and result["node_id"] is None
-    assert result["requesting_node_id"] is None
+    assert result["state"] == "forked"
+    assert "requesting_node_id" not in result and "requirements_revision" not in result
     assert result["outcome"] == "open"
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
 
@@ -189,6 +190,7 @@ def test_terminal_fork_escalates_once_to_the_existing_review_node(review_env):
 
     assert escalated and escalated["node_id"]
     assert escalated["fork_id"] is None
+    assert escalated["state"] == "handed_back" and escalated["reason"] == "limit"
     assert public.get_node(escalated["node_id"], db=db).state == "active"
     assert review_requests.escalate_fork(db, result["id"]) is None
 
@@ -210,7 +212,7 @@ def test_escalation_preserves_comments_and_passes_requesting_intent(review_env, 
     escalated = review_requests.escalate_fork(db, result["id"])
     comment = db.execute("SELECT id FROM doc_comments WHERE body='The claim needs evidence.'").fetchone()
     assert comment is not None
-    assert seen[0]["intent_node_id"] == result["requesting_node_id"]
+    assert "intent_node_id" not in seen[0] and "requesting_node_id" not in seen[0]
     node = public.get_node(escalated["node_id"], db=db)
     assert comment["id"] in node.description and "Check claims" in node.description
     assert db.execute("SELECT state FROM doc_feedback_batches WHERE review_request_id=?", (result["id"],)).fetchone()[0] == "open"
@@ -285,6 +287,7 @@ def test_clean_submit_ends_without_comments_and_never_escalates(review_env):
     assert not pending and not undelivered
     row = stored(db, result["id"])
     assert review_requests.outcome(db, row) == "ended_without_comments"
+    assert row["state"] == "submitted"
     assert artifact_review_capture.submitted(result["id"])
     assert review_requests.escalate_fork(db, result["id"]) is None
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0

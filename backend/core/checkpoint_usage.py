@@ -17,7 +17,7 @@ from llm.pricing import recorded_cost
 from subagents.usage_model import detached_usage_model_id
 
 
-async def bind_usage(request, *, checkpoint_owned: bool = True):
+async def bind_usage(request, *, checkpoint_owned: bool = True, source: str = "checkpoint"):
     """Freeze attribution before dispatch; accounting failure cannot stop output.
 
     A fork with no checkpoint row (``checkpoint_owned=False``, a document
@@ -36,14 +36,14 @@ async def bind_usage(request, *, checkpoint_owned: bool = True):
     binding = {field: binding.get(field) if binding else None for field in PLAN_FIELDS}
 
     async def defect(key, error):
-        logger.error("checkpoint {} usage incomplete for {}: {}", request.checkpoint_id, key, error)
+        logger.error("{} {} usage incomplete for {}: {}", source, request.fork_id, key, error)
         try:
             await run_in_db(
                 public.report_usage_defect, request.thread_id, binding, None,
-                f"checkpoint:{request.checkpoint_id}:{key}", reason="checkpoint_usage_failed", detail=str(error),
+                f"{source}:{request.fork_id}:{key}", reason=f"{source}_usage_failed", detail=str(error),
             )
         except Exception:
-            logger.exception("checkpoint {} accounting defect could not be persisted", request.checkpoint_id)
+            logger.exception("{} {} accounting defect could not be persisted", source, request.fork_id)
 
     if binding_error is not None:
         await defect("binding", binding_error)
@@ -75,11 +75,11 @@ async def bind_usage(request, *, checkpoint_owned: bool = True):
                 )
             else:
                 inserted = await run_in_db(
-                    checkpoint_usage.record_fork_call, request.checkpoint_id, request.thread_id,
-                    call_key, model, measured, vendor_account_id=account_id, now_iso=utc_now_iso(),
+                    checkpoint_usage.record_fork_call, request.fork_id, request.thread_id,
+                    call_key, model, measured, vendor_account_id=account_id, now_iso=utc_now_iso(), source=source,
                 )
             if inserted:
-                emit_llm_usage_recorded(request.thread_id, model, measured, source="checkpoint")
+                emit_llm_usage_recorded(request.thread_id, model, measured, source=source)
             if not public.usage_is_measured(measured):
                 await defect(call_key, "provider usage was not measured")
         except Exception as error:

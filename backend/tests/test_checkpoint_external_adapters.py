@@ -50,7 +50,7 @@ def vendor_thread(isolated_db):
 
 def _request(target, source, *, binary: str):
     return ProviderCheckpointRequest(
-        checkpoint_id="checkpoint-1",
+        fork_id="checkpoint-1",
         thread_id="thread-1",
         target=target,
         instruction="Write the current checkpoint.",

@@ -143,7 +143,7 @@ def _pair(
         originating_turn_id=turn_id, first_included_seq=1, started_at="t1",
     )
     provider = ProviderCheckpointRequest(
-        checkpoint_id=checkpoint_id, thread_id=thread_id,
+        fork_id=checkpoint_id, thread_id=thread_id,
         target=_target(target_model), instruction="fold", reasoning_effort=None,
         working_dir="/tmp", warm_source=object(),
     )

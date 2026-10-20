@@ -82,7 +82,7 @@ def record_call(checkpoint_id, call_key, model, measured, *, now_iso, db=None):
     return True
 
 
-def record_fork_call(fork_id, thread_id, call_key, model, measured, *, vendor_account_id, now_iso, db=None):
+def record_fork_call(fork_id, thread_id, call_key, model, measured, *, vendor_account_id, now_iso, source, db=None):
     """Commit one observation of a fork with no checkpoint row, once per call.
 
     The ledger row is the receipt: the same per-call id and writer contract as
@@ -91,11 +91,11 @@ def record_fork_call(fork_id, thread_id, call_key, model, measured, *, vendor_ac
     """
     if not isinstance(call_key, str) or not call_key.strip():
         raise ValueError("checkpoint call key must be non-empty")
-    identity = hashlib.sha256(f"checkpoint-usage\0{fork_id}\0{call_key}".encode()).hexdigest()[:24]
+    identity = hashlib.sha256(f"{source}-usage\0{fork_id}\0{call_key}".encode()).hexdigest()[:24]
     binding = dict.fromkeys(PLAN_FIELDS)
     payload = _receipt_payload(
         thread_id=thread_id, turn_id=None, usage_key=call_key, model=model, measured=measured,
-        ttft_ms=None, binding=binding, source="checkpoint", now_iso=now_iso,
+        ttft_ms=None, binding=binding, source=source, now_iso=now_iso,
         vendor_account_id=vendor_account_id,
     )
     with write_transaction(db, scope="fork_usage_call") as connection:
@@ -106,7 +106,7 @@ def record_fork_call(fork_id, thread_id, call_key, model, measured, *, vendor_ac
             return False
         write_usage_row(
             connection, usage_id=identity, thread_id=thread_id, turn_id=None, model=model,
-            measured=payload["measured"], ttft_ms=None, binding=binding, source="checkpoint",
+            measured=payload["measured"], ttft_ms=None, binding=binding, source=source,
             now_iso=now_iso, vendor_account_id=vendor_account_id,
         )
     return True

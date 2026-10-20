@@ -106,7 +106,7 @@ def complete_warm_admission(
     from prompts.checkpoint import build_checkpoint_system_prompt
 
     provider = ProviderCheckpointRequest(
-        checkpoint_id=request.id,
+        fork_id=request.id,
         thread_id=request.thread_id,
         target=target,
         instruction=build_checkpoint_system_prompt(),
