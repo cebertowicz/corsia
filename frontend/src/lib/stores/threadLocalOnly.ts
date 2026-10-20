@@ -1,5 +1,6 @@
 import { saveFailureText } from '../saveFailure';
 import { threads, type Thread } from './threads';
+import { loadThreads } from './threadsLoad';
 
 export interface ThreadLocalOnly {
 	effective: boolean;
@@ -72,7 +73,10 @@ export async function saveThreadLocalOnly(
 	const updates = new Map<string, LocalOnlyThreadFields>(
 		payloadThreads.filter(isLocalOnlyThreadFields).map((row) => [row.id, row]),
 	);
-	if (!updates.has(threadId)) return { ok: false, error: saveFailureText(null, false) };
+	if (!updates.has(threadId)) {
+		await loadThreads(auth).catch(() => {});
+		return { ok: true };
+	}
 	threads.update((rows) => rows.map((row) => {
 		const update = updates.get(row.id);
 		return update ? {

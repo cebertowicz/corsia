@@ -28,7 +28,6 @@
 	import { uiScope } from '$lib/stores/uiScope';
 	import { openProjectSettings, requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { toasts } from '$lib/stores/toast';
-	import { onModelSheetRequest } from '$lib/stores/modelSheetRequest';
 	import {
 		contextSheetUsageSummary,
 		type ContextSheetSourceRow,
@@ -125,8 +124,7 @@
 		return reasoningEffortLabel(reasoningConfig, resolvedEffort);
 	});
 	let contextSourceDetail = $state<ContextSheetSourceRow | null>(null);
-	let requestedLocalOnlyFocus = $state(false);
-	const shouldFocusLocalOnly = $derived(focusLocalOnly || requestedLocalOnlyFocus);
+	const shouldFocusLocalOnly = $derived(focusLocalOnly);
 	// The opened source groups of the context view now on screen. This component
 	// stays mounted across preview refreshes, which can leave the sheet with no
 	// snapshot for a moment, so the record lives here, not in the list. It starts
@@ -216,12 +214,6 @@
 		if (sheetView !== view && view === 'model') loadModels({ refreshUsage: true });
 		toggleSheet(view);
 	}
-	// Another surface asks for the model sheet; a leaf composer has its own thread.
-	$effect(() => (threadId ? undefined : onModelSheetRequest((request) => {
-		requestedLocalOnlyFocus = request.focusLocalOnly;
-		if (sheetView !== 'model') openSheet('model');
-	})));
-
 	function documentName(source: ContextSheetSourceRow): string {
 		const parts = source.stableReference.split(/[\\/]/).filter(Boolean);
 		return parts.at(-1) ?? source.label ?? 'Document';
@@ -311,7 +303,7 @@
 {/if}
 
 {#if sheetView === 'model'}
-	<InputBarModelSheet onclose={() => toggleSheet('model')} focusLocalOnly={shouldFocusLocalOnly} onfocusconsumed={() => { requestedLocalOnlyFocus = false; onfocusconsumed(); }} />
+	<InputBarModelSheet onclose={() => toggleSheet('model')} focusLocalOnly={shouldFocusLocalOnly} onfocusconsumed={onfocusconsumed} />
 {/if}
 
 {#if sheetView === 'context'}

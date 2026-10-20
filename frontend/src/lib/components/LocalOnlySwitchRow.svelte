@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import Toggle from './ui/Toggle.svelte';
 	import { token } from '$lib/stores/auth';
 	import { activeThreadId, threads } from '$lib/stores/threads';
@@ -49,8 +48,9 @@
 		onleave();
 	}
 
-	// The request that opened this sheet carries the intent to focus this row.
-	onMount(() => {
+	// The request that opened this sheet carries the intent to focus this row,
+	// including when the already-open sheet receives another request.
+	$effect(() => {
 		if (!focusOnMount) return;
 		requestAnimationFrame(() => rowEl?.focus());
 		onfocusconsumed();

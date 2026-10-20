@@ -62,13 +62,13 @@
 		}
 		function closeSheet() { sheetView = null; }
 
-	// Only the top composer owns requests from another surface.
-	$effect(() => threadId === undefined ? onModelSheetRequest((request) => {
-		focusLocalOnly = request.focusLocalOnly;
-		if (sheetView === 'model') return;
-		void loadModels({ refreshUsage: true });
-		sheetView = 'model';
-	}) : undefined);
+		// The top composer owns the sheet state and focus request for every bound control.
+		$effect(() => threadId === undefined ? onModelSheetRequest((request) => {
+			focusLocalOnly = request.focusLocalOnly;
+			if (sheetView === 'model') return;
+			void loadModels({ refreshUsage: true });
+			sheetView = 'model';
+		}) : undefined);
 
 		const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
 

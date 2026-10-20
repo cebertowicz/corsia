@@ -4,7 +4,8 @@
 	import { token, user, isAuthenticated } from '$lib/stores/auth';
 	import { threads, activeThreadId, activeThread, messages, reasoningEffort, clearThreadBuffers, saveThreadProject, adoptCreatedThread } from '$lib/stores/threads';
 	import { toasts } from '$lib/stores/toast';
-	import { activeModelId, loadModels, getLastChosenModelId, reconcileThreadModelSnapshots } from '$lib/stores/models';
+	import { activeModelId, loadModels, getLastChosenModelId } from '$lib/stores/models';
+	import { loadThreads } from '$lib/stores/threadsLoad';
 	import { loadSettings, loadUpdateStatus } from '$lib/stores/settings';
 	import { connect, on, subscribeThread } from '$lib/ws';
 	import { sidebarCollapsed } from '$lib/stores/ui';
@@ -407,17 +408,6 @@
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ archived: true }),
 		}).catch(() => {});
-	}
-
-	async function loadThreads() {
-		const t = $token;
-		if (!t) return;
-		const res = await fetch(`/api/threads?token=${t}`);
-		const data = await res.json();
-		const filtered = reconcileThreadModelSnapshots(data.threads as Thread[]);
-		filtered.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-		threads.set(filtered);
-		void fetchScopeTarget(t, $uiScope); // the list omits the target; re-read its model too
 	}
 
 	function handleKeydown(e: KeyboardEvent) {

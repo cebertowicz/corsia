@@ -251,7 +251,7 @@
 	/* A long scoped title yields to the fixed header controls instead of pushing them away. */
 	.h-scope { min-width: 0; max-width: 24rem; overflow: hidden; text-overflow: ellipsis; }
 	/* The Local only badge: a status mark, not a pill (DESIGN-SYSTEM §0.1, §0.2): no fill or border at rest, teal icon, secondary label. */
-	.h-local-slot { display: inline-flex; flex: 1 0 86px; min-width: 0; }
+	.h-local-slot { display: inline-flex; flex: 0 0 auto; min-width: 86px; }
 	.h-local-only { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; padding: var(--space-1) var(--chip-inline-padding); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; animation: hLocalOnlyIn var(--dur-tight) var(--ease-snap); transition: background var(--dur-tight), color var(--dur-tight), opacity var(--dur-tight), transform var(--dur-tight); }
 	.h-local-only:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.h-local-only:active { transform: scale(.96); }

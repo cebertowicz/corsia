@@ -69,11 +69,15 @@ describe('saveThreadLocalOnly', () => {
 		expect(await saveThreadLocalOnly('t1', true, 'tok')).toEqual({ ok: false, error: "Couldn’t save this change. Check your connection and try again." });
 		expect(get(threads)[0].local_only).toBeUndefined();
 	});
-	it('treats an accepted but unparseable response as a visible save failure', async () => {
+	it('reloads and accepts an OK save whose body is unusable', async () => {
 		threads.set([makeThread()]);
-		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => { throw new SyntaxError('bad JSON'); } })));
-		expect(await saveThreadLocalOnly('t1', true, 'tok')).toEqual({ ok: false, error: "Couldn’t save this change. Check your connection and try again." });
-		expect(get(threads)[0].local_only).toBeUndefined();
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).startsWith('/api/threads?')
+			? ({ ok: true, json: async () => ({ threads: [makeThread({ local_only: true, local_only_effective: true, local_only_from_project: false, local_only_inherited_from_thread_id: null, local_only_inherited_from_title: null })] }) })
+			: ({ ok: true, json: async () => { throw new SyntaxError('bad JSON'); } }));
+		vi.stubGlobal('fetch', fetchMock);
+		expect(await saveThreadLocalOnly('t1', true, 'tok')).toEqual({ ok: true });
+		expect(fetchMock).toHaveBeenCalledWith('/api/threads?token=tok');
+		expect(get(threads)[0]).toMatchObject({ local_only: true, local_only_effective: true });
 	});
 	it('names the server\'s reason on a refusal', async () => {
 		threads.set([makeThread()]);

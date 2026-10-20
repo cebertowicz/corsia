@@ -6,7 +6,7 @@
 	import { saveFailureText } from '$lib/saveFailure';
 
 	// The project's own switch: only models on this computer or a trusted device run in the project.
-	let { projectId, onCloudModelsOffState }: { projectId: string; onCloudModelsOffState?: (value: boolean) => void } = $props();
+	let { projectId, onCloudModelsOffState, onCloudModelsOffSaved }: { projectId: string; onCloudModelsOffState?: (value: boolean) => void; onCloudModelsOffSaved?: () => void } = $props();
 	let off = $state(false);
 	let loaded = $state(false);
 	let saving = $state(false);
@@ -36,6 +36,7 @@
 		if (result.ok) {
 			off = result.value.cloud_models_off;
 			onCloudModelsOffState?.(off);
+			onCloudModelsOffSaved?.();
 		} else error = saveFailureText(result.detail, result.reached !== false);
 		saving = false;
 	}
