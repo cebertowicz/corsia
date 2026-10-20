@@ -8,7 +8,6 @@ import os
 import sqlite3
 import sys
 from contextlib import closing
-from unittest.mock import patch
 from pathlib import Path
 from uuid import uuid4
 
@@ -21,6 +20,7 @@ from infra.bind_host import (
     resolve_bind_host,
     write_setup,
 )
+from infra.devices_setting import parse_devices_setting
 from infra.platform_paths import (
     LegacyRuntimePaths,
     RuntimePaths,
@@ -180,29 +180,13 @@ def cmd_remote_address(args: argparse.Namespace) -> int:
         bootstrap_path = Path(args.bootstrap or BOOTSTRAP_PATH)
         if args.state_root:
             state_root = Path(args.state_root)
-            try:
-                bootstrap = load_bootstrap(bootstrap_path)
-            except OSError:
-                bootstrap = None
         else:
-            bootstrap = load_bootstrap(bootstrap_path)
-            state_root = bootstrap.state_root
+            state_root = load_bootstrap(bootstrap_path).state_root
         db_path = runtime_db_paths(state_root)[0]
         with closing(sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)) as db:
             db.row_factory = sqlite3.Row
             row = db.execute("SELECT value FROM settings WHERE key = ?", ("devices",)).fetchone()
-            # The parser is pure, but settings imports the normal runtime owner.
-            # Give that import the selected bootstrap identity only while loading it;
-            # this command still reads exclusively through the explicit connection.
-            workspace = bootstrap.workspace.root if bootstrap else state_root.parent / ".bootstrap-read-only"
-            with patch.dict(os.environ, {
-                "CORSIA_WORKSPACE": str(workspace),
-                "CORSIA_STATE_DIR": str(state_root),
-                "CORSIA_ALLOW_HOME_WORKSPACE_IN_CI": "1",
-            }):
-                from infra.settings import parse_devices_setting
-
-                enabled, address = parse_devices_setting(row["value"] if row else None)
+            enabled, address = parse_devices_setting(row["value"] if row else None)
     except (OSError, TypeError, ValueError, sqlite3.Error):
         print("Couldn't read the outside address.", file=sys.stderr)
         return 2
