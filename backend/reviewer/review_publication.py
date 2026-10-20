@@ -36,6 +36,7 @@ from reviewer.review_publication_types import (
 )
 from reviewer.reviewer_categories import is_approach_reset_finding
 from reviewer.reviewer_comment import format_summary_body
+from reviewer.review_thread_lifecycle import StillRaisedFinding
 from reviewer.review_thread_publication import (
     publish_absence_reply,
     reopen_and_republish,
@@ -102,7 +103,7 @@ def publish_review(
     findings: list[dict[str, Any]],
     new_threads: list[dict[str, Any]],
     resolve_replies: list[dict[str, Any]],
-    unchanged_count: int,
+    still_raised: list[StillRaisedFinding],
     model_label: str,
     existing_issue_comments: list[dict[str, Any]],
 ) -> ReviewPublication:
@@ -118,7 +119,7 @@ def publish_review(
         findings: Every finding in this run (drives the severity totals).
         new_threads: Findings with no existing comment — the ones to publish.
         resolve_replies: Prior finding comments to mark resolved.
-        unchanged_count: Prior findings that still apply.
+        still_raised: Prior findings still raised in this review.
         model_label: Human model name for the summary.
         existing_issue_comments: PR-level comments already on the PR, used to
             find the sticky summary comment.
@@ -136,7 +137,7 @@ def publish_review(
         findings=findings,
         model_label=model_label,
         new_count=len(new_threads),
-        unchanged_count=unchanged_count,
+        still_raised=still_raised,
         resolved_count=len(resolve_replies),
         pr_level_count=len(publication.pr_level),
     )
