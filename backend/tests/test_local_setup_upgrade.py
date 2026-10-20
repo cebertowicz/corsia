@@ -249,6 +249,7 @@ def upgrade_env(legacy, isolated_db, monkeypatch):
     from llm import local_setup_new_omlx, local_setup_ownership as ownership
     from llm.local_setup_ownership import marker_path
 
+    monkeypatch.setattr(ls, "_flight", ls._Flight())
     marker_path().write_text("installed by corsia local setup\n", encoding="utf-8")
     starter = LocalModel(MODEL.repository, 3_000, 32_768)
     monkeypatch.setattr(local_profiles, "STARTER_MODEL", starter)
