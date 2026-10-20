@@ -1,23 +1,22 @@
-"""Durably deliver terminal setup-download outcomes to the CORSIA agent.
+"""Deliver the setup flight's persisted terminal outcome after first-run is rendered.
 
-The setup-progress record is the one outbox owner. A setup flight can finish
-while the person is still on setup screens, so its outcome stays there until
-the first-run wake is rendered and committed. Settings downloads never call
-this module.
+The flight record is the sole store. Delivery only marks that record notified;
+startup and the first-run render hook read it rather than keeping another outbox.
 """
 
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import json
 import logging
 import re
-from typing import Any, Literal
 
+from llm import local_setup_operation
+from llm.local_setup import terminal_outcome
 from llm.local_setup_results import CAUSES
 
 log = logging.getLogger(__name__)
-
 EVENT = "onboarding.local_download"
 CHIP = "Your local-model download changed."
 SUMMARY = (
@@ -25,13 +24,12 @@ SUMMARY = (
     "state. Tell the person the outcome and one next step; do not rebind the CORSIA agent."
 )
 OUTCOMES = frozenset({"ready", "failed", "start_failed", "setup_failed"})
-
 _REF = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
 _flush_lock = asyncio.Lock()
 
 
 def _first_run_rendered(conductor_id: str) -> bool:
-    """Whether setup's held first-run wake has been rendered and committed for this agent."""
+    """Whether setup's held first-run wake has been rendered and committed."""
     from infra.database import get_db
     from infra.onboarding_events import first_run_message_id, held_first_run_path
 
@@ -46,10 +44,7 @@ def _first_run_rendered(conductor_id: str) -> bool:
         db.close()
 
 
-# The flight owner supplies the stable failure cause.
-
 def _fix(cause: str, ref: str | None, bytes_to_free: int | None) -> str:
-    """Give the first-run agent one safe next step without leaking installer output."""
     if cause == "disk_full":
         amount = f"Free {bytes_to_free} bytes," if isinstance(bytes_to_free, int) and bytes_to_free > 0 else "Free space,"
         return amount + " then retry in Settings."
@@ -57,127 +52,61 @@ def _fix(cause: str, ref: str | None, bytes_to_free: int | None) -> str:
         return "Check the connection, then retry in Settings."
     if cause == "memory":
         return "Choose a subscription or API provider instead."
-    if ref and _REF.fullmatch(ref):
-        return f"Retry in Settings. Reference: {ref}."
-    return "Retry in Settings."
+    if cause == "own_omlx_upgrade_required":
+        return "Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then retry."
+    return f"Retry in Settings. Reference: {ref}." if ref and _REF.fullmatch(ref) else "Retry in Settings."
 
 
-def _payload(
-    outcome: str, *, model: str | None, cause: object, ref: str | None, bytes_to_free: int | None,
-) -> dict[str, str | int]:
-    """Normalize the persisted and delivered event payload once."""
-    detail: dict[str, str | int] = {"outcome": outcome}
+def _payload(outcome: str, *, model: str | None, cause: object, ref: str | None, bytes_to_free: int | None) -> dict:
+    detail: dict = {"outcome": outcome}
     if outcome == "ready":
         if not model:
             raise ValueError("a ready local-download outcome needs its model")
         detail["model"] = model[:512]
         return detail
-    normalized_cause = str(cause) if cause in CAUSES else "other"
-    detail["cause"] = normalized_cause
-    detail["fix"] = _fix(normalized_cause, ref, bytes_to_free)
+    cause = str(cause) if cause in CAUSES else "other"
+    detail.update(cause=cause, fix=_fix(cause, ref, bytes_to_free))
     if isinstance(bytes_to_free, int) and not isinstance(bytes_to_free, bool) and bytes_to_free > 0:
         detail["bytes_to_free"] = bytes_to_free
     return detail
 
 
-def _notice(payload: dict[str, str | int]) -> str:
-    return "## Local model download\n\n" + json.dumps(payload, sort_keys=True, ensure_ascii=False)
-
-
-async def _deliver_once(conductor_id: str, delivery_id: str, payload: dict[str, Any]) -> bool:
-    """Deliver a rendered wake once; a real failure remains durable and is logged once."""
+async def flush_pending_local_download(conductor_id: str | None = None) -> bool:
+    """Deliver the current terminal onboarding flight once its agent can receive it."""
     from events.delivery import deliver_to_thread
-    from infra.db_async import run_in_db
-    from infra import setup_progress
-
-    try:
-        delivered = await deliver_to_thread(
-            conductor_id, EVENT, SUMMARY, delivery_id=delivery_id, chip=CHIP, notice=_notice(payload),
-        )
-    except Exception:  # noqa: BLE001 - a durable row permits a later render-path attempt
-        log.error("Could not deliver local-download wake %s", delivery_id, exc_info=True)
-        return False
-    if delivered:
-        await run_in_db(setup_progress.settle_local_download_wake, delivery_id)
-    return delivered
-
-
-async def _flush_pending(conductor_id: str) -> bool:
-    """Settle durable rows serially so a post-render flush cannot duplicate a retry."""
-    from infra import setup_progress
+    from infra.corsia_agent import get_corsia_agent
     from infra.db_async import run_in_db
 
     async with _flush_lock:
-        if not await run_in_db(_first_run_rendered, conductor_id):
+        operation = local_setup_operation.read()
+        if not operation or not operation.onboarding or operation.kind != "setup" or operation.notified:
             return False
-        pending = await run_in_db(setup_progress.pending_local_download_wakes)
-        if not pending:
-            return True
-        delivered = True
-        for delivery_id, payload in pending.items():
-            delivered = await _deliver_once(conductor_id, delivery_id, payload) and delivered
+        outcome = terminal_outcome(operation.result, downloaded=operation.downloaded)
+        if outcome not in OUTCOMES:
+            return False
+        current = await run_in_db(get_corsia_agent)
+        if not current or (conductor_id is not None and conductor_id != current):
+            return False
+        if not await run_in_db(_first_run_rendered, current):
+            return False
+        result = operation.result or {}
+        payload = _payload(outcome, model=operation.repository, cause=result.get("cause"),
+                           ref=result.get("ref"), bytes_to_free=result.get("bytes_to_free"))
+        delivery_id = f"local-download:{operation.flight_id}:{outcome}"
+        try:
+            delivered = await deliver_to_thread(
+                current, EVENT, SUMMARY, delivery_id=delivery_id, chip=CHIP,
+                notice="## Local model download\n\n" + json.dumps(payload, sort_keys=True, ensure_ascii=False),
+            )
+        except Exception:
+            log.error("Could not deliver local-download wake %s", delivery_id, exc_info=True)
+            return False
+        latest = local_setup_operation.read()
+        if delivered and latest == operation:
+            local_setup_operation.write(replace(operation, notified=True))
         return delivered
 
 
-async def _pending() -> dict[str, dict]:
-    from infra import setup_progress
-    from infra.db_async import run_in_db
-
-    return await run_in_db(setup_progress.pending_local_download_wakes)
-
-
-async def _has_pending() -> bool:
-    return bool(await _pending())
-
-
 async def resume_pending_local_download() -> None:
-    """Flush durable download delivery after startup when a conductor and outbox exist."""
-    from infra.corsia_agent import get_corsia_agent
-    from infra.db_async import run_in_db
-
-    conductor_id = await run_in_db(get_corsia_agent)
-    if not conductor_id or not await _has_pending():
-        return None
-    await _flush_pending(conductor_id)
-
-
-async def flush_pending_local_download(conductor_id: str | None = None) -> bool:
-    """Flush the durable outbox after model selection has rendered the first-run wake."""
-    from infra.corsia_agent import get_corsia_agent
-    from infra.db_async import run_in_db
-
-    current = await run_in_db(get_corsia_agent)
-    if not current or (conductor_id is not None and conductor_id != current):
-        return False
-    return await _flush_pending(current)
-
-
-async def notify_terminal_setup_download(
-    flight_id: str,
-    outcome: Literal["ready", "failed", "start_failed", "setup_failed"],
-    *,
-    model: str | None = None,
-    cause: object = None,
-    ref: str | None = None,
-    bytes_to_free: int | None = None,
-) -> bool:
-    """Persist one terminal setup-flight outcome and flush it when first-run can receive it.
-
-    ``ref`` is the local setup flight's safe reference; the agent-facing ``fix``
-    is derived here. Returning false leaves the row durable for the render hook.
-    """
-    if not flight_id:
-        raise ValueError("flight_id is required")
-    if outcome not in OUTCOMES:
-        raise ValueError(f"unknown local-download outcome: {outcome}")
-
-    from infra import setup_progress
-    from infra.db_async import run_in_db
-
-    delivery_id = f"local-download:{flight_id}:{outcome}"
-    await run_in_db(
-        setup_progress.record_local_download_wake,
-        delivery_id,
-        _payload(outcome, model=model, cause=cause, ref=ref, bytes_to_free=bytes_to_free),
-    )
-    return await flush_pending_local_download()
+    """Read the persisted flight on startup; never start or re-download a terminal flight."""
+    await flush_pending_local_download()

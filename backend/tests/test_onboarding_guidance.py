@@ -212,15 +212,17 @@ def test_local_model_offer_reads_a_running_setup_before_offering_and_never_waits
     offer = LOCAL_MODEL_OFFER.read_text(encoding="utf-8")
     running = offer.split("## Setup already running", 1)[1]
 
-    assert offer.index("`state` is `running` or `downloading`") < offer.index("2. Ask once")
+    assert offer.index("`state` is `starting` or `downloading`") < offer.index("2. Ask once")
     assert "make no offer" in offer
-    # A succeeded flight's result outlives its connection (kept in memory until restart),
-    # so it only stops the offer while a local model is still connected.
-    assert "if none is, that result is old: carry on as if it were absent" in offer
+    # A durable ready outcome alone is not proof that its endpoint still works.
+    assert "re-check with `model_sources` `recheck: true`" in offer
+    assert "if a local model is connected, make no offer" in offer
     assert "never holds up a setup task" in running
     assert "at the end of each later setup task" in running
-    assert "`succeeded`" in running and "`failed`" in running and "Each is said once." in running
-    assert "never post `result.next_action`" in running
+    for state in ("ready", "stopped", "setup_failed", "start_failed", "failed"):
+        assert f"`{state}`" in running
+    assert "say once what failed" in running
+    assert "Never invent a `stage`, `result` or failure message field" in running
     assert "re-read it after each later task" in FIRST_RUN.read_text(encoding="utf-8")
 
 
@@ -228,7 +230,7 @@ def test_local_model_offer_reads_omlx_s_pick_and_never_sends_a_profile():
     offer = LOCAL_MODEL_OFFER.read_text(encoding="utf-8")
 
     # Setup takes the model oMLX recommender picks.
-    for state in ("low_memory", "own_omlx", "picked", "not_checked", "checking", "failed"):
+    for state in ("low_memory", "picked", "not_checked", "checking", "failed"):
         assert f"`{state}`" in offer
     assert "make the offer without a name or size" in offer
     assert "CORSIA's starter model, not oMLX's pick, so pass the `message` on" in offer

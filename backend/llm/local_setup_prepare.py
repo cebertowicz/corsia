@@ -146,8 +146,12 @@ async def begin_prepare() -> dict:
     """
     from llm import local_setup as ls
 
+    from llm.local_sources import connected_local_server
+
     async with _prepare_lock:
         view = await pick_view()
+        if await asyncio.to_thread(connected_local_server) is not None:
+            return view
         if view["state"] not in {NOT_CHECKED, FAILED} or ls._running():
             return view
         _settle(CHECKING)

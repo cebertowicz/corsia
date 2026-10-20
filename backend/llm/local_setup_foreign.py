@@ -27,13 +27,7 @@ def _read_choice() -> dict:
         value = json.loads(foreign_omlx_choice_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    if not isinstance(value, dict):
-        return {}
-    # Preserve an answer made by the earlier dev setup, without trusting a new PID.
-    if isinstance(value.get("stop"), bool):
-        return {"choice": "stop" if value["stop"] else "keep",
-                "pids": [value.get("pid")], "applied": True}
-    return value
+    return value if isinstance(value, dict) else {}
 
 
 def _write_choice(choice: str | None, pids: list[int], *, applied: bool) -> None:
@@ -104,6 +98,7 @@ def apply_foreign_omlx_choice(*, other_omlx: OtherOmlxChoice | None = None) -> s
     process. Keep both survives PID changes; Stop requires the exact offered set.
     """
     processes = foreign_omlx_processes()
+    # Supervisor identity cannot make OS inspection readable; never stop an unverified process.
     if processes is None:
         _continue_after_unknown_inspection()
         return None

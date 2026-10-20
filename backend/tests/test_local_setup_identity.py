@@ -25,7 +25,11 @@ def identity(monkeypatch, tmp_path):
     return tmp_path
 
 
-def test_argv_identity_uses_the_exact_resolved_base_and_the_last_option(identity, monkeypatch):
+def test_only_supervisor_records_prove_identity_even_after_title_rewrite(identity, monkeypatch, isolated_db):
+    from llm.providers import omlx_supervisor as supervisor
+
+    supervisor._write_pid("owned-a", 101)
+    supervisor._write_pid("owned-rewritten", 107)
     base = managed.managed_omlx_paths().base_path
     alias = identity / "alias with spaces"
     alias.symlink_to(base, target_is_directory=True)
@@ -42,9 +46,14 @@ def test_argv_identity_uses_the_exact_resolved_base_and_the_last_option(identity
     result = managed.omlx_processes()
     assert result is not None
     assert [(p.pid, p.owner) for p in result] == [
-        (101, "managed"), (102, "managed"), (103, "personal"), (104, "personal"), (105, "personal"),
-        (107, "personal"),
+        (101, "managed"), (102, "personal"), (103, "personal"), (104, "personal"), (105, "personal"),
+        (107, "managed"),
     ]
+    monkeypatch.setattr(managed.psutil, "process_iter", lambda _attrs: [processes[-1]])
+    monkeypatch.setattr(foreign.os, "kill", lambda *_args: pytest.fail("must never stop the managed process"))
+    assert foreign.apply_foreign_omlx_choice() is None
+    assert foreign.apply_foreign_omlx_choice(other_omlx="stop") is None
+    assert not foreign.foreign_omlx_choice_path().exists()
 
 
 def test_no_process_is_distinct_from_unknown(identity, monkeypatch):
@@ -139,7 +148,7 @@ def test_unowned_old_or_broken_binary_never_runs_homebrew(identity, monkeypatch,
     binary.touch()
     if marked:
         managed.marker_path().touch()
-    monkeypatch.setattr(installer, "installed_omlx", lambda: str(binary) if working else None)
+    monkeypatch.setattr(installer, "_is_broken_leftover", lambda _path: not working)
     monkeypatch.setattr(installer, "omlx_on_path", lambda: str(binary))
     monkeypatch.setattr(installer.shutil, "which", lambda _name: "/brew")
     monkeypatch.setattr(managed, "command_output", lambda cmd: str(identity / "keg") if "--prefix" in cmd else "omlx 0.7")

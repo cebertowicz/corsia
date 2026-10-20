@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Coroutine, IO
 
 from llm import local_setup_download, local_setup_operation
@@ -18,6 +18,7 @@ from llm.local_model import LocalModel
 from llm.local_profiles import format_size
 from llm.local_setup_disk import require_free_disk
 
+STATES = frozenset({"starting", "downloading", "ready", "stopped", "setup_failed", "start_failed", "failed"})
 EVENT_CATEGORY = "local_setup"
 log = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class _Flight:
     result: dict | None = None
     model: LocalModel | None = None
     downloaded: bool = False
-    following: bool = False
+    downloading: bool = False
     kind: str | None = None
     onboarding: bool = False
     server_id: str | None = None
@@ -56,34 +57,33 @@ def _claim_operation(kind: str, model: LocalModel | None = None, *, onboarding: 
     if lock is None:
         return False
     try:
-        if local_setup_operation.read() is not None:
+        previous = local_setup_operation.read()
+        if previous is not None and (previous.result is None or previous.result.get("downloading")):
             local_setup_operation.unlock(lock)
             return False
-        if model is not None:
-            local_setup_operation.write(local_setup_operation.Operation.for_model(model, kind, onboarding=onboarding))
+        local_setup_operation.write(local_setup_operation.Operation.for_model(model, kind, onboarding=onboarding))
     except Exception:
         local_setup_operation.unlock(lock)
         raise
     _flight.operation_lock = lock
     _flight.kind, _flight.model, _flight.onboarding = kind, model, onboarding
-    _flight.downloaded = False
+    _flight.downloaded, _flight.downloading = False, False
     return True
 
 
 def _record_model(model: LocalModel) -> None:
     """Persist the pick before any request to download it."""
-    local_setup_operation.write(local_setup_operation.Operation.for_model(
-        model, _flight.kind or "setup", onboarding=_flight.onboarding,
-    ))
+    operation = local_setup_operation.read()
+    picked = local_setup_operation.Operation.for_model(model, _flight.kind or "setup", onboarding=_flight.onboarding)
+    local_setup_operation.write(replace(picked, flight_id=operation.flight_id) if operation else picked)
     _flight.model = model
 
 
 def _record_download_task(model: LocalModel, task_id: str) -> None:
     operation = local_setup_operation.read()
     if operation is not None and operation.repository == model.repository:
-        local_setup_operation.write(local_setup_operation.Operation.for_model(
-            model, operation.kind, task_id, onboarding=operation.onboarding,
-        ))
+        local_setup_operation.write(replace(operation, task_id=task_id))
+    _flight.downloading = True
 
 
 def start_flight(work: Coroutine[Any, Any, dict], stage: str, *,
@@ -94,7 +94,6 @@ def start_flight(work: Coroutine[Any, Any, dict], stage: str, *,
         _flight.onboarding = operation.onboarding
         _flight.downloaded = False
     _flight.result, _flight.stage = None, stage
-    _flight.following = False
     _flight.server_id = None
     _flight.download_eta_seconds, _flight.download_stalled = None, False
     _flight.task = asyncio.create_task(work)
@@ -116,7 +115,7 @@ def report_stage(stage: str) -> None:
 
 def record_downloaded() -> None:
     """Record that the download completed before settings or discovery can fail."""
-    _flight.downloaded = True
+    _flight.downloaded, _flight.downloading = True, False
 
 
 def clear_result() -> None:
@@ -124,24 +123,42 @@ def clear_result() -> None:
     _flight.result = None
 
 
+def restore_terminal_flight(operation: local_setup_operation.Operation) -> None:
+    """Restore the persisted outcome without starting another setup or download."""
+    _flight.kind, _flight.model, _flight.onboarding = operation.kind, operation.model, operation.onboarding
+    _flight.result, _flight.downloaded = operation.result, operation.downloaded
+    _flight.stage, _flight.task = None, None
+    _flight.downloading = False
+
+
+def record_resume_failure(ref: str) -> None:
+    """Publish a referenced startup delivery failure through the same durable flight."""
+    operation = local_setup_operation.read() or local_setup_operation.Operation.for_model(None, "setup", onboarding=True)
+    local_setup_operation.write(operation)
+    restore_terminal_flight(operation)
+    finish_flight({"ok": False, "state": "failed", "cause": "other", "ref": ref,
+                   "message": "CORSIA couldn't resume the local model outcome. Retry, or save a report."})
+
+
 def finish_flight(result: dict) -> dict:
     """Publish a terminal result and release ownership, keeping unfinished downloads resumable."""
-    _flight.result, _flight.stage, _flight.following = result, None, False
-    if not result.get("downloading"):
-        local_setup_operation.clear()
+    _flight.result, _flight.stage = result, None
+    operation = local_setup_operation.read()
+    if operation is not None:
+        local_setup_operation.write(replace(operation, result=result, downloaded=_flight.downloaded))
+    _flight.downloading = bool(result.get("downloading"))
     _release_operation_lock()
     return result
 
 
-def _download_progress(eta_seconds: int | None, stalled: bool, following: bool) -> None:
+def _download_progress(eta_seconds: int | None, stalled: bool) -> None:
     _flight.download_eta_seconds, _flight.download_stalled = eta_seconds, stalled
-    _flight.following = following
 
 
 async def _download(server_id: str, report: Callable[[str], None], model: LocalModel) -> None:
     """Check disk space, then follow one persisted oMLX download without sharing flight state."""
     _flight.server_id = server_id
-    _download_progress(None, False, False)
+    _download_progress(None, False)
     model_dir = await local_setup_download.download_dir(server_id)
     await asyncio.to_thread(require_free_disk, model.download_size_bytes, model_dir, model.repository)
     report(f"Downloading {model.model} ({format_size(model.download_size_bytes)})")
@@ -149,6 +166,8 @@ async def _download(server_id: str, report: Callable[[str], None], model: LocalM
 
 
 async def _wait_for_download(server_id: str, report: Callable[[str], None], model: LocalModel) -> None:
+    operation = local_setup_operation.read()
+    _flight.downloading = bool(operation and operation.task_id)
     await local_setup_download.wait_for_download(
         server_id, report, model, record_task=_record_download_task, on_progress=_download_progress,
         wait_seconds=local_setup_download.DOWNLOAD_WAIT_SECONDS,
@@ -200,19 +219,28 @@ def download_estimate() -> tuple[int | None, bool]:
     return _flight.download_eta_seconds, _flight.download_stalled
 
 
+def terminal_outcome(result: dict | None, *, downloaded: bool = False) -> str:
+    """Derive the one setup outcome, or validate an already projected wire state."""
+    if result is None or result.get("cancelled"):
+        return "stopped"
+    if "state" in result:
+        return result["state"] if result["state"] in STATES else "stopped"
+    if result.get("downloading"):
+        return "downloading"
+    if result.get("ok"):
+        return "ready"
+    if result.get("pre_download"):
+        return "setup_failed"
+    return "start_failed" if downloaded else "failed"
+
+
 def setup_status() -> dict[str, Any]:
     """Bounded live state for setup and the first-run download rail."""
     result, model = _flight.result, _flight.model
     stage = setup_stage()
-    if _running():
-        state = "downloading" if model is not None else "starting"
-    elif result is None:
-        state = "stopped"
-    elif result.get("downloading"):
-        state = "downloading"
-    else:
-        state = ("ready" if result.get("ok") else "setup_failed" if result.get("pre_download")
-                 else "start_failed" if _flight.downloaded else "failed")
+    state = ("downloading" if _flight.downloading else "starting") if _running() else terminal_outcome(
+        result, downloaded=_flight.downloaded,
+    )
     match = re.search(r"(\d{1,3})%", stage) if stage else None
     return {
         "state": state, "model": model.repository if model else None,
@@ -260,18 +288,12 @@ async def _notify_terminal_setup_download(result: dict) -> None:
     """Wake onboarding only for a flight explicitly begun by onboarding."""
     if not _flight.onboarding or _flight.kind != "setup" or result.get("downloading"):
         return
-    model = _flight.model
-    outcome = ("ready" if result.get("ok") else "setup_failed" if result.get("pre_download")
-               else "start_failed" if _flight.downloaded else "failed")
-    operation = local_setup_operation.read()
-    flight_id = (operation.task_id if operation else None) or (model.repository if model else "local-model")
+    if terminal_outcome(result, downloaded=_flight.downloaded) == "stopped":
+        return
     try:
-        from onboarding.local_download_wake import notify_terminal_setup_download
+        from onboarding.local_download_wake import flush_pending_local_download
 
-        await notify_terminal_setup_download(
-            flight_id, outcome, model=model.repository if model else None,
-            cause=result.get("cause"), ref=result.get("ref"), bytes_to_free=result.get("bytes_to_free"),
-        )
+        await flush_pending_local_download()
     except Exception:
         log.exception("Couldn't notify first-run chat of terminal local setup download")
 
@@ -304,7 +326,7 @@ async def cancel_local_setup() -> dict:
     except asyncio.CancelledError:
         pass
     finish_flight({"ok": True, "cancelled": True})
-    _download_progress(None, False, False)
+    _download_progress(None, False)
     _notify_models_changed()
     _emit("cancelled", model=operation.repository if operation else None)
     return {"ok": True, "cancelled": True}

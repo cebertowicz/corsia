@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import urllib.error
 
+import pytest
+
 
 def _args(**values):
     return argparse.Namespace(**{
@@ -32,9 +34,9 @@ def test_local_setup_starts_server_flight_then_follows_distinct_stages_to_ready(
     import cli_local
 
     calls = _patch_follow(monkeypatch, [
-        {"state": "running", "stage": "Downloading", "result": None},
-        {"state": "running", "stage": "Downloading", "result": None},
-        {"state": "succeeded", "stage": None, "result": {"ok": True}},
+        {"state": "starting", "model": "picked-model"},
+        {"state": "starting", "model": "picked-model"},
+        {"state": "ready"},
     ])
 
     assert cli_local.cmd_setup(_args(if_no_subscription=True)) == 0
@@ -44,7 +46,7 @@ def test_local_setup_starts_server_flight_then_follows_distinct_stages_to_ready(
         {"no_subscription_only": True, "automatic": False},
     )
     assert {call[:2] for call in calls[1:]} == {("GET", "/api/providers/local/setup")}
-    assert capsys.readouterr().out == "Downloading\nLocal model is ready.\n"
+    assert capsys.readouterr().out == "Local model is ready.\n"
 
 
 def test_local_setup_says_corsia_is_not_running_and_runs_nothing_on_refused_connection(monkeypatch, capsys):
@@ -66,7 +68,7 @@ def test_local_setup_says_corsia_is_not_running_and_runs_nothing_on_refused_conn
 def test_lost_post_response_reads_the_status_route_once_and_follows_it(monkeypatch, capsys):
     import cli_local
 
-    calls = _patch_follow(monkeypatch, [{"state": "succeeded", "stage": None, "result": {"ok": True}}])
+    calls = _patch_follow(monkeypatch, [{"state": "ready"}])
     original = cli_local.request_json
 
     def lost_post(method, *args):
@@ -106,34 +108,34 @@ def test_local_setup_directs_existing_omlx_consent_to_the_app(monkeypatch, capsy
 
     assert cli_local.cmd_setup(_args()) == 2
     assert capsys.readouterr().out == (
-        "CORSIA needs your permission to inspect the existing oMLX.\n"
-        "Open the CORSIA app and choose Use it in local model setup.\n"
+        "Another oMLX is running.\n"
+        "Open the CORSIA app and choose whether to stop it or keep both running.\n"
     )
 
 
-def test_local_setup_prints_failed_flight_result_and_returns_two(monkeypatch, capsys):
+@pytest.mark.parametrize("state", ["failed", "setup_failed", "start_failed"])
+def test_local_setup_prints_failed_flight_result_and_returns_two(monkeypatch, capsys, state):
     import cli_local
 
     _patch_follow(monkeypatch, [{
-        "state": "failed", "stage": None,
-        "result": {"ok": False, "message": "oMLX failed", "next_action": "Fix oMLX, then rerun."},
+        "state": state, "cause": "connection", "ref": "local-test",
     }])
 
     assert cli_local.cmd_setup(_args()) == 2
-    assert capsys.readouterr().out == "oMLX failed\nFix oMLX, then rerun.\n"
+    assert capsys.readouterr().out == "Check the connection, then retry. Reference: local-test\nRun `corsia local setup` again.\n"
 
 
 def test_local_setup_idle_flight_while_following_means_the_server_restarted(monkeypatch, capsys):
     import cli_local
 
     _patch_follow(monkeypatch, [
-        {"state": "running", "stage": "Installing", "result": None},
-        {"state": "idle", "stage": None, "result": None},
+        {"state": "starting"},
+        {"state": "stopped"},
     ])
 
     assert cli_local.cmd_setup(_args()) == 2
     output = capsys.readouterr().out
-    assert "no longer running" in output and "restarted" in output
+    assert "Local setup stopped." in output
     assert "Run `corsia local setup` again." in output
 
 
@@ -168,7 +170,7 @@ def test_start_only_returns_a_distinct_status_without_following(monkeypatch, cap
 def test_automatic_setup_prints_why_a_limited_subscription_falls_back_to_local(monkeypatch, capsys):
     import cli_local
 
-    _patch_follow(monkeypatch, [{"state": "succeeded", "stage": None, "result": {"ok": True}}], post={
+    _patch_follow(monkeypatch, [{"state": "ready"}], post={
         "ok": True, "in_progress": True,
         "notice": "Codex is signed in but has reached its plan limit; it resets at 2099-01-01T12:00:00+00:00.",
     })
@@ -184,7 +186,7 @@ def test_local_setup_follow_timeout_reports_unfinished(monkeypatch, capsys):
     import cli_local
 
     moments = iter([0.0, 0.0, cli_local.FOLLOW_TIMEOUT_SECONDS])
-    _patch_follow(monkeypatch, [{"state": "running", "stage": None, "result": None}])
+    _patch_follow(monkeypatch, [{"state": "starting"}])
     monkeypatch.setattr(cli_local.time, "monotonic", lambda: next(moments))
 
     assert cli_local._follow_server_setup("service-token", "corsia local setup") == 1
@@ -211,13 +213,12 @@ def test_local_setup_still_downloading_exits_twelve_and_says_it_finishes_in_the_
     import cli_local
 
     _patch_follow(monkeypatch, [
-        {"state": "running", "stage": "Downloading", "result": None},
-        {"state": "downloading", "stage": "Still downloading", "result": None},
+        {"state": "starting", "model": "picked-model"},
+        {"state": "downloading", "percent": 25},
     ])
 
     assert cli_local.cmd_setup(_args()) == 12
     assert capsys.readouterr().out == (
-        "Downloading\n"
         "The download keeps going in CORSIA; the app shows its progress.\n"
         "Run `corsia local setup` again to follow it.\n"
     )
@@ -226,20 +227,17 @@ def test_local_setup_still_downloading_exits_twelve_and_says_it_finishes_in_the_
 def test_local_setup_says_an_existing_omlx_is_unchanged(monkeypatch, capsys):
     import cli_local
 
-    _patch_follow(monkeypatch, [
-        {"state": "succeeded", "stage": None, "result": {"ok": True, "existing": True, "models": 2}},
-    ])
+    _patch_follow(monkeypatch, [], post={"ok": True, "existing": True,
+                                         "message": "A local model is already connected. Its settings are unchanged."})
 
     assert cli_local.cmd_setup(_args(automatic=True)) == 0
-    assert capsys.readouterr().out == "Using your oMLX (2 models). Its settings are unchanged.\n"
+    assert capsys.readouterr().out == "A local model is already connected. Its settings are unchanged.\n"
 
 
 def test_local_setup_does_not_call_a_skipped_flight_ready(monkeypatch, capsys):
     import cli_local
 
-    _patch_follow(monkeypatch, [
-        {"state": "succeeded", "stage": None, "result": {"ok": True, "skipped": "x", "message": "No models."}},
-    ])
+    _patch_follow(monkeypatch, [], post={"ok": True, "skipped": "x", "message": "No models."})
 
     assert cli_local.cmd_setup(_args(automatic=True)) == 11
     assert capsys.readouterr().out == "No models.\n"

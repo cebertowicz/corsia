@@ -474,7 +474,8 @@ class TestAppPath:
             "skills/conductor-bootstrap/references/local-model-offer.md",
         ).read_text(encoding="utf-8")
 
-        assert "setup adds no models to it: don't make the offer" in local_offer
+        assert "if a local model is connected, make no offer" in local_offer
+        assert "Existing registered local servers and their models stay in use unchanged" in local_offer
         assert "download lands in the person's oMLX" not in local_offer
         assert "When it is empty, leave out the first sentence." in reference
         assert "if you have a [Claude | ChatGPT] subscription" in reference

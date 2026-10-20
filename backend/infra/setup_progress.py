@@ -23,8 +23,6 @@ KEY = "setup_progress"
 STEPS = frozenset({"models", "local-consent"})
 #: What Welcome asks the person to check: the two subscriptions and a pay-as-you-go key.
 PICKS = ("claude", "chatgpt", "key")
-#: Terminal setup-download wakes that must survive completing before the first chat is rendered.
-LOCAL_DOWNLOAD_WAKES = "local_download_wakes"
 
 
 class SetupProgressError(ValueError):
@@ -82,38 +80,4 @@ def update(
             record["handoff"] = handoff
         if completed:
             record["setup_completed"] = True
-        set_setting(KEY, record, db=connection)
-
-
-def record_local_download_wake(delivery_id: str, payload: dict, *, db: sqlite3.Connection | None = None) -> None:
-    """Durably enqueue one normalized terminal setup-download outcome, idempotently."""
-    with write_transaction(db, scope="setup_progress_local_download_enqueue") as connection:
-        record = read(db=connection) or {}
-        wakes = record.get(LOCAL_DOWNLOAD_WAKES)
-        wakes = dict(wakes) if isinstance(wakes, dict) else {}
-        wakes.setdefault(delivery_id, payload)
-        record[LOCAL_DOWNLOAD_WAKES] = wakes
-        set_setting(KEY, record, db=connection)
-
-
-def pending_local_download_wakes(*, db: sqlite3.Connection | None = None) -> dict[str, dict]:
-    """The persisted terminal outcomes that no successful event delivery has settled yet."""
-    wakes = (read(db=db) or {}).get(LOCAL_DOWNLOAD_WAKES)
-    return {key: value for key, value in wakes.items() if isinstance(key, str) and isinstance(value, dict)} \
-        if isinstance(wakes, dict) else {}
-
-
-def settle_local_download_wake(delivery_id: str, *, db: sqlite3.Connection | None = None) -> None:
-    """Remove a wake only after event delivery confirms it; a later retry then cannot duplicate it."""
-    with write_transaction(db, scope="setup_progress_local_download_settle") as connection:
-        record = read(db=connection) or {}
-        wakes = record.get(LOCAL_DOWNLOAD_WAKES)
-        if not isinstance(wakes, dict) or delivery_id not in wakes:
-            return
-        updated = dict(wakes)
-        del updated[delivery_id]
-        if updated:
-            record[LOCAL_DOWNLOAD_WAKES] = updated
-        else:
-            record.pop(LOCAL_DOWNLOAD_WAKES, None)
         set_setting(KEY, record, db=connection)

@@ -4,15 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from llm.local_setup import terminal_outcome
 from llm.local_setup_results import CAUSES as _SAFE_CAUSES
-
-_LIVE_STATES = frozenset({"downloading", "stopped", "failed", "starting", "setup_failed", "start_failed", "ready"})
 
 
 def normalize(status: dict[str, Any]) -> dict[str, Any]:
     """Keep only the action-relevant local state; installer text and credentials never escape."""
-    state = status.get("state")
-    if state in _LIVE_STATES:
+    state = terminal_outcome({"state": status.get("state")})
+    if state != "stopped":
         detail: dict[str, Any] = {"state": state}
         model = status.get("model")
         if isinstance(model, str) and model:

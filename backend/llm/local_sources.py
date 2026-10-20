@@ -10,7 +10,9 @@ import re
 from typing import Any
 
 from llm.catalog import list_models
-from llm.managed_omlx_binary import is_corsia_managed_server, managed_omlx_executable
+from llm.managed_omlx_binary import managed_omlx_executable
+from llm.locality import endpoint_on_this_mac
+from llm.network_endpoints import endpoint_base, get_endpoints
 from llm.local_setup_ownership import omlx_on_path
 from llm.local_setup_gates import local_memory_ok
 from llm.local_profiles import format_size
@@ -69,11 +71,25 @@ def _project_local_flight(result: dict[str, Any], flight: dict[str, Any] | None)
         )
 
 
-def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:
-    """A managed server decides; only with none is this host's binary asked.
+def local_omlx_servers() -> list[dict]:
+    """Every registered oMLX row with a loopback endpoint, regardless of its install origin."""
+    return [server for server in get_servers(provider="omlx")
+            if server.get("status") != "disabled" and any(
+                endpoint_on_this_mac(endpoint_base(
+                    parse_server_metadata(server["id"], server.get("metadata_json")) or {},
+                    host=ep["host"], port=server.get("port"),
+                )) for ep in get_endpoints(server["id"]))]
 
-    A managed server is registered by host and port, so it may be remote.
-    """
+
+def connected_local_server() -> dict | None:
+    """An existing local server that is online and has a usable catalog model."""
+    available, _enabled = catalog_membership()
+    return next((server for server in local_omlx_servers()
+                 if server.get("status") == "online" and f"omlx@{server['id']}" in available), None)
+
+
+def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:
+    """Project every local server row; only with none is this host's binary asked."""
     from llm.local_setup import (
         download_estimate, setup_failure, setup_kind, setup_stage,
         setup_stopped_following,
@@ -105,12 +121,11 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
         eta_seconds, stalled = download_estimate()
         result["download_eta_seconds"] = eta_seconds
         result["download_stalled"] = stalled
-        result["setup_downloading"] = flight["state"] == "downloading"
+        result["setup_downloading"] = flight is not None and flight["state"] == "downloading"
         _project_local_flight(result, flight)
         return result
     name = "Local model"
-    servers = [s for s in get_servers(provider="omlx")
-               if is_corsia_managed_server(s) and s.get("status") != "disabled"]
+    servers = local_omlx_servers()
     if not servers:
         if managed_omlx_executable() is None and omlx_on_path() is None:
             result = starter_source("not_installed", "oMLX is not installed", "Install oMLX")
@@ -165,7 +180,7 @@ def external_sources(membership: tuple[set[str], set[str]] | None = None) -> lis
 
 
 def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:
-    """The CORSIA-managed local source row and its active download state."""
+    """The registered local source row and its active download state."""
     from llm.local_setup import flight_model, setup_kind, setup_stage
 
     result = _omlx_state(membership)

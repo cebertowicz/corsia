@@ -148,7 +148,7 @@
 			const response = await fetch('/api/setup/local-download');
 			if (!response.ok) return;
 			const live = await response.json();
-			preauthLocal = { source: 'omlx', name: live.model ?? 'Local model', state: 'needs_setup', local_state: live.state,
+			preauthLocal = { source: 'omlx', name: live.model ?? 'Local model', state: live.state, local_state: live.state,
 				setup_downloading: live.state === 'downloading', setup_stage: live.state === 'starting' ? 'starting' : undefined,
 				download_percent: live.percent, download_eta_seconds: live.eta_seconds, download_size: live.download_size, download_stalled: live.stalled,
 				setup_error: ['failed', 'setup_failed', 'start_failed'].includes(live.state) ? live.cause ?? live.state : undefined,

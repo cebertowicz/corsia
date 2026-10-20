@@ -67,8 +67,7 @@ def _backend_refused(error: OSError) -> bool:
 
 
 def _follow_server_setup(token: str, command: str) -> int:
-    """Print each stage once and settle on the server's setup flight record."""
-    seen_stages: set[str] = set()
+    """Follow the server's state vocabulary; downloading is the only exit-12 outcome."""
     deadline = time.monotonic() + FOLLOW_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         try:
@@ -79,30 +78,24 @@ def _follow_server_setup(token: str, command: str) -> int:
                 "next_action": f"Run `{command}` again after the backend is available.",
             })
         state = flight.get("state")
-        if state == "succeeded":
-            result = flight.get("result") or {}
-            if result.get("skipped"):
-                return _print_skipped(result)
-            models = result.get("models")
-            if result.get("existing") and isinstance(models, int):
-                noun = "model" if models == 1 else "models"
-                print(f"Using your oMLX ({models} {noun}). Its settings are unchanged.")
-            else:
-                print("Local model is ready.")
+        if state == "ready":
+            print("Local model is ready.")
             return 0
         if state == "downloading":
-            return _print_still_downloading(flight.get("result") or {}, command)
-        if state == "failed":
-            return _print_terminal_error(flight.get("result") or {})
-        if state == "idle":
-            return _print_terminal_error({
-                "message": "Local setup is no longer running; the CORSIA server may have restarted.",
-                "next_action": f"Run `{command}` again.",
-            })
-        stage = flight.get("stage")
-        if isinstance(stage, str) and stage not in seen_stages:
-            print(stage)
-            seen_stages.add(stage)
+            return _print_still_downloading(flight, command)
+        if state in {"failed", "setup_failed", "start_failed", "stopped"}:
+            cause = flight.get("cause")
+            message = {
+                "disk_full": f"Free {flight.get('bytes_to_free') or 'disk space'} bytes, then retry.",
+                "connection": "Check the connection, then retry.",
+                "memory": "Choose a subscription or API provider instead.",
+                "own_omlx_upgrade_required": "Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX.",
+            }.get(cause, "Local setup stopped." if state == "stopped" else "Local setup failed. Retry, or save a report.")
+            if flight.get("ref"):
+                message += f" Reference: {flight['ref']}"
+            return _print_terminal_error({"message": message, "next_action": f"Run `{command}` again."})
+        if state != "starting":
+            return _print_terminal_error({"message": "The server returned an unknown local setup state."})
         time.sleep(FOLLOW_INTERVAL_SECONDS)
     return _print_still_running(command)
 
@@ -127,8 +120,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
     except urllib.error.HTTPError as error:
         if _consent_required(error):
             return _print_terminal_error({
-                "message": "CORSIA needs your permission to inspect the existing oMLX.",
-                "next_action": "Open the CORSIA app and choose Use it in local model setup.",
+                "message": "Another oMLX is running.",
+                "next_action": "Open the CORSIA app and choose whether to stop it or keep both running.",
             })
         return _print_terminal_error({
             "message": f"Local setup could not start on the backend: {error}",
@@ -155,6 +148,9 @@ def cmd_setup(args: argparse.Namespace) -> int:
         return _print_terminal_error(result)
     if result.get("skipped"):
         return _print_skipped(result)
+    if result.get("existing"):
+        print(result.get("message") or "A local model is already connected. Its settings are unchanged.")
+        return 0
     if result.get("notice"):
         print(result["notice"])
     if args.start_only:

@@ -14,7 +14,7 @@ import pytest
 async def test_register_managed_server_preserves_existing_rows(isolated_db, monkeypatch, tmp_path) -> None:
     from infra.db_async import run_in_db
     from llm import network_discovery as discovery
-    from llm.managed_omlx_binary import is_corsia_managed_server, reserve_managed_omlx_port
+    from llm.managed_omlx_binary import reserve_managed_omlx_port
     from llm.managed_omlx_binary import marker_path
     from llm.local_setup_runtime import LOCAL_SERVER_NAME, register_managed_server
 
@@ -36,7 +36,8 @@ async def test_register_managed_server_preserves_existing_rows(isolated_db, monk
 
     registered = await run_in_db(discovery.get_server, server_id)
     assert registered is not None
-    assert is_corsia_managed_server(registered)
+    assert registered["instance_id"] == "corsia-managed"
+    assert discovery.get_server_metadata(server_id)["base_path"] == str(paths.base_path)
     assert (await run_in_db(discovery.get_server, legacy_managed))["status"] == "online"
     assert (await run_in_db(discovery.get_server, foreign_external))["status"] == "online"
 
@@ -215,30 +216,22 @@ def test_lan_omlx_added_in_settings_keeps_routing_after_retirement(isolated_db, 
     {"provider": "omlx", "kind": "managed", "instance_id": "corsia-managed"},
     {"provider": "ollama", "kind": "managed", "instance_id": "127.0.0.1:11434"},
 ])
-def test_unproven_rows_are_not_claimed(row) -> None:
-    from llm.managed_omlx_binary import is_corsia_managed_server
+def test_row_metadata_does_not_establish_process_ownership(row, monkeypatch, tmp_path) -> None:
+    from llm.providers.omlx_supervisor import is_corsia_process
 
-    assert not is_corsia_managed_server(row)
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    assert not is_corsia_process(101)
 
 
-def test_only_state_root_row_is_corsia_managed() -> None:
-    from infra.config import STATE_ROOT
-    from llm.managed_omlx_binary import is_corsia_managed_server
+def test_supervisor_spawn_record_survives_a_new_identity_read(monkeypatch, tmp_path) -> None:
+    from llm.providers import omlx_supervisor as supervisor
 
-    base = STATE_ROOT / "managed-omlx"
-    row = {
-        "provider": "omlx", "kind": "managed", "instance_id": "corsia-managed",
-        "host": "127.0.0.1",
-    }
-    metadata = {
-        "corsia_managed": True,
-        "base_path": str(base),
-        "model_dir": str(base / "models"),
-    }
-
-    assert is_corsia_managed_server(row, metadata)
-    assert not is_corsia_managed_server({**row, "instance_id": "legacy"}, metadata)
-    assert not is_corsia_managed_server(row, {**metadata, "base_path": "/tmp/foreign"})
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    supervisor._write_pid("managed", 107)
+    assert supervisor._pid_path("managed").parent == tmp_path / "managed-omlx"
+    assert supervisor.is_corsia_process(107)
+    supervisor._clear_pid("managed")
+    assert not supervisor.is_corsia_process(107)
 
 
 # Process identity is produced by managed; the choice owner executes its exact set.
@@ -324,15 +317,23 @@ def test_stop_mine_falls_back_to_a_signal_when_launchd_is_unreadable(monkeypatch
     assert signals == [101]
 
 
-def test_legacy_brew_service_is_offered_as_another_omlx(monkeypatch, tmp_path) -> None:
-    from llm import local_setup_foreign as foreign, managed_omlx_binary as managed
+def test_registered_legacy_brew_service_is_never_offered_to_stop(isolated_db, monkeypatch, tmp_path) -> None:
+    from llm import local_setup_foreign as foreign, managed_omlx_binary as managed, network_discovery as discovery
+    from llm import local_sources
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
     (tmp_path / "local_setup_installed_omlx").write_text("legacy\n")
+    sid = discovery.upsert_server(provider="omlx", instance_id="127.0.0.1:8000", instance_name="This Mac",
+                                  host="127.0.0.1", port=8000, status="online", kind="managed")
+    _model_row("legacy-model", f"omlx@{sid}/someone/model", "someone/model")
     _fake_commands(monkeypatch, launchctl_list="PID\tStatus\tLabel\n101\t0\thomebrew.mxcl.omlx\n", record=[])
-    processes = managed.foreign_omlx_processes()
-    assert processes is not None and [p.pid for p in processes] == [101]
-    assert foreign.apply_foreign_omlx_choice() == "consent_required"
+    monkeypatch.setattr("llm.providers.omlx_process.port_owner_pid", lambda host, port: 101)
+    monkeypatch.setattr(foreign.os, "kill", lambda *_args: pytest.fail("registered server must never stop"))
+    assert managed.foreign_omlx_processes() == ()
+    assert foreign.apply_foreign_omlx_choice() is None
+    assert foreign.apply_foreign_omlx_choice(other_omlx="stop") is None
+    assert local_sources.omlx_source()["state"] == "ready"
+    assert not foreign.foreign_omlx_choice_path().exists()
 
 
 def test_stop_child_omlx_never_unloads_its_parent_app(monkeypatch) -> None:

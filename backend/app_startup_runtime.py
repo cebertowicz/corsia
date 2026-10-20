@@ -51,8 +51,10 @@ async def resume_local_setup() -> None:
     Each step is independent and none can stop the app: a failure is logged and
     local inference reports its own state.
     """
-    from loguru import logger
+    import logging
 
+    from infra.failure_reference import new_reference
+    from llm.local_setup import record_resume_failure
     from llm.local_model import backfill_legacy_record
     from llm.local_setup_new_omlx import resume_pending_setup
     from onboarding.local_download_wake import resume_pending_local_download
@@ -66,8 +68,11 @@ async def resume_local_setup() -> None:
     for label, step in steps:
         try:
             await step()
-        except Exception as exc:
-            logger.warning(f"Local setup startup step failed ({label}): {exc}")
+        except Exception:
+            ref = new_reference("local")
+            logging.getLogger(__name__).warning("Local setup startup step failed (%s) reference=%s", label, ref, exc_info=True)
+            if step is resume_pending_local_download:
+                record_resume_failure(ref)
 
 
 

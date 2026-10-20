@@ -19,7 +19,6 @@ import subprocess
 
 from packaging.version import InvalidVersion, Version
 
-from llm.local_setup_ownership import installed_omlx
 from llm.managed_omlx_binary import managed_omlx_executable
 from llm.providers.omlx_endpoints import OmlxAdminError, admin_request, setup_admin_key
 
@@ -57,11 +56,6 @@ def omlx_version() -> str | None:
     return _omlx_version(managed_omlx_executable() or "omlx")
 
 
-def existing_omlx_version() -> str | None:
-    """Return the person's PATH oMLX version without changing it."""
-    return _omlx_version(installed_omlx())
-
-
 def omlx_version_is_compatible(version: str | None) -> bool:
     """Whether a reported oMLX version keeps auth loopback-only and runs the starter model."""
     return Version(version) >= MINIMUM_OMLX if version is not None else False
@@ -70,19 +64,6 @@ def omlx_version_is_compatible(version: str | None) -> bool:
 def _omlx_supports_loopback_auth(version: str | None = None) -> bool:
     """Whether the installed oMLX preserves auth when its bind later changes."""
     return omlx_version_is_compatible(omlx_version() if version is None else version)
-
-
-def foreign_omlx_failure() -> str | None:
-    """Explain why a person's oMLX cannot be adopted without touching it."""
-    version = existing_omlx_version()
-    if version is None:
-        if not installed_omlx():
-            return None  # absent or a broken leftover: the caller installs one instead
-        return "oMLX didn't answer in time. Try again."
-    if not omlx_version_is_compatible(version):
-        minimum = ".".join(map(str, MINIMUM_OMLX.release))
-        return f"Your oMLX is {version}; CORSIA needs {minimum} or newer. Update it, then Try again."
-    return None
 
 
 def _loopback_only(hosts: object) -> bool:
@@ -101,25 +82,6 @@ def _loopback_only(hosts: object) -> bool:
         if not (address.is_loopback or (mapped is not None and mapped.is_loopback)):
             return False
     return True
-
-
-async def registered_local_key(host: str, port: int) -> str | None:
-    """The key already registered for this local oMLX, so a retry reuses it."""
-    from infra.db_async import run_in_db
-    from infra.database import get_db
-    from infra.key_store_servers import resolve_server
-
-    def _lookup() -> str | None:
-        row = get_db().execute(
-            "SELECT id FROM network_servers WHERE provider = ? AND instance_id = ?",
-            ("omlx", f"{host}:{port}"),
-        ).fetchone()
-        if not row:
-            return None
-        key = resolve_server(row["id"])
-        return str(key) if key else None
-
-    return await run_in_db(_lookup)
 
 
 async def secure_local_omlx(server_id: str, key: str) -> None:

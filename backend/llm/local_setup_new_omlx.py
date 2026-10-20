@@ -18,6 +18,12 @@ from llm.local_setup_runtime import configure_model_settings, start_managed_omlx
 
 async def _setup_new_omlx(report: Callable[[str], None], events: list[str],
                          model: LocalModel | None = None) -> dict:
+    from llm.local_sources import connected_local_server
+
+    connected = await asyncio.to_thread(connected_local_server)
+    if connected is not None:
+        return {"ok": True, "existing": True, "server_id": connected["id"],
+                "message": "A local model is already connected. Its settings are unchanged.", "progress": events}
     await prepare.join()
     server_id, port = await start_managed_omlx(report)
     model = model or prepare.picked_model()
@@ -66,8 +72,9 @@ async def _run_flight(*, model: LocalModel | None = None,
         if isinstance(exc, DiskSpaceError):
             result["bytes_to_free"] = exc.bytes_to_free
         ls._emit("failed", cause=cause, ref=ref)
+    ls.finish_flight(result)
     await ls._notify_terminal_setup_download(result)
-    return ls.finish_flight(result)
+    return result
 
 
 async def _resume(operation: local_setup_operation.Operation) -> dict:
@@ -75,6 +82,8 @@ async def _resume(operation: local_setup_operation.Operation) -> dict:
     if operation.kind == "settings":
         from llm.local_settings_download import _run_flight as settings_flight
 
+        if operation.model is None:
+            raise ValueError("a Settings download needs its selected model")
         return await settings_flight(operation.model)
     return await _run_flight(model=operation.model)
 
@@ -85,6 +94,9 @@ async def resume_pending_setup() -> bool:
         return True
     operation = local_setup_operation.read()
     if operation is None:
+        return False
+    if operation.result is not None and not operation.result.get("downloading"):
+        ls.restore_terminal_flight(operation)
         return False
     if operation.kind not in {"setup", "starter", "settings"} or not await asyncio.to_thread(local_memory_ok):
         ls.log.warning("discarding local setup recovery record: invalid kind or insufficient memory")
@@ -100,10 +112,19 @@ async def begin_local_setup(*, no_subscription_only: bool = False,
     """Start setup, or report its existing operation and eligibility decision."""
     if ls._running():
         return ls._in_progress_result()
-    if local_setup_operation.read() is not None:
+    operation = local_setup_operation.read()
+    if operation is not None and (operation.result is None or operation.result.get("downloading")):
         if await resume_pending_setup():
             return ls._in_progress_result()
         return local_setup_error("CORSIA could not resume the local model setup safely.")
+    from llm.local_sources import connected_local_server
+
+    connected = await asyncio.to_thread(connected_local_server)
+    if connected is not None:
+        if not ls._claim_operation("setup"):
+            return ls._in_progress_result()
+        return ls.finish_flight({"ok": True, "existing": True, "server_id": connected["id"],
+                                 "message": "A local model is already connected. Its settings are unchanged."})
     memory_ok = await asyncio.to_thread(local_memory_ok)
     ls.clear_result()
     subscription = await subscription_available() if no_subscription_only else None
@@ -137,7 +158,8 @@ async def begin_settings_download(model: LocalModel) -> dict:
 
     if ls._running():
         return ls._in_progress_result()
-    if local_setup_operation.read() is not None:
+    operation = local_setup_operation.read()
+    if operation is not None and (operation.result is None or operation.result.get("downloading")):
         if await resume_pending_setup():
             return ls._in_progress_result()
         return {"ok": False, "reason": "recovery_failed", "message": "Couldn't resume the local model download. Try again."}

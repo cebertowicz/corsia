@@ -52,12 +52,6 @@ def omlx_on_path() -> str | None:
     return None if path is None or managed.is_managed_omlx_executable(path) else path
 
 
-def installed_omlx() -> str | None:
-    """Return a runnable PATH oMLX; broken leftover entry points count as absent."""
-    path = omlx_on_path()
-    return None if path is None or _is_broken_leftover(path) else path
-
-
 def run_command(command: list[str]) -> None:
     """Run an installer command, streaming only when the CLI owns the terminal."""
     env = {**os.environ, **_COMMAND_ENV}
@@ -83,15 +77,15 @@ def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False, 
     """Use the bundled executable, install an absent one, or repair a managed source install."""
     if managed.managed_omlx_executable() is not None:
         return
-    current = installed_omlx()
+    current = omlx_on_path()
     brew = shutil.which("brew")
-    if current is None and brew and managed.marker_path().exists():
-        existing = omlx_on_path()
-        try:
-            if existing and managed.setup_owns_current_omlx(brew, existing):
-                current, needs_repair, broken = existing, True, True
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise RuntimeError(homebrew_failure_message("check", exc)) from exc
+    if current is not None:
+        if needs_repair or _is_broken_leftover(current):
+            raise OwnOmlxUpgradeRequired(
+                "Run `brew upgrade jundot/omlx/omlx` (or `brew reinstall jundot/omlx/omlx` "
+                "for a broken installation), then Retry; or install the CORSIA app to use its bundled oMLX."
+            )
+        return
     if current is None:
         if not brew:
             raise RuntimeError("Homebrew is required to install oMLX. Install Homebrew, then retry.")
@@ -108,21 +102,6 @@ def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False, 
             raise RuntimeError(homebrew_failure_message("install", exc)) from exc
         managed.mark_installed_by_setup()
         return
-    if not needs_repair:
-        return
-    try:
-        owned = bool(brew) and managed.setup_owns_current_omlx(str(brew), current)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError(homebrew_failure_message("check", exc)) from exc
-    if not owned:
-        raise OwnOmlxUpgradeRequired("Update your oMLX, then Retry.")
-    progress("Updating oMLX")
-    try:
-        run_command([str(brew), "tap", "jundot/omlx", "https://github.com/jundot/omlx"])
-        run_command([str(brew), "update"])
-        run_command([str(brew), "reinstall" if broken else "upgrade", managed.OMLX_FORMULA])
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError(homebrew_failure_message("reinstall" if broken else "update", exc)) from exc
 
 
 _LOG_ERROR = re.compile(r"^(ERROR|CRITICAL)\b| - (ERROR|CRITICAL) - |^\w*(Error|Exception):")

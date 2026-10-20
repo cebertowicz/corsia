@@ -106,7 +106,8 @@ def test_get_started_downloads_the_pick_and_every_reader_sees_that_model(monkeyp
     assert path == f"/models/{repository.split('/')[1]}/settings" and settings["max_context_window"] == window
     recorded = local_model.set_up_model()
     assert (recorded.repository, recorded.context_window) == (repository, window)
-    assert local_setup_operation.read() is None
+    operation = local_setup_operation.read()
+    assert operation.repository == repository and operation.result == result and operation.downloaded
     # A later server process has no prepare state; it reads the same model from the record.
     monkeypatch.setattr(prepare, "_prepare", prepare._Prepare())
     assert asyncio.run(prepare.pick_view())["model"]["repository"] == repository
@@ -262,7 +263,9 @@ def test_a_flight_whose_recommender_never_answers_fails_without_downloading(monk
     result = asyncio.run(_flown())
 
     assert result["ok"] is False and "Couldn't get model recommendations from oMLX" in result["message"]
-    assert mac.downloads == [] and local_setup_operation.read() is None
+    assert mac.downloads == []
+    operation = local_setup_operation.read()
+    assert operation.repository is None and operation.result == result and not operation.downloaded
 
 
 def test_an_omlx_without_the_recommender_cannot_check(monkeypatch):

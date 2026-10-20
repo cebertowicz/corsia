@@ -811,7 +811,7 @@ class TestRecheck:
         assert client.post("/api/providers/local/setup", json={"onboarding": True}).status_code == 200
         assert calls[-1]["onboarding"] is True
 
-    def test_local_setup_route_reuses_keep_both_after_a_pid_change_and_excludes_unmanaged_rows(
+    def test_local_setup_route_reuses_keep_both_after_a_pid_change_and_keeps_local_rows(
             self, isolated_db, client, monkeypatch, tmp_path):
         from llm import local_setup_foreign, local_sources, network_discovery
         from llm.managed_omlx_binary import OmlxProcess
@@ -837,7 +837,7 @@ class TestRecheck:
         assert client.post("/api/providers/local/setup", json={"other_omlx": "keep"}).status_code == 200
         current["pid"] = 4243
         assert client.post("/api/providers/local/setup").status_code == 200
-        assert _sources(client)["omlx"]["state"] == "not_installed"
+        assert _sources(client)["omlx"]["state"] == "ready"
         # A manually added loopback row remains routable across setup checks.
 
         assert f"omlx@{foreign}" in set().union(*local_sources.catalog_membership())
@@ -885,7 +885,7 @@ class TestRecheck:
         assert client.post("/api/providers/local/setup", json={"other_omlx": "keep"}).status_code == 200
         assert choice.read_text(encoding="utf-8") == '{"choice": "keep", "pids": [4242], "applied": true}'
 
-    def test_local_setup_route_applies_a_legacy_stop_choice_to_its_exact_pid_once(
+    def test_local_setup_route_rejects_an_unreleased_boolean_stop_choice(
             self, isolated_db, client, monkeypatch, tmp_path):
         from llm import local_setup_foreign
         from llm.managed_omlx_binary import OmlxProcess
@@ -908,9 +908,9 @@ class TestRecheck:
             return {"ok": True, "in_progress": True}
 
         monkeypatch.setattr("llm.local_setup_new_omlx.begin_local_setup", begin)
-        assert client.post("/api/providers/local/setup").status_code == 200
-        assert stops == [offered()]
-        assert choice.read_text(encoding="utf-8") == '{"choice": "stop", "pids": [4242], "applied": true}'
+        assert client.post("/api/providers/local/setup").status_code == 409
+        assert stops == []
+        assert choice.read_text(encoding="utf-8") == '{"choice": null, "pids": [4242], "applied": false}'
 
     def test_local_setup_route_never_applies_a_remembered_choice_to_a_changed_pid(
             self, isolated_db, client, monkeypatch, tmp_path):

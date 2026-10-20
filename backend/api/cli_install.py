@@ -6,7 +6,6 @@ import asyncio
 import logging
 import os
 import re
-from infra.failure_reference import new_reference
 import signal
 import subprocess
 import tempfile
@@ -24,6 +23,7 @@ from api.provider_sources import recheck_sources_once
 from cli_location import login_shell_binary, package_manager_for, path_shadowed_binary, service_binary, service_path
 from connections.vendor_accounts import VENDORS
 from infra.auth import require_user
+from infra.failure_reference import new_reference
 from infra.state.ws import schedule_models_changed
 
 router = APIRouter(prefix="/api/providers/cli", tags=["providers"])

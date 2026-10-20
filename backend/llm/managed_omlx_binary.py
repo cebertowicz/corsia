@@ -59,14 +59,6 @@ def command_output(command: list[str]) -> str:
     return subprocess.run(command, check=True, capture_output=True, text=True, timeout=30).stdout.strip()
 
 
-def setup_owns_current_omlx(brew: str, omlx: str) -> bool:
-    """Prove both the managed-install record and the executable's current brew keg."""
-    if not marker_path().exists() or not command_output([brew, "list", "--versions", OMLX_FORMULA]):
-        return False
-    prefix = command_output([brew, "--prefix", OMLX_FORMULA])
-    return bool(prefix) and Path(omlx).resolve().is_relative_to(Path(prefix).resolve())
-
-
 @dataclass(frozen=True)
 class ManagedOmlxPaths:
     """Filesystem locations belonging exclusively to the managed server."""
@@ -118,23 +110,6 @@ def reserve_managed_omlx_port() -> tuple[ManagedOmlxPaths, int]:
     return paths, port
 
 
-def is_corsia_managed_server(server: dict, metadata: dict | None = None) -> bool:
-    """Identify only a private managed row, without process, filesystem or brew probes."""
-    if (server.get("provider") != "omlx" or server.get("kind") != "managed"
-            or server.get("instance_id") != MANAGED_INSTANCE_ID):
-        return False
-    if metadata is None:
-        raw = server.get("metadata_json")
-        try:
-            metadata = json.loads(raw) if isinstance(raw, str) else {}
-        except ValueError:
-            return False
-    if not isinstance(metadata, dict) or metadata.get("corsia_managed") is not True:
-        return False
-    paths = managed_omlx_paths()
-    return metadata.get("base_path") == str(paths.base_path) and metadata.get("model_dir") == str(paths.model_dir)
-
-
 @dataclass(frozen=True)
 class OmlxProcess:
     """One oMLX server; its label names a job only if that job's PID is this PID."""
@@ -170,20 +145,10 @@ def _serve_argv(argv: list[str]) -> list[str] | None:
     return None
 
 
-def _managed_argv(argv: list[str]) -> bool:
-    value = ""
-    for index, token in enumerate(argv):
-        if token == "--base-path":
-            value = argv[index + 1] if index + 1 < len(argv) else ""
-        elif token.startswith("--base-path="):
-            value = token.partition("=")[2]
-    return bool(value) and Path(value).expanduser().is_absolute() and (
-        Path(value).expanduser().resolve() == managed_omlx_paths().base_path.resolve()
-    )
-
-
 def omlx_processes() -> tuple[OmlxProcess, ...] | None:
-    """Inspect same-user servers; exact private base-path proves managed ownership."""
+    """Inspect same-user servers; only the spawning supervisor proves ownership."""
+    from llm.providers.omlx_supervisor import is_corsia_process
+
     parsed = []
     current_uid = os.getuid()
     try:
@@ -207,11 +172,19 @@ def omlx_processes() -> tuple[OmlxProcess, ...] | None:
     if not parsed:
         return ()
     jobs = launchd_jobs() or {}
-    return tuple(OmlxProcess(pid, parent, jobs.get(pid), "managed" if _managed_argv(argv) else "personal")
-                 for pid, parent, argv in parsed)
+    return tuple(OmlxProcess(pid, parent, jobs.get(pid), "managed" if is_corsia_process(pid) else "personal")
+                 for pid, parent, _argv in parsed)
 
 
 def foreign_omlx_processes() -> tuple[OmlxProcess, ...] | None:
-    """All personal oMLX processes, or None if inspection failed."""
+    """Unsupervised processes not serving a registered local endpoint; None if unreadable."""
+    from llm.local_sources import local_omlx_servers
+    from llm.network_endpoints import get_endpoints
+    from llm.providers.omlx_process import port_owner_pid
+
     processes = omlx_processes()
-    return None if processes is None else tuple(p for p in processes if p.owner == "personal")
+    if processes is None:
+        return None
+    in_use = {port_owner_pid(ep["host"], int(server["port"]))
+              for server in local_omlx_servers() for ep in get_endpoints(server["id"])}
+    return tuple(p for p in processes if p.owner == "personal" and p.pid not in in_use)
