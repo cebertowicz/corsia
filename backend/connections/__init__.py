@@ -109,6 +109,15 @@ def binary_from_config(provider: str, cfg: dict) -> str | None:
     return None  # None -> not_installed
 
 
+def agent_binary_from_config(cfg: dict) -> str | None:
+    """Resolve the agents' GitHub executable, including their prior verified CORSIA install."""
+    if binary := binary_from_config("github", cfg):
+        return binary
+    from tools.managed_runtime import installed_command_path
+
+    return installed_command_path("gh")
+
+
 def seed_builtin_connections(*, db=None) -> int:
     """Detect installed CLI connectors on PATH and upsert their records.
 

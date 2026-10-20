@@ -6,10 +6,30 @@ LOCAL_APP_NOTICE = (
     "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. "
     "Connect only apps you trust."
 )
+_RUNTIME_NOTICE = {
+    "node": ("Node", "nodejs.org"),
+    "uv": ("uv", "GitHub"),
+    "gh": ("GitHub CLI", "GitHub"),
+}
 
 
 def local_app_notice(config: object) -> str | None:
-    return LOCAL_APP_NOTICE if isinstance(config, dict) and isinstance(config.get("command"), str) else None
+    """Return the approval disclosure, including only a pending pinned download."""
+    if not isinstance(config, dict) or not isinstance(config.get("command"), str):
+        return None
+    notice = LOCAL_APP_NOTICE
+    configured_env = config.get("env")
+    path = configured_env.get("PATH") if isinstance(configured_env, dict) else None
+    if not isinstance(path, str):
+        path = None
+    from tools.managed_runtime import runtime_fetch_plan
+
+    plan = runtime_fetch_plan(config["command"], path=path)
+    if plan is None:
+        return notice
+    kind, _pin = plan
+    label, maker = _RUNTIME_NOTICE[kind]
+    return f"{notice} CORSIA will download {label} from {maker} to run it."
 
 
 def _transport(config: object) -> str | None:
