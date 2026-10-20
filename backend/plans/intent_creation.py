@@ -17,7 +17,7 @@ def prepare(db, plan_id: str, params: dict, *, workflow_version: str | None, ope
     acting = actor.thread_id if actor.kind == "thread" else None
     resolved_words = intent_words.resolve_words(db, plan_id, requested_words, actor_id=acting)
     if (
-        created["kind"] == "task" and inherited is None
+        actor.kind == "thread" and created["kind"] == "task" and inherited is None
         and not intent_words.has_person_origin(db, actor.turn_id)
         and not any(word["author"] == "person" and word["role"] == "authority" for word in resolved_words)
     ):

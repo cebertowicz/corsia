@@ -8,7 +8,7 @@ import pytest
 from infra.db_fts import _init_messages_fts
 from infra.input_admission import accept_thread_input
 from plans import intent_words, service
-from plans.boundary import mutate
+from plans.boundary import PlanActor, mutate
 from tests.plan_scene import ACTOR, db  # noqa: F401
 
 
@@ -118,6 +118,28 @@ def test_add_and_insert_require_authority_when_no_person_origin(db, operation):
     assert str(refusal.value) == (
         "task creation needs intent_words with an exact person quote and role: authority"
     )
+
+
+def test_human_add_requires_intent_but_not_an_authority_quote(db):
+    plan = service.ensure_plan("thread", "root", db=db)
+    human = PlanActor(None, "user-1", None, kind="user")
+
+    with pytest.raises(service.PlanInputError, match="task creation requires intent"):
+        mutate(
+            plan.id, "add",
+            {"title": "Ungrounded", "acceptance_criteria": "It is grounded", "size": "S"},
+            actor=human, provenance="test", mutation_id="human-intent-required", db=db,
+        )
+
+    result = mutate(
+        plan.id, "add", {
+            "title": "Human task", "acceptance_criteria": "Outcome is checked", "size": "S",
+            "intent": "The authenticated person created this task",
+        },
+        actor=human, provenance="test", mutation_id="human-creates-task", db=db,
+    ).result
+
+    assert result["node"]["intent"] == "The authenticated person created this task"
 
 
 def test_intent_and_quote_byte_limits_and_paraphrase_refusal(db):

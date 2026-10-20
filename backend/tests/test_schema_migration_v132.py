@@ -15,6 +15,7 @@ def _dev_131() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     initialize_schema(db)
+    db.execute("DROP INDEX idx_plan_nodes_intent_node")
     db.execute("ALTER TABLE plan_nodes DROP COLUMN intent_node_id")
     db.execute("ALTER TABLE plan_nodes DROP COLUMN intent")
     db.execute("DROP TABLE plan_node_intent_words")
@@ -35,6 +36,7 @@ def test_existing_plan_nodes_survive_the_intent_migration() -> None:
             plan.id,
             title="Existing task",
             kind="task",
+            acceptance_criteria="Existing task remains unchanged",
             db=db,
         )
         db.commit()
