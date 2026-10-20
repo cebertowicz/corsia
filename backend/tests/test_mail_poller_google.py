@@ -6,12 +6,13 @@ import asyncio
 
 import pytest
 
-from connections.connected_accounts import get_account, set_state
+from connections.connected_accounts import get_account
+from connections.account_state import set_state
 from connections.google import client as google_client
-from connections.google import email_screen
+from connections.mail import email_screen
 from connections.google import gmail_read
 from events.connectors import gmail_feed as feed
-from events.connectors import gmail_poller as poller
+from events.connectors import mail_poller as poller
 from google_account_helpers import only_corsia_account
 from infra.database import get_db
 
@@ -309,6 +310,7 @@ async def test_one_account_signed_out_by_google_leaves_the_other_polling(monkeyp
 
     async def added(account_id: str, _start: str):
         if account_id == account:
+            set_state(account_id, google_client.STATUS_NEEDS_SIGN_IN)
             raise google_client.GoogleSignInRejected()
         return feed.HistoryPage((), "b-new")
 
@@ -324,7 +326,7 @@ async def test_one_account_signed_out_by_google_leaves_the_other_polling(monkeyp
 
 
 async def test_a_remove_during_a_poll_stops_every_later_write(monkeypatch, account):
-    from connections.google.account_actions import _remove_locally
+    from connections.account_actions import _remove_locally
 
     _seed_cursor(account)
     delivered = _capture_deliveries(monkeypatch)

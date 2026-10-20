@@ -29,6 +29,7 @@ function render(overrides: Record<string, unknown> = {}) {
 }
 // The recovery drawer is portaled to the body, after the host, so the last match is the drawer's own control, never a closing dialog's.
 const button = (text: string) => [...document.querySelectorAll('button')].filter(button => button.textContent?.trim() === text).at(-1)!;
+const recoveryButton = (text: string) => [...document.body.querySelectorAll<HTMLButtonElement>('[data-adaptive-drawer] button, .popover button')].find(button => button.textContent?.trim() === text)!;
 
 it('keeps the connected line quiet and reports a failed device copy while disconnected', async () => {
 	setup(); render(); expect(host.textContent).not.toContain('Disconnected');
@@ -73,10 +74,10 @@ it('keeps both held texts and candidate copyable and asks before each choice', a
 	}
 	for (const [label, choice] of [['Keep CORSIA text, overwrite the file', 'corsia'], ["Use the file's text, replace CORSIA text", 'file']]) {
 		await vi.waitFor(() => expect(button(label).disabled).toBe(false));
-		button(label).click(); flushSync(); expect(choose).not.toHaveBeenCalled();
+		recoveryButton(label).click(); flushSync(); expect(choose).not.toHaveBeenCalled();
 		button('Cancel').click(); flushSync(); expect(session.held?.file_text).toBe('outside file');
-		button(label).click(); flushSync();
-		const dialog = [...host.querySelectorAll('[role="alertdialog"]')].at(-1)!;
+		recoveryButton(label).click(); flushSync();
+		const dialog = [...document.body.querySelectorAll('.modal[role="alertdialog"]')].at(-1)!;
 		[...dialog.querySelectorAll('button')].find(item => item.textContent?.trim() === label)!.click();
 		await vi.waitFor(() => expect(choose).toHaveBeenCalledWith(choice)); choose.mockClear();
 	}
@@ -85,10 +86,10 @@ it('retains an old-store copy through a cancelled or refused replacement and nev
 	setup(); session.recovery = [{ storeId: 'old', text: 'old local copy' }];
 	const replace = vi.spyOn(session, 'replace').mockRejectedValue(new Error('replace refused')); render();
 	expect(host.textContent).toContain('This document was reset on the server. Your unsaved text is on this device.');
-	button('Details').click(); flushSync(); button('Replace with my text').click(); flushSync();
+	button('Details').click(); flushSync(); recoveryButton('Replace with my text').click(); flushSync();
 	expect(replace).not.toHaveBeenCalled(); button('Cancel').click(); flushSync();
-	expect(session.recovery[0].text).toBe('old local copy'); button('Replace with my text').click(); flushSync();
-	const dialog = [...host.querySelectorAll('[role="alertdialog"]')].at(-1)!;
+	expect(session.recovery[0].text).toBe('old local copy'); recoveryButton('Replace with my text').click(); flushSync();
+	const dialog = [...document.body.querySelectorAll('.modal[role="alertdialog"]')].at(-1)!;
 	[...dialog.querySelectorAll('button')].find(item => item.textContent?.trim() === 'Replace with my text')!.click();
 	await vi.waitFor(() => expect(document.body.textContent).toContain('replace refused'));
 	expect(session.text.toString()).toBe('live text'); expect(session.recovery[0].text).toBe('old local copy');

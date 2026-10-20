@@ -311,7 +311,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			host.querySelector<HTMLButtonElement>('.comment-status')!.click();
 			flushSync();
 			expect(host.querySelector('.doc [data-doc-comments-drawer]')).not.toBeNull();
-			expect(host.querySelector('.popover')).toBeNull();
+			expect(document.body.querySelector('.popover')).toBeNull();
 			expect(host.querySelector('[data-adaptive-drawer]')).toBeNull();
 			expect(get(paneOpen)).toBe(true);
 		} finally {
@@ -341,7 +341,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		host.querySelector<HTMLButtonElement>('.comment-status')!.click();
 		flushSync();
 		expect(document.querySelector('[data-adaptive-drawer].within [data-doc-comments-drawer]')).not.toBeNull();
-		expect(host.querySelector('.popover')).toBeNull();
+		expect(document.body.querySelector('.popover')).toBeNull();
 		expect(get(paneOpen)).toBe(false);
 	});
 
@@ -906,7 +906,7 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		flushSync();
 		// The editor's anchor-focus callback reached the viewer and opened this thread.
 		expect(get(focusedDocComment)).toBe('comment');
-		expect(host.querySelector('.popover')).not.toBeNull();
+		expect(document.body.querySelector('.popover')).not.toBeNull();
 		expect(view.state.selection.main).toMatchObject({ anchor: QUOTE.from + 2, head: QUOTE.from + 2 });
 	});
 
@@ -921,7 +921,7 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		marker.click();
 		flushSync();
 		expect(get(focusedDocComment)).toBe('comment');
-		expect(host.querySelector('.popover')).not.toBeNull();
+		expect(document.body.querySelector('.popover')).not.toBeNull();
 		expect(view.state.selection.main).toMatchObject({ anchor: 0, head: 0 });
 		expect(view.contentDOM.contains(document.activeElement)).toBe(false);
 	});
@@ -953,6 +953,6 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		const tab = get(threadWorkspaces)[THREAD].activeTabId!;
 		await vi.waitFor(() => expect(tabDocumentImage(THREAD, tab)).toMatchObject({ ...IMG, focus: { id: 'pin' } }));
 		await vi.waitFor(() => expect(host.querySelector('.image-overlay [data-image-comment]')).not.toBeNull());
-		expect(host.querySelector('.popover')).toBeNull();
+		expect(document.body.querySelector('.popover')).toBeNull();
 	});
 });

@@ -1,4 +1,4 @@
-"""Google accounts as Connected apps rows: the list, and Sign out, Remove and Where it works for one row."""
+"""Connected accounts as Connected apps rows: the list, and Sign out, Remove and Where it works for one row."""
 
 from __future__ import annotations
 
@@ -14,9 +14,10 @@ from auth_fixtures import OWNER_USER
 from connections.app_reach import AppReach
 from connections.app_lifecycle import create_app
 from connections.connected_accounts import (
-    GOOGLE_PROVIDER, create_google_account, credential_key, get_account, store_google_credentials,
+    GOOGLE_PROVIDER, MICROSOFT_PROVIDER, create_account, credential_key, get_account, store_credentials,
 )
-from connections.google import account_actions
+from connections import account_actions
+from connections.google import provider as google_provider
 from google_account_helpers import ONLY_CORSIA_REACH, make_only_corsia
 from infra.auth import require_user
 from infra.database import get_db
@@ -37,13 +38,13 @@ def _stored_entries(account_id: str) -> int:
 
 def _account(address: str, *, reach: AppReach | None = None, signed_in: bool = True) -> str:
     """A connected account; with no ``reach``, Only CORSIA."""
-    account_id = str(create_google_account(
+    account_id = str(create_account(GOOGLE_PROVIDER,
         address, reach=reach or ALL, created_by=("system", "test"), state="connected",
     )["id"])
     if reach is None:
         make_only_corsia(account_id)
     if signed_in:
-        store_google_credentials(account_id, {
+        store_credentials(account_id, {
             "client_id": SECRETS[0], "client_secret": SECRETS[1], "refresh_token": SECRETS[2],
             "scopes": ["https://mail.google.com/"],
         })
@@ -64,9 +65,9 @@ def api(isolated_db, monkeypatch):
     revoked: list[str] = []
     real_revoke = account_actions._revoke
 
-    async def revoke(token):
-        if not token:
-            return await real_revoke(token)
+    async def revoke(spec, token):
+        if not token or spec.name != GOOGLE_PROVIDER:
+            return await real_revoke(spec, token)
         revoked.append(token)
         return "revoked"
 
@@ -97,12 +98,24 @@ def test_two_accounts_are_two_rows_with_their_own_state_and_reach_and_no_secrets
     rows = {row["id"]: row for row in body["accounts"]}
     assert set(rows) == {first, second}
     assert rows[first] == {
-        "kind": "account", "id": first, "provider": GOOGLE_PROVIDER, "address": "person@example.com",
+        "kind": "account", "id": first, "provider": GOOGLE_PROVIDER, "provider_display_name": "Google", "address": "person@example.com",
         "capabilities": ["mail", "calendar", "files"], "state": "connected", "reach": ONLY_CORSIA_REACH,
+        "account_kind": None, "cause": None, "scopes": [], "client_id": None, "tenant_id": None,
     }
     # A row that lost its sign-in says so, with its own reach, whatever its stored state.
     assert rows[second]["state"] == "needs_sign_in" and rows[second]["reach"] == ALL
     assert not any(secret in response.text for secret in SECRETS)
+
+
+def test_account_rows_project_each_provider_display_name(api):
+    client, _who, _revoked = api
+    microsoft = str(create_account(MICROSOFT_PROVIDER, "person@contoso.example", reach=ALL, created_by=("system", "test"), state="needs_sign_in", provider_subject="tenant:person", account_kind="work")["id"])
+    google = _account("person@example.com")
+
+    rows = {row["id"]: row for row in client.get("/api/mcp/servers").json()["accounts"]}
+
+    assert rows[google]["provider_display_name"] == "Google"
+    assert rows[microsoft]["provider_display_name"] == "Microsoft"
 
 
 def test_the_list_filters_accounts_like_apps_and_an_agent_sees_only_those_that_reach_it(api):
@@ -135,7 +148,7 @@ def test_sign_out_changes_only_that_row_and_returns_it_with_the_cause(api):
     assert not any(secret in response.text for secret in SECRETS[:3])
     # It can't be signed out twice.
     again = client.post(f"/api/mcp/accounts/{first}/sign-out")
-    assert again.status_code == 409 and again.json()["detail"] == connected_account_rows.NOT_SIGNED_IN
+    assert again.status_code == 409 and again.json()["detail"] == connected_account_rows.NOT_SIGNED_IN.format(provider="Google")
     assert _rows(client)["work@example.com"]["state"] == "connected" and second
 
 
@@ -164,19 +177,22 @@ def test_removing_a_signed_out_row_says_it_was_not_signed_in_and_never_asks_for_
     response = client.delete(f"/api/mcp/accounts/{account_id}")
 
     assert response.json() == {"id": account_id, "removed": True, "revocation": "not_signed_in"}
-    assert "not_signed_in" not in account_actions.MANUAL_STEP_CAUSES
+    assert "not_signed_in" not in google_provider.MANUAL_STEP_CAUSES
     assert revoked == [SECRETS[2]]  # The one revoke ran at Sign out.
     assert _rows(client) == {}
 
 
 def test_the_manual_step_causes_are_exactly_the_provider_failures():
-    from connections.connected_accounts import REVOCATION_CAUSES
+    from connections.account_state import REVOCATION_CAUSES
 
-    assert account_actions.MANUAL_STEP_CAUSES == {
+    assert google_provider.MANUAL_STEP_CAUSES == {
         "provider_unreachable", "provider_timeout", "provider_rejected", "provider_unexpected",
     }
-    assert REVOCATION_CAUSES - account_actions.MANUAL_STEP_CAUSES == {"revoked", "not_signed_in"}
-    assert "manual_only" not in REVOCATION_CAUSES
+    # An audit records only what a revoke did; sign-in failures live on the row as its cause.
+    assert REVOCATION_CAUSES == {
+        "revoked", "provider_unreachable", "provider_timeout", "provider_rejected", "provider_unexpected", "not_signed_in",
+        "manual_only",
+    }
 
 
 def test_an_agent_cannot_widen_where_an_account_works_but_can_narrow_it(api):
@@ -244,13 +260,13 @@ def test_an_agent_narrowing_to_no_place_is_refused_like_any_empty_choice(api):
 @pytest.mark.parametrize("method,path,body", [
     ("post", "/sign-out", None), ("delete", "", None), ("put", "/reach", {"reach": ALL}),
 ])
-def test_an_unknown_or_non_google_id_is_a_fixed_404(api, method, path, body):
+def test_an_unknown_or_unsupported_provider_id_is_a_fixed_404(api, method, path, body):
     client, _who, _revoked = api
     db = get_db()
     db.execute(
         "INSERT INTO connected_accounts(id,provider,address,capabilities_json,state,reach_mode,credential_key,"
-        "created_by_kind,created_by_id,created_at,updated_at) VALUES ('other-1','microsoft','m@example.com','[]',"
-        "'connected','selected','connected-account--microsoft--other-1','system','test','t','t')",
+        "created_by_kind,created_by_id,created_at,updated_at) VALUES ('other-1','other','m@example.com','[]',"
+        "'connected','selected','connected-account--other--other-1','system','test','t','t')",
     )
     db.commit()
     for account_id in ("no-such-id", "other-1"):
@@ -269,10 +285,10 @@ def test_an_agent_cannot_sign_out_or_remove_any_account_and_nothing_changes(api,
 
     for response in (client.post(f"/api/mcp/accounts/{account_id}/sign-out"), client.delete(f"/api/mcp/accounts/{account_id}")):
         # Out of reach, the account answers exactly like an unknown id.
-        expected = (403, PERSON_ONLY_CONTROLS) if reaches_thread else (404, NOT_FOUND)
+        expected = (403, PERSON_ONLY_CONTROLS.format(provider="Google")) if reaches_thread else (404, NOT_FOUND)
         assert (response.status_code, response.json()["detail"]) == expected
         if reaches_thread:
-            assert response.headers["X-Corsia-Agent-Remedy"] == PERSON_ONLY_CONTROLS
+            assert response.headers["X-Corsia-Agent-Remedy"] == PERSON_ONLY_CONTROLS.format(provider="Google")
     assert revoked == [] and _stored_entries(account_id) == 1
     assert get_account(account_id, db=get_db()) == before
     db = get_db()
