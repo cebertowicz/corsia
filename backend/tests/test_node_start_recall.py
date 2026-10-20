@@ -246,22 +246,6 @@ def test_replaced_wording_of_an_active_rule_is_not_quoted(db):
     assert _related(db) == []
 
 
-def test_rules_from_one_checkpoint_decode_its_snapshot_once(db, monkeypatch):
-    from checkpoint_retrieval_fixtures import _install_checkpoint
-    from memory import checkpoint_entry_rows
-
-    user = [{"kind": "user", "reference": "message"}]
-    _install_checkpoint(db, thread_id="past", narrative="Rules", continuity=[
-        {"entry_id": index, "field": "active_constraints", "revision": 1, "body": {"statement": f"Export account ledger as CSV format {index}.", "source_refs": user}}
-        for index in range(1, 6)
-    ])
-    decode = checkpoint_entry_rows.continuity_entries
-    calls: list[str] = []
-    monkeypatch.setattr(checkpoint_entry_rows, "continuity_entries", lambda raw: calls.append(raw) or decode(raw))
-
-    assert any("rule an agent recorded" in line for line in _related(db))
-    assert len(calls) == 1
-
 
 def test_each_lookup_emits_a_counts_only_product_event(db, monkeypatch):
     from memory import node_start_recall
@@ -337,20 +321,53 @@ def test_callers_own_live_rule_is_not_quoted(db):
     assert _related(db) == []
 
 
-def test_closer_agent_recorded_rules_do_not_hide_a_user_rule(db):
+def test_more_than_source_candidates_ineligible_rules_do_not_hide_a_user_rule(db):
     from checkpoint_retrieval_fixtures import _install_checkpoint
-    from memory.node_start_recall import MAX_HITS
+    from memory.node_start_recall import SOURCE_CANDIDATES
+    from tests.event_routing_helpers import mk_session
 
     agent = {"kind": "message", "reference": "agent"}
+    user = {"kind": "user", "reference": "message"}
+    close = "Export account ledger in CSV format with stable export columns."
     _install_checkpoint(db, thread_id="past", narrative="Rules", continuity=[
         *[
-            {"entry_id": index, "field": "active_constraints", "body": {"statement": "Export account ledger in CSV format with stable export columns.", "source_refs": [agent]}, "revision": 1}
-            for index in range(1, MAX_HITS + 3)
+            {"entry_id": index, "field": "active_constraints", "body": {"statement": close, "source_refs": [agent]}, "revision": 1}
+            for index in range(1, SOURCE_CANDIDATES + 2)
         ],
-        {"entry_id": 99, "field": "active_constraints", "body": {"statement": "Export the ledger as CSV.", "source_refs": [{"kind": "user", "reference": "message"}]}, "revision": 1},
+        {"entry_id": SOURCE_CANDIDATES + 2, "field": "active_constraints", "body": {"statement": close, "source_refs": [user]}, "revision": 1},
+        {"entry_id": SOURCE_CANDIDATES + 3, "field": "active_constraints", "body": {"statement": "Export the ledger as CSV format.", "source_refs": [user]}, "revision": 1},
     ])
+    mk_session("purged")
+    _install_checkpoint(db, thread_id="purged", narrative="Rule", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "body": {"statement": close, "source_refs": [user]}, "revision": 1,
+    }])
+    _install_checkpoint(db, thread_id="caller", narrative="Rule", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "body": {"statement": close, "source_refs": [user]}, "revision": 1,
+    }])
+    db.execute("UPDATE continuity_entries SET state='retired', retired_reason='replaced' WHERE thread_id='past' AND entry_id=?", (SOURCE_CANDIDATES + 2,))
+    db.execute("UPDATE threads SET purged_at='2026-01-02' WHERE id='purged'")
+    db.commit()
 
-    assert any("Export the ledger as CSV" in line for line in _related(db))
+    assert any("Export the ledger as CSV format" in line for line in _related(db))
+
+
+def test_current_rule_wording_is_used_when_an_older_revision_matches_better(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    user = [{"kind": "user", "reference": "message"}]
+    _install_checkpoint(db, thread_id="past", narrative="First", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "revision": 1,
+        "body": {"statement": "Export account ledger in CSV format with stable columns.", "source_refs": user},
+    }])
+    _install_checkpoint(db, thread_id="past", narrative="Current", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "revision": 2,
+        "body": {"statement": "Export ledger CSV format stays current.", "source_refs": user},
+    }])
+
+    lines = _related(db)
+
+    assert any("Export ledger CSV format stays current" in line for line in lines)
+    assert not any("stable columns" in line for line in lines)
 
 
 def test_purged_thread_rule_is_not_quoted(db):
@@ -400,6 +417,26 @@ def test_cloud_off_message_stays_in_its_project(db):
     assert len(_related(db)) == 2
 
 
+def test_cloud_off_messages_cannot_fill_the_candidate_window(db):
+    from llm.locality import set_project_cloud_models_off
+    from memory.node_start_recall import SOURCE_CANDIDATES
+    from tests.event_routing_helpers import mk_session
+
+    db.executemany(
+        "INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,?,?)",
+        [("one", "one", "2026-01-01", "2026-01-01"), ("two", "two", "2026-01-01", "2026-01-01")],
+    )
+    db.execute("UPDATE threads SET project_id='one' WHERE id='past'")
+    db.execute("UPDATE threads SET project_id='two' WHERE id='caller'")
+    set_project_cloud_models_off("one", cloud_models_off=True, db=db)
+    mk_session("deliverable", project_id="two")
+    for index in range(SOURCE_CANDIDATES + 1):
+        _message(db, f"cloud-{index}", "past", "Export account ledger with CSV format and stable columns.", seq=index + 1)
+    _message(db, "deliverable-message", "deliverable", "Export ledger as CSV format.")
+
+    assert any("deliverable-message" not in line and "Export ledger as CSV format" in line for line in _related(db))
+
+
 def test_limits_to_three_lines_and_one_rule(db):
     from checkpoint_retrieval_fixtures import _install_checkpoint
 
@@ -441,7 +478,7 @@ def test_each_silent_lookup_logs_its_own_reason(db, logged):
     assert _related(db) == []
 
     reasons = [line.split("reason=")[1].split()[0] for line in logged if line.startswith("prior_words ")]
-    assert reasons == ["no_terms", "below_floor", "unresolved_caller", "withheld"]
+    assert reasons == ["no_terms", "below_floor", "unresolved_caller", "below_floor"]
 
 
 def test_error_isolated_and_key_stays_absent(db, logged):

@@ -14,12 +14,11 @@ from time import perf_counter
 
 from loguru import logger as log
 
+from core.continuity_render import ContinuitySnapshotEntry
 from core.correction_notes import local_clock
 from core.corrections_recording import is_owner_authored_message, owner_message_sql_predicate
-from infra.checkpoint_entry_index import NO_REVISION
 from infra.product_events import emit_product_event
 from llm.locality import cloud_off_project_ids
-from memory.checkpoint_entry_rows import decoded_entries, entry_rank_rows_matching, hydrate_entry_rows
 from memory.checkpoint_search import caller_user_id
 from memory.task_match import Match, NodeText, TaskTerms, floor, match, task_terms
 
@@ -38,8 +37,6 @@ class _Hit:
     created_at: str
     kind: str
     line: str
-    project_id: str | None
-    local_only: bool
 
 
 def related(
@@ -134,18 +131,12 @@ def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]
     cutoff = _start_cutoff(db, text.node_id)
     cloud_off = cloud_off_project_ids(db=db)
 
-    candidates = [*_message_candidates(db, terms, user_id, caller_thread_id),
-                  *_comment_candidates(db, terms, user_id),
-                  *_decision_candidates(db, terms, user_id),
-                  *_rule_candidates(db, terms, user_id, caller_thread_id)]
+    candidates = [*_message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff),
+                  *_comment_candidates(db, terms, user_id, caller, cloud_off, cutoff),
+                  *_decision_candidates(db, terms, user_id, caller, cloud_off, cutoff),
+                  *_rule_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff)]
     if not candidates:
         return "below_floor", []
-    candidates = [
-        hit for hit in candidates
-        if _before(hit.created_at, cutoff) and _deliverable(hit, caller, cloud_off)
-    ]
-    if not candidates:
-        return "withheld", []
     # Scores are primary, then newest sources, then direct person words ahead of a rule.
     candidates.sort(
         key=lambda hit: (-hit.matched.shared, -hit.matched.title_shared, _newest_first(hit.created_at), hit.kind == "rule"),
@@ -183,20 +174,35 @@ def _owned_threads(alias: str) -> str:
     return f"{alias}.user_id=? AND {alias}.purged_at IS NULL"
 
 
-def _message_candidates(db, terms, user_id, caller_thread_id) -> list[_Hit]:
+def _source_scope(alias: str, timestamp: str, caller: sqlite3.Row, cloud_off: set[str], cutoff: str | None) -> tuple[str, list[object]]:
+    """Return the locality and start-window predicates every source reader applies before its limit."""
+    return (
+        f"""AND (COALESCE({alias}.local_only, 0)=0 OR ?=1)
+              AND ({alias}.project_id IS NULL OR {alias}.project_id=?
+                   OR {alias}.project_id NOT IN (SELECT value FROM json_each(?)))
+              AND (? IS NULL OR {timestamp}<=?)""",
+        [int(bool(caller["local_only"])), caller["project_id"], json.dumps(sorted(cloud_off)), cutoff, cutoff],
+    )
+
+
+def _message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[_Hit]:
     owner_filter, owner_params = owner_message_sql_predicate("m")
+    shared, shared_params = _shared_terms("m.content", terms)
+    source_scope, source_params = _source_scope("t", "m.created_at", caller, cloud_off, cutoff)
     rows = db.execute(
-        f"""SELECT m.id,m.thread_id,m.content,m.role,m.metadata,m.created_at,t.title,t.project_id,t.local_only
+        f"""SELECT m.id,m.thread_id,m.content,m.role,m.metadata,m.created_at,t.title,{shared} AS shared
             FROM messages_fts JOIN messages m ON m.rowid=messages_fts.rowid
             JOIN threads t ON t.id=m.thread_id
             WHERE messages_fts MATCH ? AND {owner_filter} AND m.delivery_state='delivered'
-              AND {_owned_threads('t')}
+              AND {_owned_threads('t')} {source_scope}
+              AND {shared}>=?
               AND (m.thread_id<>? OR m.seq IS NOT NULL AND m.seq<=COALESCE((
                 SELECT MAX(c.through_seq) FROM checkpoints c JOIN threads ct ON ct.id=c.thread_id
                 WHERE c.thread_id=? AND c.status='installed' AND c.history_epoch=ct.history_epoch
               ), 0))
             ORDER BY bm25(messages_fts),m.created_at DESC LIMIT ?""",
-        [f"role:user AND ({_fts_terms(terms)})", *owner_params.values(), user_id, caller_thread_id, caller_thread_id, SOURCE_CANDIDATES],
+        [*shared_params, f"role:user AND ({_fts_terms(terms)})", *owner_params.values(), user_id, *source_params,
+         *shared_params, floor(len(terms.terms)), caller_thread_id, caller_thread_id, SOURCE_CANDIDATES],
     ).fetchall()
     hits = []
     for row in rows:
@@ -205,22 +211,23 @@ def _message_candidates(db, terms, user_id, caller_thread_id) -> list[_Hit]:
         found = match(terms, str(row["content"]))
         if found:
             line = f'{local_clock(str(row["created_at"]))} · message in “{row["title"]}” · “{_excerpt(found)}” → get_thread_history(thread_id="{row["thread_id"]}")'
-            hits.append(_Hit(found, str(row["created_at"]), "message", line, row["project_id"], bool(row["local_only"])))
+            hits.append(_Hit(found, str(row["created_at"]), "message", line))
     return hits
 
 
-def _comment_candidates(db, terms, user_id) -> list[_Hit]:
+def _comment_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[_Hit]:
     from core.correction_targets import comment_target_sql
 
     shared, params = _shared_terms("c.body", terms)
+    source_scope, source_params = _source_scope("t", "c.created_at", caller, cloud_off, cutoff)
     rows = db.execute(
         f"""SELECT * FROM (
-              SELECT c.id,c.artifact_id,c.body,c.created_at,ai.title,ai.path,t.project_id,t.local_only,{shared} AS shared
+              SELECT c.id,c.artifact_id,c.body,c.created_at,ai.title,ai.path,{shared} AS shared
               FROM doc_comments c JOIN threads t ON t.id=({comment_target_sql('c')})
               LEFT JOIN artifact_identities ai ON ai.id=c.artifact_id
-              WHERE c.author_kind='user' AND {_owned_threads('t')})
+              WHERE c.author_kind='user' AND {_owned_threads('t')} {source_scope})
             WHERE shared>=? ORDER BY shared DESC,created_at DESC,id DESC LIMIT ?""",
-        [*params, user_id, floor(len(terms.terms)), SOURCE_CANDIDATES],
+        [*params, user_id, *source_params, floor(len(terms.terms)), SOURCE_CANDIDATES],
     ).fetchall()
     hits = []
     for row in rows:
@@ -228,90 +235,91 @@ def _comment_candidates(db, terms, user_id) -> list[_Hit]:
         if found:
             about = row["title"] or row["path"] or row["artifact_id"]
             line = f'{local_clock(str(row["created_at"]))} · comment on “{about}” · “{_excerpt(found)}”'
-            hits.append(_Hit(found, str(row["created_at"]), "comment", line, row["project_id"], bool(row["local_only"])))
+            hits.append(_Hit(found, str(row["created_at"]), "comment", line))
     return hits
 
 
-def _decision_candidates(db, terms, user_id) -> list[_Hit]:
-    from plans.public import DECISION_TYPE, answer_note
+def _decision_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[_Hit]:
+    from plans.public import DECISION_TYPE
 
-    shared, params = _shared_terms("json_extract(ai.metadata,'$.plan_decision.answer.text')", terms)
+    answer = "json_extract(ai.metadata,'$.plan_decision.answer.text')"
+    answered_at = "json_extract(ai.metadata,'$.plan_decision.answered_at')"
+    shared, params = _shared_terms(answer, terms)
+    source_scope, source_params = _source_scope("t", answered_at, caller, cloud_off, cutoff)
     rows = db.execute(
         f"""SELECT * FROM (
-              SELECT ai.external_id,ai.metadata,t.project_id,t.local_only,{shared} AS shared,
-                     json_extract(ai.metadata,'$.plan_decision.answered_at') AS answered_at
+              SELECT ai.external_id,json_extract(ai.metadata,'$.plan_decision.title') AS title,
+                     {answer} AS answer,{answered_at} AS answered_at,{shared} AS shared
               FROM artifact_identities ai
               JOIN threads t ON t.id=json_extract(ai.metadata,'$.plan_decision.thread_id')
               WHERE ai.integration='local' AND ai.type=? AND ai.state='active'
                 AND json_extract(ai.metadata,'$.plan_decision.state')='answered'
-                AND {_owned_threads('t')})
+                AND json_type(ai.metadata,'$.plan_decision.answer.text')='text'
+                AND {_owned_threads('t')} {source_scope})
             WHERE shared>=? ORDER BY shared DESC,answered_at DESC LIMIT ?""",
-        [*params, DECISION_TYPE, user_id, floor(len(terms.terms)), SOURCE_CANDIDATES],
+        [*params, DECISION_TYPE, user_id, *source_params, floor(len(terms.terms)), SOURCE_CANDIDATES],
     ).fetchall()
     hits = []
     for row in rows:
-        try:
-            body = json.loads(row["metadata"]).get("plan_decision")
-        except (TypeError, ValueError, AttributeError):
-            continue
-        if not isinstance(body, dict):
-            continue
-        text = answer_note(body.get("answer"))
-        created_at = str(body.get("answered_at") or "")
-        if not text or not created_at:
-            continue
+        text, created_at = str(row["answer"]), str(row["answered_at"])
         found = match(terms, text)
         if found:
-            line = f'{local_clock(created_at)} · answer to decision “{body.get("title") or row["external_id"]}” · “{_excerpt(found)}”'
-            hits.append(_Hit(found, created_at, "decision", line, row["project_id"], bool(row["local_only"])))
+            line = f'{local_clock(created_at)} · answer to decision “{row["title"] or row["external_id"]}” · “{_excerpt(found)}”'
+            hits.append(_Hit(found, created_at, "decision", line))
     return hits
 
 
-def _rule_candidates(db, terms, user_id, caller_thread_id) -> list[_Hit]:
-    rows = entry_rank_rows_matching(db, _fts_terms(terms), user_id, None, SOURCE_CANDIDATES, SOURCE_CANDIDATES, RULE_FIELDS)
-    owned = _owned_threads_by_id(db, user_id, {str(row["thread_id"]) for row in rows})
-    # Every eligible row is decoded: whether the person is the source is only in
-    # the snapshot body, so cutting to the best few first could hide their rule.
-    # Search keeps an entry's best-matching revision; only the current one is quoted.
-    rows = [
-        row for row in rows
-        if row["thread_id"] in owned and row["canonical_state"] == "active"
-        and row["revision"] in (NO_REVISION, row["canonical_revision"])
-        and not (row["thread_id"] == caller_thread_id and not row["historical"])
-    ]
-    hits = []
-    for row, entry in decoded_entries(hydrate_entry_rows(db, rows)):
-        if not any(ref.get("kind") == "user" for ref in entry.body.get("source_refs", []) if isinstance(ref, dict)):
-            continue
-        found, created_at = match(terms, entry.primary_text or ""), str(row["latest_generated_at"] or row["first_generated_at"] or "")
-        if not found or not created_at:
-            continue
-        line = f'{local_clock(created_at)} · rule an agent recorded from their words (thread {str(row["thread_id"])[:8]}) · “{_excerpt(found)}” → get_checkpoints(checkpoint_id="{row["latest_id"]}")'
-        source = owned[str(row["thread_id"])]
-        hits.append(_Hit(found, created_at, "rule", line, source["project_id"], bool(source["local_only"])))
-    return hits
+def _primary_text_sql(body: str) -> str:
+    """Return the SQL form of ``ContinuitySnapshotEntry.primary_text`` for the rule-field contract."""
+    return (
+        f"CASE WHEN json_type({body},'$.statement') IS NOT NULL THEN json_extract({body},'$.statement') "
+        f"WHEN json_type({body},'$.result') IS NOT NULL THEN json_extract({body},'$.result') "
+        f"WHEN json_type({body},'$.kind') IS NOT NULL AND json_type({body},'$.reference') IS NOT NULL "
+        f"AND json_type({body},'$.state') IS NOT NULL THEN json_extract({body},'$.kind') || ' ' "
+        f"|| json_extract({body},'$.reference') || ': ' || json_extract({body},'$.state') ELSE '' END"
+    )
 
 
-def _owned_threads_by_id(db, user_id: str, thread_ids: set[str]) -> dict[str, sqlite3.Row]:
-    if not thread_ids:
-        return {}
-    marks = ",".join("?" for _ in thread_ids)
+def _rule_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[_Hit]:
+    primary_text = _primary_text_sql("ce.body")
+    shared, shared_params = _shared_terms(primary_text, terms)
+    source_scope, source_params = _source_scope("t", "ce.updated_at", caller, cloud_off, cutoff)
+    fields = sorted(RULE_FIELDS)
     rows = db.execute(
-        f"SELECT t.id,t.project_id,t.local_only FROM threads t WHERE t.id IN ({marks}) AND {_owned_threads('t')}",
-        [*thread_ids, user_id],
+        f"""WITH eligible AS (
+              SELECT ce.thread_id,ce.history_epoch,ce.entry_id,ce.revision,ce.field,ce.body,ce.updated_at,
+                     {primary_text} AS primary_text,{shared} AS shared
+              FROM continuity_entries ce JOIN threads t ON t.id=ce.thread_id
+              WHERE {_owned_threads('t')} AND ce.state='active'
+                AND ce.field IN (?,?)
+                AND EXISTS (SELECT 1 FROM json_each(ce.body,'$.source_refs')
+                            WHERE json_extract(value,'$.kind')='user')
+                AND NOT (ce.thread_id=? AND ce.history_epoch=t.history_epoch)
+                {source_scope}
+            ), top AS (
+              SELECT * FROM eligible WHERE shared>=?
+              ORDER BY shared DESC,updated_at DESC LIMIT ?
+            )
+            SELECT top.*,checkpoints.id AS checkpoint_id
+            FROM top LEFT JOIN checkpoint_entry_search entry_index
+              ON entry_index.thread_id=top.thread_id AND entry_index.history_epoch=top.history_epoch
+             AND entry_index.entry_id=top.entry_id AND entry_index.revision=top.revision
+            LEFT JOIN checkpoints ON checkpoints.generation_order=entry_index.last_generation_order
+            ORDER BY top.shared DESC,top.updated_at DESC""",
+        [*shared_params, user_id, *fields, caller_thread_id, *source_params,
+         floor(len(terms.terms)), SOURCE_CANDIDATES],
     ).fetchall()
-    return {str(row["id"]): row for row in rows}
-
-
-def _deliverable(hit: _Hit, caller: sqlite3.Row, cloud_off: set[str]) -> bool:
-    """Words from a Local only chat or a cloud-off project reach only a caller under the same restriction."""
-    if hit.local_only and not caller["local_only"]:
-        return False
-    return hit.project_id not in cloud_off or hit.project_id == caller["project_id"]
-
-
-def _before(created_at: str, cutoff: str | None) -> bool:
-    return not cutoff or created_at <= cutoff
+    hits = []
+    for row in rows:
+        entry = ContinuitySnapshotEntry(
+            int(row["entry_id"]), str(row["field"]), json.loads(row["body"]), int(row["revision"]),
+        )
+        found = match(terms, entry.primary_text or "")
+        if found:
+            pointer = f' → get_checkpoints(checkpoint_id="{row["checkpoint_id"]}")' if row["checkpoint_id"] else ""
+            line = f'{local_clock(str(row["updated_at"]))} · rule an agent recorded from their words (thread {str(row["thread_id"])[:8]}) · “{_excerpt(found)}”{pointer}'
+            hits.append(_Hit(found, str(row["updated_at"]), "rule", line))
+    return hits
 
 
 def _excerpt(found: Match) -> str:

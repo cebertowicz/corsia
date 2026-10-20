@@ -1,16 +1,17 @@
 """Entry-level FTS reads over the checkpoint entry index.
 
-Ranking runs on lean index rows; large frozen snapshots are joined and decoded
-only for bounded results.
+Ranking runs on the lean index rows; the large frozen snapshots are joined and
+decoded only for the bounded result. ``checkpoint_search`` and the node-start
+lookup both read through here.
 """
 
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 
 from loguru import logger as log
 
-from core.continuity_render import ContinuitySnapshotEntry
 from infra.checkpoint_entry_index import NO_REVISION
 from memory.checkpoint_search_entries import build_entry_hit, continuity_entries
 
@@ -48,19 +49,15 @@ def entry_rank_rows_matching(
     thread_id: str | None,
     candidate_limit: int,
     per_thread: int,
-    fields: frozenset[str] | None = None,
 ) -> list[dict]:
     """Return the ranked, bounded entry rows with no checkpoint columns.
 
-    Everything ranking needs lives on the lean index and continuity rows; :func:`hydrate_entry_rows` adds the checkpoint pointers and
-    the large frozen snapshots for whichever rows survive. ``fields`` limits the match before the
-    candidate limit, so entries in other fields cannot fill the window.
+    Everything ranking and ``select`` need lives on the lean index and
+    continuity rows; :func:`hydrate_entry_rows` adds the checkpoint pointers and
+    the large frozen snapshots for whichever rows survive.
     """
     params: list[object] = [match]
     scope = scope_clause(thread_id, params)
-    if fields:
-        scope += f"AND entry.field IN ({','.join('?' for _ in fields)}) "
-        params.extend(sorted(fields))
     params.extend((user_id, max(1, per_thread) * 20, candidate_limit))
     # Both window sorts carry only the narrow ranking keys of every match; the
     # wide columns (search_text, canonical body) are joined back for the bounded
@@ -169,8 +166,35 @@ def _checkpoint_rows(
 
 def entry_hits(rows: list[dict]) -> list[tuple[float, int, dict]]:
     """Decode only selected frozen snapshots using the shared entry type."""
+    snapshots: dict[int, tuple[list, bool]] = {}
     hits: list[tuple[float, int, dict]] = []
-    for row, entry in decoded_entries(rows):
+    for row in rows:
+        first_order = int(row["first_generation_order"])
+        entries, unreadable = snapshots.setdefault(
+            first_order, continuity_entries(row["continuity_snapshot_json"])
+        )
+        entry = next(
+            (
+                candidate
+                for candidate in entries
+                if candidate.entry_id == row["entry_id"]
+                and (candidate.revision or NO_REVISION) == row["revision"]
+                and candidate.field == row["field"]
+            ),
+            None,
+        )
+        if entry is None:
+            # The index only ever holds what the shared reader accepted, so a
+            # row it cannot find in the decoded snapshot is stale. Drop it
+            # rather than answer with something the reader would not.
+            log.warning(
+                "checkpoint_search reason=stale_entry_index_row "
+                "thread_id={} entry_id={} revision={} checkpoint_order={} "
+                "snapshot_unreadable={}",
+                row["thread_id"], row["entry_id"], row["revision"],
+                first_order, unreadable,
+            )
+            continue
         canonical = None
         if row["canonical_state"] is not None:
             canonical = {
@@ -194,33 +218,27 @@ def entry_hits(rows: list[dict]) -> list[tuple[float, int, dict]]:
     return hits
 
 
-def decoded_entries(rows: list[dict]) -> list[tuple[dict, ContinuitySnapshotEntry]]:
-    """Pair hydrated rows with decoded snapshot entries, logging stale rows."""
-    snapshots: dict[int, tuple[list[ContinuitySnapshotEntry], bool]] = {}
-    decoded: list[tuple[dict, ContinuitySnapshotEntry]] = []
-    for row in rows:
-        first_order = int(row["first_generation_order"])
-        if first_order not in snapshots:
-            snapshots[first_order] = continuity_entries(row["continuity_snapshot_json"])
-        entries, unreadable = snapshots[first_order]
-        entry = next(
-            (
-                candidate
-                for candidate in entries
-                if candidate.entry_id == row["entry_id"]
-                and (candidate.revision or NO_REVISION) == row["revision"]
-                and candidate.field == row["field"]
-            ),
-            None,
-        )
-        if entry is None:
-            log.warning(
-                "checkpoint_search reason=stale_entry_index_row "
-                "thread_id={} entry_id={} revision={} checkpoint_order={} "
-                "snapshot_unreadable={}",
-                row["thread_id"], row["entry_id"], row["revision"],
-                first_order, unreadable,
-            )
-            continue
-        decoded.append((row, entry))
-    return decoded
+def entry_hits_matching(
+    db: sqlite3.Connection,
+    match: str,
+    *,
+    user_id: str,
+    candidate_limit: int,
+    per_thread: int,
+    select: Callable[[list[dict]], list[dict]] = lambda rows: rows,
+) -> list[tuple[float, int, dict]]:
+    """Return owned entry hits for a caller-built FTS5 expression, best first.
+
+    The node-start lookup builds an any-term expression rather than this
+    module's every-term one, and reads entries only: narrative relevance comes
+    from a different index and does not rank against entry relevance.
+    ``select`` narrows the rows (each carries ``search_text``) before any
+    frozen snapshot is decoded, which is where the time goes.
+    """
+    # Signal that proves this: re-running
+    # shared/context-memory/metrics/node_recall_scan_cost.py on production
+    # (owner runs it), target whole-lookup p95 under 100 ms (#2908). Only the
+    # rows ``select`` keeps are hydrated with checkpoint snapshots.
+    return entry_hits(hydrate_entry_rows(db, select(entry_rank_rows_matching(
+        db, match, user_id, None, candidate_limit, per_thread
+    ))))
