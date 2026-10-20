@@ -148,10 +148,10 @@
       "sha256": "075871dd2dc7e7c61eac2138a80ca63be257e396f95adcdcfe757a01cf4bc682"
     },
     {
-      "bytes": 8574,
+      "bytes": 8951,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/SKILL.md",
-      "sha256": "7ea5a925e33a3699eca515a8dcdad336bc8b8bda13c82aed7d356b7e81dae972"
+      "sha256": "1f15ea636cdaab2be14a7dac3aa68cdd369be3af399cf376df6617e9e222ce0c"
     },
     {
       "bytes": 6205,
@@ -328,10 +328,10 @@
       "sha256": "a6cf9bc8558c748f61d1397990e88c7f46e202b206e2290ab866bfb96048c1c7"
     },
     {
-      "bytes": 7902,
+      "bytes": 7939,
       "kind": "skill",
       "path": "skills/task-discipline/SKILL.md",
-      "sha256": "1424e0d49881475bf8951e0a472426b9bd511640d3756bc52c6917ac6869e81b"
+      "sha256": "9162e61c3918bed45f65cec1ee1cd3fe622c740d86f051745977fe6fce7b1783"
     },
     {
       "bytes": 10187,
@@ -340,10 +340,10 @@
       "sha256": "33fdb76347b39afc19a8b55c1d80e700bd863d1c6355a53b7bb1e8ff13301164"
     },
     {
-      "bytes": 3276,
+      "bytes": 3928,
       "kind": "skill",
       "path": "skills/workflow-design/SKILL.md",
-      "sha256": "c52ed0deea4ea3339d5e0610c3ca29d0ba4e94f3181efe87e8d95206f44ad199"
+      "sha256": "cc549f773a77d84b78566ac2da1642378406e1ed98c00f44fea3337835dc430f"
     }
   ],
   "version": "v1"
