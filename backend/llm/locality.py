@@ -126,6 +126,16 @@ def project_cloud_models_off(project_id: str | None, *, db) -> bool:
     return bool(row and row["cloud_models_off"])
 
 
+def cloud_off_project_ids(*, db) -> set[str]:
+    """Every project that turned cloud models off, in one read, for views that cover all projects."""
+    return {
+        str(row["project_id"])
+        for row in db.execute(
+            "SELECT project_id FROM project_inference_policies WHERE cloud_models_off = 1"
+        )
+    }
+
+
 def set_project_cloud_models_off(project_id: str, *, cloud_models_off: bool, db=None) -> dict:
     """Set the sole project cloud-model policy and return its public shape.
 
