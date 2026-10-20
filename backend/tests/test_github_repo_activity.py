@@ -140,8 +140,8 @@ async def test_previous_head_closed_merged_and_dedupe_shapes(monkeypatch):
     state = {"heads": {"3": "old"}, "closed": {}, "pending": [], "reads": []}
     emitted = []
     open_pull = {"number": 3, "head": {"sha": "new"}}
-    merged = {"number": 4, "state": "closed", "merged": True, "updated_at": "now", "head": {"sha": "m"}}
-    closed = {"number": 5, "state": "closed", "merged": False, "updated_at": "now", "head": {"sha": "c"}}
+    merged = {"number": 4, "state": "closed", "merged": True, "updated_at": "now", "closed_at": "closed-4", "head": {"sha": "m"}}
+    closed = {"number": 5, "state": "closed", "merged": False, "updated_at": "now", "closed_at": "closed-5", "head": {"sha": "c"}}
     answers = [GhResponse(200, {}, []), GhResponse(200, {}, [open_pull]),
                GhResponse(200, {}, [merged, closed]), GhResponse(200, {}, {"workflow_runs": []}),
                GhResponse(200, {}, {"workflow_runs": []})]
@@ -234,7 +234,7 @@ async def test_first_poll_does_not_replay_history(monkeypatch):
     state, emitted = {}, []
     labeled = {"id": 1, "created_at": "2026-01-01T00:00:00Z", "event": "labeled", "issue": {"pull_request": {}}}
     answers = [GhResponse(200, {}, [labeled]), GhResponse(200, {}, [{"number": 3, "head": {"sha": "h"}}]),
-               GhResponse(200, {}, [{"number": 4, "state": "closed", "updated_at": "t"}]),
+               GhResponse(200, {}, [{"number": 4, "state": "closed", "updated_at": "t", "closed_at": "closed-4"}]),
                GhResponse(200, {}, {"workflow_runs": []}), GhResponse(200, {}, {"workflow_runs": []})]
     monkeypatch.setattr(poller, "_recent_webhook", lambda *_a: False)
     monkeypatch.setattr(poller, "_repo_state", lambda _r: state)
@@ -243,7 +243,7 @@ async def test_first_poll_does_not_replay_history(monkeypatch):
     monkeypatch.setattr(poller, "_admit", lambda e, p, k: emitted.append(k) or asyncio.sleep(0))
     await poller._poll_repo(lambda *_a: None, "o/r", datetime.now(UTC))
     assert emitted == []
-    assert state["issues_cursor"] == "1" and state["heads"] == {"3": "h"} and state["closed"] == {"4": "t"}
+    assert state["issues_cursor"] == "1" and state["heads"] == {"3": "h"} and state["closed"] == {"4": "closed-4"}
 
 
 @pytest.mark.asyncio

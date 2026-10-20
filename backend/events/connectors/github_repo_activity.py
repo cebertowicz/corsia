@@ -140,7 +140,8 @@ def _payload(repo: str, action: str, pull: dict[str, Any]) -> dict[str, Any]:
 
 async def _admit(event: str, payload: dict[str, Any], key: str) -> None:
     from events.connectors.github_admission import admit_github_delivery_async
-    await admit_github_delivery_async(event, payload, f"gh-poll:{event}:{key}", source="repo_activity")
+    from infra.webhook_delivery_log import POLL_DELIVERY_PREFIX
+    await admit_github_delivery_async(event, payload, f"{POLL_DELIVERY_PREFIX}{event}:{key}", source="repo_activity")
 
 
 def _rows(body: Any, key: str) -> list[dict[str, Any]]:
@@ -263,7 +264,7 @@ async def _closed_pulls(runner: feed.GhRunner, repo: str, state: dict[str, Any],
         return False
     seeding, seen, changed = "closed" not in state, dict(state.get("closed", {})), False
     for pull in _rows(response.body, ""):
-        number, marker = pull.get("number"), str(pull.get("updated_at") or pull.get("closed_at") or "")
+        number, marker = pull.get("number"), str(pull.get("closed_at") or "")
         if not isinstance(number, int) or not marker or seen.get(str(number)) == marker:
             continue
         seen[str(number)] = marker

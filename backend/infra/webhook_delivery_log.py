@@ -25,6 +25,10 @@ log = logging.getLogger(__name__)
 
 #: Event types whose ``created`` delivery names one GitHub comment object.
 _COMMENT_OBJECT_EVENTS = frozenset({"issue_comment", "pull_request_review_comment"})
+#: CORSIA-synthesized receipts are not external webhook health signals.
+POLL_DELIVERY_PREFIX = "gh-poll:"
+NOTIFICATIONS_DELIVERY_PREFIX = "gh-notifications:"
+SYNTHETIC_DELIVERY_PREFIXES = (POLL_DELIVERY_PREFIX, NOTIFICATIONS_DELIVERY_PREFIX)
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,10 +121,12 @@ def repo_delivered_since(repo: str, since: str, *, db=None) -> bool:
 
 
 def repo_last_delivered_at(repo: str, *, db=None) -> str | None:
-    """The latest delivery timestamp for a repository, if it has one."""
+    """The latest real GitHub webhook timestamp for a repository, if any."""
     connection = db if db is not None else get_db()
+    excluded = " AND ".join("delivery_id NOT LIKE ?" for _ in SYNTHETIC_DELIVERY_PREFIXES)
     row = connection.execute(
-        "SELECT MAX(created_at) FROM webhook_deliveries WHERE repo=?", (repo,),
+        f"SELECT MAX(created_at) FROM webhook_deliveries WHERE repo=? AND {excluded}",
+        (repo, *(f"{prefix}%" for prefix in SYNTHETIC_DELIVERY_PREFIXES)),
     ).fetchone()
     return str(row[0]) if row and row[0] is not None else None
 
