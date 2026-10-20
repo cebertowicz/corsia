@@ -571,7 +571,9 @@ async def test_sign_in_again_reuses_the_saved_registration_and_ignores_the_calle
     assert microsoft.token_urls[-1].startswith(f"https://login.microsoftonline.com/{TENANT_A}/")
     [row] = _accounts()
     assert (row["id"], row["state"], row["state_cause"]) == (account_id, "connected", None)
-    assert _bundle(account_id)["client_id"] == CLIENT_ID
+    bundle = _bundle(account_id)
+    assert bundle is not None
+    assert bundle["client_id"] == CLIENT_ID
 
 
 async def test_sign_in_again_as_someone_else_changes_nothing(microsoft, isolated_db) -> None:

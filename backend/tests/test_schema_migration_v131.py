@@ -1,4 +1,4 @@
-"""Schema 129 -> 130: Microsoft account row metadata and fixed audit causes."""
+"""Schema 130 -> 131: Microsoft account row metadata and fixed audit causes."""
 from __future__ import annotations
 
 import re
@@ -9,11 +9,11 @@ from connections.account_state import REGISTRATION_MISCONFIGURED, REVOCATION_CAU
 from infra.connected_accounts_schema import AUDIT_TABLE_SQL, CONNECTED_ACCOUNTS_SCHEMA_SQL, _sql_values as schema_sql_values
 from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, migrate_to_current
-from infra.migration_129_to_130_microsoft_accounts import _AUDIT_V130_SQL, _CONNECTED_ACCOUNTS_V130_SQL, migrate_129_to_130
+from infra.migration_130_to_131_microsoft_accounts import _AUDIT_V130_SQL, _CONNECTED_ACCOUNTS_V130_SQL, migrate_130_to_131
 from infra.schema import SCHEMA_VERSION
 
 
-def _v129() -> sqlite3.Connection:
+def _v130() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     initialize_schema(db)
@@ -35,7 +35,7 @@ def _v129() -> sqlite3.Connection:
         );
         CREATE INDEX idx_connected_account_audit_account ON connected_account_audit(account_id, id);
     """)
-    db.execute("PRAGMA user_version=129")
+    db.execute("PRAGMA user_version=130")
     db.commit()
     return db
 
@@ -55,20 +55,20 @@ def test_account_cause_checks_match_the_canonical_cause_sets() -> None:
     assert _literal_check_values(_AUDIT_V130_SQL, "revocation_cause") == REVOCATION_CAUSES
 
 
-def test_v129_registers_microsoft_account_step() -> None:
-    assert SCHEMA_VERSION == 130
-    assert MIGRATIONS[129] is migrate_129_to_130
+def test_v130_registers_microsoft_account_step() -> None:
+    assert SCHEMA_VERSION == 131
+    assert MIGRATIONS[130] is migrate_130_to_131
 
 
 def test_migration_adds_metadata_and_accepts_manual_only_audit() -> None:
-    with closing(_v129()) as db:
+    with closing(_v130()) as db:
         db.execute(
             "INSERT INTO connected_account_audit(created_at,account_id,actor_kind,actor_id,action,revocation_cause) "
             "VALUES ('before','account','person','person','sign_out','not_signed_in')"
         )
         db.commit()
-        result = migrate_to_current(db, 130)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 129, 130)
+        result = migrate_to_current(db, 131)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 130, 131)
         columns = {row["name"] for row in db.execute("PRAGMA table_info(connected_accounts)")}
         assert {"account_kind", "state_cause"} <= columns
         assert db.execute(
@@ -79,7 +79,7 @@ def test_migration_adds_metadata_and_accepts_manual_only_audit() -> None:
             "VALUES ('now','account','person','person','remove','manual_only')"
         )
         db.commit()
-        assert not migrate_to_current(db, 130).migrated
+        assert not migrate_to_current(db, 131).migrated
 
 
 def _snapshot(db: sqlite3.Connection, table: str, columns: str = "*") -> list[tuple]:
@@ -89,7 +89,7 @@ def _snapshot(db: sqlite3.Connection, table: str, columns: str = "*") -> list[tu
 def test_existing_google_accounts_survive_byte_for_byte_in_every_reach_mode() -> None:
     from infra import key_store
 
-    with closing(_v129()) as db:
+    with closing(_v130()) as db:
         db.execute("INSERT INTO projects(id,name,created_at,updated_at) VALUES ('project-a','a','t','t')")
         for account_id, mode, outside in (("g-all", "all", 0), ("g-selected", "selected", 1), ("g-corsia", "corsia", 0)):
             key = f"connected-account--google--{account_id}"
@@ -113,7 +113,7 @@ def test_existing_google_accounts_survive_byte_for_byte_in_every_reach_mode() ->
             _snapshot(db, "key_store_entries"),
         )
 
-        assert migrate_to_current(db, 130).migrated
+        assert migrate_to_current(db, 131).migrated
 
         after = (
             _snapshot(db, "connected_accounts", columns), _snapshot(db, "connected_account_reach"),

@@ -62,19 +62,19 @@ def notify_turn_error(
     # A head held for its model has the same recovery as a limit (#3317).
     held_kind = wait_causes.stalled_why(connection, thread_id)
     held = held_kind == "model"
+    refused_on = connection.execute(  # the Turn's model, else the thread's
+        "SELECT COALESCE(NULLIF(COALESCE((SELECT model FROM active_turns WHERE id=? AND thread_id=?),"
+        " (SELECT model FROM threads WHERE id=?)),''),'its current model')", (turn_id, worker, worker)).fetchone()[0]
+    if held_kind == 'locality':  # the person's policy, not a limit: only moving the thread lifts it
+        _wake_locality(connection, parent_plan_id, worker, refused_on, child_plan_id=str(plan['id']),
+                       subject_id=episode(f'locality\n{refused_on}'))
+        return
     if held_kind != 'account' and not held and not is_provider_usage_or_quota_limit(error):
         _wake_parent(
             connection, parent_plan_id, worker, kind="child_turn_errored",
             subject_id=episode(error), child_plan_id=str(plan["id"]), error=error,
         )
         return
-    model = connection.execute(
-        """SELECT COALESCE(
-             (SELECT model FROM active_turns WHERE id=? AND thread_id=?),
-             (SELECT model FROM threads WHERE id=?)) AS model""",
-        (turn_id, worker, worker),
-    ).fetchone()
-    refused_on = (model["model"] if model is not None else None) or "its current model"
     if held_kind == 'account':
         from connections import read_account_readiness
 
@@ -97,6 +97,21 @@ def notify_turn_error(
         child_plan_id=str(plan["id"]), error=error,
         model=refused_on, resume_note=resume_note,
     )
+
+
+def _wake_locality(connection, parent_plan_id: str, worker: str, refused_on: str, **fields) -> None:
+    """Wake the parent about the worker's locality-held head, worded by its durable cause."""
+    from plans.delegation_notice import _wake_parent
+    from prompts.cloud_off import parent_wake_template
+
+    head = connection.execute(
+        "SELECT delivery_error FROM messages WHERE thread_id=? AND input_order IS NOT NULL"
+        " AND delivery_state='queued' AND active_turn_id IS NULL ORDER BY input_order LIMIT 1",
+        (worker,),
+    ).fetchone()
+    cause = str(head["delivery_error"]) if head is not None else "project_cloud_off"
+    _wake_parent(connection, parent_plan_id, worker, kind='child_held_local_only',
+                 template=parent_wake_template(cause), model=refused_on, **fields)
 
 
 def _waits_elsewhere(connection, plan) -> bool:

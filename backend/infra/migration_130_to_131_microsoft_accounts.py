@@ -1,4 +1,4 @@
-"""Schema 129 -> 130: Microsoft connected-account metadata and fixed audit causes."""
+"""Schema 130 -> 131: Microsoft connected-account metadata and fixed audit causes."""
 from __future__ import annotations
 
 import sqlite3
@@ -51,8 +51,8 @@ _AUDIT_V130_SQL = """
 """
 
 
-def migrate_129_to_130(conn: sqlite3.Connection) -> None:
-    """Rebuild account tables to add Microsoft metadata without changing historical v129.
+def migrate_130_to_131(conn: sqlite3.Connection) -> None:
+    """Rebuild account tables to add Microsoft metadata without changing historical v130.
 
     The account row must be rebuilt because SQLite cannot add the new checked
     columns in the same shape as a fresh v130 database. Reach rows are held in

@@ -140,6 +140,7 @@ def _definitions(db: sqlite3.Connection) -> tuple[dict[str, list[Definition]], d
 
 
 def _recorded(db: sqlite3.Connection) -> tuple[dict[str, FrozenPlan], frozenset[str]]:
+    """All recorded plan and reached state; one event per version, so the read grows with recorded versions."""
     plans, reached = {}, set()
     for row in db.execute("""
         SELECT subject_key, event_name, attributes FROM outcome_events
@@ -161,8 +162,9 @@ def _terminal_at(node: Mapping[str, Any], times: Mapping[tuple[str, str], str]) 
 
 def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
                   kpi_reader: KpiReader | None = None) -> Snapshot:
-    """Every judged workflow run with its group, settlement and attributed corrections; costs come later."""
+    """Every judged workflow run, with costs added later."""
     now = now or datetime.now(timezone.utc)
+    definitions, owners = _definitions(db)
     nodes = _nodes(db)
     parents = {node["id"]: node["parent_id"] for node in nodes}
     roots = run_roots(nodes)
@@ -172,13 +174,13 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
         run_id = workflow_run_of(fact.node_id, parents, root_ids)
         facts[run_id].append(CorrectionFact(fact.message_id, fact.message_at, fact.counter, fact.is_correction))
     judged = [node for node in roots if judged_version(node["workflow_version"])]
+    judged_ids = {node["id"] for node in judged}
     models = _model_groups(db, [node["id"] for node in judged])
     times = _terminal_times(db, [node["id"] for node in judged])
-    definitions, owners = _definitions(db)
     by_workflow: dict[str, list[Run]] = defaultdict(list)
     excluded: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for node in roots:
-        if node not in judged:
+        if node["id"] not in judged_ids:
             reason = "local_edit" if node["workflow_version"] else "unversioned"
             excluded[node["workflow_ref"]][reason] += 1
             continue
@@ -192,8 +194,10 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
         if kpi_reader is not None and runs:
             rows = kpi_reader(db, runs, definitions.get(ref, []))
             runs = [replace(run, kpi_rows=rows.get(run.run_id, {})) for run in runs]
-        histories.append(WorkflowHistory(ref, owners.get(ref), tuple(runs), tuple(definitions.get(ref, ())),
-                                         excluded={k: v for k, v in excluded.get(ref, {}).items()}))
+        histories.append(WorkflowHistory(
+            ref, owners.get(ref), tuple(runs), tuple(definitions.get(ref, ())),
+            excluded={k: v for k, v in excluded.get(ref, {}).items()},
+        ))
     plans, reached = _recorded(db)
     return Snapshot(now.isoformat(), tuple(histories), plans, reached)
 

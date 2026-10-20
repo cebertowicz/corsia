@@ -26,7 +26,7 @@
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
 	import { attachPreviewFeed, type PreviewFrameSource } from '$lib/stores/livePreviewFeed';
-	import { captureDocumentPlace, type TextDocumentPlace } from '$lib/documentImagePlace';
+	import { captureDocumentPlace, dispatchKeepingPlace, type TextDocumentPlace } from '$lib/documentImagePlace';
 
 	let {
 		value = $bindable(''),
@@ -211,6 +211,7 @@
 		const v = new EditorView({
 			doc: activeText?.toString() ?? value,
 			parent: host!,
+			dispatchTransactions: dispatchKeepingPlace,
 			extensions: [
 				documentComp.of(binding?.extensions ?? localHistory),
 				keymap.of([

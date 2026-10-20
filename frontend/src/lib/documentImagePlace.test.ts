@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
-import { restoreDocumentPlace } from './documentImagePlace';
+import { dispatchKeepingPlace, restoreDocumentPlace } from './documentImagePlace';
+import { NEAR_BOTTOM_PX } from './nearBottom';
 
 const SRC = '/api/files/content?path=%2Fws%2Fa.png';
 const image = { instanceId: 'tab-1', src: SRC, alt: 'a', from: 40, to: 60, scrollTop: 300, top: 0 };
@@ -222,5 +223,102 @@ describe('restoreDocumentPlace', () => {
 		scroller.scrollTop = 700;
 		await pending;
 		expect(scroller.scrollTop).toBe(700);
+	});
+});
+
+describe('dispatchKeepingPlace', () => {
+	// jsdom has no layout: CodeMirror's measure needs range geometry. No frame ever runs, so a measure pass that runs now
+	// is seen as the waiting frame being cancelled (CodeMirror's measure cancels it before measuring).
+	const rangeLayout = Range.prototype as Partial<Pick<Range, 'getClientRects' | 'getBoundingClientRect'>>;
+	const FRAME = 7;
+	let cancelFrame: ReturnType<typeof vi.fn>;
+	beforeEach(() => {
+		cancelFrame = vi.fn();
+		vi.stubGlobal('requestAnimationFrame', () => FRAME);
+		vi.stubGlobal('cancelAnimationFrame', cancelFrame);
+		rangeLayout.getClientRects = () => [] as unknown as DOMRectList;
+		rangeLayout.getBoundingClientRect = () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }) as DOMRect;
+	});
+	afterEach(() => {
+		delete rangeLayout.getClientRects;
+		delete rangeLayout.getBoundingClientRect;
+	});
+
+	/** An editor with a measure pass waiting for the next frame; `measured` reports whether it has run since. */
+	function waiting() {
+		const view = new EditorView({ doc: 'one\ntwo\nthree', parent: root, dispatchTransactions: dispatchKeepingPlace });
+		view.requestMeasure();
+		cancelFrame.mockClear();
+		return { view, measured: () => cancelFrame.mock.calls.some(([id]) => id === FRAME) };
+	}
+
+	it('lays out a change the reader did not make before any other update can follow it', () => {
+		const { view, measured } = waiting();
+		view.dispatch({ changes: { from: 0, to: 4 } });
+		expect(measured()).toBe(true);
+		view.destroy();
+	});
+
+	it("leaves the reader's own typing and any update that changes no text to the next frame", () => {
+		const { view, measured } = waiting();
+		view.dispatch({ changes: { from: 0, insert: 'x' }, userEvent: 'input.type' });
+		view.dispatch({ selection: { anchor: 2 } });
+		expect(view.state.doc.toString()).toBe('xone\ntwo\nthree');
+		expect(measured()).toBe(false);
+		view.destroy();
+	});
+
+	/** An editor whose scroller reports a 1000px document in a 400px view, `fromEnd` px above its end; records scroll writes. */
+	function reading(fromEnd: number, doc = 'one\ntwo\nthree\n\n') {
+		const view = new EditorView({ doc, parent: root, dispatchTransactions: dispatchKeepingPlace });
+		const writes: number[] = [];
+		let top = 1000 - 400 - fromEnd;
+		Object.defineProperties(view.scrollDOM, {
+			scrollHeight: { configurable: true, get: () => 1000 },
+			clientHeight: { configurable: true, get: () => 400 },
+			scrollTop: { configurable: true, get: () => top, set: (value: number) => { top = value; writes.push(value); } },
+		});
+		return { view, writes };
+	}
+
+	it('follows text another writer appends when the reader is within the near-bottom distance of the end', () => {
+		const { view, writes } = reading(NEAR_BOTTOM_PX - 1);
+		view.dispatch({ changes: { from: view.state.doc.length, insert: 'four\n' } });
+		expect(writes).toEqual([1000]);
+		view.destroy();
+	});
+
+	it('keeps the place of a reader at or beyond the near-bottom distance when text is appended', () => {
+		const { view, writes } = reading(NEAR_BOTTOM_PX);
+		view.dispatch({ changes: { from: view.state.doc.length, insert: 'four\n' } });
+		expect(writes).toEqual([]);
+		view.destroy();
+	});
+
+	it('does not follow a near-bottom reader for remote edits that are not appends', () => {
+		const { view, writes } = reading(10);
+		const end = view.state.doc.length;
+		view.dispatch({ changes: { from: end - 1, insert: '\n' } });
+		view.dispatch({ changes: { from: 0, insert: 'zero\n' } });
+		view.dispatch({ changes: { from: view.state.doc.length - 2, to: view.state.doc.length } });
+		expect(writes).toEqual([]);
+		view.destroy();
+	});
+
+	it("leaves a near-bottom reader's own append to the editor's default scrolling", () => {
+		const { view, writes } = reading(10);
+		view.dispatch({ changes: { from: view.state.doc.length, insert: 'x' }, userEvent: 'input.type' });
+		expect(writes).toEqual([]);
+		view.destroy();
+	});
+
+	it('follows a near-bottom reader when a batch carries an append alongside an edit higher up', () => {
+		const { view, writes } = reading(10);
+		const above = view.state.update({ changes: { from: 0, insert: 'zero\n' } });
+		const append = above.state.update({ changes: { from: above.state.doc.length, insert: 'four\n' } });
+		view.dispatch([above, append]);
+		expect(view.state.doc.toString()).toBe('zero\none\ntwo\nthree\n\nfour\n');
+		expect(writes).toEqual([1000]);
+		view.destroy();
 	});
 });

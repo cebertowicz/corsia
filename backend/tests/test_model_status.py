@@ -34,7 +34,7 @@ def status_env(monkeypatch):
     rows: list[dict] = []
 
     monkeypatch.setattr(model_catalog, "get_model_status_catalog_rows", lambda: rows)
-    monkeypatch.setattr(ms, "_network_server_status", lambda: dict(servers))
+    monkeypatch.setattr(ms, "_network_server_status", lambda *_a: dict(servers))
     monkeypatch.setattr(ms, "_loaded_model_ids_fn", lambda: (lambda sid: loaded.get(sid, set())))
     monkeypatch.setattr(ms, "_cloud_providers_active", lambda: {"anthropic"})
     harness_connections = {"claude-code": False, "codex": False}

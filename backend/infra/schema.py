@@ -26,7 +26,7 @@ from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
 from infra.plan_liveness_schema import PLAN_LIVENESS_SCHEMA_SQL
 from infra.plan_schema import STRUCTURED_PLAN_SCHEMA_SQL
 from infra.presence_schema import PRESENCE_SCHEMA_SQL
-from infra.project_repo_policy_schema import PROJECT_REPO_POLICY_TABLE_SQL
+from infra.project_policy_schema import PROJECT_INFERENCE_POLICY_TABLE_SQL, PROJECT_REPO_POLICY_TABLE_SQL
 from infra.provider_availability_schema import PROVIDER_AVAILABILITY_TABLE_SQL
 from infra.reviewer_gate_schema import REVIEWER_GATE_SCHEMA_SQL
 from infra.settings_schema import SETTINGS_SCHEMA_SQL
@@ -34,7 +34,7 @@ from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-SCHEMA_VERSION = 130
+SCHEMA_VERSION = 131
 SCHEMA_SQL = f"""
     {SETTINGS_SCHEMA_SQL}
     {BULLETIN_SCHEMA_SQL}
@@ -227,7 +227,7 @@ SCHEMA_SQL = f"""
         updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
-    {PROJECT_REPO_POLICY_TABLE_SQL};
+    {PROJECT_INFERENCE_POLICY_TABLE_SQL}; {PROJECT_REPO_POLICY_TABLE_SQL};
     {HOST_ACCESS_LEASE_SCHEMA_SQL}
     {MANAGED_PROCESS_SCHEMA_SQL}
     {USAGE_SCHEMA_SQL}

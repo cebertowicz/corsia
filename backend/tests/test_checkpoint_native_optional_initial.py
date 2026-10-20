@@ -86,7 +86,7 @@ def folds(monkeypatch):
         return None, None, None
 
     async def iteration_db(function, *args):
-        if function is resolution.resolve_execution_target:
+        if getattr(function, "func", None) is resolution.resolve_locality_permitted:
             return SimpleNamespace(context_window=WINDOW)
         if function is boundary_snapshot:
             return None, None, None

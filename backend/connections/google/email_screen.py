@@ -16,9 +16,9 @@ import secrets
 import sqlite3
 from dataclasses import dataclass
 from datetime import timedelta
-from ipaddress import ip_address
 from typing import Any, Awaitable, Callable
-from urllib.parse import urlparse
+
+from llm.locality import endpoint_on_this_mac
 
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
@@ -154,13 +154,9 @@ def local_endpoint_refusal(target: Any, provider_params: Callable[[str], dict] |
         provider_params = make_provider_params
     try:
         api_base = provider_params(target.transport_model).get("api_base")
-        host = urlparse(str(api_base or "")).hostname or ""
+        loopback = endpoint_on_this_mac(api_base)
     except Exception:
         return "the screen model's endpoint can't be read"
-    try:
-        loopback = ip_address(host).is_loopback
-    except ValueError:
-        loopback = host == "localhost"
     return None if loopback else "the screen model is not on this computer"
 
 

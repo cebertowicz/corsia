@@ -22,7 +22,7 @@ def _has_check_suite_id(db) -> bool:
 def test_fresh_schema_has_check_suite_id():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 130
+        assert SCHEMA_VERSION == 131
         assert _has_check_suite_id(db)
 
 

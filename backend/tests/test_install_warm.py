@@ -122,15 +122,15 @@ def _route_session(monkeypatch, bound_model: str):
         lambda *_a, **_k: _fake_session_row(bound_model),
     )
     resolved: list[str] = []
-    real = api_runtime.resolve_execution_target
+    real = api_runtime.resolve_thread_target
 
-    def _resolve(selected, *, db):
+    def _resolve(selected, *, thread_id, db):
         resolved.append(selected)
         if not selected:
             raise ModelUnavailableError("(none)", "No model configured")
-        return real(selected, db=db)
+        return real(selected, thread_id=thread_id, db=db)
 
-    monkeypatch.setattr(api_runtime, "resolve_execution_target", _resolve)
+    monkeypatch.setattr(api_runtime, "resolve_thread_target", _resolve)
     monkeypatch.setattr(
         "core.thread_warm.warm_suppression_reason", lambda *_a, **_k: None,
     )
@@ -176,7 +176,7 @@ async def test_route_refuses_a_model_that_is_not_omlx(monkeypatch):
         expected_reported_model=None, context_window=200000, available=True,
         availability_reason=None, display_name="Sonnet", supports_reasoning=False,
     )
-    monkeypatch.setattr(api_runtime, "resolve_execution_target", lambda *_a, **_k: cloud)
+    monkeypatch.setattr(api_runtime, "resolve_thread_target", lambda *_a, **_k: cloud)
     response = await api_runtime.warm_session_cache("t", token="x", model="claude-code/sonnet")
     assert response == {
         "ok": False, "message": "Not a warmable available Native oMLX network model",

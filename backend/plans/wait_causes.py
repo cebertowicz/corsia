@@ -51,15 +51,16 @@ _STALLED = {
     "model": "The delegated child is stalled: its model is unavailable",
     "account": "The delegated child is stalled: its input is held for its account",
     "error": "The delegated child is stalled: its last Turn failed",
+    "locality": "The delegated child is stalled: local models only; its model can't run",
 }
 
 
 def stalled_sql(thread: str) -> str:
     """SQL naming why ``thread`` cannot move its plan now, else NULL (#3317).
 
-    ``'model'``: its FIFO head is held for an unavailable model. ``'error'``:
-    its last Turn failed and nothing runnable is queued. Either way no Turn
-    runs. ``thread`` is a column or a named parameter, never caller text.
+    ``'model'``, ``'locality'`` or ``'account'``: its FIFO head is held for that cause.
+    ``'error'``: its last Turn failed and nothing runnable is queued. Either way no
+    Turn runs. ``thread`` is a column or a named parameter, never caller text.
     """
     from infra.unavailable_model_recovery import held_head_kind_sql
 

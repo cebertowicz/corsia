@@ -71,7 +71,7 @@ def _seed_legacy(db: sqlite3.Connection) -> None:
 
 
 def test_v128_registers_connected_accounts_step() -> None:
-    assert SCHEMA_VERSION == 130
+    assert SCHEMA_VERSION == 131
     assert MIGRATIONS[128] is migrate_128_to_129
     assert 129 in MIGRATIONS
 
@@ -82,8 +82,8 @@ def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> 
         db.execute("PRAGMA user_version=128")
         db.commit()
 
-        result = migrate_to_current(db, 129)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 128, 129)
+        result = migrate_to_current(db, SCHEMA_VERSION)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 128, 131)
         account = google_account(db=db)
         assert account is not None
         assert account["address"] == ACCOUNT
@@ -96,7 +96,7 @@ def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> 
         assert get_setting("gmail_poll_cursor", db=db) is None
         assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
 
-        assert not migrate_to_current(db, 129).migrated
+        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 
 
 def test_migration_rekeys_owned_threads_and_binds_open_google_drafts() -> None:
@@ -164,8 +164,8 @@ def test_incomplete_legacy_credentials_become_needs_sign_in_without_blocking_sta
         db.execute("PRAGMA user_version=128")
         db.commit()
 
-        result = migrate_to_current(db, 129)
-        assert (result.migrated, result.to_version) == (True, 129)
+        result = migrate_to_current(db, SCHEMA_VERSION)
+        assert (result.migrated, result.to_version) == (True, 131)
         account = google_account(db=db)
         assert account is not None
         assert account["address"] == ACCOUNT
@@ -174,7 +174,7 @@ def test_incomplete_legacy_credentials_become_needs_sign_in_without_blocking_sta
         assert resolve_credentials(str(account["id"]), db=db) is None
         assert get_setting("google_account", db=db) is None
         assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
-        assert not migrate_to_current(db, 129).migrated
+        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 
 
 def test_addressless_legacy_data_is_retired_without_an_account() -> None:
@@ -184,14 +184,14 @@ def test_addressless_legacy_data_is_retired_without_an_account() -> None:
         db.execute("PRAGMA user_version=128")
         db.commit()
 
-        result = migrate_to_current(db, 129)
-        assert (result.migrated, result.to_version) == (True, 129)
+        result = migrate_to_current(db, SCHEMA_VERSION)
+        assert (result.migrated, result.to_version) == (True, 131)
         assert google_account(db=db) is None
         assert get_setting("google_account", db=db) is None
         assert get_setting("gmail_poll_cursor", db=db) is None
         assert key_store.resolve_names(key_store.GOOGLE_ENTRIES, db=db) == {}
 
-        assert not migrate_to_current(db, 129).migrated
+        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 
 
 def test_failed_bundle_write_keeps_legacy_credentials_and_settings_for_retry(monkeypatch) -> None:
@@ -232,7 +232,7 @@ def test_failed_multistep_ladder_rolls_back_earlier_schema_changes_and_retries(m
         ).fetchone() is None
 
         monkeypatch.undo()
-        assert migrate_to_current(db, 129).to_version == 129
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 131
 
 
 def _screen(db: sqlite3.Connection, account: str, message_id: str) -> None:

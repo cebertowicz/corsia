@@ -49,15 +49,34 @@ class WorkflowHistory:
     version_attr: str | None = None  # not persisted by measure_sync yet, so the read side passes None
     excluded: Mapping[str, int] = field(default_factory=dict)  # never-judged runs, counted: unversioned, local_edit
 
+    def _in_start_order(self) -> list[Run]:
+        return sorted(self.runs, key=lambda item: (parse_ts(item.started_at), item.run_id))
+
     def versions(self) -> list[str]:
         """Judged versions by first use (v1, v2, ...)."""
         first: dict[str, str] = {}
-        for run in sorted(self.runs, key=lambda item: (parse_ts(item.started_at), item.run_id)):
+        for run in self._in_start_order():
             first.setdefault(run.version, run.started_at)
         return list(first)
 
     def first_use(self, version: str) -> str:
         return min((run.started_at for run in self.runs if run.version == version), key=parse_ts)
+
+    def successor(self, version: str) -> tuple[str, str] | None:
+        """The version that replaced ``version`` and when: the first other version to run after its last run,
+        whether newer or rolled back to; None while it is still the one in use."""
+        ordered = self._in_start_order()
+        last = max(i for i, run in enumerate(ordered) if run.version == version)
+        after = next((run for run in ordered[last + 1:] if run.version != version), None)
+        return (after.version, after.started_at) if after is not None else None
+
+    def predecessors(self, version: str) -> list[str]:
+        """The other versions that ran before ``version``'s first use, latest run first: the one it replaced,
+        then the one before that. The reverse of ``successor``: after v1, v2, back to v1, then v3, v3 replaced
+        v1, so v1 comes before v2."""
+        ordered = self._in_start_order()
+        first = next(i for i, run in enumerate(ordered) if run.version == version)
+        return list(dict.fromkeys(run.version for run in reversed(ordered[:first])))
 
 
 @dataclass(frozen=True)
@@ -91,7 +110,7 @@ class FrozenPlan:
 
 @dataclass(frozen=True)
 class Verdict:
-    word: str  # keep, revert, changed_early (stored); collecting, not_enough_data (computed on read)
+    word: str  # keep, revert (stored); changed_early, collecting, not_enough_data (computed on read)
     reason: str
     look: int
     calls: tuple[MeasureCall, ...] = ()
@@ -166,25 +185,27 @@ def baseline_runs(history: WorkflowHistory, version: str, minimum: int, window: 
 
 def choose_baseline(history: WorkflowHistory, version: str, minimum: int, window: int, now: datetime
                     ) -> tuple[str | None, tuple[str, ...]]:
-    """The nearest earlier version with the minimum settled runs in groups shared with ``version``."""
-    order = history.versions()
-    groups = {run.group for run in _side(history, version)}
+    """The version ``version`` replaced, or failing that the latest-run earlier version, with the minimum
+    settled runs at ``now``. ``version``'s own groups are unknown at first use, so shared groups are left to
+    the comparison (``no_shared_groups``)."""
     skipped: list[str] = []
-    for candidate in reversed(order[:order.index(version)]):
-        if sum(run.group in groups for run in baseline_runs(history, candidate, minimum, window, now)) >= minimum:
+    for candidate in history.predecessors(version):
+        if len(baseline_runs(history, candidate, minimum, window, now)) >= minimum:
             return candidate, tuple(skipped)
         skipped.append(candidate)
     return None, tuple(skipped)
 
 
-def freeze_plan(history: WorkflowHistory, version: str, now: datetime) -> FrozenPlan:
-    """The plan, from the definitions in force at the version's first run, not at this pass."""
+def freeze_plan(history: WorkflowHistory, version: str) -> FrozenPlan:
+    """Freeze definitions and baseline eligibility at the version's first use (design §3.4)."""
     subject = f"workflow:{history.ref}@{version}"
-    in_force = definitions_in_force(history.definitions, history.first_use(version))
+    started = history.first_use(version)
+    first_use = parse_ts(started)
+    in_force = definitions_in_force(history.definitions, started)
     kpis, refusals, minimum = assert_evaluator_fields(in_force, history.ref, history.version_attr)
     measures = (*BUILTINS, *kpis)
     window = max(measure.window_days for measure in measures)
-    baseline, skipped = choose_baseline(history, version, minimum, window, now)
+    baseline, skipped = choose_baseline(history, version, minimum, window, first_use)
     seed = int.from_bytes(hashlib.sha256(subject.encode("utf-8")).digest()[:8], "big")
     return FrozenPlan(subject, version, baseline, skipped, measures, minimum, refusals, seed)
 
@@ -237,13 +258,24 @@ def _prefix(plan: FrozenPlan, deciding: Sequence[PlannedMeasure], new: Sequence[
     return None
 
 
-def decide(history: WorkflowHistory, plan: FrozenPlan, now: datetime, replaced_by: str | None = None) -> Verdict:
-    """Collecting, Changed again, Not enough data, or the verdict at look 1 or look 2."""
+def sides(history: WorkflowHistory, plan: FrozenPlan) -> tuple[list[Run], list[Run]]:
+    """The baseline runs settled by the version's first use, and the version's own ended runs in end order."""
+    assert plan.baseline is not None
+    window = max(m.window_days for m in plan.measures)
+    old = baseline_runs(history, plan.baseline, plan.minimum, window, parse_ts(history.first_use(plan.version)))
+    new = sorted((r for r in _side(history, plan.version) if r.terminal_at), key=lambda r: parse_ts(r.terminal_at or ""))
+    return old, new
+
+
+def decide(history: WorkflowHistory, plan: FrozenPlan, now: datetime,
+           replaced_by: tuple[str, str] | None = None) -> Verdict:
+    """Collecting, Changed again, Not enough data, or the verdict at look 1 or look 2.
+
+    ``replaced_by`` is the replacing version and when it took over (``WorkflowHistory.successor``)."""
     if plan.baseline is None:
         return Verdict("not_enough_data", "no_baseline", 0, (), {"minimum": plan.minimum, "skipped": list(plan.skipped)})
     window = max(m.window_days for m in plan.measures)
-    old = baseline_runs(history, plan.baseline, plan.minimum, window, now)
-    new = sorted((r for r in _side(history, plan.version) if r.terminal_at), key=lambda r: parse_ts(r.terminal_at or ""))
+    old, new = sides(history, plan)
     call = lambda m, runs, bootstrap=True: measure_call(m, runs, old, minimum=plan.minimum, now=now,  # noqa: E731
                                                         seed=plan.seed + len(m.name), bootstrap=bootstrap)
     overall = [call(m, new, bootstrap=False) for m in plan.measures]
@@ -254,13 +286,11 @@ def decide(history: WorkflowHistory, plan: FrozenPlan, now: datetime, replaced_b
     first = _prefix(plan, deciding, new, old, plan.minimum, now)
     inputs = {"baseline": plan.baseline, "skipped": list(plan.skipped)}
     if replaced_by is not None:
-        cutoff, own = parse_ts(history.first_use(replaced_by)), _side(history, plan.version)
-        reached = first is not None and max(parse_ts(r.started_at) for r in new[:first]) < cutoff
-        pending = any(not r.settled(window, now) for r in own if parse_ts(r.started_at) < cutoff)
-        if not reached and not pending:
-            k = sum(1 for r in own if parse_ts(r.started_at) < cutoff)
+        # The successor first ran after this version's last run, so every run of this version predates it.
+        own = _side(history, plan.version)
+        if first is None and all(r.settled(window, now) for r in own):
             return Verdict("changed_early", "replaced_before_look_1", 0, (),
-                           {**inputs, "version": plan.version, "k": k, "next": replaced_by})
+                           {**inputs, "version": plan.version, "k": len(own), "next": replaced_by[0]})
     if first is None:
         counted = [c for c in overall if c.role != "shown" and c.call not in BLOCKED | {"unknown"}]
         groups = sorted({g for c in counted for g in c.groups})
@@ -282,14 +312,13 @@ def compute(snapshot: Snapshot) -> list[Evaluation]:
     """Every judged version's evaluation; a version with a reached verdict is never recomputed."""
     now, evaluations = parse_ts(snapshot.now), []
     for history in snapshot.workflows:
-        order = history.versions()
-        for index, version in enumerate(order):
+        for version in history.versions():
             subject = f"workflow:{history.ref}@{version}"
             if subject in snapshot.reached:
                 continue
             existing = snapshot.plans.get(subject)
-            plan = existing or freeze_plan(history, version, now)
-            replaced_by = order[index + 1] if index + 1 < len(order) else None
+            plan = existing or freeze_plan(history, version)
+            replaced_by = history.successor(version)
             evaluations.append(Evaluation(subject, history.owner, plan, decide(history, plan, now, replaced_by),
                                           existing is None))
     return evaluations
