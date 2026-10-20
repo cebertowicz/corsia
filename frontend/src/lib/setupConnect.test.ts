@@ -14,7 +14,8 @@ describe('setup CLI installer failure copy', () => {
 
 	it('keeps a vendor refusal distinct and does not offer retry', () => {
 		expect(installFailureCopy('Codex', 'site_refused', 'cli-refused')).toEqual({
-			meta: 'Couldn’t download Codex. The download site refused the request. Save a report. Reference: cli-refused',
+			meta: 'Couldn’t download Codex. The download site refused the request. Save a report.',
+			reference: 'cli-refused',
 			retry: false,
 		});
 	});
@@ -26,9 +27,10 @@ describe('setup CLI installer failure copy', () => {
 		});
 	});
 
-	it('ends generic installer failure copy with its opaque reference and no trailing punctuation', () => {
+	it('keeps the opaque reference out of generic installer failure copy', () => {
 		expect(installFailureCopy('Claude Code', 'download_unverified', 'cli-failed')).toEqual({
-			meta: 'Couldn’t install Claude Code. Try again, or save a report. Reference: cli-failed',
+			meta: 'Couldn’t install Claude Code. Try again, or save a report.',
+			reference: 'cli-failed',
 			retry: true,
 		});
 	});
