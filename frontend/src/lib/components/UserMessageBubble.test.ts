@@ -5,7 +5,7 @@ import UserMessageBubble from './UserMessageBubble.svelte';
 import { token } from '$lib/stores/auth';
 import { activeThreadId, messages } from '$lib/stores/threads';
 import { activeModelId, models, type Model } from '$lib/stores/models';
-import { WAITING_FOR_LOCAL_MODEL, WAITING_FOR_MODEL, WAITING_FOR_THREAD_LOCAL_MODEL } from '$lib/messageDeliveryCopy';
+import { SWITCH_TO_LOCAL_MODEL, WAITING_FOR_LOCAL_MODEL, WAITING_FOR_MODEL, WAITING_FOR_THREAD_LOCAL_MODEL } from '$lib/messageDeliveryCopy';
 import { _resetTurnStateForTests } from '$lib/ws/turnState';
 import { formatTime } from '$lib/time';
 import { resetUpdateStoreForTests, updateStatus } from '$lib/update/store';
@@ -213,7 +213,7 @@ describe('UserMessageBubble — delivery state', () => {
 			write_outcome: 'proved_no_write', active_turn_id: null,
 		}));
 		const status = wrapper.querySelector<HTMLElement>('.delivery-status');
-		expect(status?.textContent).toBe(WAITING_FOR_LOCAL_MODEL.label);
+		expect(status?.textContent).toBe(SWITCH_TO_LOCAL_MODEL);
 		expect(status?.title).toBe(WAITING_FOR_LOCAL_MODEL.title);
 	});
 
@@ -223,7 +223,7 @@ describe('UserMessageBubble — delivery state', () => {
 			write_outcome: 'proved_no_write', active_turn_id: null,
 		}));
 		const status = wrapper.querySelector<HTMLElement>('.delivery-status');
-		expect(status?.textContent).toBe(WAITING_FOR_THREAD_LOCAL_MODEL.label);
+		expect(status?.textContent).toBe(SWITCH_TO_LOCAL_MODEL);
 		expect(status?.title).toBe(WAITING_FOR_THREAD_LOCAL_MODEL.title);
 	});
 

@@ -152,15 +152,16 @@ async function openSheetInProject(page: Page, name: string) {
 	await expect(page.locator('.model-sheet')).toBeVisible();
 }
 
-async function openHeldCloudOffChat(page: Page, state: State, name: string) {
-	const projectName = `${name} project`;
+async function openHeldCloudOffChat(page: Page, state: State) {
+	const projectName = 'Customer research';
+	const chatName = 'Interview summary';
 	const projectResponse = await page.request.post(`/api/projects?token=${encodeURIComponent(TEST_TOKEN)}`, {
 		data: { name: projectName, description: '', accent_color: '#007faa' },
 	});
 	expect(projectResponse.ok()).toBeTruthy();
 	const project = (await projectResponse.json()).project as { id: string };
 	const created = await page.request.post(`/api/threads?token=${encodeURIComponent(TEST_TOKEN)}`, {
-		data: { title: name, project_id: project.id, model: 'claude-code/opus' },
+		data: { title: chatName, project_id: project.id, model: 'claude-code/opus' },
 	});
 	expect(created.ok()).toBeTruthy();
 	const threadId = (await created.json()).thread_id as string;
@@ -177,8 +178,8 @@ async function openHeldCloudOffChat(page: Page, state: State, name: string) {
 	await expect(page.locator('.palette')).toBeVisible();
 	await page.locator('.palette').getByRole('button', { name: projectName, exact: true }).click();
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	await page.locator('.thread-title', { hasText: name }).click();
-	await expect(page.locator('.delivery-status')).toHaveText('Waiting for a local model');
+	await page.locator('.thread-title', { hasText: chatName }).click();
+	await expect(page.locator('.delivery-status')).toHaveText('Switch to a local model to send');
 }
 
 test.describe('@surface:provider-policy local-only controls frames', () => {
@@ -190,6 +191,10 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 		const state: State = { models: catalogs.plain, servers: [servers.remoteOff], cloudOff: false, failSave: false };
 		await serve(page, state);
 		let stamp = 0;
+		const projectNames = [
+			'Market research', 'Product planning', 'Design review', 'Launch preparation',
+			'Support themes', 'Sales notes', 'Interview notes', 'Competitive analysis',
+		] as const;
 		const shot = async (name: string, size: string, theme: string) => {
 			// A frame counts only with the exact committed head in its dev header: wait for the real hash, no placeholder, no dirty mark.
 			await expect(page.locator('.version-overlay')).toHaveText(/^\s*b [0-9a-f]{7}\s*·\s*f [0-9a-f]{7}\s*·/, { timeout: 15_000 });
@@ -200,7 +205,7 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 			await page.emulateMedia({ colorScheme: theme });
 			await loginByUrl(page, { waitForComposer: false });
 			stamp += 1;
-			return `lo-${testInfo.project.name}-${stamp}`;
+			return projectNames[(stamp - 1) % projectNames.length];
 		};
 
 		for (const [size, width, height, theme] of REFERENCE_ONLY ? [] : surfaces(testInfo.project.name)) {
@@ -251,7 +256,8 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 			}
 
 			if (!BEFORE) {
-				await openHeldCloudOffChat(page, state, `held cloud message ${await begin(width, height, theme)}`);
+				await begin(width, height, theme);
+				await openHeldCloudOffChat(page, state);
 				await shot('chat-held-cloud-off', size, theme);
 			}
 

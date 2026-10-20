@@ -30,7 +30,7 @@ export type DeliveryPresentation = {
 	label:
 		| 'Sending when ready…'
 		| 'Waiting for model'
-		| 'Waiting for a local model'
+		| 'Switch to a local model to send'
 		| 'Choose a model to send'
 		| 'Waiting for checkpoint'
 		| 'Delivery uncertain'

@@ -44,8 +44,11 @@ export const WAITING_FOR_MODEL = {
 /** The local-only project policy held a message still bound to a cloud model. */
 export const PROJECT_CLOUD_OFF = 'project_cloud_off';
 
+/** The action that resumes either locality hold. */
+export const SWITCH_TO_LOCAL_MODEL = 'Switch to a local model to send';
+
 export const WAITING_FOR_LOCAL_MODEL = {
-	label: 'Waiting for a local model',
+	label: SWITCH_TO_LOCAL_MODEL,
 	title: 'Local models only is on for this project. Your message is saved and will send as soon as you switch this chat to a local model or turn Local models only off.',
 } as const;
 
@@ -53,7 +56,7 @@ export const WAITING_FOR_LOCAL_MODEL = {
 export const THREAD_LOCAL_ONLY = 'thread_local_only';
 
 export const WAITING_FOR_THREAD_LOCAL_MODEL = {
-	label: WAITING_FOR_LOCAL_MODEL.label,
+	label: SWITCH_TO_LOCAL_MODEL,
 	title: 'This chat is set to local models only. Your message is saved and will send as soon as you switch this chat to a local model.',
 } as const;
 
