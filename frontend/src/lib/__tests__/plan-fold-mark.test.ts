@@ -18,8 +18,10 @@ describe('PlanFoldMark', () => {
 		component = mount(PlanFoldMark, { target: host, props: { counts: { done: 1_219, failed: 0, closed: 0 } } });
 
 		const label = host.querySelector('.fold-label');
-		expect(label?.getAttribute('aria-label')).toBe('1,219 done');
-		expect(label?.textContent).toBe('1.2k done');
-		expect(label?.firstElementChild?.getAttribute('aria-hidden')).toBe('true');
+		const [shown, spoken] = [...(label?.children ?? [])];
+		expect(shown.textContent).toBe('1.2k done');
+		expect(shown.getAttribute('aria-hidden')).toBe('true');
+		expect(spoken.textContent).toBe('1,219 done');
+		expect(spoken.classList.contains('sr-only')).toBe(true);
 	});
 });

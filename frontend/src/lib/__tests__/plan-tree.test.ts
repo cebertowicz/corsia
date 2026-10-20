@@ -479,7 +479,7 @@ describe('PlanTree — same renderer contract', () => {
 		expect(row?.getAttribute('aria-level')).toBe('2');
 		// The child's finished work folds into its own level's count, like the host's.
 		const fold = nested?.querySelector('[data-fold-level="child-plan:"]');
-		expect(fold?.textContent).toContain('1 completed');
+		expect(fold?.textContent).toContain('1 done');
 		expect(host.textContent).not.toContain('Child finished step');
 	});
 

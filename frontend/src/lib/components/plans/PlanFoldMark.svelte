@@ -3,10 +3,13 @@
 	import { foldAccessibleLabel, foldHasNoFailures, foldLabel, type FoldCounts } from './planFoldLevels';
 
 	let { counts }: { counts: FoldCounts } = $props();
+	const shown = $derived(foldLabel(counts));
+	const exact = $derived(foldAccessibleLabel(counts));
 </script>
 
 <span class="fold-mark" class:mixed={!foldHasNoFailures(counts)} aria-hidden="true">✓</span>
-<span class="fold-label" aria-label={foldAccessibleLabel(counts)}><span aria-hidden="true">{foldLabel(counts)}</span></span>
+<!-- A compacted count is shown; assistive technology reads the exact one. -->
+<span class="fold-label">{#if shown === exact}{shown}{:else}<span aria-hidden="true">{shown}</span><span class="sr-only">{exact}</span>{/if}</span>
 
 <style>
 	.fold-mark {
@@ -21,7 +24,8 @@
 		font-size: var(--text-footnote); font-variant-numeric: tabular-nums;
 		text-overflow: ellipsis; white-space: nowrap;
 	}
-	/* This component is the fold face, so it keeps its own summary and control together without growing PlanTree. */
-	:global(.fold-row) { flex-wrap: nowrap; }
-	:global(.fold-row .row-body) { flex: 1 1 0; }
+	.sr-only {
+		position: absolute; width: 1px; height: 1px; overflow: hidden;
+		clip: rect(0 0 0 0); white-space: nowrap;
+	}
 </style>
