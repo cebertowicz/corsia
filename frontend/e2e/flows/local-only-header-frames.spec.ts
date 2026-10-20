@@ -167,7 +167,7 @@ test.describe('@surface:local-only local-only header frames', () => {
 					['inherited-worker', { localOnly: true, inherited: true }, 'Set by Research review'],
 					['project-local-only', { project: true }, 'Set by this project'],
 					['no-local-ready', { noLocal: true }, 'No local model is ready.'],
-					['write-in-flight', { pendingSave: true }, 'This chat and its agents use local models only.'],
+					['write-in-flight', { pendingSave: true }, 'When on, this chat and its agents use local models only.'],
 					['save-failure', { failSave: true }, "When on, this chat and its agents use local models only."],
 				];
 			for (const [name, next, text] of frames) {
@@ -188,6 +188,7 @@ test.describe('@surface:local-only local-only header frames', () => {
 					await page.getByRole('button', { name: 'Local only', exact: true }).click();
 					await expect(page.getByRole('button', { name: 'Local only', exact: true })).toHaveAttribute('aria-pressed', 'true');
 					await expect(page.getByText('Saving…', { exact: true })).toBeVisible();
+					await expect(sheet).toContainText('This chat and its agents use local models only.');
 					await expect(sheet.locator('.tg')).toHaveClass(/locked/);
 					await expect(sheet.locator('.tg')).not.toHaveClass(/held/);
 					await expect(sheet.locator('.tg')).toHaveCSS('opacity', '1');

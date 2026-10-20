@@ -70,7 +70,7 @@
 					No local model is ready. <button type="button" class="local-only-link" onclick={onsetuplocal}>Set up a local model</button>
 				{:else if needsModelSwitch}
 					Switch this chat to a local model first.
-				{:else if cause === 'off'}
+				{:else if !on}
 					When on, this chat and its agents use local models only.
 				{:else}
 					This chat and its agents use local models only.
