@@ -28,6 +28,7 @@ _PUBLIC_PAIRS = frozenset({
     ("POST", "/api/auth/login"),
     ("POST", "/api/devices/pair/start"),
     ("POST", "/api/devices/pair/finish"),
+    ("POST", "/api/devices/identity"),
 })
 _PASSWORD = "g7-disposable-listener-password"
 _ACCOUNT = {

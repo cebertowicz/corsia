@@ -7,7 +7,7 @@ use std::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use hmac::{Hmac, Mac};
 use hkdf::Hkdf;
-use reqwest::{header::{HeaderMap, HeaderValue, HOST}, Client, ClientBuilder, StatusCode};
+use reqwest::{header::{HeaderMap, HeaderValue, HOST}, Client, ClientBuilder, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
@@ -26,6 +26,8 @@ pub struct Paired {
     pub trust: Trust,
     pub host: String,
     pub port: u16,
+    /// Stable host identity; absent only when pairing a host predating identity confirmation.
+    pub identity: Option<[u8; 32]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,6 +120,10 @@ struct FinishRequest<'a> {
 struct FinishResponse {
     confirm_s: String,
     name: String,
+    #[serde(default)]
+    spki_sha256: Option<String>,
+    #[serde(default)]
+    confirm_identity: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -145,6 +151,27 @@ pub(crate) enum RemoteHost {
     Ip(IpAddr),
     /// A link-local IPv6 address, which is only reachable through its interface.
     Scoped { address: Ipv6Addr, scope_id: u32 },
+}
+
+/// Parse either the historic bare host or an outside HTTPS URL. URLs are
+/// deliberately endpoint-only: credentials, paths, queries and fragments are
+/// not configuration and must never be silently ignored.
+pub(crate) fn parse_pairing_address(input: &str, legacy_port: u16) -> Result<(String, u16), String> {
+    let input = input.trim();
+    if input.starts_with("http://") {
+        return Err("remote address must use https".into());
+    }
+    if !input.starts_with("https://") {
+        RemoteHost::parse(input)?;
+        return Ok((input.into(), legacy_port));
+    }
+    let url = Url::parse(input).map_err(|_| "remote address is not a valid https URL".to_owned())?;
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() || url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
+        return Err("remote HTTPS address may contain only host and optional port".into());
+    }
+    let host = url.host_str().ok_or_else(|| "remote HTTPS address needs a host".to_owned())?;
+    RemoteHost::parse(host)?;
+    Ok((host.to_owned(), url.port().unwrap_or(443)))
 }
 
 impl RemoteHost {
@@ -430,11 +457,30 @@ async fn finish_exchange(
     transcript.extend_from_slice(b"name:");
     transcript.extend_from_slice(finish.name.as_bytes());
     verify_confirmation(&server_key, &transcript, &confirm_s)?;
+    let identity = match (finish.spki_sha256, finish.confirm_identity) {
+        (None, None) => None, // A paired old host remains a legacy single-route record.
+        (Some(fingerprint), Some(confirmation)) => {
+            let fingerprint: [u8; 32] = BASE64
+                .decode(fingerprint)
+                .map_err(|_| PairError::Protocol("pair/finish returned a non-base64 identity".into()))?
+                .try_into()
+                .map_err(|_| PairError::Protocol("pair/finish identity must contain exactly 32 bytes".into()))?;
+            let confirmation = BASE64
+                .decode(confirmation)
+                .map_err(|_| PairError::Protocol("pair/finish returned a non-base64 identity confirmation".into()))?;
+            transcript.extend_from_slice(b"spki:");
+            transcript.extend_from_slice(&fingerprint);
+            verify_confirmation(&server_key, &transcript, &confirmation)?;
+            Some(fingerprint)
+        }
+        _ => return Err(PairError::Protocol("pair/finish returned an incomplete identity confirmation".into())),
+    };
     Ok(Paired {
         name: finish.name,
         trust,
         host: endpoint.host.clone(),
         port: endpoint.port,
+        identity,
     })
 }
 
@@ -674,6 +720,16 @@ mod tests {
         assert_eq!(RemoteHost::parse("studio.local").unwrap().authority(1), "studio.local:1");
         assert_eq!(RemoteHost::parse("10.0.0.2").unwrap().authority(1), "10.0.0.2:1");
         assert!(RemoteHost::parse("fe80::1%no-such-interface0").is_err());
+    }
+
+    #[test]
+    fn pairing_address_accepts_only_endpoint_https_urls() {
+        assert_eq!(parse_pairing_address("studio.local", 47901), Ok(("studio.local".into(), 47901)));
+        assert_eq!(parse_pairing_address("https://outside.example", 47901), Ok(("outside.example".into(), 443)));
+        assert_eq!(parse_pairing_address("https://outside.example:47901", 47901), Ok(("outside.example".into(), 47901)));
+        for invalid in ["http://outside.example", "https://outside.example/path", "https://user@outside.example", "https://outside.example?x=1"] {
+            assert!(parse_pairing_address(invalid, 47901).is_err(), "{invalid}");
+        }
     }
 
     #[test]

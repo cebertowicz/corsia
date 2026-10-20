@@ -76,6 +76,7 @@ _PUBLIC_API_ROUTES = frozenset({
     ("POST", "/api/auth/login"),
     ("POST", "/api/devices/pair/start"),
     ("POST", "/api/devices/pair/finish"),
+    ("POST", "/api/devices/identity"),
 })
 
 
@@ -108,22 +109,33 @@ class DevicesApp:
         return user is not None and is_person_session(user)
 
     @staticmethod
-    def _peer_is_on_this_network(scope) -> bool:
-        """Only the addresses `lan_addresses` advertises (and loopback) may reach this listener, whatever it is bound to."""
+    def _may_peer_reach_devices(scope) -> bool:
+        """Return whether a peer may reach the devices listener.
+
+        The outside-peer branch is deliberately closed until the host-side
+        outside-address setting owns that admission decision.
+        """
         try:
             peer = ipaddress.ip_address(str(scope["client"][0]).split("%", 1)[0])
         except (KeyError, TypeError, IndexError, ValueError):
             return False
         if peer.version == 6 and peer.ipv4_mapped is not None:
             peer = peer.ipv4_mapped
-        return peer.is_loopback or peer.is_link_local or any(peer in network for network in _PEER_NETWORKS)
+        on_local_network = peer.is_loopback or peer.is_link_local or any(peer in network for network in _PEER_NETWORKS)
+        outside_peer_allowed = False  # Closed seam for the host-side outside-address setting.
+        return on_local_network or outside_peer_allowed
+
+    @staticmethod
+    def _peer_is_on_this_network(scope) -> bool:
+        """Compatibility name for the existing local-network admission policy."""
+        return DevicesApp._may_peer_reach_devices(scope)
 
     async def __call__(self, scope, receive, send):
         tagged = dict(scope)
         tagged["corsia_listener"] = "devices"
         path = tagged.get("path", "")
         kind = tagged.get("type")
-        if kind in {"http", "websocket"} and not self._peer_is_on_this_network(tagged):
+        if kind in {"http", "websocket"} and not self._may_peer_reach_devices(tagged):
             if kind == "http":
                 await JSONResponse({"reason": "not_on_this_network"}, status_code=403)(tagged, receive, send)
             else:
@@ -339,17 +351,30 @@ def ensure_host_key(state_root: Path = STATE_ROOT) -> tuple[Path, Path]:
     return key_path, cert_path
 
 
-def host_spki_sha256(state_root: Path = STATE_ROOT) -> bytes:
-    """Return the SHA-256 binding for the listener's stable public key."""
+def host_spki_der(state_root: Path = STATE_ROOT) -> bytes:
+    """Return the stable host public key as SubjectPublicKeyInfo DER."""
     _, cert_path = ensure_host_key(state_root)
     cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
-    spki = cert.public_key().public_bytes(
+    return cert.public_key().public_bytes(
         serialization.Encoding.DER,
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
+
+
+def host_spki_sha256(state_root: Path = STATE_ROOT) -> bytes:
+    """Return the SHA-256 binding for the listener's stable public key."""
+    spki = host_spki_der(state_root)
     digest = hashes.Hash(hashes.SHA256())
     digest.update(spki)
     return digest.finalize()
+
+
+def sign_identity_proof(nonce: bytes, authority: str, state_root: Path = STATE_ROOT) -> bytes:
+    """Sign one caller nonce and dialed authority with the stable host key."""
+    key_path, _ = ensure_host_key(state_root)
+    key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+    payload = b"corsia-identity-v1\0" + nonce + b"\0" + authority.encode("ascii")
+    return key.sign(payload, ec.ECDSA(hashes.SHA256()))
 
 
 def _write_private_file(path: Path, content: bytes) -> None:

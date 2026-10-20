@@ -191,7 +191,14 @@ class DevicePairing:
         }
 
     @_locked
-    def finish(self, *, exchange_id: str, confirm_c: bytes, name: str) -> tuple[bytes, str]:
+    def finish(
+        self,
+        *,
+        exchange_id: str,
+        confirm_c: bytes,
+        name: str,
+        identity: bytes | None = None,
+    ) -> tuple[bytes, str, bytes | None]:
         self._require_active()
         exchange = self._exchanges.pop(exchange_id, None)
         if exchange is None or exchange.generation != self._generation or exchange.expires_at <= self._clock():
@@ -213,14 +220,16 @@ class DevicePairing:
         normalized_name = pairing_computer_name(name)
         self._end_code()
         self._on_update()
-        return (
-            hmac.new(
+        confirmation_transcript = transcript + b"name:" + normalized_name.encode("utf-8")
+        confirm_s = hmac.new(server_key, confirmation_transcript, hashlib.sha256).digest()
+        confirm_identity = None
+        if identity is not None:
+            confirm_identity = hmac.new(
                 server_key,
-                transcript + b"name:" + normalized_name.encode("utf-8"),
+                confirmation_transcript + b"spki:" + identity,
                 hashlib.sha256,
-            ).digest(),
-            normalized_name,
-        )
+            ).digest()
+        return confirm_s, normalized_name, confirm_identity
 
     def _require_active(self) -> None:
         self._expire_if_needed()

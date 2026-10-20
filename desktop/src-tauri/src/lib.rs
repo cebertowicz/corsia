@@ -19,6 +19,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use source_lifecycle::{Bundled, SourceLifecycle};
 use tauri::{ipc::CapabilityBuilder, Manager};
@@ -33,6 +34,7 @@ mod pairing;
 mod proxy;
 mod release_proof;
 mod remote_config;
+mod routes;
 mod remote_lifecycle;
 mod service_management;
 mod shell_state;
@@ -976,7 +978,11 @@ async fn pair_remote(request: RemotePairRequest, app: &tauri::AppHandle, remote:
     let app_dir = default_app_dir(app)?;
     let locator = match request.target {
         RemoteTarget::DnsSd { instance } => remote_config::Locator::DnsSd { instance },
-        RemoteTarget::Address { host, port } => remote_config::Locator::Address { host, port: port.unwrap_or(47_901) },
+        RemoteTarget::Address { host, port } => {
+            let (host, parsed_port) = pairing::parse_pairing_address(&host, port.unwrap_or(47_901))
+                .map_err(|_| "invalid remote address")?;
+            remote_config::Locator::Address { host, port: parsed_port }
+        },
     };
     let (host, port) = match &locator {
         remote_config::Locator::Address { host, port } => (host.clone(), *port),
@@ -999,7 +1005,14 @@ async fn pair_remote(request: RemotePairRequest, app: &tauri::AppHandle, remote:
         Ok(started) => started,
         Err(error) => return Ok(failure_response(proxy_failure(error))),
     };
-    let record = remote_config::RemoteRecord { locator, trust: remote_config::RemoteTrust::from(&paired.trust), name: paired.name.clone(), proxy_port: 0 };
+    let record = remote_config::RemoteRecord {
+        locator,
+        trust: remote_config::RemoteTrust::from(&paired.trust),
+        name: paired.name.clone(),
+        proxy_port: 0,
+        identity: paired.identity.map(|identity| BASE64.encode(identity)),
+        outside: None,
+    };
     let mut entry = RemoteEntry {
         app,
         app_dir: &app_dir,
@@ -1838,6 +1851,8 @@ mod tests {
             trust: remote_config::RemoteTrust::System,
             name: "Studio".into(),
             proxy_port: 47911,
+            identity: None,
+            outside: None,
         };
         let mut connection = shell_state::ShellState::launch(Some(&saved));
         assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local" }));
@@ -1854,6 +1869,8 @@ mod tests {
             trust: remote_config::RemoteTrust::System,
             name: "Studio".into(),
             proxy_port: 47911,
+            identity: None,
+            outside: None,
         };
         assert!(saved_proxy_origin_allows(Some(&remote), "http://127.0.0.1:47911"));
         assert!(!saved_proxy_origin_allows(Some(&remote), "http://127.0.0.1:47912"));
@@ -2077,7 +2094,14 @@ mod tests {
     }
 
     fn saved_studio(locator: remote_config::Locator, trust: remote_config::RemoteTrust) -> remote_config::RemoteRecord {
-        remote_config::RemoteRecord { locator, trust, name: "Studio".into(), proxy_port: 47911 }
+        remote_config::RemoteRecord {
+            locator,
+            trust,
+            name: "Studio".into(),
+            proxy_port: 47911,
+            identity: None,
+            outside: None,
+        }
     }
 
     fn launch_app() -> tauri::App<tauri::test::MockRuntime> {

@@ -15,7 +15,7 @@ from spake2 import SPAKE2_Symmetric
 import api.devices as devices_api
 from core.device_pairing import PAIRING_IDENTITY, _split_key
 from core.devices_runtime import runtime
-from infra.devices_listener import _key_paths
+from infra.devices_listener import _key_paths, host_spki_sha256
 from main import app
 
 
@@ -196,7 +196,18 @@ def test_pair_api_finishes_verified_exchange_with_canonical_host_vector(monkeypa
 
     assert finished.status_code == 200
     expected_confirm_s = hmac.new(server_key, transcript + b"name:Studio", hashlib.sha256).digest()
-    assert finished.json() == {"confirm_s": _encoded(expected_confirm_s), "name": name}
+    identity = host_spki_sha256()
+    expected_confirm_identity = hmac.new(
+        server_key,
+        transcript + b"name:Studio" + b"spki:" + identity,
+        hashlib.sha256,
+    ).digest()
+    assert finished.json() == {
+        "confirm_s": _encoded(expected_confirm_s),
+        "name": name,
+        "spki_sha256": _encoded(identity),
+        "confirm_identity": _encoded(expected_confirm_identity),
+    }
     assert updates == ["updated"]
     assert not hmac.compare_digest(
         base64.b64decode(finished.json()["confirm_s"]),
@@ -225,15 +236,15 @@ def test_pair_finish_normalizes_and_caps_name_at_a_utf8_boundary(monkeypatch):
     finished = _finish(client, payload["exchange_id"], confirm_c)
 
     assert finished.status_code == 200
+    identity = host_spki_sha256()
+    confirmation_transcript = transcript + b"name:" + expected_name.encode()
     assert finished.json() == {
-        "confirm_s": _encoded(
-            hmac.new(
-                server_key,
-                transcript + b"name:" + expected_name.encode(),
-                hashlib.sha256,
-            ).digest()
-        ),
+        "confirm_s": _encoded(hmac.new(server_key, confirmation_transcript, hashlib.sha256).digest()),
         "name": expected_name,
+        "spki_sha256": _encoded(identity),
+        "confirm_identity": _encoded(
+            hmac.new(server_key, confirmation_transcript + b"spki:" + identity, hashlib.sha256).digest()
+        ),
     }
     assert len(expected_name.encode()) == 63
 

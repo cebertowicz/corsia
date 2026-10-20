@@ -11,7 +11,7 @@ from core.device_pairing import PairingError, transcript_prefix
 from core.devices_runtime import runtime
 from infra.auth import require_human_user
 from infra.db_async import run_in_db
-from infra.devices_listener import host_spki_sha256
+from infra.devices_listener import host_spki_der, host_spki_sha256, sign_identity_proof
 from infra.local_connection import is_direct_loopback
 from infra.product_events import emit_product_event
 from infra.settings import set_devices_enabled
@@ -130,10 +130,12 @@ async def pair_finish(body: dict):
     if not isinstance(exchange_id, str):
         raise HTTPException(400, "exchange_id must be a string")
     try:
-        confirm_s, name = runtime.pairing.finish(
+        identity = host_spki_sha256()
+        confirm_s, name, confirm_identity = runtime.pairing.finish(
             exchange_id=exchange_id,
             confirm_c=_decode(body.get("confirm_c"), "confirm_c"),
             name=runtime.remote_connect_name(),
+            identity=identity,
         )
     except PairingError as error:
         _emit("pairing_failed", reason=error.reason)
@@ -141,4 +143,23 @@ async def pair_finish(body: dict):
             _emit("pairing_paused")
         raise _pairing_error(error) from error
     _emit("pairing_succeeded")
-    return {"confirm_s": base64.b64encode(confirm_s).decode(), "name": name}
+    result = {"confirm_s": base64.b64encode(confirm_s).decode(), "name": name}
+    if confirm_identity is not None:
+        result["spki_sha256"] = base64.b64encode(identity).decode()
+        result["confirm_identity"] = base64.b64encode(confirm_identity).decode()
+    return result
+
+
+@router.post("/identity")
+async def identity(body: dict):
+    """Prove that a system-trusted route reaches this host's stable key."""
+    nonce = _decode(body.get("nonce"), "nonce")
+    authority = body.get("authority")
+    if len(nonce) != 32 or not isinstance(authority, str) or not authority or len(authority) > 255:
+        raise HTTPException(400, "identity proof requires a 32-byte nonce and authority")
+    if authority != authority.lower() or any(ord(char) > 127 for char in authority):
+        raise HTTPException(400, "identity authority must be lower-case ASCII")
+    return {
+        "spki": base64.b64encode(host_spki_der()).decode(),
+        "signature": base64.b64encode(sign_identity_proof(nonce, authority)).decode(),
+    }

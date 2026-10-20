@@ -127,6 +127,8 @@ mod tests {
             trust: RemoteTrust::System,
             name: "Studio".into(),
             proxy_port: 47911,
+            identity: None,
+            outside: None,
         }
     }
 

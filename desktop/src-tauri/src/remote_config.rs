@@ -52,11 +52,22 @@ impl TryFrom<&RemoteTrust> for Trust {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct OutsideRoute {
+    pub url: String,
+    pub trust: RemoteTrust,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct RemoteRecord {
     pub locator: Locator,
     pub trust: RemoteTrust,
     pub name: String,
     pub proxy_port: u16,
+    /// Stable paired-host fingerprint. Missing marks a legacy single-route record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outside: Option<OutsideRoute>,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -120,6 +131,8 @@ mod tests {
             trust: RemoteTrust::Pinned { spki_sha256: BASE64.encode([7_u8; 32]) },
             name: "Studio".into(),
             proxy_port: 47911,
+            identity: None,
+            outside: None,
         }
     }
 
