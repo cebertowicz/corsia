@@ -64,14 +64,14 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
  * Shared comment state for the document surface: the header receives open-thread and orphaned counts; the drawer's
  * placement recovery also receives the live reload state. The orphaned count is the list's 'Text changed' group, so a
  * resolved thread is never in it: a decided suggestion is resolved, and Accept replaced its quote by design. The
- * recovery's count is the part of that group Place again could place, which the server's probe decides; a comment it
- * has not answered for counts, as the footer did before probes.
+ * recovery's count is the part of that group Place again can attempt: an orphaned unresolved comment whose quote
+ * remains in the text.
  */
 export function commentSurfaceStatus(comments: DocComment[]) {
 	return {
 		commentCount: comments.filter((comment) => !comment.resolved).length,
 		orphanedCount: comments.filter((comment) => comment.orphaned && !comment.resolved).length,
-		replaceableCount: comments.filter((comment) => comment.orphaned && !comment.resolved && comment.replaceable !== false).length,
+		replaceableCount: comments.filter((comment) => comment.orphaned && !comment.resolved && !comment.detached).length,
 		placementReloading: comments.some((comment) => comment.placementReloading),
 		placementReloadError: comments.some((comment) => comment.placementReloadError),
 	};
@@ -89,6 +89,9 @@ export function commentSurfaceStatus(comments: DocComment[]) {
 export function commentsInDocumentOrder(comments: DocComment[], text: string, refused: Record<string, string> = {}): DocComment[] {
 	const at = (comment: DocComment) => (unplaced(comment) ? comment.from : canvasCommentRange(comment, text)?.from) ?? Infinity;
 	const sameImage = (a: DocComment, b: DocComment) => (a.regionNumber != null && b.regionNumber != null && a.imageSrc === b.imageSrc ? a.regionNumber - b.regionNumber : 0);
-	return comments.map((comment) => ({ ...comment, orphaned: !comment.review && !unplaced(comment) && (comment.id in refused || rangeFor(comment, text) === null) }))
-		.sort((a, b) => at(a) - at(b) || sameImage(a, b) || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id));
+	return comments.map((comment) => {
+		const orphaned = !comment.review && !unplaced(comment) && (comment.id in refused || rangeFor(comment, text) === null);
+		const detached = orphaned && (!comment.anchor || !text.includes(comment.anchor));
+		return { ...comment, orphaned, detached };
+	}).sort((a, b) => at(a) - at(b) || sameImage(a, b) || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id));
 }

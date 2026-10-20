@@ -127,7 +127,7 @@ describe('DocCommentSurface suggestions', () => {
 	});
 
 	it('shows no Place again footer when every unplaced comment is detached, though its card stays in the drawer', () => {
-		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true, replaceable: false }], placementRecovery: { onReload: vi.fn(() => true), replaceableCount: 0 } });
+		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true, detached: true }], placementRecovery: { onReload: vi.fn(() => true), replaceableCount: 0 } });
 		expect(host.querySelector('[data-doc-comments-drawer] [data-drawer-placement]')).toBeNull();
 		expect(host.querySelector('[aria-label="Reload comment placements"]')).toBeNull();
 		expect(host.querySelector('[data-doc-comments-drawer]')?.textContent).not.toContain("couldn't be placed");

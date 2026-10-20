@@ -1,5 +1,5 @@
 import { replyField } from '../support/commentDrawer';
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext } from '@playwright/test';
 import {
 	createComment,
 	deleteRenderedLine,
@@ -12,13 +12,9 @@ import {
  * The document, comments store, and placement owner remain real. This only
  * faults the requested placement response at the live transport boundary.
  */
-type ClientFrame = { type?: string; artifact_id?: string; store_id?: string; request_id?: string; probe?: boolean };
+type ClientFrame = { type?: string; artifact_id?: string; store_id?: string; request_id?: string };
 
-/**
- * `probes: 'refuse'` fails every can-Place-again probe, which leaves the footer as it was before probing existed;
- * the refused-reload journey below needs that footer to stay while its quote is gone.
- */
-async function refuseNextPlacementRequest(context: BrowserContext, probes: 'forward' | 'refuse' = 'forward') {
+async function refuseNextPlacementRequest(context: BrowserContext) {
 	let refuse = false;
 	let refused = 0;
 	await context.routeWebSocket(url => url.pathname === '/ws', socket => {
@@ -26,9 +22,9 @@ async function refuseNextPlacementRequest(context: BrowserContext, probes: 'forw
 		socket.onMessage(payload => {
 			let frame: ClientFrame | null = null;
 			try { frame = JSON.parse(String(payload)) as ClientFrame; } catch { /* Forward non-JSON frames unchanged. */ }
-			const probe = probes === 'refuse' && frame?.probe === true;
-			if ((refuse || probe) && frame?.type === 'doc_positions' && frame.artifact_id && frame.store_id && frame.request_id) {
-				if (!probe) { refuse = false; refused += 1; }
+			if (refuse && frame?.type === 'doc_positions' && frame.artifact_id && frame.store_id && frame.request_id) {
+				refuse = false;
+				refused += 1;
 				socket.send(JSON.stringify({
 					type: 'doc_error', artifact_id: frame.artifact_id, store_id: frame.store_id,
 					request_id: frame.request_id, kind: 'refused', message: 'Comment positions were refused',
@@ -55,7 +51,7 @@ test('@slice1 @surface:live-document a refused placement reload at 393 preserves
 	const writerContext = await browser.newContext({ viewport: { width: 393, height: 852 } });
 	const readerContext = await browser.newContext({ viewport: { width: 393, height: 852 } });
 	try {
-		const refuse = await refuseNextPlacementRequest(readerContext, 'refuse');
+		const refuse = await refuseNextPlacementRequest(readerContext);
 		const writer = await writerContext.newPage();
 		const reader = await readerContext.newPage();
 		await openLiveDocument(writer, document);
@@ -188,56 +184,31 @@ test('@slice1 @surface:live-document a disconnected 393px placement reload is de
 	}
 });
 
-/** Counts the can-Place-again probes the page sends and the answers it receives, so a test knows the server has been heard. */
-function watchProbes(page: Page) {
-	const sent = new Set<string>();
-	const answered = new Set<string>();
-	page.on('websocket', socket => {
-		if (new URL(socket.url()).pathname !== '/ws') return;
-		socket.on('framesent', frame => {
-			try {
-				const message = JSON.parse(String(frame.payload)) as ClientFrame;
-				if (message.type === 'doc_positions' && message.probe && message.request_id) sent.add(message.request_id);
-			} catch { /* Not a JSON frame. */ }
-		});
-		socket.on('framereceived', frame => {
-			try {
-				const message = JSON.parse(String(frame.payload)) as ClientFrame;
-				if (message.type === 'doc_positions' && message.request_id && sent.has(message.request_id)) answered.add(message.request_id);
-			} catch { /* Not a JSON frame. */ }
-		});
-	});
-	return { sent: () => sent.size, answered: () => answered.size };
-}
 
-test('@slice1 @surface:live-document Place again appears only for a comment whose text is back, and the detached card stays without it', async ({ browser, request }, testInfo) => {
+test('@slice1 @surface:live-document Place again follows the quote on screen, and detached cards stay without it', async ({ browser, request }, testInfo) => {
 	test.skip(testInfo.project.name !== 'chromium-desktop', 'The shared 1440 layout carries the footer screenshots.');
 	test.setTimeout(120_000);
-	const stamp = `probe-${Date.now()}`;
+	const stamp = `placement-${Date.now()}`;
 	const quote = `placement quote ${stamp}`;
-	const document = await seedLiveDocument(request, `placement-probe-${stamp}`, `# Placement probe ${stamp}\n\n${quote}\n`);
+	const document = await seedLiveDocument(request, `placement-recovery-${stamp}`, `# Placement recovery ${stamp}\n\n${quote}\n`);
 	await createComment(request, document, quote, `Probe ${stamp}`);
 	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 	try {
 		const page = await context.newPage();
-		const probes = watchProbes(page);
 		await openLiveDocument(page, document);
 		await expect(page.locator('.cm-comment-anchor')).toHaveCount(1);
-		expect(probes.sent()).toBe(0);
 
-		// (b) The text is gone: the server is asked, finds nothing to place, and the drawer shows the card without a footer.
+		// The text is gone: the drawer shows the Text changed card without Place again.
 		await deleteRenderedLine(page, quote);
 		await page.locator('.comment-status').click();
 		const comments = page.getByRole('region', { name: 'Document comments', exact: true });
 		await expect(comments).toBeVisible();
-		await expect.poll(probes.answered).toBeGreaterThan(0);
 		await expect(comments.getByText(/^Text changed:/)).toHaveCount(1);
 		await expect(comments.locator('[data-drawer-placement]')).toHaveCount(0);
 		await expect(comments.getByRole('button', { name: 'Reload comment placements', exact: true })).toHaveCount(0);
 		await page.screenshot({ path: testInfo.outputPath('place-again-text-gone-1440.png'), animations: 'disabled' });
 
-		// (c) The text comes back: the next probe finds it, and the footer offers Place again.
-		const before = probes.answered();
+		// The text comes back: the footer offers Place again.
 		await comments.getByRole('button', { name: 'Close comments', exact: true }).click();
 		await expect(comments).toHaveCount(0);
 		await page.locator('.cm-content').click();
@@ -246,7 +217,6 @@ test('@slice1 @surface:live-document Place again appears only for a comment whos
 		await page.locator('.comment-status').click();
 		const reload = comments.getByRole('button', { name: 'Reload comment placements', exact: true });
 		await expect(reload).toBeVisible();
-		expect(probes.answered()).toBeGreaterThan(before);
 		await expect(comments.locator('[data-drawer-placement]').getByRole('status')).toHaveText("1 comment couldn't be placed");
 		await page.screenshot({ path: testInfo.outputPath('place-again-text-back-1440.png'), animations: 'disabled' });
 		await reload.click();

@@ -255,7 +255,7 @@ async def _operate(socket, user: dict, data: dict) -> None:
                 "store_id": live.store.store_id, "seq": seq, "request_id": data.get("request_id"),
                 "reserved": _reserved(live, socket, subscription.user_id, data["reserve"])})
             return
-        anchors = await positions(entry, artifact_id, reload=bool(data.get("reload")), probe=data.get("probe") is True)
+        anchors = await positions(entry, artifact_id, reload=bool(data.get("reload")))
         await send_to_client(socket, {"type": "doc_positions", "artifact_id": artifact_id,
             "store_id": live.store.store_id, "seq": seq, "request_id": data.get("request_id"),
             **anchors, "vector": _encoded(anchors["vector"])})

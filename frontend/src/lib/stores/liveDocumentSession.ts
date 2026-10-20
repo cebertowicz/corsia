@@ -252,17 +252,6 @@ export class LiveDocumentSession {
 		return id;
 	}
 
-	/** A read-only reload: the server answers with where each comment would be placed and changes nothing. */
-	requestProbe(seq: number): string | null {
-		if (this.connection !== 'connected') return null;
-		const id = crypto.randomUUID();
-		if (!this.send({ type: 'doc_positions', artifact_id: this.artifactId, store_id: this.storeId, request_id: id, seq, reload: true, probe: true })) {
-			this.disconnected();
-			return null;
-		}
-		return id;
-	}
-
 	/** Forget a reservation request whose caller no longer awaits a reply. */
 	cancelReservationRequest(id: string | null): void {
 		if (id) this.requests.delete(id);

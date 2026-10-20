@@ -44,4 +44,11 @@ describe('a resolved comment is highlighted only while focused', () => {
 		expect(get(focusedDocComment)).toBe('a');
 		expect(highlighted()).toEqual(['a']);
 	});
+
+	it('keeps focus in one artifact when an open comment resolves in another', () => {
+		docComments.set({ first: [row('first-comment', 0, 'first')], second: [row('second-comment', 6, 'second')] });
+		focusedDocComment.set('second-comment');
+		docComments.update((all) => ({ ...all, first: [row('first-comment', 0, 'first', { resolved: true })] }));
+		expect(get(focusedDocComment)).toBe('second-comment');
+	});
 });

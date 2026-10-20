@@ -3,11 +3,11 @@ import {
 	fetchComments, markCommentThreadViewed, postComment, patchComment, persistPositions, type ServerComment
 } from '$lib/api/docs';
 import { trackPlacements } from './docCommentPlacement';
-import { fromServer, rangeFor, type CommentAuthor, type DocComment } from './docCommentProjection';
+import { fromServer, type CommentAuthor, type DocComment } from './docCommentProjection';
 import { withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
 
-export { fromServer, hasNewReplies, rangeFor, regionFromServer } from './docCommentProjection';
+export { fromServer, hasNewReplies, regionFromServer } from './docCommentProjection';
 export type { CommentAuthor, CommentReply, DocComment } from './docCommentProjection';
 
 function findById(rows: ServerComment[], id: string): ServerComment | null {
@@ -213,3 +213,10 @@ export async function flushPositions(artifactId: string, fullText?: string) {
 	if (updates.length) await persistPositions(artifactId, updates).catch((e) => console.error('persist positions failed', e));
 }
 
+export function rangeFor(c: DocComment, fullText: string): { from: number; to: number } | null {
+	if (
+		c.from != null && c.to != null && c.to > c.from && c.to <= fullText.length
+		&& fullText.slice(c.from, c.to) === c.anchor
+	) return { from: c.from, to: c.to };
+	return null;
+}

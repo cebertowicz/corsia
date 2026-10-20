@@ -163,13 +163,18 @@ describe('comment surface status', () => {
 		])).toEqual({ commentCount: 3, orphanedCount: 1, replaceableCount: 1, placementReloading: true, placementReloadError: true });
 	});
 
-	it('counts for Place again only the orphaned cards the server could place: detached ones stay in the group, not the footer', () => {
-		const status = commentSurfaceStatus([
-			comment('detached', 0, 'x', { orphaned: true, replaceable: false }), comment('unknown', 0, 'x', { orphaned: true }),
-			comment('found', 0, 'x', { orphaned: true, replaceable: true }), comment('done', 0, 'x', { orphaned: true, resolved: true }),
-			comment('placed', 0, 'x', { replaceable: false }),
-		]);
-		expect(status).toMatchObject({ orphanedCount: 3, replaceableCount: 2 });
+	it('offers Place again only for orphaned comments whose quote remains in the text', () => {
+		const deleted = commentsInDocumentOrder([comment('deleted', 0, 'quote')], 'other');
+		const restored = commentsInDocumentOrder([comment('restored', 8, 'quote')], 'restored quote', { restored: 'Refused' });
+		const elsewhere = commentsInDocumentOrder([comment('elsewhere', 20, 'quote')], 'quote elsewhere');
+		const refused = commentsInDocumentOrder([comment('refused', 8, 'quote')], 'refused quote', { refused: 'Refused' });
+
+		expect(deleted[0].detached).toBe(true);
+		expect(commentSurfaceStatus(deleted)).toMatchObject({ orphanedCount: 1, replaceableCount: 0 });
+		for (const rows of [restored, elsewhere, refused]) {
+			expect(rows[0].detached).toBe(false);
+			expect(commentSurfaceStatus(rows)).toMatchObject({ orphanedCount: 1, replaceableCount: 1 });
+		}
 	});
 
 	it('counts only open threads for the header pill', () => {

@@ -4,7 +4,6 @@ import type { DocComment } from './docComments';
 import { encodeUpdate, textDigest, type DocumentFrame } from './documentWire';
 import { liveDocumentBindings } from './liveDocuments';
 import type { LiveDocumentSession } from './liveDocumentSession';
-import { ReplaceableProbe } from './docCommentProbe';
 
 /** A live row's placement (4.2). Rows without one are not live, or have no place the server tracks. */
 export type Placement = 'placed' | 'placing' | 'not_placed';
@@ -32,20 +31,17 @@ class LivePlacement {
 	private clean: boolean;
 	private destroyed = false;
 	private stops: (() => void)[];
-	private probe: ReplaceableProbe;
 
 	constructor(session: LiveDocumentSession, rows: Rows) {
 		this.session = session;
 		this.rows = rows;
 		this.clean = session.durability.clean;
 		session.text.observe(this.moved);
-		this.probe = new ReplaceableProbe(session, () => this.current(), change => this.write(change));
 		this.stops = [session.onFrame(frame => this.frame(frame)), session.subscribe(() => this.observed())];
 		if (this.current().some(placeable)) {
 			this.write(rows => rows.map(row => placeable(row) ? { ...row, placement: 'placing', drawn: false } : row));
 			this.ask();
 		}
-		this.probe.want();
 	}
 
 	holds(id: string): boolean { return this.current().some(row => row.id === id); }
@@ -69,10 +65,8 @@ class LivePlacement {
 		});
 		const ids = new Set(next.map(row => row.id));
 		for (const id of [...this.positions.keys()]) if (!ids.has(id)) this.positions.delete(id);
-		this.rows.update(all => ({ ...all, [this.session.artifactId]: rows.map(row => previous.get(row.id)?.replaceable === undefined ? row
-			: { ...row, replaceable: previous.get(row.id)!.replaceable }) }));
+		this.rows.update(all => ({ ...all, [this.session.artifactId]: rows }));
 		if (ask) this.ask();
-		this.probe.want();
 	}
 
 	retry(): void {
@@ -90,12 +84,11 @@ class LivePlacement {
 
 	destroy(): void {
 		this.destroyed = true;
-		this.probe.destroy();
 		this.settleReload();
 		for (const stop of this.stops) stop();
 		this.session.text.unobserve(this.moved);
 		this.positions.clear();
-		this.write(rows => rows.map(row => ({ ...(row.placement || row.drawn ? unplaced(row) : row), replaceable: undefined })));
+		this.write(rows => rows.map(row => row.placement || row.drawn ? unplaced(row) : row));
 	}
 
 	private current(): DocComment[] { return get(this.rows)[this.session.artifactId] ?? []; }
@@ -135,7 +128,6 @@ class LivePlacement {
 	/** A disconnect releases the request; rows keep their state and reconnect sync asks again. */
 	private observed(): void {
 		if (this.session.connection === 'connected') return;
-		this.probe.lost();
 		const reload = this.inFlight?.reload || this.marked?.reload;
 		if (reload) this.settleReload();
 		this.inFlight = null;
@@ -143,12 +135,6 @@ class LivePlacement {
 	}
 
 	private frame(frame: DocumentFrame): void {
-		if (this.probe.frame(frame)) return;
-		this.placementFrame(frame);
-		if (frame.type === 'doc_opened' || frame.type === 'doc_ack' || frame.type === 'doc_update') this.probe.want();
-	}
-
-	private placementFrame(frame: DocumentFrame): void {
 		if (frame.type === 'doc_positions') {
 			// Only the answer to the request in flight releases it; another store never reaches here.
 			const request = this.inFlight;
@@ -237,7 +223,6 @@ class LivePlacement {
 			this.positions.delete(row.id);
 			return { ...unplaced(row), from: undefined, to: undefined };
 		}));
-		this.probe.want();
 	}
 
 	private clearReloadErrors(): void {
