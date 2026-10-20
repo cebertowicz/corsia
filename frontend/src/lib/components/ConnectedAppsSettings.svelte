@@ -130,8 +130,9 @@
 		} finally { actionId = null; }
 	}
 	function adminApprovalMessage(account: ConnectedAccount): string {
-		if (!account.client_id) return '';
-		return `Please approve my CORSIA app for my account, ${account.address}. It is my own Microsoft app registration, Application (client) ID ${account.client_id}, and requests delegated Microsoft Graph access to ${account.scopes?.join(', ') ?? ''}.`;
+		const scopes = account.scopes ?? [];
+		if (!account.client_id || !scopes.length) return '';
+		return `Please approve my CORSIA app for my account, ${account.address}. It is my own Microsoft app registration, Application (client) ID ${account.client_id}, and requests delegated Microsoft Graph access to ${scopes.slice(0, -1).join(', ')}${scopes.length > 1 ? ' and ' : ''}${scopes.at(-1)}.`;
 	}
 	async function copyAdminMessage(account: ConnectedAccount): Promise<void> {
 		const message = adminApprovalMessage(account);

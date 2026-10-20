@@ -353,7 +353,7 @@ describe('ConnectedAppsSettings', () => {
 	});
 
 	it('renders Microsoft admin approval, cancellation, refresh and provider failure with the correct next actions', async () => {
-		const admin = { ...googleAccount, id: 'microsoft-admin', provider: 'microsoft' as const, provider_display_name: 'Microsoft', address: 'alex@contoso.example', state: 'needs_sign_in' as const, account_kind: 'work' as const, cause: 'admin_approval_required', client_id: '11111111-1111-4111-8111-111111111111', tenant_id: null };
+		const admin = { ...googleAccount, id: 'microsoft-admin', provider: 'microsoft' as const, provider_display_name: 'Microsoft', address: 'alex@contoso.example', state: 'needs_sign_in' as const, account_kind: 'work' as const, cause: 'admin_approval_required', client_id: '11111111-1111-4111-8111-111111111111', tenant_id: null, scopes: ['Mail.ReadWrite', 'Mail.Send', 'Calendars.ReadWrite', 'Files.ReadWrite', 'offline_access', 'User.Read'] };
 		const cancelled = { ...admin, id: 'microsoft-cancelled', cause: 'consent_cancelled' };
 		const expired = { ...admin, id: 'microsoft-expired', cause: 'refresh_token_invalid' };
 		const failed = { ...admin, id: 'microsoft-failed', cause: 'provider_unavailable' };
@@ -374,6 +374,7 @@ describe('ConnectedAppsSettings', () => {
 		await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining('alex@contoso.example')));
 		await vi.waitFor(() => expect(host.textContent).toContain('Message copied'));
 		expect(writeText.mock.calls[0][0]).toContain('Application (client) ID 11111111-1111-4111-8111-111111111111');
+		expect(writeText.mock.calls[0][0]).toContain('access to Mail.ReadWrite, Mail.Send, Calendars.ReadWrite, Files.ReadWrite, offline_access and User.Read.');
 		expect(writeText.mock.calls[0][0]).not.toContain('You can approve it here');
 		expect(host.textContent).toContain('Message copied');
 		expect(adminRow.querySelector('.copied[role="status"]')?.textContent).toBe('Message copied');
@@ -434,6 +435,20 @@ describe('ConnectedAppsSettings', () => {
 		([...document.body.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.textContent?.trim() === 'Remove').at(-1) as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(host.textContent).toContain('Manage Microsoft permissions'));
 		expect([...host.querySelectorAll<HTMLAnchorElement>('a')].find((anchor) => anchor.textContent === 'Manage Microsoft permissions')?.href).toBe('https://myapps.microsoft.com/');
+	});
+
+	it('says a Google account was removed here when Google could not be reached', async () => {
+		const google = { ...googleAccount, id: 'google-remove' };
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('/google-remove') ? { id: google.id, removed: true, revocation: 'provider_timeout' } : { servers: [], accounts: [google] } })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="google-remove"]')).not.toBeNull());
+		(host.querySelector('[data-connected-account-id="google-remove"] button') as HTMLButtonElement).click();
+		flushSync();
+		([...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Remove') as HTMLButtonElement).click();
+		flushSync();
+		([...document.body.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.textContent?.trim() === 'Remove').at(-1) as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(host.textContent).toContain(`CORSIA removed Google — ${google.address} here, but couldn’t reach Google.`));
+		expect(host.textContent).not.toContain('You’re signed out here');
 	});
 
 	it('keeps same-prefix Google account titles distinct while preserving their domains', async () => {
