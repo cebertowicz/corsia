@@ -243,7 +243,7 @@ class MicrosoftCalendarDraftTool(Tool):
     self_describing_errors = True
     name = "microsoft_calendar_draft"
     description = "Save a Microsoft calendar create or update draft for review."
-    parameters = {"type": "object", "additionalProperties": False, "required": ["account_id", "operation", "event"], "properties": {"account_id": ACCOUNT_PARAM, "operation": {"type": "string", "enum": ["create", "update"]}, "event_id": {"type": "string"}, "event": {"type": "object"}}}
+    parameters = {"type": "object", "additionalProperties": False, "required": ["account_id", "operation", "event"], "properties": {"account_id": ACCOUNT_PARAM, "operation": {"type": "string", "enum": ["create", "update"]}, "event_id": {"type": "string"}, "event": {"type": "object"}, "draft_id": {"type": "string"}}}
     async def execute(self, **kwargs: Any) -> str:
         try:
             account = await _account(kwargs)

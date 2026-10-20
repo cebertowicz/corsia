@@ -348,8 +348,8 @@ async def _complete_sign_in(code: object, state: object) -> str:
 def accounts_status(thread_id: str | None = None, account_id: object = None) -> dict[str, object]:
     """List the caller's reachable Microsoft rows, or report one, without exposing credentials.
 
-    With no rows, the caller's latest failed add (``thread_id`` None is the person) is
-    reported as its fixed cause and message.
+    The caller's latest failed add (``thread_id`` None is the person) is reported
+    as its fixed cause and message, alongside rows when any are reachable.
     """
     from connections.connected_accounts import visible_accounts
 
@@ -364,11 +364,14 @@ def accounts_status(thread_id: str | None = None, account_id: object = None) -> 
     if account_id is not None:
         selected = next((row for row in rows if row["account_id"] == account_id), None)
         return selected or {"status": "not_connected"}
-    if rows:
-        return {"accounts": rows}
     with _pending_lock:
         _clear_expired_add_failures()
         failure = _latest_add_failures.get(thread_id or PERSON_ADDS)
+    if rows:
+        result: dict[str, object] = {"accounts": rows}
+        if failure is not None:
+            result["latest_failed_add"] = {"cause": failure.cause, "message": message(failure.cause)}
+        return result
     if failure is None:
         return {"status": "not_connected"}
     return {"status": "not_connected", "cause": failure.cause, "message": message(failure.cause)}
