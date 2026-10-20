@@ -49,7 +49,7 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 	if (pick?.state === 'failed') {
 		const message = pick.cause === 'memory' ? 'Couldn’t find a local model that fits this computer. Retry.'
 			: pick.cause === 'own_omlx_upgrade_required' ? 'Update your oMLX, then Retry.'
-			: 'CORSIA couldn’t choose a local model. Retry, or save a report.';
+			: 'CORSIA couldn’t set up the local model. Retry, or save a report.';
 		return { ...row, meta: withReference(message, pick.ref), error: true, reportable: true, action: { label: 'Retry', run: check } };
 	}
 	return { ...row, meta: `Free and private. Runs on this computer, even offline.${size ? ` ${size} download.` : ''}`, action: { label: 'Download', run: start } };

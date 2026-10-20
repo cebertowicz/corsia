@@ -87,7 +87,7 @@ describe('setup provider rows', () => {
 	it.each(['other', 'connection', 'disk_full', undefined])('keeps the pick failure reference for %s without claiming a fit failure', (cause) => {
 		const check = vi.fn();
 		const row = setupLocalRow({ ...actions(), check, pick: { state: 'failed', model: null, message: null, cause, ref: 'local-123' }, eligible: true, downloading: false, ready: false, startError: '' });
-		expect(row.meta).toBe('CORSIA couldn’t choose a local model. Retry, or save a report. Reference: local-123');
+		expect(row.meta).toBe('CORSIA couldn’t set up the local model. Retry, or save a report. Reference: local-123');
 		expect(row.reportable).toBe(true);
 		row.action?.run();
 		expect(check).toHaveBeenCalledOnce();
