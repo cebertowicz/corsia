@@ -17,6 +17,7 @@ from loguru import logger as log
 
 from core.correction_notes import local_clock
 from core.corrections_recording import is_owner_authored_message, owner_message_sql_predicate
+from infra.checkpoint_queries import current_installed_through_seq
 from infra.product_events import emit_product_event
 from llm.locality import cloud_off_project_ids
 from memory.checkpoint_search import caller_user_id
@@ -231,6 +232,7 @@ def _source_scope(alias: str, timestamp: str, caller: sqlite3.Row, cloud_off: se
 def _message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[_Hit]:
     owner_filter, owner_params = _positional(*owner_message_sql_predicate("m"))
     source_scope, source_params = _source_scope("t", "m.created_at", caller, cloud_off, cutoff)
+    caller_cut = current_installed_through_seq(caller_thread_id, db=db) or 0
     # The FTS query applies the floor before the limit; bm25 only orders eligible messages.
     rows = db.execute(
         f"""SELECT m.id,m.thread_id,m.content,m.role,m.metadata,m.created_at,t.title
@@ -238,13 +240,10 @@ def _message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off,
             JOIN threads t ON t.id=m.thread_id
             WHERE messages_fts MATCH ? AND {owner_filter} AND m.delivery_state='delivered'
               AND {_owned_threads('t')} {source_scope}
-              AND (m.thread_id<>? OR m.seq IS NOT NULL AND m.seq<=COALESCE((
-                SELECT MAX(c.through_seq) FROM checkpoints c JOIN threads ct ON ct.id=c.thread_id
-                WHERE c.thread_id=? AND c.status='installed' AND c.history_epoch=ct.history_epoch
-              ), 0))
+              AND (m.thread_id<>? OR m.seq IS NOT NULL AND m.seq<=?)
             ORDER BY bm25(messages_fts),m.created_at DESC LIMIT ?""",
         [f"role:user AND ({_fts_floor(terms)})", *owner_params, user_id, *source_params,
-         caller_thread_id, caller_thread_id, SOURCE_CANDIDATES],
+         caller_thread_id, caller_cut, SOURCE_CANDIDATES],
     ).fetchall()
     hits = []
     for row in rows:
