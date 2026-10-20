@@ -275,7 +275,7 @@ async def test_review_child_profile_confines_stock_claude_to_the_fixed_head():
 
         events = [json.loads(line) for line in stdout.decode().splitlines() if line.strip()]
         init = next(event for event in events if event.get("type") == "system" and event.get("subtype") == "init")
-        assert init["tools"] == ["Read", "Grep", "Glob"]
+        assert sorted(init["tools"]) == ["Glob", "Grep", "Read"]
 
         tool_results = [peer.results[f"review-check-{index}"] for index in range(1, len(checks) + 1)]
         assert HEAD_CONTENT in _as_text(tool_results[0])
