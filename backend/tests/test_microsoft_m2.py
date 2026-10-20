@@ -10,7 +10,7 @@ import pytest
 
 from connections.connected_accounts import ConnectedAccountError
 from connections.microsoft import calendar, client, files, mail
-from connections.microsoft.errors import MicrosoftError, PROVIDER_UNAVAILABLE
+from connections.microsoft.errors import MicrosoftError, SERVICE_UNAVAILABLE
 from events.connectors import mail_poller as poller
 from tools import microsoft_actions as actions
 
@@ -159,6 +159,41 @@ async def test_refresh_uses_recorded_tenant(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
     assert await client.access_token("m") == "access"
     assert FakeHttp.calls[0]["url"] == client.authority_url("consumers")
+
+
+@pytest.mark.asyncio
+async def test_connected_data_failures_are_retryable_without_starting_sign_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeHttp.calls, FakeHttp.responses = [], [Response(503, {"error": {"message": "provider-canary"}})]
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
+
+    async def token(_account: str) -> str: return "token"
+
+    real_access_token = client.access_token
+    monkeypatch.setattr(client, "access_token", token)
+    with pytest.raises(MicrosoftError) as graph_error:
+        await mail.search("m", "inbox", 10)
+    assert graph_error.value.cause == SERVICE_UNAVAILABLE
+    assert graph_error.value.state_cause is None
+    assert graph_error.value.browser_message == "Microsoft sign-in couldn’t finish. Go back to CORSIA and try again."
+    assert "microsoft_connect" not in graph_error.value.message
+
+    stored = {"tenant_id": "consumers", "client_id": "client", "refresh_token": "refresh", "scopes": ["User.Read"]}
+
+    async def db(*_args: object, **_kwargs: object) -> object: return stored
+
+    class NetworkFailure:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args: object): return None
+        async def post(self, *args: object, **kwargs: object) -> Response:
+            raise client.httpx.ReadTimeout("provider-canary")
+
+    monkeypatch.setattr(client, "access_token", real_access_token)
+    monkeypatch.setattr(client, "run_in_db", db)
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: NetworkFailure())
+    with pytest.raises(MicrosoftError) as refresh_error:
+        await client.access_token("m")
+    assert refresh_error.value.cause == SERVICE_UNAVAILABLE
+    assert "microsoft_connect" not in refresh_error.value.message
 
 
 @pytest.mark.asyncio
