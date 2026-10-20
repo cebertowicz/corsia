@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from contextlib import asynccontextmanager
 import json
 import os
@@ -247,6 +248,40 @@ async def test_devices_tls_listener_allows_only_the_six_public_pairs_and_forward
         forwarded = await remote.get("/api/models", headers={"Authorization": f"Bearer {token}"})
         assert forwarded.status_code == 200
         assert forwarded.json() == direct_models.json()
+
+
+@pytest.mark.asyncio
+async def test_devices_tls_listener_proves_identity_with_the_key_its_tls_presents(access_backend):
+    """A signed-out caller on the real listener gets a proof the desktop app can check against the TLS key."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    port = int(access_backend.remote_url.rsplit(":", 1)[1])
+    presented = x509.load_pem_x509_certificate(ssl.get_server_certificate(("127.0.0.1", port)).encode())
+    spki = presented.public_key().public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    nonce = os.urandom(32)
+    authority = "studio.example:443"
+    async with httpx.AsyncClient(base_url=access_backend.remote_url, verify=False, timeout=10, trust_env=False) as remote:
+        proof = await remote.post("/api/devices/identity", json={
+            "nonce": base64.b64encode(nonce).decode(), "authority": authority,
+        })
+        refused = [
+            await remote.post("/api/devices/identity", json={"nonce": "A" * 4000, "authority": authority}),
+            await remote.post("/api/devices/identity", json={
+                "nonce": base64.b64encode(nonce).decode(), "authority": "Studio.example:443",
+            }),
+        ]
+    assert proof.status_code == 200, proof.text
+    assert base64.b64decode(proof.json()["spki"]) == spki
+    presented.public_key().verify(
+        base64.b64decode(proof.json()["signature"]),
+        b"corsia-identity-v1\0" + nonce + b"\0" + authority.encode(),
+        ec.ECDSA(hashes.SHA256()),
+    )
+    assert [response.status_code for response in refused] == [400, 400]
 
 
 @pytest.mark.parametrize(("method", "path"), _MAIN_API_PAIRS)

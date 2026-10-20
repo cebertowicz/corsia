@@ -86,6 +86,37 @@ def test_python_first_vector_has_a_fixed_name_bound_confirm_s():
     assert confirm_s.hex() == "944a40f6df11c32fd42a3a2652610d84113da85571c5d6f62a9e8867423be7e0"
 
 
+def _vector_server_finish(identity: bytes | None) -> tuple[bytes, str, bytes | None]:
+    """DevicePairing as the server of the python_first vector exchange, finishing it for `identity`."""
+    from core.device_pairing import DevicePairing, transcript_prefix
+
+    vector = _rust_vector()
+    exchange = vector["python_first"]
+    server = _seeded_pairing(vector["code"], exchange["python_entropy_hex"])
+    msg_s, msg_c = server.start(), bytes.fromhex(exchange["rust_message_hex"])
+    pairing = DevicePairing()
+    pairing.enable()
+    pairing._code = vector["code"]
+    pairing._pairing_secret = bytes.fromhex(vector["pw_hex"])
+    pairing._expires_at = pairing._clock() + 600
+    prefix = transcript_prefix("verified", host="studio.local")
+    exchange_id, _ = pairing.start(msg_c=msg_c, transcript_prefix=prefix, spake=server, msg_s=msg_s, generation=pairing._generation)
+    client_key, _ = _split_key(bytes.fromhex(exchange["derived_key_hex"]))
+    confirm_c = hmac.new(client_key, prefix + msg_c + msg_s, hashlib.sha256).digest()
+    return pairing.finish(exchange_id=exchange_id, confirm_c=confirm_c, name="Studio", identity=identity)
+
+
+def test_identity_confirmation_leaves_the_recorded_confirm_s_unchanged():
+    """An app from before identity confirmation reads only confirm_s; it must be the value the old host sent."""
+    recorded = "769283af1c3f09aed33889af759908eb13bc42066f70baeee10499e383bc63b7"  # DevicePairing before the change
+    confirm_s, name, confirm_identity = _vector_server_finish(None)
+    assert (confirm_s.hex(), name, confirm_identity) == (recorded, "Studio", None)
+
+    confirm_s, _, confirm_identity = _vector_server_finish(bytes(range(32)))
+    assert confirm_s.hex() == recorded
+    assert confirm_identity.hex() == "4a6d05d96384b087259f70e28577ac46feae89c12cde76a8d0b84a7ee7140ef8"
+
+
 def test_python_spake2_wrong_code_disagrees_with_rust_04_vector():
     vector = _rust_vector()
     wrong = vector["wrong_code"]
@@ -356,6 +387,12 @@ def test_pair_api_finishes_pinned_exchange_with_spki_binding(monkeypatch):
     assert hmac.compare_digest(
         base64.b64decode(finished.json()["confirm_s"]),
         hmac.new(server_key, transcript + b"name:studio.local", hashlib.sha256).digest(),
+    )
+    # The fingerprint the pin bound is the identity the app records, under its own confirmation.
+    assert base64.b64decode(finished.json()["spki_sha256"]) == server_spki
+    assert hmac.compare_digest(
+        base64.b64decode(finished.json()["confirm_identity"]),
+        hmac.new(server_key, transcript + b"name:studio.local" + b"spki:" + server_spki, hashlib.sha256).digest(),
     )
 
 

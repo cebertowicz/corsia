@@ -153,7 +153,11 @@ async def pair_finish(body: dict):
 @router.post("/identity")
 async def identity(body: dict):
     """Prove that a system-trusted route reaches this host's stable key."""
-    nonce = _decode(body.get("nonce"), "nonce")
+    encoded_nonce = body.get("nonce")
+    # A 32-byte nonce is exactly 44 base64 characters; refusing anything else first bounds the decode on a public route.
+    if not isinstance(encoded_nonce, str) or len(encoded_nonce) != 44:
+        raise HTTPException(400, "identity proof requires a 32-byte nonce and authority")
+    nonce = _decode(encoded_nonce, "nonce")
     authority = body.get("authority")
     if len(nonce) != 32 or not isinstance(authority, str) or not authority or len(authority) > 255:
         raise HTTPException(400, "identity proof requires a 32-byte nonce and authority")
