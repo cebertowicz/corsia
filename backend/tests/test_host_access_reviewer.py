@@ -334,8 +334,6 @@ async def test_usage_row_carries_only_the_target_account_id(
 
     assert recorded[0][1]["vendor_account_id"] == account_id
     assert recorded[0][1]["source"] == f"host_access_{kind}_review"
-    assert len(recorded[0][1]["usage_id"]) == 24
-    assert set(recorded[0][1]["usage_id"]) <= set("0123456789abcdef")
     expected = "claude-code/claude-fable-5" if harness == "claude-code" else target.catalog_id
     assert recorded[0][0][1] == expected
 
@@ -351,7 +349,7 @@ def test_codex_review_usage_is_disjoint_with_explicit_zero_cache_creation() -> N
     assert usage == {
         "prompt_tokens": 60, "completion_tokens": 20,
         "cache_creation_tokens": 0, "cache_read_tokens": 40,
-        "effective_input_tokens": 100, "total_tokens": 120, "cost_usd": None,
+        "effective_input_tokens": 100, "total_tokens": 120,
     }
 
 
@@ -368,7 +366,7 @@ def test_codex_review_usage_delegates_an_inconsistent_cache_to_the_canonical_own
         "inputTokens": 40, "cachedInputTokens": 100, "outputTokens": 20,
     })
     assert expected is not None
-    assert _recorded_usage(telemetry) == {**expected.ledger_row(), "cost_usd": None}
+    assert _recorded_usage(telemetry) == expected.ledger_row()
 
 
 @pytest.mark.asyncio
@@ -530,7 +528,8 @@ async def test_action_review_quotes_descriptor_output_and_lineage(
     }
     assert "untrusted output" not in calls[0]["system_prompt"]
     assert recorded[0][1]["source"] == "host_access_action_review"
-    assert recorded[0][0][2]["cost_usd"] is None
+    # The provider-reported cost is not handed on; the ledger prices the row.
+    assert recorded[0][0][2].get("cost_usd") is None
     assert events[0][1]["properties"]["terminal"] == verdict
 
 
@@ -723,19 +722,14 @@ async def test_provider_usage_is_recorded_before_strict_schema_failure(
         )
 
     assert len(recorded) == 2
-    first_args, first_kwargs = recorded[0]
+    assert recorded[0] == recorded[1]
     args, kwargs = recorded[1]
-    assert first_args == args
-    assert first_kwargs | {"usage_id": None} == kwargs | {"usage_id": None}
-    assert first_kwargs["usage_id"] != kwargs["usage_id"]
-    assert all(len(row[1]["usage_id"]) == 24 for row in recorded)
     assert args[:2] == ("root-1", "claude-code/claude-fable-5")
-    assert kwargs | {"usage_id": None} == {
+    assert kwargs == {
         "source": "host_access_application_review",
         "ttft_ms": None,
         "harness": "claude-code",
         "vendor_account_id": None,
-        "usage_id": None,
     }
     assert args[2] == {
         "prompt_tokens": 113,

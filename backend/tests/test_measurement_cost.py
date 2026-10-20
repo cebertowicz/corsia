@@ -166,9 +166,6 @@ def test_api_equivalent_prices_only_the_proven_short_context_bound_before_weekly
             (model, CODEX, 272_000, 1_000_000, 0, 0, 1_272_000, None, "000000000000000000000001"),
             # This exact terminal receipt is an opaque aggregate above the short bound.
             (model, CODEX, 272_001, 0, 0, 0, 272_001, None, terminal_id, turn_id),
-            # A receipt-shaped checkpoint row is one disjoint call, so its own
-            # input proves the long tier instead of inheriting turn ambiguity.
-            (model, "checkpoint", 272_001, 0, 0, 0, 272_001, None, RECEIPT_ID),
             # Together these exceed 272K, but each original row proves short.
             (model, CODEX, 200_000, 0, 0, 0, 200_000, None, "000000000000000000000003"),
             (model, CODEX, 200_000, 0, 0, 0, 200_000, None, "000000000000000000000004"),
@@ -180,10 +177,9 @@ def test_api_equivalent_prices_only_the_proven_short_context_bound_before_weekly
         db.close()
     period = result["latest"]
     assert result["definition_version"] == 1
-    expected = 10.544 + 0.8 + api_equivalent(model, 272_001, 0, 0, 0, long_context=True)
-    assert period["dollars"] == pytest.approx(expected)
-    assert (period["priced_records"], period["usage_records"]) == (4, 6)
-    assert result["coverage"] == {"priced_records": 4, "usage_records": 6}
+    assert period["dollars"] == pytest.approx(10.544 + 0.8)
+    assert (period["priced_records"], period["usage_records"]) == (3, 5)
+    assert result["coverage"] == {"priced_records": 3, "usage_records": 5}
     assert {item["kind"]: item["records"] for item in result["excluded"]} == {
         "context_tier_unproven": 1, "cache_rate_unpublished": 1}
 
@@ -218,9 +214,7 @@ def test_admission_prices_only_rows_with_proven_buckets_and_contract(isolated_db
     assert {item["kind"]: item["records"] for item in result["excluded"]} == {
         "contract_unproven": 3, "tokens_unreported": 1, "tokens_inconsistent": 1, "no_list_price": 1}
     no_list_price = next(item for item in result["excluded"] if item["kind"] == "no_list_price")
-    assert no_list_price["models"] == [{
-        "model": "claude-code/opus", "label": "opus (version not recorded)", "records": 1,
-    }]
+    assert no_list_price["models"] == [{"label": "opus (version not recorded)", "records": 1}]
     assert period["per_outcome"] == pytest.approx(period["dollars"] / 2)
 
 
@@ -363,7 +357,7 @@ def test_checkpoint_and_turn_resolve_and_price_the_same_concrete_claude_identity
     assert price_identity(checkpoint.key) == "claude-sonnet-5-5"
 
 
-RECEIPT_ID = "0123456789abcdef01234567"  # the 24-hex shape of new checkpoint and review rows
+RECEIPT_ID = "0123456789abcdef01234567"  # the 24-hex shape of turn-usage and checkpoint receipts
 
 
 @pytest.mark.parametrize(
@@ -379,8 +373,9 @@ RECEIPT_ID = "0123456789abcdef01234567"  # the 24-hex shape of new checkpoint an
         ("direct-id", "claude-sonnet-4-5", "host_access_action_review", 0, "ok"),  # bare Claude identity has no receipt contract
         ("8f3a9c1e-b2d", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),  # old direct writer: format proves nothing
         ("8f3a9c1e-b2d", "gpt-5", CODEX, 0, "contract_unproven"),  # a Codex-source row stays unproven whatever its model
-        ("8f3a9c1e-b2d", "claude-code/claude-sonnet-5-5", "host_access_action_review", 5, "contract_unproven"),
-        ("8f3a9c1e-b2d", "claude-code/claude-sonnet-5-5", "host_access_action_review", 0, "contract_unproven"),
+        ("8f3a9c1e-b2d", "claude-code/claude-sonnet-5-5", "host_access_action_review", 5, "ok"),  # reviewer copied disjoint buckets since its first row
+        ("8f3a9c1e-b2d", "codex/gpt-6.1-sol", "host_access_application_review", 5, "ok"),  # a fully reported Codex reviewer row is from_codex
+        ("8f3a9c1e-b2d", "claude-code/claude-sonnet-5-5", "conversation", 5, "contract_unproven"),
         ("0123456789ABCDEF01234567", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),  # not a lowercase hex digest
         ("0123456789ABCDEF01234567", "codex/gpt-6.1-sol", "checkpoint", 0, "contract_unproven"),
         ("0123456789abcdef0123456", "codex/gpt-6.1-sol", CODEX, 0, "contract_unproven"),   # wrong length

@@ -50,7 +50,7 @@ class _ToolBoundary:
         self.closed = self.truncated = False
         self.failure: str | None = None
         self.on_usage = on_usage
-        self.calls: dict[str, dict] = {}
+        self.calls: dict[str, tuple[str | None, dict]] = {}
         self.claimed_tool_calls: set[str] = set()
 
     async def observe(self, record: dict[str, Any]) -> None:
@@ -71,11 +71,12 @@ class _ToolBoundary:
         if key and self.on_usage is not None:
             measured = from_anthropic(raw)
             row = measured.ledger_row() if measured is not None else unmeasured_ledger_row()
-            reported = message.get("model")
-            model = reported if isinstance(reported, str) and reported.strip() else (self.context.model or "")
-            if self.calls.get(key) != row:
-                await self.on_usage(str(key), model, row)
-                self.calls[key] = row
+            # The model any record of this call reported; a changed one is a new
+            # observation, so the receipt store sees the disagreement.
+            observed = (self.context.model if key == self.context.message_id else None, row)
+            if self.calls.get(key) != observed:
+                await self.on_usage(str(key), *observed)
+                self.calls[key] = observed
 
     async def _ready(self, call_id: str) -> None:
         while not self.context.ready(call_id):

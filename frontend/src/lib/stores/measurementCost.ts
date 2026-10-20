@@ -31,7 +31,7 @@ export type CostWindowFigures = {
 	hours: number;
 	per_hour: number | null;
 };
-export type ExcludedModel = { model: string; label: string; records: number };
+export type ExcludedModel = { label: string; records: number };
 export type ExcludedRecords = { kind: string; text: string; records: number; models: ExcludedModel[] };
 export type WorkspaceSubscriptionContext = { subscription_dollars: number | null; overage_dollars: number | null; subscription_facts: number; overage_facts: number; subscription_coverage: 'none' | 'absent' | 'partial' | 'complete'; overage_coverage: 'none' | 'absent' | 'partial' | 'complete'; overlapping_overage: { amount_cents: number; from_date: string; through: string }[]; allocation: 'unavailable'; overage_unrecorded?: boolean; subscription_unrecorded_accounts?: number };
 export type ActualCost = { subscription_records: number; unknown_charge_records: number; external_unset_records: number; direct_api_dollars: number; complete: boolean; workspace_subscription: WorkspaceSubscriptionContext | null };
@@ -121,8 +121,8 @@ export function decodeMeasurementCost(value: unknown): MeasurementCost {
 			if (typeof row.kind !== 'string' || typeof row.text !== 'string' || !Array.isArray(row.models)) throw new Error('excluded cost records');
 			return { kind: row.kind, text: row.text, records: count(row.records), models: row.models.map((model) => {
 				const entry = model as Record<string, unknown>;
-				if (typeof entry.model !== 'string' || typeof entry.label !== 'string') throw new Error('excluded cost records');
-				return { model: entry.model, label: entry.label, records: count(entry.records) };
+				if (typeof entry.label !== 'string') throw new Error('excluded cost records');
+				return { label: entry.label, records: count(entry.records) };
 			}) };
 		}),
 		actual: { subscription_records: count(actual.subscription_records), unknown_charge_records: count(actual.unknown_charge_records), external_unset_records: actual.external_unset_records === undefined ? 0 : count(actual.external_unset_records), direct_api_dollars: actual.direct_api_dollars as number, complete: actual.complete as boolean, workspace_subscription: workspaceContext },

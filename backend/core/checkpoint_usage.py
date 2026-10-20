@@ -13,15 +13,8 @@ from infra.time import utc_now_iso
 from infra.turn_usage_receipts import PLAN_FIELDS
 from infra.vendor_turn_binding import checkpoint_account_id
 from plans import public
-from connections.claude_unlisted import base_identity
 from llm.pricing import recorded_cost
-
-
-def _recorded_model(request, reported: str) -> str:
-    """Keep a vendor-reported Claude identity when the checkpoint supplied one."""
-    if request.target.harness == "claude-code" and reported:
-        return f"claude-code/{base_identity(reported)}"
-    return request.target.catalog_id
+from subagents.usage_model import detached_usage_model_id
 
 
 async def bind_usage(request):
@@ -56,8 +49,8 @@ async def bind_usage(request):
     except Exception as error:
         await defect("binding", error)
 
-    async def on_usage(call_key, model, measured):
-        model = _recorded_model(request, model)
+    async def on_usage(call_key, reported, measured):
+        model = detached_usage_model_id(request.target, reported)
         measured = {
             **measured,
             "cost_usd": recorded_cost(

@@ -147,13 +147,6 @@ def _frozen_account(db, thread_id, turn_id, direct_account):
     return row["vendor_account_id"] if row else None
 
 
-def _measured_usage(model: str, usage: Mapping[str, Any] | None, harness: Harness | None) -> dict[str, Any]:
-    """Attach the call-time cost to one provider's reported token buckets."""
-    from llm.pricing import recorded_cost
-
-    return {**(usage or {}), "cost_usd": recorded_cost(model, usage or {}, harness=harness)}
-
-
 def record_llm_usage(
     thread_id: str,
     model: str,
@@ -167,7 +160,6 @@ def record_llm_usage(
     vendor_account_id: str | None = None,
     harness: Harness | None = None,
     reasoning_effort: str | None = None,
-    usage_id: str | None = None,
     _emit_product_event: Callable[..., None] | None = None,
 ) -> None:
     """Durably hand one provider call to the canonical usage ledger.
@@ -186,9 +178,12 @@ def record_llm_usage(
     does not own the pooled connection; only the canonical write owner may
     settle or release it. Receipt and projection remain separate commits.
     """
-    measured = _measured_usage(model, usage, harness)
+    from llm.pricing import recorded_cost
+
+    cost = recorded_cost(model, usage or {}, harness=harness)
+    measured = {**(usage or {}), "cost_usd": cost}
     emit = _emit_product_event or emit_product_event
-    usage_id = usage_id or str(uuid.uuid4())[:12]
+    usage_id = str(uuid.uuid4())[:12]
     now_iso = utc_now_iso()
     persisted = False
     frozen_account = vendor_account_id if turn_id is None else None

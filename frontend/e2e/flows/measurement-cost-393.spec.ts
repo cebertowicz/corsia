@@ -14,7 +14,7 @@ async function serveMeasurement(page: import('@playwright/test').Page, project: 
 		const url = new URL(route.request().url());
 		if (url.pathname.endsWith('/agents')) return route.fulfill({ json: agentsBody(project, agent.id, agent.name, url) });
 		if (url.pathname.endsWith('/models')) return route.fulfill({ json: { rows: [] } });
-		if (url.pathname.endsWith('/cost')) return route.fulfill({ json: { definition_version: 1, period: mockPeriod(url.searchParams.get('grain')), series: [previous, latest], latest: pooled(latest), previous: pooled(previous), coverage: { priced_records: 3_900, usage_records: 5_171 }, not_api_priced_records: 12, excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 1_271, models: [] }], actual } });
+		if (url.pathname.endsWith('/cost')) return route.fulfill({ json: { definition_version: 1, period: mockPeriod(url.searchParams.get('grain')), series: [previous, latest], latest: pooled(latest), previous: pooled(previous), coverage: { priced_records: 3_900, usage_records: 5_171 }, not_api_priced_records: 12, excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 1_271, models: [{ label: 'Opus 5.5', records: 1_100 }, { label: 'GPT-5.6 Terra', records: 120 }, { label: 'Sonnet 5.5', records: 40 }, { label: 'External model', records: 11 }] }], actual } });
 		const ids = url.searchParams.get('ids')?.split(',').filter(Boolean) ?? [];
 		return route.fulfill({ json: { period: mockPeriod(url.searchParams.get('grain')), average_periods: mockAveragePeriods(url.searchParams.get('grain')), windows: mockWindows(ids), rows: ids.flatMap((series) => ['2026-09-21', '2026-09-28'].map((period) => ({ period, series, value: series === 'outcomes' ? 20 : 1, average: series === 'outcomes' ? 20 : 1, n: 20, proxy: false, partial: false, comparable: true, break: null, dimension: null, thin: false }))), definitions: [] } });
 	});
@@ -41,6 +41,9 @@ test.describe('@flow:measurement-cost-393 @surface:measurement Cost is usable on
 		const section = await openCost(page, request, testInfo);
 		await expect(section.getByText('Total spend, Sep 28 to Oct 4')).toBeVisible();
 		await expect(section.getByText('3,900 of 5,171 usage records in Sep 28 to Oct 4 are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.')).toBeVisible();
+		const excluded = section.getByText('Usage records whose token counting format is not proven: Opus 5.5 (1,100), GPT-5.6 Terra (120), Sonnet 5.5 (40) and 1 more.');
+		await expect(excluded).toBeVisible();
+		await excluded.screenshot({ path: testInfo.outputPath('excluded-models-393.png') });
 		await section.scrollIntoViewIfNeeded();
 		let box = await section.boundingBox();
 		expect(box!.x + box!.width).toBeLessThanOrEqual(393);

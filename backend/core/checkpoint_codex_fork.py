@@ -280,7 +280,7 @@ async def _run_app_server_checkpoint(
         )
         initial_tokens += measure_request(request.instruction, target=request.target).tokens
     context = CodexCheckpointContext(request.target, initial_tokens)
-    capture = CodexCheckpointCapture(on_usage=request.on_usage, model=request.target.catalog_id)
+    capture = CodexCheckpointCapture(on_usage=request.on_usage)
 
     async def tool_boundary(reply, usage=None):
         if usage is not None:
