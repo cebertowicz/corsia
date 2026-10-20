@@ -70,11 +70,11 @@ async function commentOnWholeImage(text: string) {
 	await settle();
 	overlay.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
 	await settle();
-	const textarea = host.querySelector<HTMLTextAreaElement>('.image-overlay textarea')!;
+	const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea')!;
 	textarea.value = text;
 	textarea.dispatchEvent(new Event('input', { bubbles: true }));
 	await settle();
-	host.querySelector<HTMLButtonElement>('.image-overlay button.submit')!.click();
+	document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
 	await settle();
 }
 

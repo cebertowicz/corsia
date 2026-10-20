@@ -71,6 +71,20 @@ async def test_replay_writes_the_assistant_answer_durably(isolated_db):
     assert result.turns and result.turns[0]["status"] != "running"
 
 
+async def test_replay_leaves_no_live_runtime_behind(isolated_db):
+    """A replayed thread must not outlive replay in the process-wide registry.
+
+    App shutdown refuses to finish past a live entry it cannot terminate, so a
+    leftover would fail whichever later test in the worker stops an app.
+    """
+    from infra.database import get_db
+    from subagents.cc_runtime_state import _LIVE
+
+    await replay(_text_turn(), get_db(), thread_id="thread-leak")
+
+    assert "thread-leak" not in _LIVE
+
+
 async def test_replay_persists_the_tool_result_before_its_echo(isolated_db):
     """The bridge write must precede the echo, as it does in production."""
     from infra.database import get_db

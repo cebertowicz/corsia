@@ -7,6 +7,7 @@
 
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { portal } from '$lib/actions/portal';
 	let { anchor, open, onClose, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, children }: {
 		anchor: Anchor;
 		open: boolean;
@@ -116,7 +117,8 @@
 <svelte:window onpointerdown={onPointer} onkeydown={onKey} onresize={position} onscrollcapture={position} />
 
 {#if open}
-	<div class="popover" class:fill data-popover bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${hidden ? `${style} visibility: hidden;` : style}`} role="dialog" aria-hidden={hidden || undefined}>{@render children()}</div>
+	<!-- Portaled to `document.body` so no pane clips it or paints over it; `bounds` still keeps it on its canvas. -->
+	<div class="popover" class:fill data-popover use:portal bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${hidden ? `${style} visibility: hidden;` : style}`} role="dialog" aria-hidden={hidden || undefined}>{@render children()}</div>
 {/if}
 
 <style>

@@ -165,11 +165,11 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		await settle();
 		shown.target.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
 		await settle();
-		const textarea = shown.target.querySelector<HTMLTextAreaElement>('textarea')!;
+		const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea')!;
 		textarea.value = 'Too dark';
 		textarea.dispatchEvent(new Event('input', { bubbles: true }));
 		await settle();
-		shown.target.querySelector<HTMLButtonElement>('button.submit')!.click();
+		document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
 		await settle();
 		// The document’s review surface owns the pending batch; the in-document lightbox has no duplicate control.
 		expect(sendIn(shown.target.querySelector('.bar')!)).toBeNull();

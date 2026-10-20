@@ -517,6 +517,13 @@ strengthens both border tokens.
 | Lightbox | 1000+ (legacy) | Image viewer |
 | Toast / haptic feedback | 9999 | Top-of-stack ephemera |
 
+**Every overlay (scrim, dialog, popover, drawer, menu) mounts through
+`use:portal` (`lib/actions/portal.ts`) so it is a child of `document.body`.**
+A `position: fixed` layer left inside the chat column or the open document is
+clipped to that box in the desktop app's WebKit, and a z-index cannot undo it.
+`lib/__tests__/overlay-portal.test.ts` fails on a new fixed layer that neither
+portals nor is listed there as not an overlay.
+
 Several legacy values in `app.css` (`.dialog-overlay { z-index: 200 }`)
 need an audit for collision with newer modal stack. Out of scope this
 round; flagged in §8.

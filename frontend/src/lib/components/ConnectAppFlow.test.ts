@@ -39,14 +39,14 @@ function render(): { onClose: ReturnType<typeof vi.fn>; onConnected: ReturnType<
 }
 
 function press(label: string): void {
-	const button = [...host.querySelectorAll('button')].find((candidate) => candidate.textContent?.trim() === label) as HTMLButtonElement;
+	const button = [...document.body.querySelectorAll('button')].find((candidate) => candidate.textContent?.trim() === label) as HTMLButtonElement;
 	expect(button).toBeTruthy();
 	button.click();
 	flushSync();
 }
 
 function type(label: string, value: string): void {
-	const field = host.querySelector(`input[aria-label="${label}"]`) as HTMLInputElement;
+	const field = document.body.querySelector(`input[aria-label="${label}"]`) as HTMLInputElement;
 	field.value = value;
 	field.dispatchEvent(new Event('input', { bubbles: true }));
 	flushSync();
@@ -64,39 +64,39 @@ async function connectResult(state: string, extra: Record<string, unknown> = {})
 	const stateLine = state === 'working'
 		? `Connected${typeof extra.tool_count === 'number' && extra.tool_count ? ` · ${extra.tool_count} actions` : ''}`
 		: state === 'needs_token' ? 'Needs a key' : state === 'needs_sign_in' ? 'Needs you to sign in' : state === 'connecting' ? 'Connecting…' : 'Disconnected';
-	await vi.waitFor(() => expect(host.querySelector('h2')?.textContent).toBe(`Files: ${stateLine}`));
+	await vi.waitFor(() => expect(document.body.querySelector('h2')?.textContent).toBe(`Files: ${stateLine}`));
 	return { created, onClose, onSignIn };
 }
 
 describe('ConnectAppFlow', () => {
 	it('moves from What to the Mac setup step and confines the safety notice there', () => {
 		render();
-		expect(host.textContent).toContain('What');
-		expect(host.textContent).toContain('Opens a chat with CORSIA to sign in.');
-		expect(host.textContent).not.toContain('It can do anything you can do on this computer');
+		expect(document.body.textContent).toContain('What');
+		expect(document.body.textContent).toContain('Opens a chat with CORSIA to sign in.');
+		expect(document.body.textContent).not.toContain('It can do anything you can do on this computer');
 		press('Continue');
-		expect(host.textContent).toContain('Set it up');
-		expect(host.textContent).not.toContain('They may call it an MCP server.');
-		expect(host.textContent).toContain("It can do anything you can do on this computer, except open CORSIA's own files and saved keys. Connect only apps you trust.");
+		expect(document.body.textContent).toContain('Set it up');
+		expect(document.body.textContent).not.toContain('They may call it an MCP server.');
+		expect(document.body.textContent).toContain("It can do anything you can do on this computer, except open CORSIA's own files and saved keys. Connect only apps you trust.");
 	});
 
 	it('asks for the connection detail before the name for each app kind', () => {
 		render();
 		press('Continue');
-		expect([...host.querySelectorAll('input')].map((input) => input.getAttribute('aria-label'))).toEqual(['What it runs', 'Name']);
+		expect([...document.body.querySelectorAll('input')].map((input) => input.getAttribute('aria-label'))).toEqual(['What it runs', 'Name']);
 		press('Back');
-		const web = [...host.querySelectorAll('input[type="radio"]')].find((input) => input.parentElement?.textContent?.includes('web address')) as HTMLInputElement;
+		const web = [...document.body.querySelectorAll('input[type="radio"]')].find((input) => input.parentElement?.textContent?.includes('web address')) as HTMLInputElement;
 		web.click();
 		press('Continue');
-		expect([...host.querySelectorAll('input')].map((input) => input.getAttribute('aria-label'))).toEqual(['Web address', 'Name']);
+		expect([...document.body.querySelectorAll('input')].map((input) => input.getAttribute('aria-label'))).toEqual(['Web address', 'Name']);
 	});
 
 	it('keeps an empty setup form in place with a direct error', () => {
 		render();
 		press('Continue');
 		press('Continue');
-		expect(host.textContent).toContain('Enter a name and what it runs.');
-		expect(host.textContent).toContain('Set it up');
+		expect(document.body.textContent).toContain('Enter a name and what it runs.');
+		expect(document.body.textContent).toContain('Set it up');
 	});
 
 	it('shows Where it works after a complete setup without the setup hint or safety notice', () => {
@@ -105,14 +105,14 @@ describe('ConnectAppFlow', () => {
 		type('Name', 'Files');
 		type('What it runs', 'npx -y @example/app');
 		press('Continue');
-		expect(host.textContent).toContain('Where it works');
-		expect(host.textContent).toContain('All projects');
-		expect(host.textContent).not.toContain('Agents in Garden plan, Outside projects and any new project will be able to use it.');
-		(host.querySelectorAll('input[type="radio"]')[1] as HTMLInputElement).click();
+		expect(document.body.textContent).toContain('Where it works');
+		expect(document.body.textContent).toContain('All projects');
+		expect(document.body.textContent).not.toContain('Agents in Garden plan, Outside projects and any new project will be able to use it.');
+		(document.body.querySelectorAll('input[type="radio"]')[1] as HTMLInputElement).click();
 		flushSync();
-		expect(host.textContent).toContain('Only agents in Outside projects will be able to use it.');
-		expect(host.textContent).not.toContain('They may call it an MCP server.');
-		expect(host.textContent).not.toContain('It can do anything you can do on this computer');
+		expect(document.body.textContent).toContain('Only agents in Outside projects will be able to use it.');
+		expect(document.body.textContent).not.toContain('They may call it an MCP server.');
+		expect(document.body.textContent).not.toContain('It can do anything you can do on this computer');
 	});
 
 	it('posts the local setup and reach only after the final Connect action', async () => {
@@ -135,7 +135,7 @@ describe('ConnectAppFlow', () => {
 				key_refs: [],
 			}),
 		}));
-		expect(host.textContent).toContain('Files: Connected · 46 actions');
+		expect(document.body.textContent).toContain('Files: Connected · 46 actions');
 	});
 
 	it('shows the fixed failure class and lets the person correct What it runs', async () => {
@@ -146,11 +146,11 @@ describe('ConnectAppFlow', () => {
 		type('What it runs', 'npx -y @example/app');
 		press('Continue');
 		press('Connect');
-		await vi.waitFor(() => expect(host.textContent).toContain("Couldn't connect: no response"));
-		expect(host.textContent).toContain("The app didn't respond within 10 seconds. Go back and compare What it runs with the app's setup instructions, then try again. It may also need something that isn't installed on your computer; its setup instructions say what.");
-		expect(host.textContent).toContain('Try again');
+		await vi.waitFor(() => expect(document.body.textContent).toContain("Couldn't connect: no response"));
+		expect(document.body.textContent).toContain("The app didn't respond within 10 seconds. Go back and compare What it runs with the app's setup instructions, then try again. It may also need something that isn't installed on your computer; its setup instructions say what.");
+		expect(document.body.textContent).toContain('Try again');
 		press('Back');
-		await vi.waitFor(() => expect(host.querySelector('input[aria-label="What it runs"]')).toBe(document.activeElement));
+		await vi.waitFor(() => expect(document.body.querySelector('input[aria-label="What it runs"]')).toBe(document.activeElement));
 	});
 
 	it('shows the runtime-download recovery without pointing to What it runs', async () => {
@@ -161,21 +161,21 @@ describe('ConnectAppFlow', () => {
 		type('What it runs', 'npx -y @example/app');
 		press('Continue');
 		press('Connect');
-		await vi.waitFor(() => expect(host.textContent).toContain("Couldn't connect: download failed"));
-		expect(host.textContent).toContain("CORSIA couldn't download what this app needs to run on this computer. Check that you're connected to the internet, then try again. If it keeps happening, your network may be blocking the download.");
+		await vi.waitFor(() => expect(document.body.textContent).toContain("Couldn't connect: download failed"));
+		expect(document.body.textContent).toContain("CORSIA couldn't download what this app needs to run on this computer. Check that you're connected to the internet, then try again. If it keeps happening, your network may be blocking the download.");
 	});
 
 	it('shows working state as Connected and finishes with Done', async () => {
 		const { onClose } = await connectResult('working', { tool_count: 46 });
-		expect(host.querySelector('h2')?.textContent).toBe('Files: Connected · 46 actions');
+		expect(document.body.querySelector('h2')?.textContent).toBe('Files: Connected · 46 actions');
 		press('Done');
 		expect(onClose).toHaveBeenCalledOnce();
 	});
 
 	it('explains the key requirement and takes the person to Keys', async () => {
 		const { onClose } = await connectResult('needs_token');
-		expect(host.textContent).toContain('Files needs a key before agents can use it: a code Files gives you so other apps can use your account (Files may call it a token or an API key). Create one in your Files settings.');
-		expect(host.textContent).toContain('Done');
+		expect(document.body.textContent).toContain('Files needs a key before agents can use it: a code Files gives you so other apps can use your account (Files may call it a token or an API key). Create one in your Files settings.');
+		expect(document.body.textContent).toContain('Done');
 		press('Set key');
 		expect(requestAppKey).toHaveBeenCalledWith(expect.objectContaining({ name: 'Files', state: 'needs_token' }));
 		expect(onClose).toHaveBeenCalledOnce();
@@ -183,8 +183,8 @@ describe('ConnectAppFlow', () => {
 
 	it('explains sign-in and opens the connected app after closing', async () => {
 		const { created, onClose, onSignIn } = await connectResult('needs_sign_in');
-		expect(host.textContent).toContain("Signing in lets the agents that can use an app act as you in it. You sign in on the app's own page in your browser, so CORSIA never sees your password.");
-		expect(host.textContent).toContain('Done');
+		expect(document.body.textContent).toContain("Signing in lets the agents that can use an app act as you in it. You sign in on the app's own page in your browser, so CORSIA never sees your password.");
+		expect(document.body.textContent).toContain('Done');
 		press('Sign in');
 		expect(onClose).toHaveBeenCalledOnce();
 		expect(onSignIn).toHaveBeenCalledWith(created);
@@ -192,23 +192,23 @@ describe('ConnectAppFlow', () => {
 
 	it('names connecting state without claiming the app is Connected', async () => {
 		await connectResult('connecting');
-		expect(host.querySelector('h2')?.textContent).toBe('Files: Connecting…');
-		expect(host.querySelector('h2')?.textContent).not.toContain('Connected');
-		expect(host.textContent).toContain('Done');
+		expect(document.body.querySelector('h2')?.textContent).toBe('Files: Connecting…');
+		expect(document.body.querySelector('h2')?.textContent).not.toContain('Connected');
+		expect(document.body.textContent).toContain('Done');
 	});
 
 	it('names disconnected state without claiming the app is Connected', async () => {
 		await connectResult('disconnected');
-		expect(host.querySelector('h2')?.textContent).toBe('Files: Disconnected');
-		expect(host.querySelector('h2')?.textContent).not.toContain('Connected');
-		expect(host.textContent).toContain('Done');
+		expect(document.body.querySelector('h2')?.textContent).toBe('Files: Disconnected');
+		expect(document.body.querySelector('h2')?.textContent).not.toContain('Connected');
+		expect(document.body.textContent).toContain('Done');
 	});
 
 	it('opens CORSIA with the Google request instead of starting OAuth', () => {
 		const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ projects: [] }) }));
 		vi.stubGlobal('fetch', fetch);
 		const { onClose } = render();
-		const google = [...host.querySelectorAll('input[type="radio"]')].find((input) => input.parentElement?.textContent?.includes('Google')) as HTMLInputElement;
+		const google = [...document.body.querySelectorAll('input[type="radio"]')].find((input) => input.parentElement?.textContent?.includes('Google')) as HTMLInputElement;
 		google.click();
 		press('Continue');
 		expect(requestCorsiaMessage).toHaveBeenCalledOnce();
