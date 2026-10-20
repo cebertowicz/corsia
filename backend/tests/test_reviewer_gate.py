@@ -1086,6 +1086,7 @@ class TestInfraRedRespectsStandingSuccess:
         with patch("reviewer.gh_api.subprocess.run", side_effect=fake), \
              patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
              patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=None), \
+             patch.object(gate_mod.github_reviewer_gate, "MERGEABILITY_POLL_INTERVAL_S", 0.0), \
              patch.object(
                  github_reviewer_notifications, "notify_pr_info_unreadable",
              ), \
