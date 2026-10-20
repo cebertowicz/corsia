@@ -181,9 +181,6 @@ async def _spawn(
     }
 
 
-# Child model admission is centralized in infra.fresh_threads.create_fresh_thread.
-
-
 async def _hand_over(
     step, child_thread_id: str, parent: dict[str, Any], requested, *, via: str = "delegate_task",
 ) -> dict:

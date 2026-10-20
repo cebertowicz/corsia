@@ -155,9 +155,6 @@ class DelegateSendTool(Tool):
         return delegation._json(sent)
 
 
-# Send confirmation is centralized in infra.local_only.
-
-
 async def _answer_needs(from_thread_id: str, thread_id: str, node_id: str, kwargs) -> dict:
     """Clear the worker's parent needs; the message is already delivered either way."""
     from plans import public

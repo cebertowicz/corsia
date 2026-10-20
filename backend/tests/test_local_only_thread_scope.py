@@ -257,10 +257,39 @@ def test_inheritance_uses_root_and_every_creator_candidate(monkeypatch) -> None:
     unaffected = fresh_threads.create_fresh_thread(
         user_id="u", thread_id="unaffected", model="cloud", spawned_by="ordinary", db=db,
     )
+    agent_chat = fresh_threads.create_fresh_thread(
+        user_id="u", thread_id="agent-chat", model="local", actor_thread_id="child", db=db,
+    )
+    ordinary_agent_chat = fresh_threads.create_fresh_thread(
+        user_id="u", thread_id="ordinary-chat", model="cloud", actor_thread_id="ordinary", db=db,
+    )
 
     assert (grandchild["local_only"], grandchild["local_only_root_thread_id"]) == (0, "root")
-    assert (inherited_later["local_only"], inherited_later["local_only_root_thread_id"]) == (0, "ordinary")
+    assert (inherited_later["local_only"], inherited_later["local_only_root_thread_id"]) == (0, "root")
     assert (unaffected["local_only"], unaffected["local_only_root_thread_id"]) == (0, "ordinary")
+    assert agent_chat["local_only_root_thread_id"] == "root"
+    assert ordinary_agent_chat["local_only_root_thread_id"] is None
+
+
+def test_local_only_agent_cannot_open_a_cloud_chat(monkeypatch) -> None:
+    from infra import fresh_threads
+    from infra.local_only import LocalOnlyRefused
+
+    db = _db()
+    _thread(db, "root", local_only=1)
+    monkeypatch.setattr(
+        "infra.local_only.local_only_model_refusal",
+        lambda model, *, thread_local_only, **_kwargs: (
+            "local_only_requires_local_model" if thread_local_only and model == "cloud" else None
+        ),
+    )
+
+    with pytest.raises(LocalOnlyRefused):
+        fresh_threads.create_fresh_thread(
+            user_id="u", thread_id="cloud-chat", model="cloud", actor_thread_id="root", db=db,
+        )
+
+    assert db.execute("SELECT id FROM threads WHERE id='cloud-chat'").fetchone() is None
 
 
 @pytest.mark.parametrize("lineage_field", ["spawned_by", "parent_thread_id"])

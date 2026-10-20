@@ -57,10 +57,19 @@ def _source_and_defer_receipt(row: sqlite3.Row, destination: str, *, db) -> tupl
 
 
 def request_switch(
-    thread_id: str, destination_model: str, *, operation_id: str, requested_at: str,
-    actor_kind: str = "user", actor_id: str | None = None, reason: str = "model_switch",
-    checkpoint_choice: str = "current", user_id: str | None = None,
-    account_id: str | None = None, db: sqlite3.Connection | None = None) -> SwitchRequest | None:
+    thread_id: str,
+    destination_model: str,
+    *,
+    operation_id: str,
+    requested_at: str,
+    actor_kind: str = "user",
+    actor_id: str | None = None,
+    reason: str = "model_switch",
+    checkpoint_choice: str = "current",
+    user_id: str | None = None,
+    account_id: str | None = None,
+    db: sqlite3.Connection | None = None,
+) -> SwitchRequest | None:
     """Freeze the FIFO boundary chosen by this request's database commit."""
     destination = _validated_request(destination_model, operation_id, requested_at, actor_kind, reason, checkpoint_choice)
     with write_transaction(db, scope="request_switch") as connection:

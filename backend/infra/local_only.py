@@ -70,20 +70,36 @@ def local_only_model_refusal(
 
 
 def child_local_only_root(
-    parent_ids: tuple[str | None, ...], *, db: sqlite3.Connection,
-) -> str | None:
-    """Return the root link a child stores, whether its root is Local only or not."""
-    for parent_id in dict.fromkeys(parent_ids):
-        if not parent_id:
-            continue
-        parent = db.execute(
-            "SELECT COALESCE(local_only_root_thread_id,id) AS root_thread_id "
-            "FROM threads WHERE id=?",
-            (parent_id,),
-        ).fetchone()
-        if parent:
-            return str(parent["root_thread_id"])
-    return None
+    parent_ids: tuple[str | None, ...],
+    *,
+    actor_thread_id: str | None = None,
+    db: sqlite3.Connection,
+) -> tuple[str | None, bool]:
+    """Return the root link a new thread stores and whether that root is Local only.
+
+    A Local-only root among the parents and the creating agent wins, so a
+    Local-only agent cannot open a cloud-bound thread. Otherwise a child links
+    to its first parent's root; an agent alone gives no link.
+    """
+    ids = [thread_id for thread_id in dict.fromkeys((*parent_ids, actor_thread_id)) if thread_id]
+    if not ids:
+        return None, False
+    rows = {
+        str(row["thread_id"]): row
+        for row in db.execute(
+            "SELECT thread.id AS thread_id,root.id AS root_thread_id,root.local_only "
+            "FROM threads AS thread JOIN threads AS root "
+            "ON root.id=COALESCE(thread.local_only_root_thread_id,thread.id) "
+            f"WHERE thread.id IN ({','.join('?' * len(ids))})",
+            ids,
+        )
+    }
+    found = [rows[thread_id] for thread_id in ids if thread_id in rows]
+    local = next((row for row in found if row["local_only"]), None)
+    if local is not None:
+        return str(local["root_thread_id"]), True
+    parents = [rows[parent_id] for parent_id in parent_ids if parent_id in rows]
+    return (str(parents[0]["root_thread_id"]), False) if parents else (None, False)
 
 
 def require_local_only_model(
@@ -106,7 +122,6 @@ def require_local_only_model(
         if thread_local_only:
             raise LocalOnlyRefused(refusal)
         raise ValueError(refusal)
-
 
 
 def send_confirmation_refusal(

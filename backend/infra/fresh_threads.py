@@ -104,17 +104,12 @@ def create_fresh_thread(
     now = created_at or _now()
     with write_transaction(db, scope="create_fresh_thread") as _db:
         _ensure_project_exists(_db, project_id)
-        root_thread_id = child_local_only_root(
-            (spawned_by, parent_thread_id), db=_db,
-        )
-        root = (
-            _db.execute("SELECT local_only FROM threads WHERE id=?", (root_thread_id,)).fetchone()
-            if root_thread_id
-            else None
+        root_thread_id, root_local_only = child_local_only_root(
+            (spawned_by, parent_thread_id), actor_thread_id=actor_thread_id, db=_db,
         )
         require_local_only_model(
             model,
-            thread_local_only=bool(root and root["local_only"]),
+            thread_local_only=root_local_only,
             project_id=project_id,
             db=_db,
             spawn=True,
