@@ -5,7 +5,9 @@
 	import AccountUsageRow from './v7/AccountUsageRow.svelte';
 	import { loadProviderPolicy, saveProviderPolicy, saveUseWorkspace, type ProviderEntry, type ProviderPolicy } from '$lib/api/providerPolicy';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
+	import CloudModelsOffSetting from './CloudModelsOffSetting.svelte';
 	import { requestSettingsSection, settingsAnchor } from '$lib/stores/settingsNavigation';
+	import { HARNESSES } from '$lib/stores/harnessMembership';
 
 	let { projectId, onSignIn }: { projectId?: string; onSignIn?: (provider: string) => void } = $props();
 	let policy = $state<ProviderPolicy | null>(null);
@@ -13,7 +15,13 @@
 	let accountsError = $state('');
 	let loading = $state(true);
 	let busy = $state(false);
+	// `null` stays loading until the project's persisted Local models only setting settles.
+	let cloudModelsOff = $state<boolean | null>(null);
 	const accountProviders = $derived(policy?.providers?.filter((provider) => provider.capabilities.units === 'accounts') ?? []);
+	// Every account provider the policy lists, named by the harness owner.
+	const cloudOffLine = $derived(accountProviders.length
+		? `${new Intl.ListFormat('en', { type: 'conjunction' }).format(accountProviders.map(providerName))} ${accountProviders.length === 1 ? "isn't" : "aren't"} used while Local models only is on.`
+		: '');
 
 	$effect(() => { void load(); });
 	async function load() {
@@ -46,7 +54,7 @@
 		}
 	}
 	function providerName(provider: ProviderEntry) {
-		return provider.provider_key === 'claude-code' ? 'Claude Code' : 'Codex';
+		return HARNESSES.find((harness) => harness.name === provider.provider_key)?.label ?? provider.provider_key;
 	}
 	function accountFor(unitId: string) {
 		return $vendorAccounts.find((account) => account.id === unitId);
@@ -74,8 +82,14 @@
 </script>
 
 <section class="providers-policy" aria-label={projectId ? 'Project providers' : 'Workspace providers'} data-settings-anchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'} use:settingsAnchor={projectId ? 'project-provider-policy' : 'workspace-provider-policy'}>
+	{#if projectId}
+		<h2>Models</h2>
+		<CloudModelsOffSetting {projectId} onCloudModelsOffState={(value) => { cloudModelsOff = value; }} />
+	{/if}
 	<h2>Accounts and rollover</h2>
-	{#if loading}<p role="status">Loading providers…</p>
+	{#if loading || (projectId && cloudModelsOff === null)}<p role="status">Loading providers…</p>
+	{:else if projectId && cloudModelsOff === true && policy}
+		{#if cloudOffLine}<p>{cloudOffLine}</p>{/if}
 	{:else if error}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
 	{:else if policy}
 		{#if accountsError}<p class="error" role="alert">{accountsError}</p><Button size="sm" onclick={load}>Reload providers</Button>{/if}

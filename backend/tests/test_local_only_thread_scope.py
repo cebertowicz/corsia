@@ -187,7 +187,7 @@ def test_scope_to_thread_resolves_a_local_only_thread_through_the_canonical_reso
 
 
 def test_turning_on_covers_family_created_before_and_off_clears_it() -> None:
-    from infra.local_only import local_only_ancestor, write_family_local_only
+    from infra.local_only import local_only_sources, write_family_local_only
 
     db = _db()
     _thread(db, "root")
@@ -196,18 +196,15 @@ def test_turning_on_covers_family_created_before_and_off_clears_it() -> None:
     _thread(db, "actor-chat")  # opened by an agent: no family link
     _thread(db, "other")
 
-    def grandchild():
-        return db.execute("SELECT * FROM threads WHERE id='grandchild'").fetchone()
-
     write_family_local_only("root", True, "t2", db=db)
 
     assert [_local_only(db, t) for t in ("root", "child", "grandchild", "actor-chat", "other")] == [
         1, 1, 1, 0, 0,
     ]
-    assert local_only_ancestor(grandchild(), db=db)
+    assert local_only_sources(["grandchild"], db=db) == {"grandchild": ("child", "New Chat")}
     write_family_local_only("root", False, "t3", db=db)
     assert [_local_only(db, t) for t in ("root", "child", "grandchild")] == [0, 0, 0]
-    assert not local_only_ancestor(grandchild(), db=db)
+    assert local_only_sources(["grandchild"], db=db) == {}
 
 
 def test_create_fresh_thread_refuses_cloud_child_without_writing(cloud_named_cloud, events) -> None:

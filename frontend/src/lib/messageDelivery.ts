@@ -1,10 +1,14 @@
 import {
 	blockedReason,
 	NO_MODEL_SELECTED,
+	PROJECT_CLOUD_OFF,
 	SELECTED_MODEL_UNAVAILABLE,
 	SET_ASIDE_COPY,
+	THREAD_LOCAL_ONLY,
 	UNCONFIRMED_TITLE,
+	WAITING_FOR_LOCAL_MODEL,
 	WAITING_FOR_MODEL,
+	WAITING_FOR_THREAD_LOCAL_MODEL,
 	WAITING_FOR_MODEL_CHOICE,
 } from './messageDeliveryCopy';
 import type { Message } from './stores/threads';
@@ -26,6 +30,7 @@ export type DeliveryPresentation = {
 	label:
 		| 'Sending when ready…'
 		| 'Waiting for model'
+		| 'Switch to a local model to send'
 		| 'Choose a model to send'
 		| 'Waiting for checkpoint'
 		| 'Delivery uncertain'
@@ -50,6 +55,8 @@ export type DeliveryPresentation = {
 /** Model holds by cause; the copy is the same for every provider. */
 const MODEL_HOLD_COPY: Readonly<Record<string, Pick<DeliveryPresentation, 'label' | 'title'>>> = Object.freeze({
 	[SELECTED_MODEL_UNAVAILABLE]: WAITING_FOR_MODEL,
+	[PROJECT_CLOUD_OFF]: WAITING_FOR_LOCAL_MODEL,
+	[THREAD_LOCAL_ONLY]: WAITING_FOR_THREAD_LOCAL_MODEL,
 	[NO_MODEL_SELECTED]: WAITING_FOR_MODEL_CHOICE,
 });
 

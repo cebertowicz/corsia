@@ -230,7 +230,8 @@
 		letter-spacing: var(--ls-title); color: var(--text-primary);
 		white-space: nowrap; overflow: hidden;
 	}
-	.h-scope { overflow: hidden; text-overflow: ellipsis; }
+	/* A long scoped title yields to the fixed header controls instead of pushing them away. */
+	.h-scope { min-width: 0; max-width: 24rem; overflow: hidden; text-overflow: ellipsis; }
 	/* An expanded document occupies the right canvas column, and ChatArtifactSplit publishes its width on main as
 	   --artifact-header-inset (unset without one). The title stays inside the chat's column, with a visible gap
 	   before the document tab strip. The header's right padding is outside this flex box, so the reservation adds

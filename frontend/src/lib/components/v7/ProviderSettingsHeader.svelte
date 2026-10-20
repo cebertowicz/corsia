@@ -23,13 +23,18 @@
 			? provider.server.instance_name
 			: provider.label,
 	);
+	// Grouping a loopback endpoint with this computer does not establish that its
+	// models are local. The backend supplies that fact, or the person marks it private.
+	const showTypeTag = $derived(
+		provider.type !== 'local' || !provider.server || provider.server.on_this_mac === true || provider.server.private === true,
+	);
 </script>
 
 <header class="head">
 	<div class="title">
 		<span class="dot {provider.statusDot}"></span>
 		<span>{title}</span>
-		<span class="type-tag {provider.type}">{provider.type === 'cloud' ? 'API' : provider.type}</span>
+		{#if showTypeTag}<span class="type-tag {provider.type}">{provider.type === 'cloud' ? 'API' : provider.type}</span>{/if}
 	</div>
 	<IconButton ariaLabel="Close" onclick={onClose}>
 		<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6 18 18M18 6 6 18"/></svg>
