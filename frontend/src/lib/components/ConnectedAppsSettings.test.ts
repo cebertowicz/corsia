@@ -341,19 +341,32 @@ describe('ConnectedAppsSettings', () => {
 		expect(host.textContent).not.toContain('Google signed you out');
 	});
 
+	it('keeps Google Sign in primary when the account needs sign-in', async () => {
+		const google = { ...googleAccount, state: 'needs_sign_in' as const };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: [google] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Google — sam.work@example.com"]')).not.toBeNull());
+		(host.querySelector('[data-connected-account-id="google-work"] button') as HTMLButtonElement).click();
+		flushSync();
+		const signIn = [...host.querySelector('[data-connected-account-id="google-work"]')!.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Sign in');
+		expect(signIn?.className).toContain('primary');
+	});
+
 	it('renders Microsoft admin approval, cancellation, refresh and provider failure with the correct next actions', async () => {
 		const admin = { ...googleAccount, id: 'microsoft-admin', provider: 'microsoft' as const, provider_display_name: 'Microsoft', address: 'alex@contoso.example', state: 'needs_sign_in' as const, account_kind: 'work' as const, cause: 'admin_approval_required', client_id: '11111111-1111-4111-8111-111111111111', tenant_id: null };
 		const cancelled = { ...admin, id: 'microsoft-cancelled', cause: 'consent_cancelled' };
 		const expired = { ...admin, id: 'microsoft-expired', cause: 'refresh_token_invalid' };
 		const failed = { ...admin, id: 'microsoft-failed', cause: 'provider_unavailable' };
 		const registration = { ...admin, id: 'microsoft-registration', cause: 'registration_misconfigured', reach: { mode: 'all' as const, project_ids: [], outside_projects: false } };
+		const signedOut = { ...admin, id: 'microsoft-signed-out', cause: null, state: 'signed_out' as const };
 		const writeText = vi.fn().mockResolvedValue(undefined);
 		Object.assign(navigator, { clipboard: { writeText } });
-		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: [admin, cancelled, expired, failed, registration] }) })));
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: [admin, cancelled, expired, failed, registration, signedOut] }) })));
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.querySelector('[aria-label="Microsoft — alex@contoso.example"]')).not.toBeNull());
 		const open = (id: string) => { (host.querySelector(`[data-connected-account-id="${id}"] button`) as HTMLButtonElement).click(); flushSync(); };
 		open(admin.id);
+		const adminRow = host.querySelector(`[data-connected-account-id="${admin.id}"]`) as HTMLElement;
 		expect(host.textContent).toContain('Needs admin approval');
 		expect(host.textContent).toContain('Send this to your IT admin, then press Sign in.');
 		expect([...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Copy message for IT')?.className).toContain('primary');
@@ -363,10 +376,14 @@ describe('ConnectedAppsSettings', () => {
 		expect(writeText.mock.calls[0][0]).toContain('Application (client) ID 11111111-1111-4111-8111-111111111111');
 		expect(writeText.mock.calls[0][0]).not.toContain('You can approve it here');
 		expect(host.textContent).toContain('Message copied');
+		expect(adminRow.querySelector('.copied[role="status"]')?.textContent).toBe('Message copied');
+		expect(Boolean(adminRow.querySelector('.account-actions')?.compareDocumentPosition(adminRow.querySelector('.copied')!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
 		open(cancelled.id);
 		expect(host.textContent).toContain('Sign-in was cancelled. Press Sign in to try again.');
+		expect([...host.querySelector(`[data-connected-account-id="${cancelled.id}"]`)!.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Sign in')?.className).toContain('primary');
 		open(expired.id);
 		expect(host.textContent).toContain('Microsoft signed you out, so agents can’t use this account until you sign in again.');
+		expect([...host.querySelector(`[data-connected-account-id="${expired.id}"]`)!.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Sign in')?.className).toContain('primary');
 		open(failed.id);
 		expect(host.textContent).toContain('Sign-in didn’t finish');
 		expect(host.textContent).toContain('Microsoft had a problem with sign-in. Try again.');
@@ -377,13 +394,16 @@ describe('ConnectedAppsSettings', () => {
 		open(registration.id);
 		const registrationRow = host.querySelector(`[data-connected-account-id="${registration.id}"]`) as HTMLElement;
 		expect(registrationRow.textContent).toContain('Microsoft app needs fixing · All projects');
-		expect(registrationRow.textContent).toContain('Your Microsoft app for CORSIA isn’t set up right. Ask CORSIA to fix it, then press Sign in.');
+		expect(registrationRow.textContent).toContain('Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in.');
 		const signIn = [...registrationRow.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Sign in');
-		expect(signIn?.className).toContain('primary');
+		expect(signIn?.className).toContain('ghost');
+		expect(signIn?.className).not.toContain('primary');
 		expect(registrationRow.textContent).toContain('Where it works…');
 		expect(registrationRow.textContent).toContain('Remove');
 		expect(registrationRow.textContent).not.toContain('Copy message for IT');
 		expect(registrationRow.querySelector('a')).toBeNull();
+		open(signedOut.id);
+		expect([...host.querySelector(`[data-connected-account-id="${signedOut.id}"]`)!.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Sign in')?.className).toContain('primary');
 	});
 
 	it('uses Microsoft removal copy and keeps the correct provider permissions link after removal', async () => {

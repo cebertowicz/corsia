@@ -22,7 +22,7 @@ PERSON_CAUSE_COPY = {
     "consent_cancelled": "Sign-in was cancelled. Press Sign in to try again.",
     "refresh_token_invalid": "Microsoft signed you out, so agents can’t use this account until you sign in again.",
     "provider_unavailable": "Microsoft had a problem with sign-in. Try again.",
-    REGISTRATION_MISCONFIGURED: "Your Microsoft app for CORSIA isn’t set up right. Ask CORSIA to fix it, then press Sign in.",
+    REGISTRATION_MISCONFIGURED: "Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in.",
 }
 
 

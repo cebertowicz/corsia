@@ -10,7 +10,7 @@ const clientId = '11111111-1111-4111-8111-111111111111';
 const tenantId = '22222222-2222-4222-8222-222222222222';
 const allProjects = { mode: 'all' as const, project_ids: [], outside_projects: false };
 const onlyCorsia = { mode: 'corsia' as const, project_ids: [], outside_projects: false };
-type State = 'connected' | 'admin' | 'cancelled' | 'expired' | 'failure' | 'registration' | 'many';
+type State = 'connected' | 'admin' | 'cancelled' | 'expired' | 'failure' | 'registration' | 'google-needs-sign-in' | 'many';
 
 function microsoft(state: State, id = 'microsoft-work', address = 'alex@contoso.example') {
 	return {
@@ -23,6 +23,7 @@ function microsoft(state: State, id = 'microsoft-work', address = 'alex@contoso.
 }
 
 function accounts(state: State) {
+	if (state === 'google-needs-sign-in') return [microsoft('connected'), { id: 'google', provider: 'google' as const, provider_display_name: 'Google', address: 'alex@gmail.example', capabilities: ['mail', 'calendar', 'files'], state: 'needs_sign_in' as const, tenant_id: null, reach: onlyCorsia }];
 	if (state === 'many') return [
 		microsoft(state, 'microsoft-one', 'shared.prefix.very-long-work-address@contoso.example'),
 		microsoft(state, 'microsoft-two', 'shared.prefix.very-long-personal-address@contoso.example'),
@@ -95,31 +96,47 @@ test.describe('Microsoft Connected apps capture', () => {
 			await expect(page.getByText('Your organization needs to approve CORSIA before it can connect this account. Send this to your IT admin, then press Sign in.')).toBeVisible();
 			await page.getByRole('button', { name: 'Copy message for IT' }).click();
 			await expect(page.getByText('Message copied')).toBeVisible();
+			if (label === '393') {
+				const actions = await page.locator('[data-connected-account-id="microsoft-work"] .account-actions').boundingBox();
+				const copied = await page.locator('[data-connected-account-id="microsoft-work"] .copied[role="status"]').boundingBox();
+				expect(actions).not.toBeNull();
+				expect(copied).not.toBeNull();
+				expect(actions!.y + actions!.height).toBeLessThanOrEqual(copied!.y + 0.5);
+			}
 			await capture(page, testInfo, `ms-admin-copied-${label}-${theme}`);
 
 			state = 'cancelled';
 			await page.reload(); await openConnectedApps(page); await open();
 			await expect(page.getByText('Sign-in was cancelled. Press Sign in to try again.')).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Sign in' })).toHaveClass(/primary/);
 			await capture(page, testInfo, `ms-consent-cancelled-${label}-${theme}`);
 
 			state = 'expired';
 			await page.reload(); await openConnectedApps(page); await open();
 			await expect(page.getByText('Microsoft signed you out, so agents can’t use this account until you sign in again.')).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Sign in' })).toHaveClass(/primary/);
 			await capture(page, testInfo, `ms-refresh-invalid-${label}-${theme}`);
 
 			state = 'failure';
 			await page.reload(); await openConnectedApps(page); await open();
-			await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Try again' })).toHaveClass(/primary/);
 			await capture(page, testInfo, `ms-provider-failure-${label}-${theme}`);
 
 			state = 'registration';
 			await page.reload(); await openConnectedApps(page); await open();
 			await expect(page.getByText('Microsoft app needs fixing · All projects')).toBeVisible();
-			await expect(page.getByText('Your Microsoft app for CORSIA isn’t set up right. Ask CORSIA to fix it, then press Sign in.')).toBeVisible();
-			await expect(page.getByRole('button', { name: 'Sign in' })).toHaveClass(/primary/);
+			await expect(page.getByText('Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in.')).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Sign in' })).toHaveClass(/ghost/);
+			await expect(page.getByRole('button', { name: 'Sign in' })).not.toHaveClass(/primary/);
 			await expect(page.getByRole('button', { name: 'Copy message for IT' })).toHaveCount(0);
 			await expect(page.getByRole('link', { name: 'Manage Microsoft permissions' })).toHaveCount(0);
 			await capture(page, testInfo, `ms-registration-misconfigured-${label}-${theme}`);
+
+			state = 'google-needs-sign-in';
+			await page.reload(); await openConnectedApps(page); await open('Google — alex@gmail.example');
+			const googleRow = page.locator('[data-connected-account-id="google"]');
+			await expect(googleRow.getByRole('button', { name: 'Sign in' })).toHaveClass(/primary/);
+			await capture(page, testInfo, `google-needs-sign-in-${label}-${theme}`);
 
 			includeGoogleAccount = false;
 			state = 'connected';
@@ -132,6 +149,7 @@ test.describe('Microsoft Connected apps capture', () => {
 			await expect(connectedApps).not.toContainText('Google');
 			await expect(connectedApps).not.toContainText('You’re signed out here');
 			await expect(page.getByRole('link', { name: 'Manage Microsoft permissions' })).toHaveCount(0);
+			await expect(page.getByRole('button', { name: 'Sign in' })).toHaveClass(/primary/);
 			await capture(page, testInfo, `ms-signed-out-${label}-${theme}`);
 
 			includeGoogleAccount = true;

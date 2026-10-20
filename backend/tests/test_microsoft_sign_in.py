@@ -202,13 +202,13 @@ async def test_person_connect_and_status_use_registration_fix_copy(monkeypatch) 
     with pytest.raises(HTTPException) as raised:
         await microsoft_api.connect(await _request({}), {"token_kind": "session", "id": "person"})
     assert raised.value.status_code == 400
-    assert raised.value.detail == "Your Microsoft app for CORSIA isn’t set up right. Ask CORSIA to fix it, then press Sign in."
+    assert raised.value.detail == "Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in."
 
     monkeypatch.setattr(microsoft_api, "run_in_db", database_call)
     assert await microsoft_api.status({"token_kind": "session", "id": "person"}) == {
         "status": "not_connected",
         "cause": REGISTRATION_MISCONFIGURED,
-        "message": "Your Microsoft app for CORSIA isn’t set up right. Ask CORSIA to fix it, then press Sign in.",
+        "message": "Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in.",
     }
 
 
@@ -449,8 +449,8 @@ async def test_registration_error_is_a_latest_add_result_and_a_row_state_cause(m
 def test_registration_error_is_a_state_cause_with_fixed_copy() -> None:
     error = MicrosoftError(REGISTRATION_MISCONFIGURED)
     assert error.state_cause == REGISTRATION_MISCONFIGURED
-    assert error.message.startswith("The person's own Microsoft app registration isn't set up right.")
-    assert error.browser_message == "Your Microsoft app for CORSIA isn't set up right. Go back to CORSIA and ask it to fix the app."
+    assert error.message.startswith("The person's own Microsoft app registration isn't configured correctly.")
+    assert error.browser_message == "Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in."
     assert "provider-detail-canary" not in error.message
     assert "provider-detail-canary" not in error.browser_message
 

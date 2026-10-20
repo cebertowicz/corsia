@@ -42,12 +42,12 @@ _TEXT: dict[str, tuple[str, str]] = {
         "Microsoft had a problem with sign-in. Go back to CORSIA and try again.",
     ),
     REGISTRATION_MISCONFIGURED: (
-        "The person's own Microsoft app registration isn't set up right. Check that the app exists in the registration "
+        "The person's own Microsoft app registration isn't configured correctly. Check that the app exists in the registration "
         "tenant and its supported account type matches this connection; Authentication has http://localhost under Mobile "
         "and desktop applications and Allow public client flows is Yes; and Microsoft Graph delegated permissions are "
         "Mail.ReadWrite, Mail.Send, Calendars.ReadWrite, Files.ReadWrite, offline_access, and User.Read. Do not create "
         "a client secret. Fix the registration through the microsoft-setup steps, then call microsoft_connect again.",
-        "Your Microsoft app for CORSIA isn't set up right. Go back to CORSIA and ask it to fix the app.",
+        "Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in.",
     ),
     INPUT_REFUSAL: (
         "microsoft_connect needs client_id as the Application (client) ID GUID, kind as personal, work or both, "
