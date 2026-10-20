@@ -4,6 +4,8 @@
 	import { formatUsageLimit } from '$lib/stores/overageSetting';
 	import type { VendorAccount } from '$lib/stores/vendorAccounts';
 	import CurrentCheck from '../CurrentCheck.svelte';
+	import { inlineSlot } from '$lib/slotMotion';
+	import SwitchingIcon from '../ui/SwitchingIcon.svelte';
 
 	/**
 	 * The one account row. Settings renders it in full (`settings`, or `compact` in a policy list);
@@ -47,9 +49,8 @@
 	{#if order !== null}<span class="order" aria-label={`Rollover position ${order}`}>{order}</span>{/if}
 	<span class="main">
 		<span class="picker-label" title={full}>
-			<span class="name">{label.name}</span>{#if hasEmail}<span class="sep" aria-hidden="true">{' · '}</span><span class="email">{label.email}</span>{/if}
+			<span class="name-group"><span class="name">{label.name}</span>{#if pending}<span class="switching-slot" in:inlineSlot out:inlineSlot><SwitchingIcon ariaLabel="Switching account" /></span>{/if}</span>{#if hasEmail}<span class="sep" aria-hidden="true">{' · '}</span><span class="email">{label.email}</span>{/if}
 		</span>
-		{#if pending}<span class="switch-marker">Switching…</span>{/if}
 		<span class="figures">
 			{#each pickerSegments as segment, index}
 				{#if index > 0}<span aria-hidden="true">{' · '}</span>{/if}<span class:amber={segment.level === 'amber'} class:red={segment.level === 'red'} aria-label={segment.label}>{segment.text}</span>
@@ -131,8 +132,10 @@
 	.figures { margin-left: auto; text-align: right; color: var(--text-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 	.figures .amber { color: var(--amber-text); }
 	.figures .red { color: var(--red-text); }
-	/* The model rows' own pending marker, so a held account choice reads as a held model switch does. */
-	.switch-marker { font-size: var(--text-caption); color: var(--accent-text); white-space: nowrap; }
+	/* The pending icon follows the name of the account being switched to. */
+	.name-group { flex: 0 1 auto; min-width: 0; display: flex; align-items: baseline; gap: var(--space-1); }
+	/* A block with its own line box, so the icon's vertical-align sits it on the text baseline; an empty flex box would rest its bottom there. */
+	.switching-slot { display: inline-block; flex: 0 0 auto; }
 	@media (max-width: 480px) {
 		.figures { flex-basis: 100%; margin-left: 0; text-align: left; }
 		/* Phone: name and usage stack in the middle column; order and controls stay beside them. */

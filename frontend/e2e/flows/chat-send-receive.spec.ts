@@ -208,12 +208,12 @@ test.describe('@flow:chat @surface:chat chat send/receive', () => {
 		// Choosing the thread's own model is a no-op (InputBarModelSheet.svelte chooseModel), so pick the
 		// other seeded model (backend/e2e_mock.py seed_mock_catalog). While a Turn is active the backend does
 		// not refuse it: switch_model freezes the FIFO cut and resolves it at the next natural wake
-		// (backend/thread/model.py), answering 202 pending, which the sheet marks "Switching…"
-		// (account-switch-mid-turn.spec.ts asserts the same marker).
+		// (backend/thread/model.py), answering 202 pending, which the sheet marks with the switching icon
+		// (account-switch-mid-turn.spec.ts asserts the same icon for an account).
 		const modelChoice = page.locator('button.model-list-item', { hasText: 'Mock Test Model' });
 		await expect(modelChoice).toBeEnabled();
 		await modelChoice.click();
-		await expect(modelChoice.locator('.switch-marker')).toHaveText('Switching…');
+		await expect(modelChoice.getByRole('img', { name: 'Switching model' })).toBeVisible();
 		await expect(page.locator('.toast.toast--error')).toHaveCount(0);
 
 		await releaseMockGate(request, 'hold-checkpoint');
