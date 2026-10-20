@@ -141,6 +141,7 @@ def _skill(env: Env, name: str = "cite-the-head") -> Path:
 
 def _external_trial(
     env: Env, name: str, *, cause: str = "process_gap", state: str = "trial",
+    target_file: str = "skills/checks/SKILL.md",
 ) -> Path:
     """Seed a same-owner trial outside this thread's tray for tool-path discovery."""
     from core.lesson_files import render_trial
@@ -153,7 +154,7 @@ def _external_trial(
         description="Use when reporting a check result on a pull request.",
         text="Name the exact commit a check ran on.",
         trial=Trial("hypothesis", _due(days=14), state=state, boundary="A one-line typo fix."),
-        source_refs=TURN, target_file="skills/checks/SKILL.md", target_section="Reporting",
+        source_refs=TURN, target_file=target_file, target_section="Reporting",
         cause=cause,
         case={
             "what_happened": "A result lacked its commit.",
@@ -405,6 +406,23 @@ async def test_tool_placement_merges_the_same_target_section_and_cause_across_lo
     assert [ref["reference"] for ref in merged.lesson.source_refs] == ["turn-7", "turn-merge"]
     assert not _skill(env, "incoming-check").exists()
     assert "Open trials with this target: existing-check (process_gap)." in reply
+
+
+async def test_tool_placement_merges_relative_destination_with_resolved_trial_target(
+    env: Env,
+) -> None:
+    existing = _external_trial(
+        env, "existing-check", target_file=str((env.workspace / "skills/checks/SKILL.md").resolve()),
+    )
+    entry = _entry(env, [{"kind": "turn", "reference": "turn-relative"}])
+
+    _place(env, entry, _answer(skill_name="incoming-check"))
+    await _drain(env.worker)
+
+    merged = lesson_files.read_trial(existing.read_text())
+    assert merged is not None and merged.name == "existing-check"
+    assert [ref["reference"] for ref in merged.lesson.source_refs] == ["turn-7", "turn-relative"]
+    assert not _skill(env, "incoming-check").exists()
 
 
 async def test_tool_placement_creates_a_different_cause_and_lists_the_open_trial(

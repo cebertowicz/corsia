@@ -103,7 +103,11 @@ def _learning_metadata(decision: Decision) -> None:
 
 
 def _target(decision: Decision) -> str:
-    return str(decision.new_target_path if decision.target_file == "new" else decision.target_file)
+    from infra.config import WORKSPACE
+    from tools.filesystem_gate import join_and_resolve
+
+    raw = decision.new_target_path if decision.target_file == "new" else decision.target_file
+    return str(join_and_resolve(str(raw), workspace=WORKSPACE))
 
 
 def _target_trials(decision: Decision) -> tuple[list[tuple[Path, Any]], list[tuple[Path, Any]]]:
@@ -127,7 +131,11 @@ def _target_trials(decision: Decision) -> tuple[list[tuple[Path, Any]], list[tup
 
 
 def _target_from_lesson(current: Any) -> str | None:
-    return current.lesson.new_target_path if current.lesson.target_file == "new" else current.lesson.target_file
+    from infra.config import WORKSPACE
+    from tools.filesystem_gate import join_and_resolve
+
+    raw = current.lesson.new_target_path if current.lesson.target_file == "new" else current.lesson.target_file
+    return str(join_and_resolve(str(raw), workspace=WORKSPACE)) if raw else None
 
 
 def _trial_row(path: Path, current: Any) -> dict[str, str]:
@@ -326,8 +334,10 @@ def _render(
         lesson_id=identity, owner=thread_id, name=name,
         description=str(decision.skill_description), text=decision.text, trial=trial,
         source_refs=lesson_files.merged_refs(earlier, entry["body"].get("source_refs") or []),
-        originating_subjects=subjects, origin=origin, target_file=decision.target_file,
-        new_target_path=decision.new_target_path, target_section=decision.target_section,
+        originating_subjects=subjects, origin=origin,
+        target_file="new" if decision.target_file == "new" else _target(decision),
+        new_target_path=_target(decision) if decision.target_file == "new" else None,
+        target_section=decision.target_section,
         cause=decision.cause, case=decision.case,
     )
     errors = validate_skill_text(text).errors

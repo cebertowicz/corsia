@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from core.correction_learning import loaded_targets, record_terminal_outcome, record_triage
+from core.correction_learning import loaded_targets, record_terminal_outcome, record_triage, serious_proposed
 
 
 NOW = "2026-10-20T00:00:00+00:00"
@@ -135,21 +135,45 @@ def test_generated_manifest_entry_is_not_a_correction_target() -> None:
         )
 
 
-def test_file_manifest_and_skill_read_share_the_same_target_path(tmp_path: Path, monkeypatch) -> None:
+def test_relative_manifest_and_resolved_read_share_one_target_path(tmp_path: Path, monkeypatch) -> None:
+    import infra.config
+
     db = _db()
     path = tmp_path / "skills" / "example" / "SKILL.md"
     path.parent.mkdir(parents=True)
     path.write_text("# Example\n", encoding="utf-8")
-    _record_manifest(db, _file_source(path))
-    _record_skill_read(db, monkeypatch, path)
+    monkeypatch.setattr(infra.config, "WORKSPACE", tmp_path)
+    source = _file_source(path)
+    source.metadata["path"] = "skills/example/SKILL.md"
+    _record_manifest(db, source)
+    _record_skill_read(db, monkeypatch, path.resolve())
 
-    assert loaded_targets(db, THREAD) == (str(path),)
+    assert loaded_targets(db, THREAD) == (str(path.resolve()),)
     result = record_triage(
         db, thread_id=THREAD, subject_key=SUBJECT, tier="note", cause="process_gap",
-        new_work="no", new_work_signal=None, target_file=str(path),
+        new_work="no", new_work_signal=None, target_file="skills/example/SKILL.md",
     )
 
-    assert result["target_file"] == str(path)
+    assert result["target_file"] == str(path.resolve())
+
+
+def test_serious_effect_query_ignores_tool_rows_before_the_active_turn() -> None:
+    from infra.queries import insert_message
+
+    db = _db()
+    insert_message(
+        THREAD, "tool", "old send", {"turn_id": TURN, "name": "email_send"},
+        msg_id="tool-before-turn", db=db, created_at="2026-10-19T23:59:59+00:00",
+    )
+
+    assert serious_proposed(db, THREAD) is False
+
+    insert_message(
+        THREAD, "tool", "new send", {"turn_id": TURN, "name": "email_send"},
+        msg_id="tool-current-turn", db=db, created_at="2026-10-20T00:00:01+00:00",
+    )
+
+    assert serious_proposed(db, THREAD) is True
 
 
 def test_terminal_outcome_is_immutable_and_dropped_needs_reason(tmp_path: Path) -> None:

@@ -28,6 +28,9 @@ def loaded_targets(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
     Manifest entries retain stable references rather than prompt text; the read
     ledger adds on-demand files. Both are evidence that the agent saw a file.
     """
+    from infra.config import WORKSPACE
+    from tools.filesystem_gate import join_and_resolve
+
     turn = db.execute(
         """SELECT id,context_manifest_id FROM active_turns
            WHERE thread_id=? AND status='running' ORDER BY started_at DESC LIMIT 1""",
@@ -47,10 +50,12 @@ def loaded_targets(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
             if not isinstance(entry, dict) or entry.get("version_kind") == "generated":
                 continue
             path = entry.get("path")
-            if isinstance(path, str) and path and path not in found:
-                found.append(path)
+            if isinstance(path, str) and path:
+                resolved = str(join_and_resolve(path, workspace=WORKSPACE))
+                if resolved not in found:
+                    found.append(resolved)
     for row in db.execute("SELECT path FROM guidance_loads WHERE turn_id=? ORDER BY created_at,id", (turn["id"],)):
-        path = str(row["path"])
+        path = str(join_and_resolve(str(row["path"]), workspace=WORKSPACE))
         if path not in found:
             found.append(path)
     return tuple(found)
@@ -59,19 +64,23 @@ def loaded_targets(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
 def serious_proposed(db: sqlite3.Connection, thread_id: str) -> bool:
     """Detect the durable, named tool effects that require Serious by default."""
     from infra.turn_provenance import TurnProvenanceError, turn_provenance
-    from tools.catalog import has_serious_effect
+    from tools.catalog import has_serious_effect, serious_effect_names
 
     active = db.execute(
-        "SELECT id FROM active_turns WHERE thread_id=? AND status='running' "
+        "SELECT id,started_at FROM active_turns WHERE thread_id=? AND status='running' "
         "ORDER BY started_at DESC LIMIT 1",
         (thread_id,),
     ).fetchone()
-    if active is None:
+    names = serious_effect_names()
+    if active is None or not names:
         return False
-    for row in db.execute(
-        "SELECT id,active_turn_id,metadata FROM messages WHERE thread_id=? AND role='tool'",
-        (thread_id,),
-    ):
+    marks = ",".join("?" for _ in names)
+    query = (
+        "SELECT id,active_turn_id,metadata FROM messages "
+        "WHERE thread_id=? AND role='tool' AND created_at>=? "
+        f"AND json_extract(metadata, '$.name') IN ({marks})"
+    )
+    for row in db.execute(query, (thread_id, active["started_at"], *names)):
         try:
             metadata = json.loads(row["metadata"] or "{}")
             if not isinstance(metadata, dict):
@@ -121,7 +130,10 @@ def record_triage(
         signal = None
     if not isinstance(target_file, str) or not target_file.strip():
         raise ValueError("target_file is required")
-    target = target_file.strip()
+    from infra.config import WORKSPACE
+    from tools.filesystem_gate import join_and_resolve
+
+    target = str(join_and_resolve(target_file.strip(), workspace=WORKSPACE))
     valid_targets = loaded_targets(db, thread_id)
     if target not in valid_targets:
         choices = ", ".join(valid_targets) or "(no manifest or load-receipt files recorded)"

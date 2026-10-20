@@ -20,7 +20,8 @@ from infra.continuity_store import (
 )
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
-from tools import continuity_learning, continuity_runtime
+import tools.continuity_learning as continuity_learning
+import tools.continuity_runtime as continuity_runtime
 from tools.base import Tool
 from tools.continuity_schema import (
     _FIELD_SCHEMAS,
@@ -382,6 +383,7 @@ class ContinuityEditTool(Tool):
         error = _execution_error(operation, kwargs)
         if error is not None:
             return error
+        assert isinstance(operation, str)
         context = continuity_runtime.require_context(kwargs)
         if isinstance(context, str):
             return context

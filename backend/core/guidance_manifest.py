@@ -145,7 +145,10 @@ def _entry(source: ContextSourceEntry, *, model: str | None) -> dict[str, Any]:
         # References identify every source, including generated rows. The path
         # is deliberately narrower: it is the file identity shared by read
         # receipts and correction targets.
-        entry["path"] = path
+        from infra.config import WORKSPACE
+        from tools.filesystem_gate import join_and_resolve
+
+        entry["path"] = str(join_and_resolve(path, workspace=WORKSPACE))
     lessons = (source.metadata or {}).get("lessons")
     if source.source_id == SKILLS_INDEX_SOURCE_ID and isinstance(lessons, list):
         # Offered trial lessons by version; no key means the install predates them.
