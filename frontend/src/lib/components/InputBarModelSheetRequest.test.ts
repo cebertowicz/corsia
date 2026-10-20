@@ -110,6 +110,19 @@ describe('full composer model-sheet requests', () => {
 		expect(usageRefreshes()).toBe(2);
 	});
 
+	it('carries Local-only focus through a delayed sheet mount without a timing window', async () => {
+		vi.useFakeTimers();
+		threads.set([{ id: 'top-thread', user_id: 'u', profile: 'personal', title: 'Focus chat', model: null, local_only: 1, local_only_effective: true, local_only_from_project: false, local_only_inherited_from_thread_id: null, local_only_inherited_from_title: null, created_at: 'now', updated_at: 'now' }]);
+		const { host } = render();
+		requestModelSheet({ focusLocalOnly: true });
+		vi.advanceTimersByTime(2001);
+		flushSync();
+		await vi.runAllTimersAsync();
+		flushSync();
+		expect(document.activeElement).toBe(host.querySelector('.local-only-setting'));
+		vi.useRealTimers();
+	});
+
 	it.each(['leaf-thread', 'top-thread', null])('keeps an explicit %s composer out of the global request while the top opens', (threadId) => {
 		const top = render();
 		const leaf = render({ threadId });

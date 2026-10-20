@@ -342,6 +342,20 @@ def test_non_local_thread_can_switch_to_a_cloud_model(monkeypatch) -> None:
     ).fetchone()[0] == "cloud"
 
 
+def test_family_write_and_payload_exclude_cross_user_links() -> None:
+    from infra.local_only import family_local_only_payload, write_family_local_only
+
+    db = _db()
+    _thread(db, "root", user_id="u")
+    _thread(db, "foreign-child", user_id="other", spawned_by="root")
+
+    write_family_local_only("root", True, "now", db=db)
+
+    assert _local_only(db, "root") == 1
+    assert _local_only(db, "foreign-child") == 0
+    assert [row["id"] for row in family_local_only_payload("root", db=db)] == ["root"]
+
+
 def _app(*routers) -> FastAPI:
     app = FastAPI()
     for router in routers:

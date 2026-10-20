@@ -28,8 +28,8 @@
 	const localityOff = (model: Model) => model.status_reason === 'project_cloud_off' || model.status_reason === 'thread_local_only';
 	const cloudModelsOff = $derived($models.some(localityOff));
 	const threadPolicy = $derived(threadLocalOnly($threads.find((thread) => thread.id === $activeThreadId)));
-	const projectCloudOff = $derived(threadPolicy.fromProject || $models.some((model) => model.status_reason === 'project_cloud_off'));
-	const inheritedLocalOnly = $derived(threadPolicy.inheritedFromThreadId != null);
+	const projectCloudOff = $derived(threadPolicy.cause === 'project');
+	const inheritedLocalOnly = $derived(threadPolicy.cause === 'inherited');
 	const openProjectPolicy = () => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy');
 	const pickerModels = $derived(cloudModelsOff ? $models.filter((model) => !localityOff(model)) : $models);
 	const groups = $derived(groupModels(pickerModels, $activeModelId));
@@ -41,7 +41,7 @@
 	let usageShown = $state<Record<string, boolean>>({});
 	let showAddLocal = $state(false);
 	let settingsRetrying = $state(false);
-	let { onclose = () => {} }: { onclose?: () => void } = $props();
+	let { onclose = () => {}, focusLocalOnly = false, onfocusconsumed = () => {} }: { onclose?: () => void; focusLocalOnly?: boolean; onfocusconsumed?: () => void } = $props();
 	const isOpen = (group: ModelGroup, hasAccounts: boolean) => opened[group.key] ?? (group.state === 'ready' || hasAccounts);
 	// A collapsed group nobody can pick from still shows the thread's current model, disabled.
 	const rowsShown = (group: ModelGroup, open: boolean) =>
@@ -163,7 +163,7 @@
 </script>
 
 <div class="action-sheet model-sheet">
-	<LocalOnlySwitchRow onsetuplocal={() => showAddLocal = true} onleave={onclose} />
+	<LocalOnlySwitchRow onsetuplocal={() => showAddLocal = true} onleave={onclose} focusOnMount={focusLocalOnly} onfocusconsumed={onfocusconsumed} />
 	<div class="sheet-section">
 		<div class="sheet-section-label">Model</div>
 		<div class="model-list">

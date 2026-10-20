@@ -56,13 +56,15 @@
 			('ontouchstart' in window || navigator.maxTouchPoints > 0);
 
 		let sheetView = $state<SheetView>(null);
+		let focusLocalOnly = $state(false);
 		function toggleSheet(view: Exclude<SheetView, null>) {
 			sheetView = sheetView === view ? null : view;
 		}
 		function closeSheet() { sheetView = null; }
 
 	// Only the top composer owns requests from another surface.
-	$effect(() => threadId === undefined ? onModelSheetRequest(() => {
+	$effect(() => threadId === undefined ? onModelSheetRequest((request) => {
+		focusLocalOnly = request.focusLocalOnly;
 		if (sheetView === 'model') return;
 		void loadModels({ refreshUsage: true });
 		sheetView = 'model';
@@ -371,6 +373,8 @@
 		hasMessageToSend={hasMessageToSend}
 		{canSendToModel}
 		queueUntilSwitch={hasReadySwitchDestination}
+		{focusLocalOnly}
+		onfocusconsumed={() => focusLocalOnly = false}
 		onAttachFile={() => fileInputsRef?.openFile()}
 		onAttachCamera={() => fileInputsRef?.openCamera()}
 		onAttachPhotos={() => fileInputsRef?.openPhotos()}

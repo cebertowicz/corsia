@@ -4,7 +4,7 @@ import { activeThreadId, threads } from '$lib/stores/threads';
 import { canvasHeader } from '$lib/stores/canvasHeader';
 import { uiScope } from '$lib/stores/uiScope';
 import { models, type Model } from '$lib/stores/models';
-import { onLocalOnlyFocusRequest } from '$lib/stores/modelSheetRequest';
+import { onModelSheetRequest } from '$lib/stores/modelSheetRequest';
 import Header from './Header.svelte';
 
 let host: HTMLElement;
@@ -60,21 +60,20 @@ describe('Header Local only badge', () => {
 		expect(badge()?.textContent).toContain('Local only');
 	});
 
-	it('shows the badge when the catalog says the project allows only local models', () => {
+	it('does not infer the badge from catalog availability', () => {
 		models.set([{ id: 'cc/opus', name: 'Opus', size: '', backend: 'claude-code', speed: '', status: 'unavailable', status_reason: 'project_cloud_off' } as Model]);
 		render();
-		expect(badge()).not.toBeNull();
+		expect(badge()).toBeNull();
 	});
 
 	it('asks for the model sheet with the Local only row focused when tapped', () => {
 		withLocalOnly({ local_only: 1 });
 		render();
-		const focus = vi.fn();
-		const stop = onLocalOnlyFocusRequest(focus);
-		focus.mockClear();
+		const open = vi.fn();
+		const stop = onModelSheetRequest(open);
 		badge()!.click();
 		stop();
-		expect(focus).toHaveBeenCalledTimes(1);
+		expect(open).toHaveBeenCalledWith(expect.objectContaining({ focusLocalOnly: true }));
 	});
 
 	it('shows no badge outside the chat view', () => {

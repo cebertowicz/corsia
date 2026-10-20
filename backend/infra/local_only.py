@@ -20,9 +20,11 @@ _ANCESTOR_DEPTH = 64
 
 #: The thread and every thread under it through the family links.
 _FAMILY_SQL = (
-    "WITH RECURSIVE family(id) AS (SELECT ? UNION "
-    "SELECT thread.id FROM threads AS thread JOIN family "
-    "ON thread.spawned_by=family.id OR thread.parent_thread_id=family.id) "
+    "WITH RECURSIVE family(id,user_id) AS ("
+    "SELECT id,user_id FROM threads WHERE id=? UNION "
+    "SELECT thread.id,thread.user_id FROM threads AS thread JOIN family "
+    "ON (thread.spawned_by=family.id OR thread.parent_thread_id=family.id) "
+    "AND thread.user_id=family.user_id) "
 )
 
 

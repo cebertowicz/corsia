@@ -5,23 +5,16 @@
 	import { activeThreadId, threads } from '$lib/stores/threads';
 	import { saveThreadLocalOnly, threadLocalOnly } from '$lib/stores/threadLocalOnly';
 	import { activeModelId, loadModels, modelMatchesId, models } from '$lib/stores/models';
-	import { previewLocalOnly } from '$lib/stores/localOnlyPreview';
-	import { onLocalOnlyFocusRequest } from '$lib/stores/modelSheetRequest';
 	import { openProjectSettings } from '$lib/stores/settingsNavigation';
 	import { openSubagentRequest } from '$lib/stores/subagents';
 
 	// The Local only row at the top of the model sheet: the thread's switch, its cause when locked,
 	// and why it can't be turned on. Every state and its copy are in the Local only design, §5.
-	let { onsetuplocal = () => {}, onleave = () => {} }: { onsetuplocal?: () => void; onleave?: () => void } = $props();
+	let { onsetuplocal = () => {}, onleave = () => {}, focusOnMount = false, onfocusconsumed = () => {} }: { onsetuplocal?: () => void; onleave?: () => void; focusOnMount?: boolean; onfocusconsumed?: () => void } = $props();
 
 	const thread = $derived($threads.find((row) => row.id === $activeThreadId));
 	const policy = $derived(threadLocalOnly(thread));
-	const projectCloudOff = $derived(policy.fromProject || $models.some((model) => model.status_reason === 'project_cloud_off'));
-	const cause = $derived(
-		projectCloudOff || (policy.effective && !policy.own && policy.inheritedFromThreadId == null) ? 'project'
-			: policy.inheritedFromThreadId != null ? 'inherited'
-				: policy.own ? 'own' : 'off',
-	);
+	const cause = $derived(policy.cause);
 	// A parent or project policy is held, distinct from a full-color in-flight save lock.
 	const held = $derived(cause === 'project' || cause === 'inherited');
 	let pending = $state<boolean | null>(null);
@@ -41,11 +34,10 @@
 		if (!threadId || !auth || saving) return;
 		error = '';
 		pending = next;
-		const restore = previewLocalOnly(next);
 		const result = await saveThreadLocalOnly(threadId, next, auth);
 		pending = null;
 		if (result.ok) await loadModels();
-		else { restore(); void loadModels(); error = result.error; }
+		else error = result.error;
 	}
 
 	function openParent() {
@@ -57,8 +49,12 @@
 		onleave();
 	}
 
-	// The badge asks for the sheet with this row focused, so "is this chat local?" and "make it local" are one place.
-	onMount(() => onLocalOnlyFocusRequest(() => requestAnimationFrame(() => rowEl?.focus())));
+	// The request that opened this sheet carries the intent to focus this row.
+	onMount(() => {
+		if (!focusOnMount) return;
+		requestAnimationFrame(() => rowEl?.focus());
+		onfocusconsumed();
+	});
 </script>
 
 {#if $activeThreadId}
@@ -67,7 +63,7 @@
 			<span class="local-only-label">Local only</span>
 			<p id="local-only-description">
 				{#if cause === 'inherited'}
-					<button type="button" class="local-only-link" onclick={openParent}>Set by {policy.inheritedFromTitle ?? 'parent chat'}</button>
+					<button type="button" class="local-only-link" onclick={openParent}>Set by {policy.inheritedFromTitle ?? 'its parent chat'}</button>
 				{:else if cause === 'project'}
 					<button type="button" class="local-only-link" onclick={openProject}>Set by this project</button>
 				{:else if needsLocalModel}

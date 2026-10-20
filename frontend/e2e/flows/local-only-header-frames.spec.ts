@@ -123,8 +123,10 @@ async function openChat(page: Page, state: FrameState) {
 			id, user_id: 'e2e', profile: 'personal', title: next.inherited ? 'Delegated analysis' : next.chatTitle ?? 'Research review',
 			model: next.cloudModel ? 'claude-code/opus' : 'omlx@qwen', project_id: next.project ? 'project-local' : null,
 			created_at: '2026-10-19T00:00:00Z', updated_at: '2026-10-19T00:00:00Z',
-			// N1 workers retain their own stored Local only value and name the inherited source too.
+			// Workers retain their stored Local only value and name the inherited source too.
 			local_only: next.localOnly === true || next.inherited === true,
+			local_only_effective: next.localOnly === true || next.inherited === true || next.project === true,
+			local_only_from_project: next.project === true,
 			local_only_inherited_from_thread_id: next.inherited ? 'parent-chat' : null,
 			local_only_inherited_from_title: next.inherited ? next.parentTitle ?? 'Research review' : null,
 		}]);

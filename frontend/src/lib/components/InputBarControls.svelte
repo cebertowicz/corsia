@@ -47,6 +47,8 @@
 		hasMessageToSend,
 		canSendToModel,
 		queueUntilSwitch,
+		focusLocalOnly = false,
+		onfocusconsumed = () => {},
 		onAttachFile,
 		onAttachCamera,
 		onAttachPhotos,
@@ -64,6 +66,8 @@
 		hasMessageToSend: boolean;
 		canSendToModel: boolean;
 		queueUntilSwitch: boolean;
+		focusLocalOnly?: boolean;
+		onfocusconsumed?: () => void;
 		onAttachFile: () => void;
 		onAttachCamera: () => void;
 		onAttachPhotos: () => void;
@@ -121,6 +125,8 @@
 		return reasoningEffortLabel(reasoningConfig, resolvedEffort);
 	});
 	let contextSourceDetail = $state<ContextSheetSourceRow | null>(null);
+	let requestedLocalOnlyFocus = $state(false);
+	const shouldFocusLocalOnly = $derived(focusLocalOnly || requestedLocalOnlyFocus);
 	// The opened source groups of the context view now on screen. This component
 	// stays mounted across preview refreshes, which can leave the sheet with no
 	// snapshot for a moment, so the record lives here, not in the list. It starts
@@ -211,7 +217,8 @@
 		toggleSheet(view);
 	}
 	// Another surface asks for the model sheet; a leaf composer has its own thread.
-	$effect(() => (threadId ? undefined : onModelSheetRequest(() => {
+	$effect(() => (threadId ? undefined : onModelSheetRequest((request) => {
+		requestedLocalOnlyFocus = request.focusLocalOnly;
 		if (sheetView !== 'model') openSheet('model');
 	})));
 
@@ -304,7 +311,7 @@
 {/if}
 
 {#if sheetView === 'model'}
-	<InputBarModelSheet onclose={() => toggleSheet('model')} />
+	<InputBarModelSheet onclose={() => toggleSheet('model')} focusLocalOnly={shouldFocusLocalOnly} onfocusconsumed={() => { requestedLocalOnlyFocus = false; onfocusconsumed(); }} />
 {/if}
 
 {#if sheetView === 'context'}

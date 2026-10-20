@@ -8,7 +8,6 @@ import { workspaceModels } from '$lib/stores/modelsState';
 import { activeThreadId, threads, type Thread } from '$lib/stores/threads';
 import { openSubagentRequest } from '$lib/stores/subagents';
 import { settingsNavigation } from '$lib/stores/settingsNavigation';
-import { requestModelSheet } from '$lib/stores/modelSheetRequest';
 
 const loadModels = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock('$lib/stores/modelsLoad', () => ({ loadModels }));
@@ -95,6 +94,14 @@ describe('Local only switch row states', () => {
 		expect(get(settingsNavigation)).toMatchObject({ section: 'projects', project: 'p1', anchor: 'project-provider-policy' });
 		expect(onleave).toHaveBeenCalledOnce();
 	});
+	it('shows an own setting as enabled after the project switch turns off', () => {
+		thread({ local_only: 1, local_only_effective: true, local_only_from_project: false });
+		models.set([local, marked('thread_local_only')]);
+		mountRow();
+		expect(toggle().getAttribute('aria-pressed')).toBe('true');
+		expect(toggle().getAttribute('aria-disabled')).toBeNull();
+		expect(text()).toContain(THREAD_COPY);
+	});
 	it('inherited, with the parent since turned off, stays on and held', () => {
 		thread({ local_only: 1, local_only_inherited_from_thread_id: 'p0', local_only_inherited_from_title: 'Quarterly report', local_only_effective: true });
 		mountRow();
@@ -113,7 +120,7 @@ describe('Local only switch writes', () => {
 	}));
 	let resolver = () => {};
 
-	it('moves at once, shows Saving…, filters the list to local rows, and waits for the save before the badge state', async () => {
+	it('moves at once, shows Saving…, and waits for the confirmed family payload', async () => {
 		const fetchMock = respond(true, { ok: true, local_only: true, threads: [{ id: 't1', local_only: true, local_only_effective: true, local_only_from_project: false, local_only_inherited_from_thread_id: null, local_only_inherited_from_title: null }] });
 		vi.stubGlobal('fetch', fetchMock);
 		mountRow();
@@ -121,7 +128,7 @@ describe('Local only switch writes', () => {
 		expect(toggle().getAttribute('aria-pressed')).toBe('true');
 		expect(text()).toContain('Saving…');
 		expect(toggle().getAttribute('aria-disabled')).toBe('true'); expect(toggle().classList.contains('locked')).toBe(true); expect(toggle().classList.contains('held')).toBe(false);
-		expect(get(models).find((m) => m.id === 'cc/opus')?.status_reason).toBe('thread_local_only');
+		expect(get(models).find((m) => m.id === 'cc/opus')?.status_reason).toBeUndefined();
 		expect(get(threads)[0].local_only).toBeUndefined();
 		toggle().click(); flushSync();
 		expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -138,16 +145,16 @@ describe('Local only switch writes', () => {
 		expect(text()).toContain("Couldn’t save this change. Check your connection and try again.");
 		expect(host.querySelector('[role="alert"]')).not.toBeNull();
 		expect(get(models).find((m) => m.id === 'cc/opus')?.status_reason).toBeUndefined();
-		expect(loadModels).toHaveBeenCalledOnce();
+		expect(loadModels).not.toHaveBeenCalled();
 	});
-	it('turning it off restores the cloud rows at once and reads the catalog once saved', async () => {
+	it('turning it off leaves catalog rows alone until the confirmed refresh', async () => {
 		thread({ local_only: 1 }); models.set([local, marked('thread_local_only')]);
 		const fetchMock = respond(true, { ok: true, local_only: false, threads: [{ id: 't1', local_only: false, local_only_effective: false, local_only_from_project: false, local_only_inherited_from_thread_id: null, local_only_inherited_from_title: null }] });
 		vi.stubGlobal('fetch', fetchMock);
 		mountRow();
 		toggle().click(); flushSync();
 		expect(toggle().getAttribute('aria-pressed')).toBe('false');
-		expect(get(models).find((m) => m.id === 'cc/opus')?.status).toBe('ready');
+		expect(get(models).find((m) => m.id === 'cc/opus')?.status).toBe('unavailable');
 		resolver(); await settle();
 		expect(get(threads)[0]).toMatchObject({ local_only: false });
 		expect(loadModels).toHaveBeenCalledOnce();
@@ -155,9 +162,8 @@ describe('Local only switch writes', () => {
 });
 
 describe('Local only row focus', () => {
-	it('takes focus when the badge asked for the sheet just before it mounted', async () => {
-		requestModelSheet({ focusLocalOnly: true });
-		mountRow();
+	it('takes focus from its mount prop without a timing window', async () => {
+		mountRow({ focusOnMount: true });
 		await new Promise((r) => setTimeout(r, 40));
 		expect(document.activeElement).toBe(host.querySelector('.local-only-setting'));
 	});
