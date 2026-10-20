@@ -90,6 +90,10 @@ async function serve(page: Page, state: State) {
 					socket.send(JSON.stringify({ ...frame, user: { ...frame.user, name: 'Sam' } }));
 					return;
 				}
+				if (frame?.type === 'message_added' && frame.message?.role === 'assistant' && frame.message.metadata && typeof frame.message.metadata === 'object') {
+					socket.send(JSON.stringify({ ...frame, message: { ...frame.message, metadata: { ...frame.message.metadata, model_name: 'Qwen3 8B' } } }));
+					return;
+				}
 			} catch { /* Forward non-JSON frames unchanged. */ }
 			socket.send(payload);
 		});
@@ -99,6 +103,14 @@ async function serve(page: Page, state: State) {
 	} }));
 	await page.route('**/api/models**', (route) => route.request().method() === 'GET' && new URL(route.request().url()).pathname === '/api/models'
 		? route.fulfill({ json: { models: state.models, active_local_threads: 0 } }) : route.continue());
+	await page.route('**/api/threads/*/messages?**', async (route) => {
+		if (route.request().method() !== 'GET') return route.continue();
+		const response = await route.fetch();
+		const body = await response.json() as { messages: Array<Record<string, unknown>> };
+		await route.fulfill({ response, json: { ...body, messages: body.messages.map((message) => message.role === 'assistant'
+			? { ...message, metadata: { ...(message.metadata as Record<string, unknown> | undefined), model_name: 'Qwen3 8B' } }
+			: message) } });
+	});
 	// Only the frames that show "Add a local model" fake this computer's setup answer; the rest read the disposable backend's own.
 	await page.route('**/api/providers/sources**', (route) => state.canAddLocal && route.request().method() === 'GET' && new URL(route.request().url()).pathname === '/api/providers/sources'
 		? route.fulfill({ json: { sources: [{ source: 'omlx', name: 'oMLX', state: 'needs_setup', eligible: true }] } }) : route.continue());
@@ -223,7 +235,7 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 			await loginByUrl(page, { waitForComposer: false });
 			stamp += 1;
 			const index = stamp - 1;
-			return `${projectThemes[index % projectThemes.length]} — ${projectMonths[Math.floor(index / projectThemes.length)]}`;
+			return `${projectThemes[index % projectThemes.length]} ${projectMonths[Math.floor(index / projectThemes.length)]}`;
 		};
 
 		for (const [size, width, height, theme] of REFERENCE_ONLY ? [] : surfaces(testInfo.project.name)) {
@@ -275,7 +287,7 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 
 			if (!BEFORE) {
 				await begin(width, height, theme);
-				const heldProjectName = `Customer research — ${projectMonths[Math.floor((stamp - 1) / projectThemes.length)]}`;
+				const heldProjectName = `Customer research ${projectMonths[Math.floor((stamp - 1) / projectThemes.length)]}`;
 				await openHeldCloudOffChat(page, state, heldProjectName);
 				await shot('chat-held-cloud-off', size, theme);
 			}
@@ -347,15 +359,25 @@ test.describe('@surface:provider-policy local-only controls frames', () => {
 
 		// Reference: the chat canvas once, at 1440, light.
 		if (!BEFORE && testInfo.project.name === 'chromium-desktop') {
-			await page.unrouteAll({ behavior: 'ignoreErrors' });
+			// Keep the backend's executable mock model, but give its visible catalog row the real name used in the sheet frames.
+			await page.unroute('**/api/models**');
+			await page.route('**/api/models**', async (route) => {
+				if (route.request().method() !== 'GET' || new URL(route.request().url()).pathname !== '/api/models') return route.continue();
+				const response = await route.fetch();
+				const body = await response.json() as { models: Record<string, unknown>[] };
+				await route.fulfill({ response, json: { ...body, models: body.models.map((model) => ({ ...model, name: 'Qwen3 8B', display_name: 'Qwen3 8B' })) } });
+			});
 			await page.setViewportSize({ width: 1440, height: 900 });
 			await page.emulateMedia({ colorScheme: 'light' });
 			await setFocusMode(page.request, false);
 			await loginByUrl(page);
 			await waitForWsConnected(page);
+			await expect(page.locator('button.model-chip')).toContainText('Qwen3 8B');
 			await seedMockResponses(page.request, [{ content: 'Here is the outline: three sections, each with one open question for you to settle.', finish_reason: 'stop' }]);
 			await sendChatMessage(page, 'Outline the client report for me.');
 			await expect(assistantMessages(page).last()).toContainText('Here is the outline', { timeout: 30_000 });
+			await expect(page.locator('.msg-model-badge').last()).toHaveText('Qwen3 8B');
+			await expect(page.getByText('Mock Pressure Model', { exact: true })).toHaveCount(0);
 			await shot('reference-chat-canvas', '1440', 'light');
 		}
 	});
