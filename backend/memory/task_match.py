@@ -1,8 +1,7 @@
-"""Shared pure task-term extraction and window matching.
+"""Pure task-term extraction and window matching shared by task-context readers.
 
-AL2 uses the matcher to find a person's earlier words at task start.  Structured
-Plans uses the same terms and scoring for AL4, so this module deliberately has
-no database or delivery dependency.
+The module has no database or delivery dependency: callers supply task text and
+candidate words, then use the best matching window when it clears the floor.
 """
 
 from __future__ import annotations

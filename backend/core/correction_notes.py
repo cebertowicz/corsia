@@ -40,7 +40,7 @@ def _quote(content: str) -> str:
     return line if len(line) <= QUOTE_CHARS else line[: QUOTE_CHARS - 1].rstrip() + "…"
 
 
-def _local_clock(created_at: str) -> str:
+def local_clock(created_at: str) -> str:
     """When the correction was sent, in local time like the digest clock."""
     try:
         sent = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
@@ -64,12 +64,12 @@ def _note(where: str, words: str, arrived_as: str) -> str:
 
 def note_text(message_id: str, content: str, created_at: str) -> str:
     """The note one chat correction puts in its target's next turn."""
-    return _note(f"work (message {message_id}, sent {_local_clock(created_at)})", content, "message")
+    return _note(f"work (message {message_id}, sent {local_clock(created_at)})", content, "message")
 
 
 def _source_note_text(candidate: CorrectionCandidate) -> str:
     """The note for a comment (its artifact) or a decision answer (its decision title)."""
-    clock = _local_clock(candidate.created_at)
+    clock = local_clock(candidate.created_at)
     if candidate.source_kind == "doc_comment":
         where = f"artifact {candidate.about} (comment {candidate.source_id}, sent {clock})"
         note = _note(where, candidate.quote or "", "comment")

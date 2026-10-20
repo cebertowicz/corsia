@@ -113,6 +113,21 @@ def test_many_newer_one_term_comments_do_not_hide_an_older_match(db):
     assert len(lines) == 2 and "Export account ledger with CSV" in lines[1]
 
 
+def test_purged_thread_answered_decision_is_not_quoted(db):
+    from plans.public import DECISION_TYPE
+
+    metadata = {"plan_decision": {"state": "answered", "thread_id": "past", "answered_at": "2026-01-01", "title": "Export ledger", "answer": {"option_id": "other", "text": "Export account ledger with CSV format."}}}
+    db.execute(
+        "INSERT INTO artifact_identities (id,integration,type,external_id,state,retention,metadata,created_at,updated_at) "
+        "VALUES ('purged-decision','local',?,'purged-decision','active','durable',?,'2026-01-01','2026-01-01')",
+        (DECISION_TYPE, json.dumps(metadata)),
+    )
+    db.execute("UPDATE threads SET purged_at='2026-01-02' WHERE id='past'")
+    db.commit()
+
+    assert _related(db) == []
+
+
 def test_many_one_term_decision_answers_do_not_hide_a_match(db):
     from memory.node_start_recall import SOURCE_CANDIDATES
     from plans.public import DECISION_TYPE
@@ -164,6 +179,49 @@ def test_only_user_sourced_active_rule_is_quoted(db):
     lines = _related(db)
 
     assert len(lines) == 2 and "rule an agent recorded" in lines[1]
+
+
+def test_rule_without_revision_is_quoted(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    _install_checkpoint(db, thread_id="past", narrative="Rule", continuity=[{
+        "entry_id": 1,
+        "field": "active_constraints",
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+    }])
+
+    assert any("rule an agent recorded" in line for line in _related(db))
+
+
+def test_retired_rule_is_not_quoted(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    _install_checkpoint(db, thread_id="past", narrative="Rule", continuity=[{
+        "entry_id": 1,
+        "field": "active_constraints",
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+        "revision": 1,
+    }])
+    db.execute(
+        "UPDATE continuity_entries SET state='retired', retired_reason='replaced' "
+        "WHERE thread_id='past' AND entry_id=1",
+    )
+    db.commit()
+
+    assert _related(db) == []
+
+
+def test_callers_own_live_rule_is_not_quoted(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    _install_checkpoint(db, thread_id="caller", narrative="Rule", continuity=[{
+        "entry_id": 1,
+        "field": "active_constraints",
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+        "revision": 1,
+    }])
+
+    assert _related(db) == []
 
 
 def test_live_transcript_messages_are_excluded_but_folded_messages_are_eligible(db):
