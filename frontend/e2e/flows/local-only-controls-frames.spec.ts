@@ -146,8 +146,13 @@ async function createProject(page: Page, name: string): Promise<{ id: string }> 
 	await modal.getByRole('textbox', { name: 'Name' }).fill(name);
 	const created = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/projects' && response.request().method() === 'POST');
 	await modal.getByRole('button', { name: 'Create project' }).click();
+	const project = (await (await created).json()).project as { id: string };
+	// Select the new project explicitly: a frame sequence can already have another project in scope.
+	await page.keyboard.press('Control+k');
+	await expect(page.locator('.palette')).toBeVisible();
+	await page.locator('.palette').getByRole('button', { name, exact: true }).click();
 	await expect(page.getByRole('button', { name: 'Project settings' })).toBeVisible({ timeout: 10_000 });
-	return (await (await created).json()).project as { id: string };
+	return project;
 }
 
 async function openProjectProviders(page: Page, name: string): Promise<Locator> {
