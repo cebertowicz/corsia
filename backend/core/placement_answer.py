@@ -251,6 +251,10 @@ def _stage_trial(
             "flags": list(flags),
             "override_reason": decision.trial.incident_detail_reason if decision.trial else None,
         },
+        "admission": {
+            "open_trials": list(getattr(admission, "open_trials", ())), "retired_matches": list(getattr(admission, "retired_matches", ())),
+            "merged_into": getattr(admission, "merged_into", None),
+        },
     }
 
 

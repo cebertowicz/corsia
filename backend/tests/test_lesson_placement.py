@@ -353,7 +353,7 @@ async def test_a_retired_lesson_tried_again_is_a_new_lesson_naming_its_origin(en
     assert _offered(env) == []
     second = _entry(env, [{"kind": "turn", "reference": "turn-40"}], "citing the head still helps")
 
-    _place(env, second)
+    _place(env, second, _answer(new_evidence="case_differs"))
     await _drain(env.worker)
 
     new = lesson_files.read_trial(_skill(env).read_text())
@@ -661,8 +661,11 @@ async def test_a_literal_that_is_kept_nowhere_holds_the_hypothesis(env: Env) -> 
     assert "name that in trial.literal_ref" in reply
 
 
-def _derived(**literal_ref) -> dict:
-    return _answer(trial={"derivation": "it follows", "literal_ref": literal_ref})
+def _derived(*, new_evidence: str | None = None, **literal_ref) -> dict:
+    answer = _answer(trial={"derivation": "it follows", "literal_ref": literal_ref})
+    if new_evidence:
+        answer["new_evidence"] = new_evidence
+    return answer
 
 
 HELD = "does not point at where their exact words are kept"
@@ -769,7 +772,7 @@ async def test_a_written_trial_is_not_where_a_persons_words_are_kept(env: Env) -
 
     assert HELD in _place(env, entry, _derived(entry_id=written))
     assert HELD in _place(env, entry, _derived(**its_file))
-    assert QUEUED in _place(env, entry, _derived(entry_id=literal))
+    assert QUEUED in _place(env, entry, _derived(entry_id=literal, new_evidence="case_differs"))
 
 
 # -- a review that was settled, or a version that came back ------------------------

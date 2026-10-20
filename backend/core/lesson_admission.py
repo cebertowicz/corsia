@@ -65,6 +65,10 @@ class Admission:
     capture_id: str
     hold: str | None = None
     text: str | None = None
+    destination_path: Path | None = None
+    open_trials: tuple[dict[str, str], ...] = ()
+    retired_matches: tuple[dict[str, str], ...] = ()
+    merged_into: str | None = None
 
 
 def human_refs(body: dict[str, Any]) -> set[tuple[str, str]]:
@@ -94,6 +98,40 @@ def _learning_metadata(decision: Decision) -> None:
         raise TrialRefused("missing-learning-metadata", "Trial admission needs target_section and case (what_happened, right_call, does_not_apply, correction_subject).")
     if decision.cause not in ("wrong_rule", "no_foundation", "rule_gap", "process_gap", "not_delivered", "not_followed", "cant_be_done"):
         raise TrialRefused("invalid-learning-metadata", "cause must be a System correction cause.")
+    if decision.new_evidence not in (None, "target_changed", "case_differs"):
+        raise TrialRefused("invalid-learning-metadata", "new_evidence must be target_changed or case_differs.")
+
+
+def _target(decision: Decision) -> str:
+    return str(decision.new_target_path if decision.target_file == "new" else decision.target_file)
+
+
+def _target_trials(decision: Decision) -> tuple[list[tuple[Path, Any]], list[tuple[Path, Any]]]:
+    from core.skill_scanning import skill_files
+    from infra.config import WORKSPACE
+
+    root = Path(WORKSPACE)
+    paths = [*skill_files(root)]
+    for tray in sorted((root / ".threads").glob("*")) if (root / ".threads").is_dir() else []:
+        paths.extend(skill_files(tray))
+    open_trials, retired = [], []
+    for path in paths:
+        current = lesson_files.read_trial(path.read_text(encoding="utf-8", errors="replace"))
+        if current is None or _target_from_lesson(current) != _target(decision):
+            continue
+        if current.lesson.state in ("watch", "trial"):
+            open_trials.append((path, current))
+        elif current.lesson.state in ("retired", "promoted"):
+            retired.append((path, current))
+    return open_trials, retired
+
+
+def _target_from_lesson(current: Any) -> str | None:
+    return current.lesson.new_target_path if current.lesson.target_file == "new" else current.lesson.target_file
+
+
+def _trial_row(path: Path, current: Any) -> dict[str, str]:
+    return {"name": current.name, "target_file": _target_from_lesson(current) or "", "cause": current.lesson.cause or ""}
 
 
 def admit(
@@ -136,18 +174,33 @@ def admit(
         raise TrialRefused("invalid-output", (
             "skill_name must be a new lowercase-hyphenated name for the trial skill"
         ))
+    open_trials, retired_trials = _target_trials(decision)
+    open_rows = tuple(_trial_row(path, current) for path, current in open_trials)
+    retired_rows = tuple(_trial_row(path, current) for path, current in retired_trials)
+    same = lambda current: current.lesson.target_section == decision.target_section and current.lesson.cause == decision.cause
+    retired_match = next(((path, current) for path, current in retired_trials if same(current)), None)
+    if retired_match and decision.new_evidence is None:
+        raise TrialRefused("retired-match", (
+            f"retired trial '{retired_match[1].name}' has the same target, section, and cause; "
+            "set new_evidence to target_changed or case_differs to admit a new trial"
+        ))
+    merge = next(((path, current) for path, current in open_trials if same(current)), None)
+    write_path = merge[0] if merge else destination.path
     capture = None
     if place.tray is not None:
         path = lesson_files.capture_path(place.tray, capture_id)
         capture = lesson_files.read_capture(path.read_text(encoding="utf-8")) if path.exists() else None
-    identity, text = _render(thread_id, capture_id, entry, decision, destination.path, capture)
-    offered = _offered_elsewhere(db, place, str(decision.skill_name), destination.path)
-    line = _index_line(decision, destination.path)
+    identity, text = _render(thread_id, capture_id, entry, decision, write_path, capture)
+    offered = _offered_elsewhere(db, place, str(decision.skill_name), write_path)
+    line = _index_line(decision, write_path)
     from core.lesson_index import fits_budget
 
     if not fits_budget(offered, line, identity):
-        return Admission(identity, capture_id, "over-budget")
-    return Admission(identity, capture_id, None, text)
+        return Admission(identity, capture_id, "over-budget", open_trials=open_rows, retired_matches=retired_rows)
+    return Admission(
+        identity, capture_id, None, text, write_path, open_rows, retired_rows,
+        merge[1].name if merge else None,
+    )
 
 
 def _incomplete(
@@ -253,6 +306,7 @@ def _render(
     from core.lesson_corrections import merge_subjects
 
     identity, origin, earlier = capture_id, None, ()
+    name = str(decision.skill_name)
     subjects = merge_subjects(
         capture.originating_subjects if capture is not None else (), decision.originating_subjects,
     )
@@ -264,12 +318,12 @@ def _render(
                 "your trial lesson; choose a new name"
             ))
         if current.lesson.state in ("watch", "trial"):
-            identity, earlier = current.lesson.id, current.lesson.source_refs
+            identity, earlier, name = current.lesson.id, current.lesson.source_refs, current.name
             subjects = merge_subjects(current.lesson.originating_subjects, subjects)
         elif current.lesson.id != capture_id:
             origin = {"id": current.lesson.id, "behavioral_sha256": current.behavioral_sha256}
     text = lesson_files.render_trial(
-        lesson_id=identity, owner=thread_id, name=str(decision.skill_name),
+        lesson_id=identity, owner=thread_id, name=name,
         description=str(decision.skill_description), text=decision.text, trial=trial,
         source_refs=lesson_files.merged_refs(earlier, entry["body"].get("source_refs") or []),
         originating_subjects=subjects, origin=origin, target_file=decision.target_file,

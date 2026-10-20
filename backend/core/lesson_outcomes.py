@@ -14,6 +14,7 @@ repeats nothing. Until the last step the trial stays out of the index.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -76,7 +77,8 @@ def place_trial(
     if isinstance(admission, TrialRefused):
         outcomes.settle(entry, "unplaced", admission.code)
     elif admission.hold is None:
-        _activate(entry, place, decision, destination, admission)
+        actual_destination = replace(destination, path=admission.destination_path) if admission.destination_path else destination
+        _activate(entry, place, decision, actual_destination, admission)
     else:
         _capture(entry, place, decision, admission)
 

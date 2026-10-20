@@ -85,6 +85,7 @@ ANSWER_SCHEMA: dict[str, Any] = {
         "new_target_path": {"type": ["string", "null"]},
         "target_section": {"type": ["string", "null"]},
         "cause": {"type": ["string", "null"], "enum": ["wrong_rule", "no_foundation", "rule_gap", "process_gap", "not_delivered", "not_followed", "cant_be_done", None]},
+        "new_evidence": {"type": ["string", "null"], "enum": ["target_changed", "case_differs", None]},
         "case": {
             "type": ["object", "null"], "additionalProperties": False,
             "properties": {
@@ -117,6 +118,7 @@ class Decision:
     target_section: str | None = None
     cause: str | None = None
     case: dict[str, str] | None = None
+    new_evidence: str | None = None
     originating_subjects: tuple[str, ...] = ()
 
 
@@ -173,6 +175,7 @@ def validate_decision(raw: object) -> Decision:
         target_section=_optional(raw, "target_section"),
         cause=_optional(raw, "cause"),
         case=_case(raw.get("case")),
+        new_evidence=_optional(raw, "new_evidence"),
     )
 
 
