@@ -118,7 +118,7 @@ class _ReviewPeer:
     def __init__(self, checks: list[tuple[str, dict]]) -> None:
         self.checks = checks
         self.bodies: list[dict] = []
-        self.results: list[tuple[str, dict]] = []
+        self.results: dict[str, dict] = {}
         self._next = 0
 
     async def respond(self, reader, writer) -> None:
@@ -130,7 +130,7 @@ class _ReviewPeer:
             elif "/v1/messages" in route:
                 self.bodies.append(body)
                 for result in _tool_result(body):
-                    self.results.append((self.checks[self._next - 1][0], result))
+                    self._record_result(result)
                 data = self._reply(body.get("model", "fixture"))
                 content_type = "text/event-stream"
             else:
@@ -143,6 +143,17 @@ class _ReviewPeer:
         finally:
             writer.close()
             await writer.wait_closed()
+
+    def _record_result(self, result: dict) -> None:
+        """Keep one durable result per model-issued tool use.
+
+        Claude Code can replay an already-completed tool result in a later
+        model request (for example after adding its system reminder). The tool
+        use ID, not the HTTP request, is the fixture's causal identity.
+        """
+        tool_use_id = result.get("tool_use_id")
+        assert isinstance(tool_use_id, str) and tool_use_id
+        self.results.setdefault(tool_use_id, result)
 
     def _reply(self, model: str) -> bytes:
         block: dict[str, object]
@@ -185,6 +196,16 @@ def test_review_profile_args_leave_only_read_tools_available():
     assert args[args.index("--disallowedTools") + 1:] == [
         "Bash", "WebFetch", "WebSearch", "Write", "Edit", "Task",
     ]
+
+
+def test_review_peer_deduplicates_replayed_result_by_tool_use_id():
+    peer = _ReviewPeer([])
+    result = {"type": "tool_result", "tool_use_id": "review-check-1", "content": "first"}
+
+    peer._record_result(result)
+    peer._record_result({**result, "content": "replayed"})
+
+    assert peer.results == {"review-check-1": result}
 
 
 @pytest.mark.integration
@@ -252,9 +273,10 @@ async def test_review_child_profile_confines_stock_claude_to_the_fixed_head():
         _, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
         assert peer.bodies, f"stock Claude sent no request: {stderr.decode()[-600:]}"
         assert process.returncode == 0, stderr.decode()[-600:]
-        assert len(peer.results) == len(checks), f"missing tool results: {stderr.decode()[-600:]}"
+        expected_ids = {f"review-check-{index}" for index in range(1, len(checks) + 1)}
+        assert set(peer.results) == expected_ids, f"unexpected tool-result IDs: {set(peer.results)}"
 
-        tool_results = [result for _, result in peer.results]
+        tool_results = [peer.results[f"review-check-{index}"] for index in range(1, len(checks) + 1)]
         assert HEAD_CONTENT in _as_text(tool_results[0])
         outside_result = tool_results[1]
         assert _denied(outside_result), _as_text(outside_result)
