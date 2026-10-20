@@ -100,7 +100,7 @@ class ArtifactArrivalCoordinator {
 			this.queues.set(frame.thread_id, queue);
 		}
 		// The comment stays out of the document's comments from here until its turn (every exit releases).
-		if (frame.kind === 'comment' && frame.comment_id) this.holdForLane(frame.comment_id);
+		if ((frame.kind === 'comment' || frame.kind === 'suggestion') && frame.comment_id) this.holdForLane(frame.comment_id);
 		queue.enqueue({ frame });
 		void queue.run().catch((error) => console.error('document arrival failed', error));
 	}
@@ -124,7 +124,7 @@ class ArtifactArrivalCoordinator {
 	}
 
 	private release(arrival: RuntimeArrival): void {
-		if (arrival.frame.kind !== 'comment' || !arrival.frame.comment_id) return;
+		if ((arrival.frame.kind !== 'comment' && arrival.frame.kind !== 'suggestion') || !arrival.frame.comment_id) return;
 		this.staged.delete(arrival.frame.comment_id);
 		releaseCommentArrival(this.artifactId, arrival.frame.comment_id);
 	}
