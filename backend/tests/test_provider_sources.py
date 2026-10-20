@@ -1027,7 +1027,7 @@ class TestRecheck:
         local_setup._flight.result = failure
         failed = client.get("/api/providers/local/setup").json()
         assert failed["state"] == "failed" and failed["local_model"] == not_checked
-        assert failed["fix"] == "Retry in Settings › Providers, where Retry is." and idle["fix"] is None
+        assert failed["fix"] == "Retry in Settings › Providers." and idle["fix"] is None
 
         # A finished setup's model is what the conductor's offer and Welcome read.
         installed = local_model.LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 262_144)

@@ -119,12 +119,12 @@ def test_local_setup_prints_failed_flight_result_and_returns_two(monkeypatch, ca
 
     _patch_follow(monkeypatch, [{
         "state": state, "cause": "connection", "ref": "local-test",
-        "fix": "Check the connection, then retry in Settings › Providers, where Retry is.",
+        "fix": "Check the connection, then retry in Settings › Providers.",
     }])
 
     assert cli_local.cmd_setup(_args()) == 2
     assert capsys.readouterr().out == (
-        "Check the connection, then retry in Settings › Providers, where Retry is. Reference: local-test\n"
+        "Check the connection, then retry in Settings › Providers. Reference: local-test\n"
         "Run `corsia local setup` again.\n"
     )
 

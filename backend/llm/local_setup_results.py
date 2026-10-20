@@ -10,7 +10,7 @@ from fastapi import HTTPException
 #: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
 SETUP_COMMAND = "corsia local setup"
 CAUSES = frozenset({"connection", "disk_full", "memory", "other", "own_omlx_upgrade_required"})
-_RETRY = "retry in Settings › Providers, where Retry is."
+_RETRY = "retry in Settings › Providers."
 
 
 def setup_fix(cause: object, bytes_to_free: object = None) -> str:
@@ -24,7 +24,7 @@ def setup_fix(cause: object, bytes_to_free: object = None) -> str:
         return "Choose a subscription or API provider instead."
     if cause == "own_omlx_upgrade_required":
         return f"Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then {_RETRY}"
-    return "Retry in Settings › Providers, where Retry is."
+    return "Retry in Settings › Providers."
 
 
 def local_setup_error(message: str) -> dict:
