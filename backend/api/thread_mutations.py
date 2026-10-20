@@ -207,9 +207,11 @@ def _write_metadata_patch(
         }
 
 
-def _person_local_only_error(exc: LocalOnlyRefused) -> dict[str, str]:
+def _person_local_only_error(exc: LocalOnlyRefused, *, turning_on: bool = False) -> dict[str, str]:
     if NO_LOCAL_READY_TEXT in exc.message:
-        message = "No local model is ready. Load one in Settings, then try again."
+        message = "No local model is ready. Set up a local model in Settings, then try again."
+    elif turning_on:
+        message = "Switch this chat to a local model first, then turn on Local only."
     else:
         message = "This chat is Local only, so choose a local model and try again."
     return {"code": exc.code, "message": message}
@@ -258,7 +260,7 @@ async def set_local_only(
     try:
         result = await run_in_db(_write_local_only, thread_id, user["id"], local_only)
     except LocalOnlyRefused as exc:
-        return JSONResponse(status_code=409, content=_person_local_only_error(exc))
+        return JSONResponse(status_code=409, content=_person_local_only_error(exc, turning_on=True))
     if result == "not_found":
         raise HTTPException(404)
     if result.get("error") == "child":
@@ -272,7 +274,7 @@ async def set_local_only(
         return JSONResponse(
             status_code=409,
             content={
-                "code": "local_only_requires_local_model",
+                "code": "local_only_set_by_parent",
                 "message": message,
             },
         )

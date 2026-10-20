@@ -390,7 +390,7 @@ async def test_local_only_route_requires_a_person_and_owns_the_thread(
 
     assert inherited.status_code == 409
     assert inherited.json() == {
-        "code": "local_only_requires_local_model",
+        "code": "local_only_set_by_parent",
         "message": (
             "This chat is Local only because the chat that started it is. "
             "Turn Local only off there, or start a new chat."
@@ -426,7 +426,7 @@ async def test_local_only_route_refuses_child_of_non_local_root(isolated_db) -> 
 
     assert response.status_code == 409
     assert response.json() == {
-        "code": "local_only_requires_local_model",
+        "code": "local_only_set_by_parent",
         "message": "Only the chat that started this chat can change Local only. "
         "Turn Local only on or off there, or start a new chat.",
     }
@@ -474,7 +474,7 @@ async def test_local_only_route_refuses_cloud_current_or_pending_model(
     assert response.status_code == 409
     assert response.json() == {
         "code": "local_only_requires_local_model",
-        "message": "This chat is Local only, so choose a local model and try again.",
+        "message": "Switch this chat to a local model first, then turn on Local only.",
     }
 
 
@@ -510,7 +510,7 @@ async def test_local_only_route_uses_person_copy_when_no_local_model_is_ready(
     assert response.status_code == 409
     assert response.json() == {
         "code": "local_only_requires_local_model",
-        "message": "No local model is ready. Load one in Settings, then try again.",
+        "message": "No local model is ready. Set up a local model in Settings, then try again.",
     }
 
 
