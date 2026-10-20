@@ -43,6 +43,23 @@ def _notes(db, thread_id: str) -> list[str]:
     ]
 
 
+def _accepted_note(suggestion: dict) -> str:
+    """Names the accepted suggestion so its author can resolve the person's comment it answers."""
+    return (
+        f"Robin accepted your suggestion on Design: “quoted source” ({suggestion['id']}). "
+        "If it answers a comment of theirs, resolve that comment, naming the suggestion in your reply."
+    )
+
+
+def test_an_accepted_suggestion_is_named_by_its_quote_clipped_to_one_line():
+    from doceditor.feedback_suggestion_decisions import QUOTE_CHARS, _named
+
+    named = _named({"id": "s1", "anchor_text": "word " * 30 + "\nend"})
+    quote = named[1:named.index("”")]
+    assert "\n" not in quote and len(quote) == QUOTE_CHARS and quote.endswith("…")
+    assert named.endswith(" (s1)")
+
+
 def _plan_nodes(db, thread_id: str) -> int:
     return db.execute(
         "SELECT COUNT(*) FROM plan_nodes n JOIN plans p ON p.id=n.plan_id "
@@ -229,7 +246,7 @@ def test_acceptance_writes_one_passive_note_without_creating_or_waking_plan_work
         note = db.execute(
             "SELECT summary FROM context_change_journal WHERE object_kind='thread_context' AND object_id='author'"
         ).fetchone()
-        assert note["summary"] == "Robin accepted your suggestion on Design; nothing to do."
+        assert note["summary"] == _accepted_note(suggestion)
         plan = service.ensure_plan("thread", "author", db=db)
         assert plan.state == "paused"
         assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE plan_id=?", (plan.id,)).fetchone()[0] == 0
@@ -343,7 +360,7 @@ def test_acceptance_is_immediately_passive_and_does_not_wake_a_paused_suggester(
         note = db.execute(
             "SELECT summary FROM context_change_journal WHERE object_kind='thread_context' AND object_id='author'"
         ).fetchone()
-        assert note["summary"] == "Robin accepted your suggestion on Design; nothing to do."
+        assert note["summary"] == _accepted_note(suggestion)
         assert service.ensure_plan("thread", "author", db=db).state == "paused"
         assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE plan_id=?", (plan.id,)).fetchone()[0] == 0
     finally:
