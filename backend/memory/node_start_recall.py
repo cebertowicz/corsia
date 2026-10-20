@@ -17,7 +17,11 @@ from time import perf_counter
 from loguru import logger as log
 
 from core.correction_notes import local_clock
-from core.corrections_recording import is_owner_authored_message, owner_message_sql_predicate
+from core.corrections_recording import (
+    decision_answer_arrived_at_sql,
+    is_owner_authored_message,
+    owner_message_sql_predicate,
+)
 from infra.checkpoint_queries import current_installed_through_seq
 from infra.product_events import emit_product_event
 from llm.locality import cloud_off_project_ids
@@ -284,7 +288,7 @@ def _decision_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[
     from plans.public import DECISION_TYPE
 
     answer = "json_extract(ai.metadata,'$.plan_decision.answer.text')"
-    answered_at = "json_extract(ai.metadata,'$.plan_decision.answered_at')"
+    answered_at = decision_answer_arrived_at_sql("ai")
     source_scope, source_params = _source_scope("t", answered_at, caller, cloud_off, cutoff)
     matching, match_params = _matching(answer, terms)
     rows = db.execute(
