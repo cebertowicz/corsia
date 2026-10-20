@@ -226,7 +226,7 @@ async def _issue_events(runner: feed.GhRunner, repo: str, state: dict[str, Any],
 
 
 async def _open_pulls(runner: feed.GhRunner, repo: str, state: dict[str, Any], now: datetime) -> bool | None:
-    """Emit opened/synchronize against the saved heads; None when the gate stopped the read."""
+    """Recognize new/reopened PRs from saved heads and closure markers."""
     response = await _get(runner, f"repos/{repo}/pulls?state=open&sort=updated&direction=desc&per_page=100", state, now)
     if response is None:
         return None
@@ -242,7 +242,10 @@ async def _open_pulls(runner: feed.GhRunner, repo: str, state: dict[str, Any], n
         if seeding or old == head:
             continue
         if old is None:
-            await _admit("pull_request", _payload(repo, "opened", pull), f"opened:{repo}#{number}")
+            closure = state.get("closed", {}).get(str(number))
+            action = "reopened" if closure is not None else "opened"
+            key = f"{action}:{repo}#{number}" + (f":{closure}" if closure is not None else "")
+            await _admit("pull_request", _payload(repo, action, pull), key)
         else:
             event = _payload(repo, "synchronize", pull)
             event["before"] = old
@@ -266,8 +269,7 @@ async def _closed_pulls(runner: feed.GhRunner, repo: str, state: dict[str, Any],
         seen[str(number)] = marker
         if seeding:
             continue
-        action = "closed" if pull.get("state") == "closed" else "reopened"
-        await _admit("pull_request", _payload(repo, action, pull), f"{action}:{repo}#{number}:{marker}")
+        await _admit("pull_request", _payload(repo, "closed", pull), f"closed:{repo}#{number}:{marker}")
         changed = True
     state["closed"] = seen
     return changed
