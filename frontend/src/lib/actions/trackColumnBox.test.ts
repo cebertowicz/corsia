@@ -37,6 +37,21 @@ function run(limit: number, step = 16, each: () => void = () => {}) {
 }
 
 describe('trackColumnBox', () => {
+	it('measures the right inset from the layout viewport, which a reserved scrollbar gutter narrows below innerWidth', () => {
+		vi.stubGlobal('innerWidth', 1440);
+		// The shell reserves a 6px gutter: the root, and so the fixed containing block, ends at 1434.
+		const root = vi.spyOn(document.documentElement, 'getBoundingClientRect')
+			.mockReturnValue({ top: 0, left: 0, right: 1434, bottom: 1000, width: 1434, height: 1000 } as DOMRect);
+		const seen: ColumnBox[] = [];
+		const node = column();
+		node.getBoundingClientRect = () => ({ top: 0, bottom: 600, left: 708, right: 1122, height: 600 } as DOMRect);
+		const stop = trackColumnBox(node, (box) => seen.push(box));
+		// A fixed box with `right: 312px` ends at 1434 - 312 = 1122, the column's own right edge; innerWidth would give 318 and end 6px short.
+		expect(seen[0].right).toBe(312);
+		root.mockRestore();
+		stop();
+	});
+
 	it('reports the box once, then only when it changes', () => {
 		const seen: ColumnBox[] = [];
 		const stop = trackColumnBox(column(), (box) => seen.push(box));

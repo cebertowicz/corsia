@@ -1,6 +1,7 @@
 import path from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
+import { test } from '../support/test';
 
 /**
  * A mouse selection inside a rendered table cell stays selected, so it can be commented on. With the editor focused, the editor

@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test, type APIRequestContext, type BrowserContext, type Page, type WebSocketRoute } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type BrowserContext, type Page, type WebSocketRoute } from '@playwright/test';
 import { createSession, TEST_TOKEN } from '../support/corsia';
 import { openLiveDocument, serverText, type LiveDocument } from '../support/liveDocument';
 

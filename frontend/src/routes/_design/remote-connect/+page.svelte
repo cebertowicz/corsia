@@ -23,7 +23,7 @@
 	const LONG = 'Alex’s Mac mini (2)';
 	const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 	const server = (patch: Record<string, unknown> = {}, name: string | null = 'Studio') => ({
-		enabled: true, listening: { port: 47901 }, announced_name: name, local_hostname: 'studio.local', computer_name: 'Studio',
+		enabled: true, listening: { port: 47901 }, announced_name: name, local_hostname: 'studio.local', computer_name: name ?? 'Studio', // the API always names the computer; only the announced name is null
 		lan_addresses: ['192.168.1.20'], code: { state: 'none' }, ...patch,
 	});
 	const active = (seconds: number) => ({ state: 'active', value: 'K7QX', expires_in_seconds: seconds });
@@ -40,7 +40,7 @@
 			'not-announced': () => json(server({}, null)),
 			paused: () => json(server({ code: { state: 'paused' } }, name)),
 			starting: () => json(server({ enabled: false }, null)),
-			'ports-taken': () => json(server({ enabled: false, listening: { error: 'No approved Devices port is available' } }, null)),
+			'ports-taken': () => json(server({ enabled: false, listening: { error: 'No approved Devices port is available', reason: 'ports_taken' } }, null)),
 			'load-failed': () => json({}, 500),
 			loading: () => new Promise<Response>(() => {}),
 			'read-only': () => json(server({ code: { state: 'active', expires_in_seconds: 300 } }, name)),

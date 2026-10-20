@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 test.use({ video: { mode: 'on', size: { width: 1280, height: 900 } } });
 
@@ -57,6 +58,10 @@ async function serveSetupState(page: Page, state: SetupState | (() => SetupState
 	});
 	await page.route('**/api/setup/first-account', async (route) => {
 		await route.fulfill({ json: { token: 'setup-evidence-token', user: { id: 'setup-evidence', name: 'First Person' } } });
+	});
+	// Finishing records completion before the app opens (SetupScreen.finishSetup); the fake session is not a real one.
+	await page.route('**/api/setup/progress', async (route) => {
+		await route.fulfill({ json: { ok: true } });
 	});
 	await page.route('**/api/corsia-agent**', async (route) => {
 		await route.fulfill({ json: { target: { thread_id: 'corsia-agent' } } });
@@ -477,11 +482,13 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		await page.goto('/');
 		await page.locator('html').evaluate((element) => element.style.setProperty('--dur-tight', '1000ms'));
 		await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible();
+		// The first scene is still crossfading in from the checking scene; wait it out so the next crossfade is the only one counted.
+		await expect(page.locator('.pane-scene')).toHaveCount(1);
 		await page.getByRole('button', { name: 'Get started' }).click();
 		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
 		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeFocused();
 		await expect.poll(() => page.locator('.pane-scenes').evaluate((scenes) => scenes.querySelectorAll<HTMLElement>('.pane-scene').length)).toBe(2);
-		const crossfades = await page.locator('.pane-scenes').evaluate((scenes) =>
+		const readCrossfades = () => page.locator('.pane-scenes').evaluate((scenes) =>
 			Array.from(scenes.querySelectorAll<HTMLElement>('.pane-scene')).flatMap((scene) =>
 				scene.getAnimations().filter((animation) => animation.playState === 'running').map((animation) => ({
 					duration: Number(animation.effect?.getComputedTiming().duration ?? 0),
@@ -491,7 +498,9 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 				})),
 			),
 		);
-		expect(crossfades.some((animation) => animation.duration > 0)).toBe(true);
+		// A scene is in the DOM a moment before its fade is attached, so wait for the fade rather than the scene.
+		await expect.poll(async () => (await readCrossfades()).some((animation) => animation.duration > 0)).toBe(true);
+		const crossfades = await readCrossfades();
 		for (const animation of crossfades) {
 			expect(animation.properties).not.toContain('transform');
 			expect(animation.properties).not.toContain('height');
@@ -524,19 +533,21 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 
 		await page.emulateMedia({ reducedMotion: 'no-preference' });
 		await openModelStep(page);
-		const normalAction = page.getByRole('button', { name: 'Use an API key instead' });
+		const normalAction = page.getByRole('region', { name: 'This computer' }).getByRole('button', { name: 'Cancel', exact: true });
 		await normalAction.hover();
 		await page.mouse.down();
 		await page.waitForTimeout(50);
 		await expect.poll(() => normalAction.evaluate((element) => getComputedStyle(element).transform)).not.toBe('none');
+		await page.mouse.move(0, 0); // release off the button so the press is not a Cancel click
 		await page.mouse.up();
 
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await openModelStep(page);
-		const reducedAction = page.getByRole('button', { name: 'Use an API key instead' });
+		const reducedAction = page.getByRole('region', { name: 'This computer' }).getByRole('button', { name: 'Cancel', exact: true });
 		await reducedAction.hover();
 		await page.mouse.down();
 		await expect(reducedAction.evaluate((element) => getComputedStyle(element).transform)).resolves.toBe('none');
+		await page.mouse.move(0, 0);
 		await page.mouse.up();
 	});
 });

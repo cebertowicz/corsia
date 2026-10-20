@@ -1,5 +1,6 @@
 
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { createSession, e2eModel, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 test.describe('@flow:sidebar @surface:navigation sidebar renders', () => {

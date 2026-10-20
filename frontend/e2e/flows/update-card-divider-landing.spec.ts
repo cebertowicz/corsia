@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
 import { setFocusMode } from '../support/focusMode';
 import { injectMessage } from '../support/mock';
 import {

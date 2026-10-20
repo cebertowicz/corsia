@@ -1,5 +1,6 @@
 
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 const tok = encodeURIComponent(TEST_TOKEN);

@@ -1,5 +1,6 @@
 import { replyField } from '../support/commentDrawer';
-import { expect, test, type BrowserContext } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type BrowserContext } from '@playwright/test';
 import {
 	createComment,
 	deleteRenderedLine,
@@ -112,6 +113,10 @@ test('@slice1 @surface:live-document a refused placement reload at 393 preserves
 		await deleteRenderedLine(writer, removed);
 		await expect(reader.locator('.cm-content')).not.toContainText(removed);
 		await expect(reader.locator('.comment-status:has(.unplaced-dot)')).toBeVisible();
+		// Place again is offered only when the orphan's quote remains in the document. Change both nearby contexts,
+		// so the real resolver has no safe range to return and leaves the restored quote replaceable.
+		await writer.keyboard.insertText(`\nchanged-before ${removed} changed-after`);
+		await expect(reader.locator('.cm-content')).toContainText(removed);
 		const reload = comments.getByRole('button', { name: 'Reload comment placements', exact: true });
 		await expect(reload).toBeVisible();
 		await reply.focus();

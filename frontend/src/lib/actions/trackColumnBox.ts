@@ -7,7 +7,7 @@ const STILL_FRAMES = 2;
 const LAYOUT_PROPERTY = /^(width|height|padding|margin|left|right|top|bottom|inset|flex|grid)/;
 
 /**
- * Reports where `column` sits in the viewport, so a sheet portaled out of it can stay over exactly that column.
+ * Reports where `column` sits in the viewport (its insets taken from the fixed containing block's edges), so a sheet portaled out of it can stay over exactly that column.
  * Returns the cleanup. `report` is called only when a value changed.
  *
  * Scale budget: nothing runs while the page is still. A layout transition anywhere in the shell starts a
@@ -21,7 +21,10 @@ export function trackColumnBox(column: HTMLElement, report: (box: ColumnBox) => 
 	/** Reads the rect; true when it changed. */
 	const read = () => {
 		const rect = column.getBoundingClientRect();
-		const next = { top: rect.top, right: innerWidth - rect.right, bottom: innerHeight - rect.bottom, left: rect.left, height: rect.height };
+		// A fixed box is positioned inside the layout viewport, which a reserved scrollbar gutter
+		// (`scrollbar-gutter: stable` on the shell, with a classic scrollbar) makes narrower than
+		// `innerWidth`. The root element spans exactly that width, so measure the right inset from it.
+		const next = { top: rect.top, right: document.documentElement.getBoundingClientRect().right - rect.right, bottom: innerHeight - rect.bottom, left: rect.left, height: rect.height };
 		const changed = !last || (Object.keys(next) as Array<keyof ColumnBox>).some((key) => last![key] !== next[key]);
 		if (changed) report(last = next);
 		return changed;

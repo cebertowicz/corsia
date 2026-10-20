@@ -1,4 +1,5 @@
-import { expect, test, type BrowserContext } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type BrowserContext } from '@playwright/test';
 import { holdRequest, openLivePair, textDigest, watchPlacementReports } from '../support/liveConcurrency';
 import { seedLiveDocument, serverText } from '../support/liveDocument';
 import {
