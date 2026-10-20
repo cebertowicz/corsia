@@ -603,6 +603,29 @@ class TestSetModelReaddress:
                               "from_thread_id": "sender-self"})
         assert r.status_code == 404
 
+    def test_local_only_set_model_refusal_names_ready_local_models(
+            self, client, deleg_db, monkeypatch):
+        import api.delegation_model as model_api
+        from infra.local_only import LocalityRefused
+
+        self._wedged_codex(deleg_db)
+
+        async def refuse(*_args, **_kwargs):
+            raise LocalityRefused("thread_local_only", "claude-code/sonnet", ("omlx@local/qwen",))
+
+        monkeypatch.setattr(model_api, "switch_model", refuse)
+        response = client.post(
+            "/api/delegation/threads/cx-wedged/set-model",
+            params={"token": _TOKEN},
+            json={"model": "claude-code/sonnet", "from_thread_id": "sender-self"},
+        )
+
+        assert response.status_code == 409
+        body = response.json()
+        assert body["code"] == "local_only_requires_local_model"
+        assert body["message"].startswith("local_only_requires_local_model: claude-code/sonnet")
+        assert "omlx@local/qwen" in body["message"]
+
     def test_switch_routes_through_canonical_preparation(
             self, client, deleg_db, monkeypatch):
         import api.delegation_model as model_api
