@@ -85,11 +85,12 @@ async def test_app_bundle_reports_bundled_build_identity_and_service_generation(
     import json
 
     import api.version as api_version
+    from infra import build_info
 
     build = {"label": "0.4.0", "short_hash": "abc1234", "full_hash": "abc1234" * 5 + "ab"}
     (tmp_path / "build-info.json").write_text(json.dumps(build))
-    monkeypatch.setattr(api_version, "FRONTEND_DIR", tmp_path)
-    monkeypatch.setattr(api_version, "_APP_BUNDLE", tmp_path / "CORSIA.app")
+    monkeypatch.setattr(build_info, "FRONTEND_DIR", tmp_path)
+    monkeypatch.setattr(build_info, "app_bundle_root", lambda: tmp_path / "CORSIA.app")
     monkeypatch.setattr(
         api_version.subprocess,
         "check_output",
@@ -162,11 +163,12 @@ def test_clean_status_read_is_false_not_unknown(monkeypatch):
 def test_version_payload_carries_the_bundle_stamp_and_this_backends_shell_protocol(monkeypatch):
     """The shell's compatibility check reads ``app``; the computer name is never on this public route."""
     import api.version as api_version
+    from infra import build_info
 
     stamped = {"version": "0.4.1-dev.219", "shell_protocol": 99}
-    monkeypatch.setattr(api_version, "_read_frontend_build_info", lambda: {"app": stamped})
+    monkeypatch.setattr(build_info, "frontend_build_info", lambda: {"app": stamped})
     monkeypatch.setattr(api_version, "_current_head_info", lambda: _UNAVAILABLE_HEAD)
-    monkeypatch.setattr(api_version, "_git_read", lambda _args: pytest.fail("a stamped build never asks git"))
+    monkeypatch.setattr(build_info, "_git_read", lambda _args: pytest.fail("a stamped build never asks git"))
 
     app = api_version._version_payload()["app"]
 
@@ -175,18 +177,18 @@ def test_version_payload_carries_the_bundle_stamp_and_this_backends_shell_protoc
 
 
 def test_app_bundle_without_a_stamp_reports_no_version_and_never_runs_git(monkeypatch, tmp_path):
-    import api.version as api_version
+    from infra import build_info
 
-    monkeypatch.setattr(api_version, "_APP_BUNDLE", tmp_path / "CORSIA.app")
-    monkeypatch.setattr(api_version, "_git_read", lambda _args: pytest.fail("an app bundle ran git"))
+    monkeypatch.setattr(build_info, "app_bundle_root", lambda: tmp_path / "CORSIA.app")
+    monkeypatch.setattr(build_info, "_git_read", lambda _args: pytest.fail("an app bundle ran git"))
 
-    assert api_version._app_version({}) is None
-    assert api_version._app_version({"app": {"version": None}}) is None
-    assert api_version._app_version(api_version._placeholder_frontend_info()) is None
+    assert build_info.app_version({}) is None
+    assert build_info.app_version({"app": {"version": None}}) is None
+    assert build_info.app_version(build_info.placeholder_frontend_info()) is None
 
 
 def test_source_checkout_reports_the_release_tag_git_describes_without_its_v(monkeypatch):
-    import api.version as api_version
+    from infra import build_info
 
     asked = []
 
@@ -194,30 +196,30 @@ def test_source_checkout_reports_the_release_tag_git_describes_without_its_v(mon
         asked.append(args)
         return "v0.4.1-230-g1a2b3c4"
 
-    monkeypatch.setattr(api_version, "_APP_BUNDLE", None)
-    monkeypatch.setattr(api_version, "_git_read", describe)
+    monkeypatch.setattr(build_info, "app_bundle_root", lambda: None)
+    monkeypatch.setattr(build_info, "_git_read", describe)
 
-    assert api_version._app_version(api_version._placeholder_frontend_info()) == "0.4.1-230-g1a2b3c4"
+    assert build_info.app_version(build_info.placeholder_frontend_info()) == "0.4.1-230-g1a2b3c4"
     assert asked == [["describe", "--tags", "--match", "v[0-9]*"]]
 
 
 @pytest.mark.parametrize("failure", [None, ""])
 def test_source_checkout_reports_no_version_when_git_cannot_describe(monkeypatch, failure):
-    import api.version as api_version
+    from infra import build_info
 
-    monkeypatch.setattr(api_version, "_APP_BUNDLE", None)
-    monkeypatch.setattr(api_version, "_git_read", lambda _args: failure)
+    monkeypatch.setattr(build_info, "app_bundle_root", lambda: None)
+    monkeypatch.setattr(build_info, "_git_read", lambda _args: failure)
 
-    assert api_version._app_version({}) is None
+    assert build_info.app_version({}) is None
 
 
 def test_source_checkout_prefers_a_stamp_over_git(monkeypatch):
-    import api.version as api_version
+    from infra import build_info
 
-    monkeypatch.setattr(api_version, "_APP_BUNDLE", None)
-    monkeypatch.setattr(api_version, "_git_read", lambda _args: pytest.fail("a stamped build never asks git"))
+    monkeypatch.setattr(build_info, "app_bundle_root", lambda: None)
+    monkeypatch.setattr(build_info, "_git_read", lambda _args: pytest.fail("a stamped build never asks git"))
 
-    assert api_version._app_version({"app": {"version": "0.4.1-dev.230"}}) == "0.4.1-dev.230"
+    assert build_info.app_version({"app": {"version": "0.4.1-dev.230"}}) == "0.4.1-dev.230"
 
 
 def test_the_bundle_build_stamps_its_release_version_into_the_frontend_build_info():

@@ -95,7 +95,7 @@ def test_download_request_identifies_corsia_with_its_app_version(monkeypatch):
         observed["user_agent"] = request.get_header("User-agent")
         return _Response(b"#!/bin/sh\n")
 
-    monkeypatch.setattr(cli_install.app_version, "_read_frontend_build_info", lambda: {"app": {"version": "0.4.1-dev.246"}})
+    monkeypatch.setattr(cli_install.build_info, "frontend_build_info", lambda: {"app": {"version": "0.4.1-dev.246"}})
     monkeypatch.setattr(cli_install.urllib.request, "urlopen", fetch)
     script = cli_install._download_script("codex")
     assert observed["user_agent"] == "CORSIA/0.4.1-dev.246"

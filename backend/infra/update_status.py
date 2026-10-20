@@ -26,7 +26,7 @@ from urllib.request import urlopen
 
 import semver
 
-from infra import platform_paths
+from infra import build_info, platform_paths
 
 # Serving checkout root: backend/infra/update_status.py -> repo root.
 _SERVING_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -100,17 +100,15 @@ def _bundle_endpoint(bundle: Path) -> str:
     if (
         not isinstance(endpoint, str)
         or not endpoint.startswith("https:" + "//")
-        or any(endpoint.isspace() for endpoint in endpoint)
+        or any(ch.isspace() for ch in endpoint)
     ):
         raise RuntimeError("Bundled updater endpoint is invalid.")
     return endpoint
 
 
 def _bundle_current_version() -> str:
-    """Return the running bundle version from the /api/version source of truth."""
-    from api.version import _version_payload
-
-    version = _version_payload().get("app", {}).get("version")
+    """Return the running bundle version from the canonical build-info owner."""
+    version = build_info.app_version()
     if not isinstance(version, str):
         raise RuntimeError("Running bundle version is unavailable.")
     return version

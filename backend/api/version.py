@@ -16,8 +16,6 @@ No auth — must be reachable to bootstrap the version overlay.
 from __future__ import annotations
 
 import asyncio
-import json
-import logging
 import os
 import subprocess
 from datetime import datetime, timezone
@@ -25,16 +23,12 @@ from pathlib import Path
 
 from fastapi import APIRouter
 
-from infra.config import FRONTEND_DIR
-from infra.platform_paths import app_bundle_root
+from infra import build_info
 
 router = APIRouter(prefix="/api", tags=["version"])
-log = logging.getLogger(__name__)
 
 # Repo root: .corsia/. backend/ is a sibling of frontend/.
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-# An app bundle has no checkout: its backend and frontend are one signed build.
-_APP_BUNDLE = app_bundle_root()
 
 # The contract between the desktop shell and a host. This is the one definition;
 # the shell's own copy is checked against this line (version_check.rs).
@@ -83,8 +77,8 @@ def _capture_backend_build_info() -> dict:
     now = datetime.now(timezone.utc)
     build_iso = now.isoformat(timespec="seconds").replace("+00:00", "Z")
     label = now.strftime("%Y.%m.%d.%H%M")
-    if _APP_BUNDLE is not None:
-        return {**_read_frontend_build_info(), "build_iso": build_iso}
+    if build_info.app_bundle_root() is not None:
+        return {**build_info.frontend_build_info(), "build_iso": build_iso}
 
     full_hash = _git(["rev-parse", "HEAD"]) or "unknown"
     short_hash = _git(["rev-parse", "--short=7", "HEAD"]) or "unknown"
@@ -103,34 +97,7 @@ def _capture_backend_build_info() -> dict:
     }
 
 
-def _placeholder_frontend_info() -> dict:
-    return {
-        "label": "unknown",
-        "short_hash": "unknown",
-        "full_hash": "unknown",
-        "commit_iso": "",
-        "commit_subject": "(frontend not built)",
-        "dirty": None,
-        "build_iso": "",
-        "app": {"version": None},
-    }
-
-
-def _read_frontend_build_info() -> dict:
-    """Read frontend/dist/build-info.json. Returns placeholder if missing/unreadable.
-
-    Re-read per request so an in-place rebuild is reflected without a server
-    restart. File is small (~300B) and traffic is low — cost is negligible.
-    """
-    path = FRONTEND_DIR / "build-info.json"
-    if not path.exists():
-        return _placeholder_frontend_info()
-    try:
-        return json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as e:
-        log.warning("Failed to read %s: %s", path, e)
-        return _placeholder_frontend_info()
-
+# Frontend build stamps are owned by infra.build_info.
 
 # Captured once at module import (= server start). Cheap, no per-request cost.
 _BACKEND_BUILD: dict = _capture_backend_build_info()
@@ -153,21 +120,7 @@ def _current_head_info() -> dict:
     }
 
 
-def _app_version(frontend: dict) -> str | None:
-    """The release version this host runs, or None when it cannot say.
-
-    An app bundle carries the version its build stamped into build-info.json (``CORSIA_APP_VERSION``). A source
-    checkout has no stamp, so it reports the nearest release tag git describes, without the leading ``v``.
-    """
-    build_app = frontend.get("app")
-    stamped = build_app.get("version") if isinstance(build_app, dict) else None
-    if isinstance(stamped, str) and stamped:
-        return stamped
-    if _APP_BUNDLE is not None:
-        return None
-    described = _git_read(["describe", "--tags", "--match", "v[0-9]*"])
-    return described.removeprefix("v") if described else None
-
+# App-version selection is owned by infra.build_info.
 
 def _version_payload() -> dict:
     """Build the version payload; git and file reads block, so callers offload it.
@@ -177,11 +130,11 @@ def _version_payload() -> dict:
     bundle it swapped in; an app bundle has no checkout head.
     """
     backend = dict(_BACKEND_BUILD)
-    backend["current_head"] = None if _APP_BUNDLE is not None else _current_head_info()
+    backend["current_head"] = None if build_info.app_bundle_root() is not None else _current_head_info()
     backend["generation"] = os.environ.get("CORSIA_SERVICE_GENERATION")
-    frontend = _read_frontend_build_info()
+    frontend = build_info.frontend_build_info()
     # The protocol belongs to this backend's source, not to a build file that may be missing or stale.
-    app = {"version": _app_version(frontend), "shell_protocol": SHELL_PROTOCOL}
+    app = {"version": build_info.app_version(frontend), "shell_protocol": SHELL_PROTOCOL}
     return {
         "frontend": frontend,
         "backend": backend,
