@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
-import { restoreDocumentPlace } from './documentImagePlace';
+import { dispatchKeepingPlace, restoreDocumentPlace } from './documentImagePlace';
 
 const SRC = '/api/files/content?path=%2Fws%2Fa.png';
 const image = { instanceId: 'tab-1', src: SRC, alt: 'a', from: 40, to: 60, scrollTop: 300, top: 0 };
@@ -222,5 +222,48 @@ describe('restoreDocumentPlace', () => {
 		scroller.scrollTop = 700;
 		await pending;
 		expect(scroller.scrollTop).toBe(700);
+	});
+});
+
+describe('dispatchKeepingPlace', () => {
+	// jsdom has no layout: CodeMirror's measure needs range geometry. No frame ever runs, so a measure pass that runs now
+	// is seen as the waiting frame being cancelled (CodeMirror's measure cancels it before measuring).
+	const rangeLayout = Range.prototype as Partial<Pick<Range, 'getClientRects' | 'getBoundingClientRect'>>;
+	const FRAME = 7;
+	let cancelFrame: ReturnType<typeof vi.fn>;
+	beforeEach(() => {
+		cancelFrame = vi.fn();
+		vi.stubGlobal('requestAnimationFrame', () => FRAME);
+		vi.stubGlobal('cancelAnimationFrame', cancelFrame);
+		rangeLayout.getClientRects = () => [] as unknown as DOMRectList;
+		rangeLayout.getBoundingClientRect = () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }) as DOMRect;
+	});
+	afterEach(() => {
+		delete rangeLayout.getClientRects;
+		delete rangeLayout.getBoundingClientRect;
+	});
+
+	/** An editor with a measure pass waiting for the next frame; `measured` reports whether it has run since. */
+	function waiting() {
+		const view = new EditorView({ doc: 'one\ntwo\nthree', parent: root, dispatchTransactions: dispatchKeepingPlace });
+		view.requestMeasure();
+		cancelFrame.mockClear();
+		return { view, measured: () => cancelFrame.mock.calls.some(([id]) => id === FRAME) };
+	}
+
+	it('lays out a change the reader did not make before any other update can follow it', () => {
+		const { view, measured } = waiting();
+		view.dispatch({ changes: { from: 0, to: 4 } });
+		expect(measured()).toBe(true);
+		view.destroy();
+	});
+
+	it("leaves the reader's own typing and any update that changes no text to the next frame", () => {
+		const { view, measured } = waiting();
+		view.dispatch({ changes: { from: 0, insert: 'x' }, userEvent: 'input.type' });
+		view.dispatch({ selection: { anchor: 2 } });
+		expect(view.state.doc.toString()).toBe('xone\ntwo\nthree');
+		expect(measured()).toBe(false);
+		view.destroy();
 	});
 });
