@@ -208,7 +208,7 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "tier": enum_attr(*TIERS), "cause": enum_attr(*LEARNING_CAUSES),
         "new_work": enum_attr("yes", "no"),
         "new_work_signal": enum_attr(*NEW_WORK_SIGNALS), "target_file": text_attr(500),
-        "serious_lowered_reason": text_attr(500),
+        "serious_proposed": enum_attr("yes", "no"), "serious_lowered_reason": text_attr(500),
     },
     LEARNING_OUTCOME_EVENT: {
         "outcome": enum_attr(*TERMINAL_OUTCOMES), "reason": text_attr(500),

@@ -16,6 +16,7 @@ CAUSES = (
 )
 NEW_WORK_SIGNALS = ("task_kind", "agent", "workflow_version")
 TERMINAL_OUTCOMES = ("fixed", "instruction", "watch", "lesson", "workflow", "dropped")
+SERIOUS_TOOL_NAMES = ("email_send", "calendar_send_invite", "git_push", "github_pr_merge")
 
 
 def _now() -> str:
@@ -52,6 +53,18 @@ def loaded_targets(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
         if path not in found:
             found.append(path)
     return tuple(found)
+
+
+def serious_proposed(db: sqlite3.Connection, thread_id: str) -> bool:
+    """Detect the durable, named tool effects that require Serious by default."""
+    marks = ",".join("?" for _ in SERIOUS_TOOL_NAMES)
+    row = db.execute(
+        f"""SELECT 1 FROM messages WHERE thread_id=? AND role='tool'
+            AND active_turn_id=(SELECT id FROM active_turns WHERE thread_id=? AND status='running')
+            AND json_extract(metadata, '$.name') IN ({marks}) LIMIT 1""",
+        (thread_id, thread_id, *SERIOUS_TOOL_NAMES),
+    ).fetchone()
+    return row is not None
 
 
 def _require(value: object, choices: tuple[str, ...], field: str) -> str:
@@ -94,11 +107,14 @@ def record_triage(
     if target not in valid_targets:
         choices = ", ".join(valid_targets) or "(no manifest or load-receipt files recorded)"
         raise ValueError(f"target_file is not a file loaded for this turn. Choose one of: {choices}.")
+    proposed_serious = serious_proposed(db, thread_id)
     lowered = serious_lowered_reason.strip() if isinstance(serious_lowered_reason, str) else None
     if serious_lowered_reason is not None and not lowered:
         raise ValueError("serious_lowered_reason must state why Serious was lowered")
     if tier_value == "serious" and lowered:
         raise ValueError("serious_lowered_reason is only allowed when tier is not serious")
+    if proposed_serious and tier_value != "serious" and not lowered:
+        raise ValueError("Serious is proposed because this task took an outside or hard-to-undo tool effect; serious_lowered_reason is required to lower it")
     _subject_exists(db, subject_key)
     existing = db.execute(
         "SELECT 1 FROM outcome_events WHERE event_name=? AND subject_key=? LIMIT 1",
@@ -114,7 +130,7 @@ def record_triage(
         agent_thread_id=thread_id, attributes={
             "tier": tier_value, "cause": cause_value, "new_work": str(new_work),
             "new_work_signal": signal, "target_file": target,
-            "serious_lowered_reason": lowered,
+            "serious_proposed": "yes" if proposed_serious else "no", "serious_lowered_reason": lowered,
         },
     )
     return {"subject_key": subject_key, "event_id": result.event_id, "target_file": target}
