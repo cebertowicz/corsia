@@ -16,13 +16,16 @@ from typing import Any, Mapping
 from loguru import logger
 
 CORRECTION_EVENT = "measurement.correction"
+SOURCE_KIND_MESSAGE = "message"
+SOURCE_KIND_DOC_COMMENT = "doc_comment"
+SOURCE_KIND_DECISION_ANSWER = "plan_decision_answer"
 MESSAGE_SUBJECT_PREFIX = "message:"
 COMMENT_SUBJECT_PREFIX = "doc-comment:"
 DECISION_SUBJECT_PREFIX = "plan-decision-answer:"
 SUBJECT_PREFIXES = {
-    "message": MESSAGE_SUBJECT_PREFIX,
-    "doc_comment": COMMENT_SUBJECT_PREFIX,
-    "plan_decision_answer": DECISION_SUBJECT_PREFIX,
+    SOURCE_KIND_MESSAGE: MESSAGE_SUBJECT_PREFIX,
+    SOURCE_KIND_DOC_COMMENT: COMMENT_SUBJECT_PREFIX,
+    SOURCE_KIND_DECISION_ANSWER: DECISION_SUBJECT_PREFIX,
 }
 LABEL_CORRECTION = "correction"
 LABEL_NOT_CORRECTION = "not_correction"

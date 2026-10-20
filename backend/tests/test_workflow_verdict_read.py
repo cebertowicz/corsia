@@ -79,17 +79,21 @@ def usage(db, usage_id: str, node_id: str, model: str = "claude-code/opus", *, p
 
 def correction(db, message_id: str, node_id: str, *, at: str = "2026-10-06T00:00:00Z", label: str = "correction",
                counter: str = "c1") -> None:
-    """One owner message, answered after a turn working ``node_id``, with its classified fact."""
+    """One owner message, answered after a turn working ``node_id``, with a writer-recorded fact."""
+    from core.corrections_recording import ClassifierVersion, CorrectionCandidate, SOURCE_KIND_MESSAGE
+    from jobs.corrections_recording import _record_fact
+
     db.execute("INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch,plan_id,"
                "plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role) "
                "VALUES (?,'root',0,'m','completed',?,'boot','plan',?,'attempt',?,'execution')",
                (f"turn-{message_id}", at[:9] + str(int(at[9]) - 1) + at[10:], node_id, node_id))
     db.execute("INSERT INTO messages (id,thread_id,role,content,created_at) VALUES (?,'root','user','x',?)",
                (message_id, at))
-    db.execute("INSERT INTO outcome_events (id,dedupe_key,event_name,source,provenance,ts,observed_ts,attributes) "
-               "VALUES (?,?,'measurement.correction','corsia','instrumented','2026-10-15','2026-10-15',?)",
-               (f"fact-{message_id}", f"fact-{message_id}",
-                json.dumps({"message_id": message_id, "label": label, "asset_version": counter})))
+    db.commit()
+    candidate = CorrectionCandidate(SOURCE_KIND_MESSAGE, message_id, "root", None, "x", at)
+    payload = {"label": label, "truncated": False, "original_tokens": 1, "failure_reason": "none"}
+    version = ClassifierVersion("asset", counter, "head", 0.5, "policy")
+    assert _record_fact(candidate, payload, version) is True
 
 
 def runs_of(snapshot, workflow: str = "sdlc-process"):
@@ -146,7 +150,7 @@ def test_corrections_reach_their_run_through_the_correction_attribution(db) -> N
     correction(db, "m3", "loose", at="2026-10-08T00:00:00Z")
     runs, _ = runs_of(read_snapshot(db, now=NOW))
     facts = runs["run"].corrections
-    assert [(fact.message_id, fact.is_correction, fact.counter) for fact in facts] == [
+    assert [(fact.source_id, fact.is_correction, fact.counter) for fact in facts] == [
         ("m1", True, "c1"), ("m2", False, "c1")]
 
 

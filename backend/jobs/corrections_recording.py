@@ -13,6 +13,9 @@ from core.corrections_recording import (
     FACT_KEYS,
     LABEL_CORRECTION,
     LABEL_UNREADABLE,
+    SOURCE_KIND_DECISION_ANSWER,
+    SOURCE_KIND_DOC_COMMENT,
+    SOURCE_KIND_MESSAGE,
     ClassifierVersion,
     CorrectionCandidate,
     dedupe_key,
@@ -91,7 +94,7 @@ def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidat
     """Hydrate one newly arrived correction source, or return no human candidate."""
     from infra.database import get_db
 
-    if source_kind == "message":
+    if source_kind == SOURCE_KIND_MESSAGE:
         return candidate_for_message(source_id)
     db = get_db()
     try:
@@ -113,7 +116,7 @@ def candidate_for_message(message_id: str) -> CorrectionCandidate | None:
         ).fetchone()
         if row is None:
             return None
-        key = PendingCandidateKey(int(row[0]), "message", str(row[1]), str(row[2]), row[3], str(row[4]))
+        key = PendingCandidateKey(int(row[0]), SOURCE_KIND_MESSAGE, str(row[1]), str(row[2]), row[3], str(row[4]))
     finally:
         db.close()
     candidates = hydrate_candidates([key])
@@ -127,7 +130,7 @@ def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object)
 
     try:
         if not accepted.duplicate and is_owner_authored_message(role=role, content=content, metadata=metadata):
-            notify("message", accepted.message_id)
+            notify(SOURCE_KIND_MESSAGE, accepted.message_id)
     except Exception:
         logger.exception("corrections classifier admission notification failed")
 
@@ -137,7 +140,7 @@ def notify_doc_comment(comment_id: str) -> None:
     from jobs.corrections_realtime import notify
 
     try:
-        notify("doc_comment", comment_id)
+        notify(SOURCE_KIND_DOC_COMMENT, comment_id)
     except Exception:
         logger.exception("corrections classifier comment notification failed")
 
@@ -151,7 +154,7 @@ def notify_decision_answer(decision_id: str, other_text: object) -> None:
 
     try:
         if isinstance(other_text, str) and other_text.strip():
-            notify("plan_decision_answer", decision_id)
+            notify(SOURCE_KIND_DECISION_ANSWER, decision_id)
     except Exception:
         logger.exception("corrections classifier decision-answer notification failed")
 

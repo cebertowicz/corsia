@@ -38,8 +38,8 @@ def parse_ts(value: str) -> datetime:
 
 @dataclass(frozen=True)
 class CorrectionFact:
-    message_id: str
-    message_at: str
+    source_id: str
+    source_at: str
     counter: str
     is_correction: bool
 
@@ -127,15 +127,15 @@ class _Sample:
 
 
 def _counter(measure: PlannedMeasure, runs: Sequence[Run]) -> str | None | bool:
-    """The one classifier version that counted every message on both sides, None for none, False if none did."""
-    by_message: dict[str, set[str]] = defaultdict(set)
+    """The one classifier version that counted every source on both sides, None for none, False if none did."""
+    by_source: dict[str, set[str]] = defaultdict(set)
     for run in runs:
         for fact in run.corrections:
-            if run.in_window(fact.message_at, measure.window_days):
-                by_message[fact.message_id].add(fact.counter)
-    if not by_message:
+            if run.in_window(fact.source_at, measure.window_days):
+                by_source[fact.source_id].add(fact.counter)
+    if not by_source:
         return None
-    common = set.intersection(*by_message.values())
+    common = set.intersection(*by_source.values())
     return max(common) if common else False
 
 
@@ -143,7 +143,7 @@ def _sample(measure: PlannedMeasure, run: Run, counter: str | None) -> _Sample |
     den = 1.0 if run.outcome else 0.0
     if measure.name == CORRECTIONS:
         count = sum(1 for fact in run.corrections if fact.is_correction and fact.counter == counter
-                    and run.in_window(fact.message_at, measure.window_days))
+                    and run.in_window(fact.source_at, measure.window_days))
         return _Sample(float(count), den, 1)
     if measure.name == COST:  # an unknown cost was already called unknown, never 0
         return None if run.cost is None else _Sample(run.cost, den, 1)

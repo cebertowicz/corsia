@@ -14,7 +14,9 @@ from dataclasses import replace
 import pytest
 
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
+from core.correction_attribution import attributed_facts, workflow_run_of
 from infra.database import get_db
+from tests.plan_writer_authorizer import raw_plan_seed
 from tests.test_correction_notes import THREAD, _notes, _version, agent  # noqa: F401 - shared fixture
 
 CORRECTION = {"label": "correction", "truncated": False, "original_tokens": 9, "failure_reason": "none"}
@@ -105,6 +107,31 @@ def _user_comment(db, artifact):
     row, _ = add_comment(db, artifact, author_kind="user", author="Steve", author_id=None)
     db.commit()
     return str(row["id"])
+
+
+def test_comment_and_decision_sources_attribute_from_recorded_target_and_arrival_time(db):
+    """Non-message sources have both a fact-time target and canonical source arrival time."""
+    db.execute("INSERT INTO plans (id,owner_kind,owner_id,state,revision,created_at,updated_at) "
+               "VALUES ('attribution-plan','thread','owner','active',1,'t','t')")
+    with raw_plan_seed(db):
+        db.execute("INSERT INTO plan_nodes (id,plan_id,order_key,kind,title,acceptance_criteria,state,"
+                   "commitment_id,requirements_revision,revision,created_at,updated_at) "
+                   "VALUES ('attributed-node','attribution-plan',1,'task','x','x','active','attributed-node',1,1,'t','t')")
+    db.execute("INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch,plan_id,"
+               "plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role) "
+               "VALUES ('source-turn','owner',0,'m','completed','2026-01-01T00:00:00Z','boot','attribution-plan',"
+               "'attributed-node','attempt','attributed-node','execution')")
+    comment = _user_comment(db, seed_document(db, "owner", name="attribution.md"))
+    _seed_decision(db)
+    assert _record(db, "doc_comment", comment) is True
+    assert _record(db, "plan_decision_answer", "dec") is True
+
+    facts = {(fact.source_kind, fact.source_id): fact for fact in attributed_facts(db)}
+    expected = {("doc_comment", comment), ("plan_decision_answer", "dec:7")}
+    assert set(facts) == expected
+    assert all(fact.node_id == "attributed-node" and fact.source_at is not None for fact in facts.values())
+    assert {key: workflow_run_of(fact.node_id, {"attributed-node": "run"}, ["run"])
+            for key, fact in facts.items()} == {key: "run" for key in expected}
 
 
 def test_each_user_comment_and_free_text_answer_records_one_fact_and_one_note(db):
