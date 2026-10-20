@@ -194,7 +194,6 @@ async def test_connect_route_keeps_safe_not_found_contract(monkeypatch) -> None:
 def test_scopes_are_exactly_the_graph_ones_without_openid_or_profile() -> None:
     assert oauth.SCOPES == ("Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Files.ReadWrite", "offline_access", "User.Read")
 
-
 async def test_pkce_authority_and_guid_input_refusal(microsoft, isolated_db) -> None:
     url, account_id = await oauth.start_sign_in(CLIENT_ID, "personal", actor=("system", "test"), reach=EVERYWHERE)
     assert url.startswith("https://login.microsoftonline.com/consumers/")
