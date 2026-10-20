@@ -372,3 +372,21 @@ async def test_delta_client_traverses_pages_and_skips_deletions(monkeypatch):
     values, link = await client.graph_delta("previous-delta", account_id="account")
     assert [value["id"] for value in values] == ["deleted", "new"] and link == "terminal-delta"
     assert calls == [("previous-delta", None), ("next-page", None)]
+
+
+async def test_delta_client_keeps_next_link_after_bounded_slice(monkeypatch):
+    pages = [
+        {"value": [{"id": str(index)}], "@odata.nextLink": f"next-{index}"}
+        for index in range(client.DELTA_PAGES_PER_POLL)
+    ]
+    calls = []
+
+    async def graph(method, url, **kwargs):
+        calls.append((url, kwargs.get("params")))
+        return pages.pop(0)
+
+    monkeypatch.setattr(client, "graph_json", graph)
+    values, link = await client.graph_delta("previous-delta", account_id="account", params={"$select": "id"})
+    assert [value["id"] for value in values] == [str(index) for index in range(client.DELTA_PAGES_PER_POLL)]
+    assert link == f"next-{client.DELTA_PAGES_PER_POLL - 1}"
+    assert calls == [("previous-delta", {"$select": "id"})] + [(f"next-{index}", None) for index in range(client.DELTA_PAGES_PER_POLL - 1)]
