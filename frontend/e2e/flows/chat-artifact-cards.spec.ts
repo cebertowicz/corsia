@@ -132,6 +132,12 @@ async function openTranscript(page: Page, artifact: Artifact, width: number, the
 	await expect(page.locator(`[data-artifact-id="${artifact.artifactId}"]`)).toBeVisible();
 }
 
+// The phone's plan chip arrives with the thread's plan read, after the cards render, and moves the transcript by the
+// rail's height. A tap that lands in that move misses the card, so tap only once the chip is up.
+async function planChipUp(page: Page, width: number): Promise<void> {
+	if (width === 393) await expect(page.getByRole('button', { name: /^Open plan/ })).toBeVisible();
+}
+
 function card(page: Page, artifact: Artifact) {
 	return page.locator(`[data-artifact-id="${artifact.artifactId}"]`);
 }
@@ -160,6 +166,7 @@ for (const [label, width, theme] of SURFACES) {
 			const row = card(page, artifact);
 			await expect(row).toHaveAttribute('data-card-state', 'needs_review');
 			await expect(row).toContainText('Needs your review');
+			await planChipUp(page, width);
 			await screenshot(page, `chat-card-${width}-${theme}`);
 
 			let release!: () => void;
@@ -183,6 +190,7 @@ for (const [label, width, theme] of SURFACES) {
 			await openTranscript(page, image, width, theme);
 			const imageCard = card(page, image);
 			await expect(imageCard.locator('img.thumb')).toHaveAttribute('src', /\/api\/files\/content/);
+			await planChipUp(page, width);
 			await screenshot(page, `chat-card-image-${width}-${theme}`);
 			await imageCard.click();
 			await expect(page.locator('.review-bar')).toBeVisible();
