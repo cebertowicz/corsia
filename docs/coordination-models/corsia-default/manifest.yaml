@@ -81,5 +81,5 @@ notes:
   - "The cite to shared/standards/llm-anti-patterns.md #10 in COORDINATION-CORE.md points to an optional file that this version does not ship."
   - "A ref entry pins the starter-kit file's bytes and sha256 on the branch that carries this package, so an edit to that file makes the pin visibly stale."
   - "The pinned SPAWN-POLICY.md is selector-free (tier placeholders only) and is filled from the live /api/models at install."
-  - "The bundled tests guard the package's structure (placeholder coverage, pins, manifest shape); what still keeps the package unpublished is the behavioral evals of the model itself, which do not exist yet."
+  - "The bundled tests guard the package's structure (placeholder coverage, pins, manifest shape); behavioral evals of the model itself are absent, so the package remains unpublished."
   - "Follow-ups not in this version: standards with an update path, optional/, evals/ (the behavioral evals), repository setup, install script and requires_corsia."
