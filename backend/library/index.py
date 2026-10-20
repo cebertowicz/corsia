@@ -33,11 +33,12 @@ class LibraryIndexValidationError(LibraryIndexError):
 
 @dataclass(frozen=True)
 class LibraryIndex:
-    """Validated library rows and the age of the source used to read them."""
+    """Validated library rows and the age and per-item generation of the source used to read them."""
 
     skills: tuple[dict[str, Any], ...]
     index_age: str
     refreshed: bool
+    generations: dict[str, int]
 
 
 def load_index() -> LibraryIndex:
@@ -55,12 +56,21 @@ def load_index() -> LibraryIndex:
             raise LibraryUnreachableError(
                 "library_unreachable: could not fetch the library index and no valid cached index exists"
             ) from error
-        payload, fetched_at = cached
-        return LibraryIndex(payload, _format_age(now - fetched_at), refreshed=False)
+        payload, fetched_at, generations = cached
+        return LibraryIndex(payload, _format_age(now - fetched_at), refreshed=False, generations=generations)
 
+    prior_items = {} if cached is None else {item["name"]: item for item in cached[0]}
+    prior_generations = {} if cached is None else cached[2]
+    generations = {
+        item["name"]: prior_generations.get(item["name"], 0) + int(prior_items.get(item["name"]) != item)
+        for item in payload
+    }
+    for name, generation in list(generations.items()):
+        if generation == 0:
+            generations[name] = 1
     refreshed = cached is None or payload != cached[0]
-    _write_cache(payload, now)
-    return LibraryIndex(payload, "just now", refreshed=refreshed)
+    _write_cache(payload, now, generations)
+    return LibraryIndex(payload, "just now", refreshed=refreshed, generations=generations)
 
 
 def _fetch_index() -> Any:
@@ -78,7 +88,7 @@ def _cache_path() -> Path:
     return _state_root() / "library" / _CACHE_NAME
 
 
-def _read_cache() -> tuple[tuple[dict[str, Any], ...], float] | None:
+def _read_cache() -> tuple[tuple[dict[str, Any], ...], float, dict[str, int]] | None:
     try:
         cached = json.loads(_cache_path().read_text(encoding="utf-8"))
         if not isinstance(cached, dict):
@@ -88,18 +98,24 @@ def _read_cache() -> tuple[tuple[dict[str, Any], ...], float] | None:
             return None
         if not math.isfinite(fetched_at):
             return None
-        return _validate_index(cached.get("index")), float(fetched_at)
+        generations = cached.get("generations", {})
+        if not isinstance(generations, dict) or any(
+            not isinstance(name, str) or isinstance(generation, bool) or not isinstance(generation, int) or generation < 1
+            for name, generation in generations.items()
+        ):
+            return None
+        return _validate_index(cached.get("index")), float(fetched_at), generations
     except (OSError, ValueError, TypeError, LibraryIndexValidationError):
         return None
 
 
-def _write_cache(payload: tuple[dict[str, Any], ...], fetched_at: float) -> None:
+def _write_cache(payload: tuple[dict[str, Any], ...], fetched_at: float, generations: dict[str, int]) -> None:
     target = _cache_path()
     target.parent.mkdir(parents=True, exist_ok=True)
     staged = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     try:
         with staged.open("w", encoding="utf-8") as handle:
-            json.dump({"fetched_at": fetched_at, "index": {"skills": payload}}, handle)
+            json.dump({"fetched_at": fetched_at, "generations": generations, "index": {"skills": payload}}, handle)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(staged, target)

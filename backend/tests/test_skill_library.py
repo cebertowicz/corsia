@@ -185,14 +185,34 @@ def test_discard_token_is_bound_to_the_exact_local_files(tmp_path):
 
 
 def test_update_results_name_files_dropped_upstream():
+    from infra.skill_install import _skill_text
     from tools import skill_library
 
+    upstream = b"---\nname: pdf\ndescription: PDF work.\n---\nUse it.\n"
+    installed = _skill_text("pdf", upstream, "PDF work.")
+    assert installed is not None
     changed = skill_library._changed_paths(
-        {"SKILL.md": b"same", "corsia.yaml": b"local", "removed.md": b"old"},
-        b"same", {"added.md": b"new"},
+        {"SKILL.md": installed.encode(), "corsia.yaml": b"local", "removed.md": b"old"},
+        "pdf", upstream, "PDF work.", {"added.md": b"new"},
     )
 
     assert changed == ["added.md", "removed.md"]
+
+
+def test_update_results_omit_unchanged_installed_files():
+    from infra.skill_install import _skill_text
+    from tools import skill_library
+
+    upstream = b"---\nname: pdf\ndescription: PDF work.\n---\nUse it.\n"
+    installed = _skill_text("pdf", upstream, "PDF work.")
+    assert installed is not None
+
+    changed = skill_library._changed_paths(
+        {"SKILL.md": installed.encode(), "corsia.yaml": b"local", "guide.md": b"same"},
+        "pdf", upstream, "PDF work.", {"guide.md": b"same"},
+    )
+
+    assert changed == []
 
 
 def test_raw_index_failures_return_actionable_agent_errors(isolated_db, monkeypatch):

@@ -212,10 +212,7 @@ def _parse(candidate: Candidate) -> str:
         try:
             part = installed_digest_part(name, candidate.files[name])
         except (UnicodeDecodeError, ValueError):
-            # An upstream sidecar is dropped at install. It still changes the
-            # offered bundle identity, but cannot make SKILL.md look invalid.
-            if name != "corsia.yaml":
-                return _unreadable(candidate, BAD_HEADER)
+            # A malformed sidecar is still part of the offered bundle identity.
             part = candidate.files[name]
         if part is not None:
             digest.update(name.encode("utf-8") + b"\0" + hashlib.sha256(part).digest())

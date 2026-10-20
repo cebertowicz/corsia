@@ -327,7 +327,7 @@ def remove_skill_bundle(
 def origin_metadata(
     source: str,
     upstream_skill_md: bytes,
-    adopted_at: str,
+    adopted_at: str | None = None,
     version: str | None = None,
     item_manifest: str | None = None,
 ) -> dict[str, str]:
@@ -335,8 +335,9 @@ def origin_metadata(
     origin = {
         "source": source,
         "sha256": hashlib.sha256(upstream_skill_md).hexdigest(),
-        "adopted_at": adopted_at,
     }
+    if adopted_at is not None:
+        origin["adopted_at"] = adopted_at
     if version is not None:
         origin["version"] = version
     if item_manifest is not None:
