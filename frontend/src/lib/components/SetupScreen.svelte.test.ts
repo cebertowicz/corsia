@@ -66,12 +66,13 @@ const APPROVED_WELCOME = {
 	account: 'Create your account. It stays on this computer.',
 };
 const flat = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim();
-function expectWelcomeCopy() {
+function expectWelcomeCopy(accountLine = true) {
 	const welcome = host.querySelector('.welcome');
 	expect(welcome).toBeTruthy();
 	expect(Array.from(welcome!.querySelectorAll('.line')).map((line) => flat(line.textContent))).toEqual(APPROVED_WELCOME.lines);
 	expect(Array.from(welcome!.querySelectorAll('.rows li')).map((row) => flat(row.textContent))).toEqual(APPROVED_WELCOME.rows);
-	expect(flat(welcome!.querySelector('.account')?.textContent)).toBe(APPROVED_WELCOME.account);
+	if (accountLine) expect(flat(welcome!.querySelector('.account')?.textContent)).toBe(APPROVED_WELCOME.account);
+	else expect(welcome!.querySelector('.account')).toBeNull();
 }
 async function remountWide() {
 	if (component) await unmount(component);
@@ -96,15 +97,21 @@ describe('SetupScreen', () => {
 		expect(calls[0]).toEqual({ url: '/api/setup/status', method: 'GET' });
 	});
 
-	it('from 1280 wide, Welcome fills the right column beside the account form with no extra click, and reads first', async () => {
+	it('from 1280 wide, Welcome fills the right column beside the account form, which opens with the account sentence as its lede', async () => {
 		await remountWide();
 		expect(host.querySelector('h1')?.textContent).toBe(APPROVED_WELCOME.title);
-		expectWelcomeCopy();
+		expectWelcomeCopy(false);
 		expect(host.querySelector('.aside .welcome')).toBeTruthy();
+		const lede = host.querySelector('.lede')!;
+		expect(flat(lede.textContent)).toBe(APPROVED_WELCOME.account);
+		expect(host.querySelector('.aside')!.contains(lede)).toBe(false);
 		const form = host.querySelector('#setup-name')!;
 		expect(form).toBeTruthy();
-		// Welcome content comes before the form in reading order.
-		expect(host.querySelector('.aside')!.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		// Reading order: title, lede, fields, then the Welcome column.
+		const follows = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+		expect(follows(host.querySelector('h1')!, lede)).toBe(true);
+		expect(follows(lede, form)).toBe(true);
+		expect(follows(form, host.querySelector('.aside')!)).toBe(true);
 		fillAccount(); await settle();
 		button('Continue')?.click(); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Choose your work folder');

@@ -1,6 +1,7 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { openAppByUrl, TEST_TOKEN } from '../support/corsia';
 import { injectMessage } from '../support/mock';
@@ -14,8 +15,8 @@ const fixtures: Fixture[] = [
 	{ name: 'status-error', screen: 'error', element: 'CORSIA couldn’t start; Retry and Save a report' },
 	{ name: 'disk-image', screen: 'disk-image', element: 'Move CORSIA to Applications' },
 	{ name: 'old-macos', screen: 'old-macos', element: 'Update macOS to open CORSIA' },
-	{ name: 'account-empty', screen: 'account', element: 'Welcome beside the five account fields' },
-	{ name: 'account-welcome-short', screen: 'account', only: 'short', element: 'All of Welcome, to its last line, beside the form in a 1280×600 window, with no scrolling' },
+	{ name: 'account-empty', screen: 'account', element: 'Lede under the title, the five account fields, and Welcome beside them' },
+	{ name: 'account-welcome-short', screen: 'account', only: 'short', element: 'The lede above the form, and all of Welcome to its last row beside it, in a 1280×600 window with no scrolling' },
 	{ name: 'welcome', screen: 'welcome', only: 'narrow', element: 'Welcome screen: three rows and Continue' },
 	{ name: 'account-form', screen: 'account-form', only: 'narrow', element: 'Create your account form after Continue, with no Welcome' },
 	{ name: 'folder-back', screen: 'back-to-form', only: 'narrow', element: 'Back from the work folder lands on the filled form, not Welcome' },
@@ -192,7 +193,19 @@ const isNarrow = (page: Page) => (page.viewportSize()?.width ?? 0) < 1280;
 async function expectWelcomeCopy(page: Page) {
 	await expect(page.locator('.welcome .line')).toHaveText([...WELCOME_LINES]);
 	await expect(page.locator('.welcome li')).toHaveText(WELCOME_ROWS.map((row) => `${row.label} ${row.text}`));
-	await expect(page.locator('.welcome .account')).toHaveText(WELCOME_ACCOUNT_LINE);
+	// Below 1280 Welcome ends on the account sentence. From 1280 it is the form's lede instead, and the Welcome column leaves it out.
+	if (isNarrow(page)) { await expect(page.locator('.welcome .account')).toHaveText(WELCOME_ACCOUNT_LINE); return; }
+	await expect(page.locator('.welcome .account')).toHaveCount(0);
+	await expect(page.locator('.pane-scene > .lede')).toHaveText(WELCOME_ACCOUNT_LINE);
+	await expect(page.locator('.aside .lede')).toHaveCount(0);
+	const box = async (selector: string) => (await page.locator(selector).first().boundingBox())!;
+	const [title, lede, name, welcome] = [await box('.pane-scene h1'), await box('.pane-scene > .lede'), await box('#setup-name'), await box('.aside .welcome .line')];
+	expect(title.y + title.height, 'the lede sits directly under the title').toBeLessThanOrEqual(lede.y + 1);
+	expect(lede.y + lede.height, 'the lede sits above Name').toBeLessThanOrEqual(name.y);
+	expect(Math.abs(welcome.y - lede.y), 'the first Welcome line is top-aligned with the lede').toBeLessThanOrEqual(2);
+	// Title, lede, fields, then the Welcome column, in DOM order (which is tab and screen-reader order).
+	const order = await page.locator('.pane-scene').evaluate((scene) => ['h1', '.lede', '#setup-name', '.aside'].map((selector) => scene.querySelector(selector)!).every((node, index, nodes) => index === 0 || Boolean(nodes[index - 1].compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)));
+	expect(order, 'DOM order is title, lede, fields, Welcome').toBe(true);
 }
 const accountScreens = ['account', 'invalid', 'mismatch', 'short-password', 'account-exists'];
 async function navigate(page: Page, fixture: Fixture) {
@@ -266,7 +279,8 @@ async function assertState(page: Page, fixture: Fixture) {
 			const aside = page.locator('.aside');
 			expect(await aside.evaluate((node) => node.scrollHeight <= node.clientHeight), 'Welcome fits without scrolling').toBe(true);
 			await expect(page.locator('.welcome .line').first()).toBeInViewport({ ratio: 1 });
-			await expect(page.locator('.welcome .account')).toBeInViewport({ ratio: 1 });
+			await expect(page.locator('.welcome li').last()).toBeInViewport({ ratio: 1 });
+			await expect(page.locator('.pane-scene > .lede')).toBeInViewport({ ratio: 1 });
 		}
 	}
 	if (fixture.screen === 'checking') { await expect(page.getByRole('heading', { name: 'Checking this computer' })).toBeVisible(); return; }
@@ -346,6 +360,35 @@ async function capture(page: Page, fixture: Fixture, theme: string, width: numbe
 	console.log(`FRAME ${file}: ${fixture.element}`);
 }
 
+// Evidence-fixture only: the real catalog name the composer shows for the bound mock model, so the frame doesn't read as fake.
+// The mock backend's own row is `Mock Test Model`; product code and the mock seed are untouched.
+const FRAME_MODEL_NAME = 'Sonnet 5.5';
+const STRAY_MOCK_REPLY = 'This is a test response.';
+/** Rename the bound mock model in the catalog the page reads, and leave the mock backend's stray default reply out of the thread. */
+async function presentFirstRun(page: Page, threadId: string) {
+	await page.route((url) => url.pathname === '/api/models', async (route) => {
+		const response = await route.fetch();
+		const body = await response.json();
+		const rows = (body.models ?? []).map((row: Record<string, unknown>) => row.litellm_model === 'mock/test-model' ? { ...row, name: FRAME_MODEL_NAME, display_name: FRAME_MODEL_NAME } : row);
+		await route.fulfill({ response, json: { ...body, models: rows } });
+	});
+	await page.route((url) => url.pathname === `/api/threads/${threadId}/messages`, async (route) => {
+		const response = await route.fetch();
+		const body = await response.json();
+		const messages = (body.messages ?? []).filter((message: { content?: unknown }) => message.content !== STRAY_MOCK_REPLY);
+		await route.fulfill({ response, json: { ...body, messages } });
+	});
+}
+/** The composer shows the bound model by its catalog name, no stray mock reply is on screen, and the dev header is clean at the committed head. */
+async function expectCleanFirstRun(page: Page) {
+	await expect(page.locator('button.model-chip .model-chip-name')).toHaveText(FRAME_MODEL_NAME);
+	await expect(page.getByText('Mock Test Model')).toHaveCount(0);
+	await expect(page.getByText(STRAY_MOCK_REPLY)).toHaveCount(0);
+	const head = execSync('git rev-parse --short=7 HEAD', { encoding: 'utf8' }).trim();
+	expect(execSync('git status --porcelain', { encoding: 'utf8' }).trim(), 'the checkout is clean, so the build stamp carries no dirty mark').toBe('');
+	await expect.poll(async () => (await page.locator('.version-overlay').textContent()) ?? '').toMatch(new RegExp(`^b ${head} · f ${head} · \\d\\d:\\d\\d$`));
+}
+
 // The first-run frames turn Focus off; restore it even when a frame fails, so later specs render with it on.
 test.afterEach(async ({ request }) => {
 	await setFocusMode(request, true);
@@ -372,8 +415,8 @@ test('setup redesign complete state frames @setup-redesign', async ({ browser, r
 		}
 	}
 	await writeManifest();
-	// A run limited to named states leaves the first-run chat frames, which the setup screens don't change, as they were.
-	if (process.env.CORSIA_SETUP_FRAME_STATES) return;
+	// A run limited to named states leaves the first-run chat frames, which the setup screens don't change, as they were, unless CORSIA_SETUP_FRAME_CHAT asks for them too.
+	if (process.env.CORSIA_SETUP_FRAME_STATES && !process.env.CORSIA_SETUP_FRAME_CHAT) return;
 	await setFocusMode(request, false);
 	const emailQuestion = 'Which email do you use: Gmail (a work Gmail counts), Outlook, or something else?';
 	const emailScenarios = [
@@ -391,32 +434,37 @@ Think of it as a team you build around your problems. For a quick question, just
 
 First, a few things to set up here, one at a time. Any of them can wait: say "not now" to one, or "skip the rest" to stop here.`;
 	const openingLead = "I'm CORSIA, your assistant. My job is to give you back your time. I'm a bit different from most AI assistants: I measure how much of your time your work here takes, the AI agents working for you included, and I work to bring that number down. You can see it any time in Measurement. I keep everything here set up and running, and I take care of the everyday, like email, your calendar and research.";
+	await injectMessage(request, threadId, { role: 'assistant', content: opening }, TEST_TOKEN);
 	for (const theme of ['light', 'dark']) {
-		const context = await browser.newContext({ colorScheme: theme as 'light' | 'dark', reducedMotion: 'reduce', viewport: { width: 1280, height: 900 } });
-		const page = await context.newPage();
-		await injectMessage(request, threadId, { role: 'assistant', content: opening }, TEST_TOKEN);
-		await openAppByUrl(page);
-		await expect(page.getByText(openingLead, { exact: true }).first()).toBeVisible();
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible();
-		await page.waitForFunction((message) => {
-			const composer = document.querySelector<HTMLElement>('[aria-label="Message CORSIA"]');
-			const openingNode = [...document.querySelectorAll<HTMLElement>('*')].find((element) => element.textContent?.trim() === message);
-			const opaque = (element: HTMLElement | null) => {
-				for (let current = element; current; current = current.parentElement) if (Number.parseFloat(getComputedStyle(current).opacity) < 1) return false;
-				return Boolean(element);
-			};
-			return opaque(composer) && opaque(openingNode) && document.getAnimations().every((animation) => animation.playState !== 'running');
-		}, openingLead);
-		await expect(page.getByText('Select Model', { exact: true })).toHaveCount(0);
-		const file = `first-run-opening-${theme}-1280x900.png`;
-		const path = resolve(assets!, file);
-		await page.screenshot({ path, scale: 'css' });
-		records.push({ file, state: 'first-run-opening-scripted', element: 'Scripted first-run opening and bound composer model (not Select Model)', assertion: 'scripted opening visible; bound composer visible; Select Model absent', sha256: fileSha256(path) });
-		console.log(`FRAME ${file}: scripted first-run opening and bound composer model`);
-		await context.close();
+		if (theme === 'light') {
+			const context = await browser.newContext({ colorScheme: 'light', reducedMotion: 'reduce', viewport: { width: 1280, height: 900 } });
+			const page = await context.newPage();
+			await presentFirstRun(page, threadId);
+			await openAppByUrl(page);
+			await expect(page.getByText(openingLead, { exact: true }).first()).toBeVisible();
+			await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible();
+			await page.waitForFunction((message) => {
+				const composer = document.querySelector<HTMLElement>('[aria-label="Message CORSIA"]');
+				const openingNode = [...document.querySelectorAll<HTMLElement>('*')].find((element) => element.textContent?.trim() === message);
+				const opaque = (element: HTMLElement | null) => {
+					for (let current = element; current; current = current.parentElement) if (Number.parseFloat(getComputedStyle(current).opacity) < 1) return false;
+					return Boolean(element);
+				};
+				return opaque(composer) && opaque(openingNode) && document.getAnimations().every((animation) => animation.playState !== 'running');
+			}, openingLead);
+			await expect(page.getByText('Select Model', { exact: true })).toHaveCount(0);
+			await expectCleanFirstRun(page);
+			const file = `first-run-opening-${theme}-1280x900.png`;
+			const path = resolve(assets!, file);
+			await page.screenshot({ path, scale: 'css' });
+			records.push({ file, state: 'first-run-opening-scripted', element: 'Scripted first-run opening and the composer bound to Sonnet 5.5 (not Select Model)', assertion: 'scripted opening visible; bound composer shows Sonnet 5.5, not Select Model or Mock Test Model; no stray mock reply; clean dev header at the committed head', sha256: fileSha256(path) });
+			console.log(`FRAME ${file}: scripted first-run opening and bound composer model`);
+			await context.close();
+		}
 		for (const scenario of emailScenarios) {
 			const emailContext = await browser.newContext({ colorScheme: theme as 'light' | 'dark', reducedMotion: 'reduce', viewport: { width: 1280, height: 900 } });
 			const emailPage = await emailContext.newPage();
+			await presentFirstRun(emailPage, threadId);
 			await injectMessage(request, threadId, { role: 'assistant', content: emailQuestion }, TEST_TOKEN);
 			await injectMessage(request, threadId, { role: 'user', content: scenario.answer }, TEST_TOKEN);
 			await injectMessage(request, threadId, { role: 'assistant', content: scenario.next }, TEST_TOKEN);
@@ -425,10 +473,11 @@ First, a few things to set up here, one at a time. Any of them can wait: say "no
 			await expect(emailPage.getByText(scenario.answer, { exact: true }).last()).toBeVisible();
 			await expect(emailPage.getByText(scenario.next, { exact: true }).last()).toBeVisible();
 			await emailPage.getByText(scenario.next, { exact: true }).last().scrollIntoViewIfNeeded();
+			await expectCleanFirstRun(emailPage);
 			const emailFile = `${scenario.name}-${theme}-1280x900.png`;
 			const emailPath = resolve(assets!, emailFile);
 			await emailPage.screenshot({ path: emailPath, scale: 'css' });
-			records.push({ file: emailFile, state: scenario.name, element: `Email app profile: ${scenario.profile}`, assertion: 'email step-5 question, answer, and next line visible', sha256: fileSha256(emailPath) });
+			records.push({ file: emailFile, state: scenario.name, element: `Email app profile: ${scenario.profile}`, assertion: 'email step-5 question, answer, and next line visible; composer shows Sonnet 5.5; no stray mock reply; clean dev header at the committed head', sha256: fileSha256(emailPath) });
 			console.log(`FRAME ${emailFile}: ${scenario.profile}`);
 			await emailContext.close();
 		}
