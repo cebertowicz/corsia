@@ -144,6 +144,7 @@ describe('ProvidersPolicyBlock', () => {
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			const path = input.toString();
 			if (path.startsWith('/api/vendor-accounts')) return { ok: true, json: async () => ({ accounts: [] }) };
+			if (path.startsWith('/api/threads?')) return { ok: true, json: async () => ({ threads: [] }) };
 			if (path.startsWith('/api/projects/project/cloud-models-off')) {
 				if (init?.method === 'PUT') return save === 'ok'
 					? { ok: true, json: async () => ({ cloud_models_off: true }) }
@@ -190,6 +191,7 @@ describe('ProvidersPolicyBlock', () => {
 
 		(host.querySelector('[aria-label="Local models only"]') as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(host.textContent).toContain("Claude Code and Codex aren't used while Local models only is on."));
+		expect(vi.mocked(fetch).mock.calls.some(([path]) => String(path).startsWith('/api/threads?'))).toBe(true);
 	});
 
 	it('keeps account controls visible when saving Local models only fails', async () => {
