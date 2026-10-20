@@ -68,6 +68,8 @@ def env(tmp_path, monkeypatch) -> Env:
 
 
 def _due(**delta) -> str:
+    # A date, not an instant: compute it once per test and reuse it, or a run
+    # that crosses midnight UTC compares two different days.
     return (datetime.now(timezone.utc) + timedelta(**delta)).date().isoformat()
 
 
@@ -202,12 +204,13 @@ def _once(env: Env, target: str, *, skip: int = 0, result: Any = None) -> None:
 
 async def test_a_hypothesis_becomes_a_reviewed_trial_the_next_install_offers(env: Env) -> None:
     entry = _entry(env)
+    due = _due(days=14)
 
-    reply = _place(env, entry)
+    reply = _place(env, entry, _answer(trial={"review_after": due}))
 
     assert reply == (
         f"Entry {entry} queued: CORSIA writes the trial skill cite-the-head, opens your "
-        f"review task for {_due(days=14)} and retires the entry. It is not in this "
+        f"review task for {due} and retires the entry. It is not in this "
         "conversation's skills list; it appears when the list is next rebuilt."
     )
     assert not _skill(env).exists() and _offered(env) == []
@@ -827,8 +830,9 @@ async def test_the_same_trial_placed_with_another_date_moves_its_reviews_wake(en
     _place(env, _entry(env))
     await _drain(env.worker)
     later = _entry(env, [{"kind": "turn", "reference": "turn-30"}], "needs longer")
+    due = _due(days=40)
 
-    _place(env, later, _answer(trial={"review_after": _due(days=40)}))
+    _place(env, later, _answer(trial={"review_after": due}))
     await _drain(env.worker)
 
     _one_open_review_offers(env)
@@ -837,7 +841,7 @@ async def test_the_same_trial_placed_with_another_date_moves_its_reviews_wake(en
         "SELECT condition_value FROM expected_event_watches WHERE plan_node_id=? AND status='armed'",
         (review["id"],),
     ).fetchall()
-    assert watch["condition_value"][:10] == _due(days=40) == _trial(env).lesson.review_after[:10]
+    assert watch["condition_value"][:10] == due == _trial(env).lesson.review_after[:10]
 
 
 async def test_a_hypothesis_with_no_boundary_is_captured(env: Env) -> None:
