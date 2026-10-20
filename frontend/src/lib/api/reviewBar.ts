@@ -1,11 +1,12 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { fetchWithTimeout, COMMENT_POST_TIMEOUT_MS } from './docs';
+
 export type ReviewVerdict = 'approved' | 'approved_with_changes' | 'changes_requested';
 
 export interface FeedbackCounts { comments: number; suggestions: number; edits: number }
 
-/** The review bar's read of one artifact: the newest raised ask and what the user did since it was raised. */
+/** The person step whose instructions this document is: the bar offers its Done / Won't do. */
 export interface PersonStepInstruction {
 	node_id: string;
 	node_title: string;
@@ -15,6 +16,7 @@ export interface PersonStepInstruction {
 	owner_name: string;
 }
 
+/** The review bar's read of one artifact: the newest raised ask and what the user did since it was raised. */
 export interface ReviewBarRead {
 	ask_raised: boolean;
 	/** The Plans-owned holds this answer closes; each one identifies one review round. */

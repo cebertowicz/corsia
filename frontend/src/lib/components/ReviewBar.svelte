@@ -181,7 +181,6 @@
 			window.removeEventListener('resize', update);
 		};
 	});
-
 	function onNoteKey(event: KeyboardEvent) {
 		if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendNote(); }
 		else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); void cancelNote(); }

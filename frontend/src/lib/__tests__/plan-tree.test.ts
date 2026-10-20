@@ -123,8 +123,9 @@ describe('PlanTree — same renderer contract', () => {
 		component = mount(PlanTree, {
 			target: host,
 			props: withFolds({
-				nodes: [node({ id: 'person-step', title: 'Set up workspace', assignee: 'user', artifacts: [instructions] })],
+				nodes: [node({ id: 'person-step', title: 'Set up workspace', assignee: 'user', artifacts: [instructions], user_actions: ['mark_done', 'close_node'] })],
 				onOpenArtifact,
+				onUserAction: vi.fn(),
 			}),
 		});
 		flushSync();
@@ -133,6 +134,8 @@ describe('PlanTree — same renderer contract', () => {
 		expect(rowButton.title).toBe('Open instructions');
 		expect(rowButton.hasAttribute('aria-controls')).toBe(false);
 		expect(rowButton.hasAttribute('aria-expanded')).toBe(false);
+		// Done and Won't do stay one menu away on the row.
+		expect(rowButton.getAttribute('aria-haspopup')).toBe('menu');
 		rowButton.click();
 		await settle();
 

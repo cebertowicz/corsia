@@ -28,7 +28,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import PlanTree from './PlanTree.svelte';
 	import { EMPTY_CHILD_STATE, type ChildRowState } from './childExpansion.svelte';
-
+	/** A child plan renders whole: its depth continues its parent's, with no drill boundary. */
 	const CHILD_MAX_DEPTH = Number.MAX_SAFE_INTEGER;
 
 	let {
@@ -78,21 +78,19 @@
 		folded?: FoldedWork | null;
 	} = $props();
 
-
+	// Right-click, Shift+F10 or a long-press opens the row's actions, when it has any.
 	const taskMenu = createTaskMenu(
 		(node) => !userActionBusy && !!onUserAction && node.user_actions.length > 0,
 	);
 
-	function openPersonStep(node: OperatorNode): boolean {
-		const document = personStepInstructionsDocument(node);
-		if (!document) return false; onOpenArtifact(document, node.title);
-		return true;
-	}
-
+	// Which tasks are quietly scheduled depends on the clock, so the tree re-arranges on its minute tick.
 	const now = $derived($minuteClock);
 
+	// Finished work new since the user last looked stays open, then folds (`foldMotion`).
 	const hold = createPaneHold(() => nodes, () => paneView);
+	// Only finished work folds: an open task, however far off its wait ends, stays a row.
 	const shownNodes = $derived(hold.nodes);
+	// Each level's fold row reads the server's counts; its older rows are fetched when the user opens them.
 	const history = createFoldHistory({ planId: () => folded?.planId ?? '', rootParent: () => folded?.rootParent ?? null });
 	const foldView = $derived(buildFoldLevels({ nodes: shownNodes, held: hold.held, work: folded, history: history.level, maxDepth }));
 	// A row the history route fetched carries no details; opening it reads the node (`PlanHistoryDetails`).
@@ -112,7 +110,10 @@
 		history,
 	});
 
-
+	// Row selection and disclosure eligibility come from one pure rule set, so
+	// no row can render a chevron that discloses nothing or bypass the
+	// collapsed-ancestor filter. The per-level fold row is the one control that
+	// hides finished work; there is no separate plan-wide toggle.
 	const view = $derived(buildPlanTreeView({
 		nodes: treeNodes, index, maxDepth, isBranchExpanded, levels: foldView.levels, revealed: reveal.revealed,
 		now: now.getTime(), isScheduledOpen: reveal.isScheduledOpen,
@@ -138,11 +139,11 @@
 		return rowControls.focusRow(nodeId);
 	}
 
-
+	// The controller owns person-requested disclosure and page motion; keep this gate local so transition wiring stays explicit.
 	const userDisclosure = $derived(reveal.userDisclosure);
 	const pendingFoldLevel = $derived(reveal.pendingFoldLevel);
 
-
+	// The fold wave (`foldMotion`): rows that fold or sink since the last render glide as one wave.
 	let treeElement = $state<HTMLElement | null>(null);
 	const { indentAt, depthStyle } = createPlanTreeLayout(
 		() => treeElement, (depth, width, reserve) => indentVar(depth, width, reserve),
@@ -180,6 +181,7 @@
 <!-- A row's ask opens while it is open: raised, or deferred by a pause or a put-off. -->
 {#snippet row(node: OperatorNode, nest: number, view?: ScheduledView)}
 		{@const ask = node.artifacts.find((artifact) => artifact.role === 'attention' && (artifact.attention_state === 'raised' || artifact.attention_state === 'deferred'))}
+		{@const instructions = personStepInstructionsDocument(node)}
 		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<div
 			class="tree-row" role="listitem"
@@ -194,18 +196,17 @@
 			aria-level={depthOffset + node.depth + nest + 1}
 			aria-current={currentNodeIds.includes(node.id) ? 'step' : undefined}
 		>
-
+			<!-- The row body is the details disclosure (a person step with an instructions
+			     document opens it instead): status, title and subline are one control. A branch's
+			     done/total count and chevron are its separate expand control, a sibling. -->
 			<button
 				class="row-body"
 				type="button"
-				aria-expanded={personStepInstructionsDocument(node) ? undefined : detailsExpanded(node.id)}
-				aria-controls={personStepInstructionsDocument(node) ? undefined : rowControls.detailsId(node.id)}
-				aria-haspopup={personStepInstructionsDocument(node) ? undefined : onUserAction && node.user_actions.length > 0 ? 'menu' : undefined}
-				title={personStepInstructionsDocument(node) ? 'Open instructions' : `${detailsExpanded(node.id) ? 'Hide' : 'Show'} details`}
-				onclick={() => {
-					if (openPersonStep(node)) return;
-					reveal.byRequest(() => toggleDetails(node.id));
-				}}
+				aria-expanded={instructions ? undefined : detailsExpanded(node.id)}
+				aria-controls={instructions ? undefined : rowControls.detailsId(node.id)}
+				aria-haspopup={onUserAction && node.user_actions.length > 0 ? 'menu' : undefined}
+				title={instructions ? 'Open instructions' : `${detailsExpanded(node.id) ? 'Hide' : 'Show'} details`}
+				onclick={() => instructions ? onOpenArtifact(instructions, node.title) : reveal.byRequest(() => toggleDetails(node.id))}
 			>
 				<PlanRowFace
 					{node} isNext={nextNodeIds.includes(node.id)} showProgress={!branchParents.has(node.id)} detailsOpen={detailsExpanded(node.id)}
