@@ -238,34 +238,39 @@ def _remove_empty_dir(path: Path) -> bool:
     return True
 
 
-def _protected_working_dirs(db) -> set[Path]:
-    """Read durable artifact and open-ask paths once, with their ancestors.
+def _protected_working_dirs(db) -> tuple[set[Path], set[Path]]:
+    """Read active and always-protected paths once, with their ancestors.
 
-    ``working/`` is temporary even for write-observed identities, so only a
-    durable active identity protects its path. An open ask protects its target
-    regardless of retention until the ask is cleared.
+    A settled worker retains every active identity, including a released
+    ephemeral one. Every eligible thread retains durable active identities and
+    open-ask targets. The one query keeps the two protection classes in sync.
     """
     from plans.public import open_asks_sql
 
     open_ask_paths = open_asks_sql(
-        "i.path",
+        "i.path, 0 AS active_identity, 1 AS always_protected",
         joins="JOIN artifact_identities i ON i.id=l.artifact_id",
         by="all",
     ) + " AND i.path IS NOT NULL AND i.path != ''"
     rows = db.execute(
-        "SELECT path FROM artifact_identities "
-        "WHERE state='active' AND retention='durable' "
-        "AND path IS NOT NULL AND path != '' "
+        "SELECT path, 1 AS active_identity, "
+        "retention='durable' AS always_protected "
+        "FROM artifact_identities "
+        "WHERE state='active' AND path IS NOT NULL AND path != '' "
         "UNION " + open_ask_paths
     ).fetchall()
-    protected: set[Path] = set()
+    active_dirs: set[Path] = set()
+    always_dirs: set[Path] = set()
     for row in rows:
         if "://" in row["path"]:
             continue
         path = Path(row["path"]).expanduser().resolve(strict=False)
-        protected.add(path)
-        protected.update(path.parents)
-    return protected
+        paths = {path, *path.parents}
+        if row["active_identity"]:
+            active_dirs.update(paths)
+        if row["always_protected"]:
+            always_dirs.update(paths)
+    return active_dirs, always_dirs
 
 
 def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
@@ -274,8 +279,9 @@ def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
 
     Active, dormant, and settled temporary workers use the normal TTL. Other
     archived threads, ``scratch``, and other thread folders remain durable.
-    Keep markers, active turns, durable artifact identities, and open-ask
-    targets preserve units. Removal re-judges entries before unlinking; filesystem
+    Keep markers, active turns, every active identity in settled workers, and
+    durable identities or open-ask targets in every eligible thread preserve
+    units. Removal re-judges entries before unlinking; filesystem
     errors keep and log the unit, while ``working_files_trimmed`` counts whole removals.
     """
     from core.turn_core import active_turn_thread_ids
@@ -289,7 +295,7 @@ def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
         f"OR ({_SETTLED_WORKER})",
         (SETTLED_WORKER_REASON, SETTLED_WORKER_REASON),
     ).fetchall()
-    protected_working_dirs = _protected_working_dirs(db)
+    active_identity_dirs, always_protected_dirs = _protected_working_dirs(db)
     cutoff = (now - timedelta(days=cfg.working_ttl_days)).timestamp()
     working_roots: dict[str, Path] = {}
     for r in rows:
@@ -318,7 +324,10 @@ def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
             continue
         for unit in units:
             try:
-                if unit.resolve(strict=False) in protected_working_dirs:
+                resolved_unit = unit.resolve(strict=False)
+                if (resolved_unit in always_protected_dirs
+                        or (_row_get(r, "settled_worker")
+                            and resolved_unit in active_identity_dirs)):
                     continue
                 if not _unit_is_stale(unit, cutoff):
                     continue

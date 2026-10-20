@@ -1980,6 +1980,32 @@ def test_settled_worker_working_unit_uses_normal_ttl(tmp_path, mtime_as_added_ti
     assert durable.read_text() == "keep"
 
 
+def test_settled_worker_keeps_released_ephemeral_active_identity(
+    tmp_path, mtime_as_added_time,
+):
+    db = _db()
+    _add_session(
+        db, "settled", state="archived", archived_reason=lifecycle.SETTLED_WORKER_REASON,
+        archived_at=NOW - timedelta(days=8), spawned_by="parent",
+    )
+    artifact = _thread_root(tmp_path, "settled") / "working" / "released.txt"
+    artifact.write_text("keep")
+    _age(artifact, 8)
+    _add_artifact_identity(db, "released", path=artifact, retention="ephemeral")
+    _add_artifact_registration(
+        db, "released", "settled", relationship_state="subscriber-archived",
+    )
+    db.commit()
+
+    report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
+
+    assert report.working_files_trimmed == 0
+    assert artifact.exists()
+    assert db.execute(
+        "SELECT state FROM artifact_identities WHERE id='released'"
+    ).fetchone()["state"] == "active"
+
+
 def test_settled_worker_working_unit_under_normal_ttl_is_kept(tmp_path, mtime_as_added_time):
     db = _db()
     _add_session(
