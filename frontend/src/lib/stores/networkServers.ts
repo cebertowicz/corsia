@@ -61,6 +61,10 @@ export interface NetworkServer {
 	last_seen_at?: string | null;
 	discovered_at?: string | null;
 	metadata?: NetworkServerMetadata;
+	/** The backend's fact that the endpoint is on this computer; it supplies the address caption only. */
+	on_this_mac?: boolean;
+	/** The person marked this machine as theirs, so its models count as local. */
+	private?: boolean;
 	has_key?: boolean;
 	masked_key?: string;
 	/** How the endpoint is billed; null when unset. */
@@ -179,6 +183,28 @@ export async function setNetworkServerEnabled(
 		return { ok: false, message: typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}` };
 	} catch (e) {
 		return { ok: false, message: String(e) };
+	}
+}
+
+/** Mark a network server's machine as the person's own (private), or clear the mark. */
+export async function setNetworkServerPrivate(
+	serverId: string,
+	isPrivate: boolean,
+): Promise<{ ok: true } | { ok: false; detail?: unknown; reached: boolean }> {
+	try {
+		const res = await fetch(`${BASE}/api/settings/network-servers/${encodeURIComponent(serverId)}/private?token=${encodeURIComponent(t())}`, {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ private: isPrivate }),
+		});
+		if (res.ok) {
+			networkServers.update(servers => servers.map(row => row.id === serverId ? { ...row, private: isPrivate } : row));
+			return { ok: true };
+		}
+		const data = await res.json().catch(() => null);
+		return { ok: false, detail: data?.detail, reached: true };
+	} catch {
+		return { ok: false, reached: false };
 	}
 }
 

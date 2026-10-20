@@ -5,12 +5,9 @@ from __future__ import annotations
 import pytest
 
 from connections.connected_accounts import (
-    ConnectedAccountError,
-    account_reaches_thread,
-    create_google_account,
-    create_google_account_for_thread,
-    record_audit,
+    GOOGLE_PROVIDER, ConnectedAccountError, account_reaches_thread, create_account, create_account_for_thread,
 )
+from connections.account_state import record_audit
 from infra.database import get_db
 from infra.time import utc_now_iso
 from tests.registry_helpers import make_session
@@ -28,7 +25,7 @@ def test_project_caller_cannot_create_an_account_with_workspace_reach(isolated_d
         project_thread = make_session(db, project_id="project-a", prefix="project")
         workspace_thread = make_session(db, prefix="workspace")
 
-        account = create_google_account_for_thread(
+        account = create_account_for_thread(GOOGLE_PROVIDER,
             "person@example.test", actor_thread_id=project_thread, created_by=("agent", project_thread), db=db,
         )
 
@@ -44,7 +41,7 @@ def test_project_caller_cannot_create_an_account_with_workspace_reach(isolated_d
 def test_audit_records_only_fixed_account_lifecycle_facts(isolated_db) -> None:
     db = get_db()
     try:
-        account = create_google_account(
+        account = create_account(GOOGLE_PROVIDER,
             "person@example.test", reach={"mode": "all", "project_ids": [], "outside_projects": False},
             created_by=("system", "test"), db=db,
         )

@@ -55,6 +55,8 @@ export interface Model {
 	/** What the model is. Whether it is available is `modelAvailability(model)`. */
 	status: 'ready' | 'available' | 'unavailable';
 	status_reason?: string;
+	/** Whether this model is served locally or by a trusted device. */
+	is_local?: boolean;
 	/** Whether discovery reported this harness model on any account. */
 	available?: boolean;
 	cache_marker?: 'Cached';

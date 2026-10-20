@@ -90,13 +90,17 @@ describe('ProjectSettingsView', () => {
 		component = mount(ProjectSettingsView, { target: host, props: { projectId: 'corsia' } });
 
 		await vi.waitFor(() => expect(host.querySelector('.page-title')?.textContent).toBe('CORSIA'));
+		const heading = host.querySelector('h2.project-title');
+		expect(heading?.textContent).toBe('CORSIA');
+		expect(heading?.classList.contains('page-title')).toBe(true);
+		expect(heading?.parentElement?.firstElementChild).toBe(heading);
 		expect(host.textContent).toContain('Working folder missing');
 
 		button('Choose folder')!.click();
-		await vi.waitFor(() => expect(button('Choose this folder')).toBeTruthy());
+		await vi.waitFor(() => expect(Array.from(document.body.querySelectorAll('button')).find((candidate) => candidate.textContent?.trim().startsWith('Choose this folder'))).toBeTruthy());
 		const browsed = fetchMock.mock.calls.map((call) => String(call[0])).find((url) => url.startsWith('/api/fs/browse'));
 		expect(decodeURIComponent(browsed ?? '')).toContain('path=/workspace/projects');
-		button('Choose this folder')!.click();
+		Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find((candidate) => candidate.textContent?.trim().startsWith('Choose this folder'))!.click();
 
 		await vi.waitFor(() => {
 			const patch = fetchMock.mock.calls.find(

@@ -224,7 +224,7 @@
 	<p class="note">Loading…</p>
 {:else if project}
 	<div class="project-page">
-		<h2 class="page-title">{project.name}</h2>
+		<h2 class="page-title project-title">{project.name}</h2>
 
 		<SettingsGroup label="What this project can use">
 			<SettingsRow name="Skills" sub="For all projects, and for this one" chevron onOpen={() => openUse('skills')} />
@@ -308,7 +308,12 @@
 
 <style>
 	.project-page { display: flex; flex-direction: column; }
-	/* This page title owns the first gap; its first group should match the other titled Settings pages. */
+	/* The app header names this project at every width; retain the first heading for assistive technology. */
+	.project-page :global(.project-title) {
+		position: absolute; width: 1px; height: 1px; padding: 0; margin: 0;
+		overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+	}
+	/* The visually hidden title must not create an extra gap before the first group. */
 	.project-page :global(.settings-group:first-of-type) { margin-top: var(--space-1); }
 	.group-gap { margin-top: var(--space-6); }
 	/* The policy block draws edge to edge; inset it to the page's row edge. */

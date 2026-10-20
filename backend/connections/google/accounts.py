@@ -14,9 +14,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from connections.connected_accounts import (
-    GOOGLE_PROVIDER, ConnectedAccountError, account_reaches_thread, get_account, google_accounts,
-)
+from connections.connected_accounts import GOOGLE_PROVIDER, list_accounts, visible_accounts
 from connections.google.client import (
     NOT_CONNECTED, SIGN_IN_RECOVERY, STATUS_CONNECTED, STATUS_NEEDS_SIGN_IN, GoogleError,
 )
@@ -69,28 +67,6 @@ def _usable(account: dict) -> dict:
     raise GoogleError(UNAVAILABLE.format(address=account["address"]))
 
 
-def _visible(account: dict[str, object], thread_id: str | None, db: sqlite3.Connection) -> bool:
-    """The one visibility rule: the person sees every account; an agent, only those that reach its thread."""
-    return thread_id is None or account_reaches_thread(str(account["id"]), thread_id, db=db)
-
-
-def visible_google_accounts(thread_id: str | None, *, db: sqlite3.Connection) -> list[dict[str, object]]:
-    """Every Google account this caller may see (``thread_id`` None is the person)."""
-    return [account for account in google_accounts(db=db) if _visible(account, thread_id, db)]
-
-
-def visible_google_account(
-    account_id: str, thread_id: str | None, *, db: sqlite3.Connection,
-) -> dict[str, object] | None:
-    """The Google account ``account_id`` names if this caller may see it (any, for the person);
-    None alike for an unknown id and an out-of-reach one, so no surface can tell them apart."""
-    try:
-        account = get_account(account_id, db=db)
-    except ConnectedAccountError:
-        return None
-    return account if account["provider"] == GOOGLE_PROVIDER and _visible(account, thread_id, db) else None
-
-
 def resolve_for_thread(selector: object, thread_id: object, *, db: sqlite3.Connection | None = None) -> dict:
     """The one reachable connected account ``selector`` names; else a fixed refusal."""
     if db is None:
@@ -101,11 +77,10 @@ def resolve_for_thread(selector: object, thread_id: object, *, db: sqlite3.Conne
             return resolve_for_thread(selector, thread_id, db=connection)
         finally:
             connection.close()
-    accounts = google_accounts(db=db)
-    if not accounts:
+    if not list_accounts(GOOGLE_PROVIDER, db=db):
         raise GoogleError(NOT_CONNECTED)
     caller = thread_id if isinstance(thread_id, str) and thread_id else None
-    reachable = [account for account in accounts if caller is not None and _visible(account, caller, db)]
+    reachable = visible_accounts(caller, db=db, provider=GOOGLE_PROVIDER) if caller is not None else []
     if not reachable:
         raise GoogleError(NONE_AVAILABLE)
     listed = _choices(reachable)

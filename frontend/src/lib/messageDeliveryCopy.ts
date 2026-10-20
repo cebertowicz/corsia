@@ -41,6 +41,25 @@ export const WAITING_FOR_MODEL = {
 	title: 'The selected model is unavailable. Your message is saved and will send when the model is back, or as soon as you switch models.',
 } as const;
 
+/** The local-only project policy held a message still bound to a cloud model. */
+export const PROJECT_CLOUD_OFF = 'project_cloud_off';
+
+/** The action that resumes either locality hold. */
+export const SWITCH_TO_LOCAL_MODEL = 'Switch to a local model to send';
+
+export const WAITING_FOR_LOCAL_MODEL = {
+	label: SWITCH_TO_LOCAL_MODEL,
+	title: 'Local models only is on for this project. Your message is saved and will send as soon as you switch this chat to a local model or turn Local models only off.',
+} as const;
+
+/** The chat itself excludes cloud models, so only switching this chat can resume it. */
+export const THREAD_LOCAL_ONLY = 'thread_local_only';
+
+export const WAITING_FOR_THREAD_LOCAL_MODEL = {
+	label: SWITCH_TO_LOCAL_MODEL,
+	title: 'Local only is on for this chat. Your message is saved and will send as soon as you switch this chat to a local model.',
+} as const;
+
 /** The same hold, written while the thread has no model at all. */
 export const NO_MODEL_SELECTED = 'no_model_selected';
 

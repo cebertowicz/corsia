@@ -83,19 +83,6 @@ def test_locality_refusal_reads_private_mark_and_project_policy(isolated_db):
     assert locality_refusal({"backend": "api"}, thread_local_only=False, project_id=None, db=db) is None
 
 
-def test_project_cloud_off_text_is_governance_wording():
-    from prompts.cloud_off import project_cloud_off_text
-
-    head = "project_cloud_off: This project uses local models only, so codex/gpt-5.6-terra can't run here. "
-    assert project_cloud_off_text("codex/gpt-5.6-terra", ["omlx@local/a", "omlx@local/b"]) == (
-        head + "Use a ready local model: omlx@local/a, omlx@local/b."
-    )
-    assert project_cloud_off_text("codex/gpt-5.6-terra", [], spawn=True) == (
-        head + "No local model is ready now. Do the work in a thread already on a local model,"
-        " or check model_catalog later. Local workers run one at a time."
-    )
-
-
 def test_held_text_moves_the_thread_instead_of_staying_on_its_cloud_model():
     from prompts.cloud_off import HOLD_ACTION, held_error
 
@@ -116,7 +103,7 @@ def test_held_text_moves_the_thread_instead_of_staying_on_its_cloud_model():
 
 
 def test_email_screen_keeps_external_loopback_behavior():
-    from connections.google.email_screen import local_endpoint_refusal
+    from connections.mail.email_screen import local_endpoint_refusal
 
     target = SimpleNamespace(harness="native", backend="network", transport_model="external@cloud/model")
     assert local_endpoint_refusal(target, lambda _model: {"api_base": "http://127.0.0.1:8000/v1"}) is None

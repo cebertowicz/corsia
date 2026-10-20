@@ -43,14 +43,14 @@ async def _stop_process(process) -> None:
 class _ToolBoundary:
     """One fork's in-flight tool owner; no queue, retry, or foreground Turn."""
 
-    def __init__(self, process, context, cancel_event, *, on_usage=None, model="") -> None:
+    def __init__(self, process, context, cancel_event, *, on_usage=None) -> None:
         self.process, self.context, self.cancel_event = process, context, cancel_event
         self.changed = asyncio.Event()
         self.lock = asyncio.Lock()
         self.closed = self.truncated = False
         self.failure: str | None = None
-        self.on_usage, self.model = on_usage, model
-        self.calls: dict[str, dict] = {}
+        self.on_usage = on_usage
+        self.calls: dict[str, tuple[str | None, dict]] = {}
         self.claimed_tool_calls: set[str] = set()
 
     async def observe(self, record: dict[str, Any]) -> None:
@@ -71,9 +71,12 @@ class _ToolBoundary:
         if key and self.on_usage is not None:
             measured = from_anthropic(raw)
             row = measured.ledger_row() if measured is not None else unmeasured_ledger_row()
-            if self.calls.get(key) != row:
-                await self.on_usage(str(key), self.model, row)
-                self.calls[key] = row
+            # The model any record of this call reported; a changed one is a new
+            # observation, so the receipt store sees the disagreement.
+            observed = (self.context.model if key == self.context.message_id else None, row)
+            if self.calls.get(key) != observed:
+                await self.on_usage(str(key), *observed)
+                self.calls[key] = observed
 
     async def _ready(self, call_id: str) -> None:
         while not self.context.ready(call_id):
@@ -204,8 +207,7 @@ async def communicate_checkpoint(
 ) -> CCCheckpointOutput:
     """Capture buffered narrative on cutoff; explicit Stop still cancels the call."""
     context = CCCheckpointContext(request.target, 0)
-    boundary = _ToolBoundary(process, context, cancel_event,
-                             on_usage=request.on_usage, model=request.target.catalog_id)
+    boundary = _ToolBoundary(process, context, cancel_event, on_usage=request.on_usage)
     if on_tool_executor is not None:
         try:
             await on_tool_executor(boundary.execute)

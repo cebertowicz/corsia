@@ -11,9 +11,9 @@ commit point: a rolled-back write leaves the entry on its old value.
 
 Nothing here turns an entry's name into its value for a caller. What uses a
 key is fixed in code: :func:`resolve_builtin`, :func:`resolve_provider`,
-``connections.connected_accounts.resolve_google_credentials`` and
+``connections.connected_accounts.resolve_credentials`` and
 ``infra.key_store_servers.resolve_server`` are the only readers, and only a
-built-in, a cloud-provider, a Google account or a server entry has one. An entry an agent adds does nothing until code
+built-in, a cloud-provider, a connected account or a server entry has one. An entry an agent adds does nothing until code
 that uses it ships, and cannot claim a name code owns (``RESERVED_PREFIXES``).
 
 Errors raised here carry fixed text and never a value.
