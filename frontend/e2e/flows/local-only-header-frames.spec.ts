@@ -88,7 +88,10 @@ async function serve(page: Page, state: { current: FrameState }) {
 			return nativeFetch(input, init);
 		};
 	});
-	await page.route('**/api/threads/local-only-review/messages**', (route) => route.fulfill({ json: { messages: [], has_more: false, oldest_id: null, turn_summaries: {} } }));
+	// Login starts a first-page read for the disposable account's initial thread before
+	// the fixture replaces it. Keep every transcript read valid and empty so that stale
+	// load cannot leave the synthetic review transcript in its loading state.
+	await page.route('**/api/threads/*/messages**', (route) => route.fulfill({ json: { messages: [], has_more: false, oldest_id: null, turn_summaries: {} } }));
 	await page.route('**/api/threads/**/local-only**', async (route) => {
 		if (state.current.failSave) return route.abort();
 		if (state.current.pendingSave) await new Promise<void>((resolve) => { releasePendingSave = resolve; });
