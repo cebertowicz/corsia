@@ -22,6 +22,7 @@ from urllib.parse import urlencode
 import httpx
 
 from connections.app_reach import AppReach
+from connections.account_state import CONSENT_CANCELLED, PROVIDER_UNAVAILABLE, emit_lifecycle_event
 from connections.connected_accounts import Actor
 from connections.google import client
 from connections.google.client import STATUS_CONNECTED, TIMEOUT_SECONDS, TOKEN_URL, GoogleError, GoogleRequestFailed
@@ -123,26 +124,25 @@ read_client_file = client.read_client_file
 
 def _client_for(account_id: str | None, client_file: object, db) -> tuple[str, str] | None:  # type: ignore[no-untyped-def]
     """The client to sign in with: the file, else this row's saved client, else another row's."""
-    from connections.connected_accounts import google_accounts, google_client_material
+    from connections.connected_accounts import GOOGLE_PROVIDER, account_client, list_accounts
 
     if client_file:
         return client.read_client_file(client_file)
-    if account_id is not None and (own := google_client_material(account_id, db=db)):
-        return own
-    for account in google_accounts(db=db):
-        if material := google_client_material(str(account["id"]), db=db):
-            return material
+    saved = [account_id] if account_id is not None else []
+    for candidate in saved + [str(account["id"]) for account in list_accounts(GOOGLE_PROVIDER, db=db)]:
+        if material := account_client(candidate, db=db):
+            return material["client_id"], material["client_secret"]
     return None
 
 
 def _check_reconnect(account_id: str, db) -> None:  # type: ignore[no-untyped-def]
-    from connections.connected_accounts import ConnectedAccountError, get_account, resolve_google_credentials
+    from connections.connected_accounts import ConnectedAccountError, get_account, resolve_credentials
 
     try:
         account = get_account(account_id, db=db)
     except ConnectedAccountError:
         raise GoogleSignInError(UNKNOWN_ACCOUNT) from None
-    if account["state"] == STATUS_CONNECTED and resolve_google_credentials(account_id, db=db) is not None:
+    if account["state"] == STATUS_CONNECTED and resolve_credentials(account_id, db=db) is not None:
         raise GoogleSignInError(STILL_CONNECTED.format(address=account["address"]))
 
 
@@ -198,7 +198,9 @@ async def start_sign_in(
     account whose reach comes from ``adding_thread_id``'s scope or, for a
     person's session, the given ``reach``.
     """
-    return await run_in_db(_begin, client_file, account_id, actor, adding_thread_id, reach)
+    url, pending_account_id = await run_in_db(_begin, client_file, account_id, actor, adding_thread_id, reach)
+    emit_lifecycle_event("connect_started", pending_account_id, "google")
+    return url, pending_account_id
 
 
 def _take_pending(state: object) -> _Pending:
@@ -251,11 +253,9 @@ def not_covered_reply(account: dict, adding_thread_id: str | None, db) -> str | 
 
 
 def _add(pending: _Pending, email: str, provider_subject: str | None, conn) -> None:  # type: ignore[no-untyped-def]
-    from connections.connected_accounts import (
-        create_google_account, create_google_account_for_thread, google_accounts,
-    )
+    from connections.connected_accounts import GOOGLE_PROVIDER, create_account, create_account_for_thread, list_accounts
 
-    for account in google_accounts(db=conn):
+    for account in list_accounts(GOOGLE_PROVIDER, db=conn):
         if _same_identity(account, email, provider_subject):
             # These replies address the person, so the callback page shows them as they are.
             if account["state"] != STATUS_CONNECTED:
@@ -270,18 +270,17 @@ def _add(pending: _Pending, email: str, provider_subject: str | None, conn) -> N
         "account_id": pending.account_id, "state": STATUS_CONNECTED,
     }
     if pending.adding_thread_id is not None:
-        create_google_account_for_thread(email, actor_thread_id=pending.adding_thread_id, db=conn, **fields)
+        create_account_for_thread(GOOGLE_PROVIDER, email, actor_thread_id=pending.adding_thread_id, db=conn, **fields)
     else:
-        create_google_account(email, reach=pending.reach, db=conn, **fields)  # type: ignore[arg-type]
+        create_account(GOOGLE_PROVIDER, email, reach=pending.reach, db=conn, **fields)  # type: ignore[arg-type]
 
 
 def _store(
     pending: _Pending, refresh_token: str, email: str, scopes: list[str], provider_subject: str | None,
 ) -> None:
     """Write only this flow's row: create it (an add) or sign it in again, with its audit."""
-    from connections.connected_accounts import (
-        ConnectedAccountError, get_account, mark_signed_in, record_audit, store_google_credentials,
-    )
+    from connections.connected_accounts import ConnectedAccountError, get_account, store_credentials
+    from connections.account_state import mark_signed_in, record_audit
 
     bundle = {
         "client_id": pending.client_id, "client_secret": pending.client_secret,
@@ -303,7 +302,7 @@ def _store(
                     WRONG_ACCOUNT.format(signed_in=email, address=account["address"]),
                     browser_message=f"That's a different Google account. Go back to CORSIA and sign in again as {account['address']}.",
                 )
-        store_google_credentials(pending.account_id, bundle, db=conn)
+        store_credentials(pending.account_id, bundle, db=conn)
         if not pending.adding:
             mark_signed_in(
                 pending.account_id, address=email, provider_subject=provider_subject, actor=pending.actor, db=conn,
@@ -311,37 +310,52 @@ def _store(
         record_audit(pending.account_id, "connect" if pending.adding else "sign_in", pending.actor, db=conn)
 
 
+def _failure_cause(error: GoogleError) -> str:
+    return CONSENT_CANCELLED if isinstance(error, GoogleSignInError) else PROVIDER_UNAVAILABLE
+
+
 async def complete_sign_in(code: object, state: object) -> str:
     """Finish one pending sign-in from Google's redirect; returns the connected address."""
     pending = _take_pending(state)
-    if not isinstance(code, str) or not code:
-        raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
-            response = await http.post(TOKEN_URL, data={
-                "grant_type": "authorization_code", "code": code, "code_verifier": pending.verifier,
-                "client_id": pending.client_id, "client_secret": pending.client_secret,
-                "redirect_uri": pending.redirect_uri,
-            })
-    except httpx.HTTPError:
-        raise GoogleRequestFailed() from None
-    if response.status_code != 200:
-        raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
-    try:
-        grant = response.json()
-        refresh_token, access = grant["refresh_token"], grant["access_token"]
-        scopes = sorted(str(grant.get("scope", "")).split())
-        provider_subject = client.id_token_subject(grant.get("id_token"))
-        profile = await client.request_json("GET", PROFILE_URL, account_id=None, token=access)
-        email = str(profile["emailAddress"])
-        refresh_token = key_store.validated_value(refresh_token)
-    except GoogleError:
+        if not isinstance(code, str) or not code:
+            raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http:
+                response = await http.post(TOKEN_URL, data={
+                    "grant_type": "authorization_code", "code": code, "code_verifier": pending.verifier,
+                    "client_id": pending.client_id, "client_secret": pending.client_secret,
+                    "redirect_uri": pending.redirect_uri,
+                })
+        except httpx.HTTPError:
+            raise GoogleRequestFailed() from None
+        if response.status_code != 200:
+            raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED)
+        try:
+            grant = response.json()
+            refresh_token, access = grant["refresh_token"], grant["access_token"]
+            scopes = sorted(str(grant.get("scope", "")).split())
+            provider_subject = client.id_token_subject(grant.get("id_token"))
+            profile = await client.request_json("GET", PROFILE_URL, account_id=None, token=access)
+            email = str(profile["emailAddress"])
+            refresh_token = key_store.validated_value(refresh_token)
+        except GoogleError:
+            raise
+        except Exception:
+            raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED) from None
+        if not set(REQUIRED_SCOPES) <= set(scopes):
+            raise GoogleSignInError(MISSING_SCOPES, browser_message=BROWSER_MISSING_SCOPES)
+        await run_in_db(_store, pending, refresh_token, email, scopes, provider_subject)
+        from events.connectors.mail_poller import schedule_account
+
+        schedule_account(pending.account_id)
+    except GoogleError as error:
+        emit_lifecycle_event("connect_failed", pending.account_id, "google", cause=_failure_cause(error))
         raise
     except Exception:
-        raise GoogleSignInError(DENIED, browser_message=BROWSER_DENIED) from None
-    if not set(REQUIRED_SCOPES) <= set(scopes):
-        raise GoogleSignInError(MISSING_SCOPES, browser_message=BROWSER_MISSING_SCOPES)
-    await run_in_db(_store, pending, refresh_token, email, scopes, provider_subject)
+        emit_lifecycle_event("connect_failed", pending.account_id, "google", cause=PROVIDER_UNAVAILABLE)
+        raise
+    emit_lifecycle_event("connect_succeeded", pending.account_id, "google")
     return email
 
 
@@ -350,22 +364,21 @@ def accounts_status(thread_id: str | None = None) -> dict:
     (``thread_id`` None), only those that reach the calling agent's thread otherwise. Both
     ``/api/google/status`` and the ``google_status`` tool answer from here."""
     # Imported here: the poller module imports this one.
-    from connections.connected_accounts import google_scopes, resolve_google_credentials
-    from connections.google.accounts import visible_google_accounts
-    from events.connectors.gmail_poller import poller_status
+    from connections.connected_accounts import GOOGLE_PROVIDER, granted_scopes, resolve_credentials, visible_accounts
+    from events.connectors.mail_poller import poller_status
 
     db = get_db()
     try:
         rows = []
-        for account in visible_google_accounts(thread_id, db=db):
+        for account in visible_accounts(thread_id, db=db, provider=GOOGLE_PROVIDER):
             account_id = str(account["id"])
             status = str(account["state"])
-            if status == STATUS_CONNECTED and resolve_google_credentials(account_id, db=db) is None:
+            if status == STATUS_CONNECTED and resolve_credentials(account_id, db=db) is None:
                 status = client.STATUS_NEEDS_SIGN_IN
             poller = poller_status(account_id)
             row = {
                 "account_id": account_id, "email": account["address"], "status": status,
-                "scopes": google_scopes(account_id, db=db), "reach": account["reach"],
+                "scopes": granted_scopes(account_id, db=db), "reach": account["reach"],
                 "poller_state": poller["state"], "last_success_at": poller["last_success_at"],
             }
             if status == client.STATUS_NEEDS_SIGN_IN:

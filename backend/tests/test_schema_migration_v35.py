@@ -30,7 +30,7 @@ def _insert(db, delivery_id: str, object_key: str | None) -> None:
 def test_fresh_schema_has_unique_object_key():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 131
+        assert SCHEMA_VERSION == 132
         assert _has_object_key(db)
         _insert(db, "a", None)
         _insert(db, "b", None)

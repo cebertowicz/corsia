@@ -70,13 +70,13 @@ def _agent_thread_id(user: dict, missing_thread_message: str) -> str:
         db.close()
 
 
-def _visible(account_id: str, thread_id: str) -> bool:
-    from connections.google.accounts import visible_google_account
+def _visible(account_id: str, thread_id: str | None) -> bool:
+    from connections.connected_accounts import GOOGLE_PROVIDER, visible_account
     from infra.database import get_db
 
     db = get_db()
     try:
-        return visible_google_account(account_id, thread_id, db=db) is not None
+        return visible_account(account_id, thread_id, db=db, provider=GOOGLE_PROVIDER) is not None
     finally:
         db.close()
 
@@ -95,6 +95,8 @@ async def connect(request: Request, user: dict = Depends(require_user)) -> dict[
         body = {}
     account_id = _body_field(body, "account_id")
     person = is_person_session(user)
+    if account_id is not None and person and not await run_in_db(_visible, account_id, None):
+        raise HTTPException(404, oauth.UNKNOWN_ACCOUNT)
     if account_id is not None and not person:
         thread_id = await run_in_db(
             _agent_thread_id, user,

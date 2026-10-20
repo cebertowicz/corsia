@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 from connections.google import client as google_client
 from connections.google.client import GoogleError, GoogleRequestFailed
-from connections.google.email_document import DraftRefused, reply_target_label, signature_text
+from connections.mail.email_document import DraftRefused, reply_target_label, signature_text
 
 GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
 SEND_AS_URL = f"{GMAIL}/settings/sendAs"

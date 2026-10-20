@@ -20,7 +20,8 @@ from auth_fixtures import OWNER_SESSION_TOKEN
 from fastapi import FastAPI
 
 from api import google as google_api
-from connections.connected_accounts import google_accounts, resolve_google_credentials
+from connections.connected_accounts import GOOGLE_PROVIDER, MICROSOFT_PROVIDER, create_account, list_accounts, resolve_credentials
+from connections.app_reach import AppReach
 from connections.google import client as google_client
 from connections.google import oauth
 from infra import key_store
@@ -149,7 +150,7 @@ async def _connect(google: FakeGoogle, conductor: str, client_file: str | None) 
 def _accounts() -> list[dict]:
     db = get_db()
     try:
-        return google_accounts(db=db)
+        return list_accounts(GOOGLE_PROVIDER, db=db)
     finally:
         db.close()
 
@@ -167,7 +168,7 @@ def _credentials() -> dict | None:
         return None
     db = get_db()
     try:
-        return resolve_google_credentials(str(account["id"]), db=db)
+        return resolve_credentials(str(account["id"]), db=db)
     finally:
         db.close()
 
@@ -339,9 +340,9 @@ async def test_existing_connected_account_returns_the_b_g1_reply_for_each_reach(
         db.commit()
     finally:
         db.close()
-    from connections.google.account_actions import change_google_account_reach
+    from connections.account_actions import change_account_reach
 
-    await run_in_db(change_google_account_reach, account_id, reach, actor=("person", "person"))
+    await run_in_db(change_account_reach, account_id, reach, actor=("person", "person"))
     caller = conductor
     if reach["mode"] == "selected":
         db = get_db()
@@ -373,7 +374,7 @@ async def test_existing_connected_account_reply_names_when_the_calling_scope_is_
         db.commit()
     finally:
         db.close()
-    from connections.google.account_actions import change_google_account_reach
+    from connections.account_actions import change_account_reach
 
     workspace_reply = f"{EMAIL} is already connected for all your projects. To change where it works, use Where it works… on its row in Connected apps."
     needs_sign_in_reply = f"{EMAIL} is already connected, but it needs you to sign in again. Use Sign in on its row in Connected apps."
@@ -388,7 +389,7 @@ async def test_existing_connected_account_reply_names_when_the_calling_scope_is_
     assert (await _account_reply(account_id, launch_agent))[0] == workspace_reply
 
     await run_in_db(
-        change_google_account_reach,
+        change_account_reach,
         account_id,
         {"mode": "selected", "project_ids": ["garden"], "outside_projects": False},
         actor=("person", "person"),
@@ -557,9 +558,9 @@ async def test_agent_routes_filter_status_and_refuse_an_unreachable_reconnect(go
         db.commit()
     finally:
         db.close()
-    from connections.google.account_actions import change_google_account_reach
+    from connections.account_actions import change_account_reach
     await run_in_db(
-        change_google_account_reach, account_id,
+        change_account_reach, account_id,
         {"mode": "selected", "project_ids": ["visible"], "outside_projects": False}, actor=("person", "person"),
     )
     async with _http() as http:
@@ -588,7 +589,7 @@ async def test_agent_routes_filter_status_and_refuse_an_unreachable_reconnect(go
 def _reach_cast(conductor: str) -> tuple[str, dict[str, str]]:
     """Projects A and B, A's conductor, and one account per reach: B only, A only, Only CORSIA, All projects."""
     from connections.app_reach import AppReach
-    from connections.connected_accounts import create_google_account
+    from connections.connected_accounts import GOOGLE_PROVIDER, create_account
     from google_account_helpers import make_only_corsia
     from infra.conductor import set_project_conductor
 
@@ -609,7 +610,7 @@ def _reach_cast(conductor: str) -> tuple[str, dict[str, str]]:
             "everywhere@example.com": AppReach(mode="all", project_ids=frozenset(), outside_projects=False),
         }
         ids = {
-            address: str(create_google_account(
+            address: str(create_account(GOOGLE_PROVIDER,
                 address, reach=reach, created_by=("system", "test"), state="connected", db=db,
             )["id"])
             for address, reach in reaches.items()
@@ -680,7 +681,7 @@ async def test_only_corsia_reaches_the_corsia_agent_and_no_project_conductor(goo
 
 async def test_resolver_uses_the_only_reachable_account_and_asks_when_two_reach(google, conductor):
     from connections.app_reach import AppReach
-    from connections.google.account_actions import change_google_account_reach
+    from connections.account_actions import change_account_reach
     from connections.google.accounts import CHOOSE, resolve_for_thread
 
     _conductor_a, ids = _reach_cast(conductor)
@@ -691,7 +692,7 @@ async def test_resolver_uses_the_only_reachable_account_and_asks_when_two_reach(
     finally:
         db.close()
 
-    change_google_account_reach(
+    change_account_reach(
         ids["everywhere@example.com"],
         AppReach(mode="selected", project_ids=frozenset({"a"}), outside_projects=False),
         actor=("person", "steve"),
@@ -732,9 +733,9 @@ async def test_the_mail_and_calendar_resolver_answers_an_out_of_reach_account_li
     finally:
         db.close()
     from connections.app_reach import AppReach
-    from connections.google.account_actions import change_google_account_reach
+    from connections.account_actions import change_account_reach
 
-    change_google_account_reach(
+    change_account_reach(
         ids["everywhere@example.com"], AppReach(mode="selected", project_ids=frozenset({"a"}), outside_projects=False),
         actor=("person", "person"),
     )
@@ -745,13 +746,22 @@ async def test_the_mail_and_calendar_resolver_answers_an_out_of_reach_account_li
 
 async def test_person_google_routes_remain_unfiltered(google, conductor, client_file):
     account_id = await _connect(google, conductor, client_file)
+    microsoft_id = str(create_account(
+        MICROSOFT_PROVIDER, "wrong-provider@contoso.example",
+        reach=AppReach(mode="all", project_ids=frozenset(), outside_projects=False),
+        created_by=("person", "person"), provider_subject="tenant:object", account_kind="work",
+    )["id"])
     async with _http() as http:
         status = await http.get("/api/google/status", headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"})
         reconnect = await http.post(
             "/api/google/connect", headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"}, json={"account_id": account_id},
         )
+        wrong_provider = await http.post(
+            "/api/google/connect", headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"}, json={"account_id": microsoft_id},
+        )
     assert [account["account_id"] for account in status.json()["accounts"]] == [account_id]
     assert reconnect.status_code == 400 and "already connected" in reconnect.text
+    assert wrong_provider.status_code == 404 and wrong_provider.json()["detail"] == oauth.UNKNOWN_ACCOUNT
 
 
 def test_concurrent_begins_never_exceed_the_pending_limit(monkeypatch):

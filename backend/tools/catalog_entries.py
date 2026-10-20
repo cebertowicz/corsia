@@ -1,8 +1,4 @@
-"""The tool catalog's data: one declaration per registry tool.
-
-``tools.catalog`` is the public import path; it re-exports these names with
-the packs and lookups that read them.
-"""
+"""Tool-catalog declarations, re-exported through ``tools.catalog``."""
 
 from __future__ import annotations
 
@@ -11,6 +7,8 @@ from tools.catalog_entry import ToolCatalogEntry
 from tools.catalog_host_entries import HOST_ACCESS_CATALOG_ENTRIES
 from tools.catalog_library_entries import LIBRARY_CATALOG_ENTRIES
 from tools.catalog_measurement_entries import MEASUREMENT_CATALOG_ENTRIES
+from tools.catalog_microsoft_entries import MICROSOFT_CATALOG_ENTRIES
+
 _Entry = ToolCatalogEntry
 
 POST_UPDATE_SUMMARY = "Leave the user a marked update they see in Focus mode"
@@ -257,6 +255,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Read the Google sign-in's email, scopes and status",
         activity="Checking Google sign-in",
     ),
+
     "email_draft": _Entry(
         "google", status="active", authority="conductor-api",
         summary="Save an email as a draft document for the person to review; nothing is sent",
@@ -395,6 +394,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Releasing artifact",
     ),
     **HOST_ACCESS_CATALOG_ENTRIES,
+    **MICROSOFT_CATALOG_ENTRIES,
     **LIBRARY_CATALOG_ENTRIES,
     **CONSENT_CATALOG_ENTRIES,
 }

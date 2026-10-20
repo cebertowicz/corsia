@@ -96,14 +96,14 @@ async def test_send_recovery_is_invite_specific_for_lost_stale_and_sending_draft
         return fn(*args)
 
     monkeypatch.setattr(google_calendar, "run_in_db", run_direct)
-    monkeypatch.setattr(google_calendar, "_open_draft", lambda *_args: None)
+    monkeypatch.setattr(google_calendar, "open_draft", lambda *_args: None)
     tool = CalendarSendInviteTool()
     assert await tool._prepare("thread", "lost", "revision") == f"Error: {google_calendar.NO_OPEN_DRAFT}"
 
-    monkeypatch.setattr(google_calendar, "_open_draft", lambda *_args: {"state": "sending"})
+    monkeypatch.setattr(google_calendar, "open_draft", lambda *_args: {"state": "sending"})
     assert await tool._prepare("thread", "sending", "revision") == f"Error: {google_calendar.STILL_SENDING}"
 
-    monkeypatch.setattr(google_calendar, "_open_draft", lambda *_args: {"state": "open"})
+    monkeypatch.setattr(google_calendar, "open_draft", lambda *_args: {"state": "open"})
 
     async def stale(*_args):
         return Refusal(action_gate.STALE_REVISION)
@@ -279,16 +279,15 @@ def test_attendee_emails_rejects_non_plain_addresses(value):
 
 @pytest.mark.asyncio
 async def test_draft_refuses_to_record_changed_readback(mail, monkeypatch):
-    monkeypatch.setattr(google_calendar, "_read_document", lambda _relative: b"changed")
+    from tools import reviewed_drafts
+
+    monkeypatch.setattr(reviewed_drafts, "_read_bytes", lambda _relative: b"changed")
     before = get_db().execute("SELECT COUNT(*) FROM action_drafts").fetchone()[0]
     output = await CalendarDraftInviteTool().execute(
         _thread_id=mail.thread, account_id=mail.account, title="Planning", start="2026-10-15T09:00:00-07:00",
         end="2026-10-15T10:00:00-07:00", attendees=["sam@example.com"], description="Agenda",
     )
-    assert output == (
-        "Error: The invite draft changed while it was being saved, so it is not recorded. "
-        "Save it again with calendar_draft_invite."
-    )
+    assert output == "Error: The draft changed while it was being saved, so it is not recorded. Save it again."
     assert get_db().execute("SELECT COUNT(*) FROM action_drafts").fetchone()[0] == before
 
 
