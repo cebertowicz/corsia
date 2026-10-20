@@ -42,7 +42,7 @@ def runs(version: str, corrections: int | list[int], *, count: int = 20, group=G
     made = []
     for index in range(count):
         number = next(_serial)
-        facts = tuple(CorrectionFact(f"m{number}-{k}", _at(ended - lag), counter, True)
+        facts = tuple(CorrectionFact("message", f"m{number}-{k}", _at(ended - lag), counter, True)
                       for k in range(per_run[index % len(per_run)]))
         # The test KPI settles in 0 days, so its rows land when the run ends.
         rows = {KPI.name: tuple(KpiRow(part, label, value, _at(ended)) for part, label, value in (kpi or []))}
@@ -98,6 +98,19 @@ def test_not_comparable_no_shared_groups() -> None:
 
 def test_not_comparable_counter_changed() -> None:
     call = corrections_call(runs("v2", 1, counter="c2"), runs("v1", 1, counter="c1"))
+    assert (call.call, call.reason) == ("not_comparable", "counter_changed")
+
+
+def test_equal_ids_in_distinct_correction_source_namespaces_do_not_share_a_counter() -> None:
+    run = replace(
+        runs("v2", 0, count=1)[0],
+        corrections=(
+            CorrectionFact("message", "same-id", _at(9), "c1", True),
+            CorrectionFact("doc_comment", "same-id", _at(9), "c2", True),
+        ),
+    )
+
+    call = corrections_call([run], [], minimum=0)
     assert (call.call, call.reason) == ("not_comparable", "counter_changed")
 
 
