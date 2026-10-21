@@ -417,7 +417,7 @@ def test_drain_settles_a_pending_case_with_a_mocked_local_adapter(tmp_path: Path
     assert not is_pending(db, fact)
 
 
-def test_committed_save_drain_uses_the_admitted_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_ready_free_save_starts_the_admitted_drain_without_another_trigger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from core.lesson_carry_in import _drain_committed_facts
     from core.lesson_files import render_trial
     from core.lesson_trials import Trial
@@ -448,6 +448,74 @@ def test_committed_save_drain_uses_the_admitted_adapter(tmp_path: Path, monkeypa
 
     assert users == ["user"]
     assert db.execute("SELECT event_name FROM outcome_events WHERE event_name='learning_loop.carry_in_result'").fetchone()
+
+
+def test_committed_save_returns_before_its_background_drain_runs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from core.lesson_carry_in import record_committed_save
+
+    started: list[object] = []
+
+    class DeferredThread:
+        def __init__(self, *, target, args, daemon, name):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+            self.name = name
+
+        def start(self):
+            started.append(self)
+
+    monkeypatch.setattr("core.lesson_carry_in_drain.threading.Thread", DeferredThread)
+    record_committed_save(tmp_path, [tmp_path / "context" / "rule.md"], "a" * 40)
+
+    assert len(started) == 1
+    assert started[0].name == "corsia-carry-in"
+
+
+def test_busy_save_stays_pending_until_the_existing_pending_drain_trigger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from core.lesson_carry_in import CarryInFact, drain_facts, is_pending, record_pending
+    from core.lesson_carry_in_drain import _drain_pending
+    from core.lesson_files import render_trial
+    from core.lesson_trials import Trial
+
+    workspace = tmp_path / "workspace"
+    source = workspace / "case.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(render_trial(
+        lesson_id="12345678-1234-5678-1234-567812345678", owner="owner", name="lesson",
+        description="A carry-in case.", text="Use it.",
+        trial=Trial("hypothesis", "2030-01-01"), source_refs=[{"kind": "turn", "reference": "turn"}],
+        target_file="context/rule.md", case={"what_happened": "Missed.", "right_call": "Read.",
+        "does_not_apply": "Draft.", "correction_subject": "message:1", "actions": ACTIONS},
+    ))
+    fact = CarryInFact("12345678-1234-5678-1234-567812345678", "owner", "a" * 40, "context/rule.md", "case.md#corsia.lesson.case")
+    db = _event_db()
+    passed = [_call("read_file", {"path": "context/rule.md"}), _call("plan_update", {"operation": "mark_done"})]
+
+    monkeypatch.setattr("core.lesson_carry_in._target_snapshot", lambda *_args: ("target-hash", None))
+    assert record_pending(db, fact)
+    assert [run.state for run in drain_facts(db, workspace, [fact], Adapter([], is_ready=False))] == ["pending"]
+    assert is_pending(db, fact)
+
+    class ReadyAdapter(Adapter):
+        def __init__(self, *_args):
+            super().__init__([passed, passed, passed])
+
+    class NoCloseDb:
+        def __getattr__(self, name):
+            return getattr(db, name)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("core.lesson_carry_in_drain._pending_facts", lambda _db: [fact])
+    monkeypatch.setattr("core.lesson_carry_in_drain.LocalTraceAdapter", ReadyAdapter)
+    monkeypatch.setattr("core.lesson_carry_in_drain._fresh_scope", lambda *_args: None)
+    monkeypatch.setattr("infra.database.get_db", lambda: NoCloseDb())
+    monkeypatch.setattr("core.lesson_carry_in_contract.CASES_PER_EDIT_CAP", 1)
+    _drain_pending(workspace)
+
+    assert not is_pending(db, fact)
 
 
 def test_failed_thread_target_does_not_create_an_owner_failure_surface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
