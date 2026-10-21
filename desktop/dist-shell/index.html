@@ -282,6 +282,7 @@
 				actions.hidden = true;
 				backgroundApproval.hidden = true;
 				quit.hidden = true;
+				saveReport.hidden = true;
 			}
 
 			function showExistingInstall(workDir) {
@@ -298,6 +299,8 @@
 				backgroundApproval.hidden = true;
 				failureLoginItems.hidden = true;
 				quit.hidden = false;
+				saveReport.hidden = true;
+				retry.hidden = false;
 				retry.textContent = 'Use it';
 				actions.hidden = false;
 				retry.disabled = false;
@@ -309,6 +312,7 @@
 			function showAdoptionProgress(progress) {
 				if (!progress) return;
 				line.hidden = true;
+				saveReport.hidden = true;
 				// A Quit that is waiting on the switch says so, for the three phases it waits through.
 				note.textContent = progress.quit_pending === true ? ADOPTION_COPY.quitPending : '';
 				note.hidden = !note.textContent;
@@ -365,6 +369,8 @@
 				spinner.hidden = true;
 				failureLoginItems.hidden = true;
 				quit.hidden = false;
+				saveReport.hidden = true;
+				retry.hidden = false;
 				retry.textContent = kind === 'check' ? ADOPTION_COPY.switched.button : recovery ? recovery.button : 'Try again';
 				actions.hidden = false;
 				try { logPath.textContent = await invoke('get_service_log_path'); } catch { logPath.textContent = 'Service log location unavailable'; }
@@ -405,6 +411,7 @@
 				retryAction = quitting ? null : again;
 				setUpLocal.hidden = true;
 				saveReport.hidden = quitting;
+				retry.hidden = false;
 				note.hidden = true;
 				details.hidden = true;
 				retry.textContent = 'Retry';
@@ -453,6 +460,7 @@
 				log.hidden = true;
 				spinner.hidden = true;
 				actions.hidden = true;
+				saveReport.hidden = true;
 				status.textContent = 'Keep CORSIA running';
 				backgroundApproval.hidden = false;
 				approvalCheck.dataset.state = 'off';
@@ -504,7 +512,7 @@
 				} else if (startup.state === 'disk_image') {
 					status.textContent = 'Move CORSIA to Applications';
 					line.textContent = 'Drag CORSIA into your Applications folder, then open it from there. It can’t update itself from the disk image.';
-					line.hidden = false; spinner.hidden = true; retry.textContent = 'Check again'; retryAction = start; actions.hidden = false;
+					line.hidden = false; spinner.hidden = true; retry.hidden = true; quit.hidden = false; saveReport.hidden = true; actions.hidden = false;
 				} else {
 					await showBackgroundApproval();
 				}
@@ -593,6 +601,8 @@
 				log.hidden = true;
 				failureLoginItems.hidden = true;
 				spinner.hidden = state.kind !== 'connecting';
+				saveReport.hidden = true;
+				retry.hidden = false;
 				setUpLocal.hidden = !['unreachable', 'incompatible', 'too_old', 'key_changed'].includes(state.kind);
 				if (state.kind === 'connecting') {
 					status.textContent = `Connecting to ${state.name}…`;
@@ -628,7 +638,14 @@
 			failureLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			quit.addEventListener('click', () => invoke?.('quit_app'));
 			retry.addEventListener('click', retryFailure);
-			saveReport.addEventListener('click', () => invoke?.('save_setup_report'));
+			saveReport.addEventListener('click', async () => {
+				try {
+					await invoke?.('save_setup_report');
+				} catch {
+					line.textContent = 'CORSIA couldn’t save the report. Try again.';
+					line.hidden = false;
+				}
+			});
 			setUpLocal.addEventListener('click', setUpThisComputer);
 			if (window.location.hash === '#background-approval') showBackgroundApproval();
 			if (window.location.hash === '#quit-failure') showFailure(undefined, true);

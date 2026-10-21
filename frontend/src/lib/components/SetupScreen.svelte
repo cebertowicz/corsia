@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
 	import { get } from 'svelte/store';
-	import { Button, Message } from '$lib/components/ui';
+	import { Button } from '$lib/components/ui';
 	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
 	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
@@ -62,9 +62,14 @@
 		if (code === 'progress_save') return 'CORSIA couldn’t save setup progress. Try again.';
 		return 'CORSIA couldn’t finish model setup. Try again.';
 	}
+	function plainAccountError(detail: unknown): string | null {
+		if (typeof detail !== 'string') return null;
+		const message = detail.trim();
+		return /^[A-Z][^<>\n]{0,300}[.!?]$/.test(message) ? message : null;
+	}
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'account' | 'folder' | 'models' | 'hard-stop' | 'error' | 'connect';
-	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; app_location?: string; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
+	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
 	const classifier = createSetupClassifier(), localPick = createSetupLocalPick(), remote = createSetupRemote();
 	let page = $state<Page>(untrack(() => startConnect) ? 'connect' : 'checking');
 	// Below 1280 wide, Welcome is its own screen before the account form; from 1280 it sits beside the form instead.
@@ -73,7 +78,7 @@
 	let status = $state<Status>({}), statusError = $state(''), reportError = $state('');
 	let name = $state(''), username = $state(''), password = $state(''), confirmation = $state(''), email = $state('');
 	let folder = $state('~/CORSIA'), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
-	let accountBusy = $state(false), accountError = $state(''), accountUsernameError = $state(''), accountExists = $state(false), confirmationError = $state('');
+	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
 	let localStartError = $state<'other' | 'other_omlx' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false), otherQuestion = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
@@ -87,7 +92,7 @@
 	const tested = $derived($testedProviders.map((source) => ({ source })));
 	const best = $derived(bestSetupModel(catalog, tested));
 	const canFinish = $derived(Boolean(best));
-	const usernameError = $derived(accountUsernameError || (username && !/^[a-z0-9_-]{1,32}$/.test(username) ? 'Use up to 32 lowercase letters, numbers, dashes or underscores.' : ''));
+	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? 'Use up to 32 lowercase letters, numbers, dashes or underscores.' : '');
 	const accountValid = $derived(Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password));
 	const steps = $derived<SetupStep[]>(page === 'connect' ? remote.steps : [
 		{ label: 'Your account', icon: 'person', state: ['checking', 'account', 'hard-stop'].includes(page) ? 'current' : 'done' },
@@ -127,10 +132,7 @@
 		if (page === 'connect') return remote.view;
 		if (page === 'checking') return { title: 'Checking this computer' };
 		if (page === 'error') return { title: 'CORSIA couldn’t start', lede: reportError || statusError || 'Something went wrong while starting. Try again, or save a report to send.', primary: { label: 'Retry' }, onPrimary: resume ? resumeSetup : readStatus };
-		if (page === 'hard-stop') {
-			if (status.macos_supported === false) return { title: 'Update macOS to open CORSIA', lede: 'CORSIA needs macOS 15 or later. Update in System Settings › General › Software Update, then open CORSIA again.' };
-			return { title: 'Move CORSIA to Applications', lede: 'Drag CORSIA into your Applications folder, then open it from there. It can’t update itself from the disk image.' };
-		}
+		if (page === 'hard-stop') return { title: 'Update macOS to open CORSIA', lede: 'CORSIA needs macOS 15 or later. Update in System Settings › General › Software Update, then open CORSIA again.' };
 		if (screen === 'welcome') return { title: WELCOME_TITLE, mark: true, primary: { label: 'Continue' }, onPrimary: () => { welcomeSeen = true; } };
 		if (page === 'account') return { title: $isSetupWide ? WELCOME_TITLE : 'Create your account', lede: $isSetupWide ? WELCOME_ACCOUNT_LINE : undefined, mark: $isSetupWide, primary: { label: 'Continue', disabled: !accountValid }, onPrimary: toFolder };
 		if (page === 'folder') return { title: 'Choose your work folder', lede: 'Your projects and files live here.', primary: { label: 'Continue', loading: accountBusy, disabled: accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'picker_failed' }, onPrimary: createAccount };
@@ -148,7 +150,7 @@
 			status = await response.json(); folder = status.work_folder || folder;
 			if (status.required_username) username = status.required_username;
 			if (status.classifier) classifier.accept(status.classifier);
-			if (status.macos_supported === false || status.app_location === 'disk_image') { page = 'hard-stop'; return; }
+			if (status.macos_supported === false) { page = 'hard-stop'; return; }
 			page = 'account'; void classifier.start();
 			if (eligible) { await localPick.start(); await startLocal(); await readLocalProgress(); }
 		} catch { statusError = 'Something went wrong while starting. Retry, or save a report to send.'; page = 'error'; }
@@ -212,14 +214,14 @@
 	}
 	async function createAccount() {
 		if (!accountValid || accountBusy) return;
-		accountBusy = true; accountError = ''; accountUsernameError = '';
+		accountBusy = true; accountError = '';
 		try {
 			if (folderChanged) { await applyWorkFolder(folder); folderChanged = false; }
 			const response = await fetch('/api/setup/first-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null }) });
 			if (response.status === 409) { accountExists = true; accountError = 'This computer already has a CORSIA account. Sign in instead.'; page = 'account'; return; }
 			const result = await response.json().catch(() => null);
 			if (!response.ok) {
-				if (response.status === 422) { page = 'account'; accountUsernameError = "That username isn't available. Choose another."; }
+				if (response.status === 422) { page = 'account'; accountError = plainAccountError(result?.detail) ?? 'Couldn’t create your account. Retry.'; }
 				else accountError = 'Couldn’t create your account. Retry.';
 				return;
 			}
@@ -310,5 +312,5 @@
 	.other-omlx { margin: var(--space-4) var(--space-4); color: var(--text-secondary); }
 	h2 { font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-primary); }
 	p { font-size: var(--text-footnote); line-height: var(--lh-normal); }
-	.setup-error { color: var(--red-text); margin: var(--space-2) var(--space-4); }
+	.setup-error { margin: var(--space-2) var(--space-4); }
 </style>

@@ -141,7 +141,6 @@ def test_status_exposes_only_screen_facts(client, monkeypatch):
         "macos_supported": True,
         "ram_tier": "eligible",
         "free_disk_gb": 123.0,
-        "app_location": "applications",
         "local_eligible": True,
         "work_folder": "~/corsia",
         "required_username": None,
@@ -409,19 +408,6 @@ def test_macos_support_uses_the_approved_major_version_floor(monkeypatch, system
     monkeypatch.setattr(setup_api.platform, "mac_ver", lambda: (version, ("", "", ""), ""))
     assert setup_api._macos_supported() is expected
 
-
-@pytest.mark.parametrize(
-    ("executable", "expected"),
-    [
-        (Path("/Applications/CORSIA.app/Contents/MacOS/corsia"), "applications"),
-        (Path("/Volumes/CORSIA/CORSIA.app/Contents/MacOS/corsia"), "disk_image"),
-        (Path("/private/var/folders/x/AppTranslocation/id/d/CORSIA.app/Contents/MacOS/corsia"), "disk_image"),
-        (Path("/private/Applications/cache/corsia"), "other"),
-        (Path("/opt/corsia/bin/corsia"), "other"),
-    ],
-)
-def test_app_location_is_classified_without_returning_a_path(executable, expected):
-    assert setup_api._app_location_class(executable) == expected
 
 
 def test_work_folder_display_hides_the_home_name(monkeypatch, tmp_path):

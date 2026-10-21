@@ -14,7 +14,6 @@ import logging
 import os
 import platform
 import shutil
-import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, Request, Response
@@ -99,19 +98,6 @@ def _macos_supported() -> bool:
         return False
 
 
-def _app_location_class(executable: Path | None = None) -> str:
-    """Expose a coarse package class, never the executable's path."""
-    parts = (executable or Path(sys.executable)).parts
-    if "AppTranslocation" in parts:
-        return "disk_image"
-    if len(parts) > 1 and parts[1] == "Volumes":
-        return "disk_image"
-    try:
-        app_index = parts.index("CORSIA.app")
-    except ValueError:
-        return "other"
-    return "applications" if app_index > 0 and parts[app_index - 1] == "Applications" else "other"
-
 
 def _work_folder_display(workspace: Path) -> str:
     """Return a home-abbreviated workspace label with no account name leakage."""
@@ -173,7 +159,6 @@ def _setup_status() -> dict:
         "macos_supported": macos_supported,
         "ram_tier": "eligible" if memory_ok else "below_minimum",
         "free_disk_gb": free_disk_gb,
-        "app_location": _app_location_class(),
         "local_eligible": apple_silicon and macos_supported and memory_ok,
         "work_folder": _work_folder_display(config.WORKSPACE),
         "required_username": _required_username(),

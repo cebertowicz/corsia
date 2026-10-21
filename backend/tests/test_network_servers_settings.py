@@ -162,7 +162,7 @@ def test_lifecycle_start_dispatches_to_provider_connector(client, monkeypatch):
             "port": 5200,
             "message": "oMLX started on 127.0.0.1:5200 (pid 12345)",
         }),
-    ):
+    ) as start_server:
         r = client.post(
             f"/api/settings/network-servers/ns-test/lifecycle/start?token={_TOKEN}"
         )
@@ -170,6 +170,7 @@ def test_lifecycle_start_dispatches_to_provider_connector(client, monkeypatch):
     body = r.json()
     assert body["ok"] is True
     assert body["pid"] == 12345
+    start_server.assert_awaited_once_with({"server_id": "ns-test"}, health_timeout_s=30.0)
 
 
 def test_lifecycle_stop_dispatches_to_provider_connector(client, monkeypatch):

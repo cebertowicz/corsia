@@ -51,7 +51,7 @@
 		actionError = '';
 		const base = endpointUrl.trim();
 		if (!/^https?:\/\/[\w.-]+/i.test(base)) {
-			actionError = 'Enter the full endpoint URL, including https://';
+			actionError = 'Enter the full web address, including https://';
 			return;
 		}
 		// The URL is the endpoint on this path: host and port are not sent, and the
@@ -152,7 +152,7 @@
 			<input placeholder="https://host.example.com/compatible-mode/v1" bind:value={endpointUrl} />
 		</Field>
 		<Field label="API key" hint="Stored on this computer only. Never shown again.">
-			<input type="password" placeholder="(leave empty for a keyless endpoint)" bind:value={endpointKey} />
+			<input type="password" placeholder="(leave empty when the web address needs no key)" bind:value={endpointKey} />
 		</Field>
 		<button type="button" class="more-options" aria-expanded={showEndpointOptions} onclick={() => showEndpointOptions = !showEndpointOptions}>
 			{showEndpointOptions ? 'Fewer options' : 'More options'}
@@ -171,7 +171,7 @@
 				<input placeholder="(optional — uses the address)" bind:value={endpointName} />
 			</Field>
 		{/if}
-		{#if actionError}<p class="field-error">{actionError}</p>{/if}
+		{#if actionError}<p class="setup-error">{actionError}</p>{/if}
 
 		<div class="actions">
 			<Button variant="ghost" disabled={busy} onclick={() => mode = 'menu'}>Back</Button>
@@ -196,7 +196,7 @@
 		<Field label="Name">
 			<input placeholder="(optional — uses the address)" bind:value={remoteName} />
 		</Field>
-		{#if actionError}<p class="field-error">{actionError}</p>{/if}
+		{#if actionError}<p class="setup-error">{actionError}</p>{/if}
 
 		<div class="actions">
 			<Button variant="ghost" disabled={busy} onclick={() => mode = 'menu'}>Back</Button>
@@ -287,7 +287,7 @@
 		font-size: var(--text-footnote);
 		cursor: pointer;
 	}
-	.field-error { margin: var(--space-2) 0 0; color: var(--red-text); font-size: var(--text-footnote); line-height: var(--lh-normal); }
+	.setup-error { margin: var(--space-2) 0 0; }
 	.actions {
 		display: flex; gap: 8px; margin-top: 18px; align-items: center; justify-content: flex-end;
 	}
