@@ -6,7 +6,7 @@
 </script>
 
 <div class="welcome">
-	<img class="mark" src="/icons/corsia-mark.svg" alt="CORSIA" />
+	{#if accountLine}<img class="mark" src="/icons/corsia-mark.svg" alt="CORSIA" />{/if}
 	{#each WELCOME_LINES as line}<p class="line">{line}</p>{/each}
 	<ul>
 		{#each WELCOME_ROWS as row}<li><strong>{row.label}</strong> {row.text}</li>{/each}
