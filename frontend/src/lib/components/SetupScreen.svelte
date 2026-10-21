@@ -90,7 +90,7 @@
 	const usernameError = $derived(accountUsernameError || (username && !/^[a-z0-9_-]{1,32}$/.test(username) ? 'Use up to 32 lowercase letters, numbers, dashes or underscores.' : ''));
 	const accountValid = $derived(Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password));
 	const steps = $derived<SetupStep[]>(page === 'connect' ? remote.steps : [
-		{ label: 'Your account', icon: 'person', state: ['checking', 'account', 'error', 'hard-stop'].includes(page) ? 'current' : 'done' },
+		{ label: 'Your account', icon: 'person', state: ['checking', 'account', 'hard-stop'].includes(page) ? 'current' : 'done' },
 		{ label: 'Work folder', icon: 'computer', state: page === 'folder' ? 'current' : page === 'models' ? 'done' : 'todo' },
 		{ label: 'Providers & models', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
 	]);
@@ -304,10 +304,10 @@
 	{/if}
 </SetupShell>
 {#if showAdd}<AddProviderModal onClose={() => { showAdd = false; void refreshSources(); }} onSelectCloud={selectProvider} />{/if}
-{#if openProvider}<ProviderSettingsModal provider={openProvider} onClose={() => { openProvider = null; void refreshSources(); }} />{/if}
+{#if openProvider}<ProviderSettingsModal provider={openProvider} initialTab="advanced" onClose={() => { openProvider = null; void refreshSources(); }} />{/if}
 
 <style>
-	.other-omlx { margin: var(--space-4) var(--space-2); color: var(--text-secondary); }
-	h2 { font-size: var(--text-body); font-weight: var(--fw-semibold); color: var(--text-primary); }
-	p { font-size: var(--text-caption); line-height: var(--lh-normal); }
+	.other-omlx { margin: var(--space-4) var(--space-4); color: var(--text-secondary); }
+	h2 { font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-primary); }
+	p { font-size: var(--text-footnote); line-height: var(--lh-normal); }
 </style>

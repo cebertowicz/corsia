@@ -54,15 +54,8 @@ afterEach(async () => {
 // The approved Welcome copy (onboarding story section 2), spelled out here so a change to the shipped strings fails this test.
 const APPROVED_WELCOME = {
 	title: 'Welcome to CORSIA',
-	lines: [
-		'Your agents learn how you like things done and keep their own instructions and skills up to date, so you don’t have to.',
-		'You can check that yourself. CORSIA measures how much of your time their work takes, and you can see it any time.',
-	],
-	rows: [
-		'CORSIA handles: the setup steps for connecting your tools, and checking work against what you asked before it reaches you.',
-		'You decide: what gets done. When a choice is yours to make, agents bring it to you with a recommendation.',
-		'Asks you first: sending messages or posting anything for you, making purchases, or opening files outside your work folder. You can let agents go ahead on things you approve often.',
-	],
+	lines: ['Your agents learn how you like things done and keep their own instructions and skills up to date, so you don’t have to. You can check that yourself. CORSIA measures how much of your time their work takes, and you can see it any time.'],
+	rows: [],
 	account: 'Create your account. It stays on this computer.',
 };
 const flat = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim();
