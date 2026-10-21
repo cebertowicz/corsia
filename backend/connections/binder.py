@@ -73,11 +73,13 @@ def _now() -> str:
 
 
 def _binding_rule(rule: Any) -> Rule:
+    from events.rules import thread_destination
+
     condition = rule.match[0]
     return Rule(
         id=rule.id, scope=rule.scope, connector=rule.connector,
         fact=condition['field'], value=condition['value'],
-        destination_thread_id=rule.to[7:],
+        destination_thread_id=str(thread_destination(rule.to)),
         precedence=rule.precedence, enabled=rule.enabled,
     )
 
@@ -111,6 +113,8 @@ def create_rule(
     scope: str = "global", precedence: int = 100, db=None,
 ) -> Rule:
     """Create a rule. Validates the field against the live manifest (loud)."""
+    from events.rules import THREAD_PREFIX
+
     rule = Rule(str(uuid.uuid4())[:12], scope, connector, fact, str(value),
                 destination_thread_id, precedence, True)
     validate_rule(rule)
@@ -123,7 +127,7 @@ def create_rule(
                VALUES (?,?,?,?,?,'first_seen','deliver','default',?,1,?,?)''',
             (rule.id, scope, connector,
              json.dumps([{'field': fact, 'op': 'eq', 'value': str(value)}]),
-             'thread:' + destination_thread_id, precedence, now, now),
+             THREAD_PREFIX + destination_thread_id, precedence, now, now),
         )
         return rule
 

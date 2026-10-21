@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import pytest
 
-from events.platform import deliver_platform_event_sync
 from infra.database import write_transaction
 from tests.event_routing_helpers import (
     check_suite_payload, mk_session, pr_payload, register_pr, route,
@@ -36,7 +35,7 @@ async def test_seeded_drop_row_decides_check_event_before_pr_lookup(isolated_db)
 
     register_pr('o/r', 71, mk_session('wk-cancel'))
     with (patch.object(router, 'check_suite_pr_metadata_from_event') as lookup,
-          patch('events.platform.emit_product_event') as emit,
+          patch('events.router.emit_product_event') as emit,
           patch('events.router.delivery.deliver_to_thread') as deliver):
         res = await route('webhook.github.check_suite_completed',
                           check_suite_payload('o/r', 71, conclusion='cancelled'))
@@ -69,7 +68,7 @@ async def test_self_authored_drop_logs_product_event_with_author_and_rule(isolat
 
     register_pr('owner/repo', 90, mk_session('owner'))
     payload = pr_payload('owner/repo', 90, author='corsia[bot]', author_type='Bot')
-    with (patch('events.platform.emit_product_event') as emit,
+    with (patch('events.router.emit_product_event') as emit,
           patch('events.router.delivery.deliver_to_thread') as deliver):
         res = await route('webhook.github.pr_opened', payload)
     deliver.assert_not_called()
@@ -103,15 +102,3 @@ async def test_inactive_tag_target_reason_comes_from_the_evaluator(isolated_db):
         res = await route('webhook.github.pr_merged', payload)
     deliver.assert_not_called()
     assert (res.outcome, res.reason) == (RouteOutcome.DEAD_LETTERED, 'invalid_tag_target')
-
-
-def test_platform_drop_uses_the_same_drop_record(isolated_db):
-    with write_transaction(None, scope='platform_drop') as db:
-        db.execute('''INSERT INTO event_rules
-            (id,created_at,updated_at,scope,connector,event_type,"match","on",action,"to",mode,precedence)
-            VALUES ('stop','a','b','global','github','pr.merged','[]','every','drop',NULL,NULL,0)''')
-    with patch('events.platform.emit_product_event') as emit:
-        delivered = deliver_platform_event_sync('github', _merged(), 'pr.merged')
-    assert [d.outcome for d in delivered] == ['dropped']
-    assert [(action, props['rule_id']) for action, props in _route_events(emit)] == [
-        ('suppressed', 'stop')]

@@ -10,8 +10,7 @@ from typing import Any
 from loguru import logger
 
 from events import dead_letter, delivery, guard
-from events.platform import record_drop
-from events.rules import dropping_rule, evaluate, event_scope
+from events.rules import dropping_rule, evaluate
 from infra.database import get_db
 from events.identity import (
     CHECK_SUITE_COMPLETED_EVENTS,
@@ -116,20 +115,24 @@ def _record_passive_change(
     )
 
 
+def record_drop(envelope: Any, rule_id: str, *, author: str | None) -> None:
+    """The one record of a rule drop: a log line and the suppressed product event."""
+    logger.info("event-routing: rule {} dropped {} (author {})", rule_id, envelope.type, author or '?')
+    emit_product_event(
+        "event_route", "suppressed",
+        properties={"internal_event": envelope.type, "author": author, "rule_id": rule_id},
+    )
+
+
 def _rule_drop_result(
     internal_event: str, payload: dict[str, Any], identity: Any = None,
 ) -> RouteResult | None:
-    """The webhook's one drop pass, and the one mapping of a rule drop to a result.
-
-    Drop rows match event facts only; the identity only selects their scope, as
-    platform delivery does. It runs once per event: after source facts with the
-    resolved identity, or before a check event's identity read. That check pass
-    has no artifact yet, so only global drop rows apply to check events here.
-    """
+    """The webhook's one drop pass: once per event, after source facts, or before
+    a check event's identity read. Maps a rule drop to its one result."""
     envelope = github_routing_envelope(internal_event, identity, payload)
     db = get_db()
     try:
-        rule_id = dropping_rule(envelope, scope=event_scope(envelope, db=db), db=db)
+        rule_id = dropping_rule(envelope, db=db)
     finally:
         db.close()
     if rule_id is None:
@@ -209,7 +212,7 @@ def _select_route(
     envelope = github_routing_envelope(internal_event, identity, payload)
     db = get_db()
     try:
-        targets = evaluate(envelope, scope=event_scope(envelope, db=db), db=db,
+        targets = evaluate(envelope, db=db,
                            resolve_owner=lambda: resolve_targets(envelope))
     finally:
         db.close()
@@ -346,4 +349,50 @@ def _record_source_facts(
         schedule_merged_pr_reap(payload)
 
 
-# Source summaries are declared by the connector, alongside its normalized facts.
+def _summarize(
+    internal_event: str, payload: dict[str, Any], external_id: str | None
+) -> tuple[str, dict[str, Any]]:
+    """Build a one-line summary and structured details for the thread input."""
+    repo = (payload.get("repository") or {}).get("full_name", "")
+    pr = payload.get("pull_request") or {}
+    comment = payload.get("comment") or {}
+    details: dict[str, Any] = {"repo": repo, "external_id": external_id}
+
+    if comment:
+        author = (comment.get("user") or {}).get("login", "?")
+        body = (comment.get("body") or "")[:280]
+        details.update({"author": author, "comment": body,
+                        "url": comment.get("html_url")})
+        return f"{external_id} comment from {author}: {body[:100]}", details
+
+    if pr:
+        details.update({"pr_title": pr.get("title"),
+                        "head_sha": (pr.get("head") or {}).get("sha"),
+                        "base_ref": (pr.get("base") or {}).get("ref"),
+                        "url": pr.get("html_url")})
+        action = payload.get("action", "")
+        return f"{external_id} {action}: {pr.get('title', '')}", details
+
+    check_suite = payload.get("check_suite") or {}
+    if check_suite:
+        conclusion = check_suite.get("conclusion") or "completed"
+        details.update(
+            {
+                "check_suite_id": check_suite.get("id"),
+                "head_sha": check_suite.get("head_sha"),
+                "check_suite_updated_at": check_suite.get("updated_at"),
+            }
+        )
+        return f"{internal_event} on {external_id or repo} ({conclusion})", details
+
+    return f"{internal_event} on {external_id or repo}", details
+
+
+def _chip_line(payload: dict[str, Any], external_id: str | None, summary: str) -> str:
+    """The chip's line for a routed event (``summary`` is the agent's): only the
+    check-suite summary reads as machine text, the rest are already sentences."""
+    suite = payload.get("check_suite") or {}
+    if suite and not (payload.get("comment") or payload.get("pull_request")):
+        target = external_id or (payload.get("repository") or {}).get("full_name", "")
+        return f"CI {suite.get('conclusion') or 'completed'} on {target}"
+    return summary

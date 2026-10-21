@@ -1,18 +1,21 @@
-"""One matcher for first-seen bindings and every-event delivery rules.
+"""One matcher for first-seen bindings and the seeded every-event rules.
 
-Only eq/present, deliver/drop and their live consumers are supported. Ownership
-and disposition remain resolve_targets' responsibility, not a second registry.
+Only eq/present, deliver/drop and their live consumers are supported. ``every``
+rows are the global seeds: the drop rows and the tag and owner delivery rows.
+Ownership and disposition remain resolve_targets' responsibility.
 """
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from events.envelope import EventEnvelope
-from events.disposition import delivery_disposition
 from events.resolve import Target
 from infra.database import get_db
+
+THREAD_PREFIX = 'thread:'
+TAG_DESTINATION = '$corsia_tag'
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,13 @@ class EventRule:
     enabled: bool
 
 
+def thread_destination(to: str | None) -> str | None:
+    """The destination of a ``thread:`` target, or None for any other target."""
+    if to is not None and to.startswith(THREAD_PREFIX):
+        return to.removeprefix(THREAD_PREFIX)
+    return None
+
+
 def from_row(row) -> EventRule:
     return EventRule(
         row['id'], row['scope'], row['connector'], row['event_type'],
@@ -39,7 +49,7 @@ def from_row(row) -> EventRule:
 
 
 def list_rules(connector: str, *, on: str, event_type: str = '*',
-               scopes: tuple[str, ...] | None = None, enabled_only: bool = True,
+               scope: str | None = None, enabled_only: bool = True,
                db=None) -> list[EventRule]:
     conn = db or get_db()
     try:
@@ -47,9 +57,9 @@ def list_rules(connector: str, *, on: str, event_type: str = '*',
         args: list[Any] = [connector, on, event_type]
         if enabled_only:
             sql += 'AND enabled=1 '
-        if scopes is not None:
-            sql += 'AND scope IN (' + ','.join('?' for _ in scopes) + ') '
-            args.extend(scopes)
+        if scope is not None:
+            sql += 'AND scope=? '
+            args.append(scope)
         rows = conn.execute(sql + 'ORDER BY precedence,created_at,id', args).fetchall()
         return [from_row(row) for row in rows]
     finally:
@@ -72,89 +82,53 @@ def matches(rule: EventRule, facts: dict[str, Any]) -> bool:
 
 
 def matching_rules(facts: dict[str, Any], connector: str, *, on: str,
-                   event_type: str = '*', scopes: tuple[str, ...] | None = None,
+                   event_type: str = '*', scope: str | None = None,
                    db=None) -> list[EventRule]:
     return [rule for rule in list_rules(
-        connector, on=on, event_type=event_type, scopes=scopes, db=db,
+        connector, on=on, event_type=event_type, scope=scope, db=db,
     ) if matches(rule, facts)]
 
 
-def _every_rules(envelope: EventEnvelope, scope: str, db) -> list[EventRule]:
+def _every_rules(envelope: EventEnvelope, db) -> list[EventRule]:
     return matching_rules(
         envelope.facts, envelope.connector or '', on='every',
-        event_type=envelope.type, scopes=tuple(dict.fromkeys(('global', scope))), db=db,
+        event_type=envelope.type, scope='global', db=db,
     )
 
 
-def dropping_rule(envelope: EventEnvelope, *, scope: str = 'global', db=None) -> str | None:
+def dropping_rule(envelope: EventEnvelope, *, db=None) -> str | None:
     """The first matching drop row's id. Drop rows match event facts only."""
-    return next((r.id for r in _every_rules(envelope, scope, db) if r.action == 'drop'), None)
+    return next((r.id for r in _every_rules(envelope, db) if r.action == 'drop'), None)
 
 
-def evaluate(envelope: EventEnvelope, *, scope: str = 'global',
+def evaluate(envelope: EventEnvelope, *,
              resolve_owner: Callable[[], list[Target]], db=None) -> list[Target]:
-    """Resolve the owner once, then merge delivery rules per thread.
+    """The first matching deliver row's target, by precedence.
 
     Callers run ``dropping_rule`` first. The owner callback is lazy, so an
-    event no rule delivers to its owner never binds an artifact.
+    event whose first row does not deliver to its owner never binds an artifact.
+    Each further matching row adds a ``multiple_rule_recipients`` marker, which
+    the router dead-letters rather than picking among recipients.
     """
-    rules = [r for r in _every_rules(envelope, scope, db) if r.action == 'deliver']
-    # Webhook defaults are explicit seeded rows. Other producers use rule 0.
-    owner_rules = [r for r in rules if r.to == 'registered_owner']
-    use_default = not envelope.facts.get('webhook')
-    owner_targets = resolve_owner() if owner_rules or use_default else []
-    targets: list[Target] = []
-    explicit_availability: dict[str, bool] = {}
-
-    def merge(target: Target, mode: str | None = 'default') -> None:
-        if mode in ('wake', 'digest') and target.thread is not None:
-            target = replace(target, disposition='owner_' + mode)
-        existing = next((t for t in targets if t.thread == target.thread), None)
-        if existing is None:
-            targets.append(target)
-        elif target.disposition == 'owner_wake' and existing.disposition != 'owner_wake':
-            targets[targets.index(existing)] = target
-
-    if use_default:
-        for target in owner_targets:
-            merge(target)
-    for rule in rules:
-        if rule.to == 'registered_owner':
-            for target in owner_targets:
-                merge(target, rule.mode)
-        else:
-            destination = (rule.to or '')[7:]
-            if destination == '$corsia_tag':
-                destination = str(envelope.facts['corsia_tag'])
-            from events.delivery import thread_exists_and_active
-
-            if destination not in explicit_availability:
-                explicit_availability[destination] = thread_exists_and_active(destination, db=db)
-            available = explicit_availability[destination]
-            inactive = 'invalid_tag_target' if rule.to == 'thread:$corsia_tag' else 'owner_inactive'
-            merge(Target(destination, 'rule', 'owner',
-                         reason=None if available else inactive,
-                         disposition=(delivery_disposition('owner', envelope.event_class)
-                                      if available else 'dead_letter')),
-                  rule.mode if available else 'default')
-    # A live explicit destination handles an ownerless event. Rule 0's missing
-    # owner is not an extra recipient to dead-letter alongside that delivery.
-    if any(target.thread is not None for target in targets):
-        return [target for target in targets if target.thread is not None]
-    return targets
+    delivering = [r for r in _every_rules(envelope, db) if r.action == 'deliver']
+    if not delivering:
+        return []
+    first = delivering[0]
+    if first.to == 'registered_owner':
+        targets = resolve_owner()
+    elif thread_destination(first.to) == TAG_DESTINATION:
+        targets = [_tag_target(str(envelope.facts['corsia_tag']), db)]
+    else:
+        targets = []
+    extra = [Target(None, 'rule', 'none', reason='multiple_rule_recipients',
+                    disposition='dead_letter') for _ in delivering[1:]]
+    return targets + extra
 
 
-def event_scope(envelope: EventEnvelope, *, db) -> str:
-    """Resolve scope from registered ownership, never from external event facts."""
-    from registry import models
+def _tag_target(thread_id: str, db) -> Target:
+    from events.delivery import thread_exists_and_active
 
-    ref = envelope.artifact_ref
-    if ref is None:
-        return 'global'
-    state = models.routing_registrations(ref['integration'], ref['type'], ref['external_id'], db=db)
-    owner = state.get('owner') or state.get('triage')
-    if owner:
-        row = db.execute('SELECT project_id FROM threads WHERE id=?', (owner['parent_thread_id'],)).fetchone()
-        if row and row['project_id']:
-            return 'project:' + row['project_id']
-    return 'global'
+    if not thread_exists_and_active(thread_id, db=db):
+        return Target(thread_id, 'rule', 'owner', reason='invalid_tag_target',
+                      disposition='dead_letter')
+    return Target(thread_id, 'rule', 'owner', disposition='owner_wake')

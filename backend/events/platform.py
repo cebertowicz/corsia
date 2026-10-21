@@ -1,13 +1,10 @@
-"""Deliver a platform-produced event to its owner: wake, digest, drop or dead-letter.
+"""Deliver a platform-produced event to its owner: wake, digest or dead-letter.
 
 The delivery entrypoint for events the platform itself observes (a poller,
-not a webhook). The webhook router wakes its one evaluated recipient itself;
-only this path honors digest dispositions and more than one recipient.
-``normalize`` applies the type's declared rules, a drop row ends the event
-(``record_drop``, shared with the router), ``evaluate`` applies delivery rules
-around ``resolve_targets``' owner, then each target gets an owner wake
-(``enqueue_event_wake``) when the event is actionable, otherwise an owner
-digest note (``append_thread_context_note``) collapsed by the type's
+not a webhook); unlike the webhook router, it honors resolved dispositions. It reuses the existing path: ``normalize`` applies the type's
+declared rules, ``resolve_targets`` picks the owner, then each target gets an
+owner wake (``enqueue_event_wake``) when the event is actionable, otherwise an
+owner digest note (``append_thread_context_note``) collapsed by the type's
 declared ``collapse_fact``. An unresolvable target goes to the dead-letter
 sink. Everything is keyed on ``event_id`` (per target), so a repeat is a no-op.
 It names no connector (the no-bespoke-router guard keeps it that way).
@@ -20,14 +17,11 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from loguru import logger
-
 from events import dead_letter
 from events.connectors import EventTypeDecl, get_manifest
 from events.delivery import enqueue_event_wake
 from events.envelope import EventEnvelope, normalize
 from events.resolve import Target, resolve_targets
-from events.rules import dropping_rule, evaluate, event_scope
 from infra.database import write_transaction
 from infra.db_async import run_in_db_unless_owned
 from infra.passive_changes import append_thread_context_note
@@ -38,7 +32,6 @@ DIGESTED = "digested"
 DEAD_LETTERED = "dead_lettered"
 DUPLICATE = "duplicate"
 FILTERED = "filtered"
-DROPPED = "dropped"
 
 _NOTE_LINE_LIMIT = 2000
 
@@ -49,7 +42,7 @@ class PlatformDelivery:
 
     event_id: str
     thread_id: str | None
-    outcome: str  # woke | digested | dead_lettered | duplicate | filtered | dropped
+    outcome: str  # woke | digested | dead_lettered | duplicate | filtered
     reason: str | None = None
 
 
@@ -64,16 +57,6 @@ def _after_delivery(db, envelope: EventEnvelope, delivered: PlatformDelivery) ->
             RoutingIdentity(ref['integration'], ref['type'], ref['external_id']),
             envelope.type, recipient=delivered.thread_id, db=db,
         )
-
-
-def record_drop(envelope: EventEnvelope, rule_id: str, *, author: str | None) -> None:
-    """The one record of a rule drop: a log line and the suppressed product event."""
-    logger.info("event-routing: rule {} dropped {} (author {})",
-                rule_id, envelope.type, author or '?')
-    emit_product_event(
-        "event_route", "suppressed",
-        properties={"internal_event": envelope.type, "author": author, "rule_id": rule_id},
-    )
 
 
 def _wake_message_id(event_id: str, thread_id: str) -> str:
@@ -195,15 +178,7 @@ def deliver_platform_event_sync(
     envelope = normalize(connector, raw_payload, event_type)
     decl = get_manifest(connector).decl(envelope.type)
     with write_transaction(db, scope="deliver_platform_event") as conn:
-        scope = event_scope(envelope, db=conn)
-        dropped_by = dropping_rule(envelope, scope=scope, db=conn)
-        if dropped_by is not None:
-            record_drop(envelope, dropped_by, author=envelope.facts.get('author'))
-            return [PlatformDelivery(envelope.event_id, None, DROPPED)]
-        targets = evaluate(
-            envelope, scope=scope, db=conn,
-            resolve_owner=lambda: resolve_targets(envelope, repair_owner=repair_owner, db=conn),
-        )
+        targets = resolve_targets(envelope, repair_owner=repair_owner, db=conn)
         deliveries = [
             PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
             if target_filter is not None and (reason := target_filter(target, conn)) is not None

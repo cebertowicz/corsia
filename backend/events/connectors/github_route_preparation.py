@@ -7,8 +7,6 @@ import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from events.connectors.github import event_chip, summarize_event
-
 if TYPE_CHECKING:
     from events.router import RouteResult
 
@@ -98,10 +96,10 @@ def _prepare_route(
         prepared.result = selected
         return
     thread_id, wake_reason, routing_state = selected
-    summary, details = summarize_event(internal_event, payload, external_id)
+    summary, details = router._summarize(internal_event, payload, external_id)
     if tag_provenance:
         details["tag_provenance"] = tag_provenance
-    chip = event_chip(payload, external_id, summary)
+    chip = router._chip_line(payload, external_id, summary)
     router._record_passive_change(
         routing_state=routing_state, wake_thread_id=thread_id,
         internal_event=internal_event, external_id=external_id,

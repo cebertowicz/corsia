@@ -23,14 +23,13 @@ Two axes stay separate:
 Inbound user turns, delegated messages, and routed events converge on shared
 send and dispatch services before entering the selected execution provider.
 
-`event_rules` stores first-seen ownership bindings and per-event deliver/drop
-rules. `backend/events/rules.py` matches both and alone decides drops and
-recipients; the binder retains declaration priority and conflict repair.
-Webhooks run one drop pass in the artifact owner's scope after recording
-source facts (check events: before identity resolution, global rows only),
-then deliver their one evaluated recipient;
-platform delivery owns
-post-delivery watch resolution through `plans.public`.
+`event_rules` stores first-seen ownership bindings and the seeded per-event
+deliver/drop rows. `backend/events/rules.py` matches both and alone decides
+drops and the webhook recipient; the binder retains declaration priority and
+conflict repair. Webhooks run one global drop pass after recording source
+facts (check events: before identity resolution), then deliver their one
+evaluated recipient; platform delivery owns post-delivery watch resolution
+through `plans.public`.
 
 ## Code map
 

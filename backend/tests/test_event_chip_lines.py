@@ -174,7 +174,7 @@ def test_an_event_wake_chip_can_differ_from_the_summary_the_agent_reads():
 
 
 def test_a_check_suite_chip_says_the_outcome_in_words():
-    from events.connectors.github import event_chip as _chip_line, summarize_event as _summarize
+    from events.router import _chip_line, _summarize
 
     payload = {
         "repository": {"full_name": "o/r"},
