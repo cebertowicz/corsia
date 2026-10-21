@@ -267,8 +267,7 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
 
 
 async def admit_event(*, event_type: str, facts: dict, origin: Literal["connector", "emitter", "agent", "platform"],
-                      producer: str, event_id: str, external_id: str | None = None,
-                      occurred_at: datetime | None = None) -> IntakeResult:
+                      producer: str, event_id: str) -> IntakeResult:
     """Validate, deduplicate, evaluate and deliver one declared event without trusting producer input."""
     problem = _facts_problem(facts)
     if problem is not None:
