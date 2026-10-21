@@ -63,7 +63,6 @@
 			base_url: base,
 			dialect: endpointDialect,
 			api_key: endpointKey.trim() || undefined,
-
 			model_ids: parseModelIds(endpointModels),
 		});
 		busy = false;

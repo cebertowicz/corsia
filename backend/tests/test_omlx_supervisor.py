@@ -379,7 +379,16 @@ def test_omlx_module_reexports_real_supervisor(isolated_runtime, monkeypatch):
     assert "server_id" in result["message"]
 
 
-def test_new_omlx_start_waits_for_process_progress_not_a_fixed_30_seconds(isolated_runtime, monkeypatch):
+def test_readiness_wait_fails_at_once_when_the_new_child_exits(monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    monkeypatch.setattr(sup, "_process_exited", lambda _pid: True)
+    began = time.monotonic()
+    assert asyncio.run(sup._wait_for_healthy("127.0.0.1", 9, pid=1234)) is False
+    assert time.monotonic() - began < 5
+
+
+def test_new_omlx_start_waits_on_its_child_not_a_fixed_30_seconds(isolated_runtime, monkeypatch):
     from llm.providers import omlx_supervisor as sup
 
     class Spawned:
@@ -399,5 +408,4 @@ def test_new_omlx_start_waits_for_process_progress_not_a_fixed_30_seconds(isolat
     result = asyncio.run(sup.start_server({"server_id": "progress", "host": "127.0.0.1", "port": 9999}))
 
     assert result["ok"] is True
-    assert waited["pid"] == 1234
-    assert waited["log_path"] == sup._log_path("progress")
+    assert waited == {"server_id": "progress", "pid": 1234}

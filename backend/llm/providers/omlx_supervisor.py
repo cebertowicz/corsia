@@ -37,8 +37,9 @@ def _mark_endpoint_alive(server_id: str, host: str, port: int) -> None:
     except Exception as e:
         log.warning("_mark_endpoint_alive failed for %s: %s", server_id, e)
 
-HEALTH_STARTUP_CAP_S = 30 * 60.0
-HEALTH_STALL_TIMEOUT_S = 120.0
+# A first spawn pays Gatekeeper's scan of the signed bundle and a cold Metal
+# start; the cap bounds a hang, and an exited child fails at once.
+HEALTH_STARTUP_CAP_S = 600.0
 HEALTH_POLL_INTERVAL_S = 0.5
 SIGTERM_GRACE_S = 5.0
 
@@ -128,25 +129,14 @@ def _managed_omlx_argv(host: str, port: int, settings: dict) -> list[str] | dict
 
 
 async def _wait_for_healthy(
-    host: str, port: int, *, server_id: str | None = None, pid: int | None = None, log_path=None,
+    host: str, port: int, *, server_id: str | None = None, pid: int | None = None,
 ) -> bool:
-    """Poll readiness while a new child stays alive and continues writing startup output."""
+    """Poll the provider's readiness surface until it answers, the new child exits, or the cap passes."""
     url = models_probe_url(lan_base(host, port))
-    started = last_progress = time.monotonic()
-    last_log_size = -1
+    started = time.monotonic()
     async with httpx.AsyncClient(timeout=2.0) as client:
         while time.monotonic() - started < HEALTH_STARTUP_CAP_S:
             if pid is not None and _process_exited(pid):
-                return False
-            if log_path is not None:
-                try:
-                    size = log_path.stat().st_size
-                    if size != last_log_size:
-                        last_log_size = size
-                        last_progress = time.monotonic()
-                except OSError:
-                    pass
-            if time.monotonic() - last_progress >= HEALTH_STALL_TIMEOUT_S:
                 return False
             try:
                 headers = {}
@@ -207,7 +197,7 @@ def _failed_boot_result(
         "ok": False,
         "message": (
             f"oMLX did not become healthy on {host}:{port} within "
-            f"startup made no progress for {int(HEALTH_STALL_TIMEOUT_S)}s. Last log lines:\n{tail or '(empty log)'}"
+            f"{int(HEALTH_STARTUP_CAP_S)}s or exited first. Last log lines:\n{tail or '(empty log)'}"
         ),
     }
 
@@ -263,7 +253,7 @@ async def start_server(cfg: dict) -> dict[str, Any]:
              proc.pid, sid, host, port)
 
     healthy = await _wait_for_healthy(
-        host, int(port), server_id=sid, pid=proc.pid, log_path=log_path,
+        host, int(port), server_id=sid, pid=proc.pid,
     )
     if healthy:
         await run_in_db(_mark_endpoint_alive, sid, host, int(port))
