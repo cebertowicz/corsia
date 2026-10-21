@@ -310,10 +310,10 @@
       "sha256": "c7238069a8c2505cefadd5a8da0d1c366a94e9e2fa226998f7e8ad3679d1c036"
     },
     {
-      "bytes": 1887,
+      "bytes": 2063,
       "kind": "skill",
       "path": "skills/microsoft-setup/references/stop-messages.md",
-      "sha256": "87123c3b4ad892e9c5aa7e835d1e59b35619d99a649999f552ba261d89a71cb7"
+      "sha256": "2b46dc74b1121c334dff1d659f33620b01aa7f89c161fa88da6a316d52a250ab"
     },
     {
       "bytes": 2630,

@@ -10,7 +10,9 @@ Message for IT: `Please let me register applications in Microsoft Entra ID, eith
 
 ## R2 Existing app takes other account types (step 7)
 
-`Your CORSIA app on Microsoft only accepts <its supported account types>, so I can’t connect <address> with it. You can change them yourself in Entra (CORSIA, Manifest, signInAudience) where Microsoft allows it, or delete that app, which disconnects any account already using it. Then ask me to connect Outlook again. I can also connect an account of its type now.`
+`Your CORSIA app on Microsoft only accepts <its supported account types>, so I can’t connect <address> with it. You can change them yourself in Entra: open CORSIA, then Manifest, set "signInAudience" to "<value>" and save, where Microsoft allows it. Or delete that app, which disconnects any account already using it. Then ask me to connect Outlook again. I can also connect an account of its type now.`
+
+`<value>` is step 3's kind: `AzureADMyOrg` (work), `PersonalMicrosoftAccount` (personal) or `AzureADandPersonalMicrosoftAccount` (both).
 
 ## R3 Needs admin approval: `admin_approval_required` (step 13)
 
