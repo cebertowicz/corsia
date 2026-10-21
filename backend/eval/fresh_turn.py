@@ -27,7 +27,6 @@ class FreshTurnScope:
 
     project_id: str | None = None
     owner_thread_id: str | None = None
-    actor_thread_id: str | None = None
     fenced_target: object | None = None
 
 
@@ -49,7 +48,6 @@ async def _open_eval_thread(
         project_id=None if scope is None else scope.project_id,
         parent_thread_id=None,
         spawned_by=None,
-        actor_thread_id=None if scope is None else scope.actor_thread_id,
     ))
     return thread_id, await run_in_db(_read_thread_row, thread_id)
 

@@ -40,7 +40,7 @@ def _event_db() -> sqlite3.Connection:
 
 
 @pytest.mark.asyncio
-async def test_fresh_eval_scope_is_unparented_and_uses_owner_only_for_local_routing(monkeypatch: pytest.MonkeyPatch):
+async def test_carry_in_eval_creates_its_own_unattributed_thread(monkeypatch: pytest.MonkeyPatch):
     from eval.fresh_turn import FreshTurnScope, _open_eval_thread
 
     calls = []
@@ -52,16 +52,18 @@ async def test_fresh_eval_scope_is_unparented_and_uses_owner_only_for_local_rout
     monkeypatch.setattr("infra.db_async.run_in_db", run_in_db)
     thread_id, row = await _open_eval_thread(
         "user", "omlx@server/model",
-        scope=FreshTurnScope(project_id="project", owner_thread_id="owner", actor_thread_id="owner"),
+        scope=FreshTurnScope(project_id="project", owner_thread_id="owner"),
     )
 
     creation = calls[0][0]
     assert thread_id.startswith("eval-")
+    assert thread_id != "owner"
+    assert creation.keywords["thread_id"] == thread_id
     assert row["id"] == "eval-1"
     assert creation.keywords["project_id"] == "project"
     assert creation.keywords["parent_thread_id"] is None
     assert creation.keywords["spawned_by"] is None
-    assert creation.keywords["actor_thread_id"] == "owner"
+    assert "actor_thread_id" not in creation.keywords
 
 
 def test_project_context_target_uses_normal_fresh_turn_delivery(

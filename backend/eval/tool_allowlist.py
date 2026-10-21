@@ -17,11 +17,11 @@ _ENV = "CORSIA_EVAL_TOOL_ALLOWLIST"
 # may observe state during one; every other resolved tool is recorded without
 # execution so a sample can score its intended action without mutating work.
 CARRY_IN_READ_ONLY_TOOLS = frozenset({
-    "glob",
-    "grep",
-    "list_dir",
-    "plan_read",
-    "read_file",
+    "glob",  # Finds candidate paths without mutating the workspace.
+    "grep",  # Finds relevant existing text without mutating the workspace.
+    "list_dir",  # Enumerates candidate paths without mutating the workspace.
+    "plan_read",  # Reads delivery state without changing the plan.
+    "read_file",  # Reads target content without changing the file.
 })
 _carry_in_tool_isolation: ContextVar[bool] = ContextVar(
     "carry_in_tool_isolation", default=False,
