@@ -18,39 +18,14 @@ import pytest
 
 
 @pytest.fixture
-def run_db(tmp_path, monkeypatch):
-    """Give the nightly scheduler an isolated run table and retirement outbox."""
-    from infra.managed_process_schema import MANAGED_PROCESS_SCHEMA_SQL
+def run_db(isolated_db):
+    """Run every nightly step on the test database.
 
-    path = tmp_path / "nightly-runs.db"
-    with sqlite3.connect(path) as db:
-        db.execute(
-            """CREATE TABLE fact_extraction_runs (
-                   run_date TEXT PRIMARY KEY,
-                   status TEXT NOT NULL DEFAULT 'ok',
-                   result_json TEXT,
-                   ran_at TEXT NOT NULL
-               )"""
-        )
-        db.executescript(MANAGED_PROCESS_SCHEMA_SQL)
-
-    def factory():
-        db = sqlite3.connect(path)
-        db.row_factory = sqlite3.Row
-        return db
-
-    from infra import managed_process_store
-    from jobs import nightly
-
-    monkeypatch.setattr(nightly, "get_db", factory)
-    monkeypatch.setattr("infra.database.get_db", factory)
-    # The store binds get_db at import. Once any earlier test has imported it, patching
-    # infra.database alone leaves the retirement drain on the suite's database.
-    monkeypatch.setattr(managed_process_store, "get_db", factory)
-    # The idle-worktree reaper reads repository policy through another import-bound
-    # get_db and removes worktrees; it has its own tests and must not act from here.
-    monkeypatch.setattr("infra.worktree_reaper.reap_all_idle", MagicMock(return_value=None))
-    return path
+    ``isolated_db`` repoints the database path itself, so every ``get_db`` binding
+    opens it however it was imported. Patching module names instead missed the ones
+    bound at import, and the drain and reaper then read the suite's database.
+    """
+    return isolated_db
 
 
 def _read_run(path):
