@@ -319,3 +319,18 @@ def test_source_checkout_still_uses_git(monkeypatch):
     monkeypatch.setattr(mod, "_git", fake_git)
     assert mod.update_status(force=True).available is True
     assert ("fetch", "--quiet", "origin", "dev") in calls
+
+
+def test_e2e_mock_never_contacts_git_or_updater_manifest(monkeypatch):
+    from infra import update_status as mod
+
+    mod.invalidate_cache()
+    monkeypatch.setenv("CORSIA_E2E_MOCK", "1")
+    monkeypatch.setattr(mod.platform_paths, "app_bundle_root", lambda: pytest.fail("E2E mock must not inspect app bundles"))
+    monkeypatch.setattr(mod, "_git", lambda *_args, **_kwargs: pytest.fail("E2E mock must not run git"))
+    monkeypatch.setattr(mod, "urlopen", lambda *_args, **_kwargs: pytest.fail("E2E mock must not fetch manifests"))
+
+    status = mod.update_status(force=True)
+
+    assert status.available is None
+    assert status.error == "Update checks are disabled in E2E mock mode."
