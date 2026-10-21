@@ -419,7 +419,8 @@ test.afterEach(async ({ request }) => {
 
 test('setup redesign complete state frames @setup-redesign', async ({ browser, request }, testInfo) => {
 	test.skip(testInfo.project.name === 'chromium-mobile', 'The evidence pack fixes its own 1280×900 and 800×600 viewports; the mobile project duplicates the same captures.');
-	test.setTimeout(600000);
+	// This test captures every supported state in light and dark plus narrow/short layouts; the isolated backend can take longer than ten minutes on a cold host.
+	test.setTimeout(900000);
 	for (const theme of ['light', 'dark']) {
 		for (const fixture of selectedFixtures) {
 			if (fixture.only) continue;
