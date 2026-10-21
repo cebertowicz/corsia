@@ -333,7 +333,7 @@ async function assertState(page: Page, fixture: Fixture) {
 			: fixture.local === 'paused' ? 'Download paused. It continues when the connection returns.'
 			: fixture.local === 'starting' ? 'Starting the local model…'
 			: fixture.local === 'disk-space' ? 'Needs 30 GB free, and this computer has 12 GB. Free up space, then check again.'
-			: fixture.local === 'pick-failed' ? 'Couldn’t find a local model that fits this computer. Try again.'
+			: fixture.local === 'pick-failed' ? 'Couldn’t find a local model that fits this computer. Retry.'
 			: fixture.local === 'connection' ? 'Couldn’t download the local model because the connection was lost. Check your internet connection, then Retry.'
 			: fixture.local === 'disk-full' ? 'Couldn’t download the local model: the disk is full. Free up 5 GB, then Retry.'
 			: fixture.local === 'memory' ? 'This computer doesn’t have enough memory to run the local model. Choose a subscription or API provider instead.'
