@@ -50,9 +50,9 @@ def record_failed_plan_node(db, node_id: str, thread_id: str | None) -> bool:
 
 def record_plan_correction(db, source_node_id: str, correction_node_id: str) -> bool:
     """Record an add_correction against the agent that settled any terminal source."""
-    from plans.node_states import _TERMINAL_STATES
+    from plans.public import TERMINAL_STATES
 
-    terminal_states = tuple(sorted(_TERMINAL_STATES))
+    terminal_states = tuple(sorted(TERMINAL_STATES))
     placeholders = ",".join("?" for _ in terminal_states)
     settled = db.execute(
         f"""SELECT actor_id,created_at FROM plan_node_events
