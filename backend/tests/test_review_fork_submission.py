@@ -13,23 +13,25 @@ from infra.database import write_transaction
 from test_doc_review_requests import request, review_env, fork_comment, stored  # noqa: F401
 
 
-@pytest.mark.parametrize("deleted_comment", [False, True])
-def test_empty_submit_finishes_once_without_feedback_or_reviewer_wake(review_env, deleted_comment):
+@pytest.mark.parametrize("deleted_comments,pending,answered", [(0, False, False), (1, True, True)])
+def test_empty_submit_finishes_once_without_feedback_or_reviewer_wake(
+    review_env, deleted_comments, pending, answered,
+):
     db, aid = review_env
     row = request(db, aid)
-    if deleted_comment:
+    for _ in range(deleted_comments):
         fork_comment(db, aid, row["id"])
     with write_transaction(db, scope="test_empty_fork_submit"):
         db.execute("DELETE FROM doc_comments")
-        assert review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid) == (deleted_comment, [], [])
+        assert review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid) == (pending, [], [])
     assert stored(db, row["id"])["state"] == "submitted"
-    assert stored(db, row["id"])["answered_batch_id"] is None
+    assert (stored(db, row["id"])["answered_batch_id"] is not None) is answered
     with write_transaction(db, scope="test_repeated_empty_fork_submit"):
         assert review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid) == (False, [], [])
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
 
 
-def test_owner_batch_delivery_answers_a_running_fork(review_env):
+def test_owner_batch_delivery_does_not_end_a_running_fork(review_env):
     db, aid = review_env
     row = request(db, aid)
     fork_comment(db, aid, row["id"])
@@ -37,8 +39,12 @@ def test_owner_batch_delivery_answers_a_running_fork(review_env):
     batch = ordinary_comment(db, aid)
     with write_transaction(db, scope="test_delivery_before_fork_submit"):
         claim_and_deliver(db, batch, from_state="open", reason="submit")
+    assert stored(db, row["id"])["state"] == "forked"
+    fork_comment(db, aid, row["id"])
+    with write_transaction(db, scope="test_fork_ends_after_delivery"):
+        review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     assert stored(db, row["id"])["state"] == "submitted"
-    assert stored(db, row["id"])["answered_batch_id"] == batch
+    assert stored(db, row["id"])["answered_batch_id"] is None
     assert db.execute("SELECT item_count FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == 2
 
 
@@ -49,6 +55,9 @@ def test_duplicate_comment_with_submit_delivers_existing_ordinary_feedback(revie
     _comment, _registered, result = fork_comment(db, aid, row["id"], submit=True)
     assert set(result) == {"batch_ids", "undelivered_batches", "woken"}
     assert not result["undelivered_batches"]
+    assert stored(db, row["id"])["state"] == "forked"
+    with write_transaction(db, scope="test_duplicate_fork_end"):
+        review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     assert stored(db, row["id"])["state"] == "submitted"
     assert db.execute("SELECT COUNT(*) FROM doc_comments").fetchone()[0] == 1
 
@@ -104,7 +113,7 @@ def test_empty_fork_sends_reviewers_existing_batch_and_receipt_counts_it(review_
         "SELECT summary FROM context_change_journal WHERE object_kind='thread_context' "
         "AND object_id='reviewer' ORDER BY created_at DESC LIMIT 1",
     ).fetchone()["summary"]
-    assert "1 feedback items delivered" in receipt
+    assert "0 review comments written; feedback was delivered" in receipt
     assert "The continuation adds evidence." in receipt
     assert "nothing was sent to the document owner" not in receipt
 

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from doceditor import comment_notifications, feedback_comments, feedback_delivery, feedback_edits
-from doceditor.feedback_batch_identity import open_batch
 from doceditor.review_lifecycle import settle_for_batch
 from doceditor.feedback_state import (
     USER_AUTHOR_ID,
@@ -37,6 +37,24 @@ def _after(value: str, seconds: int) -> str:
 
 def _new_deadline(author_kind: str, now: str) -> str:
     return _after(now, AGENT_QUIET if author_kind == "agent" else USER_IDLE)
+
+
+def open_batch(db, *, author_kind, author_id, artifact_id, recipient_id, now, closes_at) -> str:
+    row = db.execute(
+        "SELECT id FROM doc_feedback_batches WHERE author_kind=? AND author_id=? AND artifact_id=? "
+        "AND recipient_id=? AND state='open'",
+        (author_kind, author_id, artifact_id, recipient_id),
+    ).fetchone()
+    if row is not None:
+        return str(row["id"])
+    batch_id = str(uuid.uuid4())
+    db.execute(
+        "INSERT INTO doc_feedback_batches (id,artifact_id,author_kind,author_id,recipient_id,state,"
+        "opened_at,last_item_at,closes_at,item_count,created_at,updated_at) "
+        "VALUES (?,?,?,?,?,'open',?,?,?,0,?,?)",
+        (batch_id, artifact_id, author_kind, author_id, recipient_id, now, now, closes_at, now, now),
+    )
+    return batch_id
 
 
 def _touch_batch(
@@ -219,6 +237,51 @@ def record_comment(
     return {"batch_ids": batch_ids, "undelivered_batches": notices, "woken": woken}
 
 
+def claim_and_deliver(db, batch_id: str, *, from_state: str,
+                      reason: str | None) -> tuple[bool, tuple[str, ...]]:
+    """Claim one batch and settle its request in the caller's write transaction."""
+    batch = db.execute(
+        "SELECT * FROM doc_feedback_batches WHERE id=? AND state=?", (batch_id, from_state),
+    ).fetchone()
+    if batch is None:
+        return False, ()
+    now = _now()
+    closed_sql = "closed_reason=?" if reason is not None else "closed_reason=closed_reason"
+    params: list[Any] = [now]
+    if reason is not None:
+        params.append(reason)
+    params.extend([batch_id, from_state])
+    changed = db.execute(
+        f"""UPDATE doc_feedback_batches SET state='delivered',updated_at=?,
+            {closed_sql},undelivered_reason=NULL,attempts=attempts+1
+            WHERE id=? AND state=?""",
+        params,
+    )
+    if changed.rowcount == 0:
+        return False, ()
+    batch = db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
+    delivered = feedback_delivery.deliver_claimed(db, batch)
+    review_woken: tuple[str, ...] = ()
+    if delivered.reason is not None:
+        db.execute(
+            """UPDATE doc_feedback_batches
+               SET state='undelivered',undelivered_reason=?,delivery_outcome=NULL,
+                   updated_at=? WHERE id=?""",
+            (delivered.reason, now, batch_id),
+        )
+    else:
+        if delivered.outcome is None:
+            raise RuntimeError("successful feedback delivery has no typed outcome")
+        db.execute(
+            """UPDATE doc_feedback_batches
+               SET delivered_node_id=?,delivery_outcome=?,updated_at=? WHERE id=?""",
+            (delivered.node_id, delivered.outcome, now, batch_id),
+        )
+        db.execute("DELETE FROM doc_feedback_edit_items WHERE batch_id=?", (batch_id,))
+        review_woken = settle_for_batch(db, batch)
+    return True, delivered.woken_threads + review_woken
+
+
 def close_batch(db, batch_id: str, reason: str) -> tuple[bool, tuple[str, ...]]:
     """Conditionally close and deliver one open batch exactly once."""
     with write_transaction(db, scope="close_doc_feedback_batch") as connection:
@@ -249,6 +312,21 @@ def close_for_document(
     woken: list[str] = []
     for row in rows:
         _closed, selected = close_batch(db, row["id"], reason)
+        woken.extend(selected)
+    return woken
+
+
+def close_for_turn_end(db, thread_id: str) -> list[str]:
+    """Close the author's open batches at turn end."""
+    rows = db.execute(
+        """SELECT id FROM doc_feedback_batches
+           WHERE state='open' AND author_kind='agent' AND author_id=?
+           ORDER BY opened_at,id""",
+        (thread_id,),
+    ).fetchall()
+    woken: list[str] = []
+    for row in rows:
+        _closed, selected = close_batch(db, row["id"], "turn_end")
         woken.extend(selected)
     return woken
 
@@ -318,63 +396,3 @@ def retry_for_document(db, *, author_kind: str, author_id: str, artifact_id: str
         _retried, selected = retry_batch(db, row["id"])
         woken.extend(selected)
     return woken
-
-
-def close_for_turn_end(db, thread_id: str) -> list[str]:
-    """Close the author's open batches at turn end."""
-    rows = db.execute(
-        """SELECT id FROM doc_feedback_batches
-           WHERE state='open' AND author_kind='agent' AND author_id=?
-           ORDER BY opened_at,id""",
-        (thread_id,),
-    ).fetchall()
-    woken: list[str] = []
-    for row in rows:
-        _closed, selected = close_batch(db, row["id"], "turn_end")
-        woken.extend(selected)
-    return woken
-
-
-def claim_and_deliver(db, batch_id: str, *, from_state: str,
-                      reason: str | None) -> tuple[bool, tuple[str, ...]]:
-    """Claim one batch and settle its request in the caller's write transaction."""
-    batch = db.execute(
-        "SELECT * FROM doc_feedback_batches WHERE id=? AND state=?", (batch_id, from_state),
-    ).fetchone()
-    if batch is None:
-        return False, ()
-    now = _now()
-    closed_sql = "closed_reason=?" if reason is not None else "closed_reason=closed_reason"
-    params: list[Any] = [now]
-    if reason is not None:
-        params.append(reason)
-    params.extend([batch_id, from_state])
-    changed = db.execute(
-        f"""UPDATE doc_feedback_batches SET state='delivered',updated_at=?,
-            {closed_sql},undelivered_reason=NULL,attempts=attempts+1
-            WHERE id=? AND state=?""",
-        params,
-    )
-    if changed.rowcount == 0:
-        return False, ()
-    batch = db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
-    delivered = feedback_delivery.deliver_claimed(db, batch)
-    review_woken: tuple[str, ...] = ()
-    if delivered.reason is not None:
-        db.execute(
-            """UPDATE doc_feedback_batches
-               SET state='undelivered',undelivered_reason=?,delivery_outcome=NULL,
-                   updated_at=? WHERE id=?""",
-            (delivered.reason, now, batch_id),
-        )
-    else:
-        if delivered.outcome is None:
-            raise RuntimeError("successful feedback delivery has no typed outcome")
-        db.execute(
-            """UPDATE doc_feedback_batches
-               SET delivered_node_id=?,delivery_outcome=?,updated_at=? WHERE id=?""",
-            (delivered.node_id, delivered.outcome, now, batch_id),
-        )
-        db.execute("DELETE FROM doc_feedback_edit_items WHERE batch_id=?", (batch_id,))
-        review_woken = settle_for_batch(db, batch)
-    return True, delivered.woken_threads + review_woken

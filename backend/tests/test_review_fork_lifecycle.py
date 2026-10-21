@@ -17,6 +17,7 @@ from core.fork_runtime import ForkHandle, ForkStepLimitReached, handles
 from doceditor import review_feedback, review_requests
 from infra.database import write_transaction
 from plans import public
+from prompts.artifact_review import continuation
 from test_doc_review_requests import request, review_env, fork_comment, stored
 from test_checkpoint_provider_adapters import _request
 
@@ -42,7 +43,9 @@ async def test_start_build_failure_records_reason_and_hands_back(review_env, mon
     failed = stored(db, row["id"])
     assert failed["state"] == "failed" and failed["reason"] == reason
     assert review_requests.is_open(db, failed)
-    assert reason in public.get_node(failed["node_id"], db=db).description
+    assert public.get_node(failed["node_id"], db=db).description.endswith(
+        "Check claims\n\n" + continuation(0, reason),
+    )
     assert failed["fork_id"] is None and row["fork_id"] not in handles
     assert any(reason in record.message for record in caplog.records)
     await runtime.start(row["id"])
@@ -65,7 +68,7 @@ async def test_partial_review_limit_and_failure_are_distinct_live_tasks(review_e
     assert (result["state"], result["reason"]) == (expected_state, reason)
     assert public.review_is_open(db, result["node_id"])
     note = public.get_node(result["node_id"], db=db).description
-    assert reason in note and "comments already written" in note
+    assert note.endswith("Check claims\n\n" + continuation(1, reason))
     assert db.execute("SELECT state,item_count FROM doc_feedback_batches").fetchone()[:] == ("open", 1)
     await capture.review_limit_or_failure_handler(row["id"], error)
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 1

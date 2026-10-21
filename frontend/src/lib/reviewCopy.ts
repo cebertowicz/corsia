@@ -14,9 +14,9 @@ export function reviewContinuationText(reviewer: string, reason?: string | null)
 	return `The review is unfinished. ${reviewer} will finish it.`;
 }
 
-export function reviewStatus(state: DocumentReviewLifecycleState, reviewer: string, createdAt: string, reason?: string | null): string {
+export function reviewStatus(state: DocumentReviewLifecycleState, reviewer: string, createdAt: string, reason?: string | null, commentCount = 0): string {
 	if (state === 'forked') return `Requested ${new Date(createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
-	if (state === 'submitted') return 'Submitted.';
+	if (state === 'submitted') return commentCount ? `Finished with ${commentCount} comment${commentCount === 1 ? '' : 's'}.` : 'Finished without comments.';
 	if (state === 'withdrawn') return 'Cancelled.';
 	if (state === 'handed_back') return `Unfinished. ${reviewer} will finish it.`;
 	if (reason === 'missing_credentials') return 'Couldn’t finish because sign-in is needed.';

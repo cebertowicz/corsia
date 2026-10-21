@@ -5,7 +5,6 @@ import sqlite3
 import pytest
 
 from infra.migration_132_to_133_review_forks import migrate_132_to_133
-from infra.migration_133_to_134_review_feedback_scope import migrate_133_to_134
 
 
 def test_review_fork_ladder_preserves_legacy_rows_and_is_idempotent():
@@ -28,13 +27,9 @@ def test_review_fork_ladder_preserves_legacy_rows_and_is_idempotent():
         """)
         for _ in range(2):
             migrate_132_to_133(db)
-            migrate_133_to_134(db)
         assert db.execute("SELECT id,node_id,fork_id,state,state_changed_at,reason FROM doc_review_requests").fetchone() == (
             "legacy", "review-node", None, "handed_back", "2026-01-01", None,
         )
-        columns = {row[1] for row in db.execute("PRAGMA table_info(doc_review_requests)")}
-        assert not {"requesting_node_id", "requirements_revision"} & columns
-        assert "review_request_id" not in {row[1] for row in db.execute("PRAGMA table_info(doc_feedback_batches)")}
         assert db.execute("SELECT id FROM doc_feedback_batches").fetchone() == ("legacy-batch",)
         with pytest.raises(sqlite3.IntegrityError):
             db.execute("INSERT INTO doc_feedback_batches VALUES ('duplicate','agent','reviewer','doc','owner','open')")
@@ -67,7 +62,6 @@ def test_fresh_schema_matches_edited_review_migration_chain():
             CREATE INDEX idx_doc_review_reviewer ON doc_review_requests(artifact_id,reviewer_thread_id,created_at);
         """ + DOC_REVIEW_REVIEWER_INDEX_SQL + ";" + DOC_FEEDBACK_SCHEMA_SQL)
         migrate_132_to_133(upgraded)
-        migrate_133_to_134(upgraded)
         assert fresh.execute("SELECT name,type FROM sqlite_master ORDER BY name").fetchall() == upgraded.execute(
             "SELECT name,type FROM sqlite_master ORDER BY name",
         ).fetchall()

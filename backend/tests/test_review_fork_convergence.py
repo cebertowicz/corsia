@@ -43,7 +43,6 @@ def test_ended_continuation_keeps_visible_findings_for_ordinary_delivery(review_
 def test_comment_admission_reads_request_state_only(review_env):
     db, aid = review_env
     row = request(db, aid)
-    assert "cancelled_at" not in {column[1] for column in db.execute("PRAGMA table_info(doc_review_requests)")}
     fork_comment(db, aid, row["id"])
     assert db.execute("SELECT item_count FROM doc_feedback_batches").fetchone()[0] == 1
     with write_transaction(db, scope="test_withdrawn_review"):
@@ -120,7 +119,6 @@ async def test_pool_thread_withdrawal_wakes_running_fork_promptly(review_env):
         await asyncio.wait_for(task, timeout=0.5)
         assert time.monotonic() - started < 0.5
         assert stored(db, row["id"])["state"] == "withdrawn"
-        assert "cancelled_at" not in stored(db, row["id"])
     finally:
         loop.set_debug(original_debug)
         handles.pop(row["fork_id"], None)

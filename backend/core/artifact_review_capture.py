@@ -20,7 +20,7 @@ class ReviewForkFailure(RuntimeError):
         self.reason = reason
 
 
-def submitted(request_id: str) -> bool:
+def fork_ended(request_id: str) -> bool:
     """Whether this request no longer belongs to an executing fork."""
     db = get_db()
     try:
@@ -76,7 +76,7 @@ async def review_limit_or_failure_handler(
     reason: str | None = None,
     state: Literal["handed_back", "failed"] | None = None,
 ) -> None:
-    if await run_in_db(submitted, request_id):
+    if await run_in_db(fork_ended, request_id):
         return
     reason = reason or failure_reason(error)
     log = logger.warning if reason == "limit" else logger.error
@@ -108,5 +108,5 @@ def provider_failure(harness: str, detail: str) -> None:
 
 
 async def review_end_handler(request_id: str, result=None) -> None:
-    if not await run_in_db(submitted, request_id):
+    if not await run_in_db(fork_ended, request_id):
         await review_limit_or_failure_handler(request_id, reason="review_completed_without_submission")

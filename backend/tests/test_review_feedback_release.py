@@ -41,7 +41,7 @@ async def test_withdrawal_between_state_read_and_handle_registration_launches_no
     row = await run_in_db(request, db, aid)
     cold = SimpleNamespace(fork_id=row["fork_id"], thread_id="reviewer")
     monkeypatch.setattr(runtime, "_cold_request", lambda _request_id: (row, cold))
-    original = runtime.submitted
+    original = runtime.fork_ended
     reads = []
     model_steps = []
     source_reads = []
@@ -63,7 +63,7 @@ async def test_withdrawal_between_state_read_and_handle_registration_launches_no
         raise AssertionError("a withdrawn review must not launch a model")
 
     monkeypatch.setattr(runtime, "_source", source)
-    monkeypatch.setattr(runtime, "submitted", withdraw_after_read)
+    monkeypatch.setattr(runtime, "fork_ended", withdraw_after_read)
     monkeypatch.setattr(fork_runtime, "invoke_fork", invoke)
     await runtime.start(row["id"])
     handle = fork_runtime.handles.get(row["fork_id"])

@@ -8,7 +8,7 @@ from typing import Any
 
 from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
 from core.fork_runtime import ForkHandle, cancel_fork, forget, handles
-from core.artifact_review_capture import ReviewForkFailure, submitted
+from core.artifact_review_capture import ReviewForkFailure, fork_ended
 from prompts.artifact_review import instruction
 
 _starting: set[str] = set()
@@ -81,7 +81,7 @@ async def start(request_id: str) -> None:
                 reason = f"cold_request_build:{type(error).__name__}"
             await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id, reason=reason)
             return
-        if await asyncio.to_thread(submitted, request_id):
+        if await asyncio.to_thread(fork_ended, request_id):
             return
         fork_id = request.fork_id
         cancel_event = asyncio.Event()
@@ -146,7 +146,7 @@ async def _run(request_id: str, request: Any, cancel_event: asyncio.Event) -> No
     try:
         # start() registers the handle before this first yield/state read, so a
         # withdrawal either appears here or signals the registered handle.
-        if await asyncio.to_thread(submitted, request_id) or cancel_event.is_set():
+        if await asyncio.to_thread(fork_ended, request_id) or cancel_event.is_set():
             return
         from core.checkpoint_runtime import await_checkpoint
         from infra.checkpoint_queries import active_for_thread

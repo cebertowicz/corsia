@@ -13,7 +13,7 @@
 				<Avatar name={request.reviewer_name} color={agentColor(request.reviewer_thread_id)} hidden size="md" />
 				<span class="who">
 					<span class="name">{request.reviewer_name}</span>
-					<span class="status" title={request.state === 'failed' ? reviewContinuationText(request.reviewer_name, request.reason) : undefined}>{reviewStatus(request.state, request.reviewer_name, request.created_at, request.reason)}</span>
+					<span class="status" title={request.state === 'failed' ? reviewContinuationText(request.reviewer_name, request.reason) : undefined}>{reviewStatus(request.state, request.reviewer_name, request.created_at, request.reason, request.comment_count)}</span>
 					{#if model.cancelErrors[request.id]}<span class="error" role="alert">{model.cancelErrors[request.id]}</span>{/if}
 				</span>
 				{#if request.may_cancel}

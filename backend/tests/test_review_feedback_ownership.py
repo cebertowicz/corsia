@@ -80,21 +80,32 @@ def test_ended_continuation_quiet_closer_delivers_all_ordinary_comments(review_e
     assert "The claim needs evidence." in tasks[0]["description"]
 
 
-@pytest.mark.parametrize("state", ["forked", "handed_back", "failed"])
-def test_generic_closers_deliver_fork_comments_in_every_open_request_state(review_env, state):
+def _assert_running_fork_survives_trigger(db, aid, row, trigger):
+    fork_comment(db, aid, row["id"])
+    trigger(db, aid)
+    assert stored(db, row["id"])["state"] == "forked"
+    fork_comment(db, aid, row["id"])
+    with write_transaction(db, scope="finish_running_fork"):
+        review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
+    assert stored(db, row["id"])["state"] == "submitted"
+
+
+def test_quiet_timer_delivery_does_not_end_running_fork(review_env):
     db, aid = review_env
     row = request(db, aid)
-    fork_comment(db, aid, row["id"])
-    if state != "forked":
-        review_requests.escalate_fork(db, row["id"], reason="limit" if state == "handed_back" else "target_unavailable")
-    with write_transaction(db, scope="test_generic_closers"):
-        feedback_batches.close_for_document(db, author_kind="agent", author_id="reviewer", artifact_id=aid, reason="submit")
-        assert feedback_batches.close_for_turn_end(db, "reviewer") == []
-    assert feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db) == []
-    batch = db.execute("SELECT state FROM doc_feedback_batches").fetchone()
-    assert batch["state"] == "delivered"
-    assert stored(db, row["id"])["answered_batch_id"]
-    assert stored(db, row["id"])["state"] == "submitted"
+    _assert_running_fork_survives_trigger(db, aid, row, lambda db, aid: feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db))
+
+
+def test_reviewer_turn_end_delivery_does_not_end_running_fork(review_env):
+    db, aid = review_env
+    row = request(db, aid)
+    _assert_running_fork_survives_trigger(db, aid, row, lambda db, aid: feedback_batches.close_for_turn_end(db, "reviewer"))
+
+
+def test_reviewer_feedback_delivery_does_not_end_running_fork(review_env):
+    db, aid = review_env
+    row = request(db, aid)
+    _assert_running_fork_survives_trigger(db, aid, row, lambda db, aid: review_feedback.send_document_feedback(db, "reviewer", aid))
 
 
 def test_active_fork_feedback_uses_ordinary_pending_notices_and_retry(review_env, monkeypatch):
@@ -115,7 +126,7 @@ def test_active_fork_feedback_uses_ordinary_pending_notices_and_retry(review_env
     with write_transaction(db, scope="test_ordinary_retry"):
         feedback_batches.retry_for_document(db, **identity)
     assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == "delivered"
-    assert stored(db, row["id"])["state"] == "submitted"
+    assert stored(db, row["id"])["state"] == "forked"
     assert len(comments.list_for_artifact(aid, db=db)) == 1
 
 
@@ -150,7 +161,7 @@ def test_submitted_fork_failure_is_noticed_and_retry_delivers_ordinary_batch(rev
     with write_transaction(db, scope="test_submit_delivery_failure"):
         pending, woken, failures = review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     assert pending and failures and not woken
-    assert stored(db, row["id"])["state"] == "forked"
+    assert stored(db, row["id"])["state"] == "submitted"
     batch = db.execute("SELECT * FROM doc_feedback_batches").fetchone()
     assert batch["state"] == "undelivered"
     attempts = batch["attempts"]
@@ -164,7 +175,7 @@ def test_submitted_fork_failure_is_noticed_and_retry_delivers_ordinary_batch(rev
         feedback_batches.retry_for_document(db, **kwargs)
     assert db.execute("SELECT state,attempts FROM doc_feedback_batches WHERE id=?", (batch["id"],)).fetchone()[:] == ("delivered", attempts + 1)
     assert stored(db, row["id"])["state"] == "submitted"
-    assert stored(db, row["id"])["answered_batch_id"] == batch["id"]
+    assert stored(db, row["id"])["answered_batch_id"] is None
     assert feedback_state.undelivered_for_document(db, **kwargs) == []
 
 

@@ -8,6 +8,7 @@ from threading import Barrier
 import pytest
 
 from doc_feedback_helpers import add_comment, seed_thread
+from doceditor import review_feedback
 from infra.database import write_transaction
 from plans import public
 from test_doc_review_requests import request, review_env, stored, fork_comment  # noqa: F401
@@ -24,7 +25,9 @@ def test_create_settle_cancel_emit_one_artifact_frame_after_commit_and_none_on_r
     monkeypatch.setattr(state, "broadcast_to_user", broadcast)
     first = request(db, aid)
     assert len(frames) == 1
-    fork_comment(db, aid, first["id"], submit=True)
+    fork_comment(db, aid, first["id"])
+    with write_transaction(db, scope="test_review_settle"):
+        review_feedback.submit_fork_feedback(db, first["id"], "reviewer", aid)
     assert len(frames) == 2
     second = request(db, aid, reviewer="second", key="second")
     assert len(frames) == 3
@@ -42,7 +45,7 @@ def test_create_settle_cancel_emit_one_artifact_frame_after_commit_and_none_on_r
     assert len(frames) == 5
     with pytest.raises(RuntimeError, match="rollback"):
         with write_transaction(db, scope="test_settlement_rollback"):
-            fork_comment(db, aid, third["id"], submit=True)
+            review_feedback.submit_fork_feedback(db, third["id"], "reviewer", aid)
             raise RuntimeError("rollback")
     assert len(frames) == 5
     assert stored(db, third["id"])["state"] == "forked"

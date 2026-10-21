@@ -195,7 +195,7 @@ describe('document review toolbar and popover', () => {
 		const group = document.body.querySelector<HTMLElement>('.reviewer-group')!;
 		expect(group.querySelector('.mark')?.classList.contains('submitted')).toBe(true);
 		group.click(); await settle();
-		expect(document.body.querySelector('.status')?.textContent).toBe('Submitted.');
+		expect(document.body.querySelector('.status')?.textContent).toBe('Finished without comments.');
 		expect(maybeButton('Cancel request to Quality Gate')).toBeUndefined();
 	});
 	it('returns focus to the comments pill in the header when cancelling the last request removed its trigger', async () => {

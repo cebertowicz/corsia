@@ -13,6 +13,7 @@ export interface DocumentReview {
 	created_at: string;
 	may_cancel: boolean;
 	state: DocumentReviewLifecycleState;
+	comment_count: number;
 	reason?: string | null;
 }
 export interface DocumentReviewer {

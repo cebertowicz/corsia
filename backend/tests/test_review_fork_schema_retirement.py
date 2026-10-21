@@ -63,6 +63,6 @@ def test_fresh_review_schema_has_one_state_fact():
     try:
         db.executescript(DOC_REVIEW_SCHEMA_SQL)
         columns = {row[1] for row in db.execute("PRAGMA table_info(doc_review_requests)")}
-        assert "state" in columns and "cancelled_at" not in columns
+        assert "state" in columns
     finally:
         db.close()

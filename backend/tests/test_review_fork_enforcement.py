@@ -248,7 +248,7 @@ def test_submitted_receipt_and_owner_reply_reach_next_reviewer_context(review_en
     from infra.passive_changes import materialize_pending_digest
     import json
     from doc_feedback_helpers import add_comment
-    from doceditor import review_feedback, review_requests
+    from doceditor import review_feedback
 
     db, aid = review_env
     row = request(db, aid)
@@ -272,7 +272,7 @@ def test_submitted_receipt_and_owner_reply_reach_next_reviewer_context(review_en
     assert delivered and delivered["delivered_node_id"]
 
 
-def test_foreground_completion_delivers_fork_feedback_through_ordinary_batch(review_env):
+def test_foreground_turn_end_delivers_fork_feedback_without_ending_the_fork(review_env):
     from doceditor import feedback_batches
 
     db, aid = review_env
@@ -282,8 +282,7 @@ def test_foreground_completion_delivers_fork_feedback_through_ordinary_batch(rev
         feedback_batches.close_for_turn_end(db, "reviewer")
     assert feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db) == []
     assert db.execute("SELECT state,item_count FROM doc_feedback_batches").fetchone()[:] == ("delivered", 1)
-    assert stored(db, row["id"])["answered_batch_id"]
-    assert stored(db, row["id"])["state"] == "submitted"
+    assert stored(db, row["id"])["state"] == "forked"
 
 
 def test_startup_escalates_each_orphaned_review_once(review_env):

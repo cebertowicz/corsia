@@ -11,7 +11,7 @@ from typing import Literal
 from core.agent_roster_queries import agent_rows
 from doceditor import feedback_delivery
 from doceditor.comments import validate_client_id
-from doceditor.review_lifecycle import FALLBACK_STATES, is_open, notify_change, transition
+from doceditor.review_lifecycle import FALLBACK_STATES, is_open, notify_change, request_comment_count, transition
 from infra.auth import is_owner_sentinel, may_access_artifact
 from infra.corsia_agent import CorsiaAgentSettingError, get_corsia_agent
 from infra.database import write_transaction
@@ -132,8 +132,10 @@ def _reviewer(db, artifact, reviewer: str, actor: ReviewActor) -> None:
 
 
 def _view(db, row) -> dict:
-    """Expose the stored lifecycle without a parallel status vocabulary."""
-    return dict(row)
+    """Expose the stored lifecycle with the request's current review-comment count."""
+    result = dict(row)
+    result["comment_count"] = request_comment_count(db, row)
+    return result
 
 
 def get_request(db, request_id: str) -> dict:
@@ -236,19 +238,12 @@ def escalate_fork(db, request_id: str, *, reason: str = "limit",
         if row is None or row["state"] != "forked":
             return None
         requester = connection.execute("SELECT title FROM threads WHERE id=?", (row["requester_id"],)).fetchone()
-        comments = connection.execute(
-            "SELECT DISTINCT i.comment_id AS id FROM doc_feedback_batch_items i "
-            "JOIN doc_feedback_batches b ON b.id=i.batch_id "
-            "WHERE b.artifact_id=? AND b.author_kind='agent' AND b.author_id=? "
-            "AND b.state='open' AND i.comment_id IS NOT NULL ORDER BY i.comment_id",
-            (row["artifact_id"], row["reviewer_thread_id"]),
-        ).fetchall()
+        comment_count = request_comment_count(connection, row)
         state = state or ("handed_back" if reason == "limit" else "failed")
-        task_text = continuation([str(comment["id"]) for comment in comments], state, reason)
         request = {
             **dict(row),
-            "requester_display": (requester["title"] if requester else None) or row["requester_id"],
-            "note": f"{row['note'] or ''}\n\n{task_text}".strip(),
+            "requester_display": (requester["title"] if requester else None) or "the requester",
+            "note": f"{row['note'] or ''}\n\n{continuation(comment_count, reason)}".strip(),
         }
         node = public.create_review_node(connection, row["reviewer_thread_id"], request)
         connection.execute(

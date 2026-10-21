@@ -48,8 +48,10 @@ def is_open(db, row) -> bool:
 
         try:
             return public.review_is_open(db, row["node_id"])
-        except public.PlanError:
-            return False  # A deleted continuation cannot receive document changes.
+        except public.PlanError as exc:
+            if str(exc).startswith("unknown plan node:"):
+                return False  # A deleted continuation cannot receive document changes.
+            raise
     return False
 
 
@@ -115,18 +117,25 @@ def _submit_request(db, row, batch_id: str | None) -> ReviewTransition:
     return ReviewTransition(True, tuple(woken))
 
 
+def request_comment_count(db, row) -> int:
+    return db.execute(
+        "SELECT COUNT(*) FROM doc_comments WHERE artifact_id=? AND author_kind='agent' "
+        "AND author_thread_id=? AND created_at>=?",
+        (row["artifact_id"], row["reviewer_thread_id"], row["created_at"]),
+    ).fetchone()[0]
+
+
 def _receipt(db, row, batch_id: str | None) -> None:
     from infra.passive_changes import append_thread_context_note
 
-    count = 0
+    count = request_comment_count(db, row)
     summary = "nothing was sent to the document owner"
     if batch_id is not None:
-        count = db.execute("SELECT item_count FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()[0]
         comments = db.execute(
             "SELECT c.body FROM doc_feedback_batch_items i JOIN doc_comments c ON c.id=i.comment_id "
             "WHERE i.batch_id=? ORDER BY c.created_at,c.id LIMIT 3", (batch_id,),
         ).fetchall()
-        summary = f"{count} feedback items delivered"
+        summary = f"{count} review comments written; feedback was delivered"
         if comments:
             summary += ": " + "; ".join(str(comment["body"])[:200] for comment in comments)
     append_thread_context_note(
@@ -137,10 +146,14 @@ def _receipt(db, row, batch_id: str | None) -> None:
     )
 
 
-def submit_without_batch(db, artifact_id: str, reviewer_id: str) -> ReviewTransition:
-    """An explicit empty submit finishes an open fork or continuation."""
+def submit_without_batch(
+    db, artifact_id: str, reviewer_id: str, batch_id: str | None = None, *, fork_end: bool = False,
+) -> ReviewTransition:
+    """Finish a continuation, or a fork that has reached its own end."""
     row = pending_request(db, artifact_id, reviewer_id)
-    return _submit_request(db, row, None) if row is not None else ReviewTransition()
+    if row is not None and row["state"] == "forked" and not fork_end:
+        return ReviewTransition()
+    return _submit_request(db, row, batch_id) if row is not None else ReviewTransition()
 
 
 def settle_for_batch(db, batch) -> tuple[str, ...]:
@@ -159,4 +172,6 @@ def settle_for_batch(db, batch) -> tuple[str, ...]:
     if artifact is None or batch["recipient_id"] != artifact["parent_thread_id"]:
         return ()
     row = pending_request(db, batch["artifact_id"], batch["author_id"])
+    if row is not None and row["state"] not in FALLBACK_STATES:
+        return ()
     return _submit_request(db, row, batch["id"]).woken if row is not None else ()

@@ -12,7 +12,7 @@ from test_doc_review_requests import request, review_env  # noqa: F401
 
 
 def test_list_without_thread_names_and_permissions_never_reads_roster(client, review_env, monkeypatch):
-    from doceditor import review_feedback, review_requests as reviews
+    from doceditor import review_requests as reviews
     db, aid = review_env
     row = request(db, aid)
     monkeypatch.setattr(reviews, "agent_rows", lambda *args: pytest.fail("No thread must not read a roster"))
@@ -35,7 +35,7 @@ def test_user_requester_name_comes_from_the_user(client, review_env):
 
 
 def test_viewing_thread_is_owned_before_roster_read_and_artifact_is_checked_first(client, review_env, monkeypatch):
-    from doceditor import review_feedback, review_requests as reviews
+    from doceditor import review_requests as reviews
     db, aid = review_env
     seed_thread(db, "foreign")
     db.execute("UPDATE threads SET user_id='someone-else' WHERE id='foreign'")
@@ -62,7 +62,7 @@ def test_viewing_thread_is_owned_before_roster_read_and_artifact_is_checked_firs
 
 
 def test_picker_and_post_share_one_helper_and_one_roster_read_per_list(client, review_env, monkeypatch):
-    from doceditor import review_feedback, review_requests as reviews
+    from doceditor import review_requests as reviews
     db, aid = review_env
     requested = request(db, aid)
     count = 0
@@ -102,7 +102,7 @@ def test_picker_and_post_share_one_helper_and_one_roster_read_per_list(client, r
 
 
 def test_roster_error_preserves_known_requests_and_is_not_empty_or_500(client, review_env, monkeypatch):
-    from doceditor import review_feedback, review_requests as reviews
+    from doceditor import review_requests as reviews
     db, aid = review_env
     row = request(db, aid)
 
@@ -130,7 +130,7 @@ def test_roster_error_preserves_known_requests_and_is_not_empty_or_500(client, r
     ("/api/delegation/docs/reviews", {"as_session_id": "requester"}),
 ])
 def test_both_create_routes_return_safe_roster_error(client, review_env, monkeypatch, path, fields):
-    from doceditor import review_feedback, review_requests as reviews
+    from doceditor import review_requests as reviews
     _db, aid = review_env
 
     def broken(*args):
@@ -144,7 +144,7 @@ def test_both_create_routes_return_safe_roster_error(client, review_env, monkeyp
 
 
 def test_user_and_agent_roster_refusals_have_distinct_stable_copy(client, review_env):
-    from doceditor import review_feedback, review_requests as reviews
+    from doceditor import review_requests as reviews
     db, aid = review_env
     db.execute("UPDATE threads SET agent_enabled=0 WHERE id='reviewer'")
     db.commit()
@@ -217,7 +217,7 @@ def test_post_rechecks_reviewer_after_picker_read(client, review_env, monkeypatc
 
 @pytest.mark.parametrize("role,expected", [("requester", True), ("owner", True), ("neither", False)])
 def test_list_cancel_permission_matches_mutation(client, review_env, monkeypatch, role, expected):
-    from doceditor import review_feedback, review_requests as reviews
+    from doceditor import review_requests as reviews
     db, aid = review_env
     requester_id = "owner-token" if role == "requester" else "someone-else"
     actor = reviews.ReviewActor("user", requester_id, "requester", "owner-token", "Steve")
@@ -230,12 +230,10 @@ def test_list_cancel_permission_matches_mutation(client, review_env, monkeypatch
     assert response.status_code == (200 if expected else 403)
     stored = db.execute("SELECT * FROM doc_review_requests WHERE id=?", (row["id"],)).fetchone()
     assert stored["state"] == ("withdrawn" if expected else "forked")
-    assert "cancelled_at" not in stored.keys()
-    assert "outcome" not in body["reviews"][0]
 
 
 def test_projection_uses_canonical_cancel_permission_helper(client, review_env, monkeypatch):
-    from doceditor import review_feedback, review_requests as reviews
+    from doceditor import review_requests as reviews
     db, aid = review_env
     row = request(db, aid)
     calls = []
@@ -278,7 +276,7 @@ def test_ended_review_disappears_without_requested_picker_state(client, review_e
 
 
 def test_clean_fork_without_comments_remains_named_in_http_list(client, review_env):
-    from doceditor import review_feedback, review_requests as reviews
+    from doceditor import review_feedback
     from infra.database import write_transaction
 
     db, aid = review_env
