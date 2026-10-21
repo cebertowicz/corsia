@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -58,12 +59,18 @@ class LocalTraceAdapter:
     def run(self, *, target_path: str, case: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
         from eval.fresh_turn import run_fresh_turn
 
+        started = time.perf_counter()
         fresh = asyncio.run((self._runner or run_fresh_turn)(
             user_id=self.user_id,
             prompt=json.dumps({"target_path": target_path, "case": case}, sort_keys=True),
             model=LOCAL_SELECTOR,
             timeout_seconds=120.0,
         ))
+        self.last_receipt = {
+            "wall_seconds": round(time.perf_counter() - started, 3),
+            "usage": {} if fresh.result is None else getattr(fresh.result, "usage", {}),
+            "error": fresh.error,
+        }
         return () if fresh.result is None else fresh.result.tool_calls
 
 
@@ -198,11 +205,22 @@ def run_three(
     """Run exactly three serialized fresh turns, or retain pending when not ready."""
     if not adapter.ready():
         return CarryInRun("pending")
-    scores = tuple(
-        score_trace(actions, adapter.run(target_path=target_path, case=case or {}))
-        for _ in range(SAMPLE_COUNT)
-    )
-    return CarryInRun("settled", scores)
+    scores: list[TraceScore] = []
+    for _ in range(SAMPLE_COUNT):
+        score = score_trace(actions, adapter.run(target_path=target_path, case=case or {}))
+        receipt = getattr(adapter, "last_receipt", {})
+        usage = receipt.get("usage", {}) if isinstance(receipt, dict) else {}
+        logger.info(
+            "carry-in sample target={} wall_seconds={} input_tokens={} output_tokens={} decisive={} verdict={}",
+            target_path,
+            receipt.get("wall_seconds") if isinstance(receipt, dict) else None,
+            usage.get("prompt_tokens", usage.get("input_tokens")),
+            usage.get("completion_tokens", usage.get("output_tokens")),
+            score.decisive_call_index,
+            score.verdict,
+        )
+        scores.append(score)
+    return CarryInRun("settled", tuple(scores))
 
 
 def is_discriminating(before: CarryInRun, after: CarryInRun) -> bool | None:

@@ -96,7 +96,13 @@ def test_local_adapter_reaches_only_the_shared_fresh_turn_runner():
 
     async def runner(**kwargs):
         calls.append(kwargs)
-        return SimpleNamespace(result=SimpleNamespace(tool_calls=[_call("read_file", {"path": "context/rule.md"})]))
+        return SimpleNamespace(
+            result=SimpleNamespace(
+                tool_calls=[_call("read_file", {"path": "context/rule.md"})],
+                usage={"prompt_tokens": 12, "completion_tokens": 5},
+            ),
+            error=None,
+        )
 
     adapter = LocalTraceAdapter("owner", runner=runner)
 
@@ -105,6 +111,7 @@ def test_local_adapter_reaches_only_the_shared_fresh_turn_runner():
     ]
     assert calls[0]["model"] == "omlx@ns-f378151a51/Qwen3.8-Flash-Next-MLX-oQ6-MTP"
     assert calls[0]["prompt"] == '{"case": {"right_call": "Read it."}, "target_path": "context/rule.md"}'
+    assert adapter.last_receipt["usage"] == {"prompt_tokens": 12, "completion_tokens": 5}
 
 
 def test_three_samples_settle_by_two_of_three():
