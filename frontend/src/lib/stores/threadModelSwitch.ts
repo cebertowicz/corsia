@@ -1,4 +1,4 @@
-import { threads } from './threads';
+import { updateThreadRow } from './threadRow';
 
 export interface ThreadModelSwitchState {
 	pending_model?: string | null;
@@ -30,17 +30,13 @@ export function applyPendingThreadModelSwitch(
 	) {
 		throw new Error('Model switch response did not include pending operation truth');
 	}
-	threads.update((rows) => rows.map((thread) => (
-		thread.id === threadId
-			? {
-				...thread,
-				pending_model: body.pending_model,
-				switch_status: body.status,
-				switch_error: null,
-				switch_operation_id: body.operation_id,
-			}
-			: thread
-	)));
+	const pending = {
+		pending_model: body.pending_model,
+		switch_status: body.status,
+		switch_error: null,
+		switch_operation_id: body.operation_id,
+	};
+	updateThreadRow(threadId, pending);
 	return {
 		kind: 'pending',
 		operationId: body.operation_id,

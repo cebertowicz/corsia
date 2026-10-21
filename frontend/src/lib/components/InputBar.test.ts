@@ -34,8 +34,9 @@ import InputBar from './InputBar.svelte';
 import { QUEUE_ARM_MS as ARM_MS } from './InputBarActionRow.svelte';
 import { token } from '$lib/stores/auth';
 import { connectionState } from '$lib/stores/connection';
-import { activeModelId, models } from '$lib/stores/models';
+import { _resetThreadModelTruthForTests, acceptThreadModelTruth, activeModelId, models } from '$lib/stores/models';
 import { activeThreadId, messages, threads } from '$lib/stores/threads';
+import { subagentMeta } from '$lib/stores/subagents';
 import { toasts } from '$lib/stores/toast';
 import { applyLifecycle, applyTerminal, _resetTurnStateForTests } from '$lib/ws/turnState';
 import { stopRequestedTurns } from '$lib/ws/send';
@@ -104,6 +105,7 @@ afterEach(() => {
 	activeModelId.set(null);
 	models.set([]);
 	threads.set([]);
+	subagentMeta.set(new Map());
 });
 
 async function mountPreparedComposer({ switchThreadOnSend = true } = {}) {
@@ -263,12 +265,45 @@ describe('InputBar send and queue preparation', () => {
 		host.querySelector<HTMLButtonElement>('.send-btn')!.click();
 		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
 
+		// The worker's own selection rides the send, never the open thread's model.
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
 			'subagent-thread',
 			'hello subagent',
-			'network/model',
+			undefined,
 			[],
 			undefined,
+		);
+	});
+
+	it('sends a worker its own model once its row has loaded', async () => {
+		activeThreadId.set('active-thread');
+		activeModelId.set('network/other');
+		models.update(rows => [...rows, {
+			id: 'network/worker', name: 'Worker Model', size: '', backend: 'network', speed: '', status: 'ready',
+		}]);
+		_resetThreadModelTruthForTests();
+		acceptThreadModelTruth('subagent-thread', 'network/worker', '2026-10-20T10:00:00.000000');
+		subagentMeta.set(new Map([['subagent-thread', {
+			childThreadId: 'subagent-thread', parentThreadId: 'active-thread', name: 'Worker',
+			provider: 'cc', status: 'running',
+		} as never]]));
+		// The worker's own catalog, read on mount, lists its model.
+		vi.stubGlobal('fetch', vi.fn(async () => ({
+			ok: true,
+			json: async () => ({ models: get(models) }),
+		})));
+		component = mount(InputBar, {
+			target: host,
+			props: { threadId: 'subagent-thread', onSend: vi.fn() },
+		});
+		flushSync();
+		await component.setText('hello worker');
+
+		host.querySelector<HTMLButtonElement>('.send-btn')!.click();
+		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
+
+		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
+			'subagent-thread', 'hello worker', 'network/worker', [], undefined,
 		);
 	});
 

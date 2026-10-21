@@ -10,7 +10,7 @@ export interface ThreadLocalOnly {
 }
 
 /** Read a thread's Local only state and cause from its payload fields alone. */
-export function threadLocalOnly(thread: Thread | null | undefined): ThreadLocalOnly {
+export function threadLocalOnly(thread: Partial<Thread> | null | undefined): ThreadLocalOnly {
 	return {
 		effective: thread?.local_only_effective === true,
 		cause: thread?.local_only_cause ?? 'off',

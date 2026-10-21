@@ -25,6 +25,7 @@ httpx==0.28.1
 cryptography==48.0.0
 spake2==0.9
 packaging==26.0
+semver==3.0.4
 readability-lxml==0.8.4.1
 json-repair==0.60.1
 mcp==1.27.2

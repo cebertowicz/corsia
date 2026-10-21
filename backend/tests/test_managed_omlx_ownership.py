@@ -41,6 +41,49 @@ async def test_register_managed_server_preserves_existing_rows(isolated_db, monk
     assert (await run_in_db(discovery.get_server, foreign_external))["status"] == "online"
 
 
+@pytest.mark.asyncio
+async def test_register_managed_server_renames_only_its_existing_row(isolated_db, monkeypatch, tmp_path) -> None:
+    from infra.db_async import run_in_db
+    from infra.key_store_servers import resolve_server, set_server_key
+    from llm import network_discovery as discovery
+    from llm.managed_omlx_binary import MANAGED_INSTANCE_ID
+    from llm.local_setup_runtime import LOCAL_SERVER_NAME, register_managed_server
+
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    managed = await run_in_db(
+        discovery.upsert_server,
+        provider="omlx", instance_id=MANAGED_INSTANCE_ID, instance_name="This Mac",
+        host="127.0.0.1", port=8200, status="offline", kind="managed", source="corsia",
+    )
+    await run_in_db(discovery.set_server_metadata, managed, corsia_managed=True)
+    legacy = await run_in_db(
+        discovery.upsert_server,
+        provider="omlx", instance_id="127.0.0.1:8000", instance_name="This Mac",
+        host="127.0.0.1", port=8000, status="online", kind="managed", source="auto",
+    )
+    await run_in_db(discovery.set_server_metadata, legacy, owner="person")
+    await run_in_db(set_server_key, legacy, "legacy-key")
+    _model_row("legacy-model", f"omlx@{legacy}/someone/model", "someone/model")
+    before = await run_in_db(discovery.get_server, legacy)
+    before_key = await run_in_db(resolve_server, legacy)
+    from infra.database import get_db
+    db = get_db()
+    before_binding = tuple(db.execute("SELECT * FROM models WHERE id = ?", ("legacy-model",)).fetchone())
+    db.close()
+
+    registered, _key = await register_managed_server(
+        port=8201, base_path=str(tmp_path / "managed"), model_dir=str(tmp_path / "models"),
+    )
+
+    assert registered == managed
+    assert (await run_in_db(discovery.get_server, managed))["instance_name"] == LOCAL_SERVER_NAME
+    assert await run_in_db(discovery.get_server, legacy) == before
+    assert await run_in_db(resolve_server, legacy) == before_key
+    db = get_db()
+    assert tuple(db.execute("SELECT * FROM models WHERE id = ?", ("legacy-model",)).fetchone()) == before_binding
+    db.close()
+
+
 def test_managed_paths_are_a_pure_lookup(monkeypatch, tmp_path) -> None:
     """Reading the paths binds no port and creates or writes nothing (startup reads them)."""
     from llm.managed_omlx_binary import managed_omlx_paths

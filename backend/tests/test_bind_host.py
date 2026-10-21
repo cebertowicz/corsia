@@ -5,13 +5,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 
 from infra.bind_host import BindHostError, resolve_bind_host, write_setup
+from infra.platform_paths import load_bootstrap, runtime_db_paths
 
 BACKEND = Path(__file__).resolve().parents[1]
 
@@ -145,6 +148,41 @@ class TestCommands:
         _bootstrap(tmp_path / ".corsia")
         assert _cli("setup", "local", home=tmp_path).returncode == 0
         assert _cli("bind-host", home=tmp_path).stdout == "127.0.0.1\n"
+
+    def test_remote_address_prints_only_a_saved_address_while_devices_can_connect(self, tmp_path):
+        from infra.settings import DEVICE_SETTING_KEY
+
+        assert _cli("init", "--workspace", str(tmp_path / "work"), "--setup", "local",
+                    home=tmp_path).returncode == 0
+        db_path = runtime_db_paths(load_bootstrap(tmp_path / ".corsia" / "config.json").state_root)[0]
+        assert _cli("remote-address", home=tmp_path).stdout == ""
+        assert not db_path.exists()  # read-only: never creates the database
+
+        def save(value: dict) -> None:
+            with closing(sqlite3.connect(db_path)) as db, db:
+                db.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+                db.execute("INSERT OR REPLACE INTO settings VALUES (?, ?)",
+                           (DEVICE_SETTING_KEY, json.dumps(value)))
+
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        save({"enabled": False, "outside_address": "home.example.com"})
+        assert _cli("remote-address", home=tmp_path).stdout == ""
+        save({"enabled": True})
+        assert _cli("remote-address", home=tmp_path).stdout == ""
+        save({"enabled": True, "outside_address": "home.example.com"})
+        result = _cli("remote-address", home=tmp_path)
+        assert (result.returncode, result.stdout) == (0, "home.example.com\n")
+
+        # The app passes its own state root, so a checkout install's address never shows for it.
+        app_root = tmp_path / "app-state"
+        assert _cli("remote-address", "--state-root", str(app_root), home=tmp_path).stdout == ""
+        app_root.mkdir()
+        with closing(sqlite3.connect(app_root / "corsia.db")) as db, db:
+            db.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+            db.execute("INSERT INTO settings VALUES (?, ?)",
+                       (DEVICE_SETTING_KEY, json.dumps({"enabled": True, "outside_address": "app.example.com"})))
+        app = _cli("remote-address", "--state-root", str(app_root), home=tmp_path)
+        assert (app.returncode, app.stdout) == (0, "app.example.com\n")
 
 
 def test_init_force_keeps_the_recorded_setup_as_the_default(tmp_path, monkeypatch):

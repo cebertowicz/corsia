@@ -49,6 +49,7 @@ describe('viewFromApi', () => {
 	});
 });
 
+
 describe('createDevices', () => {
 	let calls: { url: string; method: string; body?: string; auth?: string }[];
 	let responses: Array<Response | (() => Response)>;
@@ -104,10 +105,37 @@ describe('createDevices', () => {
 		expect(devices.view).toMatchObject({ enabled: false, listener: 'all-ports-taken' });
 	});
 
+	it('submits the typed outside address and shows the backend refusal', async () => {
+		const devices = createDevices();
+		await devices.read();
+		const refusal = 'Type a name, like home.example.com, or a name and port, like home.example.com:8443.';
+		responses.push(json({ detail: refusal }, 400), json(api()));
+		expect(await devices.setOutside('home.example.com:99999')).toBe(refusal);
+		expect(calls[1]).toMatchObject({ url: '/api/devices', method: 'PUT', body: JSON.stringify({ outside_address: 'home.example.com:99999' }) });
+	});
+
+	it('uses the outside-address fallback for a server failure instead of its detail', async () => {
+		const devices = createDevices();
+		await devices.read();
+		responses.push(json({ detail: 'internal detail' }, 500), json(api()));
+		expect(await devices.setOutside('home.example.com')).toBe('Couldn’t save the outside address. Try again.');
+	});
+
+	it('displays the server-normalized outside address and clears it', async () => {
+		const devices = createDevices();
+		await devices.read();
+		responses.push(json(api({ outside_address: 'home.example.com:8443' })));
+		expect(await devices.setOutside(' https://home.example.com:8443/ ')).toBeNull();
+		expect(devices.view.outside).toBe('home.example.com:8443');
+		responses.push(json(api({ outside_address: null })));
+		expect(await devices.setOutside('')).toBeNull();
+		expect(devices.view.outside).toBeNull();
+	});
+
 	it('asks for a new code with POST', async () => {
 		const devices = createDevices({ now: () => clock });
 		await devices.read();
-		responses.push(json({ code: 'W4BC', ...api({ code: { state: 'active', value: 'W4BC', expires_in_seconds: 600 } }) }));
+		responses.push(json(api({ code: { state: 'active', value: 'W4BC', expires_in_seconds: 600 } })));
 		await devices.newCode();
 		expect(calls.at(-1)).toMatchObject({ url: '/api/devices/code', method: 'POST' });
 		expect(devices.view).toMatchObject({ pairing: 'code', code: 'W4BC' });
