@@ -211,9 +211,6 @@ async def test_native_cold_fork_never_offers_a_tool_it_can_only_refuse(monkeypat
         {"type": "function", "function": {"name": CHECKPOINT_TOOL_NAME}},
         {"type": "function", "function": {"name": "read_file"}},
     )
-    monkeypatch.setattr(
-        "tools.catalog.advertised_tool_definitions", lambda _registry: catalog,
-    )
     # Once any tool call round-trips through the loop, pretend it no longer
     # fits -- exactly the tightly-fit cold input this failure needs, without
     # depending on real token counts.
@@ -243,6 +240,9 @@ async def test_native_cold_fork_never_offers_a_tool_it_can_only_refuse(monkeypat
         )
 
     class Tools:
+        def get_definitions(self):
+            return list(catalog)
+
         async def execute(self, name, arguments):
             pytest.fail(f"a refused tool must never execute: {name}")
 
@@ -288,11 +288,6 @@ async def test_native_cold_fold_at_its_allowance_completes_edit_then_narrative(m
         target=replace(_target(), context_window=window),
         max_output_tokens=max_output,
     )
-    monkeypatch.setattr(
-        "tools.catalog.advertised_tool_definitions",
-        lambda _registry: ({"type": "function", "function": {"name": CHECKPOINT_TOOL_NAME}},),
-    )
-
     calls, edits = [], []
 
     async def completion(**kwargs):
@@ -309,6 +304,9 @@ async def test_native_cold_fold_at_its_allowance_completes_edit_then_narrative(m
         return LLMResponse(content="checkpoint narrative")
 
     class Tools:
+        def get_definitions(self):
+            return [{"type": "function", "function": {"name": CHECKPOINT_TOOL_NAME}}]
+
         async def execute(self, name, arguments):
             edits.append((name, arguments))
             return "ok"

@@ -29,10 +29,6 @@ def _tool_reply() -> LLMResponse:
 
 async def _run(monkeypatch, replies, *, loop_fits=True, tool_fits=True, seen=None):
     """Run one cold fork; ``loop_fits`` and ``tool_fits`` may be verdicts in order."""
-    monkeypatch.setattr(
-        "tools.catalog.advertised_tool_definitions",
-        lambda _registry: ({"type": "function", "function": {"name": CHECKPOINT_TOOL_NAME}},),
-    )
     tool_verdicts = iter(tool_fits if isinstance(tool_fits, list) else [tool_fits] * 9)
     monkeypatch.setattr(
         "core.fork_native_tools.input_fits_off_loop",
@@ -48,6 +44,9 @@ async def _run(monkeypatch, replies, *, loop_fits=True, tool_fits=True, seen=Non
         return next(pending)
 
     class Tools:
+        def get_definitions(self):
+            return [{"type": "function", "function": {"name": CHECKPOINT_TOOL_NAME}}]
+
         async def execute(self, *_args):
             return "ok" * 500
 
