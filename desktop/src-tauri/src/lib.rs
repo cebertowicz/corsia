@@ -21,6 +21,7 @@ use std::{
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
+use service_management::service_label;
 use source_lifecycle::{Bundled, SourceLifecycle};
 use tauri::{ipc::CapabilityBuilder, Manager};
 
@@ -385,7 +386,14 @@ fn bundled_resource_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 fn wait_for_service(port: u16, app_dir: &Path) -> Result<(), String> {
     let log = service_log_path(app_dir)?;
-    wait_for_startup(port, &log, STARTUP_STALL_WINDOW, STARTUP_ABSOLUTE_CAP)
+    let target = format!("gui/{}/{}", unsafe { libc::geteuid() }, service_label());
+    wait_for_startup(
+        port,
+        &log,
+        || release_proof::launchd_pid(&target),
+        STARTUP_STALL_WINDOW,
+        STARTUP_ABSOLUTE_CAP,
+    )
 }
 
 /// Startup can take minutes while a large state root migrates. Health is the
@@ -393,15 +401,24 @@ fn wait_for_service(port: u16, app_dir: &Path) -> Result<(), String> {
 pub(crate) fn wait_for_startup(
     port: u16,
     log: &Path,
+    mut service_pid: impl FnMut() -> Option<u32>,
     stall_window: Duration,
     absolute_cap: Duration,
 ) -> Result<(), String> {
     let began = Instant::now();
     let mut marker = startup_log_marker(log);
     let mut last_progress = began;
+    let mut initial_pid = None;
     loop {
         if probe_health(port) {
             return Ok(());
+        }
+        match (initial_pid, service_pid()) {
+            (Some(expected), Some(actual)) if actual != expected => {
+                return Err(startup_failure::timeout_message(log));
+            }
+            (None, Some(pid)) => initial_pid = Some(pid),
+            _ => {}
         }
         let next_marker = startup_log_marker(log);
         if next_marker != marker {
@@ -605,35 +622,38 @@ fn choose_work_folder(app: tauri::AppHandle) -> Result<Option<first_run::FolderC
 }
 
 #[tauri::command]
-fn configure_work_folder(
-    app: tauri::AppHandle,
-    service: tauri::State<'_, AppServiceState>,
-    path: PathBuf,
-) -> Result<(), String> {
-    let app_dir = default_app_dir(&app)?;
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|error| format!("could not resolve the home folder: {error}"))?;
-    first_run::ensure_folder_writable(&path)?;
-    let port = first_run::recorded_port(&app_dir).unwrap_or(DEFAULT_SERVICE_PORT);
-    let resources = bundled_resource_dir(&app).ok();
-    first_run::apply_chosen_folder(
-        &path,
-        &first_run::default_workspace(&home),
-        &app_dir,
-        port,
-        || setup_account_exists(port),
-        |workspace| {
-            first_run::git_init(
-                workspace,
-                resources.as_deref(),
-                first_run::command_line_tools_installed,
-            )
-        },
-        restart_service,
-        || wait_for_service(port, &app_dir),
-    )?;
+async fn configure_work_folder(app: tauri::AppHandle, path: PathBuf) -> Result<(), String> {
+    let configuring = app.clone();
+    let (app_dir, port) = tauri::async_runtime::spawn_blocking(move || {
+        let app_dir = default_app_dir(&configuring)?;
+        let home = configuring
+            .path()
+            .home_dir()
+            .map_err(|error| format!("could not resolve the home folder: {error}"))?;
+        first_run::ensure_folder_writable(&path)?;
+        let port = first_run::recorded_port(&app_dir).unwrap_or(DEFAULT_SERVICE_PORT);
+        let resources = bundled_resource_dir(&configuring).ok();
+        first_run::apply_chosen_folder(
+            &path,
+            &first_run::default_workspace(&home),
+            &app_dir,
+            port,
+            || setup_account_exists(port),
+            |workspace| {
+                first_run::git_init(
+                    workspace,
+                    resources.as_deref(),
+                    first_run::command_line_tools_installed,
+                )
+            },
+            restart_service,
+            || wait_for_service(port, &app_dir),
+        )?;
+        Ok::<_, String>((app_dir, port))
+    })
+    .await
+    .map_err(|error| format!("configuring the work folder did not finish: {error}"))??;
+    let service = app.state::<AppServiceState>();
     grant_local_service_origin(&app, &service, port)?;
     *service
         .app_dir

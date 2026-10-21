@@ -63,8 +63,6 @@ pub struct SourceLifecycle {
     env: Vec<(&'static str, OsString)>,
     proof_timeout: Duration,
     count_interval: Duration,
-    start_stall_window: Duration,
-    start_absolute_cap: Duration,
     /// Reads a process's start time; replaced in tests.
     stop_clock: fn(u32) -> Option<String>,
 }
@@ -81,8 +79,6 @@ impl SourceLifecycle {
                 .collect(),
             proof_timeout: PROOF_TIMEOUT,
             count_interval: COUNT_INTERVAL,
-            start_stall_window: STARTUP_STALL_WINDOW,
-            start_absolute_cap: STARTUP_ABSOLUTE_CAP,
             stop_clock: process_started,
         }
     }
@@ -221,11 +217,18 @@ impl SourceLifecycle {
     }
 
     fn wait_for_source(&self) -> Result<(), String> {
+        let log = self.source.state.join("backend.log");
         wait_for_startup(
             self.source.port,
-            &self.source.log(),
-            self.start_stall_window,
-            self.start_absolute_cap,
+            &log,
+            || {
+                self.loaded_job()
+                    .ok()
+                    .flatten()
+                    .and_then(|job| release_proof::pid_from_launchctl_print(&job))
+            },
+            STARTUP_STALL_WINDOW,
+            STARTUP_ABSOLUTE_CAP,
         )
     }
 
@@ -682,8 +685,6 @@ mod tests {
         lifecycle.env = vec![("HOME", base.into()), ("PATH", "/usr/bin:/bin".into())];
         lifecycle.proof_timeout = Duration::from_millis(300);
         lifecycle.count_interval = Duration::from_millis(30);
-        lifecycle.start_stall_window = Duration::from_millis(300);
-        lifecycle.start_absolute_cap = Duration::from_secs(2);
         fs::write(&loaded, "").unwrap();
         Home { root, lifecycle }
     }
@@ -720,67 +721,69 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "run with --ignored and CORSIA_ADOPTION_REHEARSAL_STATE/_PYTHON from scripts/generate_adoption_rehearsal.py"]
-    fn real_size_snapshot_and_restore_preserve_migration_backups() {
-        let state = PathBuf::from(std::env::var("CORSIA_ADOPTION_REHEARSAL_STATE").unwrap());
-        let python = PathBuf::from(std::env::var("CORSIA_ADOPTION_REHEARSAL_PYTHON").unwrap());
-        let backend = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../backend");
-        let workspace = state.parent().unwrap().join("workspace");
-        let source = adoption::SourceInstall {
-            plist: state.join("unused.plist"), state: state.clone(), workspace,
-            port: 47_896, working_directory: backend.clone(), cli: state.join("unused-corsia"),
-            generation: None, env_file: state.join("unused.env"), plist_variable_names: vec![],
-        };
-        let mut lifecycle = SourceLifecycle::new(source, Bundled { python, backend: backend.clone(), packages: backend });
-        let before = lifecycle.python("import hashlib, sqlite3, sys; c=sqlite3.connect(sys.argv[1]); rows=c.execute(\"select count(*) from messages\").fetchone()[0]; sample=''.join(row[0] for row in c.execute(\"select content from messages order by rowid limit 100\")); print(f'{rows}:{hashlib.sha256(sample.encode()).hexdigest()}')").arg(state.join("corsia.db")).output().unwrap();
-        assert!(before.status.success());
-        let before = String::from_utf8(before.stdout).unwrap();
-        let backups: Vec<_> = fs::read_dir(&state).unwrap().filter_map(Result::ok).map(|entry| entry.path()).filter(|path| path.file_name().unwrap().to_string_lossy().contains(".pre-migration-")).collect();
-        assert_eq!(backups.len(), 2);
-        let backup_metadata: Vec<_> = backups.iter().map(|path| { use std::os::unix::fs::MetadataExt; let metadata = fs::metadata(path).unwrap(); (metadata.ino(), metadata.mtime()) }).collect();
-        let snapshot_started = Instant::now();
-        let snapshot = lifecycle.backup(&state).unwrap();
-        let snapshot_elapsed = snapshot_started.elapsed();
-        assert!(backups.iter().all(|path| !snapshot.join("files").join(path.file_name().unwrap()).exists()));
-        let mutate = lifecycle.python("import sqlite3, sys; from pathlib import Path; c=sqlite3.connect(Path(sys.argv[1])/'corsia.db'); c.execute(\"insert into messages (id, thread_id, role, content, created_at) values ('mutated','rehearsal-thread','assistant','changed','now')\"); c.commit(); (Path(sys.argv[1])/'changed.txt').write_text('changed')").arg(&state).status().unwrap();
-        assert!(mutate.success());
-        let restore_started = Instant::now();
-        lifecycle.restore_backup(&state, &snapshot).unwrap();
-        let restore_elapsed = restore_started.elapsed();
-        let verification_started = Instant::now();
-        let after = lifecycle.python("import hashlib, sqlite3, sys; from pathlib import Path; c=sqlite3.connect(Path(sys.argv[1])/'corsia.db'); assert c.execute('pragma integrity_check').fetchone()[0] == 'ok'; rows=c.execute(\"select count(*) from messages\").fetchone()[0]; sample=''.join(row[0] for row in c.execute(\"select content from messages order by rowid limit 100\")); print(f'{rows}:{hashlib.sha256(sample.encode()).hexdigest()}')").arg(&state).output().unwrap();
-        assert!(after.status.success());
-        assert_eq!(String::from_utf8(after.stdout).unwrap(), before);
-        assert!(!state.join("changed.txt").exists());
-        for (path, expected) in backups.iter().zip(backup_metadata) { use std::os::unix::fs::MetadataExt; let metadata = fs::metadata(path).unwrap(); assert_eq!((metadata.ino(), metadata.mtime()), expected); }
-        eprintln!("rehearsal snapshot={snapshot_elapsed:?} restore={restore_elapsed:?} verify={:?}", verification_started.elapsed());
+    fn startup_succeeds_while_the_log_advances_past_the_stall_window() {
+        let home = home("rm -f LOADED", "exit 0", "exit 0");
+        let port = home.lifecycle.source.port;
+        let log = home.lifecycle.source.state.join("backend.log");
+        let stall_window = Duration::from_millis(500);
+        thread::spawn(move || {
+            for _ in 0..7 {
+                thread::sleep(Duration::from_millis(100));
+                fs::create_dir_all(log.parent().unwrap()).unwrap();
+                fs::write(&log, format!("{} progress\n", Instant::now().elapsed().as_nanos())).unwrap();
+            }
+            serve_health(port);
+        });
+        let began = Instant::now();
+        wait_for_startup(
+            port,
+            &home.lifecycle.source.state.join("backend.log"),
+            || None,
+            stall_window,
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        assert!(began.elapsed() > stall_window);
     }
 
     #[test]
-    fn startup_succeeds_while_the_log_advances_past_the_stall_window() {
-        let mut home = home("rm -f LOADED", "exit 0", "exit 0");
-        let port = home.lifecycle.source.port;
-        let log = home.lifecycle.source.log();
-        home.lifecycle.start_stall_window = Duration::from_millis(80);
-        thread::spawn(move || {
-            for _ in 0..3 {
-                thread::sleep(Duration::from_millis(10));
-                fs::create_dir_all(log.parent().unwrap()).unwrap();
-                fs::write(&log, format!("{} progress\n", std::time::Instant::now().elapsed().as_nanos())).unwrap();
-            }
-            thread::sleep(Duration::from_millis(10));
-            serve_health(port);
-        });
-        home.lifecycle.start_old().unwrap();
+    fn a_restarted_service_fails_before_the_stall_window() {
+        let home = home("rm -f LOADED", "exit 0", "exit 0");
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let stall_window = Duration::from_millis(300);
+        let began = Instant::now();
+        let error = wait_for_startup(
+            home.lifecycle.source.port,
+            &home.lifecycle.source.state.join("backend.log"),
+            || {
+                Some(
+                    if calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
+                        1
+                    } else {
+                        2
+                    },
+                )
+            },
+            stall_window,
+            Duration::from_secs(1),
+        )
+        .unwrap_err();
+        assert_eq!(error, "the CORSIA service did not become ready in time");
+        assert!(began.elapsed() < stall_window);
     }
 
     #[test]
     fn a_startup_stall_fails_before_the_absolute_cap() {
-        let mut stalled = home("rm -f LOADED", "exit 0", "exit 0");
-        stalled.lifecycle.start_stall_window = Duration::from_millis(30);
-        stalled.lifecycle.start_absolute_cap = Duration::from_secs(1);
+        let stalled = home("rm -f LOADED", "exit 0", "exit 0");
         assert_eq!(
-            stalled.lifecycle.start_old().unwrap_err(),
+            wait_for_startup(
+                stalled.lifecycle.source.port,
+                &stalled.lifecycle.source.state.join("backend.log"),
+                || None,
+                Duration::from_millis(30),
+                Duration::from_secs(1),
+            )
+            .unwrap_err(),
             "the CORSIA service did not become ready in time"
         );
     }

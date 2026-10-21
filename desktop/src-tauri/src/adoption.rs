@@ -65,14 +65,6 @@ pub struct SourceInstall {
     pub plist_variable_names: Vec<String>,
 }
 
-impl SourceInstall {
-    /// Where the source service writes its output (`scripts/corsia` BACKEND_LOG,
-    /// the plist's stdout and stderr), and what its `corsia logs` tails.
-    pub fn log(&self) -> PathBuf {
-        self.state.join("backend.log")
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
     pub source: SourceInstall,
@@ -327,7 +319,7 @@ fn journal_path(plan: &Plan) -> PathBuf {
 
 /// Preserve rollback detail alongside the restored install that can act on it.
 fn write_failure_trail(plan: &Plan, failure: &Failure) {
-    let path = plan.source.log();
+    let path = plan.source.state.join("backend.log");
     let result = (|| -> Result<(), std::io::Error> {
         let mut file = OpenOptions::new().create(true).append(true).open(path)?;
         writeln!(file, "adoption rollback: {}: {}", failure.step, failure.message)?;
@@ -976,7 +968,7 @@ fn rollback(
     if let Some(snapshot) = snapshot.filter(|_| !restore_snapshot) {
         if let Err(error) = fs::remove_dir_all(snapshot) {
             if error.kind() != std::io::ErrorKind::NotFound {
-                return Err(AdoptionError::reopen(io(error)));
+                log::warn!("could not remove the disposable adoption snapshot: {error}");
             }
         }
     }
@@ -1018,6 +1010,7 @@ mod tests {
         fail: Option<&'static str>,
         also_fail: Option<&'static str>,
         real_state: bool,
+        snapshot_is_file: bool,
         /// Sets Quit's flag when the named step runs, as the menu would.
         quit_at: Option<(&'static str, Arc<AtomicBool>)>,
         service_json: PathBuf,
@@ -1137,7 +1130,10 @@ mod tests {
         fn backup(&mut self, state: &Path) -> Result<PathBuf, String> {
             self.step("backup", "backup failed")?;
             let snapshot = state.join("backups/fake-adoption");
-            if self.real_state {
+            if self.snapshot_is_file {
+                fs::create_dir_all(snapshot.parent().unwrap()).unwrap();
+                fs::write(&snapshot, "not a directory").unwrap();
+            } else if self.real_state {
                 copy_state(state, &snapshot);
             }
             Ok(snapshot)
@@ -1172,6 +1168,7 @@ mod tests {
             fail,
             also_fail: None,
             real_state: false,
+            snapshot_is_file: false,
             quit_at: None,
             service_json: plan.app_dir.join("service.json"),
             plist: plan.source.plist.clone(),
@@ -1526,6 +1523,17 @@ mod tests {
     }
 
     #[test]
+    fn an_early_rollback_restarts_the_source_when_snapshot_removal_fails() {
+        let (_home, plan) = plan(false);
+        let mut fake = fake_for(&plan, Some("old_is_down"));
+        fake.snapshot_is_file = true;
+        let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
+        assert_eq!(error.outcome, Outcome::Restored);
+        assert_eq!(fake.events, ["stop_old", "backup", "old_is_down", "start_old"]);
+        assert_eq!(journal_step(&plan), None);
+    }
+
+    #[test]
     fn rollback_writes_failure_detail_to_the_restored_install_log() {
         let (_home, plan) = plan(false);
         let mut fake = fake_for(&plan, Some("start_new"));
@@ -1533,7 +1541,7 @@ mod tests {
         let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
         assert_eq!(error.recovery, Some(Recovery::StartAgain));
         assert_eq!(read_journal(&plan).unwrap().unwrap().step, Step::Reverted);
-        let log = fs::read_to_string(plan.source.log()).unwrap();
+        let log = fs::read_to_string(plan.source.state.join("backend.log")).unwrap();
         assert!(log.contains("start_new"));
         assert!(log.contains("start_old"));
     }

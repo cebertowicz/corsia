@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI
 from app_shutdown_idle_timers import fold_idle_checkpoint_shutdown, remaining_idle_timers
@@ -20,6 +21,32 @@ import infra.app_loop as app_loop
 from infra import key_store_values, state
 from infra.db_async import run_in_db
 from infra.database import init_db, shutdown_pool
+
+
+_STARTUP_PROGRESS_INTERVAL_SECONDS = 30.0
+
+
+@contextmanager
+def _startup_progress(logger, phase: str, interval: float = _STARTUP_PROGRESS_INTERVAL_SECONDS):
+    """Keep desktop startup's log-progress signal current during a long phase."""
+    stopped = threading.Event()
+    began = time.monotonic()
+
+    def report() -> None:
+        while not stopped.wait(interval):
+            logger.info(
+                "startup phase: {} still running after {:.1f}s",
+                phase,
+                time.monotonic() - began,
+            )
+
+    reporter = threading.Thread(target=report, daemon=True)
+    reporter.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        reporter.join()
 
 
 async def _startup_cloud_discovery() -> None:
@@ -117,10 +144,11 @@ def _initialize_startup(logger) -> None:
         directory.mkdir(parents=True, exist_ok=True)
     phase_started = time.monotonic()
     logger.info("startup phase: database initialization started")
-    init_db()
-    drop_ignored_environment()
-    key_store_values.sweep_at_startup()
-    convert_legacy_project_paths(WORKSPACE_SELECTION)
+    with _startup_progress(logger, "database initialization"):
+        init_db()
+        drop_ignored_environment()
+        key_store_values.sweep_at_startup()
+        convert_legacy_project_paths(WORKSPACE_SELECTION)
     elapsed = time.monotonic() - phase_started
     logger.info("startup phase: database initialization complete in {:.1f}s", elapsed)
     recover_write_intents()

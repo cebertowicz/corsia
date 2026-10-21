@@ -7,6 +7,8 @@ store is empty or a key is removed, while the UI says the variable is ignored.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from infra import ignored_environment, key_store_providers
@@ -70,6 +72,22 @@ def test_startup_drops_them_after_the_database_migration_has_read_them(launch_en
 
     assert seen_by_migration == [True]
     assert not any(variable in os.environ for variable in VARIABLES)
+
+
+def test_database_initialization_heartbeats_during_one_long_step():
+    import app_lifecycle
+
+    class Logger:
+        messages: list[str] = []
+
+        def info(self, message: str, *args: object) -> None:
+            self.messages.append(message.format(*args))
+
+    logger = Logger()
+    with app_lifecycle._startup_progress(logger, "database initialization", interval=0.01):
+        time.sleep(0.03)
+
+    assert any("database initialization still running" in message for message in logger.messages)
 
 
 def test_with_the_store_empty_no_key_reaches_the_sdk_params(launch_environment):
