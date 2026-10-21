@@ -304,16 +304,16 @@
       "sha256": "b6e513e6b01040266b7eaa974c751e819f5fb5da7e9c966951e2c35c61d0df9a"
     },
     {
-      "bytes": 5343,
+      "bytes": 5639,
       "kind": "skill",
       "path": "skills/microsoft-setup/SKILL.md",
-      "sha256": "4c804375b3fd68ca17c9e10fab6cad7881241bc573de7313d61b179e6e11a96d"
+      "sha256": "c7238069a8c2505cefadd5a8da0d1c366a94e9e2fa226998f7e8ad3679d1c036"
     },
     {
-      "bytes": 1727,
+      "bytes": 1861,
       "kind": "skill",
       "path": "skills/microsoft-setup/references/stop-messages.md",
-      "sha256": "262f798b849166a2eb630f71739632cddbf53141da62033b1b30e61797730495"
+      "sha256": "036d455f969d8619001f0c26b9be8cedd1fc91412ae805c15e73d5c9764055b6"
     },
     {
       "bytes": 2630,

@@ -10,11 +10,11 @@ Message for IT: `Please let me register applications in Microsoft Entra ID, eith
 
 ## R2 Existing app takes other account types (step 7)
 
-`Your CORSIA app on Microsoft only accepts <its supported account types>, so I can’t connect <address> with it. You can change them yourself in Entra (CORSIA, Authentication, Supported account types) where Microsoft allows it, or delete that app, which disconnects any account already using it. Then ask me to connect Outlook again. I can also connect an account of its type now.`
+`Your CORSIA app on Microsoft only accepts <its supported account types>, so I can’t connect <address> with it. You can change them yourself in Entra (CORSIA, Manifest, signInAudience) where Microsoft allows it, or delete that app, which disconnects any account already using it. Then ask me to connect Outlook again. I can also connect an account of its type now.`
 
 ## R3 Needs admin approval: `admin_approval_required` (step 13)
 
-`Your organization needs to approve CORSIA before it can connect this account. Send this to your IT admin, then ask me to connect Outlook again.`
+`Your organization needs to approve CORSIA before it can connect this account. Send this to your IT admin, then ask me to connect Outlook again. If you’re the admin yourself, approve it in Entra: App registrations, CORSIA, API permissions, then Grant admin consent and Yes, and ask me again.`
 
 Message for IT: `Please approve my CORSIA app for my account, <address>. It is my own Microsoft app registration, Application (client) ID <client ID from step 10>, and requests delegated Microsoft Graph access to Mail.ReadWrite, Mail.Send, Calendars.ReadWrite, Files.ReadWrite, offline_access and User.Read.`
 
