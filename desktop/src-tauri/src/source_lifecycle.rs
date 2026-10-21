@@ -129,6 +129,8 @@ impl SourceLifecycle {
             .args(["-B", "-c", program])
             .env_clear()
             .envs(self.env.iter().map(|(name, value)| (name, value)))
+            .env("CORSIA_WORKSPACE", &self.source.workspace)
+            .env("CORSIA_STATE_DIR", &self.source.state)
             .env("PYTHONPATH", &self.bundled.packages)
             .env("PYTHONNOUSERSITE", "1")
             .current_dir(&self.bundled.backend);
@@ -745,6 +747,96 @@ mod tests {
                 let _ = stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok");
             }
         });
+    }
+
+    #[test]
+    fn bundled_python_receives_the_source_roots() {
+        let home = home("rm -f LOADED", "touch LOADED", "env | sort");
+        let output = home.lifecycle.python("ignored").output().unwrap();
+        assert!(output.status.success());
+        let environment = String::from_utf8(output.stdout).unwrap();
+        assert!(environment.contains(&format!(
+            "CORSIA_WORKSPACE={}\n",
+            home.lifecycle.source.workspace.display()
+        )));
+        assert!(environment.contains(&format!(
+            "CORSIA_STATE_DIR={}\n",
+            home.lifecycle.source.state.display()
+        )));
+    }
+
+    #[test]
+    fn real_size_snapshot_and_restore_preserve_migration_backups() {
+        if std::env::var("CORSIA_ADOPTION_REAL_SIZE").as_deref() != Ok("1") {
+            return;
+        }
+        let state = PathBuf::from(std::env::var("CORSIA_ADOPTION_REHEARSAL_STATE").unwrap());
+        let python = PathBuf::from(std::env::var("CORSIA_ADOPTION_REHEARSAL_PYTHON").unwrap());
+        let backend = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../backend");
+        let workspace = state.parent().unwrap().join("workspace");
+        let source = adoption::SourceInstall {
+            plist: state.join("unused.plist"), state: state.clone(), workspace,
+            port: 47_896, working_directory: backend.clone(), cli: state.join("unused-corsia"),
+            generation: None, env_file: state.join("unused.env"), plist_variable_names: vec![],
+        };
+        let mut lifecycle = SourceLifecycle::new(source, Bundled { python, backend: backend.clone(), packages: backend });
+        let before = lifecycle.python("import hashlib, sqlite3, sys; c=sqlite3.connect(sys.argv[1]); rows=c.execute(\"select count(*) from messages\").fetchone()[0]; sample=''.join(row[0] for row in c.execute(\"select content from messages order by rowid limit 100\")); print(f'{rows}:{hashlib.sha256(sample.encode()).hexdigest()}')").arg(state.join("corsia.db")).output().unwrap();
+        assert!(before.status.success());
+        let before = String::from_utf8(before.stdout).unwrap();
+        let backups: Vec<_> = fs::read_dir(&state).unwrap().filter_map(Result::ok).map(|entry| entry.path()).filter(|path| path.file_name().unwrap().to_string_lossy().contains(".pre-migration-")).collect();
+        assert_eq!(backups.len(), 2);
+        let backup_metadata: Vec<_> = backups.iter().map(|path| { use std::os::unix::fs::MetadataExt; let metadata = fs::metadata(path).unwrap(); (metadata.ino(), metadata.mtime()) }).collect();
+        let snapshot_started = Instant::now();
+        let snapshot = lifecycle.backup(&state).unwrap();
+        let snapshot_elapsed = snapshot_started.elapsed();
+        assert!(backups.iter().all(|path| !snapshot.join("files").join(path.file_name().unwrap()).exists()));
+        let mutate = lifecycle.python("import sqlite3, sys; from pathlib import Path; c=sqlite3.connect(Path(sys.argv[1])/'corsia.db'); c.execute(\"insert into messages (id, thread_id, role, content, created_at) values ('mutated','rehearsal-thread','assistant','changed','now')\"); c.commit(); (Path(sys.argv[1])/'changed.txt').write_text('changed')").arg(&state).status().unwrap();
+        assert!(mutate.success());
+        let restore_started = Instant::now();
+        lifecycle.restore_backup(&state, &snapshot).unwrap();
+        let restore_elapsed = restore_started.elapsed();
+        let verification_started = Instant::now();
+        let after = lifecycle.python("import hashlib, sqlite3, sys; from pathlib import Path; c=sqlite3.connect(Path(sys.argv[1])/'corsia.db'); assert c.execute('pragma integrity_check').fetchone()[0] == 'ok'; rows=c.execute(\"select count(*) from messages\").fetchone()[0]; sample=''.join(row[0] for row in c.execute(\"select content from messages order by rowid limit 100\")); print(f'{rows}:{hashlib.sha256(sample.encode()).hexdigest()}')").arg(&state).output().unwrap();
+        assert!(after.status.success());
+        assert_eq!(String::from_utf8(after.stdout).unwrap(), before);
+        assert!(!state.join("changed.txt").exists());
+        for (path, expected) in backups.iter().zip(backup_metadata) { use std::os::unix::fs::MetadataExt; let metadata = fs::metadata(path).unwrap(); assert_eq!((metadata.ino(), metadata.mtime()), expected); }
+        eprintln!("rehearsal snapshot={snapshot_elapsed:?} restore={restore_elapsed:?} verify={:?}", verification_started.elapsed());
+    }
+
+    #[test]
+    fn startup_past_the_former_health_timeout_succeeds_while_the_log_advances() {
+        let mut home = home("rm -f LOADED", "exit 0", "exit 0");
+        let port = home.lifecycle.source.port;
+        let log = home.lifecycle.source.state.join("logs/service.log");
+        home.lifecycle.start_stall_window = Duration::from_millis(80);
+        thread::spawn(move || {
+            for _ in 0..3 {
+                thread::sleep(Duration::from_millis(10));
+                fs::create_dir_all(log.parent().unwrap()).unwrap();
+                fs::write(&log, format!("{} progress\n", std::time::Instant::now().elapsed().as_nanos())).unwrap();
+            }
+            thread::sleep(Duration::from_millis(10));
+            serve_health(port);
+        });
+        let former_timeout = Duration::from_millis(30);
+        let started = Instant::now();
+        home.lifecycle.start_old().unwrap();
+        assert!(started.elapsed() > former_timeout);
+    }
+
+    #[test]
+    fn a_startup_stall_or_liveness_loss_fails_before_the_safety_cap() {
+        let mut stalled = home("rm -f LOADED", "exit 0", "exit 0");
+        stalled.lifecycle.start_stall_window = Duration::from_millis(30);
+        stalled.lifecycle.start_absolute_cap = Duration::from_secs(1);
+        assert!(stalled.lifecycle.start_old().unwrap_err().contains("stopped making startup progress"));
+
+        let mut unloaded = home("rm -f LOADED", "rm -f LOADED", "exit 0");
+        assert!(unloaded.lifecycle.start_old().unwrap_err().contains("unloaded"));
+        let mut exited = home("rm -f LOADED", "exit 0", "exit 0");
+        script(&exited.root.path().join("launchctl"), "echo 'pid = 999999'");
+        assert!(exited.lifecycle.start_old().unwrap_err().contains("process exited"));
     }
 
     #[test]
