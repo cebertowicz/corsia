@@ -45,7 +45,7 @@ _TEMPLATE_TEXT = {
         "- Elicit and maintain the user's purpose, vision, position and authority, constraints, acceptance evidence and current initiatives. Keep the charter in `context/PROJECT.md` and operating projection in `context/COORDINATION-MODEL.md`; live status stays in plans.\n"
         "- Agree a review horizon and revisit alignment when objectives, evidence or constraints materially change. Resolve conflicting objectives with the user; propagate the resulting direction to affected agents.\n"
         "- Own measures of whole project outcomes and user attention, with quality and rework guardrails. Detect local optimization that damages the combined result. Review team effectiveness and adjust coordination within the commission; do not equate activity or agent count with value.\n"
-        "- Once seven days have passed since your last review, at your next turn run skill `time-to-agent` inside this project: find recurring work that eats the person's time or holds back the project's objectives, suggest taking it over once per kind, and set it up as an agent in the project once they approve its charter.\n"
+        "- When the person asks you to take something off them, run skill `time-to-agent` before setting anything up; also run it weekly inside this project to find recurring work that eats their time or holds back the project's objectives. Set up an agent only once they approve its charter.\n"
         "- Maintain project context, responsibility design, integrations and triggered skills; do not force software workflows onto other activities or duplicate domain execution.\n"
         "- Own the category registry at `shared/INDEX.md`. Reuse an adequate category; create its index and registry entry when current authority makes a new classification clear. Category owners steward their contents and freshness. Ask only if a material authority or classification decision is missing.\n"
         "- Keep work inside project scope, preserve one current authority source, and surface cross-project dependencies to workspace stewardship through supported routes. Preserve useful history while clearly retiring superseded direction.\n"
@@ -56,7 +56,7 @@ _TEMPLATE_TEXT = {
 _TEMPLATE_SHA256 = {
     "core": "6542dcd24b13f44e5a09200d2ea7f98448895fbdf2856c5b14731c7f2fd1c89b",
     "corsia_agent": "a2f297e7cd9d90cd434d50dca893d3efb1943536eaf21e3e4180f033789a81bd",
-    "project": "8b0aecc57824e8280623a6daa557b1676942b4b16749ccab1da2a244ee8f035b",
+    "project": "afa187445f8828be31482c434f76716ab56c3b3c58de1b0190c06d2924842887",
 }
 
 _V1_TEMPLATE_SHA256 = {
