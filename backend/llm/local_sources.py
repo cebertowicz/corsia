@@ -19,7 +19,6 @@ from llm.network_discovery import get_servers, parse_server_metadata
 
 OMLX_FIX = "Settings › Providers › Local model"
 CHECK_AGAIN = "Check again"
-# Download progress comes from the setup flight's structured state.
 
 
 def catalog_membership() -> tuple[set[str], set[str]]:
@@ -47,9 +46,6 @@ def _source(source: str, name: str, state: str, reason: str | None = None,
             fix: str | None = None, checked_at: str | None = None) -> dict[str, Any]:
     return {"source": source, "name": name, "state": state, "prior_state": None,
             "reason": reason, "fix": fix, "checked_at": checked_at}
-
-
-# Stage copy is presentation-only; callers read structured progress from local_setup.
 
 
 def _project_local_flight(result: dict[str, Any], flight: dict[str, Any] | None) -> None:
