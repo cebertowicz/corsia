@@ -107,7 +107,8 @@ def _emit_error_reference(
     error_message: str,
 ) -> str:
     """Log and instrument an API failure under one opaque reference."""
-    from infra.error_reference import new_error_reference
+    from infra.failure_reference import new_error_reference
+    from infra.internal_principal import current_internal_user
 
     reference = new_error_reference()
     logger.error(
@@ -123,7 +124,7 @@ def _emit_error_reference(
         "error", "api",
         properties={
             "error_type": type(exc).__name__,
-            "error_message": error_message,
+            "error_message": "In-process conductor request failed" if current_internal_user() else error_message,
             "path": str(request.url.path),
             "method": request.method,
             "status": status,
@@ -155,14 +156,11 @@ async def _emit_http_error_api(request: Request, exc: StarletteHTTPException):
 @app.exception_handler(Exception)
 async def _emit_error_api(request: Request, exc: Exception):
     """Emit uncaught HTTP route failures as error.api and return generic 500."""
-    from infra.internal_principal import current_internal_user
-
-    internal = current_internal_user()
     reference = _emit_error_reference(
         request,
         exc,
         status=500,
-        error_message="In-process conductor request failed" if internal else str(exc)[:200],
+        error_message=str(exc)[:200],
     )
     return _ErrorJSONResponse(
         status_code=500,

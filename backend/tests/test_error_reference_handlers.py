@@ -8,6 +8,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 import main
+from infra.internal_principal import internal_request
 
 
 def _assert_reference(value: str) -> None:
@@ -99,6 +100,20 @@ def test_server_http_error_preserves_status_headers_and_reference(monkeypatch, c
     reference = response.json()["reference"]
     _assert_reference(reference)
     _assert_logged_and_emitted(caplog, events, reference, error_type="HTTPException", status=503, path=path)
+
+
+def test_internal_server_http_error_event_hides_detail(monkeypatch):
+    events = _capture_events(monkeypatch)
+
+    def endpoint() -> None:
+        raise HTTPException(500, "private-detail-sentinel")
+
+    with internal_request("user", "actor"), _client_for("/_test/error-reference/internal", endpoint) as client:
+        response = client.get("/_test/error-reference/internal")
+
+    assert response.status_code == 500
+    assert events[0][1]["properties"]["error_message"] == "In-process conductor request failed"
+    assert "private-detail-sentinel" not in str(events)
 
 
 def test_server_http_error_event_message_is_capped(monkeypatch):
