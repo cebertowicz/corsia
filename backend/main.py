@@ -143,7 +143,7 @@ async def _emit_http_error_api(request: Request, exc: StarletteHTTPException):
         request,
         exc,
         status=exc.status_code,
-        error_message=str(exc.detail),
+        error_message=str(exc.detail)[:200],
     )
     return _ErrorJSONResponse(
         status_code=exc.status_code,

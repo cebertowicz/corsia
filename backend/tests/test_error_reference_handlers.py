@@ -101,6 +101,20 @@ def test_server_http_error_preserves_status_headers_and_reference(monkeypatch, c
     _assert_logged_and_emitted(caplog, events, reference, error_type="HTTPException", status=503, path=path)
 
 
+def test_server_http_error_event_message_is_capped(monkeypatch):
+    events = _capture_events(monkeypatch)
+    path = "/_test/error-reference/http-500-long"
+
+    def endpoint() -> None:
+        raise HTTPException(500, {"text": "x" * 500})
+
+    with _client_for(path, endpoint) as client:
+        response = client.get(path)
+
+    assert response.json()["detail"] == {"text": "x" * 500}
+    assert len(events[0][1]["properties"]["error_message"]) == 200
+
+
 def test_client_and_validation_errors_do_not_receive_references(monkeypatch):
     _capture_events(monkeypatch)
 
