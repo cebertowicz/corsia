@@ -115,7 +115,7 @@
 
 <div class="section-header">
 	<h2>System</h2>
-	<p>Backend controls and system health.</p>
+	<p>Controls and health for this computer.</p>
 </div>
 
 {#if settingsError}

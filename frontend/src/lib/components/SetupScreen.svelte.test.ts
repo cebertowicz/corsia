@@ -148,6 +148,59 @@ describe('SetupScreen', () => {
 		expect(button('Start using CORSIA')?.disabled).toBe(true);
 	});
 
+	it('returns an existing-account response to the account form with Sign in', async () => {
+		await remountWide(); fillAccount(); await settle();
+		button('Continue')?.click(); await settle();
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input) === '/api/setup/first-account' ? json({}, 409) : json({})));
+		button('Continue')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Welcome to CORSIA');
+		expect(host.textContent).toContain('This computer already has a CORSIA account. Sign in instead.');
+		expect(button('Sign in')).toBeTruthy();
+	});
+
+	it.each([
+		['a plain user-facing detail', { detail: 'That username isn’t available. Choose another.' }, 'That username isn’t available. Choose another.'],
+		['the backend username validation detail', { detail: 'Use up to 32 lowercase letters, numbers, dashes or underscores for the username.' }, 'Use up to 32 lowercase letters, numbers, dashes or underscores for the username.'],
+		['the backend password validation detail', { detail: 'Use a password of at least 8 characters.' }, 'Use a password of at least 8 characters.'],
+		['structured detail', { detail: { message: 'username must be valid' } }, 'Couldn’t create your account. Try again.'],
+		['no detail', {}, 'Couldn’t create your account. Try again.'],
+	] as const)('returns a 422 with %s to an editable account form', async (_case, body, expected) => {
+		await remountWide(); fillAccount(); await settle();
+		button('Continue')?.click(); await settle();
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input) === '/api/setup/first-account' ? json(body, 422) : json({})));
+		button('Continue')?.click(); await settle();
+		expect(host.textContent).toContain(expected);
+		expect(button('Continue')?.disabled).toBe(false);
+	});
+
+	it('checks the signed-in local retry through setup progress and the authenticated start', async () => {
+		if (component) await unmount(component);
+		const requests: Array<{ url: string; init?: RequestInit }> = [];
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input); requests.push({ url, init });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' });
+			if (url === '/api/setup/local-model') return json({}, 409);
+			if (url === '/api/setup/local-download') return json(init?.method === 'POST' ? { ok: true } : { state: 'stopped' });
+			if (url === '/api/setup/first-account') return json({ token: 'setup-token', user: { id: 'user', name: 'Ada Lovelace' } });
+			if (url === '/api/setup/progress') return json({ setup_completed: false, status: { local_eligible: true, work_folder: '~/CORSIA' } });
+			if (url === '/api/providers/local/setup') return json({ ok: true });
+			if (url.includes('/sources')) return json({ sources: [] });
+			if (url.includes('/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
+			if (url.includes('/models')) return json({ models: [] });
+			return json({});
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync(); await settle(); button('Continue')?.click(); await settle(); fillAccount(); await settle();
+		button('Continue')?.click(); await settle(); button('Continue')?.click(); await settle();
+		await vi.waitFor(() => expect(button('Retry')).toBeTruthy());
+		button('Retry')?.click();
+		await vi.waitFor(() => expect(requests.some((request) => request.url === '/api/providers/local/setup')).toBe(true));
+		expect(requests.some((request) => request.url === '/api/setup/progress')).toBe(true);
+		const authenticatedStart = requests.find((request) => request.url === '/api/providers/local/setup')!;
+		expect(authenticatedStart.init?.headers).toMatchObject({ Authorization: 'Bearer setup-token' });
+		expect(requests.filter((request) => request.url === '/api/setup/local-model')).toHaveLength(1);
+	});
+
 	it('routes a completed setup status to sign in', async () => {
 		if (component) await unmount(component);
 		const onExistingAccount = vi.fn();
@@ -166,5 +219,9 @@ describe('SetupScreen', () => {
 		expect(host.querySelector('h1')?.textContent).toBe('CORSIA couldn’t start');
 		expect(button('Retry')).toBeTruthy();
 		expect(button('Save a report')).toBeTruthy();
+		// No account exists yet, so the step rail must not mark it done under the error.
+		const accountRow = [...host.querySelectorAll('.lbl')].find((label) => label.textContent === 'Your account')?.closest('*:has(> .lead)');
+		expect(accountRow).toBeTruthy();
+		expect(accountRow?.querySelector('.done-check')).toBeNull();
 	});
 });

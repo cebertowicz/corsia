@@ -95,12 +95,12 @@ describe('SetupScreen local-start recovery', () => {
 
 	it('always shows the other-oMLX question when the server requires a fresh choice', async () => {
 		await openModels({ localEligible: true, otherOmlx: 'stopped_theirs', localReplies: [json({ code: 'consent_required' }, 409)] });
-		await vi.waitFor(() => expect(host.textContent).toContain('Another copy of oMLX is already running'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Stop other oMLX processes?'));
 	});
 
 	it('shows generic recovery when the person’s other-oMLX choice cannot start setup', async () => {
 		await openModels({ localEligible: true, localReplies: [json({ code: 'consent_required' }, 409), json({ message: 'private route detail' }, 500)] });
-		click('Keep it running');
+		click('Keep them running');
 		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t start local setup.'));
 		expect(host.textContent).not.toContain('private route detail');
 	});

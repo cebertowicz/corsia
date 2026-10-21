@@ -23,7 +23,7 @@ def normalize_username(raw: str) -> str:
     name = (raw or "").strip().lower()
     if not USERNAME_PATTERN.match(name):
         raise AccountError(
-            "username must be 1-32 characters of a-z, 0-9, '-' or '_'"
+            "Use up to 32 lowercase letters, numbers, dashes or underscores for the username."
         )
     return name
 
@@ -32,5 +32,5 @@ def require_password(password: str) -> None:
     """Reject a password too short to be worth hashing."""
     if len(password or "") < MIN_PASSWORD_LENGTH:
         raise AccountError(
-            f"password must be at least {MIN_PASSWORD_LENGTH} characters"
+            f"Use a password of at least {MIN_PASSWORD_LENGTH} characters."
         )

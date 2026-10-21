@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
 	import { get } from 'svelte/store';
-	import { Button, Message } from '$lib/components/ui';
+	import { Button } from '$lib/components/ui';
 	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
 	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
@@ -62,9 +62,13 @@
 		if (code === 'progress_save') return 'CORSIA couldn’t save setup progress. Try again.';
 		return 'CORSIA couldn’t finish model setup. Try again.';
 	}
+	/** The backend's own account refusal names the cause; a validation 422 has no string detail. */
+	function accountRefusal(detail: unknown): string | null {
+		return typeof detail === 'string' && detail.trim() ? detail.trim() : null;
+	}
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'account' | 'folder' | 'models' | 'hard-stop' | 'error' | 'connect';
-	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; app_location?: string; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
+	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
 	const classifier = createSetupClassifier(), localPick = createSetupLocalPick(), remote = createSetupRemote();
 	let page = $state<Page>(untrack(() => startConnect) ? 'connect' : 'checking');
 	// Below 1280 wide, Welcome is its own screen before the account form; from 1280 it sits beside the form instead.
@@ -82,7 +86,7 @@
 	let preauthLocal = $state<LocalRowState | undefined>();
 	const local = $derived(($token ? sources.find((source) => source.source === 'omlx') : preauthLocal) as LocalRowState | undefined);
 	const eligible = $derived(status.local_eligible !== false);
-	const downloading = $derived(['downloading', 'starting'].includes(local?.local_state ?? ''));
+	const downloading = $derived(['downloading', 'paused', 'starting'].includes(local?.local_state ?? ''));
 	const localFailed = $derived(['failed', 'setup_failed', 'start_failed'].includes(local?.local_state ?? '') || Boolean(localStartError));
 	const tested = $derived($testedProviders.map((source) => ({ source })));
 	const best = $derived(bestSetupModel(catalog, tested));
@@ -90,7 +94,7 @@
 	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? 'Use up to 32 lowercase letters, numbers, dashes or underscores.' : '');
 	const accountValid = $derived(Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password));
 	const steps = $derived<SetupStep[]>(page === 'connect' ? remote.steps : [
-		{ label: 'Your account', icon: 'person', state: ['checking', 'account', 'error', 'hard-stop'].includes(page) ? 'current' : 'done' },
+		{ label: 'Your account', icon: 'person', state: ['checking', 'account', 'hard-stop'].includes(page) || (page === 'error' && !$token) ? 'current' : 'done' },
 		{ label: 'Work folder', icon: 'computer', state: page === 'folder' ? 'current' : page === 'models' ? 'done' : 'todo' },
 		{ label: 'Providers & models', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
 	]);
@@ -106,7 +110,10 @@
 	const aiRows = $derived.by((): AiRow[] => {
 		const rows = ['claude-code', 'codex'].map((vendor): AiRow => {
 			const source = sources.find((row) => row.source === vendor);
-			if (!source) return { key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', meta: '', busy: true };
+			if (!source) {
+				const name = vendor === 'codex' ? 'Codex' : 'Claude Code';
+				return sourceError ? { key: vendor, name, meta: `Couldn’t check ${name}.`, error: true, action: { label: 'Retry', run: () => void refreshSources(true) } } : { key: vendor, name, meta: '', busy: true };
+			}
 			const view = connectFlow.row(source);
 			const works = catalog.some((row) => row.connection === vendor && setupModelWorks(row));
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, pill: works ? { state: 'success', label: 'Ready' } : undefined });
@@ -124,12 +131,9 @@
 		if (page === 'connect') return remote.view;
 		if (page === 'checking') return { title: 'Checking this computer' };
 		if (page === 'error') return { title: 'CORSIA couldn’t start', lede: reportError || statusError || 'Something went wrong while starting. Try again, or save a report to send.', primary: { label: 'Retry' }, onPrimary: resume ? resumeSetup : readStatus };
-		if (page === 'hard-stop') {
-			if (status.macos_supported === false) return { title: 'Update macOS to open CORSIA', lede: 'CORSIA needs macOS 15 or later. Update in System Settings › General › Software Update, then open CORSIA again.' };
-			return { title: 'Move CORSIA to Applications', lede: 'Drag CORSIA into your Applications folder, then open it from there. It can’t update itself from the disk image.' };
-		}
-		if (screen === 'welcome') return { title: WELCOME_TITLE, primary: { label: 'Continue' }, onPrimary: () => { welcomeSeen = true; } };
-		if (page === 'account') return { title: $isSetupWide ? WELCOME_TITLE : 'Create your account', lede: $isSetupWide ? WELCOME_ACCOUNT_LINE : undefined, primary: { label: 'Continue', disabled: !accountValid }, onPrimary: toFolder };
+		if (page === 'hard-stop') return { title: 'Update macOS to open CORSIA', lede: 'CORSIA needs macOS 15 or later. Update in System Settings › General › Software Update, then open CORSIA again.' };
+		if (screen === 'welcome') return { title: WELCOME_TITLE, mark: true, primary: { label: 'Continue' }, onPrimary: () => { welcomeSeen = true; } };
+		if (page === 'account') return { title: $isSetupWide ? WELCOME_TITLE : 'Create your account', lede: $isSetupWide ? WELCOME_ACCOUNT_LINE : undefined, mark: $isSetupWide, primary: { label: 'Continue', disabled: !accountValid }, onPrimary: toFolder };
 		if (page === 'folder') return { title: 'Choose your work folder', lede: 'Your projects and files live here.', primary: { label: 'Continue', loading: accountBusy, disabled: accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'picker_failed' }, onPrimary: createAccount };
 		return { title: 'Providers & models', lede: canFinish ? 'Ready to start. You can connect more here or later in Settings › Providers.' : 'Connect at least one to start chatting.', primary: { label: 'Start using CORSIA', disabled: !canFinish || finishing, loading: finishing, note: finishNote, noteAlways: true }, onPrimary: finishSetup };
 	});
@@ -145,12 +149,22 @@
 			status = await response.json(); folder = status.work_folder || folder;
 			if (status.required_username) username = status.required_username;
 			if (status.classifier) classifier.accept(status.classifier);
-			if (status.macos_supported === false || status.app_location === 'disk_image') { page = 'hard-stop'; return; }
+			if (status.macos_supported === false) { page = 'hard-stop'; return; }
 			page = 'account'; void classifier.start();
 			if (eligible) { await localPick.start(); await startLocal(); await readLocalProgress(); }
 		} catch { statusError = 'Something went wrong while starting. Try again, or save a report to send.'; page = 'error'; }
 	}
-	async function checkLocal() { await localPick.start(); if (get(token)) await refreshSources(); else await readLocalProgress(); }
+	async function checkLocal() {
+		const current = get(token);
+		if (current) {
+			const progress = await fetchSetupProgress(current);
+			if (progress?.status) status = progress.status as Status;
+			await startLocal();
+			return;
+		}
+		await localPick.start();
+		await readLocalProgress();
+	}
 	async function readLocalProgress() {
 		try {
 			const response = await fetch('/api/setup/local-download');
@@ -205,7 +219,11 @@
 			const response = await fetch('/api/setup/first-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null }) });
 			if (response.status === 409) { accountExists = true; accountError = 'This computer already has a CORSIA account. Sign in instead.'; page = 'account'; return; }
 			const result = await response.json().catch(() => null);
-			if (!response.ok) { accountError = typeof result?.detail === 'string' ? result.detail : 'Couldn’t create your account. Try again.'; return; }
+			if (!response.ok) {
+				if (response.status === 422) { page = 'account'; accountError = accountRefusal(result?.detail) ?? 'Couldn’t create your account. Try again.'; }
+				else accountError = 'Couldn’t create your account. Try again.';
+				return;
+			}
 			onAccountCreated(); token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() }); connect();
 			password = ''; confirmation = ''; page = 'models';
 			await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
@@ -282,15 +300,16 @@
 	{:else if page === 'folder'}<SetupWorkFolder bind:folder bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} error={accountError} />
 	{:else if page === 'models'}
 		<SetupAiRows rows={aiRows} />
-		{#if otherQuestion}<div class="other-omlx"><h2>Another copy of oMLX is already running</h2><p>CORSIA runs its own oMLX for the local model. Stopping the other copy frees memory. If it opens when you log in, it comes back next time.</p><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(true)}>Stop it</Button><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(false)}>Keep it running</Button></div>{/if}
-		{#if sourceError}<Message variant="err">{sourceError}</Message><Button variant="chip" onclick={() => void refreshSources(true)}>Retry</Button>{/if}
+		{#if otherQuestion}<div class="other-omlx"><h2>Stop other oMLX processes?</h2><p>CORSIA runs its own oMLX for the local model. Stopping other oMLX processes can free memory. Login items start again when you next sign in. Other processes stay stopped until you start them.</p><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(true)}>Stop other oMLX</Button><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(false)}>Keep them running</Button></div>{/if}
+		{#if sourceError}<p class="error-text">{sourceError}</p><Button variant="chip" onclick={() => void refreshSources(true)}>Retry</Button>{/if}
 	{/if}
 </SetupShell>
 {#if showAdd}<AddProviderModal onClose={() => { showAdd = false; void refreshSources(); }} onSelectCloud={selectProvider} />{/if}
-{#if openProvider}<ProviderSettingsModal provider={openProvider} onClose={() => { openProvider = null; void refreshSources(); }} />{/if}
+{#if openProvider}<ProviderSettingsModal provider={openProvider} initialTab="advanced" onClose={() => { openProvider = null; void refreshSources(); }} />{/if}
 
 <style>
-	.other-omlx { margin: var(--space-4) var(--space-2); color: var(--text-secondary); }
-	h2 { font-size: var(--text-body); font-weight: var(--fw-semibold); color: var(--text-primary); }
-	p { font-size: var(--text-caption); line-height: var(--lh-normal); }
+	.other-omlx { margin: var(--space-4) var(--space-4); color: var(--text-secondary); }
+	h2 { font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-primary); }
+	p { font-size: var(--text-footnote); line-height: var(--lh-normal); }
+	.error-text { margin: var(--space-2) var(--space-4); }
 </style>

@@ -30,9 +30,9 @@ export function installFailureCopy(cli: string, cause?: InstallFailureCause | nu
 		return { meta: `Couldn’t download ${cli}. The download site refused the request. Save a report.`, reference: ref ?? undefined, retry: false };
 	}
 	if (installCause(cause) === 'connection') {
-		return { meta: `Couldn’t download ${cli}. Check your internet connection, then retry.`, retry: true };
+		return { meta: `Couldn’t download ${cli}. Check your internet connection, then Retry.`, reference: ref ?? undefined, retry: true };
 	}
-	return { meta: `Couldn’t install ${cli}. Try again, or save a report.`, reference: ref ?? undefined, retry: true };
+	return { meta: `Couldn’t install ${cli}. Retry, or save a report.`, reference: ref ?? undefined, retry: true };
 }
 
 /** Install once on Set up, then sign in; retain setup-only attempts for the handoff. */
@@ -126,7 +126,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 			return { meta: failure.meta, reference: failure.reference, error: true, reportable: true, action: failure.retry ? { label: 'Retry', run: () => void startInstall(source) } : undefined };
 		}
 		if (entry?.phase === 'path-shadow') return { meta: `An older ${copy.cli} at ${entry.shadowedBinary} runs instead of the one CORSIA installed. Remove it, then come back here.`, error: true, action: { label: 'Check again', run: () => void deps.refreshSources(true) } };
-		if (source.limited) return { meta: source.resets_at ? `Signed in, but your ${copy.account} subscription has reached its usage limit until ${formatMoment(new Date(source.resets_at))}.` : `Signed in, but your ${copy.account} subscription has reached its usage limit.` };
+		if (source.limited) return { meta: source.resets_at ? `Signed in, but your ${copy.account} subscription has reached its usage limit until ${formatMoment(new Date(source.resets_at))}.` : `Signed in, but your ${copy.account} subscription has reached its usage limit.`, error: true };
 		if (sourceIsReady(source)) return { meta: `Signed in with your ${copy.account} account.`, ready: true };
 		if (source.state === 'not_installed') return { meta: `For ${copy.account} subscribers. CORSIA installs it from ${copy.maker}, then you sign in.`, action: { label: 'Set up', run: () => void startInstall(source) } };
 		if (source.state === 'unverified' && source.cli_package_manager) {

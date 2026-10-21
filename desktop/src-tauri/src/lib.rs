@@ -123,6 +123,7 @@ fn command_line_mode(args: &[OsString]) -> Result<Option<CommandLineMode>, Strin
 enum ServiceStartup {
     Ready { url: String },
     RequiresApproval,
+    DiskImage,
     /// An existing install this app can adopt: the window asks the person first.
     AdoptionOffered { workspace: String },
     /// An earlier adoption's undo could not finish; the window offers the recovery the backend chose.
@@ -311,7 +312,17 @@ fn operation_is_active(port: u16) -> Result<bool, String> {
     operation_is_active_response(&local_get(port, "/api/system/operation-active")?)
 }
 
+fn running_from_disk_image() -> Result<bool, String> {
+    let executable = env::current_exe()
+        .map_err(|error| format!("could not resolve CORSIA executable: {error}"))?;
+    Ok(service_management::is_transient_bundle_path(&executable))
+}
+
 fn run_service_command(action: &str) -> Result<(), String> {
+    // Every registration goes through here, so a copy on a disk image never leaves a service behind it.
+    if action == "register" && running_from_disk_image()? {
+        return Err("Drag CORSIA into your Applications folder, then open it from there.".into());
+    }
     let executable = env::current_exe()
         .map_err(|error| format!("could not resolve CORSIA executable: {error}"))?;
     let status = Command::new(executable)
@@ -505,6 +516,9 @@ fn start_service(
     app: &tauri::AppHandle,
     service: &AppServiceState,
 ) -> Result<ServiceStartup, String> {
+    if running_from_disk_image()? {
+        return Ok(ServiceStartup::DiskImage);
+    }
     let app_dir = default_app_dir(app)?;
     // The undo finishes before anything else, then launch goes on as if
     // nothing had been tried: the restored install is offered for adoption again.
@@ -2586,7 +2600,7 @@ mod tests {
     fn setup_status_response_reports_whether_an_account_exists() {
         assert_eq!(
             setup_account_exists_response(
-                "HTTP/1.1 200 OK\r\n\r\n{\"apple_silicon\":true,\"macos_supported\":true,\"ram_tier\":\"eligible\",\"free_disk_gb\":123.0,\"app_location\":\"applications\",\"local_eligible\":true,\"work_folder\":\"~/corsia\",\"required_username\":null,\"existing_omlx\":false,\"ready_ai\":null}",
+                "HTTP/1.1 200 OK\r\n\r\n{\"apple_silicon\":true,\"macos_supported\":true,\"ram_tier\":\"eligible\",\"free_disk_gb\":123.0,\"local_eligible\":true,\"work_folder\":\"~/corsia\",\"required_username\":null,\"existing_omlx\":false,\"ready_ai\":null}",
             ),
             Ok(false)
         );

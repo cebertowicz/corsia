@@ -28,7 +28,7 @@
 			<div class="pic">
 				{#if step === 'open'}
 					<span class="label">{SETTINGS_PATH}</span>
-					<div class="crop head"><b>System</b><span>Backend controls and system health.</span></div>
+					<div class="crop head"><b>System</b><span>Controls and health for this computer.</span></div>
 				{:else if step === 'on'}
 					<span class="label">Turn on Let other devices connect</span>
 					<div class="crop row"><SettingsDevicesView view={{ ...on, pairing: 'idle' }} /></div>

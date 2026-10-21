@@ -1,6 +1,6 @@
 <script lang="ts">
 	import FolderRow from './FolderRow.svelte';
-	import { Message } from '$lib/components/ui';
+
 	export type FolderNotice = { kind: 'protected'; folder: string } | { kind: 'unwritable'; reason: string } | { kind: 'picker_failed' } | null;
 	type Choice = { state: 'ready'; path: string; protected_folder: string | null } | { state: 'unwritable'; path: string; reason: string };
 	interface Props { folder: string; changed: boolean; changing: boolean; notice: FolderNotice; error?: string }
@@ -19,4 +19,8 @@
 	}
 </script>
 <FolderRow {folder} {notice} {changing} onChange={changeFolder} />
-{#if error}<Message variant="err">{error}</Message>{/if}
+{#if error}<p class="error-text">{error}</p>{/if}
+
+<style>
+	.error-text { margin: var(--space-2) 0 0; }
+</style>
