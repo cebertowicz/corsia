@@ -257,9 +257,13 @@ async function navigate(page: Page, fixture: Fixture) {
 	if (fixture.local === 'other-omlx') await expect(page.getByRole('region', { name: 'Local model' }).getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
 	if (fixture.api) {
 		await page.getByRole('button', { name: 'Add provider', exact: true }).click();
-		if (fixture.api === 'address') await page.getByRole('button', { name: 'Other provider by address', exact: true }).click();
+		if (fixture.api === 'address') await page.getByRole('button', { name: /^Other provider by address/ }).click();
 		else if (fixture.api !== 'menu') {
 			await page.getByRole('button', { name: /^Anthropic Cloud API/ }).click();
+			await page.getByRole('button', { name: 'Advanced', exact: true }).click();
+			await page.getByPlaceholder('Paste new API key', { exact: true }).fill('fixture-api-key');
+			await page.getByRole('button', { name: 'Save', exact: true }).first().click();
+			await page.getByRole('button', { name: 'Overview', exact: true }).click();
 			await page.getByRole('button', { name: 'Test connection', exact: true }).click();
 			if (fixture.api === 'ready') await page.getByRole('button', { name: 'Close', exact: true }).last().click();
 		}
@@ -316,7 +320,7 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.screen === 'folder') { await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible(); return; }
 	if (fixture.other) { await expect(page.getByRole('heading', { name: 'Stop other oMLX processes?' })).toBeVisible(); await expect(page.getByRole('button', { name: 'Stop other oMLX', exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'Keep them running', exact: true })).toBeVisible(); return; }
 	if (fixture.api === 'menu') { await expect(page.getByText('Cloud', { exact: true })).toBeVisible(); await expect(page.getByText('Other ways to connect', { exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: /^Models on another computer/ })).toBeVisible(); return; }
-	if (fixture.api === 'address') { await expect(page.getByRole('dialog').getByText('Other provider by address', { exact: true })).toBeVisible(); await expect(page.getByLabel('Web address', { exact: true })).toBeVisible(); await expect(page.getByLabel('API key', { exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'More options', exact: true })).toBeVisible(); await expect(page.getByLabel('Connection type', { exact: true })).toHaveCount(0); return; }
+	if (fixture.api === 'address') { await expect(page.getByRole('dialog').getByText('Other provider by address', { exact: true })).toBeVisible(); await expect(page.getByPlaceholder('https://host.example.com/compatible-mode/v1', { exact: true })).toBeVisible(); await expect(page.getByPlaceholder('(leave empty for a keyless endpoint)', { exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'More options', exact: true })).toBeVisible(); await expect(page.getByText('Connection type', { exact: true })).toHaveCount(0); return; }
 	if (fixture.api === 'ready') { await expect(page.getByRole('region', { name: 'API provider' }).getByText('Anthropic · passed a test call')).toBeVisible(); return; }
 	if (fixture.api === 'failed') { await expect(text('Couldn’t test this key. Check it and try again.')).toBeVisible(); return; }
 	if (fixture.cli === 'bind-failed') { await expect(page.getByRole('button', { name: 'Start using CORSIA', exact: true })).toBeDisabled(); return; }
