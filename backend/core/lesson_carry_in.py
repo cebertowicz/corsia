@@ -242,6 +242,7 @@ def rotated_cases(cases: Sequence[T], *, cap: int | None, edit_number: int) -> l
 PENDING_EVENT = "learning_loop.carry_in_pending"
 RESULT_EVENT = "learning_loop.carry_in_result"
 RETIREMENT_EVENT = "learning_loop.carry_in_retirement"
+SOURCE_SKIPPED_EVENT = "learning_loop.carry_in_source_skipped"
 
 
 @dataclass(frozen=True)
@@ -313,6 +314,17 @@ def record_pending(db, fact: CarryInFact) -> bool:
     return _record(db, event_name=PENDING_EVENT, fact=fact, dedupe_suffix="pending", attributes={})
 
 
+def record_source_skipped(
+    db, *, lesson_id: str, owner_thread_id: str, target_commit: str, target_path: str,
+) -> bool:
+    """Count a matched case whose source escapes its workspace without retaining its path."""
+    fact = CarryInFact(lesson_id, owner_thread_id, target_commit, target_path, "outside-workspace")
+    return _record(
+        db, event_name=SOURCE_SKIPPED_EVENT, fact=fact, dedupe_suffix="source-outside-workspace",
+        attributes={"reason": "outside_workspace"},
+    )
+
+
 def record_result(db, fact: CarryInFact, run: CarryInRun, *, owner_unresolved: bool = False) -> bool:
     """Persist a settled three-sample result; callers keep pending results pending."""
     if run.state != "settled" or run.verdict is None or len(run.scores) != SAMPLE_COUNT:
@@ -376,13 +388,18 @@ def _matching_facts(db, workspace: Path, paths: Sequence[Path], commit: str) -> 
         target = trial.lesson.new_target_path if trial.lesson.target_file == "new" else trial.lesson.target_file
         if actions is None or not target or canonical_target_path(target, workspace_root) not in saved:
             continue
+        canonical_target = canonical_target_path(target, workspace_root)
         try:
             relative = source_path.resolve().relative_to(workspace_root).as_posix()
         except ValueError:
+            record_source_skipped(
+                db, lesson_id=trial.lesson.id, owner_thread_id=trial.lesson.owner,
+                target_commit=commit, target_path=canonical_target,
+            )
             logger.warning("carry-in case source is outside workspace: source={} workspace={}", source_path, workspace_root)
             continue
         facts.append(CarryInFact(
-            trial.lesson.id, trial.lesson.owner, commit, canonical_target_path(target, workspace_root),
+            trial.lesson.id, trial.lesson.owner, commit, canonical_target,
             f"{relative}#corsia.lesson.case",
         ))
     return facts

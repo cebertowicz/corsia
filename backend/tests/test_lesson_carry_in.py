@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -225,6 +226,38 @@ def test_matching_case_survives_a_symlinked_workspace_root(tmp_path: Path):
     runs = drain_facts(db, workspace, facts, Adapter([], is_ready=False))
     assert [run.state for run in runs] == ["pending"]
     assert is_pending(db, facts[0])
+
+
+def test_external_carry_in_source_is_counted_without_retaining_its_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from core.lesson_carry_in import _matching_facts
+    from core.lesson_files import render_trial
+    from core.lesson_trials import Trial
+
+    workspace = tmp_path / "workspace"
+    target = workspace / "context" / "rule.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("rule\n")
+    source = tmp_path / "outside" / "SKILL.md"
+    source.parent.mkdir()
+    source.write_text(render_trial(
+        lesson_id="12345678-1234-5678-1234-567812345678", owner="owner", name="lesson",
+        description="A carry-in case.", text="Use the rule.",
+        trial=Trial("hypothesis", "2030-01-01"), source_refs=[{"kind": "turn", "reference": "turn"}],
+        target_file="context/rule.md", case={
+            "what_happened": "The rule was missed.", "right_call": "Read it.",
+            "does_not_apply": "For a draft.", "correction_subject": "message:1", "actions": ACTIONS,
+        },
+    ))
+    monkeypatch.setattr("core.skill_data_conversion.installed_skill_files", lambda *_args: [source])
+    db = _event_db()
+
+    assert _matching_facts(db, workspace, [target], "a" * 40) == []
+    row = db.execute(
+        "SELECT subject_key,attributes FROM outcome_events WHERE event_name='learning_loop.carry_in_source_skipped'"
+    ).fetchone()
+    assert row["subject_key"] == "carry-in:12345678-1234-5678-1234-567812345678:" + "a" * 40
+    assert json.loads(row["attributes"])["reason"] == "outside_workspace"
+    assert str(source) not in row["attributes"]
 
 
 def test_drain_settles_a_pending_case_with_a_mocked_local_adapter(tmp_path: Path):
