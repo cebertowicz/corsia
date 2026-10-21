@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import replace
 from typing import Any
 
@@ -11,6 +12,7 @@ from core.fork_runtime import ForkHandle, cancel_fork, forget, handles
 from core.artifact_review_capture import ReviewForkFailure, fork_ended
 from prompts.artifact_review import instruction
 
+logger = logging.getLogger(__name__)
 _starting: set[str] = set()
 
 # A backstop for a fork that stops making progress without exiting. The step
@@ -82,7 +84,7 @@ async def start(request_id: str) -> None:
             reason = failure_reason(error)
             if reason.startswith("provider_error:"):
                 reason = f"cold_request_build:{type(error).__name__}"
-            await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id, reason=reason)
+            await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id, error, reason=reason)
             return
         if await asyncio.to_thread(fork_ended, request_id):
             return
@@ -194,3 +196,5 @@ async def _review(request_id: str, request: Any, cancel_event: asyncio.Event) ->
     except Exception as error:
         if not cancel_event.is_set():
             await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id, error)
+        else:
+            logger.warning("artifact review raised after cancel request_id=%s", request_id, exc_info=error)

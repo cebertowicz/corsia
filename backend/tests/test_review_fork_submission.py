@@ -8,7 +8,7 @@ import pytest
 from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
 from core.fork_tools import execute_fork_tool
 from doceditor import comments, review_feedback
-from doceditor.feedback_batches import claim_and_deliver
+from doceditor.feedback_batches import close_batch
 from infra.database import write_transaction
 from test_doc_review_requests import request, review_env, fork_comment, stored  # noqa: F401
 
@@ -36,8 +36,7 @@ def test_owner_batch_delivery_does_not_end_a_running_fork(review_env):
     fork_comment(db, aid, row["id"])
     from test_review_feedback_ownership import ordinary_comment
     batch = ordinary_comment(db, aid)
-    with write_transaction(db, scope="test_delivery_before_fork_submit"):
-        claim_and_deliver(db, batch, from_state="open", reason="submit")
+    close_batch(db, batch, "submit")
     assert stored(db, row["id"])["state"] == "forked"
     fork_comment(db, aid, row["id"])
     with write_transaction(db, scope="test_fork_ends_after_delivery"):

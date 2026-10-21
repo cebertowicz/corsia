@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Literal
 
 from infra.write_effects import after_commit
 
@@ -48,20 +49,24 @@ def transition(db, request_id: str, state: str, *, reason: str | None = None) ->
     return ReviewTransition(True)
 
 
-def is_open(db, row) -> bool:
+def review_state(db, row) -> Literal["open", "ended", "missing"]:
     """A fork is pending; a handed-back request follows its public Plans task."""
     if row["state"] == "forked":
-        return True
-    if row["state"] in FALLBACK_STATES:
-        from plans import public
+        return "open"
+    if row["state"] not in FALLBACK_STATES:
+        return "ended"
+    from plans import public
 
-        try:
-            return public.review_is_open(db, row["node_id"])
-        except public.PlanError as exc:
-            if str(exc).startswith("unknown plan node:"):
-                return False  # test_missing_continuation_node_is_closed_and_unwatched covers this Plans contract.
-            raise
-    return False
+    try:
+        return "open" if public.review_is_open(db, row["node_id"]) else "ended"
+    except public.PlanError as exc:
+        if str(exc).startswith("unknown plan node:"):
+            return "missing"  # test_missing_continuation_node_is_closed_and_unwatched covers this Plans contract.
+        raise
+
+
+def is_open(db, row) -> bool:
+    return review_state(db, row) == "open"
 
 
 def notify_change(db, request, artifact) -> None:

@@ -96,6 +96,7 @@ async def test_run_exception_reaches_escalation_handler_log(review_env, monkeypa
     await _run(row["id"], prepared[1], asyncio.Event())
 
     assert f"artifact review ended request_id={row['id']} reason=provider_error:RuntimeError" in caplog.text
+    assert "fixture bind failure" in caplog.text  # the traceback, not only the type name
     fallback = stored(db, row["id"])
     assert fallback["node_id"] is not None
     assert fallback["fork_id"] is None

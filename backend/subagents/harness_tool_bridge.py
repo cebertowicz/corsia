@@ -76,7 +76,7 @@ def write_cc_mcp_config(
         "CORSIA_CC_TOOL_TOKEN": tool_token,
     }
     if fork_id is not None:
-        env.update(CORSIA_FORK_ID=fork_id, CORSIA_FORK_TOOL_TOKEN=tool_token)
+        env["CORSIA_FORK_ID"] = fork_id
     payload = {
         "mcpServers": {
             "corsia": {

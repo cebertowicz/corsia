@@ -11,7 +11,7 @@ from typing import Literal
 from core.agent_roster_queries import agent_rows
 from doceditor import feedback_delivery
 from doceditor.comments import validate_client_id
-from doceditor.review_lifecycle import FALLBACK_STATES, is_open, notify_change, request_comment_count, request_comment_counts, transition
+from doceditor.review_lifecycle import FALLBACK_STATES, is_open, notify_change, request_comment_count, request_comment_counts, review_state, transition
 from infra.accounts import get_user
 from infra.auth import is_owner_sentinel, may_access_artifact
 from infra.corsia_agent import CorsiaAgentSettingError, get_corsia_agent
@@ -141,12 +141,13 @@ def requester_name(db, row) -> str | None:
     return user["name"] if user else None
 
 
-def _view(db, row, comment_count: int | None = None) -> dict:
+def _view(db, row, comment_count: int | None = None, state: str | None = None) -> dict:
     """Expose the stored lifecycle with its comment count and derived, never stored, outcome."""
     result = dict(row)
     result["comment_count"] = request_comment_count(db, row) if comment_count is None else comment_count
+    state = state or review_state(db, row)
     result["outcome"] = (
-        "open" if is_open(db, row) else "ended_without_comments" if result["comment_count"] == 0 else "ended"
+        "open" if state == "open" else "ended_without_comments" if result["comment_count"] == 0 else "ended"
     )
     return result
 
@@ -228,15 +229,14 @@ def for_document(db, artifact_id: str) -> list[dict]:
         " ORDER BY created_at,id", (artifact_id,))
     rows = rows.fetchall()
     counts = request_comment_counts(db, rows)
-    views = [_view(db, row, counts[row["id"]]) for row in rows]
-    return [
-        view for view in views
-        if view["outcome"] == "open"
-        or (view["comment_count"] == 0 and (
-            view["state"] not in FALLBACK_STATES
-            or db.execute("SELECT 1 FROM plan_nodes WHERE id=?", (view["node_id"],)).fetchone() is not None
-        ))
-    ]
+    listed = []
+    for row in rows:
+        state = review_state(db, row)
+        view = _view(db, row, counts[row["id"]], state)
+        # A request whose continuation task was deleted leaves the list.
+        if state == "open" or (view["comment_count"] == 0 and state != "missing"):
+            listed.append(view)
+    return listed
 
 
 def may_cancel(db, artifact, row, actor: ReviewActor) -> bool:

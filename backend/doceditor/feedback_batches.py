@@ -39,7 +39,7 @@ def _new_deadline(author_kind: str, now: str) -> str:
     return _after(now, AGENT_QUIET if author_kind == "agent" else USER_IDLE)
 
 
-def open_batch(
+def _open_batch(
     db,
     *,
     author_kind: str,
@@ -109,10 +109,10 @@ def _add_comment_item(
     return True
 
 
-def join_open_batch(db, comment: dict[str, Any], recipient_id: str) -> str:
+def _join_open_batch(db, comment: dict[str, Any], recipient_id: str) -> str:
     author_kind = str(comment["author_kind"])
     now = str(comment["created_at"])
-    batch_id = open_batch(
+    batch_id = _open_batch(
         db,
         author_kind=author_kind,
         author_id=feedback_comments.author_id(comment),
@@ -143,7 +143,7 @@ def record_reopen(
         return None
     at = now or _now()
     recipient_id, = feedback_comments.recipients(db, comment, document_owner_only=True)
-    batch_id = open_batch(
+    batch_id = _open_batch(
         db,
         author_kind="user",
         author_id=USER_AUTHOR_ID,
@@ -182,7 +182,7 @@ def record_edit(
         raise ValueError("edit feedback author_kind must be 'agent' or 'user'")
     now = at or _now()
 
-    batch_id = open_batch(
+    batch_id = _open_batch(
         db,
         author_kind=author_kind,
         author_id=author_id,
@@ -222,15 +222,16 @@ def record_comment(
     if created:
         feedback_comments.make_user_document_durable(db, comment)
         feedback_comments.emit_comment_created(db, comment)
-        batch_ids = [join_open_batch(db, comment, recipient) for recipient in feedback_comments.recipients(db, comment)]
+        batch_ids = [_join_open_batch(db, comment, recipient) for recipient in feedback_comments.recipients(db, comment)]
+        if submit and comment["author_kind"] == "agent":
+            woken = close_for_document(
+                db,
+                author_kind="agent",
+                author_id=feedback_comments.author_id(comment),
+                artifact_id=comment["artifact_id"],
+                reason="submit",
+            )
     if submit and comment["author_kind"] == "agent":
-        woken = close_for_document(
-            db,
-            author_kind="agent",
-            author_id=feedback_comments.author_id(comment),
-            artifact_id=comment["artifact_id"],
-            reason="submit",
-        )
         current_failures = undelivered_for_document(
             db,
             author_kind="agent",
@@ -242,7 +243,7 @@ def record_comment(
     return {"batch_ids": batch_ids, "undelivered_batches": notices, "woken": woken}
 
 
-def claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None) -> tuple[bool, tuple[str, ...]]:
+def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None) -> tuple[bool, tuple[str, ...]]:
     now = _now()
     closed_sql = "closed_reason=?" if reason is not None else "closed_reason=closed_reason"
     params: list[Any] = [now]
@@ -283,13 +284,13 @@ def claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None)
 def close_batch(db, batch_id: str, reason: str) -> tuple[bool, tuple[str, ...]]:
     """Conditionally close and deliver one open batch exactly once."""
     with write_transaction(db, scope="close_doc_feedback_batch") as connection:
-        return claim_and_deliver(connection, batch_id, from_state="open", reason=reason)
+        return _claim_and_deliver(connection, batch_id, from_state="open", reason=reason)
 
 
 def retry_batch(db, batch_id: str) -> tuple[bool, tuple[str, ...]]:
     """Retry one undelivered batch without creating another node."""
     with write_transaction(db, scope="retry_doc_feedback_batch") as connection:
-        return claim_and_deliver(connection, batch_id, from_state="undelivered", reason=None)
+        return _claim_and_deliver(connection, batch_id, from_state="undelivered", reason=None)
 
 
 def close_for_document(

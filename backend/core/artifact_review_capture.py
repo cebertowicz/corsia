@@ -77,10 +77,14 @@ async def review_limit_or_failure_handler(
     state: Literal["handed_back", "failed"] | None = None,
 ) -> None:
     if await run_in_db(fork_ended, request_id):
+        if error is not None:
+            logger.warning("artifact review raised after it ended request_id=%s", request_id, exc_info=error)
         return
     reason = reason or failure_reason(error)
-    log = logger.warning if reason == "limit" else logger.error
-    log("artifact review ended request_id=%s reason=%s", request_id, reason)
+    if reason == "limit":
+        logger.warning("artifact review ended request_id=%s reason=%s", request_id, reason)
+    else:
+        logger.error("artifact review ended request_id=%s reason=%s", request_id, reason, exc_info=error)
     await run_in_db(_escalate_in_db, request_id, reason, state=state)
 
 

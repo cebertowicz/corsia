@@ -102,7 +102,7 @@ async def test_cc_bridge_owns_token_allowlist_exact_call_and_cancel(review_env):
         with open(_request_.mcp_config) as stream:
             env = json.load(stream)["mcpServers"]["corsia"]["env"]
         assert env["CORSIA_FORK_ID"] == row["fork_id"]
-        assert env["CORSIA_FORK_TOOL_TOKEN"] == handle.tool_token
+        assert env["CORSIA_CC_TOOL_TOKEN"] == handle.tool_token
         with pytest.raises(HTTPException):
             authenticate(http, "reviewer", "forged")
         advertised = {item["function"]["name"] for item in definitions(handle)}
