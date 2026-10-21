@@ -58,10 +58,6 @@ test.skip(!assets, 'Set CORSIA_SETUP_FRAME_DIR to the review pack assets directo
 if (assets) mkdirSync(assets, { recursive: true });
 
 function cliSource(cli?: string, vendor = 'claude-code') {
-	if (!cli || cli === 'not-installed') {
-		const proof = JSON.parse(readFileSync(process.env.CORSIA_SETUP_CLI_PROOF!, 'utf8'));
-		return proof.sources.find((row: { source: string }) => row.source === vendor);
-	}
 	const state = cli === 'ready' || cli === 'both-ready' || cli === 'limited' ? 'ready' : cli === 'signed-out' || cli === 'signing-in' || cli === 'signin-failed' ? 'needs_auth' : cli === 'unusable' ? 'unverified' : 'not_installed';
 	return { source: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', state, limited: cli === 'limited', resets_at: '2026-10-20T01:00:00Z', checked_at: '2026-10-19T17:00:00Z', ...(cli === 'unusable' ? { cli_package_manager: 'homebrew' } : {}) };
 }
