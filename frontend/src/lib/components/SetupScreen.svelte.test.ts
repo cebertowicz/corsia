@@ -54,8 +54,15 @@ afterEach(async () => {
 // The approved Welcome copy (onboarding story section 2), spelled out here so a change to the shipped strings fails this test.
 const APPROVED_WELCOME = {
 	title: 'Welcome to CORSIA',
-	lines: ['Your agents learn how you like things done and keep their own instructions and skills up to date, so you don’t have to. You can check that yourself. CORSIA measures how much of your time their work takes, and you can see it any time.'],
-	rows: [],
+	lines: [
+		'Your agents learn how you like things done and keep their own instructions and skills up to date, so you don’t have to.',
+		'You can check that yourself. CORSIA measures how much of your time their work takes, and you can see it any time.',
+	],
+	rows: [
+		'CORSIA handles: the setup steps for connecting your tools, and checking work against what you asked before it reaches you.',
+		'You decide: what gets done. When a choice is yours to make, agents bring it to you with a recommendation.',
+		'Asks you first: sending messages or posting anything for you, making purchases, or opening files outside your work folder. You can let agents go ahead on things you approve often.',
+	],
 	account: 'Create your account. It stays on this computer.',
 };
 const flat = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim();
@@ -139,6 +146,16 @@ describe('SetupScreen', () => {
 		expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
 		expect(host.textContent).toContain('Connect at least one to start chatting.');
 		expect(button('Start using CORSIA')?.disabled).toBe(true);
+	});
+
+	it('returns an existing-account response to the account form with Sign in', async () => {
+		await remountWide(); fillAccount(); await settle();
+		button('Continue')?.click(); await settle();
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input) === '/api/setup/first-account' ? json({}, 409) : json({})));
+		button('Continue')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Welcome to CORSIA');
+		expect(host.textContent).toContain('This computer already has a CORSIA account. Sign in instead.');
+		expect(button('Sign in')).toBeTruthy();
 	});
 
 	it('routes a completed setup status to sign in', async () => {

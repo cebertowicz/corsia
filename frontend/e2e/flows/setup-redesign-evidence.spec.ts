@@ -240,7 +240,11 @@ async function navigate(page: Page, fixture: Fixture) {
 	if (fixture.screen === 'protected' || fixture.screen === 'unwritable') { await page.getByRole('button', { name: 'Change', exact: true }).click(); return; }
 	if (fixture.screen === 'folder') return;
 	await page.getByRole('button', { name: 'Continue', exact: true }).click();
-	if (fixture.screen === 'creating' || fixture.screen === 'create-failed' || fixture.screen === 'account-exists') {
+	if (fixture.screen === 'account-exists') {
+		await expect(page.getByText('This computer already has a CORSIA account. Sign in instead.', { exact: true })).toBeVisible();
+		return;
+	}
+	if (fixture.screen === 'creating' || fixture.screen === 'create-failed') {
 		await expect(page.getByRole('heading', { name: 'Choose your work folder', exact: true })).toBeVisible();
 		await page.getByRole('button', { name: 'Continue', exact: true }).click();
 		return;
