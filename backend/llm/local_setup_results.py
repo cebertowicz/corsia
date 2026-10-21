@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 #: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
 SETUP_COMMAND = "corsia local setup"
-CAUSES = frozenset({"connection", "damaged_bundle", "disk_full", "memory", "other", "other_omlx", "own_omlx_upgrade_required"})
+CAUSES = frozenset({"connection", "damaged_bundle", "disk_full", "memory", "other", "own_omlx_upgrade_required"})
 # Sentences say "try again"; "Retry" names only the button.
 RETRY_IN_APP = "try again."
 RETRY_IN_TERMINAL = f"run `{SETUP_COMMAND}` again."
@@ -28,10 +28,6 @@ def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN
         return f"Check your internet connection, then {retry}"
     if cause == "memory":
         return "Choose a subscription or API provider instead."
-    if cause == "other_omlx":
-        if retry == RETRY_IN_APP:
-            return "CORSIA couldn’t stop another oMLX server. Try again, or leave it running."
-        return f"CORSIA couldn’t stop another oMLX server. {retry[0].upper() + retry[1:]}"
     if cause == "own_omlx_upgrade_required":
         # Only a source run without the bundled oMLX reaches this (ensure_omlx).
         if retry == RETRY_IN_APP:

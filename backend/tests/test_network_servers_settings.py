@@ -202,3 +202,23 @@ def test_lifecycle_unknown_provider_returns_clean_error(client, monkeypatch):
     body = r.json()
     assert body["ok"] is False
     assert "retired" in body["message"]
+
+
+def test_loading_or_pinning_a_model_clears_a_failed_keep_attempt(client, monkeypatch):
+    from llm import local_keep_loaded
+
+    model = "Qwen3.8-27B-oQ4e"
+    monkeypatch.setitem(local_keep_loaded._FAILED, ("ns-test", model), local_keep_loaded.NOT_LOADED)
+    with patch("llm.providers.omlx.load_model", new=AsyncMock(return_value={"ok": False, "message": "no"})):
+        client.post("/api/settings/network-servers/ns-test/models/load", params=_auth(), json={"model": model})
+    assert local_keep_loaded.failures("ns-test") == {}
+
+    monkeypatch.setitem(local_keep_loaded._FAILED, ("ns-test", model), local_keep_loaded.NOT_KEPT)
+    with patch("llm.providers.omlx.update_model_settings", new=AsyncMock(return_value={"ok": True})):
+        r = client.put(f"/api/settings/network-servers/ns-test/models/{model}/settings", params=_auth(), json={"pinned": True})
+    assert r.status_code == 200, r.text
+    assert local_keep_loaded.failures("ns-test") == {}
+
+
+def _auth() -> dict[str, str]:
+    return dict(zip(("token",), (_TOKEN,)))

@@ -247,10 +247,10 @@
 			{:else if hasServer}
 				{#if isLocalhostDaemon}
 					{#if daemonRunning}
-						<Button disabled={busy} onclick={() => handleDaemonAction('stop')}>Stop daemon</Button>
+						<Button disabled={busy} onclick={() => handleDaemonAction('stop')}>Stop</Button>
 						<Button disabled={busy} onclick={() => handleDaemonAction('reload')}>Reload models</Button>
 					{:else}
-						<Button variant="primary" disabled={busy} onclick={() => handleDaemonAction('start')}>Start daemon</Button>
+						<Button variant="primary" disabled={busy} onclick={() => handleDaemonAction('start')}>Start</Button>
 					{/if}
 					<Button disabled={busy} onclick={handleTestLocal}>{busy ? 'Testing…' : 'Test connection'}</Button>
 
@@ -286,7 +286,7 @@
 		{:else if hasServer && provider.name === 'omlx' && provider.server}
 			<OmlxServerInfoPanel serverId={provider.server.id} />
 		{:else if hasServer}
-			<p class="hint">{provider.label} is added manually by host:port. Server-level settings are owned by the daemon itself.</p>
+			<p class="hint">{provider.label} is added manually by host:port. Its settings are changed on that server, not here.</p>
 		{/if}
 	{/if}
 </Modal>

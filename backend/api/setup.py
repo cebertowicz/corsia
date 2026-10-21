@@ -9,7 +9,6 @@ the first account); it exists only while no account does.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import platform
@@ -28,8 +27,6 @@ from infra.auth import authenticate, require_user, token_from_request
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
 from infra.time import utc_storage_iso_to_api
-from llm.local_setup_foreign import apply_foreign_omlx_choice, foreign_omlx_answer
-from llm.local_setup_results import setup_fix
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 logger = logging.getLogger(__name__)
@@ -165,7 +162,6 @@ def _setup_status() -> dict:
         "classifier": classifier_state(CLASSIFIER_DOWNLOAD.status()),
         "ready_ai": _ready_ai(),
         "ai_check_pending": _ai_check_pending(),
-        "other_omlx": foreign_omlx_answer(),
     }
 
 
@@ -269,7 +265,7 @@ async def local_download_status(request: Request) -> dict | Response:
         return refused
     from onboarding.local_download_state import current
 
-    return {**current(), "other_omlx": foreign_omlx_answer()}
+    return current()
 
 
 @router.post("/local-download", response_model=None)
@@ -280,17 +276,9 @@ async def local_download(request: Request) -> dict | Response:
     if await run_in_db(accounts.has_users):
         return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
     try:
-        body = LocalDownloadRequest.model_validate(await request.json())
+        LocalDownloadRequest.model_validate(await request.json())
     except (ValidationError, ValueError):
         return Response(status_code=422)
-    if refusal := await asyncio.to_thread(
-        apply_foreign_omlx_choice,
-        other_omlx=body.other_omlx,
-    ):
-        content = {"code": refusal}
-        if refusal == "foreign_omlx_changed":
-            content["fix"] = setup_fix("other_omlx")
-        return JSONResponse(status_code=409, content=content)
     from llm.local_setup_flow import begin_local_setup
 
     return await begin_local_setup(onboarding=True)

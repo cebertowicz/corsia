@@ -5,6 +5,7 @@ export type LocalModelRecommendationMeta = {
 	download_size_gb: number;
 	quantization_bits?: number;
 	relative_speed?: number;
+	tokens_per_second?: number;
 };
 
 /** The oMLX recommender's relative decode speed, expressed for a Settings decision. */
@@ -22,12 +23,19 @@ function quantizationLabel(bits: number | undefined): string | null {
 	return `${Number.isInteger(bits) ? bits : Number(bits.toFixed(1))}-bit`;
 }
 
+/** oMLX's estimated decode speed; the relative label is the fallback when it gives none. */
+function speedLabel(model: LocalModelRecommendationMeta): string | null {
+	const tps = model.tokens_per_second;
+	if (tps !== undefined && Number.isFinite(tps) && tps > 0) return `~${Math.round(tps)} tokens/s est.`;
+	return relativeSpeedLabel(model.relative_speed);
+}
+
 /** The one display formatter for an oMLX recommendation's structured metadata. */
 export function localModelRecommendationMeta(model: LocalModelRecommendationMeta): string[] {
 	return [
 		`${humanCtx(model.context_window)} context`,
 		quantizationLabel(model.quantization_bits),
 		`${model.download_size_gb} GB`,
-		relativeSpeedLabel(model.relative_speed),
+		speedLabel(model),
 	].filter((value): value is string => Boolean(value));
 }

@@ -227,12 +227,10 @@ def test_local_model_offer_reads_a_running_setup_before_offering_and_never_waits
     assert "re-read it after each later task" in FIRST_RUN.read_text(encoding="utf-8")
 
 
-def test_local_model_offer_names_what_stop_and_keep_do_and_never_reads_a_wake_flight_twice():
+def test_local_model_offer_reads_a_wake_flight_once_and_offers_no_retry_for_memory():
     offer = LOCAL_MODEL_OFFER.read_text(encoding="utf-8")
     running = offer.split("## Setup already running", 1)[1]
 
-    assert "Stop it, or keep it running? Stopping it frees memory." in offer
-    assert "on a second one, offer to keep both instead" in offer
     assert "setup ended without a model" in offer
     assert "For `cause: memory` offer no retry" in running
     assert "never read it again unless the person asks" in running

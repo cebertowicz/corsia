@@ -28,6 +28,8 @@ class Download:
     detail: str | None = None
     # The local server that completed the download; absent for legacy records.
     server_id: str | None = None
+    # On a failed record: the bytes are on disk and only listing the model failed.
+    downloaded: bool = False
 
     def view(self) -> dict:
         return {
@@ -82,6 +84,7 @@ def all() -> list[Download]:
             model, status, speed if isinstance(speed, (int, float)) else None,
             detail if isinstance(detail, str) else None,
             server_id if isinstance(server_id, str) else None,
+            item.get("downloaded") is True,
         ))
     return sorted(result, key=lambda entry: entry.model.repository)
 
@@ -105,12 +108,28 @@ def reconcile(on_disk: set[str]) -> None:
             forget(download.model.model)
 
 
+def settle_listed(server_id: str, listed: set[str]) -> None:
+    """Forget failed downloads whose model CORSIA's own oMLX now lists: the failure no longer describes them.
+
+    Discovery calls this for every server it reconciles; the one place a failed Settings
+    download settles. A person's oMLX listing the same model says nothing about CORSIA's.
+    """
+    from llm.local_sources import corsia_omlx_server
+
+    own = corsia_omlx_server()
+    if own is None or own["id"] != server_id:
+        return
+    for download in all():
+        if download.status == "failed" and download.model.model in listed:
+            forget(download.model.model)
+
+
 def write(download: Download) -> None:
     values = _read_raw()
     values[download.model.model] = {
         "model": to_record(download.model), "status": download.status,
         "speed": download.speed, "detail": download.detail,
-        "server_id": download.server_id,
+        "server_id": download.server_id, "downloaded": download.downloaded,
     }
     _write_raw(values)
 

@@ -278,7 +278,7 @@ Caller-supplied properties merge with defaults. Caller properties win on key col
 | Category | Additional properties |
 |---|---|
 | `turn.*` | `turn_id`, `model`, `provider`, `token_count` (when known) |
-| `model.*` | `provider`, `model_id`, `reasoning_shape`, `previous_model_id` (on switch), `error` (on failure) |
+| `model.*` | `provider`, `model_id`, `reasoning_shape`, `previous_model_id` (on switch), `error` (on failure), `automatic` (true when CORSIA pinned or loaded a finished download itself) |
 | `onboarding.account_created`, `onboarding.first_run_wake` | No caller properties. |
 | `onboarding.first_model_selected` | `source_kind` (the model dispatch prefix only), `seconds_since_account` (integer or null). |
 | `onboarding.first_turn_completed` | `seconds_since_account` (integer or null). |

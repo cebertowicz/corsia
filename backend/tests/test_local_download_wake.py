@@ -171,13 +171,6 @@ def test_flight_causes_reach_rail_and_wake_identically(cause):
     assert rail["cause"] == payload["cause"] == cause
 
 
-def test_wake_does_not_classify_start_path_other_omlx_as_a_flight_cause():
-    from onboarding import local_download_wake
-
-    payload = local_download_wake._payload("failed", model=None, cause="other_omlx", ref=None, bytes_to_free=None)
-    assert payload["cause"] == "other_omlx"
-
-
 @pytest.mark.parametrize("cause", ["disk_full", "connection", "memory", "own_omlx_upgrade_required", "other"])
 def test_wake_and_status_route_share_one_fix(wake, cause):
     from llm import local_setup

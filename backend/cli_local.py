@@ -44,18 +44,6 @@ def _print_still_downloading(result: dict, command: str) -> int:
     return EXIT_STILL_DOWNLOADING
 
 
-def _consent_required(error: urllib.error.HTTPError) -> bool:
-    """Whether local setup needs consent that only the app can collect."""
-    if error.code != 409:
-        return False
-    try:
-        detail = json.loads(error.read().decode() or "null")
-    except (OSError, ValueError):
-        return False
-    payload = detail.get("detail") if isinstance(detail, dict) else None
-    return isinstance(payload, dict) and payload.get("code") == "consent_required"
-
-
 def _print_skipped(result: dict) -> int:
     """0 only when a signed-in subscription made setup unnecessary; else nothing works yet."""
     print(result.get("message") or "No local setup was needed.")
@@ -116,11 +104,6 @@ def cmd_setup(args: argparse.Namespace) -> int:
             {"no_subscription_only": args.if_no_subscription, "automatic": args.automatic},
         )
     except urllib.error.HTTPError as error:
-        if _consent_required(error):
-            return _print_terminal_error({
-                "message": "Another copy of oMLX is already running on this computer.",
-                "next_action": "Open the CORSIA app and choose whether to stop it or keep it running.",
-            })
         return _print_terminal_error({
             "message": f"Local setup could not start on the backend: {error}",
             "next_action": f"Run `{command}` again after the backend is available.",

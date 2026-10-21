@@ -23,8 +23,8 @@ from omlx_recommender_fixtures import fresh_local_setup  # noqa: F401
 _REPO = Path(__file__).resolve().parents[2]
 SAMPLING = {"temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty", "chat_template_kwargs"}
 
-# What the recorded recommender picks at each memory size (GiB), stated here so a
-# re-recorded fixture shows its change. Under 24 GiB there is no local model.
+# What setup picks at each memory size (GiB) from the recorded recommender: oMLX's own
+# ranking, first that fits. Stated here so a re-recorded fixture shows its change. Under 24 GiB there is no local model.
 PICKS = {
     16: None,
     24: ("Jundot/gemma-4-26B-A4B-it-oQ3.5e-mtp", 90_890, "Gemma 4 26B A4B"),
@@ -138,6 +138,7 @@ def test_recommender_metadata_survives_in_the_structured_settings_view():
         "download_size_gb": round(row["download_bytes"] / 1000**3, 1),
         "context_window": row["max_context"], "quantization_bits": row["level"],
         "relative_speed": row["relative_speed"], "resident_bytes": row["resident_bytes"],
+        "smarts_level": row["smarts_level"], "tokens_per_second": row["tokens_per_second"],
     }
     restored = local_model.from_recommendation(local_model.to_record(model))
     assert restored == model and restored.view() == model.view()

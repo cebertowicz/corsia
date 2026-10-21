@@ -43,6 +43,8 @@ class Operation:
     downloaded: bool = False
     notified: bool = False
     resident_bytes: int | None = None
+    smarts_level: float | None = None
+    tokens_per_second: float | None = None
 
     @classmethod
     def for_model(cls, model: LocalModel | None, kind: str, task_id: str | None = None, *, onboarding: bool = False) -> Operation:
@@ -52,8 +54,14 @@ class Operation:
         return cls(
             model.repository, model.download_size_bytes, model.context_window, kind, task_id,
             model.name, model.level, model.fp16, model.relative_speed, onboarding,
-            resident_bytes=model.resident_bytes,
+            resident_bytes=model.resident_bytes, smarts_level=model.smarts_level,
+            tokens_per_second=model.tokens_per_second,
         )
+
+    @property
+    def in_flight(self) -> bool:
+        """True until the flight has a terminal result; a download still running in oMLX stays in flight."""
+        return self.result is None or bool(self.result.get("downloading"))
 
     @property
     def model(self) -> LocalModel | None:
@@ -63,6 +71,7 @@ class Operation:
         return LocalModel(
             self.repository, self.download_size_bytes, self.context_window, self.name,
             self.level, self.fp16, self.relative_speed, self.resident_bytes,
+            self.smarts_level, self.tokens_per_second,
         )
 
 

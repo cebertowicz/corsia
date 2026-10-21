@@ -34,6 +34,8 @@ from infra.product_events import emit_product_event
 from infra.state.ws import notify_models_changed
 from llm import network_discovery as nd
 from llm import network_endpoints as ne
+from llm.local_keep_loaded import forget_failure
+from llm.local_sources import corsia_omlx_server
 from llm.locality import server_locality
 from llm.providers import for_provider
 
@@ -87,9 +89,11 @@ def _network_view(server_id: str) -> dict:
 async def list_servers():
     servers = await run_in_db(nd.get_servers)
     billing = await run_in_db(billing_views, [s["id"] for s in servers])
+    own = corsia_omlx_server(servers)
     for s in servers:
         s.update(await run_in_db(_network_view, s["id"]))
         s.update(billing[s["id"]])
+        s["corsia_omlx"] = own is not None and s["id"] == own["id"]
     keys = await run_in_db(server_keys, [s["id"] for s in servers])
     return {"servers": [_public_server_view(s, keys) for s in servers]}
 
@@ -204,6 +208,7 @@ async def load_model(server_id: str, body: ModelBody):
         raise HTTPException(404, detail="Server not found")
     _refuse_external(server)
 
+    forget_failure(server_id, body.model)
     cfg = {"server_id": server_id}
     pv = for_provider(server["provider"])
     result = await pv.load_model(cfg, body.model)

@@ -136,13 +136,14 @@ async def test_startup_delivery_failure_preserves_a_live_flight(flight, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_existing_registered_local_model_is_visible_and_setup_and_prepare_do_not_modify_it(isolated_db, flight, monkeypatch):
+async def test_corsias_own_registered_local_model_is_visible_and_setup_and_prepare_do_not_modify_it(isolated_db, flight, monkeypatch):
     from llm import local_setup_flow as flow, local_setup_prepare as prepare, local_sources
     from llm import network_discovery as discovery
+    from llm.managed_omlx_binary import MANAGED_INSTANCE_ID
     from test_managed_omlx_ownership import _model_row
 
-    sid = discovery.upsert_server(provider="omlx", instance_id="127.0.0.1:8000", instance_name="Existing oMLX",
-                                  host="127.0.0.1", port=8000, status="online", kind="managed")
+    sid = discovery.upsert_server(provider="omlx", instance_id=MANAGED_INSTANCE_ID, instance_name="Existing oMLX",
+                                  host="127.0.0.1", port=8000, status="online", kind="managed", source="corsia")
     _model_row("old-local-model", f"omlx@{sid}/existing/model", "existing/model")
     monkeypatch.setattr(prepare, "_prepare", prepare._Prepare())
     monkeypatch.setattr(prepare, "start_managed_omlx", AsyncMock(side_effect=AssertionError("must not start oMLX")))
@@ -162,6 +163,23 @@ async def test_existing_registered_local_model_is_visible_and_setup_and_prepare_
 
 
 @pytest.mark.asyncio
+async def test_a_persons_own_omlx_is_left_alone_and_never_stands_in_for_corsias_server(isolated_db, flight, monkeypatch):
+    from llm import local_sources
+    from llm import network_discovery as discovery
+    from test_managed_omlx_ownership import _model_row
+
+    sid = discovery.upsert_server(provider="omlx", instance_id="127.0.0.1:8000", instance_name="My oMLX",
+                                  host="127.0.0.1", port=8000, status="online", kind="managed")
+    _model_row("their-model", f"omlx@{sid}/their/model", "their/model")
+    before = discovery.get_server(sid)
+
+    assert await local_sources.local_server_for_install(lambda _s: None, start_if_absent=False) is None
+    source = local_sources.omlx_source()
+    assert source["corsia_omlx"] is False and source["corsia_omlx_online"] is False
+    assert discovery.get_server(sid) == before
+
+
+@pytest.mark.asyncio
 async def test_failed_boot_retains_identity_until_the_supervised_process_exits(flight, monkeypatch):
     from llm.providers import omlx_supervisor as supervisor
 
@@ -177,10 +195,3 @@ async def test_failed_boot_retains_identity_until_the_supervised_process_exits(f
     assert supervisor.is_corsia_process(pid)
     assert (await supervisor.start_server({"server_id": "boot-failed", "host": "127.0.0.1", "port": 8210}))["ok"] is False
     assert supervisor.is_corsia_process(pid)
-
-
-def test_unreleased_boolean_choice_shape_does_not_apply(flight):
-    from llm import local_setup_foreign as foreign
-
-    foreign.foreign_omlx_choice_path().write_text('{"stop": true, "pid": 101}')
-    assert foreign.foreign_omlx_answer() == "none"

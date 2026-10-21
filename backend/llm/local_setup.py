@@ -27,6 +27,8 @@ log = logging.getLogger(__name__)
 class _Flight:
     task: asyncio.Task | None = None
     stage: str | None = None
+    # The bytes are on disk and the flight is adding and loading the model; set with each stage.
+    finishing: bool = False
     result: dict | None = None
     model: LocalModel | None = None
     downloaded: bool = False
@@ -59,7 +61,7 @@ def _claim_operation(kind: str, model: LocalModel | None = None, *, onboarding: 
         return False
     try:
         previous = local_setup_operation.read()
-        if previous is not None and (previous.result is None or previous.result.get("downloading")):
+        if previous is not None and previous.in_flight:
             local_setup_operation.unlock(lock)
             return False
         local_setup_operation.write(local_setup_operation.Operation.for_model(model, kind, onboarding=onboarding))
@@ -94,7 +96,7 @@ def start_flight(work: Coroutine[Any, Any, dict], stage: str, *,
         _flight.kind, _flight.model = operation.kind, operation.model
         _flight.onboarding = operation.onboarding
         _flight.downloaded = False
-    _flight.result, _flight.stage = None, stage
+    _flight.result, _flight.stage, _flight.finishing = None, stage, False
     _flight.server_id = None
     _flight.download_eta_seconds, _flight.download_stalled, _flight.download_percent = None, False, None
     _flight.task = asyncio.create_task(work)
@@ -108,9 +110,13 @@ async def wait_for_operation() -> None:
         _flight.operation_lock = await local_setup_operation.wait_for_lock()
 
 
-def report_stage(stage: str) -> None:
-    """Publish the current stage from setup or Settings work."""
-    _flight.stage = stage
+def report_stage(stage: str, *, finishing: bool = False) -> None:
+    """Publish the current stage from setup or Settings work.
+
+    ``stage`` is wording only; ``finishing`` says the bytes are on disk, so the model's
+    own row takes over from the download row.
+    """
+    _flight.stage, _flight.finishing = stage, finishing
     _notify_models_changed()
 
 
@@ -135,7 +141,7 @@ def restore_terminal_flight(operation: local_setup_operation.Operation) -> None:
 def record_resume_failure(ref: str) -> None:
     """Publish a referenced startup delivery failure through the same durable flight."""
     operation = local_setup_operation.read()
-    if _running() or (operation is not None and operation.result is not None and not operation.result.get("downloading")):
+    if _running() or (operation is not None and not operation.in_flight):
         return
     operation = operation or local_setup_operation.Operation.for_model(None, "setup", onboarding=True)
     local_setup_operation.write(operation)
@@ -152,6 +158,9 @@ def finish_flight(result: dict) -> dict:
         local_setup_operation.write(replace(operation, result=result, downloaded=_flight.downloaded))
     _flight.downloading = bool(result.get("downloading"))
     _release_operation_lock()
+    from infra.state.ws import schedule_models_changed
+
+    schedule_models_changed()  # open Providers screens re-read the setup state instead of polling it
     return result
 
 
@@ -201,6 +210,11 @@ def flight_model() -> LocalModel | None:
 def setup_stage() -> str | None:
     """The current stage while work is running."""
     return (_flight.stage or "Setting up local model") if _running() else None
+
+
+def setup_finishing() -> bool:
+    """Whether running work is past its download: adding and loading the model."""
+    return _flight.finishing and _running()
 
 
 def setup_kind() -> str | None:
