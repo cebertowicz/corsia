@@ -23,6 +23,6 @@ AUTOMATION_CATALOG_ENTRIES: dict[str, ToolCatalogEntry] = {
     "event_rules": ToolCatalogEntry(
         "automations", status="active", authority="event-rules-write",
         summary="Get woken, with your own note, when a connected app's event matches; or stop one",
-        activity="Setting event rules",
+        activity="Managing app events",
     ),
 }

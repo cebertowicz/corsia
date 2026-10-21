@@ -28,6 +28,15 @@ from infra.queries import thread_available_sql
 _EXPLAIN_LIMIT = 50
 
 
+def _prune_disabled(db: sqlite3.Connection, scope: str, now: str) -> None:
+    """Keep disabled rules briefly for inspection, then discard them in their own scope."""
+    cutoff = (datetime.fromisoformat(now) - rules.RETENTION).isoformat()
+    db.execute(
+        "DELETE FROM event_rules WHERE scope=? AND enabled=0 AND updated_at<?",
+        (scope, cutoff),
+    )
+
+
 class RuleRefused(ValueError):
     """A request the writer limits or the rule shape refuse; the text says why."""
 
@@ -208,6 +217,7 @@ def create(
         (rule_id, now, now, own_scope, connector, event_type, json.dumps(tests), action,
          stored_to, mode, note, f"agent:{writer}", writer, authority),
     )
+    _prune_disabled(db, own_scope, now)
     return _shape(rules.from_row(db.execute("SELECT * FROM event_rules WHERE id=?", (rule_id,)).fetchone()))
 
 
@@ -222,6 +232,7 @@ def disable(
     if caller not in (rule.created_by, rules.thread_target(rule.to)) and _conductor(db, project_id) != caller:
         raise RuleRefused("Only the rule's writer, its recipient or the project's conductor can turn it off.")
     db.execute("UPDATE event_rules SET enabled=0, updated_at=? WHERE id=?", (now, rule.id))
+    _prune_disabled(db, rules.project_scope(project_id), now)
     return {**_shape(rule), "enabled": False}
 
 
@@ -256,9 +267,7 @@ def list_rules(db: sqlite3.Connection, *, project_id: str | None, now: str) -> l
     return [
         {**_shape(rule),
          "last_fired": stats[rule.id]["last_fired"] if rule.id in stats else None,
-         "wakes_24h": int(stats[rule.id]["wakes"] or 0) if rule.id in stats else 0,
-         # Rules start no work until run_script and start_worker arrive.
-         "starts_24h": 0}
+         "wakes_24h": int(stats[rule.id]["wakes"] or 0) if rule.id in stats else 0}
         for rule in found
     ]
 

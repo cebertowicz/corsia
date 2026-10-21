@@ -50,6 +50,7 @@ WAKE_CAP = "wake cap"
 PAUSED = "paused"
 LOCAL_ONLY = "local only"
 ACCOUNT_REACH = "account reach"
+OUT_OF_PROJECT = "recipient outside the rule's project"
 
 WAKES_PER_HOUR = 1
 RETENTION = timedelta(days=30)
@@ -279,12 +280,9 @@ def _apply_drops(plan: RulePlan, rules: list[Rule], by_thread: Mapping[str, Rout
         dropped_by.setdefault(writer, rule.id)
         if writer in by_thread:
             plan.drops.setdefault(writer, rule.id)
-        plan.settled.append(Outcome(
-            rule.id, writer, DROPPED,
-            reason=None if writer in by_thread else "nothing routed to drop"))
+        plan.settled.append(Outcome(rule.id, writer, DROPPED,
+                            reason=None if writer in by_thread else "nothing routed to drop"))
     return dropped_by
-
-
 def _wake_for(
     db: sqlite3.Connection, rule: Rule, thread: str, routed_wake: bool,
 ) -> tuple[bool, str | None, int]:
@@ -321,11 +319,10 @@ def evaluate(
         rule.id: (owner if rule.to == REGISTERED_OWNER else thread_target(rule.to))
         for rule in rules
     }
-    threads = rule_reads.threads(db, [owner, *by_thread, *recipients.values()])
+    threads = rule_reads.threads(db, [owner, *by_thread, *recipients.values(), *(rule.created_by for rule in rules)])
     event_project = threads[owner]["project_id"] if owner in threads else None
     if event_project is None:
-        event_project = next(
-            (threads[item.thread]["project_id"] for item in routed if item.thread in threads), None)
+        event_project = next((threads[item.thread]["project_id"] for item in routed if item.thread in threads), None)
     account_id = event.facts.get("account_id")
     if account_id is None:
         rules = [rule for rule in rules if _in_scope(rule, event_project)]
@@ -336,16 +333,27 @@ def evaluate(
         # R27: an ended artifact's later activity fires no rule.
         plan.settled = [Outcome(rule.id, recipients[rule.id], ENDED) for rule in rules]
         return plan
-
+    current = []
+    for rule in rules:
+        thread = recipients[rule.id] if rule.action == DELIVER else rule.created_by
+        row = threads.get(thread) if thread else None
+        if thread is None or row is None or not row["available"]:
+            unavailable_reason = "no registered owner" if thread is None else "recipient unavailable"
+            plan.settled.append(Outcome(rule.id, thread, DEAD_LETTERED, reason=unavailable_reason))
+        elif row["project_id"] != rule.scope.removeprefix(PROJECT_PREFIX):
+            plan.settled.append(Outcome(rule.id, thread, HELD, reason=OUT_OF_PROJECT))
+        else:
+            current.append(rule)
+    rules = current
+    if not rules:
+        return plan
     dropped_by = _apply_drops(plan, rules, by_thread)
     cloud_off: set[str] | None = None
     for rule in (rule for rule in rules if rule.action == DELIVER):
         thread = recipients[rule.id]
-        row = threads.get(thread) if thread else None
-        if thread is None or row is None or not row["available"]:
-            reason = "no registered owner" if thread is None else "recipient unavailable"
-            plan.settled.append(Outcome(rule.id, thread, DEAD_LETTERED, reason=reason))
+        if thread is None:  # The guard above already settled this rule.
             continue
+        row = threads[thread]
         if thread in dropped_by:
             plan.settled.append(Outcome(
                 rule.id, thread, DROPPED, reason=f"dropped by rule {dropped_by[thread]}"))

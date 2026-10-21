@@ -8,6 +8,7 @@ from typing import Any
 from events import rule_authoring
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
+from infra.product_events import emit_product_event
 from tools.base import Tool
 
 _OPERATIONS = ("create", "disable", "list", "test", "explain")
@@ -26,15 +27,21 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
             kwargs.get("connector"), kwargs.get("match"), project_id) if operation == "create" else None)
         with write_transaction(None, scope="event_rules_tool") as db:
             if operation == "create":
-                return rule_authoring.create(
+                result = rule_authoring.create(
                     db, writer=thread_id, project_id=project_id,
                     connector=kwargs.get("connector"), event_type=kwargs.get("event_type"),
                     match=kwargs.get("match"), action=kwargs.get("action", "deliver"),
                     to=kwargs.get("to"), mode=kwargs.get("mode"), note=kwargs.get("note"),
                     scope=kwargs.get("scope"), now=now, tracked=tracked,
                 )
-            return rule_authoring.disable(
-                db, caller=thread_id, project_id=project_id, rule_id=kwargs.get("rule_id"), now=now)
+            else:
+                result = rule_authoring.disable(
+                    db, caller=thread_id, project_id=project_id, rule_id=kwargs.get("rule_id"), now=now)
+        emit_product_event(
+            "event_rule", "created" if operation == "create" else "disabled", thread_id=thread_id,
+            properties={"rule_id": result["id"], "scope": project_id},
+        )
+        return result
     db = get_db()
     try:
         if operation == "list":

@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
+from collections.abc import Iterable
 from typing import Any, Callable
 
 from events import dead_letter, rules
@@ -229,6 +230,20 @@ def deliver_rule_adds(
     return deliveries, outcomes
 
 
+def emit_route_events(envelope: EventEnvelope, deliveries: Iterable[PlatformDelivery]) -> None:
+    """Record the same route event for deliveries from either event path."""
+    for delivery in deliveries:
+        emit_product_event(
+            "event_route", delivery.outcome,
+            properties={
+                "internal_event": envelope.type,
+                "thread_id": delivery.thread_id,
+                "external_id": delivery.event_id,
+                "reason": delivery.reason,
+            },
+        )
+
+
 def apply_webhook_rules_sync(
     envelope: EventEnvelope, watch_event: str, routed_thread: str | None, *, ends_artifact: bool,
 ) -> rules.RulePlan | None:
@@ -253,8 +268,9 @@ def apply_webhook_rules_sync(
         plan = rules.evaluate(conn, event, routed)
         if plan is None:
             return None
-        _, outcomes = deliver_rule_adds(conn, envelope, decl, plan)
+        added, outcomes = deliver_rule_adds(conn, envelope, decl, plan)
         rules.record(conn, event, [*plan.settled, *outcomes])
+        emit_route_events(envelope, added)
         return plan
 
 
@@ -311,16 +327,7 @@ def deliver_platform_event_sync(
             added, added_outcomes = deliver_rule_adds(conn, envelope, decl, plan)
             deliveries += added
             rules.record(conn, plan.event, [*outcomes, *added_outcomes])
-        for delivery in deliveries:
-            emit_product_event(
-                "event_route", delivery.outcome,
-                properties={
-                    "internal_event": envelope.type,
-                    "thread_id": delivery.thread_id,
-                    "external_id": delivery.event_id,
-                    "reason": delivery.reason,
-                },
-            )
+        emit_route_events(envelope, deliveries)
         return deliveries
 
 

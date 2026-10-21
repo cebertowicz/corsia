@@ -368,7 +368,7 @@ async def test_a_burst_wakes_a_rule_once_and_the_owner_on_every_event(isolated_d
         [("woke", "rule", None)] + [("digested", "rule", "wake cap")] * 49)
 
     [listed] = (await _tool("watcher", operation="list"))["rules"]
-    assert (listed["wakes_24h"], listed["starts_24h"]) == (1, 0)
+    assert listed["wakes_24h"] == 1
     assert listed["last_fired"] is not None
 
 
@@ -477,6 +477,66 @@ async def test_a_drop_removes_the_writers_own_delivery_and_leaves_its_watch_arme
 
 
 @pytest.mark.asyncio
+async def test_rules_hold_threads_that_left_their_project(isolated_db, sent, monkeypatch):
+    _project(P, conductor="cond")
+    _project(Q)
+    _agent("cond")
+    _agent("owner")
+    _agent("watcher")
+    register_pr(REPO, 7, "owner")
+    rule = await _tool("cond", operation="create", connector="github",
+                       event_type="pr.synchronize", to="thread:watcher", mode="digest")
+    _write("UPDATE threads SET project_id=? WHERE id='watcher'", Q)
+
+    await route(SYNC, _sync(7, 1))
+
+    assert _wakes("watcher") == [] and _notes("watcher") == []
+    [held] = _decisions(rule_id=rule["id"])
+    assert (held["outcome"], held["reason"]) == ("held", "recipient outside the rule's project")
+    [why] = (await _tool("cond", operation="explain", event_id=held["event_id"]))["decisions"]
+    assert why["explanation"].endswith("held it from watcher: recipient outside the rule's project")
+
+    _write("UPDATE threads SET project_id=? WHERE id='watcher'", P)
+    await route(SYNC, _sync(7, 2))
+    assert len(_notes("watcher")) == 1
+
+    drop = await _tool("owner", operation="create", connector="gmail",
+                       event_type="email.received", action="drop")
+    _write("UPDATE threads SET project_id=? WHERE id='owner'", Q)
+    models.register_artifact(integration="gmail", type="email-thread",
+                             external_id="google:acct-1:thread:t1", parent_thread_id="owner")
+    monkeypatch.setattr("events.rules._reaches", lambda *_args: True)
+    [delivered] = deliver_platform_event_sync("gmail", _email("acct-1", "moved-writer"))
+    assert delivered.outcome == "digested"
+    assert [(item["outcome"], item["reason"]) for item in _decisions(rule_id=drop["id"])] == [
+        ("held", "recipient outside the rule's project")]
+
+
+@pytest.mark.asyncio
+async def test_disabled_rules_age_out_on_the_next_write(isolated_db):
+    _project(P)
+    _agent("writer")
+    base = {"operation": "create", "connector": "github", "event_type": "pr.merged"}
+    old = await _tool("writer", **base)
+    recent = await _tool("writer", **base)
+    await _tool("writer", operation="disable", rule_id=old["id"])
+    await _tool("writer", operation="disable", rule_id=recent["id"])
+    _write("UPDATE event_rules SET updated_at=? WHERE id=?", "2026-08-01T00:00:00+00:00", old["id"])
+
+    await _tool("writer", **base)
+
+    assert {row["id"] for row in _rows("SELECT id FROM event_rules")} >= {recent["id"]}
+    assert old["id"] not in {row["id"] for row in _rows("SELECT id FROM event_rules")}
+
+    stale = await _tool("writer", **base)
+    await _tool("writer", operation="disable", rule_id=stale["id"])
+    _write("UPDATE event_rules SET updated_at=? WHERE id=?", "2026-08-01T00:00:00+00:00", stale["id"])
+    enabled = await _tool("writer", **base)
+    await _tool("writer", operation="disable", rule_id=enabled["id"])
+    assert stale["id"] not in {row["id"] for row in _rows("SELECT id FROM event_rules")}
+
+
+@pytest.mark.asyncio
 async def test_a_paused_target_gets_a_digest(isolated_db, sent, monkeypatch):
     _project(P)
     _agent("owner")
@@ -568,6 +628,44 @@ def test_r29_and_r30_hold_an_account_event_from_recipients_it_may_not_reach(isol
     # The owner's project can't see the other project's rules.
     assert asyncio.run(_tool("owner", operation="explain",
                              event_id=later[0]["event_id"]))["decisions"] == []
+
+
+@pytest.mark.asyncio
+async def test_rule_authoring_and_both_delivery_paths_emit_product_events(isolated_db, sent, monkeypatch):
+    authored, routed = [], []
+    monkeypatch.setattr("tools.event_rules.emit_product_event",
+                        lambda category, action, **kwargs: authored.append((category, action, kwargs)))
+    monkeypatch.setattr("events.platform.emit_product_event",
+                        lambda category, action, **kwargs: routed.append((category, action, kwargs)))
+    _project(P)
+    _agent("owner")
+    _agent("watcher")
+    register_pr(REPO, 7, "owner")
+
+    webhook_rule = await _tool("watcher", operation="create", connector="github",
+                               event_type="pr.synchronize")
+    disabled = await _tool("watcher", operation="create", connector="github",
+                           event_type="pr.merged")
+    await _tool("watcher", operation="disable", rule_id=disabled["id"])
+    assert [(category, action) for category, action, _ in authored] == [
+        ("event_rule", "created"), ("event_rule", "created"), ("event_rule", "disabled")]
+
+    await route(SYNC, _sync(7, 1))
+    webhook_events = [
+        (category, action, event["properties"]["thread_id"])
+        for category, action, event in routed if category == "event_route"
+    ]
+    assert webhook_events == [("event_route", "woke", "watcher")]
+
+    _library_owner("owner")
+    platform_rule = await _tool("watcher", operation="create", connector=library.LIBRARY_CONNECTOR,
+                                event_type=library.ITEM_CHANGED_EVENT)
+    delivered = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-1"))
+    assert platform_rule["id"]
+    assert any(category == "event_route" and action == "woke"
+               and event["properties"]["thread_id"] == "watcher"
+               for category, action, event in routed)
+    assert {delivery.thread_id for delivery in delivered} == {"owner", "watcher"}
 
 
 # -- Platform path and watches ----------------------------------------------------------------
