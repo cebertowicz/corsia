@@ -310,5 +310,5 @@
 	.other-omlx { margin: var(--space-4) var(--space-4); color: var(--text-secondary); }
 	h2 { font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-primary); }
 	p { font-size: var(--text-footnote); line-height: var(--lh-normal); }
-	.setup-error { color: var(--danger-text); margin: var(--space-2) var(--space-4); }
+	.setup-error { color: var(--red-text); margin: var(--space-2) var(--space-4); }
 </style>

@@ -22,5 +22,5 @@
 {#if error}<p class="setup-error">{error}</p>{/if}
 
 <style>
-	.setup-error { margin: var(--space-2) 0 0; color: var(--danger-text); font-size: var(--text-footnote); line-height: var(--lh-normal); }
+	.setup-error { margin: var(--space-2) 0 0; color: var(--red-text); font-size: var(--text-footnote); line-height: var(--lh-normal); }
 </style>

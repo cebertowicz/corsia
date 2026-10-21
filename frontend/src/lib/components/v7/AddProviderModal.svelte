@@ -283,12 +283,12 @@
 		border: 0;
 		padding: 0;
 		background: transparent;
-		color: var(--text-link);
+		color: var(--accent-text);
 		font: inherit;
 		font-size: var(--text-footnote);
 		cursor: pointer;
 	}
-	.field-error { margin: var(--space-2) 0 0; color: var(--danger-text); font-size: var(--text-footnote); line-height: var(--lh-normal); }
+	.field-error { margin: var(--space-2) 0 0; color: var(--red-text); font-size: var(--text-footnote); line-height: var(--lh-normal); }
 	.actions {
 		display: flex; gap: 8px; margin-top: 18px; align-items: center; justify-content: flex-end;
 	}

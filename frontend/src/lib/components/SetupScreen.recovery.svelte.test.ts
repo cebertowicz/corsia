@@ -100,7 +100,7 @@ describe('SetupScreen local-start recovery', () => {
 
 	it('shows generic recovery when the person’s other-oMLX choice cannot start setup', async () => {
 		await openModels({ localEligible: true, localReplies: [json({ code: 'consent_required' }, 409), json({ message: 'private route detail' }, 500)] });
-		click('Keep it running');
+		click('Keep them running');
 		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t start local setup.'));
 		expect(host.textContent).not.toContain('private route detail');
 	});

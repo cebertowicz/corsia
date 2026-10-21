@@ -22,14 +22,15 @@ describe('setup CLI installer failure copy', () => {
 
 	it('uses the approved connection recovery copy when the network is unavailable', () => {
 		expect(installFailureCopy('Claude Code', 'connection', 'cli-offline')).toEqual({
-			meta: 'Couldn’t download Claude Code. Check your internet connection, then retry.',
+			meta: 'Couldn’t download Claude Code. Check your internet connection, then Retry.',
+			reference: 'cli-offline',
 			retry: true,
 		});
 	});
 
-	it('keeps the opaque reference out of generic installer failure copy', () => {
+	it('keeps the opaque reference on generic installer failure copy', () => {
 		expect(installFailureCopy('Claude Code', 'download_unverified', 'cli-failed')).toEqual({
-			meta: 'Couldn’t install Claude Code. Try again, or save a report.',
+			meta: 'Couldn’t install Claude Code. Retry, or save a report.',
 			reference: 'cli-failed',
 			retry: true,
 		});
