@@ -51,6 +51,7 @@
       "../bundle/bin/corsia-service": "bin/corsia-service",
       "../bundle/bin/omlx": "bin/omlx",
       "../bundle/bin/git": "bin/git",
+      "../bundle/bin/agent-browser": "bin/agent-browser",
       "../bundle/libexec": "libexec",
       "../bundle/share": "share",
       "../bundle/licenses": "licenses",

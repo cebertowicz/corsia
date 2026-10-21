@@ -265,6 +265,15 @@ def command_path(command: str, *, path: str | None = None, root: Path | None = N
     return str(executable if command == "node" else executable.with_name(command))
 
 
+def runtime_bin_dir(kind: str, *, root: Path | None = None) -> Path | None:
+    """Where a pinned runtime's commands will be once installed; fetches nothing."""
+    try:
+        selected, pin = _pin(kind)
+    except ManagedRuntimeError:
+        return None
+    return _expected_executable(_install_dir(kind, selected, pin, root or runtime_cache_root()), pin).parent
+
+
 def command_bin_dir(command: str, *, root: Path | None = None) -> Path | None:
     kind = _COMMAND_RUNTIME.get(command)
     return ensure_runtime(kind, root=root).parent if kind else None

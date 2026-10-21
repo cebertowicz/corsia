@@ -175,12 +175,21 @@ class BrowserSessionOwner:
                 result = await self._invoke((path, "--version"), timeout=5.0)
                 if result.completion != "exited" or result.timed_out or result.returncode:
                     raise identity.BrowserIdentityError(
-                        f"`agent-browser --version` did not succeed; {browser_cli.INSTALL_HINT}")
+                        f"`agent-browser --version` did not succeed; {browser_cli.install_hint()}")
                 version = browser_cli.admitted_version(result.stdout)
                 if await asyncio.to_thread(browser_cli.resolve_native, self.binary) != (path, fingerprint):
                     raise identity.BrowserIdentityChanged(_EXECUTABLE_CHANGED)
+                chrome, source = await asyncio.to_thread(browser_cli.chrome_executable)
+                if source == "default" and await asyncio.to_thread(browser_cli.chrome_download_missing):
+                    # No Chrome on this Mac: agent-browser's own install fetches Chrome for Testing
+                    # into the person's home, with no admin step.
+                    install = await self._invoke((path, "install"), timeout=browser_cli.CHROME_INSTALL_TIMEOUT)
+                    if install.completion != "exited" or install.timed_out or install.returncode:
+                        raise identity.BrowserIdentityError(
+                            "agent-browser could not download its browser (Chrome for Testing); "
+                            "check the internet connection, then try again")
                 self._native = browser_cli.NativeExecutable(path, fingerprint, version)
-                self._chrome, source = await asyncio.to_thread(browser_cli.chrome_executable)
+                self._chrome = chrome
                 logger.info("agent-browser launches Chrome from %s (%s)", self._chrome or "its default", source)
             except identity.BrowserIdentityError as exc:
                 # Setup refusal precedes admission; it never enters cleanup state.

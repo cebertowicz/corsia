@@ -21,6 +21,11 @@ readonly GIT_ARCHIVE="git-${GIT_VERSION}.tar.xz"
 readonly GIT_URL="https://mirrors.edge.kernel.org/pub/software/scm/git/${GIT_ARCHIVE}"
 readonly GIT_SHA256="5818bd7d80b061bbbdfec8a433d609dc8818a05991f731ffc4a561e2ca18c653"
 readonly GIT_SOURCE="$BUILD_ROOT/git-${GIT_VERSION}"
+# The browser tool's CLI: the upstream native arm64 build. The version must stay inside
+# _VERIFIED_FAMILIES in backend/host_access/browser_cli.py.
+readonly AGENT_BROWSER_VERSION="0.31.2"
+readonly AGENT_BROWSER_URL="https://github.com/vercel-labs/agent-browser/releases/download/v${AGENT_BROWSER_VERSION}/agent-browser-darwin-arm64"
+readonly AGENT_BROWSER_SHA256="98042bcfee9afdf6119d6817a04ef5897f519f290491664911779b084ae1b82a"
 
 skip_dmg=false
 for argument in "$@"; do
@@ -35,6 +40,13 @@ fetch_verified() {
   local url="$1" file="$2" digest="$3"
   curl --fail --location --retry 3 --silent --show-error "$url" --output "$file"
   echo "${digest}  ${file}" | shasum --algorithm 256 --check --status || fail "SHA-256 mismatch for $(basename "$file")"
+}
+fetch_agent_browser() {
+  local download="$BUILD_ROOT/downloads/agent-browser-darwin-arm64"
+  fetch_verified "$AGENT_BROWSER_URL" "$download" "$AGENT_BROWSER_SHA256"
+  install -m 0755 "$download" "$BUNDLE_ROOT/bin/agent-browser"
+  [ "$("$BUNDLE_ROOT/bin/agent-browser" --version)" = "agent-browser $AGENT_BROWSER_VERSION" ] \
+    || fail "bundled agent-browser does not report version $AGENT_BROWSER_VERSION"
 }
 build_git_runtime() {
   local archive="$BUILD_ROOT/downloads/$GIT_ARCHIVE"
@@ -137,6 +149,7 @@ PYTHONPATH="$BUNDLE_ROOT/python/backend-packages" "$PYTHON" -m pip check
 PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 
 build_git_runtime
+fetch_agent_browser
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
 (
   cd "$ROOT/frontend"

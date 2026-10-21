@@ -97,7 +97,7 @@ def browser_available() -> dict:
     problem = _native_problem()
     return {
         "available": problem is None,
-        "binary": shutil.which(_AGENT_BROWSER_BIN) if problem is None else None,
+        "binary": (browser_cli.bundled_executable() or shutil.which(_AGENT_BROWSER_BIN)) if problem is None else None,
         "tool": _AGENT_BROWSER_BIN,
         "install_hint": problem,
     }

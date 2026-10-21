@@ -178,6 +178,7 @@ while IFS= read -r git_dir; do
   [ "$git_dir" -ef "$GIT_CORE" ] || { echo "error: the backend ran Git from $git_dir" >&2; exit 1; }
 done < <(sed -n 's/.*trace: resolved executable dir: //p' "$TEMP_ROOT/service-git-trace.log" | sort -u)
 "$RESOURCES/bin/omlx" --version
+"$RESOURCES/bin/agent-browser" --version
 PYTHONPATH="$RESOURCES/python/omlx-packages" "$PYTHON" -c 'import mlx.core as mx; value = mx.sum(mx.ones((1024, 1024)) @ mx.ones((1024, 1024))); mx.eval(value); print(f"MLX device={mx.default_device()} value={value.item()}")'
 codesign --verify --deep --strict --verbose=2 "$APP"
 [ ! -e "$SYSTEM_GIT_CALLS" ] || { echo "error: a system Git shim ran:" >&2; cat "$SYSTEM_GIT_CALLS" >&2; exit 1; }
