@@ -12,7 +12,7 @@ export type PairTarget =
 
 export type PairReason =
 	| 'wrong_code' | 'expired' | 'too_many_tries' | 'paused' | 'busy'
-	| 'network' | 'server' | 'incompatible' | 'too_old' | 'local';
+	| 'network' | 'server' | 'incompatible' | 'too_old' | 'local' | 'not_local';
 
 export type PairResult =
 	| { ok: true; name: string }
@@ -41,7 +41,7 @@ export async function remoteDiscovered(): Promise<DiscoveredResult> {
 	return { names: Array.isArray(result?.names) ? result.names : [], denied: result?.denied === true };
 }
 
-const REASONS: readonly PairReason[] = ['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy', 'network', 'server', 'incompatible', 'too_old', 'local'];
+const REASONS: readonly PairReason[] = ['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy', 'network', 'server', 'incompatible', 'too_old', 'local', 'not_local'];
 
 export async function remotePair(target: PairTarget, code: string): Promise<PairResult> {
 	try {
@@ -80,6 +80,8 @@ function withPort(host: string, port: string | undefined): { host: string; port?
 // "Open CORSIA › Settings › System" never splits across lines: no-break spaces around the chevrons.
 const NB = ' ';
 export const SETTINGS_PATH = `Open${NB}CORSIA${NB}›${NB}Settings${NB}›${NB}System`;
+/** The same path in the middle of a sentence. */
+export const SETTINGS_PATH_IN_SENTENCE = SETTINGS_PATH.replace(/^Open/, 'open');
 
 export type RefusalContext = { name: string; appVersion?: string; hostVersion?: string };
 
@@ -91,6 +93,8 @@ export function codeRefusalLine(reason: PairReason, name: string): string | null
 		case 'too_many_tries': return `Too many wrong codes. ${SETTINGS_PATH} on ${name} to get a new one.`;
 		case 'paused': return `Pairing is paused on ${name}. ${SETTINGS_PATH} on it and press New code to start again.`;
 		case 'busy': return `${name} is busy with another computer. Try again in a moment.`;
+		// The main computer pairs only from its own network, whatever address was typed; the line needs no name.
+		case 'not_local': return 'If this computer isn’t on the same network as the main computer, connect it to that network, then try again.';
 		default: return null;
 	}
 }

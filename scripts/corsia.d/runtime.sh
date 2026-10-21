@@ -101,13 +101,16 @@ resolve_bind_host() {
     (cd "$BACKEND_DIR" && "$PYTHON" -m cli bind-host ${BOOTSTRAP_CONFIG:+--bootstrap "$BOOTSTRAP_CONFIG"})
 }
 
+# Saved in Settings › System and printed only while Let other devices connect is on.
+resolve_remote_address() {
+    (cd "$BACKEND_DIR" && "$PYTHON" -m cli remote-address ${BOOTSTRAP_CONFIG:+--bootstrap "$BOOTSTRAP_CONFIG"})
+}
+
 print_endpoints() {
     echo "  Local:     http://localhost:$BACKEND_PORT"
-    local ts_ip
-    # A loopback-only setup is not reachable over the tailnet; don't offer it.
-    [ "$(resolve_bind_host 2>/dev/null)" = 127.0.0.1 ] && return 0
-    ts_ip=$(tailscale ip -4 2>/dev/null | head -1)
-    [ -n "$ts_ip" ] && echo "  Tailscale: http://$ts_ip:$BACKEND_PORT"
+    local outside_address
+    outside_address="$(resolve_remote_address 2>/dev/null)" || outside_address=""
+    [ -n "$outside_address" ] && echo "  Outside address: $outside_address"
     return 0
 }
 

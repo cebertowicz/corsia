@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Button, CodeInput, StatePill, Toggle } from '$lib/components/ui';
+	import { Button, CodeInput, Field, StatePill, Toggle } from '$lib/components/ui';
 	import type { DevicesView } from '$lib/devices.svelte';
 
 	/**
@@ -13,8 +13,18 @@
 		onToggle?: (next: boolean) => void;
 		onNewCode?: () => void;
 		onRetry?: () => void;
+		/** Saves the outside address (empty clears it); resolves to the refusal line, or null once saved. Without it the field is not drawn. */
+		onOutside?: (text: string) => Promise<string | null>;
 	}
-	const { view, onToggle = () => {}, onNewCode = () => {}, onRetry = () => {} }: Props = $props();
+	const { view, onToggle = () => {}, onNewCode = () => {}, onRetry = () => {}, onOutside }: Props = $props();
+
+	// The outside address: one optional field under the row, shown only while the switch is on. The draft follows the saved value.
+	let draft = $state('');
+	let outsideError = $state('');
+	const saved = $derived(view.outside ?? '');
+	$effect(() => { draft = saved; outsideError = ''; });
+	const dirty = $derived(draft.trim() !== (view.outside ?? ''));
+	async function saveOutside(text: string) { outsideError = (await onOutside?.(text)) ?? ''; }
 
 	const NAME = 'Let other devices connect';
 	const DESCRIPTION = 'Your other computers on this network can find this one and connect with a code. Use only on a network you trust. Turning this off disconnects them.';
@@ -94,6 +104,21 @@
 			{#if !view.readOnly && view.busy === null}
 				<div class="action"><Button variant="chip" size="sm" onclick={onNewCode}>New code</Button></div>
 			{/if}
+			{#if onOutside && !view.readOnly && view.busy === null && view.enabled}
+				<form class="outside" onsubmit={(event) => { event.preventDefault(); if (dirty) void saveOutside(draft); }}>
+					<Field variant="nested" layout="stacked" label="Outside address" labelFor="outside-address" error={outsideError}>
+						<input id="outside-address" type="text" placeholder="home.example.com" autocapitalize="off" autocomplete="off" spellcheck="false" aria-invalid={outsideError !== ''} bind:value={draft} />
+						{#if dirty}
+							<Button variant="chip" size="sm" type="submit">Save</Button>
+						{:else if view.outside}
+							<Button variant="chip" size="sm" ariaLabel="Delete outside address" onclick={() => void saveOutside('')}>Delete</Button>
+						{/if}
+					</Field>
+					{#if view.devicesPort}
+						<p class="help">Paired computers use this when they’re away from this network. Only add an address you’ve already set up, forwarded to port {view.devicesPort}.</p>
+					{/if}
+				</form>
+			{/if}
 		</div>
 	{/if}
 </div>
@@ -131,6 +156,12 @@
 	.ends { color: var(--text-secondary); }
 	/* A text action sits on the text's left edge, as in setup's dock. */
 	.action { margin-left: calc(var(--space-2) * -1); }
+	/* The outside address sits under the pairing actions at the card's own text size; its help line is the description's muted footnote. */
+	.outside { display: flex; flex-direction: column; gap: var(--space-2); align-self: stretch; max-width: calc(var(--space-8) * 9); margin-top: var(--space-2); }
+	/* An unfocused long address ends in an ellipsis; focus shows it whole and scrolls it, as any text field does. */
+	.outside :global(input) { text-overflow: ellipsis; }
+	.outside :global(input:focus) { text-overflow: clip; }
+	.help { margin: 0; color: var(--text-muted); text-wrap: pretty; }
 
 	.reveal { animation: reveal var(--dur-standard) var(--ease-entrance) both; }
 	@keyframes reveal { from { opacity: 0; } }

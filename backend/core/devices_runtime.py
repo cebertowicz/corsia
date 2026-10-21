@@ -28,11 +28,13 @@ def _matches_bootstrapped_state_root() -> bool:
 class DevicesRuntime:
     pairing: DevicePairing
     listener: DevicesListener | None = None
+    outside_address: str | None = None
     _name_resolver: NameResolver = field(init=False, repr=False)
 
     def __init__(self, *, name_resolver: NameResolver | None = None) -> None:
         self.pairing = DevicePairing(on_update=schedule_devices_updated)
         self.listener = None
+        self.outside_address = None
         self._name_resolver = name_resolver or remote_connect_name
 
     @property
@@ -47,7 +49,11 @@ class DevicesRuntime:
         if self.listener is not None and self.listener.task is not None:
             return True
         self.pairing.enable()
-        self.listener = DevicesListener(app, on_announcement_change=schedule_devices_updated)
+        self.listener = DevicesListener(
+            app,
+            on_announcement_change=schedule_devices_updated,
+            outside_enabled=lambda: self.outside_address is not None,
+        )
         if not await self.listener.start():
             self.pairing.disable()
             return False
@@ -59,8 +65,9 @@ class DevicesRuntime:
             await self.listener.stop()
             self.listener = None
 
-    async def restore(self, app, enabled: bool) -> None:
-        """Restore only in an installed runtime, never dev/test state."""
+    async def restore(self, app, enabled: bool, outside_address: str | None = None) -> None:
+        """Restore the persisted endpoint before reopening an installed listener."""
+        self.outside_address = outside_address
         if (
             enabled
             and os.environ.get("CORSIA_DEVICES_DISABLE") != "1"
@@ -87,6 +94,7 @@ class DevicesRuntime:
             "computer_name": computer_name(),
             "lan_addresses": lan_addresses(include_link_local=listener_active),
             "code": self.pairing.status(include_code=include_code),
+            "outside_address": self.outside_address,
         }
 
 

@@ -35,6 +35,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from infra import account_validation
+
 _NO_DATABASE = (
     "This install has no account tables yet. Start CORSIA once, or run: "
     "corsia user add"
@@ -71,7 +73,7 @@ def _resolve_user(explicit: str | None) -> str:
     from infra import accounts
 
     if explicit:
-        name = accounts.normalize_username(explicit)
+        name = account_validation.normalize_username(explicit)
         if accounts.get_user(name) is None:
             raise SystemExit(f"No account named '{name}'. Run: corsia user add {name}")
         return name
@@ -137,8 +139,8 @@ def _prompt_username(owners: list[str]) -> str:
     if owners:
         return input("Username: ")
     try:
-        default = accounts.normalize_username(getpass.getuser())
-    except (accounts.AccountError, OSError):
+        default = account_validation.normalize_username(getpass.getuser())
+    except (account_validation.AccountError, OSError):
         return input("Username: ")
     return input(f"Username [{default}]: ").strip() or default
 
@@ -200,8 +202,8 @@ def cmd_user_add(args: argparse.Namespace) -> int:
         print(f"Existing data belongs to: {', '.join(owners)}")
         print("Use one of these names to keep it.")
     try:
-        name = accounts.normalize_username(args.name or _prompt_username(owners))
-    except accounts.AccountError as error:
+        name = account_validation.normalize_username(args.name or _prompt_username(owners))
+    except account_validation.AccountError as error:
         return _fail(str(error))
     except EOFError:
         return _fail(_INPUT_ENDED)
@@ -220,7 +222,7 @@ def cmd_user_add(args: argparse.Namespace) -> int:
             accounts.create_first_account(name, password, call_name=call_name, email=email)
         else:
             accounts.create_user(name, password)
-    except accounts.AccountError as error:
+    except account_validation.AccountError as error:
         return _fail(str(error))
     except OSError:
         return _fail(
@@ -239,7 +241,7 @@ def cmd_user_passwd(args: argparse.Namespace) -> int:
     password = _read_password(args.password_stdin)
     try:
         revoked = accounts.set_password(name, password)
-    except accounts.AccountError as error:
+    except account_validation.AccountError as error:
         return _fail(str(error))
     print(f"Password updated for '{name}'; {revoked} session(s) revoked.")
     print("API tokens were kept. Revoke one with: corsia token revoke <label>")

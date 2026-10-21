@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import cli_accounts  # noqa: E402
 from api import setup as setup_api  # noqa: E402
 from connections import signed_in_emails  # noqa: E402
-from infra import accounts, config, user_profile  # noqa: E402
+from infra import account_validation, accounts, config, user_profile  # noqa: E402
 from infra.default_port import DEFAULT_BACKEND_PORT  # noqa: E402
 from infra.time import utc_now_iso  # noqa: E402
 
@@ -181,7 +181,7 @@ def test_a_whitespace_only_name_is_a_validation_error_before_anything_is_touched
 
 def test_the_account_function_refuses_a_blank_name_before_anything_is_touched(workspace):
     before = _state()
-    with pytest.raises(accounts.AccountError, match="name is required"):
+    with pytest.raises(account_validation.AccountError, match="name is required"):
         accounts.create_first_account("pat", PASSWORD, call_name="  ")
     assert _state() == before
     assert not (workspace / "context").exists()
