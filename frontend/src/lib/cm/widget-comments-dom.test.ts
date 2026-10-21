@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorState, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { forceParsing } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
 import { GFM } from '@lezer/markdown';
 import { commentRanges, setCommentRanges, type CommentRange } from './comment-marks';
@@ -17,8 +18,14 @@ const FENCE_TO = DOC.length - 1;
 const rect = (top: number) => ({ top, height: 40, bottom: top + 40, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
 const label = (selection: WidgetSelection | null) => typeof selection?.label === 'function' ? selection.label() : selection?.label;
 
+/** The first parse stops after 20ms of wall time and finishes on a timer these tests never run, so parse the document now. */
+function parsed(view: EditorView) {
+	if (!forceParsing(view, view.state.doc.length, 1_000)) throw new Error('markdown parser did not finish');
+	return view;
+}
+
 const open = (extra: Extension = []) =>
-	new EditorView({ state: EditorState.create({ doc: DOC, extensions: [markdown({ extensions: GFM }), commentRanges, pendingCommentMark, ...(extra ? [extra] : [])] }), parent: document.body });
+	parsed(new EditorView({ state: EditorState.create({ doc: DOC, extensions: [markdown({ extensions: GFM }), commentRanges, pendingCommentMark, ...(extra ? [extra] : [])] }), parent: document.body }));
 
 /** A drawn table widget for TABLE; header and two body rows. */
 function drawnTable(view: EditorView) {
@@ -128,7 +135,7 @@ describe('a selection raised inside a rendered table', () => {
 			view.plugin(pendingCommentMark)!.range = selection && { from: selection.from, to: selection.to };
 			view.dispatch({ effects: setCommentRanges.of([]) });
 		};
-		view = new EditorView({ state: EditorState.create({ doc: DOC, extensions: [markdown({ extensions: GFM }), markdownLivePreview, commentRanges, pendingCommentMark, widgetComments({ onSelect, onFocus: vi.fn() })] }), parent: document.body });
+		view = parsed(new EditorView({ state: EditorState.create({ doc: DOC, extensions: [markdown({ extensions: GFM }), markdownLivePreview, commentRanges, pendingCommentMark, widgetComments({ onSelect, onFocus: vi.fn() })] }), parent: document.body }));
 		view.focus();
 		expect(view.hasFocus, 'setup: the editor holds focus, as after any click in the document').toBe(true);
 		const table = view.contentDOM.querySelector<HTMLElement>('.cm-md-table')!;
