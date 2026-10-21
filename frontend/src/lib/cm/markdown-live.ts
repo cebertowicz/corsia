@@ -4,7 +4,10 @@ import { StateField, type EditorState, type Extension, type Range } from '@codem
 import type { SyntaxNodeRef } from '@lezer/common';
 import { renderMarkdown } from '$lib/markdown';
 import { mountMermaid, type MermaidMount } from '$lib/mermaid';
-import { markdownImages, openSelectedImageOnEnter, renderableImage, selectImageOnClick } from './markdown-image';
+import {
+	imageContext, type ImageContext, markdownImages, openSelectedImageOnEnter, renderableImage, selectImageOnClick
+} from './markdown-image';
+import { drawRenderedImages } from './rendered-images';
 import { linkDecoration, openLinkOnAltEnter, openLinkOnClick } from './markdown-link';
 import { blockSource, isMermaidFence } from './widget-blocks';
 
@@ -31,10 +34,14 @@ class HrWidget extends WidgetType {
  * Renders a GFM table block as a real HTML table, reusing the app's canonical
  * markdown renderer so inline formatting and theming match everywhere else.
  * The table always stays rendered — it never drops to raw pipe/dash source.
+ * Its cell images resolve and load the way a standalone image does (`markdown-image.ts`).
  */
 class TableWidget extends WidgetType {
-	constructor(readonly src: string) { super(); }
-	eq(o: TableWidget) { return o.src === this.src; }
+	constructor(readonly src: string, readonly images: ImageContext | null) { super(); }
+	eq(o: TableWidget) {
+		const [a, b] = [o.images, this.images];
+		return o.src === this.src && a?.docPath === b?.docPath && a?.projectId === b?.projectId && a?.token === b?.token;
+	}
 	toDOM() {
 		const el = document.createElement('div');
 		el.className = 'cm-md-table md-content';
@@ -42,6 +49,7 @@ class TableWidget extends WidgetType {
 		// renderMarkdown applies the canonical DOMPurify policy before HTML reaches
 		// the document. Keep this widget on that single sanitized renderer.
 		el.innerHTML = renderMarkdown(this.src);
+		drawRenderedImages(el, this.images);
 		el.dataset.srcLength = String(this.src.length); // the source range the widget stands for, for `widget-comments.ts`
 		return el;
 	}
@@ -193,12 +201,13 @@ const markdownInlinePreview = ViewPlugin.fromClass(
 function buildTableDecorations(state: EditorState): DecorationSet {
 	const decos: Range<Decoration>[] = [];
 	const { doc } = state;
+	const images = state.facet(imageContext)();
 	syntaxTree(state).iterate({
 		enter: (node) => {
 			if (node.name !== 'Table') return;
 			const { from, to } = blockSource(doc, node);
 			const src = doc.sliceString(from, to);
-			decos.push(Decoration.replace({ widget: new TableWidget(src), block: true }).range(from, to));
+			decos.push(Decoration.replace({ widget: new TableWidget(src, images), block: true }).range(from, to));
 			return false;
 		}
 	});

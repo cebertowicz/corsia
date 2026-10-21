@@ -17,10 +17,11 @@ const SOURCE = {
 	gif: '![Animated render](shots/render.gif)',
 	missing: '![Gone](shots/gone.png)',
 	remote: `![Remote](https://${REMOTE_HOST}/remote.png)`,
+	table: ['| Phone | Desktop |', '| - | - |', '| ![Phone shot](shots/screen.png) | ![Desktop shot](./shots/render.gif) |'].join('\n'),
 };
 const DOC = [
 	'# Design walkthrough', '', 'Intro paragraph before the first image.', '', SOURCE.png, '',
-	'Text between the images that a comment can anchor on.', '', SOURCE.gif, '', SOURCE.missing, '', SOURCE.remote, '', 'Closing paragraph.', '',
+	'Text between the images that a comment can anchor on.', '', SOURCE.gif, '', SOURCE.missing, '', SOURCE.remote, '', SOURCE.table, '', 'Closing paragraph.', '',
 ].join('\n');
 
 test.describe('@flow:doc-inline-images @surface:documents markdown images render inside a document', () => {
@@ -158,6 +159,16 @@ test.describe('@flow:doc-inline-images @surface:documents markdown images render
 				await note.scrollIntoViewIfNeeded();
 				await expect(page.locator('.cm-md-link', { hasText: 'Remote' })).toBeInViewport();
 				await saveEvidenceScreenshot(page, testInfo, `doc-inline-images-${width}-missing-and-remote`, { fullPage: false });
+
+				// Images in table cells resolve from the document folder and load as the standalone ones do.
+				const cells = page.locator('.cm-md-table td img');
+				await expect(cells).toHaveCount(2);
+				await cells.first().scrollIntoViewIfNeeded();
+				for (const alt of ['Phone shot', 'Desktop shot']) {
+					const cell = page.getByRole('img', { name: alt });
+					await expect.poll(() => cell.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
+				}
+				await saveEvidenceScreenshot(page, testInfo, `doc-inline-images-${width}-table`, { fullPage: false });
 
 				expect(outsideRequests, outsideRequests.join('\n')).toEqual([]);
 			} finally {
