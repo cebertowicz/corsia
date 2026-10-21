@@ -32,7 +32,7 @@
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
 	type LocalStartResult = 'started' | 'consent_required' | 'foreign_omlx_changed' | 'failed';
 	type LocalStartResponse = { result: LocalStartResult; reference?: string; fix?: string };
-	const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup. Press Retry, or save a report.';
+	const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';
 	async function requestLocalStart(session: string | null, otherOmlx: 'stop' | 'keep' | null = null): Promise<LocalStartResponse> {
 		const response = await fetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
 			method: 'POST',

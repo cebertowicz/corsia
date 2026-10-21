@@ -37,7 +37,7 @@ function mountResume() {
 		if (url === '/api/setup/progress') return json({ setup_completed: false, step: 'models', local_ai: false, status: { local_eligible: true, work_folder: '~/CORSIA' } });
 		if (url === '/api/providers/sources' || url === '/api/providers/sources/recheck') return json({ sources: [
 			{ source: 'codex', name: 'Codex', state: sourceState },
-			...(localFailure ? [{ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'start_failed', setup_error_code: 'start_failed', fix: 'CORSIA couldn’t set up the local model. Press Retry.' }] : []),
+			...(localFailure ? [{ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'start_failed', setup_error_code: 'start_failed', fix: 'CORSIA couldn’t set up the local model.' }] : []),
 		] });
 		if (url.startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
 		if (url.startsWith('/api/models?')) return json({ models: [] });
@@ -165,7 +165,7 @@ describe('SetupScreen owned-job polling', () => {
 			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' });
 			if (url === '/api/setup/local-model' && method === 'POST') return json({ state: 'picked', model: { name: 'Qwen', repository: 'qwen', download_size_bytes: 30_000_000_000, download_size_gb: 30, context_window: 8192 } });
 			if (url === '/api/setup/local-download' && method === 'POST') return json({ state: 'downloading' });
-			if (url === '/api/setup/local-download') return json({ state: localState, model: 'Qwen', ...(localState === 'start_failed' ? { cause: 'other', fix: 'CORSIA couldn’t set up the local model. Press Retry.' } : {}) });
+			if (url === '/api/setup/local-download') return json({ state: localState, model: 'Qwen', ...(localState === 'start_failed' ? { cause: 'other', fix: 'CORSIA couldn’t set up the local model.' } : {}) });
 			return json({});
 		}));
 		host = document.createElement('div'); document.body.appendChild(host);
@@ -174,7 +174,7 @@ describe('SetupScreen owned-job polling', () => {
 		expect(intervalSpy).toHaveBeenCalledOnce();
 		localState = terminal;
 		await vi.advanceTimersByTimeAsync(3000); await tick();
-		if (terminal === 'start_failed') expect(host.textContent).toContain('CORSIA couldn’t set up the local model. Press Retry.');
+		if (terminal === 'start_failed') expect(host.textContent).toContain('CORSIA couldn’t set up the local model.');
 		expect(clearIntervalSpy).toHaveBeenCalledOnce();
 		expect(vi.getTimerCount()).toBe(0);
 	});
