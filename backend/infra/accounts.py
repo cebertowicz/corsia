@@ -81,6 +81,11 @@ def get_user(user_id: str, db: sqlite3.Connection | None = None) -> dict | None:
     return {"id": row["id"], "name": row["id"]} if row else None
 
 
+def account_exists(username: str, db: sqlite3.Connection | None = None) -> bool:
+    """Return whether an already-normalized username names an account."""
+    return _db(db).execute("SELECT 1 FROM users WHERE id = ?", (username,)).fetchone() is not None
+
+
 def list_users(db: sqlite3.Connection | None = None) -> list[dict]:
     """Return every account, oldest first, without any secret material."""
     rows = _db(db).execute(

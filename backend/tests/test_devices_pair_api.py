@@ -15,6 +15,7 @@ from spake2 import SPAKE2_Symmetric
 import api.devices as devices_api
 from core.device_pairing import PAIRING_IDENTITY, _split_key
 from core.devices_runtime import runtime
+from infra import devices_events
 from infra.devices_identity import _key_paths, host_spki_sha256
 from infra.settings import set_devices_outside_address
 from main import app
@@ -444,7 +445,7 @@ def test_pair_api_rejects_pinned_exchange_with_incorrect_spki_binding(monkeypatc
 )
 def test_pair_start_counts_a_bad_mode_or_host_as_a_failed_try(monkeypatch, body):
     events = []
-    monkeypatch.setattr(devices_api, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    monkeypatch.setattr(devices_events, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
     code = _enable_pairing()
     client = TestClient(app)
 
@@ -461,7 +462,7 @@ def test_pair_start_counts_a_bad_mode_or_host_as_a_failed_try(monkeypatch, body)
 
 def test_pair_finish_counts_a_malformed_client_message_as_a_failed_try(monkeypatch):
     events = []
-    monkeypatch.setattr(devices_api, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    monkeypatch.setattr(devices_events, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
     _enable_pairing()
     client = TestClient(app)
     started = _start(client, b"not-a-pake-message")

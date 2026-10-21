@@ -13,6 +13,7 @@ from core.device_pairing import PairingError, transcript_prefix
 from core.devices_runtime import runtime
 from infra.auth import require_human_user
 from infra.db_async import run_in_db
+from infra.devices_events import emit_pairing_failure
 from infra.devices_identity import host_spki_der, host_spki_sha256, sign_identity_proof
 from infra.local_connection import is_direct_loopback
 from infra.product_events import emit_product_event
@@ -44,11 +45,6 @@ def _decode(value: object, name: str) -> bytes:
 def _emit(action: str, *, reason: str | None = None) -> None:
     properties = {"reason": reason} if reason is not None else None
     emit_product_event("devices", action, properties=properties)
-
-
-def emit_pairing_failure(*, reason: str) -> None:
-    """Record any pairing refusal through the shared Devices event emitter."""
-    _emit("pairing_failed", reason=reason)
 
 
 def _outside_address(value: object) -> str | None:

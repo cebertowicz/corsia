@@ -252,6 +252,29 @@ class TestFailureBackoff:
         )
         assert signed_in.status_code == 200
 
+    def test_a_full_waiting_cap_holds_existing_and_made_up_names_equally(self, client, monkeypatch):
+        holds = []
+
+        async def _hold(seconds):
+            holds.append(seconds)
+
+        monkeypatch.setattr(
+            auth_api, "_waiting_attempts", auth_api._MAX_WAITING_ATTEMPTS
+        )
+        monkeypatch.setattr(auth_api.asyncio, "sleep", _hold)
+        made_up = client.post(
+            "/api/auth/login",
+            json={"username": "nobody", "password": TEST_PASSWORD},
+        )
+        existing = client.post(
+            "/api/auth/login",
+            json={"username": OWNER_USER, "password": TEST_PASSWORD},
+        )
+
+        assert made_up.status_code == 401
+        assert existing.status_code == 200
+        assert holds == [auth_api._HELD_SECONDS, auth_api._HELD_SECONDS]
+
     def test_one_waiting_attempt_per_name(self, client, monkeypatch):
         def _must_not_run(*args, **kwargs):
             raise AssertionError("a refused attempt must not cost a hash")
