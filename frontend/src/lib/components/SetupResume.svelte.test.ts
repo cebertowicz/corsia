@@ -39,6 +39,18 @@ describe('SetupScreen resume', () => {
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.includes('Start using CORSIA'))).toBe(true);
 	});
 
+	it('goes Back from a resumed Providers & models to the subscriptions question, then the work folder', async () => {
+		mountResume(); await settle();
+		const click = (label: string) => Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === label)?.click();
+		click('Back'); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		expect(host.textContent).toContain('Do you pay for Claude or ChatGPT?');
+		click('Back'); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Choose your work folder');
+		click('Continue'); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+	});
+
 	it('opens the app directly when the backend records completed setup', async () => {
 		const onFinished = vi.fn();
 		token.set('setup-token'); user.set({ id: 'user', name: 'Ada' });

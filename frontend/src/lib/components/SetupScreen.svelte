@@ -320,7 +320,7 @@
 		{:else if (screen === 'welcome' || page === 'account') && canConnect}<Button variant="chip" onclick={() => void connectToAnotherComputer()}>Connect to CORSIA on another computer</Button>
 		{:else if page === 'folder'}<Button variant="chip" disabled={accountBusy} onclick={() => { page = 'account'; }}>Back</Button>{#if accountError}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>{/if}
 		{:else if page === 'subscriptions'}<Button variant="chip" onclick={() => { page = 'folder'; }}>Back</Button>
-		{:else if page === 'models' && !resume}<Button variant="chip" disabled={finishing} onclick={() => { page = subscriptionsSkipped ? 'folder' : 'subscriptions'; }}>Back</Button>
+		{:else if page === 'models'}<Button variant="chip" disabled={finishing} onclick={() => { page = subscriptionsSkipped ? 'folder' : 'subscriptions'; }}>Back</Button>
 		{:else if page === 'hard-stop'}<Button variant="chip" onclick={readStatus}>Check again</Button>
 		{:else if page === 'error'}<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>{/if}
 	{/snippet}
