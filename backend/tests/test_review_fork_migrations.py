@@ -5,6 +5,7 @@ import sqlite3
 import pytest
 
 from infra.migration_132_to_133_review_forks import migrate_132_to_133
+from test_doc_review_requests import request, review_env  # noqa: F401
 
 
 def test_review_fork_ladder_preserves_legacy_rows_and_is_idempotent():
@@ -35,6 +36,39 @@ def test_review_fork_ladder_preserves_legacy_rows_and_is_idempotent():
             db.execute("INSERT INTO doc_feedback_batches VALUES ('duplicate','agent','reviewer','doc','owner','open')")
     finally:
         db.close()
+
+
+def test_migrated_legacy_request_with_a_closed_node_is_listed_as_ended_without_comments(review_env):
+    from doceditor import review_requests
+    from plans import public
+
+    db, aid = review_env
+    row = review_requests.escalate_fork(db, request(db, aid)["id"])
+    public.transition_node(row["node_id"], "closed", db=db)
+    db.commit()
+    # Rebuild the table as schema 132 stored this request, then run the real migration.
+    db.execute("PRAGMA foreign_keys=OFF")
+    db.execute("DROP TABLE doc_review_requests")
+    db.execute(
+        "CREATE TABLE doc_review_requests ("
+        "id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL REFERENCES artifact_identities(id), "
+        "requester_kind TEXT NOT NULL, requester_id TEXT NOT NULL, "
+        "reviewer_thread_id TEXT NOT NULL REFERENCES threads(id), note TEXT, client_ids TEXT NOT NULL, "
+        "node_id TEXT REFERENCES plan_nodes(id), cancelled_at TEXT, "
+        "answered_batch_id TEXT REFERENCES doc_feedback_batches(id), created_at TEXT NOT NULL, "
+        "CHECK (cancelled_at IS NULL OR answered_batch_id IS NULL))"
+    )
+    db.execute(
+        "INSERT INTO doc_review_requests(id,artifact_id,requester_kind,requester_id,reviewer_thread_id,"
+        "note,client_ids,node_id,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        (row["id"], aid, row["requester_kind"], row["requester_id"], row["reviewer_thread_id"],
+         row["note"], row["client_ids"], row["node_id"], row["created_at"]),
+    )
+    migrate_132_to_133(db)
+    db.execute("PRAGMA foreign_keys=ON")
+    listed = review_requests.for_document(db, aid)
+    assert [(item["id"], item["state"], item["outcome"], item["comment_count"]) for item in listed] == [
+        (row["id"], "handed_back", "ended_without_comments", 0)]
 
 
 def test_fresh_schema_matches_edited_review_migration_chain():

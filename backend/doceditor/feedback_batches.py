@@ -39,22 +39,34 @@ def _new_deadline(author_kind: str, now: str) -> str:
     return _after(now, AGENT_QUIET if author_kind == "agent" else USER_IDLE)
 
 
-def open_batch(db, *, author_kind, author_id, artifact_id, recipient_id, now) -> str:
+def open_batch(
+    db,
+    *,
+    author_kind: str,
+    author_id: str,
+    artifact_id: str,
+    recipient_id: str,
+    now: str,
+) -> str:
     """Return the canonical open batch for one author, artifact, and recipient."""
     row = db.execute(
-        "SELECT id FROM doc_feedback_batches WHERE author_kind=? AND author_id=? AND artifact_id=? "
-        "AND recipient_id=? AND state='open'",
+        """SELECT id FROM doc_feedback_batches
+           WHERE author_kind=? AND author_id=? AND artifact_id=?
+             AND recipient_id=? AND state='open'""",
         (author_kind, author_id, artifact_id, recipient_id),
     ).fetchone()
     if row is not None:
         return str(row["id"])
     batch_id = str(uuid.uuid4())
     db.execute(
-        "INSERT INTO doc_feedback_batches (id,artifact_id,author_kind,author_id,recipient_id,state,"
-        "opened_at,last_item_at,closes_at,item_count,created_at,updated_at) "
-        "VALUES (?,?,?,?,?,'open',?,?,?,0,?,?)",
-        (batch_id, artifact_id, author_kind, author_id, recipient_id, now, now,
-         _new_deadline(author_kind, now), now, now),
+        """INSERT INTO doc_feedback_batches
+           (id,artifact_id,author_kind,author_id,recipient_id,state,
+            opened_at,last_item_at,closes_at,item_count,created_at,updated_at)
+           VALUES (?,?,?,?,?,'open',?,?,?,0,?,?)""",
+        (
+            batch_id, artifact_id, author_kind, author_id, recipient_id,
+            now, now, _new_deadline(author_kind, now), now, now,
+        ),
     )
     return batch_id
 
@@ -97,10 +109,7 @@ def _add_comment_item(
     return True
 
 
-def join_open_batch(
-    db, comment: dict[str, Any], recipient_id: str,
-) -> str:
-    """Add one comment to its author's open batch for the recipient, opening one if needed."""
+def join_open_batch(db, comment: dict[str, Any], recipient_id: str) -> str:
     author_kind = str(comment["author_kind"])
     now = str(comment["created_at"])
     batch_id = open_batch(
@@ -213,10 +222,7 @@ def record_comment(
     if created:
         feedback_comments.make_user_document_durable(db, comment)
         feedback_comments.emit_comment_created(db, comment)
-        batch_ids = [
-            join_open_batch(db, comment, recipient)
-            for recipient in feedback_comments.recipients(db, comment)
-        ]
+        batch_ids = [join_open_batch(db, comment, recipient) for recipient in feedback_comments.recipients(db, comment)]
     if submit and comment["author_kind"] == "agent":
         woken = close_for_document(
             db,
@@ -236,9 +242,7 @@ def record_comment(
     return {"batch_ids": batch_ids, "undelivered_batches": notices, "woken": woken}
 
 
-def claim_and_deliver(db, batch_id: str, *, from_state: str,
-                      reason: str | None) -> tuple[bool, tuple[str, ...]]:
-    """Claim one batch and settle its request in the caller's write transaction."""
+def claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None) -> tuple[bool, tuple[str, ...]]:
     now = _now()
     closed_sql = "closed_reason=?" if reason is not None else "closed_reason=closed_reason"
     params: list[Any] = [now]
@@ -310,7 +314,7 @@ def close_for_document(
 
 
 def close_for_turn_end(db, thread_id: str) -> list[str]:
-    """Close the author's open batches at turn end."""
+    """Close an agent thread's open batches in the terminal write transaction."""
     rows = db.execute(
         """SELECT id FROM doc_feedback_batches
            WHERE state='open' AND author_kind='agent' AND author_id=?
@@ -325,7 +329,7 @@ def close_for_turn_end(db, thread_id: str) -> list[str]:
 
 
 def close_due(now: str, *, db=None) -> list[str]:
-    """Deliver due ordinary batches; a raising batch rolls back alone and is logged."""
+    """Deliver every due batch; one that raises rolls back alone, is logged, and retries next pass."""
     deliveries: list[tuple[str, str]] = []
     with write_transaction(db, scope="close_due_doc_feedback") as connection:
         rows = connection.execute(

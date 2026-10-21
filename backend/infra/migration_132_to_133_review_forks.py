@@ -7,7 +7,7 @@ import sqlite3
 
 
 def _remove_cancelled_at(conn: sqlite3.Connection) -> None:
-    """Rebuild the legacy table without its duplicate state column and CHECK.
+    """Rebuild the legacy table without its duplicate state column, CHECK and batch link.
 
     Preserve the installed DDL and its indexes/triggers, including nullable
     legacy fixture columns. The migration runner holds foreign_keys=OFF.
@@ -20,7 +20,9 @@ def _remove_cancelled_at(conn: sqlite3.Connection) -> None:
         r",\s*CHECK\s*\(\s*cancelled_at\s+IS\s+NULL\s+OR\s+answered_batch_id\s+IS\s+NULL\s*\)",
         "", sql, flags=re.IGNORECASE,
     )
-    if re.search(r"\bcancelled_at\b", sql, flags=re.IGNORECASE):
+    link = r"answered_batch_id\s+TEXT(?:\s+REFERENCES\s+\w+\s*\(\s*\w+\s*\))?"
+    sql = re.sub(rf"\b{link}\s*,\s*|,\s*{link}(?=\s*\))", "", sql, count=1, flags=re.IGNORECASE)
+    if re.search(r"\b(cancelled_at|answered_batch_id)\b", sql, flags=re.IGNORECASE):
         raise ValueError("review request cancellation schema could not be retired")
     sql = re.sub(r"\bdoc_review_requests\b", "doc_review_requests_new", sql, count=1)
     objects = conn.execute(
@@ -28,7 +30,7 @@ def _remove_cancelled_at(conn: sqlite3.Connection) -> None:
         "AND type IN ('index','trigger') AND sql IS NOT NULL",
     ).fetchall()
     columns = [str(row[1]) for row in conn.execute("PRAGMA table_info(doc_review_requests)")
-               if row[1] != "cancelled_at"]
+               if row[1] not in {"cancelled_at", "answered_batch_id"}]
     names = ",".join('"' + name.replace('"', '""') + '"' for name in columns)
     conn.execute(sql)
     conn.execute(f"INSERT INTO doc_review_requests_new ({names}) SELECT {names} FROM doc_review_requests")
@@ -39,7 +41,7 @@ def _remove_cancelled_at(conn: sqlite3.Connection) -> None:
 
 
 def migrate_132_to_133(conn: sqlite3.Connection) -> None:
-    """Backfill the lifecycle, then remove the legacy cancellation fact."""
+    """Backfill the lifecycle from the legacy facts, then remove them."""
     columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(doc_review_requests)")}
     if not columns:
         return

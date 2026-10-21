@@ -214,7 +214,7 @@ def test_pending_reads_lifecycle_and_checks_only_continuation_tasks(review_env):
     row = request(db, aid)
     snapshot = {**stored(db, row["id"]), "node_id": "unrelated-node"}
     assert review_requests.is_open(db, snapshot)
-    snapshot.update(state="submitted", answered_batch_id=None)
+    snapshot.update(state="submitted")
     assert not review_requests.is_open(db, snapshot)
     snapshot.update(state="failed", reason="no_sealed_boundary")
     assert not review_requests.is_open(db, snapshot)

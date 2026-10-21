@@ -287,7 +287,7 @@ describe('document review toolbar and popover', () => {
 		expect(button('Cancel request to Quality Gate')).toBeTruthy();
 	});
 	it.each([
-		['missing_credentials', 'Couldn’t finish Quality Gate’s review. Sign in again in Settings › Providers.', 'Couldn’t finish because sign-in is needed.'],
+		['missing_credentials', 'Couldn’t finish Quality Gate’s review. Sign in again in Settings › Providers.', 'Couldn’t finish. Sign in again in Settings › Providers.'],
 		['target_unavailable', 'Couldn’t finish Quality Gate’s review. Choose another model for Quality Gate.', 'Couldn’t finish. Choose another model.'],
 		['binary_resolution', 'Couldn’t finish Quality Gate’s review. Ask CORSIA in chat to fix it.', 'Couldn’t finish. Ask CORSIA to fix it.'],
 	])('shows the recovery step for %s on the summary and review list', async (reason, message, status) => {

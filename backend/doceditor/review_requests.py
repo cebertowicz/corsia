@@ -11,7 +11,8 @@ from typing import Literal
 from core.agent_roster_queries import agent_rows
 from doceditor import feedback_delivery
 from doceditor.comments import validate_client_id
-from doceditor.review_lifecycle import FALLBACK_STATES, is_open, notify_change, request_comment_count, transition
+from doceditor.review_lifecycle import FALLBACK_STATES, is_open, notify_change, request_comment_count, request_comment_counts, transition
+from infra.accounts import get_user
 from infra.auth import is_owner_sentinel, may_access_artifact
 from infra.corsia_agent import CorsiaAgentSettingError, get_corsia_agent
 from infra.database import write_transaction
@@ -131,10 +132,19 @@ def _reviewer(db, artifact, reviewer: str, actor: ReviewActor) -> None:
         raise ReviewRequestError(ROSTER_REFUSAL.format(id=reviewer), code=REVIEWER_NOT_IN_ROSTER)
 
 
-def _view(db, row) -> dict:
+def requester_name(db, row) -> str | None:
+    """The requester's display name, or None when they can no longer be named."""
+    if row["requester_kind"] == "agent":
+        thread = db.execute("SELECT title FROM threads WHERE id=?", (row["requester_id"],)).fetchone()
+        return thread["title"] if thread else None
+    user = get_user(row["requester_id"], db=db)
+    return user["name"] if user else None
+
+
+def _view(db, row, comment_count: int | None = None) -> dict:
     """Expose the stored lifecycle with its comment count and derived, never stored, outcome."""
     result = dict(row)
-    result["comment_count"] = request_comment_count(db, row)
+    result["comment_count"] = request_comment_count(db, row) if comment_count is None else comment_count
     result["outcome"] = "open" if is_open(db, row) else "ended_without_comments"
     return result
 
@@ -214,7 +224,9 @@ def for_document(db, artifact_id: str) -> list[dict]:
         " AND NOT EXISTS (SELECT 1 FROM doc_review_requests later WHERE later.artifact_id=r.artifact_id"
         " AND later.reviewer_thread_id=r.reviewer_thread_id AND later.created_at>r.created_at)"
         " ORDER BY created_at,id", (artifact_id,))
-    views = [_view(db, row) for row in rows]
+    rows = rows.fetchall()
+    counts = request_comment_counts(db, rows)
+    views = [_view(db, row, counts[row["id"]]) for row in rows]
     return [view for view in views if view["outcome"] == "open" or view["comment_count"] == 0]
 
 
@@ -237,12 +249,11 @@ def escalate_fork(db, request_id: str, *, reason: str = "limit",
         row = connection.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone()
         if row is None or row["state"] != "forked":
             return None
-        requester = connection.execute("SELECT title FROM threads WHERE id=?", (row["requester_id"],)).fetchone()
         comment_count = request_comment_count(connection, row)
         state = state or ("handed_back" if reason == "limit" else "failed")
         request = {
             **dict(row),
-            "requester_display": (requester["title"] if requester else None) or "the requester",
+            "requester_display": requester_name(connection, row) or "the requester",
             "note": f"{row['note'] or ''}\n\n{continuation(comment_count, reason)}".strip(),
         }
         node = public.create_review_node(connection, row["reviewer_thread_id"], request)

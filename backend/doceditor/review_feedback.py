@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from doceditor import feedback_batches, feedback_state
-from doceditor.review_lifecycle import admit_feedback, request_delivery, submit_without_batch
+from doceditor.review_lifecycle import admit_feedback, submit_without_batch
 
 
 def send_document_feedback(db, reviewer_id: str, artifact_id: str) -> tuple[bool, list[str], list[dict]]:
@@ -30,8 +30,5 @@ def submit_fork_feedback(db, request_id: str, reviewer_thread_id: str,
         return False, [], []
     admit_feedback(db, request_id, author_kind="agent", author_id=reviewer_thread_id, artifact_id=artifact_id)
     pending, woken, undelivered = send_document_feedback(db, reviewer_thread_id, artifact_id)
-    delivered = request_delivery(db, request).latest_delivered
-    woken.extend(submit_without_batch(
-        db, artifact_id, reviewer_thread_id, delivered, fork_end=True,
-    ).woken)
+    woken.extend(submit_without_batch(db, artifact_id, reviewer_thread_id, fork_end=True).woken)
     return pending, woken, undelivered

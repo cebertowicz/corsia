@@ -55,7 +55,6 @@ def test_delivered_batch_settles_once_and_selects_next_task(review_env):
     db.commit()
     add_comment(db, aid, author_id="reviewer", submit=True)
     batch = batches(db)[0]
-    assert stored(db, result["id"])["answered_batch_id"] == batch["id"]
     assert public.get_node(node.id, db=db).state == "accepted"
     evidence = public.latest_review_evidence(node.id, requirements_revision=node.requirements_revision, db=db)
     assert batch["id"] in evidence["evidence"]
@@ -94,6 +93,5 @@ def test_nonterminal_settlement_failure_rolls_back_delivery_and_request(review_e
     with pytest.raises(RuntimeError, match="injected settlement failure"):
         feedback_batches.close_batch(db, batch_id, "submit")
     assert batches(db)[0]["state"] == "open"
-    assert stored(db, result["id"])["answered_batch_id"] is None
     assert public.get_node(result["node_id"], db=db).state == "active"
     assert db.execute("SELECT COUNT(*) FROM plan_node_artifact_links WHERE provenance='document.feedback_batch'").fetchone()[0] == 0

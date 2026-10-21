@@ -238,7 +238,7 @@ async def test_busy_reviewer_pass_writes_as_reviewer_without_turn_or_node(review
     await _run(row["id"], provider, asyncio.Event())
     comment = db.execute("SELECT * FROM doc_comments WHERE body='The claim needs evidence.'").fetchone()
     assert comment is not None and comment["author_thread_id"] == "reviewer"
-    assert stored(db, row["id"])["answered_batch_id"]
+    assert stored(db, row["id"])["state"] == "submitted"
     assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE owner_thread_id='reviewer'").fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM active_turns WHERE thread_id='reviewer'").fetchone()[0] == before_turns
 

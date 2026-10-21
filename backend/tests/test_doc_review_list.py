@@ -286,7 +286,7 @@ def test_clean_fork_without_comments_remains_named_in_http_list(client, review_e
         review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     body = client.get(f"/api/artifacts/{aid}/reviews", params={"thread_id": "requester"}).json()
     shown = body["reviews"][0]
-    assert (shown["id"], shown["answered_batch_id"], shown["may_cancel"]) == (row["id"], None, False)
+    assert (shown["id"], shown["may_cancel"]) == (row["id"], False)
     assert shown["state"] == "submitted"
     assert next(choice for choice in body["reviewers"] if choice["id"] == "reviewer")["requested"] is False
 
@@ -341,25 +341,6 @@ def test_submitted_fork_lists_as_ended_only_without_comments(client, review_env)
     with write_transaction(db, scope="test_commented_submit_unlisted"):
         review_feedback.submit_fork_feedback(db, commented["id"], "reviewer", aid)
     assert client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"] == []
-
-
-def test_migrated_legacy_ended_row_stays_listed_as_ended(client, review_env):
-    db, aid = review_env
-    row = request(db, aid)
-    # Migration 132 to 133 maps a legacy ended request to handed_back with its node already closed.
-    escalated = escalate_fork(db, row["id"])
-    from plans import public
-    public.transition_node(escalated["node_id"], "closed", db=db)
-    # Exactly the shape the migration leaves a legacy ended row in.
-    db.execute(
-        "UPDATE doc_review_requests SET state='handed_back',state_changed_at=created_at,reason=NULL,"
-        "fork_id=NULL,answered_batch_id=NULL WHERE id=?", (row["id"],),
-    )
-    db.commit()
-    stored_row = db.execute("SELECT state,answered_batch_id FROM doc_review_requests WHERE id=?", (row["id"],)).fetchone()
-    assert (stored_row["state"], stored_row["answered_batch_id"]) == ("handed_back", None)
-    shown = client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"]
-    assert [(r["id"], r["outcome"], r["may_cancel"]) for r in shown] == [(row["id"], "ended_without_comments", False)]
 
 
 def test_workspace_conductor_is_never_offered_but_the_project_conductor_is(client, review_env):

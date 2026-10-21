@@ -13,9 +13,9 @@ from infra.database import write_transaction
 from test_doc_review_requests import request, review_env, fork_comment, stored  # noqa: F401
 
 
-@pytest.mark.parametrize("deleted_comments,pending,answered", [(0, False, False), (1, True, False)])
+@pytest.mark.parametrize("deleted_comments,pending", [(0, False), (1, True)])
 def test_empty_submit_finishes_once_without_feedback_or_reviewer_wake(
-    review_env, deleted_comments, pending, answered,
+    review_env, deleted_comments, pending,
 ):
     db, aid = review_env
     row = request(db, aid)
@@ -25,7 +25,6 @@ def test_empty_submit_finishes_once_without_feedback_or_reviewer_wake(
         db.execute("DELETE FROM doc_comments")
         assert review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid) == (pending, [], [])
     assert stored(db, row["id"])["state"] == "submitted"
-    assert (stored(db, row["id"])["answered_batch_id"] is not None) is answered
     with write_transaction(db, scope="test_repeated_empty_fork_submit"):
         assert review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid) == (False, [], [])
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
@@ -44,7 +43,6 @@ def test_owner_batch_delivery_does_not_end_a_running_fork(review_env):
     with write_transaction(db, scope="test_fork_ends_after_delivery"):
         review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     assert stored(db, row["id"])["state"] == "submitted"
-    assert stored(db, row["id"])["answered_batch_id"] == batch
     assert db.execute("SELECT item_count FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == 2
 
 
@@ -103,12 +101,11 @@ def test_empty_fork_sends_reviewers_existing_batch_and_receipt_counts_it(review_
 
     db, aid = review_env
     row = request(db, aid)
-    batch = ordinary_comment(db, aid)
+    ordinary_comment(db, aid)
     with write_transaction(db, scope="test_fork_sends_reviewer_batch"):
         pending, _woken, failures = review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     assert pending and not failures
     assert stored(db, row["id"])["state"] == "submitted"
-    assert stored(db, row["id"])["answered_batch_id"] == batch
     receipt = db.execute(
         "SELECT summary FROM context_change_journal WHERE object_kind='thread_context' "
         "AND object_id='reviewer' ORDER BY created_at DESC LIMIT 1",

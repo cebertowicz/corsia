@@ -18,7 +18,7 @@ test('@flow:review-failure-status compact failures on phone', async ({ page, req
 	expect(seeded.ok()).toBeTruthy();
 	const artifactId = (await seeded.json()).artifact.id as string;
 	const cases = [
-		['missing_credentials', 'Couldn’t finish because sign-in is needed.', 'Sign in again in Settings › Providers.'],
+		['missing_credentials', 'Couldn’t finish. Sign in again in Settings › Providers.', 'Sign in again in Settings › Providers.'],
 		['target_unavailable', 'Couldn’t finish. Choose another model.', 'Choose another model for Quality Gate.'],
 		['binary_resolution', 'Couldn’t finish. Ask CORSIA to fix it.', 'Ask CORSIA in chat to fix it.'],
 		['provider_error', 'Unfinished. Quality Gate will finish it.', 'Quality Gate will finish it.'],
@@ -52,9 +52,9 @@ test('@flow:review-failure-status compact failures on phone', async ({ page, req
 				overflow: style.textOverflow, height: element.getBoundingClientRect().height,
 				clientWidth: element.clientWidth, scrollWidth: element.scrollWidth };
 		});
-		expect(measured.lines).toBe(1);
-		expect(measured.whiteSpace).toBe('nowrap');
-		expect(measured.overflow).toBe('ellipsis');
+		// The status wraps instead of being cut off.
+		expect(measured.whiteSpace).not.toBe('nowrap');
+		expect(measured.overflow).not.toBe('ellipsis');
 		expect(measured.scrollWidth).toBeLessThanOrEqual(measured.clientWidth);
 		await info.attach(`status-${i}-geometry`, { body: JSON.stringify(measured), contentType: 'application/json' });
 	}

@@ -33,7 +33,6 @@ def test_continuation_adds_one_comment_produces_one_feedback_task_with_all_findi
         feedback_batches.close_for_turn_end(db, "reviewer")
 
     assert stored(db, row["id"])["state"] == "submitted"
-    assert stored(db, row["id"])["answered_batch_id"] == ordinary
     assert not public.review_is_open(db, continuation["node_id"])
     tasks = db.execute("SELECT n.description FROM plan_nodes n JOIN plans p ON p.id=n.plan_id WHERE p.owner_kind='thread' AND p.owner_id='owner'").fetchall()
     assert len(tasks) == 1
@@ -53,7 +52,6 @@ def test_empty_continuation_submit_delivers_existing_feedback_once(review_env):
     submit(aid)
 
     assert stored(db, row["id"])["state"] == "submitted"
-    assert stored(db, row["id"])["answered_batch_id"]
     assert not public.review_is_open(db, continuation["node_id"])
     assert db.execute("SELECT COUNT(*) FROM plan_nodes n JOIN plans p ON p.id=n.plan_id WHERE p.owner_kind='thread' AND p.owner_id='owner'").fetchone()[0] == 1
 
@@ -70,7 +68,6 @@ def test_ended_continuation_quiet_closer_delivers_all_ordinary_comments(review_e
     feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db)
 
     assert stored(db, row["id"])["state"] == "handed_back"
-    assert stored(db, row["id"])["answered_batch_id"] is None
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batch_items").fetchone()[0] >= 1
     batch = db.execute("SELECT state FROM doc_feedback_batches").fetchone()
     assert batch["state"] == "delivered"
@@ -109,13 +106,12 @@ def test_reviewer_turn_end_delivery_does_not_end_running_fork(review_env):
     fork_comment(db, aid, row["id"])
     with write_transaction(db, scope="turn_end_delivery"):
         feedback_batches.close_for_turn_end(db, "reviewer")
-    delivered = db.execute("SELECT id FROM doc_feedback_batches WHERE state='delivered'").fetchone()["id"]
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches WHERE state='delivered'").fetchone()[0] == 1
     assert stored(db, row["id"])["state"] == "forked"
     fork_comment(db, aid, row["id"])
     with write_transaction(db, scope="finish_running_fork"):
         review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     assert stored(db, row["id"])["state"] == "submitted"
-    assert stored(db, row["id"])["answered_batch_id"] == delivered
     receipt = _receipt_text(db)
     assert "feedback was delivered" in receipt and "nothing was sent" not in receipt
 
@@ -131,7 +127,6 @@ def test_fork_submit_with_failed_final_delivery_says_it_will_be_retried(review_e
         _pending, _woken, failures = review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     assert len(failures) == 1
     assert stored(db, row["id"])["state"] == "submitted"
-    assert stored(db, row["id"])["answered_batch_id"] is None
     receipt = _receipt_text(db)
     assert "1 review comments written; delivery failed and will be retried" in receipt
     assert "nothing was sent" not in receipt
@@ -218,7 +213,6 @@ def test_submitted_fork_failure_is_noticed_and_retry_delivers_ordinary_batch(rev
     batch = db.execute("SELECT * FROM doc_feedback_batches").fetchone()
     assert batch["state"] == "undelivered"
     attempts = batch["attempts"]
-    assert stored(db, row["id"])["answered_batch_id"] is None
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batch_items").fetchone()[0] >= 1
     kwargs = dict(author_kind="agent", author_id="reviewer", artifact_id=aid)
     assert feedback_state.undelivered_for_document(db, **kwargs)[0]["id"] == batch["id"]
@@ -228,7 +222,6 @@ def test_submitted_fork_failure_is_noticed_and_retry_delivers_ordinary_batch(rev
         feedback_batches.retry_for_document(db, **kwargs)
     assert db.execute("SELECT state,attempts FROM doc_feedback_batches WHERE id=?", (batch["id"],)).fetchone()[:] == ("delivered", attempts + 1)
     assert stored(db, row["id"])["state"] == "submitted"
-    assert stored(db, row["id"])["answered_batch_id"] is None
     assert feedback_state.undelivered_for_document(db, **kwargs) == []
 
 

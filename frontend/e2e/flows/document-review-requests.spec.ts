@@ -327,7 +327,7 @@ test('@flow:document-review-requests closed continuation refreshes on Plans chan
 		'from doceditor.review_requests import escalate_fork',
 		'connection = sqlite3.connect(sys.argv[1])',
 		'connection.row_factory = sqlite3.Row',
-		"changed = connection.execute(\"UPDATE doc_review_requests SET state='forked', node_id=NULL, fork_id='e2e-fixture', answered_batch_id=NULL, reason=NULL WHERE id=?\", (sys.argv[2],)).rowcount",
+		"changed = connection.execute(\"UPDATE doc_review_requests SET state='forked', node_id=NULL, fork_id='e2e-fixture', reason=NULL WHERE id=?\", (sys.argv[2],)).rowcount",
 		'assert changed == 1, changed',
 		'connection.commit()',
 		'request = escalate_fork(connection, sys.argv[2])',

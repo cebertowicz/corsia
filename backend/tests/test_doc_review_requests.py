@@ -96,7 +96,6 @@ def test_submit_settles_node_less_request_and_leaves_reviewer_unselected(review_
         )
 
     assert pending and not undelivered
-    assert stored(db, result["id"])["answered_batch_id"]
     assert stored(db, result["id"])["state"] == "submitted"
     assert "reviewer" not in woken
     assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE owner_thread_id='reviewer'").fetchone()[0] == 0
@@ -131,7 +130,6 @@ def test_cancel_preserves_seen_and_replied_comments_and_ordinary_feedback(review
     assert db.execute("SELECT COUNT(*) FROM doc_comment_thread_views WHERE root_id=?", (root,)).fetchone()[0] == 1
     assert changed == []  # no comment write, so no comment-change announcement
     assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == "open"
-    assert stored(db, first["id"])["answered_batch_id"] is None
 
 
 def test_cancel_keeps_fork_and_reviewer_comments_in_one_ordinary_batch(review_env):
@@ -200,7 +198,7 @@ def test_escalation_preserves_comments_and_passes_requesting_intent(review_env, 
     assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == "open"
     with write_transaction(db, scope="test_continuation_submit"):
         review_feedback.send_document_feedback(db, "reviewer", artifact_id)
-    assert stored(db, result["id"])["answered_batch_id"]
+    assert stored(db, result["id"])["state"] == "submitted"
 
 
 def test_escalation_names_an_untitled_requester_without_its_id(review_env, monkeypatch):
@@ -222,6 +220,44 @@ def test_escalation_names_an_untitled_requester_without_its_id(review_env, monke
     assert seen[0]["requester_display"] == "the requester"
 
 
+def test_user_requested_fork_that_escalates_names_the_user(review_env, monkeypatch):
+    from doceditor import review_requests
+
+    db, artifact_id = review_env
+    result = request(db, artifact_id, kind="user")
+    monkeypatch.setattr(review_requests, "get_user", lambda user_id, db=None: {"id": user_id, "name": "Steve"})
+    seen = []
+    create = public.create_review_node
+
+    def capture(connection, reviewer, request_):
+        seen.append(request_)
+        return create(connection, reviewer, request_)
+
+    monkeypatch.setattr(public, "create_review_node", capture)
+    review_requests.escalate_fork(db, result["id"])
+    assert seen[0]["requester_display"] == "Steve"
+
+
+def test_list_counts_every_reviewers_comments_in_one_query(review_env):
+    from doc_feedback_helpers import seed_thread
+    from doceditor import review_requests
+
+    db, artifact_id = review_env
+    seed_thread(db, "third", title="Third")
+    db.execute("UPDATE threads SET agent_enabled=1,agent_responsibility='Review documents' WHERE id='third'")
+    db.commit()
+    for reviewer in ("reviewer", "second", "third"):
+        request(db, artifact_id, reviewer=reviewer, key=f"key-{reviewer}")
+    reads = []
+    db.set_trace_callback(lambda statement: reads.append(statement) if "doc_comments" in statement else None)
+    try:
+        listed = review_requests.for_document(db, artifact_id)
+    finally:
+        db.set_trace_callback(None)
+    assert [item["comment_count"] for item in listed] == [0, 0, 0]
+    assert len(reads) == 1
+
+
 def test_escalated_comments_follow_the_ordinary_quiet_timer(review_env):
     """Ordinary feedback can deliver before the continuation starts."""
     from doceditor import review_requests
@@ -236,7 +272,7 @@ def test_escalated_comments_follow_the_ordinary_quiet_timer(review_env):
     batch = db.execute("SELECT state FROM doc_feedback_batches").fetchone()
     assert batch["state"] == "delivered"
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 1
-    assert stored(db, result["id"])["answered_batch_id"]
+    assert stored(db, result["id"])["state"] == "submitted"
     assert not public.review_is_open(db, escalated["node_id"])
 
 
@@ -255,7 +291,6 @@ def test_clean_submit_ends_without_comments_and_never_escalates(review_env):
 
     assert not pending and not undelivered
     row = stored(db, result["id"])
-    assert row["answered_batch_id"] is None
     assert row["state"] == "submitted"
     assert artifact_review_capture.fork_ended(result["id"])
     assert review_requests.escalate_fork(db, result["id"]) is None

@@ -97,8 +97,6 @@ def _submit_request(db, row, batch_id: str | None) -> ReviewTransition:
     result = transition(db, row["id"], "submitted")
     if not result.changed:
         return result
-    if batch_id is not None:
-        db.execute("UPDATE doc_review_requests SET answered_batch_id=? WHERE id=?", (batch_id, row["id"]))
     woken: list[str] = []
     if row["node_id"] is not None:
         with public.collect_wake_recipients(db, woken):
@@ -117,25 +115,30 @@ def _submit_request(db, row, batch_id: str | None) -> ReviewTransition:
     return ReviewTransition(True, tuple(woken))
 
 
+def request_comment_counts(db, rows) -> dict[str, int]:
+    """Each request's reviewer comments since it began; a submitted or withdrawn request stops counting at its end."""
+    ids = [row["id"] for row in rows]
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
+    found = db.execute(
+        "SELECT r.id, COUNT(c.id) FROM doc_review_requests r LEFT JOIN doc_comments c "
+        "ON c.artifact_id=r.artifact_id AND c.author_kind='agent' AND c.author_thread_id=r.reviewer_thread_id "
+        "AND c.created_at>=r.created_at "
+        "AND (r.state NOT IN ('submitted','withdrawn') OR c.created_at<=r.state_changed_at) "
+        f"WHERE r.id IN ({marks}) GROUP BY r.id", ids,
+    ).fetchall()
+    return {row[0]: row[1] for row in found}
+
+
 def request_comment_count(db, row) -> int:
-    """The reviewer's comments since the request; a submitted or withdrawn request stops counting at its end."""
-    ended = row["state"] in {"submitted", "withdrawn"}
-    return db.execute(
-        "SELECT COUNT(*) FROM doc_comments WHERE artifact_id=? AND author_kind='agent' "
-        "AND author_thread_id=? AND created_at>=?" + (" AND created_at<=?" if ended else ""),
-        (row["artifact_id"], row["reviewer_thread_id"], row["created_at"],
-         *((row["state_changed_at"],) if ended else ())),
-    ).fetchone()[0]
+    return request_comment_counts(db, [row])[row["id"]]
 
 
 @dataclass(frozen=True)
 class RequestDelivery:
     delivered_ids: tuple[str, ...] = ()
     undelivered: bool = False
-
-    @property
-    def latest_delivered(self) -> str | None:
-        return self.delivered_ids[-1] if self.delivered_ids else None
 
 
 def request_delivery(db, row) -> RequestDelivery:
