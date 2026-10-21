@@ -252,7 +252,7 @@ class TestFailureBackoff:
         )
         assert signed_in.status_code == 200
 
-    def test_a_full_waiting_cap_holds_existing_and_made_up_names_equally(self, client, monkeypatch):
+    def test_a_full_waiting_cap_holds_existing_and_made_up_names_for_the_same_minimum(self, client, monkeypatch):
         holds = []
 
         async def _hold(seconds):

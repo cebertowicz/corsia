@@ -176,8 +176,7 @@ async def login(body: LoginRequest) -> dict:
         is_account = await run_in_db(accounts.account_exists, username)
         if _waiting_attempts >= _MAX_WAITING_ATTEMPTS:
             # Every normalized name gets the same minimum hold while the cap is
-            # full. The outcome can therefore not distinguish an account from
-            # a name that has never existed.
+            # full; an account then still waits for its own hash.
             await asyncio.sleep(_HELD_SECONDS)
         if not is_account and _waiting_attempts >= _MAX_WAITING_ATTEMPTS:
             _record_failure(username, is_account=False)
