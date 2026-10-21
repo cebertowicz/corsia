@@ -76,10 +76,10 @@
       "sha256": "9df2a5a0dde7b703026ee62c360aa0ff5b40225008ddfed546061ac26fff1b07"
     },
     {
-      "bytes": 9176,
+      "bytes": 9012,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/context/COORDINATION-CORE.md",
-      "sha256": "a3dca4e0d0f1095d552c6f87f36a52aa539abc26430f22535eb296b4f2c105c9"
+      "sha256": "28f0fa4fb738d19025e9d1453fb34be33bdbdba39d9f3f7dee2a61438f202890"
     },
     {
       "bytes": 740,
@@ -115,7 +115,7 @@
       "bytes": 6115,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/manifest.yaml",
-      "sha256": "8e052af8aaf95dd992993647f757a9779c70066ec465c86d98a8f72145d456a8"
+      "sha256": "24399d808120bc473733226deca12dcdea69400e4216c2ca30530b731b8e8c51"
     },
     {
       "bytes": 3541,
