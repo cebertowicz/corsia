@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -99,14 +100,42 @@ def test_cli_stdin_and_error_exit_contracts(emit_world, capsys, monkeypatch):
 
 def test_cli_bad_json_and_transient_exit_contracts(emit_world, capsys, monkeypatch):
     bad_json, out, err = _run(_cli("qa.route", "--facts", "{"), capsys)
-    assert bad_json == 2 and not out and err.startswith("error: bad_json:")
+    assert bad_json == 1 and not out and err.startswith("error: bad_json:")
 
     async def unavailable(**_kwargs):
-        raise OSError("offline")
+        raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setattr("events.intake.admit_event", unavailable)
-    transient, transient_out, transient_err = _run(_cli("qa.route", "--facts", '{"code":"ok"}'), capsys)
-    assert transient == 3 and not transient_out and transient_err.startswith("error: intake_unreachable:")
+    fresh, fresh_out, fresh_err = _run(_cli("qa.route", "--facts", '{"code":"ok"}'), capsys)
+    keyed, _, keyed_err = _run(_cli("qa.route", "--facts", '{"code":"ok"}', "--id", "hook-2"), capsys)
+    # Without --id the event id is random, so a retry could duplicate a committed event.
+    assert fresh == 3 and not fresh_out and fresh_err.startswith("error: intake_unreachable:")
+    assert "Pass --id so a retry cannot duplicate the event." in fresh_err
+    assert keyed == 3 and "Retry with the same --id." in keyed_err
+
+
+@pytest.mark.parametrize("defect", [TypeError("bad call"), sqlite3.OperationalError("no such table: event_rules")])
+def test_cli_defect_is_logged_and_never_told_to_retry(emit_world, capsys, monkeypatch, caplog, defect):
+    async def broken(**_kwargs):
+        raise defect
+
+    monkeypatch.setattr("events.intake.admit_event", broken)
+    rc, out, err = _run(_cli("qa.route", "--facts", '{"code":"ok"}', "--id", "hook-3"), capsys)
+
+    assert rc == 1 and not out and err.startswith("error: internal_error:") and "Retry with" not in err
+    assert any(record.exc_info for record in caplog.records)
+
+
+def test_cli_session_defaults_to_the_shell_thread(emit_world, capsys, monkeypatch):
+    args = ["event", "emit", "qa.route", "--facts", '{"code":"ok"}']
+    monkeypatch.delenv("CORSIA_THREAD_ID", raising=False)
+    missing, missing_out, missing_err = _run(args, capsys)
+    monkeypatch.setenv("CORSIA_THREAD_ID", OWNER)
+    ok, out, err = _run(args, capsys)
+
+    assert missing == 2 and not missing_out
+    assert missing_err.startswith("error: usage:") and "--as-session" in missing_err and "CORSIA_THREAD_ID" in missing_err
+    assert ok == 0 and not err and json.loads(out)["duplicate"] is False
 
 
 def test_cli_recording_failure_keeps_the_permanent_refusal(emit_world, capsys, monkeypatch):

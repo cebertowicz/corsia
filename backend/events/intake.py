@@ -29,6 +29,7 @@ _ERROR_FIXES = {
     "not_your_namespace": "Use a type declared by this session's rule set.",
     "reserved_type": "worker.* events are produced by CORSIA only.",
     "intake_unreachable": "Retry with the same --id.",
+    "internal_error": "This is a CORSIA defect and was logged; report it instead of retrying.",
     "record_refused": "Fix the record as the text says; the event was not routed.",
 }
 
@@ -79,9 +80,9 @@ def emitted_event_id(event_type: str, identity: str | None) -> str:
     return hashlib.sha256(f"{event_type}\0{identity}".encode()).hexdigest()
 
 
-def format_event_error(code: str, text: str) -> str:
+def format_event_error(code: str, text: str, fix: str | None = None) -> str:
     """Render the common caller-facing error copy without exposing event facts."""
-    return f"{code}: {text.rstrip('.')}. {_ERROR_FIXES.get(code, 'Correct the event and try again.')}"
+    return f"{code}: {text.rstrip('.')}. {fix or _ERROR_FIXES.get(code, 'Correct the event and try again.')}"
 
 
 def _refusal(code: str, text: str) -> IntakeResult:
