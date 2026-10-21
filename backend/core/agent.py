@@ -19,7 +19,6 @@ from infra.settings import get_agent_defaults, get_tool_config
 from core.context_builder import ContextBuilder
 from tools.base import Tool
 from tools.registry import ToolRegistry
-from tools.register_events import register as register_event_tools
 
 
 class CORSIAAgent:
@@ -380,7 +379,7 @@ def _register_tools(agent: CORSIAAgent, tool_cfg: dict, workspace: Path):
     _register_document_tools(agent, workspace)
 
     _register_artifact_tools(agent, workspace)
-    register_event_tools(agent.tools)
+
     _register_delegation_tools(agent)
 
     from tools.restart import RestartResumeTool

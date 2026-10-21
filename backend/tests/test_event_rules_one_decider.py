@@ -42,10 +42,25 @@ async def test_seeded_drop_row_decides_check_event_before_pr_lookup(isolated_db)
                           check_suite_payload('o/r', 71, conclusion='cancelled'))
     lookup.assert_not_called()
     deliver.assert_not_called()
-    assert res.outcome == router.RouteOutcome.PARKED
+    assert (res.outcome, res.reason) == (router.RouteOutcome.SUPPRESSED, 'rule_set:github@1:cancelled')
     assert _route_events(emit) == [('suppressed', {
         'internal_event': 'webhook.github.check_suite_completed',
         'author': 'alice', 'rule_id': 'rule_set:github@1:cancelled'})]
+
+
+@pytest.mark.asyncio
+async def test_check_event_dropped_by_another_row_is_labeled_by_that_row(isolated_db):
+    from events import router
+
+    register_pr('o/r', 72, mk_session('wk-bot'))
+    payload = check_suite_payload('o/r', 72, conclusion='success')
+    payload['sender'] = {'login': 'ci[bot]', 'type': 'Bot'}
+    with (patch.object(router, 'check_suite_pr_metadata_from_event') as lookup,
+          patch('events.router.delivery.deliver_to_thread') as deliver):
+        res = await route('webhook.github.check_suite_completed', payload)
+    lookup.assert_not_called()
+    deliver.assert_not_called()
+    assert (res.outcome, res.reason) == (router.RouteOutcome.SUPPRESSED, 'rule_set:github@1:self')
 
 
 @pytest.mark.asyncio
@@ -58,7 +73,7 @@ async def test_self_authored_drop_logs_product_event_with_author_and_rule(isolat
           patch('events.router.delivery.deliver_to_thread') as deliver):
         res = await route('webhook.github.pr_opened', payload)
     deliver.assert_not_called()
-    assert res.outcome == RouteOutcome.SUPPRESSED
+    assert (res.outcome, res.reason) == (RouteOutcome.SUPPRESSED, 'rule_set:github@1:self')
     assert _route_events(emit) == [('suppressed', {
         'internal_event': 'webhook.github.pr_opened',
         'author': 'corsia[bot]', 'rule_id': 'rule_set:github@1:self'})]

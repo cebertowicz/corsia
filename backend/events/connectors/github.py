@@ -245,9 +245,6 @@ def github_routing_envelope(
     payload: dict[str, Any],
 ) -> EventEnvelope:
     """Wrap a resolved GitHub identity for generic owner resolution."""
-    import hashlib
-    import json
-
     from events.envelope import EventEnvelope
     from events.guard import is_bot_or_self_authored
     from events.routing_inputs import structured_tag
@@ -267,17 +264,14 @@ def github_routing_envelope(
     tag = structured_tag(payload) if identity is not None else None
     if tag:
         facts['corsia_tag'] = tag['thread_id']
-    event_id = hashlib.sha256(json.dumps(
-        [internal_event, payload], sort_keys=True, separators=(',', ':'),
-    ).encode()).hexdigest()
     return EventEnvelope(
-        event_id=event_id,
+        event_id="",
         type=internal_event,
         connector='github',
         facts=facts,
         relationships=(),
         artifact_ref=artifact_ref,
-        provenance={'source': 'github', 'rule_trace': []},
+        provenance={},
         event_class=github_event_class(payload),
         ownerless_ok=False,
     )

@@ -10,6 +10,7 @@ from tools.catalog_measurement_entries import MEASUREMENT_CATALOG_ENTRIES
 from tools.catalog_microsoft_entries import MICROSOFT_CATALOG_ENTRIES
 
 _Entry = ToolCatalogEntry
+
 POST_UPDATE_SUMMARY = "Leave the user a marked update they see in Focus mode"
 
 POST_UPDATE_WORTH_SENDING = (
@@ -26,7 +27,6 @@ POST_UPDATE_ATTENTION_GUIDANCE = (
 )
 
 TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
-    'event_rules': _Entry('events', summary='Inspect rules, preview routing, or explain a delivery', activity='Checking where events go'),
     "continuity_edit": _Entry(
         "memory", status="substrate", authority="continuity-write", core=True,
         activity="Updating continuity",

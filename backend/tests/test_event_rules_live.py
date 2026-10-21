@@ -1,4 +1,4 @@
-"""Rule execution is live, inspection is read-only, and delivered watches end."""
+"""Rule execution is live and delivered watches end."""
 from __future__ import annotations
 
 import json
@@ -7,11 +7,9 @@ from unittest.mock import patch
 import pytest
 
 from connections import binder
-from events.envelope import normalize
 from events.platform import deliver_platform_event_sync
 from infra.database import get_db, write_transaction
 from tests.event_routing_helpers import mk_session, register_pr, pr_payload, route
-from tools.event_rules import inspect_rules
 
 
 def _rule(db, id, *, action='deliver', to='registered_owner', mode='digest',
@@ -29,7 +27,7 @@ def _event():
     return payload
 
 
-def test_every_merges_wake_over_digest_and_traces_all_rules(isolated_db):
+def test_every_merges_wake_over_digest(isolated_db):
     owner = mk_session('owner')
     register_pr('owner/repo', 7, owner)
     with write_transaction(None, scope='test_rules') as db:
@@ -37,12 +35,6 @@ def test_every_merges_wake_over_digest_and_traces_all_rules(isolated_db):
         _rule(db, 'wake', mode='wake', to='thread:' + owner)
     delivered = deliver_platform_event_sync('github', _event(), 'pr.merged')
     assert [(d.thread_id, d.outcome) for d in delivered] == [(owner, 'woke')]
-    db = get_db()
-    metadata = json.loads(db.execute("SELECT metadata FROM messages WHERE id LIKE 'platform-event:%'").fetchone()[0])
-    assert set(metadata['provenance']['rule_trace']) == {'builtin:0', 'digest', 'wake'}
-    assert {r['rule_id'] for r in db.execute('SELECT rule_id FROM event_route_decisions')} == {
-        'builtin:0', 'digest', 'wake'}
-    db.close()
 
 
 @pytest.mark.parametrize('mode', ['wake', 'digest', 'drop'])
@@ -88,23 +80,11 @@ async def test_legacy_webhook_name_watch_resolves_on_platform_path(isolated_db):
     db.close()
 
 
-def test_drop_runs_before_binding_and_test_matches_live_without_writes(isolated_db):
+def test_drop_runs_before_binding(isolated_db):
     owner = mk_session('owner')
     binder.create_rule(connector='github', fact='repo', value='owner/repo', destination_thread_id=owner)
     with write_transaction(None, scope='test_rules') as db:
         _rule(db, 'stop', action='drop')
-    envelope = normalize('github', _event(), 'pr.merged')
-    db = get_db()
-    db.execute('PRAGMA query_only=ON')
-    before = db.total_changes
-    preview = inspect_rules(db, action='test', project_id=None, event={
-        'connector': 'github', 'type': envelope.type, 'facts': envelope.facts,
-        'artifact_ref': envelope.artifact_ref, 'event_class': envelope.event_class,
-    })
-    assert db.total_changes == before
-    assert preview == {'dropped_by': 'stop', 'targets': [], 'delivered': False}
-    db.execute('PRAGMA query_only=OFF')
-    db.close()
     assert deliver_platform_event_sync('github', _event(), 'pr.merged')[0].outcome == 'dropped'
     db = get_db()
     assert db.execute("SELECT 1 FROM artifact_identities WHERE external_id='owner/repo#7'").fetchone() is None
@@ -112,7 +92,7 @@ def test_drop_runs_before_binding_and_test_matches_live_without_writes(isolated_
 
 
 @pytest.mark.parametrize('enabled', [True, False])
-def test_cancelled_preflight_uses_evaluator_with_any_rule_id(isolated_db, enabled):
+def test_drop_pass_maps_any_drop_row_to_suppressed_with_its_id(isolated_db, enabled):
     from events import router
 
     with write_transaction(None, scope='custom_cancel_drop') as db:
@@ -124,53 +104,40 @@ def test_cancelled_preflight_uses_evaluator_with_any_rule_id(isolated_db, enable
                    (int(enabled), 'custom-cancel-drop'))
     payload = {'repository': {'full_name': 'owner/repo'},
                'check_suite': {'conclusion': 'cancelled', 'head_sha': 'abc'}}
-    with (patch.object(router, 'evaluate', wraps=router.evaluate) as evaluate,
+    with (patch.object(router, 'dropping_rule', wraps=router.dropping_rule) as dropping,
           patch.object(router, 'check_suite_pr_metadata_from_event') as resolve_pr):
-        result = router._cancelled_check_result('webhook.github.check_suite_completed', payload)
-    evaluate.assert_called_once()
+        result = router._rule_drop_result('webhook.github.check_suite_completed', payload)
+    dropping.assert_called_once()
     resolve_pr.assert_not_called()
-    assert (result is not None) == enabled
-    db = get_db()
-    assert [r['rule_id'] for r in db.execute('SELECT rule_id FROM event_route_decisions')] == (
-        ['custom-cancel-drop'] if enabled else [])
-    db.close()
+    assert result == (router.RouteResult(router.RouteOutcome.SUPPRESSED, reason='custom-cancel-drop')
+                      if enabled else None)
 
 
-def test_selection_keeps_registry_state_separate_from_prepared_rule_fields(isolated_db):
+def test_selection_returns_registry_routing_state(isolated_db):
     from events import router
-    from events.connectors.github_route_preparation import PreparedRoute
     from events.identity import resolve_identity
 
     owner = mk_session('owner')
     register_pr('owner/repo', 7, owner)
     identity = resolve_identity('webhook.github.pr_merged', _event())
-    prepared = PreparedRoute()
     selected = router._select_route('webhook.github.pr_merged', _event(), identity,
-                                    identity.external_id, None, None, False, prepared=prepared)
+                                    identity.external_id, None, None, False)
     assert not isinstance(selected, router.RouteResult)
     assert set(selected[2]) == {'identity', 'owner', 'subscribers', 'triage'}
-    assert prepared.envelope.type == 'webhook.github.pr_merged'
-    assert prepared.envelope.provenance['rule_trace'] == ['rule_set:github@1:owner']
 
 
-def test_readonly_preview_predicts_first_seen_binding_and_delivery(isolated_db):
+def test_first_seen_binding_rule_delivers_on_platform_path(isolated_db):
     owner = mk_session('owner')
     binder.create_rule(connector='github', fact='repo', value='owner/repo', destination_thread_id=owner)
-    envelope = normalize('github', _event(), 'pr.merged')
-    db = get_db()
-    db.execute('PRAGMA query_only=ON')
-    before = db.total_changes
-    preview = inspect_rules(db, action='test', project_id=None, event={
-        'connector': 'github', 'type': envelope.type, 'facts': envelope.facts,
-        'artifact_ref': envelope.artifact_ref, 'event_class': envelope.event_class,
-    })
-    assert preview['targets'][0]['thread_id'] == owner
-    assert preview['targets'][0]['disposition'] == 'owner_digest'
-    assert db.total_changes == before
-    db.execute('PRAGMA query_only=OFF')
-    db.close()
     live = deliver_platform_event_sync('github', _event(), 'pr.merged')
     assert [(d.thread_id, d.outcome) for d in live] == [(owner, 'digested')]
+
+
+def test_binding_rule_on_numeric_fact_matches_its_stored_string(isolated_db):
+    owner = mk_session('owner')
+    binder.create_rule(connector='github', fact='pr_number', value=7, destination_thread_id=owner)
+    assert binder.evaluate({'pr_number': 7}, 'github')[0].destination_thread_id == owner
+    assert binder.evaluate({'pr_number': 8}, 'github') == []
 
 
 def test_explicit_recipient_handles_ownerless_event_with_default_mode(isolated_db):
@@ -179,19 +146,6 @@ def test_explicit_recipient_handles_ownerless_event_with_default_mode(isolated_d
         _rule(db, 'explicit', to='thread:' + recipient, mode='default')
     delivered = deliver_platform_event_sync('github', _event(), 'pr.merged')
     assert [(d.thread_id, d.outcome) for d in delivered] == [(recipient, 'digested')]
-
-
-def test_list_is_project_scoped_and_limited(isolated_db):
-    with write_transaction(None, scope='test_rules') as db:
-        _rule(db, 'own', scope='project:one')
-        _rule(db, 'other', scope='project:two')
-    db = get_db()
-    db.execute('PRAGMA query_only=ON')
-    rows = inspect_rules(db, action='list', project_id='one')['rules']
-    assert 'own' in {r['id'] for r in rows}
-    assert 'other' not in {r['id'] for r in rows}
-    assert len(inspect_rules(db, action='list', project_id='one', limit=1)['rules']) == 1
-    db.close()
 
 
 def test_designation_unicode_lookup_enabled_filter_and_current_designee(isolated_db):
@@ -224,46 +178,29 @@ def test_explicit_missing_recipient_is_not_delivered(isolated_db, mode):
         _rule(db, 'missing', to='thread:missing', mode=mode)
     delivered = deliver_platform_event_sync('github', _event(), 'pr.merged')
     assert [(d.thread_id, d.outcome, d.reason) for d in delivered] == [
-        ('missing', 'dead_lettered', 'owner_inactive')]
+        (None, 'dead_lettered', 'owner_inactive')]
 
 
-def test_preview_uses_artifact_scope_instead_of_callers_project(isolated_db):
+def test_project_drop_row_applies_only_in_the_artifact_owners_scope(isolated_db):
     with write_transaction(None, scope='project_rule') as db:
         _rule(db, 'project-drop', scope='project:one', action='drop')
-    envelope = normalize('github', _event(), 'pr.merged')
-    db = get_db()
-    db.execute('PRAGMA query_only=ON')
-    preview = inspect_rules(db, action='test', project_id='one', event={
-        'connector': 'github', 'type': envelope.type, 'facts': envelope.facts,
-        'artifact_ref': envelope.artifact_ref, 'event_class': envelope.event_class})
-    assert preview['dropped_by'] is None
-    assert preview['targets'][0]['disposition'] == 'dead_letter'
-    db.execute('PRAGMA query_only=OFF')
-    db.close()
     assert deliver_platform_event_sync('github', _event(), 'pr.merged')[0].outcome == 'dead_lettered'
 
 
-def test_explain_rejects_ambiguous_pr_reference(isolated_db):
-    db = get_db()
-    with pytest.raises(ValueError, match='type pull-request and external_id owner/repo#7'):
-        inspect_rules(db, action='explain', project_id=None, artifact_ref={
-            'integration': 'github', 'type': 'pull_request',
-            'external_id': 'https://github.com/owner/repo/pull/7'})
-    db.close()
+@pytest.mark.asyncio
+async def test_project_drop_row_applies_on_webhook_path_only_in_owners_project(isolated_db):
+    from events.router import RouteOutcome, RouteResult
 
-
-def test_retention_deletes_at_most_one_thousand_old_decisions(isolated_db):
-    from events import route_decisions
-
-    envelope = normalize('github', _event(), 'pr.merged')
-    with write_transaction(None, scope='retention') as db:
-        db.executemany('''INSERT INTO event_route_decisions
-            (event_id,rule_id,outcome,scope,at) VALUES (?,'old','digested','global','2000-01-01')''',
-            [(str(i),) for i in range(1001)])
-        route_decisions.record(db, envelope, rule_ids=['new'], thread_id=None,
-                               outcome='dropped', scope='global')
-        assert db.execute("SELECT count(*) FROM event_route_decisions WHERE rule_id='old'").fetchone()[0] == 1
-        assert db.execute("SELECT count(*) FROM event_route_decisions WHERE rule_id='new'").fetchone()[0] == 1
+    register_pr('owner/repo', 7, mk_session('in-one', project_id='one'))
+    register_pr('owner/repo', 8, mk_session('in-two', project_id='two'))
+    with write_transaction(None, scope='project_rule') as db:
+        _rule(db, 'project-drop', scope='project:one', action='drop', event_type='*')
+    with patch('events.router.delivery.deliver_to_thread') as deliver:
+        dropped = await route('webhook.github.pr_opened', pr_payload('owner/repo', 7))
+        kept = await route('webhook.github.pr_opened', pr_payload('owner/repo', 8))
+    assert dropped == RouteResult(RouteOutcome.SUPPRESSED, reason='project-drop')
+    assert kept.outcome != RouteOutcome.SUPPRESSED
+    assert [c.args[0] for c in deliver.call_args_list] == ['in-two']
 
 
 def test_designation_reads_are_batched_across_forty_scopes(isolated_db):

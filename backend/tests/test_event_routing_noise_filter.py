@@ -110,8 +110,7 @@ class TestCheckSuiteFilter:
             res = await _route("webhook.github.check_suite_completed", payload)
 
         from events.router import RouteOutcome
-        assert res.outcome == RouteOutcome.PARKED
-        assert res.reason == "check_suite_cancelled_dropped"
+        assert (res.outcome, res.reason) == (RouteOutcome.SUPPRESSED, "rule_set:github@1:cancelled")
         mock_deliver.assert_not_called()
 
 

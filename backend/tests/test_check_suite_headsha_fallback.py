@@ -387,8 +387,8 @@ class TestRouterCancellation:
             router.route_event("webhook.github.check_suite_completed", payload)
         )
 
-        assert result.outcome == router.RouteOutcome.PARKED
-        assert result.reason == "check_suite_cancelled_dropped"
+        assert (result.outcome, result.reason) == (
+            router.RouteOutcome.SUPPRESSED, "rule_set:github@1:cancelled")
 
 
 class TestReviewerRouteResolutionFailure:

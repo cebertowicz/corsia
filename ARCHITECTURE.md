@@ -26,10 +26,11 @@ send and dispatch services before entering the selected execution provider.
 `event_rules` stores first-seen ownership bindings and per-event deliver/drop
 rules. `backend/events/rules.py` matches both and alone decides drops and
 recipients; the binder retains declaration priority and conflict repair.
-Webhook preparation keeps source ordering and notice cleanup and delivers its
-one evaluated recipient, while platform delivery owns post-delivery watch
-resolution through `plans.public`. Scoped decision records retain 30 days of routing
-explanations; the `event_rules` tool lists, previews and explains without writes.
+Webhooks run one drop pass in the artifact owner's scope after recording
+source facts (check events: before identity resolution, global rows only),
+then deliver their one evaluated recipient;
+platform delivery owns
+post-delivery watch resolution through `plans.public`.
 
 ## Code map
 

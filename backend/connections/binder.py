@@ -221,7 +221,7 @@ def _declared_owner(facts: dict[str, Any], *, db=None) -> str | None:
 
 def bind_owner_for(
     artifact_ref: dict | None, facts: dict[str, Any], connector: str | None, *,
-    repair_owner: str | None = None, db=None, preview: bool = False,
+    repair_owner: str | None = None, db=None,
 ) -> BindResult:
     """Resolve an artifact identity to an owner: ownership, declaration, else rule.
 
@@ -246,8 +246,6 @@ def bind_owner_for(
             return BindResult(record, via="unbound")
         declared_owner = _declared_owner(facts, db=_db)
         if declared_owner is not None:
-            if preview:
-                return BindResult(replace(record, owner_thread=declared_owner), via='declaration')
             bound = AR.register_or_resolve(
                 artifact_ref, owner_intent=declared_owner, db=_db,
             )
@@ -271,16 +269,12 @@ def bind_owner_for(
             conflict = ConflictInfo(
                 fact=top[0].fact, value=top[0].value, precedence=min_prec,
                 rule_ids=tuple(r.id for r in top), destinations=tuple(destinations))
-            # A preview reports the conflict without creating its repair artifact.
-            repair = None if preview else _create_repair_artifact(
+            repair = _create_repair_artifact(
                 _db, connector, artifact_ref, conflict, repair_owner)
             return BindResult(record, via="repair", conflict=conflict,
                               repair_artifact=repair)
 
         winner = top[0]
-        if preview:
-            return BindResult(replace(record, owner_thread=winner.destination_thread_id),
-                              via='rule', matched_rule_id=winner.id)
         bound = AR.register_or_resolve(
             artifact_ref, owner_intent=winner.destination_thread_id, db=_db)
         _record_rule_provenance(_db, artifact_ref, winner)

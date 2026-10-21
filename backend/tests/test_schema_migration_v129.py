@@ -32,7 +32,6 @@ def _fresh() -> sqlite3.Connection:
 def _dev_128() -> sqlite3.Connection:
     """Reconstruct dev schema 128, including the measure registry, in memory."""
     db = _fresh()
-    db.execute('DROP TABLE event_route_decisions')
     db.execute('DROP TABLE event_rules')
     db.execute('''CREATE TABLE connection_rules (
         id TEXT PRIMARY KEY, scope TEXT NOT NULL DEFAULT 'global',

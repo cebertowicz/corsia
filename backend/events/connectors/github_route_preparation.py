@@ -11,7 +11,6 @@ from events.connectors.github import event_chip, summarize_event
 
 if TYPE_CHECKING:
     from events.router import RouteResult
-    from events.envelope import EventEnvelope
 
 
 @dataclass
@@ -26,7 +25,6 @@ class PreparedRoute:
     chip: str | None = None
     notice: str | None = None
     reap_payload: dict[str, Any] | None = None
-    envelope: EventEnvelope | None = None
 
 
 @dataclass
@@ -84,12 +82,17 @@ def _prepare_route(
         return
     if identity is not None and router._record_source_facts_db(internal_event, identity, payload):
         prepared.reap_payload = payload
-
+    # Source facts hold even for an event a rule drops. A check event has none
+    # and ran its drop pass before identity resolution (router.route_event).
+    if internal_event not in router._CHECK_EVENTS:
+        prepared.result = router._rule_drop_result(internal_event, payload, identity)
+        if prepared.result is not None:
+            return
     external_id = identity.external_id if identity else None
     tag_provenance = structured_tag(payload)
     selected = router._select_route(
         internal_event, payload, identity, external_id, tag_provenance,
-        check_suite_base_ref, check_suite_pr_selected, prepared=prepared,
+        check_suite_base_ref, check_suite_pr_selected,
     )
     if isinstance(selected, router.RouteResult):
         prepared.result = selected

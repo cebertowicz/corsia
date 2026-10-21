@@ -118,7 +118,6 @@ async def deliver_to_thread(
     delivery_id: str | None = None,
     chip: str | None = None,
     notice: str | None = None,
-    metadata: dict[str, Any] | None = None,
 ) -> bool:
     """Accept, visibly project, and drive one routed event exactly once."""
     thread_row = get_thread(thread_id)
@@ -133,7 +132,7 @@ async def deliver_to_thread(
             thread_row,
             format_event_input(internal_event, summary, details, notice=notice),
             role="system",
-            metadata=_event_metadata(internal_event, summary, details, metadata, chip),
+            metadata=_event_metadata(internal_event, summary, details, None, chip),
             idempotency_key=_event_idempotency_key(
                 internal_event, summary, details, delivery_id=delivery_id,
             ),
@@ -167,33 +166,24 @@ async def deliver_and_resolve_to_thread(
     delivery_id: str | None = None,
     chip: str | None = None,
     notice: str | None = None,
-    envelope=None,
 ) -> bool:
     """Deliver one event, then resolve the watches this exact delivery ends.
 
     The one owner of "deliver, then resolve" for every caller that routes an
     event to a thread: resolving only after a successful delivery, never
     before, so a task never loses its wait without the payload it waited for.
-    A rule-evaluated ``envelope`` also records its route decision.
     """
     delivered = await deliver_to_thread(
         thread_id, internal_event, summary, details,
         delivery_id=delivery_id, chip=chip, notice=notice,
-        metadata=None if envelope is None else {'provenance': envelope.provenance},
     )
     if delivered:
         from infra.db_async import run_in_db
+        from plans.public import resolve_delivered_event
 
-        if envelope is None:
-            from plans.public import resolve_delivered_event
-
-            await run_in_db(
-                resolve_delivered_event, identity, internal_event, recipient=thread_id,
-            )
-        else:
-            from events.platform import settle_routed_delivery
-
-            await run_in_db(settle_routed_delivery, envelope, thread_id)
+        await run_in_db(
+            resolve_delivered_event, identity, internal_event, recipient=thread_id,
+        )
     return delivered
 
 

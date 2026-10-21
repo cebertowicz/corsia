@@ -10,9 +10,9 @@ from typing import Any
 from loguru import logger
 
 from events import dead_letter, delivery, guard
-from events.platform import _traced, record_drop
-from events.rules import evaluate, event_scope
-from infra.database import get_db, write_transaction
+from events.platform import record_drop
+from events.rules import dropping_rule, evaluate, event_scope
+from infra.database import get_db
 from events.identity import (
     CHECK_SUITE_COMPLETED_EVENTS,
     PrResolutionError,
@@ -29,7 +29,6 @@ from events.connectors.github import (
 from events.github_mapper import pr_terminal_state
 from events.routing_inputs import structured_tag
 from events.connectors.github_route_preparation import (
-    PreparedRoute,
     prepare_route_ordered,
     release_notice_off_loop,
 )
@@ -117,21 +116,26 @@ def _record_passive_change(
     )
 
 
-def _cancelled_check_result(
-    internal_event: str, payload: dict[str, Any],
+def _rule_drop_result(
+    internal_event: str, payload: dict[str, Any], identity: Any = None,
 ) -> RouteResult | None:
-    # Drop rows decide before PR identity resolution, which may need an API read.
-    envelope = github_routing_envelope(internal_event, None, payload)
-    with write_transaction(None, scope='check_event_rule') as db:
-        evaluated = evaluate(envelope, resolve_owner=lambda: [], db=db)
-        if evaluated.dropped_by is None:
-            return None
-        record_drop(db, envelope, evaluated.dropped_by, 'global',
-                    author=guard._event_author(payload).get('login'))
-    return RouteResult(
-        RouteOutcome.PARKED, external_id=None,
-        reason="check_suite_cancelled_dropped",
-    )
+    """The webhook's one drop pass, and the one mapping of a rule drop to a result.
+
+    Drop rows match event facts only; the identity only selects their scope, as
+    platform delivery does. It runs once per event: after source facts with the
+    resolved identity, or before a check event's identity read. That check pass
+    has no artifact yet, so only global drop rows apply to check events here.
+    """
+    envelope = github_routing_envelope(internal_event, identity, payload)
+    db = get_db()
+    try:
+        rule_id = dropping_rule(envelope, scope=event_scope(envelope, db=db), db=db)
+    finally:
+        db.close()
+    if rule_id is None:
+        return None
+    record_drop(envelope, rule_id, author=guard._event_author(payload).get('login'))
+    return RouteResult(RouteOutcome.SUPPRESSED, reason=rule_id)
 
 
 async def _resolve_event_identity(
@@ -152,7 +156,6 @@ async def _resolve_event_identity(
         logger.warning("event-routing: PR resolution failed for {}: {}", internal_event, exc)
         # The ordered DB stage owns error parking as well as normal route writes.
         return exc, None, False
-
 
 
 def _unowned_check_result(
@@ -199,8 +202,6 @@ def _select_route(
     tag: dict[str, str] | None,
     check_suite_base_ref: str | None,
     check_suite_pr_selected: bool,
-    *,
-    prepared: PreparedRoute,
 ) -> tuple[str, str, dict[str, Any]] | RouteResult:
     routing_state: dict[str, Any] = {
         "identity": None, "owner": None, "subscribers": [], "triage": None,
@@ -208,27 +209,20 @@ def _select_route(
     envelope = github_routing_envelope(internal_event, identity, payload)
     db = get_db()
     try:
-        scope = event_scope(envelope, db=db)
-        evaluated = evaluate(envelope, scope=scope, db=db,
-                             resolve_owner=lambda: resolve_targets(envelope))
-        if evaluated.dropped_by:
-            with write_transaction(db, scope='dropped_webhook_rule'):
-                record_drop(db, envelope, evaluated.dropped_by, scope,
-                            author=guard._event_author(payload).get('login'))
-            return RouteResult(RouteOutcome.SUPPRESSED)
+        targets = evaluate(envelope, scope=event_scope(envelope, db=db), db=db,
+                           resolve_owner=lambda: resolve_targets(envelope))
     finally:
         db.close()
-    if len(evaluated.targets) > 1:
+    if len(targets) > 1:
         # One-recipient routing never picks among rule recipients.
         logger.error("event-routing: rules chose {} recipients for {}",
-                     len(evaluated.targets), internal_event)
+                     len(targets), internal_event)
         return _dead_letter_result(internal_event, payload, 'multiple_rule_recipients', external_id)
-    if not evaluated.targets:
+    if not targets:
         return _dead_letter_result(internal_event, payload, 'no_owner', external_id)
-    target = evaluated.targets[0]
+    target = targets[0]
     routing_state = target.routing_state or (
         registry_models.routing_registrations(*identity) if identity else routing_state)
-    prepared.envelope = _traced(envelope, evaluated.rule_ids[target.thread])
     if target.thread is not None and target.disposition == 'dead_letter':
         return _dead_letter_result(internal_event, payload, str(target.reason), external_id)
     if tag is not None and identity is not None:
@@ -258,14 +252,13 @@ async def route_event(
     delivery_id: str | None = None,
 ) -> RouteResult:
     """Resolve an event's owning thread and deliver it as a thread input."""
-    # Check identity may require a provider read. Consult its drop row first,
-    # off-loop, before the connector attempts that read.
     if internal_event in _CHECK_EVENTS:
         from infra.db_async import run_in_db
 
-        cancelled = await run_in_db(_cancelled_check_result, internal_event, payload)
-        if cancelled is not None:
-            return cancelled
+        # Check identity may need a provider read; a dropped event skips it.
+        dropped = await run_in_db(_rule_drop_result, internal_event, payload)
+        if dropped is not None:
+            return dropped
     resolved = await _resolve_event_identity(internal_event, payload)
 
     identity, check_suite_base_ref, check_suite_pr_selected = resolved
@@ -295,7 +288,6 @@ async def route_event(
             delivery_id=delivery_id,
             chip=prepared.chip,
             notice=prepared.notice,
-            envelope=prepared.envelope,
         )
     finally:
         # A refused or raising delivery (StaleContinuation, cancellation) releases

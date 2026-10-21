@@ -1,11 +1,11 @@
 """Deliver a platform-produced event to its owner: wake, digest, drop or dead-letter.
 
 The delivery entrypoint for events the platform itself observes (a poller,
-not a webhook). The webhook router wakes its one evaluated recipient itself
-and records it here (``settle_routed_delivery``); only this path honors digest
-dispositions and more than one recipient. ``normalize`` applies the type's
-declared rules, ``evaluate`` applies drop and delivery rules around
-``resolve_targets``' owner, then each target gets an owner wake
+not a webhook). The webhook router wakes its one evaluated recipient itself;
+only this path honors digest dispositions and more than one recipient.
+``normalize`` applies the type's declared rules, a drop row ends the event
+(``record_drop``, shared with the router), ``evaluate`` applies delivery rules
+around ``resolve_targets``' owner, then each target gets an owner wake
 (``enqueue_event_wake``) when the event is actionable, otherwise an owner
 digest note (``append_thread_context_note``) collapsed by the type's
 declared ``collapse_fact``. An unresolvable target goes to the dead-letter
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from loguru import logger
@@ -27,8 +27,7 @@ from events.connectors import EventTypeDecl, get_manifest
 from events.delivery import enqueue_event_wake
 from events.envelope import EventEnvelope, normalize
 from events.resolve import Target, resolve_targets
-from events.rules import evaluate, event_scope
-from events import route_decisions
+from events.rules import dropping_rule, evaluate, event_scope
 from infra.database import write_transaction
 from infra.db_async import run_in_db_unless_owned
 from infra.passive_changes import append_thread_context_note
@@ -54,15 +53,8 @@ class PlatformDelivery:
     reason: str | None = None
 
 
-def _traced(envelope: EventEnvelope, rule_ids: list[str]) -> EventEnvelope:
-    return replace(envelope, provenance={**envelope.provenance, 'rule_trace': rule_ids})
-
-
-def _after_delivery(db, envelope: EventEnvelope, delivered: PlatformDelivery,
-                    rule_ids: list[str], scope: str) -> None:
+def _after_delivery(db, envelope: EventEnvelope, delivered: PlatformDelivery) -> None:
     """Transport owns the delivery; Plans alone owns watch settlement."""
-    route_decisions.record(db, envelope, rule_ids=rule_ids,
-                           thread_id=delivered.thread_id, outcome=delivered.outcome, scope=scope)
     if delivered.outcome in (WOKE, DIGESTED) and envelope.artifact_ref:
         from events.identity import RoutingIdentity
         from plans.public import resolve_delivered_event
@@ -74,24 +66,14 @@ def _after_delivery(db, envelope: EventEnvelope, delivered: PlatformDelivery,
         )
 
 
-def record_drop(db, envelope: EventEnvelope, rule_id: str, scope: str,
-                *, author: str | None) -> None:
-    """The one record of a rule drop: route decision, log line and product event."""
-    route_decisions.record(db, envelope, rule_ids=[rule_id], thread_id=None,
-                           outcome=DROPPED, scope=scope)
+def record_drop(envelope: EventEnvelope, rule_id: str, *, author: str | None) -> None:
+    """The one record of a rule drop: a log line and the suppressed product event."""
     logger.info("event-routing: rule {} dropped {} (author {})",
                 rule_id, envelope.type, author or '?')
     emit_product_event(
         "event_route", "suppressed",
         properties={"internal_event": envelope.type, "author": author, "rule_id": rule_id},
     )
-
-
-def settle_routed_delivery(envelope: EventEnvelope, thread_id: str) -> None:
-    """Record a router wake and settle its watches, as platform delivery does."""
-    with write_transaction(None, scope='routed_event_delivered') as conn:
-        _after_delivery(conn, envelope, PlatformDelivery(envelope.event_id, thread_id, WOKE),
-                        envelope.provenance['rule_trace'], event_scope(envelope, db=conn))
 
 
 def _wake_message_id(event_id: str, thread_id: str) -> str:
@@ -122,7 +104,6 @@ def _digest_details(envelope: EventEnvelope, collapse_fact: str | None) -> dict[
         k: v for k, v in envelope.facts.items() if k != "message_id"
     }
     details["event_id"] = envelope.event_id
-    details['provenance'] = envelope.provenance
     value = envelope.facts.get(collapse_fact) if collapse_fact else None
     if value is not None:
         details["path"] = str(value)
@@ -171,7 +152,7 @@ def _deliver_target(
     thread = target.thread
     if thread is None or disposition == "dead_letter":
         if _parked(db, envelope):
-            return PlatformDelivery(event_id, thread, DUPLICATE)
+            return PlatformDelivery(event_id, None, DUPLICATE)
         reason = target.reason or target.resolution
         dead_letter.park(
             envelope.type,
@@ -179,7 +160,7 @@ def _deliver_target(
              "facts": envelope.facts},
             reason, event_id, db=db,
         )
-        return PlatformDelivery(event_id, thread, DEAD_LETTERED, reason)
+        return PlatformDelivery(event_id, None, DEAD_LETTERED, reason)
     if disposition == "owner_wake":
         message_id = _wake_message_id(event_id, thread)
         if db.execute("SELECT 1 FROM messages WHERE id=?", (message_id,)).fetchone():
@@ -187,7 +168,7 @@ def _deliver_target(
         enqueue_event_wake(
             thread, envelope.type, _summary(envelope),
             {**envelope.facts, "event_id": event_id},
-            message_id=message_id, db=db, metadata={'provenance': envelope.provenance},
+            message_id=message_id, db=db,
         )
         return PlatformDelivery(event_id, thread, WOKE)
     if _digest_seen(db, thread, event_id):
@@ -215,23 +196,22 @@ def deliver_platform_event_sync(
     decl = get_manifest(connector).decl(envelope.type)
     with write_transaction(db, scope="deliver_platform_event") as conn:
         scope = event_scope(envelope, db=conn)
-        evaluated = evaluate(
+        dropped_by = dropping_rule(envelope, scope=scope, db=conn)
+        if dropped_by is not None:
+            record_drop(envelope, dropped_by, author=envelope.facts.get('author'))
+            return [PlatformDelivery(envelope.event_id, None, DROPPED)]
+        targets = evaluate(
             envelope, scope=scope, db=conn,
             resolve_owner=lambda: resolve_targets(envelope, repair_owner=repair_owner, db=conn),
         )
-        if evaluated.dropped_by:
-            record_drop(conn, envelope, evaluated.dropped_by, scope,
-                        author=envelope.facts.get('author'))
-            return [PlatformDelivery(envelope.event_id, None, DROPPED)]
-        targets = evaluated.targets
         deliveries = [
             PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
             if target_filter is not None and (reason := target_filter(target, conn)) is not None
-            else _deliver_target(conn, _traced(envelope, evaluated.rule_ids[target.thread]), target, decl)
+            else _deliver_target(conn, envelope, target, decl)
             for target in targets
         ]
         for delivered in deliveries:
-            _after_delivery(conn, envelope, delivered, evaluated.rule_ids[delivered.thread_id], scope)
+            _after_delivery(conn, envelope, delivered)
         for delivery in deliveries:
             emit_product_event(
                 "event_route", delivery.outcome,

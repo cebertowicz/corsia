@@ -40,7 +40,6 @@ EXCLUDED: dict[str, str] = {
     "vendor_accounts": _small(7),
     "connections": _small(3),
     "event_rules": "four seeded webhook rules; binding-rule production census 2026-10-21: zero",
-    "event_route_decisions": "new 30-day routing ledger; no production volume yet; bounded reads covered by rule tests",
     "provider_policies": _small(2),
     "project_policy_overrides": _small(1),
     "system_bulletin_identity": _small(1),

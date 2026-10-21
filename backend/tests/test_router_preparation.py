@@ -261,7 +261,8 @@ async def test_real_route_branches_have_no_loop_writes(owned, monkeypatch, branc
             "conclusion": "cancelled" if branch == "cancelled" else "success",
             "pull_requests": [], "head_branch": "dev",
         }}
-        expected = router.RouteOutcome.PARKED
+        expected = (router.RouteOutcome.SUPPRESSED if branch == "cancelled"
+                    else router.RouteOutcome.PARKED)
         if branch == "resolution-error":
             def fail(*args):
                 raise PrResolutionError("synthetic metadata failure")

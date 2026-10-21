@@ -44,23 +44,6 @@ EVENT_RULE_SCHEMA_SQL = f"""
     );
     CREATE INDEX IF NOT EXISTS idx_event_rules_match
         ON event_rules(connector, "on", enabled, event_type, scope, precedence, created_at);
-    CREATE TABLE IF NOT EXISTS event_route_decisions (
-        id INTEGER PRIMARY KEY,
-        event_id TEXT NOT NULL,
-        rule_id TEXT NOT NULL,
-        thread_id TEXT,
-        outcome TEXT NOT NULL,
-        scope TEXT NOT NULL,
-        artifact_integration TEXT,
-        artifact_type TEXT,
-        artifact_external_id TEXT,
-        at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_event_route_decisions_event
-        ON event_route_decisions(scope, event_id, id);
-    CREATE INDEX IF NOT EXISTS idx_event_route_decisions_artifact
-        ON event_route_decisions(scope, artifact_integration, artifact_type, artifact_external_id, id);
-    CREATE INDEX IF NOT EXISTS idx_event_route_decisions_retention ON event_route_decisions(at, id);
 """
 
 # These rows describe webhook behavior only. Poller events keep their current

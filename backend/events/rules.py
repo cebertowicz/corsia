@@ -6,7 +6,7 @@ and disposition remain resolve_targets' responsibility, not a second registry.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 from events.envelope import EventEnvelope
@@ -79,54 +79,49 @@ def matching_rules(facts: dict[str, Any], connector: str, *, on: str,
     ) if matches(rule, facts)]
 
 
-@dataclass
-class Evaluation:
-    targets: list[Target] = field(default_factory=list)
-    rule_ids: dict[str | None, list[str]] = field(default_factory=dict)
-    dropped_by: str | None = None
-
-
-def evaluate(envelope: EventEnvelope, *, scope: str = 'global',
-             resolve_owner: Callable[[], list[Target]], db=None) -> Evaluation:
-    """Drop first, resolve the owner once, then merge delivery rules per thread.
-
-    The owner callback is lazy: dropped events cannot bind an artifact or resolve
-    a watch. A read-only preview supplies a read-only ownership callback.
-    """
-    rules = matching_rules(
+def _every_rules(envelope: EventEnvelope, scope: str, db) -> list[EventRule]:
+    return matching_rules(
         envelope.facts, envelope.connector or '', on='every',
         event_type=envelope.type, scopes=tuple(dict.fromkeys(('global', scope))), db=db,
     )
-    drop = next((r for r in rules if r.action == 'drop'), None)
-    if drop is not None:
-        return Evaluation(dropped_by=drop.id)
+
+
+def dropping_rule(envelope: EventEnvelope, *, scope: str = 'global', db=None) -> str | None:
+    """The first matching drop row's id. Drop rows match event facts only."""
+    return next((r.id for r in _every_rules(envelope, scope, db) if r.action == 'drop'), None)
+
+
+def evaluate(envelope: EventEnvelope, *, scope: str = 'global',
+             resolve_owner: Callable[[], list[Target]], db=None) -> list[Target]:
+    """Resolve the owner once, then merge delivery rules per thread.
+
+    Callers run ``dropping_rule`` first. The owner callback is lazy, so an
+    event no rule delivers to its owner never binds an artifact.
+    """
+    rules = [r for r in _every_rules(envelope, scope, db) if r.action == 'deliver']
     # Webhook defaults are explicit seeded rows. Other producers use rule 0.
     owner_rules = [r for r in rules if r.to == 'registered_owner']
     use_default = not envelope.facts.get('webhook')
     owner_targets = resolve_owner() if owner_rules or use_default else []
-    result = Evaluation()
+    targets: list[Target] = []
     explicit_availability: dict[str, bool] = {}
 
-    def merge(target: Target, rule_id: str, mode: str | None = 'default') -> None:
+    def merge(target: Target, mode: str | None = 'default') -> None:
         if mode in ('wake', 'digest') and target.thread is not None:
             target = replace(target, disposition='owner_' + mode)
-        key = target.thread
-        ids = result.rule_ids.setdefault(key, [])
-        if rule_id not in ids:
-            ids.append(rule_id)
-        existing = next((t for t in result.targets if t.thread == key), None)
+        existing = next((t for t in targets if t.thread == target.thread), None)
         if existing is None:
-            result.targets.append(target)
+            targets.append(target)
         elif target.disposition == 'owner_wake' and existing.disposition != 'owner_wake':
-            result.targets[result.targets.index(existing)] = target
+            targets[targets.index(existing)] = target
 
     if use_default:
         for target in owner_targets:
-            merge(target, 'builtin:0')
+            merge(target)
     for rule in rules:
         if rule.to == 'registered_owner':
             for target in owner_targets:
-                merge(target, rule.id, rule.mode)
+                merge(target, rule.mode)
         else:
             destination = (rule.to or '')[7:]
             if destination == '$corsia_tag':
@@ -141,13 +136,12 @@ def evaluate(envelope: EventEnvelope, *, scope: str = 'global',
                          reason=None if available else inactive,
                          disposition=(delivery_disposition('owner', envelope.event_class)
                                       if available else 'dead_letter')),
-                  rule.id, rule.mode if available else 'default')
+                  rule.mode if available else 'default')
     # A live explicit destination handles an ownerless event. Rule 0's missing
     # owner is not an extra recipient to dead-letter alongside that delivery.
-    if any(target.thread is not None for target in result.targets):
-        result.targets = [target for target in result.targets if target.thread is not None]
-        result.rule_ids.pop(None, None)
-    return result
+    if any(target.thread is not None for target in targets):
+        return [target for target in targets if target.thread is not None]
+    return targets
 
 
 def event_scope(envelope: EventEnvelope, *, db) -> str:
