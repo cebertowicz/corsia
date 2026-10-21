@@ -1015,7 +1015,11 @@ class TestRecheck:
         response = client.post("/api/providers/local/setup", json={"other_omlx": "stop"})
 
         assert response.status_code == 409
-        assert response.json() == {"detail": {"code": refusal}}
+        # Only a changed foreign process is a failure with a recovery line; consent is a question.
+        expected = {"code": refusal}
+        if refusal == "foreign_omlx_changed":
+            expected["fix"] = "CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running."
+        assert response.json() == {"detail": expected}
 
     def test_local_setup_status_route_returns_the_flight_record(self, isolated_db, client, monkeypatch):
         import asyncio

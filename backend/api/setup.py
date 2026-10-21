@@ -302,7 +302,10 @@ async def local_download(request: Request) -> dict | Response:
         apply_foreign_omlx_choice,
         other_omlx=body.other_omlx,
     ):
-        return JSONResponse(status_code=409, content={"code": refusal, "fix": setup_fix("other_omlx")})
+        content = {"code": refusal}
+        if refusal == "foreign_omlx_changed":
+            content["fix"] = setup_fix("other_omlx")
+        return JSONResponse(status_code=409, content=content)
     from llm.local_setup_flow import begin_local_setup
 
     return await begin_local_setup(onboarding=True)

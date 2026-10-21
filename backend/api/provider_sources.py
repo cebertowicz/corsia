@@ -147,7 +147,10 @@ async def setup_local_source(
         apply_foreign_omlx_choice,
         other_omlx=other_omlx,
     ):
-        raise HTTPException(status_code=409, detail={"code": refusal, "fix": setup_fix("other_omlx")})
+        detail = {"code": refusal}
+        if refusal == "foreign_omlx_changed":
+            detail["fix"] = setup_fix("other_omlx")
+        raise HTTPException(status_code=409, detail=detail)
     from llm.local_setup_flow import begin_local_setup
 
     return await begin_local_setup(no_subscription_only=no_subscription_only, automatic=automatic, onboarding=onboarding)

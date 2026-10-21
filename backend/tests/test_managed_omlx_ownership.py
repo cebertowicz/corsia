@@ -100,7 +100,7 @@ def test_backfill_with_no_bindable_port_records_nothing_and_does_not_raise(monke
 @pytest.mark.asyncio
 async def test_startup_local_setup_survives_a_failing_step(monkeypatch) -> None:
     import app_startup_runtime
-    from llm import local_model
+    from llm import local_model, local_setup
 
     calls: list[str] = []
 
@@ -115,15 +115,16 @@ async def test_startup_local_setup_survives_a_failing_step(monkeypatch) -> None:
     async def notified() -> None:
         calls.append("notice")
 
+    # The failed step publishes a durable failed flight; record the call instead of writing one
+    # that later tests would read.
+    monkeypatch.setattr(local_setup, "record_resume_failure", lambda _ref: calls.append("failure"))
     monkeypatch.setattr(local_model, "backfill_legacy_record", broken)
     monkeypatch.setattr("llm.local_setup_flow.resume_pending_setup", resumed)
     monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", notified)
 
-
-
     await app_startup_runtime.resume_local_setup()
 
-    assert calls == ["backfill", "resume", "notice"]
+    assert calls == ["backfill", "failure", "resume", "notice"]
 
 
 @pytest.mark.asyncio

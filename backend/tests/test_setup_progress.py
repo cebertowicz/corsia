@@ -203,9 +203,7 @@ def test_local_download_applies_the_foreign_process_choice_before_starting(clien
     monkeypatch.setattr(setup_api, "apply_foreign_omlx_choice", choice)
     monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", started)
 
-    assert client.post("/api/setup/local-download", json={}, headers=JSON_HEADERS).json() == {
-        "code": "consent_required", "fix": "CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running.",
-    }
+    assert client.post("/api/setup/local-download", json={}, headers=JSON_HEADERS).json() == {"code": "consent_required"}
     kept = client.post("/api/setup/local-download", json={"other_omlx": "keep"}, headers=JSON_HEADERS)
     assert kept.status_code == 200 and kept.json() == {"ok": True}
     stopped = client.post("/api/setup/local-download", json={"other_omlx": "stop"}, headers=JSON_HEADERS)
