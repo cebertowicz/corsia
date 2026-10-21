@@ -23,8 +23,8 @@ ACTION_FIELDS = frozenset({"tool", "params"})
 ACTIONS_FIELDS = frozenset({"required_actions", "forbidden_actions", "decisive_action"})
 SAMPLE_COUNT = 3
 PASS_THRESHOLD = 2
-# Set only after the first guarded three-sample measurement; never infer a number.
-CASES_PER_EDIT_CAP: int | None = None
+# One pending case per existing catalog-ready trigger bounds recovery work.
+CASES_PER_EDIT_CAP = 1
 
 
 class TraceAdapter(Protocol):
@@ -113,6 +113,7 @@ class LocalTraceAdapter:
             "selector": target.transport_model,
             "identity": target.catalog_id,
             "fixture_sha": getattr(getattr(fresh, "context_receipt", None), "fixture_sha", None),
+            "delivered_blob_sha": getattr(getattr(fresh, "context_receipt", None), "delivered_blob_sha", None),
             "neighbour_shas": getattr(getattr(fresh, "context_receipt", None), "neighbour_shas", ()),
         }
         return () if fresh.result is None else fresh.result.tool_calls
@@ -137,6 +138,7 @@ class CarryInRun:
     identity: str | None = None
     target_hash: str | None = None
     fixture_sha: str | None = None
+    delivered_blob_sha: str | None = None
     neighbour_shas: tuple[str, ...] = ()
     reason: str | None = None
 
@@ -277,9 +279,13 @@ def run_three(
         receipt = getattr(adapter, "last_receipt", {})
         if isinstance(receipt, dict) and isinstance(receipt.get("error"), str):
             return CarryInRun("pending", tuple(scores), reason=receipt["error"])
+        delivered_blob_sha = (
+            receipt.get("delivered_blob_sha", receipt.get("fixture_sha"))
+            if isinstance(receipt, dict) else None
+        )
         if (
-            isinstance(receipt, dict) and target_hash is not None
-            and receipt.get("fixture_sha") is not None and receipt["fixture_sha"] != target_hash
+            target_hash is not None and delivered_blob_sha is not None
+            and delivered_blob_sha != target_hash
         ):
             return CarryInRun("pending", tuple(scores), reason="fixture_blob_mismatch")
         score = score_trace(actions, calls)
@@ -296,7 +302,8 @@ def run_three(
     return CarryInRun(
         "settled", tuple(scores),
         selector=receipt.get("selector"), identity=receipt.get("identity"), target_hash=target_hash,
-        fixture_sha=receipt.get("fixture_sha"), neighbour_shas=tuple(receipt.get("neighbour_shas", ())),
+        fixture_sha=receipt.get("fixture_sha"), delivered_blob_sha=receipt.get("delivered_blob_sha", receipt.get("fixture_sha")),
+        neighbour_shas=tuple(receipt.get("neighbour_shas", ())),
     )
 
 

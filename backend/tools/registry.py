@@ -44,6 +44,17 @@ def _is_reserved_execution_param(key: object) -> bool:
     return isinstance(key, str) and key.startswith(_RESERVED_EXECUTION_PREFIXES)
 
 
+async def _record_only_eval_result(name: str, params: dict[str, Any]) -> str | None:
+    """Return the carry-in eval success stub without touching a live tool."""
+    from eval.tool_allowlist import is_carry_in_record_only
+
+    if not is_carry_in_record_only(name):
+        return None
+    from eval.null_tool import RecordOnlyTool
+
+    return await RecordOnlyTool(name).execute(**params)
+
+
 class ToolRegistry:
     """Registry for agent tools."""
 
@@ -231,7 +242,6 @@ class ToolRegistry:
         """Execute once, a ``tool_call`` as the tool it names; the boundary sanitizes."""
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
         name, params, dispatcher = resolve_dispatch(name, params)
-
         _tracer = get_tracer("corsia.tools")
         with _tracer.start_as_current_span(SPAN_TOOL_CALL) as _tool_span:
             set_attrs(_tool_span, {
@@ -239,6 +249,10 @@ class ToolRegistry:
                 "tool.is_null_probe": (name == "null_probe"),
                 **({"tool.dispatcher": dispatcher} if dispatcher else {}),
             })
+
+            if (record_only := await _record_only_eval_result(name, params)) is not None:
+                set_attrs(_tool_span, {"tool.record_only": True})
+                return record_only
 
             tool = self._callable(name, dispatcher)
             if isinstance(tool, str):

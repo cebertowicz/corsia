@@ -6,9 +6,41 @@ import hashlib
 import json
 import os
 from collections.abc import Iterable
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Iterator
 
 
 _ENV = "CORSIA_EVAL_TOOL_ALLOWLIST"
+
+# Carry-in samples inspect a fresh product turn. These are the only tools that
+# may observe state during one; every other resolved tool is recorded without
+# execution so a sample can score its intended action without mutating work.
+CARRY_IN_READ_ONLY_TOOLS = frozenset({
+    "glob",
+    "grep",
+    "list_dir",
+    "plan_read",
+    "read_file",
+})
+_carry_in_tool_isolation: ContextVar[bool] = ContextVar(
+    "carry_in_tool_isolation", default=False,
+)
+
+
+@contextmanager
+def carry_in_tool_isolation() -> Iterator[None]:
+    """Make this task and its child tasks record non-read-only eval calls."""
+    token = _carry_in_tool_isolation.set(True)
+    try:
+        yield
+    finally:
+        _carry_in_tool_isolation.reset(token)
+
+
+def is_carry_in_record_only(tool_name: str) -> bool:
+    """True when a carry-in turn must retain, but not execute, this call."""
+    return _carry_in_tool_isolation.get() and tool_name not in CARRY_IN_READ_ONLY_TOOLS
 
 
 def eval_tool_allowlist() -> tuple[str, ...] | None:

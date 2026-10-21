@@ -63,7 +63,7 @@ def _drain_committed_facts(
 def _pending_facts(db) -> list[CarryInFact]:
     """Rebuild unfinished facts from their existing outcome-event attributes."""
     rows = db.execute(
-        """SELECT pending.agent_thread_id,pending.attributes FROM outcome_events pending
+        """SELECT pending.attributes FROM outcome_events pending
            WHERE pending.event_name=? AND pending.retracted_at IS NULL AND NOT EXISTS (
              SELECT 1 FROM outcome_events terminal WHERE terminal.subject_key=pending.subject_key
                AND terminal.retracted_at IS NULL AND terminal.event_name IN (?, ?)
@@ -75,7 +75,7 @@ def _pending_facts(db) -> list[CarryInFact]:
         try:
             attrs = json.loads(row["attributes"])
             fact = CarryInFact(
-                str(attrs["lesson_id"]), str(row["agent_thread_id"]), str(attrs["target_commit"]),
+                str(attrs["lesson_id"]), str(attrs["owner_thread_id"]), str(attrs["target_commit"]),
                 str(attrs["target_path"]), str(attrs["case_ref"]), str(attrs.get("role", "edit")),
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):

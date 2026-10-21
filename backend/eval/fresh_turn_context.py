@@ -22,13 +22,29 @@ class FencedTarget:
 
 @dataclass(frozen=True)
 class EvalContextReceipt:
-    """Attachments and fixture facts retained until the C1 outcome is recorded."""
+    """Attachments and delivery facts retained until the C1 outcome is recorded."""
 
     thread_id: str
     user_id: str
-    fixture: Path
-    fixture_sha: str
+    fixture: Path | None
+    fixture_sha: str | None
+    delivered_blob_sha: str
     neighbour_shas: tuple[str, ...]
+
+
+def _normally_delivered_target(
+    db, workspace: Path, thread_id: str, project_id: str | None, target_path: Path,
+) -> bool:
+    """Whether the fresh eval thread receives the target through normal scope context."""
+    from core.dynamic_context_registry import _static_sources
+
+    sources, _cwd, _roles = _static_sources(thread_id, project_id, workspace, db)
+    return any(
+        source.inclusion == "included"
+        and source.metadata.get("path") is not None
+        and Path(str(source.metadata["path"])).resolve(strict=False) == target_path
+        for source in sources
+    )
 
 
 def attach_fenced_context(
@@ -60,10 +76,12 @@ def attach_fenced_context(
                 owner_entries.append(entry)
                 seen.add(Path(entry).name)
         target_path = (workspace / target.path).resolve(strict=False)
+        if _normally_delivered_target(db, workspace, thread_id, project_id, target_path):
+            return EvalContextReceipt(thread_id, user_id, None, None, target.blob_sha, ())
         resolved = [Path(entry).expanduser().resolve(strict=False) for entry in owner_entries]
         indexes = [index for index, entry in enumerate(resolved) if entry == target_path]
         if len(indexes) != 1:
-            raise ValueError("carry-in target is not exactly one owner thread bootloader entry")
+            raise ValueError("carry-in target is neither normal scope context nor one owner thread bootloader entry")
         context_root = resolve_thread_root(scope_root, thread_id) / "context"
         context_root.mkdir(parents=True, exist_ok=True)
         fixture = context_root / "CARRY_IN_TARGET.md"
@@ -90,7 +108,9 @@ def attach_fenced_context(
                 for entry in resolved
                 if entry != fixture and entry.is_file()
             )
-            return EvalContextReceipt(thread_id, user_id, fixture, fixture_sha, neighbour_shas)
+            return EvalContextReceipt(
+                thread_id, user_id, fixture, fixture_sha, target.blob_sha, neighbour_shas,
+            )
         except Exception:
             fixture.unlink(missing_ok=True)
             raise
@@ -105,21 +125,22 @@ async def detach_and_delete(receipt: EvalContextReceipt) -> None:
     from core.bootloader_management import thread_bootloader_files
     from infra.database import get_db
 
-    db = get_db()
-    try:
-        files = thread_bootloader_files(receipt.thread_id, db=db)
-        target = BootloaderTarget("thread", receipt.thread_id, receipt.fixture.parent, (receipt.fixture.parent,), True)
-        _write_context_change(
-            db,
-            target=target,
-            user_id=receipt.user_id,
-            action="detach_eval_fenced_context",
-            files=[],
-            expected_files=files,
-        )
-    finally:
-        db.close()
-    receipt.fixture.unlink(missing_ok=True)
+    if receipt.fixture is not None:
+        db = get_db()
+        try:
+            files = thread_bootloader_files(receipt.thread_id, db=db)
+            target = BootloaderTarget("thread", receipt.thread_id, receipt.fixture.parent, (receipt.fixture.parent,), True)
+            _write_context_change(
+                db,
+                target=target,
+                user_id=receipt.user_id,
+                action="detach_eval_fenced_context",
+                files=[],
+                expected_files=files,
+            )
+        finally:
+            db.close()
+        receipt.fixture.unlink(missing_ok=True)
     status = await delete_owned_thread(receipt.thread_id, receipt.user_id, [])
     if status != "ok":
         raise RuntimeError(f"could not delete hidden eval thread: {status}")

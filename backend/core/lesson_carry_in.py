@@ -14,6 +14,11 @@ from core.lesson_carry_in_contract import (
     ACTIONS_FIELDS, ACTION_FIELDS, SAMPLE_COUNT, Action, CarryInRun, LocalTraceAdapter, TraceAdapter, TraceScore, action_matches,
     canonical_calls, is_discriminating, rotated_cases, run_three, scenario_for_case, score_trace, validate_actions,
 )
+from core.lesson_carry_in_history import (
+    case_sha as _case_sha,
+    recorded_target_blob as _recorded_target_blob,
+    target_snapshot as _target_snapshot,
+)
 
 PENDING_EVENT = "learning_loop.carry_in_pending"
 RESULT_EVENT = "learning_loop.carry_in_result"
@@ -73,19 +78,22 @@ def _record(db, *, event_name: str, fact: CarryInFact, dedupe_suffix: str, attri
     from infra.outcome_events import record_outcome_event
 
     specs = {
-        "lesson_id": id_attr(), "target_commit": id_attr(), "target_path": id_attr(), "case_ref": id_attr(),
-        "verdict": enum_attr("pass", "fail"), "owner_resolution": enum_attr("resolved", "owner_unresolved"), "sample_count": count_attr(),
-        "passed_samples": count_attr(), "target_hash": id_attr(), "model_selector": id_attr(),
-        "model_identity": text_attr(500), "blob_sha": id_attr(), "commit": id_attr(),
-        "role": enum_attr("promotion_old", "promotion_new", "edit", "rebaseline"),
-        "target_fixture_sha": id_attr(), "delivered_neighbour_shas": text_attr(4000), "reason": text_attr(500),
+        "lesson_id": id_attr(), "owner_thread_id": id_attr(), "target_commit": id_attr(),
+        "target_path": id_attr(), "case_ref": id_attr(), "case_sha": id_attr(),
+        "verdict": enum_attr("pass", "fail"), "owner_resolution": enum_attr("resolved", "owner_unresolved"),
+        "sample_count": count_attr(), "passed_samples": count_attr(), "target_hash": id_attr(),
+        "model_selector": id_attr(), "model_identity": text_attr(500), "blob_sha": id_attr(),
+        "commit": id_attr(), "role": enum_attr("promotion_old", "promotion_new", "edit", "rebaseline"),
+        "target_fixture_sha": id_attr(), "delivered_blob_sha": id_attr(),
+        "delivered_neighbour_shas": text_attr(4000), "reason": text_attr(500),
     }
     result = record_outcome_event(
         db, dedupe_key=f"{fact.subject_key}:{dedupe_suffix}", event_name=event_name,
         source="corsia", provenance="instrumented", ts=_now(), subject_key=fact.subject_key,
         project_id=_project_id(db, fact.owner_thread_id), agent_thread_id=None,
-        attributes={"lesson_id": fact.lesson_id, "target_commit": fact.target_commit,
-                    "target_path": fact.target_path, "case_ref": fact.case_ref, "role": fact.role, **attributes}, declared_specs=specs,
+        attributes={"lesson_id": fact.lesson_id, "owner_thread_id": fact.owner_thread_id,
+                    "target_commit": fact.target_commit, "target_path": fact.target_path,
+                    "case_ref": fact.case_ref, "role": fact.role, **attributes}, declared_specs=specs,
     )
     return result.inserted
 
@@ -113,7 +121,10 @@ def _is_thread_skill_target(target_path: str) -> bool:
     return len(parts) >= 4 and parts[0] == ".threads" and parts[2] == "skills"
 
 
-def record_result(db, fact: CarryInFact, run: CarryInRun, *, owner_unresolved: bool = False) -> bool:
+def record_result(
+    db, fact: CarryInFact, run: CarryInRun, *, owner_unresolved: bool = False,
+    case_sha: str | None = None,
+) -> bool:
     """Persist a settled three-sample result; callers keep pending results pending."""
     if run.state != "settled" or run.verdict is None or len(run.scores) != SAMPLE_COUNT:
         raise ValueError("only a settled three-sample carry-in run has a result")
@@ -124,8 +135,10 @@ def record_result(db, fact: CarryInFact, run: CarryInRun, *, owner_unresolved: b
             "verdict": run.verdict, "owner_resolution": "owner_unresolved" if owner_unresolved else "resolved",
             "sample_count": SAMPLE_COUNT, "passed_samples": passed, "target_hash": run.target_hash,
             "model_selector": run.selector, "model_identity": _model_identity(run),
-            "blob_sha": run.target_hash, "commit": fact.target_commit, "role": fact.role,
-            "target_fixture_sha": run.fixture_sha, "delivered_neighbour_shas": json.dumps(run.neighbour_shas),
+            "blob_sha": run.delivered_blob_sha or run.target_hash, "case_sha": case_sha,
+            "commit": fact.target_commit, "role": fact.role, "target_fixture_sha": run.fixture_sha,
+            "delivered_blob_sha": run.delivered_blob_sha,
+            "delivered_neighbour_shas": json.dumps(run.neighbour_shas),
         },
     )
 
@@ -271,34 +284,6 @@ def _fresh_scope(db, workspace: Path, target_path: str):
     return FreshTurnScope(project_id=project_id, owner_thread_id=owner, actor_thread_id=owner)
 
 
-def _recorded_target_blob(workspace: Path, fact: CarryInFact) -> tuple[bytes | None, str | None]:
-    """Read the immutable target bytes from guidance history, never from live disk."""
-    from infra.guidance_git import GitFault, _git_bytes, workspace_repository
-
-    repo, reason = workspace_repository(workspace)
-    if repo is None:
-        return None, reason or "guidance history unavailable"
-    try:
-        return _git_bytes(repo, "show", f"{fact.target_commit}:{fact.target_path}"), None
-    except (GitFault, ValueError):
-        return None, "recorded_target_unavailable"
-
-
-def _target_snapshot(workspace: Path, fact: CarryInFact) -> tuple[str | None, str | None]:
-    """Return the recorded blob hash only while disk still equals the target commit."""
-    recorded, reason = _recorded_target_blob(workspace, fact)
-    if recorded is None:
-        return None, reason
-    try:
-        on_disk = (workspace / fact.target_path).read_bytes()
-    except OSError:
-        return None, "recorded_target_unavailable"
-    if on_disk != recorded:
-        return None, "target_changed_after_commit"
-    import hashlib
-
-    return hashlib.sha256(recorded).hexdigest(), None
-
 
 def _rebaseline_first(
     db, workspace: Path, fact: CarryInFact, actions: dict[str, Any], adapter: TraceAdapter, runs: list[CarryInRun],
@@ -328,19 +313,22 @@ def _rebaseline_first(
     setter(FencedTarget(prior.target_path, prior.target_commit, blob, rebaseline.role))
     import hashlib
 
-    run = run_three(
-        actions, adapter, scenario=scenario_for_case(_case_for_fact(workspace, prior) or {}),
-        before_sample=lambda: (hashlib.sha256(blob).hexdigest(), None),
-    )
-    if run.state == "settled":
-        record_result(db, rebaseline, run)
-    elif run.reason is not None:
-        record_pending(db, rebaseline, reason=run.reason)
-    runs.append(run)
-    cleanup = getattr(adapter, "cleanup", None)
-    if cleanup is not None:
-        cleanup()
-    return run.state == "settled"
+    prior_case = _case_for_fact(workspace, prior)
+    try:
+        run = run_three(
+            actions, adapter, scenario=scenario_for_case(prior_case or {}),
+            before_sample=lambda: (hashlib.sha256(blob).hexdigest(), None),
+        )
+        if run.state == "settled":
+            record_result(db, rebaseline, run, case_sha=_case_sha(prior_case))
+        elif run.reason is not None:
+            record_pending(db, rebaseline, reason=run.reason)
+        runs.append(run)
+        return run.state == "settled"
+    finally:
+        cleanup = getattr(adapter, "cleanup", None)
+        if cleanup is not None:
+            cleanup()
 
 
 def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: TraceAdapter) -> list[CarryInRun]:
@@ -376,7 +364,9 @@ def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: Trac
         try:
             if run.state == "settled":
                 owner = target_scope_owner(db, workspace, fact.target_path)
-                record_result(db, fact, run, owner_unresolved=owner is None)
+                record_result(
+                    db, fact, run, owner_unresolved=owner is None, case_sha=_case_sha(case),
+                )
                 if run.verdict == "fail" and (event := _result_event(db, fact)) is not None:
                     from core.self_caught_corrections import record_carry_in_regression
 

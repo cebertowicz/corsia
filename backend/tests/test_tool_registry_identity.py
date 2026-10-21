@@ -42,6 +42,16 @@ class _CaptureTool(Tool):
         return "ok"
 
 
+class _NamedCaptureTool(_CaptureTool):
+    def __init__(self, name: str) -> None:
+        super().__init__()
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+
 class _ResultTool(Tool):
     def __init__(
         self,
@@ -103,6 +113,100 @@ def _seed_session(
     )
     db.commit()
     db.close()
+
+
+@pytest.mark.asyncio
+async def test_carry_in_eval_records_non_read_only_tools_without_executing_them(isolated_db, monkeypatch):
+    from eval.tool_allowlist import carry_in_tool_isolation
+    from infra import state
+
+    _seed_session(
+        isolated_db, thread_id="eval-isolated", user_id="eval-user", project_id=None,
+    )
+    registry = ToolRegistry()
+    read = _NamedCaptureTool("read_file")
+    mutations = [_NamedCaptureTool(name) for name in ("write_file", "plan_update", "delegate_send")]
+    registry.register(read)
+    for tool in mutations:
+        registry.register(tool)
+    async def authorized(tool, _name, _model_params, execution_params, _thread_context):
+        return await tool.execute(**execution_params)
+
+    monkeypatch.setattr(registry, "_authorized_execute", authorized)
+    token = state._current_thread_id.set("eval-isolated")
+    try:
+        with carry_in_tool_isolation():
+            for name, params in (
+                ("write_file", {"path": "context/rule.md", "content": "mutate"}),
+                ("plan_update", {"node_id": "node", "operation": "mark_done"}),
+                ("delegate_send", {"thread_id": "other", "message": "mutate"}),
+                ("new_mutating_tool", {"payload": {"exact": True}}),
+            ):
+                result = json.loads(await registry.execute(name, params))
+                assert result == {"ok": True, "record_only": True, "tool": name}
+            assert await registry.execute("read_file", {"value": "safe"}) == "ok"
+    finally:
+        state._current_thread_id.reset(token)
+
+    assert read.calls == [{"value": "safe", "_thread_id": "eval-isolated", "_thread_project_id": None}]
+    assert all(tool.calls == [] for tool in mutations)
+
+
+@pytest.mark.asyncio
+async def test_carry_in_record_only_calls_keep_the_canonical_trace(monkeypatch):
+    from core import turns_steps
+    from eval.tool_allowlist import carry_in_tool_isolation
+    from infra import state
+
+    registry = ToolRegistry()
+    mutations = [_NamedCaptureTool(name) for name in ("write_file", "plan_update", "delegate_send")]
+    for tool in mutations:
+        registry.register(tool)
+    response = SimpleNamespace(
+        content="", reasoning_content=None,
+        tool_calls=[
+            SimpleNamespace(id="write", name="write_file", arguments={"path": "rule.md", "content": "mutate"}),
+            SimpleNamespace(id="plan", name="plan_update", arguments={"node_id": "node", "operation": "mark_done"}),
+            SimpleNamespace(id="send", name="delegate_send", arguments={"thread_id": "owner", "message": "mutate"}),
+            SimpleNamespace(id="unknown", name="future_mutation", arguments={"value": "exact"}),
+        ],
+    )
+    events = []
+
+    class Context:
+        @staticmethod
+        def add_assistant_message(messages, _content, _calls, **_kwargs):
+            return messages
+
+    agent = SimpleNamespace(
+        tools=registry, context=Context(), _strip_think=lambda _content: "",
+        _tool_hint=lambda _calls: None,
+    )
+
+    async def on_step(kind, payload):
+        events.append((kind, payload))
+        return "step" if kind == "tool_calls_start" else None
+
+    async def append_results(_agent, messages, _results, _thread, _budget, _model):
+        return messages
+
+    monkeypatch.setattr(turns_steps, "_append_tool_results", append_results)
+    monkeypatch.setattr(turns_steps, "_end_preview", lambda _call_id, result: result)
+    token = state._current_thread_id.set("eval-trace")
+    try:
+        with carry_in_tool_isolation():
+            await turns_steps.execute_tool_calls(
+                agent, response, [], "eval-trace", SimpleNamespace(is_set=lambda: False),
+                on_step, [], model="test/model",
+            )
+    finally:
+        state._current_thread_id.reset(token)
+
+    assert [call["function"]["name"] for call in events[0][1]["tool_call_dicts"]] == [
+        "write_file", "plan_update", "delegate_send", "future_mutation",
+    ]
+    assert json.loads(events[1][1]["result"])["record_only"] is True
+    assert all(tool.calls == [] for tool in mutations)
 
 
 @pytest.mark.asyncio

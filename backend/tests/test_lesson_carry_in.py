@@ -64,6 +64,45 @@ async def test_fresh_eval_scope_is_unparented_and_uses_owner_only_for_local_rout
     assert creation.keywords["actor_thread_id"] == "owner"
 
 
+def test_project_context_target_uses_normal_fresh_turn_delivery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from eval.fresh_turn_context import _normally_delivered_target
+
+    workspace = tmp_path / "workspace"
+    target = workspace / "projects" / "project" / "context" / "PROJECT.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("project context\n")
+    calls = []
+
+    def static(thread_id, project_id, root, db):
+        calls.append((thread_id, project_id, root, db))
+        return [SimpleNamespace(inclusion="included", metadata={"path": str(target)})], None, None
+
+    monkeypatch.setattr("core.dynamic_context_registry._static_sources", static)
+    db = object()
+
+    assert _normally_delivered_target(db, workspace, "eval-1", "project", target.resolve())
+    assert calls == [("eval-1", "project", workspace, db)]
+
+
+def test_eval_threads_are_excluded_from_owner_measurement_and_lesson_scopes():
+    from core.measurement_scope import scope_cte
+
+    db = _event_db()
+    db.execute(
+        "INSERT INTO threads (id,user_id,model,project_id,parent_thread_id,created_at,updated_at) "
+        "VALUES ('eval-sample', 'user', 'native/test', 'project', NULL, 't', 't')"
+    )
+    db.execute("UPDATE threads SET project_id='project', agent_enabled=1, agent_status='active' WHERE id='owner'")
+    db.commit()
+    params = {"user_id": "user", "scope_project": "project", "scope_agent": "owner"}
+
+    rows = db.execute(scope_cte() + "SELECT id FROM scope_threads ORDER BY id", params).fetchall()
+
+    assert [row["id"] for row in rows] == ["owner"]
+
+
 def test_scores_required_decisive_action_after_its_precondition():
     from core.lesson_carry_in import score_trace
 
@@ -550,7 +589,6 @@ def test_busy_save_stays_pending_until_the_existing_pending_drain_trigger(tmp_pa
     monkeypatch.setattr("core.lesson_carry_in_drain.LocalTraceAdapter", ReadyAdapter)
     monkeypatch.setattr("core.lesson_carry_in_drain._fresh_scope", lambda *_args: None)
     monkeypatch.setattr("infra.database.get_db", lambda: NoCloseDb())
-    monkeypatch.setattr("core.lesson_carry_in_contract.CASES_PER_EDIT_CAP", 1)
     _drain_pending(workspace)
 
     assert not is_pending(db, fact)
@@ -596,9 +634,17 @@ def test_pending_result_and_retirement_are_queryable_outcome_events():
     assert record_pending(db, fact)
     assert is_pending(db, fact)
 
-    run = CarryInRun("settled", (TraceScore("pass", "required decisive action", 0),) * 3)
-    assert record_result(db, fact, run)
+    run = CarryInRun(
+        "settled", (TraceScore("pass", "required decisive action", 0),) * 3,
+        target_hash="target-sha", delivered_blob_sha="delivered-sha",
+    )
+    assert record_result(db, fact, run, case_sha="case-sha")
     assert not is_pending(db, fact)
+    attrs = json.loads(db.execute(
+        "SELECT attributes FROM outcome_events WHERE event_name='learning_loop.carry_in_result'"
+    ).fetchone()["attributes"])
+    assert attrs["case_sha"] == "case-sha"
+    assert attrs["blob_sha"] == "delivered-sha"
 
     retired = CarryInFact("lesson-2", "owner", "b" * 40, "context/rule.md", ".threads/owner/skills/lesson/SKILL.md#corsia.lesson.case")
     assert record_pending(db, retired)
@@ -606,6 +652,65 @@ def test_pending_result_and_retirement_are_queryable_outcome_events():
     assert not is_pending(db, retired)
     row = db.execute("SELECT attributes FROM outcome_events WHERE event_name='learning_loop.carry_in_retirement'").fetchone()
     assert 'superseded by a corrected rule' in row["attributes"]
+
+
+def test_pending_round_trip_recovers_owner_and_drains_without_a_cap_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from core.lesson_carry_in import CarryInFact, record_pending
+    from core.lesson_carry_in_drain import _drain_pending, _pending_facts
+
+    db = _event_db()
+    fact = CarryInFact("lesson", "owner", "a" * 40, "context/rule.md", "case")
+    assert record_pending(db, fact)
+    assert _pending_facts(db) == [fact]
+    drained: list[CarryInFact] = []
+
+    class NoCloseDb:
+        def __getattr__(self, name):
+            return getattr(db, name)
+
+        def close(self):
+            pass
+
+    class Adapter:
+        def __init__(self, *_args):
+            pass
+
+    def drain(_db, _workspace, facts, _adapter):
+        drained.extend(facts)
+
+    monkeypatch.setattr("infra.database.get_db", lambda: NoCloseDb())
+    monkeypatch.setattr("core.lesson_carry_in_drain.LocalTraceAdapter", Adapter)
+    monkeypatch.setattr("core.lesson_carry_in_drain._fresh_scope", lambda *_args: None)
+    monkeypatch.setattr("core.lesson_carry_in_drain.drain_facts", drain)
+
+    _drain_pending(tmp_path)
+
+    assert drained == [fact]
+
+
+def test_nonunique_or_cloud_ready_rows_do_not_admit_a_local_model(monkeypatch: pytest.MonkeyPatch):
+    from core.lesson_carry_in_contract import ready_local_target
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "llm.resolution.resolve_execution_target", lambda model: calls.append(model),
+    )
+    monkeypatch.setattr(
+        "llm.model_status.get_model_status_rows",
+        lambda: [{"status": "ready", "provider": "cloud", "is_local": False, "litellm_model": "cloud/model"}],
+    )
+    assert ready_local_target() is None
+    monkeypatch.setattr(
+        "llm.model_status.get_model_status_rows",
+        lambda: [
+            {"status": "ready", "provider": "omlx", "is_local": True, "litellm_model": "omlx/one"},
+            {"status": "ready", "provider": "omlx", "is_local": True, "litellm_model": "omlx/two"},
+        ],
+    )
+    assert ready_local_target() is None
+    assert calls == []
 
 
 def test_legacy_case_without_actions_remains_valid():

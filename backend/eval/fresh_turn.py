@@ -166,13 +166,16 @@ async def run_fresh_turn(
 
             await delete_owned_thread(thread_id, user_id, [])
             return FreshTurn(thread_id, None, f"Eval context setup errored: {_failure_detail(exc)}")
-    turn_id, error = await _run_turn(
-        thread_id=thread_id,
-        thread_row=thread_row,
-        prompt=prompt,
-        model=model,
-        timeout_seconds=timeout_seconds,
-    )
+    from eval.tool_allowlist import carry_in_tool_isolation
+
+    with carry_in_tool_isolation():
+        turn_id, error = await _run_turn(
+            thread_id=thread_id,
+            thread_row=thread_row,
+            prompt=prompt,
+            model=model,
+            timeout_seconds=timeout_seconds,
+        )
     if turn_id is None:
         return FreshTurn(thread_id, None, error, cleanup, context_receipt)
     return FreshTurn(thread_id, await read_turn_result(thread_id, turn_id), None, cleanup, context_receipt)
