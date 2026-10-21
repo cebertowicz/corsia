@@ -286,7 +286,7 @@
 		{:else if hasServer && provider.name === 'omlx' && provider.server}
 			<OmlxServerInfoPanel serverId={provider.server.id} />
 		{:else if hasServer}
-			<p class="hint">{provider.label} is added manually by host:port. Server-level settings are owned by the daemon itself.</p>
+			<p class="hint">{provider.label} is added manually by host:port. Its settings are changed on that server, not here.</p>
 		{/if}
 	{/if}
 </Modal>
