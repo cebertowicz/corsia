@@ -49,14 +49,18 @@ def record_failed_plan_node(db, node_id: str, thread_id: str | None) -> bool:
 
 
 def record_plan_correction(db, source_node_id: str, correction_node_id: str) -> bool:
-    """Record a correction against the thread that originally settled its source."""
+    """Record an add_correction against the agent that settled any terminal source."""
+    from plans.node_states import _TERMINAL_STATES
+
+    terminal_states = tuple(sorted(_TERMINAL_STATES))
+    placeholders = ",".join("?" for _ in terminal_states)
     settled = db.execute(
-        """SELECT actor_id,created_at FROM plan_node_events
+        f"""SELECT actor_id,created_at FROM plan_node_events
            WHERE node_id=? AND event='state_transition'
-             AND new_state IN ('accepted','accepted_with_followup','failed')
+             AND new_state IN ({placeholders})
              AND actor_id IS NOT NULL AND actor_id NOT LIKE 'user:%'
            ORDER BY rowid DESC LIMIT 1""",
-        (source_node_id,),
+        (source_node_id, *terminal_states),
     ).fetchone()
     if settled is None:
         return False
