@@ -23,8 +23,8 @@ TOOL_DESCRIPTION = (
     "section that changes the reviewer's area: name that section and your question in `note`. "
     "The reviewer reads only that section and leaves its changes as suggestions. `reviewer` "
     "is a thread ID from `agent_roster`; the document's owner cannot be the reviewer. "
-    "The reviewer is given your current task's intent and acceptance criteria; pass "
-    "`requesting_node_id` only to name a different task you can read."
+    "The reviewer is given the intent of the task you are on when you request (the task's own, "
+    "or the one it inherits from the task it was handed for); request from that task."
 )
 TARGET_REFUSAL = "exactly one of doc_path / artifact_id is required"
 UNREGISTERED_REFUSAL = "doc_path is not registered; register it first or retry with its artifact_id"
@@ -49,7 +49,7 @@ def _cancel_after_commit(fork_id: str) -> None:
 
 def create_request(actor: reviews.ReviewActor, *, reviewer: str, note: str | None,
                    client_id: str, doc_path: str | None = None,
-                   artifact_id: str | None = None, requesting_node_id: str | None = None,
+                   artifact_id: str | None = None,
                    origin: RegistrationOrigin | None = None) -> tuple[dict, list[str]]:
     if bool(doc_path) == bool(artifact_id):
         raise ValueError(TARGET_REFUSAL)
@@ -67,8 +67,7 @@ def create_request(actor: reviews.ReviewActor, *, reviewer: str, note: str | Non
             woken: list[str] = []
             with public.collect_wake_recipients(connection, woken):
                 result = reviews.request_review(
-                    connection, aid, reviewer, actor, note, client_id,
-                    requesting_node_id=requesting_node_id, live_node_id=live,
+                    connection, aid, reviewer, actor, note, client_id, live_node_id=live,
                 )
                 if result["state"] == "forked":
                     after_commit(
@@ -122,8 +121,6 @@ class DocReviewRequestTool(Tool):
             "reviewer": {"type": "string", "description": (
                 "Reviewer thread ID from agent_roster; must be an active agent in your visible roster.")},
             "note": {"type": ["string", "null"], "maxLength": 500},
-            "requesting_node_id": {"type": ["string", "null"], "description": (
-                "Optional: the task this review serves, when not your current one. Must be readable by you.")},
             "client_id": {"type": "string", "maxLength": 64, "description": (
                 "Stable retry key. Reuse it to retrieve the same request. To change a review "
                 "already running, withdraw it and request again with your note.")},
@@ -143,7 +140,6 @@ class DocReviewRequestTool(Tool):
                 reviewer=kwargs.get("reviewer", ""), note=kwargs.get("note"),
                 client_id=kwargs.get("client_id"), doc_path=doc_path,
                 artifact_id=kwargs.get("artifact_id"),
-                requesting_node_id=kwargs.get("requesting_node_id"),
                 origin=origin_from_tool_context(thread_id, kwargs, "doc_review_request"))
         except reviews.ReviewRosterError:
             return f"Error: {reviews.ROSTER_ERROR}"

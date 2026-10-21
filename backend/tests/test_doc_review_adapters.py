@@ -137,6 +137,7 @@ async def test_tool_uses_real_context_schema_and_approved_description(review_env
     tool = DocReviewRequestTool()
     assert tool.description == TOOL_DESCRIPTION
     assert set(tool.parameters["required"]) == {"reviewer", "client_id"}
+    assert "requesting_node_id" not in tool.parameters["properties"]
     result = json.loads(await tool.execute(artifact_id=aid, reviewer="reviewer", client_id="tool-key", _thread_id="requester"))
     assert result["request"]["requester_id"] == "requester"
     assert result["request"]["reviewer_thread_id"] == "reviewer"

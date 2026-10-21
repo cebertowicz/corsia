@@ -1,13 +1,10 @@
-"""A review request names its requester's task by reference (AL5 seam 2), on the fork-first base."""
+"""A review request carries one server-resolved requester task (AL5 seam 2)."""
 from __future__ import annotations
-
-import json
 
 import pytest
 
-from doc_feedback_helpers import seed_thread
 from doceditor import review_requests as reviews
-from plans import admission, mutations, public, service
+from plans import admission, intent_words, mutations, public, service
 from registry.registration_origin import RegistrationOrigin
 from test_doc_review_requests import review_env, stored  # noqa: F401
 from test_review_fork_cold_request import TARGET, _prepare, _turn
@@ -45,15 +42,23 @@ def _actor(kind: str = "agent") -> reviews.ReviewActor:
     return reviews.ReviewActor("agent", "requester", "requester", "owner-token", "Requester")
 
 
-def _ask(aid, *, key="k1", note="Check claims", kind="agent", **kwargs):
-    result, _woken = create_request(_actor(kind), reviewer="reviewer", note=note, client_id=key, artifact_id=aid, **kwargs)
+def _ask(aid, *, key="k1", note="Check claims", kind="agent", origin=None):
+    result, _woken = create_request(
+        _actor(kind), reviewer="reviewer", note=note, client_id=key, artifact_id=aid, origin=origin,
+    )
     return result
 
 
-def test_an_explicit_node_is_stored(review_env):
+def _request_with_live_node(db, aid, node: str, *, key="k1", note="Check claims"):
+    return reviews.request_review(
+        db, aid, "reviewer", _actor(), note, key, live_node_id=node,
+    )
+
+
+def test_the_turns_live_node_is_stored(review_env):
     db, aid = review_env
     node = _task(db, "requester")
-    result = _ask(aid, requesting_node_id=node)
+    result = _ask(aid, origin=_current(db, "requester", node))
     assert result["state"] == "forked" and result["requesting_node_id"] == node
 
 
@@ -73,29 +78,7 @@ def test_a_person_request_is_null_even_from_a_thread_with_a_live_node(review_env
     db, aid = review_env
     node = _task(db, "requester")
     origin = _current(db, "requester", node)
-    assert _ask(aid, kind="user", requesting_node_id=node, origin=origin)["requesting_node_id"] is None
-
-
-@pytest.mark.parametrize("which", ["foreign", "missing"])
-def test_an_unreadable_explicit_node_is_refused_not_nulled(review_env, which):
-    db, aid = review_env
-    seed_thread(db, "stranger")
-    db.execute("UPDATE threads SET user_id='foreign' WHERE id='stranger'")
-    node = _task(db, "stranger") if which == "foreign" else "no-such-node"
-    with pytest.raises(reviews.ReviewRequestError, match="plan_read"):
-        _ask(aid, requesting_node_id=node)
-    assert db.execute("SELECT COUNT(*) FROM doc_review_requests").fetchone()[0] == 0
-
-
-def test_the_notice_names_the_task_by_reference_not_by_text(review_env):
-    db, _aid = review_env
-    node = _task(db, "requester")
-    text = reviews.requesting_task_notice(db, node)
-    assert text == (
-        f"Requested from task {node}; read its current intent and acceptance criteria with "
-        f"plan_read(thread_id='requester', node_id='{node}')."
-    )
-    assert "secret criteria" not in text
+    assert _ask(aid, kind="user", origin=origin)["requesting_node_id"] is None
 
 
 def _words(db, node: str) -> None:
@@ -113,7 +96,7 @@ def test_the_fork_input_carries_the_task_and_revision_read_not_a_plan_read_line(
     db, aid = review_env
     node = _task(db, "requester", "Ship it", intent="Preserve the outcome")
     _words(db, node)
-    result = _ask(aid, requesting_node_id=node)
+    result = _ask(aid, origin=_current(db, "requester", node))
     _turn(db, "completed", "completed", messages=True)
     instruction = _prepare(monkeypatch, result["id"])[1].instruction
     revision = service.get_node(node, db=db).requirements_revision
@@ -127,7 +110,7 @@ def test_the_fork_input_carries_the_task_and_revision_read_not_a_plan_read_line(
 def test_the_fork_reads_the_revision_current_at_fork_start(review_env, monkeypatch):
     db, aid = review_env
     node = _task(db, "requester", "Ship it", intent="Preserve the outcome")
-    result = _ask(aid, requesting_node_id=node)
+    result = _ask(aid, origin=_current(db, "requester", node))
     first = service.get_node(node, db=db).requirements_revision
     mutations.edit_node(
         node, expected_revision=service.get_node(node, db=db).revision, actor_id="requester", db=db,
@@ -160,7 +143,7 @@ def test_an_overlong_criteria_text_is_bounded_in_the_fork_input():
 def test_a_failed_task_read_fails_the_fork_start_instead_of_dropping_the_task(review_env, monkeypatch):
     db, aid = review_env
     node = _task(db, "requester")
-    result = _ask(aid, requesting_node_id=node)
+    result = _ask(aid, origin=_current(db, "requester", node))
 
     def gone(*_args, **_kwargs):
         raise public.PlanError("unknown plan node")
@@ -178,15 +161,24 @@ def test_a_fork_input_without_a_requesting_task_has_no_task_block(review_env, mo
     assert "Requested from task" not in _prepare(monkeypatch, result["id"])[1].instruction
 
 
-def test_escalation_carries_the_row_value(review_env):
+def test_escalation_passes_the_requesting_node_through_unchanged(review_env, monkeypatch):
     db, aid = review_env
     node = _task(db, "requester", intent="Preserve the outcome")
-    result = _ask(aid, requesting_node_id=node)
+    result = _ask(aid, origin=_current(db, "requester", node))
+    seen = []
+    create = public.create_review_node
+
+    def capture(connection, reviewer, request):
+        seen.append(request)
+        return create(connection, reviewer, request)
+
+    monkeypatch.setattr(public, "create_review_node", capture)
     escalated = reviews.escalate_fork(db, result["id"])
     assert escalated["requesting_node_id"] == node
     description = public.get_node(escalated["node_id"], db=db).description
-    assert reviews.requesting_task_notice(db, node) in description and "Check claims" in description
-    assert "Preserve the outcome" not in description  # by reference, never the text
+    assert seen[0]["requesting_node_id"] == node
+    assert "Check claims" in description
+    assert "Requested from task" not in description and "Preserve the outcome" not in description
 
 
 def test_a_pre_migration_row_reads_as_null_through_escalation(review_env):
@@ -199,35 +191,50 @@ def test_a_pre_migration_row_reads_as_null_through_escalation(review_env):
     assert public.get_node(escalated["node_id"], db=db).intent_node_id is None
 
 
-def test_a_no_note_repeat_from_another_task_while_forked_joins_and_a_note_is_refused(review_env):
+def test_a_repeat_from_another_task_is_refused_while_queued(review_env):
     db, aid = review_env
     first, second = _task(db, "requester", "First"), _task(db, "requester", "Second")
-    opened = _ask(aid, requesting_node_id=first)
-    assert _ask(aid, key="k2", note=None, requesting_node_id=first)["id"] == opened["id"]
-    # Another task's no-note repeat joins the running review, as on dev: key recorded, nothing else changes.
-    assert _ask(aid, key="k3", note=None, requesting_node_id=second)["id"] == opened["id"]
-    # A fork's input is frozen, so a note is still refused, from any task.
+    opened = _ask(aid, origin=_current(db, "requester", first))
+    # The adapter committed the request but this module's autouse fixture held its fork launch.
+    with pytest.raises(reviews.ReviewRequestError, match="another task"):
+        _request_with_live_node(db, aid, second, key="k2", note=None)
+    assert stored(db, opened["id"])["requesting_node_id"] == first
+
+
+def test_a_repeat_from_another_task_is_refused_while_forked(review_env):
+    db, aid = review_env
+    first, second = _task(db, "requester", "First"), _task(db, "requester", "Second")
+    _request_with_live_node(db, aid, first)
+    with pytest.raises(reviews.ReviewRequestError, match="another task"):
+        _request_with_live_node(db, aid, second, key="k2", note=None)
+
+
+def test_a_repeat_from_the_same_task_or_none_joins(review_env):
+    db, aid = review_env
+    first = _task(db, "requester", "First")
+    opened = _request_with_live_node(db, aid, first)
+    assert _request_with_live_node(db, aid, first, key="k2", note=None)["id"] == opened["id"]
+    assert reviews.request_review(db, aid, "reviewer", _actor(), None, "k3")["id"] == opened["id"]
     with pytest.raises(reviews.ReviewRequestError, match="already in progress"):
-        _ask(aid, key="k4", note="Also this", requesting_node_id=second)
-    row = stored(db, opened["id"])
-    assert row["requesting_node_id"] == first and row["state"] == "forked"
-    assert json.loads(row["client_ids"]) == ["k1", "k2", "k3"]
-    assert db.execute("SELECT COUNT(*) FROM doc_review_requests").fetchone()[0] == 1
-    assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE owner_thread_id='reviewer'").fetchone()[0] == 0
+        _request_with_live_node(db, aid, first, key="k4", note="Also this")
 
 
-def test_a_repeat_from_another_task_after_escalation_names_it_on_the_review_task(review_env):
+def test_a_repeat_from_another_task_is_refused_after_escalation(review_env):
     db, aid = review_env
     first, second = _task(db, "requester", "First"), _task(db, "requester", "Second")
-    opened = _ask(aid, requesting_node_id=first)
-    node_id = reviews.escalate_fork(db, opened["id"])["node_id"]
-    _ask(aid, key="k2", note=None, requesting_node_id=first)
-    # Escalation named the first task; the same task's repeat adds nothing.
-    assert public.get_node(node_id, db=db).description.count(f"Requested from task {first};") == 1
-    _ask(aid, key="k3", note="Also this", requesting_node_id=second)
-    row = stored(db, opened["id"])
-    assert row["requesting_node_id"] == first
-    description = public.get_node(node_id, db=db).description
-    assert f"Requested from task {second}; read" in description
-    assert f"node_id='{second}')" in description and "Also this" in description
-    assert db.execute("SELECT COUNT(*) FROM doc_review_requests").fetchone()[0] == 1
+    opened = _request_with_live_node(db, aid, first)
+    reviews.escalate_fork(db, opened["id"])
+    with pytest.raises(reviews.ReviewRequestError, match="another task"):
+        _request_with_live_node(db, aid, second, key="k2", note=None)
+
+
+def test_the_fork_and_the_inherited_task_name_the_same_intent_source(review_env, monkeypatch):
+    db, aid = review_env
+    parent = _task(db, "requester", "Parent", intent="Parent intent")
+    child = _task(db, "requester", "Child", intent_node_id=parent)
+    result = _ask(aid, origin=_current(db, "requester", child))
+    _turn(db, "completed", "completed", messages=True)
+    instruction = _prepare(monkeypatch, result["id"])[1].instruction
+    canonical = intent_words.canonical(db, child)
+    assert canonical["id"] == parent
+    assert f'Requested from task "Parent" ({parent})' in instruction

@@ -42,14 +42,9 @@ REVIEWER_NOT_IN_ROSTER = "reviewer_not_in_roster"
 DEFAULT_REQUEST_ERROR_CODE = "review_request_refused"
 CANCEL_REASON = "Review request cancelled by its requester or document owner."
 IN_REVIEW_REFUSAL = "A review is already in progress. Wait for it to finish, or cancel it and request a new review with your note."
-NODE_REFUSAL = (
-    "requesting_node_id {id} is not a task you can read. Pass a task from your plan_read(), "
-    "or omit it to use your current task."
-)
-#: Names the requester's task by reference, never its text: the intent can change after the request.
-REQUESTING_TASK_NOTICE = (
-    "Requested from task {node_id}; read its current intent and acceptance criteria with "
-    "plan_read(thread_id='{owner}', node_id='{node_id}')."
+DIFFERENT_TASK_REFUSAL = (
+    "This reviewer already has an open review of this document for another task, so it would not "
+    "check it against yours. Wait for it to finish, then request again."
 )
 
 
@@ -165,57 +160,23 @@ def get_request(db, request_id: str) -> dict:
     return _view(db, db.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone())
 
 
-def requesting_task_notice(db, node_id: str) -> str:
-    """The one line that names the requester's task and the read that returns it.
-
-    Only reached with a readable node, so its owning thread is known.
-    """
-    return REQUESTING_TASK_NOTICE.format(node_id=node_id, owner=public.node_owner_thread(node_id, db=db))
-
-
-def _readable_node(db, requester: ReviewActor, node_id: str) -> None:
-    """Refuse an explicit task the requester could not open with the read the notice names."""
-    owner = public.node_owner_thread(node_id, db=db)
-    thread = get_thread_for_user(requester.thread_id, requester.user_id, db=db)
-    if owner is None or thread is None:
-        raise ReviewRequestError(NODE_REFUSAL.format(id=node_id))
-    actor = public.PlanActor(requester.thread_id, requester.user_id, thread["project_id"])
-    try:
-        public.read_current_status(actor=actor, node_id=node_id, thread_id=owner, db=db)
-    except (public.PlanError, PermissionError) as exc:
-        raise ReviewRequestError(NODE_REFUSAL.format(id=node_id)) from exc
-
-
-def _requesting_node(db, requester: ReviewActor, explicit: str | None, live: str | None) -> str | None:
-    """The requester's task: an explicit readable one, else its live Turn node, else None.
-
-    A person's request carries none, even from inside a thread. ``live`` is the
-    server-resolved Turn node and is never model-supplied.
-    """
-    if requester.kind != "agent":
-        return None
-    explicit = (explicit or "").strip()
-    if explicit:
-        _readable_node(db, requester, explicit)
-        return explicit
-    return live or None
+def _requesting_node(requester: ReviewActor, live: str | None) -> str | None:
+    """Return only the server-resolved live Turn node for an agent request."""
+    return (live or None) if requester.kind == "agent" else None
 
 
 def _repeat(db, row, actor: ReviewActor, note: str | None, key: str, requesting: str | None = None) -> dict:
     keys = json.loads(row["client_ids"])
     if key in keys:
         return _view(db, row)
+    if requesting and requesting != row["requesting_node_id"]:
+        raise ReviewRequestError(DIFFERENT_TASK_REFUSAL)
     if note and row["state"] == "forked":
         # A fork has already frozen its instruction; silently accepting a
         # later note would claim the reviewer saw it when it could not.
         raise ReviewRequestError(IN_REVIEW_REFUSAL)
     keys.append(key)
     db.execute("UPDATE doc_review_requests SET client_ids=? WHERE id=?", (json.dumps(keys), row["id"]))
-    # The first reference stays on the row. A forked request joins a repeat from another task
-    # unchanged; once the review is a plan task the repeat names its own task there, by reference.
-    if row["state"] != "forked" and requesting and requesting != row["requesting_node_id"]:
-        note = f"{note}\n\n" if note else ""
-        note += requesting_task_notice(db, requesting)
     if note:
         public.append_review_note(db, row["node_id"], {
             **dict(row), "note": note, "requester_display": actor.display,
@@ -225,8 +186,7 @@ def _repeat(db, row, actor: ReviewActor, note: str | None, key: str, requesting:
 
 
 def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: ReviewActor,
-                   note: str | None, client_id: str, *, requesting_node_id: str | None = None,
-                   live_node_id: str | None = None) -> dict:
+                   note: str | None, client_id: str, *, live_node_id: str | None = None) -> dict:
     """Queue one reviewer task, with retry-safe notes and no preemption."""
     key = validate_client_id(client_id)
     if key is None:
@@ -245,7 +205,7 @@ def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: Rev
         if prior is not None:
             return _view(connection, prior)
         # The write lock serializes the pending request check and insert.
-        requesting = _requesting_node(connection, requester, requesting_node_id, live_node_id)
+        requesting = _requesting_node(requester, live_node_id)
         latest = _latest(connection, artifact_id, reviewer_thread_id)
         if latest is not None and is_open(connection, latest):
             return _repeat(connection, latest, requester, note, key, requesting)
@@ -312,12 +272,10 @@ def escalate_fork(db, request_id: str, *, reason: str = "limit",
             return None
         comment_count = request_comment_count(connection, row)
         state = state or ("handed_back" if reason == "limit" else "failed")
-        # The review task can call plan_read, so it names the requester's task by reference.
-        requesting = requesting_task_notice(connection, row["requesting_node_id"]) if row["requesting_node_id"] else ""
         request = {
             **dict(row),
             "requester_display": requester_name(connection, row) or "the requester",
-            "note": "\n\n".join(part for part in (row["note"], requesting, continuation(comment_count, reason)) if part),
+            "note": "\n\n".join(part for part in (row["note"], continuation(comment_count, reason)) if part),
         }
         node = public.create_review_node(connection, row["reviewer_thread_id"], request)
         connection.execute(
