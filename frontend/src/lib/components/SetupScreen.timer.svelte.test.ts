@@ -82,7 +82,7 @@ describe('SetupScreen owned-job polling', () => {
 	});
 
 	it.each(['done', 'failed'] as const)('stops after a CLI job reaches %s', async (terminal) => {
-		mountResume(); await settle(); click('Set up'); await settle();
+		mountResume(); await settle(); click('Sign in'); await settle();
 		expect(intervalSpy).toHaveBeenCalledOnce();
 		installState = terminal; if (terminal === 'done') sourceState = 'unverified';
 		await vi.advanceTimersByTimeAsync(3000); await tick();
@@ -96,18 +96,19 @@ describe('SetupScreen owned-job polling', () => {
 	it('runs Save a report from a failed CLI row', async () => {
 		const invoke = vi.fn(async () => undefined);
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
-		mountResume(); await settle(); click('Set up'); await settle();
+		mountResume(); await settle(); click('Sign in'); await settle();
 		installState = 'failed';
 		await vi.advanceTimersByTimeAsync(3000); await tick();
 		click('Save a report'); await settle();
-		expect(invoke).toHaveBeenCalledWith('save_setup_report');
+		expect(calls).toContain('POST /api/setup/report');
+		expect(invoke).toHaveBeenCalledWith('save_setup_report', { details: '' });
 	});
 
 	it.each([
 		['completed', 'ready'],
 		['failed', 'needs_auth'],
 	] as const)('stops after sign-in reaches %s', async (terminal, nextSourceState) => {
-		mountResume(); await settle(); click('Set up'); await settle();
+		mountResume(); await settle(); click('Sign in'); await settle();
 		installState = 'done'; sourceState = 'needs_auth';
 		await vi.advanceTimersByTimeAsync(3000); await tick();
 		expect(vi.getTimerCount()).toBe(1);
@@ -119,7 +120,7 @@ describe('SetupScreen owned-job polling', () => {
 	});
 
 	it('cleans up an active sign-in timer when the screen unmounts', async () => {
-		mountResume(); await settle(); click('Set up'); await settle();
+		mountResume(); await settle(); click('Sign in'); await settle();
 		installState = 'done'; sourceState = 'needs_auth';
 		await vi.advanceTimersByTimeAsync(3000); await tick();
 		expect(vi.getTimerCount()).toBe(1);
@@ -128,26 +129,19 @@ describe('SetupScreen owned-job polling', () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
-	it('stops after cancellation and unmount', async () => {
-		mountResume(); await settle(); click('Set up'); await settle(); click('Cancel'); await settle();
-		const readsAfterCancel = installReads();
-		expect(clearIntervalSpy).toHaveBeenCalledOnce();
-		expect(vi.getTimerCount()).toBe(0);
-		await vi.advanceTimersByTimeAsync(3000); await tick();
-		expect(installReads()).toBe(readsAfterCancel);
-
-		click('Set up'); await settle();
+	it('stops an install poller on unmount', async () => {
+		mountResume(); await settle(); click('Sign in'); await settle();
 		expect(vi.getTimerCount()).toBe(1);
 		await unmount(component!); component = null;
 		const readsAtUnmount = installReads();
-		expect(clearIntervalSpy).toHaveBeenCalledTimes(2);
+		expect(clearIntervalSpy).toHaveBeenCalledOnce();
 		expect(vi.getTimerCount()).toBe(0);
 		await vi.advanceTimersByTimeAsync(3000); await tick();
 		expect(installReads()).toBe(readsAtUnmount);
 	});
 
 	it('refreshes authenticated sources on models_updated, never from the CLI job timer', async () => {
-		mountResume(); await settle(); click('Set up'); await settle();
+		mountResume(); await settle(); click('Sign in'); await settle();
 		const sourcesBeforeTimer = sourceCalls(), catalogBeforeTimer = catalogCalls();
 		await vi.advanceTimersByTimeAsync(3000); await tick();
 		expect(sourceCalls()).toBe(sourcesBeforeTimer);
@@ -184,7 +178,7 @@ describe('SetupScreen owned-job polling', () => {
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke }); localFailure = true;
 		mountResume(); await settle();
 		click('Save a report'); await settle();
-		expect(invoke).toHaveBeenCalledWith('save_setup_report');
+		expect(invoke).toHaveBeenCalledWith('save_setup_report', { details: '' });
 	});
 
 	it('cleans up a pre-account local download timer when the screen unmounts', async () => {

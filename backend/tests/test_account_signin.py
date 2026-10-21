@@ -513,6 +513,24 @@ async def test_claude_signin_stores_identity_from_status_and_never_an_account_id
 
 @pytest.mark.real_harness_cli
 @pytest.mark.asyncio
+@both
+async def test_signin_starts_when_the_source_row_reads_needs_auth(scripted_vendor_clis, provider):
+    """A fresh install's CLI is signed out, so its row reads needs_auth: that is when Sign in must work."""
+    from connections import account_controls
+    from connections.models import get_connection
+    from infra.database import write_transaction
+
+    with write_transaction(None, scope="test") as conn:
+        conn.execute("UPDATE connections SET status = 'needs_auth' WHERE provider = ?", (provider,))
+    assert get_connection(provider)["status"] == "needs_auth"
+    account = scripted_vendor_clis[provider]
+    started = await account_controls.start_signin(account["id"])
+    assert started["status"] != "unavailable"
+    assert (await _finished(account["id"]))["status"] == "completed"
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
 async def test_codex_signin_stores_only_the_private_identity_fingerprint(scripted_vendor_clis):
     from connections import account_controls
 

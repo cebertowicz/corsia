@@ -13,7 +13,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import shutil
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -93,11 +92,10 @@ async def _custom(account_id: str) -> dict:
 
 
 async def _binary(provider: str) -> str | None:
-    if provider not in VENDORS:  # a non-inference CLI is found whatever the person's own sign-in says
-        from connections import resolve_builtin_binary
-        return (await run_in_db(resolve_builtin_binary, provider))[1]
-    binary, unavailable = await run_in_db(harness_models._provider_binary, provider)
-    return None if unavailable else shutil.which(binary or "")
+    # Found whatever the source row says: a signed-out CLI reads needs_auth, and that is
+    # exactly when its sign-in has to start.
+    from connections import resolve_builtin_binary
+    return (await run_in_db(resolve_builtin_binary, provider))[1]
 
 
 async def _spawn(provider: str, home: str, binary: str, action: str) -> asyncio.subprocess.Process:
@@ -201,6 +199,9 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
         log.warning("account %s sign-in check failed: %s", operation.account_id, type(exc).__name__)
         if operation.status == "waiting":
             operation.status, operation.cause = "failed", "signin_check_failed"
+    finally:
+        if operation.status == "failed":  # a setup report finds this line by the vendor's name
+            log.warning("%s sign-in failed cause=%s", operation.provider, operation.cause)
 
 
 async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> dict[str, Any]:

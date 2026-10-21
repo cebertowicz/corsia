@@ -176,6 +176,27 @@ async def test_success_refreshes_sources_and_notifies_models(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_done_is_reported_only_after_the_source_recheck(monkeypatch):
+    """A reader that sees done must find the installed CLI in the sources, never the old not_installed."""
+    from api import cli_install
+
+    seen = []
+
+    async def refresh():
+        seen.append(cli_install._status("codex")["state"])
+
+    monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor, _job: None)
+    _nothing_installed(monkeypatch)
+    monkeypatch.setattr(cli_install, "recheck_sources_once", refresh)
+    monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
+    monkeypatch.setattr(cli_install, "path_shadowed_binary", lambda _vendor: None)
+    await cli_install.start_install("codex", {})
+    await cli_install._jobs["codex"].task
+    assert seen == ["running"]
+    assert cli_install._status("codex")["state"] == "done"
+
+
+@pytest.mark.asyncio
 async def test_location_check_failure_does_not_break_a_successful_install(monkeypatch, caplog):
     from api import cli_install
 

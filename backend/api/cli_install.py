@@ -234,15 +234,21 @@ def _run_installer(vendor: str, job: InstallJob) -> str | None:
 
 
 async def _complete_job(vendor: str, job: InstallJob) -> None:
-    """Settle an installer job, refresh sources once, and notify live model consumers."""
+    """Refresh sources once, then settle an installer job and notify live model consumers.
+
+    The job reads running until the recheck ends, so a reader that sees done also sees the
+    installed CLI in the sources.
+    """
     try:
         job.reason = await asyncio.to_thread(_run_installer, vendor, job)
     except Exception:
         log.exception("CLI installer for %s stopped unexpectedly", vendor)
         job.reason = INSTALLER_STOPPED
-    job.state = "cancelled" if job.cancelled else "failed" if job.reason else "done"
-    job.settled.set()
-    if job.state == "done":
+    state = "cancelled" if job.cancelled else "failed" if job.reason else "done"
+    if state == "failed":
+        # The reference ties a setup report's row to this line.
+        log.warning("CLI install for %s failed reference=%s cause=%s", vendor, job.ref, install_cause(job.reason))
+    if state == "done":
         try:
             job.path_shadowed_by = await asyncio.to_thread(path_shadowed_binary, vendor)
         except Exception:
@@ -251,6 +257,8 @@ async def _complete_job(vendor: str, job: InstallJob) -> None:
         await recheck_sources_once()
     except Exception:
         log.warning("model source recheck after CLI installation did not complete")
+    job.state = state
+    job.settled.set()
     schedule_models_changed()
 
 

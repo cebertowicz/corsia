@@ -174,17 +174,28 @@ export async function cancelSignin(t: string, accountId: string): Promise<Signin
 	return signinOf(await response.json().catch(() => null), accountId);
 }
 
-/** Start the person's stopped local server through the existing lifecycle route. */
-export async function startLocalServer(t: string): Promise<boolean> {
+/** Start or stop the person's own local server through the existing lifecycle route. */
+async function localServerLifecycle(t: string, action: 'start' | 'stop'): Promise<boolean> {
 	const listed = await fetch('/api/settings/network-servers', { headers: headers(t) });
 	if (!listed.ok) return false;
 	const servers: { id: string; provider: string; kind?: string | null; status: string }[] = (await listed.json())?.servers ?? [];
 	const server = servers.find((row) => row.provider === 'omlx' && row.kind !== 'external' && row.status !== 'disabled');
 	if (!server) return false;
-	const response = await fetch(`/api/settings/network-servers/${encodeURIComponent(server.id)}/lifecycle/start`, {
+	const response = await fetch(`/api/settings/network-servers/${encodeURIComponent(server.id)}/lifecycle/${action}`, {
 		method: 'POST', headers: headers(t),
 	});
-	return response.ok;
+	if (!response.ok) return false;
+	return (await response.json().catch(() => null))?.ok !== false;
+}
+
+/** Start the person's stopped local server through the existing lifecycle route. */
+export async function startLocalServer(t: string): Promise<boolean> {
+	return localServerLifecycle(t, 'start');
+}
+
+/** Turn the person's local server off: the setup toggle's off once the local model is Ready. */
+export async function stopLocalServer(t: string): Promise<boolean> {
+	return localServerLifecycle(t, 'stop');
 }
 
 export interface StarterResult { ok: boolean; in_progress?: boolean; reason?: 'not_your_omlx' | 'mac_cannot_run'; message?: string }

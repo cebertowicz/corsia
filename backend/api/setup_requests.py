@@ -1,5 +1,7 @@
 """Validated request bodies for the loopback-only setup routes."""
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from api.setup_handoff import SetupHandoff
@@ -21,6 +23,23 @@ class SetupProgressUpdate(BaseModel):
     picks: dict[str, StrictBool] | None = None
     handoff: SetupHandoff | None = None
     completed: bool = False
+
+
+class SetupReportRow(BaseModel):
+    """One failed setup row as the screen shows it."""
+
+    model_config = ConfigDict(extra="forbid")
+    key: Literal["claude-code", "codex", "omlx", "api"]
+    name: str = Field(min_length=1, max_length=80)
+    cause: str | None = Field(default=None, max_length=400)
+    reference: str | None = Field(default=None, max_length=160, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class SetupReportRequest(BaseModel):
+    """The failed rows a setup report describes."""
+
+    model_config = ConfigDict(extra="forbid")
+    rows: list[SetupReportRow] = Field(default_factory=list, max_length=8)
 
 
 class FirstAccountRequest(BaseModel):
