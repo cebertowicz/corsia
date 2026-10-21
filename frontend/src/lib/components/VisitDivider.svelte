@@ -1,10 +1,14 @@
 <script lang="ts">
 	// Where this visit's new material starts (AS18); frozen for the visit.
-	let { truncated = false, attached = false }: { truncated?: boolean; attached?: boolean } = $props();
+	let {
+		truncated = false,
+		attached = false,
+		element = $bindable<HTMLDivElement | undefined>(),
+	}: { truncated?: boolean; attached?: boolean; element?: HTMLDivElement } = $props();
 	const LABEL = $derived(truncated ? 'Since your last visit · more above' : 'Since your last visit');
 </script>
 
-<div class="visit-divider" class:attached role="separator" aria-label={LABEL} data-visit-divider>
+<div bind:this={element} class="visit-divider" class:attached role="separator" aria-label={LABEL} data-visit-divider>
 	<span>{LABEL}</span>
 </div>
 
