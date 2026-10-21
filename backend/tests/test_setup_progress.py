@@ -203,7 +203,9 @@ def test_local_download_applies_the_foreign_process_choice_before_starting(clien
     monkeypatch.setattr(setup_api, "apply_foreign_omlx_choice", choice)
     monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", started)
 
-    assert client.post("/api/setup/local-download", json={}, headers=JSON_HEADERS).json() == {"code": "consent_required"}
+    assert client.post("/api/setup/local-download", json={}, headers=JSON_HEADERS).json() == {
+        "code": "consent_required", "fix": "CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running.",
+    }
     kept = client.post("/api/setup/local-download", json={"other_omlx": "keep"}, headers=JSON_HEADERS)
     assert kept.status_code == 200 and kept.json() == {"ok": True}
     stopped = client.post("/api/setup/local-download", json={"other_omlx": "stop"}, headers=JSON_HEADERS)
@@ -215,6 +217,20 @@ def test_local_download_applies_the_foreign_process_choice_before_starting(clien
     ]
     assert started.await_count == 2
     assert started.await_args_list == [call(onboarding=True), call(onboarding=True)]
+
+
+def test_local_download_returns_backend_recovery_for_a_changed_foreign_omlx(client, monkeypatch):
+    from unittest.mock import Mock
+
+    monkeypatch.setattr(setup_api, "apply_foreign_omlx_choice", Mock(return_value="foreign_omlx_changed"))
+
+    response = client.post("/api/setup/local-download", json={}, headers=JSON_HEADERS)
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": "foreign_omlx_changed",
+        "fix": "CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running.",
+    }
 
 
 def test_before_an_account_only_the_local_choice_is_taken(client):

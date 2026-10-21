@@ -214,12 +214,6 @@ def setup_failure() -> dict | None:
     return result if result and not result.get("ok") else None
 
 
-def setup_stopped_following() -> dict | None:
-    """The last unfinished download whose follow window ended."""
-    result = _flight.result
-    return result if result and result.get("downloading") else None
-
-
 def download_estimate() -> tuple[int | None, bool]:
     """The current ETA and stalled flag."""
     return _flight.download_eta_seconds, _flight.download_stalled

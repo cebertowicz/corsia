@@ -165,7 +165,7 @@ describe('SetupScreen owned-job polling', () => {
 			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' });
 			if (url === '/api/setup/local-model' && method === 'POST') return json({ state: 'picked', model: { name: 'Qwen', repository: 'qwen', download_size_bytes: 30_000_000_000, download_size_gb: 30, context_window: 8192 } });
 			if (url === '/api/setup/local-download' && method === 'POST') return json({ state: 'downloading' });
-			if (url === '/api/setup/local-download') return json({ state: localState, model: 'Qwen' });
+			if (url === '/api/setup/local-download') return json({ state: localState, model: 'Qwen', ...(localState === 'start_failed' ? { cause: 'other', fix: 'CORSIA couldn’t set up the local model. Press Retry.' } : {}) });
 			return json({});
 		}));
 		host = document.createElement('div'); document.body.appendChild(host);
@@ -174,7 +174,7 @@ describe('SetupScreen owned-job polling', () => {
 		expect(intervalSpy).toHaveBeenCalledOnce();
 		localState = terminal;
 		await vi.advanceTimersByTimeAsync(3000); await tick();
-		if (terminal === 'start_failed') expect(host.textContent).toContain('Couldn’t start local setup');
+		if (terminal === 'start_failed') expect(host.textContent).toContain('CORSIA couldn’t set up the local model. Press Retry.');
 		expect(clearIntervalSpy).toHaveBeenCalledOnce();
 		expect(vi.getTimerCount()).toBe(0);
 	});

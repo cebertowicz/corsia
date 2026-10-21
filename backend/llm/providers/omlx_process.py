@@ -102,6 +102,11 @@ def port_owner_pid(host: str, port: int) -> PortOwnerPid:
     except (subprocess.SubprocessError, OSError):
         return PORT_OWNER_UNKNOWN
     if out.returncode != 0:
+        # lsof uses exit 1 with no output for its ordinary "no matching
+        # listener" result. Confirm that the port can bind before treating it
+        # as unowned: an unreadable or raced probe must remain unknown.
+        if out.returncode == 1 and not out.stdout and not out.stderr and port_is_free(port):
+            return None
         return PORT_OWNER_UNKNOWN
     if not out.stdout:
         return None

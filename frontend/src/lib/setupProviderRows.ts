@@ -5,13 +5,13 @@ import { measuredDownloadTime } from './setupLocalPresentation';
 
 // Settings imports the separable first sentence from setupLocalPick.
 export type LocalRowState = ModelSource;
-export type LocalRowInput = { source?: LocalRowState; pick: LocalPick | null; eligible: boolean; downloading: boolean; ready: boolean; startError: string; startReference?: string; freeDisk?: number; start: () => void; stop: () => void; check: () => void };
+export type LocalRowInput = { source?: LocalRowState; pick: LocalPick | null; eligible: boolean; downloading: boolean; ready: boolean; startError: string; startFix?: string; startReference?: string; freeDisk?: number; start: () => void; stop: () => void; check: () => void };
 
 const LOCAL_FAILURE_STATES = new Set(['failed', 'setup_failed', 'start_failed']);
 
 /** Present one local lifecycle and one cause-specific recovery action. */
 export function setupLocalRow(input: LocalRowInput): AiRow {
-	const { source, pick, eligible, downloading, ready, startError, startReference, freeDisk, start, stop, check } = input;
+	const { source, pick, eligible, downloading, ready, startError, startFix, startReference, freeDisk, start, stop, check } = input;
 	const row = { key: 'omlx', name: 'Local model' };
 	const model = pick?.model?.name ?? source?.settings_download?.name ?? 'Local model';
 	const size = pick?.model ? `${pick.model.download_size_gb} GB` : source?.download_size ?? '';
@@ -26,7 +26,7 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 	if (LOCAL_FAILURE_STATES.has(source?.local_state ?? '') || startError) {
 		const cause = source?.setup_error_code ?? startError;
 		const reference = source?.setup_error_reference ?? startReference;
-		const meta = source?.fix ?? 'CORSIA couldn’t start local setup. Press Retry, or save a report.';
+		const meta = startError ? startFix ?? '' : source?.fix ?? '';
 		return { ...row, meta, reference, error: true, reportable: Boolean(startError) || cause === 'other' || cause === undefined || source?.local_state === 'start_failed' || cause === 'start_failed' || source?.local_state === 'setup_failed' || cause === 'setup_failed', action: { label: 'Retry', run: start } };
 	}
 	if (pick?.state === 'failed') {

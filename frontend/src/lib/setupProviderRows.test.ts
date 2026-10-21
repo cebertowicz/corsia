@@ -73,8 +73,8 @@ describe('setup provider rows', () => {
 		expect(start).toHaveBeenCalledOnce();
 	});
 
-	it('keeps a request failure reference and offers its report action', () => {
-		const row = setupLocalRow({ ...actions(), pick: null, eligible: true, downloading: false, ready: false, startError: 'other', startReference: 'local-request-123' });
+	it('keeps a network failure reference and offers its report action', () => {
+		const row = setupLocalRow({ ...actions(), pick: null, eligible: true, downloading: false, ready: false, startError: 'other', startFix: 'CORSIA couldn’t start local setup. Press Retry, or save a report.', startReference: 'local-request-123' });
 
 		expect(row).toMatchObject({ meta: 'CORSIA couldn’t start local setup. Press Retry, or save a report.', reference: 'local-request-123', reportable: true });
 	});

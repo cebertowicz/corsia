@@ -20,6 +20,7 @@ from infra.auth import require_user, require_user_header_only
 from infra.db_async import run_in_db, run_off_db
 from llm import local_sources, network_discovery
 from llm.local_setup_foreign import apply_foreign_omlx_choice
+from llm.local_setup_results import setup_fix
 from llm.local_sources import CHECK_AGAIN, external_sources, omlx_source
 
 log = logging.getLogger(__name__)
@@ -146,7 +147,7 @@ async def setup_local_source(
         apply_foreign_omlx_choice,
         other_omlx=other_omlx,
     ):
-        raise HTTPException(status_code=409, detail={"code": refusal})
+        raise HTTPException(status_code=409, detail={"code": refusal, "fix": setup_fix("other_omlx")})
     from llm.local_setup_flow import begin_local_setup
 
     return await begin_local_setup(no_subscription_only=no_subscription_only, automatic=automatic, onboarding=onboarding)

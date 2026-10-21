@@ -332,6 +332,21 @@ def test_stop_mine_falls_back_to_a_signal_when_launchd_is_unreadable(monkeypatch
     assert signals == [101]
 
 
+def test_down_registered_row_does_not_hide_a_personal_omlx(monkeypatch) -> None:
+    from llm import managed_omlx_binary as managed
+    from llm import local_sources, network_endpoints
+    from llm.providers import omlx_process
+
+    personal = managed.OmlxProcess(101, 1, None, "personal")
+    monkeypatch.setattr(managed, "omlx_processes", lambda: (personal,))
+    monkeypatch.setattr(local_sources, "local_omlx_servers", lambda: [{"id": "managed", "port": 8200}])
+    monkeypatch.setattr(network_endpoints, "get_endpoints", lambda _server_id: [{"host": "127.0.0.1", "port": 8200}])
+    monkeypatch.setattr(omlx_process, "port_owner_pid", lambda *_args: None)
+
+    assert managed.foreign_omlx_processes() == (personal,)
+
+
+
 def test_registered_legacy_brew_service_is_never_offered_to_stop(isolated_db, monkeypatch, tmp_path) -> None:
     from llm import local_setup_foreign as foreign, managed_omlx_binary as managed, network_discovery as discovery
     from llm import local_sources

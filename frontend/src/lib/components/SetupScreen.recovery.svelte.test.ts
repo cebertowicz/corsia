@@ -82,13 +82,14 @@ describe('SetupScreen account recovery', () => {
 
 describe('SetupScreen local-start recovery', () => {
 	it.each([
-		['a changed foreign oMLX', [json({ code: 'foreign_omlx_changed' }, 409)], 'CORSIA couldn’t start local setup. Press Retry, or save a report.'],
+		['a changed foreign oMLX', [json({ code: 'foreign_omlx_changed', fix: 'CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running.' }, 409)], 'CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running.'],
 		['an unrecognized refusal without exposing its message', [json({ message: 'private route detail' }, 500)], 'CORSIA couldn’t start local setup. Press Retry, or save a report.'],
 		['an unrecognized refusal with a reference', [json({ message: 'private route detail', ref: 'local-start-123' }, 500)], 'CORSIA couldn’t start local setup. Press Retry, or save a report.'],
 		['an unreachable local backend', [new Error('network down')], 'CORSIA couldn’t start local setup. Press Retry, or save a report.'],
 	] as const)('shows the local row recovery for %s', async (_name, localReplies, expected) => {
 		await openModels({ localEligible: true, localReplies: [...localReplies] });
 		await vi.waitFor(() => expect(host.textContent).toContain(expected));
+		if (_name === 'a changed foreign oMLX') expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Retry')).toBe(true);
 		expect(host.textContent).not.toContain('private route detail');
 	});
 

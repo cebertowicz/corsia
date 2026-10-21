@@ -31,7 +31,8 @@
 	import { isSetupWide } from '$lib/stores/viewport';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
 	type LocalStartResult = 'started' | 'consent_required' | 'foreign_omlx_changed' | 'failed';
-	type LocalStartResponse = { result: LocalStartResult; reference?: string };
+	type LocalStartResponse = { result: LocalStartResult; reference?: string; fix?: string };
+	const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup. Press Retry, or save a report.';
 	async function requestLocalStart(session: string | null, otherOmlx: 'stop' | 'keep' | null = null): Promise<LocalStartResponse> {
 		const response = await fetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
 			method: 'POST',
@@ -41,9 +42,15 @@
 		const body = await response.json().catch(() => null);
 		const code = body?.detail?.code ?? body?.code;
 		const reference = typeof body?.detail?.ref === 'string' ? body.detail.ref : typeof body?.ref === 'string' ? body.ref : undefined;
+		const fix = typeof body?.detail?.fix === 'string' ? body.detail.fix : typeof body?.fix === 'string' ? body.fix : undefined;
 		if (response.status === 409 && code === 'consent_required') return { result: 'consent_required', reference };
-		if (response.status === 409 && code === 'foreign_omlx_changed') return { result: 'foreign_omlx_changed', reference };
-		return { result: response.ok && body?.ok !== false ? 'started' : 'failed', reference };
+		if (response.status === 409 && code === 'foreign_omlx_changed') {
+			if (!fix) throw new Error('local start response omitted recovery');
+			return { result: 'foreign_omlx_changed', reference, fix };
+		}
+		if (response.ok && body?.ok !== false) return { result: 'started', reference };
+		if (!fix) throw new Error('local start response omitted recovery');
+		return { result: 'failed', reference, fix };
 	}
 	function setupFinishRecovery(error: unknown): string {
 		const code = error instanceof SetupFirstModelError ? error.code : undefined;
@@ -68,7 +75,7 @@
 	let folder = $state('~/CORSIA'), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
-	let localStartError = $state<'other' | 'other_omlx' | ''>(''), localStartReference = $state(''), localBusy = $state(false), otherQuestion = $state(false);
+	let localStartError = $state<'other' | 'other_omlx' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false), otherQuestion = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources });
 	const canConnect = shellInfo() !== null;
@@ -92,7 +99,7 @@
 	}
 	const jobs = $derived<SetupJob[]>([
 		...(page !== 'models' && (downloading || localFailed) ? [{ label: 'Local model', state: localFailed ? 'error' as const : 'busy' as const,
-			meta: localFailed ? local?.fix ?? 'Couldn’t start local setup' : local?.local_state === 'starting' ? 'Starting the local model…' : ['Downloading', `${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), progress: (local?.download_percent ?? 0) / 100 }] : []),
+			meta: localFailed ? (localStartError ? startFix : local?.fix) ?? '' : local?.local_state === 'starting' ? 'Starting the local model…' : ['Downloading', `${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), progress: (local?.download_percent ?? 0) / 100 }] : []),
 		...(classifier.job ? [classifier.job] : []),
 		...(accountBusy ? [{ label: 'Starting CORSIA', state: 'busy' as const }] : []),
 	]);
@@ -104,7 +111,7 @@
 			const works = catalog.some((row) => row.connection === vendor && setupModelWorks(row));
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, pill: works ? { state: 'success', label: 'Ready' } : undefined });
 		});
-		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startReference: localStartReference, freeDisk: status.free_disk_gb,
+		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
 			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal() })));
 		const provider = tested.find((test) => bestSetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
 		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${provider.source} · passed a test call` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.',
@@ -156,29 +163,29 @@
 	}
 	async function startLocal() {
 		if (!eligible || localBusy) return;
-		localBusy = true; localStartError = ''; localStartReference = '';
+		localBusy = true; localStartError = ''; localStartReference = ''; startFix = undefined;
 		try {
 			const current = get(token);
-			const { result, reference } = await requestLocalStart(current);
+			const { result, reference, fix } = await requestLocalStart(current);
 			localStartReference = reference ?? '';
 			if (result === 'consent_required') otherQuestion = true;
-			else if (result === 'foreign_omlx_changed') localStartError = 'other_omlx';
-			else if (result === 'failed') localStartError = 'other';
+			else if (result === 'foreign_omlx_changed') { localStartError = 'other_omlx'; startFix = fix; }
+			else if (result === 'failed') { localStartError = 'other'; startFix = fix; }
 			if (current) await refreshSources();
-		} catch { localStartError = 'other'; }
+		} catch { localStartError = 'other'; startFix = LOCAL_START_NETWORK_FAILURE; }
 		finally { localBusy = false; }
 	}
 	async function chooseOther(stop: boolean) {
-		localBusy = true; localStartError = ''; localStartReference = '';
+		localBusy = true; localStartError = ''; localStartReference = ''; startFix = undefined;
 		try {
 			const current = get(token);
-			const { result, reference } = await requestLocalStart(current, stop ? 'stop' : 'keep');
+			const { result, reference, fix } = await requestLocalStart(current, stop ? 'stop' : 'keep');
 			localStartReference = reference ?? '';
-			if (result === 'foreign_omlx_changed') { localStartError = 'other_omlx'; return; }
-			if (result !== 'started') { localStartError = 'other'; return; }
+			if (result === 'foreign_omlx_changed') { localStartError = 'other_omlx'; startFix = fix; return; }
+			if (result !== 'started') { localStartError = 'other'; startFix = fix; return; }
 			otherQuestion = false;
 			if (current) await refreshSources();
-		} catch { localStartError = 'other'; }
+		} catch { localStartError = 'other'; startFix = LOCAL_START_NETWORK_FAILURE; }
 		finally { localBusy = false; }
 	}
 	async function stopLocal() {

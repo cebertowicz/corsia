@@ -40,6 +40,7 @@ def local_setup_error(message: str) -> dict:
     return {
         "ok": False,
         "message": message,
+        "fix": setup_fix("other"),
         "next_action": f"Run `{SETUP_COMMAND}` again after fixing this, or add a subscription/API key.",
     }
 

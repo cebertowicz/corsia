@@ -120,6 +120,25 @@ def test_missing_lsof_is_an_unknown_port_owner(monkeypatch):
     assert omlx_process.port_owner_pid("127.0.0.1", 8200) is omlx_process.PORT_OWNER_UNKNOWN
 
 
+@pytest.mark.parametrize(("stdout", "stderr", "free", "expected"), [
+    ("", "", True, None),
+    ("", "", False, "unknown"),
+    ("", "permission denied", False, "unknown"),
+])
+def test_lsof_exit_one_only_means_no_owner_when_the_port_is_free(monkeypatch, stdout, stderr, free, expected):
+    from llm.providers import omlx_process
+
+    monkeypatch.setattr(omlx_process.shutil, "which", lambda _name: "lsof")
+    monkeypatch.setattr(omlx_process.subprocess, "run", lambda *_args, **_kwargs: subprocess.CompletedProcess(
+        ["lsof"], 1, stdout, stderr,
+    ))
+    monkeypatch.setattr(omlx_process, "port_is_free", lambda _port: free)
+
+    owner = omlx_process.port_owner_pid("127.0.0.1", 8200)
+
+    assert owner is None if expected is None else owner is omlx_process.PORT_OWNER_UNKNOWN
+
+
 def test_reconcile_clears_stale_pid(isolated_runtime):
     from llm.providers.omlx_supervisor import reconcile, _pid_path, _read_pid
     sid = "ns-reconcile-stale"

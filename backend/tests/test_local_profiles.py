@@ -355,3 +355,32 @@ def test_route_starts_the_flight_with_no_model_choice(client, monkeypatch):
 
     assert client.post("/api/providers/local/setup").json() == {"ok": True, "in_progress": True}
     assert calls[-1] == {"no_subscription_only": False, "automatic": False, "onboarding": False}
+
+
+def test_route_returns_backend_recovery_when_starting_fails(client, monkeypatch):
+    from llm.local_setup_results import local_setup_error
+
+    async def begin(**_kwargs):
+        return local_setup_error("could not start")
+
+    monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
+    monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_processes", lambda: ())
+
+    response = client.post("/api/providers/local/setup")
+
+    assert response.status_code == 200
+    assert response.json()["fix"] == "CORSIA couldn’t set up the local model. Press Retry."
+
+
+def test_route_returns_backend_recovery_for_a_changed_foreign_omlx(client, monkeypatch):
+    from api import provider_sources
+
+    monkeypatch.setattr(provider_sources, "apply_foreign_omlx_choice", lambda **_kwargs: "foreign_omlx_changed")
+
+    response = client.post("/api/providers/local/setup")
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": {
+        "code": "foreign_omlx_changed",
+        "fix": "CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running.",
+    }}
