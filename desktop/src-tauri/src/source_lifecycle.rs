@@ -740,7 +740,8 @@ mod tests {
             &home.lifecycle.source.state.join("backend.log"),
             || None,
             stall_window,
-            Duration::from_secs(1),
+            // The cap isn't under test here; leave the writer thread ample time on a loaded host.
+            Duration::from_secs(10),
         )
         .unwrap();
         assert!(began.elapsed() > stall_window);
