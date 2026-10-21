@@ -93,8 +93,10 @@
 		void updateDividerAttachment();
 	}
 
+	// The one owner of the fit: a new divider (collapse remounts it), chip or label variant re-measures;
+	// after that only a change in the chip's width or the space beside it does.
 	$effect(() => {
-		if (!section || !toggleButton || !visitDivider) return;
+		if (dividerVariant === null || !section || !toggleButton || !visitDivider) return;
 		lastDividerContainerWidth = undefined;
 		lastToggleWidth = undefined;
 		observeDividerFit();
@@ -103,16 +105,6 @@
 		observer.observe(section);
 		observer.observe(toggleButton);
 		return () => observer.disconnect();
-	});
-
-	$effect(() => {
-		if (expanded || dividerVariant === null) {
-			dividerAttached = true;
-			return;
-		}
-		lastDividerContainerWidth = undefined;
-		lastToggleWidth = undefined;
-		void updateDividerAttachment();
 	});
 
 	// A stub-backed block reads newest rows first: its rows only start at its start once the read is whole.
