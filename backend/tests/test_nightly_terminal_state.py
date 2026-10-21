@@ -19,7 +19,9 @@ import pytest
 
 @pytest.fixture
 def run_db(tmp_path, monkeypatch):
-    """Give the nightly scheduler an isolated run table."""
+    """Give the nightly scheduler an isolated run table and retirement outbox."""
+    from infra.managed_process_schema import MANAGED_PROCESS_SCHEMA_SQL
+
     path = tmp_path / "nightly-runs.db"
     with sqlite3.connect(path) as db:
         db.execute(
@@ -30,16 +32,24 @@ def run_db(tmp_path, monkeypatch):
                    ran_at TEXT NOT NULL
                )"""
         )
+        db.executescript(MANAGED_PROCESS_SCHEMA_SQL)
 
     def factory():
         db = sqlite3.connect(path)
         db.row_factory = sqlite3.Row
         return db
 
+    from infra import managed_process_store
     from jobs import nightly
 
     monkeypatch.setattr(nightly, "get_db", factory)
     monkeypatch.setattr("infra.database.get_db", factory)
+    # The store binds get_db at import. Once any earlier test has imported it, patching
+    # infra.database alone leaves the retirement drain on the suite's database.
+    monkeypatch.setattr(managed_process_store, "get_db", factory)
+    # The idle-worktree reaper reads repository policy through another import-bound
+    # get_db and removes worktrees; it has its own tests and must not act from here.
+    monkeypatch.setattr("infra.worktree_reaper.reap_all_idle", MagicMock(return_value=None))
     return path
 
 
@@ -71,6 +81,28 @@ async def test_successful_sweep_records_ok_and_runs_retention(run_db, monkeypatc
     retention.assert_called_once_with()
     row = _read_run(run_db)
     assert row["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_retirement_drain_runs_on_the_isolated_database(run_db, monkeypatch):
+    """The drain must consume this fixture's outbox, never the suite's database."""
+    from jobs import nightly
+
+    handle = "nightly-isolation-probe"
+    with sqlite3.connect(run_db) as db:
+        db.execute(
+            "INSERT INTO managed_process_retirements"
+            " (handle, thread_id, head_log_name, tail_log_name, staged_at)"
+            " VALUES (?, 'thread-probe', ?, NULL, '2026-10-20T00:00:00Z')",
+            (handle, f"{handle}.log"),
+        )
+    _install_retention(monkeypatch)
+    await nightly._run_job_safely()
+
+    with sqlite3.connect(run_db) as db:
+        left = db.execute("SELECT COUNT(*) FROM managed_process_retirements").fetchone()[0]
+    assert left == 0
+    assert _read_run(run_db)["status"] == "ok"
 
 
 @pytest.mark.asyncio
