@@ -168,7 +168,7 @@ def annotate(items: list[dict], *, db) -> list[dict]:
                 row, body, sources.get(body["thread_id"]),
                 answerable.get(row["artifact_id"], False),
             )
-        if detail is None:
+        if row is None or detail is None:
             annotated.append({
                 **item, "renderer": None, "detail": None,
                 "deferred": row is not None and row["artifact_id"] in deferred,

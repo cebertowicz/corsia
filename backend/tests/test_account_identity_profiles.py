@@ -9,6 +9,7 @@ import asyncio
 from dataclasses import replace
 import json
 import logging
+import os
 from pathlib import Path
 import shutil
 import sqlite3
@@ -1420,6 +1421,12 @@ def test_unknown_existing_regular_or_retargeted_path_is_never_relinked(accounts,
     assert auth.stat() == before
 
 
+def _link_identity(path: Path) -> tuple:
+    """The link left in place, not replaced. Reading it can move its access time, so that is left out."""
+    st = path.lstat()
+    return st.st_ino, st.st_dev, st.st_mode, st.st_size, st.st_mtime_ns, st.st_ctime_ns, os.readlink(path)
+
+
 def test_first_exact_link_can_be_adopted_after_establishment_crash(accounts, tmp_path):
     from connections.vendor_accounts import get_account
 
@@ -1428,9 +1435,9 @@ def test_first_exact_link_can_be_adopted_after_establishment_crash(accounts, tmp
     home.mkdir()
     auth = home / 'auth.json'
     auth.symlink_to(Path(custom['source_home']) / 'auth.json')
-    before = auth.lstat()
+    before = _link_identity(auth)
     _establish(db, custom, receipt, home, 'discovery')
-    assert auth.lstat() == before
+    assert _link_identity(auth) == before
     assert get_account(custom['id'], db=db)['discovery']['auth_projection']['homes'][str(auth)]['phase'] == 'established'
 
 
@@ -1470,8 +1477,8 @@ def test_fresh_login_cleanup_is_fenced_and_never_deletes_new_projection(accounts
     assert cleanup_stale(current, quiesced=True, db=db)
     assert not auth.exists()
     _establish(db, updated, current)
-    before = auth.lstat()
+    before = _link_identity(auth)
     assert not cleanup_stale(old, quiesced=True, db=db)
-    assert auth.lstat() == before
+    assert _link_identity(auth) == before
     validate_projection(current, home=auth.parent, db=db)
     assert get_account(custom['id'], db=db)['discovery']['auth_projection']['stale'] == []

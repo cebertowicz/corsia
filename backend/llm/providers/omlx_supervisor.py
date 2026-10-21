@@ -18,6 +18,11 @@ from infra.db_async import run_in_db
 from llm.network_endpoints import lan_base, models_probe_url
 from llm.providers import omlx_process as process
 from llm.providers.omlx_endpoints import _resolve_endpoint as _resolve_endpoint_via_freshness
+from llm.providers.omlx_supervisor_config import (
+    listen_host as _listen_host,
+    resolve_endpoint as _resolve_endpoint,
+    resolve_settings as _resolve_settings,
+)
 
 log = logging.getLogger("llm.providers.omlx.supervisor")
 
@@ -37,6 +42,14 @@ HEALTH_POLL_INTERVAL_S = 0.5
 SIGTERM_GRACE_S = 5.0
 
 
+def is_corsia_process(pid: int) -> bool:
+    """Match an observed process to the supervisor's durable spawn records, regardless of argv."""
+    for path in RUNTIME_DIR.glob("omlx-*.pid"):
+        if process.read_pid(path.parent, path.stem.removeprefix("omlx-"), preserve_legacy=True) == pid:
+            return True
+    return False
+
+
 def _pid_path(server_id: str):
     return process.pid_path(RUNTIME_DIR, server_id)
 
@@ -45,8 +58,10 @@ def _log_path(server_id: str):
     return process.log_path(RUNTIME_DIR, server_id)
 
 
-def _read_pid(server_id: str) -> int | None:
-    return process.read_pid(RUNTIME_DIR, server_id)
+def _read_pid(server_id: str, *, host: str | None = None, port: int | None = None) -> int | None:
+    owner = (_port_owner_pid(host, port) if host is not None and port is not None
+             else process.PORT_OWNER_UNKNOWN)
+    return process.read_pid(RUNTIME_DIR, server_id, legacy_port_owner_pid=owner)
 
 
 def _write_pid(server_id: str, pid: int) -> None:
@@ -70,12 +85,46 @@ def _process_exited(pid: int) -> bool:
     return waited_pid == pid or not _process_alive(pid)
 
 
-def _port_owner_pid(host: str, port: int) -> int | None:
+def _port_owner_pid(host: str, port: int) -> process.PortOwnerPid:
     return process.port_owner_pid(host, port)
 
 
-def _build_argv(host: str, port: int, settings: dict) -> list[str]:
-    return process.build_argv(host, port, settings)
+def _build_argv(
+    host: str,
+    port: int,
+    settings: dict,
+    *,
+    executable: str | None = None,
+) -> list[str]:
+    return process.build_argv(host, port, settings, executable=executable)
+
+
+def _is_managed_omlx_row(settings: dict) -> bool:
+    from llm.managed_omlx_binary import managed_omlx_paths
+
+    return settings.get("base_path") == str(managed_omlx_paths().base_path)
+
+
+def _managed_omlx_argv(host: str, port: int, settings: dict) -> list[str] | dict[str, Any]:
+    """Resolve the bundled executable only for CORSIA's setup-created row."""
+    if _is_managed_omlx_row(settings):
+        install_error = process.managed_omlx_install_error()
+        if install_error:
+            return {"ok": False, "message": install_error}
+        executable = process.managed_omlx_executable()
+    else:
+        executable = None
+    executable = executable or shutil.which("omlx")
+    if not executable:
+        return {
+            "ok": False,
+            "message": (
+                "omlx binary not found on PATH. Install oMLX "
+                "(`brew install omlx` or pip install omlx) and retry."
+            ),
+        }
+    return _build_argv(host, port, settings, executable=executable)
+
 
 async def _wait_for_healthy(
     host: str, port: int, timeout_s: float, *, server_id: str | None = None,
@@ -103,85 +152,6 @@ def _tail_log(server_id: str, lines: int = 20) -> str:
     return process.tail_log(RUNTIME_DIR, server_id, lines=lines)
 
 
-def _resolve_settings(cfg: dict) -> dict:
-    """Merge the row's metadata_json and stored key with ``cfg`` so explicit cfg keys win."""
-    sid = cfg.get("server_id")
-    base: dict = {}
-    if sid:
-        try:
-            from infra.key_store_servers import resolve_server
-            from llm.network_discovery import get_server_metadata
-            base = get_server_metadata(sid) or {}
-            if stored_key := resolve_server(sid):
-                base["api_key"] = stored_key
-        except Exception as e:
-            log.warning(f"server metadata lookup failed for {sid}: {e}")
-            base = {}
-    for k in ("api_key", "model_dir", "max_model_memory"):
-        if cfg.get(k) is not None:
-            base[k] = cfg[k]
-    return base
-
-
-def _resolve_stale_endpoint(
-    server_id: str,
-    host: str | None,
-    port: int | str | None,
-) -> tuple[str | None, int | None]:
-    try:
-        from llm.network_discovery import get_server
-        from llm.network_endpoints import get_endpoints
-        server = get_server(server_id)
-        if not server:
-            return None, None
-        port = port or (int(server["port"]) if server.get("port") else None)
-        if not host:
-            for ep in get_endpoints(server_id) or []:
-                if ep.get("host") in ("127.0.0.1", "localhost"):
-                    host = ep["host"]
-                    break
-            if not host:
-                host = "127.0.0.1"
-    except Exception as e:
-        log.warning(f"endpoint resolution failed for {server_id}: {e}")
-    return host, int(port) if port else None
-
-
-def _resolve_endpoint(cfg: dict) -> tuple[str | None, int | None]:
-    """Resolve (host, port), including offline rows with stale endpoints."""
-    host, port = cfg.get("host"), cfg.get("port")
-    if host and port:
-        return host, int(port)
-
-    fresh_host, fresh_port = _resolve_endpoint_via_freshness(cfg)
-    if fresh_host and fresh_port:
-        return fresh_host, int(fresh_port)
-
-    server_id = cfg.get("server_id")
-    if not server_id:
-        return None, None
-    return _resolve_stale_endpoint(server_id, host, port)
-
-
-def _listen_host(resolved: str) -> str:
-    """Keep the managed oMLX listener inside the exposure the user chose.
-
-    A local setup binds CORSIA to loopback, so oMLX must not listen on a LAN
-    address either. A server or pre-choice install keeps the endpoint host.
-    The running service never refuses here: an unreadable choice falls back
-    to loopback, the narrowest exposure.
-    """
-    from infra.bind_host import LOCAL_BIND, BindHostError, resolve_bind_host
-    from infra.config import BOOTSTRAP_CONFIG_PATH
-
-    try:
-        bind = resolve_bind_host(BOOTSTRAP_CONFIG_PATH)
-    except (BindHostError, OSError) as exc:
-        log.warning("oMLX bind host unreadable (%s); using %s", exc, LOCAL_BIND)
-        bind = LOCAL_BIND
-    return LOCAL_BIND if bind == LOCAL_BIND else resolved
-
-
 def _spawn_process(argv: list[str], log_path) -> subprocess.Popen | dict[str, Any]:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -206,7 +176,7 @@ def _failed_boot_result(
     port: int,
     pid: int,
 ) -> dict[str, Any]:
-    if _process_alive(pid):
+    if _read_pid(server_id) == pid:
         try:
             os.kill(pid, signal.SIGTERM)
         except (OSError, ProcessLookupError) as exc:
@@ -216,7 +186,8 @@ def _failed_boot_result(
                 pid,
                 exc,
             )
-    _clear_pid(server_id)
+    if _process_exited(pid):
+        _clear_pid(server_id)
     tail = _tail_log(server_id, lines=20)
     return {
         "ok": False,
@@ -238,7 +209,7 @@ async def start_server(cfg: dict) -> dict[str, Any]:
         return {"ok": False, "message": "start_server: cfg has no host/port"}
     host = _listen_host(host)
 
-    existing_pid = _read_pid(sid)
+    existing_pid = _read_pid(sid, host=host, port=int(port))
     if existing_pid and _process_alive(existing_pid):
         owner = _port_owner_pid(host, port)
         if owner == existing_pid:
@@ -249,12 +220,11 @@ async def start_server(cfg: dict) -> dict[str, Any]:
                 "already_running": True,
                 "message": f"oMLX already running on {host}:{port} (pid {existing_pid})",
             }
-        log.info("start_server: stale pid %s for %s — port owned by %s",
-                 existing_pid, sid, owner)
-        _clear_pid(sid)
+        return {"ok": False, "pid": existing_pid,
+                "message": "The local model isn't responding. Stop it in Settings › Providers, then retry."}
 
     owner = _port_owner_pid(host, port)
-    if owner is not None and (existing_pid is None or owner != existing_pid):
+    if isinstance(owner, int) and (existing_pid is None or owner != existing_pid):
         return {
             "ok": False,
             "message": (
@@ -263,19 +233,10 @@ async def start_server(cfg: dict) -> dict[str, Any]:
             ),
         }
 
-    omlx_bin = shutil.which("omlx")
-    if not omlx_bin:
-        return {
-            "ok": False,
-            "message": (
-                "omlx binary not found on PATH. Install oMLX "
-                "(`brew install omlx` or pip install omlx) and retry."
-            ),
-        }
-
     settings = await run_in_db(_resolve_settings, cfg)
-    argv = _build_argv(host, int(port), settings)
-    argv[0] = omlx_bin
+    argv = _managed_omlx_argv(host, int(port), settings)
+    if isinstance(argv, dict):
+        return argv
 
     log_path = _log_path(sid)
     spawned = _spawn_process(argv, log_path)
@@ -311,9 +272,12 @@ async def stop_server(cfg: dict) -> dict[str, Any]:
     if not sid:
         return {"ok": False, "message": "stop_server: missing server_id in cfg"}
 
-    pid = _read_pid(sid)
+    host, port = await run_in_db(_resolve_endpoint, cfg)
+    host = _listen_host(host) if host else None
+    had_record = _pid_path(sid).exists()
+    pid = _read_pid(sid, host=host, port=int(port) if port else None)
     if not pid:
-        return {"ok": False, "message": "Not running (no pid file)"}
+        return {"ok": had_record, "already_stopped": had_record, "message": "Not running"}
 
     if not _process_alive(pid):
         _clear_pid(sid)
@@ -338,6 +302,8 @@ async def stop_server(cfg: dict) -> dict[str, Any]:
     if not exited:
         exited = _process_exited(pid)
 
+    if not exited and _read_pid(sid, host=host, port=int(port) if port else None) != pid:
+        exited = True
     if not exited:
         try:
             os.kill(pid, signal.SIGKILL)
@@ -361,11 +327,12 @@ def reconcile(cfg: dict) -> dict[str, Any]:
     sid = cfg.get("server_id")
     if not sid:
         return {"adopted": False, "cleared": False, "pid": None}
-    pid = _read_pid(sid)
+    had_record = _pid_path(sid).exists()
+    host, port = _resolve_endpoint_via_freshness(cfg)
+    pid = _read_pid(sid, host=host, port=int(port) if port else None)
     if pid is None:
-        return {"adopted": False, "cleared": False, "pid": None}
+        return {"adopted": False, "cleared": had_record, "pid": None}
     if _process_alive(pid):
-        host, port = _resolve_endpoint_via_freshness(cfg)
         if host and port:
             _mark_endpoint_alive(sid, host, int(port))
         return {"adopted": True, "cleared": False, "pid": pid}

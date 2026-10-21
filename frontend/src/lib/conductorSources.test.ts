@@ -59,6 +59,7 @@ describe('source routes', () => {
 		expect(await fetchSources('tok')).toEqual([{ source: 'omlx' }]);
 		expect(await recheckSources('tok')).toEqual([{ source: 'omlx' }]);
 		expect(await setupLocalSource('tok')).toEqual({ ok: true });
+		expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ body: JSON.stringify({ other_omlx: null }) });
 		expect(await fetchLocalModelRecommendations('tok')).toEqual({ state: 'ready', sections: { best: [] } });
 		await startLocalModelDownload('tok', 'org/model');
 		await cancelLocalDownload('tok');

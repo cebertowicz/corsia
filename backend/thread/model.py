@@ -229,7 +229,11 @@ async def _apply_first_selection(
         return None
     from infra.onboarding_events import note_first_model_selected
     from onboarding.first_chat_switch import record_first_model
+    from onboarding.local_download_wake import flush_pending_local_download
 
+    # ``select_first_model`` committed the rendered first-run wake above. A setup
+    # download that ended while the person was still in setup can now be delivered.
+    await flush_pending_local_download(thread_id)
     await run_in_db(note_first_model_selected, thread_id, destination_model.strip())
     if setup_selection:
         await run_in_db(record_first_model, thread_id, destination_model.strip())

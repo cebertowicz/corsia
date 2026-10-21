@@ -152,8 +152,8 @@ export function createSetupRemote(deps: Deps = {}) {
 				await hold(REFUSAL_HOLD_MS);
 				code = ''; invalid = false; refocus += 1;
 			} else {
-				chooseError = unreachableLine(result.reason, label, { app: result.app_version, host: result.host_version }) ?? '';
-				code = ''; stage = 'choose';
+				refusal = unreachableLine(result.reason, label, { app: result.app_version, host: result.host_version }) ?? '';
+				code = entered; stage = 'code';
 			}
 			busy = false;
 			return result;

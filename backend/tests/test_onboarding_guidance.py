@@ -115,6 +115,12 @@ def test_settings_keys_is_spelled_by_the_one_constant():
             assert spelling == SETTINGS_KEYS
 
 
+def test_the_key_how_to_says_never_in_chat_before_where_to_find_the_key():
+    web_search = WEB_SEARCH.read_text(encoding="utf-8")
+    warning = web_search.index("The key goes only in Settings › Keys, never here in chat.")
+    assert warning < web_search.index("Press Add API Key")
+
+
 def test_first_run_sets_the_reviewer_in_chat_and_never_enables_auto_approve():
     first_run = FIRST_RUN.read_text(encoding="utf-8")
     task_3 = first_run.split("## Task 3:", 1)[1].split("## Task 4:", 1)[0]
@@ -206,23 +212,38 @@ def test_local_model_offer_reads_a_running_setup_before_offering_and_never_waits
     offer = LOCAL_MODEL_OFFER.read_text(encoding="utf-8")
     running = offer.split("## Setup already running", 1)[1]
 
-    assert offer.index("`state` is `running` or `downloading`") < offer.index("2. Ask once")
+    assert offer.index("`state` is `starting` or `downloading`") < offer.index("2. Ask once")
     assert "make no offer" in offer
-    # A succeeded flight's result outlives its connection (kept in memory until restart),
-    # so it only stops the offer while a local model is still connected.
-    assert "if none is, that result is old: carry on as if it were absent" in offer
+    # A durable ready outcome alone is not proof that its endpoint still works.
+    assert "re-check with `model_sources` `recheck: true`" in offer
+    assert "if a local model is connected, make no offer" in offer
     assert "never holds up a setup task" in running
     assert "at the end of each later setup task" in running
-    assert "`succeeded`" in running and "`failed`" in running and "Each is said once." in running
-    assert "never post `result.next_action`" in running
+    for state in ("ready", "stopped", "setup_failed", "start_failed", "failed"):
+        assert f"`{state}`" in running
+    assert "say once what failed" in running
+    assert "plain words, plus `ref` when present" in running
+    assert "eta_seconds" not in offer
     assert "re-read it after each later task" in FIRST_RUN.read_text(encoding="utf-8")
+
+
+def test_local_model_offer_names_what_stop_and_keep_do_and_never_reads_a_wake_flight_twice():
+    offer = LOCAL_MODEL_OFFER.read_text(encoding="utf-8")
+    running = offer.split("## Setup already running", 1)[1]
+
+    assert "Stop it, or keep it running? Stopping it frees memory." in offer
+    assert "on a second one, offer to keep both instead" in offer
+    assert "setup ended without a model" in offer
+    assert "For `cause: memory` offer no retry" in running
+    assert "never read it again unless the person asks" in running
+    assert "A download you started in step 3" in running
 
 
 def test_local_model_offer_reads_omlx_s_pick_and_never_sends_a_profile():
     offer = LOCAL_MODEL_OFFER.read_text(encoding="utf-8")
 
     # Setup takes the model oMLX recommender picks.
-    for state in ("low_memory", "own_omlx", "picked", "not_checked", "checking", "failed"):
+    for state in ("low_memory", "picked", "not_checked", "checking", "failed"):
         assert f"`{state}`" in offer
     assert "make the offer without a name or size" in offer
     assert "CORSIA's starter model, not oMLX's pick, so pass the `message` on" in offer
@@ -257,9 +278,28 @@ def test_app_path_sends_the_message_then_seven_steps_and_ends_on_the_handoff():
 def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
     assert "`model_sources` `recheck: true`" in app
-    # A running flight sets only setup_stage; a backgrounded one sets setup_downloading
-    # (test_local_source_sends_the_download_percent_as_a_number). The setup screen reads both.
-    assert "`setup_stage` set or `setup_downloading` true is still setting up, not failed: say nothing about it" in app
+    # The flight alone publishes its live state to every local-model consumer.
+    assert "`local_state` is `starting` or `downloading` is still setting up, not failed: say nothing about it" in app
+
+
+def test_app_path_email_step_records_the_email_app_where_the_microsoft_fact_reads_it():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    email = app.split("5. **Email and calendar.**", 1)[1].split("6. **GitHub", 1)[0]
+    for branch in ("**Gmail or Google:**", "**Outlook:**", "**Both:** Gmail first", "**Something else:**"):
+        assert branch in email
+    assert "`context/50-USER-PROFILE.md`, `- **Email app:** <Outlook | Other> — <what they said>`" in email
+    assert "Outlook for Outlook and for both, Other for anything else" in email
+    assert "Never write it in `USER.md`, and never change the `- **Email:**` line" in email
+    # Conditional on delivery: phrased so check_system_closure does not require the skill before it ships.
+    assert "when your skills list includes `microsoft-setup`, follow it from its step 1" in email
+
+
+def test_app_path_local_news_covers_exactly_the_outcomes_the_wake_sends():
+    from onboarding.local_download_wake import OUTCOMES
+
+    news = FIRST_RUN_APP.read_text(encoding="utf-8").split("**The local model's news.**", 1)[1].split("## The message", 1)[0]
+    named = set(re.findall(r"`([a-z_]+)`", "".join(line.split(":", 1)[0] for line in news.splitlines() if line.startswith("- `"))))
+    assert named == OUTCOMES
 
 
 def test_app_path_reads_no_other_app_settings_before_a_yes():

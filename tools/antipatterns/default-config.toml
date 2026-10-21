@@ -127,5 +127,10 @@ allow_files = [
     # operation status while an update is in flight, bounded to that window and
     # stopped on the terminal state.
     "frontend/src/lib/update/store.ts",
+    # Setup's pre-account local download has no authenticated event stream, and
+    # vendor install/sign-in emits no progress event. It polls only while either
+    # owned job is active, stops on every terminal state and unmount, and uses
+    # models_updated for authenticated source and catalog refreshes.
+    "frontend/src/lib/components/SetupScreen.svelte",
 ]
 # server_read_pattern = ''

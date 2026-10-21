@@ -66,7 +66,7 @@ def _discover_provider_window(window: int, *, override: int | None = None) -> No
                 backend,source,context_window,created_at,updated_at)
                VALUES (?,'native','omlx','i7-window-model',
                        'omlx@i7srv/i7-window-model','I7 Window Model','network',
-                       'discovered',?,'t','t')""",
+                       'test',?,'t','t')""",
             (MODEL_ID, window),
         )
         db.execute("DELETE FROM model_profiles WHERE model_id = ?", (MODEL_ID,))
