@@ -8,8 +8,7 @@ and no path writes over a file that changed since the caller read it.
 
 from __future__ import annotations
 
-import fcntl
-import os
+import fcntl, os
 import shlex
 import stat
 import subprocess
@@ -47,13 +46,9 @@ class _LockBusy(GitFault):
     pass
 
 
-
 @dataclass(frozen=True)
 class SaveResult:
-    """``outcome``: written, unchanged, failed, deferred, stale, history-off, ordinary or refused; ``sha`` is full.
-    ``unsynced`` names paths whose commit landed while the real index kept the old blob (reason
-    ``index-unsynced``): a partial success the caller must show, never a plain "committed". ``refused``
-    (reason ``invalid-skill``) wrote nothing; ``errors`` holds the validation errors and ``line`` the fix."""
+    """Guidance-save outcome, exact commit SHA, and any unsynced paths or validation errors."""
 
     outcome: str
     reason: str = ""
@@ -309,7 +304,6 @@ def save_guidance(
 
             record_committed_save(workspace, tuple(changes), result.sha)
         except Exception:
-            # Carry-in checks are after-save work: guidance history remains authoritative.
             logger.opt(exception=True).warning("carry-in scheduling failed")
     return result
 

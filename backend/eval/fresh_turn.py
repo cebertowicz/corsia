@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
 from functools import partial
 
 from eval.turn_result import EvalTurnResult, read_turn_result
@@ -16,14 +17,28 @@ class FreshTurn:
     thread_id: str
     result: EvalTurnResult | None
     error: str | None
+    cleanup: Callable[[], Awaitable[None]] | None = None
+    context_receipt: object | None = None
+
+
+@dataclass(frozen=True)
+class FreshTurnScope:
+    """The existing project/thread scope whose normal delivery the fresh turn uses."""
+
+    project_id: str | None = None
+    owner_thread_id: str | None = None
+    actor_thread_id: str | None = None
+    fenced_target: object | None = None
 
 
 def _new_eval_session_id() -> str:
     return f"eval-{uuid.uuid4().hex[:12]}"
 
 
-async def _open_eval_thread(user_id: str, model: str) -> tuple[str, dict]:
-    """Create the fresh turn's hidden row and return its canonical dispatch row."""
+async def _open_eval_thread(
+    user_id: str, model: str, *, scope: FreshTurnScope | None = None,
+) -> tuple[str, dict]:
+    """Create the fresh turn in its target's existing scope and return its dispatch row."""
     from infra.db_async import run_in_db
     from infra.fresh_threads import create_fresh_thread
 
@@ -31,6 +46,10 @@ async def _open_eval_thread(user_id: str, model: str) -> tuple[str, dict]:
     await run_in_db(partial(
         create_fresh_thread, user_id=user_id, thread_id=thread_id,
         title="Eval turn", model=model,
+        project_id=None if scope is None else scope.project_id,
+        parent_thread_id=None,
+        spawned_by=None,
+        actor_thread_id=None if scope is None else scope.actor_thread_id,
     ))
     return thread_id, await run_in_db(_read_thread_row, thread_id)
 
@@ -121,9 +140,32 @@ async def _run_turn(
 
 async def run_fresh_turn(
     *, user_id: str, prompt: str, model: str, timeout_seconds: float,
+    scope: FreshTurnScope | None = None,
 ) -> FreshTurn:
     """Return one fresh turn's canonical tool-call projection or its error."""
-    thread_id, thread_row = await _open_eval_thread(user_id, model)
+    thread_id, thread_row = await _open_eval_thread(user_id, model, scope=scope)
+    cleanup = None
+    context_receipt = None
+    if scope is not None and scope.fenced_target is not None:
+        from eval.fresh_turn_context import attach_fenced_context, detach_and_delete
+        from infra.db_async import run_in_db
+
+        try:
+            receipt = await run_in_db(
+                attach_fenced_context,
+                thread_id,
+                user_id,
+                owner_thread_id=scope.owner_thread_id or "",
+                project_id=scope.project_id,
+                target=scope.fenced_target,
+            )
+            cleanup = lambda: detach_and_delete(receipt)
+            context_receipt = receipt
+        except Exception as exc:
+            from api.thread_deletion import delete_owned_thread
+
+            await delete_owned_thread(thread_id, user_id, [])
+            return FreshTurn(thread_id, None, f"Eval context setup errored: {_failure_detail(exc)}")
     turn_id, error = await _run_turn(
         thread_id=thread_id,
         thread_row=thread_row,
@@ -132,5 +174,5 @@ async def run_fresh_turn(
         timeout_seconds=timeout_seconds,
     )
     if turn_id is None:
-        return FreshTurn(thread_id, None, error)
-    return FreshTurn(thread_id, await read_turn_result(thread_id, turn_id), None)
+        return FreshTurn(thread_id, None, error, cleanup, context_receipt)
+    return FreshTurn(thread_id, await read_turn_result(thread_id, turn_id), None, cleanup, context_receipt)

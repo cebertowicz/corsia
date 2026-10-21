@@ -63,7 +63,7 @@
     "backend/core/agent.py::_register_tools": 92,
     "backend/core/context_preview.py::build_next_turn_context_preview": 109,
     "backend/e2e_mock.py::seed_mock_catalog": 97,
-    "backend/eval/endpoint.py::eval_turn": 81,
+    "backend/eval/endpoint.py::eval_turn": 66,
     "backend/host_access/processes.py::ProcessOwner.spawn": 148,
     "backend/host_access/redaction.py::_redact_shell_tokens": 221,
     "backend/host_access/redaction.py::redact_process_arguments": 103,

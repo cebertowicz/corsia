@@ -199,9 +199,18 @@ def broadcast_all(message: dict):
 def notify_models_changed() -> None:
     """Broadcast catalog changes and resume any now-runnable held FIFO heads."""
     broadcast_all({"type": "models_updated"})
+    from infra.config import WORKSPACE
     from infra.unavailable_model_recovery import schedule_unavailable_model_recovery
 
     schedule_unavailable_model_recovery()
+    try:
+        from core.lesson_carry_in import schedule_pending_drain
+
+        schedule_pending_drain(WORKSPACE)
+    except Exception:
+        from loguru import logger
+
+        logger.exception("pending carry-in catalog drain could not start")
 
 
 def notify_devices_updated() -> None:

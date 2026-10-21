@@ -1,243 +1,19 @@
-"""File-local carry-in checks for lesson guidance.
-
-A lesson keeps its existing case as the source of truth.  When it supplies an
-optional action contract, this module scores a fresh turn's canonical tool calls
-mechanically; it neither imports the disposable eval harness nor chooses or
-loads a model.
-"""
+"""Durable carry-in facts and their after-save drain for lesson guidance."""
 from __future__ import annotations
 
-import asyncio
 import json
-import threading
-import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Protocol, TypeVar
+from typing import Any
 
 from loguru import logger
 
-Action = dict[str, Any]
-Verdict = Literal["pass", "fail"]
-T = TypeVar("T")
-
-ACTION_FIELDS = frozenset({"tool", "params"})
-ACTIONS_FIELDS = frozenset({"required_actions", "forbidden_actions", "decisive_action"})
-SAMPLE_COUNT = 3
-PASS_THRESHOLD = 2
-# Set only after the first guarded three-sample measurement; never infer a number.
-CASES_PER_EDIT_CAP: int | None = None
-LOCAL_SELECTOR = "omlx@ns-f378151a51/Qwen3.8-Flash-Next-MLX-oQ6-MTP"
-
-
-class TraceAdapter(Protocol):
-    """The owned boundary to the local fresh-turn runner."""
-
-    def ready(self) -> bool:
-        """Whether an already-loaded local model may receive a turn now."""
-
-    def run(self, *, target_path: str, case: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
-        """Return canonical ``EvalTurnResult.tool_calls`` for one fresh turn."""
-
-
-class LocalTraceAdapter:
-    """Admission-gated bridge to the one shared product fresh-turn runner."""
-
-    def __init__(self, user_id: str, runner: Callable[..., Any] | None = None):
-        self.user_id = user_id
-        self._runner = runner
-
-    def ready(self) -> bool:
-        from llm.capabilities import get_active_local_threads, snapshot_active_threads
-        from llm.catalog import get_model, get_model_by_litellm
-
-        model = get_model(LOCAL_SELECTOR) or get_model_by_litellm(LOCAL_SELECTOR)
-        return bool(model and model.get("status") == "ready" and not get_active_local_threads(snapshot_active_threads()))
-
-    def run(self, *, target_path: str, case: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
-        from eval.fresh_turn import run_fresh_turn
-
-        started = time.perf_counter()
-        fresh = asyncio.run((self._runner or run_fresh_turn)(
-            user_id=self.user_id,
-            prompt=json.dumps({"target_path": target_path, "case": case}, sort_keys=True),
-            model=LOCAL_SELECTOR,
-            timeout_seconds=120.0,
-        ))
-        self.last_receipt = {
-            "wall_seconds": round(time.perf_counter() - started, 3),
-            "usage": {} if fresh.result is None else getattr(fresh.result, "usage", {}),
-            "error": fresh.error,
-        }
-        return () if fresh.result is None else fresh.result.tool_calls
-
-
-@dataclass(frozen=True)
-class TraceScore:
-    """The first decisive or forbidden call's mechanical verdict."""
-
-    verdict: Verdict
-    reason: str
-    decisive_call_index: int | None
-
-
-@dataclass(frozen=True)
-class CarryInRun:
-    """Three samples, or a pending result when local admission is unavailable."""
-
-    state: Literal["pending", "settled"]
-    scores: tuple[TraceScore, ...] = ()
-
-    @property
-    def verdict(self) -> Verdict | None:
-        if self.state != "settled":
-            return None
-        return "pass" if sum(score.verdict == "pass" for score in self.scores) >= PASS_THRESHOLD else "fail"
-
-
-def _json_value(value: object) -> bool:
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return True
-    if isinstance(value, list):
-        return all(_json_value(item) for item in value)
-    if isinstance(value, dict):
-        return all(isinstance(key, str) and _json_value(item) for key, item in value.items())
-    return False
-
-
-def _action(value: object, *, field: str) -> Action:
-    if not isinstance(value, dict) or set(value) != ACTION_FIELDS:
-        raise ValueError(f"corsia.lesson.case.actions.{field} actions must be {{tool, params}}")
-    tool, params = value.get("tool"), value.get("params")
-    if not isinstance(tool, str) or not tool.strip() or not isinstance(params, dict) or not _json_value(params):
-        raise ValueError(f"corsia.lesson.case.actions.{field} actions need a tool and JSON-object params")
-    return {"tool": tool.strip(), "params": params}
-
-
-def validate_actions(value: object) -> dict[str, Any] | None:
-    """Validate the intentionally small, file-local action contract.
-
-    It deliberately excludes evaluator bindings, shell semantics and allowances:
-    a lesson needing those remains a case without an executable carry-in test.
-    """
-    if value is None:
-        return None
-    if not isinstance(value, dict) or set(value) != ACTIONS_FIELDS:
-        raise ValueError(
-            "corsia.lesson.case.actions must name required_actions, forbidden_actions and decisive_action"
-        )
-    required_raw, forbidden_raw = value.get("required_actions"), value.get("forbidden_actions")
-    if not isinstance(required_raw, list) or not required_raw or not isinstance(forbidden_raw, list):
-        raise ValueError("corsia.lesson.case.actions requires non-empty required_actions and list forbidden_actions")
-    required = [_action(item, field="required_actions") for item in required_raw]
-    forbidden = [_action(item, field="forbidden_actions") for item in forbidden_raw]
-    decisive = _action(value.get("decisive_action"), field="decisive_action")
-    if decisive not in required:
-        raise ValueError("corsia.lesson.case.actions.decisive_action must be one declared required action")
-    return {
-        "required_actions": required,
-        "forbidden_actions": forbidden,
-        "decisive_action": decisive,
-    }
-
-
-def _parsed_params(value: object) -> dict[str, Any] | None:
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            return None
-    return value if isinstance(value, dict) else None
-
-
-def canonical_calls(calls: Sequence[Mapping[str, Any]]) -> list[Action]:
-    """Normalize the canonical eval projection, including its generic tool wrapper."""
-    normalized: list[Action] = []
-    for call in calls:
-        name = call.get("name") or call.get("tool")
-        params = _parsed_params(call.get("arguments", call.get("params", {})))
-        if not isinstance(name, str) or params is None:
-            continue
-        if name == "tool_call":
-            inner_name, inner_params = params.get("name"), _parsed_params(params.get("arguments"))
-            if not isinstance(inner_name, str) or inner_params is None:
-                continue
-            name, params = inner_name, inner_params
-        normalized.append({"tool": name, "params": params})
-    return normalized
-
-
-def _subset(expected: object, actual: object) -> bool:
-    if isinstance(expected, dict):
-        return isinstance(actual, dict) and all(key in actual and _subset(value, actual[key]) for key, value in expected.items())
-    return expected == actual
-
-
-def action_matches(call: Mapping[str, Any], action: Mapping[str, Any]) -> bool:
-    """Match an action's params as a subset of one canonical call's params."""
-    return call.get("tool") == action.get("tool") and _subset(action.get("params", {}), call.get("params", {}))
-
-
-def score_trace(actions: Mapping[str, Any], calls: Sequence[Mapping[str, Any]]) -> TraceScore:
-    """Score a settled fresh turn by its first forbidden or decisive call."""
-    contract = validate_actions(dict(actions))
-    assert contract is not None
-    required = contract["required_actions"]
-    decisive = contract["decisive_action"]
-    preconditions = [action for action in required if action != decisive]
-    normalized = canonical_calls(calls)
-    for index, call in enumerate(normalized):
-        if any(action_matches(call, action) for action in contract["forbidden_actions"]):
-            return TraceScore("fail", "forbidden decisive action", index)
-        if action_matches(call, decisive):
-            seen = normalized[:index]
-            if all(any(action_matches(previous, action) for previous in seen) for action in preconditions):
-                return TraceScore("pass", "required decisive action", index)
-            return TraceScore("fail", "required precondition missing before decisive action", index)
-    return TraceScore("fail", "no_decisive_action", None)
-
-
-def run_three(
-    actions: Mapping[str, Any], adapter: TraceAdapter, *, target_path: str = "", case: Mapping[str, Any] | None = None,
-) -> CarryInRun:
-    """Run exactly three serialized fresh turns, or retain pending when not ready."""
-    if not adapter.ready():
-        return CarryInRun("pending")
-    scores: list[TraceScore] = []
-    for _ in range(SAMPLE_COUNT):
-        score = score_trace(actions, adapter.run(target_path=target_path, case=case or {}))
-        receipt = getattr(adapter, "last_receipt", {})
-        usage = receipt.get("usage", {}) if isinstance(receipt, dict) else {}
-        logger.info(
-            "carry-in sample target={} wall_seconds={} input_tokens={} output_tokens={} decisive={} verdict={}",
-            target_path,
-            receipt.get("wall_seconds") if isinstance(receipt, dict) else None,
-            usage.get("prompt_tokens", usage.get("input_tokens")),
-            usage.get("completion_tokens", usage.get("output_tokens")),
-            score.decisive_call_index,
-            score.verdict,
-        )
-        scores.append(score)
-    return CarryInRun("settled", tuple(scores))
-
-
-def is_discriminating(before: CarryInRun, after: CarryInRun) -> bool | None:
-    """Promotion requires a 2-of-3 pre-lesson failure and post-lesson pass."""
-    if before.state == "pending" or after.state == "pending":
-        return None
-    return before.verdict == "fail" and after.verdict == "pass"
-
-
-def rotated_cases(cases: Sequence[T], *, cap: int | None, edit_number: int) -> list[T]:
-    """Select a stable rotating window; an unset cap intentionally runs nothing."""
-    if cap is None or cap <= 0 or not cases:
-        return []
-    size = min(cap, len(cases))
-    start = (edit_number * size) % len(cases)
-    return [cases[(start + offset) % len(cases)] for offset in range(size)]
-
+from core.lesson_carry_in_contract import (
+    ACTIONS_FIELDS, ACTION_FIELDS, SAMPLE_COUNT, Action, CarryInRun, LocalTraceAdapter, TraceAdapter, TraceScore, action_matches,
+    canonical_calls, is_discriminating, rotated_cases, run_three, scenario_for_case, score_trace, validate_actions,
+)
 
 PENDING_EVENT = "learning_loop.carry_in_pending"
 RESULT_EVENT = "learning_loop.carry_in_result"
@@ -254,10 +30,12 @@ class CarryInFact:
     target_commit: str
     target_path: str
     case_ref: str
+    role: str = "edit"
 
     @property
     def subject_key(self) -> str:
-        return f"carry-in:{self.lesson_id}:{self.target_commit}"
+        suffix = "" if self.role == "edit" else f":{self.role}"
+        return f"carry-in:{self.lesson_id}:{self.target_commit}{suffix}"
 
 
 def _now() -> str:
@@ -297,32 +75,42 @@ def _record(db, *, event_name: str, fact: CarryInFact, dedupe_suffix: str, attri
     specs = {
         "lesson_id": id_attr(), "target_commit": id_attr(), "target_path": id_attr(), "case_ref": id_attr(),
         "verdict": enum_attr("pass", "fail"), "owner_resolution": enum_attr("resolved", "owner_unresolved"), "sample_count": count_attr(),
-        "passed_samples": count_attr(), "reason": text_attr(500),
+        "passed_samples": count_attr(), "target_hash": id_attr(), "model_selector": id_attr(),
+        "model_identity": text_attr(500), "blob_sha": id_attr(), "commit": id_attr(),
+        "role": enum_attr("promotion_old", "promotion_new", "edit", "rebaseline"),
+        "target_fixture_sha": id_attr(), "delivered_neighbour_shas": text_attr(4000), "reason": text_attr(500),
     }
     result = record_outcome_event(
         db, dedupe_key=f"{fact.subject_key}:{dedupe_suffix}", event_name=event_name,
         source="corsia", provenance="instrumented", ts=_now(), subject_key=fact.subject_key,
-        project_id=_project_id(db, fact.owner_thread_id), agent_thread_id=fact.owner_thread_id,
+        project_id=_project_id(db, fact.owner_thread_id), agent_thread_id=None,
         attributes={"lesson_id": fact.lesson_id, "target_commit": fact.target_commit,
-                    "target_path": fact.target_path, "case_ref": fact.case_ref, **attributes}, declared_specs=specs,
+                    "target_path": fact.target_path, "case_ref": fact.case_ref, "role": fact.role, **attributes}, declared_specs=specs,
     )
     return result.inserted
 
 
-def record_pending(db, fact: CarryInFact) -> bool:
-    """Record a local-model-unavailable carry-in check once, without a durable queue."""
-    return _record(db, event_name=PENDING_EVENT, fact=fact, dedupe_suffix="pending", attributes={})
+def record_pending(db, fact: CarryInFact, *, reason: str | None = None) -> bool:
+    """Record a local-model-unavailable carry-in check without adding a queue."""
+    suffix = "pending" if reason is None else f"pending:{reason}"
+    return _record(db, event_name=PENDING_EVENT, fact=fact, dedupe_suffix=suffix, attributes={} if reason is None else {"reason": reason})
 
 
 def record_source_skipped(
     db, *, lesson_id: str, owner_thread_id: str, target_commit: str, target_path: str,
+    reason: str = "outside_workspace",
 ) -> bool:
-    """Count a matched case whose source escapes its workspace without retaining its path."""
-    fact = CarryInFact(lesson_id, owner_thread_id, target_commit, target_path, "outside-workspace")
+    """Count an excluded case without retaining its source path or target text."""
+    fact = CarryInFact(lesson_id, owner_thread_id, target_commit, target_path, "skipped-source")
     return _record(
-        db, event_name=SOURCE_SKIPPED_EVENT, fact=fact, dedupe_suffix="source-outside-workspace",
-        attributes={"reason": "outside_workspace"},
+        db, event_name=SOURCE_SKIPPED_EVENT, fact=fact, dedupe_suffix=f"source-{reason}",
+        attributes={"reason": reason},
     )
+
+
+def _is_thread_skill_target(target_path: str) -> bool:
+    parts = Path(target_path).parts
+    return len(parts) >= 4 and parts[0] == ".threads" and parts[2] == "skills"
 
 
 def record_result(db, fact: CarryInFact, run: CarryInRun, *, owner_unresolved: bool = False) -> bool:
@@ -332,8 +120,20 @@ def record_result(db, fact: CarryInFact, run: CarryInRun, *, owner_unresolved: b
     passed = sum(score.verdict == "pass" for score in run.scores)
     return _record(
         db, event_name=RESULT_EVENT, fact=fact, dedupe_suffix="result",
-        attributes={"verdict": run.verdict, "owner_resolution": "owner_unresolved" if owner_unresolved else "resolved", "sample_count": SAMPLE_COUNT, "passed_samples": passed},
+        attributes={
+            "verdict": run.verdict, "owner_resolution": "owner_unresolved" if owner_unresolved else "resolved",
+            "sample_count": SAMPLE_COUNT, "passed_samples": passed, "target_hash": run.target_hash,
+            "model_selector": run.selector, "model_identity": _model_identity(run),
+            "blob_sha": run.target_hash, "commit": fact.target_commit, "role": fact.role,
+            "target_fixture_sha": run.fixture_sha, "delivered_neighbour_shas": json.dumps(run.neighbour_shas),
+        },
     )
+
+
+def _model_identity(run: CarryInRun) -> str | None:
+    if run.selector is None or run.identity is None:
+        return None
+    return json.dumps({"resolved_identity": run.identity, "selector": run.selector}, sort_keys=True)
 
 
 def _result_event(db, fact: CarryInFact):
@@ -341,6 +141,37 @@ def _result_event(db, fact: CarryInFact):
         "SELECT id,ts FROM outcome_events WHERE dedupe_key=? AND retracted_at IS NULL",
         (f"{fact.subject_key}:result",),
     ).fetchone()
+
+
+def baseline_result(db, fact: CarryInFact) -> tuple[CarryInFact, str] | None:
+    """Return the newest promotion/edit fact used to compare the current model."""
+    rows = db.execute(
+        "SELECT attributes FROM outcome_events WHERE event_name=? AND retracted_at IS NULL ORDER BY ts DESC",
+        (RESULT_EVENT,),
+    ).fetchall()
+    fallback = None
+    for row in rows:
+        try:
+            attrs = json.loads(row["attributes"])
+            if attrs.get("lesson_id") != fact.lesson_id or attrs.get("target_path") != fact.target_path:
+                continue
+            identity = attrs.get("model_identity")
+            if not isinstance(identity, str) or not identity:
+                continue
+            previous = CarryInFact(
+                fact.lesson_id, fact.owner_thread_id, str(attrs["commit"]), fact.target_path,
+                fact.case_ref, str(attrs.get("role", "edit")),
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if previous.role in {"promotion_old", "promotion_new"}:
+            return previous, identity
+        if previous.role == "edit" and fallback is None:
+            fallback = previous, identity
+    return fallback
+
+
+from core.lesson_carry_in_coverage import coverage_counts
 
 
 def record_retirement(db, fact: CarryInFact, reason: str) -> bool:
@@ -389,6 +220,13 @@ def _matching_facts(db, workspace: Path, paths: Sequence[Path], commit: str) -> 
         if actions is None or not target or canonical_target_path(target, workspace_root) not in saved:
             continue
         canonical_target = canonical_target_path(target, workspace_root)
+        if _is_thread_skill_target(canonical_target):
+            record_source_skipped(
+                db, lesson_id=trial.lesson.id, owner_thread_id=trial.lesson.owner,
+                target_commit=commit, target_path=canonical_target,
+                reason="thread_skill_no_unlineaged_route",
+            )
+            continue
         try:
             relative = source_path.resolve().relative_to(workspace_root).as_posix()
         except ValueError:
@@ -421,6 +259,90 @@ def _case_for_fact(workspace: Path, fact: CarryInFact) -> dict[str, Any] | None:
     return trial.lesson.case
 
 
+def _fresh_scope(db, workspace: Path, target_path: str):
+    """Map a canonical target to its existing owner/project delivery scope."""
+    from eval.fresh_turn import FreshTurnScope
+
+    owner = target_scope_owner(db, workspace, target_path)
+    row = None if owner is None else db.execute(
+        "SELECT project_id FROM threads WHERE id=?", (owner,),
+    ).fetchone()
+    project_id = None if row is None or row[0] is None else str(row[0])
+    return FreshTurnScope(project_id=project_id, owner_thread_id=owner, actor_thread_id=owner)
+
+
+def _recorded_target_blob(workspace: Path, fact: CarryInFact) -> tuple[bytes | None, str | None]:
+    """Read the immutable target bytes from guidance history, never from live disk."""
+    from infra.guidance_git import GitFault, _git_bytes, workspace_repository
+
+    repo, reason = workspace_repository(workspace)
+    if repo is None:
+        return None, reason or "guidance history unavailable"
+    try:
+        return _git_bytes(repo, "show", f"{fact.target_commit}:{fact.target_path}"), None
+    except (GitFault, ValueError):
+        return None, "recorded_target_unavailable"
+
+
+def _target_snapshot(workspace: Path, fact: CarryInFact) -> tuple[str | None, str | None]:
+    """Return the recorded blob hash only while disk still equals the target commit."""
+    recorded, reason = _recorded_target_blob(workspace, fact)
+    if recorded is None:
+        return None, reason
+    try:
+        on_disk = (workspace / fact.target_path).read_bytes()
+    except OSError:
+        return None, "recorded_target_unavailable"
+    if on_disk != recorded:
+        return None, "target_changed_after_commit"
+    import hashlib
+
+    return hashlib.sha256(recorded).hexdigest(), None
+
+
+def _rebaseline_first(
+    db, workspace: Path, fact: CarryInFact, actions: dict[str, Any], adapter: TraceAdapter, runs: list[CarryInRun],
+) -> bool:
+    """Re-run the prior blob on a changed local identity before judging this edit."""
+    if fact.role == "rebaseline":
+        return True
+    current_identity = getattr(adapter, "current_model_identity", lambda: None)()
+    baseline = baseline_result(db, fact)
+    setter = getattr(adapter, "set_fenced_target", None)
+    if current_identity is None or baseline is None or setter is None or baseline[1] == current_identity:
+        return True
+    prior, _identity = baseline
+    blob, reason = _recorded_target_blob(workspace, prior)
+    if blob is None:
+        record_pending(
+            db,
+            CarryInFact(prior.lesson_id, prior.owner_thread_id, prior.target_commit, prior.target_path, prior.case_ref, "rebaseline"),
+            reason=reason,
+        )
+        return False
+    from eval.fresh_turn_context import FencedTarget
+
+    rebaseline = CarryInFact(
+        prior.lesson_id, prior.owner_thread_id, prior.target_commit, prior.target_path, prior.case_ref, "rebaseline",
+    )
+    setter(FencedTarget(prior.target_path, prior.target_commit, blob, rebaseline.role))
+    import hashlib
+
+    run = run_three(
+        actions, adapter, scenario=scenario_for_case(_case_for_fact(workspace, prior) or {}),
+        before_sample=lambda: (hashlib.sha256(blob).hexdigest(), None),
+    )
+    if run.state == "settled":
+        record_result(db, rebaseline, run)
+    elif run.reason is not None:
+        record_pending(db, rebaseline, reason=run.reason)
+    runs.append(run)
+    cleanup = getattr(adapter, "cleanup", None)
+    if cleanup is not None:
+        cleanup()
+    return run.state == "settled"
+
+
 def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: TraceAdapter) -> list[CarryInRun]:
     """Use one caller-admitted local adapter to settle pending facts serially."""
     runs: list[CarryInRun] = []
@@ -434,67 +356,45 @@ def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: Trac
         actions = None if case is None else case.get("actions")
         if not isinstance(actions, dict):
             continue
-        run = run_three(actions, adapter, target_path=fact.target_path, case=case)
-        if run.state == "settled":
-            owner = target_scope_owner(db, workspace, fact.target_path)
-            record_result(db, fact, run, owner_unresolved=owner is None)
-            if run.verdict == "fail" and (event := _result_event(db, fact)) is not None:
-                from core.self_caught_corrections import record_carry_in_regression
+        if not _rebaseline_first(db, workspace, fact, actions, adapter, runs):
+            continue
+        setter = getattr(adapter, "set_fenced_target", None)
+        if setter is not None:
+            blob, reason = _recorded_target_blob(workspace, fact)
+            if blob is None:
+                record_pending(db, fact, reason=reason)
+                continue
+            from eval.fresh_turn_context import FencedTarget
 
-                record_carry_in_regression(
-                    db, result_event_id=str(event[0]), thread_id=owner, created_at=str(event[1]),
-                )
-        runs.append(run)
+            setter(FencedTarget(fact.target_path, fact.target_commit, blob, fact.role))
+        run = run_three(
+            actions, adapter, scenario=scenario_for_case(case),
+            before_sample=lambda: _target_snapshot(workspace, fact),
+        )
+        if run.state == "pending" and run.reason is not None:
+            record_pending(db, fact, reason=run.reason)
+        try:
+            if run.state == "settled":
+                owner = target_scope_owner(db, workspace, fact.target_path)
+                record_result(db, fact, run, owner_unresolved=owner is None)
+                if run.verdict == "fail" and (event := _result_event(db, fact)) is not None:
+                    from core.self_caught_corrections import record_carry_in_regression
+
+                    record_carry_in_regression(
+                        db, result_event_id=str(event[0]), thread_id=None, created_at=str(event[1]),
+                    )
+            runs.append(run)
+        finally:
+            cleanup = getattr(adapter, "cleanup", None)
+            if cleanup is not None:
+                cleanup()
     return runs
 
 
-_DRAIN_LOCK = threading.Lock()
-
-
-def record_committed_save(workspace: Path, paths: Sequence[Path], commit: str) -> None:
-    """Start the single non-blocking in-process drain after a guidance commit.
-
-    The outcome event is the durable pending signal; this transient drain is not
-    a queue and deliberately makes no model call until its owned adapter exists.
-    """
-    thread = threading.Thread(
-        target=_record_save_drain, args=(workspace, tuple(paths), commit), daemon=True,
-        name="corsia-carry-in",
-    )
-    thread.start()
-
-
-def _owner_user_id(db, thread_id: str) -> str | None:
-    row = db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()
-    return None if row is None or row[0] is None else str(row[0])
-
-
-def _drain_committed_facts(
-    db, workspace: Path, paths: Sequence[Path], commit: str,
-    *, adapter_factory: Callable[[str], TraceAdapter] = LocalTraceAdapter,
-) -> None:
-    """Advance a committed edit through the sole local adapter when its owner is known."""
-    facts = _matching_facts(db, workspace, paths, commit)
-    for fact in facts:
-        user_id = _owner_user_id(db, fact.owner_thread_id)
-        if user_id is None:
-            record_pending(db, fact)
-            continue
-        drain_facts(db, workspace, [fact], adapter_factory(user_id))
-
-
-def _record_save_drain(workspace: Path, paths: Sequence[Path], commit: str) -> None:
-    from infra.database import get_db
-
-    with _DRAIN_LOCK:
-        db = None
-        try:
-            db = get_db()
-            _drain_committed_facts(db, workspace, paths, commit)
-            db.commit()
-        except Exception:
-            # The durable save already landed; a later edit can retry this transient drain.
-            logger.opt(exception=True).warning("carry-in pending fact could not be recorded")
-        finally:
-            if db is not None:
-                db.close()
+from core.lesson_carry_in_drain import (
+    _drain_committed_facts,
+    _pending_facts,
+    record_committed_save,
+    schedule_committed_save,
+    schedule_pending_drain,
+)

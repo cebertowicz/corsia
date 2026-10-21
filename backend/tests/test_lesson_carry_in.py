@@ -39,6 +39,31 @@ def _event_db() -> sqlite3.Connection:
     return db
 
 
+@pytest.mark.asyncio
+async def test_fresh_eval_scope_is_unparented_and_uses_owner_only_for_local_routing(monkeypatch: pytest.MonkeyPatch):
+    from eval.fresh_turn import FreshTurnScope, _open_eval_thread
+
+    calls = []
+
+    async def run_in_db(function, *args, **kwargs):
+        calls.append((function, args, kwargs))
+        return {"id": "eval-1", "user_id": "user"}
+
+    monkeypatch.setattr("infra.db_async.run_in_db", run_in_db)
+    thread_id, row = await _open_eval_thread(
+        "user", "omlx@server/model",
+        scope=FreshTurnScope(project_id="project", owner_thread_id="owner", actor_thread_id="owner"),
+    )
+
+    creation = calls[0][0]
+    assert thread_id.startswith("eval-")
+    assert row["id"] == "eval-1"
+    assert creation.keywords["project_id"] == "project"
+    assert creation.keywords["parent_thread_id"] is None
+    assert creation.keywords["spawned_by"] is None
+    assert creation.keywords["actor_thread_id"] == "owner"
+
+
 def test_scores_required_decisive_action_after_its_precondition():
     from core.lesson_carry_in import score_trace
 
@@ -90,8 +115,9 @@ class Adapter:
         return self.samples.pop(0)
 
 
-def test_local_adapter_reaches_only_the_shared_fresh_turn_runner():
-    from core.lesson_carry_in import LocalTraceAdapter
+def test_local_adapter_sends_only_the_scenario_to_the_shared_fresh_turn_runner(monkeypatch: pytest.MonkeyPatch):
+    from core.lesson_carry_in import LocalTraceAdapter, scenario_for_case
+    from llm.resolution import ExecutionTarget
 
     calls: list[dict[str, Any]] = []
 
@@ -105,13 +131,22 @@ def test_local_adapter_reaches_only_the_shared_fresh_turn_runner():
             error=None,
         )
 
+    target = ExecutionTarget("local-id", "native", "omlx", "network", "omlx@server/model", None, 1, True, None, "Local", True)
+    monkeypatch.setattr("core.lesson_carry_in_contract.ready_local_target", lambda: target)
     adapter = LocalTraceAdapter("owner", runner=runner)
+    adapter._target = target
+    scenario = scenario_for_case({
+        "what_happened": "The context was missed.", "right_call": "Read it.",
+        "does_not_apply": "Drafts.", "actions": ACTIONS,
+    })
 
-    assert adapter.run(target_path="context/rule.md", case={"right_call": "Read it."}) == [
-        _call("read_file", {"path": "context/rule.md"})
-    ]
-    assert calls[0]["model"] == "omlx@ns-f378151a51/Qwen3.8-Flash-Next-MLX-oQ6-MTP"
-    assert calls[0]["prompt"] == '{"case": {"right_call": "Read it."}, "target_path": "context/rule.md"}'
+    assert adapter.run(scenario=scenario) == [_call("read_file", {"path": "context/rule.md"})]
+    assert calls[0]["model"] == "omlx@server/model"
+    assert calls[0]["prompt"] == '{"situation": "The context was missed."}'
+    assert "right_call" not in calls[0]["prompt"]
+    assert "does_not_apply" not in calls[0]["prompt"]
+    assert "required_actions" not in calls[0]["prompt"]
+    assert "context/rule.md" not in calls[0]["prompt"]
     assert adapter.last_receipt["usage"] == {"prompt_tokens": 12, "completion_tokens": 5}
 
 
@@ -138,6 +173,55 @@ def test_promotion_requires_pre_lesson_failure_and_post_lesson_pass():
     assert pre_lesson.verdict == "fail"
     assert post_lesson.verdict == "pass"
     assert is_discriminating(pre_lesson, post_lesson) is True
+
+
+def test_eval_context_setup_error_is_pending_not_scored_as_a_failed_decisive_call(monkeypatch: pytest.MonkeyPatch):
+    from core.lesson_carry_in import LocalTraceAdapter, run_three
+    from llm.resolution import ExecutionTarget
+
+    async def runner(**_kwargs):
+        return SimpleNamespace(result=None, error="Eval context setup errored: carry-in target is not exactly one owner thread bootloader entry")
+
+    target = ExecutionTarget("local-id", "native", "omlx", "network", "omlx@server/model", None, 1, True, None, "Local", True)
+    monkeypatch.setattr("core.lesson_carry_in_contract.ready_local_target", lambda: target)
+    adapter = LocalTraceAdapter("owner", runner=runner)
+    adapter._target = target
+
+    result = run_three(ACTIONS, adapter, before_sample=lambda: ("target-hash", None))
+
+    assert result.state == "pending"
+    assert result.reason == "Eval context setup errored: carry-in target is not exactly one owner thread bootloader entry"
+
+
+def test_fixture_hash_mismatch_refuses_scoring_before_a_decisive_call():
+    from core.lesson_carry_in import run_three
+
+    class MismatchedFixtureAdapter(Adapter):
+        def run(self, **_kwargs) -> list[dict[str, Any]]:
+            self.last_receipt = {"fixture_sha": "not-the-recorded-blob"}
+            return super().run()
+
+    passed = [_call("read_file", {"path": "context/rule.md"}), _call("plan_update", {"operation": "mark_done"})]
+    result = run_three(ACTIONS, MismatchedFixtureAdapter([passed]), before_sample=lambda: ("recorded-blob", None))
+
+    assert (result.state, result.reason, result.scores) == ("pending", "fixture_blob_mismatch", ())
+
+
+def test_promotion_result_is_preferred_as_the_model_baseline():
+    from core.lesson_carry_in import CarryInFact, CarryInRun, TraceScore, baseline_result, record_result
+
+    db = _event_db()
+    score = TraceScore("pass", "required decisive action", 1)
+    edit = CarryInFact("lesson", "owner", "a" * 40, "context/rule.md", "case", "edit")
+    promotion = CarryInFact("lesson", "owner", "b" * 40, "context/rule.md", "case", "promotion_new")
+    run = CarryInRun("settled", (score,) * 3, "omlx@server/model", "resolved-model", "blob-sha")
+    assert record_result(db, edit, run)
+    assert record_result(db, promotion, run)
+
+    assert baseline_result(db, edit) == (
+        promotion,
+        '{"resolved_identity": "resolved-model", "selector": "omlx@server/model"}',
+    )
 
 
 def test_model_not_ready_stays_pending_without_a_model_call():
@@ -228,6 +312,47 @@ def test_matching_case_survives_a_symlinked_workspace_root(tmp_path: Path):
     assert is_pending(db, facts[0])
 
 
+def test_thread_skill_target_is_skipped_without_an_unlineaged_route(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from core.lesson_carry_in import _matching_facts
+    from core.lesson_files import render_trial
+    from core.lesson_trials import Trial
+
+    workspace = tmp_path / "workspace"
+    target = workspace / ".threads" / "owner" / "skills" / "lesson" / "SKILL.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("old rule\n")
+    source = workspace / ".threads" / "owner" / "skills" / "lesson" / "SKILL.md"
+    source.write_text(render_trial(
+        lesson_id="12345678-1234-5678-1234-567812345678", owner="owner", name="lesson",
+        description="A carry-in case.", text="Use the rule.",
+        trial=Trial("hypothesis", "2030-01-01"), source_refs=[{"kind": "turn", "reference": "turn"}],
+        target_file=".threads/owner/skills/lesson/SKILL.md", case={
+            "what_happened": "The rule was missed.", "right_call": "Read it.",
+            "does_not_apply": "For a draft.", "correction_subject": "message:1", "actions": ACTIONS,
+        },
+    ))
+    db = _event_db()
+
+    assert _matching_facts(db, workspace, [target], "a" * 40) == []
+    row = db.execute("SELECT attributes FROM outcome_events WHERE event_name='learning_loop.carry_in_source_skipped'").fetchone()
+    assert json.loads(row["attributes"])["reason"] == "thread_skill_no_unlineaged_route"
+
+
+def test_coverage_counts_skipped_thread_skill_targets_in_the_denominator():
+    from core.lesson_carry_in import CarryInFact, CarryInRun, TraceScore, coverage_counts, record_result, record_source_skipped
+
+    db = _event_db()
+    fact = CarryInFact("lesson", "owner", "a" * 40, "context/rule.md", "case")
+    run = CarryInRun("settled", (TraceScore("pass", "ok", 0),) * 3)
+    assert record_result(db, fact, run)
+    assert record_source_skipped(
+        db, lesson_id="skill", owner_thread_id="owner", target_commit="b" * 40,
+        target_path=".threads/owner/skills/lesson/SKILL.md", reason="thread_skill_no_unlineaged_route",
+    )
+
+    assert coverage_counts(db) == {"covered": 1, "skipped": 1, "total": 2}
+
+
 def test_external_carry_in_source_is_counted_without_retaining_its_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from core.lesson_carry_in import _matching_facts
     from core.lesson_files import render_trial
@@ -260,7 +385,7 @@ def test_external_carry_in_source_is_counted_without_retaining_its_path(tmp_path
     assert str(source) not in row["attributes"]
 
 
-def test_drain_settles_a_pending_case_with_a_mocked_local_adapter(tmp_path: Path):
+def test_drain_settles_a_pending_case_with_a_mocked_local_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from core.lesson_carry_in import _matching_facts, drain_facts, is_pending, record_pending
     from core.lesson_files import render_trial
     from core.lesson_trials import Trial
@@ -284,6 +409,7 @@ def test_drain_settles_a_pending_case_with_a_mocked_local_adapter(tmp_path: Path
     db = _event_db()
     passed = [_call("read_file", {"path": "context/rule.md"}), _call("plan_update", {"operation": "mark_done"})]
 
+    monkeypatch.setattr("core.lesson_carry_in._target_snapshot", lambda *_args: ("target-hash", None))
     assert record_pending(db, fact)
     runs = drain_facts(db, workspace, [fact], Adapter([passed, passed, passed]))
 
@@ -291,7 +417,7 @@ def test_drain_settles_a_pending_case_with_a_mocked_local_adapter(tmp_path: Path
     assert not is_pending(db, fact)
 
 
-def test_committed_save_drain_uses_the_admitted_adapter(tmp_path: Path):
+def test_committed_save_drain_uses_the_admitted_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from core.lesson_carry_in import _drain_committed_facts
     from core.lesson_files import render_trial
     from core.lesson_trials import Trial
@@ -317,13 +443,14 @@ def test_committed_save_drain_uses_the_admitted_adapter(tmp_path: Path):
         users.append(user_id)
         return Adapter([passed, passed, passed])
 
+    monkeypatch.setattr("core.lesson_carry_in._target_snapshot", lambda *_args: ("target-hash", None))
     _drain_committed_facts(db, workspace, [target], "a" * 40, adapter_factory=adapter_factory)
 
     assert users == ["user"]
     assert db.execute("SELECT event_name FROM outcome_events WHERE event_name='learning_loop.carry_in_result'").fetchone()
 
 
-def test_failed_thread_target_maps_once_to_a_self_caught_carry_in_regression(tmp_path: Path):
+def test_failed_thread_target_does_not_create_an_owner_failure_surface(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from core.lesson_carry_in import CarryInFact, drain_facts, record_pending
 
     workspace = tmp_path / "workspace"
@@ -345,12 +472,14 @@ def test_failed_thread_target_maps_once_to_a_self_caught_carry_in_regression(tmp
     db = _event_db()
     failed = [_call("read_file", {"path": "context/rule.md"})]
 
+    monkeypatch.setattr("core.lesson_carry_in._target_snapshot", lambda *_args: ("target-hash", None))
     assert record_pending(db, fact)
     assert [run.verdict for run in drain_facts(db, workspace, [fact], Adapter([failed, failed, failed]))] == ["fail"]
     assert drain_facts(db, workspace, [fact], Adapter([failed, failed, failed])) == []
     rows = db.execute("SELECT attributes FROM outcome_events WHERE event_name='measurement.correction'").fetchall()
-    assert len(rows) == 1
-    assert 'carry_in_regression:' in rows[0]["attributes"]
+    assert rows == []
+    result = db.execute("SELECT agent_thread_id FROM outcome_events WHERE event_name='learning_loop.carry_in_result'").fetchone()
+    assert result["agent_thread_id"] is None
 
 
 def test_pending_result_and_retirement_are_queryable_outcome_events():
