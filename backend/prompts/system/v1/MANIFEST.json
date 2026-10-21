@@ -166,10 +166,10 @@
       "sha256": "075871dd2dc7e7c61eac2138a80ca63be257e396f95adcdcfe757a01cf4bc682"
     },
     {
-      "bytes": 8951,
+      "bytes": 9040,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/SKILL.md",
-      "sha256": "1f15ea636cdaab2be14a7dac3aa68cdd369be3af399cf376df6617e9e222ce0c"
+      "sha256": "10d35434a9172751504434fe5a2d228acbf7662a2252019f33a23b718d0cebc8"
     },
     {
       "bytes": 6205,
@@ -346,10 +346,10 @@
       "sha256": "9162e61c3918bed45f65cec1ee1cd3fe622c740d86f051745977fe6fce7b1783"
     },
     {
-      "bytes": 10187,
+      "bytes": 10177,
       "kind": "skill",
       "path": "skills/time-to-agent/SKILL.md",
-      "sha256": "33fdb76347b39afc19a8b55c1d80e700bd863d1c6355a53b7bb1e8ff13301164"
+      "sha256": "b53cafd83e5c11f87de2050950cc0d8617e92bbf499bfcd0a11bfbc05c2e90c6"
     },
     {
       "bytes": 3928,
