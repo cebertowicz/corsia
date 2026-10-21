@@ -22,17 +22,14 @@ REVIEW_WALL_SECONDS = 30 * 60
 
 
 def _requesting_task(db, row) -> str | None:
-    """The requesting task, read once through Plans at fork start; the review proceeds without it on failure.
+    """The requesting task, read once through Plans at fork start.
 
     The fork cannot call plan_read, so it is given the task itself, named with the revision read.
+    A failed read fails the fork start, which hands the review to the reviewer's plan task.
     """
     if not row["requesting_node_id"]:
         return None
-    try:
-        return requesting_task_block(public.intent_of(row["requesting_node_id"], db=db))
-    except public.PlanError:
-        logger.warning("review fork proceeds without its requesting task request_id=%s", row["id"], exc_info=True)
-        return None
+    return requesting_task_block(public.intent_of(row["requesting_node_id"], db=db))
 
 
 def _cold_request(request_id: str):

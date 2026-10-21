@@ -157,7 +157,7 @@ def test_an_overlong_criteria_text_is_bounded_in_the_fork_input():
     assert whole.endswith("Acceptance criteria: short")
 
 
-def test_a_failed_task_read_leaves_the_fork_input_without_a_task_block(review_env, monkeypatch, caplog):
+def test_a_failed_task_read_fails_the_fork_start_instead_of_dropping_the_task(review_env, monkeypatch):
     db, aid = review_env
     node = _task(db, "requester")
     result = _ask(aid, requesting_node_id=node)
@@ -167,9 +167,8 @@ def test_a_failed_task_read_leaves_the_fork_input_without_a_task_block(review_en
 
     monkeypatch.setattr(public, "intent_of", gone)
     _turn(db, "completed", "completed", messages=True)
-    instruction = _prepare(monkeypatch, result["id"])[1].instruction
-    assert "Requested from task" not in instruction and "Check claims" in instruction
-    assert f"without its requesting task request_id={result['id']}" in caplog.text
+    with pytest.raises(public.PlanError):
+        _prepare(monkeypatch, result["id"])
 
 
 def test_a_fork_input_without_a_requesting_task_has_no_task_block(review_env, monkeypatch):
@@ -185,6 +184,9 @@ def test_escalation_carries_the_row_value(review_env):
     result = _ask(aid, requesting_node_id=node)
     escalated = reviews.escalate_fork(db, result["id"])
     assert escalated["requesting_node_id"] == node
+    description = public.get_node(escalated["node_id"], db=db).description
+    assert reviews.requesting_task_notice(db, node) in description and "Check claims" in description
+    assert "Preserve the outcome" not in description  # by reference, never the text
 
 
 def test_a_pre_migration_row_reads_as_null_through_escalation(review_env):
@@ -220,7 +222,8 @@ def test_a_repeat_from_another_task_after_escalation_names_it_on_the_review_task
     opened = _ask(aid, requesting_node_id=first)
     node_id = reviews.escalate_fork(db, opened["id"])["node_id"]
     _ask(aid, key="k2", note=None, requesting_node_id=first)
-    assert "Requested from task" not in public.get_node(node_id, db=db).description  # same task: nothing to add
+    # Escalation named the first task; the same task's repeat adds nothing.
+    assert public.get_node(node_id, db=db).description.count(f"Requested from task {first};") == 1
     _ask(aid, key="k3", note="Also this", requesting_node_id=second)
     row = stored(db, opened["id"])
     assert row["requesting_node_id"] == first

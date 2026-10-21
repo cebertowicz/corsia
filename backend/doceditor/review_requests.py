@@ -312,10 +312,12 @@ def escalate_fork(db, request_id: str, *, reason: str = "limit",
             return None
         comment_count = request_comment_count(connection, row)
         state = state or ("handed_back" if reason == "limit" else "failed")
+        # The review task can call plan_read, so it names the requester's task by reference.
+        requesting = requesting_task_notice(connection, row["requesting_node_id"]) if row["requesting_node_id"] else ""
         request = {
             **dict(row),
             "requester_display": requester_name(connection, row) or "the requester",
-            "note": f"{row['note'] or ''}\n\n{continuation(comment_count, reason)}".strip(),
+            "note": "\n\n".join(part for part in (row["note"], requesting, continuation(comment_count, reason)) if part),
         }
         node = public.create_review_node(connection, row["reviewer_thread_id"], request)
         connection.execute(

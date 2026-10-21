@@ -23,7 +23,7 @@ TOOL_DESCRIPTION = (
     "section that changes the reviewer's area: name that section and your question in `note`. "
     "The reviewer reads only that section and leaves its changes as suggestions. `reviewer` "
     "is a thread ID from `agent_roster`; the document's owner cannot be the reviewer. "
-    "The reviewer is pointed to your current task by reference, to read its intent; pass "
+    "The reviewer is given your current task's intent and acceptance criteria; pass "
     "`requesting_node_id` only to name a different task you can read."
 )
 TARGET_REFUSAL = "exactly one of doc_path / artifact_id is required"
