@@ -51,7 +51,9 @@ class BrowserClickTool(Tool):
     name = "browser_click"
     description = (
         "Click an element in the browser by ref (from snapshot) or CSS selector. "
-        "These actions work alongside the person; password pages are for the person to handle.\n\n"
+        "These actions work alongside the person. Never click what would show a password, key or code "
+        "(such as creating or revealing a key): post_update the person to click it, "
+        "then watch only the page's URL and title.\n\n"
         "USE THIS to:\n"
         "- Click buttons, links, checkboxes\n"
         "- Navigate between pages\n"
