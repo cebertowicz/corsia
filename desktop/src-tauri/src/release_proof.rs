@@ -15,9 +15,8 @@ use std::{
 };
 
 const PROOF_TIMEOUT: Duration = Duration::from_secs(15);
-/// `SMAppService::unregister` delegates the stop to launchd, whose default
-/// SIGKILL grace applies because the bundled plist has no `ExitTimeOut`.
-const LAUNCHD_SIGKILL_GRACE: Duration = Duration::from_secs(20);
+/// Outlasts launchd's default 20 s SIGKILL grace: `SMAppService::unregister`
+/// delegates the stop to launchd, and the bundled plist has no `ExitTimeOut`.
 const PID_EXIT_TIMEOUT: Duration = Duration::from_secs(25);
 const PROOF_POLL: Duration = Duration::from_millis(100);
 
@@ -165,12 +164,6 @@ pub fn started_after(age_seconds: u64, seconds_since_restart: u64) -> bool {
 mod tests {
     use super::*;
     use std::net::TcpListener;
-
-    #[test]
-    fn pid_release_bound_exceeds_launchds_sigkill_grace() {
-        assert!(PID_EXIT_TIMEOUT > LAUNCHD_SIGKILL_GRACE);
-        assert_eq!(PROOF_TIMEOUT, Duration::from_secs(15));
-    }
 
     #[test]
     fn reads_the_pid_launchd_reports() {

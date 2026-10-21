@@ -72,7 +72,6 @@ def test_startup_drops_them_after_the_database_migration_has_read_them(launch_en
     assert not any(variable in os.environ for variable in VARIABLES)
 
 
-
 def test_with_the_store_empty_no_key_reaches_the_sdk_params(launch_environment):
     from llm.capabilities import make_provider_params
 

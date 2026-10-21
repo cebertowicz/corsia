@@ -44,6 +44,7 @@ mod source_lifecycle;
 mod startup_failure;
 #[cfg(test)]
 mod test_tls;
+use startup_failure::StartupFailure;
 mod trust;
 mod version_check;
 mod update_stage;
@@ -394,31 +395,36 @@ fn wait_for_service(port: u16, app_dir: &Path) -> Result<(), String> {
         || Ok(release_proof::launchd_pid(&target)),
         STARTUP_CAP,
     )
+    .map_err(|failure| failure.to_string())
 }
 
 /// Health is the readiness signal. A changed launchd PID proves the service
-/// restarted while starting; otherwise the fixed cap bounds a hung startup.
+/// restarted while starting, and a PID the kernel no longer knows with none in
+/// its place proves it exited; otherwise the fixed cap bounds a hung startup.
 pub(crate) fn wait_for_startup(
     port: u16,
     log: &Path,
     mut service_pid: impl FnMut() -> Result<Option<u32>, String>,
     cap: Duration,
-) -> Result<(), String> {
+) -> Result<(), StartupFailure> {
     let began = Instant::now();
     let mut initial_pid = None;
     loop {
         if probe_health(port) {
             return Ok(());
         }
-        match (initial_pid, service_pid()?) {
+        match (initial_pid, service_pid().map_err(StartupFailure::PidUnreadable)?) {
             (Some(expected), Some(actual)) if actual != expected => {
-                return Err("the CORSIA service restarted while it was starting".into());
+                return Err(StartupFailure::Restarted);
+            }
+            (Some(expected), None) if release_proof::pid_is_gone(expected) => {
+                return Err(StartupFailure::exited(log));
             }
             (None, Some(pid)) => initial_pid = Some(pid),
             _ => {}
         }
         if began.elapsed() >= cap {
-            return Err(startup_failure::timeout_message(log));
+            return Err(StartupFailure::timed_out(log));
         }
         thread::sleep(HEALTH_POLL_INTERVAL);
     }

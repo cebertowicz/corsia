@@ -16,6 +16,7 @@ use crate::{
     adoption::{self, ReadyError, RestartLook, StopProcess},
     release_proof, run_service_command,
     service_management::service_label,
+    startup_failure::StartupFailure,
     unregister_service, wait_for_service, wait_for_startup, STARTUP_CAP,
 };
 
@@ -215,6 +216,8 @@ impl SourceLifecycle {
         self.wait_for_source()
     }
 
+    /// The source writes no launcher refusals, so its log only bounds the
+    /// search; the existing install is named by the failure's kind alone.
     fn wait_for_source(&self) -> Result<(), String> {
         let log = self.source.state.join("backend.log");
         wait_for_startup(
@@ -227,14 +230,13 @@ impl SourceLifecycle {
             },
             STARTUP_CAP,
         )
-        .map_err(|error| {
-            if error.starts_with("the CORSIA service did not become ready in time") {
+        .map_err(|failure| match failure {
+            StartupFailure::TimedOut { .. } => {
                 "the existing install did not answer after it was started".into()
-            } else if error == "the CORSIA service restarted while it was starting" {
-                "the existing install restarted while it was starting".into()
-            } else {
-                error
             }
+            StartupFailure::Restarted => "the existing install restarted while it was starting".into(),
+            StartupFailure::Exited { .. } => "the existing install stopped while it was starting".into(),
+            StartupFailure::PidUnreadable(error) => error,
         })
     }
 
@@ -746,7 +748,33 @@ mod tests {
             cap,
         )
         .unwrap_err();
-        assert_eq!(error, "the CORSIA service restarted while it was starting");
+        assert_eq!(error, StartupFailure::Restarted);
+        assert!(began.elapsed() < cap);
+    }
+
+    #[test]
+    fn a_service_that_exits_without_a_restart_fails_well_before_the_startup_cap() {
+        let home = home("rm -f LOADED", "exit 0", "exit 0");
+        let log = home.lifecycle.source.state.join("backend.log");
+        fs::create_dir_all(log.parent().unwrap()).unwrap();
+        fs::write(&log, "CORSIA bundled backend refused to start: another service owns this Mac\n").unwrap();
+        let mut exited = std::process::Command::new("/usr/bin/true").spawn().unwrap();
+        let pid = exited.id();
+        exited.wait().unwrap();
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let cap = Duration::from_secs(3);
+        let began = Instant::now();
+        let error = wait_for_startup(
+            home.lifecycle.source.port,
+            &log,
+            || Ok((calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0).then_some(pid)),
+            cap,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "the CORSIA service stopped while it was starting: CORSIA bundled backend refused to start: another service owns this Mac"
+        );
         assert!(began.elapsed() < cap);
     }
 
@@ -761,7 +789,7 @@ mod tests {
                 Duration::from_secs(3),
             )
             .unwrap_err(),
-            "could not ask launchd about the existing install"
+            StartupFailure::PidUnreadable("could not ask launchd about the existing install".into())
         );
     }
 
@@ -776,7 +804,7 @@ mod tests {
                 Duration::from_millis(30),
             )
             .unwrap_err(),
-            "the CORSIA service did not become ready in time"
+            StartupFailure::TimedOut { refusal: None }
         );
     }
 
