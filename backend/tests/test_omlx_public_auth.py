@@ -140,6 +140,6 @@ def test_readiness_reloads_registered_key_before_each_probe(isolated_db, monkeyp
     monkeypatch.setattr(supervisor, "HEALTH_POLL_INTERVAL_S", 0)
 
     assert asyncio.run(supervisor._wait_for_healthy(
-        "127.0.0.1", 5200, server_id=server_id,
-    )) is True
+        "127.0.0.1", 5200, timeout_s=30.0, server_id=server_id,
+    )) == "healthy"
     assert headers == ["Bearer first", "Bearer second"]
