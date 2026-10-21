@@ -5,6 +5,7 @@ import sqlite3
 import pytest
 
 from infra.migration_132_to_133_review_forks import migrate_132_to_133
+from infra.migration_139_to_140_review_requesting_node import migrate_139_to_140
 from test_doc_review_requests import request, review_env  # noqa: F401
 
 
@@ -119,6 +120,7 @@ def test_fresh_schema_matches_edited_review_migration_chain():
             CREATE INDEX idx_doc_review_reviewer ON doc_review_requests(artifact_id,reviewer_thread_id,created_at);
         """ + DOC_REVIEW_REVIEWER_INDEX_SQL + ";" + DOC_FEEDBACK_SCHEMA_SQL)
         migrate_132_to_133(upgraded)
+        migrate_139_to_140(upgraded)
         assert fresh.execute("SELECT name,type FROM sqlite_master ORDER BY name").fetchall() == upgraded.execute(
             "SELECT name,type FROM sqlite_master ORDER BY name",
         ).fetchall()

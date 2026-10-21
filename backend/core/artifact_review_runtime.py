@@ -10,7 +10,8 @@ from typing import Any
 from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
 from core.fork_runtime import ForkHandle, cancel_fork, forget, handles
 from core.artifact_review_capture import ReviewForkFailure, fork_ended
-from prompts.artifact_review import instruction
+from plans import public
+from prompts.artifact_review import instruction, requesting_task_block
 
 logger = logging.getLogger(__name__)
 _starting: set[str] = set()
@@ -18,6 +19,20 @@ _starting: set[str] = set()
 # A backstop for a fork that stops making progress without exiting. The step
 # budget ends an ordinary review well before it; past it the reviewer finishes.
 REVIEW_WALL_SECONDS = 30 * 60
+
+
+def _requesting_task(db, row) -> str | None:
+    """The requesting task, read once through Plans at fork start; the review proceeds without it on failure.
+
+    The fork cannot call plan_read, so it is given the task itself, named with the revision read.
+    """
+    if not row["requesting_node_id"]:
+        return None
+    try:
+        return requesting_task_block(public.intent_of(row["requesting_node_id"], db=db))
+    except public.PlanError:
+        logger.warning("review fork proceeds without its requesting task request_id=%s", row["id"], exc_info=True)
+        return None
 
 
 def _cold_request(request_id: str):
@@ -57,7 +72,7 @@ def _cold_request(request_id: str):
         protected = ({"role": "user", "content": render_prior_checkpoint(previous)},) if previous else ()
         request = build_cold_fork_admission(
             fork_id=row["fork_id"], thread_id=thread["id"], target=target, kind=ARTIFACT_REVIEW_KIND,
-            instruction=instruction(row, artifact),
+            instruction=instruction(row, artifact, _requesting_task(db, row)),
             source=ColdForkSource(projection, protected),
             working_dir=resolve_working_dir(thread["project_id"], db),
             reasoning_effort=thread["reasoning_effort"], binary=fork_binary(target, db),

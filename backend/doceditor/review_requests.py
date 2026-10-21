@@ -42,6 +42,15 @@ REVIEWER_NOT_IN_ROSTER = "reviewer_not_in_roster"
 DEFAULT_REQUEST_ERROR_CODE = "review_request_refused"
 CANCEL_REASON = "Review request cancelled by its requester or document owner."
 IN_REVIEW_REFUSAL = "A review is already in progress. Wait for it to finish, or cancel it and request a new review with your note."
+NODE_REFUSAL = (
+    "requesting_node_id {id} is not a task you can read. Pass a task from your plan_read(), "
+    "or omit it to use your current task."
+)
+#: Names the requester's task by reference, never its text: the intent can change after the request.
+REQUESTING_TASK_NOTICE = (
+    "Requested from task {node_id}; read its current intent and acceptance criteria with "
+    "plan_read(thread_id='{owner}', node_id='{node_id}')."
+)
 
 
 class ReviewRequestError(ValueError):
@@ -156,17 +165,58 @@ def get_request(db, request_id: str) -> dict:
     return _view(db, db.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone())
 
 
-def _repeat(db, row, actor: ReviewActor, note: str | None, key: str) -> dict:
+def requesting_task_notice(db, node_id: str) -> str:
+    """The one line that names the requester's task and the read that returns it.
+
+    Only reached with a readable node, so its owning thread is known.
+    """
+    return REQUESTING_TASK_NOTICE.format(node_id=node_id, owner=public.node_owner_thread(node_id, db=db))
+
+
+def _readable_node(db, requester: ReviewActor, node_id: str) -> None:
+    """Refuse an explicit task the requester could not open with the read the notice names."""
+    owner = public.node_owner_thread(node_id, db=db)
+    thread = get_thread_for_user(requester.thread_id, requester.user_id, db=db)
+    if owner is None or thread is None:
+        raise ReviewRequestError(NODE_REFUSAL.format(id=node_id))
+    actor = public.PlanActor(requester.thread_id, requester.user_id, thread["project_id"])
+    try:
+        public.read_current_status(actor=actor, node_id=node_id, thread_id=owner, db=db)
+    except (public.PlanError, PermissionError) as exc:
+        raise ReviewRequestError(NODE_REFUSAL.format(id=node_id)) from exc
+
+
+def _requesting_node(db, requester: ReviewActor, explicit: str | None, live: str | None) -> str | None:
+    """The requester's task: an explicit readable one, else its live Turn node, else None.
+
+    A person's request carries none, even from inside a thread. ``live`` is the
+    server-resolved Turn node and is never model-supplied.
+    """
+    if requester.kind != "agent":
+        return None
+    explicit = (explicit or "").strip()
+    if explicit:
+        _readable_node(db, requester, explicit)
+        return explicit
+    return live or None
+
+
+def _repeat(db, row, actor: ReviewActor, note: str | None, key: str, requesting: str | None = None) -> dict:
     keys = json.loads(row["client_ids"])
     if key in keys:
         return _view(db, row)
+    if note and row["state"] == "forked":
+        # A fork has already frozen its instruction; silently accepting a
+        # later note would claim the reviewer saw it when it could not.
+        raise ReviewRequestError(IN_REVIEW_REFUSAL)
     keys.append(key)
     db.execute("UPDATE doc_review_requests SET client_ids=? WHERE id=?", (json.dumps(keys), row["id"]))
+    # The first reference stays on the row. A forked request joins a repeat from another task
+    # unchanged; once the review is a plan task the repeat names its own task there, by reference.
+    if row["state"] != "forked" and requesting and requesting != row["requesting_node_id"]:
+        note = f"{note}\n\n" if note else ""
+        note += requesting_task_notice(db, requesting)
     if note:
-        if row["state"] == "forked":
-            # A fork has already frozen its instruction; silently accepting a
-            # later note would claim the reviewer saw it when it could not.
-            raise ReviewRequestError(IN_REVIEW_REFUSAL)
         public.append_review_note(db, row["node_id"], {
             **dict(row), "note": note, "requester_display": actor.display,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -175,7 +225,8 @@ def _repeat(db, row, actor: ReviewActor, note: str | None, key: str) -> dict:
 
 
 def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: ReviewActor,
-                   note: str | None, client_id: str) -> dict:
+                   note: str | None, client_id: str, *, requesting_node_id: str | None = None,
+                   live_node_id: str | None = None) -> dict:
     """Queue one reviewer task, with retry-safe notes and no preemption."""
     key = validate_client_id(client_id)
     if key is None:
@@ -194,23 +245,24 @@ def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: Rev
         if prior is not None:
             return _view(connection, prior)
         # The write lock serializes the pending request check and insert.
+        requesting = _requesting_node(connection, requester, requesting_node_id, live_node_id)
         latest = _latest(connection, artifact_id, reviewer_thread_id)
         if latest is not None and is_open(connection, latest):
-            return _repeat(connection, latest, requester, note, key)
+            return _repeat(connection, latest, requester, note, key, requesting)
         request_id = str(uuid.uuid4())
         request = {
             "id": request_id, "artifact_id": artifact_id,
             "requester_kind": requester.kind, "requester_id": requester.id,
             "reviewer_thread_id": reviewer_thread_id, "note": note,
-            "fork_id": str(uuid.uuid4()),
+            "fork_id": str(uuid.uuid4()), "requesting_node_id": requesting,
             "created_at": datetime.now(timezone.utc).isoformat(), "requester_display": requester.display,
         }
         connection.execute(
             """INSERT INTO doc_review_requests(id,artifact_id,requester_kind,requester_id,
-               reviewer_thread_id,note,client_ids,fork_id,state,state_changed_at,created_at)
-               VALUES (?,?,?,?,?,?,?,?,'forked',?,?)""",
+               reviewer_thread_id,note,client_ids,fork_id,requesting_node_id,state,state_changed_at,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,'forked',?,?)""",
             (request["id"], artifact_id, requester.kind, requester.id, reviewer_thread_id,
-             note, json.dumps([key]), request["fork_id"], request["created_at"], request["created_at"]),
+             note, json.dumps([key]), request["fork_id"], requesting, request["created_at"], request["created_at"]),
         )
         # Recheck admission under the same write lock. A request is fork-first:
         # Plans is reserved for terminal fallback only.
