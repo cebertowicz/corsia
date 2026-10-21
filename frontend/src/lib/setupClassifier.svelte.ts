@@ -48,7 +48,7 @@ export function createSetupClassifier() {
 	const job = $derived<SetupJob | undefined>(
 		state.state === 'ready' || state.state === 'idle' ? undefined
 			: state.state === 'failed'
-				? { label: FINISHING_SETUP, state: 'error', meta: state.reason || 'The download needs attention.', action: { label: 'Try again', onclick: start } }
+				? { label: FINISHING_SETUP, state: 'error', meta: state.reason || 'The download needs attention.', action: { label: 'Retry', onclick: start } }
 				: { label: FINISHING_SETUP, state: 'busy', meta, progress: percent == null ? undefined : percent / 100 },
 	);
 

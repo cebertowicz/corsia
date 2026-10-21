@@ -23,7 +23,7 @@ use serde::Serialize;
 use crate::adoption;
 
 pub const SERVICE_FILE: &str = "service.json";
-const WORKSPACE_FOLDER: &str = "corsia";
+const WORKSPACE_FOLDER: &str = "CORSIA";
 const LEGACY_STATE_FOLDER: &str = "com.cebertowicz.corsia";
 // Finder's view settings do not make a folder someone's data. A `.git`
 // directory is ignored only when it has no branch refs or packed branch refs.

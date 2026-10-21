@@ -74,7 +74,7 @@ describe('SetupScreen account recovery', () => {
 		fill('#setup-name', 'Ada'); fill('#setup-username', 'ada'); fill('#setup-password', 'password1'); fill('#setup-confirm-password', 'password1');
 		await settle(); click('Continue'); await settle();
 		click('Continue'); await settle();
-		expect(host.textContent).toContain('Couldn’t create your account. Try again.');
+		expect(host.textContent).toContain('Couldn’t create your account. Retry.');
 		click('Save a report'); await settle();
 		expect(invoke).toHaveBeenCalledWith('save_setup_report');
 	});
@@ -95,7 +95,7 @@ describe('SetupScreen local-start recovery', () => {
 
 	it('always shows the other-oMLX question when the server requires a fresh choice', async () => {
 		await openModels({ localEligible: true, otherOmlx: 'stopped_theirs', localReplies: [json({ code: 'consent_required' }, 409)] });
-		await vi.waitFor(() => expect(host.textContent).toContain('Another copy of oMLX is already running'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Stop other oMLX processes?'));
 	});
 
 	it('shows generic recovery when the person’s other-oMLX choice cannot start setup', async () => {

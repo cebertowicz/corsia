@@ -148,9 +148,19 @@
 			if (status.macos_supported === false || status.app_location === 'disk_image') { page = 'hard-stop'; return; }
 			page = 'account'; void classifier.start();
 			if (eligible) { await localPick.start(); await startLocal(); await readLocalProgress(); }
-		} catch { statusError = 'Something went wrong while starting. Try again, or save a report to send.'; page = 'error'; }
+		} catch { statusError = 'Something went wrong while starting. Retry, or save a report to send.'; page = 'error'; }
 	}
-	async function checkLocal() { await localPick.start(); if (get(token)) await refreshSources(); else await readLocalProgress(); }
+	async function checkLocal() {
+		const current = get(token);
+		if (current) {
+			const progress = await fetchSetupProgress(current);
+			if (progress?.status) status = progress.status as Status;
+			await startLocal();
+			return;
+		}
+		await localPick.start();
+		await readLocalProgress();
+	}
 	async function readLocalProgress() {
 		try {
 			const response = await fetch('/api/setup/local-download');
@@ -205,11 +215,11 @@
 			const response = await fetch('/api/setup/first-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null }) });
 			if (response.status === 409) { accountExists = true; accountError = 'This computer already has a CORSIA account. Sign in instead.'; page = 'account'; return; }
 			const result = await response.json().catch(() => null);
-			if (!response.ok) { accountError = typeof result?.detail === 'string' ? result.detail : 'Couldn’t create your account. Try again.'; return; }
+			if (!response.ok) { accountError = 'Couldn’t create your account. Retry.'; return; }
 			onAccountCreated(); token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() }); connect();
 			password = ''; confirmation = ''; page = 'models';
 			await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
-		} catch { accountError = 'Couldn’t create your account. Try again.'; }
+		} catch { accountError = 'Couldn’t create your account. Retry.'; }
 		finally { accountBusy = false; }
 	}
 	async function refreshSources(strict = false) {
@@ -282,7 +292,7 @@
 	{:else if page === 'folder'}<SetupWorkFolder bind:folder bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} error={accountError} />
 	{:else if page === 'models'}
 		<SetupAiRows rows={aiRows} />
-		{#if otherQuestion}<div class="other-omlx"><h2>Another copy of oMLX is already running</h2><p>CORSIA runs its own oMLX for the local model. Stopping the other copy frees memory. If it opens when you log in, it comes back next time.</p><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(true)}>Stop it</Button><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(false)}>Keep it running</Button></div>{/if}
+		{#if otherQuestion}<div class="other-omlx"><h2>Stop other oMLX processes?</h2><p>CORSIA runs its own oMLX for the local model. Stopping other oMLX processes can free memory. Login items start again when you next sign in. Other processes stay stopped until you start them.</p><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(true)}>Stop other oMLX</Button><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(false)}>Keep them running</Button></div>{/if}
 		{#if sourceError}<Message variant="err">{sourceError}</Message><Button variant="chip" onclick={() => void refreshSources(true)}>Retry</Button>{/if}
 	{/if}
 </SetupShell>
