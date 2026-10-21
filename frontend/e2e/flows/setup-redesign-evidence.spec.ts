@@ -246,7 +246,6 @@ async function navigate(page: Page, fixture: Fixture) {
 	}
 	if (fixture.screen === 'creating' || fixture.screen === 'create-failed') {
 		await expect(page.getByRole('heading', { name: 'Choose your work folder', exact: true })).toBeVisible();
-		await page.getByRole('button', { name: 'Continue', exact: true }).click();
 		return;
 	}
 	await expect(page.getByRole('heading', { name: 'Providers & models', exact: true })).toBeVisible();
