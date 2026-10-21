@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 import uuid
 from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
@@ -165,7 +166,6 @@ async def run_fresh_turn(
 
             await delete_owned_thread(thread_id, user_id, [])
             return FreshTurn(thread_id, None, f"Eval context setup errored: {_failure_detail(exc)}")
-    from contextlib import nullcontext
     from eval.tool_allowlist import carry_in_tool_isolation
 
     isolation = carry_in_tool_isolation() if scope is not None and scope.carry_in else nullcontext()
