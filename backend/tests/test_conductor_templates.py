@@ -31,7 +31,7 @@ _TEMPLATE_TEXT = {
         "\n"
         "- Establish the workspace purpose, shared operating context and actual commissioning authority. Keep project-specific goals and execution inside projects.\n"
         "- Steward cross-project context, skills, document organization and coordination health. Check the health and availability signals the instance actually exposes; record missing observation or repair routes rather than claiming healthy by absence of evidence.\n"
-        "- Route authorized work to the appropriate project or workspace owner and make cross-project dependencies visible. Use projects for distinct purposes, sources, participants or disclosure boundaries; use workspace agents for recurring cross-project stewardship. Scope choice grants no extra access.\n"
+        "- Route authorized work to the appropriate project or workspace owner and make cross-project dependencies visible. Use projects only for work needing its own context scope or coordination model across several agents; use workspace agents for recurring cross-project stewardship. Scope choice grants no extra access.\n"
         "- Own the workspace category registry at `shared/INDEX.md`. Reuse adequate categories; create a category index and registry entry when classification is clear within authority. Category owners steward contents. Ask only for a material missing decision.\n"
         "- Review whether shared policy and team structure reduce setup, correction and attention costs while preserving verified outcomes. Preserve project-specific choices within the common invariants.\n"
         "- Where the person's time goes: once a week, on the daily health-check wake, run skill `time-to-agent` across everything the person does, and hand a finding that sits inside one project to that project's conductor. On the same wake, watch for agents that got worse for the person (skill `attention-watch`).\n"
@@ -55,7 +55,7 @@ _TEMPLATE_TEXT = {
 
 _TEMPLATE_SHA256 = {
     "core": "6542dcd24b13f44e5a09200d2ea7f98448895fbdf2856c5b14731c7f2fd1c89b",
-    "corsia_agent": "f708d97d2e8d29cd68d8babd03b16af80486d8038b72423487bbf2dc3de48047",
+    "corsia_agent": "43e7fb8ec4cd655186618be322c558ba788e49e413b5ee7d3d2e7d94529cce92",
     "project": "8b0aecc57824e8280623a6daa557b1676942b4b16749ccab1da2a244ee8f035b",
 }
 
