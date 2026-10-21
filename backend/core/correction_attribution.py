@@ -34,6 +34,8 @@ from core.corrections_recording import (
     SOURCE_KIND_DECISION_ANSWER,
     SOURCE_KIND_DOC_COMMENT,
     SOURCE_KIND_MESSAGE,
+    SOURCE_KIND_SELF_CAUGHT,
+    SELF_CAUGHT_SUBJECT_PREFIX,
     decision_answer_arrived_at_sql,
     decision_answer_subject_key_sql,
 )
@@ -72,6 +74,10 @@ _ATTRIBUTED_SQL = f"""
       FROM facts f LEFT JOIN artifact_identities d ON f.subject_key={decision_answer_subject_key_sql('d')}
         AND d.integration='local' AND d.type='plan-decision'
       WHERE f.subject_key LIKE '{DECISION_SUBJECT_PREFIX}%'
+      UNION ALL
+      SELECT '{SOURCE_KIND_SELF_CAUGHT}',substr(f.subject_key,length('{SELF_CAUGHT_SUBJECT_PREFIX}') + 1),
+        json_extract(f.attributes,'$.recorded_at'),f.agent_thread_id,NULL,f.attributes
+      FROM facts f WHERE f.subject_key LIKE '{SELF_CAUGHT_SUBJECT_PREFIX}%'
     )
     SELECT s.source_kind,s.source_id,s.source_at,s.attributes,
       (SELECT t.plan_node_id FROM active_turns t

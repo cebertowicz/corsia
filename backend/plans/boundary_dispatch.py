@@ -163,8 +163,10 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow_version
     if operation == "reorder":
         return _reorder(params, common)
     from plans import corrections, intent_words
-    return corrections.add(
-        params["node_id"], title=fields.text(params, "title"),
+
+    result = corrections.add(
+        params["node_id"],
+        title=fields.text(params, "title"),
         acceptance_criteria=fields.text(params, "acceptance_criteria"),
         affected_nodes=params.get("affected_nodes"), intent=params.get("intent"),
         intent_words=intent_words.resolve_words(
@@ -172,6 +174,10 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow_version
         ),
         **fields.expected(params), **common,
     )
+    from core.self_caught_corrections import record_plan_correction
+
+    record_plan_correction(db, params["node_id"], result["correction"]["id"])
+    return result
 
 
 def _replace_worker(node_id: str, params: dict, common: dict) -> dict:
@@ -259,6 +265,9 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
     if operation == "fail":
         _record_verdict(params, "Failed", common)
         mutations.fail_node(node_id, **fields.expected(params), **common)
+        from core.self_caught_corrections import record_failed_plan_node
+
+        record_failed_plan_node(db, node_id, acting)
         return after.after_close(node_id, "failed", params, common, executor=acting)
     if operation == "close_node":
         import plans.closure as closure

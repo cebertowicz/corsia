@@ -112,6 +112,9 @@ def _write_raw_facts(
                         subject_key=draft.subject_key,
                         attributes=draft.attributes,
                     )
+                from core.self_caught_corrections import record_github_outcome_drafts
+
+                record_github_outcome_drafts(connection, drafts)
             return
         except OutcomeInputRefusal as exc:
             # Deliberate credential/budget rejection, never an incidental exception

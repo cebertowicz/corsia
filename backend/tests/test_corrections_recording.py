@@ -218,7 +218,7 @@ async def test_fact_carries_the_verified_asset_result_without_message_text(isola
     finally:
         db.close()
     assert attributes == {
-        "source_kind": "message", "source_id": "owner-message", "thread_id": "thread", "label": "correction",
+        "source_kind": "message", "source_id": "owner-message", "thread_id": "thread", "caught_by": "person", "label": "correction",
         "asset_id": "corrections-classifier", "asset_version": "v1", "head": "correction",
         "threshold": "0.595681", "input_policy_id": "modernbert-owner-context-v2-2048",
         "truncated": "false", "original_tokens": 9, "failure_reason": "none",

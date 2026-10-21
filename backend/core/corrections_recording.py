@@ -19,13 +19,16 @@ CORRECTION_EVENT = "measurement.correction"
 SOURCE_KIND_MESSAGE = "message"
 SOURCE_KIND_DOC_COMMENT = "doc_comment"
 SOURCE_KIND_DECISION_ANSWER = "plan_decision_answer"
+SOURCE_KIND_SELF_CAUGHT = "self_caught"
 MESSAGE_SUBJECT_PREFIX = "message:"
 COMMENT_SUBJECT_PREFIX = "doc-comment:"
 DECISION_SUBJECT_PREFIX = "plan-decision-answer:"
+SELF_CAUGHT_SUBJECT_PREFIX = "self-caught:"
 SUBJECT_PREFIXES = {
     SOURCE_KIND_MESSAGE: MESSAGE_SUBJECT_PREFIX,
     SOURCE_KIND_DOC_COMMENT: COMMENT_SUBJECT_PREFIX,
     SOURCE_KIND_DECISION_ANSWER: DECISION_SUBJECT_PREFIX,
+    SOURCE_KIND_SELF_CAUGHT: SELF_CAUGHT_SUBJECT_PREFIX,
 }
 LABEL_CORRECTION = "correction"
 LABEL_NOT_CORRECTION = "not_correction"
@@ -45,6 +48,7 @@ FACT_KEYS = (
     "source_kind",
     "source_id",
     "thread_id",
+    "caught_by",
     "label",
     "asset_id",
     "asset_version",
@@ -55,6 +59,14 @@ FACT_KEYS = (
     "original_tokens",
     "failure_reason",
     "classified_at",
+)
+SELF_CAUGHT_FACT_KEYS = (
+    "source_kind",
+    "source_id",
+    "thread_id",
+    "caught_by",
+    "label",
+    "recorded_at",
 )
 
 
@@ -210,6 +222,16 @@ def dedupe_key(candidate: CorrectionCandidate, version: ClassifierVersion) -> st
     return "correction:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def self_caught_dedupe_key(candidate: CorrectionCandidate) -> str:
+    """Stable idempotency key for one observed self-caught correction.
+
+    Self-caught failures are direct observations, not classifier outputs: their
+    identity therefore has no classifier-version component.
+    """
+    payload = subject_key(candidate.source_kind, candidate.source_id)
+    return "self-caught-correction:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _metadata(value: object) -> Mapping[str, Any]:
     if isinstance(value, Mapping):
         return value
@@ -288,10 +310,25 @@ def fact_attributes(
         "source_kind": candidate.source_kind,
         "source_id": candidate.source_id,
         "thread_id": candidate.thread_id,
+        "caught_by": "person",
         "label": label,
         **version_attributes(version),
         "truncated": "true" if classification["truncated"] else "false",
         "original_tokens": int(classification["original_tokens"]),
         "failure_reason": reason,
         "classified_at": classified_at or datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def self_caught_attributes(candidate: CorrectionCandidate) -> dict[str, str]:
+    """Shape one direct failure observation without pretending it was classified."""
+    if candidate.source_kind != SOURCE_KIND_SELF_CAUGHT:
+        raise ValueError("self-caught facts require a self_caught source")
+    return {
+        "source_kind": candidate.source_kind,
+        "source_id": candidate.source_id,
+        "thread_id": candidate.thread_id,
+        "caught_by": "us",
+        "label": LABEL_CORRECTION,
+        "recorded_at": candidate.created_at,
     }

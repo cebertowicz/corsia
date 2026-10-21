@@ -31,7 +31,12 @@ from core.correction_learning import (
     TIERS,
     TRIAGE_EVENT,
 )
-from core.corrections_recording import CORRECTION_EVENT, FACT_KEYS as CORRECTION_FACT_KEYS, LABELS as CORRECTION_LABELS
+from core.corrections_recording import (
+    CORRECTION_EVENT,
+    FACT_KEYS as CORRECTION_FACT_KEYS,
+    LABELS as CORRECTION_LABELS,
+    SELF_CAUGHT_FACT_KEYS,
+)
 from core.size_rating import BASES, FACT_KEYS, SIZE_CLASSES, SIZE_EVENT
 from host_access.credential_sanitizer import contains_credential, sanitize_credential_data
 from infra.outcome_event_input import OutcomeInputRefusal
@@ -174,6 +179,10 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "repo": id_attr(), "pr": id_attr(), "issue_repo": id_attr(),
         "issue": id_attr(), "confidence": enum_attr("stated"),
     },
+    "github.pr.reverts": {
+        "repo": id_attr(), "pr": id_attr(), "reverted_repo": id_attr(),
+        "reverted_pr": id_attr(), "confidence": enum_attr("stated"),
+    },
     "github.workflow_run.completed": {
         "repo": id_attr(), "run_id": id_attr(), "attempt": count_attr(),
         "workflow_id": id_attr(), "head_sha": id_attr(), "head_branch": id_attr(),
@@ -198,7 +207,9 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     # Local correction classifications retain only versioned result metadata,
     # never source-message text or an LLM explanation.
     CORRECTION_EVENT: {
-        **{key: id_attr() for key in CORRECTION_FACT_KEYS if key not in {"label", "threshold", "truncated", "original_tokens"}},
+        **{key: id_attr() for key in (set(CORRECTION_FACT_KEYS) | set(SELF_CAUGHT_FACT_KEYS))
+           if key not in {"label", "threshold", "truncated", "original_tokens", "caught_by"}},
+        "caught_by": enum_attr("person", "us"),
         "label": enum_attr(*CORRECTION_LABELS),
         "threshold": id_attr(),
         "truncated": enum_attr("true", "false"),
@@ -215,6 +226,7 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "lesson_id": id_attr(), "workflow_version": id_attr(),
     },
     "github.issue.opened": {**_ISSUE_ATTRS},
+    "github.issue.reopened": {**_ISSUE_ATTRS},
     "github.issue.closed": {
         **_ISSUE_ATTRS, "state_reason": enum_attr("completed", "not_planned", "reopened", "duplicate"),
     },
