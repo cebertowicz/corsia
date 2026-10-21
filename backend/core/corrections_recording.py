@@ -48,7 +48,6 @@ FACT_KEYS = (
     "source_kind",
     "source_id",
     "thread_id",
-    "caught_by",
     "label",
     "asset_id",
     "asset_version",
@@ -64,7 +63,6 @@ SELF_CAUGHT_FACT_KEYS = (
     "source_kind",
     "source_id",
     "thread_id",
-    "caught_by",
     "label",
     "recorded_at",
 )
@@ -310,7 +308,6 @@ def fact_attributes(
         "source_kind": candidate.source_kind,
         "source_id": candidate.source_id,
         "thread_id": candidate.thread_id,
-        "caught_by": "person",
         "label": label,
         **version_attributes(version),
         "truncated": "true" if classification["truncated"] else "false",
@@ -328,7 +325,6 @@ def self_caught_attributes(candidate: CorrectionCandidate) -> dict[str, str]:
         "source_kind": candidate.source_kind,
         "source_id": candidate.source_id,
         "thread_id": candidate.thread_id,
-        "caught_by": "us",
         "label": LABEL_CORRECTION,
         "recorded_at": candidate.created_at,
     }

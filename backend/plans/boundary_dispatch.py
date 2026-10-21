@@ -267,7 +267,7 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
         mutations.fail_node(node_id, **fields.expected(params), **common)
         from core.self_caught_corrections import record_failed_plan_node
 
-        record_failed_plan_node(db, node_id, acting)
+        record_failed_plan_node(db, node_id)
         return after.after_close(node_id, "failed", params, common, executor=acting)
     if operation == "close_node":
         import plans.closure as closure

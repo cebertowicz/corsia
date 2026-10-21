@@ -31,9 +31,21 @@ def _record(db, *, source_id: str, thread_id: str, created_at: str) -> bool:
     )
 
 
-def record_failed_plan_node(db, node_id: str, thread_id: str | None) -> bool:
-    """Record a failed node for the agent that failed it, never another reporter."""
-    if not thread_id:
+def _thread_plan_owner(db, node_id: str) -> str | None:
+    """Return the canonical owner of the thread plan holding ``node_id``."""
+    row = db.execute(
+        """SELECT p.owner_id FROM plan_nodes n
+           JOIN plans p ON p.id=n.plan_id
+           WHERE n.id=? AND p.owner_kind='thread' AND length(trim(p.owner_id)) > 0""",
+        (node_id,),
+    ).fetchone()
+    return None if row is None else str(row[0])
+
+
+def record_failed_plan_node(db, node_id: str) -> bool:
+    """Record a failed node for its owning thread plan after transition."""
+    thread_id = _thread_plan_owner(db, node_id)
+    if thread_id is None:
         return False
     row = db.execute(
         """SELECT created_at FROM plan_node_events
@@ -49,16 +61,18 @@ def record_failed_plan_node(db, node_id: str, thread_id: str | None) -> bool:
 
 
 def record_plan_correction(db, source_node_id: str, correction_node_id: str) -> bool:
-    """Record an add_correction against the agent that settled any terminal source."""
+    """Record an add_correction against its source node's owning thread plan."""
     from plans.public import TERMINAL_STATES
 
+    thread_id = _thread_plan_owner(db, source_node_id)
+    if thread_id is None:
+        return False
     terminal_states = tuple(sorted(TERMINAL_STATES))
     placeholders = ",".join("?" for _ in terminal_states)
     settled = db.execute(
-        f"""SELECT actor_id,created_at FROM plan_node_events
+        f"""SELECT created_at FROM plan_node_events
            WHERE node_id=? AND event='state_transition'
              AND new_state IN ({placeholders})
-             AND actor_id IS NOT NULL AND actor_id NOT LIKE 'user:%'
            ORDER BY rowid DESC LIMIT 1""",
         (source_node_id, *terminal_states),
     ).fetchone()
@@ -67,8 +81,8 @@ def record_plan_correction(db, source_node_id: str, correction_node_id: str) -> 
     return _record(
         db,
         source_id=f"plan-correction:{source_node_id}:{correction_node_id}",
-        thread_id=str(settled[0]),
-        created_at=str(settled[1]),
+        thread_id=thread_id,
+        created_at=str(settled[0]),
     )
 
 

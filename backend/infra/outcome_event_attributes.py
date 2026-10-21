@@ -208,8 +208,7 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     # never source-message text or an LLM explanation.
     CORRECTION_EVENT: {
         **{key: id_attr() for key in (set(CORRECTION_FACT_KEYS) | set(SELF_CAUGHT_FACT_KEYS))
-           if key not in {"label", "threshold", "truncated", "original_tokens", "caught_by"}},
-        "caught_by": enum_attr("person", "us"),
+           if key not in {"label", "threshold", "truncated", "original_tokens"}},
         "label": enum_attr(*CORRECTION_LABELS),
         "threshold": id_attr(),
         "truncated": enum_attr("true", "false"),

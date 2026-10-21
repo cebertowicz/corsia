@@ -42,8 +42,9 @@ def _actor(thread_id="owner") -> PlanActor:
 
 
 def _mutate(db, plan_id, operation, params, key, *, actor="owner"):
+    plan_actor = _actor(actor) if actor is not None else PlanActor(None, "user", None, kind="user")
     return mutate(
-        plan_id, operation, params, actor=_actor(actor), provenance="test.self_caught",
+        plan_id, operation, params, actor=plan_actor, provenance="test.self_caught",
         mutation_id=key, db=db,
     ).result
 
@@ -78,16 +79,12 @@ def test_fail_records_one_direct_correction_and_replay_is_idempotent(db):
     assert thread_id == "owner"
     assert attributes == {
         "source_kind": "self_caught", "source_id": f"plan-failed:{task.id}",
-        "thread_id": "owner", "caught_by": "us", "label": "correction",
+        "thread_id": "owner", "label": "correction",
         "recorded_at": attributes["recorded_at"],
     }
-    assert db.execute(
-        "SELECT COUNT(*) FROM outcome_events "
-        "WHERE json_extract(attributes, '$.caught_by')='us'"
-    ).fetchone()[0] == 1
 
 
-def test_terminal_add_correction_targets_the_original_settler(db):
+def test_terminal_add_correction_targets_the_plan_owner_after_person_settlement(db):
     plan = service.ensure_plan("thread", "owner", db=db)
     source = _task(db, plan.id, "Original work")
     active = _mutate(db, plan.id, "activate", {"node_id": source.id, "expected_revision": source.revision}, "start-source")
@@ -99,7 +96,7 @@ def test_terminal_add_correction_targets_the_original_settler(db):
     accepted = _mutate(
         db, plan.id, "accept",
         {"node_id": source.id, "verification_result": "passed", "expected_revision": reviewed["node"]["revision"]},
-        "accept-source",
+        "accept-source", actor=None,
     )
     affected = _task(db, plan.id, "Affected work")
     _mutate(
@@ -115,7 +112,20 @@ def test_terminal_add_correction_targets_the_original_settler(db):
     [(subject, thread_id, attributes)] = _facts(db)
     assert subject.startswith(f"self-caught:plan-correction:{source.id}:")
     assert thread_id == "owner"
-    assert attributes["caught_by"] == "us"
+    assert attributes["source_kind"] == "self_caught"
+
+
+def test_non_thread_owned_plan_is_not_a_self_caught_source(db):
+    from core.self_caught_corrections import record_failed_plan_node
+
+    db.execute(
+        "INSERT INTO projects (id,name,created_at,updated_at) VALUES ('project','project','t','t')"
+    )
+    plan = service.ensure_plan("project_scope", "project", db=db)
+    task = _task(db, plan.id, "Public scope work")
+
+    assert not record_failed_plan_node(db, task.id)
+    assert _facts(db) == []
 
 
 def test_reject_is_not_a_self_caught_source(db):
@@ -148,7 +158,7 @@ def test_github_reopen_and_explicit_merged_revert_target_owned_prs(db):
     facts = _facts(db)
     assert len(facts) == 2
     assert {thread_id for _subject, thread_id, _attributes in facts} == {"owner"}
-    assert {attributes["caught_by"] for _subject, _thread_id, attributes in facts} == {"us"}
+    assert {attributes["source_kind"] for _subject, _thread_id, attributes in facts} == {"self_caught"}
     assert any("github:issue:cebertowicz/maestro#1627:reopened" in subject for subject, *_ in facts)
     assert any("github:pr:cebertowicz/maestro#3200:reverts:cebertowicz/maestro#3191" in subject for subject, *_ in facts)
 

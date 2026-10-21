@@ -218,11 +218,51 @@ async def test_fact_carries_the_verified_asset_result_without_message_text(isola
     finally:
         db.close()
     assert attributes == {
-        "source_kind": "message", "source_id": "owner-message", "thread_id": "thread", "caught_by": "person", "label": "correction",
+        "source_kind": "message", "source_id": "owner-message", "thread_id": "thread", "label": "correction",
         "asset_id": "corrections-classifier", "asset_version": "v1", "head": "correction",
         "threshold": "0.595681", "input_policy_id": "modernbert-owner-context-v2-2048",
         "truncated": "false", "original_tokens": 9, "failure_reason": "none",
         "classified_at": attributes["classified_at"],
+    }
+
+
+def test_measurement_correction_split_groups_by_source_kind(isolated_db):
+    from core.corrections_recording import CorrectionCandidate, SOURCE_KIND_SELF_CAUGHT
+    from jobs.corrections_recording import _record_fact, record_self_caught
+    from jobs.corrections_scanning import hydrate_candidates, pending_candidate_keys
+
+    db = _db()
+    try:
+        _seed(db)
+    finally:
+        db.close()
+    person = hydrate_candidates(pending_candidate_keys(_version(), 20, "owner"))[0]
+    assert _record_fact(
+        person,
+        {"label": "correction", "truncated": False, "original_tokens": 9, "failure_reason": "none"},
+        _version(),
+    )
+    db = _db()
+    try:
+        assert record_self_caught(
+            CorrectionCandidate(
+                SOURCE_KIND_SELF_CAUGHT, "plan-failed:test", "thread", "project", "",
+                "2026-10-01T00:02:00Z", arrived=True,
+            ),
+            db=db,
+        )
+        rows = db.execute(
+            """SELECT json_extract(attributes, '$.source_kind') AS source_kind, COUNT(*) AS count
+               FROM outcome_events
+               WHERE event_name='measurement.correction'
+               GROUP BY json_extract(attributes, '$.source_kind')"""
+        ).fetchall()
+    finally:
+        db.close()
+
+    assert {str(row["source_kind"]): row["count"] for row in rows} == {
+        "message": 1,
+        "self_caught": 1,
     }
 
 
