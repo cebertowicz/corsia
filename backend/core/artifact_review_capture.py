@@ -6,8 +6,9 @@ import logging
 from typing import Literal
 
 from doceditor import review_requests
-from infra.database import get_db
+from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
+from plans import public
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +43,15 @@ def startup_forked_requests() -> list[str]:
         db.close()
 
 
-def _escalate_in_db(request_id: str, reason: str, *, state: Literal["handed_back", "failed"] | None = None) -> None:
+def _escalate_in_db(request_id: str, reason: str, *, state: Literal["handed_back", "failed"] | None = None) -> list[str]:
+    """Hand the review back and return the threads its continuation task woke."""
     db = get_db()
     try:
-        review_requests.escalate_fork(db, request_id, reason=reason, state=state)
+        woken: list[str] = []
+        with write_transaction(db, scope="escalate_review_adapter") as connection:
+            with public.collect_wake_recipients(connection, woken):
+                review_requests.escalate_fork(connection, request_id, reason=reason, state=state)
+        return woken
     finally:
         db.close()
 
@@ -85,7 +91,7 @@ async def review_limit_or_failure_handler(
         logger.warning("artifact review ended request_id=%s reason=%s", request_id, reason)
     else:
         logger.error("artifact review ended request_id=%s reason=%s", request_id, reason, exc_info=error)
-    await run_in_db(_escalate_in_db, request_id, reason, state=state)
+    await public.drive_threads(await run_in_db(_escalate_in_db, request_id, reason, state=state))
 
 
 async def reconcile_startup_reviews() -> list[str]:

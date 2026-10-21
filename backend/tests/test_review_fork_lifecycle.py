@@ -75,6 +75,26 @@ async def test_partial_review_limit_and_failure_are_distinct_live_tasks(review_e
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("hand_back", ["limit", "startup"])
+async def test_hand_back_drives_the_reviewer_once(review_env, monkeypatch, hand_back):
+    db, aid = review_env
+    row = request(db, aid)
+    driven: list[tuple[str, ...]] = []
+
+    async def record(threads):
+        driven.append(tuple(threads))
+
+    monkeypatch.setattr(public, "drive_threads", record)
+    if hand_back == "limit":
+        await capture.review_limit_or_failure_handler(row["id"], ForkStepLimitReached("job exhausted"))
+    else:
+        await capture.reconcile_startup_reviews()
+    assert driven == [("reviewer",)]
+    await capture.review_limit_or_failure_handler(row["id"], ForkStepLimitReached("job exhausted"))
+    assert driven == [("reviewer",)]
+
+
+@pytest.mark.asyncio
 async def test_start_checks_live_and_submitted_requests_before_build(review_env, monkeypatch):
     db, aid = review_env
     row = request(db, aid)
