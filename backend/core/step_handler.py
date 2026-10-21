@@ -16,6 +16,7 @@ from infra.context_receipts import (
     context_usage_summary, live_context_usage_payload,
 )
 from infra.queries import insert_message
+from llm.error_cause import error_fields
 from core.plan_turn_end import record_turn_end_logged
 from core.turn_core import TurnIdentity
 from tools.tool_display import tool_start_frame
@@ -387,11 +388,9 @@ class StepHandler:
         err_id = str(uuid.uuid4())
         err_now = utc_now_iso()
         err_content = payload.get("message", "An error occurred")
-        err_meta = {
-            "type": "llm_error",
-            "model": self.model_info.get("model"),
-            "turn_id": self.turn_id,
-        }
+        cause = error_fields(payload)
+        err_meta = {"type": "llm_error", "model": self.model_info.get("model"),
+                    "turn_id": self.turn_id, **cause}
 
         def _persist():
             with write_transaction(None, scope="persist_error") as db:
@@ -406,12 +405,8 @@ class StepHandler:
             level="ERROR", outcome="error", error=err_content, turn_id=self.turn_id,
         )
 
-        ws_payload = {
-            "type": "error",
-            "thread_id": self.thread_id,
-            "message": err_content,
-            **terminal_context,
-        }
+        ws_payload = {"type": "error", "thread_id": self.thread_id,
+                      "message": err_content, **cause, **terminal_context}
         await self._emit(ws_payload)
 
     async def _handle_turn_cancelled(self, payload: dict):

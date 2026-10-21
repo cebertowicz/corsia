@@ -422,7 +422,7 @@ class TestContextUsage:
         from core.turn_core import TurnIdentity
         from subagents.cc_event_result import _result_metadata
 
-        ctx = SimpleNamespace(live=SimpleNamespace(interrupt_requested=False))
+        ctx = SimpleNamespace(live=SimpleNamespace(interrupt_requested=False, model=None))
         _, metadata = _result_metadata(
             ctx,
             {

@@ -134,6 +134,7 @@ def provider_reset_deadline(
     reset_at: object | None = None,
     now: datetime | None = None,
     zone: tzinfo | None = None,
+    known_limit: bool = False,
 ) -> datetime | None:
     """Return a strict future provider reset deadline, never a best-effort guess.
 
@@ -143,9 +144,10 @@ def provider_reset_deadline(
     read in the zone it states or else the host's. A stated zone that cannot be
     resolved or disagrees with the host's abbreviation is unknown. Ambiguous and
     nonexistent DST wall times deliberately fall back to generic liveness
-    rather than delaying work on an invented deadline.
+    rather than delaying work on an invented deadline. ``known_limit`` says the
+    caller already classified the error as a usage limit.
     """
-    if not is_provider_usage_or_quota_limit(value):
+    if not known_limit and not is_provider_usage_or_quota_limit(value):
         return None
     observed = now or datetime.now(timezone.utc)
     if reset_at is not None:

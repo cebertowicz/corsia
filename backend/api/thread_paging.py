@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from history.projection import in_read_snapshot
+from llm.error_cause import served_metadata
 from infra.focus_rows import NEVER_DRAWN_FILTER
 from infra.queries import get_thread_for_user
 from core.message_display import llm_to_display
@@ -29,11 +30,11 @@ def _parse_message_metadata(display_msgs: list[dict]) -> None:
             except (json.JSONDecodeError, TypeError):
                 pass
         if isinstance(row.get("metadata"), dict):
-            row["metadata"] = {
+            row["metadata"] = served_metadata({
                 key: value
                 for key, value in row["metadata"].items()
                 if not key.startswith("_corsia_")
-            }
+            })
 
 
 def _defer_tool_results(display_msgs: list[dict]) -> None:

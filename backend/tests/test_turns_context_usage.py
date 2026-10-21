@@ -556,6 +556,9 @@ async def test_native_provider_error_persists_last_successful_call_occupancy(mon
         SimpleNamespace(
             content="provider failed",
             finish_reason="error",
+            error_kind=None,
+            resets_at=None,
+            own_server=False,
             has_tool_calls=False,
             usage={
                 "prompt_tokens": 999,

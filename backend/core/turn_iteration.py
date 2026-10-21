@@ -23,6 +23,7 @@ from core.turns_util import _log_llm_usage, usage_call_fields
 from plans.public import binding_at_call_start
 from infra import state as runtime_state
 from infra.db_async import run_in_db
+from llm.error_cause import response_error_fields
 
 if TYPE_CHECKING:
     from core.media_projection import ValidatedMediaProjection
@@ -201,7 +202,8 @@ async def _check_provider_error(state, response, turn_model, thread_id, provider
         message = response.content or (
             "The model call failed without a diagnostic message. Retry, or "
             "switch models if it persists.")
-    await provider_on_step("error", _terminal_payload(state, message=message))
+    await provider_on_step("error", _terminal_payload(
+        state, message=message, **response_error_fields(response)))
     raise TurnProviderError(message)
 
 

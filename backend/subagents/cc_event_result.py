@@ -12,6 +12,7 @@ from core.turn_core import TurnIdentity, TurnTerminalResult
 from infra.db_async import run_in_db_unless_owned
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_stored_message
+from llm.error_cause import cause_fields
 import subagents.cc_event_tool_boundary as tool_boundary
 import subagents.cc_trust as cc_trust
 from subagents.cc_event_context import CCEventContext, claim_terminal, event_identity, frame
@@ -96,6 +97,10 @@ def _result_metadata(
             "cause": "context_window_exceeded",
             "repair_owner": "ctx-stability",
         })
+    if is_error and metadata.get("stop_reason") != "interrupted":
+        metadata.update(cause_fields(
+            "claude-code", metadata.get("cause"), ev.get("result"), None, ctx.live.model,
+        ))
     return is_error, metadata
 
 
@@ -109,7 +114,7 @@ async def _retire_poisoned_session(ctx: CCEventContext, metadata: dict) -> None:
     from subagents.cc_resume_transition import retire_rejected_provider_session
 
     cc_trust.distrust(ctx.live)
-    metadata["cause"] = "provider_transcript_poisoned"
+    metadata.update(cause_fields("claude-code", "provider_transcript_poisoned"))
     session = ctx.live.session
     session_id = (
         getattr(session, "resume_session_id", None)
