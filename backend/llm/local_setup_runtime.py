@@ -73,7 +73,7 @@ async def start_managed_omlx(report: Callable[[str], None]) -> tuple[str, int]:
     report("Starting")
     started = await start_server({"server_id": server_id})
     if not started.get("ok"):
-        raise RuntimeError(str(started.get("message") or "CORSIA couldn't start its local model server."))
+        raise RuntimeError(str(started.get("message") or "CORSIA couldn’t start its local model server."))
     report("Configuring")
     await secure_local_omlx(server_id, key)
     await configure_global(server_id)

@@ -25,14 +25,14 @@ def test_signed_in_row_projection_uses_the_normalized_flight_shape(flight):
 
     normalized = normalize({
         "state": "failed", "cause": "disk_full", "percent": 41, "eta_seconds": 80,
-        "bytes_to_free": 4_000_000_000, "ref": "local-42", "fix": "Free 4.0 GB, then press Retry.",
+        "bytes_to_free": 4_000_000_000, "ref": "local-42", "fix": "The local model needs 4.0 GB more free space. Free it up, then Retry.",
     })
     row = {"state": "needs_setup", "reason": None, "fix": None}
 
     local_sources._project_local_flight(row, normalized)
 
     assert row == {
-        "state": "needs_setup", "reason": None, "fix": "Free 4.0 GB, then press Retry.",
+        "state": "needs_setup", "reason": None, "fix": "The local model needs 4.0 GB more free space. Free it up, then Retry.",
         "local_state": "failed", "setup_error_code": "disk_full", "setup_error_reference": "local-42",
         "bytes_to_free": 4_000_000_000, "download_percent": 41, "download_eta_seconds": 80,
         "download_stalled": False,

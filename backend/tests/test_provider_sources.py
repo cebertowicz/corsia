@@ -1018,7 +1018,7 @@ class TestRecheck:
         # Only a changed foreign process is a failure with a recovery line; consent is a question.
         expected = {"code": refusal}
         if refusal == "foreign_omlx_changed":
-            expected["fix"] = "CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running."
+            expected["fix"] = "CORSIA couldn’t stop another oMLX server. Retry to ask again, or leave it running."
         assert response.json() == {"detail": expected}
 
     def test_local_setup_status_route_returns_the_flight_record(self, isolated_db, client, monkeypatch):
@@ -1037,7 +1037,7 @@ class TestRecheck:
         local_setup._flight.result = failure
         failed = client.get("/api/providers/local/setup").json()
         assert failed["state"] == "failed" and failed["local_model"] == not_checked
-        assert failed["fix"] == "CORSIA couldn’t set up the local model. Press Retry." and idle["fix"] is None
+        assert failed["fix"] == "CORSIA couldn’t set up the local model." and idle["fix"] is None
 
         # A finished setup's model is what the conductor's offer and Welcome read.
         installed = local_model.LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 262_144)

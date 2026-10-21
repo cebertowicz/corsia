@@ -369,7 +369,7 @@ def test_route_returns_backend_recovery_when_starting_fails(client, monkeypatch)
     response = client.post("/api/providers/local/setup")
 
     assert response.status_code == 200
-    assert response.json()["fix"] == "CORSIA couldn’t set up the local model. Press Retry."
+    assert response.json()["fix"] == "CORSIA couldn’t set up the local model."
 
 
 def test_route_returns_backend_recovery_for_a_changed_foreign_omlx(client, monkeypatch):
@@ -382,5 +382,5 @@ def test_route_returns_backend_recovery_for_a_changed_foreign_omlx(client, monke
     assert response.status_code == 409
     assert response.json() == {"detail": {
         "code": "foreign_omlx_changed",
-        "fix": "CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running.",
+        "fix": "CORSIA couldn’t stop another oMLX server. Retry to ask again, or leave it running.",
     }}

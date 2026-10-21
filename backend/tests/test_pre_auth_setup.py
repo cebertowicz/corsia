@@ -534,6 +534,7 @@ def test_welcome_picks_then_get_started_downloads_that_model_through_the_setup_r
         "name": "Qwen3.8 27B", "repository": row["repo_id"], "model": "Qwen3.8-27B-oQ4e-mtp",
         "download_size_bytes": row["download_bytes"], "download_size_gb": round(row["download_bytes"] / 1000**3, 1),
         "context_window": 262_144, "quantization_bits": row["level"], "relative_speed": row["relative_speed"],
+        "resident_bytes": row["resident_bytes"],
     }}
     # Welcome only picked; nothing downloaded and nothing was written to oMLX.
     assert mac.downloads == [] and mac.omlx.puts() == []

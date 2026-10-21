@@ -82,10 +82,10 @@ describe('SetupScreen account recovery', () => {
 
 describe('SetupScreen local-start recovery', () => {
 	it.each([
-		['a changed foreign oMLX', [json({ code: 'foreign_omlx_changed', fix: 'CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running.' }, 409)], 'CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running.'],
-		['an unrecognized refusal without exposing its message', [json({ message: 'private route detail' }, 500)], 'CORSIA couldn’t start local setup. Press Retry, or save a report.'],
-		['an unrecognized refusal with a reference', [json({ message: 'private route detail', ref: 'local-start-123' }, 500)], 'CORSIA couldn’t start local setup. Press Retry, or save a report.'],
-		['an unreachable local backend', [new Error('network down')], 'CORSIA couldn’t start local setup. Press Retry, or save a report.'],
+		['a changed foreign oMLX', [json({ code: 'foreign_omlx_changed', fix: 'CORSIA couldn’t stop another oMLX server. Retry to ask again, or leave it running.' }, 409)], 'CORSIA couldn’t stop another oMLX server. Retry to ask again, or leave it running.'],
+		['an unrecognized refusal without exposing its message', [json({ message: 'private route detail' }, 500)], 'CORSIA couldn’t start local setup.'],
+		['an unrecognized refusal with a reference', [json({ message: 'private route detail', ref: 'local-start-123' }, 500)], 'CORSIA couldn’t start local setup.'],
+		['an unreachable local backend', [new Error('network down')], 'CORSIA couldn’t start local setup.'],
 	] as const)('shows the local row recovery for %s', async (_name, localReplies, expected) => {
 		await openModels({ localEligible: true, localReplies: [...localReplies] });
 		await vi.waitFor(() => expect(host.textContent).toContain(expected));
@@ -101,7 +101,7 @@ describe('SetupScreen local-start recovery', () => {
 	it('shows generic recovery when the person’s other-oMLX choice cannot start setup', async () => {
 		await openModels({ localEligible: true, localReplies: [json({ code: 'consent_required' }, 409), json({ message: 'private route detail' }, 500)] });
 		click('Keep it running');
-		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t start local setup. Press Retry, or save a report.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t start local setup.'));
 		expect(host.textContent).not.toContain('private route detail');
 	});
 });
