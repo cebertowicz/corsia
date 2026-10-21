@@ -105,8 +105,16 @@
 	// The sheet's outro ends in onClosed, so under reduced motion it holds still for the crossfade instead of ending at once.
 	const flyParams = $derived(sheetFly($prefersReducedMotion, tightMs));
 
+	// A click dismisses only a press that began on the scrim. The click that follows the tap which opened this sheet
+	// lands on the new scrim with no press of its own on it, so it is not a tap outside.
+	let pressedScrim = false;
+	function onBackdropDown(event: PointerEvent): void {
+		pressedScrim = event.target === event.currentTarget;
+	}
 	function onBackdrop(event: MouseEvent): void {
-		if (modal && detent !== 'half' && event.target === event.currentTarget) onClose();
+		const pressed = pressedScrim;
+		pressedScrim = false;
+		if (modal && detent !== 'half' && pressed && event.target === event.currentTarget) onClose();
 	}
 
 	$effect(() => {
@@ -150,6 +158,7 @@
 	style:--drawer-left="{box?.left ?? 0}px"
 	style:--drawer-h="{box?.height ?? 0}px"
 	data-adaptive-drawer
+	onpointerdown={onBackdropDown}
 	onclick={onBackdrop}
 		in:fade|global={fadeParams}
 		out:fade={fadeParams}

@@ -235,8 +235,22 @@ describe("AdaptiveDrawer", () => {
     (host.querySelector(".drawer-panel") as HTMLElement).click();
     expect(close).not.toHaveBeenCalled();
 
-    (host.querySelector("[data-adaptive-drawer]") as HTMLElement).click();
+    const scrim = host.querySelector("[data-adaptive-drawer]") as HTMLElement;
+    scrim.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    scrim.click();
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a click on the scrim whose press did not begin there, such as the tap that opened the sheet", async () => {
+    const close = vi.fn();
+    component = mount(AdaptiveDrawerHarness, {
+      target: host,
+      props: { onClose: close },
+    });
+    await settle();
+
+    (host.querySelector("[data-adaptive-drawer]") as HTMLElement).click();
+    expect(close).not.toHaveBeenCalled();
   });
 
   it("supports a deliberate downward drag to dismiss and snaps short drags back", async () => {
