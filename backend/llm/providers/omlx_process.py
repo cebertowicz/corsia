@@ -162,6 +162,11 @@ def build_argv(
         val = settings.get(key)
         if val is None or val == "":
             continue
+        if key == "api_key":
+            # A generated key can start with '-', which argparse would read
+            # as an option; the joined form always binds it to the flag.
+            argv.append(f"{flag}={val}")
+            continue
         argv.extend([flag, str(val)])
 
     if settings.get("no_cache"):
