@@ -17,7 +17,7 @@ use crate::{
     release_proof, run_service_command,
     service_management::service_label,
     startup_failure::StartupFailure,
-    unregister_service, wait_for_service, wait_for_startup, STARTUP_CAP,
+    unregister_service, wait_for_service, wait_for_startup, NOT_RUNNING_WINDOW, STARTUP_CAP,
 };
 
 /// The source's own drain wait, in seconds: its cap, and the longest a switch waits for running work.
@@ -216,18 +216,18 @@ impl SourceLifecycle {
         self.wait_for_source()
     }
 
-    /// The source writes no launcher refusals, so its log only bounds the
-    /// search; the existing install is named by the failure's kind alone.
+    /// The source writes no launcher refusals, so no log is searched; the
+    /// existing install is named by the failure's kind alone.
     fn wait_for_source(&self) -> Result<(), String> {
-        let log = self.source.state.join("backend.log");
         wait_for_startup(
             self.source.port,
-            &log,
+            None,
             || {
                 Ok(self
                     .loaded_job()?
                     .and_then(|job| release_proof::pid_from_launchctl_print(&job)))
             },
+            NOT_RUNNING_WINDOW,
             STARTUP_CAP,
         )
         .map_err(|failure| match failure {
@@ -735,7 +735,7 @@ mod tests {
         let began = Instant::now();
         let error = wait_for_startup(
             home.lifecycle.source.port,
-            &home.lifecycle.source.state.join("backend.log"),
+            None,
             || {
                 Ok(Some(
                     if calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
@@ -745,6 +745,7 @@ mod tests {
                     },
                 ))
             },
+            cap,
             cap,
         )
         .unwrap_err();
@@ -766,8 +767,9 @@ mod tests {
         let began = Instant::now();
         let error = wait_for_startup(
             home.lifecycle.source.port,
-            &log,
+            Some(&log),
             || Ok((calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0).then_some(pid)),
+            cap,
             cap,
         )
         .unwrap_err();
@@ -779,13 +781,33 @@ mod tests {
     }
 
     #[test]
+    fn a_service_launchd_never_shows_running_fails_at_the_not_running_window() {
+        let home = home("rm -f LOADED", "exit 0", "exit 0");
+        let cap = Duration::from_secs(3);
+        let began = Instant::now();
+        assert_eq!(
+            wait_for_startup(
+                home.lifecycle.source.port,
+                None,
+                || Ok(None),
+                Duration::from_millis(30),
+                cap,
+            )
+            .unwrap_err(),
+            StartupFailure::Exited { refusal: None }
+        );
+        assert!(began.elapsed() < cap);
+    }
+
+    #[test]
     fn a_pid_inspection_error_is_returned() {
         let home = home("rm -f LOADED", "exit 0", "exit 0");
         assert_eq!(
             wait_for_startup(
                 home.lifecycle.source.port,
-                &home.lifecycle.source.state.join("backend.log"),
+                None,
                 || Err("could not ask launchd about the existing install".into()),
+                Duration::from_secs(3),
                 Duration::from_secs(3),
             )
             .unwrap_err(),
@@ -799,8 +821,9 @@ mod tests {
         assert_eq!(
             wait_for_startup(
                 stalled.lifecycle.source.port,
-                &stalled.lifecycle.source.state.join("backend.log"),
-                || Ok(None),
+                None,
+                || Ok(Some(std::process::id())),
+                Duration::from_millis(30),
                 Duration::from_millis(30),
             )
             .unwrap_err(),

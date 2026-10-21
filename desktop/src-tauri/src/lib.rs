@@ -58,6 +58,8 @@ const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// largest observed start leaves room for a slow migration without concealing
 /// a hang indefinitely.
 pub(crate) const STARTUP_CAP: Duration = Duration::from_secs(600);
+/// How long launchd may show no process for a just-started service.
+pub(crate) const NOT_RUNNING_WINDOW: Duration = Duration::from_secs(30);
 const RELAUNCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Default)]
@@ -391,8 +393,9 @@ fn wait_for_service(port: u16, app_dir: &Path) -> Result<(), String> {
     let target = format!("gui/{}/{}", unsafe { libc::geteuid() }, service_label());
     wait_for_startup(
         port,
-        &log,
+        Some(&log),
         || Ok(release_proof::launchd_pid(&target)),
+        NOT_RUNNING_WINDOW,
         STARTUP_CAP,
     )
     .map_err(|failure| failure.to_string())
@@ -400,11 +403,16 @@ fn wait_for_service(port: u16, app_dir: &Path) -> Result<(), String> {
 
 /// Health is the readiness signal. A changed launchd PID proves the service
 /// restarted while starting, and a PID the kernel no longer knows with none in
-/// its place proves it exited; otherwise the fixed cap bounds a hung startup.
+/// its place proves it exited. launchd showing no process for the whole
+/// `not_running` window means it exited before it was seen or never started;
+/// launchd's 10 s respawn throttle sits well inside the window. Otherwise the
+/// fixed cap bounds a hung startup. `log` is searched only for launcher
+/// refusals.
 pub(crate) fn wait_for_startup(
     port: u16,
-    log: &Path,
+    log: Option<&Path>,
     mut service_pid: impl FnMut() -> Result<Option<u32>, String>,
+    not_running: Duration,
     cap: Duration,
 ) -> Result<(), StartupFailure> {
     let began = Instant::now();
@@ -418,6 +426,9 @@ pub(crate) fn wait_for_startup(
                 return Err(StartupFailure::Restarted);
             }
             (Some(expected), None) if release_proof::pid_is_gone(expected) => {
+                return Err(StartupFailure::exited(log));
+            }
+            (None, None) if began.elapsed() >= not_running => {
                 return Err(StartupFailure::exited(log));
             }
             (None, Some(pid)) => initial_pid = Some(pid),
@@ -642,7 +653,10 @@ async fn configure_work_folder(app: tauri::AppHandle, path: PathBuf) -> Result<(
         Ok::<_, String>((app_dir, port))
     })
     .await
-    .map_err(|error| format!("configuring the work folder did not finish: {error}"))??;
+    .map_err(|error| {
+        log::error!("configuring the work folder did not finish: {error}");
+        "Couldn’t finish setting up the work folder. Quit CORSIA and open it again.".to_string()
+    })??;
     let service = app.state::<AppServiceState>();
     grant_local_service_origin(&app, &service, port)?;
     *service
