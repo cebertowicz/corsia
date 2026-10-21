@@ -131,8 +131,8 @@
 			if (status.macos_supported === false) return { title: 'Update macOS to open CORSIA', lede: 'CORSIA needs macOS 15 or later. Update in System Settings › General › Software Update, then open CORSIA again.' };
 			return { title: 'Move CORSIA to Applications', lede: 'Drag CORSIA into your Applications folder, then open it from there. It can’t update itself from the disk image.' };
 		}
-		if (screen === 'welcome') return { title: WELCOME_TITLE, primary: { label: 'Continue' }, onPrimary: () => { welcomeSeen = true; } };
-		if (page === 'account') return { title: $isSetupWide ? WELCOME_TITLE : 'Create your account', lede: $isSetupWide ? WELCOME_ACCOUNT_LINE : undefined, primary: { label: 'Continue', disabled: !accountValid }, onPrimary: toFolder };
+		if (screen === 'welcome') return { title: WELCOME_TITLE, mark: true, primary: { label: 'Continue' }, onPrimary: () => { welcomeSeen = true; } };
+		if (page === 'account') return { title: $isSetupWide ? WELCOME_TITLE : 'Create your account', lede: $isSetupWide ? WELCOME_ACCOUNT_LINE : undefined, mark: $isSetupWide, primary: { label: 'Continue', disabled: !accountValid }, onPrimary: toFolder };
 		if (page === 'folder') return { title: 'Choose your work folder', lede: 'Your projects and files live here.', primary: { label: 'Continue', loading: accountBusy, disabled: accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'picker_failed' }, onPrimary: createAccount };
 		return { title: 'Providers & models', lede: canFinish ? 'Ready to start. You can connect more here or later in Settings › Providers.' : 'Connect at least one to start chatting.', primary: { label: 'Start using CORSIA', disabled: !canFinish || finishing, loading: finishing, note: finishNote, noteAlways: true }, onPrimary: finishSetup };
 	});
