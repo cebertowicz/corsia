@@ -82,12 +82,6 @@ def _binding_rule(rule: Any) -> Rule:
     )
 
 
-def _row_to_rule(row: Any) -> Rule:
-    from events.rules import from_row
-
-    return _binding_rule(from_row(row))
-
-
 def live_filterable_fields(connector: str) -> set[str]:
     """Union of declared filterable fields across a connector's event types."""
     from events.connectors import get_manifest
@@ -277,11 +271,9 @@ def bind_owner_for(
             conflict = ConflictInfo(
                 fact=top[0].fact, value=top[0].value, precedence=min_prec,
                 rule_ids=tuple(r.id for r in top), destinations=tuple(destinations))
-            if preview:
-                repair = AR.ArtifactRecord({}, repair_owner, (), 'unregistered')
-            else:
-                repair = _create_repair_artifact(
-                    _db, connector, artifact_ref, conflict, repair_owner)
+            # A preview reports the conflict without creating its repair artifact.
+            repair = None if preview else _create_repair_artifact(
+                _db, connector, artifact_ref, conflict, repair_owner)
             return BindResult(record, via="repair", conflict=conflict,
                               repair_artifact=repair)
 
@@ -331,8 +323,12 @@ def ensure_designation_rule(
             (rule_scope, connector, fact, str(value)),
         ).fetchone()
         if existing is not None:
-            return _resolve_designation(_row_to_rule(existing), _db)
-        designated = _designated_thread(designation, _db)
+            from events.rules import from_row
+
+            return next(iter(_resolve_bindings([from_row(existing)], _db)), None)
+        from infra.conductor import get_scope_coordinators
+
+        designated = get_scope_coordinators({designation}, db=_db)[designation]
         if not designated:
             return None
         return create_rule(
@@ -342,14 +338,11 @@ def ensure_designation_rule(
         )
 
 
-def _designated_thread(designation: str, db) -> str | None:
-    from infra.conductor import get_scope_coordinator
-
-    return get_scope_coordinator(designation, db=db)
-
-
 def _resolve_bindings(rows, db) -> list[Rule]:
-    """Batch designation reads before the row loop, independent of rule count."""
+    """Point designation rules at the current designee, dropping undesignated ones.
+
+    The one designation read for every binder path, batched before the row loop.
+    """
     from infra.conductor import get_scope_coordinators
 
     scopes = {row.scope[len(DESIGNATION_PREFIX):] for row in rows
@@ -361,18 +354,8 @@ def _resolve_bindings(rows, db) -> list[Rule]:
         if rule.scope.startswith(DESIGNATION_PREFIX):
             designation = rule.scope[len(DESIGNATION_PREFIX):]
             destination = designations[designation]
-            if destination is None:
+            if not destination:
                 continue
             rule = replace(rule, destination_thread_id=destination)
         result.append(rule)
     return result
-
-
-def _resolve_designation(rule: Rule, db) -> Rule | None:
-    """A designation rule pointed at the current designee; None when undesignated."""
-    if not rule.scope.startswith(DESIGNATION_PREFIX):
-        return rule
-    designated = _designated_thread(rule.scope[len(DESIGNATION_PREFIX):], db)
-    if not designated:
-        return None
-    return replace(rule, destination_thread_id=designated)

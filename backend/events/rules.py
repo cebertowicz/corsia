@@ -136,8 +136,9 @@ def evaluate(envelope: EventEnvelope, *, scope: str = 'global',
             if destination not in explicit_availability:
                 explicit_availability[destination] = thread_exists_and_active(destination, db=db)
             available = explicit_availability[destination]
+            inactive = 'invalid_tag_target' if rule.to == 'thread:$corsia_tag' else 'owner_inactive'
             merge(Target(destination, 'rule', 'owner',
-                         reason=None if available else 'owner_inactive',
+                         reason=None if available else inactive,
                          disposition=(delivery_disposition('owner', envelope.event_class)
                                       if available else 'dead_letter')),
                   rule.id, rule.mode if available else 'default')

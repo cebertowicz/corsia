@@ -150,7 +150,7 @@ def test_selection_keeps_registry_state_separate_from_prepared_rule_fields(isola
     assert not isinstance(selected, router.RouteResult)
     assert set(selected[2]) == {'identity', 'owner', 'subscribers', 'triage'}
     assert prepared.envelope.type == 'webhook.github.pr_merged'
-    assert prepared.evaluation.targets[0].thread == owner
+    assert prepared.envelope.provenance['rule_trace'] == ['rule_set:github@1:owner']
 
 
 def test_readonly_preview_predicts_first_seen_binding_and_delivery(isolated_db):
@@ -179,40 +179,6 @@ def test_explicit_recipient_handles_ownerless_event_with_default_mode(isolated_d
         _rule(db, 'explicit', to='thread:' + recipient, mode='default')
     delivered = deliver_platform_event_sync('github', _event(), 'pr.merged')
     assert [(d.thread_id, d.outcome) for d in delivered] == [(recipient, 'digested')]
-
-
-@pytest.mark.asyncio
-async def test_webhook_delivers_to_two_recipients_and_replay_is_deduplicated(isolated_db, monkeypatch):
-    from unittest.mock import AsyncMock
-    from events.router import route_event, RouteOutcome
-    from shared_send_fixtures import _insert_session, _messages, _install_fake_native_context_agent
-    from subagents import codex_runtime
-
-    _install_fake_native_context_agent(monkeypatch)
-    for thread in ('owner', 'extra'):
-        _insert_session(thread, user_id='user-1', model='codex/gpt-5-codex', spawned_by=None)
-    register_pr('owner/repo', 7, 'owner')
-    with write_transaction(None, scope='two_recipients') as db:
-        _rule(db, 'extra-wake', to='thread:extra', mode='wake', event_type='webhook.github.pr_merged')
-
-    async def feed(*_args, **kwargs):
-        turn_id = kwargs['successor_turn_id']
-        await kwargs['bind_input_turn'](turn_id, None)
-        kwargs['mark_accepted']()
-        return kwargs['preadmitted_turn']
-
-    with (patch.object(codex_runtime, 'ensure_connection_available', lambda db=None: None),
-          patch.object(codex_runtime, 'has_thread_id', AsyncMock(return_value=False)),
-          patch.object(codex_runtime, 'has_prior_messages', AsyncMock(return_value=False)),
-          patch.object(codex_runtime, 'feed_main', AsyncMock(side_effect=feed))):
-        for _ in range(2):
-            result = await route_event('webhook.github.pr_merged', _event(), delivery_id='delivery-7')
-            assert result.outcome == RouteOutcome.ACCEPTED
-    for thread in ('owner', 'extra'):
-        rows = [r for r in _messages(thread) if r['role'] == 'system'
-                and json.loads(r['metadata']).get('routed_event')]
-        assert len(rows) == 1
-        assert json.loads(rows[0]['metadata'])['provenance']['rule_trace']
 
 
 def test_list_is_project_scoped_and_limited(isolated_db):

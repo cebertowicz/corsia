@@ -44,30 +44,31 @@ def get_project_conductor(project_id: str, db=None) -> str | None:
     """Return a project's conductor, or None when the project is unknown/unassigned."""
     if project_id == WORKSPACE_SCOPE:
         raise ValueError("workspace scope has a CORSIA agent, not a project conductor")
+    return get_scope_coordinators({project_id}, db=db)[project_id]
+
+
+def get_scope_coordinators(scopes: set[str], db=None) -> dict[str, str | None]:
+    """The one designation read: each scope's coordinator, or None when unassigned.
+
+    At most two reads for any number of scopes, so a rule batch costs one rule's.
+    """
+    result: dict[str, str | None] = {scope: None for scope in scopes}
+    projects = sorted(scopes - {WORKSPACE_SCOPE})
     _db = db or get_db()
     try:
-        row = _db.execute(
-            "SELECT conductor_thread_id FROM projects WHERE id = ?", (project_id,)
-        ).fetchone()
-        return row["conductor_thread_id"] if row else None
+        if projects:
+            placeholders = ','.join('?' for _ in projects)
+            rows = _db.execute(
+                'SELECT id,conductor_thread_id FROM projects WHERE id IN (' + placeholders + ')',
+                projects,
+            ).fetchall()
+            result.update({row['id']: row['conductor_thread_id'] for row in rows})
+        if WORKSPACE_SCOPE in scopes:
+            result[WORKSPACE_SCOPE] = get_corsia_agent(db=_db)
+        return result
     finally:
         if not db:
             _db.close()
-
-
-def get_scope_coordinators(scopes: set[str], *, db) -> dict[str, str | None]:
-    """Resolve a rule batch in at most two reads, independent of row count."""
-    result: dict[str, str | None] = {scope: None for scope in scopes}
-    projects = sorted(scopes - {WORKSPACE_SCOPE})
-    if projects:
-        placeholders = ','.join('?' for _ in projects)
-        rows = db.execute(
-            'SELECT id,conductor_thread_id FROM projects WHERE id IN (' + placeholders + ')', projects,
-        ).fetchall()
-        result.update({row['id']: row['conductor_thread_id'] for row in rows})
-    if WORKSPACE_SCOPE in scopes:
-        result[WORKSPACE_SCOPE] = get_corsia_agent(db=db)
-    return result
 
 
 def get_all_coordination_ids(db=None) -> list[str]:
@@ -316,9 +317,7 @@ def set_project_conductor(project_id: str, thread_id: str | None, db=None) -> bo
 
 def get_scope_coordinator(scope: str, db=None) -> str | None:
     """Return the CORSIA agent for workspace or the conductor for a project."""
-    if scope == WORKSPACE_SCOPE:
-        return get_corsia_agent(db=db)
-    return get_project_conductor(scope, db=db)
+    return get_scope_coordinators({scope}, db=db)[scope]
 
 
 def set_scope_coordinator(scope: str, thread_id: str | None, db=None) -> bool:

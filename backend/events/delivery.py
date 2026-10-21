@@ -168,21 +168,33 @@ async def deliver_and_resolve_to_thread(
     chip: str | None = None,
     notice: str | None = None,
     envelope=None,
-    target=None,
 ) -> bool:
     """Deliver one event, then resolve the watches this exact delivery ends.
 
     The one owner of "deliver, then resolve" for every caller that routes an
     event to a thread: resolving only after a successful delivery, never
     before, so a task never loses its wait without the payload it waited for.
+    A rule-evaluated ``envelope`` also records its route decision.
     """
-    from events.platform import deliver_routed_event
-
-    return await deliver_routed_event(
-        thread_id, identity, internal_event, summary, details,
+    delivered = await deliver_to_thread(
+        thread_id, internal_event, summary, details,
         delivery_id=delivery_id, chip=chip, notice=notice,
-        envelope=envelope, target=target,
+        metadata=None if envelope is None else {'provenance': envelope.provenance},
     )
+    if delivered:
+        from infra.db_async import run_in_db
+
+        if envelope is None:
+            from plans.public import resolve_delivered_event
+
+            await run_in_db(
+                resolve_delivered_event, identity, internal_event, recipient=thread_id,
+            )
+        else:
+            from events.platform import settle_routed_delivery
+
+            await run_in_db(settle_routed_delivery, envelope, thread_id)
+    return delivered
 
 
 def _event_idempotency_key(

@@ -9,7 +9,8 @@ from typing import Any
 
 from loguru import logger
 
-from events import dead_letter, delivery, route_decisions
+from events import dead_letter, delivery, guard
+from events.platform import _traced, record_drop
 from events.rules import evaluate, event_scope
 from infra.database import get_db, write_transaction
 from events.identity import (
@@ -119,22 +120,14 @@ def _record_passive_change(
 def _cancelled_check_result(
     internal_event: str, payload: dict[str, Any],
 ) -> RouteResult | None:
-    if (payload.get('check_suite') or {}).get('conclusion') != 'cancelled':
-        return None
-    # Evaluate cancellation before PR identity resolution to avoid its API lookup.
+    # Drop rows decide before PR identity resolution, which may need an API read.
     envelope = github_routing_envelope(internal_event, None, payload)
-    with write_transaction(None, scope='cancelled_event_rule') as db:
+    with write_transaction(None, scope='check_event_rule') as db:
         evaluated = evaluate(envelope, resolve_owner=lambda: [], db=db)
         if evaluated.dropped_by is None:
             return None
-        route_decisions.record(db, envelope, rule_ids=[evaluated.dropped_by], thread_id=None,
-                               outcome='dropped', scope='global')
-    logger.info("event-routing: dropping cancelled check_suite — superseded")
-    emit_product_event(
-        "event_route", RouteOutcome.PARKED.value,
-        properties={"internal_event": internal_event, "external_id": None,
-                    "reason": "check_suite_cancelled_dropped"},
-    )
+        record_drop(db, envelope, evaluated.dropped_by, 'global',
+                    author=guard._event_author(payload).get('login'))
     return RouteResult(
         RouteOutcome.PARKED, external_id=None,
         reason="check_suite_cancelled_dropped",
@@ -220,21 +213,25 @@ def _select_route(
                              resolve_owner=lambda: resolve_targets(envelope))
         if evaluated.dropped_by:
             with write_transaction(db, scope='dropped_webhook_rule'):
-                route_decisions.record(db, envelope, rule_ids=[evaluated.dropped_by],
-                                       thread_id=None, outcome='dropped', scope=scope)
+                record_drop(db, envelope, evaluated.dropped_by, scope,
+                            author=guard._event_author(payload).get('login'))
             return RouteResult(RouteOutcome.SUPPRESSED)
     finally:
         db.close()
+    if len(evaluated.targets) > 1:
+        # One-recipient routing never picks among rule recipients.
+        logger.error("event-routing: rules chose {} recipients for {}",
+                     len(evaluated.targets), internal_event)
+        return _dead_letter_result(internal_event, payload, 'multiple_rule_recipients', external_id)
     if not evaluated.targets:
         return _dead_letter_result(internal_event, payload, 'no_owner', external_id)
     target = evaluated.targets[0]
     routing_state = target.routing_state or (
         registry_models.routing_registrations(*identity) if identity else routing_state)
-    prepared.evaluation = evaluated
-    prepared.envelope = envelope
+    prepared.envelope = _traced(envelope, evaluated.rule_ids[target.thread])
+    if target.thread is not None and target.disposition == 'dead_letter':
+        return _dead_letter_result(internal_event, payload, str(target.reason), external_id)
     if tag is not None and identity is not None:
-        if not delivery.thread_exists_and_active(target.thread):
-            return _dead_letter_result(internal_event, payload, 'invalid_tag_target', external_id)
         return str(target.thread), 'tag', routing_state
     if target.thread is not None:
         reason = "triage" if target.relationship == "triage" else "owner"
@@ -252,14 +249,6 @@ def _select_route(
         )
     reason = "no_artifact" if identity is None else (target.reason or "no_owner")
     return _dead_letter_result(internal_event, payload, reason, external_id)
-
-
-def _recipient_delivery_id(delivery_id: str | None, thread_id: str, prepared) -> str | None:
-    """Preserve the primary input key and scope additional recipients' keys."""
-    if thread_id == prepared.thread_id:
-        return delivery_id
-    assert prepared.envelope is not None
-    return f'{delivery_id or prepared.envelope.event_id}:recipient:{thread_id}'
 
 
 async def route_event(
@@ -297,23 +286,17 @@ async def route_event(
     external_id = identity.external_id if identity else None
     delivered = False
     try:
-        from events.platform import _traced
-
-        targets = prepared.evaluation.targets if prepared.evaluation else [None]
-        results = []
-        for target in targets:
-            thread_id = target.thread if target else prepared.thread_id
-            envelope = None
-            details = prepared.details
-            if prepared.envelope is not None and prepared.evaluation is not None:
-                envelope = _traced(prepared.envelope, prepared.evaluation.rule_ids[thread_id])
-            results.append(await delivery.deliver_and_resolve_to_thread(
-                thread_id, prepared.identity, internal_event, prepared.summary, details,
-                delivery_id=_recipient_delivery_id(delivery_id, thread_id, prepared), chip=prepared.chip,
-                notice=prepared.notice if thread_id == prepared.thread_id else None,
-                envelope=envelope, target=target,
-            ))
-        delivered = all(results)
+        delivered = await delivery.deliver_and_resolve_to_thread(
+            prepared.thread_id,
+            prepared.identity,
+            internal_event,
+            prepared.summary,
+            prepared.details,
+            delivery_id=delivery_id,
+            chip=prepared.chip,
+            notice=prepared.notice,
+            envelope=prepared.envelope,
+        )
     finally:
         # A refused or raising delivery (StaleContinuation, cancellation) releases
         # the claim so the next event carries the notice; a repeat beats a loss.

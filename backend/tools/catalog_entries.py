@@ -26,7 +26,7 @@ POST_UPDATE_ATTENTION_GUIDANCE = (
 )
 
 TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
-    'event_rules': _Entry('events', summary='Inspect rules, preview routing, or explain a delivery', activity='Inspecting event rules'),
+    'event_rules': _Entry('events', summary='Inspect rules, preview routing, or explain a delivery', activity='Checking where events go'),
     "continuity_edit": _Entry(
         "memory", status="substrate", authority="continuity-write", core=True,
         activity="Updating continuity",

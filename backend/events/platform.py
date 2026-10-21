@@ -1,10 +1,13 @@
-"""Deliver a platform-produced event to its owner: wake, digest or dead-letter.
+"""Deliver a platform-produced event to its owner: wake, digest, drop or dead-letter.
 
 The delivery entrypoint for events the platform itself observes (a poller,
-not a webhook); unlike the webhook router, it honors resolved dispositions. It reuses the existing path: ``normalize`` applies the type's
-declared rules, ``resolve_targets`` picks the owner, then each target gets an
-owner wake (``enqueue_event_wake``) when the event is actionable, otherwise an
-owner digest note (``append_thread_context_note``) collapsed by the type's
+not a webhook). The webhook router wakes its one evaluated recipient itself
+and records it here (``settle_routed_delivery``); only this path honors digest
+dispositions and more than one recipient. ``normalize`` applies the type's
+declared rules, ``evaluate`` applies drop and delivery rules around
+``resolve_targets``' owner, then each target gets an owner wake
+(``enqueue_event_wake``) when the event is actionable, otherwise an owner
+digest note (``append_thread_context_note``) collapsed by the type's
 declared ``collapse_fact``. An unresolvable target goes to the dead-letter
 sink. Everything is keyed on ``event_id`` (per target), so a repeat is a no-op.
 It names no connector (the no-bespoke-router guard keeps it that way).
@@ -16,6 +19,8 @@ import json
 import sqlite3
 from dataclasses import dataclass, replace
 from typing import Any, Callable
+
+from loguru import logger
 
 from events import dead_letter
 from events.connectors import EventTypeDecl, get_manifest
@@ -34,6 +39,7 @@ DIGESTED = "digested"
 DEAD_LETTERED = "dead_lettered"
 DUPLICATE = "duplicate"
 FILTERED = "filtered"
+DROPPED = "dropped"
 
 _NOTE_LINE_LIMIT = 2000
 
@@ -44,7 +50,7 @@ class PlatformDelivery:
 
     event_id: str
     thread_id: str | None
-    outcome: str  # woke | digested | dead_lettered | duplicate | filtered
+    outcome: str  # woke | digested | dead_lettered | duplicate | filtered | dropped
     reason: str | None = None
 
 
@@ -66,6 +72,26 @@ def _after_delivery(db, envelope: EventEnvelope, delivered: PlatformDelivery,
             RoutingIdentity(ref['integration'], ref['type'], ref['external_id']),
             envelope.type, recipient=delivered.thread_id, db=db,
         )
+
+
+def record_drop(db, envelope: EventEnvelope, rule_id: str, scope: str,
+                *, author: str | None) -> None:
+    """The one record of a rule drop: route decision, log line and product event."""
+    route_decisions.record(db, envelope, rule_ids=[rule_id], thread_id=None,
+                           outcome=DROPPED, scope=scope)
+    logger.info("event-routing: rule {} dropped {} (author {})",
+                rule_id, envelope.type, author or '?')
+    emit_product_event(
+        "event_route", "suppressed",
+        properties={"internal_event": envelope.type, "author": author, "rule_id": rule_id},
+    )
+
+
+def settle_routed_delivery(envelope: EventEnvelope, thread_id: str) -> None:
+    """Record a router wake and settle its watches, as platform delivery does."""
+    with write_transaction(None, scope='routed_event_delivered') as conn:
+        _after_delivery(conn, envelope, PlatformDelivery(envelope.event_id, thread_id, WOKE),
+                        envelope.provenance['rule_trace'], event_scope(envelope, db=conn))
 
 
 def _wake_message_id(event_id: str, thread_id: str) -> str:
@@ -194,9 +220,9 @@ def deliver_platform_event_sync(
             resolve_owner=lambda: resolve_targets(envelope, repair_owner=repair_owner, db=conn),
         )
         if evaluated.dropped_by:
-            route_decisions.record(conn, envelope, rule_ids=[evaluated.dropped_by],
-                                   thread_id=None, outcome='dropped', scope=scope)
-            return [PlatformDelivery(envelope.event_id, None, 'dropped')]
+            record_drop(conn, envelope, evaluated.dropped_by, scope,
+                        author=envelope.facts.get('author'))
+            return [PlatformDelivery(envelope.event_id, None, DROPPED)]
         targets = evaluated.targets
         deliveries = [
             PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
@@ -217,54 +243,6 @@ def deliver_platform_event_sync(
                 },
             )
         return deliveries
-
-
-async def deliver_routed_event(
-    thread_id: str, identity, internal_event: str, summary: str,
-    details: dict[str, Any] | None = None, *, delivery_id: str | None = None,
-    chip: str | None = None, notice: str | None = None,
-    envelope: EventEnvelope | None = None, target: Target | None = None,
-) -> bool:
-    """The legacy async send surface shares platform watch/decision handling.
-
-    The router's ordered preparation and notice cleanup remain its own. Wake
-    delivery keeps the canonical async sender (including continuation guards).
-    """
-    from events import delivery
-    from infra.db_async import run_in_db
-
-    if envelope is None:
-        ref = None if identity is None else {
-            'integration': identity.integration, 'type': identity.type,
-            'external_id': identity.external_id,
-        }
-        envelope = EventEnvelope(
-            delivery._event_idempotency_key(internal_event, summary, details, delivery_id=delivery_id),
-            internal_event, None, details or {}, (), ref,
-            {'rule_trace': ['builtin:0']}, 'actionable', False,
-        )
-    rule_ids = envelope.provenance.get('rule_trace') or ['builtin:0']
-
-    def digest() -> PlatformDelivery:
-        with write_transaction(None, scope='deliver_routed_digest') as conn:
-            delivered = _deliver_target(conn, envelope, target, EventTypeDecl(internal_event, (), ()))
-            _after_delivery(conn, envelope, delivered, rule_ids, event_scope(envelope, db=conn))
-            return delivered
-
-    if target is not None and target.disposition != 'owner_wake':
-        return (await run_in_db(digest)).outcome in (DIGESTED, DUPLICATE)
-    delivered = await delivery.deliver_to_thread(
-        thread_id, internal_event, summary, details,
-        delivery_id=delivery_id, chip=chip, notice=notice,
-        metadata={'provenance': envelope.provenance},
-    )
-    if delivered:
-        def complete() -> None:
-            with write_transaction(None, scope='routed_event_delivered') as conn:
-                _after_delivery(conn, envelope, PlatformDelivery(envelope.event_id, thread_id, WOKE),
-                                rule_ids, event_scope(envelope, db=conn))
-        await run_in_db(complete)
-    return delivered
 
 
 async def deliver_platform_event(

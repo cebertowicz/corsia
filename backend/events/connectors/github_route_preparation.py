@@ -12,7 +12,6 @@ from events.connectors.github import event_chip, summarize_event
 if TYPE_CHECKING:
     from events.router import RouteResult
     from events.envelope import EventEnvelope
-    from events.rules import Evaluation
 
 
 @dataclass
@@ -28,7 +27,6 @@ class PreparedRoute:
     notice: str | None = None
     reap_payload: dict[str, Any] | None = None
     envelope: EventEnvelope | None = None
-    evaluation: Evaluation | None = None
 
 
 @dataclass
