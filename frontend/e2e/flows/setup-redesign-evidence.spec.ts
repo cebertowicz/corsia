@@ -66,9 +66,9 @@ function localFlight(state: LocalFixture | undefined) {
 	if (state === 'connection') return { state: 'failed', cause: 'connection' };
 	if (state === 'disk-full') return { state: 'failed', cause: 'disk_full', bytes_to_free: 5_000_000_000 };
 	if (state === 'memory') return { state: 'failed', cause: 'memory' };
-	if (state === 'other-ref') return { state: 'failed', cause: 'other', ref: 'setup-report-123', fix: 'CORSIA couldn’t set up the local model. Press Retry.' };
-	if (state === 'other-no-ref') return { state: 'failed', cause: 'other', fix: 'CORSIA couldn’t set up the local model. Press Retry.' };
-	if (state === 'setup-failed') return { state: 'setup_failed', cause: 'other', fix: 'CORSIA couldn’t set up the local model. Press Retry.' };
+	if (state === 'other-ref') return { state: 'failed', cause: 'other', ref: 'setup-report-123', fix: 'CORSIA couldn’t set up the local model.' };
+	if (state === 'other-no-ref') return { state: 'failed', cause: 'other', fix: 'CORSIA couldn’t set up the local model.' };
+	if (state === 'setup-failed') return { state: 'setup_failed', cause: 'other', fix: 'CORSIA couldn’t set up the local model.' };
 	if (state === 'start-failed') return { state: 'start_failed', cause: 'connection' };
 	return { state: state === 'other-omlx' ? 'stopped' : state ?? 'stopped' };
 }
@@ -77,7 +77,7 @@ function localSource(state?: LocalFixture) {
 	return { source: 'omlx', name: 'Local model', state: state === 'ready' ? 'ready' : 'needs_setup', local_state: flight.state,
 		download_size: '30 GB', download_percent: 42, download_eta_seconds: 720, setup_downloading: ['downloading', 'paused'].includes(state ?? ''), download_stalled: state === 'paused',
 		setup_stage: state === 'starting' ? 'starting' : undefined, setup_error: ['failed', 'setup_failed', 'start_failed'].includes(flight.state) ? 'failed' : undefined,
-		setup_error_code: 'cause' in flight ? flight.cause : undefined, setup_error_reference: 'ref' in flight ? flight.ref : undefined, bytes_to_free: 'bytes_to_free' in flight ? flight.bytes_to_free : undefined, fix: 'fix' in flight ? flight.fix : undefined };
+		setup_error_code: 'cause' in flight ? flight.cause : undefined, setup_error_reference: 'ref' in flight ? flight.ref : undefined, ref: 'ref' in flight ? flight.ref : undefined, bytes_to_free: 'bytes_to_free' in flight ? flight.bytes_to_free : undefined, fix: 'fix' in flight ? flight.fix : undefined };
 }
 function catalogRow(connection: string) {
 	return { id: `${connection}/vendor-default`, litellm_model: `${connection}/vendor-default`, name: 'Vendor default', connection, provider: connection, backend: connection === 'omlx' ? 'network' : 'api', status: 'ready', is_default: true,
@@ -335,9 +335,9 @@ async function assertState(page: Page, fixture: Fixture) {
 			: fixture.local === 'connection' ? 'Couldn’t download the local model because the connection was lost. Check your internet connection, then try again.'
 			: fixture.local === 'disk-full' ? 'Couldn’t download the local model: the disk is full. Free up 5 GB, then try again.'
 			: fixture.local === 'memory' ? 'This computer doesn’t have enough memory to run the local model. Choose a subscription or API provider instead.'
-			: fixture.local === 'other-ref' ? 'CORSIA couldn’t set up the local model. Press Retry. Reference: setup-report-123'
-			: fixture.local === 'other-no-ref' ? 'CORSIA couldn’t set up the local model. Press Retry.'
-			: fixture.local === 'setup-failed' ? 'CORSIA couldn’t set up the local model. Press Retry.'
+			: fixture.local === 'other-ref' ? 'CORSIA couldn’t set up the local model. Reference: setup-report-123'
+			: fixture.local === 'other-no-ref' ? 'CORSIA couldn’t set up the local model.'
+			: fixture.local === 'setup-failed' ? 'CORSIA couldn’t set up the local model.'
 			: fixture.local === 'start-failed' ? 'The local model downloaded but couldn’t start. Try again, or save a report.'
 			: fixture.local === 'other-omlx' ? 'The other oMLX copies changed or couldn’t stop. Retry asks again, or keep them running.'
 			: 'Free and private. Runs on this computer, even offline. 30 GB download.';
