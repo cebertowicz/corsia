@@ -188,6 +188,46 @@ def test_committed_target_edit_finds_its_file_local_executable_case_without_a_wo
     ]
 
 
+def test_matching_case_survives_a_symlinked_workspace_root(tmp_path: Path):
+    from core.lesson_carry_in import CarryInFact, _matching_facts
+    from core.lesson_files import render_trial
+    from core.lesson_trials import Trial
+
+    real = tmp_path / "real"
+    real.mkdir()
+    workspace = tmp_path / "workspace-link"
+    workspace.symlink_to(real, target_is_directory=True)
+    target = workspace / "context" / "rule.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("rule\n")
+    source = workspace / ".threads" / "owner" / "skills" / "lesson" / "SKILL.md"
+    source.parent.mkdir(parents=True)
+    source.write_text(render_trial(
+        lesson_id="12345678-1234-5678-1234-567812345678", owner="owner", name="lesson",
+        description="A carry-in case.", text="Use the rule.",
+        trial=Trial("hypothesis", "2030-01-01"), source_refs=[{"kind": "turn", "reference": "turn"}],
+        target_file="context/rule.md", case={
+            "what_happened": "The rule was missed.", "right_call": "Read it.",
+            "does_not_apply": "For a draft.", "correction_subject": "message:1", "actions": ACTIONS,
+        },
+    ))
+
+    db = _event_db()
+    facts = _matching_facts(db, workspace, [target], "a" * 40)
+
+    assert facts == [
+        CarryInFact(
+            "12345678-1234-5678-1234-567812345678", "owner", "a" * 40,
+            "context/rule.md", ".threads/owner/skills/lesson/SKILL.md#corsia.lesson.case",
+        )
+    ]
+    from core.lesson_carry_in import record_pending
+    assert record_pending(db, facts[0])
+    assert db.execute(
+        "SELECT event_name FROM outcome_events WHERE event_name='learning_loop.carry_in_pending'"
+    ).fetchone()["event_name"] == "learning_loop.carry_in_pending"
+
+
 def test_drain_settles_a_pending_case_with_a_mocked_local_adapter(tmp_path: Path):
     from core.lesson_carry_in import _matching_facts, drain_facts, is_pending, record_pending
     from core.lesson_files import render_trial

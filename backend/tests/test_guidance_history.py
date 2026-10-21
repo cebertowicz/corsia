@@ -715,6 +715,9 @@ def test_a_committed_save_schedules_carry_in_after_history_lands(history_scope, 
 def test_forty_save_burst_reports_lock_wait_p95(history_scope, monkeypatch):
     workspace, _ = history_scope
     events: list[dict] = []
+    # This stress test owns concurrent Git-save behavior, not post-save C1 execution.
+    # Suppress its daemon drains so their independent DB work cannot race the test DB authorizer.
+    monkeypatch.setattr("core.lesson_carry_in.record_committed_save", lambda *_args: None)
     monkeypatch.setattr(
         "infra.product_events.emit_product_event",
         lambda category, action, **kwargs: events.append({"event": f"{category}.{action}", **kwargs["properties"]}),

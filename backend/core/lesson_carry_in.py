@@ -362,9 +362,10 @@ def _matching_facts(db, workspace: Path, paths: Sequence[Path], commit: str) -> 
     from core.skill_data_conversion import installed_skill_files
     from tools.filesystem_gate import canonical_target_path
 
-    saved = {canonical_target_path(str(path.resolve()), workspace) for path in paths}
+    workspace_root = workspace.resolve(strict=False)
+    saved = {canonical_target_path(str(path.resolve()), workspace_root) for path in paths}
     facts: list[CarryInFact] = []
-    for source_path in installed_skill_files(workspace, db):
+    for source_path in installed_skill_files(workspace_root, db):
         try:
             trial = read_trial(source_path.read_text(encoding="utf-8"))
         except OSError:
@@ -373,14 +374,15 @@ def _matching_facts(db, workspace: Path, paths: Sequence[Path], commit: str) -> 
             continue
         actions = trial.lesson.case.get("actions")
         target = trial.lesson.new_target_path if trial.lesson.target_file == "new" else trial.lesson.target_file
-        if actions is None or not target or canonical_target_path(target, workspace) not in saved:
+        if actions is None or not target or canonical_target_path(target, workspace_root) not in saved:
             continue
         try:
-            relative = source_path.resolve().relative_to(workspace).as_posix()
+            relative = source_path.resolve().relative_to(workspace_root).as_posix()
         except ValueError:
+            logger.warning("carry-in case source is outside workspace: source={} workspace={}", source_path, workspace_root)
             continue
         facts.append(CarryInFact(
-            trial.lesson.id, trial.lesson.owner, commit, canonical_target_path(target, workspace),
+            trial.lesson.id, trial.lesson.owner, commit, canonical_target_path(target, workspace_root),
             f"{relative}#corsia.lesson.case",
         ))
     return facts
