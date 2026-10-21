@@ -297,6 +297,10 @@ def webhook_rule_envelope(
         facts = {key: value for key, value in facts.items() if value is not None}
     else:
         facts = _extract_facts(payload)
+        # Declared filterable for rules only; today's facts and event ids stay as they are.
+        user = _json_object(payload, "pull_request").get("user")
+        if isinstance(user, Mapping) and user.get("login") is not None:
+            facts["author"] = user["login"]
     try:
         event_id = compute_event_id(MANIFEST.connector, event_type, facts, decl.identity_facts)
     except MalformedEventError:

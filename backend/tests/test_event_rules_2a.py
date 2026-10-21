@@ -100,6 +100,22 @@ def _notes(thread_id: str) -> list[dict]:
                  "WHERE object_kind='thread_context' AND object_id=? ORDER BY seq", thread_id)
 
 
+def _digest(thread_id: str) -> list[dict]:
+    """The notes the thread's next passive digest shows, after collapsing.
+
+    Newest first, as ``passive_changes`` reads them, so a collapsed note shows its latest row.
+    """
+    from infra.passive_digest import build_digest
+
+    db = get_db()
+    try:
+        rows = db.execute("SELECT * FROM context_change_journal WHERE object_kind='thread_context' "
+                          "AND object_id=? ORDER BY seq DESC", (thread_id,)).fetchall()
+    finally:
+        db.close()
+    return build_digest(rows, overflow=False, clock=None)[1]
+
+
 def _decisions(**where) -> list[dict]:
     clause = " AND ".join(f"{key}=?" for key in where) or "1"
     return _rows(f"SELECT * FROM event_route_decisions WHERE {clause} ORDER BY id", *where.values())
@@ -111,9 +127,10 @@ def _sync(number: int, n: int, **kwargs) -> dict:
     return payload
 
 
-def _merged(number: int) -> dict:
+def _merged(number: int, author: str = "alice") -> dict:
     payload = pr_payload(REPO, number, action="closed")
     payload["pull_request"]["merged"] = True
+    payload["pull_request"]["user"] = {"login": author, "type": "User"}
     return payload
 
 
@@ -242,6 +259,59 @@ async def test_without_a_matching_rule_the_router_delivers_exactly_as_before(iso
     assert _decisions() == []
 
 
+@pytest.mark.asyncio
+async def test_a_self_rule_fires_on_a_pr_routing_gave_no_thread(isolated_db, sent):
+    _project(P, conductor="cond")
+    _agent("cond")
+    _agent("a")
+    _agent("b")
+    rule = await _tool("a", operation="create", connector="github", event_type="pr.merged",
+                       match=[{"field": "repo", "op": "eq", "value": REPO}], note="Unowned PR merged.")
+    # A rule for someone else can't see an event no project claims.
+    other = await _tool("cond", operation="create", connector="github", event_type="pr.merged",
+                        to="thread:b", mode="digest")
+
+    with patch("events.connectors.github_rules.apply_routed_rules", lambda *a, **k: None):
+        today = await route(MERGED, _merged(41))
+    result = await route(MERGED, _merged(42))
+
+    # Today's result and its dead-letter record are unchanged; the rule only adds a wake.
+    assert (result.outcome, result.thread_id, result.reason) == (
+        today.outcome, today.thread_id, today.reason)
+    assert result.outcome == RouteOutcome.DEAD_LETTERED
+    parked = _rows("SELECT external_id, reason FROM dead_letter_events ORDER BY id")
+    assert [row["reason"] for row in parked] == [today.reason, today.reason]
+    assert sent == []
+    [wake] = _wakes("a")
+    assert "Unowned PR merged." in wake
+    [decision] = _decisions()
+    assert (decision["rule_id"], decision["thread_id"], decision["outcome"], decision["via"]) == (
+        rule["id"], "a", "woke", "rule")
+    assert _decisions(rule_id=other["id"]) == [] and _notes("b") == []
+
+
+@pytest.mark.asyncio
+async def test_webhook_reads_when_routing_chose_no_thread(isolated_db, sent):
+    _project(P)
+    _agent("a")
+
+    async def run(number: int) -> list[str]:
+        with _statements() as seen:
+            await route(MERGED, _merged(number))
+        return _reads(seen)
+
+    with patch("events.connectors.github_rules.apply_routed_rules", lambda *a, **k: None):
+        await run(60)
+        before = await run(61)
+    no_rule = await run(62)
+    await _tool("a", operation="create", connector="github", event_type="pr.merged")
+    matched = await run(63)
+
+    assert len(no_rule) - len(before) == 1
+    print(f"unrouted webhook reads: dev={len(before)} no_rule=+{len(no_rule) - len(before)} "
+          f"matched=+{len(matched) - len(before)}")
+
+
 # -- Burst -----------------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -264,9 +334,10 @@ async def test_a_burst_wakes_a_rule_once_and_the_owner_on_every_event(isolated_d
     assert all("rule_notes" not in content for _, content in sent)
     [wake] = _wakes("watcher")
     assert "Re-run the load check." in wake
-    notes = _notes("watcher")
-    assert len(notes) == 49
-    assert all("rule note: Re-run the load check." in note["summary"] for note in notes)
+    # The 49 capped events reach the next turn as one note that counts them.
+    [note] = _digest("watcher")
+    assert f"; 49 since rule {rule['id']} last woke you" in note["summary"]
+    assert note["summary"].endswith("; rule note: Re-run the load check.")
     assert [(d["outcome"], d["via"], d["reason"]) for d in _decisions(rule_id=rule["id"])] == (
         [("woke", "rule", None)] + [("digested", "rule", "wake cap")] * 49)
 
@@ -278,7 +349,7 @@ async def test_a_burst_wakes_a_rule_once_and_the_owner_on_every_event(isolated_d
 # -- Writer limits ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_writer_limits(isolated_db):
+async def test_writer_limits(isolated_db, sent):
     _project(P, conductor="cond")
     _project(Q)
     _agent("cond")
@@ -308,7 +379,17 @@ async def test_writer_limits(isolated_db):
 
     assert "Only the rule's writer" in await _tool("a", operation="disable", rule_id=digest["id"])
     assert (await _tool("b", operation="disable", rule_id=digest["id"]))["enabled"] is False
-    assert len(_rows("SELECT id FROM event_rules")) == 2
+
+    # Every declared field can match: a PR's author comes from the webhook.
+    by_author = await _tool("a", **base, match=[{"field": "author", "op": "eq", "value": "carol"}])
+    register_pr(REPO, 5, "a")
+    register_pr(REPO, 6, "a")
+    await route(MERGED, _merged(5, author="carol"))
+    await route(MERGED, _merged(6, author="dave"))
+    [hit] = _decisions(rule_id=by_author["id"])
+    assert (hit["thread_id"], hit["outcome"]) == ("a", "woke")
+    assert hit["artifact_external_id"] == pr_external_id(REPO, 5)
+    assert len(_rows("SELECT id FROM event_rules")) == 3
 
 
 @pytest.mark.asyncio

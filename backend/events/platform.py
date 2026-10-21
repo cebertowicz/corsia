@@ -119,9 +119,10 @@ def _note_line(envelope: EventEnvelope, line_facts: tuple[str, ...]) -> str:
 
 def _deliver_target(
     db: sqlite3.Connection, envelope: EventEnvelope, target: Target,
-    decl: EventTypeDecl, notes: tuple[str, ...] = (),
+    decl: EventTypeDecl, notes: tuple[str, ...] = (), capped: tuple[rules.Entry, ...] = (),
 ) -> PlatformDelivery:
-    """Deliver one target. ``notes`` are the writers' own rule notes, never event text."""
+    """Deliver one target. ``notes`` are the writers' own rule notes, never event text;
+    ``capped`` are the rules whose wake the hourly cap turned into this digest."""
     event_id = envelope.event_id
     disposition = target.disposition
     thread = target.thread
@@ -153,9 +154,15 @@ def _deliver_target(
     # The person's chip keeps the plain event line; the facts are the agent's.
     details = {**_digest_details(envelope, decl.collapse_fact), "chip": _summary(envelope)}
     line = _note_line(envelope, decl.digest_line_facts)
+    if capped:
+        # R9: one note per capped rule and thread; the latest carries the count.
+        details["path"] = "rule:" + ",".join(sorted(entry.rule_id for entry in capped))
+        line += "".join(f"; {entry.since_wake} since rule {entry.rule_id} last woke you"
+                        for entry in capped)
     if notes:
         details["rule_notes"] = list(notes)
-        line = _clip(line + "".join(f"; rule note: {note}" for note in notes), _NOTE_LINE_LIMIT)
+        line += "".join(f"; rule note: {note}" for note in notes)
+    line = _clip(line, _NOTE_LINE_LIMIT)
     append_thread_context_note(db, thread_id=thread, summary=line, details=details)
     return PlatformDelivery(event_id, thread, DIGESTED)
 
@@ -216,19 +223,20 @@ def deliver_rule_adds(
     deliveries, outcomes = [], []
     for thread, delivery in plan.adds.items():
         made = _deliver_target(db, envelope, _rule_target(thread, delivery, None), decl,
-                               tuple(delivery.notes))
+                               tuple(delivery.notes), tuple(delivery.capped))
         deliveries.append(made)
         outcomes += settle_rule_delivery(db, plan, thread, delivery, made.outcome, ride=False)
     return deliveries, outcomes
 
 
 def apply_webhook_rules_sync(
-    envelope: EventEnvelope, watch_event: str, routed_thread: str, *, ends_artifact: bool,
+    envelope: EventEnvelope, watch_event: str, routed_thread: str | None, *, ends_artifact: bool,
 ) -> rules.RulePlan | None:
-    """Rules for one routed webhook event: deliver what they add, return what rides.
+    """Rules for one webhook event: deliver what they add, return what rides.
 
     The router keeps its own delivery to ``routed_thread``; this returns the plan
-    so it can drop that delivery or add the rules' notes to it. One read when no
+    so it can drop that delivery or add the rules' notes to it. ``None`` when
+    routing chose no thread: rules can then only add recipients. One read when no
     rule for the type matches; the write transaction opens only when one does.
     """
     event = rule_event(envelope, watch_event, ends_artifact=ends_artifact)
@@ -241,7 +249,8 @@ def apply_webhook_rules_sync(
         reader.close()
     decl = get_manifest(event.connector).decl(event.event_type)
     with write_transaction(None, scope="apply_webhook_rules") as conn:
-        plan = rules.evaluate(conn, event, [rules.Routed(routed_thread, wake=True)])
+        routed = [rules.Routed(routed_thread, wake=True)] if routed_thread is not None else []
+        plan = rules.evaluate(conn, event, routed)
         if plan is None:
             return None
         _, outcomes = deliver_rule_adds(conn, envelope, decl, plan)

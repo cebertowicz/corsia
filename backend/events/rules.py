@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from infra.queries import thread_available_sql
+from events import rule_reads
 
 DELIVER = "deliver"
 DROP = "drop"
@@ -52,9 +52,6 @@ ACCOUNT_REACH = "account reach"
 
 WAKES_PER_HOUR = 1
 RETENTION = timedelta(days=30)
-# The registration event the registry appends when an artifact ends.
-_ARTIFACT_ENDED = "artifact_ended"
-_OWNER_STATES = ("owner-pinned", "owner-active")
 
 
 @dataclass(frozen=True)
@@ -101,6 +98,7 @@ class Entry:
     rule_id: str
     wake: bool
     reason: str | None = None  # R7 or R9 turned its wake into a digest
+    since_wake: int = 0  # R9: this rule's capped digests to the thread since it last woke it
 
 
 @dataclass
@@ -119,8 +117,13 @@ class Delivery:
     def wake(self) -> bool:
         return self.routed_wake or any(entry.wake for entry in self.entries)
 
-    def add(self, rule: Rule, wake: bool, reason: str | None) -> None:
-        self.entries.append(Entry(rule.id, wake, reason))
+    @property
+    def capped(self) -> list[Entry]:
+        """The rules whose wake the hourly cap turned into this digest."""
+        return [] if self.wake else [entry for entry in self.entries if entry.reason == WAKE_CAP]
+
+    def add(self, rule: Rule, wake: bool, reason: str | None, since_wake: int = 0) -> None:
+        self.entries.append(Entry(rule.id, wake, reason, since_wake))
         if rule.note:
             self.notes.append(rule.note)
 
@@ -223,60 +226,29 @@ def project_scope(project_id: str) -> str:
     return PROJECT_PREFIX + project_id
 
 
-def _artifact_context(db: sqlite3.Connection, ref: Mapping[str, str] | None) -> tuple[str | None, bool]:
-    """The artifact's registered owner and whether it has ended, in one read."""
-    if not ref:
-        return None, False
+def _wake_budget(db: sqlite3.Connection, rule_id: str, thread: str) -> tuple[bool, int]:
+    """R9: whether this rule already woke this thread within the hour, and how many
+    of its events the cap has digested there since its last wake, in one read."""
     row = db.execute(
-        f"""SELECT
-              (SELECT r.parent_thread_id FROM artifact_registrations r
-                WHERE r.artifact_id=i.id AND r.relationship_state IN (?, ?)
-                ORDER BY CASE r.relationship_state WHEN 'owner-pinned' THEN 0 ELSE 1 END,
-                         r.updated_at DESC
-                LIMIT 1) AS owner,
-              EXISTS (SELECT 1 FROM artifact_registration_events e
-                       WHERE e.artifact_id=i.id AND e.event_type=?) AS ended
-            FROM artifact_identities i
-           WHERE i.integration=? AND i.type=? AND i.external_id=? AND i.state='active'""",
-        (*_OWNER_STATES, _ARTIFACT_ENDED, ref["integration"], ref["type"], ref["external_id"]),
+        "SELECT (SELECT COUNT(*) FROM event_route_decisions WHERE rule_id=:rule "
+        "        AND thread_id=:thread AND outcome='woke' AND via='rule' AND at>=:since) AS spent, "
+        "       (SELECT COUNT(*) FROM event_route_decisions WHERE rule_id=:rule "
+        "        AND thread_id=:thread AND outcome='digested' AND reason=:cap "
+        "        AND id>COALESCE((SELECT MAX(id) FROM event_route_decisions WHERE rule_id=:rule "
+        "                AND thread_id=:thread AND outcome='woke' AND via='rule'), 0)) AS capped",
+        {"rule": rule_id, "thread": thread, "cap": WAKE_CAP,
+         "since": _iso(_now() - timedelta(hours=1))},
     ).fetchone()
-    if row is None:
-        return None, False
-    return row["owner"], bool(row["ended"])
+    return int(row["spent"]) >= WAKES_PER_HOUR, int(row["capped"])
 
 
-def _threads(db: sqlite3.Connection, ids: Iterable[str | None]) -> dict[str, Mapping[str, Any]]:
-    wanted = sorted({thread for thread in ids if thread})
-    if not wanted:
-        return {}
-    rows = db.execute(
-        f"SELECT id, project_id, local_only, {thread_available_sql()} AS available "
-        f"FROM threads WHERE id IN ({','.join('?' * len(wanted))})",
-        wanted,
-    ).fetchall()
-    return {row["id"]: row for row in rows}
-
-
-def _cloud_off(db: sqlite3.Connection, projects: Iterable[str | None]) -> set[str]:
-    wanted = sorted({project for project in projects if project})
-    if not wanted:
-        return set()
-    rows = db.execute(
-        "SELECT project_id FROM project_inference_policies WHERE cloud_models_off=1 "
-        f"AND project_id IN ({','.join('?' * len(wanted))})",
-        wanted,
-    ).fetchall()
-    return {row["project_id"] for row in rows}
-
-
-def _wake_spent(db: sqlite3.Connection, rule_id: str, thread: str) -> bool:
-    """R9: this rule already woke this thread within the hour."""
-    row = db.execute(
-        "SELECT COUNT(*) FROM event_route_decisions WHERE rule_id=? AND thread_id=? "
-        "AND outcome='woke' AND via='rule' AND at>=?",
-        (rule_id, thread, _iso(_now() - timedelta(hours=1))),
-    ).fetchone()
-    return int(row[0]) >= WAKES_PER_HOUR
+def _in_scope(rule: Rule, event_project: str | None) -> bool:
+    """An event with a project matches only that project's rules. One with no owner
+    and nothing routed has no project, so only a rule delivering to its own writer
+    sees it: that writer already reads the source, and no one else is reached."""
+    if event_project is not None:
+        return rule.scope == project_scope(event_project)
+    return rule.action == DELIVER and thread_target(rule.to) == rule.created_by
 
 
 def _paused(db: sqlite3.Connection, thread: str) -> bool:
@@ -289,6 +261,36 @@ def _reaches(db: sqlite3.Connection, account_id: Any, thread: str) -> bool:
     from connections.connected_accounts import account_reaches_thread
 
     return account_reaches_thread(str(account_id), thread, db=db)
+
+
+def _apply_drops(plan: RulePlan, rules: list[Rule], by_thread: Mapping[str, Routed]) -> dict[str, str]:
+    """Each drop rule removes its writer's own routed delivery; returns writer -> rule."""
+    dropped_by: dict[str, str] = {}
+    for rule in (rule for rule in rules if rule.action == DROP):
+        writer = rule.created_by
+        dropped_by.setdefault(writer, rule.id)
+        if writer in by_thread:
+            plan.drops.setdefault(writer, rule.id)
+        plan.settled.append(Outcome(
+            rule.id, writer, DROPPED,
+            reason=None if writer in by_thread else "nothing routed to drop"))
+    return dropped_by
+
+
+def _wake_for(
+    db: sqlite3.Connection, rule: Rule, thread: str, routed_wake: bool,
+) -> tuple[bool, str | None, int]:
+    """Whether this rule wakes the thread, why not (R7, R9), and its capped count."""
+    if rule.mode != WAKE:
+        return False, None, 0
+    if routed_wake:
+        return False, None, 0  # routing already wakes it; the rule only rides
+    if _paused(db, thread):
+        return False, PAUSED, 0  # R7
+    spent, capped = _wake_budget(db, rule.id, thread)
+    if spent:
+        return False, WAKE_CAP, capped + 1  # R9
+    return True, None, 0
 
 
 def evaluate(
@@ -305,21 +307,20 @@ def evaluate(
         return None
     routed = list(routed)
     by_thread = {item.thread: item for item in routed}
-    owner, ended = _artifact_context(db, event.artifact_ref)
+    owner, ended = rule_reads.artifact_context(db, event.artifact_ref)
     owner = owner or next((item.thread for item in routed if item.owner), None)
     recipients = {
         rule.id: (owner if rule.to == REGISTERED_OWNER else thread_target(rule.to))
         for rule in rules
     }
-    threads = _threads(db, [owner, *by_thread, *recipients.values()])
+    threads = rule_reads.threads(db, [owner, *by_thread, *recipients.values()])
     event_project = threads[owner]["project_id"] if owner in threads else None
     if event_project is None:
         event_project = next(
             (threads[item.thread]["project_id"] for item in routed if item.thread in threads), None)
     account_id = event.facts.get("account_id")
     if account_id is None:
-        rules = [rule for rule in rules
-                 if event_project is not None and rule.scope == project_scope(event_project)]
+        rules = [rule for rule in rules if _in_scope(rule, event_project)]
     plan = RulePlan(event)
     if not rules:
         return plan
@@ -328,16 +329,7 @@ def evaluate(
         plan.settled = [Outcome(rule.id, recipients[rule.id], ENDED) for rule in rules]
         return plan
 
-    dropped_by: dict[str, str] = {}
-    for rule in (rule for rule in rules if rule.action == DROP):
-        writer = rule.created_by
-        dropped_by.setdefault(writer, rule.id)
-        if writer in by_thread:
-            plan.drops.setdefault(writer, rule.id)
-        plan.settled.append(Outcome(
-            rule.id, writer, DROPPED,
-            reason=None if writer in by_thread else "nothing routed to drop"))
-
+    dropped_by = _apply_drops(plan, rules, by_thread)
     cloud_off: set[str] | None = None
     for rule in (rule for rule in rules if rule.action == DELIVER):
         thread = recipients[rule.id]
@@ -355,7 +347,8 @@ def evaluate(
             plan.settled.append(Outcome(rule.id, thread, HELD, reason=ACCOUNT_REACH))
             continue
         if cloud_off is None:
-            cloud_off = _cloud_off(db, [event_project, *(r["project_id"] for r in threads.values())])
+            cloud_off = rule_reads.cloud_off(
+                db, [event_project, *(r["project_id"] for r in threads.values())])
         if (event_project in cloud_off and not row["local_only"]
                 and row["project_id"] not in cloud_off):
             # R29: a Local-models-only project's event reaches no cloud recipient.
@@ -363,17 +356,10 @@ def evaluate(
             continue
         routed_here = by_thread.get(thread)
         routed_wake = bool(routed_here and routed_here.wake)
-        wake = rule.mode == WAKE
-        reason: str | None = None
-        if wake and routed_wake:
-            wake = False  # routing already wakes it; the rule only rides
-        elif wake and _paused(db, thread):
-            wake, reason = False, PAUSED  # R7
-        elif wake and _wake_spent(db, rule.id, thread):
-            wake, reason = False, WAKE_CAP  # R9
+        wake, reason, since_wake = _wake_for(db, rule, thread, routed_wake)
         target = plan.rides if routed_here else plan.adds
         delivery = target.setdefault(thread, Delivery(routed_wake=routed_wake))
-        delivery.add(rule, wake, reason)
+        delivery.add(rule, wake, reason, since_wake)
     return plan
 
 

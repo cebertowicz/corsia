@@ -94,6 +94,8 @@ def _prepare_route(
     )
     if isinstance(selected, router.RouteResult):
         prepared.result = selected
+        # Routing chose no thread; rules may still add recipients, never change this result.
+        apply_routed_rules(prepared, internal_event, payload, identity, check_suite_base_ref)
         return
     thread_id, wake_reason, routing_state = selected
     summary, details = router._summarize(internal_event, payload, external_id)
@@ -110,7 +112,7 @@ def _prepare_route(
     prepared.summary, prepared.details, prepared.chip = summary, details, chip
     prepared.notice = router.github_pr_notice.notice_for_routed_event(thread_id, identity)
     # Routing has decided; agent-written rules add recipients or drop or annotate this one.
-    apply_routed_rules(prepared, internal_event, payload, check_suite_base_ref)
+    apply_routed_rules(prepared, internal_event, payload, identity, check_suite_base_ref)
 
 
 async def release_notice_off_loop(thread_id: str, identity: Any) -> None:

@@ -1,10 +1,11 @@
-"""Agent-written event rules on a routed GitHub webhook, once routing chose its thread.
+"""Agent-written event rules on a GitHub webhook, once routing has decided.
 
 The router's own decision stays as it is; this runs at the end of its
 preparation. Recipients a rule adds are delivered through the platform path
 (``events.platform``). For the routed thread a rule can only drop the delivery
-(its writer's own) or ride it with a note. Comments have no declared type yet,
-so no rule matches them.
+(its writer's own) or ride it with a note. When routing chose no thread, rules
+can only add recipients, and today's result stands. Comments have no declared
+type yet, so no rule matches them.
 """
 
 from __future__ import annotations
@@ -21,21 +22,25 @@ if TYPE_CHECKING:
 
 
 def apply_routed_rules(
-    prepared: PreparedRoute, internal_event: str, payload: dict[str, Any],
+    prepared: PreparedRoute, internal_event: str, payload: dict[str, Any], identity: Any,
     check_suite_base_ref: str | None,
 ) -> None:
-    """Deliver what rules add, then drop or annotate the routed delivery in ``prepared``."""
+    """Deliver what rules add, then drop or annotate the routed delivery in ``prepared``.
+
+    ``prepared.thread_id`` is ``None`` when routing chose no thread; ``prepared.result``
+    then already holds today's result, which rules never change.
+    """
     event_type = manifest_type(internal_event)
-    if event_type is None or prepared.thread_id is None:
+    if event_type is None:
         return
-    envelope = webhook_rule_envelope(event_type, payload, prepared.identity, check_suite_base_ref)
+    envelope = webhook_rule_envelope(event_type, payload, identity, check_suite_base_ref)
     if envelope is None:
         return
-    plan = apply_webhook_rules_sync(
-        envelope, internal_event, prepared.thread_id, ends_artifact=ends_artifact(internal_event))
-    if plan is None:
-        return
     thread = prepared.thread_id
+    plan = apply_webhook_rules_sync(
+        envelope, internal_event, thread, ends_artifact=ends_artifact(internal_event))
+    if plan is None or thread is None:
+        return
     if thread in plan.drops:
         _drop(prepared, internal_event, f"dropped by rule {plan.drops[thread]}")
         return
