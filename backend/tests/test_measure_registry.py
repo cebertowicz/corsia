@@ -131,6 +131,15 @@ def test_event_declarations_stay_in_their_namespace_and_use_a_known_mode(tmp_pat
     assert "event mail.triaged use must be record, route or both" in refused(tmp_path, invalid_use)
 
 
+def test_a_both_event_routes_only_ids_counts_and_enums() -> None:
+    both = MEASURES.replace("    dedupe: [message_ref, run_id]", "    dedupe: [message_ref, run_id]\n    use: both")
+    sync(db(), owner_thread_id="agent-a", path=own("agent-a"), text=both)
+    for kind in ("login", "num"):
+        text = both.replace("      message_ref: id\n", f"      message_ref: id\n      sender: {kind}\n")
+        with pytest.raises(ValueError, match=f'attribute sender cannot be "{kind}"; use id, count or enum'):
+            sync(db(), owner_thread_id="agent-a", path=own("agent-a"), text=text)
+
+
 def test_qg_declaration_copy_syncs_with_version_attr_can_decide_and_decides_as(tmp_path: Path) -> None:
     text = (FIXTURES / "qg_measures.yaml").read_text()
     path = skill_file(tmp_path, text)
