@@ -66,9 +66,9 @@ function cliSource(cli?: string, vendor = 'claude-code') {
 	return { source: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', state, limited: cli === 'limited', resets_at: '2026-10-20T01:00:00Z', checked_at: '2026-10-19T17:00:00Z', ...(cli === 'unusable' ? { cli_package_manager: 'homebrew' } : {}) };
 }
 function localFlight(state: LocalFixture | undefined) {
-	if (state === 'connection') return { state: 'failed', cause: 'connection' };
-	if (state === 'disk-full') return { state: 'failed', cause: 'disk_full', bytes_to_free: 5_000_000_000 };
-	if (state === 'memory') return { state: 'failed', cause: 'memory' };
+	if (state === 'connection') return { state: 'failed', cause: 'connection', fix: 'Couldn’t download the local model because the connection was lost. Check your internet connection, then Retry.' };
+	if (state === 'disk-full') return { state: 'failed', cause: 'disk_full', bytes_to_free: 5_000_000_000, fix: 'Couldn’t download the local model: the disk is full. Free up 5 GB, then Retry.' };
+	if (state === 'memory') return { state: 'failed', cause: 'memory', fix: 'This computer doesn’t have enough memory to run the local model. Choose a subscription or API provider instead.' };
 	if (state === 'other-ref') return { state: 'failed', cause: 'other', ref: 'setup-report-123', fix: 'CORSIA couldn’t set up the local model.' };
 	if (state === 'other-no-ref') return { state: 'failed', cause: 'other', fix: 'CORSIA couldn’t set up the local model.' };
 	if (state === 'setup-failed') return { state: 'setup_failed', cause: 'other', fix: 'CORSIA couldn’t set up the local model.' };
@@ -311,7 +311,7 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.requiredUsername) { await expect(page.getByLabel('Username', { exact: true })).toHaveAttribute('readonly'); }
 	if (fixture.classifier === 'downloading') { await expect(text('Finishing setup')).toBeVisible(); await expect(text('Downloading · 60%')).toBeVisible(); }
 	if (fixture.classifier === 'failed') { await expect(text('Finishing setup')).toBeVisible(); await expect(page.getByRole('button', { name: /^Try again/ })).toBeVisible(); }
-	if (fixture.screen === 'account') { await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible(); if (fixture.local === 'connection') await expect(text('Couldn’t download')).toBeVisible(); return; }
+	if (fixture.screen === 'account') { await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible(); if (fixture.local === 'connection') await expect(text('Couldn’t download the local model because the connection was lost. Check your internet connection, then Retry.')).toBeVisible(); return; }
 	if (fixture.screen === 'folder') { await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible(); return; }
 	if (fixture.other) { await expect(page.getByRole('heading', { name: 'Another copy of oMLX is already running' })).toBeVisible(); await expect(page.getByRole('button', { name: 'Stop it', exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'Keep it running', exact: true })).toBeVisible(); return; }
 	if (fixture.api === 'menu') { await expect(page.getByText('Cloud', { exact: true })).toBeVisible(); await expect(page.getByText('Other ways to connect', { exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'Models on another computer', exact: true })).toBeVisible(); return; }
