@@ -29,7 +29,6 @@ const STUCK_AFTER: Duration = Duration::from_secs(DRAIN_MAX_WAIT_SECONDS + 300);
 const INHERITED: [&str; 5] = ["HOME", "PATH", "USER", "LANG", "TMPDIR"];
 const COUNT_INTERVAL: Duration = Duration::from_secs(1);
 const PROOF_TIMEOUT: Duration = Duration::from_secs(15);
-// Startup waits share the bundled-service progress policy in lib.rs.
 
 /// What the source backend's drain counts as running (`turn_core.active_turn_count`).
 /// Read only, over `mode=ro` and never immutable: the database is live.
@@ -224,10 +223,9 @@ impl SourceLifecycle {
     fn wait_for_source(&self) -> Result<(), String> {
         wait_for_startup(
             self.source.port,
-            &self.source.state.join("logs/service.log"),
+            &self.source.log(),
             self.start_stall_window,
             self.start_absolute_cap,
-            "Your existing CORSIA took too long to start.",
         )
     }
 
@@ -259,7 +257,6 @@ fn classify_restart(answer: &str) -> RestartLook {
     }
 }
 
-// Log progress is measured by the shared startup wait in lib.rs.
 /// When the kernel says a process started, as `seconds.microseconds`; `None`
 /// when no such process exists. A pid alone can be reused, the pair cannot.
 fn process_started(pid: u32) -> Option<String> {
@@ -723,7 +720,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs CORSIA_ADOPTION_REAL_SIZE=1 and an isolated rehearsal fixture"]
+    #[ignore = "run with --ignored and CORSIA_ADOPTION_REHEARSAL_STATE/_PYTHON from scripts/generate_adoption_rehearsal.py"]
     fn real_size_snapshot_and_restore_preserve_migration_backups() {
         let state = PathBuf::from(std::env::var("CORSIA_ADOPTION_REHEARSAL_STATE").unwrap());
         let python = PathBuf::from(std::env::var("CORSIA_ADOPTION_REHEARSAL_PYTHON").unwrap());
@@ -763,7 +760,7 @@ mod tests {
     fn startup_succeeds_while_the_log_advances_past_the_stall_window() {
         let mut home = home("rm -f LOADED", "exit 0", "exit 0");
         let port = home.lifecycle.source.port;
-        let log = home.lifecycle.source.state.join("logs/service.log");
+        let log = home.lifecycle.source.log();
         home.lifecycle.start_stall_window = Duration::from_millis(80);
         thread::spawn(move || {
             for _ in 0..3 {
@@ -784,7 +781,7 @@ mod tests {
         stalled.lifecycle.start_absolute_cap = Duration::from_secs(1);
         assert_eq!(
             stalled.lifecycle.start_old().unwrap_err(),
-            "Your existing CORSIA took too long to start."
+            "the CORSIA service did not become ready in time"
         );
     }
 

@@ -65,6 +65,14 @@ pub struct SourceInstall {
     pub plist_variable_names: Vec<String>,
 }
 
+impl SourceInstall {
+    /// Where the source service writes its output (`scripts/corsia` BACKEND_LOG,
+    /// the plist's stdout and stderr), and what its `corsia logs` tails.
+    pub fn log(&self) -> PathBuf {
+        self.state.join("backend.log")
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
     pub source: SourceInstall,
@@ -276,7 +284,7 @@ pub struct StopProcess {
     pub started: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug)]
 struct Failure {
     step: String,
     message: String,
@@ -289,7 +297,6 @@ struct Journal {
     snapshot: Option<PathBuf>,
     #[serde(default)]
     stop: Option<StopProcess>,
-    // Rollback details remain in the restored service log.
 }
 
 fn read_journal(plan: &Plan) -> Result<Option<Journal>, String> {
@@ -320,9 +327,8 @@ fn journal_path(plan: &Plan) -> PathBuf {
 
 /// Preserve rollback detail alongside the restored install that can act on it.
 fn write_failure_trail(plan: &Plan, failure: &Failure) {
-    let path = plan.source.state.join("logs/service.log");
+    let path = plan.source.log();
     let result = (|| -> Result<(), std::io::Error> {
-        fs::create_dir_all(path.parent().expect("service log has a parent"))?;
         let mut file = OpenOptions::new().create(true).append(true).open(path)?;
         writeln!(file, "adoption rollback: {}: {}", failure.step, failure.message)?;
         file.sync_all()
@@ -987,12 +993,6 @@ fn rollback(
             message: format!("{}; old install could not be restored: {error}", failure.message),
         };
         write_failure_trail(plan, &failure);
-        write_journal_with(
-            plan,
-            Step::Reverted,
-            snapshot.filter(|_| restore_snapshot),
-            None,
-        )?;
         return Err(AdoptionError::start_again(failure.message));
     }
     forget_journal(plan);
@@ -1526,14 +1526,14 @@ mod tests {
     }
 
     #[test]
-    fn rollback_writes_failure_detail_to_the_restored_service_log() {
+    fn rollback_writes_failure_detail_to_the_restored_install_log() {
         let (_home, plan) = plan(false);
         let mut fake = fake_for(&plan, Some("start_new"));
         fake.also_fail = Some("start_old");
         let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
         assert_eq!(error.recovery, Some(Recovery::StartAgain));
         assert_eq!(read_journal(&plan).unwrap().unwrap().step, Step::Reverted);
-        let log = fs::read_to_string(plan.source.state.join("logs/service.log")).unwrap();
+        let log = fs::read_to_string(plan.source.log()).unwrap();
         assert!(log.contains("start_new"));
         assert!(log.contains("start_old"));
     }

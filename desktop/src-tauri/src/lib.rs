@@ -37,7 +37,7 @@ mod remote_lifecycle;
 mod service_management;
 mod shell_state;
 mod source_lifecycle;
-// Startup wait logic lives in wait_for_startup below.
+mod startup_failure;
 #[cfg(test)]
 mod test_tls;
 mod trust;
@@ -382,13 +382,7 @@ fn bundled_resource_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 fn wait_for_service(port: u16, app_dir: &Path) -> Result<(), String> {
     let log = service_log_path(app_dir)?;
-    wait_for_startup(
-        port,
-        &log,
-        STARTUP_STALL_WINDOW,
-        STARTUP_ABSOLUTE_CAP,
-        "CORSIA stopped starting up. Quit and open it again.",
-    )
+    wait_for_startup(port, &log, STARTUP_STALL_WINDOW, STARTUP_ABSOLUTE_CAP)
 }
 
 /// Startup can take minutes while a large state root migrates. Health is the
@@ -398,7 +392,6 @@ pub(crate) fn wait_for_startup(
     log: &Path,
     stall_window: Duration,
     absolute_cap: Duration,
-    failure: &str,
 ) -> Result<(), String> {
     let began = Instant::now();
     let mut marker = startup_log_marker(log);
@@ -416,7 +409,7 @@ pub(crate) fn wait_for_startup(
         if now.duration_since(began) >= absolute_cap
             || now.duration_since(last_progress) >= stall_window
         {
-            return Err(failure.into());
+            return Err(startup_failure::timeout_message(log));
         }
         thread::sleep(HEALTH_POLL_INTERVAL);
     }
