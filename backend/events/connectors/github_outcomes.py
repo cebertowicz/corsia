@@ -44,7 +44,7 @@ _CLOSES = re.compile(
     re.I,
 )
 _REVERTS = re.compile(
-    r"^[ \t]*reverts[ \t]+((?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#\d+)[ \t]*$",
+    r"^[ \t]*reverts[ \t]+((?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#\d+)[ \t\r]*$",
     re.I | re.M,
 )
 _LANE_PREFIX = "lane:"

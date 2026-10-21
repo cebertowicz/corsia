@@ -117,10 +117,11 @@ def test_reverts_parser_accepts_only_explicit_line_start_footers():
         "Reverts: #13\n"
         "A sentence Reverts #14 is not a footer.\n"
         "  reverts cebertowicz/OtherRepo#7\n"
+        "Reverts cebertowicz/maestro#8\r\n"
         "Reverts #12"
     )
     assert reverts_pr_refs(body, REPO) == [
-        (REPO.lower(), 12), ("cebertowicz/otherrepo", 7),
+        (REPO.lower(), 12), ("cebertowicz/otherrepo", 7), (REPO.lower(), 8),
     ]
 
 
