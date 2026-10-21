@@ -151,14 +151,17 @@ def _extract_facts(raw: dict[str, Any]) -> dict[str, Any]:
         })
     cs = raw.get("check_suite") or {}
     if cs:
-        selected_pr = check_suite_pr_metadata_from_event(raw)
-        facts.update({
-            "check_suite_id": cs.get("id"), "conclusion": cs.get("conclusion"),
-            "head_sha": cs.get("head_sha"),
-            "pr_number": selected_pr.get("number") if selected_pr else None,
-            "branch": selected_pr.get("base_ref") if selected_pr else None,
-        })
+        facts.update(_check_suite_facts(cs, check_suite_pr_metadata_from_event(raw)))
     return {k: v for k, v in facts.items() if v is not None}
+
+
+def _check_suite_facts(cs: Mapping[str, Any], selected_pr: Mapping[str, Any] | None) -> dict[str, Any]:
+    return {
+        "check_suite_id": cs.get("id"), "conclusion": cs.get("conclusion"),
+        "head_sha": cs.get("head_sha"),
+        "pr_number": selected_pr.get("number") if selected_pr else None,
+        "branch": selected_pr.get("base_ref") if selected_pr else None,
+    }
 
 
 def _artifact_ref(event_type: str, facts: dict, raw: dict) -> dict | None:
@@ -264,6 +267,49 @@ def github_routing_envelope(
         provenance={},
         event_class=github_event_class(payload),
         ownerless_ok=False,
+    )
+
+
+def webhook_rule_envelope(
+    event_type: str,
+    payload: dict[str, Any],
+    identity: RoutingIdentity | None,
+    base_ref: str | None,
+) -> EventEnvelope | None:
+    """A routed webhook as the manifest declares it, for agent-written rules.
+
+    ``event_type`` is the manifest type the webhook mapper named. Pure: a check
+    suite's PR comes from the identity routing already resolved, never a new
+    lookup. ``None`` when the identity facts are missing.
+    """
+    from events.envelope import EventEnvelope
+    from events.identity_formula import compute_event_id
+
+    decl = MANIFEST.decl(event_type)
+    check_suite = payload.get("check_suite")
+    if isinstance(check_suite, Mapping):
+        selected = None
+        number = identity.external_id.rpartition("#")[2] if identity is not None else ""
+        if number.isdigit():
+            selected = {"number": int(number), "base_ref": base_ref}
+        facts = {"repo": _json_object(payload, "repository").get("full_name"),
+                 **_check_suite_facts(check_suite, selected)}
+        facts = {key: value for key, value in facts.items() if value is not None}
+    else:
+        facts = _extract_facts(payload)
+    try:
+        event_id = compute_event_id(MANIFEST.connector, event_type, facts, decl.identity_facts)
+    except MalformedEventError:
+        return None
+    artifact_ref = None
+    if identity is not None:
+        artifact_ref = {"integration": identity.integration, "type": identity.type,
+                        "external_id": identity.external_id}
+    return EventEnvelope(
+        event_id=event_id, type=event_type, connector=MANIFEST.connector, facts=facts,
+        relationships=(), artifact_ref=artifact_ref,
+        provenance={"source": MANIFEST.namespace, "conn_version": MANIFEST.version},
+        event_class=decl.event_class, ownerless_ok=decl.ownerless_ok,
     )
 
 

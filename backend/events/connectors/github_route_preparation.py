@@ -23,6 +23,7 @@ class PreparedRoute:
     chip: str | None = None
     notice: str | None = None
     reap_payload: dict[str, Any] | None = None
+    rule_plan: Any = None  # agent-written rules riding the routed delivery
 
 
 @dataclass
@@ -67,6 +68,7 @@ def _prepare_route(
 ) -> None:
     """Perform each canonical write in the original noninterleaved stage order."""
     from events import router
+    from events.connectors.github_rules import apply_routed_rules
     from events.identity import PrResolutionError
     from events.routing_inputs import structured_tag
 
@@ -107,6 +109,8 @@ def _prepare_route(
     prepared.thread_id, prepared.identity = thread_id, identity
     prepared.summary, prepared.details, prepared.chip = summary, details, chip
     prepared.notice = router.github_pr_notice.notice_for_routed_event(thread_id, identity)
+    # Routing has decided; agent-written rules add recipients or drop or annotate this one.
+    apply_routed_rules(prepared, internal_event, payload, check_suite_base_ref)
 
 
 async def release_notice_off_loop(thread_id: str, identity: Any) -> None:
@@ -120,6 +124,17 @@ async def release_notice_off_loop(thread_id: str, identity: Any) -> None:
     release.result()
     if cancellation is not None:
         raise cancellation
+
+
+async def settle_routed_delivery(prepared: PreparedRoute, delivered: bool) -> None:
+    """After the routed delivery: release an undelivered notice and record the rules that rode it."""
+    from events.connectors.github_rules import record_routed_rides
+    from infra.db_async import run_in_db
+
+    if not delivered and prepared.notice and prepared.thread_id is not None:
+        await release_notice_off_loop(prepared.thread_id, prepared.identity)
+    if prepared.rule_plan is not None:
+        await run_in_db(record_routed_rides, prepared, delivered)
 
 
 async def prepare_route_ordered(

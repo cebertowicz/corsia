@@ -8,6 +8,10 @@ owner digest note (``append_thread_context_note``) collapsed by the type's
 declared ``collapse_fact``. An unresolvable target goes to the dead-letter
 sink. Everything is keyed on ``event_id`` (per target), so a repeat is a no-op.
 It names no connector (the no-bespoke-router guard keeps it that way).
+
+Rules agents wrote (``events.rules``) add to that decision after it is made, on
+this path and on the webhook router's: each recipient a rule adds is delivered
+here, whatever the event's source.
 """
 
 from __future__ import annotations
@@ -17,12 +21,12 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from events import dead_letter
+from events import dead_letter, rules
 from events.connectors import EventTypeDecl, get_manifest
 from events.delivery import enqueue_event_wake
 from events.envelope import EventEnvelope, normalize
 from events.resolve import Target, resolve_targets
-from infra.database import write_transaction
+from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db_unless_owned
 from infra.passive_changes import append_thread_context_note
 from infra.product_events import emit_product_event
@@ -115,8 +119,9 @@ def _note_line(envelope: EventEnvelope, line_facts: tuple[str, ...]) -> str:
 
 def _deliver_target(
     db: sqlite3.Connection, envelope: EventEnvelope, target: Target,
-    decl: EventTypeDecl,
+    decl: EventTypeDecl, notes: tuple[str, ...] = (),
 ) -> PlatformDelivery:
+    """Deliver one target. ``notes`` are the writers' own rule notes, never event text."""
     event_id = envelope.event_id
     disposition = target.disposition
     thread = target.thread
@@ -135,9 +140,11 @@ def _deliver_target(
         message_id = _wake_message_id(event_id, thread)
         if db.execute("SELECT 1 FROM messages WHERE id=?", (message_id,)).fetchone():
             return PlatformDelivery(event_id, thread, DUPLICATE)
+        wake_details: dict[str, Any] = {**envelope.facts, "event_id": event_id}
+        if notes:
+            wake_details["rule_notes"] = list(notes)
         enqueue_event_wake(
-            thread, envelope.type, _summary(envelope),
-            {**envelope.facts, "event_id": event_id},
+            thread, envelope.type, _summary(envelope), wake_details,
             message_id=message_id, db=db,
         )
         return PlatformDelivery(event_id, thread, WOKE)
@@ -145,11 +152,113 @@ def _deliver_target(
         return PlatformDelivery(event_id, thread, DUPLICATE)
     # The person's chip keeps the plain event line; the facts are the agent's.
     details = {**_digest_details(envelope, decl.collapse_fact), "chip": _summary(envelope)}
-    append_thread_context_note(
-        db, thread_id=thread,
-        summary=_note_line(envelope, decl.digest_line_facts), details=details,
-    )
+    line = _note_line(envelope, decl.digest_line_facts)
+    if notes:
+        details["rule_notes"] = list(notes)
+        line = _clip(line + "".join(f"; rule note: {note}" for note in notes), _NOTE_LINE_LIMIT)
+    append_thread_context_note(db, thread_id=thread, summary=line, details=details)
     return PlatformDelivery(event_id, thread, DIGESTED)
+
+
+def rule_event(
+    envelope: EventEnvelope, watch_event: str | None = None, *, ends_artifact: bool = False,
+) -> rules.RuleEvent:
+    """The envelope as rules see it; ``watch_event`` is the name watches use for it."""
+    return rules.RuleEvent(
+        envelope.event_id, envelope.connector or "", envelope.type,
+        watch_event or envelope.type, envelope.facts, envelope.artifact_ref, ends_artifact,
+    )
+
+
+_RULE_OUTCOMES = {WOKE: rules.WOKE, DIGESTED: rules.DIGESTED, DUPLICATE: rules.DUPLICATE}
+
+
+def _rule_target(thread: str, delivery: rules.Delivery, routed: Target | None) -> Target:
+    """A ridden routed target keeps its own fields; a wake a rule asked for beats its digest."""
+    if routed is None:
+        return Target(thread, "rule", "rule",
+                      disposition="owner_wake" if delivery.wake else "owner_digest")
+    if delivery.wake and routed.disposition != "owner_wake":
+        return Target(routed.thread, routed.resolution, routed.relationship, routed.reason,
+                      routed.routing_state, routed.repair_artifact, "owner_wake")
+    return routed
+
+
+def _resolve_watches(db: sqlite3.Connection, event: rules.RuleEvent, thread: str) -> None:
+    """A watch on this event ends once a rule delivered it; Plans owns the settlement."""
+    ref = event.artifact_ref
+    if not ref:
+        return
+    from events.identity import RoutingIdentity
+    from plans.public import resolve_delivered_event
+
+    resolve_delivered_event(
+        RoutingIdentity(ref["integration"], ref["type"], ref["external_id"]),
+        event.watch_event, recipient=thread, db=db,
+    )
+
+
+def settle_rule_delivery(
+    db: sqlite3.Connection, plan: rules.RulePlan, thread: str, delivery: rules.Delivery,
+    made: str, *, ride: bool, resolve: bool = True,
+) -> list[rules.Outcome]:
+    """Each rule's outcome for one delivery it rode or added, and the watches it ends."""
+    outcome = _RULE_OUTCOMES.get(made, rules.DEAD_LETTERED)
+    if resolve and outcome in (rules.WOKE, rules.DIGESTED):
+        _resolve_watches(db, plan.event, thread)
+    return delivery.outcomes(thread, outcome, ride=ride)
+
+
+def deliver_rule_adds(
+    db: sqlite3.Connection, envelope: EventEnvelope, decl: EventTypeDecl, plan: rules.RulePlan,
+) -> tuple[list[PlatformDelivery], list[rules.Outcome]]:
+    """Deliver each recipient a rule added, whatever the event's source."""
+    deliveries, outcomes = [], []
+    for thread, delivery in plan.adds.items():
+        made = _deliver_target(db, envelope, _rule_target(thread, delivery, None), decl,
+                               tuple(delivery.notes))
+        deliveries.append(made)
+        outcomes += settle_rule_delivery(db, plan, thread, delivery, made.outcome, ride=False)
+    return deliveries, outcomes
+
+
+def apply_webhook_rules_sync(
+    envelope: EventEnvelope, watch_event: str, routed_thread: str, *, ends_artifact: bool,
+) -> rules.RulePlan | None:
+    """Rules for one routed webhook event: deliver what they add, return what rides.
+
+    The router keeps its own delivery to ``routed_thread``; this returns the plan
+    so it can drop that delivery or add the rules' notes to it. One read when no
+    rule for the type matches; the write transaction opens only when one does.
+    """
+    event = rule_event(envelope, watch_event, ends_artifact=ends_artifact)
+    reader = get_db()
+    try:
+        if not any(rules.matches(rule, event.facts)
+                   for rule in rules.lookup(reader, event.connector, event.event_type)):
+            return None
+    finally:
+        reader.close()
+    decl = get_manifest(event.connector).decl(event.event_type)
+    with write_transaction(None, scope="apply_webhook_rules") as conn:
+        plan = rules.evaluate(conn, event, [rules.Routed(routed_thread, wake=True)])
+        if plan is None:
+            return None
+        _, outcomes = deliver_rule_adds(conn, envelope, decl, plan)
+        rules.record(conn, event, [*plan.settled, *outcomes])
+        return plan
+
+
+def record_rule_ride_sync(plan: rules.RulePlan, thread: str, delivered: bool) -> None:
+    """Record the rules that rode the router's own delivery; it resolved the watches."""
+    delivery = plan.rides.get(thread)
+    if delivery is None:
+        return
+    with write_transaction(None, scope="record_rule_ride") as conn:
+        outcomes = settle_rule_delivery(
+            conn, plan, thread, delivery, WOKE if delivered else DEAD_LETTERED,
+            ride=True, resolve=False)
+        rules.record(conn, plan.event, outcomes)
 
 
 def deliver_platform_event_sync(
@@ -166,12 +275,33 @@ def deliver_platform_event_sync(
     decl = get_manifest(connector).decl(envelope.type)
     with write_transaction(db, scope="deliver_platform_event") as conn:
         targets = resolve_targets(envelope, repair_owner=repair_owner, db=conn)
-        deliveries = [
-            PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
-            if target_filter is not None and (reason := target_filter(target, conn)) is not None
-            else _deliver_target(conn, envelope, target, decl)
+        filtered = [
+            target_filter(target, conn) if target_filter is not None else None
             for target in targets
         ]
+        plan = rules.evaluate(conn, rule_event(envelope), [
+            rules.Routed(target.thread, target.disposition == "owner_wake",
+                         owner=target.relationship == "owner")
+            for target, reason in zip(targets, filtered)
+            if reason is None and target.thread is not None and target.disposition != "dead_letter"
+        ])
+        deliveries = [
+            PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
+            if reason is not None
+            else _deliver_routed(conn, envelope, target, decl, plan)
+            for target, reason in zip(targets, filtered)
+        ]
+        if plan is not None:
+            outcomes = list(plan.settled)
+            for made in deliveries:
+                if (made.thread_id is not None and made.thread_id in plan.rides
+                        and made.outcome != FILTERED):
+                    outcomes += settle_rule_delivery(
+                        conn, plan, made.thread_id, plan.rides[made.thread_id], made.outcome,
+                        ride=True)
+            added, added_outcomes = deliver_rule_adds(conn, envelope, decl, plan)
+            deliveries += added
+            rules.record(conn, plan.event, [*outcomes, *added_outcomes])
         for delivery in deliveries:
             emit_product_event(
                 "event_route", delivery.outcome,
@@ -183,6 +313,24 @@ def deliver_platform_event_sync(
                 },
             )
         return deliveries
+
+
+def _deliver_routed(
+    db: sqlite3.Connection, envelope: EventEnvelope, target: Target, decl: EventTypeDecl,
+    plan: rules.RulePlan | None,
+) -> PlatformDelivery:
+    """Today's delivery to one routed target, unless a rule dropped or rides it."""
+    thread = target.thread
+    if plan is None or thread is None:
+        return _deliver_target(db, envelope, target, decl)
+    if thread in plan.drops:
+        return PlatformDelivery(envelope.event_id, thread, FILTERED,
+                                f"dropped by rule {plan.drops[thread]}")
+    ride = plan.rides.get(thread)
+    if ride is None:
+        return _deliver_target(db, envelope, target, decl)
+    return _deliver_target(db, envelope, _rule_target(thread, ride, target), decl,
+                           tuple(ride.notes))
 
 
 async def deliver_platform_event(

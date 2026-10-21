@@ -27,7 +27,7 @@ from events.github_mapper import pr_terminal_state
 from events.routing_inputs import structured_tag
 from events.connectors.github_route_preparation import (
     prepare_route_ordered,
-    release_notice_off_loop,
+    settle_routed_delivery,
 )
 from infra.product_events import emit_product_event
 from infra.worktree_reaper_pr import schedule_merged_pr_reap
@@ -297,8 +297,7 @@ async def route_event(
     finally:
         # A refused or raising delivery (StaleContinuation, cancellation) releases
         # the claim so the next event carries the notice; a repeat beats a loss.
-        if not delivered and prepared.notice:
-            await release_notice_off_loop(prepared.thread_id, prepared.identity)
+        await settle_routed_delivery(prepared, delivered)
     if not delivered:
         emit_product_event(
             "event_route", "delivery_failed",
