@@ -160,8 +160,8 @@ describe('SetupScreen', () => {
 
 	it.each([
 		['a plain user-facing detail', { detail: 'That username isn’t available. Choose another.' }, 'That username isn’t available. Choose another.'],
-		['the backend username validation detail', { detail: "username must be 1-32 characters of a-z, 0-9, '-' or '_'" }, "username must be 1-32 characters of a-z, 0-9, '-' or '_'"],
-		['the backend password validation detail', { detail: 'password must be at least 8 characters' }, 'password must be at least 8 characters'],
+		['the backend username validation detail', { detail: 'Use up to 32 lowercase letters, numbers, dashes or underscores for the username.' }, 'Use up to 32 lowercase letters, numbers, dashes or underscores for the username.'],
+		['the backend password validation detail', { detail: 'Use a password of at least 8 characters.' }, 'Use a password of at least 8 characters.'],
 		['structured detail', { detail: { message: 'username must be valid' } }, 'Couldn’t create your account. Try again.'],
 		['no detail', {}, 'Couldn’t create your account. Try again.'],
 	] as const)('returns a 422 with %s to an editable account form', async (_case, body, expected) => {
@@ -219,5 +219,9 @@ describe('SetupScreen', () => {
 		expect(host.querySelector('h1')?.textContent).toBe('CORSIA couldn’t start');
 		expect(button('Retry')).toBeTruthy();
 		expect(button('Save a report')).toBeTruthy();
+		// No account exists yet, so the step rail must not mark it done under the error.
+		const accountRow = [...host.querySelectorAll('.lbl')].find((label) => label.textContent === 'Your account')?.closest('*:has(> .lead)');
+		expect(accountRow).toBeTruthy();
+		expect(accountRow?.querySelector('.done-check')).toBeNull();
 	});
 });

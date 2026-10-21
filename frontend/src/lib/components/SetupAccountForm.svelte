@@ -24,12 +24,12 @@
 		<Field variant="chip" layout="stacked" label="Confirm password" labelFor="setup-confirm-password" error={confirmationError}><input id="setup-confirm-password" type="password" autocomplete="new-password" bind:value={confirmation} onblur={onValidateConfirmation} /></Field>
 	</div>
 	<Field variant="chip" layout="stacked" label="Email (optional)" labelFor="setup-email"><input id="setup-email" type="email" autocomplete="email" bind:value={email} /></Field>
-	{#if accountError}<p class="setup-error">{accountError}</p>{/if}
+	{#if accountError}<p class="error-text">{accountError}</p>{/if}
 </form>
 
 <style>
 	.form { display: flex; flex-direction: column; gap: var(--space-3); width: 100%; }
 	.passwords { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
-	.setup-error { margin: 0; }
+	.error-text { margin: 0; }
 	@media (max-width: 40em) { .passwords { grid-template-columns: 1fr; } }
 </style>

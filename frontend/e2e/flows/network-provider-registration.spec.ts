@@ -31,7 +31,7 @@ test('@flow:settings @surface:settings network registration shows its endpoint a
 		await openSettingsSection(page, 'Providers'); // the phone opens Settings on its section list
 		// The header button exists whether or not an earlier spec left a provider; the empty state's own button does not.
 		await page.getByRole('button', { name: 'Add provider', exact: true }).click();
-		await page.getByRole('button', { name: 'Models on another computer', exact: true }).click();
+		await page.getByRole('button', { name: 'oMLX on another Mac', exact: true }).click();
 		const dialog = page.getByRole('dialog').last();
 		await dialog.getByPlaceholder('100.64.1.5  ·  macbook-m4.local').fill('127.0.0.1');
 		await dialog.getByPlaceholder('8000', { exact: true }).fill(String(bound.port));

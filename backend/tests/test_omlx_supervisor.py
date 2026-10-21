@@ -425,3 +425,18 @@ def test_failed_boot_names_the_reason_that_ended_the_health_wait(isolated_runtim
 
     assert exited["message"].startswith("oMLX exited before becoming healthy on 127.0.0.1:9999. Last log lines:")
     assert timed_out["message"].startswith("oMLX did not become healthy on 127.0.0.1:9999 within 30s. Last log lines:")
+
+
+def test_failed_boot_signals_only_a_child_that_has_not_exited(isolated_runtime, monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(sup, "_read_pid", lambda _server_id: 1234)
+    monkeypatch.setattr(sup, "_process_exited", lambda _pid: True)
+    monkeypatch.setattr(sup, "_tail_log", lambda _server_id, lines: "")
+    monkeypatch.setattr(sup.os, "kill", lambda pid, sig: signals.append((pid, sig)))
+
+    sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="exited")
+    assert signals == []
+    sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="timed_out")
+    assert signals == [(1234, sup.signal.SIGTERM)]

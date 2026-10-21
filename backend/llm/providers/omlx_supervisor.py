@@ -184,7 +184,8 @@ def _failed_boot_result(
     reason: str = "timed_out",
     timeout_s: float = DEFAULT_HEALTH_TIMEOUT_S,
 ) -> dict[str, Any]:
-    if _read_pid(server_id) == pid:
+    # An exited child is already reaped, and the OS may reuse its pid; only a live one is signalled.
+    if reason != "exited" and _read_pid(server_id) == pid:
         try:
             os.kill(pid, signal.SIGTERM)
         except (OSError, ProcessLookupError) as exc:

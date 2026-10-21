@@ -19,8 +19,8 @@
 	}
 </script>
 <FolderRow {folder} {notice} {changing} onChange={changeFolder} />
-{#if error}<p class="setup-error">{error}</p>{/if}
+{#if error}<p class="error-text">{error}</p>{/if}
 
 <style>
-	.setup-error { margin: var(--space-2) 0 0; }
+	.error-text { margin: var(--space-2) 0 0; }
 </style>

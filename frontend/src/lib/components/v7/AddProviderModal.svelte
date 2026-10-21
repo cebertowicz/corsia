@@ -93,7 +93,7 @@
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
 					</IconButton>
 				{/if}
-				<span>{mode === 'menu' ? 'Add provider' : mode === 'remote' ? 'Models on another computer' : 'Other provider by address'}</span>
+				<span>{mode === 'menu' ? 'Add provider' : mode === 'remote' ? 'oMLX on another Mac' : 'Other provider by address'}</span>
 			</div>
 			<IconButton ariaLabel="Close" onclick={onClose}>
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6 18 18M18 6 6 18"/></svg>
@@ -125,8 +125,8 @@
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
 			</span>
 			<span class="ai-text">
-				<span class="ai-name">Models on another computer</span>
-				<span class="ai-desc">Use models running on another computer</span>
+				<span class="ai-name">oMLX on another Mac</span>
+				<span class="ai-desc">Use the local models oMLX runs on another Mac</span>
 			</span>
 			<svg class="arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
 		</button>
@@ -143,7 +143,7 @@
 		</button>
 
 		{#if cloudUnconfigured.length === 0}
-			<div class="empty">All known providers are configured. You can still add models on another computer or another provider by address.</div>
+			<div class="empty">All known providers are configured. You can still add oMLX on another Mac, or another provider by address.</div>
 		{/if}
 	{:else if mode === 'endpoint'}
 		<p class="hint">Add a provider using the full web address it gives you.</p>
@@ -171,7 +171,7 @@
 				<input placeholder="(optional — uses the address)" bind:value={endpointName} />
 			</Field>
 		{/if}
-		{#if actionError}<p class="setup-error">{actionError}</p>{/if}
+		{#if actionError}<p class="error-text">{actionError}</p>{/if}
 
 		<div class="actions">
 			<Button variant="ghost" disabled={busy} onclick={() => mode = 'menu'}>Back</Button>
@@ -185,7 +185,7 @@
 			</Button>
 		</div>
 	{:else}
-		<p class="hint">Add models that are already running on another computer.</p>
+		<p class="hint">Add the local models oMLX already runs on another Mac.</p>
 
 		<Field label="Computer address">
 			<input placeholder="100.64.1.5  ·  macbook-m4.local" bind:value={remoteHost} />
@@ -196,7 +196,7 @@
 		<Field label="Name">
 			<input placeholder="(optional — uses the address)" bind:value={remoteName} />
 		</Field>
-		{#if actionError}<p class="setup-error">{actionError}</p>{/if}
+		{#if actionError}<p class="error-text">{actionError}</p>{/if}
 
 		<div class="actions">
 			<Button variant="ghost" disabled={busy} onclick={() => mode = 'menu'}>Back</Button>
@@ -287,7 +287,7 @@
 		font-size: var(--text-footnote);
 		cursor: pointer;
 	}
-	.setup-error { margin: var(--space-2) 0 0; }
+	.error-text { margin: var(--space-2) 0 0; }
 	.actions {
 		display: flex; gap: 8px; margin-top: 18px; align-items: center; justify-content: flex-end;
 	}

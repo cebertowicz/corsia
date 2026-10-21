@@ -374,7 +374,7 @@ def test_first_account_returns_safe_account_error_detail(client):
     })
 
     assert response.status_code == 422
-    assert response.json() == {"detail": "username must be 1-32 characters of a-z, 0-9, '-' or '_'"}
+    assert response.json() == {"detail": "Use up to 32 lowercase letters, numbers, dashes or underscores for the username."}
 
 
 def test_first_account_rejects_the_client_only_folder_field(client):
