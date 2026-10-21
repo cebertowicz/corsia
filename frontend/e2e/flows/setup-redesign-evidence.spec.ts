@@ -322,7 +322,7 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.finish === 'progress-save') { await expect(text('CORSIA couldn’t save setup progress. Try again.')).toBeVisible(); return; }
 	if (fixture.cli === 'codex-ready') { await expect(page.getByRole('region', { name: 'Codex' }).getByText('Ready')).toBeVisible(); return; }
 	if (fixture.cli === 'claude-ready-codex-signed-out') { await expect(page.getByRole('region', { name: 'Codex' }).getByRole('button', { name: 'Sign in', exact: true })).toBeVisible(); return; }
-	if (fixture.cli === 'install-connection') { const row = page.getByRole('region', { name: 'Claude Code' }); await expect(row).toContainText('Couldn’t download Claude Code. Check your internet connection, then retry.'); await expect(row.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible(); }
+	if (fixture.cli === 'install-connection') { const row = page.getByRole('region', { name: 'Claude Code' }); await expect(row).toContainText('Couldn’t download Claude Code. Check your internet connection, then Retry.'); await expect(row.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible(); }
 	if (fixture.cli === 'install-failed') { const row = page.getByRole('region', { name: 'Claude Code' }); await expect(row).toContainText('Couldn’t install Claude Code. Try again, or save a report. Reference: cli-fixture-123'); await expect(row.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible(); }
 	if (fixture.cli && !['install-connection', 'install-failed'].includes(fixture.cli)) { await expect(page.getByRole('region', { name: 'Claude Code' })).toContainText(fixture.cli === 'ready' || fixture.cli === 'both-ready' ? 'Ready' : fixture.cli === 'signed-out' ? 'Sign in' : fixture.cli === 'not-installed' ? 'Set up' : fixture.cli === 'installing' ? 'Installing Claude Code…' : fixture.cli === 'signing-in' ? 'Finish signing in from your browser.' : fixture.cli === 'limited' ? 'usage limit' : fixture.cli === 'unusable' ? 'can’t use' : fixture.cli === 'shadow' ? 'older Claude Code' : 'Couldn’t'); }
 	if (fixture.local) {
@@ -334,8 +334,8 @@ async function assertState(page: Page, fixture: Fixture) {
 			: fixture.local === 'starting' ? 'Starting the local model…'
 			: fixture.local === 'disk-space' ? 'Needs 30 GB free, and this computer has 12 GB. Free up space, then check again.'
 			: fixture.local === 'pick-failed' ? 'Couldn’t find a local model that fits this computer. Try again.'
-			: fixture.local === 'connection' ? 'Couldn’t download the local model because the connection was lost. Check your internet connection, then try again.'
-			: fixture.local === 'disk-full' ? 'Couldn’t download the local model: the disk is full. Free up 5 GB, then try again.'
+			: fixture.local === 'connection' ? 'Couldn’t download the local model because the connection was lost. Check your internet connection, then Retry.'
+			: fixture.local === 'disk-full' ? 'Couldn’t download the local model: the disk is full. Free up 5 GB, then Retry.'
 			: fixture.local === 'memory' ? 'This computer doesn’t have enough memory to run the local model. Choose a subscription or API provider instead.'
 			: fixture.local === 'other-ref' ? 'CORSIA couldn’t set up the local model. Reference: setup-report-123'
 			: fixture.local === 'other-no-ref' ? 'CORSIA couldn’t set up the local model.'
