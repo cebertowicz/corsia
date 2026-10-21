@@ -64,10 +64,10 @@
       "sha256": "33a8d6359786e2644ed7749f7aeac428ebe9e4eed8196de80ecccad8eba98f94"
     },
     {
-      "bytes": 728,
+      "bytes": 729,
       "kind": "coordination-model",
       "path": "coordination-models/INDEX.md",
-      "sha256": "c57f28b2ba0e95826eb56a94ff678daf673f38b5b2c2767a6d275c7a803de6e5"
+      "sha256": "35165771157fb085aa539a1dc78f78bb88a7c6957f05dbe5df25c1ca5ef4598d"
     },
     {
       "bytes": 807,
@@ -100,6 +100,12 @@
       "sha256": "11c3dfc5f0945fb5ceb9af78ed8751e3c96adcf6f4b28d3e41d0feac66c5d0bf"
     },
     {
+      "bytes": 4534,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/context/SPAWN-POLICY.md",
+      "sha256": "9121f7c87f5ae8e4922a6bd99d2eb505a4f97a624f214dc4b342cfed2f0be192"
+    },
+    {
       "bytes": 730,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/context/roles/agent/05-waiting-is-work.md",
@@ -112,10 +118,22 @@
       "sha256": "3bff6d1f27574b6082e14c4cbee914e1e937b8b6fcc9a19f742a03506a01265f"
     },
     {
-      "bytes": 6115,
+      "bytes": 5721,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/manifest.yaml",
-      "sha256": "24399d808120bc473733226deca12dcdea69400e4216c2ca30530b731b8e8c51"
+      "sha256": "cd08dc6eb35db976ea2f3916ebd45b113f9b7f6abdeea371fd15f3f941124edc"
+    },
+    {
+      "bytes": 3492,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/standards/RESPONSIBILITY-STANDARD.md",
+      "sha256": "1afe075f552a1ab4a3930e73308cdf7d5e4654aa416bba91495136225a27f06e"
+    },
+    {
+      "bytes": 4580,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/templates/RESPONSIBILITY.md",
+      "sha256": "1ca79f669304f24f60c13235a91b8d9c7edf0f35d125b9f4f21117d012fafc6f"
     },
     {
       "bytes": 3541,

@@ -5,8 +5,8 @@ See ``scripts/check_docs_drift/`` for the implementation, split into one
 module per check to stay inside the repo's file-size limits.
 
 Usage:
-    scripts/check-docs-drift [--workspace PATH] [--internal-names-file PATH]
-        [--owner-identity-file PATH] [--owner-profile PATH] [--json] [--json-out PATH]
+    scripts/check-docs-drift [--internal-names-file PATH] [--owner-identity-file PATH]
+        [--owner-profile PATH] [--json] [--json-out PATH]
 """
 
 from __future__ import annotations

@@ -17,8 +17,7 @@ jobs:
     name: Documentation drift check (citations + private-name scan)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # The checks below are calibrated for a runner with neither the
-    # maintainers' workspace nor a git identity.
+    # The checks below are calibrated for a runner with no git identity.
     env:
       GIT_CONFIG_GLOBAL: /dev/null
       GIT_CONFIG_NOSYSTEM: '1'
@@ -29,13 +28,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      # Check 1 (starter-kit copies vs workspace sources) needs the
-      # maintainers' private workspace, which does not exist on a CI
-      # runner -- --allow-missing-workspace treats that as an accepted
-      # skip instead of a failure, same as an outside contributor's plain
-      # clone. It stays a release-runbook precondition instead, run where
-      # the workspace is actually present.
-      #
       # --allow-missing-owner-identity: a CI runner has no configured owner
       # identity, so the owner-identity leak sub-check cannot run here. The
       # skip is accepted but never reported as complete: the report's verdict
@@ -47,9 +39,7 @@ jobs:
       - name: Run citation and private-name-scan checks
         run: |
           set -o pipefail
-          export CORSIA_WORKSPACE="$RUNNER_TEMP/no-maintainer-workspace"
           python scripts/check-docs-drift \
-            --allow-missing-workspace \
             --allow-missing-owner-identity \
             | tee "$RUNNER_TEMP/docs-drift.txt"
           rc=$?
@@ -63,8 +53,7 @@ jobs:
           exit "$rc"
 
       # System tier closure (issue #939): every declared System skill
-      # dependency must ship in the tier, and none may be contributor-only.
-      # Needs no workspace, so it has no skip flag.
+      # dependency must ship in the tier. Needs no workspace or skip flag.
       - name: Run System tier closure check
         run: python scripts/check_system_closure.py
 
