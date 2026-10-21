@@ -330,4 +330,4 @@ async def chat_completion(
         retry_transient_errors=retry_transient_errors,
     ))
     response.effort_sent = (extra_body or {}).get("reasoning_effort")
-    return mark_own_server(response, omlx_server_id)
+    return await mark_own_server(response, omlx_server_id)

@@ -17,8 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.turn_core import TurnIdentity  # noqa: E402
 from llm import error_cause  # noqa: E402
 from llm.error_cause import (  # noqa: E402
-    KINDS, cause_fields, cause_kind, cause_kind_for_row, error_fields,
-    harness_cause_kind, native_error_kind, served_metadata,
+    KINDS, cause_fields, cause_kind, error_fields, harness_cause_kind, native_error_kind,
 )
 from llm.providers.omlx_lifecycle import OmlxLoadedStateError  # noqa: E402
 from llm.router import provider_error_response  # noqa: E402
@@ -68,7 +67,11 @@ def test_the_table_only_names_listed_kinds():
     (_status(openai.RateLimitError, 429), "provider_rate_limited"),
     (_status(openai.APIStatusError, 529, "overloaded"), "provider_rate_limited"),
     (httpx.ConnectError("refused"), "provider_server_unreachable"),
-    (httpx.ReadTimeout("slow"), "provider_server_unreachable"),
+    (httpx.ConnectTimeout("no answer"), "provider_server_unreachable"),
+    (ConnectionRefusedError(61, "refused"), "provider_server_unreachable"),
+    (httpx.ReadTimeout("slow"), None),
+    (openai.APITimeoutError(request=_REQUEST), None),
+    (TimeoutError("slow"), None),
     (OmlxLoadedStateError("not loaded"), "provider_model_not_loaded"),
     (RuntimeError("You've hit your session limit"), "provider_usage_limit"),
     (_status(openai.RateLimitError, 429, "You exceeded your current quota"), "provider_usage_limit"),
@@ -79,9 +82,19 @@ def test_native_errors_are_classified_by_status_type_and_limit_classifier(error,
     assert native_error_kind(error) == code
 
 
+def _wrapped(outer: BaseException, inner: BaseException) -> BaseException:
+    try:
+        try:
+            raise inner
+        except type(inner):
+            raise outer from inner
+    except type(outer) as chained:
+        return chained
+
+
 def test_a_connection_wrapped_by_the_sdk_is_still_unreachable():
-    wrapper = openai.APIConnectionError(request=_REQUEST)
-    assert native_error_kind(wrapper) == "provider_server_unreachable"
+    refused = _wrapped(openai.APIConnectionError(request=_REQUEST), httpx.ConnectError("refused"))
+    assert native_error_kind(refused) == "provider_server_unreachable"
     try:
         try:
             raise httpx.ConnectError("refused")
@@ -151,32 +164,19 @@ def test_cause_kind_is_never_provider_text():
     assert error_fields({"cause_kind": hostile})["cause_kind"] == "unknown"
     assert error_fields({"message": hostile})["cause_kind"] == "unknown"
     assert cause_fields("codex", hostile, hostile)["cause_kind"] == "unknown"
-    assert cause_kind_for_row({"cause_kind": hostile, "cause": "process_exited"}) == "process_exited"
 
 
-def test_a_stored_row_with_only_cause_or_error_kind_gets_a_kind():
-    assert cause_kind_for_row({"type": "cc_error", "cause": "process_exited"}) == "process_exited"
-    assert cause_kind_for_row({"type": "llm_error", "error_kind": "provider_stream_stalled"}) == "stream_stalled"
-    assert cause_kind_for_row({"type": "llm_error"}) == "unknown"
-    assert cause_kind_for_row({"cause_kind": "usage_limit", "cause": "process_exited"}) == "usage_limit"
+def test_wrappers_of_a_server_that_answered_are_not_unreachable():
+    import litellm
 
-
-def test_served_rows_of_older_failures_come_out_with_a_kind():
-    from api.thread_paging import _parse_message_metadata
-
-    rows = [
-        {"metadata": '{"type": "cc_error", "cause": "backend_shutdown", "_corsia_x": 1}'},
-        {"metadata": {"type": "llm_error", "model": "m"}},
-        {"metadata": {"type": "result", "is_error": True, "cause": "context_window_exceeded"}},
-        {"metadata": {"type": "result", "is_error": False}},
-        {"metadata": {"type": "assistant_step"}},
-    ]
-    _parse_message_metadata(rows)
-    assert [r["metadata"].get("cause_kind") for r in rows] == [
-        "backend_shutdown", "unknown", "context_overflow", None, None,
-    ]
-    assert "_corsia_x" not in rows[0]["metadata"]
-    assert served_metadata({"type": "cc_error", "cause_kind": "rate_limited"})["cause_kind"] == "rate_limited"
+    slow = _wrapped(openai.APITimeoutError(request=_REQUEST), httpx.ReadTimeout("slow"))
+    catch_all = _wrapped(
+        litellm.APIConnectionError(message="odd", llm_provider="openai", model="m"),
+        ValueError("bad json"),
+    )
+    assert native_error_kind(slow) is None
+    assert native_error_kind(catch_all) is None
+    assert native_error_kind(anthropic.APITimeoutError(request=_REQUEST)) is None
 
 
 @pytest.mark.parametrize(("own_id", "kind", "expected"), [
@@ -188,7 +188,7 @@ def test_served_rows_of_older_failures_come_out_with_a_kind():
 def test_own_server_is_set_only_for_corsia_own_omlx(monkeypatch, own_id, kind, expected):
     monkeypatch.setattr("llm.local_sources.corsia_omlx_server", lambda servers=None: {"id": "srv-own"})
     response = SimpleNamespace(error_kind=kind, own_server=False)
-    error_cause.mark_own_server(response, own_id)
+    asyncio.run(error_cause.mark_own_server(response, own_id))
     assert response.own_server is expected
     assert error_fields({"cause_kind": "server_unreachable", **({"own_server": True} if expected else {})}).get(
         "own_server",
@@ -198,9 +198,9 @@ def test_own_server_is_set_only_for_corsia_own_omlx(monkeypatch, own_id, kind, e
 def test_own_server_is_false_when_corsia_runs_none(monkeypatch):
     monkeypatch.setattr("llm.local_sources.corsia_omlx_server", lambda servers=None: None)
     response = SimpleNamespace(error_kind="provider_server_unreachable", own_server=False)
-    error_cause.mark_own_server(response, "srv-own")
+    asyncio.run(error_cause.mark_own_server(response, "srv-own"))
     assert response.own_server is False
-    error_cause.mark_own_server(response, None)
+    asyncio.run(error_cause.mark_own_server(response, None))
     assert response.own_server is False
 
 
@@ -321,7 +321,7 @@ def test_successful_and_interrupted_claude_code_results_get_no_kind():
     assert "cause_kind" not in ok and "cause_kind" not in stopped
 
 
-def test_codex_failure_meta_keeps_reset_at_and_adds_resets_at():
+def test_codex_failure_meta_stores_the_reset_once_as_resets_at():
     from datetime import datetime, timedelta, timezone
 
     reset = (datetime.now(timezone.utc) + timedelta(hours=1)).replace(microsecond=0).isoformat()
@@ -329,7 +329,8 @@ def test_codex_failure_meta_keeps_reset_at_and_adds_resets_at():
         "usageLimitExceeded", "Usage limit reached", reset, "codex/gpt-x", {"unrecorded": True},
     )
     assert meta["type"] == "cc_error" and meta["cause"] == "usageLimitExceeded"
-    assert meta["cause_kind"] == "usage_limit" and meta["resets_at"] == reset == meta["reset_at"]
+    assert meta["cause_kind"] == "usage_limit" and meta["resets_at"] == reset
+    assert "reset_at" not in meta
     assert meta["model"] == "codex/gpt-x" and meta["unrecorded"] is True
     plain = error_cause.codex_failure_meta("SomeNewCodexError", None, None, None, {})
     assert plain["cause_kind"] == "unknown" and "reset_at" not in plain and "model" not in plain

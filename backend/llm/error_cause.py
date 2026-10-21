@@ -88,38 +88,33 @@ def native_error_kind(error: BaseException) -> str | None:
 
 
 def _is_connection_failure(error: BaseException) -> bool:
-    """Whether the chain holds a connect or timeout failure, by exception type."""
-    import anthropic
+    """Whether the chain holds a failure to connect, by exception type.
+
+    Only the transport's own connect errors count. The SDK wrappers
+    (``APIConnectionError`` and its ``APITimeoutError`` subclass, litellm's
+    catch-all) also wrap read timeouts and unrelated failures from a server
+    that answered, so they are matched only through what they wrap.
+    """
     import httpx
-    import litellm
-    import openai
 
-    kinds = (
-        httpx.ConnectError, httpx.TimeoutException, openai.APIConnectionError,
-        anthropic.APIConnectionError, litellm.Timeout, ConnectionError, TimeoutError,
-    )
-    seen: set[int] = set()
-    current: BaseException | None = error
-    while current is not None and id(current) not in seen:
-        if isinstance(current, kinds):
-            return True
-        seen.add(id(current))
-        current = current.__cause__ or (
-            None if current.__suppress_context__ else current.__context__
-        )
-    return False
+    from llm.server_observation import exception_chain
+
+    kinds = (httpx.ConnectError, httpx.ConnectTimeout, ConnectionRefusedError)
+    return any(isinstance(current, kinds) for current in exception_chain(error))
 
 
-def mark_own_server(response: Any, omlx_server_id: str | None) -> Any:
+async def mark_own_server(response: Any, omlx_server_id: str | None) -> Any:
     """Flag a failed oMLX response whose server is CORSIA's own (``own_server``).
 
     Only the kinds whose remedy depends on it (unreachable, not loaded) are
-    flagged; the server is the one local_sources already names. Returns ``response``.
+    flagged; the server is the one local_sources already names, read off the
+    event loop and only on those failures. Returns ``response``.
     """
     if omlx_server_id and response.error_kind in (SERVER_UNREACHABLE, MODEL_NOT_LOADED):
+        from infra.db_async import run_read
         from llm.local_sources import corsia_omlx_server
 
-        own = corsia_omlx_server()
+        own = await run_read(corsia_omlx_server)
         response.own_server = own is not None and own["id"] == omlx_server_id
     return response
 
@@ -150,22 +145,6 @@ def reset_iso(detail: object, reset_at: object = None) -> str | None:
 
     deadline = provider_reset_deadline(detail, reset_at=reset_at, known_limit=True)
     return deadline.isoformat() if deadline else None
-
-
-def cause_kind_for_row(meta: dict) -> str:
-    """The kind of a stored error row: its own ``cause_kind``, else mapped from ``cause`` or ``error_kind``."""
-    stored = meta.get("cause_kind")
-    if stored in KINDS:
-        return stored
-    return cause_kind(meta.get("cause") or meta.get("error_kind"))
-
-
-def served_metadata(meta: dict) -> dict:
-    """``meta`` as served: a failed-turn row (``llm_error``, ``cc_error``, errored ``result``) always carries a ``cause_kind``."""
-    failed = meta.get("type") in ("llm_error", "cc_error") or (
-        meta.get("type") == "result" and meta.get("is_error") is True
-    )
-    return {**meta, "cause_kind": cause_kind_for_row(meta)} if failed else meta
 
 
 def harness_cause_kind(harness: str, cause: str | None, detail: Any = None) -> str:
@@ -213,7 +192,6 @@ def cause_fields(
 def codex_failure_meta(
     cause: str, message: str | None, reset_at: str | None, model: str | None, usage: dict,
 ) -> dict[str, Any]:
-    """The ``cc_error`` metadata of a failed Codex turn; ``reset_at`` stays as Codex gave it."""
-    meta = {"codex": True, "type": "cc_error", "event_type": "harness.error",
+    """The ``cc_error`` metadata of a failed Codex turn; Codex's ``reset_at`` is stored only as ``resets_at``."""
+    return {"codex": True, "type": "cc_error", "event_type": "harness.error",
             "harness": "codex", **cause_fields("codex", cause, message, reset_at, model), **usage}
-    return {**meta, "reset_at": reset_at} if reset_at else meta
