@@ -7,11 +7,6 @@
 	type Comment = CommentThreadData & { review?: boolean };
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
-	/** A press on a text comment's card goes to its text like its quote does; a control, the reply field or a text selection in progress keeps the press. */
-	function jumpFromCard(event: MouseEvent, comment: Comment) {
-		if (unplaced(comment) || (event.target as Element).closest('a, button, input, textarea') || !window.getSelection()?.isCollapsed) return;
-		onFocus?.(comment.id);
-	}
 	let { comments, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, cellLabel, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false, replyDrafts = $bindable({}), replySelections = $bindable({}), leavingIds = new Set<string>(), reduced = false }: {
 		comments: Comment[];
 		documentOrder?: boolean;
@@ -89,12 +84,11 @@
 			{#each row.comments as comment (comment.id)}
 			{@const region = comment.regionNumber != null}
 			<!-- An image comment's card and its mark light up together; the card itself selects its tag, so it needs no link. -->
-			<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
 				data-comment-id={comment.id}
 				class:focused={focusedId === comment.id}
 				use:leaveRow={{ leaving: leavingIds.has(comment.id), reduced }}
-				onclick={region ? undefined : (event) => jumpFromCard(event, comment)}
 				onpointerenter={region && onHover ? () => onHover(comment.id) : undefined}
 				onpointerleave={region && onHover ? () => onHover(null) : undefined}
 				onfocusin={region && onHover ? () => onHover(comment.id) : undefined}
@@ -105,7 +99,7 @@
 						{#if comment.review || comment.orphaned}{comment.review ? 'Review comment' : 'Text changed'}{comment.anchor ? `: “${plainQuote(comment.anchor)}”` : ''}{:else}{shownQuote(comment) ?? (comment.anchor ? `“${plainQuote(comment.anchor)}”` : 'Go to text')}{/if}
 					</button>
 				{/if}
-				<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} focused={focusedId === comment.id} linked={region && hoveredId === comment.id} selectable={region} leaving={leavingIds.has(comment.id)} {scrollOnFocus} onFocus={region ? () => onFocus?.(comment.id) : undefined} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} keepReplyVisible={keepReplyVisible && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} flat hideOrphan={documentOrder} />
+				<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} focused={focusedId === comment.id} linked={region && hoveredId === comment.id} selectable={region} leaving={leavingIds.has(comment.id)} {scrollOnFocus} onFocus={region || !unplaced(comment) ? () => onFocus?.(comment.id) : undefined} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} keepReplyVisible={keepReplyVisible && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} flat hideOrphan={documentOrder} />
 			</div>
 			{/each}
 		{/each}

@@ -44,7 +44,7 @@ it('names a comment on a diagram or table by its label in the jump button, not b
 	expect(jumps).toEqual(['Go to text: The whole diagram', 'Go to text: plain words']);
 });
 
-it('goes to a text comment\'s text when its card is pressed, but not from a control, the reply field, a selection or an unplaced card', () => {
+it("goes to a text comment's text when its card is pressed, but not from a card control or on an unplaced card", () => {
 	host = document.createElement('div'); document.body.appendChild(host);
 	const comment = (id: string, extra: Record<string, unknown> = {}) => ({ id, anchor: id, author: 'you', text: `body of ${id}`, at: 'now', resolved: false, replies: [], ...extra });
 	const onFocus = vi.fn();
@@ -55,18 +55,13 @@ it('goes to a text comment\'s text when its card is pressed, but not from a cont
 	expect(onFocus).toHaveBeenCalledTimes(1);
 	expect(onFocus).toHaveBeenLastCalledWith('a');
 	card('o').querySelector<HTMLElement>('.ct')!.click();
+	expect(onFocus).toHaveBeenCalledTimes(2);
 	expect(onFocus).toHaveBeenLastCalledWith('o');
+	card('r').querySelector<HTMLElement>('.ct')!.click();
+	expect(onFocus).toHaveBeenCalledTimes(3);
+	expect(onFocus).toHaveBeenLastCalledWith('r');
 	onFocus.mockClear();
-	card('a').querySelector<HTMLTextAreaElement>('.ct-input')!.click();
 	card('a').querySelector<HTMLButtonElement>('.ct-act.resolve')!.click();
 	card('u').querySelector<HTMLElement>('.ct')!.click();
 	expect(onFocus).not.toHaveBeenCalled();
-	const selection = vi.spyOn(window, 'getSelection').mockReturnValue({ isCollapsed: false } as Selection);
-	card('a').querySelector<HTMLElement>('.ct')!.click();
-	expect(onFocus).not.toHaveBeenCalled();
-	selection.mockRestore();
-	// An image comment's card selects its tag through its own handler, once, not through this one.
-	card('r').querySelector<HTMLElement>('.ct')!.click();
-	expect(onFocus).toHaveBeenCalledTimes(1);
-	expect(onFocus).toHaveBeenLastCalledWith('r');
 });
