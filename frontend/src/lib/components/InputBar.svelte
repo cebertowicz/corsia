@@ -3,7 +3,8 @@
 	import { tick, onMount } from 'svelte';
 	import { setContentEditableText } from '$lib/inputText';
 	import { token } from '$lib/stores/auth';
-	import { activeThreadId, isThreadTurnActive, threads } from '$lib/stores/threads';
+	import { activeThreadId, isThreadTurnActive } from '$lib/stores/threads';
+	import { composerSelectionFor } from '$lib/stores/composerSelection';
 	import { turnStates } from '$lib/ws/turnState';
 	import InputBarComposer from './InputBarComposer.svelte';
 	import InputBarControls from './InputBarControls.svelte';
@@ -19,9 +20,8 @@
 	} from './inputBarHelpers';
 	import { createComposerDrafts, sendAndRestoreDraft, type ComposerDraft } from './composerDrafts';
 	import { composerCanSend, hasReadySwitchDestination as readySwitchDestination, type SendOutcome } from './composerSendReadiness';
-	import { activeModelId, findModelById, loadModels, models } from '$lib/stores/models';
+	import { findModelById, loadModels, loadThreadCatalog } from '$lib/stores/models';
 	import { on, sendMessage, stopTurn } from '$lib/ws';
-	import { subagentMeta } from '$lib/stores/subagents';
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
 	import { onModelSheetRequest } from '$lib/stores/modelSheetRequest';
@@ -68,7 +68,10 @@
 		const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
 
 		const hasImageAttachments = $derived(pendingAttachments.some(a => a.is_image));
-		const activeModel = $derived(findModelById($models, $activeModelId));
+		const selection = $derived($composerSelectionFor(threadId));
+		const activeModel = $derived(findModelById(selection.models, selection.modelId));
+		const catalogThreadId = $derived(!selection.isOpen ? selection.threadId : null); // another thread's composer reads its own catalog
+		$effect(() => { if (catalogThreadId) void loadThreadCatalog(catalogThreadId); });
 		$effect(() => {
 		if (!sheetView) return;
 		const onPointerDown = (e: PointerEvent) => {
@@ -133,7 +136,7 @@
 		const snapshot = () => boundThreadId ? ({
 			threadId: boundThreadId,
 			content: inputText.trim(),
-			modelId: $activeModelId ?? undefined,
+			modelId: selection.modelId ?? undefined,
 			attachments: [...pendingAttachments],
 		}) : null;
 		return boundThreadId ? snapshot() : ensureThread().then(snapshot);
@@ -203,14 +206,11 @@
 		return 'sent';
 	}
 
-	const activeThread = $derived(
-		$threads.find(thread => thread.id === boundThreadId),
-	);
-	const isSubagentThread = $derived(
-		boundThreadId ? $subagentMeta.has(boundThreadId) : false,
-	);
-	const hasReadySwitchDestination = $derived(readySwitchDestination(activeThread, $models));
-	const canSendToModel = $derived(!$updateRestarting && (isSubagentThread || composerCanSend(activeThread, activeModel, $models, boundThreadId !== null && boundThreadId === $corsiaAgentId)));
+	const activeThread = $derived(selection.thread);
+	const hasReadySwitchDestination = $derived(readySwitchDestination(activeThread, selection.models));
+	// A thread outside the list (a worker, the Corsia agent) may have no model to gate on: the server holds or routes it.
+	const allowUnlistedNoModelThread = $derived(boundThreadId !== null && (boundThreadId === $corsiaAgentId || !selection.isOpen));
+	const canSendToModel = $derived(!$updateRestarting && composerCanSend(activeThread, activeModel, selection.models, allowUnlistedNoModelThread));
 	const hasMessageToSend = $derived(inputText.trim().length > 0 || pendingAttachments.length > 0);
 
 	function handleSendButtonClick() {

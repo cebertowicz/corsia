@@ -8,7 +8,7 @@ vi.mock('$lib/stores/threadVendorAccounts', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/stores/threadVendorAccounts')>()),
 	loadThreadVendorAccounts: reloadAccounts,
 }));
-vi.mock('$lib/stores/modelsLoad', () => ({ loadModels: reloadModels }));
+vi.mock('$lib/stores/modelsLoad', () => ({ loadModels: reloadModels, loadComposerModels: reloadModels }));
 vi.mock('$lib/stores/threadAccountPin', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/stores/threadAccountPin')>()),
 	pinThreadAccount: pin,

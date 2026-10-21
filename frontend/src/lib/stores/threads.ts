@@ -260,19 +260,6 @@ export async function saveThreadTitle(threadId: string, title: string, token: st
 	}
 }
 
-export async function saveReasoningEffort(threadId: string, effort: string | null, token: string) {
-	threads.update(ss => ss.map(s => s.id === threadId ? { ...s, reasoning_effort: effort } : s));
-	reasoningEffort.set(effort);
-	try {
-		await fetch(`/api/threads/${threadId}?token=${token}`, {
-			method: 'PATCH',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ reasoning_effort: effort }),
-		});
-	} catch {
-	}
-}
-
 export async function saveThreadProject(threadId: string, projectId: string | null, token: string) {
 	let prev: string | null = null;
 	threads.update(ss => ss.map(s => {

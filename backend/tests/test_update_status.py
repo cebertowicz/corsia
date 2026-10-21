@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -117,6 +118,38 @@ def test_cache_prevents_repeated_remote_calls(monkeypatch):
     assert calls["n"] == 2
 
 
+def test_concurrent_cache_misses_share_one_probe(monkeypatch):
+    from infra import update_status as mod
+
+    mod.invalidate_cache()
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+    results = []
+
+    def slow_probe():
+        nonlocal calls
+        calls += 1
+        started.set()
+        assert release.wait(timeout=5), "test did not release the update probe"
+        return mod._unknown("offline")
+
+    monkeypatch.setattr(mod, "_probe", slow_probe)
+    first = threading.Thread(target=lambda: results.append(mod.update_status()))
+    second = threading.Thread(target=lambda: results.append(mod.update_status()))
+    first.start()
+    assert started.wait(timeout=5), "probe did not start"
+    second.start()
+    release.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert calls == 1
+    assert len(results) == 2
+
+
 def test_locally_ahead_branch_is_not_an_update(monkeypatch):
     # Local commits not yet pushed make HEAD differ from the remote ref, but
     # there is nothing to pull. This must not offer an update.
@@ -155,3 +188,134 @@ def test_unusable_behind_count_is_unknown(monkeypatch):
     assert status.available is None
     assert status.commits_behind is None
     assert "how far behind" in status.error
+
+
+class _ManifestResponse:
+    def __init__(self, body: bytes):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self) -> bytes:
+        return self.body
+
+
+def _packaged_status(monkeypatch, tmp_path, *, current_version="1.0.0", manifest=None):
+    import json
+
+    from infra import update_status as mod
+
+    bundle = tmp_path / "CORSIA.app"
+    resource = bundle / "Contents" / "Resources" / "updater-endpoint.json"
+    resource.parent.mkdir(parents=True)
+    resource.write_text(json.dumps({"endpoint": "https://updates.example.test/latest.json"}))
+    manifest_data = {"version": "1.1.0", "platforms": {"darwin-aarch64": {}}}
+    if isinstance(manifest, dict):
+        manifest_data.update(manifest)
+    body = manifest if isinstance(manifest, bytes) else json.dumps(manifest_data).encode()
+    mod.invalidate_cache()
+    monkeypatch.setattr(mod.platform_paths, "app_bundle_root", lambda: bundle)
+    monkeypatch.setattr(mod, "_tauri_platform_key", lambda: "darwin-aarch64")
+    monkeypatch.setattr(mod, "_git", lambda *_args, **_kwargs: pytest.fail("packaged check must not call git"))
+    monkeypatch.setattr(mod, "_bundle_current_version", lambda: current_version)
+    monkeypatch.setattr(mod, "urlopen", lambda _endpoint, timeout: _ManifestResponse(body))
+    return mod.update_status(force=True)
+
+
+def test_packaged_app_reports_newer_manifest_version(monkeypatch, tmp_path):
+    status = _packaged_status(monkeypatch, tmp_path, manifest={"version": "1.1.0"})
+
+    assert status.available is True
+    assert status.current_version == "1.0.0"
+    assert status.target_version == "1.1.0"
+    assert status.changes is None
+
+
+@pytest.mark.parametrize("target_version", ["1.0.0", "0.9.0"])
+def test_packaged_app_reports_equal_or_older_version_as_up_to_date(monkeypatch, tmp_path, target_version):
+    status = _packaged_status(monkeypatch, tmp_path, manifest={"version": target_version})
+
+    assert status.available is False
+    assert status.target_version == target_version
+
+
+def test_packaged_app_newer_version_without_current_platform_is_not_available(monkeypatch, tmp_path):
+    status = _packaged_status(
+        monkeypatch,
+        tmp_path,
+        manifest={"version": "1.1.0", "platforms": {"linux-x86_64": {}}},
+    )
+
+    assert status.available is False
+    assert status.target_version == "1.1.0"
+
+
+def test_packaged_app_unreachable_manifest_is_unknown(monkeypatch, tmp_path):
+    from urllib.error import URLError
+
+    from infra import update_status as mod
+
+    bundle = tmp_path / "CORSIA.app"
+    resource = bundle / "Contents" / "Resources" / "updater-endpoint.json"
+    resource.parent.mkdir(parents=True)
+    resource.write_text('{"endpoint": "https://updates.example.test/latest.json"}')
+    mod.invalidate_cache()
+    monkeypatch.setattr(mod.platform_paths, "app_bundle_root", lambda: bundle)
+    monkeypatch.setattr(mod, "_git", lambda *_args, **_kwargs: pytest.fail("packaged check must not call git"))
+    monkeypatch.setattr(mod, "_bundle_current_version", lambda: "1.0.0")
+    monkeypatch.setattr(mod, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(URLError("offline")))
+
+    status = mod.update_status(force=True)
+
+    assert status.available is None
+    assert "offline" in status.error
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [b"{not-json", {"version": "not-semver"}],
+    ids=["malformed-json", "non-semver"],
+)
+def test_packaged_app_malformed_or_non_semver_manifest_is_unknown(monkeypatch, tmp_path, manifest):
+    status = _packaged_status(monkeypatch, tmp_path, manifest=manifest)
+
+    assert status.available is None
+    assert status.error
+
+
+def test_packaged_manifest_notes_cap_and_count_more(monkeypatch, tmp_path):
+    notes = "\n".join(f"- Change {index}" for index in range(52))
+    status = _packaged_status(monkeypatch, tmp_path, manifest={"version": "1.1.0", "notes": notes})
+
+    assert status.changes == {
+        "kind": "changelog",
+        "headline": None,
+        "items": [f"Change {index}" for index in range(50)],
+        "more": 2,
+    }
+
+
+def test_packaged_manifest_empty_notes_are_absent(monkeypatch, tmp_path):
+    status = _packaged_status(monkeypatch, tmp_path, manifest={"version": "1.1.0", "notes": " \n\n "})
+
+    assert status.changes is None
+
+
+def test_source_checkout_still_uses_git(monkeypatch):
+    from infra import update_status as mod
+
+    mod.invalidate_cache()
+    calls = []
+
+    def fake_git(args, timeout=30):
+        calls.append(tuple(args))
+        return _ON_BRANCH[tuple(args)]
+
+    monkeypatch.setattr(mod.platform_paths, "app_bundle_root", lambda: None)
+    monkeypatch.setattr(mod, "_git", fake_git)
+    assert mod.update_status(force=True).available is True
+    assert ("fetch", "--quiet", "origin", "dev") in calls
