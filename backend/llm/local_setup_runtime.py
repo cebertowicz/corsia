@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 LOCAL_HOST = "127.0.0.1"
 HEALTH_WAIT_SECONDS = 120.0
-LOCAL_SERVER_NAME = "This Mac"
+LOCAL_SERVER_NAME = "CORSIA's own oMLX"
 
 
 async def omlx_answers(port: int) -> bool:
