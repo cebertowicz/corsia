@@ -367,11 +367,12 @@ test('@flow:document-review-requests closed continuation refreshes on Plans chan
 	} });
 	expect(closed.ok(), await closed.text()).toBeTruthy();
 	await expect.poll(() => frames.some((frame) => frame.type === 'plans_changed'), { timeout: 10_000 }).toBe(true);
-	await expect(list.locator('[data-review-request]')).toHaveCount(0);
-	await expect(page.locator('.reviewer-group')).toHaveCount(0);
+	await expect(list).toContainText('Ended without comments');
+	await expect(page.locator('.reviewer-group')).toHaveAttribute('aria-label', /Ended without comments/);
+	await expect(list.getByRole('button', { name: /^Cancel request to / })).toHaveCount(0);
 	expect(frames.some((frame) => frame.type === 'artifacts_changed' && frame.artifact_id === doc.artifactId)).toBe(false);
 	expect(reads).toBe(0); expect(navigations).toBe(0);
-	await saveEvidenceScreenshot(page, info, 'review-handed-back-closed-without-reload', { fullPage: false });
+	await saveEvidenceScreenshot(page, info, 'review-ended-without-comments', { fullPage: false });
 	const late = await request.post('/api/delegation/docs/comments', { params: { token: TEST_TOKEN }, data: {
 		artifact_id: doc.artifactId, as_session_id: agents[0].id, review: true, body: 'A later review comment.', submit: true,
 	} });

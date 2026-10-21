@@ -113,31 +113,63 @@ def _submit_request(db, row, batch_id: str | None) -> ReviewTransition:
     if artifact is not None:
         notify_change(db, row, artifact)
     if row["state"] == "forked":
-        _receipt(db, row, batch_id)
+        _receipt(db, row)
     return ReviewTransition(True, tuple(woken))
 
 
 def request_comment_count(db, row) -> int:
+    """The reviewer's comments since the request; a submitted or withdrawn request stops counting at its end."""
+    ended = row["state"] in {"submitted", "withdrawn"}
     return db.execute(
         "SELECT COUNT(*) FROM doc_comments WHERE artifact_id=? AND author_kind='agent' "
-        "AND author_thread_id=? AND created_at>=?",
-        (row["artifact_id"], row["reviewer_thread_id"], row["created_at"]),
+        "AND author_thread_id=? AND created_at>=?" + (" AND created_at<=?" if ended else ""),
+        (row["artifact_id"], row["reviewer_thread_id"], row["created_at"],
+         *((row["state_changed_at"],) if ended else ())),
     ).fetchone()[0]
 
 
-def _receipt(db, row, batch_id: str | None) -> None:
+@dataclass(frozen=True)
+class RequestDelivery:
+    delivered_ids: tuple[str, ...] = ()
+    undelivered: bool = False
+
+    @property
+    def latest_delivered(self) -> str | None:
+        return self.delivered_ids[-1] if self.delivered_ids else None
+
+
+def request_delivery(db, row) -> RequestDelivery:
+    """What happened to the request's comments: the reviewer's batches holding any written since it began."""
+    batches = db.execute(
+        "SELECT b.id,b.state FROM doc_feedback_batches b WHERE b.author_kind='agent' AND b.author_id=? "
+        "AND b.artifact_id=? AND b.state IN ('delivered','undelivered') AND EXISTS ("
+        "SELECT 1 FROM doc_feedback_batch_items i JOIN doc_comments c ON c.id=i.comment_id "
+        "WHERE i.batch_id=b.id AND c.created_at>=?) ORDER BY b.updated_at,b.id",
+        (row["reviewer_thread_id"], row["artifact_id"], row["created_at"]),
+    ).fetchall()
+    return RequestDelivery(
+        tuple(batch["id"] for batch in batches if batch["state"] == "delivered"),
+        any(batch["state"] == "undelivered" for batch in batches),
+    )
+
+
+def _receipt(db, row) -> None:
     from infra.passive_changes import append_thread_context_note
 
     count = request_comment_count(db, row)
+    delivery = request_delivery(db, row)
     summary = "nothing was sent to the document owner"
-    if batch_id is not None:
+    if delivery.delivered_ids:
+        marks = ",".join("?" for _ in delivery.delivered_ids)
         comments = db.execute(
             "SELECT c.body FROM doc_feedback_batch_items i JOIN doc_comments c ON c.id=i.comment_id "
-            "WHERE i.batch_id=? ORDER BY c.created_at,c.id LIMIT 3", (batch_id,),
+            f"WHERE i.batch_id IN ({marks}) ORDER BY c.created_at,c.id LIMIT 3", delivery.delivered_ids,
         ).fetchall()
         summary = f"{count} review comments written; feedback was delivered"
         if comments:
             summary += ": " + "; ".join(str(comment["body"])[:200] for comment in comments)
+    elif delivery.undelivered:
+        summary = f"{count} review comments written; delivery failed and will be retried"
     append_thread_context_note(
         db, thread_id=row["reviewer_thread_id"],
         summary=f"Document review submitted for {row['artifact_id']}: {summary}",

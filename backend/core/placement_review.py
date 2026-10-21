@@ -259,5 +259,4 @@ async def attach_review(request):
         request,
         instruction=reviewed_instruction,
         instruction_candidates=(reviewed_instruction, request.instruction),
-        instruction_without_review=request.instruction,
     )

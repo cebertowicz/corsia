@@ -13,7 +13,7 @@ from infra.database import write_transaction
 from test_doc_review_requests import request, review_env, fork_comment, stored  # noqa: F401
 
 
-@pytest.mark.parametrize("deleted_comments,pending,answered", [(0, False, False), (1, True, True)])
+@pytest.mark.parametrize("deleted_comments,pending,answered", [(0, False, False), (1, True, False)])
 def test_empty_submit_finishes_once_without_feedback_or_reviewer_wake(
     review_env, deleted_comments, pending, answered,
 ):
@@ -44,7 +44,7 @@ def test_owner_batch_delivery_does_not_end_a_running_fork(review_env):
     with write_transaction(db, scope="test_fork_ends_after_delivery"):
         review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     assert stored(db, row["id"])["state"] == "submitted"
-    assert stored(db, row["id"])["answered_batch_id"] is None
+    assert stored(db, row["id"])["answered_batch_id"] == batch
     assert db.execute("SELECT item_count FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == 2
 
 
@@ -102,8 +102,8 @@ def test_empty_fork_sends_reviewers_existing_batch_and_receipt_counts_it(review_
     from test_review_feedback_ownership import ordinary_comment
 
     db, aid = review_env
-    batch = ordinary_comment(db, aid)
     row = request(db, aid)
+    batch = ordinary_comment(db, aid)
     with write_transaction(db, scope="test_fork_sends_reviewer_batch"):
         pending, _woken, failures = review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     assert pending and not failures
@@ -113,7 +113,7 @@ def test_empty_fork_sends_reviewers_existing_batch_and_receipt_counts_it(review_
         "SELECT summary FROM context_change_journal WHERE object_kind='thread_context' "
         "AND object_id='reviewer' ORDER BY created_at DESC LIMIT 1",
     ).fetchone()["summary"]
-    assert "0 review comments written; feedback was delivered" in receipt
+    assert "1 review comments written; feedback was delivered" in receipt
     assert "The continuation adds evidence." in receipt
     assert "nothing was sent to the document owner" not in receipt
 

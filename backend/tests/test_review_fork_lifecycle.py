@@ -192,12 +192,12 @@ async def test_creation_reports_failed_state_after_cold_build_failure(review_env
             ))
             result = json.loads(await document_reviews.DocReviewRequestTool().execute(**fields))
         assert result["request"]["state"] == "forked"
-        assert "outcome" not in result["request"]
+        assert result["request"]["outcome"] == "open"
         assert result["request"]["node_id"] is None
         await asyncio.wait_for(entered.wait(), timeout=5)
         await asyncio.gather(*launches)
         refreshed = review_requests.get_request(db, result["request"]["id"])
-        assert "outcome" not in refreshed
+        assert refreshed["outcome"] == "open"
         assert refreshed["state"] == "failed"
         assert refreshed["reason"] == "no_sealed_boundary"
         assert refreshed["node_id"]

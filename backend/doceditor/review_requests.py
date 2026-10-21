@@ -132,9 +132,10 @@ def _reviewer(db, artifact, reviewer: str, actor: ReviewActor) -> None:
 
 
 def _view(db, row) -> dict:
-    """Expose the stored lifecycle with the request's current review-comment count."""
+    """Expose the stored lifecycle with its comment count and derived, never stored, outcome."""
     result = dict(row)
     result["comment_count"] = request_comment_count(db, row)
+    result["outcome"] = "open" if is_open(db, row) else "ended_without_comments"
     return result
 
 
@@ -209,13 +210,12 @@ def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: Rev
 def for_document(db, artifact_id: str) -> list[dict]:
     """Each reviewer's latest request, while it is open or ended without comments."""
     rows = db.execute(
-        "SELECT * FROM doc_review_requests r WHERE artifact_id=?"
-        " AND (state IN ('forked','handed_back','failed') OR (state='submitted' AND answered_batch_id IS NULL))"
+        "SELECT * FROM doc_review_requests r WHERE artifact_id=? AND state!='withdrawn'"
         " AND NOT EXISTS (SELECT 1 FROM doc_review_requests later WHERE later.artifact_id=r.artifact_id"
         " AND later.reviewer_thread_id=r.reviewer_thread_id AND later.created_at>r.created_at)"
         " ORDER BY created_at,id", (artifact_id,))
-    return [_view(db, row) for row in rows
-            if row["state"] not in FALLBACK_STATES or is_open(db, row)]
+    views = [_view(db, row) for row in rows]
+    return [view for view in views if view["outcome"] == "open" or view["comment_count"] == 0]
 
 
 def may_cancel(db, artifact, row, actor: ReviewActor) -> bool:

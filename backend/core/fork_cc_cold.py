@@ -217,7 +217,7 @@ async def prepare_warm_payload(process, request, cancel_event, spawned_at: float
         if fits(instruction):
             if index:
                 logger.info(
-                    "fork.instruction_skipped thread={} fork={} reason=no-room-at-fork",
+                    "placement.review_skipped thread={} checkpoint={} reason=no-room-at-fork",
                     request.thread_id, request.fork_id,
                 )
             return build_user_frame(instruction)

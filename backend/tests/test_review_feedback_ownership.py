@@ -96,10 +96,63 @@ def test_quiet_timer_delivery_does_not_end_running_fork(review_env):
     _assert_running_fork_survives_trigger(db, aid, row, lambda db, aid: feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db))
 
 
+def _receipt_text(db):
+    return db.execute(
+        "SELECT summary FROM context_change_journal WHERE object_kind='thread_context' "
+        "AND object_id='reviewer' ORDER BY created_at DESC LIMIT 1",
+    ).fetchone()["summary"]
+
+
 def test_reviewer_turn_end_delivery_does_not_end_running_fork(review_env):
     db, aid = review_env
     row = request(db, aid)
-    _assert_running_fork_survives_trigger(db, aid, row, lambda db, aid: feedback_batches.close_for_turn_end(db, "reviewer"))
+    fork_comment(db, aid, row["id"])
+    with write_transaction(db, scope="turn_end_delivery"):
+        feedback_batches.close_for_turn_end(db, "reviewer")
+    delivered = db.execute("SELECT id FROM doc_feedback_batches WHERE state='delivered'").fetchone()["id"]
+    assert stored(db, row["id"])["state"] == "forked"
+    fork_comment(db, aid, row["id"])
+    with write_transaction(db, scope="finish_running_fork"):
+        review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
+    assert stored(db, row["id"])["state"] == "submitted"
+    assert stored(db, row["id"])["answered_batch_id"] == delivered
+    receipt = _receipt_text(db)
+    assert "feedback was delivered" in receipt and "nothing was sent" not in receipt
+
+
+def test_fork_submit_with_failed_final_delivery_says_it_will_be_retried(review_env, monkeypatch):
+    from doceditor import feedback_delivery
+
+    db, aid = review_env
+    row = request(db, aid)
+    fork_comment(db, aid, row["id"])
+    monkeypatch.setattr(feedback_delivery, "recipient_problem", lambda *args: "owner_unavailable")
+    with write_transaction(db, scope="failed_final_delivery"):
+        _pending, _woken, failures = review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
+    assert len(failures) == 1
+    assert stored(db, row["id"])["state"] == "submitted"
+    assert stored(db, row["id"])["answered_batch_id"] is None
+    receipt = _receipt_text(db)
+    assert "1 review comments written; delivery failed and will be retried" in receipt
+    assert "nothing was sent" not in receipt
+
+
+def test_comment_after_a_submitted_request_ended_is_not_counted(review_env):
+    db, aid = review_env
+    row = request(db, aid)
+    fork_comment(db, aid, row["id"])
+    with write_transaction(db, scope="finish_before_late_comment"):
+        review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
+    assert review_requests.request_comment_count(db, stored(db, row["id"])) == 1
+    with write_transaction(db, scope="late_reviewer_comment"):
+        comments.create_with_status(
+            aid, body="Written long after the submit.", author="Reviewer", author_kind="agent",
+            author_thread_id="reviewer", review=True, client_id="late", db=db,
+        )
+        db.execute(
+            "UPDATE doc_comments SET created_at='9999-01-01T00:00:00+00:00' WHERE body='Written long after the submit.'",
+        )
+    assert review_requests.request_comment_count(db, stored(db, row["id"])) == 1
 
 
 def test_reviewer_feedback_delivery_does_not_end_running_fork(review_env):

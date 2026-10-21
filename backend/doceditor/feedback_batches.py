@@ -39,7 +39,8 @@ def _new_deadline(author_kind: str, now: str) -> str:
     return _after(now, AGENT_QUIET if author_kind == "agent" else USER_IDLE)
 
 
-def open_batch(db, *, author_kind, author_id, artifact_id, recipient_id, now, closes_at) -> str:
+def open_batch(db, *, author_kind, author_id, artifact_id, recipient_id, now) -> str:
+    """Return the canonical open batch for one author, artifact, and recipient."""
     row = db.execute(
         "SELECT id FROM doc_feedback_batches WHERE author_kind=? AND author_id=? AND artifact_id=? "
         "AND recipient_id=? AND state='open'",
@@ -52,7 +53,8 @@ def open_batch(db, *, author_kind, author_id, artifact_id, recipient_id, now, cl
         "INSERT INTO doc_feedback_batches (id,artifact_id,author_kind,author_id,recipient_id,state,"
         "opened_at,last_item_at,closes_at,item_count,created_at,updated_at) "
         "VALUES (?,?,?,?,?,'open',?,?,?,0,?,?)",
-        (batch_id, artifact_id, author_kind, author_id, recipient_id, now, now, closes_at, now, now),
+        (batch_id, artifact_id, author_kind, author_id, recipient_id, now, now,
+         _new_deadline(author_kind, now), now, now),
     )
     return batch_id
 
@@ -108,7 +110,6 @@ def join_open_batch(
         artifact_id=str(comment["artifact_id"]),
         recipient_id=recipient_id,
         now=now,
-        closes_at=_new_deadline(author_kind, now),
     )
     _add_comment_item(
         db,
@@ -140,7 +141,6 @@ def record_reopen(
         artifact_id=str(comment["artifact_id"]),
         recipient_id=recipient_id,
         now=at,
-        closes_at=_new_deadline("user", at),
     )
     _add_comment_item(
         db,
@@ -180,7 +180,6 @@ def record_edit(
         artifact_id=artifact_id,
         recipient_id=recipient_id,
         now=now,
-        closes_at=_new_deadline(author_kind, now),
     )
     item_delta = feedback_edits.record_edit_item(
         db,
@@ -240,11 +239,6 @@ def record_comment(
 def claim_and_deliver(db, batch_id: str, *, from_state: str,
                       reason: str | None) -> tuple[bool, tuple[str, ...]]:
     """Claim one batch and settle its request in the caller's write transaction."""
-    batch = db.execute(
-        "SELECT * FROM doc_feedback_batches WHERE id=? AND state=?", (batch_id, from_state),
-    ).fetchone()
-    if batch is None:
-        return False, ()
     now = _now()
     closed_sql = "closed_reason=?" if reason is not None else "closed_reason=closed_reason"
     params: list[Any] = [now]
@@ -305,8 +299,7 @@ def close_for_document(
     """Close all matching open recipient batches for one document."""
     rows = db.execute(
         """SELECT id FROM doc_feedback_batches WHERE state='open'
-           AND author_kind=? AND author_id=? AND artifact_id=?
-           ORDER BY opened_at,id""",
+           AND author_kind=? AND author_id=? AND artifact_id=? ORDER BY opened_at,id""",
         (author_kind, author_id, artifact_id),
     ).fetchall()
     woken: list[str] = []
@@ -337,8 +330,7 @@ def close_due(now: str, *, db=None) -> list[str]:
     with write_transaction(db, scope="close_due_doc_feedback") as connection:
         rows = connection.execute(
             """SELECT id,artifact_id,author_kind,closed_reason FROM doc_feedback_batches
-               WHERE state='open' AND closes_at<=?
-               ORDER BY closes_at,id""",
+               WHERE state='open' AND closes_at<=? ORDER BY closes_at,id""",
             (now,),
         ).fetchall()
         woken: list[str] = []
@@ -387,8 +379,7 @@ def retry_for_document(db, *, author_kind: str, author_id: str, artifact_id: str
     """Retry every undelivered recipient batch for one author's document."""
     rows = db.execute(
         """SELECT id FROM doc_feedback_batches WHERE state='undelivered'
-           AND author_kind=? AND author_id=? AND artifact_id=?
-           ORDER BY updated_at,id""",
+           AND author_kind=? AND author_id=? AND artifact_id=? ORDER BY updated_at,id""",
         (author_kind, author_id, artifact_id),
     ).fetchall()
     woken: list[str] = []

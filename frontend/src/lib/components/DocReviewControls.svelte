@@ -19,7 +19,7 @@
 	let narrow = $state(false);
 	const shown = $derived(model.requests.slice(0, MAX_AVATARS));
 	const overflow = $derived(model.requests.length - shown.length);
-	const statusText = (request: (typeof model.requests)[number]) => reviewStatus(request.state, request.reviewer_name, request.created_at, request.reason, request.comment_count);
+	const statusText = (request: (typeof model.requests)[number]) => reviewStatus(request.outcome, request.state, request.reviewer_name, request.created_at, request.reason);
 	const groupLabel = $derived(`Reviewers: ${model.requests.map((request) => `${request.reviewer_name} (${statusText(request)})`).join(', ')}`);
 	$effect(() => {
 		const id = artifactId, thread = viewingThreadId, key = targetKey;
@@ -63,7 +63,7 @@
 				{#each shown as request (request.id)}
 					<span class="reviewer" title={`${request.reviewer_name}: ${statusText(request)}`}>
 						<Avatar name={request.reviewer_name} color={agentColor(request.reviewer_thread_id)} hidden />
-						<span class="mark" class:submitted={request.state === 'submitted'} aria-hidden="true"></span>
+						<span class="mark" class:ended={request.outcome === 'ended_without_comments'} aria-hidden="true"></span>
 					</span>
 				{/each}
 				{#if overflow > 0}<span class="more" title={model.requests.slice(MAX_AVATARS).map((request) => request.reviewer_name).join(', ')}>+{overflow}</span>{/if}
@@ -92,7 +92,7 @@
 	.reviewer:first-child { margin-left: 0; }
 	.reviewer :global(.avatar) { border: 2px solid var(--bg-primary); }
 	.mark { position: absolute; right: -1px; bottom: -1px; width: 8px; height: 8px; box-sizing: border-box; border: 2px solid var(--bg-primary); border-radius: var(--radius-circle); background: var(--amber); }
-	.mark.submitted { background: var(--text-tertiary); }
+	.mark.ended { background: var(--text-tertiary); }
 	.more { margin-left: -5px; padding: 1px 5px; border: 2px solid var(--bg-primary); border-radius: var(--radius-pill); background: var(--bg-tertiary); color: var(--text-secondary); font-size: var(--text-caption); font-weight: var(--fw-semibold); }
 	@container doc-canvas (max-width: 600px) {
 		.review-request .label { display: none; }

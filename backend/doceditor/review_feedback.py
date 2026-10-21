@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from doceditor import feedback_batches, feedback_state
-from doceditor.review_lifecycle import admit_feedback, submit_without_batch
+from doceditor.review_lifecycle import admit_feedback, request_delivery, submit_without_batch
 
 
 def send_document_feedback(db, reviewer_id: str, artifact_id: str) -> tuple[bool, list[str], list[dict]]:
@@ -29,20 +29,8 @@ def submit_fork_feedback(db, request_id: str, reviewer_thread_id: str,
     if request["state"] == "submitted":
         return False, [], []
     admit_feedback(db, request_id, author_kind="agent", author_id=reviewer_thread_id, artifact_id=artifact_id)
-    open_batches = [
-        row["id"] for row in db.execute(
-            "SELECT id FROM doc_feedback_batches WHERE author_kind='agent' AND author_id=? "
-            "AND artifact_id=? AND state='open' ORDER BY opened_at,id",
-            (reviewer_thread_id, artifact_id),
-        )
-    ]
     pending, woken, undelivered = send_document_feedback(db, reviewer_thread_id, artifact_id)
-    delivered_row = db.execute(
-        "SELECT id FROM doc_feedback_batches WHERE id IN (%s) AND state='delivered' "
-        "ORDER BY updated_at DESC,id DESC" % ",".join("?" for _ in open_batches),
-        open_batches,
-    ).fetchone() if open_batches else None
-    delivered = delivered_row["id"] if delivered_row is not None else None
+    delivered = request_delivery(db, request).latest_delivered
     woken.extend(submit_without_batch(
         db, artifact_id, reviewer_thread_id, delivered, fork_end=True,
     ).woken)

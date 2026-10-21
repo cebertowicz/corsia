@@ -67,7 +67,7 @@ def test_request_is_node_less_and_persists_a_running_fork(review_env):
     assert result["fork_id"] and result["node_id"] is None
     assert result["state"] == "forked"
     assert "requesting_node_id" not in result and "requirements_revision" not in result
-    assert "outcome" not in result
+    assert result["outcome"] == "open"
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
 
 

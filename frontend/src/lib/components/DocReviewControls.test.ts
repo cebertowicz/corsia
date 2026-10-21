@@ -19,7 +19,7 @@ let rosterError = false;
 let fetchMock: ReturnType<typeof vi.fn>;
 const NAMES: Record<string, string> = { quality: 'Quality Gate', product: 'Product Experience', plans: 'Structured Plans' };
 const reviewer = (id: string, extras = {}) => ({ id, name: NAMES[id] ?? id, responsibility: 'Review documents', requested: false, unavailable_reason: null, unavailable_text: null, ...extras });
-const row = (id = 'review-1', extras = {}) => ({ id, reviewer_thread_id: 'quality', reviewer_name: 'Quality Gate', requester_name: 'Steve', may_cancel: true, state: 'forked', created_at: '2026-10-02T16:14:00Z', ...extras });
+const row = (id = 'review-1', extras = {}) => ({ id, reviewer_thread_id: 'quality', reviewer_name: 'Quality Gate', requester_name: 'Steve', may_cancel: true, state: 'forked', outcome: 'open', created_at: '2026-10-02T16:14:00Z', ...extras });
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const list = () => ({ reviews: rows, ...(rosterError ? { reviewers_error: 'roster_error' } : { reviewers }) });
 async function settle() { await new Promise((resolve) => setTimeout(resolve, 0)); flushSync(); }
@@ -189,13 +189,14 @@ describe('document review toolbar and popover', () => {
 		button('Cancel request to Quality Gate').click(); await settle();
 		expect(fetchMock.mock.calls.some(([input, init]) => String(input).startsWith('/api/doc-reviews/') && init?.method === 'DELETE')).toBe(true);
 	});
-	it('keeps a submitted review in the summary with a terminal marker and no Cancel', async () => {
-		rows = [row('review-submitted', { state: 'submitted', may_cancel: false })];
+	it.each(['submitted', 'handed_back', 'failed'])('keeps a %s review that ended without comments in the summary with an ended marker and no Cancel', async (state) => {
+		rows = [row('review-ended', { state, outcome: 'ended_without_comments', may_cancel: false })];
 		render(); await settle();
 		const group = document.body.querySelector<HTMLElement>('.reviewer-group')!;
-		expect(group.querySelector('.mark')?.classList.contains('submitted')).toBe(true);
+		expect(group.querySelector('.mark')?.classList.contains('ended')).toBe(true);
+		expect(group.getAttribute('aria-label')).toBe('Reviewers: Quality Gate (Ended without comments)');
 		group.click(); await settle();
-		expect(document.body.querySelector('.status')?.textContent).toBe('Finished without comments.');
+		expect(document.body.querySelector('.status')?.textContent).toBe('Ended without comments');
 		expect(maybeButton('Cancel request to Quality Gate')).toBeUndefined();
 	});
 	it('returns focus to the comments pill in the header when cancelling the last request removed its trigger', async () => {
@@ -300,10 +301,10 @@ describe('document review toolbar and popover', () => {
 	it('refetches on an artifact change and on a plan change, and cleans its listeners up', async () => {
 		rows = [row()]; render(); await settle();
 		const calls = fetchMock.mock.calls.length;
-		rows = [];
+		rows = [row('review-1', { state: 'handed_back', outcome: 'ended_without_comments', may_cancel: false })];
 		for (const callback of events.get('plans_changed') ?? []) callback({ type: 'plans_changed', plans: [] });
 		await settle(); expect(fetchMock.mock.calls.length).toBe(calls + 1);
-		expect(document.body.querySelector('.reviewer-group')).toBeNull();
+		expect(document.body.querySelector('.reviewer-group')?.getAttribute('aria-label')).toBe('Reviewers: Quality Gate (Ended without comments)');
 		rows = []; emit('doc-a'); await settle();
 		expect(document.body.querySelector('.reviewer-group')).toBeNull();
 		component.$destroy(); expect(events.get('plans_changed')?.size).toBe(0);

@@ -1,4 +1,4 @@
-import type { DocumentReviewLifecycleState } from '$lib/api/docReviews';
+import type { DocumentReview, DocumentReviewLifecycleState } from '$lib/api/docReviews';
 
 /** User-facing review status and recovery copy comes from the stored request state. */
 export function reviewContinuationText(reviewer: string, reason?: string | null): string {
@@ -14,10 +14,9 @@ export function reviewContinuationText(reviewer: string, reason?: string | null)
 	return `The review is unfinished. ${reviewer} will finish it.`;
 }
 
-export function reviewStatus(state: DocumentReviewLifecycleState, reviewer: string, createdAt: string, reason?: string | null, commentCount = 0): string {
+export function reviewStatus(outcome: DocumentReview['outcome'], state: DocumentReviewLifecycleState, reviewer: string, createdAt: string, reason?: string | null): string {
+	if (outcome === 'ended_without_comments') return 'Ended without comments';
 	if (state === 'forked') return `Requested ${new Date(createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
-	if (state === 'submitted') return commentCount ? `Finished with ${commentCount} comment${commentCount === 1 ? '' : 's'}.` : 'Finished without comments.';
-	if (state === 'withdrawn') return 'Cancelled.';
 	if (state === 'handed_back') return `Unfinished. ${reviewer} will finish it.`;
 	if (reason === 'missing_credentials') return 'Couldn’t finish because sign-in is needed.';
 	if (reason === 'target_unavailable') return 'Couldn’t finish. Choose another model.';

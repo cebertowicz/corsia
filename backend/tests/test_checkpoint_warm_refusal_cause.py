@@ -90,7 +90,6 @@ def _reviewed_request():
         request,
         instruction="checkpoint\n\nreview block",
         instruction_candidates=("checkpoint\n\nreview block", "checkpoint"),
-        instruction_without_review="checkpoint",
     )
 
 
@@ -149,5 +148,3 @@ async def test_attach_review_remembers_the_instruction_it_extended(monkeypatch):
     reviewed = await placement_review.attach_review(request)
 
     assert reviewed.instruction == "checkpoint\n\nreview block"
-    assert reviewed.instruction_without_review == "checkpoint"
-    assert request.instruction_without_review is None

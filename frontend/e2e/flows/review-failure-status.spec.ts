@@ -27,7 +27,7 @@ test('@flow:review-failure-status compact failures on phone', async ({ page, req
 	await page.route(`**/api/artifacts/${artifactId}/reviews*`, (route) => route.fulfill({ json: {
 		reviews: cases.map(([reason], i) => ({ id: `status-${i}`, reviewer_thread_id: `reviewer-${i}`,
 			reviewer_name: 'Quality Gate', requester_name: 'Requester', created_at: new Date().toISOString(),
-			may_cancel: true, state: 'failed', reason })), reviewers: [],
+			may_cancel: true, state: 'failed', outcome: 'open', reason })), reviewers: [],
 	} }));
 	await page.addInitScript(({ threadId, artifactId, docPath, title }) => {
 		localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({ threads: { [threadId]: {

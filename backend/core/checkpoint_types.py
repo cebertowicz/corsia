@@ -15,7 +15,6 @@ class CheckpointProviderForkRequest(ProviderForkRequest):
     """Checkpoint-only recovery and review-preservation fields."""
 
     same_model_cold: Callable[[], object] | None = None
-    instruction_without_review: str | None = None
 
 
 CheckpointTrigger = Literal["manual", "pressure", "model_switch", "idle", "agent"]

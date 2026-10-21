@@ -8,7 +8,7 @@ import pytest
 from doc_feedback_helpers import seed_thread
 from doceditor.review_requests import escalate_fork
 from test_doc_review_adapters import client, payload  # noqa: F401
-from test_doc_review_requests import request, review_env  # noqa: F401
+from test_doc_review_requests import fork_comment, request, review_env  # noqa: F401
 
 
 def test_list_without_thread_names_and_permissions_never_reads_roster(client, review_env, monkeypatch):
@@ -250,7 +250,7 @@ def test_projection_uses_canonical_cancel_permission_helper(client, review_env, 
 
 
 @pytest.mark.parametrize("end", ["closed", "failed"])
-def test_ended_review_disappears_without_requested_picker_state(client, review_env, end):
+def test_ended_continuation_without_comments_stays_listed_as_ended_not_requested(client, review_env, end):
     from plans import public
     db, aid = review_env
     row = request(db, aid)
@@ -258,7 +258,8 @@ def test_ended_review_disappears_without_requested_picker_state(client, review_e
     public.transition_node(row["node_id"], end, db=db)
     db.commit()
     body = client.get(f"/api/artifacts/{aid}/reviews", params={"thread_id": "requester"}).json()
-    assert body["reviews"] == []
+    assert [(r["id"], r["outcome"], r["may_cancel"]) for r in body["reviews"]] == [(row["id"], "ended_without_comments", False)]
+    assert body["reviews"][0]["state"] in {"handed_back", "failed"}
     choices = {choice["id"]: choice for choice in body["reviewers"]}
     assert choices["reviewer"]["requested"] is False
     repeated = client.post("/api/doc-reviews", json=payload(aid, thread_id="requester", client_id="after-end"))
@@ -290,7 +291,7 @@ def test_clean_fork_without_comments_remains_named_in_http_list(client, review_e
     assert next(choice for choice in body["reviewers"] if choice["id"] == "reviewer")["requested"] is False
 
 
-def test_ended_review_stays_absent_after_later_comments(client, review_env):
+def test_ended_review_leaves_the_list_after_later_comments(client, review_env):
     from doc_feedback_helpers import add_comment
     from plans import public
     db, aid = review_env
@@ -298,12 +299,13 @@ def test_ended_review_stays_absent_after_later_comments(client, review_env):
     row = escalate_fork(db, row["id"])
     public.transition_node(row["node_id"], "closed", db=db)
     db.commit()
-    assert client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"] == []
+    listed = client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"]
+    assert [(r["id"], r["outcome"], r["comment_count"]) for r in listed] == [(row["id"], "ended_without_comments", 0)]
     add_comment(db, aid, author_id="reviewer", submit=True)
     assert client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"] == []
 
 
-def test_silent_end_disappears_through_real_plan_http_contract(client, review_env):
+def test_silent_end_stays_listed_as_ended_through_real_plan_http_contract(client, review_env):
     from api import plans
     client.app.include_router(plans.router)
     db, aid = review_env
@@ -320,7 +322,44 @@ def test_silent_end_disappears_through_real_plan_http_contract(client, review_en
     })
     assert closed.status_code == 200, closed.text
     shown = client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"]
-    assert shown == []
+    assert [(r["id"], r["outcome"], r["may_cancel"]) for r in shown] == [(row["id"], "ended_without_comments", False)]
+
+
+def test_submitted_fork_lists_as_ended_only_without_comments(client, review_env):
+    from doceditor import review_feedback
+    from infra.database import write_transaction
+
+    db, aid = review_env
+    empty = request(db, aid)
+    with write_transaction(db, scope="test_empty_submit_listed"):
+        review_feedback.submit_fork_feedback(db, empty["id"], "reviewer", aid)
+    shown = client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"]
+    assert [(r["id"], r["state"], r["outcome"], r["may_cancel"]) for r in shown] == [
+        (empty["id"], "submitted", "ended_without_comments", False)]
+    commented = request(db, aid, key="second-request")
+    fork_comment(db, aid, commented["id"])
+    with write_transaction(db, scope="test_commented_submit_unlisted"):
+        review_feedback.submit_fork_feedback(db, commented["id"], "reviewer", aid)
+    assert client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"] == []
+
+
+def test_migrated_legacy_ended_row_stays_listed_as_ended(client, review_env):
+    db, aid = review_env
+    row = request(db, aid)
+    # Migration 132 to 133 maps a legacy ended request to handed_back with its node already closed.
+    escalated = escalate_fork(db, row["id"])
+    from plans import public
+    public.transition_node(escalated["node_id"], "closed", db=db)
+    # Exactly the shape the migration leaves a legacy ended row in.
+    db.execute(
+        "UPDATE doc_review_requests SET state='handed_back',state_changed_at=created_at,reason=NULL,"
+        "fork_id=NULL,answered_batch_id=NULL WHERE id=?", (row["id"],),
+    )
+    db.commit()
+    stored_row = db.execute("SELECT state,answered_batch_id FROM doc_review_requests WHERE id=?", (row["id"],)).fetchone()
+    assert (stored_row["state"], stored_row["answered_batch_id"]) == ("handed_back", None)
+    shown = client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"]
+    assert [(r["id"], r["outcome"], r["may_cancel"]) for r in shown] == [(row["id"], "ended_without_comments", False)]
 
 
 def test_workspace_conductor_is_never_offered_but_the_project_conductor_is(client, review_env):
