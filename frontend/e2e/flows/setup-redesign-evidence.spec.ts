@@ -310,7 +310,7 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.screen === 'create-failed') { await expect(text('Couldn’t create your account. Retry.')).toBeVisible(); await expect(page.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible(); return; }
 	if (fixture.requiredUsername) { await expect(page.getByLabel('Username', { exact: true })).toHaveAttribute('readonly'); }
 	if (fixture.classifier === 'downloading') { await expect(text('Finishing setup')).toBeVisible(); await expect(text('Downloading · 60%')).toBeVisible(); }
-	if (fixture.classifier === 'failed') { await expect(text('Finishing setup')).toBeVisible(); await expect(page.getByRole('button', { name: /^Try again/ })).toBeVisible(); }
+	if (fixture.classifier === 'failed') { await expect(text('Finishing setup')).toBeVisible(); await expect(page.getByRole('button', { name: /^Retry: Finishing setup/ })).toBeVisible(); }
 	if (fixture.screen === 'account') { await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible(); if (fixture.local === 'connection') await expect(text('Couldn’t download the local model because the connection was lost. Check your internet connection, then Retry.')).toBeVisible(); return; }
 	if (fixture.screen === 'folder') { await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible(); return; }
 	if (fixture.other) { await expect(page.getByRole('heading', { name: 'Another copy of oMLX is already running' })).toBeVisible(); await expect(page.getByRole('button', { name: 'Stop it', exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'Keep it running', exact: true })).toBeVisible(); return; }
