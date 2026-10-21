@@ -33,6 +33,10 @@ events:
     attributes: {cost: num}
     dedupe: [cost]
     use: route
+  qa.both:
+    attributes: {code: id}
+    dedupe: [code, run_id]
+    use: both
 """
 
 
@@ -179,6 +183,36 @@ def test_missing_resolved_envelope_is_refused_without_an_assertion(intake_world,
     assert result.refusal.text == "event could not be resolved; this is a platform fault"
 
 
+def _stored(db, name: str) -> list[tuple]:
+    return [tuple(row) for row in db.execute(
+        "SELECT agent_thread_id, project_id, json_extract(attributes,'$.code'), json_extract(attributes,'$.run_id') "
+        "FROM outcome_events WHERE event_name=?", (name,),
+    ).fetchall()]
+
+
+def test_a_both_event_is_stored_once_and_routed(intake_world):
+    result = _admit(event_type="qa.both", event_id="both-1")
+    retry = _admit(event_type="qa.both", event_id="both-1")
+    routed = intake_world.execute(
+        "SELECT rule_id, thread_id FROM event_route_decisions WHERE event_id='both-1'",
+    ).fetchall()
+
+    assert result.accepted and not result.duplicate and retry.duplicate
+    assert _stored(intake_world, "qa.both") == [(OWNER, "project-a", "ok", "both-1")]
+    assert [tuple(row) for row in routed] == [("builtin:0", OWNER)]
+    assert _admit(event_id="route-1").accepted and _stored(intake_world, "qa.route") == []
+
+
+def test_a_both_event_the_store_refuses_is_not_routed(intake_world):
+    # Valid for routing (no undeclared fact) but the store's dedupe needs code.
+    result = _admit(event_type="qa.both", event_id="both-refused", facts={})
+    routed = intake_world.execute("SELECT 1 FROM event_route_decisions WHERE event_id='both-refused'").fetchall()
+    accepted = intake_world.execute("SELECT 1 FROM event_intake_records WHERE event_id='both-refused'").fetchall()
+
+    assert result.refusal and result.refusal.code == "record_refused" and "dedupe needs" in result.refusal.text
+    assert routed == [] and accepted == []
+
+
 def test_script_event_lines_route_and_a_refusal_becomes_an_owner_error(intake_world, tmp_path):
     path = tmp_path / "events.py"
     path.write_text("print('event')")
@@ -194,6 +228,12 @@ def test_script_event_lines_route_and_a_refusal_becomes_an_owner_error(intake_wo
         schedule, RunReport("ok", [], [], events=[{"type": "qa.route", "facts": {"outside": "x"}}], run_id="run-2"),
     ))
 
-    assert accepted.status == "ok"
+    both = asyncio.run(script_runner._admit_events(
+        schedule, RunReport("ok", [], [], events=[{"type": "qa.both", "facts": {"code": "ok"}}], run_id="run-3"),
+    ))
+
+    assert accepted.status == "ok" and both.status == "ok"
     assert refused.status == "error" and refused.error == "event line refused: undeclared_fact"
     assert refused.signals[-1].kind == "error" and "undeclared_fact" in refused.signals[-1].summary
+    # The run's stamp, the same one a measure line from this run gets, so the two dedupe together.
+    assert _stored(intake_world, "qa.both") == [(OWNER, "project", "ok", f"script:{schedule.id}:run-3")]

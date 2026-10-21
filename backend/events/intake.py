@@ -15,6 +15,7 @@ from events.envelope import EventEnvelope
 from events.platform import deliver_event_envelope_sync
 from events.resolve import Target
 from infra.database import get_db, write_transaction
+from infra.measure_admission import admit as admit_measure
 from infra.measure_registry import REGISTRY
 
 _MAX_FACT_BYTES = 64 * 1024
@@ -28,6 +29,7 @@ _ERROR_FIXES = {
     "not_your_namespace": "Use a type declared by this session's rule set.",
     "reserved_type": "worker.* events are produced by CORSIA only.",
     "intake_unreachable": "Retry with the same --id.",
+    "record_refused": "Fix the record as the text says; the event was not routed.",
 }
 
 
@@ -53,6 +55,17 @@ class _ResolvedEvent:
     refusal: IntakeRefusal | None
     registered_owner: str | None
     declaration: EventTypeDecl | None
+    stored: bool = False  # a use: both type is also a measure record
+
+
+@dataclass(frozen=True)
+class MeasureStamps:
+    """The runner's stamps for a both type's record, so an event line dedupes like a measure line."""
+
+    run_id: str | None = None
+    workflow_ref: str | None = None
+    workflow_version: str | None = None
+    project_id: str | None = None
 
 
 def _now() -> str:
@@ -183,12 +196,18 @@ def _declared_event(conn, event_type: str, facts: dict[str, Any], producer: str,
         None,
         owner,
         declaration,
+        entry.use == "both",
     )
 
 
-def _owner_scope(conn, owner: str) -> str:
+def _owner_project(conn, owner: str) -> str | None:
     row = conn.execute("SELECT project_id FROM threads WHERE id=?", (owner,)).fetchone()
-    return f"project:{row['project_id']}" if row and row["project_id"] else "global"
+    return row["project_id"] if row and row["project_id"] else None
+
+
+def _owner_scope(conn, owner: str) -> str:
+    project = _owner_project(conn, owner)
+    return f"project:{project}" if project else "global"
 
 
 def _registered_owner_targets(owner: str, envelope: EventEnvelope, conn) -> list[Target]:
@@ -228,7 +247,20 @@ def record_refusal(*, event_id: str, event_type: str, origin: Literal["emitter",
         )
 
 
-def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: str, event_id: str) -> IntakeResult:
+def _store(conn, event_type: str, facts: dict[str, Any], owner: str, event_id: str,
+           stamps: MeasureStamps | None) -> IntakeResult | None:
+    """Record a both type through the one measure admission; its refusal refuses the event."""
+    stamps = stamps or MeasureStamps()
+    admission = admit_measure(
+        conn, owner_thread_id=owner, event_name=event_type, attributes=facts,
+        project_id=stamps.project_id or _owner_project(conn, owner), run_id=stamps.run_id or event_id,
+        workflow_ref=stamps.workflow_ref, workflow_version=stamps.workflow_version,
+    )
+    return None if admission.refusal is None else _refusal("record_refused", admission.refusal)
+
+
+def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: str, event_id: str,
+                stamps: MeasureStamps | None = None) -> IntakeResult:
     with write_transaction(None, scope="admit_event") as conn:
         row = conn.execute(
             "SELECT rules_matched FROM event_intake_records "
@@ -249,6 +281,10 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
             return _refusal("unresolved_event", "event could not be resolved; this is a platform fault")
         envelope = EventEnvelope(**{**resolved.envelope.__dict__, "event_id": event_id})
         owner = resolved.registered_owner
+        if resolved.stored and owner is not None:
+            refused = _store(conn, event_type, facts, owner, event_id, stamps)
+            if refused is not None:
+                return refused
         deliveries, evaluated = deliver_event_envelope_sync(
             envelope,
             resolved.declaration,
@@ -267,9 +303,12 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
 
 
 async def admit_event(*, event_type: str, facts: dict, origin: Literal["connector", "emitter", "agent", "platform"],
-                      producer: str, event_id: str) -> IntakeResult:
-    """Validate, deduplicate, evaluate and deliver one declared event without trusting producer input."""
+                      producer: str, event_id: str, stamps: MeasureStamps | None = None) -> IntakeResult:
+    """Validate, deduplicate, evaluate and deliver one declared event without trusting producer input.
+
+    A use: both type is also recorded as a measure in the same transaction, before routing.
+    """
     problem = _facts_problem(facts)
     if problem is not None:
         return problem
-    return await asyncio.to_thread(_admit_sync, event_type, facts, origin, producer, event_id)
+    return await asyncio.to_thread(_admit_sync, event_type, facts, origin, producer, event_id, stamps)
