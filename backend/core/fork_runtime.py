@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -14,6 +15,7 @@ ForkUsageBinder = Callable[[Any], Awaitable[Any]]
 ForkProviderFailure = Callable[[str, str], None]
 ForkStepLimit = int | None | Callable[[Any], int | None]
 FORK_HARNESSES = frozenset({"native", "claude-code", "codex"})
+logger = logging.getLogger(__name__)
 
 
 class ForkKindDefinitionError(ValueError):
@@ -104,7 +106,9 @@ def forget(fork_id: str, task: asyncio.Task) -> None:
     if handle is not None and handle.task is task:
         handles.pop(fork_id, None)
     if not task.cancelled():
-        task.exception()
+        error = task.exception()
+        if error is not None:
+            logger.error("fork %s ended with an exception", fork_id, exc_info=error)
 
 
 async def shutdown_forks() -> None:

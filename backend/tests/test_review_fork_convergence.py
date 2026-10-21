@@ -40,6 +40,23 @@ def test_ended_continuation_keeps_visible_findings_for_ordinary_delivery(review_
     assert stored(db, row["id"])["state"] == continuation["state"]
 
 
+def test_missing_continuation_node_is_closed_and_unwatched(review_env):
+    from infra.reviewer_watch import watched_reviews
+
+    from plan_writer_authorizer import raw_plan_seed
+
+    db, aid = review_env
+    row = request(db, aid)
+    continuation = review_requests.escalate_fork(db, row["id"])
+    with raw_plan_seed(db):
+        db.execute("DELETE FROM plan_nodes WHERE id=?", (continuation["node_id"],))
+    db.commit()
+
+    assert not review_requests.is_open(db, stored(db, row["id"]))
+    assert review_requests.for_document(db, aid) == []
+    assert aid not in watched_reviews(db, "reviewer")
+
+
 def test_comment_admission_reads_request_state_only(review_env):
     db, aid = review_env
     row = request(db, aid)

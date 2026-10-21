@@ -42,9 +42,10 @@ def _bounded_history(thread_id, previous, *, db):
 def bounded_review_history(thread_id, previous, *, db):
     """Render a tail only when its full validation source has at most 1,024 rows.
 
-    The guard fetches at most 1,025 integer rows, never message payloads. With
-    a checkpoint it starts at the anchor's owning segment; without one it
-    counts the entire delivered history. Above the cap the request follows its
+    The counting guard fetches at most 1,025 integer rows, never message
+    payloads. With a checkpoint the segment walk starts at the anchor's owning
+    segment and is bounded by that segment; without one it counts the entire
+    delivered history. Above the cap the request follows its
     failure-to-continuation path.
     """
     return in_read_snapshot(db, _bounded_history, thread_id, previous)

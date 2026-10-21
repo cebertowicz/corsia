@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from doceditor import comments, doc_images, feedback_batches, image_regions, review_lifecycle
+from doceditor import comments, doc_images, feedback_batches, image_regions, review_feedback, review_lifecycle
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
@@ -116,8 +116,18 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                     author_id=request.author_thread_id, artifact_id=artifact_id,
                 )
             feedback = feedback_batches.record_comment(
-                connection, row, created=created, submit=request.submit,
+                connection, row, created=created,
+                submit=request.submit and request.review_request_id is None,
             )
+            if request.review_request_id is not None and request.submit:
+                _pending, woken, undelivered = review_feedback.submit_fork_feedback(
+                    connection, request.review_request_id, request.author_thread_id, artifact_id,
+                )
+                feedback["woken"].extend(woken)
+                known = {batch["id"] for batch in feedback["undelivered_batches"]}
+                feedback["undelivered_batches"].extend(
+                    batch for batch in undelivered if batch["id"] not in known
+                )
         return row, registered, feedback
     except BaseException:
         receipt.failed(identifier, db, artifact_id=request.artifact_id, author=request.author)

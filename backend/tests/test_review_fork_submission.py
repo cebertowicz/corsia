@@ -53,11 +53,25 @@ def test_duplicate_comment_with_submit_delivers_existing_ordinary_feedback(revie
     _comment, _registered, result = fork_comment(db, aid, row["id"], submit=True)
     assert set(result) == {"batch_ids", "undelivered_batches", "woken"}
     assert not result["undelivered_batches"]
-    assert stored(db, row["id"])["state"] == "forked"
-    with write_transaction(db, scope="test_duplicate_fork_end"):
-        review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
+    assert stored(db, row["id"])["state"] == "submitted"
+    with write_transaction(db, scope="test_repeated_duplicate_fork_submit"):
+        assert review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid) == (False, [], [])
     assert stored(db, row["id"])["state"] == "submitted"
     assert db.execute("SELECT COUNT(*) FROM doc_comments").fetchone()[0] == 1
+
+
+def test_submit_comment_finishes_a_fork_without_a_continuation_or_reviewer_wake(review_env):
+    from infra.passive_changes import materialize_pending_digest
+
+    db, aid = review_env
+    row = request(db, aid)
+
+    _comment, _registered, feedback = fork_comment(db, aid, row["id"], submit=True)
+
+    assert stored(db, row["id"])["state"] == "submitted"
+    assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE owner_thread_id='reviewer'").fetchone()[0] == 0
+    assert "reviewer" not in feedback["woken"]
+    assert materialize_pending_digest(db, "reviewer") is not None
 
 
 @pytest.mark.parametrize("root_kind,root_author,recipient", [

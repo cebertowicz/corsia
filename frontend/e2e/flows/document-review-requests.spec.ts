@@ -8,6 +8,7 @@ import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '.
 import { expectContrast, TEXT } from '../support/contrast';
 import { openUnsentFooter, visibleHeaderSends } from '../support/docFeedbackFooter';
 import { demoteAgent } from '../support/sharedLiveDocument';
+import { injectMessage, readMockCallCount, releaseMockGate, seedMockResponses } from '../support/mock';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const auth = () => ({ Authorization: `Bearer ${TEST_TOKEN}` });
@@ -29,6 +30,10 @@ async function reviewers(request: APIRequestContext, stamp: string) {
 		promoted.push(id);
 		return { id, name };
 	}));
+}
+
+async function seedReviewerHistory(request: APIRequestContext, reviewer: string) {
+	await injectMessage(request, reviewer, { role: 'user', content: 'Earlier context.' }, TEST_TOKEN);
 }
 async function seedDocument(request: APIRequestContext, title: string) {
 	const threadId = await createSession(request, title);
@@ -61,6 +66,18 @@ async function requestReview(request: APIRequestContext, doc: DocumentFixture, r
 		artifact_id: doc.artifactId, thread_id: doc.threadId, reviewer, client_id: crypto.randomUUID(),
 	} });
 	expect(response.ok(), await response.text()).toBeTruthy();
+}
+
+async function waitForHeldReviewFork(request: APIRequestContext, calls: number) {
+	await expect.poll(() => readMockCallCount(request)).toBe(calls);
+}
+
+async function waitForReviewState(request: APIRequestContext, artifactId: string, state: string) {
+	await expect.poll(async () => {
+		const response = await request.get(`/api/artifacts/${artifactId}/reviews`, { headers: auth() });
+		expect(response.ok(), await response.text()).toBeTruthy();
+		return (await response.json()).reviews[0]?.state;
+	}).toBe(state);
 }
 
 function rewriteGeneratedBuildInfo() {
@@ -259,6 +276,12 @@ test('@flow:document-review-requests request, list, cancel and settlement withou
 	await page.setViewportSize(mobile ? { width: 393, height: 852 } : { width: 1440, height: 1000 });
 	await page.emulateMedia({ reducedMotion: 'reduce' });
 	const stamp = String(Date.now()), agents = await reviewers(request, stamp);
+	await Promise.all([seedReviewerHistory(request, agents[0].id), seedReviewerHistory(request, agents[1].id)]);
+	const firstGate = `review-journey-first-${stamp}`, secondGate = `review-journey-second-${stamp}`;
+	await seedMockResponses(request, [
+		{ match_thread: agents[0].id, response_gate: firstGate },
+		{ match_thread: agents[1].id, response_gate: secondGate },
+	]);
 	const doc = await seedDocument(request, `review-journey-${stamp}`);
 	const frames: { type?: string; artifact_id?: string }[] = [];
 	page.on('websocket', (socket) => socket.on('framereceived', (frame) => {
@@ -275,19 +298,27 @@ test('@flow:document-review-requests request, list, cancel and settlement withou
 	await expect(search).toBeFocused();
 	await search.fill(agents[0].name); await search.press('Home'); await search.press('Enter');
 	await page.getByRole('button', { name: 'Send', exact: true }).click();
+	await waitForHeldReviewFork(request, 1);
 	const list = page.locator('[data-review-surface]');
 	const summary = page.locator('.reviewer-group'); await expect(summary).toBeVisible();
 	await expect(page.getByText(/^Review requested from /)).toBeVisible(); await expect(trigger).toBeFocused();
 	await requestReview(request, doc, agents[1].id);
+	await waitForHeldReviewFork(request, 2);
 	await expect(summary.locator('.reviewer')).toHaveCount(2);
 	await summary.click(); await expect(list.locator('[data-review-request]')).toHaveCount(2);
 	await expect(list).toContainText(agents[0].name); await expect(list.locator('[data-review-request] .status').first()).toHaveText(/Requested \d/);
 	const cancel = list.getByRole('button', { name: /^Cancel request to / });
 	await cancel.first().click(); await expect(list.locator('[data-review-request]')).toHaveCount(1);
 	await cancel.click(); await expect(list.locator('[data-review-request]')).toHaveCount(0);
+	await releaseMockGate(request, firstGate); await releaseMockGate(request, secondGate);
 	await surface.close.click(); await expect(trigger).toBeFocused();
+	const settlementGate = `review-journey-settlement-${stamp}`;
+	await seedMockResponses(request, [{ match_thread: agents[0].id, response_gate: settlementGate }]);
 	await requestReview(request, doc, agents[0].id);
+	await waitForHeldReviewFork(request, 1);
 	await expect(summary).toBeVisible(); await summary.click();
+	await releaseMockGate(request, settlementGate);
+	await waitForReviewState(request, doc.artifactId, 'failed');
 	frames.length = 0;
 	// Counters rule out document reloads and navigations during settlement.
 	let reads = 0, navigations = 0;
@@ -312,8 +343,12 @@ test('@flow:document-review-requests closed continuation refreshes on Plans chan
 	await page.setViewportSize(mobile ? { width: 393, height: 852 } : { width: 1920, height: 1000 });
 	await page.emulateMedia({ reducedMotion: 'reduce' });
 	const stamp = String(Date.now()), agents = await reviewers(request, stamp);
+	await seedReviewerHistory(request, agents[0].id);
+	const gate = `review-silent-${stamp}`;
+	await seedMockResponses(request, [{ match_thread: agents[0].id, response_gate: gate }]);
 	const doc = await seedDocument(request, `review-silent-${stamp}`);
 	await requestReview(request, doc, agents[0].id);
+	await waitForHeldReviewFork(request, 1);
 	const listed = await request.get(`/api/artifacts/${doc.artifactId}/reviews`, { headers: auth() });
 	expect(listed.ok(), await listed.text()).toBeTruthy();
 	let row = (await listed.json()).reviews[0];
@@ -322,11 +357,11 @@ test('@flow:document-review-requests closed continuation refreshes on Plans chan
 	const stateRoot = process.env.CORSIA_E2E_STATE_DIR;
 	if (process.env.CORSIA_E2E_MOCK !== '1' || !stateRoot) throw new Error('Requires disposable E2E mock state');
 	execFileSync(process.env.CORSIA_E2E_BACKEND_PYTHON ?? path.join(repoRoot, '.venv/bin/python'), ['-c', [
-		'import os, sqlite3, sys',
+		'import os, sys',
 		"sys.path.insert(0, os.path.join(os.getcwd(), 'backend'))",
 		'from doceditor.review_requests import escalate_fork',
-		'connection = sqlite3.connect(sys.argv[1])',
-		'connection.row_factory = sqlite3.Row',
+		'from infra.database import get_db',
+		'connection = get_db()',
 		"changed = connection.execute(\"UPDATE doc_review_requests SET state='forked', node_id=NULL, fork_id='e2e-fixture', reason=NULL WHERE id=?\", (sys.argv[2],)).rowcount",
 		'assert changed == 1, changed',
 		'connection.commit()',
@@ -337,6 +372,7 @@ test('@flow:document-review-requests closed continuation refreshes on Plans chan
 		encoding: 'utf8',
 		env: { ...process.env, CORSIA_WORKSPACE: process.env.CORSIA_E2E_WORKSPACE, CORSIA_STATE_DIR: stateRoot, CORSIA_TEST_MODE: '1', CORSIA_ANALYTICS_DISABLE: '1' },
 	});
+	await releaseMockGate(request, gate);
 	const handedBack = await request.get(`/api/artifacts/${doc.artifactId}/reviews`, { headers: auth() });
 	expect(handedBack.ok(), await handedBack.text()).toBeTruthy();
 	row = (await handedBack.json()).reviews[0];

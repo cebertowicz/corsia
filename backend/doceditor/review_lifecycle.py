@@ -59,7 +59,7 @@ def is_open(db, row) -> bool:
             return public.review_is_open(db, row["node_id"])
         except public.PlanError as exc:
             if str(exc).startswith("unknown plan node:"):
-                return False  # A deleted continuation cannot receive document changes.
+                return False  # test_missing_continuation_node_is_closed_and_unwatched covers this Plans contract.
             raise
     return False
 

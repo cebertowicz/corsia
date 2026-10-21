@@ -13,7 +13,7 @@ export interface DocumentReview {
 	created_at: string;
 	may_cancel: boolean;
 	state: DocumentReviewLifecycleState;
-	outcome: 'open' | 'ended_without_comments';
+	outcome: 'open' | 'ended' | 'ended_without_comments';
 	comment_count: number;
 	reason?: string | null;
 }

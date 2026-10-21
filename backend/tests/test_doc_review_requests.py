@@ -101,6 +101,19 @@ def test_submit_settles_node_less_request_and_leaves_reviewer_unselected(review_
     assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE owner_thread_id='reviewer'").fetchone()[0] == 0
 
 
+def test_submitted_request_with_comments_has_ended_outcome(review_env):
+    from doceditor import review_feedback, review_requests
+
+    db, artifact_id = review_env
+    result = request(db, artifact_id)
+    fork_comment(db, artifact_id, result["id"])
+    with write_transaction(db, scope="test_submitted_request_outcome"):
+        review_feedback.submit_fork_feedback(db, result["id"], "reviewer", artifact_id)
+
+    refreshed = review_requests.get_request(db, result["id"])
+    assert (refreshed["outcome"], refreshed["comment_count"]) == ("ended", 1)
+
+
 def test_cancel_preserves_seen_and_replied_comments_and_ordinary_feedback(review_env, monkeypatch):
     """A comment people already saw and answered is never deleted, resolved or agreed to."""
     from doceditor import comment_notifications, review_requests

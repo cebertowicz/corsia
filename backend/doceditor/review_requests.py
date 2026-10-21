@@ -145,7 +145,9 @@ def _view(db, row, comment_count: int | None = None) -> dict:
     """Expose the stored lifecycle with its comment count and derived, never stored, outcome."""
     result = dict(row)
     result["comment_count"] = request_comment_count(db, row) if comment_count is None else comment_count
-    result["outcome"] = "open" if is_open(db, row) else "ended_without_comments"
+    result["outcome"] = (
+        "open" if is_open(db, row) else "ended_without_comments" if result["comment_count"] == 0 else "ended"
+    )
     return result
 
 
@@ -227,7 +229,14 @@ def for_document(db, artifact_id: str) -> list[dict]:
     rows = rows.fetchall()
     counts = request_comment_counts(db, rows)
     views = [_view(db, row, counts[row["id"]]) for row in rows]
-    return [view for view in views if view["outcome"] == "open" or view["comment_count"] == 0]
+    return [
+        view for view in views
+        if view["outcome"] == "open"
+        or (view["comment_count"] == 0 and (
+            view["state"] not in FALLBACK_STATES
+            or db.execute("SELECT 1 FROM plan_nodes WHERE id=?", (view["node_id"],)).fetchone() is not None
+        ))
+    ]
 
 
 def may_cancel(db, artifact, row, actor: ReviewActor) -> bool:

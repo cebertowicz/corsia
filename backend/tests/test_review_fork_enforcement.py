@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -21,6 +22,21 @@ from test_doc_review_requests import request, review_env, fork_comment, stored
 def test_every_harness_requires_an_explicit_limit():
     with pytest.raises(ForkKindDefinitionError, match="missing step limits for: codex"):
         replace(ARTIFACT_REVIEW_KIND, step_limits={"native": 3, "claude-code": 3})
+
+
+@pytest.mark.asyncio
+async def test_forget_logs_a_failed_fork_task(caplog):
+    async def fails():
+        raise RuntimeError("review fork failed")
+
+    task = asyncio.create_task(fails())
+    with pytest.raises(RuntimeError, match="review fork failed"):
+        await task
+
+    with caplog.at_level(logging.ERROR):
+        fork_runtime.forget("review-fork", task)
+
+    assert any(record.message == "fork review-fork ended with an exception" for record in caplog.records)
 
 
 @pytest.mark.asyncio
