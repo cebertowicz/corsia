@@ -65,7 +65,8 @@
 	function plainAccountError(detail: unknown): string | null {
 		if (typeof detail !== 'string') return null;
 		const message = detail.trim();
-		return /^[A-Z][^<>\n]{0,300}[.!?]$/.test(message) ? message : null;
+		if (!message || message.length > 301 || /[\r\n<>\[\]{}\\`]/.test(message)) return null;
+		return /^[\p{L}\p{N}][\p{L}\p{N} .,;'"_():!?&/@+\-]*$/u.test(message) ? message : null;
 	}
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'account' | 'folder' | 'models' | 'hard-stop' | 'error' | 'connect';
