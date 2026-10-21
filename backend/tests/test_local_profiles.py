@@ -382,5 +382,5 @@ def test_route_returns_backend_recovery_for_a_changed_foreign_omlx(client, monke
     assert response.status_code == 409
     assert response.json() == {"detail": {
         "code": "foreign_omlx_changed",
-        "fix": "CORSIA couldn’t stop another oMLX server. Retry to ask again, or leave it running.",
+        "fix": "CORSIA couldn’t stop another oMLX server. Try again, or leave it running.",
     }}

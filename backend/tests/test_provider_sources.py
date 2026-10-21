@@ -1018,7 +1018,7 @@ class TestRecheck:
         # Only a changed foreign process is a failure with a recovery line; consent is a question.
         expected = {"code": refusal}
         if refusal == "foreign_omlx_changed":
-            expected["fix"] = "CORSIA couldn’t stop another oMLX server. Retry to ask again, or leave it running."
+            expected["fix"] = "CORSIA couldn’t stop another oMLX server. Try again, or leave it running."
         assert response.json() == {"detail": expected}
 
     def test_local_setup_status_route_returns_the_flight_record(self, isolated_db, client, monkeypatch):

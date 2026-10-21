@@ -123,13 +123,13 @@ def test_local_setup_prints_failed_flight_result_and_returns_two(monkeypatch, ca
     }])
 
     assert cli_local.cmd_setup(_args()) == 2
-    assert capsys.readouterr().out == "The download failed.\nCouldn’t download the local model. Check your internet connection, then run `corsia local setup` again. Reference: local-test\n"
+    assert capsys.readouterr().out == "The download failed.\nCheck your internet connection, then run `corsia local setup` again. Reference: local-test\n"
 
 
 # The shared fix with the terminal's retry: one next step, and none to retry for memory.
 @pytest.mark.parametrize("cause, expected", [
     ("disk_full", "The local model needs 0.1 GB more free space. Free it up, then run `corsia local setup` again."),
-    ("connection", "Couldn’t download the local model. Check your internet connection, then run `corsia local setup` again."),
+    ("connection", "Check your internet connection, then run `corsia local setup` again."),
     ("memory", "Choose a subscription or API provider instead."),
     ("own_omlx_upgrade_required", "Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then run `corsia local setup` again."),
     ("other", "CORSIA couldn’t set up the local model. Run `corsia local setup` again."),

@@ -196,23 +196,23 @@ async def ask_recommendations(server_id: str) -> dict[str, list[LocalModel]]:
 
 async def ask_recommender(server_id: str) -> LocalModel | None:
     """Pick setup's model from the shared Settings recommender reader."""
-    from infra.host_resources import host_available_ram_bytes
+    from infra.host_resources import model_room_bytes
 
     sections = await ask_recommendations(server_id)
-    # The figure the Add model sheet compares against.
-    return pick_for_setup(sections, host_available_ram_bytes())
+    # The preload check's rule: available memory less the load reserve.
+    return pick_for_setup(sections, model_room_bytes())
 
 
-def pick_for_setup(sections: dict[str, list[LocalModel]], available_bytes: int) -> LocalModel | None:
-    """The first row that fits ``available_bytes``, "best" first; when none fits, the smallest.
+def pick_for_setup(sections: dict[str, list[LocalModel]], room_bytes: int) -> LocalModel | None:
+    """The first row whose loaded size fits ``room_bytes``, "best" first; when none fits, the smallest.
 
-    A row without oMLX's loaded size counts as fitting, as in the Add model
-    sheet. ``unlock`` rows need more memory than this Mac has and are never picked.
+    A row without oMLX's loaded size counts as fitting. ``unlock`` rows need
+    more memory than this Mac has and are never picked.
     """
     rows = [*sections.get("best", []),
             *(model for name, models in sections.items() if name not in ("best", "unlock") for model in models)]
     fitting = next((model for model in rows
-                    if model.resident_bytes is None or model.resident_bytes <= available_bytes), None)
+                    if model.resident_bytes is None or model.resident_bytes <= room_bytes), None)
     if fitting is not None or not rows:
         return fitting
     return min(rows, key=lambda model: model.resident_bytes or 0)

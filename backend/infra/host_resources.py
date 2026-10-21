@@ -59,6 +59,21 @@ def host_available_ram_bytes() -> int:
     return int(psutil.virtual_memory().available)
 
 
+def load_reserve_bytes(total_bytes: int) -> int:
+    """The memory a model load must leave free: an eighth of RAM, at most ``SAFE_RESERVE_BYTES``.
+
+    The one headroom rule for whether a model fits now, read by setup's pick
+    and the preload check alike. A flat 16 GiB would leave a 24 GB Mac, the
+    smallest that runs a local model, room for none.
+    """
+    return min(SAFE_RESERVE_BYTES, total_bytes // 8)
+
+
+def model_room_bytes() -> int:
+    """The memory a model may take now: what is available less the load reserve."""
+    return max(0, host_available_ram_bytes() - load_reserve_bytes(host_total_ram_bytes()))
+
+
 @lru_cache(maxsize=1)
 def _resolved_total_ram_bytes() -> int | None:
     """Read total RAM once, or return None when this machine will not say.
@@ -197,6 +212,7 @@ async def get_host_resources() -> dict[str, Any]:
     GIB = 1024 ** 3
     models_used_bytes = sum(p["used_gb"] for p in breakdown.values()) * GIB
     other_used_bytes = max(0, used - models_used_bytes)
+    reserve = load_reserve_bytes(total)
 
     import socket
     return {
@@ -205,8 +221,8 @@ async def get_host_resources() -> dict[str, Any]:
         "free_gb": round(free / GIB, 2),
         "models_used_gb": round(models_used_bytes / GIB, 2),
         "other_used_gb": round(other_used_bytes / GIB, 2),
-        "safe_free_gb": round(max(0, free - SAFE_RESERVE_BYTES) / GIB, 2),
-        "safe_reserve_gb": round(SAFE_RESERVE_BYTES / (1024 ** 3), 2),
+        "safe_free_gb": round(max(0, free - reserve) / GIB, 2),
+        "safe_reserve_gb": round(reserve / GIB, 2),
         "by_provider": breakdown,
     }
 

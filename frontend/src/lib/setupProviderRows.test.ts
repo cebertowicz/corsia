@@ -10,13 +10,13 @@ const actions = () => ({
 
 // Mirrors the emitted projection: one local state, cause, recovery line and optional reference.
 const flightShapes = [
-	{ state: 'failed', cause: 'connection', fix: 'Couldn’t download the local model. Check your internet connection, then Retry.' },
-	{ state: 'failed', cause: 'disk_full', bytes_to_free: 4_000_000_000, fix: 'The local model needs 4.0 GB more free space. Free it up, then Retry.' },
+	{ state: 'failed', cause: 'connection', fix: 'Check your internet connection, then try again.' },
+	{ state: 'failed', cause: 'disk_full', bytes_to_free: 4_000_000_000, fix: 'The local model needs 4.0 GB more free space. Free it up, then try again.' },
 	{ state: 'failed', cause: 'memory', fix: 'Choose a subscription or API provider instead.' },
 	{ state: 'failed', cause: 'other', ref: 'setup-report-123', fix: 'CORSIA couldn’t set up the local model.' },
 	{ state: 'setup_failed', cause: 'other', ref: 'setup-report-456', fix: 'CORSIA couldn’t set up the local model.' },
-	{ state: 'start_failed', cause: 'connection', ref: 'setup-report-789', fix: 'Couldn’t download the local model. Check your internet connection, then Retry.' },
-	{ state: 'setup_failed', cause: 'own_omlx_upgrade_required', ref: 'setup-report-999', fix: 'Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then press Retry.' }
+	{ state: 'start_failed', cause: 'connection', ref: 'setup-report-789', fix: 'Check your internet connection, then try again.' },
+	{ state: 'setup_failed', cause: 'own_omlx_upgrade_required', ref: 'setup-report-999', fix: 'The oMLX on this computer is out of date or broken. Update it, then try again.' }
 ] as const;
 
 function sourceFromFlight(flight: typeof flightShapes[number]) {
@@ -82,7 +82,7 @@ describe('setup provider rows', () => {
 	it('shows the actionable oMLX update when preparing a pick fails for that cause', () => {
 		const row = setupLocalRow({ ...actions(), pick: { state: 'failed', model: null, message: null, cause: 'own_omlx_upgrade_required', ref: 'pick-123' }, eligible: true, downloading: false, ready: false, startError: '' });
 
-		expect(row).toMatchObject({ meta: 'The oMLX on this computer is out of date or broken. Update it, then Retry.', reference: 'pick-123', reportable: true, action: { label: 'Retry' } });
+		expect(row).toMatchObject({ meta: 'The oMLX on this computer is out of date or broken. Update it, then try again.', reference: 'pick-123', reportable: true, action: { label: 'Retry' } });
 	});
 
 	it.each(['other', 'connection', 'disk_full', undefined])('keeps the pick failure reference for %s without claiming a fit failure', (cause) => {

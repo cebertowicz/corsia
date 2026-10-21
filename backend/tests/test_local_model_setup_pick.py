@@ -1,4 +1,4 @@
-"""Setup's automatic pick fits the memory free now, the Add model sheet's rule."""
+"""Setup's automatic pick fits the memory free now, by the preload check's rule."""
 
 from __future__ import annotations
 
@@ -49,10 +49,12 @@ def test_no_rows_is_no_pick():
     assert pick_for_setup({"best": [], "unlock": [_model("x", 1)]}, 64 * GIB) is None
 
 
-def test_ask_recommender_compares_against_available_memory(monkeypatch):
+def test_ask_recommender_leaves_the_load_reserve_free(monkeypatch):
     async def recommendations(_server_id: str) -> dict[str, list[LocalModel]]:
-        return {"best": [_model("deepseek", 163), _model("qwen", 99)]}
+        return {"best": [_model("deepseek", 163), _model("glm", 100), _model("qwen", 99)]}
 
     monkeypatch.setattr(local_model, "ask_recommendations", recommendations)
+    monkeypatch.setattr("infra.host_resources.host_total_ram_bytes", lambda: 256 * GIB)
     monkeypatch.setattr("infra.host_resources.host_available_ram_bytes", lambda: 115 * GIB)
+    # 115 GiB free less the 16 GiB reserve: 100 GiB would leave too little, 99 fits.
     assert asyncio.run(local_model.ask_recommender("server")).model == "qwen"

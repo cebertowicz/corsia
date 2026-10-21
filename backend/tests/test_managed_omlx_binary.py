@@ -25,7 +25,7 @@ def test_missing_bundled_omlx_is_a_recoverable_app_damage_state(tmp_path, monkey
     assert managed_omlx_binary.managed_omlx_executable() is None
     assert managed_omlx_binary.managed_omlx_install_error() == (
         "The CORSIA app is damaged because its bundled oMLX executable is missing. "
-        "Download CORSIA again, replace this app, then Retry."
+        "Download CORSIA again, replace this app, then try again."
     )
 
 

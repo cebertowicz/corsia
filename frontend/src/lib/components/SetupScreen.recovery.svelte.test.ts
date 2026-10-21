@@ -82,7 +82,7 @@ describe('SetupScreen account recovery', () => {
 
 describe('SetupScreen local-start recovery', () => {
 	it.each([
-		['a changed foreign oMLX', [json({ code: 'foreign_omlx_changed', fix: 'CORSIA couldn’t stop another oMLX server. Retry to ask again, or leave it running.' }, 409)], 'CORSIA couldn’t stop another oMLX server. Retry to ask again, or leave it running.'],
+		['a changed foreign oMLX', [json({ code: 'foreign_omlx_changed', fix: 'CORSIA couldn’t stop another oMLX server. Try again, or leave it running.' }, 409)], 'CORSIA couldn’t stop another oMLX server. Try again, or leave it running.'],
 		['an unrecognized refusal without exposing its message', [json({ message: 'private route detail' }, 500)], 'CORSIA couldn’t start local setup.'],
 		['an unrecognized refusal with a reference', [json({ message: 'private route detail', ref: 'local-start-123' }, 500)], 'CORSIA couldn’t start local setup.'],
 		['an unreachable local backend', [new Error('network down')], 'CORSIA couldn’t start local setup.'],

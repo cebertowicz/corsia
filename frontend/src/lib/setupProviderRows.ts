@@ -31,7 +31,7 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 	}
 	if (pick?.state === 'failed') {
 		const message = pick.cause === 'memory' ? 'Couldn’t find a local model that fits this computer. Try again.'
-			: pick.cause === 'own_omlx_upgrade_required' ? 'The oMLX on this computer is out of date or broken. Update it, then Retry.'
+			: pick.cause === 'own_omlx_upgrade_required' ? 'The oMLX on this computer is out of date or broken. Update it, then try again.'
 			: 'CORSIA couldn’t set up the local model.';
 		return { ...row, meta: message, reference: pick.ref, error: true, reportable: true, action: { label: 'Retry', run: check } };
 	}

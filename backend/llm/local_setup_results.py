@@ -11,7 +11,8 @@ from fastapi import HTTPException
 #: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
 SETUP_COMMAND = "corsia local setup"
 CAUSES = frozenset({"connection", "damaged_bundle", "disk_full", "memory", "other", "other_omlx", "own_omlx_upgrade_required"})
-RETRY_IN_APP = "Retry."
+# Sentences say "try again"; "Retry" names only the button.
+RETRY_IN_APP = "try again."
 RETRY_IN_TERMINAL = f"run `{SETUP_COMMAND}` again."
 
 
@@ -24,17 +25,17 @@ def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN
                 if isinstance(bytes_to_free, int) and bytes_to_free > 0 else "more")
         return f"The local model needs {need} free space. Free it up, then {retry}"
     if cause == "connection":
-        return f"Couldn’t download the local model. Check your internet connection, then {retry}"
+        return f"Check your internet connection, then {retry}"
     if cause == "memory":
         return "Choose a subscription or API provider instead."
     if cause == "other_omlx":
         if retry == RETRY_IN_APP:
-            return "CORSIA couldn’t stop another oMLX server. Retry to ask again, or leave it running."
+            return "CORSIA couldn’t stop another oMLX server. Try again, or leave it running."
         return f"CORSIA couldn’t stop another oMLX server. {retry[0].upper() + retry[1:]}"
     if cause == "own_omlx_upgrade_required":
         # Only a source run without the bundled oMLX reaches this (ensure_omlx).
         if retry == RETRY_IN_APP:
-            return "The oMLX on this computer is out of date or broken. Update it, then Retry."
+            return "The oMLX on this computer is out of date or broken. Update it, then try again."
         return f"Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then {retry}"
     if retry == RETRY_IN_APP:
         return "CORSIA couldn’t set up the local model."
