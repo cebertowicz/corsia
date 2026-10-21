@@ -17,6 +17,7 @@ from starlette.responses import JSONResponse
 
 from infra.auth import authenticate, is_person_session, token_from_request
 from infra.db_async import run_in_db
+from infra.devices_events import emit_pairing_failure
 from infra.devices_identity import ensure_host_key
 from infra.devices_server import DevicesServer
 from infra.dns_sd import DNSServiceAnnouncement
@@ -147,9 +148,7 @@ class DevicesApp:
             return
         if kind == "http" and self._requires_same_network(tagged):
             # This refusal happens before the route can emit its normal pairing
-            # failure event, so use that route's shared emitter here.
-            from api.devices import emit_pairing_failure
-
+            # failure event, so use the shared pairing-failure emitter here.
             emit_pairing_failure(reason="not_on_this_network")
             await JSONResponse({"detail": {"reason": "not_on_this_network"}}, status_code=403)(tagged, receive, send)
             return

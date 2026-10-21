@@ -13,7 +13,7 @@ import api.devices as devices_api
 import api.system as system_api
 from core.device_pairing import DevicePairing
 from core.devices_runtime import DevicesRuntime, runtime
-from infra import dns_sd
+from infra import devices_events, dns_sd
 from infra.auth import require_human_user
 from infra.devices_listener import DevicesApp, DevicesListener
 from infra.settings import set_devices_enabled, set_devices_outside_address
@@ -108,7 +108,7 @@ def test_outside_address_events_never_disclose_the_address(monkeypatch, address,
 
     monkeypatch.setattr(devices_api, "_require_local_management", lambda _request: None)
     monkeypatch.setattr(devices_api, "run_in_db", write_setting)
-    monkeypatch.setattr(devices_api, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    monkeypatch.setattr(devices_events, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
     monkeypatch.setattr(runtime, "outside_address", None)
     asyncio.run(devices_api.put_devices({"outside_address": address}, request=object(), _user={"id": "person"}))
     assert events == [(("devices", action), {"properties": None})]

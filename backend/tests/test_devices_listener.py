@@ -350,10 +350,8 @@ def _stub_app():
 
 @pytest.mark.parametrize("path", ["/api/devices/pair/start", "/api/devices/pair/finish"])
 def test_devices_app_counts_pairing_refusals_outside_the_pairing_network(monkeypatch, path):
-    from api import devices
-
     emitted = []
-    monkeypatch.setattr(devices, "emit_pairing_failure", lambda *, reason: emitted.append(reason))
+    monkeypatch.setattr(devices_listener, "emit_pairing_failure", lambda *, reason: emitted.append(reason))
     client = TestClient(
         DevicesApp(_stub_app(), outside_enabled=lambda: True),
         client=("198.51.100.20", 50000),
