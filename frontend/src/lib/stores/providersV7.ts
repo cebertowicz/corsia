@@ -91,7 +91,7 @@ function _statusDotForServer(s: NetworkServer): HostProvider['statusDot'] {
 }
 
 function _labelForServerProvider(s: NetworkServer, raw: ProviderEntry | undefined): string {
-	if (s.provider === 'omlx') return 'oMLX';
+	if (s.provider === 'omlx') return s.instance_name || 'oMLX';
 	if (s.kind === 'external') {
 		return s.dialect === 'anthropic' ? 'Anthropic-compatible API' : 'OpenAI-compatible API';
 	}
@@ -162,7 +162,7 @@ export function groupByHost(
 	const localServerProviders: HostProvider[] = localServers.map(s => _serverProvider(s, providers, 'local'));
 
 	if (localServerProviders.length) {
-		const deviceName = resources?.device_name?.trim() || 'This Mac';
+		const deviceName = resources?.device_name?.trim() || 'This computer';
 		groups.push({
 			key: 'this-mac',
 			name: deviceName,

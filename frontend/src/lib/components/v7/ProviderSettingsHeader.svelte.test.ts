@@ -38,6 +38,13 @@ describe('ProviderSettingsHeader local tag', () => {
 		expect(document.querySelector('.type-tag.local')?.textContent).toBe('local');
 	});
 
+	it('uses a managed row’s registered name as its title', () => {
+		const managed = provider('managed', true);
+		managed.server!.instance_name = "CORSIA's own oMLX";
+		render(managed);
+		expect(document.querySelector('.title span:nth-child(2)')?.textContent).toBe("CORSIA's own oMLX");
+	});
+
 	it('does not infer LOCAL from an unmarked External loopback', () => {
 		render(provider('external', false));
 		expect(document.querySelector('.type-tag')).toBeNull();
