@@ -220,7 +220,7 @@ def _email(account: str, message: str) -> dict:
             "subject": "hello"}
 
 
-# -- Steve's case ----------------------------------------------------------------------------
+# -- A rule on one's own PR merging -------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_a_self_rule_on_a_pr_merging_wakes_its_owner_with_the_note(isolated_db, sent):
