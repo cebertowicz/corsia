@@ -349,10 +349,10 @@ async def get_cache_stats(cfg: dict) -> dict[str, Any]:
         return {"ok": False, "message": str(e)}
 
 
-async def start_server(cfg: dict, *, health_timeout_s: float = 30.0) -> dict[str, Any]:
+async def start_server(cfg: dict) -> dict[str, Any]:
     """Spawn an ``omlx serve`` subprocess for this network-servers row."""
     from llm.providers.omlx_supervisor import start_server as _start
-    return await _start(cfg, health_timeout_s=health_timeout_s)
+    return await _start(cfg)
 
 
 async def stop_server(cfg: dict) -> dict[str, Any]:

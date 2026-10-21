@@ -407,7 +407,7 @@ def test_new_omlx_start_uses_the_managed_cap_only_for_the_bundled_row(isolated_r
     monkeypatch.setattr(sup, "_spawn_process", lambda *_args: Spawned())
     monkeypatch.setattr(sup, "_wait_for_healthy", healthy)
 
-    result = asyncio.run(sup.start_server({"server_id": "progress", "host": "127.0.0.1", "port": 9999}, health_timeout_s=30.0))
+    result = asyncio.run(sup.start_server({"server_id": "progress", "host": "127.0.0.1", "port": 9999}))
 
     assert result["ok"] is True
     assert waited == {"timeout_s": expected_timeout, "server_id": "progress", "pid": 1234}
@@ -423,6 +423,5 @@ def test_failed_boot_names_the_reason_that_ended_the_health_wait(isolated_runtim
     exited = sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="exited", timeout_s=600.0)
     timed_out = sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="timed_out", timeout_s=30.0)
 
-    assert "exited before becoming healthy" in exited["message"]
-    assert "within 30s" in timed_out["message"]
-    assert "or exited first" not in timed_out["message"]
+    assert exited["message"].startswith("oMLX exited before becoming healthy on 127.0.0.1:9999. Last log lines:")
+    assert timed_out["message"].startswith("oMLX did not become healthy on 127.0.0.1:9999 within 30s. Last log lines:")

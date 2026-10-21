@@ -49,7 +49,7 @@ async def lifecycle_action(server_id: str, action: str):
 
     cfg = {"server_id": server_id}
     if action == "start":
-        result = await provider_module.start_server(cfg, health_timeout_s=30.0)
+        result = await provider_module.start_server(cfg)
     else:
         result = await provider_module.stop_server(cfg)
 

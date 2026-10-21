@@ -207,7 +207,7 @@ def _failed_boot_result(
     }
 
 
-async def start_server(cfg: dict, *, health_timeout_s: float = DEFAULT_HEALTH_TIMEOUT_S) -> dict[str, Any]:
+async def start_server(cfg: dict) -> dict[str, Any]:
     """Spawn ``omlx serve`` for the given network-servers row. Idempotent."""
     sid = cfg.get("server_id")
     if not sid:
@@ -258,7 +258,7 @@ async def start_server(cfg: dict, *, health_timeout_s: float = DEFAULT_HEALTH_TI
     log.info("start_server: spawned omlx pid=%s for server_id=%s on %s:%s",
              proc.pid, sid, host, port)
 
-    timeout_s = MANAGED_HEALTH_STARTUP_CAP_S if managed else health_timeout_s
+    timeout_s = MANAGED_HEALTH_STARTUP_CAP_S if managed else DEFAULT_HEALTH_TIMEOUT_S
     health = await _wait_for_healthy(
         host, int(port), timeout_s=timeout_s, server_id=sid, pid=proc.pid,
     )

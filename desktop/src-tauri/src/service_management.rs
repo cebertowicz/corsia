@@ -475,9 +475,6 @@ pub fn ensure_registered_from_app(
 ) -> Result<ServiceStatus, String> {
     let executable = env::current_exe()
         .map_err(|error| format!("could not resolve CORSIA executable: {error}"))?;
-    if is_transient_bundle_path(&executable) {
-        return Err("Move CORSIA to Applications before starting it.".into());
-    }
     ensure_service_registered(
         &NativeServiceManager,
         &SystemLaunchctl,

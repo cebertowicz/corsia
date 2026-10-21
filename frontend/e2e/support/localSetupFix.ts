@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
-// Both Playwright and Vitest invoke this helper from frontend/.
+// Playwright invokes this helper from frontend/.
 const root = resolve(process.cwd(), '..');
 const backend = resolve(root, 'backend');
 const program = [
@@ -13,6 +13,7 @@ const program = [
 
 /** Read the recovery copy from the backend's canonical setup_fix implementation. */
 export function localSetupFix(cause: string, bytesToFree?: number): string {
-	const python = process.env.CORSIA_E2E_PYTHON ?? resolve(root, '.venv/bin/python');
+	// Same order as playwright.config.ts, so scripts/e2e-local's venv is used.
+	const python = process.env.CORSIA_E2E_BACKEND_PYTHON || process.env.CORSIA_E2E_PYTHON || resolve(root, '.venv/bin/python');
 	return JSON.parse(execFileSync(python, ['-c', program, JSON.stringify({ cause, bytes_to_free: bytesToFree })], { cwd: backend, encoding: 'utf8' })) as string;
 }
