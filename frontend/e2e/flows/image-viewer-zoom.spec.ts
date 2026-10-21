@@ -69,6 +69,20 @@ const imageOffset = (page: Page) => page.evaluate(() => {
 const frame = (page: Page) => page.locator('.image-overlay .frame');
 const frameWidth = async (page: Page) => (await frame(page).boundingBox())!.width;
 const level = (page: Page) => page.locator('.image-overlay .level');
+/**
+ * The frame's width and the width Fit gives it inside the viewport's 24px margins, read in one layout. The pane is still
+ * widening when the viewer opens, so the two read in separate calls belong to different frames of that animation.
+ */
+const fitWidths = (page: Page) => page.evaluate((natural) => {
+	const viewport = document.querySelector('.image-overlay .viewport')!;
+	const drawn = document.querySelector('.image-overlay .frame')!.getBoundingClientRect().width;
+	const scale = Math.min(1, (viewport.clientWidth - 48) / natural.width, (viewport.clientHeight - 48) / natural.height);
+	return { drawn: Math.round(drawn), fit: Math.round(natural.width * scale) };
+}, NATURAL);
+const atFit = async (page: Page) => {
+	const { drawn, fit } = await fitWidths(page);
+	return Math.abs(drawn - fit) <= 1;
+};
 
 /**
  * The editor draws only what is near the viewport, so a thing far down the document appears once the text has scrolled to it.
@@ -127,9 +141,8 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			await expect(overlay.getByRole('button', { name: 'Fit' })).toHaveAttribute('aria-pressed', 'true');
 			// The workspace pane gives the leaf room, unless it was already that wide.
 			await expect.poll(() => leafWidth(page)).toBeGreaterThanOrEqual(Math.min(600, Math.max(widthBefore, 600)) - 1);
-			const viewport = (await page.locator('.image-overlay .viewport').boundingBox())!;
+			await expect.poll(() => atFit(page)).toBe(true);
 			const fitted = await frame(page).boundingBox();
-			expect(fitted!.width).toBeLessThanOrEqual(viewport.width - 47);
 			expect(fitted!.width / fitted!.height).toBeCloseTo(NATURAL.width / NATURAL.height, 1);
 			// The document is withdrawn: nothing of it takes a click or a key.
 			await expect(page.locator('.doc-host')).toHaveAttribute('inert', '');
@@ -157,6 +170,7 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			const region = page.locator('.image-overlay .viewport');
 			const scrollable = await region.evaluate((el) => ({ x: el.scrollWidth > el.clientWidth, y: el.scrollHeight > el.clientHeight }));
 			expect(scrollable).toEqual({ x: true, y: true });
+			const viewport = (await region.boundingBox())!;
 			const spot = { x: viewport.x + viewport.width / 2, y: viewport.y + viewport.height / 2 };
 			const panFrom = await region.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
 			await page.keyboard.down('Space');
@@ -194,11 +208,7 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			await page.keyboard.up('Control');
 			await expect.poll(() => frameWidth(page)).toBeLessThan(scaleMid - 20);
 			await overlay.getByRole('button', { name: 'Fit' }).click();
-			// Fit follows the live viewport while the canvas settles, preserving the 24px side margins.
-			await expect.poll(async () => {
-				const currentViewport = (await page.locator('.image-overlay .viewport').boundingBox())!;
-				return (await frameWidth(page)) <= currentViewport.width - 47;
-			}).toBe(true);
+			await expect.poll(() => atFit(page)).toBe(true);
 
 			// Focus ring on the bar and the reduced-motion state.
 			await page.keyboard.press('Tab');
