@@ -9,6 +9,9 @@ from typing import Any, TypeAlias
 from history.types import PortableHistoryProjection
 from llm.resolution import ExecutionTarget
 
+# Output every fork call reserves; checkpoint fit math reads the same value.
+FORK_OUTPUT_TOKENS = 16_384
+
 # (call key, model the vendor reported for the call or None, measured usage)
 ForkUsageCallback: TypeAlias = Callable[[str, str | None, dict[str, Any]], Awaitable[None]]
 
@@ -39,7 +42,7 @@ class ProviderForkRequest:
     binary: str | None = None
     warm_source: object | None = None
     mcp_config: str | None = None
-    max_output_tokens: int = 16_384
+    max_output_tokens: int = FORK_OUTPUT_TOKENS
     tool_registry: object | None = None
     dynamic_tool_specs: tuple[dict[str, Any], ...] = ()
     developer_instructions: str | None = None

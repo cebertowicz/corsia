@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal, TypeAlias
 
-from core.fork_types import ForkNotAdmitted
+from core.fork_types import FORK_OUTPUT_TOKENS, ForkNotAdmitted
 
 CheckpointTrigger = Literal["manual", "pressure", "model_switch", "idle", "agent"]
 ColdInputCallback: TypeAlias = Callable[[int | None], Awaitable[None]]
@@ -15,7 +15,7 @@ ColdInputCallback: TypeAlias = Callable[[int | None], Awaitable[None]]
 # Exact diagnostic distinguishes degraded completion from user Stop/failure.
 CHECKPOINT_CONTEXT_TRUNCATED = "checkpoint_context_truncated"
 # Output every checkpoint call reserves; soft pressure leaves room for it.
-CHECKPOINT_OUTPUT_TOKENS = 16_384
+CHECKPOINT_OUTPUT_TOKENS = FORK_OUTPUT_TOKENS
 # Covers a fork's tool-call reply and a short error; a larger result is refused.
 CHECKPOINT_TOOL_ROUND_TRIP_TOKENS = 4_096
 

@@ -364,7 +364,7 @@ async def _shutdown_runtime_services(
     pending_cancel = pending_cancel or handoff_cancel
 
     remaining_checkpoints, checkpoint_count_failure = count_shutdown_owner(
-        "checkpoint", _fork_task_count, _log_shutdown,
+        "fork", _fork_task_count, _log_shutdown,
     )
     remaining_host_access, host_access_count_failure = count_shutdown_owner(
         "host-access", _host_access_owner_count, _log_shutdown,
