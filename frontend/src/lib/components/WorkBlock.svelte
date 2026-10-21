@@ -61,6 +61,51 @@
 
 	let section: HTMLElement | undefined = $state();
 	let toggleButton: HTMLButtonElement | undefined = $state();
+	let visitDivider: HTMLDivElement | undefined = $state();
+	let dividerAttached = $state(true);
+	let lastDividerContainerWidth: number | undefined;
+	let lastToggleWidth: number | undefined;
+	const dividerVariant = $derived(entry.divider?.truncated ?? null);
+
+	// A wrapped divider starts its own flex line, left of the chip's right edge. Compare across, not
+	// down: the sticky chip can slide vertically at the pinned edge but never sideways.
+	function dividerWrapped(): boolean {
+		if (!visitDivider || !toggleButton) return false;
+		return visitDivider.offsetLeft < toggleButton.offsetLeft + toggleButton.offsetWidth;
+	}
+
+	async function updateDividerAttachment(): Promise<void> {
+		if (!section || !visitDivider || !toggleButton || !section.clientWidth || !toggleButton.offsetWidth) return;
+		// Measure in the attached layout: a standalone divider is always on its own line.
+		dividerAttached = true;
+		await tick();
+		if (visitDivider && toggleButton) dividerAttached = !dividerWrapped();
+	}
+
+	function observeDividerFit(): void {
+		if (!section || !toggleButton) return;
+		const containerWidth = section.clientWidth;
+		const toggleWidth = toggleButton.offsetWidth;
+		// The detached divider changes the block height, not the space available to the chip.
+		if (containerWidth === lastDividerContainerWidth && toggleWidth === lastToggleWidth) return;
+		lastDividerContainerWidth = containerWidth;
+		lastToggleWidth = toggleWidth;
+		void updateDividerAttachment();
+	}
+
+	// The one owner of the fit: a new divider (collapse remounts it), chip or label variant re-measures;
+	// after that only a change in the chip's width or the space beside it does.
+	$effect(() => {
+		if (dividerVariant === null || !section || !toggleButton || !visitDivider) return;
+		lastDividerContainerWidth = undefined;
+		lastToggleWidth = undefined;
+		observeDividerFit();
+		if (typeof ResizeObserver === 'undefined') return;
+		const observer = new ResizeObserver(observeDividerFit);
+		observer.observe(section);
+		observer.observe(toggleButton);
+		return () => observer.disconnect();
+	});
 
 	// A stub-backed block reads newest rows first: its rows only start at its start once the read is whole.
 	const complete = $derived(!entry.stub || (load !== undefined && !load.loading && !load.error && !runHasMore(entry.stub, load)));
@@ -119,7 +164,7 @@
 		<svg class="fold-chevron" class:expanded width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
 	</button>
 	{#if !expanded && entry.divider}
-		<VisitDivider truncated={entry.divider.truncated} attached />
+		<VisitDivider bind:element={visitDivider} truncated={entry.divider.truncated} attached={dividerAttached} />
 	{/if}
 	{#if expanded}
 		<div class="fold-details" id={bodyId}>
@@ -180,7 +225,8 @@
 	.fold-toggle:hover { color: var(--text-primary); }
 	.fold-label, .live-step { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.live-actor { color: var(--text-secondary); }
-	.transcript-fold :global(.visit-divider.attached) { flex: 1 1 auto; min-width: 0; }
+	.transcript-fold > :global(.visit-divider) { flex: 0 0 100%; }
+	.transcript-fold > :global(.visit-divider.attached) { flex: 1 1 auto; min-width: 0; }
 	.fold-details, .fold-history { flex: 0 0 100%; box-sizing: border-box; }
 	.fold-chevron { flex: 0 0 auto; color: var(--text-tertiary); transition: transform var(--dur-tight); }
 	.fold-chevron.expanded { transform: rotate(90deg); }

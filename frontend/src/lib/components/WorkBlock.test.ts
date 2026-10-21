@@ -1,5 +1,5 @@
-import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { flushSync, mount, tick, unmount } from 'svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { activeToolsByThread } from '$lib/stores/threads';
 import { _resetTurnStateForTests } from '$lib/ws/turnState';
@@ -10,6 +10,27 @@ import { _resetLiveStepForTests } from './plans/planLiveStep';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
+
+class ResizeObserverStub {
+	static callbacks: ResizeObserverCallback[] = [];
+
+	constructor(callback: ResizeObserverCallback) {
+		ResizeObserverStub.callbacks.push(callback);
+	}
+
+	observe() {}
+	disconnect() {}
+
+	static trigger(): void {
+		for (const callback of ResizeObserverStub.callbacks) callback([], {} as ResizeObserver);
+	}
+}
+
+function setGeometry(element: HTMLElement, geometry: Record<string, number>): void {
+	for (const [property, value] of Object.entries(geometry)) {
+		Object.defineProperty(element, property, { configurable: true, value });
+	}
+}
 
 function render(entries: TranscriptEntry[]): void {
 	component = mount(TranscriptContent, {
@@ -47,12 +68,15 @@ beforeEach(() => {
 	_resetTurnStateForTests();
 	_resetLiveStepForTests();
 	activeToolsByThread.set(new Map());
+	ResizeObserverStub.callbacks = [];
+	vi.stubGlobal('ResizeObserver', ResizeObserverStub);
 });
 
 afterEach(() => {
 	if (component) unmount(component);
 	component = null;
 	host.remove();
+	vi.unstubAllGlobals();
 });
 
 describe('WorkBlock structure', () => {
@@ -113,6 +137,32 @@ describe('WorkBlock new marker (F2)', () => {
 		expect(host.querySelector('[data-new-capsule]')).toBeNull();
 		expect(host.querySelector('[data-work-block]')?.contains(divider)).toBe(true);
 		expect(toggle().getAttribute('aria-label')).toMatch(/^Expand .*, new since your last visit$/);
+	});
+
+	it('makes a wrapped collapsed divider standalone, even with the pinned chip slid down, then reattaches it when the chip fits', async () => {
+		const entries = markNew(present([work('a', 1, '10:01:00'), said('reply', 5, '10:10:00')]))
+			.map((entry) => entry.kind === 'fold' ? { ...entry, divider: { truncated: false, first_seq: 1 } } : entry);
+		render(entries);
+
+		const block = host.querySelector<HTMLElement>('[data-work-block]')!;
+		const divider = host.querySelector<HTMLElement>('[data-visit-divider]')!;
+		setGeometry(block, { clientWidth: 393 });
+		// Pinned at the sticky edge, the chip has slid down over the wrapped line.
+		setGeometry(toggle(), { offsetTop: 28, offsetLeft: 0, offsetHeight: 32, offsetWidth: 393 });
+		setGeometry(divider, { offsetTop: 32, offsetLeft: 0 });
+		ResizeObserverStub.trigger();
+		await tick();
+		flushSync();
+		await tick();
+		expect(divider.classList.contains('attached')).toBe(false);
+
+		setGeometry(toggle(), { offsetTop: 0, offsetLeft: 0, offsetHeight: 32, offsetWidth: 92 });
+		setGeometry(divider, { offsetTop: 0, offsetLeft: 100 });
+		ResizeObserverStub.trigger();
+		await tick();
+		flushSync();
+		await tick();
+		expect(divider.classList.contains('attached')).toBe(true);
 	});
 
 	it('moves that divider to the first new message only after the block opens', () => {
