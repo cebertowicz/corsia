@@ -178,8 +178,8 @@
 	.fold-toggle:hover { color: var(--text-primary); }
 	.fold-label, .live-step { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.live-actor { color: var(--text-secondary); }
-	.fold-new { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; margin-left: -4px; white-space: nowrap; }
-	.fold-new i { width: 6px; height: 6px; border-radius: var(--radius-circle); background: var(--accent); }
+	.fold-new { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--space-1); margin-left: calc(-1 * var(--space-1)); white-space: nowrap; }
+	.fold-new i { width: calc(var(--space-1) * 1.5); height: calc(var(--space-1) * 1.5); border-radius: var(--radius-circle); background: var(--accent); }
 	.fold-new-word { color: var(--accent-text); }
 	.fold-details, .fold-history { flex: 0 0 100%; box-sizing: border-box; }
 	.fold-chevron { flex: 0 0 auto; color: var(--text-tertiary); transition: transform var(--dur-tight); }
