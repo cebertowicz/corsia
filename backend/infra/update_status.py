@@ -196,8 +196,8 @@ def _packaged_probe(bundle: Path) -> UpdateStatus:
 
 def _probe() -> UpdateStatus:
     """Probe git for source checkouts or the Tauri manifest for packaged apps."""
-    if os.environ.get("CORSIA_E2E_MOCK") == "1":
-        return _unknown("Update checks are disabled in E2E mock mode.")
+    if os.environ.get("CORSIA_TEST_MODE") == "1":
+        return _unknown("Update checks are disabled in test mode.")
     bundle = platform_paths.app_bundle_root()
     if bundle is not None:
         return _packaged_probe(bundle)

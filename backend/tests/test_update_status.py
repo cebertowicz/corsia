@@ -7,6 +7,12 @@ from unittest.mock import patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _real_install_environment(monkeypatch):
+    """Keep production-path tests independent of the suite-wide test-mode default."""
+    monkeypatch.delenv("CORSIA_TEST_MODE", raising=False)
+
+
 def _status(monkeypatch, replies, fetch_error=None):
     from infra import update_status as mod
 
@@ -321,16 +327,17 @@ def test_source_checkout_still_uses_git(monkeypatch):
     assert ("fetch", "--quiet", "origin", "dev") in calls
 
 
-def test_e2e_mock_never_contacts_git_or_updater_manifest(monkeypatch):
+def test_e2e_test_mode_never_contacts_git_or_updater_manifest(monkeypatch):
     from infra import update_status as mod
 
     mod.invalidate_cache()
-    monkeypatch.setenv("CORSIA_E2E_MOCK", "1")
-    monkeypatch.setattr(mod.platform_paths, "app_bundle_root", lambda: pytest.fail("E2E mock must not inspect app bundles"))
-    monkeypatch.setattr(mod, "_git", lambda *_args, **_kwargs: pytest.fail("E2E mock must not run git"))
-    monkeypatch.setattr(mod, "urlopen", lambda *_args, **_kwargs: pytest.fail("E2E mock must not fetch manifests"))
+    monkeypatch.delenv("CORSIA_E2E_MOCK", raising=False)
+    monkeypatch.setenv("CORSIA_TEST_MODE", "1")
+    monkeypatch.setattr(mod.platform_paths, "app_bundle_root", lambda: pytest.fail("E2E test mode must not inspect app bundles"))
+    monkeypatch.setattr(mod, "_git", lambda *_args, **_kwargs: pytest.fail("E2E test mode must not run git"))
+    monkeypatch.setattr(mod, "urlopen", lambda *_args, **_kwargs: pytest.fail("E2E test mode must not fetch manifests"))
 
     status = mod.update_status(force=True)
 
     assert status.available is None
-    assert status.error == "Update checks are disabled in E2E mock mode."
+    assert status.error == "Update checks are disabled in test mode."
