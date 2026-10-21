@@ -178,7 +178,7 @@ def _target_cold_admission(
     request: SwitchRequest,
     checkpoint_id: str,
 ) -> CheckpointAdmission:
-    from core.checkpoint_render import build_cold_checkpoint_admission
+    from core.checkpoint_cold_admission import build_checkpoint_admission
     from infra.database import get_db
     from llm.resolution import ExecutionTarget
 
@@ -186,7 +186,7 @@ def _target_cold_admission(
     destination = cast(ExecutionTarget, context.destination_target)
     db = get_db()
     try:
-        admission = build_cold_checkpoint_admission(
+        admission = build_checkpoint_admission(
             checkpoint_id=checkpoint_id,
             thread_id=request.thread_id,
             trigger="model_switch",

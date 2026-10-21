@@ -54,13 +54,20 @@ class CompletedItemLimit:
 
 
 async def run_session(session, capture, item_limit, cancel_event):
-    from core.checkpoint_types import ProviderCheckpointRejected
+    from core.fork_types import ProviderForkRejected
+    from core.fork_failures import ForkBinaryResolutionError
 
     async def run():
         if cancel_event.is_set():
             raise asyncio.CancelledError
-        if not await session.start():
-            raise ProviderCheckpointRejected(f"Codex {item_limit.kind_name} was not accepted")
+        try:
+            accepted = await session.start()
+        except (FileNotFoundError, PermissionError) as error:
+            if not error.filename or error.filename != getattr(session, "binary", None):
+                raise
+            raise ForkBinaryResolutionError("Codex harness executable is unavailable") from error
+        if not accepted:
+            raise ProviderForkRejected(f"Codex {item_limit.kind_name} was not accepted")
         await capture.terminal
 
     operation = asyncio.create_task(run())

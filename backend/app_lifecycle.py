@@ -195,10 +195,10 @@ async def _run_cleanup_owner(name: str, awaitable, logger):
 async def _shutdown_checkpoints(logger):
     """Stop exact checkpoint calls before their provider transports."""
     try:
-        from core.checkpoint_runtime import shutdown_checkpoint_tasks
+        from core.checkpoint_runtime import shutdown_fork_tasks
 
         return await _run_cleanup_owner(
-            "checkpoint cleanup", shutdown_checkpoint_tasks(), logger,
+            "checkpoint cleanup", shutdown_fork_tasks(), logger,
         )
     except Exception as exc:
         logger.warning(f"shutdown: checkpoint cleanup failed: {exc}")
@@ -238,10 +238,10 @@ async def _shutdown_host_processes(logger):
         configure_host_access_terminal_callback(None)
 
 
-def _checkpoint_task_count() -> int:
-    from core.checkpoint_runtime import checkpoint_task_count
+def _fork_task_count() -> int:
+    from core.checkpoint_runtime import fork_task_count
 
-    return checkpoint_task_count()
+    return fork_task_count()
 
 
 def _host_access_owner_count() -> int:
@@ -364,7 +364,7 @@ async def _shutdown_runtime_services(
     pending_cancel = pending_cancel or handoff_cancel
 
     remaining_checkpoints, checkpoint_count_failure = count_shutdown_owner(
-        "checkpoint", _checkpoint_task_count, _log_shutdown,
+        "checkpoint", _fork_task_count, _log_shutdown,
     )
     remaining_host_access, host_access_count_failure = count_shutdown_owner(
         "host-access", _host_access_owner_count, _log_shutdown,

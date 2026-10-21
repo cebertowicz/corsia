@@ -16,11 +16,12 @@ from core import checkpoint_cc_commands
 from subagents.cc_invocation import ClaudeInvocation
 from subagents.cc_sessions import resolve_claude_dir
 from core.fork_runtime import ForkKind
-from core.checkpoint_types import (
-    ColdInputCallback,
-    ProviderCheckpointRequest,
-    ProviderCheckpointResult,
+from core.fork_failures import ForkBinaryResolutionError
+from core.fork_types import (
+    ProviderForkRequest,
+    ProviderForkResult,
 )
+from core.checkpoint_types import ColdInputCallback
 from core.checkpoint_warm_request import warm_capture_refused
 
 
@@ -157,7 +158,7 @@ async def capture_warm_source(
     )
 
 
-def _checkpoint_env(source: CCWarmSource | None, request: ProviderCheckpointRequest):
+def _checkpoint_env(source: CCWarmSource | None, request: ProviderForkRequest):
     from subagents.cc_env import apply_claude_config_dir, clean_claude_env
 
     env = clean_claude_env()
@@ -165,7 +166,7 @@ def _checkpoint_env(source: CCWarmSource | None, request: ProviderCheckpointRequ
     env["CORSIA_FORK_ID"] = request.fork_id
     from core.fork_runtime import running_fork
 
-    handle = running_fork(request.thread_id, request.checkpoint_id)
+    handle = running_fork(request.thread_id, request.fork_id)
     if handle is not None:
         env["CORSIA_FORK_TOOL_TOKEN"] = handle.tool_token
     env["CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"] = "1"
@@ -179,15 +180,20 @@ def _checkpoint_env(source: CCWarmSource | None, request: ProviderCheckpointRequ
 async def _spawn_process(argv: list[str], *, cwd: str, env: dict[str, str]):
     from subagents.cc_stream import STDOUT_LIMIT
 
-    return await asyncio.create_subprocess_exec(
-        *argv,
-        cwd=cwd,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        limit=STDOUT_LIMIT,
-        env=env,
-    )
+    try:
+        return await asyncio.create_subprocess_exec(
+            *argv,
+            cwd=cwd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            limit=STDOUT_LIMIT,
+            env=env,
+        )
+    except (FileNotFoundError, PermissionError) as error:
+        if error.filename != argv[0]:
+            raise
+        raise ForkBinaryResolutionError("Claude Code harness executable is unavailable") from error
 
 
 def _snapshot(source: CCWarmSource) -> tuple[str, Path]:
@@ -207,14 +213,10 @@ def _snapshot(source: CCWarmSource) -> tuple[str, Path]:
 
 
 
-from core.checkpoint_cc_result import (
-    result as _result,
-    result_after_process as _result_after_process,
-    process_diagnostic as _process_diagnostic,
-)
+from core import checkpoint_cc_result
 
 
-async def invoke_checkpoint(request, cancel_event, *, kind: ForkKind,
+async def invoke_fork(request, cancel_event, *, kind: ForkKind,
                             on_cold_input=None, on_tool_executor=None):
     from core.fork_cc_bridge import bind_bridge
 
@@ -225,20 +227,20 @@ async def invoke_checkpoint(request, cancel_event, *, kind: ForkKind,
             if on_tool_executor is not None:
                 await on_tool_executor(executor)
 
-        return await _invoke_checkpoint(
+        return await _invoke_fork(
             request, cancel_event, kind=kind, on_cold_input=on_cold_input,
             on_tool_executor=bind_executor,
         )
 
 
-async def _invoke_checkpoint(
-    request: ProviderCheckpointRequest,
+async def _invoke_fork(
+    request: ProviderForkRequest,
     cancel_event: asyncio.Event,
     *,
     kind: ForkKind,
     on_cold_input: ColdInputCallback | None = None,
     on_tool_executor=None,
-) -> ProviderCheckpointResult:
+) -> ProviderForkResult:
     """Run either disposable fork kind through one Claude Code process."""
     if request.target.harness != "claude-code":
         raise TypeError("Claude adapter requires a Claude Code target")
@@ -288,9 +290,9 @@ async def _invoke_checkpoint(
             spawned_at=spawned_at,
         )
         if output.truncated:
-            return _result(output.stdout, truncated=True, kind_name=kind.name)
-        diagnostic = output.failure or _process_diagnostic(output.stderr, process.returncode, kind_name=kind.name)
-        return _result_after_process(output.stdout, diagnostic, process.returncode, kind_name=kind.name)
+            return checkpoint_cc_result.result(output.stdout, truncated=True, kind=kind)
+        diagnostic = output.failure or checkpoint_cc_result.process_diagnostic(output.stderr, process.returncode, kind=kind)
+        return checkpoint_cc_result.result_after_process(output.stdout, diagnostic, process.returncode, kind=kind)
     finally:
         if snapshot is not None:
             snapshot.unlink(missing_ok=True)

@@ -6,7 +6,7 @@ import json
 import pytest
 
 from doc_feedback_helpers import seed_document, seed_thread
-from doceditor import comments, feedback_batches
+from doceditor import comments, feedback_batches, review_feedback
 from infra.database import get_db, write_transaction
 from infra.time import utc_now_iso
 from plans import public
@@ -32,7 +32,7 @@ def review_env(isolated_db, monkeypatch):
 
 
 def request(db, artifact_id, *, kind="agent", reviewer="reviewer", note="Check claims", key="review-key"):
-    from doceditor import review_requests
+    from doceditor import review_feedback, review_requests
 
     actor = review_requests.ReviewActor(
         kind, "owner-token" if kind == "user" else "requester", "requester", "owner-token",
@@ -89,7 +89,7 @@ def test_request_is_node_less_and_persists_a_running_fork(review_env):
 
 
 def test_same_key_is_idempotent_but_a_late_new_note_is_refused(review_env):
-    from doceditor import review_requests
+    from doceditor import review_feedback, review_requests
 
     db, artifact_id = review_env
     first = request(db, artifact_id)
@@ -101,14 +101,14 @@ def test_same_key_is_idempotent_but_a_late_new_note_is_refused(review_env):
 
 
 def test_submit_settles_node_less_request_and_leaves_reviewer_unselected(review_env):
-    from doceditor import review_requests
+    from doceditor import review_feedback, review_requests
 
     db, artifact_id = review_env
     result = request(db, artifact_id)
     staged_comment(db, artifact_id, result["id"])
 
     with write_transaction(db, scope="test_submit_fork_feedback"):
-        pending, woken, undelivered = review_requests.submit_fork_feedback(
+        pending, woken, undelivered = review_feedback.submit_fork_feedback(
             db, result["id"], "reviewer", artifact_id,
         )
 
@@ -154,7 +154,7 @@ def test_withdrawal_resolves_seen_and_replied_comments_without_delivering(review
 
 
 def test_withdrawal_drops_only_this_forks_undelivered_batches(review_env):
-    from doceditor import review_requests
+    from doceditor import review_feedback, review_requests
 
     db, artifact_id = review_env
     first = request(db, artifact_id)
@@ -181,7 +181,7 @@ def test_withdrawal_drops_only_this_forks_undelivered_batches(review_env):
 
 
 def test_terminal_fork_escalates_once_to_the_existing_review_node(review_env):
-    from doceditor import review_requests
+    from doceditor import review_feedback, review_requests
 
     db, artifact_id = review_env
     result = request(db, artifact_id)
@@ -196,7 +196,7 @@ def test_terminal_fork_escalates_once_to_the_existing_review_node(review_env):
 
 
 def test_escalation_preserves_comments_and_passes_requesting_intent(review_env, monkeypatch):
-    from doceditor import review_requests
+    from doceditor import review_feedback, review_requests
 
     db, artifact_id = review_env
     result = request(db, artifact_id)
@@ -223,7 +223,7 @@ def test_escalation_preserves_comments_and_passes_requesting_intent(review_env, 
 
 def test_escalated_comments_wait_for_the_reviewers_own_continuation(review_env):
     """D2: neither the quiet timer nor a Turn already running delivers them."""
-    from doceditor import review_requests
+    from doceditor import review_feedback, review_requests
 
     db, artifact_id = review_env
     result = request(db, artifact_id)
@@ -254,7 +254,7 @@ def test_escalated_comments_wait_for_the_reviewers_own_continuation(review_env):
 
 def test_escalated_comments_deliver_on_the_reviewers_submit(review_env):
     """D2: the reviewer's own submit after escalation delivers and settles once."""
-    from doceditor import review_requests
+    from doceditor import review_feedback, review_requests
 
     db, artifact_id = review_env
     result = request(db, artifact_id)
@@ -273,14 +273,14 @@ def test_escalated_comments_deliver_on_the_reviewers_submit(review_env):
 
 def test_clean_submit_ends_without_comments_and_never_escalates(review_env):
     """D4: a fork that submits nothing ends clean, with a receipt, and no node."""
-    from doceditor import review_requests
+    from doceditor import review_feedback, review_requests
     from core import artifact_review_capture
 
     db, artifact_id = review_env
     result = request(db, artifact_id)
 
     with write_transaction(db, scope="test_clean_submit"):
-        pending, _woken, undelivered = review_requests.submit_fork_feedback(
+        pending, _woken, undelivered = review_feedback.submit_fork_feedback(
             db, result["id"], "reviewer", artifact_id,
         )
 

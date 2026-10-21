@@ -24,12 +24,13 @@ def _instruction(row: Any, artifact: Any, note: str) -> str:
 
 def _cold_request(request_id: str):
     """Freeze the latest installed checkpoint plus the reviewer's sealed tail."""
-    from core.checkpoint_render import build_cold_checkpoint_admission, checkpoint_binary
-    from history.projection import render_portable_history
-    from history.types import HistoryBoundary
+    from core.checkpoint_render import checkpoint_binary, render_prior_checkpoint
+    from core.fork_admission import build_cold_fork_admission
+    from core.fork_types import ColdForkSource
+    from core.artifact_review_source import bounded_review_history
     from infra.checkpoint_queries import current_installed
     from infra.database import get_db
-    from llm.resolution import resolve_thread_target
+    from llm.resolution import ModelUnavailableError, resolve_thread_target
     from subagents.codex_runtime_support import resolve_working_dir
 
     db = get_db()
@@ -41,30 +42,29 @@ def _cold_request(request_id: str):
         artifact = db.execute("SELECT * FROM artifact_identities WHERE id=?", (row["artifact_id"],)).fetchone()
         if thread is None or artifact is None:
             raise ReviewForkFailure("thread_or_artifact")
-        target = resolve_thread_target(str(thread["model"] or ""), thread_id=thread["id"], db=db)
+        try:
+            target = resolve_thread_target(str(thread["model"] or ""), thread_id=thread["id"], db=db)
+        except ModelUnavailableError as error:
+            raise ReviewForkFailure("target_unavailable") from error
         if not target.available:
             raise ReviewForkFailure("target_unavailable")
         previous = current_installed(thread["id"], db=db)
-        projection = render_portable_history(
-            thread["id"], db=db,
-            start_exclusive=HistoryBoundary.of_checkpoint(previous) if previous else None,
-        )
+        projection = bounded_review_history(thread["id"], previous, db=db)
         boundary = projection.sealed_boundary
         if boundary is None:
             raise ReviewForkFailure("no_sealed_boundary")
-        admission = build_cold_checkpoint_admission(
-            checkpoint_id=row["fork_id"], thread_id=thread["id"], trigger="artifact_review",
-            source_target=target, writer_target=target, boundary=boundary, previous=previous,
-            projection=projection, working_dir=resolve_working_dir(thread["project_id"], db),
-            reasoning_effort=thread["reasoning_effort"], binary=checkpoint_binary(target, db), db=db,
-        )
         from doceditor.review_fork_intent import review_intent
         from subagents.harness_tool_bridge import build_tool_registry
 
-        return row, replace(
-            admission.provider_request, instruction=_instruction(row, artifact, review_intent(db, row)),
-            tool_registry=build_tool_registry(admission.provider_request.working_dir),
+        protected = ({"role": "user", "content": render_prior_checkpoint(previous)},) if previous else ()
+        request = build_cold_fork_admission(
+            fork_id=row["fork_id"], thread_id=thread["id"], target=target, kind=ARTIFACT_REVIEW_KIND,
+            instruction=_instruction(row, artifact, review_intent(db, row)),
+            source=ColdForkSource(projection, protected),
+            working_dir=resolve_working_dir(thread["project_id"], db),
+            reasoning_effort=thread["reasoning_effort"], binary=checkpoint_binary(target, db),
         )
+        return row, replace(request, tool_registry=build_tool_registry(request.working_dir))
     finally:
         db.close()
 
@@ -161,18 +161,16 @@ async def _run(request_id: str, request: Any, cancel_event: asyncio.Event) -> No
             await await_or_cancel(await_checkpoint(active.id), cancel_event)
             prepared = await asyncio.to_thread(_cold_request, request_id)
             _row, request = prepared
-        from core.checkpoint_usage import bind_usage
-
-        request = await bind_usage(await _source(request), checkpoint_owned=False, source=ARTIFACT_REVIEW_KIND.name)
+        request = await ARTIFACT_REVIEW_KIND.usage_binder(await _source(request))
         if request.target.harness == "native":
-            from core.checkpoint_native_fork import invoke_checkpoint
+            from core.checkpoint_native_fork import invoke_fork
         elif request.target.harness == "claude-code":
-            from core.checkpoint_cc_fork import invoke_checkpoint
+            from core.checkpoint_cc_fork import invoke_fork
         elif request.target.harness == "codex":
-            from core.checkpoint_codex_fork import invoke_checkpoint
+            from core.checkpoint_codex_fork import invoke_fork
         else:
             raise ValueError(f"unsupported artifact-review harness: {request.target.harness}")
-        result = await invoke_checkpoint(request, cancel_event, kind=ARTIFACT_REVIEW_KIND)
+        result = await invoke_fork(request, cancel_event, kind=ARTIFACT_REVIEW_KIND)
         if not cancel_event.is_set():
             await ARTIFACT_REVIEW_KIND.end_handler(request_id, result)
     except asyncio.CancelledError:

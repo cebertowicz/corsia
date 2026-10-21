@@ -276,11 +276,14 @@ async def test_cc_bridge_passes_live_exact_turn_identity(monkeypatch):
 @pytest.mark.asyncio
 async def test_cc_checkpoint_tool_skips_canonical_turn_lineage(monkeypatch):
     import asyncio
-    from api import cc_attach
-    from core import checkpoint_runtime as runtime
+    from core import fork_cc_bridge
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
+    from core.fork_runtime import ForkHandle
+    from core.fork_tools import ForkToolBoundary
+    from subagents import harness_tool_bridge
 
     execute = AsyncMock(return_value="checkpoint result")
-    monkeypatch.setattr(cc_attach, "execute_tool", execute)
+    monkeypatch.setattr(harness_tool_bridge, "execute_tool", execute)
     live = SimpleNamespace(tool_registry=object())
 
     async def run(operation, call_id, name, arguments):
@@ -290,21 +293,25 @@ async def test_cc_checkpoint_tool_skips_canonical_turn_lineage(monkeypatch):
         return await operation()
 
     task = asyncio.create_task(asyncio.Event().wait())
-    monkeypatch.setitem(runtime._tasks, "cp-1", runtime.ForkHandle(
-        task, asyncio.Event(), "cc-thread", run,
-    ))
+    request = SimpleNamespace(fork_id="cp-1", target=SimpleNamespace(catalog_id="test-model"))
+    handle = ForkHandle(task, asyncio.Event(), "cc-thread", kind=CHECKPOINT_KIND,
+                        tool_executor=run, request=request, tool_registry=live.tool_registry)
     try:
-        result = await cc_attach._execute_admitted_tool(
-            live, "cc-thread",
+        result = await fork_cc_bridge.execute(
+            handle,
             {"name": "capture_turn", "arguments": {"value": "safe"},
              "provider_tool_call_id": "checkpoint-call"},
-            "cp-1",
         )
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
     assert result == "checkpoint result"
+    policy = execute.await_args.kwargs["fork_policy"]
+    assert isinstance(policy, ForkToolBoundary)
+    assert (policy.kind, policy.request, policy.registry, policy.cancel_event, policy.fits) == (
+        CHECKPOINT_KIND, request, live.tool_registry, handle.cancel_event, None,
+    )
     execute.assert_awaited_once_with(
         live.tool_registry,
         thread_id="cc-thread",
@@ -312,6 +319,8 @@ async def test_cc_checkpoint_tool_skips_canonical_turn_lineage(monkeypatch):
         name="capture_turn",
         arguments={"value": "safe"},
         harness="claude-code",
+        model="test-model",
+        fork_policy=policy,
     )
 
 

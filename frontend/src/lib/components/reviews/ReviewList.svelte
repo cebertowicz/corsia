@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { reviewContinuationText } from '$lib/reviewCopy';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { agentColor } from '$lib/docPresence';
 	import type { DocumentReviewState } from '$lib/docReviewState.svelte';
@@ -13,7 +14,7 @@
 				<Avatar name={request.reviewer_name} color={agentColor(request.reviewer_thread_id)} hidden size="md" />
 				<span class="who">
 					<span class="name">{request.reviewer_name}</span>
-					<span class="status">{request.outcome === 'failed' ? 'Interrupted; reviewer has the task' : request.outcome === 'ended_without_comments' ? 'Ended without comments' : `Requested ${timeLabel(request.created_at)}`}</span>
+					<span class="status">{request.outcome === 'failed' ? reviewContinuationText(request.reviewer_name) : request.outcome === 'ended_without_comments' ? 'Ended without comments' : `Requested ${timeLabel(request.created_at)}`}</span>
 					{#if model.cancelErrors[request.id]}<span class="error" role="alert">{model.cancelErrors[request.id]}</span>{/if}
 				</span>
 				{#if request.may_cancel}

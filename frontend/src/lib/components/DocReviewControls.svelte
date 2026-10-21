@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { reviewContinuationText } from '$lib/reviewCopy';
 	import { onMount, tick, untrack } from 'svelte';
 	import { on } from '$lib/ws/events';
 	import { andList, createDocumentReviewState } from '$lib/docReviewState.svelte';
@@ -18,7 +19,7 @@
 	let narrow = $state(false);
 	const shown = $derived(model.requests.slice(0, MAX_AVATARS));
 	const overflow = $derived(model.requests.length - shown.length);
-	const statusText = (request: (typeof model.requests)[number]) => request.outcome === 'failed' ? 'interrupted; reviewer has the task' : request.outcome === 'ended_without_comments' ? 'ended without comments' : 'requested';
+	const statusText = (request: (typeof model.requests)[number]) => request.outcome === 'failed' ? reviewContinuationText(request.reviewer_name) : request.outcome === 'ended_without_comments' ? 'ended without comments' : 'requested';
 	const groupLabel = $derived(`Reviewers: ${model.requests.map((request) => `${request.reviewer_name} (${statusText(request)})`).join(', ')}`);
 	$effect(() => {
 		const id = artifactId, thread = viewingThreadId, key = targetKey;

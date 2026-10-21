@@ -55,12 +55,12 @@ async def test_first_input_nonfit_never_starts_a_codex_session(monkeypatch, tmp_
     import asyncio
     from unittest.mock import Mock
     from core import checkpoint_codex_fork as codex
-    from core.checkpoint_types import ProviderCheckpointRejected
+    from core.fork_types import ProviderForkRejected
     from test_checkpoint_external_adapters import _request
 
     session = Mock()
     monkeypatch.setattr(codex, "_checkpoint_session", session)
-    with pytest.raises(ProviderCheckpointRejected, match="initial.*input"):
+    with pytest.raises(ProviderForkRejected, match="initial.*input"):
         await codex._run_app_server_checkpoint(
             _request(target(100), None, binary="unused"), None,
             source_home=tmp_path, isolated_home=tmp_path, cwd=str(tmp_path),

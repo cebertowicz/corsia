@@ -10,9 +10,11 @@ from dataclasses import replace
 import pytest
 
 from core import artifact_review_capture as capture, artifact_review_runtime as runtime
-from core.checkpoint_types import ProviderCheckpointRejected
+from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
+from core.fork_failures import ForkBinaryResolutionError, ForkCredentialsUnavailable
+from core.fork_types import ProviderForkRejected
 from core.fork_runtime import ForkHandle, ForkStepLimitReached, handles
-from doceditor import review_requests
+from doceditor import review_feedback, review_requests
 from infra.database import write_transaction
 from plans import public
 from test_doc_review_requests import request, review_env, staged_comment, stored
@@ -22,10 +24,10 @@ from test_checkpoint_provider_adapters import _request
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error,reason", [
     (ValueError("cold input does not fit"), "cold_request_build:ValueError"),
-    (ValueError("harness binary missing"), "binary_resolution"),
-    (FileNotFoundError("executable"), "binary_resolution"),
+    (ForkBinaryResolutionError("harness binary missing"), "binary_resolution"),
+    (ForkBinaryResolutionError("executable"), "binary_resolution"),
     (capture.ReviewForkFailure("no_sealed_boundary"), "no_sealed_boundary"),
-    (ProviderCheckpointRejected("missing credentials"), "missing_credentials"),
+    (ForkCredentialsUnavailable("missing credentials"), "missing_credentials"),
 ])
 async def test_start_build_failure_records_reason_and_hands_back(review_env, monkeypatch, caplog, error, reason):
     db, aid = review_env
@@ -50,8 +52,8 @@ async def test_start_build_failure_records_reason_and_hands_back(review_env, mon
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error,expected_state,reason", [
     (ForkStepLimitReached("job exhausted"), "handed_back", "limit"),
-    (ProviderCheckpointRejected("provider unavailable"), "failed", "provider_error:ProviderCheckpointRejected"),
-    (ProviderCheckpointRejected("credentials are missing"), "failed", "missing_credentials"),
+    (ProviderForkRejected("provider unavailable"), "failed", "provider_error:ProviderForkRejected"),
+    (ForkCredentialsUnavailable("credentials are missing"), "failed", "missing_credentials"),
 ])
 async def test_partial_review_limit_and_failure_are_distinct_live_tasks(review_env, error, expected_state, reason):
     db, aid = review_env
@@ -81,11 +83,11 @@ async def test_start_checks_live_and_submitted_requests_before_build(review_env,
     monkeypatch.setattr(runtime, "_cold_request", unexpected)
     event = asyncio.Event()
     task = asyncio.create_task(event.wait())
-    handles[row["fork_id"]] = ForkHandle(task, event, "reviewer")
+    handles[row["fork_id"]] = ForkHandle(task, event, "reviewer", ARTIFACT_REVIEW_KIND)
     try:
         await runtime.start(row["id"])
         with write_transaction(db, scope="test_clean_review"):
-            review_requests.submit_fork_feedback(db, row["id"], "reviewer", aid)
+            review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
         handles.pop(row["fork_id"])
         await runtime.start(row["id"])
         assert stored(db, row["id"])["state"] == "submitted"
@@ -182,4 +184,4 @@ def test_outcome_reads_lifecycle_instead_of_node_presence(review_env):
     snapshot.update(state="submitted", answered_batch_id=None)
     assert review_requests.outcome(db, snapshot) == "ended_without_comments"
     snapshot.update(state="failed", reason="no_sealed_boundary")
-    assert review_requests.outcome(db, snapshot) == "failed"
+    assert review_requests.outcome(db, snapshot) == "ended_without_comments"

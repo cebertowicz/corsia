@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from doceditor import feedback_batches
-from doceditor.review_lifecycle import transition
+from doceditor.feedback_batch_delivery import claim_and_deliver
+from doceditor.review_lifecycle import is_open, notify_change, transition
 from infra.passive_changes import append_thread_context_note
 
 
@@ -38,6 +38,28 @@ def withdraw_fork_feedback(db, request_id: str) -> None:
     )
 
 
+def close_ended_continuations(db) -> None:
+    """Resolve staged feedback after its continuing task ends without submission.
+
+    Never deliver an unsubmitted review or wake its reviewer. Retain the visible
+    comments, resolved and acknowledged, exactly as on request withdrawal.
+    """
+    from registry import models
+
+    rows = db.execute(
+        "SELECT r.* FROM doc_review_requests r WHERE r.state IN ('handed_back','failed') "
+        "AND EXISTS (SELECT 1 FROM doc_feedback_batches b WHERE b.review_request_id=r.id "
+        "AND b.state IN ('open','undelivered'))",
+    ).fetchall()
+    for row in rows:
+        if is_open(db, row):
+            continue
+        withdraw_fork_feedback(db, row["id"])
+        artifact = models.get_artifact(row["artifact_id"], db=db)
+        if artifact is not None:
+            notify_change(db, row, artifact)
+
+
 def submit_fork_feedback(db, request_id: str, reviewer_thread_id: str,
                          artifact_id: str) -> tuple[bool, list[str], list[dict]]:
     """Submit only this fork's feedback and leave its reviewer asleep."""
@@ -59,7 +81,7 @@ def submit_fork_feedback(db, request_id: str, reviewer_thread_id: str,
     woken: list[str] = []
     for row in rows:
         if row["state"] in {"open", "undelivered"}:
-            _closed, selected = feedback_batches._claim_and_deliver(
+            _closed, selected = claim_and_deliver(
                 db, str(row["id"]), from_state=row["state"],
                 reason="submit" if row["state"] == "open" else None,
             )

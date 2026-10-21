@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from core.checkpoint_types import CheckpointTargetLimited, ProviderCheckpointRequest
+from core.fork_types import ProviderForkRequest
+from core.checkpoint_types import CheckpointTargetLimited
 from infra.db_async import run_in_db
 
 
-async def refuse_limited_target(provider_request: ProviderCheckpointRequest) -> None:
+async def refuse_limited_target(provider_request: ProviderForkRequest) -> None:
     """Read the verdict for the request's own target, never the thread's bound model.
 
     A DB read only: it creates no row, arms nothing, and sits before any wait,

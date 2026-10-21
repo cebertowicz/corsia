@@ -10,9 +10,13 @@ from typing import Any
 
 from loguru import logger
 
+from core.fork_types import (
+    ProviderForkRejected,
+    ProviderForkRequest,
+)
 from core.checkpoint_types import (
-    CHECKPOINT_TOOL_ROUND_TRIP_TOKENS, ColdInputCallback, ProviderCheckpointRejected,
-    ProviderCheckpointRequest,
+    CHECKPOINT_TOOL_ROUND_TRIP_TOKENS,
+    ColdInputCallback,
 )
 
 _CONTEXT_ADMISSION_TIMEOUT_S = 30.0
@@ -45,7 +49,7 @@ async def _control_response(
     while True:
         line = await process.stdout.readline()
         if not line:
-            raise ProviderCheckpointRejected(_admission_detail(
+            raise ProviderForkRejected(_admission_detail(
                 "Claude exited before cold context admission",
                 spawned_at,
                 diagnostics["init_status"],
@@ -54,14 +58,14 @@ async def _control_response(
         try:
             record = json.loads(line)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ProviderCheckpointRejected("Claude returned invalid cold context data") from error
+            raise ProviderForkRejected("Claude returned invalid cold context data") from error
         if not isinstance(record, dict):
-            raise ProviderCheckpointRejected("Claude returned invalid cold context data")
+            raise ProviderForkRejected("Claude returned invalid cold context data")
         if record.get("type") == "system" and record.get("subtype") == "init":
             diagnostics["init_status"] = _corsia_mcp_status(record, key="mcp_servers")
             continue
         if record.get("type") in {"assistant", "result"}:
-            raise ProviderCheckpointRejected("Claude generated before cold context admission")
+            raise ProviderForkRejected("Claude generated before cold context admission")
         response = record.get("response")
         if (
             record.get("type") == "control_response"
@@ -85,10 +89,10 @@ def _has_loaded_mcp_tools(context: dict) -> bool:
     )
 
 
-def _validated_context(context: dict, request: ProviderCheckpointRequest) -> tuple[int, int]:
+def _validated_context(context: dict, request: ProviderForkRequest) -> tuple[int, int]:
     expected = request.target.expected_reported_model or request.target.transport_model
     if context.get("model") != expected:
-        raise ProviderCheckpointRejected(
+        raise ProviderForkRejected(
             "Claude cold context does not match the selected model"
         )
     tokens, window = context.get("totalTokens"), context.get("maxTokens")
@@ -96,16 +100,16 @@ def _validated_context(context: dict, request: ProviderCheckpointRequest) -> tup
         not isinstance(tokens, int) or isinstance(tokens, bool)
         or not isinstance(window, int) or isinstance(window, bool)
     ):
-        raise ProviderCheckpointRejected("Claude cold context has no valid token counts")
+        raise ProviderForkRejected("Claude cold context has no valid token counts")
     if tokens <= 0 or window <= 0 or (tokens > window and request.warm_source is None):
-        raise ProviderCheckpointRejected("Claude cold context has invalid occupancy")
+        raise ProviderForkRejected("Claude cold context has invalid occupancy")
     target_window = request.target.context_window
     if (
         isinstance(target_window, bool)
         or not isinstance(target_window, int)
         or target_window <= 0
     ):
-        raise ProviderCheckpointRejected("Claude cold request has no proved operator cap")
+        raise ProviderForkRejected("Claude cold request has no proved operator cap")
     return tokens, min(window, target_window)
 
 
@@ -145,7 +149,7 @@ async def _mcp_status(
             deadline_at,
             diagnostics,
         )
-    except (ProviderCheckpointRejected, TimeoutError):
+    except (ProviderForkRejected, TimeoutError):
         return "unavailable"
     payload = response.get("response")
     if response.get("subtype") != "success" or not isinstance(payload, dict):
@@ -154,7 +158,7 @@ async def _mcp_status(
 
 
 async def _loaded_context(
-    process: Any, request: ProviderCheckpointRequest, spawned_at: float,
+    process: Any, request: ProviderForkRequest, spawned_at: float,
 ) -> tuple[int, int]:
     """Read context under the established write-relative admission deadline."""
     diagnostics = {"init_status": "not received"}
@@ -169,7 +173,7 @@ async def _loaded_context(
             diagnostics,
         )
     except TimeoutError as error:
-        raise ProviderCheckpointRejected(_admission_detail(
+        raise ProviderForkRejected(_admission_detail(
             "Claude cold context admission timed out",
             spawned_at,
             diagnostics["init_status"],
@@ -177,10 +181,10 @@ async def _loaded_context(
         )) from error
     context = response.get("response")
     if response.get("subtype") != "success" or not isinstance(context, dict):
-        raise ProviderCheckpointRejected("Claude could not report its loaded cold context")
+        raise ProviderForkRejected("Claude could not report its loaded cold context")
     if request.mcp_config and not _has_loaded_mcp_tools(context):
         status = await _mcp_status(process, spawned_at, deadline_at, diagnostics)
-        raise ProviderCheckpointRejected(_admission_detail(
+        raise ProviderForkRejected(_admission_detail(
             "Claude did not load the configured checkpoint MCP tools",
             spawned_at,
             status,
@@ -216,7 +220,7 @@ async def prepare_warm_payload(process, request, cancel_event, spawned_at: float
     if bare is not None and fits(bare):
         logger.info(
             "placement.review_skipped thread={} checkpoint={} reason=no-room-at-fork",
-            request.thread_id, request.checkpoint_id,
+            request.thread_id, request.fork_id,
         )
         return build_user_frame(bare)
     return None
@@ -224,7 +228,7 @@ async def prepare_warm_payload(process, request, cancel_event, spawned_at: float
 
 async def prepare_cold_payload(
     process: Any,
-    request: ProviderCheckpointRequest,
+    request: ProviderForkRequest,
     cancel_event: asyncio.Event,
     on_cold_input: ColdInputCallback | None,
     spawned_at: float,

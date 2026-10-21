@@ -88,7 +88,10 @@ async def test_run_exception_reaches_escalation_handler_log(review_env, monkeypa
         raise RuntimeError("fixture bind failure")
 
     monkeypatch.setattr("core.artifact_review_runtime._source", source)
-    monkeypatch.setattr("core.checkpoint_usage.bind_usage", fail_bind)
+    from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
+
+    monkeypatch.setattr("core.artifact_review_runtime.ARTIFACT_REVIEW_KIND",
+                        replace(ARTIFACT_REVIEW_KIND, usage_binder=fail_bind))
 
     await _run(row["id"], prepared[1], asyncio.Event())
 

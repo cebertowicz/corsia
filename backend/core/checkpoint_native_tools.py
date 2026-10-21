@@ -6,7 +6,7 @@ import asyncio
 import json
 from typing import Any, NamedTuple
 
-from core.checkpoint_types import ProviderCheckpointRequest
+from core.fork_types import ProviderForkRequest
 from core.fork_runtime import ForkKind
 from tools.recorded_call import (
     CompletedToolCall,
@@ -126,7 +126,7 @@ async def run_tool_calls(
     response: Any,
     messages: list[dict[str, Any]],
     cancel_event: asyncio.Event,
-    request: ProviderCheckpointRequest,
+    request: ProviderForkRequest,
     tools: list[dict[str, Any]],
     *,
     kind: ForkKind,
@@ -159,13 +159,13 @@ async def run_tool_calls(
                         thread_id=request.thread_id,
                         invocation_id=call.id,
                         provider_tool_call_id=call.id,
-                        checkpoint_id=request.checkpoint_id,
+                        checkpoint_id=request.fork_id,
                     )
                     raise
                 completed.append(CompletedToolCall(
                     name=call.name, result=result, arguments=dict(call.arguments),
                     thread_id=request.thread_id, invocation_id=call.id,
-                    provider_tool_call_id=call.id, checkpoint_id=request.checkpoint_id,
+                    provider_tool_call_id=call.id, checkpoint_id=request.fork_id,
                 ))
             reply = {
                 "role": "tool",

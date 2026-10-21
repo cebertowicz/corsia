@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.checkpoint_cold_count import cold_input_tokens
-from core.checkpoint_resume import CheckpointAdmission
+
 from core.checkpoint_snapshot_render import (
     render_artifact_snapshot,
     render_checkpoint_dates,
@@ -186,31 +186,13 @@ def _durable_warm_boundary(thread_id: str, boundary, harness: str):
     return _warm_boundary(projection, boundary)
 
 
-def _cold_prior_narrative(checkpoint: CheckpointRecord) -> str:
+def render_prior_checkpoint(checkpoint: CheckpointRecord) -> str:
     """Carry prior prose and truncation state without copying continuity bodies."""
     warning = (
         "[CORSIA warning: Prior checkpoint was truncated at the context limit.]\n"
         if checkpoint.error == CHECKPOINT_CONTEXT_TRUNCATED else ""
     )
     return warning + "[CORSIA prior checkpoint narrative]\n" + (checkpoint.raw_result or "")
-
-
-def _cold_source(db, *, thread_id: str, projection, previous, boundary):
-    from core.checkpoint_resume import installed_replay
-    from history.projection import slice_portable_projection
-
-    source = projection
-    protected: list[dict[str, str]] = []
-    if previous is not None:
-        source = slice_portable_projection(
-            installed_replay(previous, db=db).tail,
-            through=boundary,
-        )
-        protected.append({
-            "role": "user",
-            "content": _cold_prior_narrative(previous),
-        })
-    return source, tuple(protected)
 
 
 def _codex_cold_surface(
@@ -271,7 +253,7 @@ def _cold_input_allowance(
     return allowance
 
 
-def require_cold_checkpoint_room(
+def require_cold_fork_room(
     window: int | None, instruction: str, *, writer: object, protected=(),
     output_tokens: int = CHECKPOINT_OUTPUT_TOKENS,
 ) -> None:
@@ -320,77 +302,3 @@ def fit_cold_checkpoint_input(
         protected_blocks=source.protected_blocks,
         count_tokens=count,
     )
-
-
-def build_cold_checkpoint_admission(
-    *,
-    checkpoint_id: str,
-    thread_id: str,
-    trigger: str,
-    source_target,
-    source_model: str | None = None,
-    writer_target,
-    boundary,
-    previous,
-    projection,
-    working_dir: str,
-    reasoning_effort: str | None,
-    binary: str | None,
-    mcp_config: str | None = None,
-    originating_turn_id: str | None = None,
-    db,
-) -> CheckpointAdmission:
-    """Freeze one cold source; its existing writer owns final surface admission."""
-    from core.checkpoint_types import (
-        CheckpointRequest, ColdCheckpointSource, ProviderCheckpointRequest,
-    )
-    from infra.time import utc_now_iso
-    from prompts.checkpoint import build_checkpoint_system_prompt
-
-    instruction = build_checkpoint_system_prompt()
-    source, protected = _cold_source(
-        db,
-        thread_id=thread_id,
-        projection=projection,
-        previous=previous,
-        boundary=boundary,
-    )
-    require_cold_checkpoint_room(
-        writer_target.context_window, instruction, writer=writer_target,
-        protected=protected,
-    )
-    source_harness = getattr(source_target, "harness", None) or "unknown"
-    source_model = (
-        source_model
-        or getattr(source_target, "catalog_id", None)
-        or "unknown"
-    )
-    request = CheckpointRequest(
-        id=checkpoint_id,
-        thread_id=thread_id,
-        history_epoch=boundary.history_epoch,
-        previous_generation_id=previous.id if previous else None,
-        through_seq=boundary.seq,
-        through_message_id=boundary.message_id,
-        trigger=trigger,
-        mode="cold",
-        source_harness=source_harness,
-        source_model=source_model,
-        writer_harness=writer_target.harness,
-        writer_model=writer_target.catalog_id,
-        originating_turn_id=originating_turn_id,
-        first_included_seq=None,
-        started_at=utc_now_iso(),
-    )
-    provider = ProviderCheckpointRequest(
-        fork_id=checkpoint_id,
-        thread_id=thread_id,
-        target=writer_target,
-        instruction=instruction,
-        cold_source=ColdCheckpointSource(source, protected),
-        reasoning_effort=reasoning_effort,
-        working_dir=working_dir,
-        binary=binary,
-        mcp_config=mcp_config,
-    )
-    return CheckpointAdmission(request, provider)

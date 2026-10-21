@@ -15,7 +15,7 @@ from test_checkpoint_external_adapters import FakeProcess, _request, _target
 async def test_warm_instruction_waits_for_loaded_capacity(loaded, truncated, isolated_db):
     seed_vendor_checkpoint_thread([_target("claude-code")])
     from core.checkpoint_cc_io import communicate_checkpoint
-    from core.checkpoint_types import ProviderCheckpointRejected
+    from core.fork_types import ProviderForkRejected
 
     writes = []
 
@@ -34,7 +34,7 @@ async def test_warm_instruction_waits_for_loaded_capacity(loaded, truncated, iso
     target = replace(_target("claude-code"), context_window=100_000)
     request = _request(target, object(), binary="unused")
     if truncated:
-        with pytest.raises(ProviderCheckpointRejected, match="initial.*input"):
+        with pytest.raises(ProviderForkRejected, match="initial.*input"):
             await asyncio.wait_for(communicate_checkpoint(process, request, asyncio.Event(), spawned_at=0.0), 2)
     else:
         output = await asyncio.wait_for(communicate_checkpoint(process, request, asyncio.Event(), spawned_at=0.0), 2)

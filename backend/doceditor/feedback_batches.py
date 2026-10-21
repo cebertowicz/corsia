@@ -9,7 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from doceditor import comment_notifications, feedback_comments, feedback_delivery, feedback_edits, review_requests
+from doceditor import comment_notifications, feedback_comments, feedback_edits, review_feedback
+from doceditor.feedback_batch_delivery import claim_and_deliver
 from doceditor.feedback_state import (
     USER_AUTHOR_ID,
     annotate_pane,
@@ -202,7 +203,7 @@ def record_comment(
             for recipient in feedback_comments.recipients(db, comment)
         ]
         if submit and comment["author_kind"] == "agent" and review_request_id is not None:
-            pending, woken, failures = review_requests.submit_fork_feedback(
+            pending, woken, failures = review_feedback.submit_fork_feedback(
                 db, review_request_id, feedback_comments.author_id(comment), comment["artifact_id"],
             )
             return {"batch_ids": batch_ids, "woken": woken, "undelivered": failures}
@@ -226,54 +227,16 @@ def record_comment(
     return {"batch_ids": batch_ids, "undelivered_batches": notices, "woken": woken}
 
 
-def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None) -> tuple[bool, tuple[str, ...]]:
-    now = _now()
-    closed_sql = "closed_reason=?" if reason is not None else "closed_reason=closed_reason"
-    params: list[Any] = [now]
-    if reason is not None:
-        params.append(reason)
-    params.extend([batch_id, from_state])
-    changed = db.execute(
-        f"""UPDATE doc_feedback_batches SET state='delivered',updated_at=?,
-            {closed_sql},undelivered_reason=NULL,attempts=attempts+1
-            WHERE id=? AND state=?""",
-        params,
-    )
-    if changed.rowcount == 0:
-        return False, ()
-    batch = db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
-    delivered = feedback_delivery.deliver_claimed(db, batch)
-    review_woken: tuple[str, ...] = ()
-    if delivered.reason is not None:
-        db.execute(
-            """UPDATE doc_feedback_batches
-               SET state='undelivered',undelivered_reason=?,delivery_outcome=NULL,
-                   updated_at=? WHERE id=?""",
-            (delivered.reason, now, batch_id),
-        )
-    else:
-        if delivered.outcome is None:
-            raise RuntimeError("successful feedback delivery has no typed outcome")
-        db.execute(
-            """UPDATE doc_feedback_batches
-               SET delivered_node_id=?,delivery_outcome=?,updated_at=? WHERE id=?""",
-            (delivered.node_id, delivered.outcome, now, batch_id),
-        )
-        db.execute("DELETE FROM doc_feedback_edit_items WHERE batch_id=?", (batch_id,))
-        review_woken = review_requests.settle_for_batch(db, batch)
-    return True, delivered.woken_threads + review_woken
-
-
 def close_batch(db, batch_id: str, reason: str) -> tuple[bool, tuple[str, ...]]:
     """Conditionally close and deliver one open batch exactly once."""
     with write_transaction(db, scope="close_doc_feedback_batch") as connection:
-        return _claim_and_deliver(connection, batch_id, from_state="open", reason=reason)
+        return claim_and_deliver(connection, batch_id, from_state="open", reason=reason)
 
 
 def retry_batch(db, batch_id: str) -> tuple[bool, tuple[str, ...]]:
     """Retry one undelivered batch without creating another node."""
     with write_transaction(db, scope="retry_doc_feedback_batch") as connection:
-        return _claim_and_deliver(connection, batch_id, from_state="undelivered", reason=None)
+        return claim_and_deliver(connection, batch_id, from_state="undelivered", reason=None)
 
 
 def close_for_document(
@@ -304,11 +267,12 @@ def close_for_document(
 def close_due(now: str, *, db=None) -> list[str]:
     """Deliver every due batch; one that raises rolls back alone, is logged, and retries next pass.
 
-    A review request's batch never closes on a timer: only its reviewer's
-    submit or continuing Turn delivers it.
+    Active review batches wait for submission or the continuing Turn. Ended
+    continuations resolve their remaining undelivered comments without delivery.
     """
     deliveries: list[tuple[str, str]] = []
     with write_transaction(db, scope="close_due_doc_feedback") as connection:
+        review_feedback.close_ended_continuations(connection)
         rows = connection.execute(
             """SELECT id,artifact_id,author_kind,closed_reason FROM doc_feedback_batches
                WHERE state='open' AND closes_at<=? AND (review_request_id IS NULL OR EXISTS (

@@ -5,8 +5,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from core.checkpoint_types import CHECKPOINT_CONTEXT_TRUNCATED, ProviderCheckpointRejected, ProviderCheckpointResult
-from core.fork_runtime import ForkStepLimitReached
+from core.fork_types import (
+    ProviderForkRejected,
+    ProviderForkResult,
+)
+from core.checkpoint_types import CHECKPOINT_CONTEXT_TRUNCATED
+from core.fork_runtime import ForkKind, ForkStepLimitReached
 from infra.provider_usage import TokenUsage, checkpoint_receipt, from_anthropic
 from subagents.provider_context_limits import is_provider_context_limit
 
@@ -35,7 +39,7 @@ def _result_body(record: dict[str, Any], *, has_body: bool) -> str:
     return terminal if not has_body and isinstance(terminal, str) else ""
 
 
-def result(stdout: bytes, *, truncated: bool = False, kind_name: str = "checkpoint") -> ProviderCheckpointResult:
+def result(stdout: bytes, *, kind: ForkKind, truncated: bool = False) -> ProviderForkResult:
     bodies: list[str] = []
     usage, diagnostic = None, None
     calls: dict[str, TokenUsage] = {}
@@ -56,39 +60,39 @@ def result(stdout: bytes, *, truncated: bool = False, kind_name: str = "checkpoi
                 calls[str(message.get("id") or f"unidentified-{len(calls)}")] = measured
         if record.get("type") == "result":
             if record.get("subtype") == "error_max_turns":
-                raise ForkStepLimitReached(f"{kind_name} reached its Claude Code turn limit")
+                raise ForkStepLimitReached(f"{kind.name} reached its Claude Code turn limit")
             usage = record.get("usage") if isinstance(record.get("usage"), dict) else usage
             if record.get("is_error") is True:
                 terminal = record.get("result")
                 diagnostic = str(terminal) if terminal is not None else "result error"
                 truncated = truncated or is_provider_context_limit(record)
-                if kind_name != "checkpoint" and not truncated:
-                    raise ProviderCheckpointRejected(f"{kind_name}: {diagnostic}")
+                if not truncated:
+                    kind.provider_failure("claude-code", diagnostic)
     if not (body := "\n".join(bodies)).strip():
         detail = f"{CHECKPOINT_CONTEXT_TRUNCATED}: {diagnostic or 'no narrative'}" if truncated else None
-        raise ProviderCheckpointRejected(detail or f"Claude Code {kind_name} produced no body")
+        raise ProviderForkRejected(detail or f"Claude Code {kind.name} produced no body")
     measured = from_anthropic(usage)
     if measured is None and calls:
         measured = sum(calls.values(), TokenUsage())
-    return ProviderCheckpointResult(body, checkpoint_receipt(measured), CHECKPOINT_CONTEXT_TRUNCATED if truncated else diagnostic)
+    return ProviderForkResult(body, checkpoint_receipt(measured), CHECKPOINT_CONTEXT_TRUNCATED if truncated else diagnostic)
 
 
-def process_diagnostic(stderr: bytes | str, returncode: int | None, *, kind_name: str = "checkpoint") -> str | None:
+def process_diagnostic(stderr: bytes | str, returncode: int | None, *, kind: ForkKind) -> str | None:
     detail = stderr.decode("utf-8", "replace").strip() if isinstance(stderr, bytes) else str(stderr or "").strip()
     if detail or returncode in {None, 0}:
         return detail or None
-    return f"Claude Code {kind_name} process exited with code {returncode}"
+    return f"Claude Code {kind.name} process exited with code {returncode}"
 
 
-def result_after_process(stdout: bytes, diagnostic: str | None, returncode: int | None, *, kind_name: str = "checkpoint") -> ProviderCheckpointResult:
+def result_after_process(stdout: bytes, diagnostic: str | None, returncode: int | None, *, kind: ForkKind) -> ProviderForkResult:
     truncated = bool(diagnostic and returncode not in {None, 0} and is_provider_context_limit(diagnostic))
     try:
-        parsed = result(stdout, truncated=truncated, kind_name=kind_name)
-    except ProviderCheckpointRejected as error:
-        if diagnostic and str(error) == f"Claude Code {kind_name} produced no body":
-            raise ProviderCheckpointRejected(diagnostic) from error
+        parsed = result(stdout, truncated=truncated, kind=kind)
+    except ProviderForkRejected as error:
+        if diagnostic and str(error) == f"Claude Code {kind.name} produced no body":
+            raise ProviderForkRejected(diagnostic) from error
         raise
     if parsed.diagnostic == CHECKPOINT_CONTEXT_TRUNCATED or not diagnostic or diagnostic == parsed.diagnostic:
         return parsed
     combined = f"{parsed.diagnostic}; {diagnostic}" if parsed.diagnostic else diagnostic
-    return ProviderCheckpointResult(parsed.raw_body, parsed.usage, combined)
+    return ProviderForkResult(parsed.raw_body, parsed.usage, combined)

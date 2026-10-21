@@ -7,8 +7,11 @@ from typing import Any
 from uuid import uuid4
 
 from core.checkpoint_fit import ColdFoldInputTooLarge
+from core.fork_types import ProviderForkRequest
 from core.checkpoint_types import (
-    CLOUD_OFF_CHECKPOINT_MESSAGE, CheckpointRequest, CheckpointTrigger, ProviderCheckpointRequest,
+    CLOUD_OFF_CHECKPOINT_MESSAGE,
+    CheckpointRequest,
+    CheckpointTrigger,
 )
 from history.types import HistoryBoundary
 from infra.checkpoint_admission import IDLE_MIN_DELTA_TOKENS, admits_idle_checkpoint
@@ -125,13 +128,13 @@ def _build_manual_cold_admission(
     context: CheckpointPreparationContext,
 ):
     """Build manual cold admission through the shared checkpoint renderer."""
-    from core.checkpoint_render import build_cold_checkpoint_admission
+    from core.checkpoint_cold_admission import build_checkpoint_admission
     from history.projection import slice_portable_projection
     from infra.database import get_db
 
     db = get_db()
     try:
-        return build_cold_checkpoint_admission(
+        return build_checkpoint_admission(
             checkpoint_id=checkpoint_id,
             thread_id=context.thread_id,
             trigger="manual",
@@ -189,7 +192,7 @@ async def prepare_external_checkpoint(
     user_id: str,
     *,
     trigger: CheckpointTrigger,
-) -> tuple[CheckpointRequest, ProviderCheckpointRequest] | None:
+) -> tuple[CheckpointRequest, ProviderForkRequest] | None:
     """Prepare a requested external checkpoint without starting its operation."""
     from core.checkpoint_render import capture_warm_checkpoint_source
     from infra.db_async import run_in_db
@@ -241,7 +244,7 @@ async def prepare_external_checkpoint(
         first_included_seq=None,
         started_at=utc_now_iso(),
     )
-    provider = ProviderCheckpointRequest(
+    provider = ProviderForkRequest(
         fork_id=checkpoint_id,
         thread_id=thread_id,
         target=context.target,

@@ -19,14 +19,17 @@ from core.checkpoint_native_tools import (
     run_tool_calls as _run_tool_calls,
 )
 from core.fork_runtime import ForkKind, ForkStepLimitError, ForkStepLimitReached
+from core.fork_failures import ForkCredentialsUnavailable
+from core.fork_types import (
+    ProviderForkRejected,
+    WarmForkUnusable,
+    ProviderForkRequest,
+    ProviderForkResult,
+)
 from core.checkpoint_types import (
     CHECKPOINT_CONTEXT_TRUNCATED,
     CHECKPOINT_TOOL_ROUND_TRIP_TOKENS,
     ColdInputCallback,
-    ProviderCheckpointRejected,
-    WarmForkUnusable,
-    ProviderCheckpointRequest,
-    ProviderCheckpointResult,
 )
 
 
@@ -122,7 +125,7 @@ def _provider_params(model: str) -> dict[str, Any]:
 
 
 def _fit_cold_input(
-    request: ProviderCheckpointRequest, tools: list[dict[str, Any]],
+    request: ProviderForkRequest, tools: list[dict[str, Any]],
 ) -> Any:
     """Count the tool surface and fit the cold input; blocking, run off the loop."""
     from core.checkpoint_cold_count import cold_input_tokens
@@ -136,7 +139,7 @@ def _fit_cold_input(
 
 
 async def _messages_and_tools(
-    request: ProviderCheckpointRequest,
+    request: ProviderForkRequest,
     agent: Any,
     kind: ForkKind,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int | None]:
@@ -172,7 +175,7 @@ async def _messages_and_tools(
 
 
 async def warm_input_fits(
-    request: ProviderCheckpointRequest, kind: ForkKind,
+    request: ProviderForkRequest, kind: ForkKind,
 ) -> bool:
     """Whether a warm fork's first input fits, checked before it is admitted.
 
@@ -208,7 +211,7 @@ async def _complete(request, messages, tools, model, provider, cancel_event):
 
 async def _truncated_result(
     bodies, usage_calls, path, iteration, request, messages, tools, response,
-) -> ProviderCheckpointResult:
+) -> ProviderForkResult:
     """A partial body keeps the exact truncation marker; an empty one fails, named.
 
     A fold with no narrative has nothing to install, so it never returns as a
@@ -216,11 +219,11 @@ async def _truncated_result(
     with the path and its numbers dropped (#2514, #2116).
     """
     if bodies:
-        return ProviderCheckpointResult(
+        return ProviderForkResult(
             "\n".join(bodies), {"calls": usage_calls}, CHECKPOINT_CONTEXT_TRUNCATED,
         )
     room = await asyncio.to_thread(input_room, request, messages, tools)
-    raise ProviderCheckpointRejected(
+    raise ProviderForkRejected(
         f"{CHECKPOINT_CONTEXT_TRUNCATED}: path={path} iteration={iteration} "
         f"counted={room.counted} bound={room.bound} unusable={room.unusable} "
         f"finish_reason={getattr(response, 'finish_reason', None)} "
@@ -228,22 +231,29 @@ async def _truncated_result(
     )
 
 
-def _initial_input_refusal(request: ProviderCheckpointRequest, kind: ForkKind) -> ProviderCheckpointRejected:
+def _initial_input_refusal(request: ProviderForkRequest, kind: ForkKind) -> ProviderForkRejected:
     """Refuse an initial overflow; only a warm fork can be corrected to cold.
 
     A fitted cold input that still does not fit is terminal.
     """
-    refusal = WarmForkUnusable if request.warm_source is not None else ProviderCheckpointRejected
+    refusal = WarmForkUnusable if request.warm_source is not None else ProviderForkRejected
     return refusal(f"Native {kind.name} initial input exceeds selected context window")
 
 
-async def invoke_checkpoint(
-    request: ProviderCheckpointRequest,
+def _provider_failure(response, kind: ForkKind) -> None:
+    detail = response.content or f"Native {kind.name} provider call failed"
+    if response.endpoint_failure == "auth":
+        raise ForkCredentialsUnavailable(detail)
+    kind.provider_failure("native", detail)
+
+
+async def invoke_fork(
+    request: ProviderForkRequest,
     cancel_event: asyncio.Event,
     *,
     kind: ForkKind,
     on_cold_input: ColdInputCallback | None = None,
-) -> ProviderCheckpointResult:
+) -> ProviderForkResult:
     """Run a disposable fork of either kind through the Native tool loop."""
     if request.target.harness != "native":
         raise TypeError("Native adapter requires a Native target")
@@ -288,9 +298,7 @@ async def invoke_checkpoint(
                         partial_bodies, usage_calls, "ii_provider_context_limit",
                         _iteration, request, messages, tools, response,
                     )
-                raise ProviderCheckpointRejected(
-                    response.content or f"Native {kind.name} provider call failed"
-                )
+                _provider_failure(response, kind)
             if response.has_tool_calls:
                 if isinstance(response.content, str) and response.content.strip():
                     partial_bodies.append(response.content)
@@ -310,10 +318,10 @@ async def invoke_checkpoint(
             if not (isinstance(body, str) and body.strip()):
                 body = response.reasoning_content
             if isinstance(body, str) and body.strip():
-                return ProviderCheckpointResult(body, {"calls": usage_calls})
+                return ProviderForkResult(body, {"calls": usage_calls})
             break
         else:
             raise ForkStepLimitReached(f"{kind.name} reached its Native step limit")
     finally:
         state._current_thread_id.reset(thread_token)
-    raise ProviderCheckpointRejected(f"Native {kind.name} produced no body")
+    raise ProviderForkRejected(f"Native {kind.name} produced no body")

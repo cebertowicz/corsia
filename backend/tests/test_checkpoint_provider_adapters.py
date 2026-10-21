@@ -13,7 +13,7 @@ import pytest
 
 from core import checkpoint_cc_commands
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
-from core.checkpoint_types import ProviderCheckpointRequest
+from core.fork_types import ProviderForkRequest
 from core.checkpoint_fit import ColdFoldInput
 from history.types import HistoryBoundary
 from llm.resolution import ExecutionTarget
@@ -49,7 +49,7 @@ def vendor_thread(isolated_db):
 
 
 def _request(source):
-    return ProviderCheckpointRequest(
+    return ProviderForkRequest(
         fork_id="checkpoint-1",
         thread_id="thread-1",
         target=_target(),
@@ -119,7 +119,7 @@ def test_native_warm_fit_uses_provider_anchor_plus_only_added_delta(monkeypatch)
 async def test_native_warm_initial_fit_reserves_max_output_before_provider_call(monkeypatch):
     """A warm fork that cannot fit its generation budget must correct before calling."""
     from core import checkpoint_native_fork as native
-    from core.checkpoint_types import WarmForkUnusable
+    from core.fork_types import WarmForkUnusable
     from core.token_estimation import TokenMeasurement
 
     source = _source(
@@ -147,7 +147,7 @@ async def test_native_warm_initial_fit_reserves_max_output_before_provider_call(
     monkeypatch.setattr(native, "_provider_params", lambda _model: {"model": "wire"})
 
     with pytest.raises(WarmForkUnusable):
-        await native.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+        await native.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
 
 @pytest.mark.asyncio
@@ -251,7 +251,7 @@ async def test_native_cold_fork_never_offers_a_tool_it_can_only_refuse(monkeypat
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda _model: {"model": "wire"})
 
-    result = await native.invoke_checkpoint(_request(None), asyncio.Event(), kind=CHECKPOINT_KIND)
+    result = await native.invoke_fork(_request(None), asyncio.Event(), kind=CHECKPOINT_KIND)
 
     from core.checkpoint_render import usable_result
 
@@ -274,7 +274,7 @@ async def test_native_cold_fold_at_its_allowance_completes_edit_then_narrative(m
     from core import checkpoint_native_fork as native
     from core.checkpoint_cold_count import cold_input_tokens
     from core.checkpoint_native_tools import CHECKPOINT_TOOL_NAME
-    from core.checkpoint_types import ColdCheckpointSource
+    from core.fork_types import ColdForkSource
 
     window, max_output = 100_000, 8_000
     turns = [
@@ -284,7 +284,7 @@ async def test_native_cold_fold_at_its_allowance_completes_edit_then_narrative(m
     selection = make_exact_replay_selection("thread-1", turns)
     request = replace(
         _request(None),
-        cold_source=ColdCheckpointSource(selection.tail, ()),
+        cold_source=ColdForkSource(selection.tail, ()),
         target=replace(_target(), context_window=window),
         max_output_tokens=max_output,
     )
@@ -318,7 +318,7 @@ async def test_native_cold_fold_at_its_allowance_completes_edit_then_narrative(m
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda _model: {"model": "wire"})
 
-    result = await native.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+    result = await native.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
     first = calls[0]
     fitted = cold_input_tokens(first["messages"], request.target) + cold_input_tokens(
@@ -404,7 +404,7 @@ async def test_native_warm_capture_reuses_prefix_tools_and_tool_loop(monkeypatch
 
     outer = state._current_thread_id.set("outer-thread")
     try:
-        result = await native.invoke_checkpoint(_request(source), asyncio.Event(), kind=CHECKPOINT_KIND)
+        result = await native.invoke_fork(_request(source), asyncio.Event(), kind=CHECKPOINT_KIND)
         assert state._current_thread_id.get(None) == "outer-thread"
     finally:
         state._current_thread_id.reset(outer)
@@ -430,7 +430,7 @@ async def test_native_warm_capture_reuses_prefix_tools_and_tool_loop(monkeypatch
 async def test_native_provider_failure_cannot_be_installed_as_checkpoint(monkeypatch):
     """A transport failure is not model output, even when it carries text."""
     from core import checkpoint_native_fork as native
-    from core.checkpoint_types import ProviderCheckpointRejected
+    from core.fork_types import ProviderForkRejected
 
     response = LLMResponse(
         content="Error calling LLM: Cannot load selected model",
@@ -444,8 +444,8 @@ async def test_native_provider_failure_cannot_be_installed_as_checkpoint(monkeyp
     monkeypatch.setattr(native, "_chat_completion", lambda **_: _async_value(response))
     monkeypatch.setattr(native, "_provider_params", lambda _model: {})
 
-    with pytest.raises(ProviderCheckpointRejected, match="Cannot load selected model"):
-        await native.invoke_checkpoint(_request(_source(native)), asyncio.Event(), kind=CHECKPOINT_KIND)
+    with pytest.raises(ProviderForkRejected, match="Cannot load selected model"):
+        await native.invoke_fork(_request(_source(native)), asyncio.Event(), kind=CHECKPOINT_KIND)
 
 
 @pytest.mark.asyncio
@@ -468,7 +468,7 @@ async def test_native_checkpoint_cancel_cancels_exact_provider_call(monkeypatch)
     monkeypatch.setattr(native, "_provider_params", lambda _model: {})
     cancel = asyncio.Event()
     operation = asyncio.create_task(
-        native.invoke_checkpoint(_request(_source(native)), cancel, kind=CHECKPOINT_KIND)
+        native.invoke_fork(_request(_source(native)), cancel, kind=CHECKPOINT_KIND)
     )
     await asyncio.sleep(0)
     cancel.set()
@@ -505,7 +505,7 @@ async def test_cc_usable_body_retains_process_exit_diagnostic(monkeypatch, vendo
     monkeypatch.setattr(cc, "_spawn_process", spawn)
     request = replace(_request(None), target=_target("claude-code"))
 
-    result = await cc.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+    result = await cc.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
     assert result.raw_body == "paid body"
     assert result.diagnostic == "quota/auth process terminal"
@@ -539,7 +539,7 @@ async def test_cc_process_context_limit_retains_partial_body(monkeypatch, vendor
     monkeypatch.setattr(cc, "_spawn_process", spawn)
     request = replace(_request(None), target=_target("claude-code"))
 
-    result = await cc.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+    result = await cc.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert result.raw_body == "partial body"
     assert result.diagnostic == "checkpoint_context_truncated"
 
@@ -618,7 +618,7 @@ async def test_cc_registered_warm_recreates_then_removes_seed(tmp_path, monkeypa
 
     monkeypatch.setattr(cc, "_spawn_process", spawn)
     request = replace(_request(source), target=_target("claude-code"), binary="claude")
-    result = await cc.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+    result = await cc.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
     assert result.raw_body == "checkpoint"
     assert observed["text"] == "restored seed"

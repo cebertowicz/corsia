@@ -97,7 +97,7 @@ async def test_cc_cutoff_drains_partial_stdout_and_never_releases_oversized_resu
 ):
     seed_vendor_checkpoint_thread([_target("claude-code")])
     from core.checkpoint_cc_io import communicate_checkpoint
-    from core.checkpoint_types import ProviderCheckpointRejected
+    from core.fork_types import ProviderForkRejected
 
     records = [
         {"type": "assistant", "message": {
@@ -143,7 +143,7 @@ async def test_cc_cutoff_drains_partial_stdout_and_never_releases_oversized_resu
             return process
 
         monkeypatch.setattr(cc, "_spawn_process", spawn)
-        operation = asyncio.create_task(cc.invoke_checkpoint(
+        operation = asyncio.create_task(cc.invoke_fork(
             request, asyncio.Event(), on_tool_executor=register, kind=CHECKPOINT_KIND,
         ))
     else:
@@ -152,7 +152,7 @@ async def test_cc_cutoff_drains_partial_stdout_and_never_releases_oversized_resu
         ))
     try:
         await asyncio.wait_for(registered.wait(), 2)
-        with pytest.raises(ProviderCheckpointRejected, match="context limit"):
+        with pytest.raises(ProviderForkRejected, match="context limit"):
             await asyncio.wait_for(executor(execute, "edit", "edit", {}), 3)
         assert process.returncode is not None  # Death precedes the withheld reply.
         result = await asyncio.wait_for(operation, 3)

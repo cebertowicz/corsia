@@ -220,9 +220,10 @@ def test_batch_never_passes_the_token_cap_however_much_room_there_is(
 
 
 def _checkpoint_request(window: int, instruction: str = "Summarize."):
-    from core.checkpoint_types import CHECKPOINT_OUTPUT_TOKENS, ProviderCheckpointRequest
+    from core.fork_types import ProviderForkRequest
+    from core.checkpoint_types import CHECKPOINT_OUTPUT_TOKENS
 
-    return ProviderCheckpointRequest(
+    return ProviderForkRequest(
         fork_id="cp-1", thread_id="thread-1",
         target=SimpleNamespace(context_window=window),
         instruction=instruction, reasoning_effort=None, working_dir=".",

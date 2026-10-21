@@ -101,7 +101,7 @@ async def _start_checkpoint(
             )
         return None
     from core.checkpoint_runtime import (
-        CheckpointNotAdmitted,
+        ForkNotAdmitted,
         CheckpointTargetLimited,
         request_checkpoint,
     )
@@ -110,7 +110,7 @@ async def _start_checkpoint(
     try:
         admission = await boundary.prepare_checkpoint(checkpoint_id, required)
         if admission is None:
-            raise CheckpointNotAdmitted("checkpoint admission is unavailable")
+            raise ForkNotAdmitted("checkpoint admission is unavailable")
         _validate_admission(boundary, checkpoint_id, admission)
         return await request_checkpoint(admission.request, admission.provider_request)
     except OptionalCheckpointSkipped as skipped:
@@ -129,7 +129,7 @@ async def _start_checkpoint(
             boundary.thread_id, error,
         )
         return None
-    except (ColdFoldInputTooLarge, CheckpointNotAdmitted) as error:
+    except (ColdFoldInputTooLarge, ForkNotAdmitted) as error:
         if required:
             raise boundary.unavailable(str(error)) from error
         logger.warning("Optional checkpoint unavailable for {}: {}", boundary.thread_id, error)

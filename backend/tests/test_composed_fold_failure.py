@@ -40,7 +40,7 @@ def _target(harness: str, *, context_window: int) -> ExecutionTarget:
 
 def _cold_admission(monkeypatch, harness: str, *, window: int = WINDOW):
     """Build the real cold admission this writer would send."""
-    from core.checkpoint_render import build_cold_checkpoint_admission
+    from core.checkpoint_cold_admission import build_checkpoint_admission
 
     monkeypatch.setattr("infra.continuity_store.active_entries", lambda *_a: {})
     monkeypatch.setattr(
@@ -49,7 +49,7 @@ def _cold_admission(monkeypatch, harness: str, *, window: int = WINDOW):
     )
     target = _target(harness, context_window=window)
     projection = cold_source().projection
-    return build_cold_checkpoint_admission(
+    return build_checkpoint_admission(
         checkpoint_id="checkpoint-1", thread_id="held-thread",
         trigger="pressure", source_target=target, writer_target=target,
         boundary=projection.sealed_boundary, previous=None,

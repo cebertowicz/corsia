@@ -6,10 +6,10 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from core.fork_types import ProviderForkRequest
 from core.checkpoint_types import (
     CheckpointRequest,
     CheckpointTrigger,
-    ProviderCheckpointRequest,
 )
 from core.turn_core import TurnIdentity
 from history.types import HistoryBoundary
@@ -21,7 +21,7 @@ class CheckpointAdmission:
     """One complete checkpoint operation prepared at a provider boundary."""
 
     request: CheckpointRequest
-    provider_request: ProviderCheckpointRequest
+    provider_request: ProviderForkRequest
 
 
 def build_warm_request(
@@ -105,7 +105,7 @@ def complete_warm_admission(
     """Pair frozen provenance with one already-captured warm provider source."""
     from prompts.checkpoint import build_checkpoint_system_prompt
 
-    provider = ProviderCheckpointRequest(
+    provider = ProviderForkRequest(
         fork_id=request.id,
         thread_id=request.thread_id,
         target=target,

@@ -324,7 +324,7 @@ async def test_cc_tool_boundary_swap_survives_its_retired_callers_disconnect(
         server.should_exit = True
         await asyncio.wait_for(serve_task, 10)
         await asyncio.gather(*stops, return_exceptions=True)
-        await runtime.shutdown_checkpoint_tasks()
+        await runtime.shutdown_fork_tasks()
         for session in [old.session, *launches]:
             await session.terminate()
         _LIVE.reset()

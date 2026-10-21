@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from core import checkpoint_runtime
-from core.checkpoint_types import ProviderCheckpointResult
+from core.fork_types import ProviderForkResult
 from infra import checkpoints
 from infra.database import get_db
 from infra.turn_usage_receipts import PLAN_FIELDS
@@ -34,7 +34,7 @@ async def test_usage_callback_freezes_task_and_survives_terminal_failure(isolate
         })
         raise RuntimeError("provider failed after paid call")
 
-    monkeypatch.setattr(checkpoint_native_fork, "invoke_checkpoint", invoke)
+    monkeypatch.setattr(checkpoint_native_fork, "invoke_fork", invoke)
     with pytest.raises(RuntimeError, match="provider failed after paid call"):
         await checkpoint_runtime._invoke(_provider("spend", "cp-spend"), asyncio.Event())
     db = get_db()
@@ -68,9 +68,9 @@ async def test_accounting_failure_reports_defect_and_keeps_provider_body(isolate
 
     async def invoke(request, _cancel, **_kwargs):
         await request.on_usage("paid", "native/test", {"total_tokens": 150})
-        return ProviderCheckpointResult("keep paid checkpoint", None)
+        return ProviderForkResult("keep paid checkpoint", None)
 
-    monkeypatch.setattr(checkpoint_native_fork, "invoke_checkpoint", invoke)
+    monkeypatch.setattr(checkpoint_native_fork, "invoke_fork", invoke)
     result = await checkpoint_runtime._invoke(_provider("broken-spend", "cp-broken"), asyncio.Event())
     assert result.raw_body == "keep paid checkpoint"
     assert len(defects) == 1

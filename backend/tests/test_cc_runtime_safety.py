@@ -121,7 +121,7 @@ async def test_detached_checkpoint_does_not_touch_live_or_durable_cc_state(
     import asyncio
 
     from core import checkpoint_cc_fork as checkpoint_fork
-    from core.checkpoint_types import ProviderCheckpointRequest
+    from core.fork_types import ProviderForkRequest
     from native_checkpoint_fixtures import cold_source
     from registry.service import register_cc_session
     import subagents.cc_runtime as rt
@@ -210,7 +210,7 @@ async def test_detached_checkpoint_does_not_touch_live_or_durable_cc_state(
         return DetachedProcess()
 
     monkeypatch.setattr(checkpoint_fork, "_spawn_process", spawn)
-    request = ProviderCheckpointRequest(
+    request = ProviderForkRequest(
         fork_id="checkpoint-isolation",
         thread_id="parent",
         target=cc_target("fable"),
@@ -220,7 +220,7 @@ async def test_detached_checkpoint_does_not_touch_live_or_durable_cc_state(
         working_dir="/tmp",
         binary="/fake/claude",
     )
-    result = await checkpoint_fork.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+    result = await checkpoint_fork.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
     assert result.raw_body == checkpoint_body
     assert rt._LIVE.ids() == ("parent",)

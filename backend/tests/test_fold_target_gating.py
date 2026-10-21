@@ -14,12 +14,12 @@ from connections import harness_usage
 from core import checkpoint_runtime
 from core.checkpoint_resume import ProviderBoundary, _start_checkpoint
 from core.checkpoint_runtime import CheckpointTargetLimited, request_checkpoint
+from core.fork_types import ProviderForkRequest
 from core.checkpoint_types import (
     CheckpointRequest,
     CheckpointUnavailable,
     IdleCheckpointDisposition,
     IdleCheckpointReason,
-    ProviderCheckpointRequest,
 )
 from core.checkpoint_warm_request import CheckpointAdmission
 from infra.database import get_db
@@ -133,7 +133,7 @@ def _configure_rollover(thread_id: str, *, enabled: bool) -> tuple[str, str]:
 def _pair(
     thread_id: str, checkpoint_id: str, target_model: str, *,
     trigger: str = "pressure", turn_id: str | None = "turn-1",
-) -> tuple[CheckpointRequest, ProviderCheckpointRequest]:
+) -> tuple[CheckpointRequest, ProviderForkRequest]:
     request = CheckpointRequest(
         id=checkpoint_id, thread_id=thread_id, history_epoch=0,
         previous_generation_id=None, through_seq=3,
@@ -142,7 +142,7 @@ def _pair(
         writer_harness="claude-code", writer_model=target_model,
         originating_turn_id=turn_id, first_included_seq=1, started_at="t1",
     )
-    provider = ProviderCheckpointRequest(
+    provider = ProviderForkRequest(
         fork_id=checkpoint_id, thread_id=thread_id,
         target=_target(target_model), instruction="fold", reasoning_effort=None,
         working_dir="/tmp", warm_source=object(),
@@ -195,7 +195,7 @@ def test_model_switch_target_checkpoint_freezes_the_turn_claim_account(isolated_
     switch = SimpleNamespace(thread_id="switch-preparation", source_model=SONNET)
     monkeypatch.setattr(model_checkpoint, "read_switch_checkpoint_context", lambda _request: context)
     monkeypatch.setattr(
-        "core.checkpoint_render.build_cold_checkpoint_admission",
+        "core.checkpoint_cold_admission.build_checkpoint_admission",
         lambda **_kwargs: CheckpointAdmission(checkpoint, provider),
     )
 

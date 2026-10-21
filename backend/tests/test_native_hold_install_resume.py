@@ -109,4 +109,4 @@ async def test_native_checkpoint_hold_exits_by_install_or_independent_stop(
         if not task.done():
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-        await runtime.shutdown_checkpoint_tasks()
+        await runtime.shutdown_fork_tasks()

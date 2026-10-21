@@ -127,10 +127,10 @@ class StockClaudeRuntime:
 
     async def _arrange_checkpoint(self):
         if self.scenario == "required_failure":
-            from core.checkpoint_runtime import CheckpointNotAdmitted
+            from core.checkpoint_runtime import ForkNotAdmitted
 
             async def unavailable(*_a, **_k):
-                raise CheckpointNotAdmitted("fixture required checkpoint unavailable")
+                raise ForkNotAdmitted("fixture required checkpoint unavailable")
 
             async def cold(*_a, **_k):
                 return None

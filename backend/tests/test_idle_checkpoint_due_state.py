@@ -722,12 +722,12 @@ async def test_cancelled_runtime_launches_a_committed_idle_admission(
     import asyncio
 
     from core import checkpoint_runtime
+    from core.fork_types import ProviderForkRequest
     from core.checkpoint_types import (
-        IdleCheckpointAdmissionResult,
-        IdleCheckpointDisposition,
-        IdleCheckpointReason,
-        ProviderCheckpointRequest,
-    )
+    IdleCheckpointAdmissionResult,
+    IdleCheckpointDisposition,
+    IdleCheckpointReason,
+)
     from llm.resolution import ExecutionTarget
 
     request = _request("thread-1", "turn-1")
@@ -745,7 +745,7 @@ async def test_cancelled_runtime_launches_a_committed_idle_admission(
         supports_reasoning=True,
         preserve_thinking_default=True,
     )
-    provider = ProviderCheckpointRequest(
+    provider = ProviderForkRequest(
         fork_id=request.id,
         thread_id=request.thread_id,
         target=target,

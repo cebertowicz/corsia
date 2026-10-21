@@ -5,15 +5,12 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal, TypeAlias
+from typing import Literal, TypeAlias
 
-from history.types import PortableHistoryProjection
-from llm.resolution import ExecutionTarget
+from core.fork_types import ForkNotAdmitted
 
-CheckpointTrigger = Literal["manual", "pressure", "model_switch", "idle", "agent", "artifact_review"]
+CheckpointTrigger = Literal["manual", "pressure", "model_switch", "idle", "agent"]
 ColdInputCallback: TypeAlias = Callable[[int | None], Awaitable[None]]
-# (call key, model the vendor reported for the call or None, measured usage)
-CheckpointUsageCallback: TypeAlias = Callable[[str, str | None, dict[str, Any]], Awaitable[None]]
 
 # Exact diagnostic distinguishes degraded completion from user Stop/failure.
 CHECKPOINT_CONTEXT_TRUNCATED = "checkpoint_context_truncated"
@@ -44,11 +41,8 @@ class CheckpointUnavailable(CheckpointContinuationError):
         self.limited_connection = limited_connection
 
 
-class CheckpointNotAdmitted(RuntimeError):
-    """The caller could not admit one provider invocation right now."""
 
-
-class CheckpointTargetLimited(CheckpointNotAdmitted):
+class CheckpointTargetLimited(ForkNotAdmitted):
     """The fold's own target connection is account-limited; no provider call was made."""
 
     def __init__(self, held) -> None:
@@ -254,81 +248,3 @@ class IdleCheckpointAdmissionResult:
     disposition: IdleCheckpointDisposition
     record: CheckpointRecord | None = None
     reason: IdleCheckpointReason = field(kw_only=True)
-
-
-@dataclass(frozen=True, slots=True)
-class ColdCheckpointSource:
-    """Frozen history and mandatory continuity, before the writer's one fit."""
-
-    projection: PortableHistoryProjection
-    protected_blocks: tuple[dict[str, str], ...]
-
-
-@dataclass(frozen=True, slots=True)
-class ProviderCheckpointRequest:
-    """Frozen input for either checkpoint or artifact-review provider forks."""
-
-    fork_id: str
-    thread_id: str
-    target: ExecutionTarget
-    instruction: str
-    reasoning_effort: str | None
-    working_dir: str
-    cold_source: ColdCheckpointSource | None = None
-    binary: str | None = None
-    warm_source: object | None = None
-    mcp_config: str | None = None
-    max_output_tokens: int = CHECKPOINT_OUTPUT_TOKENS
-    tool_registry: object | None = None
-    dynamic_tool_specs: tuple[dict[str, Any], ...] = ()
-    developer_instructions: str | None = None
-    on_usage: CheckpointUsageCallback | None = None
-    vendor_account_id: str | None = None
-    vendor_account_bound: bool = False
-    vendor_account_receipt: object | None = None
-    vendor_launch: object | None = None
-    # Set only on a pressure warm request: builds the same-model cold admission
-    # this caller would have built had no warm source existed. Its presence is
-    # what allows one warm->cold path correction before any generation.
-    same_model_cold: Callable[[], object] | None = None
-    # The instruction before the optional saved-entry review block was appended
-    # to ``instruction``; None when no block was attached. A warm fork whose
-    # window cannot hold the block still fits this instruction, and the review
-    # is never a reason to fail a checkpoint.
-    instruction_without_review: str | None = None
-
-    @property
-    def checkpoint_id(self) -> str:
-        """Checkpoint-specific consumers retain their terminology at that seam."""
-        return self.fork_id
-
-
-@dataclass(frozen=True, slots=True)
-class ProviderCheckpointResult:
-    """Exact model body and provider usage captured from one invocation."""
-
-    raw_body: str
-    usage: dict[str, Any] | None
-    diagnostic: str | None = None
-
-
-class ProviderCheckpointRejected(RuntimeError):
-    """The provider invocation ended without producing checkpoint content."""
-
-
-class WarmForkUnusable(ProviderCheckpointRejected):
-    """The warm fork cannot hold its own input, proved before any generation.
-
-    Only the adapter knows this: the provider reports the live handle's real
-    occupancy at invoke time, after admission already chose warm. Raising a
-    distinct type lets the runtime correct that one path choice, which is not a
-    retry -- nothing was generated and nothing was paid for.
-
-    ``reason`` is the lowercase token the refusal log line names: the same
-    exception type covers an over-window fork and an account/home mismatch, and
-    the two need different fixes.
-    """
-
-    def __init__(self, *args: object, reason: str = "warm_fork_over_window") -> None:
-        super().__init__(*args)
-        self.reason = reason

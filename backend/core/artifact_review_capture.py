@@ -54,17 +54,17 @@ def failure_reason(error) -> str:
     """Classify without persisting provider output or credential material."""
     from core.fork_codex_control import ForkItemLimitReached
     from core.fork_runtime import ForkStepLimitReached
+    from core.fork_failures import ForkBinaryResolutionError, ForkCredentialsUnavailable
 
     if isinstance(error, ForkItemLimitReached):
         return "completed_item_missing_identity" if error.identity_missing else "limit"
     if isinstance(error, ReviewForkFailure):
         return error.reason
-    text = str(error).lower()
     if isinstance(error, ForkStepLimitReached):
         return "limit"
-    if "credential" in text or "authentication" in text or "not logged in" in text:
+    if isinstance(error, ForkCredentialsUnavailable):
         return "missing_credentials"
-    if "binary" in text or isinstance(error, FileNotFoundError):
+    if isinstance(error, ForkBinaryResolutionError):
         return "binary_resolution"
     return f"provider_error:{type(error).__name__}"
 
@@ -84,6 +84,17 @@ async def reconcile_startup_reviews(live_fork_ids, *, before: str) -> list[str]:
     for request_id in request_ids:
         await review_limit_or_failure_handler(request_id, reason="process_interrupted")
     return request_ids
+
+
+async def preserve_on_shutdown(fork_id: str) -> None:
+    """Leave request recovery to startup; shutdown must not wake the reviewer."""
+
+
+def provider_failure(harness: str, detail: str) -> None:
+    """A review's provider error cannot count as its successful submission."""
+    from core.fork_types import ProviderForkRejected
+
+    raise ProviderForkRejected(detail)
 
 
 async def review_end_handler(request_id: str, result=None) -> None:

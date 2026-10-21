@@ -11,7 +11,9 @@ def open_batch(db, *, author_kind, author_id, artifact_id, recipient_id, now,
         request = db.execute(
             "SELECT * FROM doc_review_requests WHERE id=?", (review_request_id,),
         ).fetchone()
-        if (request is None or request["cancelled_at"] or request["answered_batch_id"]
+        from doceditor.review_lifecycle import is_open
+
+        if (request is None or not is_open(db, request)
                 or author_kind != "agent" or request["reviewer_thread_id"] != author_id
                 or request["artifact_id"] != artifact_id):
             raise ValueError("review fork no longer owns this feedback")

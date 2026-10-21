@@ -14,16 +14,16 @@ from core.checkpoint_account import admit_checkpoint, bind_checkpoint_session
 from core.fork_runtime import ForkKind
 from llm.resolution import ExecutionTarget
 from core.checkpoint_codex_result import (
-    CodexCheckpointCapture, checkpoint_usage as _checkpoint_usage,
+    CodexForkCapture,
 )
 
-from core.checkpoint_types import (
-    ColdInputCallback,
-    ProviderCheckpointRejected,
+from core.fork_types import (
+    ProviderForkRejected,
     WarmForkUnusable,
-    ProviderCheckpointRequest,
-    ProviderCheckpointResult,
+    ProviderForkRequest,
+    ProviderForkResult,
 )
+from core.checkpoint_types import ColdInputCallback
 from core.checkpoint_codex_root import registered_rollout as _registered_rollout
 from core.checkpoint_warm_request import warm_capture_refused
 
@@ -185,7 +185,7 @@ def _copy_rollout(source: CodexWarmSource, isolated_home: Path) -> None:
     )
 
 
-def _checkpoint_tools(request: ProviderCheckpointRequest, cwd: str, kind: ForkKind):
+def _checkpoint_tools(request: ProviderForkRequest, cwd: str, kind: ForkKind):
     """Use the exact cold surface frozen at fit, or rebuild warm callbacks."""
     from core.fork_tools import allowed_definitions
     from subagents.harness_tool_bridge import build_tool_registry, dynamic_tool_definitions
@@ -212,7 +212,7 @@ def _checkpoint_tools(request: ProviderCheckpointRequest, cwd: str, kind: ForkKi
 
 
 def _checkpoint_session(
-    request: ProviderCheckpointRequest,
+    request: ProviderForkRequest,
     source: CodexWarmSource | None,
     *,
     source_home: Path,
@@ -264,7 +264,7 @@ def _checkpoint_session(
     ))
 
 
-def _fit_cold_request(request: ProviderCheckpointRequest, cwd: str, *, kind: ForkKind):
+def _fit_cold_request(request: ProviderForkRequest, cwd: str, *, kind: ForkKind):
     from core.checkpoint_render import _codex_cold_surface, fit_cold_checkpoint_input
 
     registry, definitions = _checkpoint_tools(request, cwd, kind)
@@ -280,14 +280,14 @@ def _fit_cold_request(request: ProviderCheckpointRequest, cwd: str, *, kind: For
 
 
 async def _run_app_server_checkpoint(
-    request: ProviderCheckpointRequest,
+    request: ProviderForkRequest,
     source: CodexWarmSource | None,
     *,
     source_home: Path, isolated_home: Path,
     cwd: str, cancel_event: asyncio.Event,
     cold_input=None,
     kind: ForkKind,
-) -> ProviderCheckpointResult:
+) -> ProviderForkResult:
     from core.checkpoint_codex_context import CodexCheckpointContext, frozen_context_tokens
     from core.token_estimation import measure_request
 
@@ -305,7 +305,7 @@ async def _run_app_server_checkpoint(
         )
         initial_tokens += measure_request(request.instruction, target=request.target).tokens
     context = CodexCheckpointContext(request.target, initial_tokens)
-    capture = CodexCheckpointCapture(on_usage=request.on_usage, kind_name=kind.name)
+    capture = CodexForkCapture(on_usage=request.on_usage, kind=kind)
 
     async def tool_boundary(reply, usage=None):
         if usage is not None:
@@ -320,7 +320,7 @@ async def _run_app_server_checkpoint(
     warm_room = source is None or context.leaves_output_room(request.max_output_tokens)
     if not (context.fits and warm_room):
         # Only a warm fork can be corrected to cold; a cold overflow is terminal.
-        refusal = WarmForkUnusable if source is not None else ProviderCheckpointRejected
+        refusal = WarmForkUnusable if source is not None else ProviderForkRejected
         raise refusal(f"Codex {kind.name} initial input exceeds selected context window")
 
     from core.fork_codex_control import CompletedItemLimit
@@ -353,13 +353,13 @@ async def _run_app_server_checkpoint(
     return await run_session(session, capture, item_limit, cancel_event)
 
 
-async def invoke_checkpoint(
-    request: ProviderCheckpointRequest,
+async def invoke_fork(
+    request: ProviderForkRequest,
     cancel_event: asyncio.Event,
     *,
     kind: ForkKind,
     on_cold_input: ColdInputCallback | None = None,
-) -> ProviderCheckpointResult:
+) -> ProviderForkResult:
     """Run either disposable fork kind through one Codex process."""
     if request.target.harness != "codex":
         raise TypeError("Codex adapter requires a Codex target")

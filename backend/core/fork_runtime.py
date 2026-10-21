@@ -10,6 +10,8 @@ from typing import Any
 
 ForkHandler = Callable[..., Awaitable[Any]]
 ForkToolExecutor = Callable[..., Awaitable[str]]
+ForkUsageBinder = Callable[[Any], Awaitable[Any]]
+ForkProviderFailure = Callable[[str, str], None]
 ForkStepLimit = int | None | Callable[[Any], int | None]
 FORK_HARNESSES = frozenset({"native", "claude-code", "codex"})
 
@@ -39,6 +41,9 @@ class ForkKind:
     step_limits: Mapping[str, ForkStepLimit]
     end_handler: ForkHandler
     limit_or_failure_handler: ForkHandler
+    usage_binder: ForkUsageBinder
+    shutdown_handler: ForkHandler
+    provider_failure: ForkProviderFailure
 
     def __post_init__(self) -> None:
         missing = FORK_HARNESSES - self.step_limits.keys()
@@ -76,8 +81,8 @@ class ForkHandle:
     task: asyncio.Task
     cancel_event: asyncio.Event
     thread_id: str
+    kind: ForkKind
     tool_executor: Any = None
-    kind: ForkKind | None = None
     request: Any = None
     tool_registry: Any = None
     tool_token: str = ""
@@ -104,5 +109,5 @@ def forget(fork_id: str, task: asyncio.Task) -> None:
 
 def cancel_fork(fork_id: str) -> None:
     handle = handles.get(fork_id)
-    if handle is not None:
-        handle.cancel_event.set()
+    if handle is not None and not handle.task.done():
+        handle.task.get_loop().call_soon_threadsafe(handle.cancel_event.set)

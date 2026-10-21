@@ -233,26 +233,26 @@ async def attach_review(request):
 
     window = request.target.context_window
     if isinstance(window, bool) or not isinstance(window, int) or window <= 0:
-        _skip(request.checkpoint_id, request.thread_id, "no-window")
+        _skip(request.fork_id, request.thread_id, "no-window")
         return request
     try:
         room = fork_instruction_room(
             window, request.max_output_tokens,
         ) - _text_tokens(request.instruction, None)
         block = await run_in_db(
-            review_block, request.checkpoint_id, request.thread_id, room,
+            review_block, request.fork_id, request.thread_id, room,
         )
         if block is None:
             return request
     except Exception:
         logger.exception(
             "placement.review_skipped thread={} checkpoint={} reason=review-error",
-            request.thread_id, request.checkpoint_id,
+            request.thread_id, request.fork_id,
         )
         return request
     logger.info(
         "placement.review_offered thread={} checkpoint={}",
-        request.thread_id, request.checkpoint_id,
+        request.thread_id, request.fork_id,
     )
     return replace(
         request,

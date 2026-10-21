@@ -11,16 +11,18 @@ from core.checkpoint_capture import read_checkpoint as _read
 from core.checkpoint_cold_fallback import invoke_with_cold_correction
 from core.checkpoint_fold_gate import refuse_limited_target as _refuse_limited_target
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
+from core.fork_types import (
+    ForkNotAdmitted,
+    ProviderForkRequest,
+    ProviderForkResult,
+)
 from core.checkpoint_types import (
-    CheckpointNotAdmitted,
     CheckpointRecord,
     CheckpointRequest,
     CheckpointTargetLimited,
     IdleCheckpointAdmissionResult,
     IdleCheckpointDisposition,
     IdleCheckpointReason,
-    ProviderCheckpointRequest,
-    ProviderCheckpointResult,
 )
 from infra import checkpoint_queries
 from infra import checkpoints as checkpoint_store
@@ -36,16 +38,14 @@ _wakes: set[asyncio.Task[None]] = set()
 
 
 async def _invoke(
-    request: ProviderCheckpointRequest,
+    request: ProviderForkRequest,
     cancel_event: asyncio.Event,
-) -> ProviderCheckpointResult:
-    from core.checkpoint_usage import bind_usage
-
+) -> ProviderForkResult:
     if request.cold_source is not None:
         from infra.continuity_staging import frozen_continuity_index
 
         index = await run_in_db(
-            frozen_continuity_index, request.checkpoint_id, request.thread_id,
+            frozen_continuity_index, request.fork_id, request.thread_id,
         )
         request = replace(
             request,
@@ -58,47 +58,35 @@ async def _invoke(
     from core.placement_review import attach_review
 
     request = await attach_review(request)
-    request = await bind_usage(request)
+    request = await CHECKPOINT_KIND.usage_binder(request)
     if request.target.harness == "native":
-        from core.checkpoint_native_fork import invoke_checkpoint
+        from core.checkpoint_native_fork import invoke_fork
     elif request.target.harness == "claude-code":
-        from core.checkpoint_cc_fork import invoke_checkpoint
+        from core.checkpoint_cc_fork import invoke_fork
     elif request.target.harness == "codex":
-        from core.checkpoint_codex_fork import invoke_checkpoint
+        from core.checkpoint_codex_fork import invoke_fork
     else:
         raise ValueError(f"unsupported checkpoint harness: {request.target.harness}")
     async def record_input(first_included_seq: int | None) -> None:
         await run_in_db(
-            checkpoint_store.admit_cold_input, request.checkpoint_id,
+            checkpoint_store.admit_cold_input, request.fork_id,
             first_included_seq=first_included_seq,
         )
 
     if request.target.harness == "claude-code":
         async def bind_executor(executor):
-            handle = _tasks.get(request.checkpoint_id)
+            handle = _tasks.get(request.fork_id)
             if handle is None or handle.thread_id != request.thread_id:
-                raise CheckpointNotAdmitted("checkpoint invocation no longer owns its tools")
+                raise ForkNotAdmitted("checkpoint invocation no longer owns its tools")
             handle.tool_executor = executor
 
-        return await invoke_checkpoint(
+        return await invoke_fork(
             request, cancel_event, kind=CHECKPOINT_KIND,
             on_cold_input=record_input, on_tool_executor=bind_executor,
         )
-    return await invoke_checkpoint(
+    return await invoke_fork(
         request, cancel_event, kind=CHECKPOINT_KIND, on_cold_input=record_input,
     )
-
-
-async def execute_checkpoint_tool(
-    thread_id: str, checkpoint_id: str, operation, call_id: str,
-    name: str, arguments: dict[str, Any],
-):
-    """Route one exact declared loopback call through its checkpoint owner."""
-    handle = _tasks.get(checkpoint_id)
-    if (handle is None or handle.thread_id != thread_id
-            or handle.task.done() or handle.tool_executor is None):
-        raise CheckpointNotAdmitted("checkpoint tool invocation is no longer owned")
-    return await handle.tool_executor(operation, call_id, name, arguments)
 
 
 def _broadcast_changed(thread_id: str) -> None:
@@ -155,7 +143,7 @@ async def _notify_completion(record: CheckpointRecord) -> None:
 
 async def _execute(
     checkpoint_id: str,
-    provider_request: ProviderCheckpointRequest,
+    provider_request: ProviderForkRequest,
     cancel_event: asyncio.Event,
 ) -> CheckpointRecord:
     # This task owns the attempt and ends its row terminal before it exits.
@@ -204,10 +192,10 @@ def _forget(checkpoint_id: str, task: asyncio.Task[CheckpointRecord]) -> None:
 
 def _validate_pair(
     request: CheckpointRequest,
-    provider_request: ProviderCheckpointRequest,
+    provider_request: ProviderForkRequest,
 ) -> None:
     if (
-        provider_request.checkpoint_id != request.id
+        provider_request.fork_id != request.id
         or provider_request.thread_id != request.thread_id
     ):
         raise ValueError("checkpoint row and provider request identity differ")
@@ -219,7 +207,7 @@ def _validate_pair(
 
 def _launch_checkpoint(
     request: CheckpointRequest,
-    provider_request: ProviderCheckpointRequest,
+    provider_request: ProviderForkRequest,
 ) -> None:
     cancel_event = asyncio.Event()
     task = asyncio.create_task(
@@ -235,14 +223,14 @@ def _launch_checkpoint(
 
 async def request_checkpoint(
     request: CheckpointRequest,
-    provider_request: ProviderCheckpointRequest | None,
+    provider_request: ProviderForkRequest | None,
 ) -> CheckpointRecord:
     """Coalesce or start one already-admitted provider invocation."""
     active = await run_in_db(checkpoint_queries.active_for_thread, request.thread_id)
     if active is not None:
         return active
     if provider_request is None:
-        raise CheckpointNotAdmitted("checkpoint provider capacity is unavailable")
+        raise ForkNotAdmitted("checkpoint provider capacity is unavailable")
     _validate_pair(request, provider_request)
     await _refuse_limited_target(provider_request)
     try:
@@ -278,7 +266,7 @@ async def request_idle_checkpoint(turn_id: str, admission):
     provider_request = None if admission is None else admission.provider_request
     if request is not None:
         if provider_request is None:
-            raise CheckpointNotAdmitted("idle checkpoint has no warm provider request")
+            raise ForkNotAdmitted("idle checkpoint has no warm provider request")
         _validate_pair(request, provider_request)
     target_limited = False
     if request is not None and provider_request is not None:
@@ -355,7 +343,7 @@ async def cancel_checkpoint(checkpoint_id: str) -> CheckpointRecord:
     return record
 
 
-async def shutdown_checkpoint_tasks() -> None:
+async def shutdown_fork_tasks() -> None:
     """Cancel and join the exact fork calls and wakes owned by this process.
 
     Every fork stops before its provider transport; only checkpoints have a
@@ -365,14 +353,8 @@ async def shutdown_checkpoint_tasks() -> None:
     handles = tuple(_tasks.items())
     for _fork_id, handle in handles:
         handle.cancel_event.set()
-    for checkpoint_id, handle in handles:
-        if handle.kind is not CHECKPOINT_KIND:
-            continue
-        await run_in_db(
-            checkpoint_store.cancel,
-            checkpoint_id,
-            ended_at=utc_now_iso(),
-        )
+    for fork_id, handle in handles:
+        await handle.kind.shutdown_handler(fork_id)
     await asyncio.gather(
         *(handle.task for _fork_id, handle in handles),
         return_exceptions=True,
@@ -395,6 +377,6 @@ async def reconcile_startup_checkpoints() -> tuple[CheckpointRecord, ...]:
     return records
 
 
-def checkpoint_task_count() -> int:
+def fork_task_count() -> int:
     """Expose live cancellation-handle count for lifecycle verification."""
-    return sum(1 for handle in _tasks.values() if handle.kind is CHECKPOINT_KIND)
+    return len(_tasks)

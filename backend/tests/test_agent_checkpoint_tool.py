@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.checkpoint_types import CheckpointRequest, ProviderCheckpointRequest
+from core.fork_types import ProviderForkRequest
+from core.checkpoint_types import CheckpointRequest
 from infra.checkpoint_admission import IDLE_MIN_DELTA_TOKENS
 from llm.resolution import ExecutionTarget
 
@@ -36,14 +37,14 @@ def _request(trigger: str = "agent") -> CheckpointRequest:
     )
 
 
-def _provider() -> ProviderCheckpointRequest:
+def _provider() -> ProviderForkRequest:
     target = ExecutionTarget(
         catalog_id="codex/test", harness="codex", provider="openai", backend="api",
         transport_model="test", expected_reported_model=None, context_window=200_000,
         available=True, availability_reason=None, display_name="test",
         supports_reasoning=True, preserve_thinking_default=True,
     )
-    return ProviderCheckpointRequest(
+    return ProviderForkRequest(
         fork_id="agent-cp", thread_id=THREAD, target=target,
         instruction="checkpoint", reasoning_effort=None, working_dir="/tmp",
     )
@@ -85,7 +86,7 @@ def _seed() -> None:
 async def test_manual_no_claude_warm_source_builds_same_model_cold(isolated_db, monkeypatch):
     """A switched Claude thread needs no live session or registration to fold."""
     from core import checkpoint_agent_admission
-    from core import checkpoint_render
+    from core import checkpoint_cold_admission, checkpoint_render
     from history import projection
     from infra import db_async
 
@@ -116,7 +117,7 @@ async def test_manual_no_claude_warm_source_builds_same_model_cold(isolated_db, 
         checkpoint_render, "capture_warm_checkpoint_source", AsyncMock(return_value=None),
     )
     monkeypatch.setattr(projection, "slice_portable_projection", lambda value, **_kwargs: value)
-    monkeypatch.setattr(checkpoint_render, "build_cold_checkpoint_admission", build_cold)
+    monkeypatch.setattr(checkpoint_cold_admission, "build_checkpoint_admission", build_cold)
 
     request, provider = await checkpoint_agent_admission.prepare_external_checkpoint(
         THREAD, "user-1", trigger="manual",

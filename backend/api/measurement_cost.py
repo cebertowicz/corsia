@@ -80,7 +80,7 @@ IDLE_HOURS_SQL = f"CASE {_IDLE_CASES} ELSE 0 END" if _IDLE_CASES else "0"
 # only writers of that shape, both later than the contract. The checkpoint Codex
 # path is per-call and disjoint: ``subagents.codex_app_server_notifications.record_usage``
 # emits ``CumulativeTurnVolume.observe`` deltas as ``TokenUsage.ledger_row()``, and
-# ``core.checkpoint_codex_result.CodexCheckpointCapture.publish_calls`` writes each
+# ``core.checkpoint_codex_result.CodexForkCapture.publish_calls`` writes each
 # one. Direct writes use ``uuid4()[:12]`` (hyphenated, so never 24 hex). The
 # host-access reviewer's Codex rows always recorded cache creation NULL, as
 # Codex reports no cache-creation count (``infra.provider_usage.from_codex``),

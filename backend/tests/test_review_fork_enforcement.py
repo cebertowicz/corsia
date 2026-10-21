@@ -35,7 +35,7 @@ async def test_native_refuses_unenforceable_limit_before_provider_call(monkeypat
     monkeypatch.setattr(native, "_provider_params", lambda *_args: {})
     kind = replace(ARTIFACT_REVIEW_KIND, step_limits={"native": None, "claude-code": 3, "codex": 3})
     with pytest.raises(ForkStepLimitError, match="has no Native step limit"):
-        await native.invoke_checkpoint(_request(_source(native)), asyncio.Event(), kind=kind)
+        await native.invoke_fork(_request(_source(native)), asyncio.Event(), kind=kind)
 
 
 @pytest.mark.asyncio
@@ -137,7 +137,7 @@ async def test_codex_counts_only_distinct_owned_completed_items_and_terminates()
 @pytest.mark.asyncio
 async def test_codex_cancel_closes_exact_session_while_start_is_waiting():
     from core.fork_codex_control import CompletedItemLimit, run_session
-    from core.checkpoint_codex_result import CodexCheckpointCapture
+    from core.checkpoint_codex_result import CodexForkCapture
 
     started, cancel = asyncio.Event(), asyncio.Event()
     closed = []
@@ -151,7 +151,7 @@ async def test_codex_cancel_closes_exact_session_while_start_is_waiting():
 
     session = SimpleNamespace(start=start, terminate=terminate)
     task = asyncio.create_task(run_session(
-        session, CodexCheckpointCapture(), CompletedItemLimit(ARTIFACT_REVIEW_KIND, None), cancel,
+        session, CodexForkCapture(kind=ARTIFACT_REVIEW_KIND), CompletedItemLimit(ARTIFACT_REVIEW_KIND, None), cancel,
     ))
     await started.wait()
     cancel.set()
@@ -163,7 +163,7 @@ async def test_codex_cancel_closes_exact_session_while_start_is_waiting():
 @pytest.mark.asyncio
 async def test_codex_missing_completed_identity_wakes_and_closes_waiting_session():
     from core.fork_codex_control import CompletedItemLimit, ForkItemLimitReached, run_session
-    from core.checkpoint_codex_result import CodexCheckpointCapture
+    from core.checkpoint_codex_result import CodexForkCapture
 
     started = asyncio.Event()
     closed = []
@@ -183,7 +183,7 @@ async def test_codex_missing_completed_identity_wakes_and_closes_waiting_session
     )
     limit = CompletedItemLimit(ARTIFACT_REVIEW_KIND, None)
     task = asyncio.create_task(run_session(
-        session, CodexCheckpointCapture(), limit, asyncio.Event(),
+        session, CodexForkCapture(kind=ARTIFACT_REVIEW_KIND), limit, asyncio.Event(),
     ))
     await started.wait()
     await limit.observe(session, {"method": "item/completed", "params": {"item": {"type": "dynamicToolCall"}}})
@@ -247,13 +247,13 @@ def test_submitted_receipt_and_owner_reply_reach_next_reviewer_context(review_en
     from infra.passive_changes import materialize_pending_digest
     import json
     from doc_feedback_helpers import add_comment
-    from doceditor import review_requests
+    from doceditor import review_feedback, review_requests
 
     db, aid = review_env
     row = request(db, aid)
     staged_comment(db, aid, row["id"])
     with write_transaction(db, scope="test_receipt_submit"):
-        review_requests.submit_fork_feedback(db, row["id"], "reviewer", aid)
+        review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE owner_thread_id='reviewer'").fetchone()[0] == 0
     comment = db.execute("SELECT id FROM doc_comments WHERE author_thread_id='reviewer'").fetchone()
     digest = materialize_pending_digest(db, "reviewer")
@@ -289,7 +289,7 @@ def test_startup_escalates_each_orphaned_review_once(review_env):
     """R: a fork that died with the process escalates once; settled requests stay."""
     from core.artifact_review_capture import reconcile_startup_reviews
     from doc_feedback_helpers import seed_thread
-    from doceditor import review_requests
+    from doceditor import review_feedback, review_requests
 
     db, aid = review_env
     seed_thread(db, "third", title="Third")
@@ -302,7 +302,7 @@ def test_startup_escalates_each_orphaned_review_once(review_env):
     review_requests.cancel(db, cancelled["id"], actor)
     answered = request(db, aid, reviewer="third", key="third-key")
     with write_transaction(db, scope="test_answered_review"):
-        review_requests.submit_fork_feedback(db, answered["id"], "third", aid)
+        review_feedback.submit_fork_feedback(db, answered["id"], "third", aid)
     before = {rid: stored(db, rid) for rid in (cancelled["id"], answered["id"])}
 
     assert asyncio.run(reconcile_startup_reviews(frozenset(), before="9999-01-01T00:00:00+00:00")) == [orphan["id"]]
@@ -327,7 +327,7 @@ async def test_review_request_with_a_live_fork_is_not_escalated_at_startup(revie
 
 
 @pytest.mark.asyncio
-async def test_shutdown_cancels_only_checkpoint_rows_and_counts_only_checkpoints(monkeypatch):
+async def test_shutdown_cancels_only_checkpoint_rows_and_counts_all_forks(monkeypatch):
     """(a): every fork stops, but a review fork has no checkpoint row to cancel."""
     from core import checkpoint_runtime
     from core.checkpoint_fork_kind import CHECKPOINT_KIND
@@ -348,9 +348,9 @@ async def test_shutdown_cancels_only_checkpoint_rows_and_counts_only_checkpoints
         return event
 
     events = [fork("cp-1", CHECKPOINT_KIND), fork("review-1", ARTIFACT_REVIEW_KIND)]
-    assert checkpoint_runtime.checkpoint_task_count() == 1
+    assert checkpoint_runtime.fork_task_count() == 2
 
-    await checkpoint_runtime.shutdown_checkpoint_tasks()
+    await checkpoint_runtime.shutdown_fork_tasks()
 
     assert cancelled_rows == ["cp-1"]
     assert all(event.is_set() for event in events)
@@ -362,7 +362,7 @@ async def test_review_fork_usage_records_each_call_once_unattributed(review_env,
     """(b): a review fork's provider calls reach the ledger, once per call key."""
     from core import checkpoint_native_fork as native
     from core.artifact_review_runtime import _run
-    from core.checkpoint_types import ProviderCheckpointResult
+    from core.fork_types import ProviderForkResult
     from infra.turn_usage_receipts import PLAN_FIELDS
     from plans import public
     from test_checkpoint_provider_adapters import _request
@@ -381,12 +381,12 @@ async def test_review_fork_usage_records_each_call_once_unattributed(review_env,
         await request_.on_usage("call-1", "native/test", measured)
         await request_.on_usage("call-1", "native/test", measured)
         await request_.on_usage("call-2", "native/test", measured)
-        return ProviderCheckpointResult("", None)
+        return ProviderForkResult("", None)
 
     async def busy_source(request_):
         return request_
 
-    monkeypatch.setattr(native, "invoke_checkpoint", invoke)
+    monkeypatch.setattr(native, "invoke_fork", invoke)
     monkeypatch.setattr("core.artifact_review_runtime._source", busy_source)
     await _run(row["id"], provider, asyncio.Event())
 

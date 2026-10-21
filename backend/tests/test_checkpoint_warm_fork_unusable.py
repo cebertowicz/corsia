@@ -7,13 +7,13 @@ from dataclasses import replace
 
 import pytest
 
-from core.checkpoint_types import (
-    CheckpointRecord,
-    ProviderCheckpointRejected,
-    ProviderCheckpointRequest,
-    ProviderCheckpointResult,
+from core.fork_types import (
+    ProviderForkRejected,
+    ProviderForkRequest,
+    ProviderForkResult,
     WarmForkUnusable,
 )
+from core.checkpoint_types import CheckpointRecord
 from llm.resolution import ExecutionTarget
 
 
@@ -29,8 +29,8 @@ def _target(harness: str) -> ExecutionTarget:
 WARM_SOURCE = object()
 
 
-def _warm_request(harness: str, *, cold_builder=None) -> ProviderCheckpointRequest:
-    return ProviderCheckpointRequest(
+def _warm_request(harness: str, *, cold_builder=None) -> ProviderForkRequest:
+    return ProviderForkRequest(
         fork_id="checkpoint-1", thread_id="thread-1",
         target=_target(harness), instruction="checkpoint",
         reasoning_effort=None, working_dir="/work",
@@ -50,7 +50,7 @@ def _cold_admission(**overrides):
     }
     fields.update(overrides)
     return CheckpointAdmission(
-        request=object(), provider_request=ProviderCheckpointRequest(**fields),
+        request=object(), provider_request=ProviderForkRequest(**fields),
     )
 
 
@@ -71,7 +71,7 @@ async def test_unusable_warm_fork_runs_cold_once_on_the_same_row(monkeypatch):
         calls.append(request)
         if request.warm_source is not None:
             raise WarmForkUnusable("initial input exceeds selected context window")
-        return ProviderCheckpointResult("cold body", None)
+        return ProviderForkResult("cold body", None)
 
     request = _warm_request("native", cold_builder=_cold_admission)
     result = await fallback.invoke_with_cold_correction(
@@ -81,7 +81,7 @@ async def test_unusable_warm_fork_runs_cold_once_on_the_same_row(monkeypatch):
     assert result.raw_body == "cold body"
     assert len(calls) == 2
     assert calls[0].warm_source is not None and calls[1].warm_source is None
-    assert calls[1].checkpoint_id == "checkpoint-1"
+    assert calls[1].fork_id == "checkpoint-1"
     assert adopted == [("checkpoint-1",)]
 
 
@@ -96,7 +96,7 @@ async def test_native_warm_fork_correction_uses_canonical_refusal_log(monkeypatc
     async def invoke(request, _cancel):
         if request.warm_source is not None:
             raise WarmForkUnusable("over window")
-        return ProviderCheckpointResult("cold body", None)
+        return ProviderForkResult("cold body", None)
 
     monkeypatch.setattr(fallback, "run_in_db", fake_run_in_db)
     lines: list[str] = []
@@ -140,9 +140,9 @@ async def test_a_provider_refusal_never_triggers_the_cold_path(monkeypatch):
 
     async def invoke(request, _cancel):
         calls.append(request)
-        raise ProviderCheckpointRejected("Codex checkpoint was not accepted")
+        raise ProviderForkRejected("Codex checkpoint was not accepted")
 
-    with pytest.raises(ProviderCheckpointRejected):
+    with pytest.raises(ProviderForkRejected):
         await fallback.invoke_with_cold_correction(
             _warm_request("codex", cold_builder=_cold_admission),
             asyncio.Event(), invoke,

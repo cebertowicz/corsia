@@ -119,12 +119,12 @@ def build_native_cold_checkpoint_admission(
     trigger="pressure",
 ):
     """Build the existing Native cold request from one frozen DB context."""
-    from core.checkpoint_render import build_cold_checkpoint_admission
+    from core.checkpoint_cold_admission import build_checkpoint_admission
     from infra.database import get_db
 
     db = get_db()
     try:
-        return build_cold_checkpoint_admission(
+        return build_checkpoint_admission(
             checkpoint_id=checkpoint_id,
             thread_id=thread_id,
             trigger=trigger,

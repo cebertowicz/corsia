@@ -14,10 +14,11 @@ from test_checkpoint_codex_capacity import target
 
 @pytest.mark.asyncio
 async def test_checkpoint_capture_propagates_completed_tool_failure():
-    from core.checkpoint_codex_result import CodexCheckpointCapture
+    from core.checkpoint_codex_result import CodexForkCapture
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
     from tools.recorded_call import CompletedToolCall, CompletedToolFailure
 
-    capture = CodexCheckpointCapture()
+    capture = CodexForkCapture(kind=CHECKPOINT_KIND)
     failure = CompletedToolFailure((CompletedToolCall(
         name="edit", result="private completed result", checkpoint_id="checkpoint",
     ),))

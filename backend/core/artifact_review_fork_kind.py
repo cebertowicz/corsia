@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from core.fork_runtime import ForkKind
-from core.artifact_review_capture import review_end_handler, review_limit_or_failure_handler
+from core.artifact_review_capture import (
+    preserve_on_shutdown, provider_failure, review_end_handler, review_limit_or_failure_handler,
+)
+from core.artifact_review_usage import bind_usage
 
 
 REVIEW_TOOL_ALLOWLIST = frozenset({
@@ -47,4 +50,7 @@ ARTIFACT_REVIEW_KIND = ForkKind(
     step_limits={harness: REVIEW_STEP_BUDGET for harness in ("native", "claude-code", "codex")},
     end_handler=review_end_handler,
     limit_or_failure_handler=review_limit_or_failure_handler,
+    usage_binder=bind_usage,
+    shutdown_handler=preserve_on_shutdown,
+    provider_failure=provider_failure,
 )

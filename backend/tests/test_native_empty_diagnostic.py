@@ -11,7 +11,8 @@ import pytest
 from core import checkpoint_native_fork as native
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from core.checkpoint_native_tools import CHECKPOINT_TOOL_NAME, InputRoom, input_fits, input_room
-from core.checkpoint_types import CHECKPOINT_CONTEXT_TRUNCATED, ProviderCheckpointRejected
+from core.fork_types import ProviderForkRejected
+from core.checkpoint_types import CHECKPOINT_CONTEXT_TRUNCATED
 from llm.router import LLMResponse, ToolCallRequest
 from test_checkpoint_provider_adapters import _async_value, _request, _source
 
@@ -52,13 +53,13 @@ async def _run(monkeypatch, replies, *, loop_fits=True, tool_fits=True, seen=Non
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda _model: {"model": "wire"})
     request = _request(None)
-    result = await native.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+    result = await native.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     return request, result
 
 
 @pytest.mark.asyncio
 async def test_empty_fold_fails_naming_loop_input_over_bound(monkeypatch):
-    with pytest.raises(ProviderCheckpointRejected) as raised:
+    with pytest.raises(ProviderForkRejected) as raised:
         await _run(monkeypatch, [_tool_reply()], loop_fits=[True, False])
 
     request = _request(None)
@@ -73,7 +74,7 @@ async def test_empty_fold_fails_naming_provider_context_limit(monkeypatch):
     overflow = LLMResponse(
         content=None, finish_reason="error", error_kind="provider_context_overflow",
     )
-    with pytest.raises(ProviderCheckpointRejected) as raised:
+    with pytest.raises(ProviderForkRejected) as raised:
         await _run(monkeypatch, [overflow])
 
     assert "path=ii_provider_context_limit iteration=0 " in str(raised.value)
@@ -82,7 +83,7 @@ async def test_empty_fold_fails_naming_provider_context_limit(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_empty_fold_fails_naming_tool_results_over_bound(monkeypatch):
-    with pytest.raises(ProviderCheckpointRejected) as raised:
+    with pytest.raises(ProviderForkRejected) as raised:
         await _run(monkeypatch, [_tool_reply()], tool_fits=False)
 
     assert "path=iii_tool_results_over_bound iteration=0 " in str(raised.value)
@@ -110,7 +111,7 @@ async def test_oversize_tool_result_becomes_a_named_error_and_the_narrative_is_c
 
 @pytest.mark.asyncio
 async def test_no_room_even_for_the_short_error_fails_named(monkeypatch):
-    with pytest.raises(ProviderCheckpointRejected) as raised:
+    with pytest.raises(ProviderForkRejected) as raised:
         await _run(monkeypatch, [_tool_reply()], tool_fits=[True, False, False])
 
     assert "path=iii_tool_results_over_bound iteration=0 " in str(raised.value)
@@ -180,7 +181,7 @@ async def test_capture_warns_once_with_the_diagnostic_and_keeps_the_stored_error
     from loguru import logger
 
     from core import checkpoint_capture
-    from core.checkpoint_types import ProviderCheckpointResult
+    from core.fork_types import ProviderForkResult
 
     failures, lines = [], []
 
@@ -192,7 +193,7 @@ async def test_capture_warns_once_with_the_diagnostic_and_keeps_the_stored_error
     sink = logger.add(lambda message: lines.append(str(message)), level="WARNING")
     try:
         await checkpoint_capture.capture_and_install(
-            "checkpoint-1", ProviderCheckpointResult("", None, "path=ii_provider_context_limit"),
+            "checkpoint-1", ProviderForkResult("", None, "path=ii_provider_context_limit"),
         )
     finally:
         logger.remove(sink)
@@ -259,7 +260,7 @@ async def _run_warm(monkeypatch, reply_tokens):
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda _model: {"model": "wire"})
     request = replace(_request(source), instruction=instruction)
-    return await native.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+    return await native.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
 
 def _bulky_tool_reply(chars: int) -> LLMResponse:
@@ -286,7 +287,7 @@ async def test_tool_call_reply_within_the_round_trip_reserve_finishes(monkeypatc
 async def test_tool_call_reply_over_the_round_trip_reserve_fails_named(monkeypatch):
     from core.checkpoint_types import CHECKPOINT_TOOL_ROUND_TRIP_TOKENS
 
-    with pytest.raises(ProviderCheckpointRejected) as raised:
+    with pytest.raises(ProviderForkRejected) as raised:
         await _run_warm(monkeypatch, [_bulky_tool_reply(CHECKPOINT_TOOL_ROUND_TRIP_TOKENS + 10)])
 
     assert "path=iii_tool_results_over_bound iteration=0 " in str(raised.value)

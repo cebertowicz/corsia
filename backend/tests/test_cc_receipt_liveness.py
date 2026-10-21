@@ -38,7 +38,7 @@ def _session():
 @pytest.mark.parametrize("completion", ["message_stop", "result"])
 async def test_completed_response_without_final_usage_fails_immediately(checkpoint, completion):
     from core.checkpoint_cc_io import _ToolBoundary
-    from core.checkpoint_types import ProviderCheckpointRejected
+    from core.fork_types import ProviderForkRejected
     from test_checkpoint_external_adapters import WaitingProcess
 
     session = _session()
@@ -48,7 +48,7 @@ async def test_completed_response_without_final_usage_fails_immediately(checkpoi
     boundary = _ToolBoundary(process, session.tool_context, asyncio.Event())
     operation = (boundary.execute(lambda: asyncio.sleep(0, result="result"), "call", "read_file", {})
                  if checkpoint else session.record_tool_reply("call", "result", session.tool_context.target))
-    with pytest.raises((RuntimeError, ProviderCheckpointRejected), match="complete.*context"):
+    with pytest.raises((RuntimeError, ProviderForkRejected), match="complete.*context"):
         await asyncio.wait_for(operation, 0.2)
     if checkpoint:
         assert process.returncode is not None
@@ -126,7 +126,7 @@ async def test_checkpoint_stdout_eof_releases_pending_tool_before_process_exit()
     import sys
 
     from core.checkpoint_cc_io import _ToolBoundary, _read_stdout
-    from core.checkpoint_types import ProviderCheckpointRejected
+    from core.fork_types import ProviderForkRejected
 
     process = await asyncio.create_subprocess_exec(
         sys.executable, "-c", "import os,signal; os.close(1); signal.pause()",
@@ -140,7 +140,7 @@ async def test_checkpoint_stdout_eof_releases_pending_tool_before_process_exit()
     await asyncio.sleep(0)
     await _read_stdout(process, boundary, bytearray())
     try:
-        with pytest.raises(ProviderCheckpointRejected, match="ended"):
+        with pytest.raises(ProviderForkRejected, match="ended"):
             await asyncio.wait_for(tool, 0.2)
         assert process.returncode is not None
     finally:
@@ -154,7 +154,7 @@ async def test_checkpoint_stdout_eof_releases_pending_tool_before_process_exit()
 @pytest.mark.asyncio
 async def test_checkpoint_result_fences_unknown_receipt_before_process_exit():
     from core.checkpoint_cc_io import _ToolBoundary
-    from core.checkpoint_types import ProviderCheckpointRejected
+    from core.fork_types import ProviderForkRejected
     from test_checkpoint_external_adapters import WaitingProcess
 
     process = WaitingProcess()
@@ -165,7 +165,7 @@ async def test_checkpoint_result_fences_unknown_receipt_before_process_exit():
     try:
         await asyncio.sleep(0)
         await boundary.observe({"type": "result", "is_error": True})
-        with pytest.raises(ProviderCheckpointRejected, match="ended"):
+        with pytest.raises(ProviderForkRejected, match="ended"):
             await asyncio.wait_for(tool, 0.2)
         assert process.returncode is not None
     finally:

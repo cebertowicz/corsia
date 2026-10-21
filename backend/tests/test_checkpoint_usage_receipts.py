@@ -86,9 +86,9 @@ class TestOneShapeAcrossHarnesses:
         }
 
     def test_codex_checkpoint_usage_is_canonical(self):
-        from core.checkpoint_codex_fork import _checkpoint_usage
+        from core.checkpoint_codex_result import fork_usage_receipt
 
-        receipt = _checkpoint_usage(_codex_volume())
+        receipt = fork_usage_receipt(_codex_volume())
         # The prompt side must stay disjoint: 1_000 uncached + 8_000 cached,
         # never 9_000 in prompt_tokens with 8_000 repeated beside it.
         assert receipt["prompt_tokens"] == 1_000
@@ -104,11 +104,11 @@ class TestOneShapeAcrossHarnesses:
 
     def test_the_same_workload_reads_identically_on_every_harness(self):
         """The regression the audit hit: one workload, three answers."""
-        from core.checkpoint_codex_fork import _checkpoint_usage
+        from core.checkpoint_codex_result import fork_usage_receipt
 
         cc = _cc_receipt(_anthropic_payload())
         native = _sum_calls(_native_ledger_rows())
-        codex = _checkpoint_usage(_codex_volume())
+        codex = fork_usage_receipt(_codex_volume())
 
         # Codex reports no cache-creation concept, so compare the prompt side
         # that all three do measure.

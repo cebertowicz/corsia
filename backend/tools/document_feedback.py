@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from doceditor import feedback_batches, feedback_state, review_requests as reviews
+from doceditor import feedback_batches, feedback_state, review_feedback, review_requests as reviews
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
@@ -44,7 +44,7 @@ def _send_feedback(
             )
         with write_transaction(db, scope="send_agent_doc_feedback") as connection:
             if review_request_id is not None:
-                pending, woken, undelivered = reviews.submit_fork_feedback(
+                pending, woken, undelivered = review_feedback.submit_fork_feedback(
                     connection, review_request_id, actor_thread_id, resolved_id,
                 )
             else:

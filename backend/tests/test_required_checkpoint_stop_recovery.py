@@ -15,7 +15,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from codex_runtime_fixtures import declare_codex_tool_step
-from core.checkpoint_types import CheckpointUnavailable, ProviderCheckpointResult
+from core.fork_types import ProviderForkResult
+from core.checkpoint_types import CheckpointUnavailable
 from core.checkpoint_wait import CheckpointWaitScope
 from core.turn_core import TurnIdentity
 from test_checkpoint_hold_install_resume import _Process, _reach_wait, _seed
@@ -116,14 +117,14 @@ async def test_stop_ends_the_awaited_attempt_and_the_next_turn_proceeds(
     invocations: list[str] = []
 
     async def invoke(request, cancel):
-        invocations.append(request.checkpoint_id)
+        invocations.append(request.fork_id)
         if len(invocations) == 1:
             raise RuntimeError("provider refused the fold")
         if len(invocations) == 2:
             # A stalled writer: neither finishes nor fails; only cancel ends it.
             await cancel.wait()
             raise asyncio.CancelledError
-        return ProviderCheckpointResult("FRESH_CHECKPOINT_BODY", None)
+        return ProviderForkResult("FRESH_CHECKPOINT_BODY", None)
 
     waiting = asyncio.Event()
     await_original = runtime.await_checkpoint
@@ -188,7 +189,7 @@ async def test_stop_ends_the_awaited_attempt_and_the_next_turn_proceeds(
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        await runtime.shutdown_checkpoint_tasks()
+        await runtime.shutdown_fork_tasks()
         await live.session.terminate()
         reset()
         db.close()

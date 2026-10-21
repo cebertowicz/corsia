@@ -73,7 +73,7 @@ async def cc_review(provider, calls, cancel):
                                               "name": name, "arguments": arguments})
             assert not str(response).startswith("Error:")
     assert result(b'{"type":"result","result":"Review submitted.","num_turns":7}',
-                  kind_name=ARTIFACT_REVIEW_KIND.name).raw_body == "Review submitted."
+                  kind=ARTIFACT_REVIEW_KIND).raw_body == "Review submitted."
 
 
 async def codex_review(provider, registry, calls, cancel):
@@ -139,10 +139,10 @@ def test_cc_limit_and_provider_failures_are_not_review_verdicts():
     from core.checkpoint_cc_result import result
     from core.artifact_review_capture import failure_reason
     from core.fork_runtime import ForkStepLimitReached
-    from core.checkpoint_types import ProviderCheckpointRejected
+    from core.fork_types import ProviderForkRejected
 
     with pytest.raises(ForkStepLimitReached):
-        result(b'{"type":"result","subtype":"error_max_turns","is_error":true}', kind_name="artifact_review")
-    with pytest.raises(ProviderCheckpointRejected) as error:
-        result(b'{"type":"result","is_error":true,"result":"Missing credentials"}', kind_name="artifact_review")
-    assert failure_reason(error.value) == "missing_credentials"
+        result(b'{"type":"result","subtype":"error_max_turns","is_error":true}', kind=ARTIFACT_REVIEW_KIND)
+    with pytest.raises(ProviderForkRejected) as error:
+        result(b'{"type":"result","is_error":true,"result":"Missing credentials"}', kind=ARTIFACT_REVIEW_KIND)
+    assert failure_reason(error.value) == "provider_error:ProviderForkRejected"

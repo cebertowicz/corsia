@@ -9,11 +9,13 @@ from unittest.mock import Mock
 import pytest
 from loguru import logger
 
+from core.fork_types import (
+    ProviderForkResult,
+    WarmForkUnusable,
+)
 from core.checkpoint_types import (
     CHECKPOINT_OUTPUT_TOKENS,
     CHECKPOINT_TOOL_ROUND_TRIP_TOKENS,
-    ProviderCheckpointResult,
-    WarmForkUnusable,
 )
 from test_checkpoint_warm_fork_unusable import _cold_admission, _warm_request
 
@@ -31,7 +33,7 @@ async def _refusal_lines(monkeypatch, refusal: WarmForkUnusable) -> list[str]:
     async def invoke(request, _cancel):
         if request.warm_source is not None:
             raise refusal
-        return ProviderCheckpointResult("cold body", None)
+        return ProviderForkResult("cold body", None)
 
     monkeypatch.setattr(fallback, "run_in_db", no_db)
     lines: list[str] = []

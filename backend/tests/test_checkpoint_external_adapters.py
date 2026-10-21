@@ -15,7 +15,7 @@ import pytest
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from core import checkpoint_cc_commands
 
-from core.checkpoint_types import ProviderCheckpointRequest
+from core.fork_types import ProviderForkRequest
 from history.types import HistoryBoundary
 from llm.resolution import ExecutionTarget
 from vendor_account_fixtures import default_receipt, seed_turn_on_default
@@ -49,7 +49,7 @@ def vendor_thread(isolated_db):
 
 
 def _request(target, source, *, binary: str):
-    return ProviderCheckpointRequest(
+    return ProviderForkRequest(
         fork_id="checkpoint-1",
         thread_id="thread-1",
         target=target,
@@ -808,7 +808,7 @@ async def test_cc_preserves_launch_and_accepts_error_envelope_body(
         return process
 
     monkeypatch.setattr(cc, "_spawn_process", spawn)
-    result = await cc.invoke_checkpoint(
+    result = await cc.invoke_fork(
         _request(_target("claude-code"), source, binary="claude"), asyncio.Event(), kind=CHECKPOINT_KIND
     )
     assert result.raw_body == "usable checkpoint"
@@ -1402,7 +1402,7 @@ async def test_codex_durable_capture_and_exact_rollout_resume(tmp_path, monkeypa
     monkeypatch.setattr(
         "subagents.codex_app_server.CodexAppServerSession", Session,
     )
-    result = await codex.invoke_checkpoint(
+    result = await codex.invoke_fork(
         _request(_target("codex"), source, binary="codex"), asyncio.Event(), kind=CHECKPOINT_KIND
     )
     assert result.raw_body == "codex checkpoint"
@@ -1533,7 +1533,7 @@ async def test_codex_cold_checkpoint_starts_callback_session_in_disposable_home(
         "subagents.codex_app_server.CodexAppServerSession", Session,
     )
 
-    result = await codex.invoke_checkpoint(
+    result = await codex.invoke_fork(
         _request(_target("codex"), None, binary="codex"), asyncio.Event(), kind=CHECKPOINT_KIND
     )
 
@@ -1615,7 +1615,7 @@ async def test_codex_checkpoint_uses_callback_capable_app_server(
         "subagents.harness_tool_bridge.dynamic_tool_definitions",
         lambda _registry: definitions,
     )
-    result = await codex.invoke_checkpoint(
+    result = await codex.invoke_fork(
         _request(_target("codex"), source, binary="codex"), asyncio.Event(), kind=CHECKPOINT_KIND
     )
 
@@ -1773,7 +1773,7 @@ async def test_checkpoint_cancel_terminates_exact_provider_handle(
         )
 
     cancel = asyncio.Event()
-    operation = asyncio.create_task(module.invoke_checkpoint(request, cancel, kind=CHECKPOINT_KIND))
+    operation = asyncio.create_task(module.invoke_fork(request, cancel, kind=CHECKPOINT_KIND))
     await asyncio.wait_for(started.wait(), timeout=30)
     assert not operation.done()
     cancel.set()

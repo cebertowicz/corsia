@@ -124,18 +124,6 @@ def _require_tool_execution_admitted(live: _Live) -> None:
         )
 
 
-def _checkpoint_execution_admitted(thread_id: str, checkpoint_id: str) -> bool:
-    """Authenticate transport metadata against one running checkpoint row."""
-    from infra.continuity_staging import running_checkpoint_for_thread
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        return running_checkpoint_for_thread(db, checkpoint_id, thread_id)
-    finally:
-        db.close()
-
-
 async def _assistant_step_for_call(live: _Live, provider_call_id: str) -> str:
     """Wait for the durable CC Step that owns one exact loopback call."""
     from core._tool_result_delivery_support import ToolResultBindingError
@@ -225,30 +213,10 @@ async def _execute_admitted_tool(
     live: _Live,
     thread_id: str,
     body: dict,
-    checkpoint_id: str | None = None,
 ) -> str:
     """Execute one tool while the exact CC live owns its backend task."""
     model = getattr(live, "catalog_model_id", None) or getattr(live, "model", None)
     model_kwargs = {"model": model} if model else {}
-    if checkpoint_id is not None:
-        from functools import partial
-        from core.checkpoint_runtime import execute_checkpoint_tool
-
-        operation = partial(
-            execute_tool,
-            live.tool_registry,
-            thread_id=thread_id,
-            checkpoint_id=checkpoint_id,
-            name=str(body.get("name") or ""),
-            arguments=body.get("arguments") or {},
-            harness="claude-code",
-            **model_kwargs,
-        )
-        return await execute_checkpoint_tool(
-            thread_id, checkpoint_id, operation,
-            str(body.get("provider_tool_call_id") or ""),
-            str(body.get("name") or ""), body.get("arguments") or {},
-        )
     task = asyncio.current_task()
     if task is None:
         raise RuntimeError("CC tool execution has no owning asyncio task")
@@ -307,7 +275,6 @@ async def _tool_result_stream(
     live: _Live,
     thread_id: str,
     body: dict,
-    checkpoint_id: str,
     token: str,
 ):
     """Yield one authenticated Claude tool result after final admission checks."""
@@ -317,16 +284,8 @@ async def _tool_result_stream(
         token,
         expected_live=live,
     )
-    if checkpoint_id:
-        if not await run_in_db(
-            _checkpoint_execution_admitted, thread_id, checkpoint_id
-        ):
-            raise HTTPException(409, "Checkpoint execution is no longer running")
-    else:
-        _require_tool_execution_admitted(admitted_live)
-    executed = await _execute_admitted_tool(
-        admitted_live, thread_id, body, checkpoint_id or None
-    )
+    _require_tool_execution_admitted(admitted_live)
+    executed = await _execute_admitted_tool(admitted_live, thread_id, body)
     media = getattr(executed, "media", None)
     if media is None:
         yield str(executed)
@@ -364,7 +323,6 @@ async def execute_cc_tool(
     thread_id: str,
     body: dict,
     token: str = Header("", alias="X-CORSIA-Tool-Token"),
-    checkpoint_id: str = Header("", alias="X-CORSIA-Checkpoint-Id"),
 ):
     """Execute one authenticated Claude Code tool call under its live handle."""
     if request.headers.get("X-CORSIA-Fork-Id"):
@@ -375,14 +333,7 @@ async def execute_cc_tool(
             result_stream(request, thread_id, token, body), media_type="text/plain",
         )
     live = _tool_live(request, thread_id, token)
-    checkpoint_id = checkpoint_id.strip() if isinstance(checkpoint_id, str) else ""
-    if checkpoint_id:
-        if not await run_in_db(
-            _checkpoint_execution_admitted, thread_id, checkpoint_id
-        ):
-            raise HTTPException(409, "Checkpoint execution is no longer running")
-    else:
-        _require_tool_execution_admitted(live)
+    _require_tool_execution_admitted(live)
 
-    stream = _tool_result_stream(request, live, thread_id, body, checkpoint_id, token)
+    stream = _tool_result_stream(request, live, thread_id, body, token)
     return _DeferredStartStreamingResponse(stream, media_type="text/plain")

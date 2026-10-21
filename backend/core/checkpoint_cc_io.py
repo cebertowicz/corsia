@@ -8,7 +8,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.checkpoint_cc_context import CCCheckpointContext
-from core.checkpoint_types import ProviderCheckpointRejected, WarmForkUnusable
+from core.fork_types import (
+    ProviderForkRejected,
+    WarmForkUnusable,
+)
 from infra.provider_usage import from_anthropic, unmeasured_ledger_row
 
 _PROCESS_EXIT_TIMEOUT = 5.0
@@ -85,10 +88,10 @@ class _ToolBoundary:
                 self.closed = True
                 self.changed.set()
                 await _stop_process(self.process)
-                raise ProviderCheckpointRejected(self.failure)
+                raise ProviderForkRejected(self.failure)
             if self.closed or self.process.returncode is not None:
                 await _stop_process(self.process)
-                raise ProviderCheckpointRejected("checkpoint process has ended")
+                raise ProviderForkRejected("checkpoint process has ended")
             self.changed.clear()
             if not self.context.ready(call_id):
                 await self.changed.wait()
@@ -97,7 +100,7 @@ class _ToolBoundary:
         self.truncated = self.closed = True
         self.changed.set()
         await _stop_process(self.process)
-        raise ProviderCheckpointRejected("checkpoint reached its context limit")
+        raise ProviderForkRejected("checkpoint reached its context limit")
 
     async def execute(
         self, operation, call_id: str, name: str, arguments: dict[str, Any],
@@ -122,7 +125,7 @@ class _ToolBoundary:
             self.claimed_tool_calls.add(call_id)
             if self.closed or self.process.returncode is not None:
                 await _stop_process(self.process)
-                raise ProviderCheckpointRejected("checkpoint process has ended")
+                raise ProviderForkRejected("checkpoint process has ended")
             if not self.context.fits:
                 await self._cutoff()
             try:

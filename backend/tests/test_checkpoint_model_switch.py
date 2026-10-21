@@ -429,7 +429,7 @@ def test_target_cold_preserves_unavailable_source_model(monkeypatch) -> None:
         model_checkpoint, "read_switch_checkpoint_context", lambda _request: context,
     )
     monkeypatch.setattr("infra.database.get_db", lambda: _Db())
-    monkeypatch.setattr("core.checkpoint_render.build_cold_checkpoint_admission", build)
+    monkeypatch.setattr("core.checkpoint_cold_admission.build_checkpoint_admission", build)
 
     model_checkpoint._target_cold_admission(request, "checkpoint-1")
 
@@ -500,7 +500,7 @@ async def test_model_switch_target_cold_without_bridge_reaches_denied_tool_comma
     monkeypatch.setattr(cc, "_spawn_process", spawn)
 
     admission = await model_checkpoint.prepare_target_checkpoint(request, "checkpoint-1")
-    result = await cc.invoke_checkpoint(admission.provider_request, asyncio.Event(), kind=CHECKPOINT_KIND)
+    result = await cc.invoke_fork(admission.provider_request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert spawn.await_args is not None
     argv = spawn.await_args.args[0]
 

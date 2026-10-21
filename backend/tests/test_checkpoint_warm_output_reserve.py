@@ -9,12 +9,14 @@ from unittest.mock import Mock
 import pytest
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
+from core.fork_types import (
+    ProviderForkRejected,
+    ProviderForkResult,
+    WarmForkUnusable,
+)
 from core.checkpoint_types import (
     CHECKPOINT_OUTPUT_TOKENS,
     CHECKPOINT_TOOL_ROUND_TRIP_TOKENS,
-    ProviderCheckpointRejected,
-    ProviderCheckpointResult,
-    WarmForkUnusable,
 )
 from test_checkpoint_warm_fork_unusable import _cold_admission, _warm_request
 
@@ -70,7 +72,7 @@ async def test_cc_warm_fork_without_output_room_corrects_to_cold(monkeypatch):
         calls.append(request)
         if request.warm_source is not None:
             await cc_io._exchange(None, request, cancel_event, None, None, [], [], 0.0)
-        return ProviderCheckpointResult("cold body", None)
+        return ProviderForkResult("cold body", None)
 
     target = _warm_request("claude-code").target
     result = await fallback.invoke_with_cold_correction(
@@ -119,6 +121,6 @@ async def test_codex_warm_fork_that_just_fits_starts_a_session(monkeypatch, tmp_
 
 @pytest.mark.asyncio
 async def test_codex_cold_overflow_stays_a_plain_rejection(monkeypatch, tmp_path):
-    with pytest.raises(ProviderCheckpointRejected) as caught:
+    with pytest.raises(ProviderForkRejected) as caught:
         await _codex_initial(monkeypatch, tmp_path, warm=False, tokens=WINDOW + 1)
     assert not isinstance(caught.value, WarmForkUnusable)

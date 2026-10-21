@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
-from core.checkpoint_types import ProviderCheckpointRequest
+from core.fork_types import ProviderForkRequest
 from llm.resolution import ExecutionTarget
 from native_checkpoint_fixtures import cold_source, seed_vendor_checkpoint_thread
 
@@ -34,7 +34,7 @@ def _target(harness: str, *, context_window: int = 262_144) -> ExecutionTarget:
 
 
 def _admission(monkeypatch, harness: str, *, window=262_144, projection=None):
-    from core.checkpoint_render import build_cold_checkpoint_admission
+    from core.checkpoint_cold_admission import build_checkpoint_admission
 
     monkeypatch.setattr("infra.continuity_store.active_entries", lambda *_a: {})
     monkeypatch.setattr(
@@ -43,7 +43,7 @@ def _admission(monkeypatch, harness: str, *, window=262_144, projection=None):
     )
     target = _target(harness, context_window=window)
     projection = projection or cold_source().projection
-    return build_cold_checkpoint_admission(
+    return build_checkpoint_admission(
         checkpoint_id="checkpoint-1",
         thread_id="thread-1",
         trigger="model_switch",
@@ -203,7 +203,7 @@ def test_cc_cold_env_enforces_output_cap_without_changing_warm_env(
     monkeypatch.setattr(
         "subagents.cc_env.apply_claude_config_dir", lambda _env, _root: None,
     )
-    request = ProviderCheckpointRequest(
+    request = ProviderForkRequest(
         fork_id="checkpoint-1",
         thread_id="thread-1",
         target=_target("claude-code"),
@@ -221,26 +221,29 @@ def test_cc_cold_env_enforces_output_cap_without_changing_warm_env(
 
 
 def test_cc_declared_context_limit_cannot_be_installed_as_checkpoint() -> None:
-    from core import checkpoint_cc_fork as cc
-    from core.checkpoint_types import CHECKPOINT_CONTEXT_TRUNCATED, ProviderCheckpointRejected
+    from core.checkpoint_cc_result import result
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
+    from core.fork_types import ProviderForkRejected
+    from core.checkpoint_types import CHECKPOINT_CONTEXT_TRUNCATED
 
     too_long = json.dumps({
         "type": "result", "is_error": True, "result": "Prompt is too long",
     }).encode()
     # Provider error prose is never checkpoint content, and no body fails named.
-    with pytest.raises(ProviderCheckpointRejected, match=CHECKPOINT_CONTEXT_TRUNCATED):
-        cc._result(too_long)
+    with pytest.raises(ProviderForkRejected, match=CHECKPOINT_CONTEXT_TRUNCATED):
+        result(too_long, kind=CHECKPOINT_KIND)
 
     unrelated = json.dumps({
         "type": "result", "is_error": True, "result": "usable checkpoint",
     }).encode()
-    accepted = cc._result(unrelated)
+    accepted = result(unrelated, kind=CHECKPOINT_KIND)
     assert accepted.raw_body == "usable checkpoint"
     assert accepted.diagnostic == "usable checkpoint"
 
 
 def test_cc_checkpoint_preserves_every_auto_continued_generation() -> None:
-    from core import checkpoint_cc_fork as cc
+    from core.checkpoint_cc_result import result
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
     stdout = b"\n".join((
         json.dumps({
@@ -256,7 +259,7 @@ def test_cc_checkpoint_preserves_every_auto_continued_generation() -> None:
         }).encode(),
     ))
 
-    assert cc._result(stdout).raw_body == "first part\nsecond part"
+    assert result(stdout, kind=CHECKPOINT_KIND).raw_body == "first part\nsecond part"
 
 
 @pytest.mark.asyncio
@@ -304,7 +307,7 @@ async def test_codex_cold_adapter_uses_the_surface_admission_counted(
     monkeypatch.setattr(
         "subagents.codex_app_server.CodexAppServerSession", Session,
     )
-    request = ProviderCheckpointRequest(
+    request = ProviderForkRequest(
         fork_id="checkpoint-1",
         thread_id="thread-1",
         target=_target("codex"),
@@ -318,7 +321,7 @@ async def test_codex_cold_adapter_uses_the_surface_admission_counted(
         developer_instructions="frozen developer surface",
     )
 
-    result = await codex.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+    result = await codex.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
     assert result.raw_body == "checkpoint"
     assert observed["tool_registry"] is registry
@@ -401,7 +404,7 @@ async def test_codex_checkpoint_keeps_body_after_unrelated_terminal_failure(
     monkeypatch.setattr(
         "subagents.codex_app_server.CodexAppServerSession", Session,
     )
-    request = ProviderCheckpointRequest(
+    request = ProviderForkRequest(
         fork_id="checkpoint-1",
         thread_id="thread-1",
         target=_target("codex"),
@@ -412,7 +415,7 @@ async def test_codex_checkpoint_keeps_body_after_unrelated_terminal_failure(
         binary="codex",
     )
 
-    result = await codex.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+    result = await codex.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
 
     assert result.raw_body == "usable paid checkpoint"
     assert result.diagnostic == "unrelated terminal failure"
@@ -448,7 +451,7 @@ async def test_codex_context_limit_retains_partial_checkpoint(
     monkeypatch.setattr(
         "subagents.codex_app_server.CodexAppServerSession", Session,
     )
-    request = ProviderCheckpointRequest(
+    request = ProviderForkRequest(
         fork_id="checkpoint-1",
         thread_id="thread-1",
         target=_target("codex"),
@@ -459,6 +462,6 @@ async def test_codex_context_limit_retains_partial_checkpoint(
         binary="codex",
     )
 
-    result = await codex.invoke_checkpoint(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+    result = await codex.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert result.raw_body == "incomplete checkpoint"
     assert result.diagnostic == CHECKPOINT_CONTEXT_TRUNCATED

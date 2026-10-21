@@ -19,7 +19,7 @@ def bind_bridge(request, kind, cancel_event):
     handle = running_fork(request.thread_id, request.fork_id)
     owns_handle = handle is None
     if owns_handle:
-        handle = ForkHandle(asyncio.current_task(), cancel_event, request.thread_id)
+        handle = ForkHandle(asyncio.current_task(), cancel_event, request.thread_id, kind=kind)
         handles[request.fork_id] = handle
     config = None
     try:
@@ -90,10 +90,10 @@ def definitions(handle):
 
 
 async def execute(handle, body):
-    from core.checkpoint_types import CheckpointNotAdmitted
+    from core.fork_types import ForkNotAdmitted
 
     if handle.tool_executor is None:
-        raise CheckpointNotAdmitted("fork tool boundary is not ready")
+        raise ForkNotAdmitted("fork tool boundary is not ready")
     name, arguments = str(body.get("name") or ""), body.get("arguments") or {}
 
     async def operation():
