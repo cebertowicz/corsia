@@ -17,9 +17,9 @@
 		onClose,
 	}: Props = $props();
 
-	// Provider protocols can share a label; the registered name identifies this row.
+	// Every External endpoint shares a dialect label; its own name tells them apart.
 	const title = $derived(
-		provider.server?.instance_name
+		provider.server?.kind === 'external' && provider.server.instance_name
 			? provider.server.instance_name
 			: provider.label,
 	);

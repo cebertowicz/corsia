@@ -90,8 +90,13 @@ function _statusDotForServer(s: NetworkServer): HostProvider['statusDot'] {
 	return 'idle';
 }
 
-function _labelForServerProvider(s: NetworkServer, raw: ProviderEntry | undefined): string {
-	if (s.provider === 'omlx') return s.instance_name || 'oMLX';
+function _labelForServerProvider(
+	s: NetworkServer,
+	raw: ProviderEntry | undefined,
+	type: HostProvider['type'],
+): string {
+	if (type === 'local' && s.provider === 'omlx') return s.instance_name || 'oMLX';
+	if (s.provider === 'omlx') return 'oMLX';
 	if (s.kind === 'external') {
 		return s.dialect === 'anthropic' ? 'Anthropic-compatible API' : 'OpenAI-compatible API';
 	}
@@ -112,7 +117,7 @@ function _serverProvider(
 	const raw = providers.find(p => p.name === s.provider);
 	return {
 		name: s.provider,
-		label: _labelForServerProvider(s, raw),
+		label: _labelForServerProvider(s, raw, type),
 		type,
 		statusDot: _statusDotForServer(s),
 		subline: _networkSubline(s),

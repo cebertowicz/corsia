@@ -124,6 +124,7 @@ describe('groupByHost', () => {
 		const groups = groupByHost([p({ name: 'omlx', type: 'network' })], [remote], null);
 		expect(groups[0].key).toBe('host-r-99');
 		expect(groups[0].providers[0].type).toBe('network');
+		expect(groups[0].providers[0].label).toBe('oMLX');
 	});
 
 	it('uses an oMLX server’s registered name', () => {
