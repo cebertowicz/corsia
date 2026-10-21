@@ -67,7 +67,7 @@ def related(
 
 
 def attach_to_result(
-    db: sqlite3.Connection, operation: str, result: object, *, caller_thread_id: str,
+    db: sqlite3.Connection, operation: str, result: object, *, caller_thread_id: str, checkpoint_generation_id: str | None = None,
 ) -> None:
     """Attach ``prior_words`` to a plan result that starts a task or raises a decision."""
     result = getattr(result, "result", result)
@@ -84,6 +84,19 @@ def attach_to_result(
     lines = related(db, text, caller_thread_id=caller_thread_id, trigger=trigger)
     if lines:
         result[RESULT_KEY] = lines
+    node = result.get("node") if isinstance(result.get("node"), dict) else None
+    node_started = (node is not None and node.get("kind") == "task") or _started_node_id(result.get("next")) == text.node_id
+    if not node_started or text.node_id is None:
+        return
+    try:
+        from plans.public import attach_trial_lessons
+
+        attach_trial_lessons(
+            db, result, thread_id=caller_thread_id, node_id=text.node_id,
+            checkpoint_generation_id=checkpoint_generation_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory sibling never fails a plan mutation
+        _log_error("trial_delivery", exc)
 
 
 def related_for_next(

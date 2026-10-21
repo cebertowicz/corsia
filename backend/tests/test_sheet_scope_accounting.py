@@ -47,9 +47,8 @@ def test_skills_index_lists_each_skill_with_a_share_of_the_block(tmp_path):
     index = _index(tmp_path)
     listed = index.metadata["skills"]
     mine = [row for row in listed if row["scope"] == "workspace"]
-    assert [(row["name"], row["lesson_id"]) for row in mine] == [
-        ("review", None), ("ship", None),
-    ]
+    assert [row["name"] for row in mine] == ["review", "ship"]
+    assert all("lesson_id" not in row for row in listed)
     inventory = index.to_inventory_dict(model="gpt-4o")
     shares = [row["prompt_tokens"] for row in inventory["metadata"]["skills"]]
     assert all(share > 0 for share in shares)
@@ -161,18 +160,20 @@ from tests.test_lesson_index import (  # noqa: E402,F401  (fixtures are imported
 
 def _listed(db, workspace):
     index = _lesson_index(_sources(db, workspace))
+    # Trials are delivered per task, so no listed skill carries a lesson id.
+    assert all("lesson_id" not in row for row in index.metadata["skills"])
     # System skills share the index; only the thread's own skills matter here.
     return {
-        row["name"]: row["lesson_id"] for row in index.metadata["skills"]
+        row["name"] for row in index.metadata["skills"]
         if row["name"] in {"deploy", "cite-the-head"}
     }
 
 
-def test_an_offered_trial_sets_lesson_id_on_the_skills_list(lesson_db, lesson_workspace):
+def test_an_offered_trial_stays_off_the_skills_list(lesson_db, lesson_workspace):
     _write(lesson_workspace, "owner", "deploy", _plain("deploy"))
     _activate(lesson_db, lesson_workspace)
 
-    assert _listed(lesson_db, lesson_workspace) == {"cite-the-head": LESSON, "deploy": None}
+    assert _listed(lesson_db, lesson_workspace) == {"deploy"}
 
 
 def test_a_held_trial_carries_no_lesson_id_on_the_skills_list(lesson_db, lesson_workspace):
@@ -180,4 +181,4 @@ def test_a_held_trial_carries_no_lesson_id_on_the_skills_list(lesson_db, lesson_
     # Written without a scheduled review, so the registry holds it back.
     _write(lesson_workspace, "owner", "cite-the-head", _trial_text())
 
-    assert _listed(lesson_db, lesson_workspace) == {"deploy": None}
+    assert _listed(lesson_db, lesson_workspace) == {"deploy"}

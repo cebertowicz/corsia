@@ -15,6 +15,7 @@ from test_lesson_index import _activate
 
 
 def test_http_preview_keeps_lesson_projection_on_a_real_scanned_source(isolated_db, tmp_path, monkeypatch):
+    """A scanned trial is shown held for per-task delivery, never cached or costed."""
     from api import thread_runtime
     from core import context_preview
     import llm.resolution
@@ -50,14 +51,15 @@ def test_http_preview_keeps_lesson_projection_on_a_real_scanned_source(isolated_
             assert response.status_code == 200, response.text
             usage = response.json()["preview"]
             snapshot = usage["context_snapshot"]
-            costs = usage["lesson_index_estimates"]
-            assert costs["snapshot_id"] == snapshot["snapshot_id"] == usage["snapshot_id"]
-            skills = next(row for row in snapshot["source_inventory"] if row.get("metadata", {}).get("provider") == "skills")
-            [lesson] = skills["metadata"]["lessons"]
-            assert lesson["path"] == str(path)
-            [estimate] = costs["sources"][skills["source_id"]]
-            assert estimate["behavioral_sha256"] == lesson["behavioral_sha256"]
-            assert 0 <= estimate["prompt_tokens"] <= skills["prompt_tokens"]
+            assert "lesson_index_estimates" not in usage
+            assert snapshot["snapshot_id"] == usage["snapshot_id"]
+            inventory = snapshot["source_inventory"]
+            skills = next(row for row in inventory if row.get("metadata", {}).get("provider") == "skills")
+            assert "lessons" not in skills["metadata"]
+            assert all(skill["path"] != str(path) for skill in skills["metadata"].get("skills", []))
+            [held] = [row for row in inventory if row.get("stable_reference") == str(path.resolve())]
+            assert held["reason"] == "trial lesson not offered: trial lesson is delivered per task"
+            assert held["inclusion"] != "included"
     db.close()
     print(json.dumps({"calls":len(samples), "cold_ms":samples[0], "warm_median_ms":statistics.median(samples[1:]),
                       "max_ms":max(samples), "environment":"disposable HTTP; one real scanned trial; catalog/auth fixtures; no production latency claim"}))

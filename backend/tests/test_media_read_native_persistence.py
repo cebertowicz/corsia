@@ -228,6 +228,7 @@ async def test_native_checkpoint_source_excludes_tool_media_bytes(monkeypatch) -
         turn_model="openai/selected",
         iteration=0,
         fit_ledger=None,
+        context_usage={},
     )
 
     stopped = await turn_iteration._run_tool_phase(

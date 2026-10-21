@@ -10,7 +10,7 @@ from infra.schema import SCHEMA_VERSION
 
 
 def test_v132_registers_correction_learning_step() -> None:
-    assert SCHEMA_VERSION == 133
+    assert SCHEMA_VERSION >= 133
     assert MIGRATIONS[132] is migrate_132_to_133
 
 

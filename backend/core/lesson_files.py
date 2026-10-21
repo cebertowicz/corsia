@@ -42,7 +42,6 @@ HOLD_REASONS = {
     "no-selective-trigger": (
         "it has no trigger and boundary that say when it applies and when it does not"
     ),
-    "over-budget": "the trial lessons already offered fill the lesson index budget",
 }
 
 

@@ -261,6 +261,7 @@ def new_app_server_live(
     context_snapshot: dict | None,
     harness: Harness = "codex",
     continuity_accounting: ContinuityAccounting,
+    checkpoint_generation_id: str | None = None,
     continuing_wait_scope: CheckpointWaitScope | None = None,
 ) -> _LiveCodex:
     live = _LiveCodex(
@@ -278,6 +279,7 @@ def new_app_server_live(
         provider_reported_model=None,
         context_snapshot_id=(context_snapshot or {}).get("snapshot_id"),
         context_snapshot=context_snapshot,
+        checkpoint_generation_id=checkpoint_generation_id,
         continuity_accounting=continuity_accounting,
         requires_terminal_identity=True,
     )
@@ -341,6 +343,7 @@ async def configure_app_server_input(
             on_exit=on_exit,
         )
         live.bind_app_server_session(session)
+        session.checkpoint_generation_id = live.checkpoint_generation_id
         _set_compaction_callbacks(thread_id, live, session, on_event, on_exit)
         session.corsia_turn_identity = live.corsia_turn
 
@@ -357,6 +360,7 @@ async def configure_app_server_input(
             )
         _set_compaction_callbacks(thread_id, live, session, on_event, on_exit)
         live.bind_app_server_session(session)
+        session.checkpoint_generation_id = live.checkpoint_generation_id
         session.catalog_model_id = getattr(live, "catalog_model_id", None)
         turn_kwargs = {"model": exact_model} if exact_model else {}
 

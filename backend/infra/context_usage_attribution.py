@@ -25,7 +25,6 @@ import logging
 from typing import Any
 
 from core.token_estimation import _estimate_messages_tokens, _text_tokens
-from infra.lesson_usage_attribution import without_lesson_estimates
 
 logger = logging.getLogger(__name__)
 
@@ -284,13 +283,10 @@ def _attach_snapshot_projection(
     usage: dict[str, Any], snapshot: dict[str, Any],
     snapshot_id: str | None, continuity_mode: str,
 ) -> None:
-    """Attach the selected snapshot and fresh view-only descriptor estimates."""
-    from infra.lesson_usage_attribution import attach_lesson_estimates
-
+    """Attach the selected snapshot without trial-only descriptor projections."""
     usage["snapshot_id"] = snapshot_id or snapshot.get("snapshot_id")
     usage["context_snapshot"] = snapshot
     usage["continuity_mode"] = continuity_mode
-    attach_lesson_estimates(usage)
 
 
 def _settle_measured_total(usage: dict[str, Any], sections: dict[str, int], measured_total: int,
@@ -320,7 +316,7 @@ def merge_context_usage_with_snapshot(
 ) -> dict[str, Any] | None:
     """Attach estimated source attribution without replacing measured usage."""
     if not isinstance(snapshot, dict):
-        return without_lesson_estimates(context_usage)
+        return context_usage
 
     incoming_usage = context_usage if isinstance(context_usage, dict) else None
     explicitly_stale = _explicitly_stale_usage(incoming_usage)

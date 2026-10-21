@@ -1,14 +1,15 @@
-"""Placing a hypothesis as a trial: the real tool call, worker, review and installed offer.
+"""Placing a hypothesis as a trial: the real tool call, worker, review and per-task offer.
 
-Nothing between the ``place`` call and the installed skills index is replaced
+Nothing between the ``place`` call and the per-task delivery seam is replaced
 here: the thread's tray, the versioned writer, the artifact registry, the Plans
-review and the skills registry are the real ones. A fault is one real step
-raising once.
+review and the skill resolver are the real ones. A fault is one real step
+raising once. A trial is offered when the task-local delivery seam would
+deliver it; no cached skills index ever carries one.
 
-- A complete hypothesis is written, reviewed and offered by the next install,
+- A complete hypothesis is written, reviewed and offered to the next task,
   and its continuity entry retires. Until the review reference is written, no
-  index offers the file.
-- A failure at any step leaves the trial out of the index and its entry
+  task is offered the file.
+- A failure at any step leaves the trial unoffered and its entry
   recoverable; the retry repeats nothing: one file, one artifact, one review.
 - A person's instruction is never a trial. A hypothesis resting on a person's
   words without a derivation, or without their words kept somewhere, is
@@ -62,6 +63,7 @@ def env(tmp_path, monkeypatch) -> Env:
     db.execute("UPDATE threads SET title='Lane', agent_enabled=1 WHERE id=?", (THREAD,))
     db.commit()
     monkeypatch.setattr("infra.database.get_db", lambda: _connect(str(path)))
+    monkeypatch.setattr("infra.config.WORKSPACE", workspace)
     return Env(
         workspace, workspace / ".threads" / THREAD, db, _tool_db(path, monkeypatch),
         placement_worker, monkeypatch,
@@ -166,12 +168,29 @@ def _external_trial(
 
 
 def _offered(env: Env) -> list[dict]:
-    """The lessons the next installed skills index would carry."""
+    """The lessons the per-task delivery seam would offer the next task.
+
+    The cached skills index must never carry one, so that is checked on every call.
+    """
+    from core.lesson_delivery import _eligible_trials
+    from core.lesson_files import read_trial
+    from core.lesson_index import TRIAL_MARK
+
     sources = skill_context_sources(
         thread_id=THREAD, project_id=None, workspace=env.workspace, db=env.db,
     )
     index = [source for source in sources if source.source_id == "dynamic:skills-index"]
-    return index[0].metadata["lessons"] if index else []
+    assert all("lessons" not in (source.metadata or {}) for source in index)
+    cached = "".join(source.prompt_content or "" for source in index)
+    assert TRIAL_MARK not in cached
+    offered = []
+    for trial in _eligible_trials(env.db, THREAD):
+        current = read_trial(trial.source_data.decode("utf-8"))
+        offered.append({
+            "id": trial.lesson_id, "behavioral_sha256": trial.behavioral_sha256,
+            "name": current.name,
+        })
+    return offered
 
 
 def _reviews(env: Env, prefix: str = "") -> list[sqlite3.Row]:
@@ -188,16 +207,17 @@ def _open(rows: list[sqlite3.Row]) -> list[sqlite3.Row]:
 
 
 def _offered_at(env: Env, now: datetime) -> list[dict]:
-    """The lessons an index installed at ``now`` would carry."""
-    from core import lesson_index
-    from core.skill_resolution import resolve_effective_skills
+    """The lessons the per-task delivery seam would offer a task started at ``now``."""
+    from core import lesson_delivery
 
-    resolved = resolve_effective_skills(
-        thread_id=THREAD, project_id=None, workspace=env.workspace, db=env.db,
-    )
-    return lesson_index.partition(
-        resolved.included, resolved.omitted, thread_id=THREAD, db=env.db, now=now,
-    ).lessons
+    class _At(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001, ANN206 - datetime's own signature
+            return now.astimezone(tz)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(lesson_delivery, "datetime", _At)
+        return _offered(env)
 
 
 def _row(env: Env, entry: int) -> dict:
@@ -987,21 +1007,6 @@ async def test_appended_evidence_finds_the_same_captured_review(env: Env) -> Non
         "message 41", "turn-30",
     ]
     assert _artifacts(env, capture) == 1
-
-
-async def test_a_full_lesson_budget_captures_the_next_trial(env: Env) -> None:
-    from plans import public as plans
-
-    env.monkeypatch.setattr("core.lesson_index.INDEX_TOKEN_BUDGET", 1)
-    entry = _entry(env)
-
-    reply = _place(env, entry)
-    await _drain(env.worker)
-
-    assert "the trial lessons already offered fill the lesson index budget" in reply
-    assert "retire or promote a trial lesson you no longer need" in reply
-    assert not _skill(env).exists() and _offered(env) == []
-    assert plans.open_capture_review_counts(env.db) == {THREAD: 1}
 
 
 async def test_duplicate_watch_placement_merges_each_turns_subjects_on_one_record(env: Env) -> None:

@@ -17,7 +17,6 @@ import anyio
 from fastapi import APIRouter, Header, HTTPException, Request
 from starlette.responses import StreamingResponse
 
-from infra import state
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
 from subagents.cc_runtime_state import (
@@ -240,6 +239,7 @@ async def _execute_admitted_tool(
             invocation_id=str(body.get("invocation_id") or ""),
             provider_tool_call_id=provider_tool_call_id,
             assistant_step_id=assistant_step_id,
+            checkpoint_generation_id=getattr(live, "checkpoint_generation_id", None),
             name=str(body.get("name") or ""),
             arguments=body.get("arguments") or {},
             harness="claude-code",

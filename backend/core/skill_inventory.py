@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.lesson_index import TRIAL_MARK, descriptor_estimates, name_entry
+from core.lesson_index import name_entry
 
 
 def _line_for(entry: dict[str, Any], lines: list[str]) -> str | None:
@@ -19,10 +19,9 @@ def _line_for(entry: dict[str, Any], lines: list[str]) -> str | None:
     if entry.get("listed") == "name":
         path = entry.get("path")
         return name_entry(name, path) if isinstance(path, str) and path else None
-    for prefix in (f"- {name}:", f"- {name}{TRIAL_MARK}:"):
-        for line in lines:
-            if line.startswith(prefix):
-                return line
+    for line in lines:
+        if line.startswith(f"- {name}:"):
+            return line
     return None
 
 
@@ -44,9 +43,13 @@ def with_skill_tokens(
         for index, entry in enumerate(skills)
         if isinstance(entry, dict) and (line := _line_for(entry, lines)) is not None
     }
-    estimates = descriptor_estimates(
-        [{"id": key, "index_line": line} for key, line in found.items()],
-        skills_tokens=total_tokens, model=model,
+    from core.token_estimation import _text_tokens
+
+    raw = {key: _text_tokens(line, model) for key, line in found.items()}
+    total = sum(raw.values())
+    estimates = (
+        raw if total <= total_tokens or total == 0
+        else {key: tokens * max(0, total_tokens) // total for key, tokens in raw.items()}
     )
     return {
         **metadata,

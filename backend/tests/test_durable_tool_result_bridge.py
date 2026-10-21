@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import httpx
@@ -72,9 +73,9 @@ def test_cc_mcp_reads_claude_tool_id_from_request_metadata() -> None:
     from mcp.server.lowlevel.server import request_ctx
     from subagents import corsia_mcp_server
 
-    token = request_ctx.set(SimpleNamespace(
+    token = request_ctx.set(cast(Any, SimpleNamespace(
         meta=SimpleNamespace(model_extra={"claudecode/toolUseId": "toolu_meta"})
-    ))
+    )))
     try:
         assert corsia_mcp_server._provider_tool_call_id() == "toolu_meta"
     finally:
@@ -663,6 +664,7 @@ async def test_codex_dynamic_request_binds_provider_call_id_to_invocation(monkey
         invocation_id="provider-call-1",
         provider_tool_call_id="provider-call-1",
         assistant_step_id="assistant-step-1",
+        checkpoint_generation_id=None,
         name="read_file",
         arguments={"path": "README.md"},
         harness="codex",

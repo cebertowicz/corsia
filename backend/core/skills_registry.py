@@ -132,13 +132,9 @@ def _skill_origin(row: SkillRow) -> dict | None:
 
 
 def _listed_skills(
-    full_rows: list[SkillRow], name_only_rows: list[SkillRow], lessons: list[dict],
+    full_rows: list[SkillRow], name_only_rows: list[SkillRow],
 ) -> list[dict]:
-    """The skills in the index, with listing form, origin, and trial membership."""
-    trial_ids = {
-        (lesson["scope"], lesson["scope_id"], lesson["name"]): lesson["id"]
-        for lesson in lessons
-    }
+    """The ordinary skills in the cached index, with listing form and origin."""
     listed = []
     rows = [(row, "full") for row in full_rows] + [(row, "name") for row in name_only_rows]
     for row, form in rows:
@@ -149,7 +145,6 @@ def _listed_skills(
             "role": row.role,
             "path": str(row.path),
             "listed": form,
-            "lesson_id": trial_ids.get((row.scope, row.scope_id, row.name)),
         }
         if origin := _skill_origin(row):
             item["origin"] = origin
@@ -242,11 +237,9 @@ def skill_context_sources(
                 "error_count": len(resolved.errors),
                 "system_unavailable": resolved.system_unavailable,
                 "repair_owner": "skills",
-                # Always a list here; a row without the key predates lessons.
-                "lessons": split.lessons,
                 # The listed skills by scope, for the context sheet. Absent on
                 # a row that predates it: unavailable, never "none".
-                "skills": _listed_skills(full_rows, name_only_rows, split.lessons),
+                "skills": _listed_skills(full_rows, name_only_rows),
             },
         )
     ]

@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from infra import state
+import infra.state as state
 from infra.config import WORKSPACE
 from infra.default_port import DEFAULT_BACKEND_PORT
 from infra.settings import get_tool_config
@@ -322,6 +322,7 @@ async def execute_tool(
     assistant_step_id: str | None = None,
     fork_id: str | None = None,
     fork_policy: Any = None,
+    checkpoint_generation_id: str | None = None,
     model: str | None = None,
     name: str,
     arguments: dict[str, Any],
@@ -332,8 +333,12 @@ async def execute_tool(
     turn_token = state._current_turn_identity.set(turn_identity)
     completion = None
     try:
-        with state.tool_invocation_context(invocation_id, fork_id=fork_id,
-                                           provider_call_id=provider_tool_call_id):
+        with state.tool_invocation_context(
+            invocation_id,
+            fork_id=fork_id,
+            provider_call_id=provider_tool_call_id,
+            checkpoint_generation_id=checkpoint_generation_id,
+        ):
             if fork_policy is None:
                 content = await registry.execute(name, arguments)
             else:

@@ -83,6 +83,7 @@ async def execute_dynamic_tool(session, name: str, arguments: dict, params: dict
         turn_identity=session.corsia_turn_identity,
         invocation_id=provider_call_id, provider_tool_call_id=provider_call_id,
         assistant_step_id=assistant_step_id,
+        checkpoint_generation_id=getattr(session, "checkpoint_generation_id", None),
         name=name, arguments=arguments, harness="codex", **model_kwargs, **fork_kwargs,
     )
     try:

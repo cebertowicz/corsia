@@ -39,7 +39,6 @@ FIXES = {
     "no-selective-trigger": (
         "give skill_description (when it applies) and trial.boundary (when it does not)"
     ),
-    "over-budget": "retire or promote a trial lesson you no longer need",
 }
 
 
@@ -199,12 +198,7 @@ def admit(
         path = lesson_files.capture_path(place.tray, capture_id)
         capture = lesson_files.read_capture(path.read_text(encoding="utf-8")) if path.exists() else None
     identity, text = _render(thread_id, capture_id, entry, decision, write_path, capture)
-    offered = _offered_elsewhere(db, place, str(decision.skill_name), write_path)
-    line = _index_line(decision, write_path)
-    from core.lesson_index import fits_budget
-
-    if not fits_budget(offered, line, identity):
-        return Admission(identity, capture_id, "over-budget", open_trials=open_rows, retired_matches=retired_rows)
+    _ensure_name_available(db, place, str(decision.skill_name), write_path)
     return Admission(
         identity, capture_id, None, text, write_path, open_rows, retired_rows,
         merge[1].name if merge else None,
@@ -346,20 +340,10 @@ def _render(
     return identity, text
 
 
-def _index_line(decision: Decision, path: Path) -> str:
-    from core.lesson_index import line_for
-
-    return line_for(
-        str(decision.skill_name), " ".join(str(decision.skill_description).split()), path,
-        trial=True,
-    )
-
-
-def _offered_elsewhere(
+def _ensure_name_available(
     db: sqlite3.Connection, place: ThreadPlace, name: str, path: Path,
-) -> list[dict[str, Any]]:
-    """The trial lessons this thread is offered now; refuses a name another skill holds."""
-    from core.lesson_index import partition
+) -> None:
+    """Refuse a lesson name already held by another resolved skill."""
     from core.skill_resolution import resolve_effective_skills
     from infra.config import WORKSPACE
 
@@ -373,4 +357,4 @@ def _offered_elsewhere(
                 f"skill_name {name} is already a skill at {row.path}; a trial "
                 "never replaces one. Choose a new name"
             ))
-    return partition(skills.included, skills.omitted, thread_id=place.thread_id, db=db).lessons
+    return None

@@ -119,9 +119,6 @@ def _context_usage(messages, source_payload, prefix_info, source_artifacts, *, m
         "checkpoint_generation_id": prefix_info["checkpoint_generation_id"],
         "source_artifacts": source_artifacts,
     }
-    from infra.lesson_usage_attribution import attach_lesson_estimates
-
-    attach_lesson_estimates(usage)
     return usage
 
 

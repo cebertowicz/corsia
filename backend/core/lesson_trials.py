@@ -29,11 +29,7 @@ PERMANENT_KINDS = frozenset(KINDS) - {"hypothesis"}
 #: fixture set, not empirical optima.
 BODY_WORDS = 150
 DESCRIPTION_WORDS = 40
-#: Provisional total for trial lines in one resolved skills index, inherited
-#: scopes included. An assumption until index cost is measured: no observed
-#: distribution backs this number.
-INDEX_TOKEN_BUDGET = 1_000
-
+# Trial bodies never enter the cached skills index.
 REVIEW_REF_PREFIX = "plan-node:"
 _FIELDS = frozenset({
     "id", "state", "owner", "review_after", "source_refs", "review_ref",

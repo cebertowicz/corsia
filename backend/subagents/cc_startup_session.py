@@ -38,6 +38,7 @@ def build_starting_session(
         registry=context.tool_registry,
     )
     transcript = context.reconstructed_transcript
+    live.checkpoint_generation_id = context.checkpoint_generation_id
     session = session_factory(
         binary=binary,
         session_id=context.cc_session_id,
@@ -57,6 +58,7 @@ def build_starting_session(
         reconstructed_transcript_path=(transcript.path if transcript else None),
     )
     session.corsia_turn_identity = live.corsia_turn
+    session.checkpoint_generation_id = context.checkpoint_generation_id
     return session
 
 

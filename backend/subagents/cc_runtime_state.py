@@ -47,6 +47,7 @@ class _Live(LiveBase):
     provider_reported_model: str | None = None
     context_snapshot_id: str | None = None
     context_snapshot: dict | None = None
+    checkpoint_generation_id: str | None = None
     source_artifacts: list[dict] | None = None
     continuity_accounting: ContinuityAccounting | None = None
     # Latest verified final ``message_delta`` measurement for this Turn. Each

@@ -96,6 +96,7 @@ async def test_harness_tool_bridge_can_load_skill_body(
         invocation_id="skill-invocation",
         provider_tool_call_id="skill-call",
         assistant_step_id=step_id,
+        checkpoint_generation_id="installed-generation",
         name="read_file",
         arguments={"path": str(skill_path)},
     )
@@ -103,3 +104,12 @@ async def test_harness_tool_bridge_can_load_skill_body(
     assert "description: Use when reviewing code." in result
     assert "# Review" in result
     assert "Inspect the diff and report defects first." in result
+    check = get_db()
+    try:
+        receipt = check.execute(
+            "SELECT checkpoint_generation_id FROM guidance_loads WHERE path=?",
+            (str(skill_path.resolve()),),
+        ).fetchone()
+    finally:
+        check.close()
+    assert receipt["checkpoint_generation_id"] == "installed-generation"

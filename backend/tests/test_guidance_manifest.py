@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from contextlib import closing
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -428,6 +429,125 @@ async def test_a_skill_read_leaves_a_version_receipt(skill):
 
 
 @pytest.mark.asyncio
+async def test_trial_delivery_changes_only_the_returned_text_and_receipt(skill, monkeypatch):
+    from core.lesson_delivery import ReadDelivery
+    from infra.database import get_db
+
+    monkeypatch.setattr(
+        "core.lesson_delivery.read_delivery",
+        lambda _db, **kwargs: ReadDelivery(
+            f"{kwargs['rendered_text']}\n\n[Trial section — with variant]", "node-1", "with",
+        ),
+    )
+
+    returned = await _read(skill)
+
+    assert "[Trial section — with variant]" in returned
+    assert "[Trial section" not in skill.read_text(encoding="utf-8")
+    with closing(get_db()) as db:
+        row = db.execute(
+            "SELECT raw_sha256,delivered_sha256,node_id,variant FROM guidance_loads"
+        ).fetchone()
+    assert row["raw_sha256"] == hashlib.sha256(skill.read_bytes()).hexdigest()
+    assert row["delivered_sha256"] == hashlib.sha256(returned.encode()).hexdigest()
+    assert (row["node_id"], row["variant"]) == ("node-1", "with")
+
+
+@pytest.mark.asyncio
+async def test_native_read_receipt_makes_a_later_task_crossover(skill, monkeypatch):
+    """The execute-level bridge stores the target identity crossover reads query."""
+    from core.lesson_delivery import TrialDelivery, draw
+    from infra import state as runtime_state
+    from infra.database import get_db
+
+    target = skill.resolve()
+    trial = TrialDelivery(
+        lesson_id="trial", behavioral_sha256="a" * 64,
+        source_path=target.parent.parent / "trial" / "SKILL.md", target=str(target),
+        is_new=False, target_section=None, body="Use the trial procedure.",
+        index_line="- trial", source_data=b"trial source",
+    )
+    with_node = next(
+        f"node-{number}" for number in range(1000)
+        if draw(trial.lesson_id, trial.behavioral_sha256, f"node-{number}") == "with"
+    )
+    without_node = next(
+        f"node-{number}" for number in range(1000)
+        if draw(trial.lesson_id, trial.behavioral_sha256, f"node-{number}") == "without"
+    )
+    monkeypatch.setattr("core.lesson_delivery._eligible_trials", lambda *_args: [trial])
+
+    async def read_for(node_id: str, install: str) -> str:
+        monkeypatch.setattr("core.lesson_delivery._current_task", lambda *_args: node_id)
+        token = runtime_state._current_checkpoint_generation_id.set(install)
+        try:
+            return await _read(skill)
+        finally:
+            runtime_state._current_checkpoint_generation_id.reset(token)
+
+    assert "Use the trial procedure." in await read_for(with_node, "install-1")
+    assert "Use the trial procedure." not in await read_for(without_node, "install-1")
+    assert "Use the trial procedure." not in await read_for(without_node, "install-2")
+
+    with closing(get_db()) as db:
+        rows = db.execute(
+            "SELECT path,node_id,checkpoint_generation_id,variant FROM guidance_loads "
+            "WHERE lesson_id='trial'"
+        ).fetchall()
+    variants = {
+        (row["node_id"], row["checkpoint_generation_id"]): row["variant"] for row in rows
+    }
+    assert {row["path"] for row in rows} == {str(target)}
+    assert variants == {
+        (with_node, "install-1"): "with",
+        (without_node, "install-1"): "crossover",
+        (without_node, "install-2"): "crossover",
+    }
+
+
+@pytest.mark.asyncio
+async def test_native_direct_trial_read_exposure_carries_to_its_target(skill, monkeypatch):
+    from core.lesson_delivery import TrialDelivery, draw
+    from infra import state as runtime_state
+    from infra.database import get_db
+
+    target = skill.resolve()
+    direct = target.parent.parent / "trial" / "SKILL.md"
+    direct.parent.mkdir()
+    direct.write_text(target.read_text(encoding="utf-8"), encoding="utf-8")
+    trial = TrialDelivery(
+        lesson_id="trial", behavioral_sha256="a" * 64, source_path=direct,
+        target=str(target), is_new=False, target_section=None, body="Use the trial procedure.",
+        index_line="- trial", source_data=direct.read_bytes(),
+    )
+    direct_node, target_node = [
+        f"node-{number}" for number in range(1000)
+        if draw(trial.lesson_id, trial.behavioral_sha256, f"node-{number}") == "without"
+    ][:2]
+    monkeypatch.setattr("core.lesson_delivery._eligible_trials", lambda *_args: [trial])
+
+    async def read_for(path, node_id: str) -> str:
+        monkeypatch.setattr("core.lesson_delivery._current_task", lambda *_args: node_id)
+        return await _read(path)
+
+    token = runtime_state._current_checkpoint_generation_id.set("install-1")
+    try:
+        assert "line 19" in await read_for(direct, direct_node)
+        assert "Use the trial procedure." not in await read_for(target, target_node)
+    finally:
+        runtime_state._current_checkpoint_generation_id.reset(token)
+
+    with closing(get_db()) as db:
+        rows = db.execute(
+            "SELECT path,node_id,variant FROM guidance_loads WHERE lesson_id='trial' ORDER BY path"
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [
+        (str(target), target_node, "crossover"),
+        (str(direct), direct_node, "crossover"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_failed_and_ordinary_reads_leave_nothing(skill):
     other = skill.parent / "NOTES.md"
     other.write_text("notes")
@@ -444,6 +564,25 @@ def test_a_skill_receipt_hashes_the_bytes_the_read_returned(skill):
         returned_text="x", partial=False,
     )
     assert _loads() == [("thread-1", "turn-1", git_blob_oid(data), 0)]
+
+
+def test_a_trial_receipt_keeps_task_variant_and_install_provenance(skill):
+    from infra.database import get_db
+
+    data = skill.read_bytes()
+    record_guidance_load(
+        thread_id="thread-1", turn_id="turn-1", path=skill, data=data,
+        returned_text="with trial", partial=False, node_id="node-1", variant="with",
+        checkpoint_generation_id="install-1",
+    )
+
+    with closing(get_db()) as db:
+        row = db.execute(
+            "SELECT node_id,variant,checkpoint_generation_id,raw_sha256,delivered_sha256 FROM guidance_loads"
+        ).fetchone()
+    assert tuple(row[:3]) == ("node-1", "with", "install-1")
+    assert row["raw_sha256"] == hashlib.sha256(data).hexdigest()
+    assert row["delivered_sha256"] == hashlib.sha256(b"with trial").hexdigest()
 
 
 @pytest.mark.asyncio

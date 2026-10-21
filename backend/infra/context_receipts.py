@@ -241,9 +241,6 @@ def context_usage_for_boundary(
         usage["content_hash"] = snapshot["content_hash"]
     if extra:
         usage.update(extra)
-    from infra.lesson_usage_attribution import attach_lesson_estimates
-
-    attach_lesson_estimates(usage)
     return _jsonable(usage)
 
 
