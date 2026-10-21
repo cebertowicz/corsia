@@ -146,7 +146,8 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow_version
         return mutations.split_node(
             params["node_id"], title=fields.text(params, "title"),
             acceptance_criteria=fields.text(params, "acceptance_criteria"),
-            description=params.get("description"), **fields.expected(params), **common,
+            description=params.get("description"), size=fields.require_task_size(params.get("size")),
+            **fields.expected(params), **common,
         )
     if operation == "reorder":
         return _reorder(params, common)
@@ -287,6 +288,7 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
     _node, follow_up = service.accept_with_follow_up(
         node_id, title=fields.text(params, "title"),
         acceptance_criteria=fields.text(params, "acceptance_criteria"),
+        size=fields.require_task_size(params.get("size")),
         verification_result="passed", verified_by=actor.audit_id,
         **expected, **common,
     )
@@ -344,7 +346,7 @@ def dispatch(plan_id, operation, params, actor, provenance, db, *, workflow_vers
     if actor.kind != "user" or operation not in user_steering.STEERING_OPERATIONS:
         return _route(plan_id, operation, params, actor, common, db, workflow_version)
     if operation in user_settle.OUTCOMES:
-        return user_settle.settle(operation, params, actor, common)
+        return user_settle.settle(operation, params, actor.audit_id, common)
     params = user_steering.prepare(operation, params, db)
     if "worker_plan_id" in params:
         return user_steering.move_worker_plan(operation, params, common)

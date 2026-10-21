@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { paneOpen, paneDragging } from '$lib/stores/paneOpen';
-	import { paneCollapsed } from '$lib/stores/paneCollapsed';
+	import { paneCollapsed, paneSnapping } from '$lib/stores/paneCollapsed';
 	import { uiScope } from '$lib/stores/uiScope';
 	import { PANE_DRAWER_WIDTH, shouldOverlayPane } from '$lib/artifactSplitLayout';
 
@@ -27,6 +27,8 @@
 			overlay = !$paneCollapsed && shouldOverlayPane(
 				protectArtifactSplit, window.innerWidth, inlineCanvasWidth,
 			);
+			// How much of the canvas's inline end the overlaid pane covers, so controls there can keep clear of it.
+			main.style.setProperty('--pane-overlay-inset', overlay ? `${PANE_DRAWER_WIDTH}px` : '0px');
 		};
 		updateOverlay();
 
@@ -37,6 +39,7 @@
 		return () => {
 			observer.disconnect();
 			window.removeEventListener('resize', updateOverlay);
+			main.style.removeProperty('--pane-overlay-inset');
 		};
 	});
 </script>
@@ -47,6 +50,7 @@
 	class:open={$paneOpen}
 	class:dragging={$paneDragging}
 	class:collapsed={$paneCollapsed}
+	class:snap={$paneSnapping}
 	class:overlay
 	style={`--pane-width: ${PANE_DRAWER_WIDTH}px`}
 >
@@ -68,6 +72,7 @@
 		transition: width var(--dur-spring) var(--ease-material),
 		            padding var(--dur-spring) var(--ease-material);
 	}
+	.pane.snap { transition: none; }
 	.pane-top {
 		position: sticky; top: 0; z-index: 3; flex-shrink: 0;
 		display: flex; align-items: center; justify-content: space-between;
@@ -76,7 +81,7 @@
 		background: var(--glass-thick);
 	}
 	.pane-scope { font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-secondary); }
-	.pane-scope.accent { color: var(--accent); }
+	.pane-scope.accent { color: var(--accent-text); }
 
 	@media (min-width: 1025px) {
 		.pane.overlay {
@@ -99,8 +104,8 @@
 		}
 		.pane.open, .pane.dragging { display: flex; }
 		.pane-top {
-			height: calc(var(--header-height, 56px) + env(safe-area-inset-top, 0px));
-			padding-top: env(safe-area-inset-top, 0px);
+			height: var(--header-bottom);
+			padding-top: var(--safe-top);
 		}
 	}
 </style>

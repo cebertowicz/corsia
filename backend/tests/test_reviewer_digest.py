@@ -35,6 +35,8 @@ def _actor():
 
 def request_review(db, artifact_id, reviewer=REVIEWER, key="k1"):
     row = reviews.request_review(db, artifact_id, reviewer, _actor(), None, key)
+    # These fixtures exercise a review node's existing watch/closure semantics.
+    row = reviews.escalate_fork(db, row["id"])
     db.commit()
     return row
 
@@ -85,6 +87,17 @@ def test_open_reviewer_hears_comments_and_edits_by_others_but_not_its_own(env):
     assert len(lines) == 2
     assert any("Bee commented on PRD." in line for line in lines)
     assert any("user edited PRD." in line for line in lines)
+
+
+def test_node_less_fork_watches_document_until_submission_or_withdrawal(env):
+    from infra.reviewer_watch import watched_reviews
+
+    db, artifact_id = env
+    row = reviews.request_review(db, artifact_id, REVIEWER, _actor(), "Check claims", "fork-watch")
+    assert row["node_id"] is None
+    assert artifact_id in watched_reviews(db, REVIEWER)
+    reviews.cancel(db, row["id"], _actor())
+    assert artifact_id not in watched_reviews(db, REVIEWER)
 
 
 def test_two_edits_by_one_actor_collapse_but_comment_and_edit_stay_apart(env):

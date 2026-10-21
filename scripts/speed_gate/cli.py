@@ -33,13 +33,25 @@ def _describe(run: dict, route: str) -> str:
 
 
 def _trace_difference(runs: list[dict], route: str) -> list[str]:
-    """The statements one run executed for ``route`` that another did not, per run, with the thread they ran on."""
+    """How the runs' statements for ``route`` differ, each with the thread it ran on.
+
+    The statements one run executed that another did not, per run; and a run that executed the same
+    statements as run 1 in another order, from the first position where they part. Order matters on its own:
+    work moved across a transaction boundary, or onto another connection, can cost a different amount.
+    """
     traces = [(run.get("routes", {}).get(route) or {}).get("info", {}).get("trace", []) for run in runs]
     lines = []
     for number, trace in enumerate(traces, 1):
         others = collections.Counter(line for index, other in enumerate(traces, 1) if index != number for line in other)
         own = collections.Counter(trace)
         lines += [f"    only in run {number}: {line} (x{count - others[line]})" for line, count in own.items() if count > others[line]]
+    first = traces[0]
+    for number, trace in enumerate(traces[1:], 2):
+        if trace == first or collections.Counter(trace) != collections.Counter(first):
+            continue
+        moved = [index for index, (one, other) in enumerate(zip(first, trace)) if one != other]
+        lines.append(f"    order differs in run {number} at {len(moved)} of {len(first)} statements, from statement "
+                     f"{moved[0] + 1}: run 1 ran {first[moved[0]]}; run {number} ran {trace[moved[0]]}")
     return lines
 
 

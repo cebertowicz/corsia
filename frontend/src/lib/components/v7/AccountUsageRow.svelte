@@ -4,6 +4,8 @@
 	import { formatUsageLimit } from '$lib/stores/overageSetting';
 	import type { VendorAccount } from '$lib/stores/vendorAccounts';
 	import CurrentCheck from '../CurrentCheck.svelte';
+	import { inlineSlot } from '$lib/slotMotion';
+	import SwitchingIcon from '../ui/SwitchingIcon.svelte';
 
 	/**
 	 * The one account row. Settings renders it in full (`settings`, or `compact` in a policy list);
@@ -47,9 +49,8 @@
 	{#if order !== null}<span class="order" aria-label={`Rollover position ${order}`}>{order}</span>{/if}
 	<span class="main">
 		<span class="picker-label" title={full}>
-			<span class="name">{label.name}</span>{#if hasEmail}<span class="sep" aria-hidden="true">{' · '}</span><span class="email">{label.email}</span>{/if}
+			<span class="name-group"><span class="name">{label.name}</span>{#if pending}<span class="switching-slot" in:inlineSlot out:inlineSlot><SwitchingIcon ariaLabel="Switching account" /></span>{/if}</span>{#if hasEmail}<span class="sep" aria-hidden="true">{' · '}</span><span class="email">{label.email}</span>{/if}
 		</span>
-		{#if pending}<span class="switch-marker">Switching…</span>{/if}
 		<span class="figures">
 			{#each pickerSegments as segment, index}
 				{#if index > 0}<span aria-hidden="true">{' · '}</span>{/if}<span class:amber={segment.level === 'amber'} class:red={segment.level === 'red'} aria-label={segment.label}>{segment.text}</span>
@@ -104,6 +105,8 @@
 
 	/* Picker: one compact line under the vendor's group header, set in with the model rows. */
 	.account-usage-row.picker {
+		position: relative;
+		--check-top: calc(6px + 0.5lh); /* the first line's centre: the figures may wrap to a second line */
 		display: flex; align-items: baseline; gap: 8px;
 		width: 100%; box-sizing: border-box;
 		padding: 6px 10px 6px 32px;
@@ -115,8 +118,8 @@
 	button.account-usage-row.picker:hover:not(:disabled):not(.marked) { background: var(--bg-hover); }
 	button.account-usage-row.picker:disabled { cursor: default; }
 	.account-usage-row.picker.blocked { color: var(--text-secondary); }
-	/* The account's selected fill shares the model row's inset; its label remains aligned with the model status dot. */
-	.account-usage-row.picker.marked { margin-left: 22px; width: calc(100% - 22px); padding-left: 10px; background: color-mix(in srgb, var(--violet) 10%, transparent); }
+	/* The selected account only gains the fill, as the model row does: its content stays where an unselected row's is, and its check enters the left gutter. */
+	.account-usage-row.picker.marked { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 	/* Rollover rows use the model-dot gutter for their order and the model-row gap before the account label. */
 	.account-usage-row.picker.ordered { padding-left: 32px; gap: 3px; }
 	.picker.ordered .order { flex: 0 0 14px; margin: 0; text-align: center; color: var(--text-tertiary); font-size: var(--text-caption); font-weight: 600; }
@@ -129,8 +132,10 @@
 	.figures { margin-left: auto; text-align: right; color: var(--text-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 	.figures .amber { color: var(--amber-text); }
 	.figures .red { color: var(--red-text); }
-	/* The model rows' own pending marker, so a held account choice reads as a held model switch does. */
-	.switch-marker { font-size: var(--text-caption); color: var(--accent); white-space: nowrap; }
+	/* The pending icon follows the name of the account being switched to. */
+	.name-group { flex: 0 1 auto; min-width: 0; display: flex; align-items: baseline; gap: var(--space-1); }
+	/* A block with its own line box, so the icon's vertical-align sits it on the text baseline; an empty flex box would rest its bottom there. */
+	.switching-slot { display: inline-block; flex: 0 0 auto; }
 	@media (max-width: 480px) {
 		.figures { flex-basis: 100%; margin-left: 0; text-align: left; }
 		/* Phone: name and usage stack in the middle column; order and controls stay beside them. */

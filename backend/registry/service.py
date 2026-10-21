@@ -12,9 +12,10 @@ from core.workspace_layout import uploads_root_for_path
 from infra.database import TransactionOwnershipError, get_db, write_transaction
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
 from registry import models, registration_events, registration_writer
+from registry.cc_session import notify_cc_session, persist_cc_session
 from registry.file_identity import FileIdentity, PreparedFileWrite, external_identity_for_path
 from registry.file_types import extension_type, image_media_type
-from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES
+from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES, written_row
 from registry.identity_metadata import last_written_sha256, merge_identity_metadata, parse_metadata
 from registry.notifications import notify_changed
 from registry.observation_owner import require_observable_owner
@@ -303,18 +304,18 @@ def register_write_strict(
             metadata=artifact_metadata, origin=origin,
             db=_db,
         )
-        merge_identity_metadata(_db, artifact["id"], artifact_metadata)
-        artifact = models.get_artifact(artifact["id"], db=_db) or artifact
+        artifact_id = (artifact or existing)["id"]
+        merge_identity_metadata(_db, artifact_id, artifact_metadata)
+        artifact = written_row(_db, artifact_id, thread_id)
         if existing is not None:
             from registry.review_edit_journal import journal_reviewed_edit
-
             journal_reviewed_edit(
                 _db, artifact, previous_sha256=last_written_sha256(existing["metadata"]),
                 new_sha256=artifact_metadata.get("last_written_sha256"),
                 actor_thread_id=thread_id if actor_thread_id is None else actor_thread_id,
             )
     if origin is not None and (db is None or not db.in_transaction):
-        emit_committed_origin(db, existing["id"] if existing else artifact["id"], thread_id)
+        emit_committed_origin(db, artifact_id, thread_id)
     if notify:
         notify_changed(artifact)
     return artifact
@@ -490,23 +491,13 @@ def register_cc_session(
 
     The durable write is loud; only its UI notification is best-effort.
     """
-    if not thread_id:
-        return None
-    from registry.cc_session import replace_cc_session
-
-    previous_id, row = replace_cc_session(
+    previous_id, row = persist_cc_session(
         thread_id, cc_session_id, title=title, cwd=cwd, invocation=invocation,
         checkpoint_generation_id=checkpoint_generation_id, expected_previous_id=expected_previous_id,
         verify_previous=verify_previous, db=db,
     )
-    if cc_session_id is not None and (db is None or not db.in_transaction):
-        try:
-            notify_changed(row or {
-                "integration": "claude-code", "type": "session",
-                "external_id": cc_session_id})
-        except Exception as error:
-            logger.warning(
-                f"registry register_cc_session notify failed for {thread_id}: {error}")
+    if db is None or not db.in_transaction:
+        notify_cc_session(thread_id, cc_session_id, row)
     return previous_id
 
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button, Field, Message } from '$lib/components/ui';
+	import { settingsAnchor } from '$lib/stores/settingsNavigation';
 	import { billingSummary, parsePriceCents, parseChargeDay, PRICE_ERROR, DAY_ERROR, LIST_PRICE, NO_LIST_PRICE, type BillingMode, type BillingValue } from './billingFormat';
 
 	// One billing row for every account and External endpoint, so the price, day, copy and layout cannot drift apart.
@@ -83,7 +84,7 @@
 	const showFields = $derived(!endpoint || draftMode === 'subscription');
 </script>
 
-<div class="billing" class:ruled={!!endpoint} data-settings-anchor={anchorId} tabindex="-1" aria-label={label} role="group">
+<div class="billing" class:ruled={!!endpoint} data-settings-anchor={anchorId} use:settingsAnchor={anchorId} tabindex="-1" aria-label={label} role="group">
 	{#if !editing}
 		<div class="summary">
 			<span class="name">Billing</span>
@@ -136,7 +137,7 @@
 <style>
 	.billing { padding: 8px 0 0; color: var(--text-secondary); font-size: var(--text-footnote); outline: none; }
 	.billing.ruled { margin-top: 10px; padding: 10px 0 0; border-top: 1px solid var(--border-subtle); }
-	.billing:focus-visible { box-shadow: 0 0 0 3px var(--violet-bg); border-radius: var(--radius-xs); }
+	.billing:focus-visible { box-shadow: 0 0 0 3px var(--accent-wash); border-radius: var(--radius-xs); }
 	.summary { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
 	.name { color: var(--text-secondary); }
 	.value { color: var(--text-primary); min-width: 0; overflow-wrap: anywhere; }

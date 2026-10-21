@@ -10,7 +10,8 @@ from pathlib import Path
 import re
 import shutil
 import stat
-from typing import Literal, Sequence
+import tempfile
+from typing import IO, Literal, Sequence
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import Version
@@ -93,6 +94,26 @@ def admitted_version(output: str) -> str:
     raise identity.BrowserIdentityError(
         f"{found} not a supported native agent-browser version ({policy}); {INSTALL_HINT}"
     )
+
+
+def _application_dirs() -> tuple[Path, ...]:
+    return Path("/Applications"), Path.home() / "Applications"
+
+
+def chrome_executable() -> tuple[str | None, Literal["env", "system", "default"]]:
+    """Choose the Chrome agent-browser launches; None keeps its own download.
+
+    That download (Chrome for Testing 152) stops sending screencast frames in about
+    half of fresh sessions, so an installed Google Chrome is preferred. Only the
+    binary changes: agent-browser keeps its temporary profile either way.
+    """
+    if explicit := os.environ.get("AGENT_BROWSER_EXECUTABLE_PATH"):
+        return explicit, "env"
+    for folder in _application_dirs():
+        candidate = folder / "Google Chrome.app/Contents/MacOS/Google Chrome"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate), "system"
+    return None, "default"
 
 
 def resolve_native(binary: str) -> tuple[str, str]:
@@ -208,6 +229,11 @@ def _diagnostic(exc: Exception, phase: str) -> str:
     return diagnostic
 
 
+def _read_output(stream: IO[bytes]) -> str:
+    stream.seek(0)
+    return stream.read().decode("utf-8", errors="replace").strip()
+
+
 async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> CommandResult:
     """Settle the actual subprocess; unknown effects are never a no-launch claim."""
     env = os.environ.copy()
@@ -215,18 +241,28 @@ async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> Co
     env.pop("AGENT_BROWSER_DASHBOARD", None)
     env.pop("AGENT_BROWSER_SESSION", None)
     env["AGENT_BROWSER_SOCKET_DIR"] = str(socket_dir)
+    # The client starts a browser daemon that outlives it, and a descendant can keep the client's stdout and stderr
+    # open after the client exits. Pipes would then never reach end-of-file, so the client writes to files and
+    # settles on its own exit; what a descendant writes later goes to a file nobody waits on.
+    output, errors = tempfile.TemporaryFile(), tempfile.TemporaryFile()
+
+    def release_output(_: object = None) -> None:
+        output.close()
+        errors.close()
+
     spawn = _retain(asyncio.create_task(asyncio.create_subprocess_exec(
-        *tuple(argv), stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE, env=env,
+        *tuple(argv), stdout=output, stderr=errors, env=env,
     )))
     try:
         process = await asyncio.wait_for(asyncio.shield(spawn), timeout)
         if (current := asyncio.current_task()) is not None and current.cancelling():
             raise asyncio.CancelledError
     except asyncio.TimeoutError:
+        spawn.add_done_callback(release_output)
         pending = _retain(asyncio.create_task(_settle_late_spawn(spawn)))
         return CommandResult(-1, "", "", True, "unknown", pending)
     except asyncio.CancelledError:
+        spawn.add_done_callback(release_output)
         pending = _retain(asyncio.create_task(_settle_late_spawn(spawn)))
         result = CommandResult(-1, "", "", completion="unknown", settlement=pending)
         try:
@@ -235,11 +271,13 @@ async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> Co
             pass  # The retained settlement still owns the client.
         raise CommandCancelled(result.settled()) from None
     except Exception as exc:
+        release_output()
         return CommandResult(1, "", _diagnostic(exc, "spawn"), completion="unknown")
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
+        await asyncio.wait_for(process.wait(), timeout)
         if (current := asyncio.current_task()) is not None and current.cancelling():
             raise asyncio.CancelledError
+        stdout, stderr = _read_output(output), _read_output(errors)
     except (asyncio.CancelledError, Exception) as exc:
         stopped = await asyncio.shield(_stop_client(process))
         diagnostic = "" if isinstance(exc, (asyncio.TimeoutError, asyncio.CancelledError)) else _diagnostic(exc, "communicate")
@@ -248,8 +286,9 @@ async def invoke(argv: Sequence[str], *, socket_dir: Path, timeout: float) -> Co
         if isinstance(exc, asyncio.CancelledError):
             raise CommandCancelled(result) from None
         return result
-    return CommandResult(int(process.returncode or 0), stdout.decode("utf-8", errors="replace").strip(),
-                         stderr.decode("utf-8", errors="replace").strip())
+    finally:
+        release_output()
+    return CommandResult(int(process.returncode or 0), stdout, stderr)
 
 
 def check_local_mode(args: Sequence[str]) -> None:

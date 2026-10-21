@@ -19,19 +19,19 @@ def agent_roster_scope_id(user_id: str, project_id: str | None) -> str:
     return f"user:{user_id}:{scope}"
 
 
-def workspace_conductor_contact_scope_id(user_id: str) -> str:
-    """Return the project-agent subscription key for a workspace conductor."""
-    return f"user:{user_id}:workspace-conductor-contact"
+def corsia_agent_contact_scope_id(user_id: str) -> str:
+    """Return the project-agent subscription key for a CORSIA agent."""
+    return f"user:{user_id}:corsia-agent-contact"
 
 
-def append_workspace_conductor_contact_change(
+def append_corsia_agent_contact_change(
     db: sqlite3.Connection, *, user_id: str, summary: str, thread_id: str | None = None,
 ) -> None:
-    """Journal one workspace-conductor contact change for a user's project agents."""
+    """Journal one corsia-agent contact change for a user's project agents."""
     append_change(
         db,
         object_kind="agent_roster",
-        object_id=workspace_conductor_contact_scope_id(user_id),
+        object_id=corsia_agent_contact_scope_id(user_id),
         change_kind="updated",
         summary=summary,
         details={"thread_id": thread_id} if thread_id else None,
@@ -56,6 +56,34 @@ def append_thread_context_note(
         details=details,
         actor_thread_id=actor_thread_id,
     )
+
+
+# A note whose details carry this key is journaled again when the digest that
+# carried it ends without reaching the model, so a restart or a Stop before the
+# write cannot lose it. A digest that may have been written is never repeated.
+REOFFER_UNWRITTEN = "reoffer_unwritten"
+
+
+def reoffer_unwritten_notes(db: sqlite3.Connection, message_ids: tuple[str, ...]) -> None:
+    """Journal again each marked note from digests that ended proved unwritten."""
+    for message_id in message_ids:
+        row = db.execute(
+            "SELECT thread_id,metadata FROM messages WHERE id=? AND write_outcome='proved_no_write' "
+            "AND delivery_state IN ('failed','cancelled') AND json_valid(metadata) "
+            "AND json_extract(metadata,'$.event_type')='context.digest'",
+            (message_id,),
+        ).fetchone()
+        if row is None:
+            continue
+        for event in json.loads(row["metadata"]).get("context_events") or ():
+            details = event.get("details") if isinstance(event, dict) else None
+            if isinstance(details, dict) and details.get(REOFFER_UNWRITTEN):
+                # Rendering lifted the chip out of the details; put it back.
+                chip = {"chip": event["chip"]} if "chip" in event else {}
+                append_thread_context_note(
+                    db, thread_id=str(row["thread_id"]), summary=str(event["summary"]),
+                    details={**chip, **details},
+                )
 
 
 def append_change(
@@ -139,20 +167,21 @@ def append_agent_roster_transition(
         for row in (before, after)
     )
     if source is not None and workspace_candidate:
-        from infra.conductor import ConductorSettingError, get_conductor
+        from infra.corsia_agent import get_corsia_agent
+        from infra.corsia_agent import CorsiaAgentSettingError
 
         source_values = dict(source)
         try:
-            workspace_conductor_id = get_conductor(db=db)
-        except ConductorSettingError:
+            corsia_agent_id = get_corsia_agent(db=db)
+        except CorsiaAgentSettingError:
             logger.warning(
-                "Skipping workspace-conductor contact journal: designation setting is corrupt"
+                "Skipping corsia-agent contact journal: designation setting is corrupt"
             )
             return
-        if workspace_conductor_id == source_values["id"]:
+        if corsia_agent_id == source_values["id"]:
             user_id = str(source_values.get("user_id") or "")
             if user_id:
-                append_workspace_conductor_contact_change(
+                append_corsia_agent_contact_change(
                     db,
                     user_id=user_id,
                     summary=summary,
@@ -230,7 +259,7 @@ def _relevant_changes(
             thread_id,
             project_id,
             agent_roster_scope_id(user_id, project_id),
-            workspace_conductor_contact_scope_id(user_id),
+            corsia_agent_contact_scope_id(user_id),
             project_id,
             DETAIL_LIMIT + 1,
         ),
@@ -257,7 +286,7 @@ def _latest_roster_change(
         "ORDER BY seq DESC LIMIT 1",
         (
             agent_roster_scope_id(user_id, project_id),
-            workspace_conductor_contact_scope_id(user_id),
+            corsia_agent_contact_scope_id(user_id),
             project_id,
             after,
             through,

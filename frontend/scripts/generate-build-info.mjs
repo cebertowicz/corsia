@@ -63,6 +63,10 @@ function capture() {
 		commit_subject: commitSubject,
 		dirty,
 		build_iso: buildIso,
+		app: {
+			// The release version, stamped by the app bundle build; a source checkout has none and the host reads git.
+			version: process.env.CORSIA_APP_VERSION || null,
+		},
 	};
 }
 

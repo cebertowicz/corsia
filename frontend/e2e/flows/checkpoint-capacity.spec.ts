@@ -1,8 +1,11 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext } from '@playwright/test';
 import {
 	chatComposer, createSession, lastAssistantMessage, saveEvidenceScreenshot,
 	TEST_TOKEN, watchSessionSubscriptions,
 } from '../support/corsia';
+import { focusSetting, openOutcomeThread } from '../support/focusOutcomeProof';
+import { setFocusMode } from '../support/focusMode';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 
 async function setContextCap(request: APIRequestContext, contextWindow: number): Promise<void> {
@@ -15,6 +18,11 @@ async function setContextCap(request: APIRequestContext, contextWindow: number):
 	expect(response.ok()).toBeTruthy();
 }
 
+// Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
+test.afterEach(async ({ request }) => {
+	await setFocusMode(request, true);
+});
+
 test('@flow:chat @surface:chat impossible checkpoint cap preserves draft and explains recovery', async ({ page, request }, testInfo) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires the isolated synthetic model catalog');
 	const title = `e2e checkpoint capacity ${Date.now()}`;
@@ -22,10 +30,8 @@ test('@flow:chat @surface:chat impossible checkpoint cap preserves draft and exp
 	const subscriptions = watchSessionSubscriptions(page);
 	await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
 	await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible();
-	if ((page.viewportSize()?.width ?? 0) <= 768) {
-		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	}
-	await page.locator('.thread-item').filter({ hasText: title }).click();
+	await focusSetting(page, false);
+	await openOutcomeThread(page, title);
 	await expect(chatComposer(page)).toBeVisible();
 	await subscriptions.waitForSubscribed(threadId);
 	await seedMockResponses(request, [{ content: 'CAPACITY_RECOVERED', finish_reason: 'stop' }]);

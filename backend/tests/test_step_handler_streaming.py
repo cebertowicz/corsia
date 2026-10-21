@@ -592,3 +592,27 @@ def test_attach_delivered_context_updates_latest_assistant_metadata(monkeypatch)
 def test_unknown_step_type_raises(handler):
     with pytest.raises(ValueError, match="Unhandled step type 'totally_unknown'"):
         asyncio.run(handler.handle("totally_unknown", {}))
+
+
+def test_turn_complete_frame_carries_the_looked_up_rows(monkeypatch):
+    bc = _FakeBroadcast()
+    h = _bind_test_identity(StepHandler(
+        thread_id="sess-test",
+        model_info={"model": "test/model", "model_name": "Test", "is_cloud": False},
+        broadcast=bc,
+        turn_id="turn-test",
+    ))
+
+    async def no_receipt(fn, *args, **kwargs):
+        return None
+
+    monkeypatch.setattr("core.step_handler.run_in_db", no_receipt)
+    looked_up = [{"server": "github", "display_name": "GitHub", "tokens": 1_200}]
+
+    asyncio.run(h.handle("turn_complete", {
+        "context_usage": {
+            "model_context_window": 200_000, "total_used": 42, "loaded_tool_tokens": looked_up,
+        },
+    }))
+
+    assert bc.events[0]["context_usage"]["loaded_tool_tokens"] == looked_up

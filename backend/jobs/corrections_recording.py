@@ -1,115 +1,43 @@
-"""Bounded serial recording of versioned owner-correction facts."""
+"""Persist local ONNX correction facts and select bounded pending candidates."""
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass
-from time import monotonic
-from typing import Any, Awaitable, Callable
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from core.corrections_recording import (
     CORRECTION_EVENT,
+    DECISION_SUBJECT_PREFIX,
     FACT_KEYS,
-    LABEL_REFUSED,
-    REFUSAL_INPUT_TOO_LONG,
-    REFUSAL_INVALID_OUTPUT,
-    REFUSAL_OUTPUT_TRUNCATED,
-    SYSTEM_PROMPT,
-    CheckerVersion,
-    ClassificationOutputError,
+    LABEL_CORRECTION,
+    LABEL_UNREADABLE,
+    SOURCE_KIND_DECISION_ANSWER,
+    SOURCE_KIND_DOC_COMMENT,
+    SOURCE_KIND_MESSAGE,
+    ClassifierVersion,
     CorrectionCandidate,
-    checker_version,
-    classifier_prompt,
     dedupe_key,
     fact_attributes,
-    refusal_classification,
     subject_key,
-    validate_classification,
+    version_match_sql,
 )
 from infra.db_async import run_in_db
 from jobs.corrections_scanning import (
     PendingCandidateKey,
+    ScanCursor,
     hydrate_candidates,
     pending_candidate_keys,
-)
-from llm.isolated_contract import IsolatedStructuredTelemetry
-from llm.isolated_structured import (
-    IsolatedStructuredContextOverflowError,
-    IsolatedStructuredIdentityError,
-    IsolatedStructuredOutputTruncatedError,
-    IsolatedStructuredProviderError,
-    IsolatedStructuredRateLimitError,
-    IsolatedStructuredTimeoutError,
-    IsolatedStructuredUnavailableError,
-    invoke_isolated_structured,
+    pending_source_candidate_keys,
+    source_candidate,
 )
 
-DEFAULT_BATCH_SIZE = 20
-# Four hours bounds a deliberate drain while the scheduler continues to service
-# maintenance triggers; at the 60-second call timeout it permits at least 240 calls.
-RUN_TIME_BUDGET_SECONDS = 4 * 60 * 60
-# Fortissimo reasons by default (as in the gated run), so the cap must leave room
-# for thinking plus the verdict; the 60s call timeout bounds it (~80 tok/s).
-CLASSIFIER_MAX_OUTPUT_TOKENS = 4096
-MANUAL_REQUEST_SETTING = "corrections_recording_manual_request"
-OUTPUT_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "label": {"type": "string", "enum": ["correction", "not_correction"]},
-        "reason": {"type": "string"},
-    },
-    "required": ["label", "reason"],
-    "additionalProperties": False,
-}
-Invoke = Callable[..., Awaitable[dict[str, str]]]
+if TYPE_CHECKING:
+    from core.corrections_classifier import Classification
 
 
-@dataclass(slots=True)
-class _UsageTelemetry:
-    """Record one detached checker call with the normal per-thread usage owner."""
-
-    thread_id: str
-
-    def record(self, telemetry: IsolatedStructuredTelemetry) -> None:
-        if not telemetry.usage_available:
-            return
-        try:
-            from infra.llm_usage import record_llm_usage
-
-            record_llm_usage(
-                self.thread_id,
-                telemetry.catalog_id,
-                {
-                    "prompt_tokens": telemetry.prompt_tokens,
-                    "completion_tokens": telemetry.completion_tokens,
-                    "cache_creation_tokens": telemetry.cache_creation_tokens,
-                    "cache_read_tokens": telemetry.cache_read_tokens,
-                    "total_tokens": telemetry.total_tokens,
-                    "cost_usd": telemetry.cost_usd,
-                },
-                source="corrections_recording",
-                ttft_ms=None,
-            )
-        except Exception:
-            logger.exception("corrections recording usage telemetry failed")
-
-
-def _resolve_target(model_id: str):
-    from core.checkpoint_render import checkpoint_binary
-    from infra.database import get_db
-    from llm.resolution import resolve_execution_target
-
-    db = get_db()
-    try:
-        target = resolve_execution_target(model_id, db=db)
-        return target, checkpoint_binary(target, db)
-    finally:
-        db.close()
-
-
-def _owner_user_ids() -> list[str]:
+def owner_user_ids() -> list[str]:
     """Return each durable account owner whose messages can be scoped independently."""
     from infra.database import get_db
 
@@ -126,56 +54,16 @@ def _owner_user_ids() -> list[str]:
         db.close()
 
 
-def request_manual_corrections_recording() -> None:
-    """Durably ask the existing nightly loop to drain for RUN_TIME_BUDGET_SECONDS."""
-    from infra.settings import set_setting
-
-    set_setting(MANUAL_REQUEST_SETTING, {"pending": True})
-
-
-def claim_manual_corrections_recording() -> bool:
-    """Atomically consume a manual request so concurrent loop ticks cannot duplicate it."""
-    from infra.database import write_transaction
-    from infra.settings import get_setting, set_setting
-
-    with write_transaction(None, scope="claim_manual_corrections_recording") as db:
-        request = get_setting(MANUAL_REQUEST_SETTING, db=db) or {}
-        if request.get("pending") is not True:
-            return False
-        set_setting(MANUAL_REQUEST_SETTING, {"pending": False}, db=db)
-        return True
-
-
-def _write_status(status: str, reason: str | None = None, **counts: int) -> None:
-    from infra.settings import set_setting
-    from infra.time import utc_now_iso
-
-    value: dict[str, str | int | None] = {"status": status, "reason": reason, "at": utc_now_iso()}
-    value.update(counts)
-    set_setting("corrections_recording_status", value)
-
-
-def _refusal_code(exc: Exception) -> str:
-    if isinstance(exc, IsolatedStructuredOutputTruncatedError):
-        return REFUSAL_OUTPUT_TRUNCATED
-    if isinstance(exc, IsolatedStructuredContextOverflowError):
-        return REFUSAL_INPUT_TOO_LONG
-    return REFUSAL_INVALID_OUTPUT
-
-
-def _record_failure() -> None:
-    from infra.database import write_transaction
-    from infra.outcome_events import count_outcome_event
-
-    with write_transaction(None, scope="corrections_recording_failure") as db:
-        count_outcome_event(db, "mapping_failed", CORRECTION_EVENT)
-
-
 def _record_fact(
     candidate: CorrectionCandidate,
-    classification: dict[str, str],
-    version: CheckerVersion,
+    classification: dict[str, str | int | bool],
+    version: ClassifierVersion,
 ) -> bool:
+    """Write one versioned local-classifier fact in its own transaction.
+
+    A new correction queues its triage note in the same transaction.
+    """
+    from core.correction_notes import queue_correction_note
     from infra.database import write_transaction
     from infra.outcome_events import record_outcome_event
 
@@ -185,85 +73,133 @@ def _record_fact(
     with write_transaction(None, scope="record_correction_fact") as db:
         result = record_outcome_event(
             db,
-            dedupe_key=dedupe_key(candidate.message_id, version),
+            dedupe_key=dedupe_key(candidate, version),
             event_name=CORRECTION_EVENT,
             source="corsia",
             provenance="agent_recorded",
             ts=candidate.created_at,
-            subject_key=subject_key(candidate.message_id),
+            subject_key=subject_key(candidate.source_kind, candidate.source_id),
             project_id=candidate.project_id,
             agent_thread_id=candidate.thread_id,
             attributes=attributes,
         )
         if result.dropped_keys:
             raise RuntimeError("correction fact attributes were dropped")
+        if result.inserted and result.event_id and classification["label"] == LABEL_CORRECTION:
+            queue_correction_note(db, candidate, version, result.event_id)
         return result.inserted
 
 
-async def _classify_and_record(
-    candidate: CorrectionCandidate, target: Any, binary: str | None,
-    version: CheckerVersion, invoke: Invoke,
-) -> str:
-    """Classify one candidate and write its fact.
+def candidate_for_source(source_kind: str, source_id: str) -> CorrectionCandidate | None:
+    """Hydrate one newly arrived correction source, or return no human candidate."""
+    from infra.database import get_db
 
-    Returns "recorded", "refused", "failed", "provider_unavailable", or
-    "duplicate" when the fact already existed and nothing was inserted.
+    if source_kind == SOURCE_KIND_MESSAGE:
+        return candidate_for_message(source_id)
+    db = get_db()
+    try:
+        candidate = source_candidate(db, source_kind, source_id)
+    finally:
+        db.close()
+    return replace(candidate, arrived=True) if candidate is not None else None
+
+
+def candidate_for_message(message_id: str) -> CorrectionCandidate | None:
+    """Read one arrived message as a candidate; None when it is not an owner candidate."""
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        row = db.execute(
+            """SELECT m.rowid,m.id,m.thread_id,t.project_id,m.created_at
+               FROM messages m JOIN threads t ON t.id=m.thread_id WHERE m.id=?""", (message_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        key = PendingCandidateKey(int(row[0]), SOURCE_KIND_MESSAGE, str(row[1]), str(row[2]), row[3], str(row[4]))
+    finally:
+        db.close()
+    candidates = hydrate_candidates([key])
+    return replace(candidates[0], arrived=True) if candidates else None
+
+
+def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object) -> None:
+    """Hand the corrections worker an admitted owner message; best effort, never failing the send."""
+    from core.corrections_recording import is_owner_authored_message
+    from jobs.corrections_realtime import notify
+
+    try:
+        if not accepted.duplicate and is_owner_authored_message(role=role, content=content, metadata=metadata):
+            notify(SOURCE_KIND_MESSAGE, accepted.message_id)
+    except Exception:
+        logger.exception("corrections classifier admission notification failed")
+
+
+def notify_doc_comment(comment_id: str) -> None:
+    """Hand the worker a committed user comment; best effort, never failing the comment."""
+    from jobs.corrections_realtime import notify
+
+    try:
+        notify(SOURCE_KIND_DOC_COMMENT, comment_id)
+    except Exception:
+        logger.exception("corrections classifier comment notification failed")
+
+
+def notify_decision_answer(decision_id: str, other_text: object) -> None:
+    """Hand the worker a committed decision answer that carries free text; best effort, never failing the answer.
+
+    An Other answer and a pick-any note both arrive as ``other_text``.
     """
+    from jobs.corrections_realtime import notify
+
     try:
-        classification = await invoke(
-            target,
-            system_prompt=SYSTEM_PROMPT,
-            user_prompt=classifier_prompt(candidate.preceding_agent, candidate.content),
-            output_schema=OUTPUT_SCHEMA,
-            validator=validate_classification,
-            max_output_tokens=CLASSIFIER_MAX_OUTPUT_TOKENS,
-            timeout_seconds=60.0,
-            binary=binary,
-            telemetry_sink=_UsageTelemetry(candidate.thread_id).record,
-            thread_id=candidate.thread_id,
-        )
-    except (
-        IsolatedStructuredOutputTruncatedError,
-        IsolatedStructuredContextOverflowError,
-        ClassificationOutputError,
-    ) as exc:
-        # Only the checker's own output (or an item it can never fit) is a
-        # refusal: this version will not re-ask it.
-        classification = refusal_classification(_refusal_code(exc))
-        logger.warning(
-            "corrections recording refused {}: {}", candidate.message_id, classification["reason"],
-        )
-    except (
-        IsolatedStructuredRateLimitError,
-        IsolatedStructuredUnavailableError,
-        IsolatedStructuredIdentityError,
-    ) as exc:
-        # Only these say the provider itself cannot serve whatever is asked:
-        # leave this message pending and stop the run.
-        logger.warning("corrections recording provider unavailable {}: {}", candidate.message_id, type(exc).__name__)
-        return "provider_unavailable"
-    except (IsolatedStructuredProviderError, IsolatedStructuredTimeoutError) as exc:
-        # These failures belong to the attempted message: leave it pending,
-        # record the failed mapping, and continue to older candidates.
-        logger.warning("corrections recording call failed {}: {}", candidate.message_id, exc)
-        await run_in_db(_record_failure)
-        return "failed"
+        if isinstance(other_text, str) and other_text.strip():
+            notify(SOURCE_KIND_DECISION_ANSWER, decision_id)
     except Exception:
-        # An unexpected local error is likewise one message failure, never a
-        # provider outage; preserve it in logs and continue the bounded run.
-        logger.exception("corrections recording failed {}", candidate.message_id)
-        await run_in_db(_record_failure)
-        return "failed"
-    try:
-        inserted = await run_in_db(_record_fact, candidate, classification, version)
-    except Exception:
-        # A failed write is ours, not the checker's: never a refusal fact.
-        logger.exception("corrections recording write failed {}", candidate.message_id)
-        await run_in_db(_record_failure)
-        return "failed"
-    if not inserted:
-        return "duplicate"
-    return "refused" if classification["label"] == LABEL_REFUSED else "recorded"
+        logger.exception("corrections classifier decision-answer notification failed")
+
+
+async def record_classification(candidate: CorrectionCandidate, result: Classification) -> bool:
+    """Record a scored fact; ``failure_reason`` is ``none``."""
+    classification = {
+        "label": result.label,
+        "truncated": result.truncated,
+        "original_tokens": result.original_tokens,
+        "failure_reason": "none",
+    }
+    return await run_in_db(_record_fact, candidate, classification, result.version)
+
+
+async def record_unreadable(candidate: CorrectionCandidate, version: ClassifierVersion, reason: str) -> bool:
+    """Record an input a healthy model failed on twice, with that failure's kind."""
+    classification = {
+        "label": LABEL_UNREADABLE, "truncated": False, "original_tokens": 0, "failure_reason": reason,
+    }
+    return await run_in_db(_record_fact, candidate, classification, version)
+
+
+def unreadable_facts(db, version: ClassifierVersion) -> int:
+    """Count served unreadable facts in the Measurement window, once per source.
+
+    Message and document-comment facts count, including legacy facts that lack a
+    source-kind attribute. Decision answers stay triage-only. The ``(event_name,
+    ts)`` index bounds the read to the window's correction facts.
+    """
+    from jobs.corrections_activation import measurement_window_start
+
+    version_filter, version_params = version_match_sql("e", version)
+    row = db.execute(
+        f"""SELECT COUNT(DISTINCT e.subject_key) FROM outcome_events e
+           WHERE e.event_name=:event AND e.ts >= :since AND e.retracted_at IS NULL
+             AND {version_filter} AND e.subject_key NOT LIKE :decision_prefix || '%'
+             AND json_extract(e.attributes,'$.label')=:label""",
+        {
+            **version_params, "event": CORRECTION_EVENT, "label": LABEL_UNREADABLE,
+            "decision_prefix": DECISION_SUBJECT_PREFIX,
+            "since": measurement_window_start().isoformat(),
+        },
+    ).fetchone()
+    return int(row[0])
 
 
 @dataclass(slots=True)
@@ -274,96 +210,21 @@ class _PendingBatch:
     candidates: list[CorrectionCandidate]
 
 
-async def _next_pending_batch(
-    version: CheckerVersion, batch_size: int, before: tuple[str, str] | None,
+async def next_pending_batch(
+    version: ClassifierVersion, batch_size: int, before: ScanCursor | None,
+    *, since: str | None = None,
 ) -> _PendingBatch:
-    """Globally select keys before reading the 20 classifier inputs."""
-    keys: list[PendingCandidateKey] = []
-    for owner_user_id in await run_in_db(_owner_user_ids):
+    """Globally select keys before reading the bounded classifier inputs."""
+    keys: list[PendingCandidateKey] = await run_in_db(
+        pending_source_candidate_keys, version, batch_size, before, since,
+    )
+    for owner_user_id in await run_in_db(owner_user_ids):
         keys.extend(
-            await run_in_db(pending_candidate_keys, version, batch_size, owner_user_id, before)
+            await run_in_db(
+                pending_candidate_keys, version, batch_size, owner_user_id, before, since,
+            )
         )
     selected = sorted(
-        keys, key=lambda key: (key.created_at, key.message_id), reverse=True,
+        keys, key=lambda key: (key.created_at, key.source_kind, key.source_id), reverse=True,
     )[:batch_size]
     return _PendingBatch(selected, await run_in_db(hydrate_candidates, selected))
-
-
-async def _finish_run(
-    counts: dict[str, int], stop_reason: str, *, status: str | None = None,
-) -> dict[str, int | str | None]:
-    recorded, refused, failed = counts["recorded"], counts["refused"], counts["failed"]
-    status = status or ("ok" if not failed else "partial")
-    reason = None if status == "ok" else "One or more classifications failed and will retry"
-    if status == "cancelled":
-        reason = "Run stopped by shutdown; pending candidates will retry"
-    elif status == "provider_unavailable":
-        reason = "Provider unavailable; pending candidates will retry"
-    result: dict[str, int | str | None] = {
-        "status": status, "processed": sum(counts.values()), "recorded": recorded,
-        "refused": refused, "failed": failed,
-    }
-    await run_in_db(
-        _write_status, status, reason, stop_reason=stop_reason,
-        processed=result["processed"], recorded=recorded, refused=refused, failed=failed,
-    )
-    return result
-
-
-async def run_corrections_recording(
-    *,
-    batch_size: int = DEFAULT_BATCH_SIZE,
-    invoke: Invoke = invoke_isolated_structured,
-    time_budget_seconds: float = RUN_TIME_BUDGET_SECONDS,
-    clock: Callable[[], float] = monotonic,
-) -> dict[str, int | str | None]:
-    """Drain newest pending batches serially until empty or the run budget expires."""
-    if batch_size < 1:
-        raise ValueError("batch_size must be positive")
-    if time_budget_seconds <= 0:
-        raise ValueError("time_budget_seconds must be positive")
-    from infra.settings import get_corrections_checker_model
-    from llm.resolution import ModelUnavailableError
-
-    model_id = await run_in_db(get_corrections_checker_model)
-    if model_id is None:
-        await run_in_db(_write_status, "unconfigured", "No checker model configured")
-        return {"status": "unconfigured", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
-    from llm.endpoint_policy import endpoint_agent_use
-    if await run_in_db(endpoint_agent_use, model_id) == "interactive_only":
-        reason = "Configured checker model is restricted to interactive use"
-        logger.warning(reason)
-        await run_in_db(_write_status, "unavailable", reason)
-        return {"status": "unavailable", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
-    try:
-        target, binary = await run_in_db(_resolve_target, model_id)
-    except (ModelUnavailableError, ValueError) as exc:
-        await run_in_db(_write_status, "unavailable", str(exc)[:500])
-        return {"status": "unavailable", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
-    if not target.available:
-        reason = target.availability_reason or "Configured checker model is unavailable"
-        await run_in_db(_write_status, "unavailable", reason)
-        return {"status": "unavailable", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
-
-    counts = {"recorded": 0, "refused": 0, "failed": 0, "duplicate": 0}
-    before: tuple[str, str] | None = None
-    version, started_at = checker_version(model_id), clock()
-    try:
-        while clock() - started_at < time_budget_seconds:
-            batch = await _next_pending_batch(version, batch_size, before)
-            if not batch.selected_keys:
-                return await _finish_run(counts, "empty")
-            before = batch.selected_keys[-1].created_at, batch.selected_keys[-1].message_id
-            for candidate in batch.candidates:
-                if clock() - started_at >= time_budget_seconds:
-                    return await _finish_run(counts, "budget")
-                outcome = await _classify_and_record(candidate, target, binary, version, invoke)
-                if outcome == "provider_unavailable":
-                    return await _finish_run(
-                        counts, "provider_unavailable", status="provider_unavailable",
-                    )
-                counts[outcome] += 1
-    except asyncio.CancelledError:
-        await _finish_run(counts, "shutdown", status="cancelled")
-        raise
-    return await _finish_run(counts, "budget")

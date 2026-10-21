@@ -37,10 +37,12 @@ import weakref
 from datetime import datetime, timedelta
 from typing import Any
 
+from api import presence_rollup
 from core.measurement_scope import query_params
 from infra.database import get_db, write_transaction
 from infra.db_async import run_bulk, run_in_db
 from infra.usage_rollup_schema import GRACE, grace_limit, hour_key
+from app_shutdown_join import join_cleanup_owner
 
 logger = logging.getLogger(__name__)
 
@@ -286,12 +288,20 @@ def refresh_step(db, now: datetime | None = None) -> bool:
     return all(write(db) for write in writes) and more
 
 
-def _plan_job() -> tuple[list[functools.partial], bool]:
+def _plan_with(plan) -> tuple[list[functools.partial], bool]:
     db = get_db()
     try:
-        return plan_step(db)
+        return plan(db)
     finally:
         db.close()
+
+
+def _plan_job() -> tuple[list[functools.partial], bool]:
+    return _plan_with(plan_step)
+
+
+def _plan_presence_job() -> tuple[list[functools.partial], bool]:
+    return _plan_with(presence_rollup.plan_step)
 
 
 def _write_job(write: functools.partial) -> bool:
@@ -307,13 +317,14 @@ _refreshing: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Task] 
 
 async def _refresh(read, write) -> None:
     try:
-        while True:
-            writes, more = await read(_plan_job)
-            for job in writes:
-                if not await write(_write_job, job):
-                    return  # the state moved after planning; the next Measurement request restarts
-            if not more:
-                return
+        for plan in (_plan_job, _plan_presence_job):  # the usage ledger, then the focus-attention spans
+            while True:
+                writes, more = await read(plan)
+                for job in writes:
+                    if not await write(_write_job, job):
+                        return  # the state moved after planning; the next Measurement request restarts
+                if not more:
+                    break
     except Exception:
         logger.exception("usage rollup refresh failed; Measurement reads stay raw past the rollup")
 
@@ -332,6 +343,23 @@ def schedule_refresh(read=run_bulk, write=run_in_db) -> None:
     if running is not None and not running.done():
         return
     _refreshing[loop] = loop.create_task(_refresh(read, write))
+
+
+async def shutdown_refresh() -> None:
+    """Cancel and join this process loop's refresh before its database pool closes."""
+    loop = asyncio.get_running_loop()
+    task = _refreshing.get(loop)
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    result, pending_cancel = await join_cleanup_owner(task)
+    if _refreshing.get(loop) is task:
+        _refreshing.pop(loop, None)
+    if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+        logger.warning("usage rollup refresh shutdown failed: %s", result)
+    if pending_cancel is not None:
+        raise pending_cancel
 
 
 async def refresh_on_request() -> None:

@@ -49,11 +49,12 @@ afterEach(async () => {
 	vi.unstubAllGlobals();
 	for (const mock of Object.values(api)) mock.mockReset();
 });
-function render() {
+function render(onSignal?: (signal: unknown) => void) {
 	host = document.createElement('div'); document.body.appendChild(host);
-	component = mount(DocViewer, { target: host, props: { target } });
+	component = mount(DocViewer, { target: host, props: { target, onSignal } });
 	flushSync();
 }
+const editorView = () => EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
 async function serverOpen(text = 'server text') {
 	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_open')).toBe(true));
 	const request = wire.frames.findLast(frame => frame.type === 'doc_open')!;
@@ -136,6 +137,45 @@ describe('composed live viewer', () => {
 		}
 	});
 
+	it('reopens a not_connected refusal only after the connection returns and clears the refusal on success', async () => {
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+		connectionState.set('connecting');
+		render();
+		await Promise.resolve(); await Promise.resolve();
+		vi.advanceTimersByTime(LIVE_OPEN_WAIT_MS);
+		await Promise.resolve(); await Promise.resolve();
+		await vi.waitFor(() => expect(host.textContent).toContain('Live editing is not connected.'));
+		expect(host.textContent).toContain('It reopens when the connection returns.');
+		expect(wire.frames.filter(frame => frame.type === 'doc_open')).toEqual([]);
+		vi.useRealTimers();
+		connectionState.set('connected');
+		await serverOpen();
+		expect(host.textContent).not.toContain('Live editing is not connected.');
+		expect(editorView().state.readOnly).toBe(false);
+	});
+
+	it.each(['store_damaged', 'store_unavailable', 'setup_failed'] as const)('does not reopen a %s refusal when the connection returns', async code => {
+		const title = 'Live editing is unavailable for this document.';
+		if (code !== 'setup_failed') {
+			api.fetchContent.mockRejectedValue(Object.assign(new Error('Live editing could not start.'), { code, title }));
+		}
+		render();
+		if (code === 'setup_failed') {
+			await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_open')).toBe(true));
+			const request = wire.frames.findLast(frame => frame.type === 'doc_open')!;
+			emit('doc_error', { type: 'doc_error', request_id: request.request_id, code, title, message: 'The shared target could not be prepared.' });
+		}
+		await vi.waitFor(() => expect(host.textContent).toContain(title));
+		const opens = wire.frames.filter(frame => frame.type === 'doc_open').length;
+		const loads = api.fetchContent.mock.calls.length;
+		// Flush between the two so the viewer sees a real transition into connected.
+		connectionState.set('connecting'); flushSync();
+		connectionState.set('connected'); flushSync();
+		await Promise.resolve(); await Promise.resolve();
+		expect(wire.frames.filter(frame => frame.type === 'doc_open')).toHaveLength(opens);
+		expect(api.fetchContent).toHaveBeenCalledTimes(loads);
+	});
+
 	it.each(['not_connected', 'store_unavailable'])('keeps an unsaved edit through a %s refusal and its Retry, never replacing it with server text', async code => {
 		seedDraft(target, 'disk copy'); setDraftText(target, 'my unsaved edit');
 		api.writeContent.mockResolvedValue({ saved: true, revision: 'r-edit' });
@@ -159,7 +199,9 @@ describe('composed live viewer', () => {
 		expect(existingDraft(target)?.editText).toBe('my unsaved edit');
 		expect(wire.frames.filter(frame => frame.type === 'doc_open')).toEqual([]);
 		connectionState.set('connected');
-		[...host.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Retry')!.click();
+		if (code === 'store_unavailable') {
+			[...host.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Retry')!.click();
+		}
 		await serverOpen('my unsaved edit');
 		expect(text()).toBe('my unsaved edit');
 		expect(existingDraft(target)?.editText).toBe('my unsaved edit');
@@ -249,5 +291,43 @@ describe('composed live viewer', () => {
 		await serverOpen();
 		expect(api.fetchContent).toHaveBeenCalledTimes(2);
 		for (const [, options] of api.fetchContent.mock.calls) expect(options.liveOpen).toBe(true);
+	});
+
+	it('paints a returning tab from its saved text at once, read-only with no read-only mark until the live document binds', async () => {
+		seedDraft(target, 'saved text');
+		const onSignal = vi.fn();
+		render(onSignal);
+		expect(host.querySelector('.md-skel')).toBeNull();
+		expect(host.querySelector('.cm-content')?.textContent).toBe('saved text');
+		expect(editorView().state.readOnly).toBe(true);
+		expect(host.querySelector('.readonly-note')).toBeNull();
+		// The tab is told its text is shown, but nothing about write access, so it shows no read-only mark meanwhile.
+		expect(onSignal).toHaveBeenCalledWith(expect.objectContaining({ status: 'ready', shown: true }));
+		expect(onSignal.mock.calls[0][0]).not.toHaveProperty('writable');
+		await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_open')).toBe(true));
+		expect(editorView().state.readOnly).toBe(true);
+		// The live text matches the saved text, so the editor shows no change; only write access arrives.
+		await serverOpen('saved text');
+		await vi.waitFor(() => expect(editorView().state.readOnly).toBe(false));
+		expect(get(liveDocumentBindings)[target.instanceId].text.toString()).toBe('saved text');
+		expect(host.querySelector('.readonly-note')).toBeNull();
+	});
+
+	it('replaces a returning tab\'s saved text with the live text when the document changed meanwhile', async () => {
+		seedDraft(target, 'saved text');
+		render();
+		expect(host.querySelector('.cm-content')?.textContent).toBe('saved text');
+		await serverOpen('edited elsewhere');
+		expect(editorView().state.readOnly).toBe(false);
+		expect(existingDraft(target)?.editText).toBe('edited elsewhere');
+	});
+
+	it('shows the loading state on a first open, which has no saved text to paint', () => {
+		api.fetchContent.mockReturnValue(new Promise(() => {}));
+		const onSignal = vi.fn();
+		render(onSignal);
+		expect(host.querySelector('.md-skel')).not.toBeNull();
+		expect(host.querySelector('.cm-editor')).toBeNull();
+		expect(onSignal).toHaveBeenCalledWith(expect.objectContaining({ status: 'loading' }));
 	});
 });

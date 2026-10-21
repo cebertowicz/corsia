@@ -10,9 +10,10 @@ reference inside the caller's transaction, so the database commit is the only
 commit point: a rolled-back write leaves the entry on its old value.
 
 Nothing here turns an entry's name into its value for a caller. What uses a
-key is fixed in code: :func:`resolve_builtin`, :func:`resolve_provider` and
+key is fixed in code: :func:`resolve_builtin`, :func:`resolve_provider`,
+``connections.connected_accounts.resolve_credentials`` and
 ``infra.key_store_servers.resolve_server`` are the only readers, and only a
-built-in, a cloud-provider or a server entry has one. An entry an agent adds does nothing until code
+built-in, a cloud-provider, a connected account or a server entry has one. An entry an agent adds does nothing until code
 that uses it ships, and cannot claim a name code owns (``RESERVED_PREFIXES``).
 
 Errors raised here carry fixed text and never a value.
@@ -27,7 +28,7 @@ from dataclasses import dataclass
 
 from infra import key_store_values
 from infra.database import get_db, write_transaction
-from infra.key_store_mcp import PREFIX as MCP_PREFIX, is_mcp_entry_name
+from infra.key_store_mcp import OAUTH_VALUE_MAX, PREFIX as MCP_PREFIX, is_mcp_entry_name, is_oauth_entry_name
 # VALUES_FILE and keys_dir are re-exported: callers find the values file through this module.
 from infra.key_store_values import VALUES_FILE as VALUES_FILE, KeyStoreError, keys_dir as keys_dir
 from infra.time import utc_now_iso
@@ -49,7 +50,14 @@ SOURCE_STORE = "keys"
 #: ``POST /api/keys`` cannot claim a name under any of them.
 PROVIDER_PREFIX = "provider-"
 SERVER_PREFIX = "server-"
-RESERVED_PREFIXES = (PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX)
+GOOGLE_PREFIX = "google-"
+CONNECTED_ACCOUNT_PREFIX = "connected-account--google--"
+RESERVED_PREFIXES = (PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX, GOOGLE_PREFIX, CONNECTED_ACCOUNT_PREFIX)
+#: The platform-held Google sign-in: the person's OAuth client and the refresh token it earned.
+GOOGLE_CLIENT_ID = f"{GOOGLE_PREFIX}client-id"
+GOOGLE_CLIENT_SECRET = f"{GOOGLE_PREFIX}client-secret"
+GOOGLE_REFRESH_TOKEN = f"{GOOGLE_PREFIX}refresh-token"
+GOOGLE_ENTRIES = (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN)
 #: A network server's id: lowercase letters, digits and hyphens, short enough for the entry name.
 SERVER_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,32}$")
 #: Providers that can hold a key, entered in add-provider. The hidden legacy
@@ -89,9 +97,11 @@ def _db(db: sqlite3.Connection | None) -> sqlite3.Connection:
 
 
 def is_managed_name(name: str) -> bool:
-    """Whether code, not a person, owns this entry: a built-in, or a provider's, server's or MCP server's key."""
+    """Whether code, not a person, owns this entry: a built-in, or a provider's, server's, MCP server's or Google sign-in's key."""
     return (
         name in BUILTINS
+        or name in GOOGLE_ENTRIES
+        or (name.startswith(CONNECTED_ACCOUNT_PREFIX) and bool(name[len(CONNECTED_ACCOUNT_PREFIX):]))
         or (name.startswith(PROVIDER_PREFIX) and name[len(PROVIDER_PREFIX):] in PROVIDER_NAMES)
         or (name.startswith(SERVER_PREFIX) and bool(SERVER_ID_PATTERN.match(name[len(SERVER_PREFIX):])))
         or is_mcp_entry_name(name)
@@ -114,14 +124,14 @@ def _require_entry(name: str, db: sqlite3.Connection) -> None:
         raise KeyStoreError("No key has that name.")
 
 
-def validated_value(value: object) -> str:
+def validated_value(value: object, *, limit: int = VALUE_MAX) -> str:
     """The value as it would be stored, or :class:`KeyStoreError` for one the store refuses."""
     if not isinstance(value, str):
         raise KeyStoreError("Couldn't save that. Nothing was changed.")
     cleaned = value.strip()
     if not cleaned:
         raise KeyStoreError("Paste the key first.")
-    if len(cleaned) > VALUE_MAX or not _VALUE_PATTERN.match(cleaned):
+    if len(cleaned) > limit or not _VALUE_PATTERN.match(cleaned):
         raise KeyStoreError("Couldn't save that. Nothing was changed.")
     return cleaned
 
@@ -165,6 +175,28 @@ def add_entry(
     return entry_metadata(name, db=db)
 
 
+def ensure_managed_entry(
+    name: str, label: str, description: str = "", *, db: sqlite3.Connection | None = None,
+) -> None:
+    """Make one code-owned key visible for a person to set, without a value."""
+    if not is_managed_name(name):
+        raise KeyStoreError("No key has that name.")
+    _name, clean_label, clean_description = validate_new_entry("person-key", label, description)
+    now = utc_now_iso()
+    with write_transaction(db, scope="key_store_managed_entry") as conn:
+        row = _row(name, conn)
+        if row is None:
+            conn.execute(
+                "INSERT INTO key_store_entries (name,label,description,created_at) VALUES (?,?,?,?)",
+                (name, clean_label, clean_description, now),
+            )
+        elif row["label"] is None:
+            conn.execute(
+                "UPDATE key_store_entries SET label=?,description=? WHERE name=?",
+                (clean_label, clean_description, name),
+            )
+
+
 def set_value(name: str, value: object, *, db: sqlite3.Connection | None = None) -> None:
     """Store ``value`` for an existing entry, replacing any earlier one.
 
@@ -178,7 +210,7 @@ def set_managed_value(name: str, value: object, *, db: sqlite3.Connection | None
     """Store a value for an entry code owns. Server code only: no route calls it."""
     if not is_managed_name(name):
         raise KeyStoreError("No key has that name.")
-    _store(name, validated_value(value), db)
+    _store(name, validated_value(value, limit=OAUTH_VALUE_MAX if is_oauth_entry_name(name) else VALUE_MAX), db)
 
 
 def _store(name: str, cleaned: str, db: sqlite3.Connection | None) -> None:

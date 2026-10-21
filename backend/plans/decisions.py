@@ -225,6 +225,7 @@ def answer(decision_id: str, *, option_id=None, option_ids=None, other_text=None
         )
         from plans import review_evidence
 
+        _end_user_pause(db, decision["node_id"], actor_id=bound.audit_id, provenance=provenance)
         review_evidence.submit(
             decision["node_id"],
             evidence=_answer_evidence(decision, chosen),
@@ -267,6 +268,23 @@ def answer(decision_id: str, *, option_id=None, option_ids=None, other_text=None
     return _perform(decision_id, "decision_answer", params,
                     mutation_id=mutation_id, actor=actor, provenance=provenance,
                     db=db, apply=apply)
+
+
+def _end_user_pause(db, node_id: str, *, actor_id: str, provenance: str) -> None:
+    """The person's answer ends their own pause on the question it settles.
+
+    A paused decision defers only its attention and stays answerable (pause
+    contract rule 5); answering it is the person acting on the item, so their
+    pause has nothing left to hold. Any other hold still refuses the answer.
+    """
+    from plans import holds, user_steering
+
+    for hold in holds.active_holds(node_id, db=db):
+        if user_steering.is_user_pause(hold):
+            holds.clear_write(
+                node_id, hold["id"], expected_kind="paused", actor_id=actor_id,
+                provenance=provenance, db=db,
+            )
 
 
 def _answer_evidence(decision: dict, chosen: dict) -> str:

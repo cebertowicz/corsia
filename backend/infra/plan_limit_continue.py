@@ -99,12 +99,53 @@ def _repeats_refusal_on_same_login(db: sqlite3.Connection, turn_id: str) -> bool
     return refused is not None and refused == read_turn_receipt(turn_id, db=db)
 
 
+def _refusal_chain_reached_account_cap(db: sqlite3.Connection, turn_id: str) -> bool:
+    """Bound one uninterrupted refusal chain to one continue per account of its provider.
+
+    The chain counts the original Turn, so N accounts allow N continues: the
+    last one is held when every account is limited and resumes at the reset.
+    """
+    from connections.account_policy import thread_scope
+    from connections.account_rollover import rollover_order
+    from connections.provider_policy import effective_policy
+    from connections.vendor_accounts import get_account
+    from infra.vendor_login import read_turn_receipt
+
+    receipt = read_turn_receipt(turn_id, db=db)
+    if receipt is None:
+        return True
+    provider = str(get_account(receipt.account_id, db=db)["provider"])
+    turn = db.execute("SELECT thread_id FROM active_turns WHERE id=?", (turn_id,)).fetchone()
+    if turn is None:
+        return True
+    project = thread_scope(str(turn["thread_id"]), db=db)["project_id"]
+    accounts = rollover_order(provider, project, effective_policy(project, provider, db=db), db=db)
+    if accounts is None:
+        return False
+    cap = len(accounts)
+    previous = turn_id
+    seen: set[str] = set()
+    count = 0
+    while previous not in seen:
+        seen.add(previous)
+        count += 1
+        row = db.execute(
+            "SELECT json_extract(metadata,'$.stopped_turn_id') AS stopped FROM messages "
+            "WHERE active_turn_id=? AND id LIKE ?",
+            (previous, f"{_CONTINUE_ID_PREFIX}%"),
+        ).fetchone()
+        if row is None or row["stopped"] is None:
+            break
+        previous = str(row["stopped"])
+    return count > cap
+
+
 def queue_limit_refusal_continue(db: sqlite3.Connection, turn_id: str, thread_id: str) -> None:
     """Queue the continue input for a Turn whose account the vendor refused for a usage limit.
 
     The caller has the account recorded limited, so the successor claim either
     rolls the continue to a usable sibling account or holds it on the limit.
     """
-    if _repeats_refusal_on_same_login(db, turn_id):
+    if _repeats_refusal_on_same_login(db, turn_id) or _refusal_chain_reached_account_cap(db, turn_id):
         return
     _queue_continue(db, turn_id, thread_id, cause=VENDOR_LIMIT_REFUSAL_REASON)

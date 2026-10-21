@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-configure-work-folder"
+description = "Enables the configure_work_folder command without any pre-configured scope."
+commands.allow = ["configure_work_folder"]
+
+[[permission]]
+identifier = "deny-configure-work-folder"
+description = "Denies the configure_work_folder command without any pre-configured scope."
+commands.deny = ["configure_work_folder"]

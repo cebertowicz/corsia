@@ -12,7 +12,7 @@ const api = vi.hoisted(() => ({ fetchReviewBar: vi.fn(), answerReview: vi.fn() }
 vi.mock('$lib/api/reviewBar', async (importOriginal) => ({ ...(await importOriginal<object>()), ...api }));
 vi.mock('$lib/ws', () => ({ on: vi.fn(() => () => {}) }));
 
-const counts = (comments = 0) => ({ comments, suggestions: 0, edits: 0 });
+const counts = (comments = 0, suggestions = 0, edits = 0) => ({ comments, suggestions, edits });
 function read(comments = 0): ReviewBarRead {
 	return {
 		ask_raised: true, hold_ids: ['h1'], ask_reason: 'Is the rollout plan right?', ask_raised_at: '2026-10-10T10:00:00',
@@ -55,6 +55,25 @@ describe('ReviewBar', () => {
 		expect(button('Approve with changes')).toBeTruthy();
 	});
 
+	it('keeps a long ask compact and reveals both askers only when expanded', async () => {
+		api.fetchReviewBar.mockResolvedValue({
+			...read(0),
+			ask_reason: 'Please review the detailed deployment and rollback plan before the handoff.',
+			other_askers: ['Research'],
+			other_asks: [{ name: 'Research', reason: 'Check the evidence links.' }],
+			other_request_count: 1,
+		});
+		await render();
+		expect(host.textContent).toContain('Docs agent');
+		expect(host.querySelector('.rb-lead .rb-ask')).toBeNull();
+		expect(host.querySelector('.rb-line > .rb-ask')?.textContent).toContain('Please review the detailed deployment');
+		expect(host.textContent).not.toContain('Check the evidence links.');
+		host.querySelector<HTMLButtonElement>('.rb-line')!.click();
+		flushSync();
+		expect(host.textContent).toContain('Please review the detailed deployment and rollback plan before the handoff.');
+		expect(host.textContent).toContain('Research: Check the evidence links.');
+	});
+
 	it('shows nothing when no ask is raised', async () => {
 		api.fetchReviewBar.mockResolvedValue({ ...read(0), ask_raised: false });
 		component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1' } });
@@ -69,13 +88,13 @@ describe('ReviewBar', () => {
 		await render();
 		button('Request changes')!.click();
 		flushSync();
-		const input = host.querySelector<HTMLInputElement>('input')!;
+		const input = host.querySelector<HTMLTextAreaElement>('textarea')!;
 		input.value = 'Tighten the rollout'; input.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
 		button('Request changes')!.click();
 		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
 		expect(host.querySelector('.review-bar.receipt')).toBeNull();
-		expect(host.querySelector<HTMLInputElement>('input')!.value).toBe('Tighten the rollout');
+		expect(host.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Tighten the rollout');
 	});
 
 	it('R4: a send from the note keeps the note, busies only the pressed button, and returns focus to the note on failure', async () => {
@@ -85,14 +104,14 @@ describe('ReviewBar', () => {
 		await render();
 		button('Request changes')!.click();
 		flushSync();
-		const input = host.querySelector<HTMLInputElement>('input')!;
+		const input = host.querySelector<HTMLTextAreaElement>('textarea')!;
 		input.value = 'Tighten the rollout'; input.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
 		button('Request changes')!.click();
 		flushSync();
 
 		// Mid-send: the same input is still mounted, the bar is still the note layout, and only the sender spins.
-		expect(host.querySelector('input')).toBe(input);
+		expect(host.querySelector('textarea')).toBe(input);
 		expect(host.querySelector('.review-bar.noting')).toBeTruthy();
 		expect(button('Approve')).toBeUndefined();
 		expect(host.querySelectorAll('.spinner')).toHaveLength(1);
@@ -102,7 +121,7 @@ describe('ReviewBar', () => {
 
 		fail(new Error('500'));
 		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
-		expect(host.querySelector('input')).toBe(input);
+		expect(host.querySelector('textarea')).toBe(input);
 		expect(input.value).toBe('Tighten the rollout');
 		await vi.waitFor(() => expect(document.activeElement).toBe(input));
 	});
@@ -210,15 +229,15 @@ describe('ReviewBar', () => {
 		let fail!: (error: Error) => void;
 		api.answerReview.mockReturnValue(new Promise((_, reject) => { fail = reject; }));
 		await render();
-		const region = [...host.querySelectorAll<HTMLElement>('[role="status"].sr-only')][0];
+		const region = host.querySelector<HTMLElement>('.rb-status[role="status"]')!;
 		expect(region).toBeTruthy();
 		expect(region.textContent).toBe('');
 		button('Approve')!.click();
 		flushSync();
 		expect(region.isConnected).toBe(true);
-		expect(region.textContent).toBe('Sending your review');
+		expect(region.textContent).toBe('Sending your review…');
 		fail(new Error('500'));
-		await vi.waitFor(() => expect(region.textContent).toBe(''));
+		await vi.waitFor(() => expect(region.textContent).toBe(SEND_FAILED));
 	});
 
 	it('R2: the receipt takes focus and is announced as status', async () => {
@@ -231,6 +250,22 @@ describe('ReviewBar', () => {
 		await vi.waitFor(() => expect(document.activeElement).toBe(receipt));
 		expect(receipt.closest('[role="status"]') ?? receipt.getAttribute('role')).toBeTruthy();
 		expect(host.textContent).toContain('You approved this');
+		expect(receipt.textContent).not.toMatch(/sent \d/);
+	});
+
+	it('lists delivered feedback kinds in canonical order with singular and plural wording', async () => {
+		api.fetchReviewBar.mockResolvedValue(read(0));
+		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts(2, 1, 3) });
+		await render();
+		button('Approve')!.click();
+		await vi.waitFor(() => expect(host.querySelector('.rb-receipt')?.textContent).toContain('sent 2 comments, 1 suggestion, 3 edits'));
+		unmount(component!); component = null; host.innerHTML = '';
+		api.fetchReviewBar.mockResolvedValue(read(0));
+		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts(0, 0, 1) });
+		await render();
+		button('Approve')!.click();
+		await vi.waitFor(() => expect(host.querySelector('.rb-receipt')?.textContent).toContain('sent 1 edit'));
+		expect(host.querySelector('.rb-receipt')?.textContent).not.toContain('comments');
 	});
 
 	it('R3: an open comment draft blocks Approve with changes and Request changes', async () => {
@@ -242,24 +277,25 @@ describe('ReviewBar', () => {
 		expect(api.answerReview).not.toHaveBeenCalled();
 		button('Request changes')!.click();
 		flushSync();
-		expect(host.querySelector('input')).toBeNull();
+		expect(host.querySelector('textarea')).toBeNull();
 	});
 
-	it('a plain Approve is not blocked by a draft', async () => {
+	it('a plain Approve is not blocked by a draft, and answers the request it shows', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts(0) });
 		await render(true);
 		button('Approve')!.click();
-		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', ''));
+		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', '', ['h1']));
 	});
 
-	it('a stale refusal shows the replaced notice', async () => {
+	it('a stale refusal says the request ended', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		api.answerReview.mockRejectedValue(new ReviewRefusal('ask_stale', 'gone'));
 		await render();
 		api.fetchReviewBar.mockResolvedValue({ ...read(0), ask_raised: false });
 		button('Approve')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.review-bar.stale')).toBeTruthy());
+		expect(host.querySelector('.review-bar.stale')!.textContent).toContain('This review request has ended');
 	});
 
 	it('tells the viewer to re-read its pending batch once the answer is confirmed, and not on a failed send', async () => {

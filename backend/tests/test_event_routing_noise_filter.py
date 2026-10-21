@@ -1,6 +1,14 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
+from infra import corsia_agent
+
 from unittest.mock import patch
 
 import pytest
@@ -57,7 +65,7 @@ class TestCheckSuiteFilter:
     async def test_check_suite_failure_unregistered_main_dead_letters(self, isolated_db):
         conductor_thread = _mk_session("cond-csf-main")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         payload = _check_suite_payload("o/r", 201, conclusion="failure",
                                        base_ref="main")
@@ -76,7 +84,7 @@ class TestCheckSuiteFilter:
     async def test_check_suite_success_unregistered_non_main_parked(self, isolated_db):
         conductor_thread = _mk_session("cond-csf-dev")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         payload = _check_suite_payload("o/r", 202, conclusion="success",
                                        base_ref="dev")
@@ -94,7 +102,7 @@ class TestCheckSuiteFilter:
     async def test_check_suite_cancelled_dropped(self, isolated_db):
         conductor_thread = _mk_session("cond-csf-cancel")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         payload = _check_suite_payload("o/r", 203, conclusion="cancelled")
 
@@ -114,7 +122,7 @@ class TestConductorNoiseFilter:
     async def test_check_suite_completed_with_no_owner_is_parked(self, isolated_db):
         conductor_thread = _mk_session("cond-noise-1")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         with patch("events.router.delivery.deliver_to_thread") as mock_deliver:
             res = await _route(
@@ -140,7 +148,7 @@ class TestConductorNoiseFilter:
     async def test_check_suite_failure_with_no_owner_is_parked(self, isolated_db):
         conductor_thread = _mk_session("cond-fail-1")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         payload = _check_suite_payload("o/r", 61, conclusion="failure")
 
@@ -159,7 +167,7 @@ class TestConductorNoiseFilter:
     ):
         conductor_thread = _mk_session(f"cond-{conclusion}")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         payload = _check_suite_payload("o/r", 62, conclusion=conclusion)
 
@@ -177,7 +185,7 @@ class TestConductorNoiseFilter:
         _register_pr("o/r", 60, worker)
         conductor_thread = _mk_session("cond-noise-arch")
         from infra import conductor as cond_mod
-        cond_mod.set_conductor(cond_mod.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         from infra.database import get_db
         db = get_db()
@@ -209,7 +217,7 @@ class TestConductorNoiseFilter:
         _register_pr("o/r", 57, worker)
         conductor_thread = _mk_session("cond-noise-3")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         with patch("events.router.delivery.deliver_to_thread",
                    return_value=True) as mock_deliver:
@@ -230,7 +238,7 @@ class TestConductorNoiseFilter:
     ):
         conductor_thread = _mk_session("cond-noise-4")
         from infra import conductor
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+        corsia_agent.set_corsia_agent(conductor_thread)
 
         with patch("events.router.delivery.deliver_to_thread") as mock_deliver:
             res = await _route(

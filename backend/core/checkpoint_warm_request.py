@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from loguru import logger
+from core.fork_capture import warm_capture_refused
 
+from core.checkpoint_types import CheckpointProviderForkRequest
 from core.checkpoint_types import (
     CheckpointRequest,
     CheckpointTrigger,
-    ProviderCheckpointRequest,
 )
 from core.turn_core import TurnIdentity
 from history.types import HistoryBoundary
@@ -21,7 +21,7 @@ class CheckpointAdmission:
     """One complete checkpoint operation prepared at a provider boundary."""
 
     request: CheckpointRequest
-    provider_request: ProviderCheckpointRequest
+    provider_request: CheckpointProviderForkRequest
 
 
 def build_warm_request(
@@ -56,13 +56,33 @@ def build_warm_request(
     )
 
 
-def warm_capture_refused(thread_id: str, harness: str, reason: str) -> None:
-    """Log the one reason a warm source was not captured, then return None."""
-    logger.info(
-        "checkpoint warm capture refused for {} ({}): {}",
-        thread_id, harness, reason,
+def _no_live_handle_reason(prepared, context) -> str:
+    """Name why a required Claude Code fold was not a provider resume.
+
+    Mirrors ``runtime_truth._has_registered_provider``: an eager checkpoint the
+    provider registration has not adopted hides an otherwise registered session.
+    """
+    eager = context.eager_checkpoint_id
+    eager_state = (
+        "none" if eager is None
+        else "adopted" if context.registered_checkpoint_id == eager
+        else "pending"
     )
-    return None
+    registered = context.provider_registered
+    mode = str(getattr(prepared, "mode", None) or "none").lower()
+    return (
+        f"no_live_handle mode={mode} "
+        f"has_session={'yes' if registered and eager_state != 'pending' else 'no'} "
+        f"session_registered={'yes' if registered else 'no'} eager={eager_state}"
+    )
+
+
+def refuse_no_live_handle(thread_id: str, context, prepared) -> None:
+    """Log a refused warm capture with the provider-resume miss named."""
+    warm_capture_refused(
+        thread_id, context.target.harness, _no_live_handle_reason(prepared, context),
+    )
+
 
 
 def complete_warm_admission(
@@ -77,11 +97,13 @@ def complete_warm_admission(
     """Pair frozen provenance with one already-captured warm provider source."""
     from prompts.checkpoint import build_checkpoint_system_prompt
 
-    provider = ProviderCheckpointRequest(
-        checkpoint_id=request.id,
+    instruction = build_checkpoint_system_prompt()
+    provider = CheckpointProviderForkRequest(
+        fork_id=request.id,
         thread_id=request.thread_id,
         target=target,
-        instruction=build_checkpoint_system_prompt(),
+        instruction=instruction,
+        instruction_candidates=(instruction,),
         reasoning_effort=reasoning_effort,
         working_dir=working_dir,
         binary=binary,

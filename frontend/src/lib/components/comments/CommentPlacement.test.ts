@@ -17,11 +17,14 @@ function render(view: typeof CommentThread | typeof CommentList, props: Record<s
 	flushSync();
 }
 const line = () => host.querySelector<HTMLElement>('[data-comment-placement]');
-afterEach(() => { if (component) unmount(component); component = null; host?.remove(); mocks.retryPlacement.mockReset(); });
+afterEach(() => { if (component) unmount(component); component = null; host?.remove(); mocks.retryPlacement.mockReset(); vi.useRealTimers(); });
 
 describe('live comment placement on the card (4.2)', () => {
-	it('shows a muted "Finding its place…" line on a row never drawn, with no Retry', () => {
+	it('delays the placement line so a fast placement does not flash or resize the sheet', async () => {
+		vi.useFakeTimers();
 		render(CommentThread, { comment: card({ placement: 'placing', drawn: false }) });
+		expect(line()).toBeNull();
+		await vi.advanceTimersByTimeAsync(200);
 		expect(line()?.textContent?.trim()).toBe('Finding its place…');
 		expect(host.querySelector('[data-placement-retry]')).toBeNull();
 	});
@@ -43,10 +46,13 @@ describe('live comment placement on the card (4.2)', () => {
 		expect(line()).toBeNull();
 	});
 
-	it('disables Jump for a row never drawn, describing it with the card line', () => {
+	it('delays the disabled Jump description with the placement line', async () => {
+		vi.useFakeTimers();
 		render(CommentList, { comments: [card({ placement: 'placing', drawn: false }), card({ id: 'c2', placement: 'placed', drawn: true })], documentOrder: true });
 		const [placing, placed] = [...host.querySelectorAll<HTMLButtonElement>('[data-comment-jump]')];
 		expect(placing.disabled).toBe(true);
+		expect(document.getElementById(placing.getAttribute('aria-describedby') ?? '')).toBeNull();
+		await vi.advanceTimersByTimeAsync(200);
 		const described = document.getElementById(placing.getAttribute('aria-describedby') ?? '');
 		expect(described?.textContent?.trim()).toBe('Finding its place…');
 		expect(placed.disabled).toBe(false);

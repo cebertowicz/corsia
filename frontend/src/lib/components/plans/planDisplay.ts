@@ -1,9 +1,4 @@
-/**
- * The single client renderer for server-owned display keys.
- *
- * Lifecycle, admission, review ownership, current/next, and plan rollup state
- * are never recomputed here. This module translates contract-v2 keys to copy.
- */
+/** The client renderer for server-owned display keys; it translates contract-v2 keys to copy without recomputing lifecycle, admission, ownership, current/next, or rollup state. */
 import type {
 	OperatorLiveness,
 	OperatorNode,
@@ -24,11 +19,7 @@ const INSTANT = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2
 /** "Waiting until" / "Until" in front of an instant: the row already says it waits, so only the time is left. */
 const UNTIL_INSTANT = /(?:Waiting )?[Uu]ntil (?=\d{4}-\d{2}-\d{2}T)/g;
 
-/**
- * Plan prose with each instant it names said in the viewer's local time, and
- * without the "until" that only restates a wait.
- * Reasons carry exact instants for agents; this is where a person reads them.
- */
+/** Plan prose with its instants localized for the viewer and redundant "until" removed. */
 export function localizeInstants(text: string, now: Date = new Date()): string {
 	return text.replace(UNTIL_INSTANT, '').replace(INSTANT, (instant) => {
 		const ms = parseWsTimestamp(instant);
@@ -64,6 +55,21 @@ const NODE_LABELS: Record<OperatorNodeLabelKey, string> = {
 	finished: 'Finished',
 };
 
+/** A settled node's outcome is more useful than the server's generic `finished` key. */
+const FINISHED_NODE_LABELS: Partial<Record<OperatorNode['state'], string>> = {
+	accepted: 'Done',
+	accepted_with_followup: 'Done',
+	closed: 'Won’t do',
+	failed: 'Failed',
+};
+
+/** An open container the server rolls up as finished reads the word of its work. */
+const FINISHED_BRANCH_LABELS: Record<string, string> = {
+	complete: 'Done',
+	closed: 'Won’t do',
+	failed: 'Failed',
+};
+
 const NODE_STATES: Record<OperatorNodeLabelKey, NodeDisplayState> = {
 	working: 'working',
 	needs_you: 'needs-you',
@@ -91,16 +97,16 @@ export function nodeDisplayState(node: OperatorNode): NodeDisplayState {
 /** Translate one server-owned node key to user-facing copy. */
 export function nodeDisplayLabel(node: OperatorNode, _isNext = false): string {
 	const key = node.display.label_key as string;
+	if (key === 'finished') {
+		const branch = node.branch_progress ? FINISHED_BRANCH_LABELS[node.display.tone_key] : undefined;
+		return FINISHED_NODE_LABELS[node.state] ?? branch ?? NODE_LABELS.finished;
+	}
 	return Object.hasOwn(NODE_LABELS, key)
 		? NODE_LABELS[key as OperatorNodeLabelKey]
 		: 'Unavailable';
 }
 
-/**
- * What a row says under its title, or null for a one-line row: the server's
- * specific cause, the try a failure forced (friction only, never an edit's
- * reselection), and a request for the user's input.
- */
+/** Tones of a row that has settled, which say when it settled. */
 const SETTLED_TONES: ReadonlySet<StateTone> = new Set(['complete', 'closed', 'failed']);
 
 /** When a settled row settled, in local time; null for open work. */
@@ -131,15 +137,18 @@ function scheduledLine(node: OperatorNode, now: Date, running: boolean, clock = 
 }
 
 function finishedOutcome(node: OperatorNode): string {
+	const label = nodeDisplayLabel(node);
 	switch (node.state) {
-		case 'accepted': return node.status_reason ? `Done · ${node.status_reason}` : 'Done';
+		case 'accepted': return node.status_reason ? `${label} · ${node.status_reason}` : label;
 		case 'accepted_with_followup':
 			return node.status_reason
-				? `Done · follow-up created · ${node.status_reason}`
-				: 'Done · follow-up created';
-		case 'failed': return 'Failed';
-		case 'closed': return node.status_reason ? `Won’t do: ${node.status_reason}` : 'Won’t do';
-		default: return 'Archived';
+				? `${label} · follow-up created · ${node.status_reason}`
+				: `${label} · follow-up created`;
+		case 'failed': return label;
+		case 'closed': return node.status_reason ? `${label} · ${node.status_reason}` : label;
+		// An open container whose work all finished says what its work did; a
+		// leaf archived before it settled is the only other open `finished`.
+		default: return node.branch_progress ? label : 'Archived';
 	}
 }
 
@@ -162,13 +171,21 @@ function openReason(node: OperatorNode, now: Date, view?: ScheduledView): string
 	return parts.length ? parts.join(' · ') : null;
 }
 
-/**
- * How a row in the Scheduled group says its time: `clock` keeps the clock on a
- * far date, `reason` says only why (its cluster's time line names the moment).
- */
+/** Scheduled-row time: `clock` keeps a far-date clock; `reason` leaves its cluster line to name the moment. */
 export type ScheduledView = 'clock' | 'reason';
 
+/** A row’s secondary copy: its server cause, failed-work attempt, or requested user input. */
 export function nodeSubline(node: OperatorNode, now: Date = new Date(), view?: ScheduledView): string | null {
+	const { lead, moment } = nodeSublineParts(node, now, view);
+	return lead && moment ? `${lead} · ${moment}` : lead ?? moment;
+}
+
+/** The narrow-row split: `lead` yields first while a settled `moment` stays whole. */
+export function nodeSublineParts(
+	node: OperatorNode,
+	now: Date = new Date(),
+	view?: ScheduledView,
+): { lead: string | null; moment: string | null } {
 	const parts: string[] = [];
 	if (node.display.label_key === 'finished') {
 		parts.push(finishedOutcome(node));
@@ -183,10 +200,9 @@ export function nodeSubline(node: OperatorNode, now: Date = new Date(), view?: S
 		const reason = openReason(node, now, view);
 		if (reason) parts.push(reason);
 	}
-	const settled = settledMoment(node, now);
-	if (settled) parts.push(settled);
 	// A row is one line: a reason's line breaks (send-back feedback, a pasted list) read as spaces.
-	return parts.length ? parts.join(' · ').replace(/\s+/g, ' ').trim() : null;
+	const lead = parts.join(' · ').replace(/\s+/g, ' ').trim();
+	return { lead: lead || null, moment: settledMoment(node, now) };
 }
 
 export function cardStateLabel(state: PlanCardState): string {
@@ -246,7 +262,6 @@ const CHAT_WORDS: Record<ThreadPlanState, string> = {
 	needs_input: 'Needs input',
 	blocked_on_you: 'Blocked on you',
 	failed: 'Failed',
-	stuck: 'Stuck',
 	paused: 'Paused',
 	idle: 'Idle',
 };

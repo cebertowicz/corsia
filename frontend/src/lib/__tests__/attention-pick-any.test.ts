@@ -131,21 +131,23 @@ describe("pick any — what the person sees", () => {
     expect(host.querySelector("fieldset legend")?.textContent).toBe("Choose any that apply");
     expect(boxes()).toHaveLength(3);
     expect(boxes().map((item) => item.checked)).toEqual([true, true, false]);
-    expect(host.querySelectorAll(".pill").length).toBe(2);
+    expect(host.querySelectorAll(".recommended").length).toBe(2);
     expect(host.textContent).toContain("Recommended");
     expect(receipt()).toBe("2 of 3 chosen · as recommended");
     expect(answerButton().disabled).toBe(false);
     expect(host.querySelector(".option-button")).toBeNull();
   });
 
-  it("names each checkbox by its label, plus 'recommended', and describes it by its detail", async () => {
+  it("names each checkbox by its label, plus 'recommended', and describes the first recommendation by its detail and rationale", async () => {
     await openChip();
 
     const first = box("Bring over your MCP servers (3)");
     expect(first.getAttribute("aria-label")).toBe("Bring over your MCP servers (3), recommended");
     expect(box("Daily summary").getAttribute("aria-label")).toBe("Daily summary");
-    const described = document.getElementById(first.getAttribute("aria-describedby")!);
-    expect(described?.textContent).toBe("Copies your config.");
+    const describedBy = first.getAttribute("aria-describedby")!.split(" ");
+    expect(describedBy).toHaveLength(2);
+    expect(document.getElementById(describedBy[0])?.textContent).toBe("Copies your config.");
+    expect(document.getElementById(describedBy[1])?.textContent).toContain("None of them changes anything else on this Mac.");
     expect(first.closest("label")).toBeTruthy();
     expect(first.tabIndex).toBe(0);
   });
@@ -170,6 +172,7 @@ describe("pick any — what the person sees", () => {
     await openChip();
     typeNote("later this week");
     await settle();
+    expect(note().classList.contains("selected")).toBe(false);
     expect(boxes().map((item) => item.checked)).toEqual([true, true, false]);
     expect(receipt()).toBe("2 of 3 chosen · as recommended");
 
@@ -180,12 +183,12 @@ describe("pick any — what the person sees", () => {
     expect(receipt()).toBe("None chosen, with a note.");
   });
 
-  it("S6: an empty recommendation starts with nothing ticked and no pills", async () => {
+  it("S6: an empty recommendation starts with nothing ticked and no Recommended mark", async () => {
     body = queueBody(pickAnyItem({ recommendation: [] }), 1);
     await openChip();
 
     expect(boxes().map((item) => item.checked)).toEqual([false, false, false]);
-    expect(host.querySelectorAll(".pill").length).toBe(0);
+    expect(host.querySelectorAll(".recommended").length).toBe(0);
     expect(receipt()).toBe("None chosen. Answering tells the agent you want none of these.");
   });
 

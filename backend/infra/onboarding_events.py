@@ -1,6 +1,6 @@
 """The first-run wake and OB10's content-free onboarding events.
 
-The wake is the workspace conductor's first input on a new install. The events
+The wake is the CORSIA agent's first input on a new install. The events
 measure time to the first governed outcome locally in DuckDB
 (``TIME_TO_FIRST_OUTCOME_SQL``); nothing leaves the machine. Every event is
 non-load-bearing: a failure is logged and never changes the caller's result.
@@ -28,7 +28,7 @@ FIRST_RUN_SUMMARY = (
 OUTCOME_OPERATIONS = frozenset({"mark_done", "accept"})
 TASK_START = "Getting started"
 TASK_PROVIDERS = "Additional provider setup"
-TASK_PROJECT = "Set up your first agent or project"
+TASK_PROJECT = "Set up your first project"
 TASK_GITHUB = "Set up GitHub"
 TASK_WEB_SEARCH = "Connect web search"
 TASK_CONFIG = "Configuration checks"
@@ -63,8 +63,7 @@ FIRST_RUN_SETUP_TASKS = (
     ),
     (
         TASK_PROJECT,
-        "the first agent shows its first result or the project's conductor reports back, "
-        "or the user chose not now",
+        "the project's conductor reports back, or the user chose not now",
     ),
 )
 
@@ -142,7 +141,9 @@ def start_first_run_task(conductor_id: str, user_id: str) -> None:
         log.warning("first-run task not started for %s", conductor_id, exc_info=True)
 
 
-def enqueue_first_run_wake(conductor_id: str, *, db: sqlite3.Connection) -> bool:
+def enqueue_first_run_wake(
+    conductor_id: str, *, first_run_path: str = "script", db: sqlite3.Connection,
+) -> bool:
     """Queue the first-run wake inside the caller's transaction.
 
     Only a conductor with no messages gets it, so a restored or reused
@@ -158,7 +159,8 @@ def enqueue_first_run_wake(conductor_id: str, *, db: sqlite3.Connection) -> bool
         return False
     enqueue_event_wake(
         conductor_id, FIRST_RUN_EVENT, FIRST_RUN_SUMMARY,
-        chip=FIRST_RUN_CHIP, message_id=first_run_message_id(conductor_id), db=db,
+        chip=FIRST_RUN_CHIP, message_id=first_run_message_id(conductor_id),
+        metadata={"first_run_path": first_run_path}, db=db,
     )
     return True
 
@@ -166,13 +168,22 @@ def enqueue_first_run_wake(conductor_id: str, *, db: sqlite3.Connection) -> bool
 _HELD_WAKE = "FROM messages WHERE id=? AND thread_id=? AND delivery_state='queued' AND delivery_error=?"
 
 
-def has_held_first_run_wake(thread_id: str, *, db: sqlite3.Connection) -> bool:
-    """Whether ``thread_id`` holds its first-run wake, unread, for a first model choice."""
+def held_first_run_path(thread_id: str, *, db: sqlite3.Connection) -> str | None:
+    """The held wake's path, defaulting legacy wakes without metadata to ``script``."""
     from infra.send_target import NO_MODEL_SELECTED
+    import json
 
-    return db.execute(
-        f"SELECT 1 {_HELD_WAKE}", (first_run_message_id(thread_id), thread_id, NO_MODEL_SELECTED),
-    ).fetchone() is not None
+    row = db.execute(
+        f"SELECT metadata {_HELD_WAKE}",
+        (first_run_message_id(thread_id), thread_id, NO_MODEL_SELECTED),
+    ).fetchone()
+    if row is None:
+        return None
+    try:
+        path = json.loads(row["metadata"] or "{}").get("first_run_path")
+    except (TypeError, ValueError):
+        path = None
+    return path if path in {"app", "script"} else "script"
 
 
 def fill_held_first_run_wake(thread_id: str, content: str, *, db: sqlite3.Connection) -> bool:
@@ -281,10 +292,10 @@ def _emit_first(action: str, **properties: object) -> None:
         _emitted.add(action)
 
 
-def _is_workspace_conductor(thread_id: str, db: sqlite3.Connection) -> bool:
-    from infra.conductor import WORKSPACE_SCOPE, get_conductor
+def _is_corsia_agent(thread_id: str, db: sqlite3.Connection) -> bool:
+    from infra.corsia_agent import get_corsia_agent
 
-    return get_conductor(WORKSPACE_SCOPE, db=db) == thread_id
+    return get_corsia_agent(db=db) == thread_id
 
 
 def _guarded(action: str, read) -> None:
@@ -311,10 +322,10 @@ def _guarded(action: str, read) -> None:
 
 
 def note_first_model_selected(thread_id: str, model: str) -> None:
-    """``first_model_selected`` when the workspace conductor gets its first model."""
+    """``first_model_selected`` when the CORSIA agent gets its first model."""
 
     def read(db: sqlite3.Connection) -> dict | None:
-        if not _is_workspace_conductor(thread_id, db):
+        if not _is_corsia_agent(thread_id, db):
             return None
         source = model.split("/", 1)[0].split("@", 1)[0]
         return {"source_kind": source,
@@ -324,10 +335,10 @@ def note_first_model_selected(thread_id: str, model: str) -> None:
 
 
 def note_turn_completed(thread_id: str) -> None:
-    """``first_turn_completed`` on the workspace conductor's first finished turn."""
+    """``first_turn_completed`` on the CORSIA agent's first finished turn."""
 
     def read(db: sqlite3.Connection) -> dict | None:
-        if not _is_workspace_conductor(thread_id, db):
+        if not _is_corsia_agent(thread_id, db):
             return None
         return {"seconds_since_account": _seconds_since_account(db, _utcnow())}
 
@@ -341,7 +352,7 @@ def note_decision_answered(node_id: str, option_id: str) -> None:
         from plans import public
 
         owner_id = public.decision_owner_id(db, node_id=node_id)
-        if owner_id is None or not _is_workspace_conductor(owner_id, db):
+        if owner_id is None or not _is_corsia_agent(owner_id, db):
             return None
         return {"option": str(option_id)[:8]}
 

@@ -26,6 +26,11 @@ answer that has not been given, so both are refused too. ``close_node`` is the
 same act as the archive by a different name -- it ends the node outright -- so
 it is refused for the same reason.
 
+The lane still refuses an agent's pause and resume, but admits the user's: a
+pause is a hold that defers the question's attention until resume, the node
+keeps the state the answer settles from, and the answer still lands while it
+is paused.
+
 This module only classifies and refuses. It writes nothing, so it adds no second
 owner of decision state.
 """
@@ -49,6 +54,10 @@ SETTLING_OPERATIONS = frozenset({
 })
 
 DECISION = "decision"
+
+#: The user's own steering a decision node admits: Won't do withdraws the
+#: decision (``plans.user_steering``); pause and resume only hold it.
+_USER_STEERING = frozenset({"close_node", "pause_node", "resume_node"})
 
 _LANE_SQL = """
     SELECT i.type AS artifact_type, i.metadata AS metadata
@@ -101,21 +110,27 @@ def lane_refusing(
     """Return the lane that refuses this generic operation on the node, or None.
 
     Non-raising, for ``plans.boundary_guard``; ``refuse`` raises the refusal.
-    The user's Won't do is the one exception: the question was put to the user,
-    so the user may drop it, and ``plans.user_steering`` withdraws the decision
-    rather than closing its node under it.
+    The question was put to the user, so the user may steer it: Won't do
+    (``plans.user_steering`` withdraws the decision rather than closing its
+    node under it) and pause/resume, which hold the node without moving it.
     """
     if operation not in SETTLING_OPERATIONS:
         return None
     lane = owning_lane(db, node_id)
-    if lane == DECISION and by_user and operation == "close_node":
+    if lane == DECISION and by_user and operation in _USER_STEERING:
         return None
     return lane
 
 
-#: What an agent's ``mark_done`` also learns: a plain step can be settled by the
-#: owner agent now, so an approval only the user may give belongs in a decision.
-_APPROVAL_NOTE = "; an approval belongs in a decision, never a plain step"
+#: What an agent's ``mark_done`` on a decision node also learns: the user's
+#: answer settles it, and approving something the agent produced is an artifact
+#: ask, not a decision (System 40-HUMAN-AGENT-INTERFACE). The open decision
+#: holds its task, so the ask can follow only once the decision is invalidated.
+_APPROVAL_NOTE = (
+    "; the user's answer settles it. To have the user review or approve "
+    "something you produced instead, invalidate this decision, then block "
+    "the task on them with ask_artifact_id"
+)
 
 
 def refusal_message(lane: str, operation: str) -> str:

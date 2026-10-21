@@ -6,12 +6,26 @@ import { readBackendUrl, requireBackendUrl } from './src/lib/dev-server/backend-
 
 const nodeModulesPath = realpathSync(resolve('node_modules'));
 
+export function backendOriginForOwnDevRequest(origin: string | undefined, host: string | undefined, backendUrl: string): string | undefined {
+	return origin && host && origin === `http://${host}` ? backendUrl : undefined;
+}
+
 export default defineConfig(() => {
 	const backendUrl = readBackendUrl(process.env);
 	const proxy = backendUrl
 		? {
-				'/api': backendUrl,
-				'/ws': { target: backendUrl.replace(/^http/, 'ws'), ws: true },
+				'/api': {
+					target: backendUrl,
+					ws: true,
+					changeOrigin: true,
+					configure(proxyServer: { on: (event: string, listener: (proxyRequest: { setHeader: (name: string, value: string) => void }, request: { headers: { origin?: string; host?: string } }) => void) => void }) {
+						proxyServer.on('proxyReq', (proxyRequest, request) => {
+							const origin = backendOriginForOwnDevRequest(request.headers.origin, request.headers.host, backendUrl);
+							if (origin) proxyRequest.setHeader('origin', origin);
+						});
+					},
+				},
+				'/ws': { target: backendUrl.replace(/^http/, 'ws'), ws: true, changeOrigin: true },
 			}
 		: undefined;
 

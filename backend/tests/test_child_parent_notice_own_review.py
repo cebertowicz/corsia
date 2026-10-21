@@ -214,7 +214,7 @@ def test_g11_a_worker_cannot_assign_its_step_to_the_user(db):
     with pytest.raises(service.PlanInputError) as refused:
         boundary.mutate(
             plan.id, "add",
-            {"kind": "task", "title": "Ask Steve", "acceptance_criteria": "answered",
+            {"kind": "task", "title": "Ask Steve", "acceptance_criteria": "answered", "size": "S",
              "assignee": "user"},
             actor=worker_actor(), provenance="tool.plans", mutation_id="to-user", db=db,
         )
@@ -227,8 +227,9 @@ def test_g11_an_agent_with_no_parent_still_assigns_the_user(db):
 
     boundary.mutate(
         plan.id, "add",
-        {"kind": "task", "title": "Sign off", "acceptance_criteria": "signed",
-         "assignee": "user"},
+        {"kind": "task", "title": "Sign off", "acceptance_criteria": "signed", "size": "S",
+         "assignee": "user",
+         "description": "Sign the release off.\n\nAlready tried: only the user can sign."},
         actor=PlanActor("grandparent", "user-1", "project-1"),
         provenance="tool.plans", mutation_id="root-user", db=db,
     )

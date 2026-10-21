@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api import auth as auth_api  # noqa: E402
 from auth_fixtures import OWNER_TOKEN, OWNER_USER, TEST_PASSWORD  # noqa: E402
-from infra import accounts  # noqa: E402
+from infra import accounts, token_admin  # noqa: E402
 
 BEARER = "Bearer {}"
 
@@ -79,7 +79,7 @@ class TestLogin:
             json={"username": OWNER_USER, "password": TEST_PASSWORD},
         )
         sessions = [
-            row for row in accounts.list_tokens(OWNER_USER)
+            row for row in token_admin.list_tokens(OWNER_USER)
             if row["kind"] == "session" and row["label"] == "browser"
         ]
         assert len(sessions) == 1
@@ -211,6 +211,7 @@ class TestFailureBackoff:
                 auth_api._failures[username] = (
                     auth_api._FREE_ATTEMPTS + 1,
                     auth_api.time.monotonic(),
+                    True,
                 )
             calls.append(username)
 
@@ -221,13 +222,41 @@ class TestFailureBackoff:
         monkeypatch.setattr(accounts, "check_password", _must_not_run)
         assert self._fail_once(client).status_code == 429
 
-    def test_attempts_beyond_the_waiting_cap_are_refused(self, client, monkeypatch):
+    def test_made_up_names_beyond_the_waiting_cap_are_held_then_refused(
+        self, client, monkeypatch
+    ):
         def _must_not_run(*args, **kwargs):
             raise AssertionError("a refused attempt must not cost a hash")
 
         monkeypatch.setattr(
             auth_api, "_waiting_attempts", auth_api._MAX_WAITING_ATTEMPTS
         )
+        monkeypatch.setattr(auth_api, "_HELD_SECONDS", 0)
+        monkeypatch.setattr(accounts, "check_password", _must_not_run)
+        refused = client.post(
+            "/api/auth/login",
+            json={"username": "nobody", "password": TEST_PASSWORD},
+        )
+        # The same answer as a failed check, so the cap says nothing about the name.
+        assert refused.status_code == 401
+        assert refused.json()["detail"] == auth_api._INVALID
+        assert auth_api._failures["nobody"][0] == 1
+
+    def test_a_full_waiting_cap_does_not_keep_the_owner_out(self, client, monkeypatch):
+        monkeypatch.setattr(
+            auth_api, "_waiting_attempts", auth_api._MAX_WAITING_ATTEMPTS
+        )
+        signed_in = client.post(
+            "/api/auth/login",
+            json={"username": OWNER_USER, "password": TEST_PASSWORD},
+        )
+        assert signed_in.status_code == 200
+
+    def test_one_waiting_attempt_per_name(self, client, monkeypatch):
+        def _must_not_run(*args, **kwargs):
+            raise AssertionError("a refused attempt must not cost a hash")
+
+        monkeypatch.setattr(auth_api, "_waiting_names", {OWNER_USER})
         monkeypatch.setattr(accounts, "check_password", _must_not_run)
         refused = self._fail_once(client)
         assert refused.status_code == 429
@@ -244,8 +273,15 @@ class TestFailureBackoff:
     def test_tracked_usernames_stay_bounded(self, monkeypatch):
         monkeypatch.setattr(auth_api, "_MAX_TRACKED_USERNAMES", 3)
         for name in ("a", "b", "c", "d", "e"):
-            auth_api._record_failure(name)
+            auth_api._record_failure(name, is_account=False)
         assert list(auth_api._failures) == ["c", "d", "e"]
+
+    def test_made_up_names_never_push_out_an_account(self, monkeypatch):
+        monkeypatch.setattr(auth_api, "_MAX_TRACKED_USERNAMES", 3)
+        auth_api._record_failure(OWNER_USER, is_account=True)
+        for name in ("a", "b", "c", "d", "e"):
+            auth_api._record_failure(name, is_account=False)
+        assert list(auth_api._failures) == [OWNER_USER, "d", "e"]
 
 
 class TestLogout:

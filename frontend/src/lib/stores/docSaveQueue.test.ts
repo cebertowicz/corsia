@@ -12,7 +12,7 @@ vi.mock('$lib/stores/docComments', () => ({ flushPositions: mocks.flushPositions
 vi.mock('$lib/stores/toast', () => ({ toasts: { show: mocks.toastShow } }));
 
 import {
-	clearDraft, closeTabWithSaveGate, docSaveDrafts, draftKey, effectiveDraftTarget,
+	clearDraft, closeTabWithSaveGate, docSaveActivities, docSaveDrafts, draftKey, withDraftArtifactId,
 	enrichDraftTarget, existingDraft, flushDraft, relocateDraftTarget, seedDraft, setDraftText,
 } from './docSaveQueue';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -46,6 +46,20 @@ afterEach(() => {
 });
 
 describe('docSaveQueue', () => {
+	it('publishes the in-flight transition after a slow write settles', async () => {
+		const doc = target({ path: '/project/activity.md' });
+		const slow = deferred();
+		mocks.writeContent.mockReturnValueOnce(slow.promise);
+		seedDraft(doc, 'base');
+		setDraftText(doc, 'changed');
+		const saving = flushDraft(doc);
+		await vi.waitFor(() => expect(get(docSaveActivities)[draftKey(doc)]?.writeInFlight).toBe(true));
+		slow.resolve({});
+		await saving;
+		expect(get(docSaveActivities)[draftKey(doc)]).toMatchObject({ writeInFlight: false, resaveQueued: false });
+		clearDraft(doc);
+	});
+
 	it('serializes delayed writes so stale text cannot complete after newer text', async () => {
 		const doc = target({ path: '/project/ordered.md', artifactId: 'ordered' });
 		const first = deferred();
@@ -150,7 +164,7 @@ describe('docSaveQueue', () => {
 		expect(get(docSaveDrafts)).toHaveProperty(draftKey(pathOnly));
 
 		setDraftText(pathOnly, 'local revision');
-		expect(effectiveDraftTarget(pathOnly)).toMatchObject({
+		expect(withDraftArtifactId(pathOnly)).toMatchObject({
 			artifactId: 'resolved-artifact',
 			path: '/project/unregistered.md',
 		});
@@ -213,6 +227,18 @@ describe('docSaveQueue', () => {
 			status: 'error',
 		});
 		clearDraft(doc);
+	});
+
+	it('frees the saved text a returning tab paints from once the tab closes', async () => {
+		const doc = target({ path: '/project/closing.md', artifactId: 'closing' });
+		seedDraft(doc, 'saved text');
+
+		const onClose = vi.fn();
+		const result = await closeTabWithSaveGate(doc, { onClose, onBringIntoView: vi.fn() });
+
+		expect(result).toEqual({ closed: true });
+		expect(onClose).toHaveBeenCalledOnce();
+		expect(existingDraft(doc)).toBeUndefined();
 	});
 
 	it('clears a failed draft when the user restores the last saved text', async () => {

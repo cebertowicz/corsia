@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+from core.checkpoint_types import CheckpointProviderForkRequest
+
 import asyncio
 from types import SimpleNamespace
 
 import pytest
 
-from core.checkpoint_types import (
-    CheckpointRequest,
-    ProviderCheckpointRequest,
-    ProviderCheckpointResult,
+from core.fork_types import (
+    ProviderForkRequest,
+    ProviderForkResult,
 )
+from core.checkpoint_types import CheckpointRequest
 from core.turn_core import TurnIdentity
 from llm.resolution import ExecutionTarget
 
@@ -76,8 +78,8 @@ def _admission(thread_id: str, checkpoint_id: str, turn: TurnIdentity):
         first_included_seq=None,
         started_at="t1",
     )
-    provider = ProviderCheckpointRequest(
-        checkpoint_id=checkpoint_id,
+    provider = CheckpointProviderForkRequest(
+        fork_id=checkpoint_id,
         thread_id=thread_id,
         target=target,
         instruction="Write one checkpoint.",
@@ -94,7 +96,7 @@ async def test_hard_wait_installs_once_and_returns_same_turn_continuation(
     monkeypatch,
 ) -> None:
     from core import checkpoint_runtime
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import (
         CheckpointWaitScope,
         InstalledContinuation,
@@ -111,7 +113,7 @@ async def test_hard_wait_installs_once_and_returns_same_turn_continuation(
     async def invoke(_request, _cancel):
         started.set()
         await release.wait()
-        return ProviderCheckpointResult("installed body", None)
+        return ProviderForkResult("installed body", None)
 
     async def prepare(checkpoint_id: str, required: bool):
         assert required is True
@@ -155,7 +157,7 @@ async def test_soft_pressure_starts_background_checkpoint_without_stop_ownership
     monkeypatch,
 ) -> None:
     from core import checkpoint_runtime
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import (
         CheckpointWaitScope,
         InstalledContinuation,
@@ -170,7 +172,7 @@ async def test_soft_pressure_starts_background_checkpoint_without_stop_ownership
 
     async def invoke(_request, _cancel):
         await release.wait()
-        return ProviderCheckpointResult("background body", None)
+        return ProviderForkResult("background body", None)
 
     async def prepare(checkpoint_id: str, required: bool):
         assert required is False
@@ -224,7 +226,7 @@ async def test_hard_wait_joiner_detaches_without_cancelling_background_work(
 
     async def invoke(_request, _cancel):
         await release.wait()
-        return ProviderCheckpointResult("background body", None)
+        return ProviderForkResult("background body", None)
 
     async def render(_record):
         return InstalledContinuation(12_000, object())

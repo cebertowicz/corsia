@@ -6,8 +6,9 @@ import sqlite3
 import pytest
 
 from doc_feedback_helpers import seed_thread
+from doceditor.review_requests import escalate_fork
 from test_doc_review_adapters import client, payload  # noqa: F401
-from test_doc_review_requests import request, review_env  # noqa: F401
+from test_doc_review_requests import fork_comment, request, review_env  # noqa: F401
 
 
 def test_list_without_thread_names_and_permissions_never_reads_roster(client, review_env, monkeypatch):
@@ -228,8 +229,7 @@ def test_list_cancel_permission_matches_mutation(client, review_env, monkeypatch
     response = client.delete(f"/api/doc-reviews/{row['id']}")
     assert response.status_code == (200 if expected else 403)
     stored = db.execute("SELECT * FROM doc_review_requests WHERE id=?", (row["id"],)).fetchone()
-    assert bool(stored["cancelled_at"]) is expected
-    assert reviews.outcome(db, stored) == ("cancelled" if expected else "open")
+    assert stored["state"] == ("withdrawn" if expected else "forked")
 
 
 def test_projection_uses_canonical_cancel_permission_helper(client, review_env, monkeypatch):
@@ -250,45 +250,67 @@ def test_projection_uses_canonical_cancel_permission_helper(client, review_env, 
 
 
 @pytest.mark.parametrize("end", ["closed", "failed"])
-def test_ended_review_remains_named_without_cancel_or_requested_picker_state(client, review_env, end):
+def test_ended_continuation_without_comments_stays_listed_as_ended_not_requested(client, review_env, end):
     from plans import public
     db, aid = review_env
     row = request(db, aid)
+    row = escalate_fork(db, row["id"])
     public.transition_node(row["node_id"], end, db=db)
     db.commit()
     body = client.get(f"/api/artifacts/{aid}/reviews", params={"thread_id": "requester"}).json()
-    shown = body["reviews"][0]
-    assert shown["id"] == row["id"]
-    assert shown["outcome"] == "ended_without_comments"
-    assert shown["reviewer_name"] == "Reviewer" and shown["requester_name"] == "Requester"
-    assert shown["may_cancel"] is False
-    assert "state" not in shown and "settled_batch_id" not in shown
+    assert [(r["id"], r["outcome"], r["may_cancel"]) for r in body["reviews"]] == [(row["id"], "ended_without_comments", False)]
+    assert body["reviews"][0]["state"] in {"handed_back", "failed"}
     choices = {choice["id"]: choice for choice in body["reviewers"]}
     assert choices["reviewer"]["requested"] is False
     repeated = client.post("/api/doc-reviews", json=payload(aid, thread_id="requester", client_id="after-end"))
     assert repeated.status_code == 200
+    assert repeated.json()["request"]["state"] == "forked"
+    import asyncio
+    from core.artifact_review_runtime import start
+    asyncio.run(start(repeated.json()["request"]["id"]))
     refreshed = client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"]
-    assert [(r["id"], r["outcome"]) for r in refreshed] == [(repeated.json()["request"]["id"], "open")]
+    # This fixture has no runnable review source: the new request's preparation
+    # fails visibly and preserves the work in a live reviewer task.
+    assert [(r["id"], r["state"]) for r in refreshed] == [(repeated.json()["request"]["id"], "failed")]
+    assert refreshed[0]["reason"] and refreshed[0]["node_id"]
     assert refreshed[0]["id"] != row["id"]
 
 
-def test_later_comments_remove_the_named_ended_row_from_the_http_list(client, review_env):
+def test_clean_fork_without_comments_remains_named_in_http_list(client, review_env):
+    from doceditor import review_feedback
+    from infra.database import write_transaction
+
+    db, aid = review_env
+    row = request(db, aid)
+    with write_transaction(db, scope="test_empty_review"):
+        review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
+    body = client.get(f"/api/artifacts/{aid}/reviews", params={"thread_id": "requester"}).json()
+    shown = body["reviews"][0]
+    assert (shown["id"], shown["may_cancel"]) == (row["id"], False)
+    assert shown["state"] == "submitted"
+    assert next(choice for choice in body["reviewers"] if choice["id"] == "reviewer")["requested"] is False
+
+
+def test_ended_review_leaves_the_list_after_later_comments(client, review_env):
     from doc_feedback_helpers import add_comment
     from plans import public
     db, aid = review_env
     row = request(db, aid)
+    row = escalate_fork(db, row["id"])
     public.transition_node(row["node_id"], "closed", db=db)
     db.commit()
-    assert client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"][0]["outcome"] == "ended_without_comments"
+    listed = client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"]
+    assert [(r["id"], r["outcome"], r["comment_count"]) for r in listed] == [(row["id"], "ended_without_comments", 0)]
     add_comment(db, aid, author_id="reviewer", submit=True)
     assert client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"] == []
 
 
-def test_silent_end_through_real_plan_http_contract(client, review_env):
+def test_silent_end_stays_listed_as_ended_through_real_plan_http_contract(client, review_env):
     from api import plans
     client.app.include_router(plans.router)
     db, aid = review_env
     row = request(db, aid)
+    row = escalate_fork(db, row["id"])
     operator = client.get("/api/plans/operator/threads/reviewer")
     assert operator.status_code == 200
     plan = next(p for p in operator.json()["plans"] if any(n["id"] == row["node_id"] for n in p["nodes"]))
@@ -303,6 +325,24 @@ def test_silent_end_through_real_plan_http_contract(client, review_env):
     assert [(r["id"], r["outcome"], r["may_cancel"]) for r in shown] == [(row["id"], "ended_without_comments", False)]
 
 
+def test_submitted_fork_lists_as_ended_only_without_comments(client, review_env):
+    from doceditor import review_feedback
+    from infra.database import write_transaction
+
+    db, aid = review_env
+    empty = request(db, aid)
+    with write_transaction(db, scope="test_empty_submit_listed"):
+        review_feedback.submit_fork_feedback(db, empty["id"], "reviewer", aid)
+    shown = client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"]
+    assert [(r["id"], r["state"], r["outcome"], r["may_cancel"]) for r in shown] == [
+        (empty["id"], "submitted", "ended_without_comments", False)]
+    commented = request(db, aid, key="second-request")
+    fork_comment(db, aid, commented["id"])
+    with write_transaction(db, scope="test_commented_submit_unlisted"):
+        review_feedback.submit_fork_feedback(db, commented["id"], "reviewer", aid)
+    assert client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"] == []
+
+
 def test_workspace_conductor_is_never_offered_but_the_project_conductor_is(client, review_env):
     """The roster lists the workspace conductor for messaging; the picker and submit both refuse it.
 
@@ -313,7 +353,7 @@ def test_workspace_conductor_is_never_offered_but_the_project_conductor_is(clien
     seed_thread(db, "project-conductor", title="Project conductor")
     db.execute("UPDATE threads SET project_id='project-a' WHERE id='project-conductor'")
     db.execute("UPDATE threads SET agent_enabled=1, agent_responsibility='Coordinates' WHERE id IN ('workspace-conductor','project-conductor')")
-    db.execute("INSERT INTO settings (key,value,updated_at) VALUES ('workspace_conductor_session_id', ?, 't')",
+    db.execute("INSERT INTO settings (key,value,updated_at) VALUES ('corsia_agent_thread_id', ?, 't')",
                ('{"session_id": "workspace-conductor"}',))
     db.commit()
     body = client.get(f"/api/artifacts/{aid}/reviews", params={"thread_id": "requester"}).json()
@@ -328,7 +368,7 @@ def test_workspace_conductor_is_not_offered_to_a_caller_outside_any_project(clie
     db, aid = review_env
     seed_thread(db, "workspace-conductor", title="Workspace conductor")
     db.execute("UPDATE threads SET agent_enabled=1, agent_responsibility='Coordinates' WHERE id='workspace-conductor'")
-    db.execute("INSERT INTO settings (key,value,updated_at) VALUES ('workspace_conductor_session_id', ?, 't')",
+    db.execute("INSERT INTO settings (key,value,updated_at) VALUES ('corsia_agent_thread_id', ?, 't')",
                ('{"session_id": "workspace-conductor"}',))
     db.commit()
     ids = {row["id"] for row in client.get(f"/api/artifacts/{aid}/reviews", params={"thread_id": "requester"}).json()["reviewers"]}

@@ -71,13 +71,22 @@ describe('DecisionChip — Other field', () => {
 		expect(el.querySelector('.other-option input')).toBeNull();
 	});
 
+	it('names the field Other for assistive tech and shows no visible label', () => {
+		const el = renderChip(makeDecision());
+		const textarea = el.querySelector('.other-option textarea')!;
+		const label = textarea.closest('label')!;
+		expect(label.textContent).toContain('Other');
+		expect(label.querySelector('.sr-only')?.textContent).toBe('Other');
+		expect(textarea.getAttribute('placeholder')).toBe('Type your own response');
+	});
+
 	it('does not select Other merely by focusing the field', () => {
 		const el = renderChip(makeDecision());
 		const textarea = el.querySelector('textarea')!;
 		textarea.focus();
 		textarea.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
 		flushSync();
-		expect(el.querySelector('.other-option')!.classList.contains('selected')).toBe(false);
+		expect(el.querySelector('.other-option textarea')!.classList.contains('selected')).toBe(false);
 		const answerBtn = el.querySelector('.decision-actions button') as HTMLButtonElement;
 		expect(answerBtn.disabled).toBe(true);
 	});
@@ -88,7 +97,7 @@ describe('DecisionChip — Other field', () => {
 		textarea.value = 'a considered, multi-sentence answer.';
 		textarea.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
-		expect(el.querySelector('.other-option')!.classList.contains('selected')).toBe(true);
+		expect(el.querySelector('.other-option textarea')!.classList.contains('selected')).toBe(true);
 	});
 
 	it('does not submit on Enter — no form wraps it and nothing intercepts the key', () => {
@@ -130,10 +139,30 @@ describe('DecisionChip — Recommended badge', () => {
 		expect(el.querySelector('dt')?.textContent).not.toBe('Recommendation');
 	});
 
-	it('shows no badge and no fallback row when no option matches the recommendation', () => {
+	it('keeps Why in the definition list when no option matches the recommendation', () => {
 		const el = renderChip(makeDecision({ recommendation: 'not-a-real-option-id' }));
 		expect(el.textContent).not.toContain('Recommended');
-		expect(el.textContent).not.toContain('None stated');
+		expect(el.querySelector('dl')?.textContent).toContain('Why');
+		expect(el.querySelector('.option-rationale')).toBeNull();
+	});
+
+	it('attaches the reason to the recommended option with an accessible description', () => {
+		const el = renderChip(makeDecision({ recommendation: 'b' }));
+		const bBtn = Array.from(el.querySelectorAll('.option-button')).find((button) => button.textContent?.includes('Option B'))!;
+		const rationale = bBtn.querySelector('.option-rationale');
+		expect(rationale?.textContent).toContain('Why');
+		expect(rationale?.textContent).toContain('A is safer given the current evidence.');
+		expect(bBtn.getAttribute('aria-describedby')).toContain(rationale?.id);
+		expect(el.querySelector('dl')?.textContent).not.toContain('Why');
+	});
+
+	it('attaches the reason once to the first recommended pick-any option', () => {
+		const el = renderChip(makeDecision({
+			pick: 'any',
+			recommendation: ['a', 'b'],
+		}));
+		expect(el.querySelectorAll('.option-rationale')).toHaveLength(1);
+		expect(el.querySelector('.option-row .option-rationale')?.parentElement?.textContent).toContain('Option A');
 	});
 });
 

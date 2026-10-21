@@ -11,13 +11,13 @@ const DOC = 'Hello world. The rest stays.';
 // environment is gone throws on the missing document; every view is destroyed after its test.
 const disposers = new Set<() => void>();
 
-function harness(doc = DOC) {
+function harness(doc = DOC, holdsCall: (callId: string) => boolean = () => false) {
 	const view = new EditorView({
 		state: EditorState.create({ doc, extensions: [createTypedReveal({ canType: () => true, isInView: () => true })] }),
 		parent: document.body,
 	});
 	let listener: ((frame: DocumentFrame) => void) | null = null;
-	const stop = attachPreviewFeed(view, { onFrame: (next) => { listener = next; return () => { listener = null; }; } });
+	const stop = attachPreviewFeed(view, { onFrame: (next) => { listener = next; return () => { listener = null; }; }, holdsCall });
 	const dispose = () => { if (!disposers.delete(dispose)) return; stop(); view.destroy(); };
 	disposers.add(dispose);
 	return { view, send: (frame: Record<string, unknown>) => listener?.(frame as unknown as DocumentFrame), stop, dispose, listening: () => listener !== null };
@@ -120,6 +120,22 @@ describe('live preview feed', () => {
 			expect(previews(h.view), `${kind} ${outcome}`).toEqual([]);
 			h.dispose();
 		}
+	});
+
+	it('a suggestion held for its arrival keeps its preview past the grace, and loses it one grace after the hold ends', async () => {
+		vi.useRealTimers();
+		let holding = true;
+		const h = harness(DOC, () => holding);
+		h.send(preview(await textDigest(DOC), [{ slot: 0, from: 6, to: 11, at: 0, text: 'the' }], 'call-1', 'suggest'));
+		await settle();
+		vi.useFakeTimers();
+		h.send(end('settled'));
+		vi.advanceTimersByTime(CLAIM_GRACE_MS * 3);
+		expect(previews(h.view)).toHaveLength(1);
+		holding = false;
+		vi.advanceTimersByTime(CLAIM_GRACE_MS);
+		expect(previews(h.view)).toEqual([]);
+		h.dispose();
 	});
 
 	it('a suggestion whole in one frame and settled at once is still placed, and held for its arrival', async () => {

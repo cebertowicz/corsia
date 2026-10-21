@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-service-log-path"
+description = "Enables the get_service_log_path command without any pre-configured scope."
+commands.allow = ["get_service_log_path"]
+
+[[permission]]
+identifier = "deny-get-service-log-path"
+description = "Denies the get_service_log_path command without any pre-configured scope."
+commands.deny = ["get_service_log_path"]

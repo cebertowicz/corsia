@@ -46,6 +46,19 @@ def test_receipt_and_ledger_commit_once_without_foreground_turn(checkpoint_db):
     assert payload["calls"][0]["total_tokens"] == 450
 
 
+def test_a_changed_model_for_the_same_call_conflicts_instead_of_rewriting(checkpoint_db):
+    from infra.checkpoint_usage import freeze_binding, record_call
+    from infra.turn_usage_receipts import UsageReceiptConflictError
+
+    db = checkpoint_db
+    freeze_binding("cp-1", _binding(), db=db)
+    record_call("cp-1", "call-1", "claude-code/claude-sonnet-5-5", _usage(), now_iso="t2", db=db)
+    assert not record_call("cp-1", "call-1", "claude-code/claude-sonnet-5-5", _usage(), now_iso="t3", db=db)
+    with pytest.raises(UsageReceiptConflictError):
+        record_call("cp-1", "call-1", "claude-code/claude-opus-5-5", _usage(), now_iso="t4", db=db)
+    assert [row[0] for row in db.execute("SELECT model FROM llm_usage")] == ["claude-code/claude-sonnet-5-5"]
+
+
 def test_changed_measurement_conflicts_instead_of_double_charging(checkpoint_db):
     from infra.checkpoint_usage import freeze_binding, record_call
 

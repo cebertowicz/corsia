@@ -6,15 +6,28 @@ person's own GitHub identity, so no action here removes it.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
 from infra.db_async import run_in_db, run_off_db
 from tools.base import Tool
 
-ACTIONS = ("status", "connect", "check", "sign_out")
+ACTIONS = ("status", "install", "connect", "check", "sign_out")
 _PROMPT_SECONDS = 15.0
 _ACCOUNT_NAME = "Agents"
+_PROMPT_NEXT = "retry connect; if it repeats, update GitHub CLI or report its prompt format"
+_LOGIN_FAILURE_NEXT = "retry connect; if it exits again, check the GitHub CLI installation"
+
+
+def _signin_with_next(signin: dict[str, Any]) -> dict[str, Any]:
+    """Add the recovery action for a named sign-in failure without vendor output."""
+    cause = signin.get("cause")
+    if cause == "prompt_unrecognized":
+        return signin | {"next": _PROMPT_NEXT}
+    if cause == "vendor_login_failed":
+        return signin | {"next": _LOGIN_FAILURE_NEXT}
+    return signin
 
 
 def _account_row(account_id: str | None) -> dict | None:
@@ -28,6 +41,21 @@ async def _status(*, verify: bool = False) -> dict[str, Any]:
 
     account = await (run_off_db(github_agent.verify_now) if verify else run_in_db(github_agent.view))
     return github_agent.source_state(account) | {"account_id": account.account_id}
+
+
+async def _install() -> dict[str, Any]:
+    """Install only CORSIA's pinned GitHub CLI, never a user-wide copy."""
+    from tools.managed_runtime import ManagedRuntimeError, ensure_runtime
+
+    try:
+        binary = await asyncio.to_thread(ensure_runtime, "gh")
+    except ManagedRuntimeError as error:
+        return {"state": "failed", "reason": str(error)}
+    return {
+        "state": "installed",
+        "binary": str(binary.with_name("gh")),
+        "notice": "CORSIA installed GitHub CLI from GitHub; only CORSIA's agents use this copy.",
+    }
 
 
 async def _connect() -> dict[str, Any]:
@@ -49,7 +77,7 @@ async def _connect() -> dict[str, Any]:
     started = await account_controls.start_signin(account_id)
     if started.get("status") == "waiting":
         started = await account_controls.wait_for_prompt(account_id, timeout=_PROMPT_SECONDS)
-    return {"signin": started}
+    return {"signin": _signin_with_next(started)}
 
 
 async def _check() -> dict[str, Any]:
@@ -60,7 +88,7 @@ async def _check() -> dict[str, Any]:
     shown: dict[str, Any] = {}
     if account.account_id is not None:
         try:
-            shown["signin"] = await account_controls.check_signin(account.account_id)
+            shown["signin"] = _signin_with_next(await account_controls.check_signin(account.account_id))
         except AccountError:
             pass  # no sign-in in this process: the account's own state answers
     return shown | {"account": await _status(verify=True)}
@@ -91,11 +119,13 @@ class GitHubAgentAccountTool(Tool):
         return (
             "The agents' own GitHub account, which agent shells use for gh and git push. "
             "status: its state (ready, needs_auth, unverified, wrong_account, not_installed), "
-            "a named cause, and its login once verified. connect: create it if missing and "
+            "a named cause, and its login once verified. install: download CORSIA's pinned GitHub CLI from GitHub "
+            "for CORSIA agents only. connect: create it if missing and "
             "start sign-in; returns a user_code and verification_uri for the person to enter "
-            "in a browser signed in as the agents' GitHub account (a private window), never "
-            "their own. check: after the person entered the code, read the sign-in and "
-            "verify the account; repeat until ready or a named cause. sign_out: sign the "
+            "in a browser signed in as the agents' GitHub account, never their own, or a "
+            "named cause, with a next step when there is one (skill github, agent-account.md). "
+            "check: read the sign-in and verify the account; repeat only while the sign-in "
+            "is waiting, then act on the account's state. sign_out: sign the "
             "account out; agent shells stay locked until it is connected again. Never run "
             "gh auth login in the shell."
         )
@@ -118,7 +148,7 @@ class GitHubAgentAccountTool(Tool):
         action = kwargs.get("action")
         if action not in ACTIONS:
             return f"Error: action must be one of {', '.join(ACTIONS)}"
-        handlers = {"status": _status, "connect": _connect, "check": _check, "sign_out": _sign_out}
+        handlers = {"status": _status, "install": _install, "connect": _connect, "check": _check, "sign_out": _sign_out}
         try:
             result = await handlers[action]()
         except AccountError as exc:

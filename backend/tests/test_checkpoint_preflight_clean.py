@@ -522,7 +522,7 @@ async def test_external_initial_boundary_uses_bound_turn_and_refreshes_on_adopti
     harness,
 ) -> None:
     """The hard wait begins only after the harness exposes its exact Turn scope."""
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import (
         CheckpointWaitScope,
         InstalledContinuation,
@@ -558,6 +558,7 @@ async def test_external_initial_boundary_uses_bound_turn_and_refreshes_on_adopti
         installed_checkpoint=None,
         registered_checkpoint_id=None,
         eager_checkpoint_id=None,
+        provider_registered=False,
         binary=None,
         reasoning_effort=None,
         warm_boundary=SimpleNamespace(tool_call_id="completed-tool"),
@@ -581,7 +582,7 @@ async def test_external_initial_boundary_uses_bound_turn_and_refreshes_on_adopti
         return warm_source
 
     monkeypatch.setattr(
-        "core.checkpoint_codex_fork._capture_tool_boundary_warm_source",
+        "core.fork_codex._capture_tool_boundary_warm_source",
         capture_tool_boundary,
     )
 
@@ -615,7 +616,7 @@ async def test_external_initial_boundary_uses_bound_turn_and_refreshes_on_adopti
         )
 
     monkeypatch.setattr(
-        "core.checkpoint_render.capture_warm_checkpoint_source", capture,
+        "core.fork_render.capture_warm_fork_source", capture,
     )
     monkeypatch.setattr(checkpoint_resume, "_prepare_external_checkpoint", prepare)
     monkeypatch.setattr(
@@ -657,7 +658,7 @@ async def test_external_initial_boundary_uses_current_checkpoint_state(
     harness,
     checkpoint_state,
 ) -> None:
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import CheckpointWaitScope, ProviderContinuation
     from core.turn_core import TurnIdentity
     from subagents import harness_checkpoint_resume as checkpoint_resume

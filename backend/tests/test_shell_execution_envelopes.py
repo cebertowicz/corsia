@@ -130,8 +130,7 @@ def test_safehouse_argv_is_direct_and_ignores_workdir_config(
         "--env-pass=CORSIA_THREAD_ID,CORSIA_PROCESS_OWNER_MARKER,"
         "CORSIA_TOOL_INVOCATION_ID,AGENT_BROWSER_ARGS,"
         "GH_CONFIG_DIR,GIT_CONFIG_COUNT,"
-        + ",".join(f"GIT_CONFIG_KEY_{i},GIT_CONFIG_VALUE_{i}" for i in range(7))
-        + ",CORSIA_GWS_HOME" in argv
+        + ",".join(f"GIT_CONFIG_KEY_{i},GIT_CONFIG_VALUE_{i}" for i in range(7)) in argv
     )
     assert not any(part == "--env" or part.startswith("--env=") for part in argv)
     assert argv[argv.index("--") + 1 :] == [

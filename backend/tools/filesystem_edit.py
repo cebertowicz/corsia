@@ -11,13 +11,13 @@ from pathlib import Path
 from typing import Any
 
 from infra.db_async import run_off_db
+from infra.guidance_targets import guidance_target
 from tools.base import Tool
 from tools.file_write_completion import (
     GUIDANCE_PARAMETERS,
     announce_published_write,
-    guidance_target,
     managed_write,
-    save_guided_write,
+    save_guided_write_and_announce,
 )
 from tools.filesystem_effects import list_bound_directory, open_bound_text
 from tools.filesystem_gate import _resolve_path_for_action
@@ -211,7 +211,9 @@ class EditFileTool(Tool):
                             notify=False, handle=handle, **write_args,
                         )
                     )
-            return await run_off_db(save_guided_write, file_path, new_content, target, kwargs, expected=content, **write_args)
+            return await save_guided_write_and_announce(
+                file_path, new_content, target, kwargs, expected=content, **write_args,
+            )
         except FileNotFoundError:
             return f"Error: File not found: {path}"
         except PermissionError as e:
@@ -312,7 +314,9 @@ class MultiEditTool(Tool):
                             notify=False, handle=handle, **write_args,
                         )
                     )
-            return await run_off_db(save_guided_write, file_path, content, target, kwargs, expected=original, **write_args)
+            return await save_guided_write_and_announce(
+                file_path, content, target, kwargs, expected=original, **write_args,
+            )
         except FileNotFoundError:
             return f"Error: File not found: {path}"
         except PermissionError as e:

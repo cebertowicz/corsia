@@ -9,8 +9,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from infra.state.context import _current_tool_invocation_id, tool_invocation_context
-from tools.registry import ToolRegistry
+from tools.registry import _is_reserved_execution_param
+from tools.tool_execution_context import inject_context, strip_reserved_context
 from tools.shell_guard import safehouse_subprocess_env
 
 
@@ -39,7 +41,7 @@ async def test_bridge_binds_only_current_invocation(monkeypatch, invocation, che
     with tool_invocation_context("outer"):
         result = await bridge.execute_tool(
             Registry(), thread_id="thread", invocation_id=invocation,
-            provider_tool_call_id="must-not-be-used", checkpoint_id=checkpoint,
+            provider_tool_call_id="must-not-be-used", fork_id=checkpoint,
             name="bash", arguments={"command": "fake"},
         )
         assert _current_tool_invocation_id.get() == "outer"
@@ -114,7 +116,7 @@ async def test_native_call_binds_its_request_id_and_restores_after_failure():
 
 @pytest.mark.asyncio
 async def test_checkpoint_native_clears_inherited_foreground_invocation(monkeypatch):
-    from core import checkpoint_native_tools as checkpoint
+    from core import fork_native_tools as checkpoint
 
     observed = []
 
@@ -128,23 +130,24 @@ async def test_checkpoint_native_clears_inherited_foreground_invocation(monkeypa
         content="", reasoning_content=None,
         tool_calls=[SimpleNamespace(id="fork-call", name="continuity_edit", arguments={})],
     )
-    request = SimpleNamespace(checkpoint_id="fork", thread_id="thread")
+    request = SimpleNamespace(fork_id="fork", thread_id="thread")
     with tool_invocation_context("outer"):
         assert await checkpoint.run_tool_calls(
             SimpleNamespace(tools=Tools()), response, [], asyncio.Event(), request, [],
+            kind=CHECKPOINT_KIND,
         )
         assert _current_tool_invocation_id.get() == "outer"
     assert observed == [None]
 
 
 def test_registry_forwards_invocation_only_to_bash_and_strips_public_override():
-    params = ToolRegistry._strip_reserved_context({
+    params = strip_reserved_context({
         "command": "fake", "_thread_invocation_id": "forged",
-    })
+    }, _is_reserved_execution_param)
     context = {"id": "thread", "project_id": "project"}
     with tool_invocation_context("current"):
-        forwarded = ToolRegistry._inject_context(params, context, tool_name="bash")
-        other = ToolRegistry._inject_context(params, context, tool_name="read_file")
+        forwarded = inject_context(params, context, tool_name="bash")
+        other = inject_context(params, context, tool_name="read_file")
     assert forwarded["_thread_invocation_id"] == "current"
     assert "_thread_invocation_id" not in other
     assert "_thread_invocation_id" not in params

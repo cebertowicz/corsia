@@ -32,11 +32,6 @@
 	const filteredProjects = $derived(
 		q ? activeProjects.filter((p) => p.name.toLowerCase().includes(q)) : activeProjects
 	);
-	const filteredArchived = $derived(
-		$projectsStore
-			.filter((p) => p.status === 'archived')
-			.filter((p) => !q || p.name.toLowerCase().includes(q))
-	);
 	const filteredConversations = $derived(
 		$threads
 			.filter((s) => !q || (s.title ?? '').toLowerCase().includes(q))
@@ -64,12 +59,10 @@
 		...filteredActions,
 		...filteredProjects.map((p) => ({ run: () => pickProject(p) })),
 		...filteredConversations.map((c) => ({ run: () => pickConversation(c.id) })),
-		...filteredArchived.map((p) => ({ run: () => pickProject(p) })),
 	]);
 	const actionIndex = (id: string) => filteredActions.findIndex((action) => action.id === id);
 	const projBase = $derived(filteredActions.length);
 	const convBase = $derived(projBase + filteredProjects.length);
-	const archBase = $derived(convBase + filteredConversations.length);
 
 	function resetSel() { sel = 0; }
 	$effect(() => {
@@ -163,17 +156,6 @@
 				{/each}
 			{/if}
 
-			{#if filteredArchived.length > 0}
-				<div class="g-label">Archived</div>
-				{#each filteredArchived as p, i (p.id)}
-					<button class="res archived" class:sel={sel === archBase + i} onmouseenter={() => (sel = archBase + i)} onclick={() => pickProject(p)}>
-						<span class="proj-dot" style="background: {projectAccent(p.id, p.accent_color)};"></span>
-						<span class="res-label">{p.name}</span>
-						<span class="res-sub">archived</span>
-					</button>
-				{/each}
-			{/if}
-
 			{#if !q}
 				<div class="g-label">Documents</div>
 				<div class="res-empty">Documents arrive with the registry.</div>
@@ -199,8 +181,6 @@
 	.results { overflow-y: auto; padding: 6px; }
 	.g-label { font-size: var(--text-caption); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-tertiary); padding: 10px 8px 4px; }
 	.res { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 10px; border-radius: var(--radius-sm); background: none; border: none; cursor: pointer; }
-	.res.archived { opacity: 0.6; }
-	.res.archived:hover, .res.archived.sel { opacity: 1; }
 	.res:active { scale: none; transition-duration: 0s; }
 	.res.sel, .res:active { background: var(--accent); }
 	.res.sel .res-label, .res:active .res-label { color: #fff; }
@@ -214,7 +194,7 @@
 	.res-empty { padding: 6px 10px 4px; font-size: var(--text-subhead); color: var(--text-tertiary); }
 
 	@media (max-width: 768px) {
-		.palette { left: 0; right: 0; top: 0; transform: none; width: 100%; max-height: 100vh; height: 100%; border-radius: 0; padding-top: env(safe-area-inset-top, 0px); }
+		.palette { left: 0; right: 0; top: 0; transform: none; width: 100%; max-height: 100vh; height: 100%; border-radius: 0; padding-top: var(--safe-top); }
 		.results { padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); }
 		.pal-close { width: 40px; height: 40px; }
 	}

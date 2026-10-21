@@ -97,9 +97,11 @@ class Scenario:
 def _gmail_payload(message_id: str, thread_id: str, sender: str,
                    label: str = "INBOX") -> dict[str, Any]:
     return {
-        "message_id": message_id, "thread_id": thread_id,
+        "account_id": "acct-1", "message_id": message_id, "thread_id": thread_id,
         "from": sender, "to": "me@example.com", "label": label,
         "subject": "hello", "snippet": "first contact",
+        # Screened, unflagged, needs the person now: the declared actionable rule.
+        "screen_status": "screened", "injection": False, "needs_person": "now",
     }
 
 
@@ -149,7 +151,7 @@ GMAIL_FIRST_TOUCH = _add(Scenario(
     description="First-seen email; no pre-existing artifact; a rule binds+registers it.",
     connector="gmail", internal_event="email.received",
     raw_payload=_gmail_payload("msg-1", "thr-1", "user_1@example.com"),
-    identity_facts=("message_id",),
+    identity_facts=("account_id", "message_id"),
     expected_facts={"from": "user_1@example.com", "label": "INBOX",
                     "thread_id": "thr-1", "message_id": "msg-1"},
     relationships=({"edge": "message_to_email_thread", "to_type": "email-thread",
@@ -166,7 +168,7 @@ GMAIL_REPEAT = _add(Scenario(
     description="Later message on an already-registered email thread routes by ownership.",
     connector="gmail", internal_event="email.received",
     raw_payload=_gmail_payload("msg-2", "thr-1", "user_1@example.com"),
-    identity_facts=("message_id",),
+    identity_facts=("account_id", "message_id"),
     expected_facts={"from": "user_1@example.com", "thread_id": "thr-1",
                     "message_id": "msg-2"},
     relationships=({"edge": "message_to_email_thread", "to_type": "email-thread",
@@ -175,8 +177,9 @@ GMAIL_REPEAT = _add(Scenario(
     event_class="actionable",
     resolution="path_a_resolve", disposition="owner_digest",
     acs=("AC-2.1", "AC-1.6"), slice_owner="S4",
-    notes="event_class is type-level (email.received=actionable); the digest vs "
-          "wake split is a lifecycle decision in the S4 disposition table.",
+    notes="email.received is informational by type; its actionable_when fact rule "
+          "promotes this message. The digest vs wake split is a lifecycle "
+          "decision in the S4 disposition table.",
 ))
 
 GITHUB_PR = _add(Scenario(
@@ -231,7 +234,7 @@ PEER_CONFLICT_REPAIR = _add(Scenario(
     description="One object matches two equal-precedence peer-scope rules.",
     connector="gmail", internal_event="email.received",
     raw_payload=_gmail_payload("msg-x", "thr-x", "boss@example.com", label="labelB"),
-    identity_facts=("message_id",),
+    identity_facts=("account_id", "message_id"),
     expected_facts={"from": "boss@example.com", "label": "labelB",
                     "thread_id": "thr-x", "message_id": "msg-x"},
     artifact_ref={"integration": "gmail", "type": "email-thread", "external_id": "thr-x"},

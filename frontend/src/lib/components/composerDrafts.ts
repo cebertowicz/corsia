@@ -32,6 +32,26 @@ export function cloneDraft(draft: ComposerDraft): ComposerDraft {
 	};
 }
 
+/** Run an automatic send before restoring the person's interrupted composer draft. */
+export async function sendAndRestoreDraft<T>(
+	draft: ComposerDraft | null,
+	draftThreadId: string | null,
+	beforeSend: () => Promise<unknown>,
+	send: () => Promise<T>,
+	restore: (draft: ComposerDraft) => void,
+	save: (threadId: string) => void,
+): Promise<T> {
+	try {
+		await beforeSend();
+		return await send();
+	} finally {
+		if (draft) {
+			restore(draft);
+			if (draftThreadId) save(draftThreadId);
+		}
+	}
+}
+
 function sameAttachments(left: Attachment[], right: Attachment[]): boolean {
 	return left.length === right.length && left.every((attachment, index) =>
 		attachment.file_id === right[index]?.file_id

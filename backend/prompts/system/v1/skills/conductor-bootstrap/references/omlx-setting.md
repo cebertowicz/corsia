@@ -1,3 +1,0 @@
-# Applying the oMLX setting
-
-On A of the oMLX decision, call `corsia_api(method="POST", path="/api/providers/sources/omlx/settings/apply", body={"fingerprint": "<omlx_settings fingerprint from model_sources' omlx source, verbatim>"})` once; never re-key, recompute or retry it. `verified` false: `I couldn't confirm the change; check oMLX's settings.` All saved: `Changed: <names>.` then `Active now.` if every result is active, else `Restart oMLX from its menu bar icon to use them.` Some unsaved: `Changed: <saved names>.` (if any), `Couldn't confirm <unsaved names> changed. Nothing else was touched.` A failure: report its safe error; retry only on a new yes. On B: `You left it as it is.`

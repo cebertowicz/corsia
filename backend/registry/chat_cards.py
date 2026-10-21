@@ -99,22 +99,33 @@ def card_for(
 
 
 def ask_state(
-    hold: Mapping[str, Any], artifact: Mapping[str, Any] | None,
+    hold: Mapping[str, Any], artifact: Mapping[str, Any] | None = None,
 ) -> tuple[str, dict[str, int] | None]:
     """The round state one ask reads as, with the feedback counts its verdict carried.
 
     ``hold`` is one ``plans.public.ask_holds`` entry. Open reads as needing
-    review. A cleared ask reads as its verdict when the review bar recorded one.
-    Without one it reads as replaced when the artifact's attention was cleared as
-    superseded, and as answered otherwise (a round answered before verdicts were
-    recorded).
+    review. A cleared ask reads its terminal path from the hold's clearance
+    event, else its verdict when the review bar recorded one, else answered when
+    the person answered. A clearance that recorded none of these predates
+    recorded endings: a person's 'replaced' clear then wrote its outcome only to
+    the artifact's attention metadata, so that is read as replaced and anything
+    else as answered.
     """
+    from plans.public import ASK_ENDINGS
+
     if hold["open"]:
         return NEEDS_REVIEW, None
     answer = hold["answer"]
+    ended = answer.get("ended")
+    if ended == "retired":
+        return UNAVAILABLE, None
+    if ended in ASK_ENDINGS:
+        return ended, None
     verdict = answer.get("verdict")
     if verdict in VERDICTS:
         return verdict, _counts(answer.get("feedback_counts"))
+    if answer.get("answered_by"):
+        return ANSWERED, None
     attention = _payload(artifact.get("metadata")) if artifact else {}
     if attention.get("attention_state") == "cleared" and attention.get("attention_outcome") == "supersede":
         return REPLACED, None

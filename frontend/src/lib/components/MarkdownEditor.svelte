@@ -10,18 +10,23 @@
 	import { docTheme, docHighlight } from '$lib/cm/theme';
 	import { markdownLivePreview } from '$lib/cm/markdown-live';
 	import { imageContext, imageOpener, type OpenImageRequest } from '$lib/cm/markdown-image';
+	import { linkOpener } from '$lib/cm/markdown-link';
 	import { token } from '$lib/stores/auth';
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
-	import { commentMarks, setCommentRanges, scrollToRange, type CommentRange, type ScrollOrigin } from '$lib/cm/comment-marks';
+	import { commentMarks, coveredByMove, setCommentRanges, scrollToRange, type CommentRange, type ScrollOrigin } from '$lib/cm/comment-marks';
 	import { pendingCommentMark, setPendingComment } from '$lib/cm/pending-comment-mark';
 	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
 	import { ANCHOR_MOVED } from '$lib/components/ui/Popover.svelte';
 	import { commentRail } from '$lib/cm/comment-rail';
+	import { widgetComments } from '$lib/cm/widget-comments';
+	import { cardQuoteLabel, widgetCommentLabel } from '$lib/cm/widget-cells';
+	import type { SelectionLabel } from '$lib/stores/commentDraft';
 	import { suggestionMarks } from '$lib/cm/suggestion-marks';
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
 	import { attachPreviewFeed, type PreviewFrameSource } from '$lib/stores/livePreviewFeed';
+	import { captureDocumentPlace, dispatchKeepingPlace, type TextDocumentPlace } from '$lib/documentImagePlace';
 
 	let {
 		value = $bindable(''),
@@ -31,6 +36,7 @@
 		readOnly = false,
 		imageBase = null,
 		onOpenImage,
+		onOpenLink,
 		onSave,
 		onSelect,
 		onAnchorFocus,
@@ -40,7 +46,9 @@
 		highlights = [],
 		presence = [],
 		pendingComment = null,
-		scrollTo = null
+		scrollTo = null,
+		tabInstanceId = null,
+		onDocumentPlace
 	}: {
 		value?: string;
 		liveText?: Y.Text | null;
@@ -52,8 +60,10 @@
 		imageBase?: { path: string; projectId: string | null } | null;
 		/** Opens a drawn image larger in the canvas; without it an image is only selected. */
 		onOpenImage?: (request: OpenImageRequest) => void;
+		/** Follows a link written in this document, given its target as written; without it a link is only styled. */
+		onOpenLink?: (href: string) => void;
 		onSave?: () => void;
-		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null } | null) => void;
+		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: SelectionLabel; above?: boolean; inWidget?: boolean } | null) => void;
 		onAnchorFocus?: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) => void;
 		onSuggestionHover?: (id: string | null) => void;
 		onEdit?: (mapPos: (pos: number) => number) => void;
@@ -62,6 +72,9 @@
 		presence?: PresenceRange[];
 		pendingComment?: CommentSelection | null;
 		scrollTo?: { from: number; to: number; focus?: boolean; origin: ScrollOrigin } | null;
+		/** The mounted tab identity keeps a delayed scroll sample from landing on the next tab. */
+		tabInstanceId?: string | null;
+		onDocumentPlace?: (instanceId: string, place: TextDocumentPlace) => void;
 	} = $props();
 
 	// Read at each remote update, so a dropped connection stops typing without a reconfigure.
@@ -82,11 +95,12 @@
 		if (!onSelect) return;
 		const r = v.state.selection.main;
 		if (r.empty) { onSelect(null); return; }
-		const coords = v.coordsAtPos(r.to);
+		const coords = v.coordsAtPos(r.to), text = v.state.sliceDoc(r.from, r.to), { state } = v;
 		onSelect({
-			from: r.from, to: r.to, text: v.state.sliceDoc(r.from, r.to),
+			from: r.from, to: r.to, text,
 			top: coords?.top ?? 0, left: coords?.right ?? coords?.left ?? 0,
 			anchor: composerAnchor(v, r.from, r.to),
+			label: () => widgetCommentLabel(state, r.from, r.to, text) ?? undefined,
 		});
 	}
 
@@ -151,6 +165,32 @@
 		return new DOMRect(content.left, top, Math.max(0, right - content.left), Math.max(start.bottom, end.bottom, insert?.bottom ?? -Infinity) - top);
 	}
 
+	/** A card's label for a comment on a table's text or its quote from code, read from this editor's own syntax tree; undefined while the editor is not up. */
+	export function widgetLabel(from: number | undefined, to: number | undefined, quote: string): string | null | undefined {
+		return view ? cardQuoteLabel(view.state, from, to, quote) : undefined;
+	}
+
+	/**
+	 * Whether the draft's text at `from` needs revealing now the sheet that overlays this editor came up (always) or moved (only when
+	 * it covered text the reader had in view); a reader's own scroll away from the draft is never undone.
+	 */
+	let bandBefore: { top: number; bottom: number } | null = null;
+	export function draftCovered(from: number, opening: boolean): boolean {
+		if (!view) return opening;
+		const { band, covered } = coveredByMove(view, from, opening ? null : bandBefore);
+		bandBefore = band;
+		return opening || covered;
+	}
+
+	/** The document a label is read from: a new one with every edit, so a cached label knows when its table may have changed. */
+	export function widgetLabelStamp(): unknown { return view?.state.doc; }
+
+	/** A click on a mark drawn inside a table or diagram: one comment opens as a click on its text does, several as their margin marker does. */
+	function focusWidgetComments(ids: string[], opener: HTMLElement) {
+		const open = ids.length > 1 ? curHighlights.find((h) => h.id === ids[0])?.onMarkerFocus : undefined;
+		if (open) open(ids, opener); else onAnchorFocus?.(ids[0], liveAnchor(ids[0]));
+	}
+
 	function handleSelection(v: EditorView) {
 		const r = v.state.selection.main;
 		if (r.empty) {
@@ -171,6 +211,7 @@
 		const v = new EditorView({
 			doc: activeText?.toString() ?? value,
 			parent: host!,
+			dispatchTransactions: dispatchKeepingPlace,
 			extensions: [
 				documentComp.of(binding?.extensions ?? localHistory),
 				keymap.of([
@@ -184,11 +225,13 @@
 				markdownLivePreview,
 				imageContext.of(() => imageBase && { docPath: imageBase.path, projectId: imageBase.projectId, token: get(token) ?? '' }),
 				...(onOpenImage ? [imageOpener.of((request) => onOpenImage?.(request))] : []),
+				...(onOpenLink ? [linkOpener.of((href) => onOpenLink?.(href))] : []),
 				markdownTasks,
 				commentMarks,
 				pendingCommentMark,
 				suggestionMarks(() => ({ focus: (id) => onAnchorFocus?.(id, liveAnchor(id), true), hover: (id) => onSuggestionHover?.(id) })),
 				commentRail,
+				widgetComments({ onSelect: (sel) => onSelect?.(sel), onFocus: focusWidgetComments }),
 				presenceMarks,
 				typedReveal,
 				EditorView.lineWrapping,
@@ -224,6 +267,27 @@
 	$effect(() => {
 		const source = previews;
 		if (view && source) return attachPreviewFeed(view, source);
+	});
+
+	// A scroll can fire while a tab switch replaces this editor's content. The scheduled sample retains the source
+	// tab key and is discarded if that key changed, so an incoming tab's 0 never overwrites the place it left.
+	$effect(() => {
+		const current = view;
+		const instanceId = tabInstanceId;
+		if (!current || !instanceId) return;
+		let frame = 0;
+		const capture = () => {
+			frame = 0;
+			if (tabInstanceId !== instanceId) return;
+			const place = captureDocumentPlace(current.dom);
+			if (place) onDocumentPlace?.(instanceId, place);
+		};
+		const onScroll = () => { if (!frame) frame = requestAnimationFrame(capture); };
+		current.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
+		return () => {
+			current.scrollDOM.removeEventListener('scroll', onScroll);
+			if (frame) cancelAnimationFrame(frame);
+		};
 	});
 
 	$effect(() => {

@@ -15,6 +15,7 @@ from infra.system_package import system_package_dir
 from plans import service
 from plans.boundary import PlanActor, mutate, read_current_plan
 from plans.current import read_current_status
+from tests.skill_sidecar_helpers import POINTER
 from tools.workflow_task_fields import (
     Workflow,
     append_add_notice,
@@ -108,7 +109,7 @@ def test_add_insert_immutable_fields_and_read_detail(db):
 def test_workflow_step_requires_difficulty_and_only_allows_the_three_levels(db):
     plan = service.ensure_plan("thread", "owner", db=db)
     base = {
-        "kind": "task", "title": "Build", "acceptance_criteria": "Build passes",
+        "kind": "task", "title": "Build", "acceptance_criteria": "Build passes", "size": "S",
         "workflow_ref": "sample", "workflow_step": "build",
     }
     with pytest.raises(service.PlanInputError, match="is the wanted result clear"):
@@ -124,7 +125,7 @@ def test_rerating_keeps_original_difficulty_and_current_attempt(db):
         plan.id,
         "add",
         {
-            "kind": "task", "title": "Build", "acceptance_criteria": "Build passes",
+            "kind": "task", "title": "Build", "acceptance_criteria": "Build passes", "size": "S",
             "workflow_ref": "sample", "workflow_step": "build", "difficulty": "standard",
         },
     )["node"]
@@ -205,7 +206,7 @@ def test_split_copies_workflow_fields_but_follow_up_does_not(db):
         "split",
         {
             "node_id": source["id"], "expected_revision": source["revision"],
-            "title": "Build remainder", "acceptance_criteria": "Remainder passes",
+            "title": "Build remainder", "acceptance_criteria": "Remainder passes", "size": "S",
         },
     )["node"]
     follow_up = _mutate(
@@ -214,7 +215,7 @@ def test_split_copies_workflow_fields_but_follow_up_does_not(db):
         "add_follow_up",
         {
             "node_id": source["id"], "expected_revision": source["revision"] + 1,
-            "title": "Later", "acceptance_criteria": "Later passes",
+            "title": "Later", "acceptance_criteria": "Later passes", "size": "S",
         },
     )["follow_up"]
 
@@ -222,7 +223,7 @@ def test_split_copies_workflow_fields_but_follow_up_does_not(db):
         assert split[key] == source[key]
         assert follow_up[key] is None
     assert source["size"] == "L"
-    assert split["size"] is None and follow_up["size"] is None
+    assert split["size"] == "S" and follow_up["size"] == "S"
 
 
 def test_required_step_prompts_are_report_only(db):
@@ -303,7 +304,7 @@ def test_effective_workflows_read_the_corsia_block(tmp_path, monkeypatch):
     current = SkillRow(
         name="current", description="current", scope="workspace", scope_id="workspace",
         path=path, body_path=path, metadata={"corsia": {"workflow": {"steps": steps}}},
-        status="included",
+        status="included", corsia={"workflow": {"steps": steps}},
     )
     monkeypatch.setattr(
         workflow_task_fields, "resolve_effective_skills",
@@ -333,11 +334,11 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
     workspace = tmp_path / "workspace"
     skill = workspace / "skills" / "sample" / "SKILL.md"
     skill.parent.mkdir(parents=True)
-    skill.write_text(
-        "---\nname: sample\ndescription: Sample workflow\ncorsia:\n"
-        "  handler: {kind: instruction}\n  workflow:\n    steps:\n"
-        "      - id: build\n        required: true\n        check: Build passes\n"
-        "      - id: review\n        required: true\n        check: Review passes\n---\n",
+    skill.write_text(f"---\nname: sample\ndescription: Sample workflow\n{POINTER}---\n", encoding="utf-8")
+    (skill.parent / "corsia.yaml").write_text(
+        "handler: {kind: instruction}\nworkflow:\n  steps:\n"
+        "    - {id: build, required: true, check: Build passes}\n"
+        "    - {id: review, required: true, check: Review passes}\n",
         encoding="utf-8",
     )
     subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
@@ -351,9 +352,14 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
         ["git", "rev-parse", "HEAD"], cwd=workspace, check=True,
         capture_output=True, text=True,
     ).stdout.strip()
+    # SKILL.md and corsia.yaml were committed together: the version carries both file versions.
+    expected_workspace_version = f"{expected_workspace_version}+{expected_workspace_version}"
     unversioned = workspace / "skills" / "unversioned" / "SKILL.md"
     unversioned.parent.mkdir()
     unversioned.write_text(skill.read_text(encoding="utf-8").replace("sample", "unversioned"), encoding="utf-8")
+    (unversioned.parent / "corsia.yaml").write_text(
+        (skill.parent / "corsia.yaml").read_text(encoding="utf-8"), encoding="utf-8",
+    )
     monkeypatch.setattr(workflow_task_fields.config, "WORKSPACE", workspace)
     thread_id = mk_session("workflow-tool")
     db = get_db()
@@ -379,7 +385,7 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
         {
             "plan_id": plan.id, "mutation_id": "missing-difficulty", "operation": "add",
             "params": {
-                "kind": "task", "title": "Missing rating", "acceptance_criteria": "Never",
+                "kind": "task", "title": "Missing rating", "acceptance_criteria": "Never", "size": "S",
                 "parent_id": phase["id"], "workflow_ref": "sample", "workflow_step": "build",
             },
         },
@@ -389,7 +395,7 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
         {
             "plan_id": plan.id, "mutation_id": "build", "operation": "add",
             "params": {
-                "kind": "task", "title": "Build", "acceptance_criteria": "Build passes",
+                "kind": "task", "title": "Build", "acceptance_criteria": "Build passes", "size": "S",
                 "parent_id": phase["id"], "workflow_ref": "sample",
                 "workflow_step": "build", "difficulty": "standard",
             },
@@ -404,7 +410,7 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
         {
             "plan_id": plan.id, "mutation_id": "caller-version", "operation": "add",
             "params": {
-                "kind": "task", "title": "Caller version", "acceptance_criteria": "Never",
+                "kind": "task", "title": "Caller version", "acceptance_criteria": "Never", "size": "S",
                 "workflow_ref": "sample", "workflow_version": "invented",
             },
         },
@@ -450,10 +456,10 @@ async def test_only_a_referenced_workflow_version_runs_git_and_a_fault_records_n
     workspace = tmp_path / "workspace"
     skill = workspace / "skills" / "sample" / "SKILL.md"
     skill.parent.mkdir(parents=True)
-    skill.write_text(
-        "---\nname: sample\ndescription: Sample workflow\ncorsia:\n"
-        "  handler: {kind: instruction}\n  workflow:\n    steps:\n"
-        "      - id: build\n        required: true\n        check: Build passes\n---\n",
+    skill.write_text(f"---\nname: sample\ndescription: Sample workflow\n{POINTER}---\n", encoding="utf-8")
+    (skill.parent / "corsia.yaml").write_text(
+        "handler: {kind: instruction}\nworkflow:\n  steps:\n"
+        "    - {id: build, required: true, check: Build passes}\n",
         encoding="utf-8",
     )
     subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
@@ -495,7 +501,7 @@ async def test_only_a_referenced_workflow_version_runs_git_and_a_fault_records_n
 
     referenced = await add("referenced", workflow_ref="sample")
     assert {"log", "status"} <= set(calls)
-    assert len(referenced["node"]["workflow_version"]) == 40
+    assert len(referenced["node"]["workflow_version"]) == 40 + 1 + 40
 
     fail_status = True
     faulted = await add("faulted", workflow_ref="sample")
@@ -521,6 +527,7 @@ async def test_registered_plan_tools_record_system_workflow_version(isolated_db,
         name="task-discipline", description="System workflow", scope="system",
         scope_id="v1", path=skill, body_path=skill,
         metadata={"corsia": {"workflow": {"steps": []}}}, status="included",
+        corsia={"workflow": {"steps": []}},
     )
     monkeypatch.setattr(
         workflow_task_fields, "resolve_effective_skills",

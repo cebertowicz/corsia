@@ -34,6 +34,9 @@ elif [ "$SCRIPT_DIR" != "$_CORSIA_SCRIPT_DIR" ]; then
     fi
     exit 1
 fi
+# A packaged app runs this script from inside its bundle; corsia.d/app_mode.sh
+# holds that one predicate and every resolver it replaces.
+source "$SCRIPT_DIR/corsia.d/app_mode.sh"
 
 is_canonical_checkout() {
     [ "$_CORSIA_CHECKOUT_DIR" = "$_CORSIA_CANONICAL_CHECKOUT" ]
@@ -53,7 +56,7 @@ is_mutating_lifecycle_command() {
     return 1
 }
 
-if [ -n "${CORSIA_DIR:-}" ] \
+if ! is_app_mode && [ -n "${CORSIA_DIR:-}" ] \
     && [ "$(cd -P "$CORSIA_DIR" 2>/dev/null && pwd)" != "$CHECKOUT_DIR" ]; then
     echo "CORSIA_DIR=$CORSIA_DIR is not this script's checkout ($CHECKOUT_DIR). This script only operates its own checkout: unset CORSIA_DIR, or run $CORSIA_DIR/scripts/corsia." >&2
     exit 1
@@ -74,7 +77,7 @@ fi
 if ! declare -p _CORSIA_REQUEST_CALLER_TOKEN > /dev/null 2>&1; then
     readonly _CORSIA_REQUEST_CALLER_TOKEN="${CORSIA_RESTART_CALLER_TOKEN:-}"
 fi
-[ -f "$ENV_FILE" ] && source "$ENV_FILE"
+if ! is_app_mode && [ -f "$ENV_FILE" ]; then source "$ENV_FILE"; fi
 # Checkout identity is immutable across .env loading and same-process re-entry.
 # The env file configures this checkout; it cannot redefine which checkout or
 # machine bootstrap this script represents.
@@ -86,6 +89,9 @@ BACKEND_DIR="$CORSIA_DIR/backend"
 PYTHON="${_CORSIA_REQUEST_PYTHON:-$CORSIA_DIR/.venv/bin/python}"
 BOOTSTRAP_CONFIG="$HOME/.corsia/config.json"
 ENV_FILE="${_CORSIA_REQUEST_ENV_FILE:-$CORSIA_DIR/.env}"
+if is_app_mode; then
+    app_mode_checkout || exit 1
+fi
 if [ -n "$_CORSIA_REQUEST_PYTHON" ]; then
     export CORSIA_PYTHON="$_CORSIA_REQUEST_PYTHON"
 else
@@ -229,6 +235,10 @@ else:
 }
 
 require_checkout_runtime_identity() {
+    # An app is its own bundle; every service verb proves ownership first.
+    if is_app_mode; then
+        return 0
+    fi
     is_canonical_checkout && return 0
     if [ -z "${CORSIA_WORKSPACE:-}" ] || [ -z "${CORSIA_STATE_DIR:-}" ]; then
         echo "Lifecycle mutation from noncanonical checkout $CHECKOUT_DIR requires explicit CORSIA_WORKSPACE and CORSIA_STATE_DIR; refusing the machine bootstrap identity." >&2
@@ -333,6 +343,9 @@ status() {
 source "$SCRIPT_DIR/corsia.d/runtime.sh"
 source "$SCRIPT_DIR/corsia.d/service.sh"
 source "$SCRIPT_DIR/corsia.d/delegate.sh"
+if is_app_mode; then
+    app_mode_install_overrides
+fi
 
 FORCE=false
 # Read by the lifecycle functions in the sourced files above, which shellcheck
@@ -366,6 +379,7 @@ case "${1:-status}" in
             esac
         done
         require_no_extra_lifecycle_args start "${start_args[@]}" || exit 1
+        refuse_if_app_owns_install || exit 1
         if [ "${CORSIA_INSTALL_FLOW:-}" = 1 ]; then
             echo "7/8  Starting…"
         else
@@ -390,6 +404,7 @@ case "${1:-status}" in
         ;;
     restart)
         require_no_extra_lifecycle_args restart "${@:2}" || exit 1
+        refuse_if_app_owns_install || exit 1
         echo "Restarting CORSIA..."
         run_owned_restart_lifecycle restart_current_release
         ;;
@@ -484,9 +499,9 @@ case "${1:-status}" in
         run_sources_cli "$@"
         exit $?
         ;;
-    conductor)
+    agent)
         shift
-        run_conductor_cli "$@"
+        run_corsia_agent_cli "$@"
         exit $?
         ;;
     setup)

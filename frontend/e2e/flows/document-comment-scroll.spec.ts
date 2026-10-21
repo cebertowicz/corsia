@@ -1,8 +1,10 @@
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN, watchSessionSubscriptions } from '../support/corsia';
 
 test('@flow:document-comment-save preserves the visible editor viewport', async ({ page, request }, testInfo) => {
+	test.setTimeout(60_000);
 	if (testInfo.project.name === 'chromium-mobile') await page.setViewportSize({ width: 393, height: 852 });
 	const title = `comment-scroll-${Date.now()}`;
 	const threadId = await createSession(request, title);
@@ -69,18 +71,21 @@ test('@flow:document-comment-save preserves the visible editor viewport', async 
 	// CodeMirror renders only the lines near the visible viewport, so the target
 	// is not in the DOM until the reader scrolls down to it.
 	const targetLine = scroller.locator('.cm-line', { hasText: target });
-	await expect.poll(async () => {
-		if (await targetLine.count()) return true;
-		await viewport.evaluate((element) => element.scrollBy(0, element.clientHeight / 2));
-		return false;
-	}, { message: 'target line never rendered while scrolling the document viewport', timeout: 15_000 }).toBe(true);
-	// Leave the line in the upper part of the viewport rather than where
-	// Playwright's scrolling centers it, so a save-time recenter is visible.
-	await targetLine.scrollIntoViewIfNeeded();
-	await expect(targetLine).toBeVisible();
-	const offset = (await targetLine.boundingBox())!.y - (await viewport.boundingBox())!.y - 120;
-	await viewport.evaluate((element, offset) => element.scrollBy(0, offset), offset);
-	await expect.poll(async () => Math.abs((await targetLine.boundingBox())!.y - (await viewport.boundingBox())!.y - 120) <= 2).toBe(true);
+	const placeTarget = async () => {
+		await expect.poll(async () => {
+			if (await targetLine.count()) return true;
+			await viewport.evaluate((element) => element.scrollBy(0, element.clientHeight / 2));
+			return false;
+		}, { message: 'target line never rendered while scrolling the document viewport', intervals: [50], timeout: 15_000 }).toBe(true);
+		// Leave the line in the upper part of the viewport rather than where
+		// Playwright's scrolling centers it, so a save-time recenter is visible.
+		await targetLine.scrollIntoViewIfNeeded();
+		await expect(targetLine).toBeVisible();
+		const offset = (await targetLine.boundingBox())!.y - (await viewport.boundingBox())!.y - 120;
+		await viewport.evaluate((element, offset) => element.scrollBy(0, offset), offset);
+		await expect.poll(async () => Math.abs((await targetLine.boundingBox())!.y - (await viewport.boundingBox())!.y - 120) <= 2).toBe(true);
+	};
+	await placeTarget();
 	expect(await viewport.evaluate((element) => element.scrollTop), 'the reader viewport must be genuinely scrolled').toBeGreaterThan(0);
 	await targetLine.click();
 	await expect.poll(() => page.evaluate(() => {
@@ -94,9 +99,45 @@ test('@flow:document-comment-save preserves the visible editor viewport', async 
 		viewportBox: await viewport.boundingBox(),
 		contentHeight: await viewport.evaluate((element) => element.scrollHeight),
 		editorTop: (await scroller.boundingBox())?.y ?? null,
-		lineBox: await targetLine.boundingBox(),
-		line: (await targetLine.boundingBox())?.y ?? null,
+		// A jump away from the target leaves its line unrendered; report that rather than hang on it.
+		lineBox: await targetLine.boundingBox({ timeout: 2_000 }).catch(() => null),
+		line: (await targetLine.boundingBox({ timeout: 2_000 }).catch(() => null))?.y ?? null,
 	});
+	const codeMirrorHead = async () => page.locator('.cm-editor').evaluate((editor) => {
+		const content = editor.querySelector('.cm-content') as HTMLElement & { cmTile?: { root?: { view?: { state?: { selection?: { main?: { head?: number } } } } } } } | null;
+		const head = content?.cmTile?.root?.view?.state?.selection?.main?.head;
+		// Fail loudly if CodeMirror reshapes these internals; a null head would make every caret comparison pass blind.
+		if (typeof head !== 'number') throw new Error('CodeMirror selection head is unreadable through cmTile.root.view');
+		return head;
+	});
+	// The reader has two carets: CodeMirror's own selection and the DOM selection. Opening a popover or drawer
+	// moves focus out of the editor and the browser then clears the DOM selection (WebKit does), so the DOM
+	// caret that must come back is the last one the editor itself held.
+	await page.evaluate(() => {
+		const win = window as unknown as { __editorCaret: unknown };
+		document.addEventListener('selectionchange', () => {
+			const selection = document.getSelection();
+			const node = selection?.anchorNode;
+			const element = node instanceof Element ? node : node?.parentElement;
+			if (!element?.closest('.cm-content')) return;
+			win.__editorCaret = { line: element.closest('.cm-line')?.textContent ?? null, offset: selection?.anchorOffset ?? null };
+		});
+	});
+	const domCaret = async () => page.evaluate(() => {
+		const selection = document.getSelection();
+		const node = selection?.anchorNode;
+		const element = node instanceof Element ? node : node?.parentElement;
+		return { line: element?.closest('.cm-line')?.textContent ?? null, offset: selection?.anchorOffset ?? null };
+	});
+	const caret = async () => ({ head: await codeMirrorHead(), dom: await domCaret() });
+	type Caret = Awaited<ReturnType<typeof caret>>;
+	// The caret the reader had in the editor just before something took focus away from it.
+	const caretBeforeFocusLeft = async (): Promise<Caret> => ({
+		head: await codeMirrorHead(),
+		dom: (await page.evaluate(() => (window as unknown as { __editorCaret: Caret['dom'] | null }).__editorCaret)) ?? await domCaret(),
+	});
+	const lifecyclePosition = async () => ({ viewport: await viewport.evaluate((element) => element.scrollTop), head: await codeMirrorHead() });
+	const nextFrame = async () => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 	// Select the line's first word, as a reader commenting on "Viewport" would.
 	await targetLine.dblclick({ position: { x: 12, y: 8 } });
 	const before = await readerPosition();
@@ -134,4 +175,178 @@ test('@flow:document-comment-save preserves the visible editor viewport', async 
 	// The first comment adds a status row above the editor, so the pane's
 	// scrollTop may change; what the reader sees is where the line sits.
 	expect(Math.abs(after.line! - before.line!), `target line moved from y=${before.line} to y=${after.line}`).toBeLessThanOrEqual(1);
+	// Phone comments use the adaptive drawer, not the desktop popover focus path under regression here.
+	if (testInfo.project.name === 'chromium-mobile') return;
+
+	const anchor = targetLine.locator('.cm-comment-anchor');
+	const popover = page.locator('[data-popover]');
+	const clickDocumentText = async () => {
+		const point = await targetLine.evaluate((line) => {
+			const box = line.getBoundingClientRect();
+			for (let x = box.right - 4; x > box.left; x -= 4) {
+				const hit = document.elementFromPoint(x, box.top + box.height / 2);
+				if (hit?.closest('.cm-line') === line && !hit.closest('.cm-comment-anchor')) return { x, y: box.top + box.height / 2 };
+			}
+			throw new Error('no unannotated text is available in the visible commented line');
+		});
+		await page.mouse.click(point.x, point.y);
+	};
+	const clickDifferentDocumentText = async () => {
+		const point = await scroller.evaluate((scrollNode) => {
+			let viewport: HTMLElement | null = scrollNode as HTMLElement;
+			while (viewport) {
+				const { overflowY } = getComputedStyle(viewport);
+				if ((overflowY === 'auto' || overflowY === 'scroll') && viewport.scrollHeight > viewport.clientHeight) break;
+				viewport = viewport.parentElement;
+			}
+			const visible = viewport?.getBoundingClientRect() ?? scrollNode.getBoundingClientRect();
+			for (const line of scrollNode.querySelectorAll<HTMLElement>('.cm-line')) {
+				const box = line.getBoundingClientRect();
+				if (box.top < visible.top || box.bottom > visible.bottom || line.querySelector('.cm-comment-anchor')) continue;
+				for (let x = box.left + 32; x < box.right - 4; x += 8) {
+					const hit = document.elementFromPoint(x, box.top + box.height / 2);
+					if (hit?.closest('.cm-line') === line) return { x, y: box.top + box.height / 2, text: line.textContent };
+				}
+			}
+			throw new Error('no visible unannotated document line is available');
+		});
+		await page.mouse.click(point.x, point.y);
+		return point.text;
+	};
+	const dismisses = [
+		{
+			name: 'unannotated text on the commented line',
+			dismiss: clickDocumentText,
+			assertCaret: async () => expect.poll(() => page.evaluate(() => {
+				const node = document.getSelection()?.anchorNode;
+				const element = node instanceof Element ? node : node?.parentElement;
+				return element?.closest('.cm-line')?.textContent ?? null;
+			})).toContain(target),
+		},
+		{
+			name: 'Escape',
+			dismiss: async () => page.keyboard.press('Escape'),
+			// Escape only closes the popover: the reader's caret stays where it was when the popover opened.
+			assertCaret: async (before: Caret) => expect.poll(caret, { message: 'Escape must keep the CodeMirror head and DOM caret' }).toEqual(before),
+		},
+		{
+			name: 'empty canvas',
+			dismiss: async () => scroller.click({ position: { x: 8, y: (await scroller.boundingBox())!.height - 8 } }),
+			assertCaret: async () => {},
+		},
+	];
+	const dismissResults: Array<{ trigger: string; before: Awaited<ReturnType<typeof readerPosition>>; after: Awaited<ReturnType<typeof readerPosition>> }> = [];
+	for (const trigger of dismisses) {
+		await placeTarget();
+		await targetLine.click();
+		await anchor.click();
+		await expect(popover).toBeVisible();
+		const beforeDismiss = await readerPosition();
+		const caretBeforeDismiss = await caretBeforeFocusLeft();
+		await trigger.dismiss();
+		await expect(popover).toHaveCount(0);
+		await nextFrame();
+		await nextFrame();
+		await trigger.assertCaret(caretBeforeDismiss);
+		const afterDismiss = await readerPosition();
+		dismissResults.push({ trigger: trigger.name, before: beforeDismiss, after: afterDismiss });
+		expect(Math.abs(afterDismiss.viewport - beforeDismiss.viewport), `${trigger.name} changed reader scrollTop from ${beforeDismiss.viewport} to ${afterDismiss.viewport}`).toBeLessThanOrEqual(2);
+	}
+	await testInfo.attach(`comment-dismiss-scroll-${testInfo.project.name}`, { body: JSON.stringify(dismissResults, null, 2), contentType: 'application/json' });
+
+	const resolveButton = () => popover.getByRole('button', { name: 'Resolve' });
+	const resolveThread = async () => {
+		await resolveButton().click();
+		// Resolving removes the inline anchor, so the still-open popover is intentionally hidden.
+		await expect(popover.locator('.ct.resolved')).toHaveCount(1);
+	};
+	const reopenThread = async (surface: import('@playwright/test').Locator) => {
+		await surface.locator('.ct-res-head').click();
+		await surface.getByRole('button', { name: 'Re-open' }).click();
+	};
+	let clickedDocumentLine = '';
+	const lifecycleDismisses = [
+		{ name: 'document line', dismiss: async () => { clickedDocumentLine = await clickDifferentDocumentText(); }, assertCaret: async () => expect.poll(() => page.evaluate(() => {
+			const node = document.getSelection()?.anchorNode;
+			const element = node instanceof Element ? node : node?.parentElement;
+			return element?.closest('.cm-line')?.textContent ?? null;
+		})).toContain(clickedDocumentLine) },
+		{ name: 'empty canvas', dismiss: async () => scroller.click({ position: { x: 8, y: (await scroller.boundingBox())!.height - 8 } }), assertCaret: async () => {} },
+		{
+			name: 'Escape',
+			dismiss: async () => page.keyboard.press('Escape'),
+			assertCaret: async (opened: Caret) => expect.poll(caret, { message: 'Escape must keep the CodeMirror head and DOM caret' }).toEqual(opened),
+		},
+	];
+	const lifecycleResults: Array<{ action: string; trigger: string; before: Awaited<ReturnType<typeof lifecyclePosition>>; afterAction: Awaited<ReturnType<typeof lifecyclePosition>>; frameOne: Awaited<ReturnType<typeof lifecyclePosition>>; frameTwo: Awaited<ReturnType<typeof lifecyclePosition>>; afterDismiss: Awaited<ReturnType<typeof lifecyclePosition>>; dismissFrameOne: Awaited<ReturnType<typeof lifecyclePosition>>; dismissFrameTwo: Awaited<ReturnType<typeof lifecyclePosition>> }> = [];
+	for (const trigger of lifecycleDismisses) {
+		// Reproduce the desktop sequence: leave the document, reopen its comment,
+		// then remove the focused Resolve control before clicking the document.
+		await placeTarget();
+		await targetLine.click();
+		await anchor.click();
+		await expect(popover).toBeVisible();
+		const beforeResolve = await lifecyclePosition();
+		const caretBeforeResolve = await caretBeforeFocusLeft();
+		await resolveThread();
+		const resolveAfterAction = await lifecyclePosition();
+		await nextFrame();
+		const resolveFrameOne = await lifecyclePosition();
+		await nextFrame();
+		const resolveFrameTwo = await lifecyclePosition();
+		await trigger.dismiss();
+		await expect(popover).toHaveCount(0);
+		await nextFrame();
+		await nextFrame();
+		await trigger.assertCaret(caretBeforeResolve);
+		const resolveAfterDismiss = await lifecyclePosition();
+		await nextFrame();
+		const resolveDismissFrameOne = await lifecyclePosition();
+		await nextFrame();
+		const resolveDismissFrameTwo = await lifecyclePosition();
+		lifecycleResults.push({ action: 'Resolve', trigger: trigger.name, before: beforeResolve, afterAction: resolveAfterAction, frameOne: resolveFrameOne, frameTwo: resolveFrameTwo, afterDismiss: resolveAfterDismiss, dismissFrameOne: resolveDismissFrameOne, dismissFrameTwo: resolveDismissFrameTwo });
+		expect(Math.abs(resolveAfterDismiss.viewport - beforeResolve.viewport), `Resolve then ${trigger.name} changed reader scrollTop from ${beforeResolve.viewport} to ${resolveAfterDismiss.viewport}`).toBeLessThanOrEqual(2);
+		expect(resolveDismissFrameOne.head, `Resolve then ${trigger.name} must keep the resulting CodeMirror selection head through one frame`).toBe(resolveAfterDismiss.head);
+		expect(resolveDismissFrameTwo.head, `Resolve then ${trigger.name} must keep the resulting CodeMirror selection head through two frames`).toBe(resolveAfterDismiss.head);
+
+		// Current code reopens a resolved thread from the persistent comment list,
+		// not the now-removed inline anchor. That list never calls restoreEditor.
+		// Measure the re-open from the reader's place, whatever the Resolve above did to it.
+		await placeTarget();
+		const caretBeforeDrawer = await caretBeforeFocusLeft();
+		await page.getByRole('button', { name: /0 open threads/ }).click();
+		const drawer = page.locator('[data-doc-comments-drawer]');
+		await expect(drawer).toBeVisible();
+		await drawer.getByRole('button', { name: 'Filter comments: Open' }).click();
+		await drawer.getByRole('menuitemradio', { name: 'Resolved' }).click();
+		await expect(drawer.locator('.ct-res-head')).toBeVisible();
+		const beforeReopen = await lifecyclePosition();
+		await reopenThread(drawer);
+		const reopenAfterAction = await lifecyclePosition();
+		await nextFrame();
+		const reopenFrameOne = await lifecyclePosition();
+		await nextFrame();
+		const reopenFrameTwo = await lifecyclePosition();
+		await drawer.getByRole('button', { name: 'Close comments' }).click();
+		await expect(drawer).toHaveCount(0);
+		await trigger.dismiss();
+		await nextFrame();
+		await nextFrame();
+		// Escape leaves the drawer rather than returning to the editor. When the reader returns by keyboard focus, CodeMirror
+		// must restore its full saved selection, including the DOM caret rebuilt with the resolved highlight.
+		if (trigger.name === 'Escape') {
+			await page.locator('.cm-content').focus();
+			await expect.poll(caret, { message: 'Returning to the editor after Escape must restore the full caret' }).toEqual(caretBeforeDrawer);
+		} else await trigger.assertCaret(caretBeforeDrawer);
+		const reopenAfterDismiss = await lifecyclePosition();
+		await nextFrame();
+		const reopenDismissFrameOne = await lifecyclePosition();
+		await nextFrame();
+		const reopenDismissFrameTwo = await lifecyclePosition();
+		lifecycleResults.push({ action: 'Re-open', trigger: trigger.name, before: beforeReopen, afterAction: reopenAfterAction, frameOne: reopenFrameOne, frameTwo: reopenFrameTwo, afterDismiss: reopenAfterDismiss, dismissFrameOne: reopenDismissFrameOne, dismissFrameTwo: reopenDismissFrameTwo });
+		expect(Math.abs(reopenAfterDismiss.viewport - beforeReopen.viewport), `Re-open then ${trigger.name} changed reader scrollTop from ${beforeReopen.viewport} to ${reopenAfterDismiss.viewport}`).toBeLessThanOrEqual(2);
+		expect(reopenDismissFrameOne.head, `Re-open then ${trigger.name} must keep the resulting CodeMirror selection head through one frame`).toBe(reopenAfterDismiss.head);
+		expect(reopenDismissFrameTwo.head, `Re-open then ${trigger.name} must keep the resulting CodeMirror selection head through two frames`).toBe(reopenAfterDismiss.head);
+	}
+	await testInfo.attach(`comment-resolve-reopen-scroll-${testInfo.project.name}`, { body: JSON.stringify(lifecycleResults, null, 2), contentType: 'application/json' });
 });

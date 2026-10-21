@@ -54,6 +54,7 @@ NPM = (
 
 STUBS = {
     "uname": 'case "$1" in -s) echo Darwin ;; -m) echo arm64 ;; esac',
+    "sw_vers": 'echo "${STUB_MACOS_VERSION:-15.1}"',
     "git": (
         'case "$*" in *--version*) echo "git version ${STUB_GIT_VERSION:-2.39.5} (Apple Git-154)" ;; '
         '*describe*) echo test-version ;; *rev-parse*) echo test-sha ;; esac'
@@ -114,7 +115,7 @@ def env(tmp_path: Path) -> dict[str, str]:
         'read -r answer || answer=none\n'
         'echo "corsia $* stdin=$answer" >> "$STUB_LOG"\n'
         'case "$*" in *--before-start*) exit "${STUB_BEFORE_START_STATUS:-0}" ;; esac\n'
-        'case "$*" in *"conductor warm"*) exit "${STUB_WARM_STATUS:-0}" ;; esac\n'
+        'case "$*" in *"agent warm"*) exit "${STUB_WARM_STATUS:-0}" ;; esac\n'
     )
     corsia.chmod(0o755)
     browser_source = tmp_path / "agent-browser-source"
@@ -194,14 +195,27 @@ def test_missing_checkout_stops_with_clone_instructions(env, tmp_path):
     assert result.stderr.strip() == CLONE_LINE
 
 
+def test_macos_older_than_15_stops_before_installing_anything(env):
+    result = _run(env, STUB_MACOS_VERSION="14.7.1")
+    assert result.returncode == 1
+    assert "CORSIA needs macOS 15 or later (found macOS 14.7.1)." in result.stderr
+    assert _calls(env) == []
+
+
+@pytest.mark.parametrize("version", ["15", "15.0", "26.1"])
+def test_macos_15_and_later_pass_the_platform_check(env, version):
+    result = _run(env, STUB_MACOS_VERSION=version)
+    assert "needs macOS 15" not in result.stderr
+
+
 FRESH_INSTALL_CALLS = [
     "corsia local setup --before-start --if-no-subscription stdin=terminal-answer",
     "corsia start stdin=none",
     "corsia sources --install-summary stdin=none",
-    "corsia conductor warm stdin=none",
+    "corsia agent warm stdin=none",
     f"open http://localhost:{DEFAULT_BACKEND_PORT}",
 ]
-def test_a_failed_conductor_warm_never_stops_the_install(env):
+def test_a_failed_agent_warm_never_stops_the_install(env):
     result = _run(env, STUB_WARM_STATUS="1")
     assert result.returncode == 0, result.stderr
     assert _calls(env) == FRESH_INSTALL_CALLS

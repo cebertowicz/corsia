@@ -1,11 +1,7 @@
-import { expect, test } from '@playwright/test';
-import {
-	captureConsoleErrors,
-	createSession,
-	TEST_TOKEN,
-	waitForWsConnected,
-	watchSessionSubscriptions,
-} from '../support/corsia';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
+import { captureConsoleErrors, createSession, openAppPastLanding, TEST_TOKEN, waitForWsConnected, watchSessionSubscriptions, sidebarThread } from '../support/corsia';
+import { setFocusMode } from '../support/focusMode';
 import { injectMessage } from '../support/mock';
 
 // In a real browser an un-stripped onerror fires and sets the sentinel; renderMarkdown
@@ -22,18 +18,25 @@ function appErrors(errs: string[]) {
 }
 
 test.describe('@flow:markdown-xss @surface:chat renderMarkdown sanitizes chat messages', () => {
+	// Focus is on by default and hides the assistant message body; these specs cover the rendered reply.
+	test.beforeEach(async ({ request }) => {
+		await setFocusMode(request, false);
+	});
+	test.afterEach(async ({ request }) => {
+		await setFocusMode(request, true);
+	});
+
 	test('an injected assistant message with script/handler payload is neutralized', async ({ page, request }) => {
 		const errors = captureConsoleErrors(page);
 		const subscriptions = watchSessionSubscriptions(page);
 		const title = `e2e md-xss chat ${Date.now()}`;
 		const sessionId = await createSession(request, title);
 
-		await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		await openAppPastLanding(page);
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
-		await page.getByText(title).click({ timeout: 10_000 });
+		await sidebarThread(page, title).click({ timeout: 10_000 });
 		await waitForWsConnected(page);
 		await subscriptions.waitForSubscribed(sessionId);
 
@@ -52,18 +55,25 @@ test.describe('@flow:markdown-xss @surface:chat renderMarkdown sanitizes chat me
 });
 
 test.describe('@flow:markdown-copy @surface:chat code-block copy still works after sanitization', () => {
+	// Focus is on by default and hides the assistant message body; these specs cover the rendered reply.
+	test.beforeEach(async ({ request }) => {
+		await setFocusMode(request, false);
+	});
+	test.afterEach(async ({ request }) => {
+		await setFocusMode(request, true);
+	});
+
 	test('the delegated copy button copies the code (the inline onclick was removed)', async ({ page, request, context }) => {
 		await context.grantPermissions(['clipboard-read', 'clipboard-write']);
 		const subscriptions = watchSessionSubscriptions(page);
 		const title = `e2e md-copy ${Date.now()}`;
 		const sessionId = await createSession(request, title);
 
-		await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		await openAppPastLanding(page);
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
-		await page.getByText(title).click({ timeout: 10_000 });
+		await sidebarThread(page, title).click({ timeout: 10_000 });
 		await waitForWsConnected(page);
 		await subscriptions.waitForSubscribed(sessionId);
 
@@ -110,12 +120,11 @@ test.describe('@flow:markdown-xss @surface:documents renderMarkdown sanitizes th
 		}
 		expect(seed.ok(), `seed failed: ${seed.status()} ${await seed.text()}`).toBeTruthy();
 
-		await page.goto(`/?token=${tok}`);
-		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({ timeout: 20_000 });
+		await openAppPastLanding(page);
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		}
-		await page.getByText(title).click({ timeout: 10_000 });
+		await sidebarThread(page, title).click({ timeout: 10_000 });
 		const browseDocuments = page.getByRole('button', { name: 'Browse documents…' });
 		if (!(await browseDocuments.isVisible())) {
 			await page.getByRole('button', { name: 'Toggle panel' }).click();

@@ -189,7 +189,7 @@ def test_actor_bound_mutation_notifies_once_and_failed_or_replayed_writes_are_si
     request = {
         "kind": "task",
         "title": "Implement",
-        "acceptance_criteria": "Focused tests pass",
+        "acceptance_criteria": "Focused tests pass", "size": "unknown",
     }
 
     deferred = mutate(
@@ -252,7 +252,7 @@ def test_committed_mutation_result_survives_broadcast_failure(db, monkeypatch):
         {
             "kind": "task",
             "title": "Committed",
-            "acceptance_criteria": "Mutation result returns",
+            "acceptance_criteria": "Mutation result returns", "size": "unknown",
         },
         actor=actor,
         provenance="test",
@@ -293,7 +293,7 @@ def test_api_mutation_via_real_db_worker_reaches_registered_socket(
                 "params": {
                     "kind": "task",
                     "title": "Deliver",
-                    "acceptance_criteria": "Socket receives the nudge",
+                    "acceptance_criteria": "Socket receives the nudge", "size": "unknown",
                 },
             },
         )
@@ -331,12 +331,62 @@ async def test_tool_mutation_via_real_db_worker_reaches_registered_socket(
         params={
             "kind": "task",
             "title": "Deliver",
-            "acceptance_criteria": "Socket receives the nudge",
+            "acceptance_criteria": "Socket receives the nudge", "size": "unknown",
         },
     )
     await asyncio.sleep(0)
 
     assert json.loads(result)["node"]["title"] == "Deliver"
+    assert [message["type"] for message in socket.sent] == ["plans_changed"]
+    assert socket.sent[0]["plans"][0]["plan_id"] == plan_id
+
+
+@pytest.mark.asyncio
+async def test_plan_writer_thread_delivers_one_frame_on_the_application_loop(
+    tmp_path, ws_registry,
+):
+    """A committed Plans mutation can notify a pane from its DB worker thread."""
+    from infra import app_loop
+    from plans import notifications
+
+    db_path = tmp_path / "plans-writer-thread.db"
+    plan_id = _seed_delivery_db(db_path)
+    socket = _FakeSocket()
+    ws_registry._ws_user_clients["user-1"] = [socket]
+    errors: list[BaseException] = []
+
+    def write_and_deliver() -> None:
+        connection = _connect(db_path)
+        try:
+            deferred = mutate(
+                plan_id,
+                "add",
+                {
+                    "kind": "task",
+                    "title": "Deliver from a worker",
+                    "acceptance_criteria": "The plan pane receives one frame", "size": "unknown",
+                },
+                actor=PlanActor("parent", "user-1", "project-1"),
+                provenance="test.worker_thread",
+                mutation_id="worker-thread-delivery",
+                db=connection,
+            )
+            notifications.deliver_deferred(deferred)
+        except BaseException as exc:  # pragma: no cover - asserted by the test thread
+            errors.append(exc)
+        finally:
+            connection.close()
+
+    app_loop.capture(asyncio.get_running_loop())
+    worker = threading.Thread(target=write_and_deliver)
+    try:
+        worker.start()
+        await asyncio.to_thread(worker.join)
+        assert errors == []
+        assert await asyncio.to_thread(socket.delivered.wait, 1)
+    finally:
+        app_loop.clear()
+
     assert [message["type"] for message in socket.sent] == ["plans_changed"]
     assert socket.sent[0]["plans"][0]["plan_id"] == plan_id
 

@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from './support/test';
+import { expect } from '@playwright/test';
 
 type Theme = 'dark' | 'light';
 
@@ -24,21 +25,21 @@ async function visitChip(
 	return chip;
 }
 
-test('reserves the estimate marker without changing width at 393px', async ({ page }) => {
+test('keeps the same chip width for measured and estimated sources at 393px', async ({ page }) => {
 	for (const theme of ['dark', 'light'] as const) {
 		const measured = await visitChip(page, theme, 'measured');
 		const measuredWidth = await measured.evaluate((element) => element.getBoundingClientRect().width);
 		await expect(measured.locator('.ctx-pct')).toHaveText('~7%');
-		await expect(measured.locator('.ctx-estimate-marker')).toBeHidden();
 
 		const estimated = await visitChip(page, theme, 'estimated');
 		await expect(estimated.locator('.ctx-pct')).toHaveText('~7%');
-		await expect(estimated.locator('.ctx-estimate-marker')).toBeVisible();
+		// A 393px viewport leaves a 343px action row, inside InputBar.css's `@container action-row
+		// (max-width: 360px)` rule: the percentage yields to the ring, so neither source adds width.
 		const estimatedWidth = await estimated.evaluate((element) => element.getBoundingClientRect().width);
 		expect(estimatedWidth, `${theme} 393px`).toBe(measuredWidth);
 
 		for (const source of ['measured', 'estimated'] as const) {
-			const chip = await visitChip(page, theme, source, 7, true, 412, 'short');
+			const chip = await visitChip(page, theme, source, 7, true, 430, 'short');
 			const geometry = await chip.evaluate((element) => {
 				const chip = element.getBoundingClientRect();
 				const label = element.querySelector('.ctx-pct')?.getBoundingClientRect();
@@ -46,7 +47,11 @@ test('reserves the estimate marker without changing width at 393px', async ({ pa
 					&& label.left >= chip.left && label.right <= chip.right
 					&& label.top >= chip.top && label.bottom <= chip.bottom);
 			});
-			expect(geometry, `${theme}/${source} 412px`).toBe(true);
+			expect(geometry, `${theme}/${source} 430px`).toBe(true);
+			// The percentage is display:none at 393px and 412px and laid out at 430px, so the marker is measurable here.
+			const marker = chip.locator('.ctx-estimate-marker');
+			if (source === 'estimated') await expect(marker).toBeVisible();
+			else await expect(marker).toBeHidden();
 		}
 	}
 });
@@ -86,5 +91,28 @@ test('preserves the #2965 priority result at 320px and 360px', async ({ page }) 
 			});
 		};
 		expect(await result('candidate'), `${width}px priority`).toEqual(await result('base'));
+	}
+});
+
+test('uses the same compact context control before Send at 393px in both themes', async ({ page }) => {
+	for (const theme of ['light', 'dark'] as const) {
+		await page.setViewportSize({ width: 393, height: 240 });
+		await page.goto(`/_design/context-chip-probe?source=estimated&pct=20&theme=${theme}&model=long`, { waitUntil: 'domcontentloaded' });
+		// This matches the narrow usable composer width at phone size, rather than
+		// making the viewport itself narrower than the reviewed 393px breakpoint.
+		await page.locator('.input-floater').evaluate((element) => { element.setAttribute('style', 'width: 360px'); });
+		const result = await page.locator('.action-row').evaluate((row) => {
+			const context = row.querySelector<HTMLElement>('.context-chip')!;
+			const send = row.querySelector<HTMLElement>('.send-btn')!;
+			const label = row.querySelector<HTMLElement>('.ctx-pct')!;
+			const contextBox = context.getBoundingClientRect();
+			const sendBox = send.getBoundingClientRect();
+			return {
+				gap: sendBox.left - contextBox.right,
+				labelVisible: getComputedStyle(label).display !== 'none',
+			};
+		});
+		expect(result.gap, `${theme} context-to-send gap`).toBeGreaterThanOrEqual(8);
+		expect(result.labelVisible, `${theme} compact form`).toBe(false);
 	}
 });

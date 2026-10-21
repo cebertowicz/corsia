@@ -201,6 +201,8 @@ def notify_reviewer_verdict(
             "nit_count": verdict.get("nit_count", 0),
             "finding_count": verdict.get("finding_count", 0),
             "model": verdict.get("model_label") or verdict.get("model"),
+            "reviewer_version": verdict["reviewer_version"],
+            "reviewer_standards": verdict["reviewer_standards"],
         },
         loop,
     )
@@ -217,6 +219,8 @@ def notify_reviewer_verdict(
                 "pr_number": pr_number,
                 "head_sha": head_sha[:8],
                 "verdict": verdict_name,
+                "reviewer_version": verdict["reviewer_version"],
+                "reviewer_standards": verdict["reviewer_standards"],
             },
         )
     return result

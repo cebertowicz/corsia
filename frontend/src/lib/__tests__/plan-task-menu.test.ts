@@ -95,8 +95,8 @@ describe('PlanTree task context menu', () => {
 		expect(document.body.querySelector('[role="menu"]')).toBeNull();
 	});
 
-	it('offers Resume on the user’s own pause and Mark done on their own task', async () => {
-		const row = mountTree({ user_actions: ['mark_done', 'resume_node', 'close_node'] }, vi.fn());
+	it('offers one-tap Mark done and Won’t do on a user step’s plan row', async () => {
+		const row = mountTree({ assignee: 'user', user_actions: ['mark_done', 'resume_node', 'close_node'] }, vi.fn());
 
 		rightClick(row);
 		await settle();

@@ -1,9 +1,6 @@
 ---
 name: task-discipline
 description: Use when accepting, performing, re-scoping, delegating, waiting on, or closing work with more than one step, whenever a thread holds multiple tasks, and before substantive research, analysis, design, recommendations, artifacts, or mutations—procedures for the alignment, groundwork, and verification gates, the plan, and work with no established workflow.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Task discipline
@@ -40,10 +37,7 @@ Before claiming domain expertise is ready, compare representative outcomes with 
 
 ## No established workflow
 
-1. Look for leading practitioners and established standards with demonstrated outcomes in this activity. Record evidence, constraints and credible alternatives; if none can be found, label the proposed process experimental.
-2. Adapt the mechanisms that fit the aligned objective, scale, tools and budget. Explain important departures; prestige alone is not evidence of fit.
-3. Define stages, inputs/outputs, owners, handoff conditions, quality checks and failure/recovery paths. Keep the process no larger than the activity needs.
-4. Test the weakest assumption with the smallest representative pilot inside authority and cost limits. Compare its result with success evidence, revise, then record the reusable workflow and its review trigger.
+Look first for a workflow or skill that fits the work, and use it. If none does and you will do this kind of work again, beyond a step or two, make one with skill `workflow-design`. A one-off is a plan: do it directly.
 
 ## Plan
 
@@ -58,7 +52,7 @@ Read the plan fresh before changing it. Each node has a plain title and acceptan
 
 ## Declared workflows
 
-If you are applying a skill (not just reading or reviewing it) whose frontmatter has `corsia.workflow.steps`, and its **Applying these steps** note covers this run, create one phase for this run, then under it one task per step you will do. Each task's acceptance criteria is the step's `check`; its dependencies are the step's `after`. To skip an optional step, create no task: add `skipped: <step id>, <reason>` to the phase description, and give its dependents the skipped step's `after` instead (repeat if that step is skipped too). A required step whose check is already met still gets a task, completed normally. Before starting, rate each task's difficulty: the step's `difficulty` wins; if it has none, ask yourself: is the wanted result clear, is there a known way to do it here, is it one piece? Three yes is routine, one no standard, more hard. Also set each task's `size` (see **Size**). On add or insert, pass `workflow_ref` (the skill name), `workflow_step` (the step id, or `+<short-name>` for an added step), and `difficulty`; the version is recorded for you. For a step you add, put the reason in that task's description. If a rating proves wrong, use the existing `difficulty_rerated` path.
+If you are applying a skill (not just reading or reviewing it) whose `corsia.yaml` (named by `metadata.corsia-data` in its SKILL.md) has `workflow.steps`, and its **Applying these steps** note covers this run, create one phase for this run, then under it one task per step you will do. Each task's acceptance criteria is the step's `check`; its dependencies are the step's `after`. To skip an optional step, create no task: add `skipped: <step id>, <reason>` to the phase description, and give its dependents the skipped step's `after` instead (repeat if that step is skipped too). A required step whose check is already met still gets a task, completed normally. Before starting, rate each task's difficulty: the step's `difficulty` wins; if it has none, ask yourself: is the wanted result clear, is there a known way to do it here, is it one piece? Three yes is routine, one no standard, more hard. Also set each task's `size` (see **Size**). On add or insert, pass `workflow_ref` (the skill name), `workflow_step` (the step id, or `+<short-name>` for an added step), and `difficulty`; the version is recorded for you. For a step you add, put the reason in that task's description. If a rating proves wrong, use the existing `difficulty_rerated` path.
 
 ## Delegated work
 

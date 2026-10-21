@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from check_system_closure import compute, main  # noqa: E402
 
 SYSTEM = "backend/prompts/system/v1"
-KIT = "docs/contributing/bootstrap/starter-kit"
 
 
 def _write(root: Path, rel: str, text: str) -> None:
@@ -22,10 +21,9 @@ def _write(root: Path, rel: str, text: str) -> None:
 
 
 def _build(root: Path, context: str, system_skills: dict[str, str],
-           kit_skills: dict[str, str] | None = None,
-           project_skills: dict[str, str] | None = None,
            system_references: dict[str, dict[str, str]] | None = None,
-           conductor: str = "Use skill `conductor-bootstrap`.\n") -> None:
+           conductor: str = "Use skill `conductor-bootstrap`.\n",
+           corsia_agent: str = "Use skill `conductor-bootstrap`.\n") -> None:
     files = []
 
     def add(rel: str, kind: str, text: str) -> None:
@@ -40,11 +38,8 @@ def _build(root: Path, context: str, system_skills: dict[str, str],
     for skill, references in (system_references or {}).items():
         for name, text in references.items():
             add(f"skills/{skill}/references/{name}", "skill", text)
-    for name, text in (kit_skills or {}).items():
-        _write(root, f"{KIT}/skills/{name}/SKILL.md", text)
-    for name, text in (project_skills or {}).items():
-        _write(root, f"{KIT}/project-skills/{name}/SKILL.md", text)
     _write(root, "backend/prompts/conductor/core-v2.md", conductor)
+    _write(root, "backend/prompts/conductor/corsia-agent-v2.md", corsia_agent)
     _write(root, f"{SYSTEM}/MANIFEST.json", json.dumps({"files": files}))
 
 
@@ -59,7 +54,6 @@ def test_closed_tier_passes(tmp_path: Path):
         tmp_path,
         "Use skill `decision-brief` before messaging.\n",
         _baseline({"decision-brief": "See skill `decide-or-raise`.\n", "decide-or-raise": "x\n"}),
-        kit_skills={"security-review": "unrelated\n"},
     )
     result = compute(tmp_path)
     assert result.errors == []
@@ -90,8 +84,7 @@ def test_transitive_chain_is_reported(tmp_path: Path):
 
 
 def test_skill_missing_from_manifest_fails(tmp_path: Path):
-    _build(tmp_path, "Use skill `decision-brief`.\n", _baseline(),
-           kit_skills={"decision-brief": "kit copy\n"})
+    _build(tmp_path, "Use skill `decision-brief`.\n", _baseline())
     result = compute(tmp_path)
     assert any("computed but not in manifest" in e for e in result.errors)
     assert main(["--root", str(tmp_path)]) == 1
@@ -102,10 +95,12 @@ def test_unreachable_manifest_skill_fails(tmp_path: Path):
     assert any("not reachable: orphan-skill" in e for e in compute(tmp_path).errors)
 
 
-def test_declared_project_skill_fails(tmp_path: Path):
-    _build(tmp_path, "Follow skill `sdlc-process`.\n", _baseline(),
-           project_skills={"sdlc-process": "contributor only\n"})
-    assert any("project-skills" in e for e in compute(tmp_path).errors)
+def test_asset_only_directory_is_not_a_skill(tmp_path: Path):
+    _build(tmp_path, "nothing named\n", _baseline(),
+           system_references={"retired-skill": {"helper.sh": "echo kept\n"}})
+    result = compute(tmp_path)
+    assert result.errors == []
+    assert "retired-skill" not in result.manifest_skills
 
 
 def test_unshipped_declared_context_skill_fails(tmp_path: Path):
@@ -146,7 +141,6 @@ def test_undeclared_installed_skill_name_is_ignored(tmp_path: Path):
         tmp_path,
         "The `decision-brief` document is ready.\n",
         _baseline(),
-        kit_skills={"decision-brief": "unrelated\n"},
     )
     assert compute(tmp_path).errors == []
 
@@ -165,6 +159,27 @@ def test_missing_conductor_prompt_fails(tmp_path: Path):
     errors = compute(tmp_path).errors
 
     assert any("closure source missing on disk" in error for error in errors)
+
+
+def test_corsia_agent_prompt_declarations_seed_closure(tmp_path: Path):
+    _build(
+        tmp_path, "x\n", _baseline({"agent-only": "x\n"}),
+        corsia_agent="Use skill `agent-only`.\n",
+    )
+
+    result = compute(tmp_path)
+
+    assert "agent-only" in result.computed
+    assert "backend/prompts/conductor/corsia-agent-v2.md:1" in result.chains["agent-only"]
+
+
+def test_missing_corsia_agent_prompt_fails(tmp_path: Path):
+    _build(tmp_path, "x\n", _baseline())
+    (tmp_path / "backend/prompts/conductor/corsia-agent-v2.md").unlink()
+
+    errors = compute(tmp_path).errors
+
+    assert any("corsia-agent-v2.md" in error for error in errors)
 
 
 def test_missing_manifest_fails(tmp_path: Path):

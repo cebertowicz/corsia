@@ -119,11 +119,11 @@
 		width: 7px;
 		height: 7px;
 		border-radius: var(--radius-circle);
-		background: var(--violet);
-		box-shadow: 0 0 0 4px color-mix(in srgb, var(--violet) 13%, transparent);
+		background: var(--accent);
+		box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 13%, transparent);
 	}
 	.plan-progress-chip:focus-visible {
-		outline: 2px solid var(--violet);
+		outline: 2px solid var(--accent);
 		outline-offset: 3px;
 	}
 	.drawer-plan {

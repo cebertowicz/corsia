@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 
 /**
@@ -56,7 +57,7 @@ for (const width of WIDTHS) {
 		if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		await page.getByText(title, { exact: true }).first().click();
 		await expect(page.locator('.cm-content')).toContainText('Tail line here.');
-		await expect(page.getByRole('button', { name: '1 comment', exact: true })).toBeEnabled();
+		await expect(page.getByRole('button', { name: /^1 open thread\b/ })).toBeEnabled();
 		await expect(page.locator('.cm-comment-marker')).toHaveCount(1);
 
 		const measured = await page.evaluate(() => new Promise<{
@@ -64,7 +65,7 @@ for (const width of WIDTHS) {
 			marker: { left: number; right: number; top: number; width: number; height: number };
 			glyph: { left: number; right: number };
 			scrollerLeft: number; gutter: number;
-			headerTop: number; appHeaderBottom: number; titleHit: boolean;
+			headerTop: number; appHeaderBottom: number; toolsHit: boolean;
 		}>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
 			const line = [...document.querySelectorAll<HTMLElement>('.cm-line')].find((candidate) => candidate.textContent?.startsWith('A paragraph'))!;
 			const rect = line.getBoundingClientRect();
@@ -73,8 +74,9 @@ for (const width of WIDTHS) {
 			const marker = document.querySelector<HTMLElement>('.cm-comment-marker')!.getBoundingClientRect();
 			const glyph = document.querySelector('.cm-comment-marker svg')!.getBoundingClientRect();
 			const header = document.querySelector('.document-header')!.getBoundingClientRect();
-			const heading = document.querySelector('.document-title')!.getBoundingClientRect();
-			const hit = document.elementFromPoint(heading.left + heading.width / 2, heading.top + heading.height / 2);
+			const tool = document.querySelector<HTMLElement>('.document-tools button')!;
+			const tools = tool.getBoundingClientRect();
+			const hit = document.elementFromPoint(tools.left + tools.width / 2, tools.top + tools.height / 2);
 			resolve({
 				left: rect.left - scroller.left, right: scroller.right - rect.right,
 				padLeft: Number.parseFloat(content.paddingLeft), padRight: Number.parseFloat(content.paddingRight),
@@ -83,7 +85,7 @@ for (const width of WIDTHS) {
 				scrollerLeft: scroller.left,
 				gutter: Number.parseFloat(getComputedStyle(document.querySelector('.leaf-body.document-canvas')!).paddingLeft),
 				headerTop: header.top, appHeaderBottom: document.querySelector('.shell-header')!.getBoundingClientRect().bottom,
-				titleHit: !!hit?.closest('.document-title'),
+				toolsHit: !!hit?.closest('.document-tools'),
 			});
 		}))));
 
@@ -100,7 +102,7 @@ for (const width of WIDTHS) {
 			expect(measured.marker.right - measured.scrollerLeft, 'the hit box reaches over the text edge').toBeGreaterThan(measured.left);
 			expect(measured.appHeaderBottom, 'the app header is taller than its nominal height by the safe area').toBeGreaterThan(64);
 			expect(measured.headerTop, 'the document header starts below the app header').toBeGreaterThanOrEqual(measured.appHeaderBottom);
-			expect(measured.titleHit, 'the document title is not under the app header').toBe(true);
+			expect(measured.toolsHit, 'the document tools are not under the app header').toBe(true);
 			// A tap on the part of the box that overlaps the text opens the thread rather than placing a caret.
 			await page.mouse.click(measured.marker.right - 4, measured.marker.top + 22);
 			await expect(page.getByText('A comment', { exact: true }).first()).toBeVisible();

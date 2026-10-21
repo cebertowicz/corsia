@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.lesson_files import _with_lesson, render_trial, with_review_ref
+from core.lesson_files import _with_lesson, render_capture, render_trial, with_review_ref
 from core.lesson_report_inventory import build_inventory, source_record
 from core.lesson_trials import Trial
 
@@ -91,6 +91,20 @@ def test_an_administrative_variant_does_not_become_an_arbitrary_offer_cost_or_pa
     assert row["current_source"] is None
     assert row["due"] is None
     assert row["extension_history_complete"] is False
+
+
+def test_capture_source_surfaces_originating_subjects_in_its_inventory_row():
+    raw = render_capture(
+        capture_id="capture", capture_hash="c" * 64, owner="owner", reason="missing-derivation",
+        name=None, description=None, text="Check before deciding.",
+        trial=Trial("hypothesis", "2026-11-01"), source_refs=[],
+        originating_subjects=("message:first", "message:second"),
+    )
+
+    record = source_record(raw, "/authorized/context/captures/capture.md")
+    assert record and record["originating_subjects"] == ["message:first", "message:second"]
+    [row] = inventory(sources=[record])
+    assert row["originating_subjects"] == ["message:first", "message:second"]
 
 
 def test_capture_review_is_separate_and_a_body_read_is_not_activation():

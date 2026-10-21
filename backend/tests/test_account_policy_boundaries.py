@@ -53,6 +53,13 @@ class _Untouched:
         raise AssertionError(f"reached .{name} after the catalog row was removed")
 
 
+class _ThreadOnly(_Untouched):
+    """A batch whose only readable field is the thread it was claimed for."""
+
+    def __init__(self, thread_id: str):
+        self.thread_id = thread_id
+
+
 @pytest.fixture
 def removed(accounts):
     """Bind each vendor thread, freeze a Turn on its account, then delete the model rows."""
@@ -144,7 +151,7 @@ def test_order_and_default_survive_persistence_and_existing_binding(accounts):
     saved = set_legacy_policy("destination-project", "codex", allowlist=ordered,
                        default_account_id=second["id"], db=db)
     assert saved["order"] == [second["id"], third["id"], legacy["id"]]
-    assert effective_policy("destination-project", "codex", db=db) == saved
+    assert effective_policy("destination-project", "codex", db=db) == {key: value for key, value in saved.items() if key != "units"}
     assert select_account("destination", "codex", db=db) == second["id"]
     set_legacy_policy("destination-project", "codex", allowlist=ordered,
                default_account_id=third["id"], db=db)
@@ -241,13 +248,13 @@ def test_project_policy_returns_to_workspace_after_project_override_is_removed(a
     set_use_workspace("destination-project", use_workspace=False, expected_revision=0, db=db)
     project = set_policy("destination-project", "codex", rollover=False, order=[second["id"]],
                          disabled=[legacy["id"]], expected_revision=workspace["revision"], db=db)
-    assert effective_policy("destination-project", "codex", db=db) == project
+    assert effective_policy("destination-project", "codex", db=db) == {key: value for key, value in project.items() if key != "units"}
 
     set_use_workspace("destination-project", use_workspace=True, expected_revision=1, db=db)
 
     assert db.execute("SELECT COUNT(*) FROM project_policy_overrides WHERE project_id='destination-project'").fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM provider_policies WHERE project_id='destination-project'").fetchone()[0] == 0
-    assert effective_policy("destination-project", "codex", db=db) == workspace
+    assert effective_policy("destination-project", "codex", db=db) == {key: value for key, value in workspace.items() if key != "units"}
 
 
 def test_project_override_owns_every_provider_policy(accounts):
@@ -632,8 +639,10 @@ async def test_fresh_launch_refuses_as_our_own_missing_catalog_row(removed, prov
 
     db, thread, model = removed.db, THREADS[provider], MODELS[provider]
     before = _bindings(db)
-    # Send admission and the drain driver share one resolver; neither reaches the batch.
-    for launch in (lambda: send_target.resolve_target(model), lambda: resolve_or_hold(model, _Untouched())):
+    # Send admission and the drain driver share one resolver; neither reaches the
+    # batch beyond the thread identity its project policy is read from.
+    batch = _ThreadOnly(thread)
+    for launch in (lambda: send_target.resolve_target(model), lambda: resolve_or_hold(model, batch)):
         with pytest.raises(send_target.TargetUnavailable) as refused:
             await launch()
         assert refused.value.side is DeliveryFailureSide.OURS
@@ -700,7 +709,7 @@ def test_checkpoint_fork_refuses_without_a_resolved_target(removed, provider):
     # The idle fold is excluded by name and builds no target.
     reason = idle_checkpoint_exclusion_reason(db, thread, model)
     assert reason is not None and reason.name == "UNRESOLVABLE"
-    assert idle_checkpoint._resolved_target(db, model) is None
+    assert idle_checkpoint._resolved_target(db, model, thread).reason.name == "TARGET_UNAVAILABLE"
 
 
 @pytest.mark.asyncio
@@ -856,3 +865,54 @@ def test_model_less_thread_binds_no_account_and_reads_no_catalog(model):
     with pytest.raises(AccountAdmissionError) as error:
         bind_model_account("destination", model, account_id="acct", db=db)
     assert error.value.reason == "account_requires_vendor_model"
+
+
+def test_detached_reviewer_session_writes_on_its_own_account_after_the_thread_moved(accounts):
+    """A lease review runs on the project-policy account while the requester's thread has moved.
+
+    The reviewer is a non-thread consumer: its session carries the requester's
+    thread id only for attribution. Re-checking the thread's *chosen* account
+    at the paid write gate refuses every application from a moved thread, so a
+    session already admitted through the operation owner must keep its account.
+    """
+    from connections.account_operation import admit_operation, bind_operation_session
+    from connections.account_policy import select_account
+    from reviewer.reviewer_account import ReviewerOperation
+    from subagents.vendor_write_admission import require_session_write
+
+    db, reviewer, moved, _third = accounts
+    select_account("destination", "codex", account_id=moved["id"], db=db)
+    request = ReviewerOperation(target=None, vendor_account_id=reviewer["id"], thread_id="destination")
+    admitted = admit_operation("codex", "codex/test", request)
+    session = bind_operation_session(admitted, SimpleNamespace(corsia_thread_id="destination"),
+                                     kind="detached", model="codex/test")
+    assert require_session_write(session, "codex") == reviewer["id"]
+    assert session.vendor_account_id == reviewer["id"]
+
+
+def test_a_thread_session_without_an_operation_binding_still_refuses_a_moved_account(accounts):
+    """The chosen-account gate keeps guarding a real thread continuation."""
+    from connections.account_policy import AccountAdmissionError, select_account
+    from subagents.codex_app_server import CodexAppServerSession
+    from subagents.vendor_write_admission import prepare_session_launch, require_session_write
+
+    db, frozen, moved, _third = accounts
+    select_account("destination", "codex", account_id=frozen["id"], db=db)
+    session = CodexAppServerSession(binary="/bin/test", task=None, corsia_thread_id="destination")
+    prepare_session_launch(session, "codex")
+    assert session.vendor_account_id == frozen["id"]
+    db.execute("UPDATE thread_vendor_accounts SET account_id=? WHERE thread_id='destination' AND provider='codex'",
+               (moved["id"],))
+    db.commit()
+    with pytest.raises(AccountAdmissionError) as refused:
+        require_session_write(session, "codex")
+    assert refused.value.reason == "account_session_mismatch"
+    assert session.vendor_account_id == frozen["id"]
+
+
+def test_operation_binding_refuses_a_kind_the_runtime_does_not_isolate():
+    """One owner names operation kinds, so isolation and the write-gate exemption cannot drift."""
+    from connections.account_operation import bind_operation_session
+
+    with pytest.raises(ValueError):
+        bind_operation_session(SimpleNamespace(), SimpleNamespace(), kind="background")

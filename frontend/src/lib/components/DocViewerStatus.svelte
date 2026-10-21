@@ -1,14 +1,15 @@
 <script lang="ts">
-	import { tick } from 'svelte';
 	import DocFeedbackStatus from './DocFeedbackStatus.svelte';
 	import DocLiveStatus from './DocLiveStatus.svelte';
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import type { DocOpenRefusal, LiveUnavailable } from '$lib/docOpenRefusal';
 	import DocReviewControls from './DocReviewControls.svelte';
+	import CommentsPill from './comments/CommentsPill.svelte';
 	import { Button, StatePill } from '$lib/components/ui';
 	import { formatFreshness, type DocumentFreshness, shouldOfferVerification } from '$lib/docFreshness';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
+	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
 
 	let {
 		title = 'Document',
@@ -16,6 +17,7 @@
 		reviewBar,
 		commentsOpen = false,
 		commentsLoading = false,
+		saveStatus = 'idle',
 		ready,
 		stale,
 		readonly,
@@ -26,10 +28,6 @@
 		viewingThreadId = null,
 		reviewTargetKey = null,
 		onReload,
-		onReloadPlacements,
-		placementReloading = false,
-		placementReloadError = false,
-		liveConnection = null,
 		onOpenComments,
 		freshness,
 		onFeedbackChanged,
@@ -47,6 +45,7 @@
 		reviewBar?: import('svelte').Snippet;
 		commentsOpen?: boolean;
 		commentsLoading?: boolean;
+		saveStatus?: 'idle' | 'saving' | 'saved';
 		ready: boolean;
 		stale: boolean;
 		readonly: boolean;
@@ -57,10 +56,6 @@
 		viewingThreadId?: string | null;
 		reviewTargetKey?: string | null;
 		onReload?: () => void;
-		onReloadPlacements?: () => boolean;
-		placementReloading?: boolean;
-		placementReloadError?: boolean;
-		liveConnection?: LiveDocumentSession['connection'] | null;
 		onOpenComments: (opener: HTMLElement) => void;
 		freshness: DocumentFreshness | null;
 		onFeedbackChanged?: () => void;
@@ -78,42 +73,19 @@
 	let verifying = $state(false);
 	let verificationError = $state('');
 	let verificationNotice = $state('');
-	let placementAnnouncement = $state('');
-	let placementReloadRequested = $state(false);
-	let placementReloadSeenBusy = $state(false);
-	let commentStatus = $state<HTMLButtonElement>();
-	const uid = $props.id();
-	const unplacedId = `unplaced-${uid}`;
+	// The unsent comments, for the pill's dot and accessible summary; the batch itself is the one source.
+	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
 	// A live region only announces a change, so the stale state needs text that appears when it starts.
 	const staleAnnouncement = $derived(stale && ready ? 'File changed since you opened it. Reload to see the latest.' : '');
 	const freshnessPresentation = $derived(freshness ? formatFreshness(freshness) : null);
-	const placementReloadVisible = $derived(Boolean(liveSession && orphanedCount && onReloadPlacements));
-	const placementReloadUnavailable = $derived(liveConnection === 'disconnected' || liveConnection === 'reconnecting');
-	const liveConnectionDescriptionId = $derived(liveSession ? `live-connection-${liveSession.artifactId}` : undefined);
+	// The live-status row renders the stable connection description for unavailable actions.
+	const connectionDescriptionId = $derived(liveConnectionDescriptionId(liveSession?.artifactId));
 	$effect(() => {
 		artifactId;
 		detailsOpen = false;
 		verificationError = '';
 		verificationNotice = '';
-		placementAnnouncement = '';
-		placementReloadRequested = false;
-		placementReloadSeenBusy = false;
 	});
-	$effect(() => {
-		if (!placementReloadRequested) return;
-		if (placementReloading) { placementReloadSeenBusy = true; return; }
-		if (!placementReloadSeenBusy) return;
-		placementReloadRequested = false;
-		placementReloadSeenBusy = false;
-		placementAnnouncement = placementReloadError ? "Couldn't reload comment placements" : orphanedCount ? `${placedPhrase(orphanedCount)}` : 'Comments placed';
-		if (!orphanedCount) void tick().then(() => commentStatus?.focus());
-	});
-	const placedPhrase = (count: number) => `${count} comment${count === 1 ? '' : 's'} still couldn't be placed`;
-	const unplacedPhrase = $derived(`${orphanedCount} comment${orphanedCount === 1 ? '' : 's'} couldn't be placed`);
-	function reloadPlacements(): void {
-		if (!placementReloadVisible || placementReloadUnavailable || placementReloading) return;
-		placementReloadRequested = onReloadPlacements?.() ?? false;
-	}
 
 	async function markVerified(): Promise<void> {
 		if (!onMarkVerified || verifying) return;
@@ -158,6 +130,13 @@
 		</button>
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
+		<span class="document-tools">
+			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
+			{#if saveStatus !== 'idle'}<span class="save-ghost" class:saving={saveStatus === 'saving'}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
+			<CommentsPill class="doc-tool comment-status" count={commentCount} {unsent} unplaced={orphanedCount}
+				loading={commentsLoading} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
+			{#if artifactId}<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />{/if}
+		</span>
 	</div>
 {#if freshness && freshnessPresentation}
 	<div class="document-metadata" class:expanded={detailsOpen}>
@@ -179,37 +158,14 @@
 {/if}
 
 <DocLiveStatus session={liveSession} {openRefusal} {liveUnavailable} {tabText} {onReopen} {onRead}
-	connectionStatusId={liveConnectionDescriptionId} />
-<span class:sr-only={!verificationError && !placementAnnouncement} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || placementAnnouncement || staleAnnouncement}</span>
+	connectionStatusId={connectionDescriptionId} />
+<span class:sr-only={!verificationError} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || staleAnnouncement}</span>
 {#if readonly && ready}
 	<div class="readonly-note">Read-only — this file is owned by the system bootloader.</div>
 {/if}
 {#if commentCount || orphanedCount || artifactId || (stale && ready)}
-	<div class="document-status-row">
-		<span class="feedback-controls"><DocFeedbackStatus
-			bind:this={feedbackStatus}
-			{artifactId}
-			{targetInstanceId}
-			{onFeedbackChanged}
-		/></span>
-		{#if stale && ready}
-			<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>
-		{/if}
-		<button type="button" class="doc-tool comment-status" bind:this={commentStatus} aria-expanded={commentsOpen} disabled={!ready || commentsLoading}
-			aria-label={commentsLoading ? 'Loading comments' : `${commentCount} comment${commentCount === 1 ? '' : 's'}`}
-			aria-describedby={orphanedCount ? unplacedId : undefined}
-			title={commentsLoading ? 'Comments are loading' : orphanedCount ? unplacedPhrase : undefined} onclick={(event) => onOpenComments(event.currentTarget)}>
-			<span class="icon-anchor"><svg class="tool-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>{#if orphanedCount}<span class="unplaced-dot" aria-hidden="true"></span>{/if}</span>
-			<span class="count">{commentsLoading ? '…' : commentCount}</span>
-			{#if orphanedCount}<span id={unplacedId} class="sr-only">{unplacedPhrase}</span>{/if}
-		</button>
-		{#if orphanedCount && placementReloadVisible}
-			<button type="button" class="doc-tool orphan-reload" aria-label="Reload comment placements"
-				aria-disabled={placementReloadUnavailable || placementReloading ? 'true' : undefined}
-				aria-describedby={placementReloadUnavailable ? liveConnectionDescriptionId : undefined}
-				onclick={reloadPlacements}>Place again</button>
-		{/if}
-		{#if artifactId}<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />{/if}
+	<div class="document-status-row document-notices">
+		<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} withSend={false} /></span>
 	</div>
 {/if}
 </header>
@@ -221,10 +177,6 @@
 	.document-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 	.identity-age { display: none; }
 	.feedback-controls { display: contents; }
-	/* The grace text gives way first (ellipsis); Send now keeps its whole label and the row keeps one line. */
-	.feedback-controls :global(> .sending-now.grace) { flex: 1 1 8rem; min-width: min-content; }
-	.feedback-controls :global(> .sending-now > .btn) { flex: none; }
-	.feedback-controls :global(> .sending-now > .sending-grace) { flex: 1 1 0; min-width: 0; contain: inline-size; }
 	.identity-details:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
 	.document-metadata, .document-status-row { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 	/* One toolbar: every control is the same quiet ghost button in the app's UI type. */
@@ -236,9 +188,6 @@
 	.document-status-row :global(.doc-tool.warn) { background: var(--amber-bg); color: var(--amber-text); }
 	.document-status-row :global(.doc-tool.warn:hover:not(:disabled)) { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber-text); }
 	.document-status-row :global(.doc-tool[aria-disabled='true']) { opacity: 0.65; cursor: not-allowed; }
-	.tool-icon { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
-	.icon-anchor { position: relative; display: inline-flex; }
-	.unplaced-dot { position: absolute; top: -3px; right: -4px; width: 7px; height: 7px; border-radius: var(--radius-circle); background: var(--amber); box-shadow: 0 0 0 2px var(--bg-primary); }
 	.document-metadata { color: var(--text-secondary); font-size: var(--text-footnote); }
 	.metadata-owner { flex: 1 1 10rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.verification-action { margin-left: -10px; }
@@ -254,10 +203,44 @@
 		.document-metadata:not(.expanded) { display: none; }
 		.document-status-row { flex-wrap: wrap; }
 		.document-status-row :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
-		.feedback-controls :global(> .sending-now > .btn), .feedback-controls :global(> .sending-now > .sent) { min-height: 44px; }
-		/* Send alone fills the rest of the row. */
-		.feedback-controls :global(> .sending-now:not(.grace)) { flex: 1; min-width: 0; }
-		.feedback-controls :global(> .sending-now:not(.grace) > .btn) { display: block; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 		.feedback-controls :global(.undelivered:not(.idle)) { flex: 1 1 100%; }
+	}
+
+	/* Slice-one review header: the title is already named by the tab or app bar, so only document tools remain in the slim row. */
+	/* Where the plan pane overlays the canvas (PaneShell), the header's content ends before it instead of under it: the tools, both ask lines and the notices.
+	   The header is a container, so the ask's line 1 can rearrange when that leaves it too narrow (ReviewBar). */
+	.document-header { gap: var(--space-1); border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-1); padding-inline-end: var(--pane-overlay-inset, 0px); container: doc-header / inline-size; }
+	.document-identity { justify-content: flex-end; }
+	.identity-details { display: none; }
+	.document-tools { position: relative; z-index: 1; flex: none; display: inline-flex; align-items: center; gap: var(--space-1); }
+	.document-notices:not(:has(.undelivered:not(.idle))) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+	.document-header :global(.doc-tool) { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
+	.document-header :global(.doc-tool:hover:not(:disabled)) { background: var(--bg-tertiary); color: var(--text-primary); }
+	.document-header :global(.doc-tool:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+	.document-header :global(.doc-tool:disabled) { opacity: 0.5; cursor: not-allowed; }
+	.document-header :global(.doc-tool.warn) { background: var(--amber-bg); color: var(--amber-text); }
+	.document-header :global(.doc-tool.warn:hover:not(:disabled)) { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber-text); }
+	.document-header :global(.doc-tool[aria-disabled='true']) { opacity: 0.65; cursor: not-allowed; }
+	@container doc-canvas (max-width: 600px) {
+		.identity-details:has(.identity-age) { display: flex; }
+		.document-title { display: none; }
+		.document-header :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
+		/* The tool row cannot shrink, and with Reload, the count and the review controls the save pill pushes it past the left edge: the save state is transient and Reload is not, so the pill yields. */
+		.stale-control ~ .save-ghost { display: none; }
+	}
+	/* When an ask exists, its first line and the tool cluster share one row; the second ask line spans the canvas. */
+	.document-header:has(:global(.rb-slot)) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: var(--space-1); }
+	.document-header:has(:global(.rb-slot)) > :global(*) { grid-column: 1 / -1; }
+	.document-header:has(:global(.rb-slot)) > :global(.rb-slot) { grid-column: 1 / -1; grid-row: 1 / 3; }
+	.document-header:has(:global(.rb-slot)) > .document-identity { display: contents; }
+	.document-header:has(:global(.rb-slot)) .identity-details { grid-column: 1 / -1; grid-row: 3; }
+	.document-header:has(:global(.rb-slot)) :global(.presence-row) { grid-column: 2; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
+	.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 3; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
+	.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: var(--space-7); }
+	@media (any-pointer: coarse) {
+		@container doc-canvas (max-width: 600px) {
+			.document-header:has(:global(.rb-slot)) { align-items: center; }
+			.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: 44px; }
+		}
 	}
 </style>

@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 from contextlib import closing
 import json
 import sqlite3
@@ -42,7 +48,7 @@ def _legacy_v39_db(path):
     """A v39 install: two accounts, a member-owned project, an empty one."""
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+        db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         _seed_user(db, "first", "2026-01-01T00:00:00")
         _seed_user(db, "member", "2026-02-01T00:00:00")
         _seed_project(db, "project-owned", "Owned")
@@ -74,7 +80,7 @@ def test_startup_migration_heals_scopes_with_membership_safe_owner(tmp_path):
 
         workspace = json.loads(
             db.execute(
-                "SELECT value FROM settings WHERE key='workspace_conductor_session_id'"
+                "SELECT value FROM settings WHERE key='corsia_agent_thread_id'"
             ).fetchone()["value"]
         )["session_id"]
         assert dict(
@@ -82,7 +88,7 @@ def test_startup_migration_heals_scopes_with_membership_safe_owner(tmp_path):
                 "SELECT user_id, title, project_id FROM threads WHERE id=?",
                 (workspace,),
             ).fetchone()
-        ) == dict(user_id="first", title="Conductor", project_id=None)
+        ) == dict(user_id="first", title="CORSIA", project_id=None)
 
         # The project conductor goes to the earliest ACCOUNT-BACKED thread
         # owner ('member'), not the ghost owner and not the first account:
@@ -116,7 +122,7 @@ def test_startup_migration_heals_scopes_with_membership_safe_owner(tmp_path):
 
 def test_startup_migration_preserves_deliberate_clear(tmp_path):
     """PUT /api/conductor with thread_id null must survive later startups."""
-    from infra.conductor import get_conductor, set_conductor
+    from infra.conductor import get_scope_coordinator, set_scope_coordinator
 
     path = _legacy_v39_db(tmp_path / "legacy-conductor-clear-v39.db")
     with closing(sqlite3.connect(path)) as db:
@@ -124,14 +130,14 @@ def test_startup_migration_preserves_deliberate_clear(tmp_path):
         migrate_to_current(db, SCHEMA_VERSION)
         before = db.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
 
-        assert set_conductor("workspace", None, db=db) is True
-        assert set_conductor("project-owned", None, db=db) is True
+        assert set_corsia_agent(None, db=db) is True
+        assert set_project_conductor("project-owned", None, db=db) is True
 
         # The next startup (and every one after) runs no reconciler: the
         # cleared designations stay cleared and no replacement thread appears.
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
-        assert get_conductor("workspace", db=db) is None
-        assert get_conductor("project-owned", db=db) is None
+        assert get_corsia_agent(db=db) is None
+        assert get_project_conductor("project-owned", db=db) is None
         assert db.execute("SELECT COUNT(*) FROM threads").fetchone()[0] == before
 
 
@@ -139,7 +145,7 @@ def test_startup_migration_without_accounts_is_a_no_op(tmp_path):
     path = tmp_path / "legacy-conductor-empty-v39.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+        db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         rewind_below_v42(db)
         rewind_to_v88_policy(db)
 

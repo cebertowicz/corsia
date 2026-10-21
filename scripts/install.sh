@@ -69,6 +69,11 @@ open_prompt_input() {
 check_platform() {
     [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] \
         || stop "CORSIA installs on macOS with Apple Silicon only (found $(uname -s) $(uname -m))."
+    # The corrections classifier always runs on the local model, which needs macOS 15.
+    local macos
+    macos="$(sw_vers -productVersion)"
+    version_at_least "$macos" 15 0 0 \
+        || stop "CORSIA needs macOS 15 or later (found macOS $macos). Update macOS in System Settings › General › Software Update, then run this again."
 }
 
 service_which() { (PATH="$SERVICE_PATH" command -v "$1") || return 1; }
@@ -288,10 +293,10 @@ summarize_sources() {
     "$CORSIA_HOME/scripts/corsia" sources --install-summary || :
 }
 
-warm_conductor() {
-    # A head start for the conductor's first reply; prints nothing unless the
+warm_corsia_agent() {
+    # A head start for the CORSIA agent's first reply; prints nothing unless the
     # local starter model is ready, and never fails the install.
-    CORSIA_INSTALL_FLOW=1 "$CORSIA_HOME/scripts/corsia" conductor warm || :
+    CORSIA_INSTALL_FLOW=1 "$CORSIA_HOME/scripts/corsia" agent warm || :
 }
 
 open_browser() {
@@ -356,7 +361,7 @@ main() {
     ensure_model_source
     start_corsia
     summarize_sources
-    warm_conductor
+    warm_corsia_agent
     open_browser
 }
 

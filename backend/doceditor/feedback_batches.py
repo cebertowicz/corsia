@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from doceditor import comment_notifications, feedback_comments, feedback_delivery, feedback_edits, review_requests
+from doceditor import comment_notifications, feedback_comments, feedback_delivery, feedback_edits
+from doceditor.review_lifecycle import settle_for_batch
 from doceditor.feedback_state import (
     USER_AUTHOR_ID,
     annotate_pane,
@@ -17,6 +19,8 @@ from doceditor.feedback_state import (
     user_feedback_for_document,
 )
 from infra.database import write_transaction
+
+log = logging.getLogger(__name__)
 
 AGENT_QUIET = 120
 USER_LEAVE_GRACE = 120
@@ -273,7 +277,7 @@ def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None
             (delivered.node_id, delivered.outcome, now, batch_id),
         )
         db.execute("DELETE FROM doc_feedback_edit_items WHERE batch_id=?", (batch_id,))
-        review_woken = review_requests.settle_for_batch(db, batch)
+        review_woken = settle_for_batch(db, batch)
     return True, delivered.woken_threads + review_woken
 
 
@@ -326,7 +330,7 @@ def close_for_turn_end(db, thread_id: str) -> list[str]:
 
 
 def close_due(now: str, *, db=None) -> list[str]:
-    """Deliver every batch whose durable row timer is due."""
+    """Deliver every due batch; one that raises rolls back alone, is logged, and retries next pass."""
     deliveries: list[tuple[str, str]] = []
     with write_transaction(db, scope="close_due_doc_feedback") as connection:
         rows = connection.execute(
@@ -337,7 +341,11 @@ def close_due(now: str, *, db=None) -> list[str]:
         woken: list[str] = []
         for row in rows:
             reason = row["closed_reason"] or ("quiet" if row["author_kind"] == "agent" else "idle")
-            closed, selected = close_batch(connection, row["id"], reason)
+            try:
+                closed, selected = close_batch(connection, row["id"], reason)
+            except Exception:
+                log.exception("document feedback batch %s failed to close", row["id"])
+                continue
             woken.extend(selected)
             comment_notifications.collect_due_user_delivery(deliveries, connection, row, closed)
     comment_notifications.publish_due_user_feedback(deliveries)
@@ -384,6 +392,3 @@ def retry_for_document(db, *, author_kind: str, author_id: str, artifact_id: str
         _retried, selected = retry_batch(db, row["id"])
         woken.extend(selected)
     return woken
-
-
-# Read-only feedback projections are imported above to preserve existing callers.

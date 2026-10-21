@@ -6,6 +6,7 @@ import sqlite3
 import uuid
 from collections.abc import Mapping
 
+import plans.ask_endings as ask_endings
 import plans.errors as errors
 import plans.service as service
 from plans.blocked_wait import WAIT_OWNERS
@@ -62,6 +63,7 @@ def place_hold(
     provenance: str,
     db,
     raised_in: Mapping[str, str] | None = None,
+    _validated_node=None,
 ):
     """Append one cause and release its selected attempt; the caller reconciles.
 
@@ -74,7 +76,7 @@ def place_hold(
         The task row as it was before the cause was placed.
     """
 
-    node = _validate_node(db, node_id, expected_revision)
+    node = _validated_node or _validate_node(db, node_id, expected_revision)
     if kind not in HOLD_KINDS:
         raise service.PlanInputError("invalid plan hold kind")
     if owner_kind not in OWNER_KINDS:
@@ -154,9 +156,16 @@ def clear(
     """
 
     node = _validate_node(db, node_id, expected_revision)
+    from plans.user_ask import open_asks_sql
+
+    is_open_ask = expected_kind == "blocked" and db.execute(
+        open_asks_sql("1", by="node") + " AND h.id=?", (node_id, hold_id),
+    ).fetchone() is not None
     clear_write(
         node_id, hold_id, expected_kind=expected_kind, actor_id=actor_id,
-        provenance=provenance, db=db,
+        provenance=provenance,
+        detail=ask_endings.detail(why="resolved", actor_id=actor_id) if is_open_ask else None,
+        db=db,
     )
     from plans import admission
 
@@ -273,12 +282,25 @@ def block_hold(
 
     Only the user's own blocker is a hold: one anyone else clears is a wait
     with a deadline (``plans.blocked_wait``), so it never sits unlooked-at.
+    A user hold on an artifact is a review request, so ``one_open_ask.already_open``
+    keeps it to one open request per document. The caller's revision is checked
+    once, before the rule may replace this task's own request.
     """
     if owner_kind in WAIT_OWNERS:
         raise service.PlanInputError(
             "a blocker anyone but the user clears is a wait, not a hold; "
             "block_node arms it with a deadline"
         )
+    node = None
+    if owner_kind == "user" and owner_id is not None:
+        from plans.one_open_ask import already_open
+
+        node = _validate_node(db, node_id, expected_revision)
+        if already_open(
+            db, node_id, owner_id, reason_key=reason_key, reason=reason,
+            actor_id=actor_id, provenance=provenance,
+        ):
+            return node
     return place_hold(
         node_id,
         kind="blocked",
@@ -291,6 +313,7 @@ def block_hold(
         provenance=provenance,
         db=db,
         raised_in=raised_in,
+        _validated_node=node,
     )
 
 

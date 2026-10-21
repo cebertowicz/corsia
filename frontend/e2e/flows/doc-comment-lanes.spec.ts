@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Browser, type Page } from '@playwright/test';
 import { createSession, loginByUrl, sendChatMessage } from '../support/corsia';
 import { openLiveDocument } from '../support/liveDocument';
 import { layouts } from '../support/liveConcurrency';
@@ -67,11 +68,11 @@ for (const [width, height, project] of layouts) {
 			const highlighted = Date.now();
 			await expect(viewer.locator(`.cm-presence-cursor[data-thread-id="${reviewer.id}"]`)).toHaveCount(1);
 			// The change frame has already reached the page, yet the comment is not in the document's comments.
-			await expect(viewer.getByRole('button', { name: '0 comments', exact: true })).toBeVisible();
+			await expect(viewer.getByRole('button', { name: /^0 open threads\b/ })).toBeVisible();
 			await viewer.screenshot({ path: testInfo.outputPath(`comment-lanes-pending-${width}.png`) });
 
 			// The whole comment arrives at once, within the cap (plus network and render slack).
-			await expect(viewer.getByRole('button', { name: '1 comment', exact: true })).toBeVisible({ timeout: POST_CAP_MS + SLACK_MS });
+			await expect(viewer.getByRole('button', { name: /^1 open thread\b/ })).toBeVisible({ timeout: POST_CAP_MS + SLACK_MS });
 			expect(Date.now() - highlighted).toBeLessThanOrEqual(POST_CAP_MS + SLACK_MS);
 			await expect(anchor).toHaveCount(0, { timeout: 5_000 });
 			await viewer.screenshot({ path: testInfo.outputPath(`comment-lanes-posted-${width}.png`) });
@@ -91,10 +92,10 @@ test('@surface:live-document clicking a pending comment anchor shows the comment
 	const { context, viewer, anchor } = await reviewerComments(browser, request, 1440, 960, 'click', body);
 	try {
 		await expect(anchor).toBeVisible({ timeout: 20_000 });
-		await expect(viewer.getByRole('button', { name: '0 comments', exact: true })).toBeVisible();
+		await expect(viewer.getByRole('button', { name: /^0 open threads\b/ })).toBeVisible();
 		const clicked = Date.now();
 		await anchor.first().click();
-		await expect(viewer.getByRole('button', { name: '1 comment', exact: true })).toBeVisible({ timeout: 2_000 });
+		await expect(viewer.getByRole('button', { name: /^1 open thread\b/ })).toBeVisible({ timeout: 2_000 });
 		expect(Date.now() - clicked, 'shown by the click, not by the full wait').toBeLessThan(POST_CAP_MS - 1_500);
 		await viewer.screenshot({ path: testInfo.outputPath('comment-lanes-clicked-1440.png') });
 	} finally {

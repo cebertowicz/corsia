@@ -2,10 +2,12 @@ import { get } from 'svelte/store';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { fetchRevision, fetchTree, type DocRevision, type TreeRoot } from '$lib/api/docs';
 import { openArtifactTab } from '$lib/stores/artifactWorkspace';
+import { defaultTabTitle } from '$lib/artifactTabTitle';
 import { openSubagentRequest } from '$lib/stores/subagents';
 import { activeThreadId } from '$lib/stores/threads';
 import { emitProductEvent } from '$lib/product_events';
 import { toasts } from '$lib/stores/toast';
+import { documentLinkTarget } from '$lib/cm/markdown-link';
 import { uiScope } from '$lib/stores/uiScope';
 import { SETTINGS_SECTIONS, requestSettingsSection, type SettingsSection } from '$lib/stores/settingsNavigation';
 
@@ -79,10 +81,11 @@ function settingsLink(href: string, origin: string): { section: SettingsSection;
 		return null;
 	}
 	if (url.origin !== origin) return null;
-	const match = /^\/settings\/([a-z]+)\/?$/.exec(url.pathname);
+	const match = /^\/settings\/([a-z-]+)\/?$/.exec(url.pathname);
 	const section = SETTINGS_SECTIONS.find((id) => id === match?.[1]);
 	if (!section) return null;
-	return { section, anchor: /^#[\w-]+$/.test(url.hash) ? url.hash.slice(1) : null };
+	const anchor = /^#[\w-]+$/.test(url.hash) ? url.hash.slice(1) : null;
+	return { section, anchor };
 }
 
 /** A same-origin `/thread/<id>` link, as an agent writes it to hand the person to a conversation. */
@@ -100,10 +103,6 @@ function threadLink(href: string, origin: string): string | null {
 
 function hasScheme(href: string): boolean {
 	return /^[a-z][a-z\d+.-]*:/i.test(href);
-}
-
-function titleFor(path: string): string {
-	return path.split('/').filter(Boolean).at(-1) ?? path;
 }
 
 /** Opens an external link in the correct host without changing web navigation. */
@@ -173,7 +172,7 @@ async function routeLinkTarget(href: string, deps: LinkResolverDeps): Promise<Li
 		deps.openArtifact(threadId, {
 			artifactId: revision.artifact_id,
 			path: revision.path ?? path,
-			title: titleFor(revision.path ?? path),
+			title: defaultTabTitle(revision.path ?? path),
 		});
 		return { result: 'document', target: 'workspace_document' };
 	} catch {
@@ -210,6 +209,11 @@ function defaultDeps(): LinkResolverDeps {
 		// The page serves this request through its one thread selector (source `link`).
 		openThread: (threadId) => openSubagentRequest.set(threadId),
 	};
+}
+
+/** Opens a link written in a document: a relative target resolves from that document's folder, not the workspace root. */
+export function openDocumentLink(href: string, docPath: string | null) {
+	return resolveLinkTarget(documentLinkTarget(docPath, href), defaultDeps());
 }
 
 function preservesNativeLinkBehavior(event: MouseEvent, anchor: HTMLAnchorElement, href: string): boolean {

@@ -11,7 +11,10 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from infra import analytics, analytics_db, config, product_events  # noqa: E402
+import infra.analytics as analytics  # noqa: E402
+import infra.analytics_db as analytics_db  # noqa: E402
+import infra.config as config  # noqa: E402
+import infra.product_events as product_events  # noqa: E402
 
 
 

@@ -5,34 +5,41 @@
 	import { limitHeldLine, OVERAGE_SWITCH_LABEL, SWITCH_MODEL_LABEL } from '$lib/stores/overageSetting';
 	import { requestProviderCard } from '$lib/stores/settingsNavigation';
 	import { pinThreadAccount } from '$lib/stores/threadAccountPin';
-	import { activeThreadId, threads } from '$lib/stores/threads';
+	import { composerSelectionFor } from '$lib/stores/composerSelection';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
 
 	// The composer passes the chip's own model and picker opener, so the line
 	// and the chip read one row and open one picker. The line clears on the
 	// models_updated reload the backend pushes when the verdict changes, and on
 	// the one the account move triggers itself.
-	const { model, onSwitchModel }: { model: Model | undefined; onSwitchModel: () => void } = $props();
+	const { model, onSwitchModel, threadId = undefined }: {
+		model: Model | undefined;
+		onSwitchModel: () => void;
+		threadId?: string | null;
+	} = $props();
 
-	const projectId = $derived($threads.find((thread) => thread.id === $activeThreadId)?.project_id ?? null);
+	// The line is about the thread the composer is bound to, which is a worker's own in a worker's pane.
+	const sel = $derived($composerSelectionFor(threadId));
+	const boundThreadId = $derived(sel.threadId);
+	const projectId = $derived(sel.thread?.project_id ?? null);
 	const policy = $derived(model?.connection ? $policyFor(projectId, model.connection) : undefined);
 
 	// Moving the thread needs a thread; a draft chat has none, so it keeps the line every vendor shares.
 	const line = $derived(limitHeldLine(
 		model,
 		new Date(),
-		$activeThreadId && model?.connection ? { accounts: $vendorAccounts, policy } : undefined,
+		boundThreadId && model?.connection ? { accounts: $vendorAccounts, policy } : undefined,
 	));
 
 	let busy = $state(false);
 	let error = $state('');
 
 	async function continueOn(accountId: string) {
-		const threadId = $activeThreadId;
-		if (!threadId || busy) return;
+		const target = boundThreadId;
+		if (!target || busy) return;
 		busy = true;
 		error = '';
-		const result = await pinThreadAccount(threadId, accountId);
+		const result = await pinThreadAccount(target, accountId);
 		busy = false;
 		if (!result.ok) error = result.message;
 	}
@@ -47,9 +54,9 @@
 		const runs = model?.runs_on ?? [];
 		const boundId = runs.find((entry) => entry.selected)?.account_id;
 		const connection = model?.connection;
-		const threadId = $activeThreadId;
-		if (!threadId || !connection || runs.length < 2 || !boundId || !limitHeldLine(model)) return;
-		const key = `${threadId}:${connection}`;
+		const target = boundThreadId;
+		if (!target || !connection || runs.length < 2 || !boundId || !limitHeldLine(model)) return;
+		const key = `${target}:${connection}`;
 		if (accountsRequestedFor !== key && !$vendorAccounts.some((account) => account.id === boundId)) {
 			accountsRequestedFor = key;
 			void loadVendorAccounts();
@@ -62,7 +69,7 @@
 
 	// A refusal belongs to the thread it came from.
 	$effect(() => {
-		void $activeThreadId;
+		void boundThreadId;
 		error = '';
 	});
 </script>

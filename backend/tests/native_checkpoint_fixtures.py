@@ -14,10 +14,10 @@ THREAD_ID = "main-1"
 
 def cold_source(content: str = "cold history", *, thread_id: str = "thread-1"):
     """One frozen portable cold source for adapter transport tests."""
-    from core.checkpoint_types import ColdCheckpointSource
+    from core.fork_types import ColdForkSource
 
     selection = make_exact_replay_selection(thread_id, [[("user", content)]])
-    return ColdCheckpointSource(selection.tail, ())
+    return ColdForkSource(selection.tail, ())
 
 
 def install_prefix_source_isolation(monkeypatch) -> None:

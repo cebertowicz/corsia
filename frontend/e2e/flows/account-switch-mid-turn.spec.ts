@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -79,6 +80,7 @@ finally:
 `, threadId)) as Seed;
 }
 
+
 function finishAndClaim(threadId: string): Claim {
 	return JSON.parse(runFixture(`
 import json
@@ -109,22 +111,34 @@ finally:
 `, threadId)) as Claim;
 }
 
+// Accounts sit behind each vendor header and start collapsed (model-first-picker-renders.spec.ts asserts
+// aria-expanded="false"); open every vendor's chooser so its account rows can be picked.
+async function expandAccountChoosers(page: Page): Promise<void> {
+	// The accounts load after the sheet opens, so wait for the first chooser before clicking.
+	await expect(page.locator('.model-sheet button.picker-account-title').first()).toBeVisible();
+	const closed = page.locator('.model-sheet button.picker-account-title[aria-expanded="false"]');
+	// Each click removes a row from this live selector, so always click the first one left.
+	while (await closed.count() > 0) await closed.first().click();
+}
+
 async function openThread(page: Page, title: string): Promise<void> {
 	await openAppByUrl(page);
 	await page.locator('.thread-item').filter({ hasText: title }).click();
 	await waitForModelListLoaded(page);
 	await page.locator('button.model-chip').click();
 	await expect(page.locator('.model-sheet')).toBeVisible();
+	await expandAccountChoosers(page);
 }
 
 async function screenshotPendingPicker(page: Page, testInfo: TestInfo): Promise<void> {
 	for (const [width, theme] of [[1280, 'light'], [1280, 'dark'], [390, 'light'], [390, 'dark']] as const) {
 		await page.setViewportSize({ width, height: 900 });
 		await page.evaluate((value) => document.documentElement.setAttribute('data-theme', value), theme);
-		await expect(page.locator('.model-sheet .switch-marker')).toHaveText('Switching…');
+		await expect(page.locator('.model-sheet [aria-label="Switching account"]')).toHaveCount(1);
 		await page.screenshot({ path: testInfo.outputPath(`account-switch-pending-${width}-${theme}.png`), fullPage: true, animations: 'disabled' });
 	}
 }
+
 
 test('@flow:chat @surface:picker account choice during a running turn moves on the next claim', async ({ page, request }, testInfo) => {
 	test.skip(testInfo.project.name !== 'chromium-desktop', 'One controlled viewport matrix supplies the required visual evidence.');
@@ -152,12 +166,13 @@ test('@flow:chat @surface:picker account choice during a running turn moves on t
 		expect(await response.json()).toMatchObject({ account_id: second, changed: false, pending: true });
 		expect(puts).toBe(1);
 		await expect(accountB).toHaveAttribute('aria-pressed', 'true');
-		await expect(accountB.locator('.switch-marker')).toHaveText('Switching…');
+		await expect(accountB.locator('[aria-label="Switching account"]')).toBeVisible();
 
 		const heldBinding = await request.get(`/api/threads/${threadId}/vendor-account?token=${process.env.CORSIA_E2E_TOKEN}`);
 		expect(heldBinding.ok()).toBeTruthy();
 		expect((await heldBinding.json()).accounts).toMatchObject([{ id: first }]);
 		await screenshotPendingPicker(page, testInfo);
+
 
 		const moved = finishAndClaim(threadId);
 		expect(moved).toEqual({ account_id: second, pending_account_id: null, turn_account_id: second });
@@ -166,8 +181,9 @@ test('@flow:chat @surface:picker account choice during a running turn moves on t
 		await page.locator('.thread-item').filter({ hasText: title }).click();
 		await waitForModelListLoaded(page);
 		await page.locator('button.model-chip').click();
+		await expandAccountChoosers(page);
 		await expect(page.locator('button.account-usage-row.picker', { hasText: 'Account B' })).toHaveAttribute('aria-pressed', 'true');
-		await expect(page.locator('.model-sheet .switch-marker')).toHaveCount(0);
+		await expect(page.locator('.model-sheet [aria-label="Switching account"]')).toHaveCount(0);
 	} finally {
 		await request.delete(`/api/threads/${threadId}?token=${process.env.CORSIA_E2E_TOKEN}`);
 	}

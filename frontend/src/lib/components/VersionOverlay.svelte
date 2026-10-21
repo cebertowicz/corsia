@@ -16,8 +16,11 @@
 		return () => clearInterval(id);
 	});
 
+	// The backend is the canonical owner of this default: it distinguishes an
+	// app bundle (off) from a source checkout (on). Do not show a developer
+	// build stamp while that resolved feature snapshot is still unavailable.
 	const visible = $derived(
-		$coreSettings?.features?.debug_version_overlay !== false,
+		$coreSettings?.features?.debug_version_overlay === true,
 	);
 	const backendShort = $derived($serverVersion?.backend.short_hash ?? '·······');
 	const backendDirty = $derived($serverVersion?.backend.dirty);
@@ -54,7 +57,7 @@
 <style>
 	.version-overlay {
 		position: fixed;
-		top: max(4px, calc(env(safe-area-inset-top, 0px) + 2px));
+		top: max(4px, calc(var(--safe-top) + 2px));
 		left: 50%;
 		transform: translateX(-50%);
 		z-index: 11;

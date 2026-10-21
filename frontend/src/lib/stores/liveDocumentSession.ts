@@ -1,18 +1,19 @@
 import * as Y from 'yjs';
 import { writable } from 'svelte/store';
 import type { DocOpenRefusal } from '$lib/docOpenRefusal';
+import { isCallHeld } from './docCommentHolds';
 import { DocumentDurability } from './documentDurability';
 import type { DeviceDocument } from './deviceDocument';
 import type { DeviceRecovery } from './deviceRecovery';
 import { liveUpdateAuthor, withLiveUpdateAuthor } from './liveUpdateAuthor';
 import { decodeUpdate, encodeUpdate, type DocumentFrame, type HeldDocument, type PositionReservation } from './documentWire';
 
-import { FAILURE_KINDS, failureKind, publicFailureMessage, LiveOperationError,
-	type BlockingFailure, type FailureKind, type FailureObservation } from './documentFailures';
+import { publicFailureMessage, LiveOperationError, type BlockingFailure } from './documentFailures';
+import { DocumentFailureLedger } from './documentFailureLedger';
 
 const SERVER = Symbol('server-document-update');
 type Send = (frame: Record<string, unknown>) => boolean;
-type Request = { resolve: (frame: DocumentFrame) => void; reject: (error: Error) => void };
+type Request = { resolve: (frame: DocumentFrame) => void; reject: (error: Error) => void; reservation?: boolean; landed?: () => void };
 
 export class LiveDocumentSession {
 	readonly doc: Y.Doc;
@@ -31,9 +32,7 @@ export class LiveDocumentSession {
 	storeError = '';
 	fileError = '';
 	private operationErrorKind: string | undefined;
-	private setupIncarnation = '';
-	private failures = new Map<FailureKind, BlockingFailure>();
-	private clears = new Map<FailureKind, number>();
+	private ledger = new DocumentFailureLedger();
 	held: HeldDocument | null = null;
 	pending = false;
 	textGeneration = 0;
@@ -59,11 +58,11 @@ export class LiveDocumentSession {
 	private changed(): void { this.state.set(this); }
 
 	get blockingFailures(): BlockingFailure[] {
-		return FAILURE_KINDS.flatMap(kind => this.failures.has(kind) ? [this.failures.get(kind)!] : []);
+		return this.ledger.rows;
 	}
 
 	get failureLines(): string[] {
-		const store = this.failures.get('store_refused')?.message ?? this.storeError;
+		const store = this.ledger.message('store_refused') ?? this.storeError;
 		const lines = store ? [`Not saved on the server: ${store}`] : [];
 		if (this.fileError) lines.push(this.operationErrorKind === 'publication_failed' || this.operationErrorKind === 'setup_failed'
 			? this.fileError : `Not saved to the file: ${this.fileError}`);
@@ -74,32 +73,10 @@ export class LiveDocumentSession {
 	/** Only the canonical matched successful open invokes this admission. */
 	admitFailures(frame: DocumentFrame): void {
 		if (frame.type !== 'doc_opened' || frame.live !== true || frame.artifact_id !== this.artifactId || frame.store_id !== this.storeId) return;
-		if (frame.setup_incarnation && frame.setup_incarnation !== this.setupIncarnation) {
-			this.setupIncarnation = frame.setup_incarnation;
-			this.failures.delete('setup_failed');
-			this.clears.delete('setup_failed');
-		}
-		for (const clear of frame.failure_clears ?? []) this.clearFailure(clear);
-		if (Array.isArray(frame.blocking)) for (const row of frame.blocking) this.observeFailure(row);
+		this.ledger.admitIncarnation(frame.setup_incarnation);
+		for (const clear of frame.failure_clears ?? []) this.ledger.clear(clear);
+		if (Array.isArray(frame.blocking)) for (const row of frame.blocking) this.ledger.observe(row);
 		this.changed();
-	}
-
-	private observeFailure(row: FailureObservation): void {
-		const kind = failureKind(row.kind);
-		if (!kind || (kind === 'setup_failed' && row.setup_incarnation !== this.setupIncarnation)) return;
-		const version = kind === 'setup_failed' ? row.setup_revision : row.failure_generation;
-		if (version === undefined || !Number.isSafeInteger(version) || version < 0) return;
-		if (version <= (this.clears.get(kind) ?? -1) || version < (this.failures.get(kind)?.version ?? -1)) return;
-		this.failures.set(kind, { kind, message: publicFailureMessage(kind, row.message), version });
-	}
-
-	private clearFailure(row: FailureObservation): void {
-		const kind = failureKind(row.kind), threshold = row.clears_through;
-		if (!kind || (kind === 'setup_failed' && row.setup_incarnation !== this.setupIncarnation)) return;
-		if (threshold === undefined || !Number.isSafeInteger(threshold) || threshold < 0) return;
-		this.clears.set(kind, Math.max(threshold, this.clears.get(kind) ?? -1));
-		const active = this.failures.get(kind);
-		if (active && active.version <= threshold) this.failures.delete(kind);
 	}
 
 	attachDevice(copy: DeviceDocument, recovery: DeviceRecovery[], error = ''): void {
@@ -179,21 +156,27 @@ export class LiveDocumentSession {
 		else for (const frame of this.updates.values()) this.send(frame);
 	}
 
+	/** Whether a comment this agent call made is held back while its lane works through earlier arrivals. */
+	holdsCall(callId: string): boolean { return isCallHeld(this.artifactId, callId); }
+
 	onFrame(listener: (frame: DocumentFrame) => void): () => void {
 		this.frameListeners.add(listener);
 		return () => this.frameListeners.delete(listener);
 	}
 
 	handle(frame: DocumentFrame): void {
-		if (frame.artifact_id !== this.artifactId && !this.requests.has(frame.request_id ?? '')) return;
-		if (frame.store_id && frame.store_id !== this.storeId) return;
+		const requestId = frame.request_id ?? '';
+		const reservationError = frame.type === 'doc_error' && this.requests.get(requestId)?.reservation === true;
+		if (frame.artifact_id !== this.artifactId && !this.requests.has(requestId) && !reservationError) return;
+		if (frame.store_id && frame.store_id !== this.storeId && !reservationError) return;
+		if (reservationError || frame.type === 'doc_positions') this.requests.delete(requestId);
 		if (frame.kind === 'publication_failed' || frame.kind === 'setup_failed') frame = { ...frame, message: publicFailureMessage(frame.kind, frame.message) };
 		if (Array.isArray(frame.blocking)) frame = { ...frame, blocking: frame.blocking.map(row => ({ ...row,
 			message: publicFailureMessage(row.kind, row.message) })) };
 		if (frame.artifact_id === this.artifactId && frame.store_id === this.storeId) {
-			if (frame.type === 'doc_error' && frame.blocking === true) this.observeFailure(frame);
-			if (frame.type === 'doc_cleared') this.clearFailure(frame);
-			if (frame.type === 'doc_saved' && Array.isArray(frame.blocking)) for (const row of frame.blocking) this.observeFailure(row);
+			if (frame.type === 'doc_error' && frame.blocking === true) this.ledger.observe(frame);
+			if (frame.type === 'doc_cleared') this.ledger.clear(frame);
+			if (frame.type === 'doc_saved' && Array.isArray(frame.blocking)) for (const row of frame.blocking) this.ledger.observe(row);
 		}
 		if (['doc_opened', 'doc_saved', 'doc_pending'].includes(frame.type)) {
 			this.pending = frame.pending === true;
@@ -209,7 +192,7 @@ export class LiveDocumentSession {
 			for (const id of frame.message_ids ?? []) this.updates.delete(id);
 			if (this.durability.clean) { this.storeError = ''; this.updates.clear(); }
 		} else if (frame.type === 'doc_saved') this.saved(frame);
-		else if (frame.type === 'doc_error') this.refused(frame);
+		else if (frame.type === 'doc_error' && !reservationError) this.refused(frame);
 		for (const listener of this.frameListeners) listener(frame);
 		this.changed();
 	}
@@ -224,6 +207,7 @@ export class LiveDocumentSession {
 		} else {
 			this.fileError = '';
 			this.operationErrorKind = undefined;
+			request?.landed?.();
 			request?.resolve(frame);
 		}
 	}
@@ -242,13 +226,13 @@ export class LiveDocumentSession {
 		} else if ((frame.kind === 'store_refused' && frame.failure_generation === undefined) || this.updates.has(frame.request_id ?? '')) this.storeError = reason;
 	}
 
-	private request(type: string, fields: Record<string, unknown> = {}): Promise<DocumentFrame> {
+	private request(type: string, fields: Record<string, unknown> = {}, landed?: () => void): Promise<DocumentFrame> {
 		if (!this.writable) return Promise.reject(new Error('This document is read-only'));
 		if (this.connection !== 'connected') return Promise.reject(new Error('Disconnected; keep your device copy'));
 		this.sync();
 		const id = crypto.randomUUID();
 		return new Promise((resolve, reject) => {
-			this.requests.set(id, { resolve, reject });
+			this.requests.set(id, { resolve, reject, landed });
 			if (!this.send({ type, artifact_id: this.artifactId, store_id: this.storeId, request_id: id, ...fields })) {
 				this.disconnected();
 			}
@@ -257,15 +241,24 @@ export class LiveDocumentSession {
 
 	/**
 	 * Ask for comment positions (4.2). Consumers match artifact, store, request id and sequence
-	 * on replies, and the request id on refusals. Null when disconnected: reconnect asks again.
+	 * on replies, and the request id on refusals; a reservation's id is tracked so that only its
+	 * own refusal is admitted whatever store it names. Null when disconnected: reconnect asks again.
 	 */
 	requestPositions(seq: number, reload = false, reserve?: PositionReservation): string | null {
 		if (this.connection !== 'connected') return null;
 		const id = crypto.randomUUID();
-		if (this.send({ type: 'doc_positions', artifact_id: this.artifactId, store_id: this.storeId, request_id: id, seq, reload,
-			...(reserve ? { reserve } : {}) })) return id;
-		this.disconnected();
-		return null;
+		if (!this.send({ type: 'doc_positions', artifact_id: this.artifactId, store_id: this.storeId, request_id: id, seq, reload,
+			...(reserve ? { reserve } : {}) })) {
+			this.disconnected();
+			return null;
+		}
+		if (reserve) this.requests.set(id, { reservation: true, resolve: () => {}, reject: () => {} });
+		return id;
+	}
+
+	/** Forget a reservation request whose caller no longer awaits a reply. */
+	cancelReservationRequest(id: string | null): void {
+		if (id) this.requests.delete(id);
 	}
 
 	/** Give back a range a capture reserved but no comment will use; the server ignores an id it no longer holds. */
@@ -273,7 +266,10 @@ export class LiveDocumentSession {
 		if (this.connection === 'connected') this.send({ type: 'doc_release', artifact_id: this.artifactId, store_id: this.storeId, client_id: clientId });
 	}
 
-	flush(): Promise<DocumentFrame> { return this.request('doc_flush'); }
+	flush(): Promise<DocumentFrame> {
+		const generation = this.durability.snapshot().localGeneration;
+		return this.request('doc_flush', {}, () => this.durability.written(generation));
+	}
 	retry(): Promise<DocumentFrame> { this.retryStore(); return this.request('doc_flush', { retry: true }); }
 	replace(text: string): Promise<DocumentFrame> { return this.request('doc_replace', { text }); }
 	choose(choice: 'corsia' | 'file'): Promise<DocumentFrame> { return this.request('doc_choice', { choice }); }

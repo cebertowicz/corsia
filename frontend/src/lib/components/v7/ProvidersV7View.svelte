@@ -15,7 +15,7 @@
 	import { Message } from '$lib/components/ui';
 	import { loadModels } from '$lib/stores/models';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
-	import { providerCardRequest, settingsAnchorRequest } from '$lib/stores/settingsNavigation';
+	import { providerCardRequest, settingsNavigation } from '$lib/stores/settingsNavigation';
 	import HostSection from './HostSection.svelte';
 	import ProviderRow from './ProviderRow.svelte';
 	import ProviderModelsBody from './ProviderModelsBody.svelte';
@@ -67,13 +67,6 @@
 		openProvider = p;
 	}
 
-	function accentFor(p: HostProvider): string {
-		if (p.name === 'omlx') return 'var(--violet)';
-		if (p.name === 'lmstudio') return 'var(--green)';
-		if (p.type === 'cloud' || p.type === 'harness') return 'var(--violet)';
-		return 'var(--accent)';
-	}
-
 	function hasLoaded(p: HostProvider): boolean {
 		if (p.type === 'cloud') {
 			return p.raw.has_key === true;
@@ -113,7 +106,7 @@
 	// A link to an account's billing row opens the settings of the provider that holds it
 	// (the first account without a price, else the first account), then focuses the row.
 	$effect(() => {
-		if ($settingsAnchorRequest !== 'account-billing') return;
+		if ($settingsNavigation.anchor !== 'account-billing') return;
 		const live = $vendorAccounts.filter((account) => account.state !== 'removed');
 		const target = live.find((account) => !account.billing) ?? live[0];
 		const provider = target && groups.flatMap((g) => g.providers).find((p) => p.type === 'harness' && p.name === target.provider);
@@ -162,13 +155,12 @@
 					provider={p}
 					expanded={expanded.has(key)}
 					hasLoaded={hasLoaded(p)}
-					accentVar={accentFor(p)}
 					onToggleEnable={() => handleToggleEnable(p)}
 					onSettings={() => handleSettings(p)}
 					onToggleExpand={() => toggleExpand(key)}
 				>
 					{#snippet body()}
-						<ProviderModelsBody provider={p} isLocal={group.key === 'this-mac'} />
+						<ProviderModelsBody provider={p} isLocal={group.key === 'this-mac'} onAddProvider={() => showAdd = true} />
 					{/snippet}
 				</ProviderRow>
 			{/each}
@@ -214,14 +206,14 @@
 		transition: all var(--dur-tight) var(--ease-snap);
 	}
 	.add-btn:hover {
-		color: var(--violet-text);
-		border-color: var(--violet-line);
-		background: var(--violet-bg);
+		color: var(--accent-text);
+		border-color: var(--accent-line);
+		background: var(--accent-wash);
 	}
 	.add-btn.primary {
-		background: var(--violet-bg);
-		border-color: var(--violet-line);
-		color: var(--violet-text);
+		background: var(--accent-wash);
+		border-color: var(--accent-line);
+		color: var(--accent-text);
 		margin-top: 12px;
 	}
 

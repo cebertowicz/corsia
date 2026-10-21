@@ -66,6 +66,8 @@ from plans.service import (
     _node_row as node_row,
     ensure_plan, get_node, record_runner_event,
 )
+from plans.ask_endings import detail as ask_ending_detail
+from plans.holds import clear_write as clear_hold_write
 from plans.receipts import (
     load as load_mutation_receipt,
     record as record_mutation_receipt,
@@ -91,13 +93,22 @@ from plans.activity_projection import (
 )
 from plans.user_ask import (
     ASKABLE_TYPES,
+    ASK_ENDINGS,
     AskRelease,
-    ask_holds,
+    ask_attention_state,
+    ask_attention_state_sql,
+    ask_linked_sql,
     cleared as ask_cleared,
+    defer_asks,
+    open_ask_artifacts,
+    open_asks_sql,
     placed_ask_hold_sql,
     raised_asks,
+    undefer_asks,
     user_ask_hold_sql,
 )
+from plans.user_ask_cards import ask_holds
+from plans.decision_projection import DECISION_TYPE, identity_row as decision_identity_row
 from plans.node_states import blocked_on_user_sql, failure_asks_user_sql, open_user_block_sql
 from plans.folded_reads import read_folded, read_path as read_folded_path
 from plans.operator_node_read import read_node as read_operator_node
@@ -155,6 +166,9 @@ from plans.review_requests import (
     append_review_note, close_review_node, review_is_open, settle_review_node,
 )
 from plans.service import add_node, transition_node
+
+# A step the system opens for the person and settles when it sees it done (host_access/browser).
+from plans.system_user_steps import open_user_step, settle_user_step
 
 # Lesson trial and captured-hypothesis reviews (core/lesson_*).
 from plans.lesson_review_history import read_batch as lesson_review_history

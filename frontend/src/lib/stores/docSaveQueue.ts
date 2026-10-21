@@ -4,7 +4,9 @@ import { closeLiveDocument, liveDocumentBindings } from './liveDocuments';
 import type { LiveDocumentSession } from './liveDocumentSession';
 import { flushPositions } from '$lib/stores/docComments';
 import { toasts } from '$lib/stores/toast';
-import { LiveOperationError } from './documentFailures';
+import { saveErrorMessage } from './docSaveError';
+import { createDocSaveActivityProjection } from './docSaveActivity';
+export { idleDocSaveActivity, type DocSaveActivity } from './docSaveActivity';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 
 export type DocSaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
@@ -42,6 +44,10 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const inflight = new Map<string, Promise<boolean>>();
 const needsResave = new Map<string, boolean>();
 const reconnectWaits = new Map<string, () => void>();
+const confirmationsOwed = new Map<string, true>();
+const activity = createDocSaveActivityProjection({ inflight, needsResave, reconnectWaits, confirmationsOwed });
+export const docSaveActivities = activity.store;
+const publishActivity = activity.publish;
 
 function getDraft(key: string): DocSaveDraft | undefined {
 	return get(drafts)[key];
@@ -58,9 +64,19 @@ export function existingDraft(target: TargetIdentity): DocSaveDraft | undefined 
 	return getDraft(draftKey(target));
 }
 
-/** The draft's target, which carries any identity resolved since it was seeded. */
-export function effectiveDraftTarget(target: DocViewerTarget): DocViewerTarget {
-	return existingDraft(target)?.target ?? target;
+/** The cue calls this only after it displays a confirmation owed by a reconnect. */
+export function confirmReconnectSave(key: string): void {
+	confirmationsOwed.delete(key);
+	publishActivity(key);
+}
+
+/**
+ * The tab's target, carrying the artifact identity its draft resolved since it
+ * was seeded. The path is always the tab's: it is what the viewer opens.
+ */
+export function withDraftArtifactId(target: DocViewerTarget): DocViewerTarget {
+	const artifactId = existingDraft(target)?.target.artifactId ?? target.artifactId;
+	return artifactId === target.artifactId ? target : { ...target, artifactId };
 }
 
 /** Establishes a fresh draft from server content. Never overwrites an
@@ -107,6 +123,7 @@ export function setDraftText(target: TargetIdentity, text: string): void {
 	});
 	// A live document re-saves only for its own unacknowledged transactions, read when the flush returns.
 	if (inflight.has(key) && !get(liveDocumentBindings)[key]) needsResave.set(key, true);
+	publishActivity(key);
 	const existingTimer = timers.get(key);
 	if (existingTimer) clearTimeout(existingTimer);
 	timers.set(key, setTimeout(() => { timers.delete(key); void runSave(key); }, SAVE_DEBOUNCE_MS));
@@ -114,41 +131,25 @@ export function setDraftText(target: TargetIdentity, text: string): void {
 
 function waitForLiveReconnect(key: string, live: LiveDocumentSession): void {
 	if (reconnectWaits.has(key)) return;
+	const draft = getDraft(key);
+	if (draft && draft.editText !== draft.savedText) confirmationsOwed.set(key, true);
 	const stop = live.onFrame((frame) => {
 		if (frame.type !== 'doc_opened') return;
 		const draft = getDraft(key);
 		if (get(liveDocumentBindings)[key] !== live || !draft || draft.editText === draft.savedText || !live.writable) {
 			reconnectWaits.delete(key);
+			if (!draft || draft.editText === draft.savedText) confirmationsOwed.delete(key);
+			publishActivity(key);
 			stop();
 			return;
 		}
 		reconnectWaits.delete(key);
+		publishActivity(key);
 		stop();
 		void runSave(key);
 	});
 	reconnectWaits.set(key, stop);
-}
-
-function saveErrorMessage(error: unknown): string {
-	if (error instanceof LiveOperationError && (error.kind === 'publication_failed' || error.kind === 'setup_failed')) return error.message;
-	const raw = error instanceof Error ? error.message : String(error);
-	const body = raw.replace(/^\d+\s+/, '');
-	try {
-		const parsed = JSON.parse(body);
-		const detail = parsed?.detail;
-		if (detail && typeof detail === 'object') {
-			if (typeof detail.line === 'string') return detail.line;
-			const message = typeof detail.message === 'string' ? detail.message : "Couldn't save the document";
-			const errors = Array.isArray(detail.errors)
-				? detail.errors.filter((item: unknown): item is string => typeof item === 'string')
-				: [];
-			return errors.length ? `${message}: ${errors.join('; ')}` : message;
-		}
-		if (typeof detail === 'string') return detail;
-	} catch {
-		// Use the local-edits-safe fallback below for non-JSON failures.
-	}
-	return "Couldn't save the document — edits are still local";
+	publishActivity(key);
 }
 
 /**
@@ -165,6 +166,13 @@ async function runSave(key: string): Promise<boolean> {
 	const draft = getDraft(key);
 	const live = get(liveDocumentBindings)[key];
 	if (!draft || (live ? !live.writable : draft.editText === draft.savedText)) return true;
+	// A live tab writes only its own transactions: once every one is acked and written there is nothing to
+	// save, and any remaining difference is remote edits the server already owns, so the draft rebaselines
+	// on them. An unacked transaction still flushes, so the resave loop below keeps going until clean.
+	if (live && live.durability.clean && !live.durability.unwritten) {
+		if (draft.status === 'dirty') patchDraft(key, { savedText: draft.editText, status: 'idle' });
+		return true;
+	}
 	const textAtStart = draft.editText;
 	patchDraft(key, { status: 'saving' });
 	const p = (async () => {
@@ -176,6 +184,7 @@ async function runSave(key: string): Promise<boolean> {
 			// remaining difference is remote edits the server owns, so only unacked local work re-saves.
 			const clean = !live || live.durability.clean;
 			if (!clean) needsResave.set(key, true);
+			publishActivity(key);
 			const cur = getDraft(key);
 			if (cur) {
 				const savedText = live ? (clean ? cur.editText : cur.savedText) : textAtStart;
@@ -209,10 +218,12 @@ async function runSave(key: string): Promise<boolean> {
 		return true;
 	})();
 	inflight.set(key, p);
+	publishActivity(key);
 	const completed = await p;
 	inflight.delete(key);
 	const resave = needsResave.get(key);
 	needsResave.delete(key);
+	publishActivity(key);
 	return resave ? runSave(key) : completed;
 }
 
@@ -248,6 +259,8 @@ export function clearDraft(target: TargetIdentity): void {
 	needsResave.delete(key);
 	reconnectWaits.get(key)?.();
 	reconnectWaits.delete(key);
+	confirmationsOwed.delete(key);
+	activity.clear(key);
 	drafts.update((all) => {
 		if (!(key in all)) return all;
 		const next = { ...all };

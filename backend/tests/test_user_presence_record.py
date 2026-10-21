@@ -164,6 +164,8 @@ def test_finished_visit_row_is_written_with_the_exit(pdb):
         "entered_at": presence.iso(at(0)),
         "exited_at": presence.iso(at(minutes=4)), "seconds": 240,
         "sessions": 1, "exit_reason": "navigated",
+        # A claim that reports no focus counts as focused the whole visit.
+        "focus_spans": f'[["{presence.iso(at(0))}","{presence.iso(at(minutes=4))}"]]',
     }
 
 

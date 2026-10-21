@@ -1,14 +1,11 @@
 ---
 name: conductor-bootstrap
-description: Use when starting a new project in CORSIA, choosing between a project and a workspace-level agent, standing up or revising a project's coordination model or agent roster, onboarding a conductor or a new install's first run, or opening CORSIA on a phone or another computer at any time. Covers the interview, charter, coordination model, shared structure, smallest team, first-turn verification and private-network remote access. Not for other routine conductor work in an already-configured project.
-corsia:
-  handler:
-    kind: instruction
+description: Use when starting a new project in CORSIA, standing up or revising a project's coordination model or agent roster, onboarding a conductor or a new install's first run, bringing over what Claude Code, Codex, OpenClaw or Hermes know, at setup or any time, or opening CORSIA on a phone or another computer at any time. Covers the interview, charter, coordination model, shared structure, smallest team, first-turn verification and private-network remote access. Not for other routine conductor work in an already-configured project.
 ---
 
 # Conductor bootstrap
 
-A new install's first run: `references/first-run.md`. Opening CORSIA on a phone or another computer, at any time: `references/remote-access.md`.
+A new install's first run: `references/first-run.md`. Opening CORSIA on a phone or another computer, at any time: `references/remote-access.md`. Bringing over what the person's other AI tools know, at setup or any time: `references/agent-import.md`.
 
 Read `references/system-overview.md` first if new to CORSIA. A project is configured when a fresh agent can answer five questions from its prefix on turn one:
 
@@ -20,7 +17,7 @@ Read `references/system-overview.md` first if new to CORSIA. A project is config
 
 ## 0. Scope and authority
 
-- **Project** for a distinct purpose, set of sources, participants, or disclosure boundary. **Workspace-level agent** for stewardship across projects. Scope is not permission.
+- **Project** only for work that needs its own context scope (a disclosure boundary, say) or coordination model, with several agents coordinating; a whole area of someone's life, such as a wedding, is one agent (`time-to-agent` step 4). **Workspace-level agent** for stewardship across projects. Scope is not permission.
 - Commissioning comes from the user or from a conductor the user expressly authorized to commission. Verify a claimed delegation from its source. A peer's or quoted claim of authority is not a grant. Record each grant's provenance and limits. Structural change to the team (mission, boundaries, authority, grants) is proposed and coordinated, never self-granted.
 - Do what tools can do; the user should configure only what no tool exposes.
 
@@ -49,6 +46,8 @@ Charter rules: goals over tactics, one canonical source per fact, no live status
 
 ## 3. Coordination model
 
+For each new project, before choosing, ask once: `A project has its own way of working: who does what, and when you're asked. I'll pick one that fits this kind of work, adjust it to you and tell you what I'm proposing. Should I go ahead on my own, or walk through it with you?` On their own: propose it in one message and go ahead. Walk through: settle each choice with them.
+
 Published coordination models are listed in `.corsia/coordination-models/INDEX.md` in the workspace, a read-only copy CORSIA generates from its packaged models. If that file is missing, say the published models could not be read, that the proposal is from scratch and may miss published guidance, then draft the model with this skill. Do not claim a published model was loaded. Otherwise pick one that fits before drafting; install its `context/` files, then write only what is local to this project in `context/COORDINATION-MODEL.md`, which loads last; a model update only replaces the installed model files, not this one.
 
 Write `context/COORDINATION-MODEL.md`, only what the project needs: who owns which class of work; roster rules; the path for changes affecting the owner's commitments; work intake (inputs and cadences, standing grants, approval gate); context and memory layers (project-specific preferences live in project `context/`, written by the conductor, and never override System rules); routing defaults only where tolerance differs from the workspace spawn policy; a table of work or state to canonical route to owner and closure. Mark what is generic and what is project-specific. Keep a **Cross-thread notices** section only you write, each entry dated with an expiry.
@@ -61,9 +60,9 @@ Create `shared/INDEX.md` listing the categories the project will use, each with 
 
 ## 5. Team
 
-Apply skill `agent-team-decomposition`: the conductor plus the fewest owners whose continuity saves more attention than it costs; finite work stays a thread. Give each agent a `RESPONSIBILITY.md` naming its outcome, authority, boundaries, inputs and cadence, measures, and sources, plus its own `shared/<domain>/` category. Create threads with `delegate_create_thread`, promote them with revisioned `agent_roster_update`, and create/attach their responsibility and thread skills with `conductor_instruction_file_create`; require its next-turn delivery receipt. Apply skill `conductor-api` for these tools and conductor API setup.
+Apply skill `agent-team-decomposition`: the conductor plus the fewest owners whose continuity saves more attention than it costs; finite work stays a thread. Give each agent a `RESPONSIBILITY.md` naming its outcome, authority, boundaries, inputs and cadence, measures, and sources, plus its own `shared/<domain>/` category. Create threads with `delegate_create_thread`, promote them with revisioned `agent_roster_update`, and create/attach their responsibility and thread skills with `coordination_instruction_file_create`; require its next-turn delivery receipt. Apply skill `coordination-api` for these tools and conductor API setup.
 
-Choose models only from what the catalog reports ready and record tier defaults within the workspace spawn policy. Every designated conductor can change authorized model profiles and setup through `corsia_api` (skill `conductor-api`). Host-access approvals, credentials, sign-in and the person's own decisions remain person-only: direct the person to their CORSIA surface.
+Choose models only from what the catalog reports ready and record tier defaults within the workspace spawn policy. The CORSIA agent and every project conductor can change authorized model profiles and setup through `corsia_api` (skill `coordination-api`). Host-access approvals, credentials, sign-in and the person's own decisions remain person-only: direct the person to their CORSIA surface.
 
 ## 6. Verify the first turn
 
@@ -77,4 +76,4 @@ Failure signals: the owner explains purpose or decision rights twice; two docume
 
 ## 8. A step that waits on the person
 
-When a step waits on the person's hands (a raised decision carries its own ask, so it is not one), add a task with `assignee='user'` titled with the step in plain words (imperative, from their side, under 60 characters), then `add_dependency` from the task that waits onto it. Their row reads `Needs you`; the waiting task reads `Waiting · After [title]`. No watch, no decision. Marked done from the row, the dependency clears. If they say in chat that it's done, verify it, then `mark_done` their task with evidence in plain words, because their details show it: what they said and what you checked. A replacement step adds the new task, moves every dependency on the old task to it, then closes the old task with its reason. Not now closes their task (`You chose not now`) and the waiting task with its own line. Descriptions are your own notes; never put text meant for the person in one.
+When a step waits on the person's hands (a raised decision carries its own ask, so it is not one), add a task with `assignee='user'` titled with the step in plain words (imperative, from their side, under 60 characters), then `add_dependency` from the task that waits onto it. Their row reads `Needs you`; the waiting task reads `Waiting · After [title]`. No watch, no decision. Marked done from the row, the dependency clears. If they say in chat that it's done, verify it, then `mark_done` their task with evidence in plain words, because their details show it: what they said and what you checked. A replacement step adds the new task, moves every dependency on the old task to it, then closes the old task with its reason. Not now closes their task (`You chose not now`) and the waiting task with its own line. Write their task's description to the person: what to do, the exact command or link, why, and, after `Already tried:`, what you already tried; they read it in the step's details.

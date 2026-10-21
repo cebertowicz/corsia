@@ -14,7 +14,7 @@ vi.mock('$lib/stores/models', async (importOriginal) => {
 });
 
 function account(state: SourceAccount['state'], extra: Partial<SourceAccount> = {}): SourceAccount {
-	return { account_id: 'acc-1', label: 'me@example.com', label_verified: true, identified: true, state, resets_at: null, conductor_binding: false, ...extra };
+	return { account_id: 'acc-1', label: 'me@example.com', label_verified: true, identified: true, state, resets_at: null, corsia_agent_binding: false, ...extra };
 }
 
 function claude(state: ModelSource['state'], accounts: SourceAccount[] = []): ModelSource {
@@ -81,7 +81,7 @@ describe('first-run line', () => {
 	it('with a ready model: points at the picker and shows no button or link', async () => {
 		listed = [claude('ready', [account('ready')])];
 		await render();
-		expect(text()).toBe('Pick a model from the picker below to start your conductor.');
+		expect(text()).toBe('Pick a model from the picker below to start CORSIA.');
 		expect(host.querySelectorAll('button')).toHaveLength(0);
 		expect(saveThreadModel).not.toHaveBeenCalled();
 	});
@@ -130,7 +130,7 @@ describe('first-run line', () => {
 	});
 
 	it('flips the line on models_updated, such as a download finishing', async () => {
-		listed = [{ source: 'omlx', name: 'Local model', state: 'needs_setup', eligible: true, setup_stage: 'Downloading', download_percent: 40 }];
+		listed = [{ source: 'omlx', name: 'Local model', state: 'needs_setup', eligible: true, local_state: 'downloading', download_percent: 40 }];
 		await render();
 		await vi.waitFor(() => expect(host.querySelector('section')).toBeNull());
 		listed = [{ source: 'omlx', name: 'Local model', state: 'ready' }];

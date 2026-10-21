@@ -9,6 +9,7 @@ import asyncio
 from dataclasses import replace
 import json
 import logging
+import os
 from pathlib import Path
 import shutil
 import sqlite3
@@ -570,7 +571,7 @@ def test_ordered_policy_api_and_thread_ownership(client_refuses_unsigned_api, ac
     assert response.json()["disabled"] == [legacy["id"]]
     payload = client_refuses_unsigned_api.get("/api/provider-policy?project_id=destination-project").json()
     saved = next(item for item in payload["providers"] if item["provider_key"] == "codex")
-    assert {key: saved[key] for key in ("provider_key", "capabilities", "rollover", "order", "disabled", "revision", "scope")} == response.json()
+    assert saved == response.json()
     assert client_refuses_unsigned_api.put(route, json=body).status_code == 409
     assert client_refuses_unsigned_api.get("/api/projects/missing/vendor-accounts/codex").status_code == 404
     assert client_refuses_unsigned_api.put("/api/provider-policy/codex?project_id=missing", json=body).status_code == 409
@@ -578,6 +579,33 @@ def test_ordered_policy_api_and_thread_ownership(client_refuses_unsigned_api, ac
     db.execute("UPDATE threads SET user_id='someone-else' WHERE id='destination'")
     db.commit()
     assert client_refuses_unsigned_api.get("/api/threads/destination/vendor-account").status_code == 404
+
+
+def test_policy_put_returns_the_matching_get_provider_entry_in_workspace_and_project_scopes(
+        client, accounts):
+    _db, legacy, second, third = accounts
+    workspace_body = {
+        "rollover": True, "order": [third["id"], second["id"]], "disabled": [legacy["id"]],
+        "expected_revision": 0,
+    }
+    workspace_response = client.put("/api/provider-policy/codex", json=workspace_body)
+    assert workspace_response.status_code == 200
+    workspace_entry = next(provider for provider in client.get("/api/provider-policy").json()["providers"]
+                           if provider["provider_key"] == "codex")
+    assert workspace_response.json()["units"] == workspace_entry["units"]
+    assert workspace_response.json() == workspace_entry
+
+    project_body = {
+        "rollover": False, "order": [second["id"], third["id"]], "disabled": [legacy["id"]],
+        "expected_revision": workspace_response.json()["revision"],
+    }
+    project_response = client.put("/api/provider-policy/codex?project_id=destination-project", json=project_body)
+    assert project_response.status_code == 200
+    project_payload = client.get("/api/provider-policy?project_id=destination-project").json()
+    assert project_payload["use_workspace"] is False
+    project_entry = next(provider for provider in project_payload["providers"] if provider["provider_key"] == "codex")
+    assert project_response.json()["units"] == project_entry["units"]
+    assert project_response.json() == project_entry
 
 
 def test_person_account_pin_ignores_the_runtime_epoch_holds_a_busy_choice_and_keeps_vendor_refusals(
@@ -1393,6 +1421,12 @@ def test_unknown_existing_regular_or_retargeted_path_is_never_relinked(accounts,
     assert auth.stat() == before
 
 
+def _link_identity(path: Path) -> tuple:
+    """The link left in place, not replaced. Reading it can move its access time, so that is left out."""
+    st = path.lstat()
+    return st.st_ino, st.st_dev, st.st_mode, st.st_size, st.st_mtime_ns, st.st_ctime_ns, os.readlink(path)
+
+
 def test_first_exact_link_can_be_adopted_after_establishment_crash(accounts, tmp_path):
     from connections.vendor_accounts import get_account
 
@@ -1401,9 +1435,9 @@ def test_first_exact_link_can_be_adopted_after_establishment_crash(accounts, tmp
     home.mkdir()
     auth = home / 'auth.json'
     auth.symlink_to(Path(custom['source_home']) / 'auth.json')
-    before = auth.lstat()
+    before = _link_identity(auth)
     _establish(db, custom, receipt, home, 'discovery')
-    assert auth.lstat() == before
+    assert _link_identity(auth) == before
     assert get_account(custom['id'], db=db)['discovery']['auth_projection']['homes'][str(auth)]['phase'] == 'established'
 
 
@@ -1443,8 +1477,8 @@ def test_fresh_login_cleanup_is_fenced_and_never_deletes_new_projection(accounts
     assert cleanup_stale(current, quiesced=True, db=db)
     assert not auth.exists()
     _establish(db, updated, current)
-    before = auth.lstat()
+    before = _link_identity(auth)
     assert not cleanup_stale(old, quiesced=True, db=db)
-    assert auth.lstat() == before
+    assert _link_identity(auth) == before
     validate_projection(current, home=auth.parent, db=db)
     assert get_account(custom['id'], db=db)['discovery']['auth_projection']['stale'] == []

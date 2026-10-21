@@ -3,9 +3,11 @@ import {
 	_resetFirstRunLandingForTests,
 	conductorScopeParam,
 	fetchConductor,
+	fetchCorsiaAgent,
+	fetchScopeTarget,
 	firstRunLanding,
 	landOnFirstRun,
-	workspaceConductorId,
+	corsiaAgentId,
 } from '../conductor';
 import type { UiScope } from '$lib/stores/uiScope';
 import { get } from 'svelte/store';
@@ -23,7 +25,7 @@ afterEach(() => {
 	globalThis.fetch = originalFetch;
 	activeThreadId.set(null);
 	activeModelId.set(null);
-	workspaceConductorId.set(null);
+	corsiaAgentId.set(null);
 	_resetThreadModelTruthForTests();
 });
 
@@ -50,6 +52,17 @@ describe('conductorScopeParam', () => {
 });
 
 describe('fetchConductor', () => {
+	it('reads a project scope from the conductor route, not the CORSIA agent route', async () => {
+		globalThis.fetch = vi.fn(async () => ({
+			ok: true,
+			json: async () => ({ scope: 'proj-123', thread_id: null, target: null }),
+		})) as unknown as typeof fetch;
+
+		await fetchConductor('tok', { id: 'proj-123', name: 'CORSIA', color: '#7c5cff' });
+
+		expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe('/api/conductor?token=tok&scope=proj-123');
+	});
+
 	it('preserves the backend target model for hidden conductor hydration', async () => {
 		globalThis.fetch = vi.fn(async () => ({
 			ok: true,
@@ -80,25 +93,26 @@ describe('fetchConductor', () => {
 			},
 			firstRunPending: false,
 		});
-		// A project conductor is never the workspace conductor.
-		expect(get(workspaceConductorId)).toBeNull();
+		// A project conductor is never the CORSIA agent.
+		expect(get(corsiaAgentId)).toBeNull();
 	});
 
-	it('reads first_run_pending and records the workspace conductor', async () => {
+	it('reads first_run_pending and records the CORSIA agent', async () => {
 		globalThis.fetch = vi.fn(async () => ({
 			ok: true,
 			json: async () => ({
 				scope: 'workspace',
 				thread_id: 'cond-w',
 				first_run_pending: true,
-				target: { thread_id: 'cond-w', title: 'Conductor' },
+				target: { thread_id: 'cond-w', title: 'CORSIA' },
 			}),
 		})) as unknown as typeof fetch;
 
-		const lookup = await fetchConductor('tok', null);
+		const lookup = await fetchCorsiaAgent('tok');
 
 		expect(lookup).toMatchObject({ kind: 'target', firstRunPending: true });
-		expect(get(workspaceConductorId)).toBe('cond-w');
+		expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toMatch(/^\/api\/corsia-agent\?token=tok$/);
+		expect(get(corsiaAgentId)).toBe('cond-w');
 	});
 
 	it('accepts the conductor model as thread truth, so the open conductor rebinds the picker', async () => {
@@ -106,7 +120,7 @@ describe('fetchConductor', () => {
 		activeModelId.set('claude-code/opus');
 		mockConductorTarget('codex/gpt-5-codex', '2026-06-18T00:00:00');
 
-		await fetchConductor('tok', null);
+		await fetchCorsiaAgent('tok');
 
 		expect(get(activeModelId)).toBe('codex/gpt-5-codex');
 	});
@@ -116,7 +130,7 @@ describe('fetchConductor', () => {
 		acceptThreadModelTruth('cond-1', 'omlx/newer', '2026-06-19T00:00:00');
 		mockConductorTarget('codex/gpt-5-codex', '2026-06-18T00:00:00');
 
-		await fetchConductor('tok', null);
+		await fetchCorsiaAgent('tok');
 
 		expect(get(activeModelId)).toBe('omlx/newer');
 	});
@@ -126,7 +140,7 @@ describe('fetchConductor', () => {
 		activeModelId.set('claude-code/opus');
 		mockConductorTarget('codex/gpt-5-codex', undefined);
 
-		await fetchConductor('tok', null);
+		await fetchCorsiaAgent('tok');
 
 		expect(get(activeModelId)).toBe('claude-code/opus');
 	});
@@ -137,7 +151,7 @@ describe('fetchConductor', () => {
 			json: async () => ({ scope: 'workspace', thread_id: null, target: null }),
 		})) as unknown as typeof fetch;
 
-		await expect(fetchConductor('tok', null)).resolves.toEqual({ kind: 'absent' });
+		await expect(fetchCorsiaAgent('tok')).resolves.toEqual({ kind: 'absent' });
 	});
 
 	it('reports unknown on a failed transport, never absent', async () => {
@@ -145,21 +159,37 @@ describe('fetchConductor', () => {
 			throw new TypeError('network down');
 		}) as unknown as typeof fetch;
 
-		await expect(fetchConductor('tok', null)).resolves.toEqual({ kind: 'unknown' });
+		await expect(fetchCorsiaAgent('tok')).resolves.toEqual({ kind: 'unknown' });
 	});
 
 	it('reports unknown on a non-OK response, never absent', async () => {
 		globalThis.fetch = vi.fn(async () => ({ ok: false, status: 500 })) as unknown as typeof fetch;
 
-		await expect(fetchConductor('tok', null)).resolves.toEqual({ kind: 'unknown' });
+		await expect(fetchCorsiaAgent('tok')).resolves.toEqual({ kind: 'unknown' });
 	});
 
 	it('reports unknown without a token and never calls the API', async () => {
 		const fetchMock = vi.fn() as unknown as typeof fetch;
 		globalThis.fetch = fetchMock;
 
-		await expect(fetchConductor(null, null)).resolves.toEqual({ kind: 'unknown' });
+		await expect(fetchCorsiaAgent(null)).resolves.toEqual({ kind: 'unknown' });
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+});
+
+describe('fetchScopeTarget', () => {
+	it('reads the CORSIA agent for the workspace and the conductor for a project', async () => {
+		globalThis.fetch = vi.fn(async () => ({
+			ok: true,
+			json: async () => ({ thread_id: null, target: null }),
+		})) as unknown as typeof fetch;
+
+		await fetchScopeTarget('tok', null);
+		await fetchScopeTarget('tok', { id: 'proj-123', name: 'CORSIA', color: '#7c5cff' });
+
+		const urls = vi.mocked(globalThis.fetch).mock.calls.map((call) => String(call[0]));
+		expect(urls[0]).toMatch(/^\/api\/corsia-agent\?/);
+		expect(urls[1]).toMatch(/^\/api\/conductor\?.*&scope=proj-123$/);
 	});
 });
 
@@ -168,7 +198,7 @@ describe('firstRunLanding', () => {
 	const settled = { ...pending, firstRunPending: false } as const;
 	const home = { scope: null, activeThreadId: null, landed: false };
 
-	it('lands on the workspace conductor only while its first run is pending', () => {
+	it('lands on the CORSIA agent only while its first run is pending', () => {
 		expect(firstRunLanding(pending, home)).toBe('cond-w');
 		expect(firstRunLanding(settled, home)).toBeNull();
 		expect(firstRunLanding({ kind: 'absent' }, home)).toBeNull();

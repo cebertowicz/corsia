@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 
 type SeedComment = { anchor: string; body: string };
@@ -117,7 +118,7 @@ async function openDocument(page: Page, testInfo: TestInfo, motion: Motion, name
 	if (size.width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
 	await expect(page.locator('.cm-content')).toBeVisible();
-	await expect(page.getByRole('button', { name: commentsButton(comments.length), exact: true })).toBeEnabled();
+	await expect(page.getByRole('button', { name: commentsButton(comments.length) })).toBeEnabled();
 	// The editor mounts before the text arrives; no line can be found until it has, and scrolls in the editor.
 	const opening = text.split('\n')[0].replace(/^#+ /, '');
 	await expect.poll(() => page.locator('.cm-scroller').evaluate((scroller, opening) => ({
@@ -139,8 +140,8 @@ async function openDocument(page: Page, testInfo: TestInfo, motion: Motion, name
 	return `${size.width}x${size.height}, ${motion.name}`;
 }
 
-function commentsButton(count: number): string {
-	return `${count} comment${count === 1 ? '' : 's'}`;
+function commentsButton(count: number): RegExp {
+	return new RegExp(`^${count} open thread${count === 1 ? '' : 's'}\\b`);
 }
 
 /**
@@ -321,12 +322,21 @@ for (const motion of MOTIONS) {
 
 		// Opening the comments list resizes the editor; the first click lands before anything scrolls.
 		await locateLine(page, 'qx-a-plain', true);
-		await page.getByRole('button', { name: commentsButton(comments.length), exact: true }).click();
+		await page.getByRole('button', { name: commentsButton(comments.length) }).click();
 		const list = page.getByRole('region', { name: 'Document comments', exact: true });
 		await expect(list).toBeVisible();
-		await clickLine(page, viewport, { marker: 'qx-a-plain', note: 'comments list just opened, nothing scrolled', scroll: false });
-		for (const marker of ['qx-a-code', 'qx-a-own', 'qx-a-cmt']) await clickLine(page, viewport, { marker, note: 'comments list open' });
-		await list.getByRole('button', { name: 'Done', exact: true }).click();
+		// The adaptive comments drawer overlays the document at widths where it cannot use a side column. Where it covers
+		// the place a clicked line rests at, the document cannot be clicked until it closes; elsewhere the clicks land.
+		const sheetCovers = await page.evaluate((place) => {
+			const scroller = document.querySelector('.cm-scroller')!.getBoundingClientRect();
+			const hit = document.elementFromPoint(scroller.left + scroller.width / 2, scroller.top + scroller.height * place);
+			return !!hit?.closest('[data-adaptive-drawer]');
+		}, PLACE);
+		if (!sheetCovers) {
+			await clickLine(page, viewport, { marker: 'qx-a-plain', note: 'comments list just opened, nothing scrolled', scroll: false });
+			for (const marker of ['qx-a-code', 'qx-a-own', 'qx-a-cmt']) await clickLine(page, viewport, { marker, note: 'comments list open' });
+		}
+		await list.getByRole('button', { name: 'Close comments', exact: true }).click();
 		await expect(list).toHaveCount(0);
 
 		await clickCommentedText(page, viewport, 'qx-a-own');

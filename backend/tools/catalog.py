@@ -23,11 +23,16 @@ TOOL_PACKS: dict[str, str] = {
     "history": "History",
     "memory": "Knowledge and lessons",
     "projects": "Projects and repositories",
-    "conductor": "Conductor setup: CORSIA API and instruction files",
+    "coordination": "Coordination setup: CORSIA API and instruction files",
     "host": "Host access, audit, and processes",
     "browser": "Browser",
     "automations": "Automations",
     "web": "Web",
+    "google": "Email and calendar",
+    "microsoft": "Microsoft sign-in",
+    "microsoft_mail": "Microsoft mail",
+    "microsoft_calendar": "Microsoft calendar",
+    "microsoft_files": "Microsoft files",
 }
 _CATEGORY_PACKS: dict[str, str] = {
     "plans": "plans",
@@ -37,11 +42,16 @@ _CATEGORY_PACKS: dict[str, str] = {
     "history": "history",
     "memory": "memory",
     "projects": "projects",
-    "conductor": "conductor",
+    "coordination": "coordination",
     "host_access": "host",
     "browser": "browser",
     "automations": "automations",
     "web": "web",
+    "google": "google",
+    "microsoft": "microsoft",
+    "microsoft_mail": "microsoft_mail",
+    "microsoft_calendar": "microsoft_calendar",
+    "microsoft_files": "microsoft_files",
 }
 
 
@@ -128,9 +138,9 @@ def advertised_tool_definitions(registry: ToolRegistry) -> tuple[dict, ...]:
     Native, Claude Code (MCP bridge) and Codex (dynamic tools) all send
     exactly this: registered core tools and explicitly always-loaded configured
     MCP tools, sorted by name, each a detached copy. Other tools stay reachable
-    through ``tools_load`` and
-    ``tool_call``, so the list changes only when the registry does: an MCP
-    import (``tools.mcp_runtime.reload_mcp_runtime``) is the one such change.
+    through ``tools_load`` and ``tool_call``, so the list changes only when the
+    registry does: an MCP approved connected-app runtime changes are the only
+    source of such updates.
     """
     definitions = []
     for definition in registry.get_definitions():
@@ -144,5 +154,19 @@ def advertised_tool_definitions(registry: ToolRegistry) -> tuple[dict, ...]:
             if not (tool is not None and tool.user_configured and tool.always_advertised):
                 continue
         definitions.append(deepcopy(definition))
+    definitions.sort(key=lambda definition: definition["function"]["name"])
+    return tuple(definitions)
+
+
+def fork_tool_definitions(
+    registry: ToolRegistry, tool_allowlist: frozenset[str],
+) -> tuple[dict, ...]:
+    """Disclose only a disposable fork's fixed tools through the catalog boundary."""
+    source = registry.get_definitions()
+    definitions = [
+        deepcopy(definition)
+        for definition in source
+        if definition["function"]["name"] in tool_allowlist
+    ]
     definitions.sort(key=lambda definition: definition["function"]["name"])
     return tuple(definitions)

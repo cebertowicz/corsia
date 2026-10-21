@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from doceditor import comments, doc_images, feedback_batches, image_regions
+from doceditor import comments, doc_images, feedback_batches, image_regions, review_feedback, review_lifecycle
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
@@ -36,6 +36,7 @@ class CommentInput:
     live_capture: bool = False
     registration: dict | None = None
     submit: bool = False
+    review_request_id: str | None = None
     # A checked (x, y, w, h) in fractions of the image (DCOL-FR13.3).
     region: tuple[float, float, float, float] | None = None
 
@@ -109,7 +110,24 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 review=request.review, replacement=request.replacement, client_id=identifier,
                 region=request.region, image_rev=image_rev, image_src=image_src, db=connection,
             )
-            feedback = feedback_batches.record_comment(connection, row, created=created, submit=request.submit)
+            if request.review_request_id is not None:
+                review_lifecycle.admit_feedback(
+                    connection, request.review_request_id, author_kind=request.author_kind,
+                    author_id=request.author_thread_id, artifact_id=artifact_id,
+                )
+            feedback = feedback_batches.record_comment(
+                connection, row, created=created,
+                submit=request.submit and request.review_request_id is None,
+            )
+            if request.review_request_id is not None and request.submit:
+                _pending, woken, undelivered = review_feedback.submit_fork_feedback(
+                    connection, request.review_request_id, request.author_thread_id, artifact_id,
+                )
+                feedback["woken"].extend(woken)
+                known = {batch["id"] for batch in feedback["undelivered_batches"]}
+                feedback["undelivered_batches"].extend(
+                    batch for batch in undelivered if batch["id"] not in known
+                )
         return row, registered, feedback
     except BaseException:
         receipt.failed(identifier, db, artifact_id=request.artifact_id, author=request.author)

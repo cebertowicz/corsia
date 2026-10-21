@@ -1,26 +1,40 @@
-"""Bounded, server-side MCP configuration discovery and import.
+"""Bounded, server-side MCP configuration discovery and Connected Apps import.
 
-Only documented user configuration files are read. Detection returns server names
-and kinds; raw configuration stays inside this module until a selected server is
-copied into CORSIA's canonical tools.mcpServers setting.
+Detection exposes only app/source/name/kind/place metadata.  Selection accepts
+only source/name pairs; configuration and credentials are reread locally and
+never returned to the caller.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import tomllib
 from typing import Any
 
+from connections.app_source_folder import clean_folder_label
 from tools import mcp_secrets
 from tools.mcp_config import MCPConfigError, allowed_names, http_options, timeout_seconds
+import tools.mcp_import_agents as mcp_import_agents
+from tools.mcp_import_reach import project_reach
 
 _SOURCE_LABELS = {
     "claude_desktop": "Claude Desktop",
     "claude_code": "Claude Code",
     "cursor": "Cursor",
     "codex": "Codex",
+    "openclaw": "OpenClaw",
+    "hermes": "Hermes Agent",
 }
+log = logging.getLogger("corsia.key_audit")
+
+# The import conversation is assembled from these canonical person-facing lines.
+IMPORT_NONE_FOUND = "I didn't find any apps to bring over from Claude Code, Claude Desktop, Cursor, Codex, OpenClaw or Hermes Agent."
+IMPORT_UNSUPPORTED = "CORSIA can't connect to that kind of app yet."
+IMPORT_FOLDER_WAITING_FOR_PLACE = "**{App}**: not working yet. Choose where it works, then approve it."
+IMPORT_KEY_STAYS_IN_CODEX = "Its key stays in Codex, so you'll set it in Settings › Keys after it comes over."
 
 
 def _home() -> Path:
@@ -38,6 +52,7 @@ def _paths(home: Path | None = None) -> dict[str, Path]:
         "claude_code": home / ".claude.json",
         "cursor": home / ".cursor" / "mcp.json",
         "codex": codex_home / "config.toml",
+        **{source: mcp_import_agents.config_path(source, home) for source in mcp_import_agents.SOURCES},
     }
 
 
@@ -66,12 +81,16 @@ def _json_servers(path: Path, key: str = "mcpServers") -> dict[str, dict[str, An
 def _kind(source: str, config: dict[str, Any]) -> str | None:
     command, url = config.get("command"), config.get("url")
     declared = config.get("type")
+    if source in mcp_import_agents.SOURCES:
+        return mcp_import_agents.kind(config)
     if source == "claude_code":
         if declared == "sdk" or (isinstance(url, str) and not declared):
             return None
         if declared in {None, "stdio"} and isinstance(command, str) and command:
             return "stdio"
-        if declared in {"http", "streamable-http", "sse", "ws"} and isinstance(url, str) and url:
+        if declared == "ws" and isinstance(url, str) and url:
+            return "unsupported"
+        if declared in {"http", "streamable-http", "sse"} and isinstance(url, str) and url:
             return "remote"
         return None
     if source == "claude_desktop":
@@ -87,25 +106,96 @@ def _kind(source: str, config: dict[str, Any]) -> str | None:
     return None
 
 
-def _source_servers(source: str, path: Path) -> dict[str, dict[str, Any]]:
+def _has_refused_proxy_authorization(config: dict[str, Any]) -> bool:
+    """Treat proxy credentials as an unsupported import, never a token prompt."""
+    headers = config.get("headers", config.get("http_headers"))
+    return isinstance(headers, dict) and any(
+        isinstance(name, str) and name.lower() == "proxy-authorization" for name in headers
+    )
+
+
+def _needs_sign_in(source: str, config: dict[str, Any]) -> bool:
+    """Whether a remote app is imported as one that may need a sign-in once approved."""
+    if _kind(source, config) != "remote":
+        return False
+    if "oauth" in config or mcp_import_agents.needs_sign_in(source, config):
+        return True
+    headers = config.get("headers", config.get("http_headers"))
+    if isinstance(headers, dict):
+        if source in mcp_import_agents.SOURCES and mcp_import_agents.has_reference(headers):
+            return False
+        _clean, lifted = mcp_secrets.split_secrets("import", {"headers": headers}, headers=True)
+        if lifted:
+            return False
+    if source == "codex" and ("bearer_token_env_var" in config or "env_http_headers" in config):
+        return False
+    # A remote app with no key may be public: it waits for approval like any import,
+    # and the connect decides. With no grant `OAuthGrantAuth` sends nothing, so a
+    # public app just connects and one that wants a sign-in asks for it then.
+    return True
+
+
+def _source_entries(source: str, path: Path) -> list[tuple[str, dict[str, Any], Path | None]]:
+    """Read just supported MCP config subtrees; a folder is never exposed whole."""
     if not path.is_file():
-        return {}
+        return []
+    if source in mcp_import_agents.SOURCES:
+        return mcp_import_agents.entries(source, path)
+    result: list[tuple[str, dict[str, Any], Path | None]] = []
     if source == "codex":
         servers = _read_toml(path).get("mcp_servers")
-        return {name: config for name, config in servers.items()
-                if isinstance(name, str) and isinstance(config, dict)} if isinstance(servers, dict) else {}
-    return _json_servers(path)
+        if isinstance(servers, dict):
+            for name, config in servers.items():
+                if isinstance(name, str) and isinstance(config, dict):
+                    result.append((name, config, None))
+        return result
+    if source != "claude_code":
+        return [(name, config, None) for name, config in _json_servers(path).items()]
+
+    document = _read_json(path)
+    global_servers = document.get("mcpServers")
+    if isinstance(global_servers, dict):
+        for name, config in global_servers.items():
+            if isinstance(name, str) and isinstance(config, dict):
+                result.append((name, config, None))
+    projects = document.get("projects")
+    if not isinstance(projects, dict):
+        return result
+    for folder, project in projects.items():
+        if not isinstance(folder, str) or not isinstance(project, dict):
+            continue
+        servers = project.get("mcpServers")
+        if not isinstance(servers, dict):
+            continue
+        for name, config in servers.items():
+            if isinstance(name, str) and isinstance(config, dict):
+                result.append((name, config, Path(folder)))
+    return result
+
+
+def _normalized_config(config: dict[str, Any]) -> str:
+    return json.dumps(config, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def detected_sources(home: Path | None = None) -> list[dict[str, Any]]:
     """Return the safe, bounded source view used by the conductor."""
     results = []
     for source, path in _paths(home).items():
-        servers = [
-            {"name": name, "kind": kind}
-            for name, config in _source_servers(source, path).items()
-            if (kind := _kind(source, config)) is not None
-        ]
+        servers: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for name, config, folder in _source_entries(source, path):
+            kind = _kind(source, config)
+            if kind is None:
+                continue
+            digest = hashlib.sha256(_normalized_config(config).encode()).hexdigest()
+            if digest in seen:
+                continue
+            seen.add(digest)
+            item: dict[str, str] = {"name": name, "kind": kind}
+            if folder is not None:
+                # Path.name is the only persisted/displayed part of a project path.
+                item["folder"] = clean_folder_label(folder.name or folder.resolve(strict=False).name) or ""
+            servers.append(item)
         if servers:
             results.append({"source": source, "app": _SOURCE_LABELS[source], "servers": servers})
     return results
@@ -114,7 +204,9 @@ def detected_sources(home: Path | None = None) -> list[dict[str, Any]]:
 def _copyable_config(source: str, config: dict[str, Any]) -> dict[str, Any]:
     kind = _kind(source, config)
     if kind is None:
-        raise MCPConfigError("server configuration is unsupported")
+        raise MCPConfigError("app configuration is unsupported")
+    if kind == "unsupported":
+        raise MCPConfigError(IMPORT_UNSUPPORTED)
     copied: dict[str, Any] = {}
     if kind == "stdio":
         copied["command"] = config["command"]
@@ -124,90 +216,173 @@ def _copyable_config(source: str, config: dict[str, Any]) -> dict[str, Any]:
             copied["env"] = config["env"]
     else:
         copied["url"] = config["url"]
+        declared = mcp_import_agents.transport(config) if source in mcp_import_agents.SOURCES else config.get("type")
+        copied["transport"] = "sse" if declared == "sse" else "http"
         headers = config.get("headers", config.get("http_headers"))
         if headers is not None:
             copied["headers"] = headers
+    if source == "codex" and ("bearer_token_env_var" in config or "env_http_headers" in config):
+        copied["needs_token"] = True
+        mcp_secrets.declare_codex_keys(config, copied)
     for source_key, target_key in (("connect_timeout", "connect_timeout"),
                                    ("startup_timeout_sec", "connect_timeout"),
                                    ("tool_timeout", "tool_timeout"),
                                    ("tool_timeout_sec", "tool_timeout")):
         if source_key in config:
             copied[target_key] = config[source_key]
+    mcp_import_agents.complete(source, config, copied)
     return copied
 
 
 def _validate(server: str, config: dict[str, Any]) -> None:
-    """Validate the config as it will be saved: credential values become key store references."""
-    config, _ = mcp_secrets.split_secrets(server, config)
-    allowed_names(config)
-    timeout_seconds(config, "connect_timeout", 10)
-    timeout_seconds(config, "tool_timeout", 30)
-    if config.get("url"):
-        http_options(config)
-    elif not isinstance(config.get("command"), str) or config.get("bearer_file"):
-        raise MCPConfigError("configure an HTTP URL or a stdio command without bearer_file")
+    """Validate a config after credentials have been lifted into references."""
+    clean, _ = mcp_secrets.split_secrets(server, config, headers=True)
+    allowed_names(clean)
+    timeout_seconds(clean, "connect_timeout", 10)
+    timeout_seconds(clean, "tool_timeout", 30)
+    if clean.get("url"):
+        http_options(clean)
+    elif not isinstance(clean.get("command"), str) or clean.get("bearer_file"):
+        raise MCPConfigError("configure an HTTP URL or a stdio command")
+
+
+def _selected_entry(source: str, name: str, home: Path | None) -> tuple[dict[str, Any], Path | None] | None:
+    path = _paths(home).get(source)
+    if path is None:
+        return None
+    for candidate_name, config, folder in _source_entries(source, path):
+        if candidate_name == name:
+            return config, folder
+    return None
 
 
 def prepare_import(selected: list[dict[str, str]], home: Path | None = None) -> tuple[dict[str, dict[str, Any]], list[dict[str, str]]]:
     """Select validated configs without returning any configuration values."""
-    paths = _paths(home)
-    available = {source: _source_servers(source, path) for source, path in paths.items()}
-    name_counts: dict[str, int] = {}
-    for item in selected:
-        name = item.get("name")
-        if isinstance(name, str):
-            name_counts[name] = name_counts.get(name, 0) + 1
     additions: dict[str, dict[str, Any]] = {}
     statuses: list[dict[str, str]] = []
+    names = [item.get("name") for item in selected if isinstance(item, dict)]
     for item in selected:
         source, name = item.get("source"), item.get("name")
-        if source not in _SOURCE_LABELS or not isinstance(name, str):
-            statuses.append({"name": str(name or "unknown"), "status": "failed: invalid selected server"})
+        if set(item) != {"source", "name"} or source not in _SOURCE_LABELS or not isinstance(name, str):
+            statuses.append({"name": str(name or "unknown"), "status": "failed: select an app by source and name"})
             continue
-        if name_counts[name] > 1:
-            statuses.append({"name": name, "status": "failed: selected server name conflicts with another selection"})
+        if names.count(name) > 1:
+            statuses.append({"name": name, "status": "failed: selected app name conflicts with another selection"})
             continue
-        config = available[source].get(name)
-        if config is None:
-            statuses.append({"name": name, "status": "failed: server was not found in that client"})
+        entry = _selected_entry(source, name, home)
+        if entry is None:
+            statuses.append({"name": name, "status": "failed: app was not found in that client"})
             continue
+        config, _folder = entry
         kind = _kind(source, config)
         try:
             copied = _copyable_config(source, config)
             _validate(name, copied)
-        except MCPConfigError as error:
-            statuses.append({"name": name, "kind": kind or "unknown", "status": f"failed: {error}"})
+        except MCPConfigError:
+            statuses.append({"name": name, "kind": kind or "unknown", "status": "failed"})
             continue
         additions[name] = copied
         statuses.append({"name": name, "kind": kind or "unknown", "status": "pending"})
     return additions, statuses
 
 
-def save_import(additions: dict[str, dict[str, Any]]) -> dict[str, str]:
-    """Merge selected configs and classify existing names in one transaction.
+def _key_refs(app_id: str, config: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+    clean, lifted = mcp_secrets.split_secrets(app_id, config, headers=True)
+    refs = [
+        {"kind": kind, "name": name}
+        for field, kind in (("secret_env", "env"), ("secret_headers", "header"))
+        for name in clean.pop(field, [])
+    ]
+    return {**clean, "key_refs": refs}, lifted
 
-    A new server's credential values go to the key store and its config keeps
-    references. A name already set up is never overwritten, and its stored
-    credentials are left as they are.
+
+def _sign_in_config(app_id: str, source: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Keep a hosted app's web settings while discarding its prior credentials."""
+    copied = _copyable_config(source, config)
+    copied.pop("needs_token", None)
+    copied.pop("secret_headers", None)
+    copied.pop(mcp_secrets.HEADER_SCHEMES, None)
+    clean, _discarded = mcp_secrets.split_secrets(app_id, copied, headers=True)
+    clean.pop("secret_env", None)
+    clean.pop("secret_headers", None)
+    clean.pop(mcp_secrets.HEADER_SCHEMES, None)
+    return {**clean, "key_refs": []}
+
+
+def audit_import_key_write(actor: str, source: str, name: str) -> None:
+    """Audit import key writes without emitting the value or generated key name."""
+    log.info("key import: actor=%s source=%s app=%s", actor, source, name)
+
+
+def import_selected(
+    selected: list[dict[str, str]], *, db, home: Path | None = None, actor: str = "unknown",
+) -> dict[str, object]:
+    """Create approval-gated Connected Apps from locally reread source/name pairs.
+
+    This is deliberately the only import writer. It never reads or writes the
+    retired ``tools.mcpServers`` setting.
     """
+    from connections.app_lifecycle import create_pending_app
+    from connections.app_reach import AppNameOverlapError
+    from infra import key_store
     from infra.database import write_transaction
-    from infra.settings import get_setting, set_setting
+    import uuid
 
-    outcomes: dict[str, str] = {}
-    with write_transaction(None, scope="import_mcp_servers") as db:
-        tools = get_setting("tools", db=db) or {}
-        servers = tools.get("mcpServers", {})
-        servers = dict(servers) if isinstance(servers, dict) else {}
-        for name, config in additions.items():
-            clean, lifted = mcp_secrets.split_secrets(name, config)
-            if name not in servers:
-                mcp_secrets.store_secrets(lifted, db=db)
-                servers[name] = clean
-                outcomes[name] = "saved"
-            elif servers[name] == clean and mcp_secrets.stored_matches(lifted, db=db):
-                outcomes[name] = "existing_equal"
+    if not isinstance(selected, list) or any(not isinstance(item, dict) for item in selected):
+        raise MCPConfigError("select apps by source and name")
+    rows: list[dict[str, str]] = []
+    names = [item.get("name") for item in selected]
+    for item in selected:
+        source, name = item.get("source"), item.get("name")
+        if set(item) != {"source", "name"} or source not in _SOURCE_LABELS or not isinstance(name, str):
+            raise MCPConfigError("select apps by source and name")
+        if names.count(name) > 1:
+            rows.append({"name": name, "status": "failed"})
+            continue
+        entry = _selected_entry(source, name, home)
+        if entry is None:
+            rows.append({"name": name, "status": "failed"})
+            continue
+        source_config, folder = entry
+        if _kind(source, source_config) == "unsupported" or _has_refused_proxy_authorization(source_config):
+            rows.append({"name": name, "status": "cannot_connect"})
+            continue
+        reach, outside_folder = project_reach(folder, db=db)
+        if reach is None:
+            # The folder is display-only: it reaches nothing until the person chooses a place (G-P1).
+            reach = {"mode": "selected", "project_ids": [], "outside_projects": False}
+        try:
+            app_id = str(uuid.uuid4())
+            lifted: dict[str, str]
+            if _needs_sign_in(source, source_config):
+                # A hosted app that signs in waits for approval like any import and brings no keys;
+                # its first connect after approval asks the person to sign in (C-R1).
+                config, lifted = _sign_in_config(app_id, source, source_config), {}
+                _validate(app_id, config)
             else:
-                outcomes[name] = "conflict"
-        tools["mcpServers"] = servers
-        set_setting("tools", tools, db=db)
-    return outcomes
+                config, lifted = _key_refs(app_id, _copyable_config(source, source_config))
+                _validate(app_id, {**config, "secret_env": [ref["name"] for ref in config["key_refs"] if ref["kind"] == "env"],
+                                   "secret_headers": [ref["name"] for ref in config["key_refs"] if ref["kind"] == "header"]})
+            with write_transaction(db, scope="mcp_import"):
+                result = create_pending_app(
+                    name, config, reach, actor_thread_id=actor, app_id=app_id,
+                    source_folder=outside_folder, audit_actor=("agent", actor), db=db,
+                )
+                for entry_name, value in lifted.items():
+                    key_store.set_managed_value(entry_name, value, db=db)
+                    audit_import_key_write(actor, _SOURCE_LABELS[source], name)
+            row = {"id": str(result["id"]), "name": name, "state": "awaiting_approval"}
+            if outside_folder is not None:
+                row["folder"] = clean_folder_label(outside_folder) or ""
+                row["message"] = IMPORT_FOLDER_WAITING_FOR_PLACE.format(App=name)
+            rows.append(row)
+        except AppNameOverlapError:
+            rows.append({"name": name, "status": "already_exists"})
+        except (MCPConfigError, key_store.KeyStoreError):
+            rows.append({"name": name, "status": "failed"})
+    return {"rows": rows}
+
+
+def save_import(_additions: dict[str, dict[str, Any]]) -> dict[str, str]:
+    """Refuse the retired settings-backed writer; import_selected is canonical."""
+    raise MCPConfigError("add the app in Connected apps")

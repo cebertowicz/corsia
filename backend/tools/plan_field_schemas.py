@@ -70,7 +70,7 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": ["string", "null"],
         "enum": [*SIZE_CLASSES, None],
         "description": (
-            f"{SIZE_TOOL_PREFIX}{SIZE_SCALE_DESCRIPTION}. Set it on every task you add."
+            f"{SIZE_TOOL_PREFIX}{SIZE_SCALE_DESCRIPTION}. Required on every task."
         ),
     },
     "difficulty_rerated": {
@@ -293,6 +293,7 @@ DECISION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "string",
         "minLength": 1,
         "maxLength": public.DECISION_MAX_RATIONALE,
+        "description": "Why you recommend it: the one point that clinches it, in a sentence or two. Not a second tradeoff.",
     },
     "options": {
         "type": "array",

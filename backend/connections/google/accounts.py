@@ -1,0 +1,97 @@
+"""Which Google account one call uses, checked against the caller's reach on every call.
+
+An agent names the account by ``account_id`` or by the address the person
+used. With no name, a caller with one reachable account uses it; otherwise the
+call returns a clarification listing the accounts this caller can reach. Every error text
+here is fixed and safe to show. Only the accounts that reach the caller are
+ever searched, so an out-of-reach account named by id or address gets exactly
+the answer a name that matches nothing gets, and a caller that reaches no
+account gets ``NONE_AVAILABLE``, which claims nothing about where any account works.
+Only when no Google account exists at all does it say to connect one.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+
+from connections.connected_accounts import GOOGLE_PROVIDER, list_accounts, visible_accounts
+from connections.google.client import (
+    NOT_CONNECTED, SIGN_IN_RECOVERY, STATUS_CONNECTED, STATUS_NEEDS_SIGN_IN, GoogleError,
+)
+
+NONE_AVAILABLE = (
+    "No Google account is available here. If one should be, ask the person to change Where it works "
+    "on its row in Connected apps."
+)
+CHOOSE = (
+    "Pass account_id to say which Google account to use: {choices}. If the person hasn't said "
+    "which account, ask them; never pick one for them."
+)
+# Never echoes the name, so the answer is byte-identical whichever unusable name was passed.
+UNKNOWN = "No Google account matches that name. Pass account_id as one of: {choices}."
+SIGNED_OUT = (
+    "{address} is signed out. Ask the person to use Sign in on its row in Connected apps, or call "
+    "google_connect with this account_id and post its reply verbatim followed by its link as "
+    "[Open it in Connected apps](<link>)."
+)
+UNAVAILABLE = "{address} isn't available right now. Try again later."
+ACCOUNT_PARAM = {
+    "type": "string",
+    "description": (
+        "The Google account to use: its account_id from google_status, or the address the person "
+        "named. Required when the person has more than one account; with none given, the result "
+        "lists the accounts you can use."
+    ),
+}
+
+
+def thread_key(account_id: str, gmail_thread_id: object) -> str | None:
+    """The CORSIA email-thread id: Gmail's thread id is local to one mailbox, so it is namespaced."""
+    if not isinstance(gmail_thread_id, str) or not gmail_thread_id:
+        return None
+    return f"google:{account_id}:thread:{gmail_thread_id}"
+
+
+def _choices(accounts: list[dict]) -> str:
+    return ", ".join(f"{account['address']} (account_id {account['id']})" for account in accounts)
+
+
+def _usable(account: dict) -> dict:
+    state = account["state"]
+    if state == STATUS_CONNECTED:
+        return account
+    if state == STATUS_NEEDS_SIGN_IN:
+        raise GoogleError(f"{account['address']}: {SIGN_IN_RECOVERY}")
+    if state == "signed_out":
+        raise GoogleError(SIGNED_OUT.format(address=account["address"]))
+    raise GoogleError(UNAVAILABLE.format(address=account["address"]))
+
+
+def resolve_for_thread(selector: object, thread_id: object, *, db: sqlite3.Connection | None = None) -> dict:
+    """The one reachable connected account ``selector`` names; else a fixed refusal."""
+    if db is None:
+        from infra.database import get_db
+
+        connection = get_db()
+        try:
+            return resolve_for_thread(selector, thread_id, db=connection)
+        finally:
+            connection.close()
+    if not list_accounts(GOOGLE_PROVIDER, db=db):
+        raise GoogleError(NOT_CONNECTED)
+    caller = thread_id if isinstance(thread_id, str) and thread_id else None
+    reachable = visible_accounts(caller, db=db, provider=GOOGLE_PROVIDER) if caller is not None else []
+    if not reachable:
+        raise GoogleError(NONE_AVAILABLE)
+    listed = _choices(reachable)
+    if selector is None or (isinstance(selector, str) and not selector.strip()):
+        if len(reachable) == 1:
+            return _usable(reachable[0])
+        raise GoogleError(CHOOSE.format(choices=listed))
+    wanted = selector.strip() if isinstance(selector, str) else ""
+    named = [account for account in reachable if account["id"] == wanted] or [
+        account for account in reachable if str(account["address"]).strip().lower() == wanted.lower()
+    ]
+    if len(named) != 1:
+        raise GoogleError(CHOOSE.format(choices=listed) if named else UNKNOWN.format(choices=listed))
+    return _usable(named[0])

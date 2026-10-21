@@ -66,6 +66,8 @@ _DEFAULT_PR_INFO = {
     "baseRefName": "dev",
     "baseRefOid": "base123def",
     "headRefOid": "abc123def",
+    "headRepoFullName": "owner/repo",
+    "baseRepoFullName": "owner/repo",
     "labels": [],
     "title": "Contain reviewer scope",
     "body": "## Scope\nOnly review the changed release slice.",

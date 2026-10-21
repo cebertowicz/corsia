@@ -1,19 +1,19 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import {
-		loadSettings,
-		updateSettings,
-		updateStatus,
-		loadUpdateStatus,
-	} from '$lib/stores/settings';
+
 	import { readSystemVersion, restartSystem, waitForSystemRestart } from '$lib/stores/settingsSystemRestart';
-	import { logout, token as authToken } from '$lib/stores/auth';
+	import { logout } from '$lib/stores/auth';
+	import { toasts } from '$lib/stores/toast';
 	import { themeSetting, type ThemeSetting } from '$lib/stores/theme';
 	import { Button } from '$lib/components/ui';
 	import FocusModeSetting from './FocusModeSetting.svelte';
+	import SettingsUpdate from './SettingsUpdate.svelte';
+	import { updateInFlight } from '$lib/update/store';
 	import HostAccessReviewSetting from './HostAccessReviewSetting.svelte';
-	import { plainResponseError } from '$lib/plainError';
-	import { reloadWithCacheBust } from '$lib/version';
+	import SettingsDevices from './SettingsDevices.svelte';
+	import { disconnectRemote, shellInfo } from '$lib/remoteShell';
+	import { connectOpen } from '$lib/stores/remoteConnect';
+	import { settingsAnchor } from '$lib/stores/settingsNavigation';
 
 	const themeOpts: { v: ThemeSetting; l: string }[] = [
 		{ v: 'light', l: 'Light' },
@@ -29,8 +29,7 @@
 	let settingsError = $state('');
 	let restartMode = $state<'restart' | null>(null);
 	let restartInProgress = $state(false);
-	let updateConfirm = $state(false);
-	let updateInProgress = $state(false);
+
 	let lifecycleProgress = $state('');
 	let lifecycleElapsedSeconds = $state(0);
 	let lifecycleTimer: ReturnType<typeof setInterval> | null = null;
@@ -54,43 +53,6 @@
 
 	onDestroy(finishLifecycle);
 
-	const updateAvailable = $derived($updateStatus?.available === true);
-	const behindLabel = $derived.by(() => {
-		const behind = $updateStatus?.commits_behind;
-		if (behind == null) return 'New version available';
-		return `${behind} commit${behind === 1 ? '' : 's'} behind`;
-	});
-
-	async function updateAndRestartServer() {
-		updateInProgress = true;
-		settingsError = '';
-		startLifecycle('Preparing update…');
-		try {
-			const before = await readSystemVersion();
-			const result = await restartSystem('update');
-			if (!result.ok) {
-				settingsError = result.message ?? 'Update failed before restart.';
-				return;
-			}
-			lifecycleProgress = 'Draining active work…';
-			const completed = await waitForSystemRestart(
-				'update',
-				before,
-				result.operation_id,
-				(message) => lifecycleProgress = message,
-			);
-			if (!completed.ok) {
-				settingsError = completed.message ?? 'Update did not finish.';
-				return;
-			}
-			updateConfirm = false;
-			await loadUpdateStatus(true);
-			reloadWithCacheBust();
-		} finally {
-			updateInProgress = false;
-			finishLifecycle();
-		}
-	}
 
 	async function restartServer(mode: 'restart' = 'restart') {
 		restartInProgress = true;
@@ -105,7 +67,6 @@
 			}
 			lifecycleProgress = 'Draining active work…';
 			const completed = await waitForSystemRestart(
-				mode,
 				before,
 				result.operation_id,
 				(message) => lifecycleProgress = message,
@@ -121,25 +82,27 @@
 		}
 	}
 
-	let accountConfirm = $state<'logout' | 'reset-url' | null>(null);
+	let accountConfirm = $state<'logout' | 'disconnect' | null>(null);
 	let accountInProgress = $state(false);
-	let isTauri = $state(false);
-	$effect(() => {
-		if (typeof window !== 'undefined') {
-			isTauri = !!((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__);
-		}
-	});
+	// Only the desktop app can connect to, or leave, another computer; a browser and the phone app have no shell.
+	const shell = shellInfo();
+	const remoteName = shell?.mode === 'remote' ? shell.name : null;
 
-	async function resetServerUrl() {
-		const tauri = (window as any).__TAURI_INTERNALS__ ?? (window as any).__TAURI__;
-		const invoke = tauri?.invoke ?? (window as any).__TAURI__?.core?.invoke;
-		if (!invoke) {
-			settingsError = 'Tauri runtime not available — open in the desktop shell.';
-		return;
-	}
-	await invoke('reset_server_url');
-	await logout();
-	window.location.href = 'tauri://localhost';
+	/** Signs this app out, then forgets the computer; the shell opens Welcome. Nothing on the other computer changes. */
+	async function disconnect() {
+		accountInProgress = true;
+		try {
+			await logout();
+			await disconnectRemote();
+		} catch {
+			const message = 'CORSIA couldn’t disconnect from this computer. Sign in and try again.';
+			settingsError = message;
+			// Signing out comes first, so this page may already be replaced by sign-in; a toast outlives it.
+			toasts.show(message, 'error', 8000);
+		} finally {
+			accountConfirm = null;
+			accountInProgress = false;
+		}
 	}
 
 	function memoryColor(pressure: string): string {
@@ -152,7 +115,7 @@
 
 <div class="section-header">
 	<h2>System</h2>
-	<p>Backend controls and system health.</p>
+	<p>Controls and health for this computer.</p>
 </div>
 
 {#if settingsError}
@@ -172,28 +135,27 @@
 
 <HostAccessReviewSetting onError={(message) => settingsError = message} />
 
-<div class="settings-card" data-settings-anchor="restart">
+<div class="settings-card" data-settings-anchor="update" use:settingsAnchor={'update'}>
+	<h3>Updates</h3>
+	<p class="card-desc">Keep CORSIA current.</p>
+	<div class="service-grid"><SettingsUpdate /></div>
+</div>
+
+<div class="settings-card" data-settings-anchor="restart" use:settingsAnchor={'restart'}>
 	<h3>Services</h3>
-	<p class="card-desc">Restart drains and bounces the current build. Update pulls the current branch, checks dependencies, and rebuilds before restarting.</p>
+	<p class="card-desc">Restart drains and bounces the current build.</p>
 
 	<div class="service-grid">
 		<div class="service-row">
 			<span class="service-name">Server</span>
-			<span class="service-status up">Running</span>
+			<span class="service-status up">Running{#if $updateInFlight}<span class="restart-unavailable">Unavailable while an update runs</span>{/if}</span>
 			<div class="service-actions">
-				{#if updateConfirm}
-					<span class="confirm-text">Update + restart?</span>
-					<Button variant="danger" size="sm" disabled={updateInProgress} onclick={updateAndRestartServer}>{updateInProgress ? 'Updating…' : 'Confirm'}</Button>
-					<Button variant="ghost" size="sm" onclick={() => updateConfirm = false}>Cancel</Button>
-				{:else if restartMode === 'restart'}
+				{#if restartMode === 'restart'}
 					<span class="confirm-text">Drain + restart?</span>
 					<Button variant="danger" size="sm" disabled={restartInProgress} onclick={() => restartServer()}>{restartInProgress ? 'Draining…' : 'Confirm'}</Button>
 					<Button variant="ghost" size="sm" onclick={() => restartMode = null}>Cancel</Button>
 				{:else}
-					{#if updateAvailable}
-						<Button variant="primary" size="sm" onclick={() => updateConfirm = true}>Update</Button>
-					{/if}
-					<Button size="sm" onclick={() => restartMode = 'restart'}>Restart</Button>
+					<Button size="sm" disabled={$updateInFlight} title={$updateInFlight ? 'Restart is unavailable while CORSIA updates.' : undefined} onclick={() => restartMode = 'restart'}>Restart</Button>
 				{/if}
 			</div>
 		</div>
@@ -204,25 +166,13 @@
 				<div class="service-actions"></div>
 			</div>
 		{/if}
-		{#if updateAvailable}
-			<div class="service-row update-row">
-				<span class="service-name">Update available</span>
-				<span class="service-status">{behindLabel} on {$updateStatus?.branch}</span>
-				<div class="service-actions"></div>
-			</div>
-		{:else if $updateStatus?.error}
-			<div class="service-row">
-				<span class="service-name">Update check</span>
-				<span class="service-status">{$updateStatus.error}</span>
-				<div class="service-actions"></div>
-			</div>
-		{/if}
+
 	</div>
 </div>
 
 <div class="settings-card">
 	<h3>Account</h3>
-	<p class="card-desc">Sign out of this CORSIA instance, or {isTauri ? 'reset the desktop shell back to the server picker' : 'sign in again with a different token'}.</p>
+	<p class="card-desc">Sign out of this CORSIA instance and return to its login screen.</p>
 
 	<div class="service-grid">
 		<div class="service-row">
@@ -238,29 +188,38 @@
 				{/if}
 			</div>
 		</div>
-		{#if isTauri}
-			<div class="service-row">
-				<span class="service-name">Reset URL</span>
-				<span class="service-status">Forgets this server and reopens the CORSIA picker.</span>
+
+		{#if remoteName}
+			<div class="service-row" data-testid="account-computer">
+				<span class="service-name">Computer</span>
+				<span class="service-status">Connected to {remoteName}</span>
 				<div class="service-actions">
-					{#if accountConfirm !== 'reset-url'}
-						<Button size="sm" onclick={() => accountConfirm = 'reset-url'}>Reset</Button>
+					{#if accountConfirm !== 'disconnect'}
+						<Button size="sm" onclick={() => accountConfirm = 'disconnect'}>Disconnect</Button>
 					{:else}
-						<span class="confirm-text">Reset and reopen picker?</span>
-						<Button variant="danger" size="sm" disabled={accountInProgress} onclick={async () => {
-							accountInProgress = true;
-							try { await resetServerUrl(); }
-							catch (e) { settingsError = String(e); }
-							accountConfirm = null;
-							accountInProgress = false;
-						}}>{accountInProgress ? 'Resetting…' : 'Confirm'}</Button>
+						<Button variant="danger" size="sm" disabled={accountInProgress} onclick={disconnect}>Disconnect</Button>
 						<Button variant="ghost" size="sm" onclick={() => accountConfirm = null}>Cancel</Button>
 					{/if}
 				</div>
+				{#if accountConfirm === 'disconnect'}
+					<div class="confirm-block" role="group" aria-label="Disconnect from {remoteName}?">
+						<span class="confirm-text">Disconnect from {remoteName}?</span>
+						<span class="service-status">Your work stays on {remoteName}. This app signs out and returns to setup.</span>
+					</div>
+				{/if}
+			</div>
+		{:else if shell}
+			<div class="service-row" data-testid="account-computer">
+				<span class="service-name">Computer</span>
+				<span class="service-status">This computer</span>
+				<div class="service-actions"><Button size="sm" onclick={() => connectOpen.set(true)}>Connect to another computer</Button></div>
 			</div>
 		{/if}
+
 	</div>
 </div>
+
+<SettingsDevices />
 
 {#if systemStatus?.memory}
 	<div class="settings-card">
@@ -296,7 +255,7 @@
 	.theme-opts { display: inline-flex; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 2px; gap: 2px; }
 	.theme-opt { padding: 6px 16px; border-radius: var(--radius-xs); background: none; border: none; cursor: pointer; font-family: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
 	.theme-opt:hover { color: var(--text-primary); }
-	.theme-opt.active { background: var(--accent); color: #fff; }
+	.theme-opt.active { background: var(--accent-fill); color: var(--accent-on-fill); }
 	.settings-card h3 { font-size: var(--text-callout); font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
 	.card-desc { font-size: var(--text-subhead); color: var(--text-muted); margin: 0 0 16px; line-height: 1.5; }
 	.settings-error { background: color-mix(in srgb, var(--red) 10%, transparent); border: 1px solid color-mix(in srgb, var(--red) 30%, transparent); color: var(--red); border-radius: var(--radius-xs); padding: 10px 14px; font-size: var(--text-subhead); margin-bottom: 16px; }
@@ -305,10 +264,12 @@
 	.service-name { font-size: var(--text-subhead); font-weight: 500; min-width: 70px; }
 	.service-status { font-size: var(--text-footnote); color: var(--text-tertiary); }
 	.service-status.up { color: var(--green); }
+	.restart-unavailable { display: block; color: var(--text-tertiary); }
 	.service-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-	.card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
-	.confirm-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
 	.confirm-text { font-size: var(--text-subhead); color: var(--text-secondary); }
+	.confirm-block { flex-basis: 100%; display: flex; flex-direction: column; gap: calc(var(--space-1) / 2); order: -1; }
+	.service-row:has(.confirm-block) { flex-wrap: wrap; }
 	.status-grid { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding: 12px; background: var(--bg-primary); border-radius: var(--radius-xs); border: 1px solid var(--border-subtle); }
 	.status-row { display: flex; align-items: center; gap: 12px; font-size: var(--text-subhead); }
 	.status-label { color: var(--text-muted); width: 120px; flex-shrink: 0; }

@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+from core.checkpoint_types import CheckpointProviderForkRequest
+
 import asyncio
 import json
 from dataclasses import replace
 
 import pytest
+from core import fork_runtime
 
-from core.checkpoint_types import (
-    CheckpointRequest,
-    ProviderCheckpointRequest,
-    ProviderCheckpointResult,
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
+from core.fork_types import (
+    ProviderForkRequest,
+    ProviderForkResult,
 )
+from core.checkpoint_types import CheckpointRequest
 from llm.resolution import ExecutionTarget
 
 
@@ -80,9 +84,9 @@ def _checkpoint(thread_id: str, checkpoint_id: str) -> CheckpointRequest:
     )
 
 
-def _provider(thread_id: str, checkpoint_id: str) -> ProviderCheckpointRequest:
-    return ProviderCheckpointRequest(
-        checkpoint_id=checkpoint_id,
+def _provider(thread_id: str, checkpoint_id: str) -> ProviderForkRequest:
+    return CheckpointProviderForkRequest(
+        fork_id=checkpoint_id,
         thread_id=thread_id,
         target=_target(),
         instruction="Write one checkpoint.",
@@ -95,9 +99,11 @@ def _provider(thread_id: str, checkpoint_id: str) -> ProviderCheckpointRequest:
 async def _clean_runtime():
     from core import checkpoint_runtime
 
-    await checkpoint_runtime.shutdown_checkpoint_tasks()
+    await fork_runtime.shutdown_forks()
+    await checkpoint_runtime.shutdown_checkpoint_wakes()
     yield
-    await checkpoint_runtime.shutdown_checkpoint_tasks()
+    await fork_runtime.shutdown_forks()
+    await checkpoint_runtime.shutdown_checkpoint_wakes()
 
 
 @pytest.mark.asyncio
@@ -114,7 +120,7 @@ async def test_active_checkpoint_coalesces_without_another_admission(
         nonlocal calls
         calls += 1
         await _wait_for(release, cancel)
-        return ProviderCheckpointResult("body", None)
+        return ProviderForkResult("body", None)
 
     monkeypatch.setattr(runtime, "_invoke", invoke)
     first = await runtime.request_checkpoint(
@@ -136,7 +142,7 @@ async def test_non_admission_creates_no_row_or_queued_work(isolated_db, trigger)
     _seed("declined")
     request = replace(_checkpoint("declined", "cp-declined"), trigger=trigger)
 
-    with pytest.raises(runtime.CheckpointNotAdmitted):
+    with pytest.raises(runtime.ForkNotAdmitted):
         await runtime.request_checkpoint(request, None)
 
     db = get_db()
@@ -144,7 +150,7 @@ async def test_non_admission_creates_no_row_or_queued_work(isolated_db, trigger)
         assert db.execute("SELECT COUNT(*) FROM checkpoints").fetchone()[0] == 0
     finally:
         db.close()
-    assert runtime.checkpoint_task_count() == 0
+    assert fork_runtime.fork_task_count() == 0
 
 
 @pytest.mark.asyncio
@@ -159,7 +165,7 @@ async def test_result_is_captured_before_install_and_then_wakes_thread(
     real_install = store.install
 
     async def invoke(_request, _cancel):
-        return ProviderCheckpointResult(
+        return ProviderForkResult(
             "paid body",
             {"input_tokens": 101},
             diagnostic="provider process exited after usable output",
@@ -265,7 +271,7 @@ async def test_checkpoint_persists_one_per_call_usage_shape_for_all_harnesses_an
     )
 
     async def invoke(_request, _cancel):
-        return ProviderCheckpointResult("paid body", provider_usage)
+        return ProviderForkResult("paid body", provider_usage)
 
     monkeypatch.setattr(runtime, "_invoke", invoke)
 
@@ -288,7 +294,7 @@ async def test_install_appends_and_broadcasts_one_completion_receipt(
     broadcasts = []
 
     async def invoke(_request, _cancel):
-        return ProviderCheckpointResult("paid body", None)
+        return ProviderForkResult("paid body", None)
 
     async def broadcast(thread_id, message_ids):
         broadcasts.append((thread_id, message_ids))
@@ -356,7 +362,7 @@ async def test_checkpoint_completion_does_not_wait_for_thread_redrive(
     wake_done = asyncio.Event()
 
     async def invoke(_request, _cancel):
-        return ProviderCheckpointResult("paid body", None)
+        return ProviderForkResult("paid body", None)
 
     async def blocked_redrive(_thread_id):
         wake_entered.set()
@@ -429,7 +435,7 @@ async def test_cancel_before_task_dispatch_never_starts_provider(
     async def invoke(_request, _cancel):
         nonlocal calls
         calls += 1
-        return ProviderCheckpointResult("should not run", None)
+        return ProviderForkResult("should not run", None)
 
     monkeypatch.setattr(runtime, "_invoke", invoke)
     await runtime.request_checkpoint(
@@ -453,7 +459,7 @@ async def test_cancelling_a_joiner_detaches_from_independent_checkpoint(
 
     async def invoke(_request, cancel):
         await _wait_for(release, cancel)
-        return ProviderCheckpointResult("body", None)
+        return ProviderForkResult("body", None)
 
     monkeypatch.setattr(runtime, "_invoke", invoke)
     await runtime.request_checkpoint(
@@ -465,7 +471,7 @@ async def test_cancelling_a_joiner_detaches_from_independent_checkpoint(
     with pytest.raises(asyncio.CancelledError):
         await joiner
 
-    assert runtime.checkpoint_task_count() == 1
+    assert fork_runtime.fork_task_count() == 1
     assert (await runtime._read("cp-1")).status == "running"
     release.set()
     assert (await runtime.await_checkpoint("cp-1")).status == "installed"
@@ -490,11 +496,73 @@ async def test_provider_failure_is_one_terminal_row(isolated_db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_task_exit_before_capture_is_failed(isolated_db, monkeypatch):
+    from core import checkpoint_runtime as runtime
+
+    _seed("thread-1")
+
+    async def invoke(_request, _cancel):
+        return ProviderForkResult("body", None)
+
+    async def capture_failure(_checkpoint_id, _result):
+        raise RuntimeError("capture persistence failed")
+
+    monkeypatch.setattr(runtime, "_invoke", invoke)
+    monkeypatch.setattr(runtime, "CHECKPOINT_KIND", replace(CHECKPOINT_KIND, end_handler=capture_failure))
+    await runtime.request_checkpoint(
+        _checkpoint("thread-1", "cp-1"), _provider("thread-1", "cp-1")
+    )
+
+    record = await runtime.await_checkpoint("cp-1")
+
+    assert (record.status, record.error) == ("failed", "capture persistence failed")
+
+
+@pytest.mark.asyncio
+async def test_install_failure_ends_the_attempt_failed_without_retry(
+    isolated_db, monkeypatch,
+):
+    from core import checkpoint_runtime as runtime
+    from infra import checkpoints as store
+
+    _seed("thread-1")
+    real_install = store.install
+    installs: list[str] = []
+
+    async def invoke(_request, _cancel):
+        return ProviderForkResult("body", None)
+
+    def install(checkpoint_id, **kwargs):
+        installs.append(checkpoint_id)
+        if checkpoint_id == "cp-1":
+            raise RuntimeError("install persistence failed")
+        return real_install(checkpoint_id, **kwargs)
+
+    monkeypatch.setattr(runtime, "_invoke", invoke)
+    monkeypatch.setattr(store, "install", install)
+    await runtime.request_checkpoint(
+        _checkpoint("thread-1", "cp-1"), _provider("thread-1", "cp-1")
+    )
+
+    record = await runtime.await_checkpoint("cp-1")
+
+    assert (record.status, record.error) == ("failed", "install persistence failed")
+    assert record.raw_result == "body"
+    assert store.reconcile_startup(reconciled_at="t9") == ()
+    fresh = await runtime.request_checkpoint(
+        _checkpoint("thread-1", "cp-fresh"), _provider("thread-1", "cp-fresh")
+    )
+    assert fresh.id == "cp-fresh"
+    assert (await runtime.await_checkpoint("cp-fresh")).status == "installed"
+    assert installs == ["cp-1", "cp-fresh"]
+
+
+@pytest.mark.asyncio
 async def test_blank_transport_fails_even_with_staged_edits(
     isolated_db, monkeypatch
 ):
     from core import checkpoint_runtime as runtime
-    from core.checkpoint_types import ProviderCheckpointRejected
+    from core.fork_types import ProviderForkRejected
 
     _seed("thread-1")
 
@@ -510,7 +578,7 @@ async def test_blank_transport_fails_even_with_staged_edits(
             db.commit()
         finally:
             db.close()
-        raise ProviderCheckpointRejected("empty envelope")
+        raise ProviderForkRejected("empty envelope")
 
     monkeypatch.setattr(runtime, "_invoke", no_body)
     await runtime.request_checkpoint(
@@ -548,7 +616,7 @@ async def test_truncated_cutoff_with_no_new_text_fails_despite_prior_narrative(
     _seed("thread-1")
 
     async def first_invoke(_request, _cancel):
-        return ProviderCheckpointResult("first narrative", None)
+        return ProviderForkResult("first narrative", None)
 
     monkeypatch.setattr(runtime, "_invoke", first_invoke)
     await runtime.request_checkpoint(
@@ -574,7 +642,7 @@ async def test_truncated_cutoff_with_no_new_text_fails_despite_prior_narrative(
         db.close()
 
     async def second_invoke(_request, _cancel):
-        return ProviderCheckpointResult("", None, "checkpoint_context_truncated")
+        return ProviderForkResult("", None, "checkpoint_context_truncated")
 
     monkeypatch.setattr(runtime, "_invoke", second_invoke)
     second_request = replace(
@@ -618,9 +686,9 @@ async def test_cold_invoke_adds_frozen_continuity_index_after_creation(
 
     async def invoke(request, _cancel, **_kwargs):
         captured["instruction"] = request.instruction
-        return ProviderCheckpointResult("body", None)
+        return ProviderForkResult("body", None)
 
-    monkeypatch.setattr("core.checkpoint_native_fork.invoke_checkpoint", invoke)
+    monkeypatch.setattr("core.fork_native.invoke_fork", invoke)
     request = replace(
         _provider("thread-1", "cp-1"),
         cold_source=cold_source(thread_id="thread-1"),
@@ -638,9 +706,9 @@ async def test_cold_invoke_adds_frozen_continuity_index_after_creation(
 @pytest.mark.parametrize(
     ("harness", "adapter"),
     [
-        ("native", "core.checkpoint_native_fork"),
-        ("claude-code", "core.checkpoint_cc_fork"),
-        ("codex", "core.checkpoint_codex_fork"),
+        ("native", "core.fork_native"),
+        ("claude-code", "core.fork_cc"),
+        ("codex", "core.fork_codex"),
     ],
 )
 async def test_placement_is_decided_by_the_fork_on_the_threads_model_and_effort(
@@ -668,9 +736,9 @@ async def test_placement_is_decided_by_the_fork_on_the_threads_model_and_effort(
 
     async def invoke(request, _cancel, **_kwargs):
         captured["request"] = request
-        return ProviderCheckpointResult("body", None)
+        return ProviderForkResult("body", None)
 
-    monkeypatch.setattr(f"{adapter}.invoke_checkpoint", invoke)
+    monkeypatch.setattr(f"{adapter}.invoke_fork", invoke)
     monkeypatch.setattr(
         "core.placement_answer.history", lambda db, thread_id, entry: [],
     )
@@ -707,9 +775,10 @@ async def test_shutdown_cancels_and_joins_every_exact_checkpoint(
             _provider(thread_id, f"cp-{thread_id}"),
         )
 
-    await runtime.shutdown_checkpoint_tasks()
+    await fork_runtime.shutdown_forks()
+    await runtime.shutdown_checkpoint_wakes()
 
-    assert runtime.checkpoint_task_count() == 0
+    assert fork_runtime.fork_task_count() == 0
     assert (await runtime.await_checkpoint("cp-one")).status == "cancelled"
     assert (await runtime.await_checkpoint("cp-two")).status == "cancelled"
 

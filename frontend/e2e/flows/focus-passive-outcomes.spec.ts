@@ -1,10 +1,16 @@
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { seedOutcomes, readStates, expectObservedNoUpdate, openOutcomeThread, focusSetting, expandLoadedWork, assertPassiveGeometry, appendClosure, assertOutcomeOrder, assertOutcomeSidebar } from '../support/focusOutcomeProof';
+import { setFocusMode } from '../support/focusMode';
 
 for (const width of [1280, 393]) for (const theme of ['dark', 'light']) {
 	test.describe(`outcomes ${width} ${theme}`, () => {
 		test.use({ viewport: { width, height: 1000 }, hasTouch: width === 393, timezoneId: 'America/Los_Angeles' });
+		// Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
+		test.afterEach(async ({ request }) => {
+			await setFocusMode(request, true);
+		});
 		test(`@surface:focus-outcomes passive composition, query, touch and keyboard ${width} ${theme}`, async ({ page, request }, info) => {
 			test.setTimeout(120_000);
 			let nudged = false;
@@ -44,7 +50,8 @@ for (const width of [1280, 393]) for (const theme of ['dark', 'light']) {
 			expect(stored).toEqual(proof.fixture.times.filter((_, i) => i !== 6));
 			await page.keyboard.press('Tab');
 			await assertPassiveGeometry(page);
-			const node = page.locator('.passive-outcomes button.node').first();
+			// PassiveOutcomeList.svelte: a node row is a `button.row` that expands in place; its detail has Open in plan.
+			const node = page.locator('.passive-outcomes button.row').first();
 			await node.focus();
 			expect(await node.evaluate(element => getComputedStyle(element).outlineStyle)).toBe('solid');
 			const disclosure = page.locator('.passive-toggle').first(); await disclosure.focus();
@@ -70,7 +77,8 @@ for (const width of [1280, 393]) for (const theme of ['dark', 'light']) {
 			await focusSetting(page, true);
 			await openOutcomeThread(page, proof.titles[0]);
 			await page.reload();
-			await expect(page.locator('.messages')).toBeVisible();
+			// A reload lands on Activity once the first run is over, so the shell is the ready signal.
+			await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible();
 			await openOutcomeThread(page, proof.titles[0]);
 			await expandLoadedWork(page);
 			await expect(page.locator('.passive-outcomes')).toHaveCount(4);
@@ -78,6 +86,8 @@ for (const width of [1280, 393]) for (const theme of ['dark', 'light']) {
 			await expectObservedNoUpdate(request, main);
 			await page.locator('.passive-toggle').first().click();
 			await node.focus(); await page.keyboard.press('Enter');
+			await expect(node).toHaveAttribute('aria-expanded', 'true');
+			await page.getByRole('button', { name: 'Open in plan' }).first().click();
 			await expect(page.getByText('Renamed after outcome', { exact: true })).toBeVisible();
 			await saveEvidenceScreenshot(page, info, `outcomes-${width}-${theme}-node-navigation`, { fullPage: false });
 			await page.goto('/_design/focus-outcomes');

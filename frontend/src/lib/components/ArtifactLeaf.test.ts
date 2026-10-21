@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
 		leaveDocFeedback: vi.fn(),
 		returnDocFeedback: vi.fn(),
 		retryDocFeedback: vi.fn(),
+		restoreDocumentPlace: vi.fn(),
 		setComments(value: Record<string, unknown[]>) {
 			comments = value;
 			for (const run of subscribers) run(comments);
@@ -57,9 +58,10 @@ vi.mock('$lib/stores/docCommentArrivals', () => ({
 	releaseCommentArrival: () => {},
 	releaseCommentArrivals: () => {},
 }));
-vi.mock('$lib/stores/docComments', () => ({
+vi.mock('$lib/stores/docComments', async () => ({
 	docComments: mocks.docComments,
 	commentLoads: { subscribe(run: (value: Record<string, unknown>) => void) { run({}); return () => {}; } },
+	hasNewReplies: (await import('$lib/stores/docCommentProjection')).hasNewReplies,
 	rangeFor: mocks.rangeFor,
 	remapComments: () => {},
 	loadComments: mocks.loadComments,
@@ -67,6 +69,11 @@ vi.mock('$lib/stores/docComments', () => ({
 	resolveComment: mocks.resolveComment,
 	ackComment: mocks.ackComment,
 	flushPositions: vi.fn(),
+}));
+
+vi.mock('$lib/documentImagePlace', async (importOriginal) => ({
+	...await importOriginal<typeof import('$lib/documentImagePlace')>(),
+	restoreDocumentPlace: mocks.restoreDocumentPlace,
 }));
 
 import ArtifactLeaf from './ArtifactLeaf.svelte';
@@ -83,7 +90,7 @@ import { setWs } from '$lib/ws/state';
 import { connectionState } from '$lib/stores/connection';
 import { LIVE_OPEN_WAIT_MS, startLiveDocuments } from '$lib/stores/liveDocuments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
-import { closeDocumentImage, documentImageViewers } from '$lib/stores/documentImageViewer';
+import { recordTabDocumentPlace, tabDocumentImage, tabViewState } from '$lib/stores/tabViewState';
 import { EditorView } from '@codemirror/view';
 
 let host: HTMLElement;
@@ -185,6 +192,7 @@ beforeEach(() => {
 	mocks.leaveDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
 	mocks.returnDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
 	mocks.retryDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
+	mocks.restoreDocumentPlace.mockReset().mockResolvedValue(undefined);
 	mocks.setComments({});
 	resetDocPresenceForTests();
 	liveOpens.length = 0;
@@ -287,18 +295,28 @@ describe('ArtifactLeaf legacy discussion compatibility', () => {
 describe('ArtifactLeaf in-canvas comments', () => {
 	it('shows an orphan marker and opens its list inside the canvas without changing the right pane', async () => {
 		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
-		mocks.fetchContent.mockResolvedValue({ text: 'Changed document', revision: 'r-1', writable: true, artifact: { id: 'art-comments' } });
-		mocks.setComments({ 'art-comments': [{ id: 'orphan', from: 0, to: 5, anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
-		openArtifactTab(THREAD, { path: '/comments.md', title: 'comments.md' });
-		render();
-		await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('title')).toBe("1 comment couldn't be placed"));
-		paneOpen.set(true);
-		host.querySelector<HTMLButtonElement>('.comment-status')!.click();
-		flushSync();
-		expect(host.querySelector('.doc [data-doc-comments-drawer]')).not.toBeNull();
-		expect(host.querySelector('.popover')).toBeNull();
-		expect(host.querySelector('[data-adaptive-drawer]')).toBeNull();
-		expect(get(paneOpen)).toBe(true);
+		// jsdom lays nothing out, so give the document column the width a wide canvas has: wide enough for the inline drawer.
+		const measure = HTMLElement.prototype.getBoundingClientRect;
+		const wide = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+			const rect = measure.call(this);
+			return this.classList.contains('doc') ? { ...rect, width: 1000, right: rect.left + 1000 } as DOMRect : rect;
+		});
+		try {
+			mocks.fetchContent.mockResolvedValue({ text: 'Changed document', revision: 'r-1', writable: true, artifact: { id: 'art-comments' } });
+			mocks.setComments({ 'art-comments': [{ id: 'orphan', from: 0, to: 5, anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
+			openArtifactTab(THREAD, { path: '/comments.md', title: 'comments.md' });
+			render();
+			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('title')).toBe("1 comment couldn't be placed"));
+			paneOpen.set(true);
+			host.querySelector<HTMLButtonElement>('.comment-status')!.click();
+			flushSync();
+			expect(host.querySelector('.doc [data-doc-comments-drawer]')).not.toBeNull();
+			expect(document.body.querySelector('.popover')).toBeNull();
+			expect(host.querySelector('[data-adaptive-drawer]')).toBeNull();
+			expect(get(paneOpen)).toBe(true);
+		} finally {
+			wide.mockRestore();
+		}
 	});
 
 	it('omits the amber marker when every thread remains anchored', async () => {
@@ -311,19 +329,19 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		expect(host.querySelector('.orphan-status')).toBeNull();
 	});
 
-	it('uses the local canvas drawer for the comment list on a narrow viewport without changing the right pane', async () => {
+	it('opens the comment list as a sheet contained by the document column on a narrow viewport without changing the right pane', async () => {
 		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 500 });
 		mocks.fetchContent.mockResolvedValue({ text: 'Document', revision: 'r-1', writable: true, artifact: { id: 'art-narrow' } });
 		mocks.setComments({ 'art-narrow': [{ id: 'comment', from: 0, to: 1, anchor: 'D', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
 		openArtifactTab(THREAD, { path: '/narrow.md', title: 'narrow.md' });
 		render('compact');
-		await vi.waitFor(() => expect(host.querySelector('.comment-status')).not.toBeNull());
+		// The pill sits in the header from the first frame and stays disabled until the comments load.
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('.comment-status')?.disabled).toBe(false));
 		paneOpen.set(false);
 		host.querySelector<HTMLButtonElement>('.comment-status')!.click();
 		flushSync();
-		expect(host.querySelector('.doc [data-doc-comments-drawer]')).not.toBeNull();
-		expect(host.querySelector('.popover')).toBeNull();
-		expect(host.querySelector('[data-adaptive-drawer]')).toBeNull();
+		expect(document.querySelector('[data-adaptive-drawer].within [data-doc-comments-drawer]')).not.toBeNull();
+		expect(document.body.querySelector('.popover')).toBeNull();
 		expect(get(paneOpen)).toBe(false);
 	});
 
@@ -454,7 +472,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		}
 	});
 
-	it('shows the viewer first and keeps same-title agent avatars and cursors separate', async () => {
+	it('shows only the other participants and keeps same-title agent avatars and cursors separate', async () => {
 		mocks.fetchContent.mockResolvedValue({ text: 'alpha beta gamma', revision: 'r-1', writable: true, artifact: { id: 'art-presence' } });
 		const at = new Date().toISOString();
 		recordDocActivity({ type: 'doc_activity', artifact_id: 'art-presence', thread_id: 'agent-a', agent: 'Reviewer', kind: 'read', span: { from: 0, to: 5 }, comment_id: null, revision: 'r-1', at });
@@ -462,7 +480,8 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		openArtifactTab(THREAD, { path: '/presence.md', title: 'presence.md' });
 		render();
 		await vi.waitFor(() => expect(host.querySelector('.presence-row')).not.toBeNull());
-		expect(host.querySelector('.presence-row .avatar')?.getAttribute('aria-label')).toBe('You');
+		// The viewer alone says nothing the viewer does not know, so no "You" avatar.
+		expect([...host.querySelectorAll('.presence-row .avatar')].map((avatar) => avatar.getAttribute('aria-label'))).not.toContain('You');
 		expect([...host.querySelectorAll<HTMLElement>('.participant-trigger')].map((row) => row.dataset.participantId)).toEqual(['agent-a', 'agent-b']);
 		expect([...host.querySelectorAll<HTMLElement>('.cm-presence-cursor')].map((row) => row.dataset.threadId)).toEqual(['agent-a', 'agent-b']);
 		expect(host.querySelector('.presence-row')?.textContent?.toLowerCase()).not.toContain('now');
@@ -470,6 +489,65 @@ describe('ArtifactLeaf in-canvas comments', () => {
 });
 
 describe('ArtifactLeaf load-status ownership', () => {
+	it('cancels an interrupted tab-return restore before it can change the next tab', async () => {
+		let continueRestore: (() => void) | undefined;
+		const firstLoad = deferred<{ text: string; revision: string; writable: boolean; artifact: { id: string } }>();
+		const returningFirstLoad = deferred<{ text: string; revision: string; writable: boolean; artifact: { id: string } }>();
+		mocks.fetchContent.mockImplementation((path: string) => {
+			if (path === '/first.md' && mocks.fetchContent.mock.calls.filter(([requested]) => requested === path).length > 1) return returningFirstLoad.promise;
+			if (path === '/first.md') return firstLoad.promise;
+			return Promise.resolve({ text: '# Second', revision: 'r-2', writable: true, artifact: { id: 'second' } });
+		});
+		mocks.restoreDocumentPlace.mockImplementation((root: HTMLElement | undefined, place: { scrollTop: number }, options: { signal?: AbortSignal } = {}) => new Promise<void>((resolve) => {
+			continueRestore = () => {
+				if (!options.signal?.aborted) {
+					const scroller = root?.querySelector<HTMLElement>('.cm-scroller');
+					if (scroller) {
+						scroller.scrollTop = place.scrollTop;
+						scroller.dispatchEvent(new Event('scroll'));
+					}
+				}
+				resolve();
+			};
+		}));
+
+		openArtifactTab(THREAD, { path: '/first.md', title: 'first.md' });
+		const first = get(threadWorkspaces)[THREAD].activeTabId!;
+		openArtifactTab(THREAD, { path: '/second.md', title: 'second.md' });
+		const second = get(threadWorkspaces)[THREAD].activeTabId!;
+		setActiveTab(THREAD, first);
+		recordTabDocumentPlace(THREAD, first, { from: 0, top: 0, scrollTop: 420 });
+		render();
+		firstLoad.resolve({ text: '# First', revision: 'r-1', writable: true, artifact: { id: 'first' } });
+		await vi.waitFor(() => expect(tabsOf().find((tab) => tab.instanceId === first)?.status).toBe('ready'));
+		await vi.waitFor(() => expect(mocks.restoreDocumentPlace).toHaveBeenCalledOnce());
+		// Its first reveal was not on screen yet, so it stays covered until it is in place.
+		expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(true);
+
+		setActiveTab(THREAD, second);
+		flushSync();
+		await vi.waitFor(() => expect(tabsOf().find((tab) => tab.instanceId === second)?.status).toBe('ready'));
+		const secondScroller = host.querySelector<HTMLElement>('.cm-scroller')!;
+		secondScroller.scrollTop = 31;
+		recordTabDocumentPlace(THREAD, second, { from: 0, top: 0, scrollTop: 31 });
+		continueRestore!();
+		await Promise.resolve();
+
+		expect(secondScroller.scrollTop).toBe(31);
+		expect(tabViewState(THREAD, second)?.documentPlace).toEqual({ from: 0, top: 0, scrollTop: 31 });
+		expect(tabViewState(THREAD, first)?.documentPlace).toEqual({ from: 0, top: 0, scrollTop: 420 });
+
+		setActiveTab(THREAD, first);
+		flushSync();
+		expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(false);
+		await vi.waitFor(() => expect(mocks.restoreDocumentPlace).toHaveBeenCalledTimes(2));
+		// The return paints its cached text at once, so neither its place nor the confirmed load's covers it.
+		expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(false);
+		returningFirstLoad.resolve({ text: '# First', revision: 'r-1', writable: true, artifact: { id: 'first' } });
+		await vi.waitFor(() => expect(mocks.restoreDocumentPlace).toHaveBeenCalledTimes(3));
+		expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(false);
+	});
+
 	it('keeps a tab restored before the socket connects loading, then opens it once connected', async () => {
 		connectionState.set('connecting');
 		mocks.fetchContent.mockResolvedValue({ text: '# restored', revision: 'r-1', writable: true, artifact: { id: 'art-restored' } });
@@ -828,7 +906,7 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		flushSync();
 		// The editor's anchor-focus callback reached the viewer and opened this thread.
 		expect(get(focusedDocComment)).toBe('comment');
-		expect(host.querySelector('.popover')).not.toBeNull();
+		expect(document.body.querySelector('.popover')).not.toBeNull();
 		expect(view.state.selection.main).toMatchObject({ anchor: QUOTE.from + 2, head: QUOTE.from + 2 });
 	});
 
@@ -843,7 +921,7 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		marker.click();
 		flushSync();
 		expect(get(focusedDocComment)).toBe('comment');
-		expect(host.querySelector('.popover')).not.toBeNull();
+		expect(document.body.querySelector('.popover')).not.toBeNull();
 		expect(view.state.selection.main).toMatchObject({ anchor: 0, head: 0 });
 		expect(view.contentDOM.contains(document.activeElement)).toBe(false);
 	});
@@ -872,8 +950,9 @@ describe('ArtifactLeaf comment focus from the text', () => {
 			return found!;
 		});
 		marker.click();
-		await vi.waitFor(() => expect(get(documentImageViewers)[THREAD]).toMatchObject({ ...IMG, focus: { id: 'pin' }, comments: { artifactId: 'art-pin' } }));
-		expect(host.querySelector('.popover')).toBeNull();
-		closeDocumentImage(THREAD);
+		const tab = get(threadWorkspaces)[THREAD].activeTabId!;
+		await vi.waitFor(() => expect(tabDocumentImage(THREAD, tab)).toMatchObject({ ...IMG, focus: { id: 'pin' } }));
+		await vi.waitFor(() => expect(host.querySelector('.image-overlay [data-image-comment]')).not.toBeNull());
+		expect(document.body.querySelector('.popover')).toBeNull();
 	});
 });

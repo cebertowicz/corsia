@@ -229,7 +229,7 @@ describe('Focus review boundary', () => {
 			.toEqual([rows[1], rows[2]]);
 	});
 	it('F2 excluded seed and routed rows do not invalidate a valid source', () => {
-		const rows = [work('p1', 1, 'p'), { ...input('seed', null, 'p'), metadata: { type: 'seed' } },
+		const rows = [work('p1', 1, 'p'), { ...input('seed', null, 'p', 'system'), metadata: { type: 'seed' } },
 			{ ...input('routed', null, 'p'), metadata: { routed_event: true } }];
 		expect(planLimitPauseDescriptors(rows, paused).map((pause) => pause.source)).toEqual([rows[0]]);
 	});

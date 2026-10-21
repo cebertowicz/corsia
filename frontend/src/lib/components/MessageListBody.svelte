@@ -4,6 +4,7 @@
 	import PendingWakeRetry from './PendingWakeRetry.svelte';
 	import type { PlanLimitPauseDescriptor } from './planLimitPause';
 	import type { RunLoad, RunStub } from '$lib/focusRuns';
+	import type { WorkBlockLive } from './workBlockLive';
 
 	let {
 		transcriptEntries,
@@ -17,6 +18,7 @@
 		onOpenLightbox,
 		threadId,
 		renderedStreaming,
+		liveRollup = undefined,
 		checkpoint,
 		turnSummaries = {},
 		pauses = [],
@@ -36,6 +38,7 @@
 		onOpenLightbox: (url: string) => void;
 		threadId?: string | null;
 		renderedStreaming: boolean;
+		liveRollup?: WorkBlockLive;
 		checkpoint: any;
 		turnSummaries?: Record<string, any>;
 		pauses?: readonly PlanLimitPauseDescriptor[];
@@ -55,6 +58,7 @@
 	{onOpenLightbox}
 	{threadId}
 	{renderedStreaming}
+	{liveRollup}
 	{turnSummaries}
 	{pauses}
 	{historyComplete}

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from datetime import datetime, timezone
 
 from infra.database import get_db, write_transaction
+from infra.devices_setting import DEVICE_SETTING_KEY, parse_devices_setting
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +29,45 @@ def get_setting(key: str, *, db: sqlite3.Connection | None = None) -> dict | Non
     except (json.JSONDecodeError, TypeError):
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+UPDATE_SCHEDULE_DEFAULT = {
+    "automatic": False,
+    "time": "03:00",
+    "tonight_at": None,
+}
+
+
+def parse_update_schedule_time(value: str) -> tuple[int, int]:
+    """Parse the one strict local HH:MM representation used by Update schedules."""
+    if not re.fullmatch(r"\d\d:\d\d", value):
+        raise ValueError("time must use HH:MM local time")
+    hour, minute = (int(part) for part in value.split(":"))
+    if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+        raise ValueError("time must use HH:MM local time")
+    return hour, minute
+
+
+def get_update_schedule(
+    *, db: sqlite3.Connection | None = None, include_owner: bool = False
+) -> dict:
+    """Return the validated schedule, retaining its owner only for backend work."""
+    value = get_setting("update_schedule", db=db) or {}
+    automatic = value.get("automatic") is True
+    time = value.get("time")
+    tonight_at = value.get("tonight_at")
+    try:
+        if not isinstance(time, str):
+            raise ValueError("time must use HH:MM local time")
+        parse_update_schedule_time(time)
+    except ValueError:
+        time = UPDATE_SCHEDULE_DEFAULT["time"]
+    if not isinstance(tonight_at, str):
+        tonight_at = None
+    schedule = {"automatic": automatic, "time": time, "tonight_at": tonight_at}
+    if include_owner and isinstance(value.get("owner_id"), str):
+        schedule["owner_id"] = value["owner_id"]
+    return schedule
 
 
 def set_setting(key: str, value: dict, *, db: sqlite3.Connection | None = None) -> None:
@@ -74,12 +115,6 @@ def get_host_access_reviewer_model(*, db=None) -> str | None:
     return _exact_agent_default("host_access_reviewer_model", db=db)
 
 
-def get_corrections_checker_model(*, db=None) -> str | None:
-    """Return the exact configured catalog ID for correction recording."""
-    return _exact_agent_default("corrections_checker_model", db=db)
-
-
-
 def _exact_agent_default(key: str, *, db=None) -> str | None:
     if db is None:
         defaults = get_agent_defaults()
@@ -124,6 +159,27 @@ def get_mcp_servers() -> dict:
 def get_feature_flags() -> dict:
     """Get feature flags. Defaults to True when not explicitly configured."""
     return get_setting("features") or {}
+
+
+
+def get_devices_enabled(*, db: sqlite3.Connection | None = None) -> bool:
+    """Return the explicitly persisted Devices listener switch state."""
+    return parse_devices_setting(get_setting(DEVICE_SETTING_KEY, db=db))[0]
+
+
+def get_devices_outside_address(*, db: sqlite3.Connection | None = None) -> str | None:
+    """Return the host's optional encrypted remote endpoint."""
+    return parse_devices_setting(get_setting(DEVICE_SETTING_KEY, db=db))[1]
+
+
+def set_devices_enabled(enabled: bool, *, db: sqlite3.Connection | None = None) -> None:
+    """Persist the dedicated Devices switch through its one writer."""
+    save_setting_merge(DEVICE_SETTING_KEY, {"enabled": enabled}, db=db)
+
+
+def set_devices_outside_address(address: str | None, *, db: sqlite3.Connection | None = None) -> None:
+    """Persist the optional encrypted remote endpoint without replacing the switch."""
+    save_setting_merge(DEVICE_SETTING_KEY, {"outside_address": address}, db=db)
 
 
 def save_setting_merge(key: str, updates: dict, *, db: sqlite3.Connection | None = None) -> None:

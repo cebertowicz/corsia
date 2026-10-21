@@ -54,12 +54,12 @@ def turn_account_id(thread_id: str, model: str, *, db) -> str | None:
     return selected_account_id(thread_id, provider, db=db) if provider else None
 
 
-def checkpoint_account_id(thread_id: str, writer_harness: str, *, db=None) -> str | None:
-    """Read the ACTUAL writer's account independently of the source Turn.
+def fork_account_id(thread_id: str, writer_harness: str, *, db=None) -> str | None:
+    """Read a detached fork writer's account independently of the source Turn.
 
-    Detached checkpoint admission does not rebind the source thread. An existing
-    writer-vendor binding is stable; an unbound writer uses the actual default
-    launch route. Runtime passes this same frozen identity to the launch owner.
+    Fork admission does not rebind the source thread. An existing writer-vendor
+    binding is stable; an unbound writer uses the actual default launch route.
+    Runtime passes this same frozen identity to the launch owner.
     """
     if writer_harness not in VENDORS:
         return None

@@ -10,14 +10,14 @@ from host_access.credential_sanitizer import CredentialSafeText, sanitize_creden
 from host_access.source_redaction import sanitize_source
 from infra.constants import READ_FILE_OUTPUT_CHAR_CAP
 from infra.db_async import run_in_db, run_off_db
+from infra.guidance_targets import guidance_target
 from tools.base import Tool
 from tools.filesystem_binary import open_bound_binary
 from tools.file_write_completion import (
     GUIDANCE_PARAMETERS,
     announce_published_write,
-    guidance_target,
     managed_write,
-    save_guided_write,
+    save_guided_write_and_announce,
 )
 from tools.filesystem_gate import _resolve_path_for_action
 from doceditor.live_tools import record_read_base, write_live
@@ -374,7 +374,7 @@ class WriteFileTool(Tool):
             }
             target = await asyncio.to_thread(guidance_target, file_path)
             if target is not None:
-                return await run_off_db(save_guided_write, file_path, content, target, kwargs, **write_args)
+                return await save_guided_write_and_announce(file_path, content, target, kwargs, **write_args)
             result = await write_live(file_path, kwargs, producer=self.name, content=content, description=description)
             if result is not None:
                 return result

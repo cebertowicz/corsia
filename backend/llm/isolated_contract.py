@@ -40,6 +40,8 @@ class IsolatedStructuredTelemetry:
     cost_source: Literal["provider_reported", "corsia_pricing"] | None
     elapsed_ms: int
     usage_available: bool
+    #: The model the catalog target expects to run as, the ledger's fallback identity.
+    expected_reported_model: str | None = None
 
 
 TelemetrySink = Callable[[IsolatedStructuredTelemetry], object]
@@ -96,6 +98,7 @@ class _TelemetryAccumulator:
             cost_source=self.cost_source,
             elapsed_ms=elapsed_ms,
             usage_available=any(value is not None for value in token_usage),
+            expected_reported_model=target.expected_reported_model,
         )
         return normalize_subscription_telemetry(telemetry)
 

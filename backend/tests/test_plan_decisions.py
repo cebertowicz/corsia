@@ -661,6 +661,34 @@ def test_updating_a_raised_decision_returns_it_to_draft_and_clears_attention(db)
     assert service._node_row(db, decision["node_id"])["state"] == "active"
 
 
+def test_update_refuses_a_stored_overlong_rationale_until_it_is_shortened(db):
+    import plans.decisions as decisions
+
+    plan, source = _delegated(db)
+    decision = _draft(db, plan, source)
+    metadata = json.loads(_artifact(db, decision["id"])["metadata"])
+    metadata["plan_decision"]["rationale"] = "r" * 500
+    db.execute(
+        "UPDATE artifact_identities SET metadata=? WHERE external_id=?",
+        (json.dumps(metadata), decision["id"]),
+    )
+    db.commit()
+
+    with pytest.raises(service.PlanError, match=r"rationale is too long \(limit 240"):
+        decisions.update(
+            decision["id"], expected_revision=decision["revision"], mutation_id=_mid(),
+            actor=_thread_actor("worker"), provenance="p", db=db,
+            title="A title-only update",
+        )
+
+    updated = decisions.update(
+        decision["id"], expected_revision=decision["revision"], mutation_id=_mid(),
+        actor=_thread_actor("worker"), provenance="p", db=db,
+        rationale="Short rationale.",
+    ).result["decision"]
+    assert updated["rationale"] == "Short rationale."
+
+
 def test_reorder_changes_only_canonical_order_and_never_the_pile(db):
     import plans.decisions as decisions
 

@@ -1,4 +1,5 @@
 import { flushSync, mount, unmount } from 'svelte';
+import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn() }));
@@ -8,6 +9,7 @@ import { token } from '$lib/stores/auth';
 import { activeModelId, models, type Model } from '$lib/stores/models';
 import { activeThreadId, threads } from '$lib/stores/threads';
 import type { ModelSource } from '$lib/conductorSources';
+import { toasts } from '$lib/stores/toast';
 
 const claude: Model = { id: 'claude-code/sonnet', name: 'Sonnet', size: '', backend: 'claude-code', speed: '', status: 'ready' };
 const localModel = { id: 'omlx/qwen', name: 'Qwen', size: '', backend: 'network', server_name: 'oMLX', litellm_model: 'omlx@qwen', speed: '', status: 'ready' } as Model;
@@ -16,6 +18,9 @@ let host: HTMLElement;
 let component: ReturnType<typeof mount> | null = null;
 let omlx: Partial<ModelSource> = {};
 let calls: string[] = [];
+let downloadBodies: unknown[] = [];
+let setupBodies: unknown[] = [];
+let setupResponses: Array<'consent' | 'failure' | 'ok'> = [];
 
 beforeEach(() => {
 	host = document.createElement('div');
@@ -26,11 +31,23 @@ beforeEach(() => {
 	threads.set([]);
 	models.set([claude]);
 	calls = [];
+	downloadBodies = [];
+	setupBodies = [];
+	setupResponses = [];
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const key = `${init?.method ?? 'GET'} ${String(input)}`;
 		calls.push(key);
 		if (key === 'GET /api/providers/sources') {
 			return { ok: true, json: async () => ({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', ...omlx }] }) };
+		}
+		if (key === 'POST /api/providers/local/downloads') {
+			downloadBodies.push(JSON.parse(String(init?.body)));
+		}
+		if (key === 'POST /api/providers/local/setup') {
+			setupBodies.push(JSON.parse(String(init?.body)));
+			const response = setupResponses.shift();
+			if (response === 'consent') return { ok: false, status: 409, json: async () => ({ detail: { code: 'consent_required' } }) };
+			if (response === 'failure') return { ok: false, status: 500, json: async () => ({}) };
 		}
 		return { ok: true, json: async () => ({}) };
 	}));
@@ -41,6 +58,7 @@ afterEach(async () => {
 	component = null;
 	host.remove();
 	vi.unstubAllGlobals();
+	for (const toast of get(toasts)) toasts.dismiss(toast.id);
 	token.set(null);
 	models.set([]);
 	threads.set([]);
@@ -57,8 +75,14 @@ async function render() {
 const button = (label: string) => [...host.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
 
 describe('the picker\'s Local group', () => {
+	it('offers the shared add-model sheet on an eligible Mac with no local rows', async () => {
+		omlx = { eligible: true };
+		await render();
+		expect(button('Add a local model')).toBeDefined();
+	});
+
 	it('uses the shared status-less Local fallback header while the starter model downloads', async () => {
-		omlx = { setup_stage: 'downloading', download_percent: 40 };
+		omlx = { local_state: 'downloading', download_percent: 40 };
 		await render();
 		const fallback = host.querySelector('section[aria-label="Local"]')!;
 		expect(fallback.querySelector('.model-group-bar')?.getAttribute('data-variant')).toBe('fallback');
@@ -69,14 +93,14 @@ describe('the picker\'s Local group', () => {
 	});
 
 	it('says only Downloading before a percent is known', async () => {
-		omlx = { setup_stage: 'downloading', download_percent: null };
+		omlx = { local_state: 'downloading', download_percent: null };
 		await render();
 		expect(host.textContent).toContain('Downloading');
 		expect(host.textContent).not.toContain('%');
 	});
 
 	it('keeps the fallback Local header plain when setup fails', async () => {
-		omlx = { setup_error: 'disk full', setup_kind: 'setup' };
+		omlx = { local_state: 'failed', setup_kind: 'setup' };
 		await render();
 		const fallback = host.querySelector('section[aria-label="Local"]')!;
 		expect(fallback.querySelector('.model-group-bar')?.textContent?.trim()).toBe('Local');
@@ -85,7 +109,7 @@ describe('the picker\'s Local group', () => {
 	});
 
 	it('retries a failed setup through the setup route', async () => {
-		omlx = { setup_error: 'disk full', setup_kind: 'setup' };
+		omlx = { local_state: 'failed', setup_kind: 'setup' };
 		await render();
 		button('Try again')!.click();
 		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/setup'));
@@ -93,15 +117,62 @@ describe('the picker\'s Local group', () => {
 	});
 
 	it('retries a failed starter download through the starter route, never the setup route', async () => {
-		omlx = { setup_error: 'network down', setup_kind: 'starter' };
+		omlx = { local_state: 'failed', setup_kind: 'starter' };
 		await render();
 		button('Try again')!.click();
 		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/starter'));
 		expect(calls).not.toContain('POST /api/providers/local/setup');
 	});
 
+	it('shows a Settings download progress line with its model name and percent', async () => {
+		omlx = { settings_download: { name: 'Qwen 3.8 27B', repository: 'Jundot/Qwen3.8-27B-oQ4e', percent: 42, failed: false } };
+		await render();
+		expect(host.textContent).toContain('Downloading Qwen 3.8 27B · 42%');
+		expect(button('Try again')).toBeUndefined();
+	});
+
+	it('retries a durable Settings download failure with its stored repository', async () => {
+		omlx = { settings_download: { name: 'Qwen 3.8 27B', repository: 'Jundot/Qwen3.8-27B-oQ4e', percent: 42, failed: true } };
+		await render();
+		expect(host.textContent).toContain("Couldn't download Qwen 3.8 27B.");
+		button('Try again')!.click();
+		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/downloads'));
+		expect(downloadBodies).toEqual([{ repository: 'Jundot/Qwen3.8-27B-oQ4e' }]);
+		expect(calls).not.toContain('POST /api/providers/local/setup');
+		expect(calls).not.toContain('POST /api/providers/local/starter');
+	});
+
+	it('offers to keep another oMLX running and retries setup with that choice', async () => {
+		omlx = { local_state: 'failed', setup_kind: 'setup' };
+		await render();
+		setupResponses = ['consent', 'ok'];
+		button('Try again')!.click();
+		await vi.waitFor(() => expect(setupBodies).toEqual([{ other_omlx: null }]));
+		expect(setupResponses).toEqual(['ok']);
+		await vi.waitFor(() => expect(get(toasts)).toHaveLength(1));
+		expect(setupBodies).toEqual([{ other_omlx: null }]);
+		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe('Another oMLX is running. Keep it running to set up the local model.'));
+		const consent = get(toasts)[0]!;
+		expect(consent.action?.label).toBe('Keep running');
+
+		await toasts.runAction(consent.id);
+
+		expect(setupBodies).toEqual([{ other_omlx: null }, { other_omlx: 'keep' }]);
+		expect(calls.filter((call) => call === 'GET /api/providers/sources')).toHaveLength(3);
+	});
+
+	it('shows a setup failure if the picker choice cannot complete', async () => {
+		omlx = { local_state: 'failed', setup_kind: 'setup' };
+		await render();
+		setupResponses = ['consent', 'failure'];
+		button('Try again')!.click();
+		await vi.waitFor(() => expect(get(toasts)).toHaveLength(1));
+		await toasts.runAction(get(toasts)[0]!.id);
+		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe("Couldn't set up the local model."));
+	});
+
 	it('shows a failure with no setup_kind without Try again', async () => {
-		omlx = { setup_error: 'unknown' };
+		omlx = { local_state: 'failed' };
 		await render();
 		expect(host.textContent).toContain('Setup failed');
 		expect(button('Try again')).toBeUndefined();
@@ -109,7 +180,7 @@ describe('the picker\'s Local group', () => {
 
 	it('puts the line inside the existing Local group when it already lists models', async () => {
 		models.set([claude, localModel]);
-		omlx = { setup_stage: 'downloading', download_percent: 10 };
+		omlx = { local_state: 'downloading', download_percent: 10 };
 		await render();
 		expect(host.querySelector('section[aria-label="Local"]')).toBeNull();
 		expect(host.querySelector('section[aria-label="oMLX"]')?.textContent).toContain('Downloading 10%');

@@ -2,8 +2,8 @@ import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	threadWorkspaces, splitWidth, emptyWorkspace, getActiveTab,
-	openArtifactTab, openAgentDocumentTab, openSubagentConversationTab, openLegacyDiscussionArchiveTab,
-	closeArtifactTab, setActiveTab, setActiveSurface, setLeafVisible, markTabStatus,
+	openArtifactTab, openAgentDocumentTab, openBrowserPane, openSubagentConversationTab, openLegacyDiscussionArchiveTab,
+	closeArtifactTab, setActiveTab, setActiveSurface, setLeafVisible, markTabStatus, setBrowserPaneLabel,
 } from './artifactWorkspace';
 import { token } from './auth';
 import { canvasCompact } from './artifactCanvas';
@@ -25,6 +25,48 @@ function keyOf(threadId: string, artifactId: string): string {
 	if (!tab) throw new Error(`no tab for ${artifactId}`);
 	return tab.instanceId;
 }
+
+// The first-reveal memory lasts the app session, so each case uses its own thread.
+describe('openBrowserPane', () => {
+	it('foregrounds and reveals an agent first opened browser tab', () => {
+		openBrowserPane('browser-first', true);
+		const ws = get(threadWorkspaces)['browser-first'];
+		expect(ws).toMatchObject({ visible: true, activeSurface: 'artifact', activeTabId: ws.tabs[0].instanceId });
+	});
+
+	it('updates the browser tab label without changing its selection', () => {
+		openBrowserPane('browser-label');
+		const before = get(threadWorkspaces)['browser-label'];
+		setBrowserPaneLabel('browser-label', 'Example page');
+		const after = get(threadWorkspaces)['browser-label'];
+		expect(after.tabs.find((tab) => tab.kind === 'browser')?.title).toBe('Example page');
+		expect(after.activeTabId).toBe(before.activeTabId);
+	});
+
+	it('does not interrupt the tab or surface after an agent reopens its browser', () => {
+		openBrowserPane('browser-reopen', true);
+		openArtifactTab('browser-reopen', { artifactId: 'art-1', path: '/docs/a.md', title: 'a.md' });
+		const before = get(threadWorkspaces)['browser-reopen'];
+		openBrowserPane('browser-reopen', true);
+		const after = get(threadWorkspaces)['browser-reopen'];
+		expect(after.activeTabId).toBe(before.activeTabId);
+		expect(after.activeSurface).toBe(before.activeSurface);
+	});
+
+	it('re-adds a browser tab the user closed in the background on a later agent open', () => {
+		openBrowserPane('browser-closed', true);
+		openArtifactTab('browser-closed', { artifactId: 'art-1', path: '/docs/a.md', title: 'a.md' });
+		const browserTab = get(threadWorkspaces)['browser-closed'].tabs.find((tab) => tab.kind === 'browser')!;
+		closeArtifactTab('browser-closed', browserTab.instanceId);
+		setActiveSurface('browser-closed', 'chat');
+		const before = get(threadWorkspaces)['browser-closed'];
+		openBrowserPane('browser-closed', true);
+		const after = get(threadWorkspaces)['browser-closed'];
+		expect(after.tabs.filter((tab) => tab.kind === 'browser')).toHaveLength(1);
+		expect(after.activeTabId).toBe(before.activeTabId);
+		expect(after.activeSurface).toBe('chat');
+	});
+});
 
 describe('openArtifactTab', () => {
 	it('reveals and selects an agent-requested document without switching the chat surface', () => {

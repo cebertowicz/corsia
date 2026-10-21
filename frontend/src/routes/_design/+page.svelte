@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { Button, Field, IconButton, Message, Modal, Section, StatePill } from '$lib/components/ui';
-	import MaterialShowcase from './MaterialShowcase.svelte'; import CommentsShowcase from './CommentsShowcase.svelte';
-
-	import AttentionDockShowcase from './AttentionDockShowcase.svelte';
+	import MaterialShowcase from './MaterialShowcase.svelte'; import CommentsShowcase from './CommentsShowcase.svelte'; import SpinnerShowcase from './SpinnerShowcase.svelte';
+	import AttentionDockShowcase from './AttentionDockShowcase.svelte'; import SetupVariantsShowcase from './SetupVariantsShowcase.svelte'; import CommentSheetFixture from './CommentSheetFixture.svelte'; import TextFieldShowcase from './TextFieldShowcase.svelte';
 
 	/**
 	 * `?frame=attention-dock` renders that showcase and nothing else, so its own
@@ -12,15 +11,13 @@
 	 * Read once from the document URL: a frame is loaded fresh and never
 	 * client-navigated, and `_design` is `ssr = false`.
 	 */
-	const framed =
-		typeof window !== 'undefined' &&
-		new URLSearchParams(window.location.search).get('frame') === 'attention-dock';
-	import AttentionCard from '$lib/components/AttentionCard.svelte';
+	const frameParams = typeof window === 'undefined' ? new URLSearchParams() : new URLSearchParams(window.location.search);
+	const frame = frameParams.get('frame'); const framed = frame === 'attention-dock';
 	import AttentionRollup from '$lib/components/AttentionRollup.svelte';
 	import ContextSheet from '$lib/components/ContextSheet.svelte';
 	import ThreadContextPanel from '$lib/components/ThreadContextPanel.svelte';
 	import { activeThreadId, threads } from '$lib/stores/threads';
-	import type { AttentionItem, ReviewResult } from '$lib/api/attention';
+	import type { AttentionItem } from '$lib/api/attention';
 	import type { ContextUsage } from '$lib/stores/threads';
 
 	// Demo items for the attention section
@@ -61,20 +58,7 @@
 			levels: []
 		}
 	];
-	const demoBlockingReview: ReviewResult = {
-		artifact_id: 'demo-1',
-		blocking_failure: true,
-		may_approve_to_user: false,
-		recommendation: 'request_revision',
-		findings: [{ severity: 'blocking', message: 'PR review criteria not met — at least one blocking finding.' }],
-	};
-	const demoCleanReview: ReviewResult = {
-		artifact_id: 'demo-2',
-		blocking_failure: false,
-		may_approve_to_user: true,
-		recommendation: 'approve_to_user',
-		findings: [],
-	};
+
 	const demoOpenContextSource = () => {};
 	const demoContextUsage: ContextUsage = {
 		model_context_window: 128000,
@@ -272,7 +256,8 @@
 	<title>Design system</title>
 </svelte:head>
 
-{#if framed}
+{#if frame === 'comment-sheet'}<CommentSheetFixture kind={frameParams.get('kind') === 'reply' ? 'reply' : 'draft'} text={frameParams.get('text') ?? ''} />
+{:else if framed}
 	<AttentionDockShowcase />
 {:else}
 <div class="page">
@@ -422,8 +407,9 @@
 		</div>
 	</section>
 
+	<SetupVariantsShowcase /><TextFieldShowcase />
 	<MaterialShowcase />
-	<CommentsShowcase />
+	<CommentsShowcase /><SpinnerShowcase />
 	<!-- ── The one attention dock (PLANS-AC34) ── -->
 	<section class="block" id="attention-dock">
 		<header class="block-head">
@@ -433,29 +419,6 @@
 		<AttentionDockShowcase />
 	</section>
 
-	<!-- ── Attention surfaces (coordination MVP S6b) ── -->
-	<section class="block">
-		<header class="block-head">
-			<h2>Attention Card — user mode (S2 clearing controls)</h2>
-			<p>Raised requires-user card with clearing actions. Solid surface, not glass. Close does not clear.</p>
-		</header>
-		<div class="card stack">
-			<AttentionCard item={demoRaised[0]} mode="user" />
-			<AttentionCard item={demoRaised[1]} mode="user" />
-			<AttentionCard item={demoRaised[2]} mode="user" />
-		</div>
-	</section>
-
-	<section class="block">
-		<header class="block-head">
-			<h2>Attention Card — parent mode (S4 disposition controls)</h2>
-			<p>Same card from the parent's perspective: approve / revise / answer-internally / reject + overflow.</p>
-		</header>
-		<div class="card stack">
-			<AttentionCard item={demoRaised[0]} mode="parent" demoReview={demoBlockingReview} />
-			<AttentionCard item={demoRaised[1]} mode="parent" demoReview={demoCleanReview} />
-		</div>
-	</section>
 
 	<section class="block">
 		<header class="block-head">
@@ -514,7 +477,6 @@
 		</Field>
 		{#snippet foot()}
 			<Button variant="ghost" onclick={() => showSmModal = false}>Cancel</Button>
-			<span style="flex: 1"></span>
 			<Button variant="primary" onclick={() => showSmModal = false}>Save</Button>
 		{/snippet}
 	</Modal>
@@ -534,8 +496,7 @@
 		</Section>
 		{#snippet foot()}
 			<Button variant="ghost" onclick={() => showMdModal = false}>Cancel</Button>
-			<span style="flex: 1"></span>
-			<Button variant="secondary" onclick={() => showMdModal = false}>Test</Button>
+			<Button variant="ghost" onclick={() => showMdModal = false}>Test</Button>
 			<Button variant="primary" onclick={() => showMdModal = false}>Save changes</Button>
 		{/snippet}
 	</Modal>
@@ -562,7 +523,6 @@
 		</p>
 		{#snippet foot()}
 			<Button variant="ghost" onclick={() => showAlertModal = false}>Cancel</Button>
-			<span style="flex: 1"></span>
 			<Button variant="danger" onclick={() => showAlertModal = false}>Load anyway</Button>
 		{/snippet}
 	</Modal>

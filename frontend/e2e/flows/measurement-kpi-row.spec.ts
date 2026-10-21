@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { loginByUrl } from '../support/corsia';
 import { agentsBody, createAgent, createProject } from '../support/measurement-fixture';
 
@@ -154,12 +155,16 @@ async function enter(page: Page, request: APIRequestContext, testInfo: TestInfo,
 	await page.addInitScript((setting) => localStorage.setItem('corsia_theme', setting), theme);
 	await loginByUrl(page, { waitForComposer: false });
 	await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
+	const mobile = (page.viewportSize()?.width ?? 0) <= 768;
+	if (mobile) await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
 	await page.getByRole('link', { name: 'Measurement', exact: true }).click();
+	if (mobile) await expect(page.locator('main.main')).not.toHaveClass(/open/);
 	await expect(page.locator('.measurement-page')).toBeVisible({ timeout: 20_000 });
 	if (scope === 'project') {
 		await page.getByRole('button', { name: /Measurement scope:/ }).click();
-		await page.getByRole('combobox', { name: 'Search projects and agents' }).fill(project.name);
+		const input = page.getByRole('combobox', { name: 'Search projects and agents' });
+		await expect(input).toBeVisible();
+		await input.fill(project.name);
 		await page.getByRole('option', { name: new RegExp(`^${project.name}`) }).first().click();
 		await expect(page.getByRole('button', { name: `Measurement scope: ${project.name}`, exact: true })).toBeVisible();
 	}

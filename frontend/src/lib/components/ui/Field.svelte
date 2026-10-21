@@ -1,26 +1,37 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import './text-field.css';
 
 	interface Props {
 		label: string;
+		labelFor?: string;
 		hint?: string;
 		error?: string;
 		required?: boolean;
 		layout?: 'row' | 'stacked';
+		/**
+		 * `chip`: the control drawn as the composer's chip (glass fill, large radius), label above and no divider, for a
+		 * field sitting straight on a pane. `nested`: the same shape with a plain outline and no fill, for a field inside a card or sheet.
+		 */
+		variant?: 'default' | 'chip' | 'nested';
+		/** Keep the label as the control's accessible name but do not draw it. */
+		hideLabel?: boolean;
 		trailing?: Snippet;
 		children: Snippet;
 	}
 
 	const {
-		label, hint, error, required = false,
-		layout = 'row', trailing, children,
+		label, labelFor, hint, error, required = false,
+		layout = 'row', variant = 'default', hideLabel = false, trailing, children,
 	}: Props = $props();
 </script>
 
-<div class="field {layout}" class:has-error={!!error}>
-	<span class="l">
-		{label}{#if required}<span class="req" aria-hidden="true">*</span>{/if}
-	</span>
+<div class="field {layout}" class:chip={variant === 'chip'} class:nested={variant === 'nested'} class:hide-label={hideLabel} class:has-error={!!error}>
+	{#if labelFor}
+		<label class="l" for={labelFor}>{label}{#if required}<span class="req" aria-hidden="true">*</span>{/if}</label>
+	{:else}
+		<span class="l">{label}{#if required}<span class="req" aria-hidden="true">*</span>{/if}</span>
+	{/if}
 	<div class="c">
 		{@render children()}
 	</div>
@@ -33,7 +44,7 @@
 		<span class="hint">{hint}</span>
 	{/if}
 	{#if error}
-		<span class="err">{error}</span>
+		<span class="err error-text">{error}</span>
 	{/if}
 </div>
 
@@ -65,7 +76,7 @@
 		font-size: var(--text-subhead);
 		color: var(--text-secondary);
 	}
-	.req { color: var(--red); margin-left: 2px; }
+	.req { color: var(--red-text); margin-left: 2px; }
 
 	.c {
 		grid-area: control;
@@ -100,8 +111,8 @@
 	.c :global(select:focus),
 	.c :global(textarea:focus) {
 		outline: none;
-		border-color: var(--violet);
-		box-shadow: 0 0 0 3px var(--violet-bg);
+		border-color: var(--accent);
+		box-shadow: 0 0 0 3px var(--accent-wash);
 	}
 
 	.c :global(select) {
@@ -131,10 +142,19 @@
 		grid-area: msg;
 		font-size: var(--text-footnote); color: var(--text-tertiary);
 	}
-	.err {
-		grid-area: msg;
-		font-size: var(--text-footnote); color: var(--red);
+	.err { grid-area: msg; }
+
+	/* chip and nested: label above, no divider; the control's own look is in text-field.css. */
+	.field.chip, .field.nested { border-bottom: 0; padding: 0; grid-template-columns: 1fr; grid-template-areas: 'label' 'control' 'msg'; gap: var(--space-1); }
+	.field.chip.hide-label, .field.nested.hide-label { grid-template-areas: 'control' 'msg'; }
+	.field.chip .t, .field.nested .t { display: none; }
+	.field.chip .l, .field.nested .l { font-size: var(--text-footnote); color: var(--text-secondary); padding-left: var(--space-1); }
+	.field.hide-label .l {
+		position: absolute; inline-size: 0; block-size: 0; margin: 0; padding: 0; overflow: hidden;
+		clip-path: inset(50%); white-space: nowrap;
 	}
+	.field.chip .c :global(select) { width: auto; flex: none; padding-right: calc(var(--space-6) + var(--space-3)); background-position: right var(--space-4) center; }
+	.field.chip .hint, .field.chip .err, .field.nested .hint, .field.nested .err { padding-left: var(--space-1); }
 
 	@media (max-width: 720px) {
 		.field {

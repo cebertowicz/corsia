@@ -1,11 +1,12 @@
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
 
 import {
 	captureConsoleErrors,
 	createSession,
 	loginByUrl,
 	openSettings,
-	TEST_TOKEN,
+	TEST_SESSION_TOKEN,
 } from '../support/corsia';
 
 type LeaseState = 'awaiting_user' | 'active' | 'blocked' | 'revoked';
@@ -133,6 +134,29 @@ const longHostAccessPurpose = [
 	'Report the exact setting changed, the verification performed, whether rollback was required, and any residual risk that needs a separate request.',
 ].join(' ');
 
+/**
+ * Opening Settings mounts the providers view, whose load asks for host resources, the settings model inventory and the model
+ * catalog together. A reload that lands while those are in flight aborts them and the view logs "harness inventory failed", so
+ * a test that reloads after opening Settings first waits for that load to be answered. Call it before opening Settings. On a phone
+ * Settings opens at its section list and the providers view is not mounted yet, so there is no such load to wait for.
+ */
+function providersLoadAnswered(page: Page): Promise<unknown> {
+	const pathOf = (url: string) => new URL(url).pathname;
+	let loadStarted = false;
+	page.on('request', (request) => {
+		if (pathOf(request.url()) === '/api/system/host-resources') loadStarted = true;
+	});
+	const answered = (match: (path: string) => boolean) => page.waitForResponse((response) => match(pathOf(response.url())));
+	// The plain model catalog is also read when Settings opens, before the load starts, so only a read after it counts.
+	const settled = Promise.all([
+		answered((path) => path === '/api/system/host-resources'),
+		answered((path) => path === '/api/settings/models'),
+		answered((path) => loadStarted && path === '/api/models'),
+	]);
+	settled.catch(() => {});
+	return settled;
+}
+
 async function selectThread(page: Page, title: string) {
 	const mobile = (page.viewportSize()?.width ?? 0) <= 768;
 	const composer = page.getByRole('textbox', { name: 'Message CORSIA' });
@@ -190,7 +214,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 
 		await page.route('**/api/settings', async (route) => {
 			const request = route.request();
-			expect(request.headers().authorization).toBe(`Bearer ${TEST_TOKEN}`);
+			expect(request.headers().authorization).toBe(`Bearer ${TEST_SESSION_TOKEN}`);
 
 			if (request.method() === 'PATCH') {
 				const body = request.postDataJSON();
@@ -230,7 +254,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 
 		await page.route('**/api/host-access/leases**', async (route) => {
 			const request = route.request();
-			expect(request.headers().authorization).toBe(`Bearer ${TEST_TOKEN}`);
+			expect(request.headers().authorization).toBe(`Bearer ${TEST_SESSION_TOKEN}`);
 			const url = new URL(request.url());
 			const action = url.pathname.match(/\/(approve|reject|revoke)$/)?.[1];
 
@@ -266,7 +290,16 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			await route.fulfill({
 				status: 200,
 				contentType: 'application/json',
-				body: JSON.stringify({ leases: [lease] }),
+				// The control asks for one thread's open leases; the server answers only for that root thread
+				// and drops terminal states, which is how a revoked lease leaves the control.
+				body: JSON.stringify({
+					leases: [lease].filter((item) => {
+						const root = url.searchParams.get('root_thread_id');
+						if (root && item.root_thread_id !== root) return false;
+						return url.searchParams.get('nonterminal_only') !== 'true'
+							|| ['reviewing', 'awaiting_user', 'activating', 'active'].includes(item.state);
+					}),
+				}),
 			});
 		});
 		await page.route(`**/api/threads/${ownerSessionId}/messages**`, async (route) => {
@@ -283,6 +316,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await selectThread(page, ownerTitle);
 		await expect(page.locator('.thread-host-access')).toHaveCount(0);
 
+		const providersLoaded = (page.viewportSize()?.width ?? 0) > 768 ? providersLoadAnswered(page) : null;
 		await openSettings(page);
 		await page.getByRole('button', { name: 'System', exact: true }).click();
 		await expect(page.getByRole('heading', { name: 'Host Access Review' })).toBeVisible();
@@ -293,6 +327,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 			{ host_access_reviewer_model: 'mock-test-model' },
 		]);
 
+		await providersLoaded;
 		await page.reload();
 		await selectThread(page, ownerTitle);
 		const reviewTrigger = page.getByRole('button', { name: 'Review temporary host access' });
@@ -317,12 +352,14 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(dialog.getByRole('button', { name: 'Approve' })).toBeVisible();
 
 		const viewport = page.viewportSize();
+		// The sheet slides up from below on open; its bounds are read where it comes to rest.
+		await expect.poll(async () => {
+			const rest = await dialog.boundingBox();
+			return !!rest && rest.x >= 0 && rest.y >= 0 && rest.x + rest.width <= viewport!.width
+				&& rest.y + rest.height <= viewport!.height;
+		}, 'the review sheet rests inside the viewport').toBe(true);
 		const box = await dialog.boundingBox();
 		expect(box).toBeTruthy();
-		expect(box!.x).toBeGreaterThanOrEqual(0);
-		expect(box!.y).toBeGreaterThanOrEqual(0);
-		expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
-		expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
 		await expect(dialog.locator('.drawer-body')).toHaveCSS('overflow-y', 'auto');
 		await expect(dialog.locator('.drawer-body')).toHaveCSS('padding-left', '16px');
 		await expect(dialog.locator('.drawer-body')).toHaveCSS('padding-right', '16px');
@@ -358,7 +395,8 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(revokeHostAccess).toHaveCount(0);
 		if (viewport!.width <= 768) {
 			const composer = page.getByRole('textbox', { name: 'Message CORSIA' });
-			const activeChip = page.locator('.active-chip');
+			// The solid material is the trigger's; the wrapper only lays it out.
+			const activeChip = page.locator('.active-chip-trigger');
 			const chipMaterial = await activeChip.evaluate((element) => {
 				const solidProbe = document.createElement('div');
 				solidProbe.style.background = 'var(--bg-secondary)';
@@ -421,11 +459,13 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 		await expect(revokeHostAccess).toBeVisible();
 		expect(decisions).toHaveLength(1);
 
+		await expect.poll(async () => {
+			const rest = await activeDialog.boundingBox();
+			return !!rest && rest.x >= 0 && rest.x + rest.width <= viewport!.width
+				&& rest.y + rest.height <= viewport!.height;
+		}, 'the active-lease sheet rests inside the viewport').toBe(true);
 		const activeDialogBox = await activeDialog.boundingBox();
 		expect(activeDialogBox).toBeTruthy();
-		expect(activeDialogBox!.x).toBeGreaterThanOrEqual(0);
-		expect(activeDialogBox!.x + activeDialogBox!.width).toBeLessThanOrEqual(viewport!.width);
-		expect(activeDialogBox!.y + activeDialogBox!.height).toBeLessThanOrEqual(viewport!.height);
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('overflow-y', 'auto');
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('padding-left', '16px');
 		await expect(activeDialog.locator('.drawer-body')).toHaveCSS('padding-right', '16px');

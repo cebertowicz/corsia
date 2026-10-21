@@ -19,7 +19,19 @@ class PipeFailure:
         self.transports = []
         self.error = RuntimeError('private-argv private-env private-session /private/path')
 
-    async def fail_pipe(self, *args, **kwargs):
+    async def connect_pipes(self, waiter):
+        """Fail the transport's pipe-connect stage, as asyncio reports it to the spawn.
+
+        The client's output goes to files, so asyncio connects no read pipe for it; this stage still
+        runs after the client has executed and is where a pipe setup failure reaches the spawn.
+        """
+        try:
+            await self.fail_pipe()
+        except BaseException as exc:
+            if not waiter.cancelled():
+                waiter.set_exception(exc)
+
+    async def fail_pipe(self):
         self.entered.set()
         await self.release.wait()
         # The real child watcher has reported exit (settle waits for it), just as the
@@ -62,7 +74,7 @@ async def pipe_failure(monkeypatch, tmp_path):
 
     monkeypatch.setattr(unix_events._UnixSubprocessTransport, '_start', start)
     monkeypatch.setattr(unix_events._UnixSubprocessTransport, '_process_exited', process_exited)
-    monkeypatch.setattr(asyncio.get_running_loop(), 'connect_read_pipe', probe.fail_pipe)
+    monkeypatch.setattr(unix_events._UnixSubprocessTransport, '_connect_pipes', probe.connect_pipes)
     yield probe
     probe.release.set()
     for transport in probe.transports:

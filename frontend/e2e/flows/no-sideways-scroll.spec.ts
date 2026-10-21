@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +46,8 @@ const EXCLUDED_ROUTES: Record<string, string> = {
 	'/_design/artifacts': 'internal design showcase for the artifact pane, not a reader surface',
 	'/_design/context-chip-probe': 'internal probe for the context chip, not a reader surface',
 	'/_design/focus-outcomes': 'internal design showcase for Focus outcomes, not a reader surface',
+	'/_design/remote-connect': 'internal review frames for remote connect, not a reader surface',
+	'/_design/setup-motion': 'internal motion evidence for setup, not a reader surface',
 };
 
 // ---- Discovery from source ------------------------------------------------
@@ -78,17 +81,16 @@ function discoverViews(): string[] {
 }
 
 /**
- * The tabs a reader can actually reach on a phone: the buttons of the component's
- * own mobile navigation, which SettingsView renders from its canonical `sections`
- * (source `SettingsView.svelte` 67-79). Matching id/label pairs out of the source
- * text was the wrong contract — a section written differently or derived from a
- * list fell out of coverage while the nonempty assertion stayed green. The rendered
- * bar is the same component's output at the width the guard measures, so a new,
- * renamed or derived tab shows up here whether or not the source still matches
- * one regex.
+ * The rows a reader can actually reach on a phone: SettingsView's root list
+ * (source `SettingsView.svelte` 54-67, 158-168). Matching id/label pairs out of
+ * source text was the wrong contract — a section written differently or derived
+ * from a list fell out of coverage while the nonempty assertion stayed green. The
+ * rendered list is the component's output at the width the guard measures, so a
+ * new, renamed or derived row shows up here whether or not the source still
+ * matches one regex.
  */
-const MOBILE_TAB_BAR = '.settings-view .mobile-tab-bar';
-const MOBILE_TAB = `${MOBILE_TAB_BAR} button.mobile-tab`;
+const MOBILE_SETTINGS_ROOT = '.settings-view .mobile-root';
+const MOBILE_SETTINGS_ROW = `${MOBILE_SETTINGS_ROOT} [data-settings-section] button.face`;
 
 /**
  * The contract the labels must satisfy before anything is measured: there is
@@ -111,13 +113,13 @@ function requireMeasuredTabLabels(labels: string[], registered: Record<string, s
 	return trimmed;
 }
 
-/** Discovered from the live navigation, scoped to the phone bar so the hidden desktop copy is never counted. */
+/** Discovered from the live root list, scoped so hidden desktop navigation is never counted. */
 async function discoverSettingTabs(page: Page): Promise<string[]> {
-	const bar = page.locator(MOBILE_TAB_BAR);
-	await expect(bar, 'the settings navigation shows its phone tab bar').toBeVisible({ timeout: 20_000 });
-	const tabs = page.locator(MOBILE_TAB);
-	await expect(tabs, 'the phone tab bar is populated before its tabs are measured').not.toHaveCount(0, { timeout: 20_000 });
-	return requireMeasuredTabLabels(await tabs.allInnerTexts(), SETTINGS_TAB_CONTENT, 'the rendered phone settings navigation');
+	const root = page.locator(MOBILE_SETTINGS_ROOT);
+	await expect(root, 'the settings navigation shows its phone root list').toBeVisible({ timeout: 20_000 });
+	const rows = page.locator(MOBILE_SETTINGS_ROW);
+	await expect(rows, 'the phone root list is populated before its rows are measured').not.toHaveCount(0, { timeout: 20_000 });
+	return requireMeasuredTabLabels(await rows.allInnerTexts(), SETTINGS_TAB_CONTENT, 'the rendered phone settings root list');
 }
 
 // ---- Measuring ------------------------------------------------------------
@@ -337,7 +339,7 @@ async function seed(
 		return route.fulfill({ json: {
 			definition_version: 1, period: mockPeriod(new URL(route.request().url()).searchParams.get('grain')), series: [previous, latest], latest: pooled(latest), previous: pooled(previous),
 			coverage: { priced_records: 1_600, usage_records: 2_000 }, not_api_priced_records: 3,
-			excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 400 }],
+			excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 400, models: [] }],
 			actual: { subscription_records: 1_600, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 4.2, complete: true, workspace_subscription: { subscription_dollars: null, overage_dollars: null, subscription_facts: 0, overage_facts: 0, subscription_coverage: 'none', overage_coverage: 'none', overlapping_overage: [], allocation: 'unavailable' } },
 		} });
 	});
@@ -491,7 +493,11 @@ async function measurementScopedRouteReady(page: Page, data: Seed, timeout = 20_
 
 /** Settings tabs, each with what proves its own content (not the previous tab's) is showing. */
 const SETTINGS_TAB_CONTENT: Record<string, string> = {
-	Providers: 'Providers',
+	Providers: 'Accounts and rollover',
+	'Connected apps': 'Connected apps',
+	Skills: 'Skills',
+	Context: 'Context',
+	Projects: 'Active',
 	Keys: 'Keys',
 	System: 'Services',
 	Debug: 'Bundle freshness',
@@ -560,6 +566,10 @@ const VIEW_TARGETS: Record<string, Target> = {
 		},
 		ready: async (page, _data, timeout = 20_000) => {
 			await expect(page.locator('.settings-view'), 'the Settings view is open').toBeVisible({ timeout });
+			if ((page.viewportSize()?.width ?? 0) <= 768) {
+				await expect(page.locator(MOBILE_SETTINGS_ROOT), 'the Settings phone root list is open').toBeVisible({ timeout });
+				return;
+			}
 			await settingsTabReady(page, 'Providers', timeout);
 		},
 	},
@@ -692,8 +702,10 @@ test.describe('@flow:no-sideways-scroll @surface:shell no page scrolls sideways 
 				await check(`view ${view}`, viewReady(page, data, view));
 				if (view === 'settings') {
 					for (const tab of await discoverSettingTabs(page)) {
-						await page.locator(MOBILE_TAB_BAR).getByRole('button', { name: tab, exact: true }).click();
+						await page.locator(MOBILE_SETTINGS_ROOT).getByRole('button', { name: tab, exact: true }).click();
 						await check(`settings ${tab}`, () => settingsTabReady(page, tab));
+						await page.locator('.shell-header .h-back').click();
+						await expect(page.locator(MOBILE_SETTINGS_ROOT), `the ${tab} section returns to the Settings root list`).toBeVisible();
 					}
 				}
 			}

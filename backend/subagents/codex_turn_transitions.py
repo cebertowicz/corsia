@@ -78,14 +78,14 @@ async def maintain_initial_boundary(
     live: _LiveCodex,
 ) -> TurnIdentity | None:
     """Checkpoint only after the initial Codex attempt owns its exact Turn."""
-    from core.checkpoint_codex_context import CodexCheckpointContext
+    from core.fork_codex_context import CodexForkContext
 
     prepared = spec.prepared_context
     refresh = spec.refresh_prepared_context
     if prepared is None or refresh is None:
         _require_provider_fit(spec, prepared)
         if prepared is not None:
-            live.session.tool_context = CodexCheckpointContext(
+            live.session.tool_context = CodexForkContext(
                 None, prepared.fit_ledger.rendered_input_tokens,
             )
         return None
@@ -98,7 +98,7 @@ async def maintain_initial_boundary(
     )
     if adopted is None:
         _require_provider_fit(spec, prepared)
-        live.session.tool_context = CodexCheckpointContext(
+        live.session.tool_context = CodexForkContext(
             None, prepared.fit_ledger.rendered_input_tokens,
         )
         return None
@@ -142,14 +142,14 @@ async def resume_same_turn_after_checkpoint_locked(
     held_lock: asyncio.Lock,
 ) -> TurnIdentity:
     """Replace one bound Codex handle and send the supplied continuation."""
-    from llm.resolution import resolve_execution_target
+    from llm.resolution import resolve_thread_target
     from subagents import codex_runtime as runtime
 
     identity = expected_live.corsia_turn
     session = expected_live.session
     if identity is None or session is None:
         raise RuntimeError("Codex checkpoint continuation has no active Turn")
-    target = resolve_execution_target(expected_live.catalog_model_id or "")
+    target = resolve_thread_target(expected_live.catalog_model_id or "", thread_id=thread_id)
     if target.harness != "codex" or not target.available:
         raise RuntimeError("Codex checkpoint target is unavailable")
     if runtime._LIVE.get(thread_id) is not expected_live:
@@ -364,10 +364,12 @@ async def _stop_exact(
 def abandon_stalled_stop(thread_id: str, expected_turn_id: str) -> object | None:
     """Detach the owner Stop could not retire by its deadline; return its session."""
     from subagents import codex_runtime as runtime
+    from subagents.codex_runtime_state import schedule_live_writer_release
 
     live = runtime._LIVE.abandon(thread_id, expected_turn_id)
     if live is None:
         return None
+    schedule_live_writer_release(thread_id)
     live.checkpoint_wait_scope.request_stop()
     if runtime._APP_SESSIONS.get(thread_id) is live.session:
         runtime._APP_SESSIONS.pop(thread_id, None)

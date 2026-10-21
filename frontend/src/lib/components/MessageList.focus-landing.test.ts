@@ -68,7 +68,8 @@ describe('F2 the block that holds what is new', () => {
 		render();
 		const capsule = host.querySelector<HTMLElement>('[data-work-block][data-new]');
 		expect(capsule).not.toBeNull();
-		expect(capsule!.querySelector('.fold-new')?.textContent).toContain('new');
+		expect(capsule!.querySelector('[data-new-capsule]')?.textContent).toContain('new');
+		expect(capsule!.querySelector('[data-visit-divider]')).toBeNull();
 		expect(capsule!.querySelector('.fold-toggle')?.getAttribute('aria-label')).toMatch(/^Expand .*, new since your last visit$/);
 		expect(host.querySelectorAll('[data-work-block]')).toHaveLength(1);
 	});
@@ -148,7 +149,7 @@ describe('F7-F11 landing', () => {
 
 	it('keeps landing targets and the pinned header under the app header, below the phone safe area', () => {
 		// jsdom has no layout: assert the one shared offset every pinned or landing element reads.
-		expect(messageListSource).toMatch(/--sticky-top: calc\(var\(--header-height, 0px\) \+ env\(safe-area-inset-top, 0px\) \+ 8px\)/);
+		expect(messageListSource).toMatch(/--sticky-top: calc\(var\(--header-bottom\) \+ 8px\)/);
 		expect(workBlockSource).toMatch(/top: var\(--sticky-top, 0px\)/);
 		expect(workBlockSource).toMatch(/scroll-margin-top: var\(--sticky-top, 0px\)/);
 		expect(messageListSource).toMatch(/position: sticky; top: var\(--sticky-top, 0px\); z-index: 5;/);

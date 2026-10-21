@@ -4,6 +4,14 @@ from infra.doc_feedback_schema import DOC_FEEDBACK_SCHEMA_SQL
 from infra.doc_review_schema import DOC_REVIEW_SCHEMA_SQL
 from infra.migration_111_to_112_image_regions import REGION_NUMBER_INDEX_SQL
 
+#: User comments by time: the corrections scan reads its window's pending comments
+#: newest first (``jobs.corrections_scanning``) without reading every comment ever
+#: written. Its own constant so step 127 creates it from this one definition.
+USER_COMMENTS_BY_TIME_INDEX_SQL = """
+    CREATE INDEX IF NOT EXISTS idx_doc_comments_user_created
+        ON doc_comments(created_at, id) WHERE author_kind='user';
+"""
+
 DOC_COMMENTS_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS doc_comments (
         id TEXT PRIMARY KEY,
@@ -45,7 +53,7 @@ DOC_COMMENTS_SCHEMA_SQL = """
     CREATE INDEX IF NOT EXISTS idx_doc_comments_decision_event
         ON doc_comments(decision_event_id)
         WHERE decision_event_id IS NOT NULL;
-""" + f"    {REGION_NUMBER_INDEX_SQL};\n"
+""" + f"    {REGION_NUMBER_INDEX_SQL};\n" + USER_COMMENTS_BY_TIME_INDEX_SQL
 
 # Feedback batches reference doc_comments, so they follow it.
 DOCUMENT_SCHEMA_SQL = DOC_COMMENTS_SCHEMA_SQL + DOC_FEEDBACK_SCHEMA_SQL + DOC_REVIEW_SCHEMA_SQL

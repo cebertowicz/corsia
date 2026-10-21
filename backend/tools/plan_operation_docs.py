@@ -20,7 +20,7 @@ _OPERATION_NOTES = {
     # remains runtime-compatible, but the published vocabulary never recommends it.
     "mark_done": (
         "active self-completion, or a user step once really done (evidence in "
-        "plain words, they read it; approvals go in a decision); accepts as "
+        "plain words, they read it; never an approval); accepts as "
         "Done without another reviewer"
     ),
     "request_review": "active handoff; leaves work awaiting another reviewer",
@@ -39,6 +39,8 @@ _OPERATION_NOTES = {
 #: Operations with more than one valid body, which one required set cannot
 #: express. The text replaces the generated key list for that operation.
 _ALTERNATE_SHAPES = {
+    "add": "title, acceptance_criteria; task size",
+    "insert": "title, acceptance_criteria; task size",
     "archive_node": "node_id, expected_revision for one node; or node_ids alone for many",
 }
 

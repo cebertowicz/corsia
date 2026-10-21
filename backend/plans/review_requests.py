@@ -4,7 +4,7 @@ from __future__ import annotations
 from infra.write_effects import after_commit
 from plans import boundary_after, closure, notifications, review_evidence, service
 from plans.plan_write import transaction
-from plans.review_request_framing import REVIEW_PROVENANCE, note_block
+from plans.review_request_framing import REVIEW_PROVENANCE, STOPPED_DELIVERY_NOTE, note_block
 
 
 def _notify(db, plan_id: str) -> None:
@@ -29,6 +29,17 @@ def settle_review_node(db, node_id: str, *, evidence: str, provenance: str) -> N
         node_id = _current(connection, node_id)
         node = service._node_row(connection, node_id)
         if node["state"] in service._TERMINAL_STATES:
+            return
+        if review_evidence.stop_reason(connection, node) is not None:
+            # A paused plan or a held step stays as the user left it, so nothing
+            # settles it now or later: its owner finishes it after resume (pause
+            # contract S26). The note replaces the framing's "settles by itself"
+            # promise. Raising here would roll back every other document's delivery.
+            text = f"{node['description']}\n\n{STOPPED_DELIVERY_NOTE.format(evidence=evidence)}"
+            service.touch_node(connection, node_id, description=text)
+            service._event(connection, node_id, "review_delivered_while_stopped", actor_id=None,
+                           provenance=provenance, payload={"evidence": evidence})
+            _notify(connection, node["plan_id"])
             return
         if node["state"] == "pending":
             # A rejection's revision starts pending; comments delivered before the

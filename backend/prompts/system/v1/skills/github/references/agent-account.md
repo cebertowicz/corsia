@@ -30,7 +30,7 @@ Only when no agents' account exists and the person chose to create one, never on
 Only when the person chose to post as themselves and no agents' account exists (`not_installed`, the table's last row): shells then use the person's own `gh` setup, so this is not a fallback from an agents' account. If one exists, it stays in charge; removing it is the person's choice. Never `connect` here: CORSIA's device-code sign-in is for the agents' account and refuses the person's own login on purpose. Check with `gh auth status`.
 
 - **Signed in:** post `Your agents will post as [login].` Done.
-- **`gh` missing:** install it the way the CLI install in setup task 2 works: post `I'll install the GitHub CLI. You'll see one request to approve.`, then `request_host_access` for exactly `brew install gh` and run it once approved.
+- **`gh` missing:** install it: post `I'll install the GitHub CLI. You'll see one request to approve.`, then `request_host_access` for exactly `brew install gh` and run it once approved.
 - **Signed out:** post `I'll sign the GitHub CLI in to your account. You'll see one request to approve, then a GitHub page where you approve the sign-in.` Then `request_host_access` for exactly `gh auth login --hostname github.com --web --git-protocol https </dev/null` and, once approved, run it in the background: it prints `First copy your one-time code: XXXX-XXXX` and the link `https://github.com/login/device`, then waits until the person approves. Post `Open [github.com/login/device](https://github.com/login/device), enter [code], and approve. I'll continue when it's done.` Then check `gh auth status` every few seconds until it succeeds (stop after about 5 minutes and ask them to tell you when it's done). Never type the code into the page yourself.
 - **A request refused:** give the person that one command to run in their own Terminal and wait for their word.
 
@@ -38,9 +38,9 @@ Done when `gh auth status` succeeds.
 
 ## Connect
 
-1. Call `action: "connect"`. It returns `signin.user_code` and `signin.verification_uri`.
-2. Tell the person: open the URL in a browser signed in **as the agents' GitHub account** (a private window works), never their own, and enter the code.
-3. Call `action: "check"` until the account reads `ready` or names a cause.
+1. Call `action: "connect"`. It returns `signin.user_code` and `signin.verification_uri`; or `signin.cause`, with `signin.next` when there is a recovery step (do it instead of waiting; a cause with no `next` has none, so tell the person in plain words what failed and stop); or, when no sign-in started, the account's status: do its top-level `next` if set, otherwise act on its row in the table above.
+2. If you created the agents' account in this setup's shared browser window, open `signin.verification_uri` in that same window: it is already signed in as the agents' account. Otherwise tell the person to open it in a browser signed in **as the agents' GitHub account** (a private window works), never their own. Either way, give the person `signin.user_code` to enter; never type it yourself.
+3. Call `action: "check"` every few seconds while `signin.status` is `waiting`: the person is still entering the code, so keep checking even though `account` reads `needs_auth` until they finish. Any other status means the sign-in is over. On `failed`, follow `signin.next` when it is there, including what it says to do if the cause repeats; a failure with no `next` has none, so tell the person in plain words what failed and stop. Otherwise (`completed`, `superseded`, or no `signin` at all) act on `account`'s row in the table above; `ready` means done. If the same cause returns after a second `connect`, tell the person in plain words what failed and stop.
 
 For the agents' account, never run `gh auth login`, `gh auth logout`, `gh auth setup-git` or `git config` for credentials or identity in the shell, and never ask for a token, name or email. The account's home is read-only to shells and its identity comes from GitHub.
 

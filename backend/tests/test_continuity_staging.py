@@ -397,6 +397,11 @@ def test_staged_add_can_be_replaced_then_dropped_before_install(
 
 @pytest.mark.asyncio
 async def test_checkpoint_harness_tools_skip_turn_lineage_and_keep_scope() -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
+    from core.fork_tools import ForkToolBoundary
     from infra.continuity_staging import current_checkpoint_id
     from subagents.harness_tool_bridge import execute_tool
 
@@ -406,15 +411,21 @@ async def test_checkpoint_harness_tools_skip_turn_lineage_and_keep_scope() -> No
 
         async def execute(self, name, arguments):
             assert (name, arguments, current_checkpoint_id()) == (
-                "ordinary_tool", {"value": 1}, "cp-1"
+                "continuity_edit", {"value": 1}, "cp-1"
             )
             return "ordinary result"
 
+    registry = Registry()
+    boundary = ForkToolBoundary(
+        CHECKPOINT_KIND, SimpleNamespace(fork_id="cp-1", thread_id="thread-1"),
+        registry, asyncio.Event(), None,
+    )
     result = await execute_tool(
-        Registry(),
+        registry,
         thread_id="thread-1",
-        checkpoint_id="cp-1",
-        name="ordinary_tool",
+        fork_id="cp-1",
+        fork_policy=boundary,
+        name="continuity_edit",
         arguments={"value": 1},
     )
 
@@ -425,7 +436,8 @@ def test_checkpoint_metadata_is_reserved_but_tool_surfaces_do_not_change(tmp_pat
     from infra.continuity_staging import checkpoint_execution_scope
     from subagents.harness_tool_bridge import write_cc_mcp_config
     from tools.continuity import ContinuityEditTool
-    from tools.registry import ToolRegistry
+    from tools.registry import ToolRegistry, _is_reserved_execution_param
+    from tools.tool_execution_context import strip_reserved_context
 
     registry = ToolRegistry()
     registry.register(ContinuityEditTool())
@@ -435,8 +447,8 @@ def test_checkpoint_metadata_is_reserved_but_tool_surfaces_do_not_change(tmp_pat
     ), encoding="utf-8").read())
     with checkpoint_execution_scope("cp-1"):
         assert registry.get_definitions() == before
-        assert registry._strip_reserved_context(
-            {"operation": "inspect", "_checkpoint_id": "spoof"}
+        assert strip_reserved_context(
+            {"operation": "inspect", "_checkpoint_id": "spoof"}, _is_reserved_execution_param,
         ) == {"operation": "inspect"}
         second = json.loads(open(write_cc_mcp_config(
             thread_id="thread-1", tool_token="token"

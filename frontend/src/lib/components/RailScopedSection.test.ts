@@ -102,7 +102,8 @@ describe('RailScopedSection agent zone', () => {
 		const labels = Array.from(host.querySelectorAll('button')).map((button) =>
 			button.textContent?.trim(),
 		);
-		expect(labels).toContain('Conductor');
+		expect(labels).toContain('CORSIA');
+		expect(labels).not.toContain('Conductor');
 		// Documents + Automations moved off this surface.
 		expect(labels).not.toContain('Documents');
 		expect(labels).not.toContain('Automations');
@@ -169,6 +170,17 @@ describe('RailScopedSection agent zone', () => {
 		}
 	});
 
+	it('labels a project scope\'s entry Conductor, not CORSIA', () => {
+		uiScope.set({ id: 'project-1', name: 'Project One', color: '#8b5cf6' });
+		renderRail();
+
+		const labels = Array.from(host.querySelectorAll('button')).map((button) =>
+			button.textContent?.trim(),
+		);
+		expect(labels).toContain('Conductor');
+		expect(labels).not.toContain('CORSIA');
+	});
+
 	it('renders the Conductor entry disabled when the scope has no designation', () => {
 		const onConductor = vi.fn();
 		renderRail(undefined, undefined, {
@@ -180,7 +192,7 @@ describe('RailScopedSection agent zone', () => {
 		const conductor = host.querySelector<HTMLElement>('.scoped-item.conductor');
 		expect(conductor).not.toBeNull();
 		expect(conductor?.querySelector<HTMLButtonElement>('.scoped-item-trigger')?.disabled).toBe(true);
-		expect(conductor?.getAttribute('title')).toBe('No conductor for this scope');
+		expect(conductor?.getAttribute('title')).toBe('No CORSIA agent for this scope');
 		conductor?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 		expect(onConductor).not.toHaveBeenCalled();
 	});
@@ -196,7 +208,7 @@ describe('RailScopedSection agent zone', () => {
 		const conductor = host.querySelector<HTMLElement>('.scoped-item.conductor');
 		expect(conductor).not.toBeNull();
 		expect(conductor?.querySelector<HTMLButtonElement>('.scoped-item-trigger')?.disabled).toBe(false);
-		expect(conductor?.getAttribute('title')).toBe('Open conductor chat');
+		expect(conductor?.getAttribute('title')).toBe('Open CORSIA chat');
 		conductor?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 		expect(onConductor).toHaveBeenCalledOnce();
 	});
@@ -458,13 +470,13 @@ describe('RailScopedSection agent zone', () => {
 });
 
 describe('RailScopedSection — workspace landing', () => {
-	it('keeps Conductor as the workspace landing and renders no Plans destination', () => {
+	it('keeps CORSIA as the workspace landing and renders no Plans destination', () => {
 		activeThreadId.set(null);
 		renderRail(undefined, undefined, { activeView: 'chat' });
 		const labels = Array.from(host.querySelectorAll('button')).map((button) =>
 			button.textContent?.trim(),
 		);
-		expect(labels).toContain('Conductor');
+		expect(labels).toContain('CORSIA');
 		expect(labels).not.toContain('Plans');
 		expect(host.querySelector('.scoped-item.conductor')?.classList.contains('active')).toBe(true);
 	});
@@ -479,7 +491,7 @@ describe('RailScopedSection motion truth', () => {
 		renderRail();
 
 		const spinner = host.querySelector<SVGElement>('.scoped-item.agent .spinner');
-		expect(spinner?.getAttribute('stroke')).toBe('var(--accent)');
+		expect(spinner?.getAttribute('stroke')).toBe('var(--status-in-progress)');
 		expect(spinner?.getAttribute('aria-label')).toBe('Working');
 	});
 
@@ -509,7 +521,7 @@ describe('RailScopedSection motion truth', () => {
 		renderRail();
 
 		const spinner = host.querySelector<SVGElement>('.scoped-item.agent .spinner');
-		expect(spinner?.getAttribute('stroke')).toBe('var(--accent)');
+		expect(spinner?.getAttribute('stroke')).toBe('var(--status-in-progress)');
 	});
 
 	it('replaces the agent sparkle with the leading pause mark when the plan is paused', () => {

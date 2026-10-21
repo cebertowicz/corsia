@@ -74,6 +74,7 @@ export function operatorNode(over: Partial<OperatorNode> = {}): OperatorNode {
 		kind: 'task',
 		title: 'Task',
 		description: null,
+		waiting_on: [],
 		acceptance_criteria: 'DOD',
 		state,
 		unmet_dependencies: [],
@@ -85,6 +86,7 @@ export function operatorNode(over: Partial<OperatorNode> = {}): OperatorNode {
 		updated_at: 'now',
 		last_transition_at: over.updated_at ?? 'now',
 		folded: false,
+		container: false,
 		requires_user_action: review?.kind === 'human_decision' || review?.kind === 'human_review',
 		executor: { thread_id: 'agent', label: 'Agent' },
 		execution: {

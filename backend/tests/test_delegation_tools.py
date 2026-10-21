@@ -457,7 +457,7 @@ async def test_delegate_send_tool_reaches_workspace_conductor(deleg_db, monkeypa
     deleg_db.execute(
         "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
         (
-            "workspace_conductor_session_id",
+            "corsia_agent_thread_id",
             json.dumps({"session_id": "workspace-conductor"}),
             "t",
         ),
@@ -491,7 +491,7 @@ async def test_delegate_send_tool_reaches_workspace_conductor(deleg_db, monkeypa
     # The designation is checked on every send, so a former conductor loses
     # the reverse privilege without waiting for a restart or stale roster.
     deleg_db.execute(
-        "UPDATE settings SET value=? WHERE key='workspace_conductor_session_id'",
+        "UPDATE settings SET value=? WHERE key='corsia_agent_thread_id'",
         (json.dumps({"session_id": None}),),
     )
     deleg_db.commit()

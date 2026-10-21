@@ -65,12 +65,12 @@ async def test_codex_rpc_rejection_releases_count_but_lost_ack_preserves_it(monk
 
 @pytest.mark.asyncio
 async def test_codex_stale_thread_ack_and_receipt_cannot_retire_current_input():
-    from core.checkpoint_codex_context import CodexCheckpointContext
+    from core.fork_codex_context import CodexForkContext
     from subagents.codex_app_server import CodexAppServerSession
 
     session = CodexAppServerSession(binary="unused", task=None, codex_thread_id="thread")
     session._track_active_turn("turn")
-    session.tool_context = CodexCheckpointContext(None, 100)
+    session.tool_context = CodexForkContext(None, 100)
     session.tool_context.pending_inputs["input"] = 20
     for thread, turn in [("other", "turn"), ("thread", "old-turn")]:
         await session._handle_notification("item/started", {
@@ -89,7 +89,7 @@ async def test_codex_stale_thread_ack_and_receipt_cannot_retire_current_input():
 
 @pytest.mark.asyncio
 async def test_codex_partial_current_usage_preserves_floor_and_natural_exit():
-    from core.checkpoint_codex_context import CodexCheckpointContext
+    from core.fork_codex_context import CodexForkContext
     from subagents.codex_app_server import CodexAppServerSession
 
     exits = []
@@ -99,7 +99,7 @@ async def test_codex_partial_current_usage_preserves_floor_and_natural_exit():
 
     session = CodexAppServerSession(binary="unused", task=None, codex_thread_id="thread", on_exit=on_exit)
     session._track_active_turn("turn")
-    session.tool_context = CodexCheckpointContext(None, 250)
+    session.tool_context = CodexForkContext(None, 250)
     stream = asyncio.StreamReader()
     stream.feed_data((json.dumps({"method": "thread/tokenUsage/updated", "params": {
         "threadId": "thread", "turnId": "turn",

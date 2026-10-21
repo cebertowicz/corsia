@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from './support/test';
+import { expect } from '@playwright/test';
 import { loginByUrl, openSettings } from './support/corsia';
 
 test.skip(process.env.CORSIA_VISUAL !== '1', 'Visual regression baselines are opt-in until approved.');

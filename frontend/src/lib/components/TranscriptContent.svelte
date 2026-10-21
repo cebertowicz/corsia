@@ -23,6 +23,7 @@
 	import { sourceMembers } from './contextEventModel';
 	import { PAUSED_AT_PLAN_LIMIT } from '$lib/stores/overageSetting';
 	import type { RunLoad, RunStub } from '$lib/focusRuns';
+	import type { WorkBlockLive } from './workBlockLive';
 
 	let {
 		entries,
@@ -39,6 +40,7 @@
 		historyComplete = false,
 		runLoads = {},
 		onLoadRun,
+		liveRollup = null,
 	}: {
 		entries: TranscriptEntry[];
 		expandedTools: Set<string>;
@@ -57,6 +59,8 @@
 		runLoads?: Record<string, RunLoad>;
 		/** Read (more of) a stub run's rows. */
 		onLoadRun?: (stub: RunStub) => void;
+		/** Parent + descendant activity derived once at the MessageList boundary. */
+		liveRollup?: WorkBlockLive | null;
 	} = $props();
 
 	const uid = $props.id();
@@ -99,17 +103,23 @@
 		if (previous !== undefined && previous !== boundThreadId) expandedFolds = new Set();
 	});
 	// AS14 owns what a running Turn is doing now; Focus reads the same step as its plan row.
-	const liveNow = $derived(
+	const ownLiveNow = $derived(
 		boundThreadId ? threadLiveStep(boundThreadId, $turnStates, $activeToolsByThread) : null,
 	);
+	const liveNow = $derived(liveRollup?.step ?? ownLiveNow);
+	const liveOwnThread = $derived(liveRollup?.ownRunning ?? ownLiveNow !== null);
+	const liveActorName = $derived(liveRollup?.actorName ?? null);
+	const livePreviewFromDescendant = $derived(liveRollup?.previewFromDescendant ?? false);
 	const liveRunIndex = $derived(renderedEntries.findIndex((entry) => entry.kind === 'fold' && entry.live));
 	const hasLiveFold = $derived(liveRunIndex !== -1);
 	// The live line restarts after each shown item: its segment is the item before the open run.
 	const liveSegment = $derived(hasLiveFold
 		? runTokens(renderedEntries, liveRunIndex, historyComplete).find((token) => token.startsWith('after:')) ?? 'after:'
 		: undefined);
-	const liveLine = createLiveLine(() => liveNow, () => !renderedStreaming, () => liveSegment);
+	// A descendant can keep this Focus block live after the visible parent's turn settles.
+	const liveLine = createLiveLine(() => liveNow, () => !(liveRollup?.active ?? renderedStreaming), () => liveSegment);
 	const labels = $derived(runLabels(renderedEntries, turnSummaries, historyComplete));
+	// A block a descendant keeps live counts its last Turn on to now, so the worker's time is included.
 	const liveTimes = $derived(hasLiveFold ? liveRunTimes(renderedEntries, turnSummaries, historyComplete, $minuteClock.getTime()) : new Map<string, string | null>());
 	// An open run whose rows were never read starts reading them, however it was opened.
 	$effect(() => {
@@ -186,6 +196,9 @@
 			liveTime={liveTimes.get(entry.id) ?? null}
 			livePhrase={liveLine.shown?.phrase ?? UNKNOWN_STEP}
 			liveDimmed={liveLine.shown?.between === true}
+			{liveOwnThread}
+			{liveActorName}
+			{livePreviewFromDescendant}
 			load={entry.stub ? runLoads[entry.stub.lastId] : undefined}
 			onToggle={() => { expandedFolds = toggleRun(tokens, expandedFolds); }}
 			{onLoadRun}

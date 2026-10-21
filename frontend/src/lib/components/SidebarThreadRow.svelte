@@ -7,6 +7,7 @@
 	import { threadPlanStates } from '$lib/stores/threadPlanStates';
 	import { descendantRunning } from '$lib/stores/activity';
 	import ThreadPlanStateMark from './ThreadPlanStateMark.svelte';
+	import { isYourMove } from './threadRowMark';
 	import ThreadPausedMark from './ThreadPausedMark.svelte';
 	import ThreadDoneMark from './ThreadDoneMark.svelte';
 
@@ -70,12 +71,33 @@
 	const checkpointLabel = $derived(
 		checkpoint?.trigger === 'model_switch' ? 'switching' : checkpoint ? 'checkpointing' : null,
 	);
-	const updateSummary = $derived($threadPlanStates[thread.id]?.latest_update?.summary);
+	const planState = $derived($threadPlanStates[thread.id]);
+	const updateSummary = $derived(planState?.latest_update?.summary);
+	// What the user owes takes the second line, in place of the update summary; the mark owns it either way.
+	const needsYou = $derived(isYourMove(planState));
+
+	// The swipe transforms are composited layers (about three per row), so a row carries them only while it is
+	// being swiped, is open, or is still sliding shut. A row at rest has none, so the windowed list can mount
+	// rows without the compositor allocating layers for each (long frames on scroll in WebKit).
+	const SETTLE_MS = 300; // longer than --dur-standard; covers a tap that never moved, which has no transitionend
+	const atRest = $derived(!swiping && transformX === 0);
+	let settling = $state(false);
+	const engaged = $derived(settling || !atRest);
+	$effect(() => {
+		if (!atRest) { settling = true; return; }
+		if (!settling) return;
+		const timer = setTimeout(() => { settling = false; }, SETTLE_MS);
+		return () => clearTimeout(timer);
+	});
+	function onSlideEnd(e: TransitionEvent) {
+		if (atRest && e.propertyName === 'transform' && e.target === e.currentTarget) settling = false;
+	}
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="thread-item-wrapper"
+	class:engaged
 	ontouchstart={(e: TouchEvent) => onTouchStart(e, thread.id)}
 	ontouchend={onTouchEnd}
 >
@@ -84,7 +106,7 @@
 		class:armed={pinArmed}
 		class:moving={swiping}
 		tabindex="-1"
-		style={`transform: translate3d(${leftZoneX}px, 0, 0)`}
+		style={engaged ? `transform: translate3d(${leftZoneX}px, 0, 0)` : undefined}
 		ontouchstart={(e: TouchEvent) => e.stopPropagation()}
 		ontouchend={(e: TouchEvent) => onPin(thread.id, e)}
 		onclick={(e: MouseEvent) => onPin(thread.id, e)}
@@ -95,7 +117,7 @@
 	<div
 		class="right-zone-group"
 		class:moving={swiping}
-		style={`transform: translate3d(${rightZoneX}px, 0, 0)`}
+		style={engaged ? `transform: translate3d(${rightZoneX}px, 0, 0)` : undefined}
 	>
 		<button
 			class="action-zone archive-zone"
@@ -125,7 +147,8 @@
 		class="thread-item press-tint"
 		class:active={isActive}
 		class:swiping={swiping && isSwipeGesture}
-		style={`transform: translate3d(${transformX}px, 0, 0)`}
+		style={engaged ? `transform: translate3d(${transformX}px, 0, 0)` : undefined}
+		ontransitionend={onSlideEnd}
 		onclick={() => onSelect(thread.id)}
 		oncontextmenu={(e: MouseEvent) => onOpenContextMenu(e, thread.id)}
 	>
@@ -156,18 +179,23 @@
 							: 'Checkpointing context'}
 						>{checkpointLabel}</span>
 					{/if}
-					<ThreadPlanStateMark threadId={thread.id} {onOpenAttention} onOpenThread={onSelect} />
-					{#if activity === 'active'}
-						<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-					{:else if $descendantRunning.has(thread.id)}
-						<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="3" role="img" aria-label="Subagent working"><title>Subagent working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+					{#if !needsYou}
+						<ThreadPlanStateMark threadId={thread.id} {onOpenAttention} onOpenThread={onSelect} />
 					{/if}
 				</div>
-				{#if !renaming && updateSummary}
+				{#if needsYou}
+					<ThreadPlanStateMark threadId={thread.id} line {onOpenAttention} onOpenThread={onSelect} />
+				{:else if updateSummary}
 					<span class="thread-update-summary" title={updateSummary}>{updateSummary}</span>
 				{/if}
 			{/if}
 		</div>
+		<!-- The trailing column: centred on the whole row, so one line or two, the spinner sits in the middle. -->
+		{#if !renaming && activity === 'active'}
+			<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--status-in-progress)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+		{:else if !renaming && $descendantRunning.has(thread.id)}
+			<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="3" role="img" aria-label="Subagent working"><title>Subagent working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+		{/if}
 		<div class="thread-hover-actions">
 			<button
 				class="thread-action-btn"
@@ -193,23 +221,26 @@
 		padding: 0; z-index: 0;
 		transition: transform var(--dur-standard) var(--ease-ios-sheet),
 		            filter var(--dur-tight) ease-out;
-		backface-visibility: hidden;
 	}
 	.action-zone.moving { transition: filter var(--dur-tight) ease-out; }
 	.action-zone .zone-label { font-size: var(--text-footnote); font-weight: 600; letter-spacing: 0.01em; }
+	/* At rest the zones sit just outside the wrapper by position alone; while engaged they take their place
+	   and the inline transform slides them in. */
 	.left-zone {
-		left: 0; width: 80px;
-		background: var(--violet);
+		right: 100%; width: 80px;
+		background: var(--accent-fill); color: var(--accent-on-fill);
 		border-top-left-radius: var(--radius-sm);
 		border-bottom-left-radius: var(--radius-sm);
 	}
 	.right-zone-group {
-		position: absolute; top: 0; bottom: 0; right: 0;
+		position: absolute; top: 0; bottom: 0; left: 100%;
 		display: flex; z-index: 0;
 		width: 144px;
 		transition: transform var(--dur-standard) var(--ease-ios-sheet);
-		backface-visibility: hidden;
 	}
+	.engaged .left-zone { right: auto; left: 0; }
+	.engaged .right-zone-group { left: auto; right: 0; }
+	.engaged .action-zone, .engaged .right-zone-group, .engaged .thread-item { backface-visibility: hidden; }
 	.right-zone-group.moving { transition: none; }
 	.archive-zone {
 		position: relative; width: 72px;
@@ -223,7 +254,8 @@
 	}
 	.action-zone.armed { filter: brightness(1.12); }
 	.thread-item {
-		width: 100%; text-align: left; padding: 7px 10px;
+		/* The row's height no longer comes from the out-of-flow action, so it is held at the list's 38px pitch. */
+		width: 100%; min-height: 38px; text-align: left; padding: 7px 10px;
 		border-radius: var(--radius-sm); cursor: pointer;
 		background: transparent;
 		border: none; color: var(--text-primary); font-family: inherit;
@@ -231,8 +263,6 @@
 		position: relative; z-index: 1;
 		transition: transform var(--dur-standard) var(--ease-ios-sheet),
 		            background var(--dur-standard) ease-out;
-		transform: translate3d(0, 0, 0);
-		backface-visibility: hidden;
 		-webkit-user-select: none;
 		user-select: none;
 		-webkit-touch-callout: none;
@@ -242,11 +272,19 @@
 		will-change: transform;
 	}
 	.thread-content { flex: 1; min-width: 0; }
+	/* Out of flow, so the hidden action reserves no width: the name and its second line run to the trailing edge. */
 	.thread-hover-actions {
+		position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
 		display: flex; align-items: center; gap: 2px;
-		opacity: 0; flex-shrink: 0; transition: opacity var(--dur-tight);
+		opacity: 0; pointer-events: none; transition: opacity var(--dur-tight);
 	}
-	.thread-item:hover .thread-hover-actions { opacity: 1; }
+	.thread-hover-actions:focus-within { opacity: 1; pointer-events: auto; }
+	@media (hover: hover) {
+		.thread-item:hover .thread-hover-actions { opacity: 1; pointer-events: auto; }
+		/* On hover the action takes the trailing slot: the text stops short of it and the spinner steps aside. */
+		.thread-item:hover .thread-content { padding-right: 28px; }
+		.thread-item:hover > .spinner { display: none; }
+	}
 	.thread-action-btn {
 		width: 24px; height: 24px; border-radius: var(--radius-2xs);
 		background: none; border: none; color: var(--text-tertiary);
@@ -256,18 +294,10 @@
 	.thread-action-btn:hover { color: var(--text-primary); background: var(--bg-tertiary); }
 	.thread-item:hover { background: var(--bg-hover); }
 	.thread-item.active {
-		background: var(--violet-bg);
-	}
-	.thread-item.active::before {
-		content: '';
-		position: absolute;
-		left: 0; top: 0; bottom: 0;
-		width: 2px;
-		background: var(--violet);
-		border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+		background: var(--accent-wash);
 	}
 	.thread-title-row {
-		display: flex; align-items: center; gap: 6px;
+		display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%;
 	}
 	.thread-title {
 		font-size: var(--text-subhead); font-weight: 500;

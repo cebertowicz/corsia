@@ -13,10 +13,13 @@
 
 	let {
 		threadId,
+		line = false,
 		onOpenAttention,
 		onOpenThread,
 	}: {
 		threadId: string;
+		/** Set as a row's second line: an owed mark reads 'Needs you · …' across the row's width. */
+		line?: boolean;
 		onOpenAttention?: (threadId: string, title: string) => void;
 		/** Opens the thread, where its update is; the dot's action. */
 		onOpenThread?: (threadId: string) => boolean | void | Promise<boolean | void>;
@@ -24,10 +27,14 @@
 
 	const entry = $derived($threadPlanStates[threadId]);
 	// Retain the old generic word while a stale cached row entry is replaced.
-	const count = $derived((entry?.attention_items ?? []).length);
-	const stuckCount = $derived(entry?.stuck_overdue_waits ?? 0);
-	const title = $derived(entry && owes(entry) ? chatStateTitle(entry) : entry?.state === 'failed' ? 'Failed work' : entry?.state === 'stuck' ? `Stuck · ${stuckCount} wait${stuckCount === 1 ? '' : 's'} past the deadline` : '');
+	const items = $derived(entry?.attention_items ?? []);
+	const count = $derived(items.length);
+	const title = $derived(entry && owes(entry) ? chatStateTitle(entry) : entry?.state === 'failed' ? 'Failed work' : '');
 	const word = $derived(slotThreeWord(entry));
+	// As a line, an owed mark names its one item, or keeps the word that counts several.
+	const label = $derived(!line || !owes(entry) ? word
+		: count === 0 ? 'Needs you'
+		: `Needs you · ${count === 1 && items[0].title ? items[0].title : word}`);
 	// The thread in front of the user shows no dot while its visit commits.
 	const updateDot = $derived(!word && Boolean(entry?.has_update) && $activeThreadId !== threadId);
 
@@ -85,20 +92,21 @@
 	}
 </script>
 
-{#if word && count === 0 && entry?.state !== 'stuck'}
+{#if word && count === 0}
 	<!-- Nothing listable behind it: a word, not a control that opens an empty list. -->
-	<span class="plan-state static {entry?.state}" {title}>{word}</span>
+	<span class="plan-state static {entry?.state}" class:line title={line ? label : title}>{label}</span>
 {:else if word}
 	<span
 		class="plan-state {entry?.state}"
+		class:line
 		role="button"
 		tabindex="0"
-		{title}
-		aria-label={entry?.state === 'stuck' ? title : `${word}: ${count} item${count === 1 ? '' : 's'}`}
-		onclick={entry?.state === 'stuck' ? openThread : show}
-		onkeydown={(event) => activate(event, entry?.state === 'stuck' ? openThread : show)}
+		title={line ? label : title}
+		aria-label={`${label}: ${count} item${count === 1 ? '' : 's'}`}
+		onclick={show}
+		onkeydown={(event) => activate(event, show)}
 		onpointerdown={(event) => event.stopPropagation()}
-	>{word}</span>
+	>{label}</span>
 {:else if updateDot}
 	<span
 		class="plan-state update-dot"
@@ -122,10 +130,11 @@
 		cursor: pointer;
 	}
 	.plan-state.static { cursor: default; }
-	.plan-state:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; border-radius: var(--radius-2xs); }
-	.plan-state.needs_input, .plan-state.blocked_on_you { color: var(--amber); }
+	.plan-state:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-2xs); }
+	.plan-state.needs_input, .plan-state.blocked_on_you { color: var(--amber-text); }
 	.plan-state.blocked_on_you { font-weight: 600; }
 	.plan-state.failed { color: var(--red); }
+	.plan-state.line { display: block; min-width: 0; margin-top: 1px; line-height: 1.2; font-weight: inherit; overflow: hidden; text-overflow: ellipsis; }
 	.update-dot {
 		width: 8px; height: 8px; border-radius: var(--radius-circle);
 		background: var(--accent);
@@ -140,5 +149,8 @@
 			width: max(calc(100% + 20px), 44px); height: max(100%, 44px);
 			transform: translate(-50%, -50%);
 		}
+		/* A row's second line already spans the row; grown to 44px it would cover the title and
+		   take the row's own tap, so it keeps its box, as the summary line it stands in for does. */
+		.plan-state.line[role="button"]::before { content: none; }
 	}
 </style>

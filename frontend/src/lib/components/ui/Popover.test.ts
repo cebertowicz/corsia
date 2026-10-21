@@ -7,21 +7,31 @@ import Popover from './Popover.svelte';
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 function anchor(left = 8, top = 8): DOMRect { return new DOMRect(left, top, 10, 10); }
-function render(options: { open?: boolean; anchor?: DOMRect; fill?: boolean } = {}) {
+function render(options: { open?: boolean; anchor?: DOMRect; fill?: boolean; width?: string; onPlace?: (card: HTMLElement) => void } = {}) {
 	host = document.createElement('div'); document.body.appendChild(host);
 	const onClose = vi.fn(); const restoreFocus = vi.fn();
 	const children = (() => {}) as any;
-	component = mount(Popover, { target: host, props: { anchor: options.anchor ?? anchor(), open: options.open ?? true, fill: options.fill, onClose, restoreFocus, children } });
+	component = mount(Popover, { target: host, props: { anchor: options.anchor ?? anchor(), open: options.open ?? true, fill: options.fill, width: options.width, onPlace: options.onPlace, onClose, restoreFocus, children } });
 	flushSync(); return { onClose, restoreFocus };
 }
 afterEach(() => { if (component) unmount(component); component = null; host?.remove(); });
 describe('Popover', () => {
 	it('gives its content a bounded flex column only when asked to fill', () => {
 		render();
-		expect(host.querySelector('.popover')!.classList.contains('fill')).toBe(false);
+		expect(document.body.querySelector('.popover')!.classList.contains('fill')).toBe(false);
 		unmount(component!); host.remove();
 		render({ fill: true });
-		expect(host.querySelector('.popover')!.classList.contains('fill')).toBe(true);
+		expect(document.body.querySelector('.popover')!.classList.contains('fill')).toBe(true);
+	});
+	it('takes a width when asked, and tells its owner each time it has placed the card', async () => {
+		const onPlace = vi.fn();
+		render({ width: '432px', onPlace });
+		expect(document.body.querySelector<HTMLElement>('.popover')!.style.width).toBe('432px');
+		await vi.waitFor(() => expect(onPlace).toHaveBeenCalled());
+		expect(onPlace.mock.calls[0][0]).toBe(document.body.querySelector('.popover'));
+		unmount(component!); host.remove();
+		render();
+		expect(document.body.querySelector<HTMLElement>('.popover')!.style.width).toBe('');
 	});
 	it('uses the subtle border token on the elevated surface', () => {
 		const source = readFileSync(join(process.cwd(), 'src/lib/components/ui/Popover.svelte'), 'utf8');
@@ -31,14 +41,14 @@ describe('Popover', () => {
 	it('clamps an anchored surface and closes on Escape', async () => {
 		const { onClose, restoreFocus } = render({ anchor: anchor(window.innerWidth + 20, window.innerHeight + 20) });
 		await Promise.resolve();
-		expect(host.querySelector('.popover')).not.toBeNull();
+		expect(document.body.querySelector('.popover')).not.toBeNull();
 		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
 		expect(onClose).toHaveBeenCalledOnce(); expect(restoreFocus).toHaveBeenCalledOnce();
 	});
 	it('clamps below the top edge when the anchor starts above the viewport', async () => {
 		render({ anchor: anchor(8, -5) });
-		await vi.waitFor(() => expect(host.querySelector<HTMLElement>('.popover')!.style.top).not.toBe('12px'));
-		expect(host.querySelector<HTMLElement>('.popover')!.style.top).toBe('8px');
+		await vi.waitFor(() => expect(document.body.querySelector<HTMLElement>('.popover')!.style.top).not.toBe('12px'));
+		expect(document.body.querySelector<HTMLElement>('.popover')!.style.top).toBe('8px');
 	});
 	it('end-aligns a bottom surface that would overflow the right edge, and marks itself for the shell layer', async () => {
 		const width = 200;
@@ -53,9 +63,27 @@ describe('Popover', () => {
 				anchor: new DOMRect(right - 10, 8, 10, 10), open: true, onClose: vi.fn(), placement: 'bottom', children: (() => {}) as any,
 			} });
 			flushSync();
-			const surface = host.querySelector<HTMLElement>('.popover')!;
+			const surface = document.body.querySelector<HTMLElement>('.popover')!;
 			expect(surface.hasAttribute('data-popover')).toBe(true);
 			await vi.waitFor(() => expect(surface.style.left).toBe(`${right - width}px`));
+		} finally {
+			HTMLElement.prototype.getBoundingClientRect = original;
+		}
+	});
+	it('opens a bottom surface above its anchor when there is no room below, instead of covering the anchor', async () => {
+		const original = HTMLElement.prototype.getBoundingClientRect;
+		HTMLElement.prototype.getBoundingClientRect = function () {
+			return this.classList.contains('popover') ? new DOMRect(0, 0, 200, 100) : original.call(this);
+		};
+		try {
+			const top = window.innerHeight - 30;
+			host = document.createElement('div'); document.body.appendChild(host);
+			component = mount(Popover, { target: host, props: {
+				anchor: new DOMRect(40, top, 60, 20), open: true, onClose: vi.fn(), placement: 'bottom', children: (() => {}) as any,
+			} });
+			flushSync();
+			const surface = document.body.querySelector<HTMLElement>('.popover')!;
+			await vi.waitFor(() => expect(surface.style.top).toBe(`${top - 100 - 8}px`));
 		} finally {
 			HTMLElement.prototype.getBoundingClientRect = original;
 		}
@@ -87,7 +115,7 @@ describe('Popover', () => {
 			const bounds = document.createElement('div'); bounds.setAttribute('data-canvas', ''); host.appendChild(bounds);
 			component = mount(Popover, { target: host, props: { anchor, bounds, open: true, onClose, children: (() => {}) as any } });
 			flushSync();
-			return host.querySelector<HTMLElement>('.popover')!;
+			return document.body.querySelector<HTMLElement>('.popover')!;
 		}
 		it('opens beside the anchor and flips below it rather than leaving the canvas', async () => {
 			const roomy = mountIn(new DOMRect(500, 0, 900, 700), new DOMRect(520, 100, 20, 20));
@@ -116,7 +144,7 @@ describe('Popover', () => {
 				open: true, onClose: vi.fn(), children: (() => {}) as any,
 			} });
 			flushSync();
-			const surface = host.querySelector<HTMLElement>('.popover')!;
+			const surface = document.body.querySelector<HTMLElement>('.popover')!;
 			await vi.waitFor(() => expect(surface.style.top).toBe('508px'));
 		});
 		it('never flips onto the pane to the left of the canvas', async () => {
@@ -175,7 +203,7 @@ describe('Popover', () => {
 		host = document.createElement('div'); document.body.appendChild(host);
 		component = mount(Popover, { target: host, props: { get anchor() { return live.current; }, open: true, onClose: vi.fn(), children: (() => {}) as any } });
 		flushSync();
-		const surface = () => host.querySelector<HTMLElement>('.popover')!;
+		const surface = () => document.body.querySelector<HTMLElement>('.popover')!;
 		await vi.waitFor(() => expect(surface().style.top).toBe('100px'));
 		current.set(new DOMRect(520, 300, 20, 20)); flushSync();
 		await vi.waitFor(() => expect(surface().style.top).toBe('300px'));

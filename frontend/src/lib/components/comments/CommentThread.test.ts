@@ -33,6 +33,83 @@ describe('CommentThread', () => {
 		expect(onReply).toHaveBeenCalledWith('c1', 'looks right');
 	});
 
+	it('restores a reply selection across remounts and saves a click-placed caret', async () => {
+		const onReplySelection = vi.fn();
+		render(thread(), false, { showReply: true, replyText: 'draft text', replySelection: [2, 5], onReplySelection });
+		await vi.waitFor(() => expect(host.querySelector<HTMLTextAreaElement>('.ct-input')).not.toBeNull());
+		let input = host.querySelector<HTMLTextAreaElement>('.ct-input')!;
+		expect([input.selectionStart, input.selectionEnd]).toEqual([2, 5]);
+		input.setSelectionRange(7, 7);
+		input.dispatchEvent(new Event('pointerup', { bubbles: true }));
+		expect(onReplySelection).toHaveBeenLastCalledWith([7, 7]);
+		unmount(component!); component = null; host.remove();
+		render(thread(), false, { showReply: true, replyText: 'draft text', replySelection: [7, 7], onReplySelection });
+		await vi.waitFor(() => expect(host.querySelector<HTMLTextAreaElement>('.ct-input')).not.toBeNull());
+		input = host.querySelector<HTMLTextAreaElement>('.ct-input')!;
+		expect([input.selectionStart, input.selectionEnd]).toEqual([7, 7]);
+	});
+
+	it('clears the owned selection when a reply is sent', async () => {
+		const onReplySelection = vi.fn();
+		const { onReply } = render(thread(), false, { onReplySelection });
+		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
+		type(input, 'ship it');
+		input.setSelectionRange(1, 4);
+		input.dispatchEvent(new Event('select', { bubbles: true }));
+		button('.ct-send').click();
+		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'ship it'));
+		await vi.waitFor(() => expect(onReplySelection).toHaveBeenLastCalledWith(null));
+	});
+
+	it('clears the owned selection when the draft is emptied by hand', () => {
+		const onReplySelection = vi.fn();
+		render(thread(), false, { onReplySelection });
+		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
+		type(input, 'draft');
+		expect(onReplySelection).toHaveBeenLastCalledWith([5, 5]);
+		type(input, '');
+		expect(onReplySelection).toHaveBeenLastCalledWith(null);
+	});
+
+	it('keeps the reply field visible on every open thread', () => {
+		render(thread());
+		expect(host.querySelector('.ct-compose.open .ct-input')).not.toBeNull();
+		expect(host.querySelector('.ct-reply-open')).toBeNull();
+	});
+
+	it('keeps a sheet reply visible after it expands', async () => {
+		const original = HTMLElement.prototype.scrollIntoView;
+		const scrollIntoView = vi.fn();
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+		try {
+			render(thread(), false, { showReply: true, keepReplyVisible: true });
+			await vi.waitFor(() => expect(host.querySelector('.ct-input')).not.toBeNull());
+			await vi.waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' }));
+		} finally {
+			Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: original });
+		}
+	});
+
+	it('keeps a long drawer author accessible while reserving a compact time label', () => {
+		const name = 'Canvas Reviewer 1791789535058';
+		render(thread({ author: name, createdAt: new Date().toISOString() }));
+		const author = host.querySelector<HTMLElement>('.ct-author')!;
+		expect(author.getAttribute('aria-label')).toBe(name);
+		expect(author.title).toBe(name);
+		expect(author.querySelector('.name-tail')?.textContent).toBe('5058');
+		expect(host.querySelector('.ct-at.compact')?.textContent).toBe('now');
+	});
+
+	it('shows agent comment and reply bylines as author then time only', () => {
+		render(thread({
+			author: 'conductor', authorKind: 'agent',
+			replies: [{ author: 'conductor', authorKind: 'agent', text: 'Reply', at: '1m ago' }],
+		}));
+		expect(host.querySelector('.ct-author')?.textContent).toBe('Conductor');
+		expect(host.querySelector('.ct-msg-author')?.textContent).toBe('Conductor');
+		expect(host.textContent).not.toMatch(/via Claude Code|opus-4\.8|project coordination/);
+	});
+
 	it('posts a reply on Cmd+Enter', () => {
 		const { onReply } = render(thread());
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
@@ -41,25 +118,97 @@ describe('CommentThread', () => {
 		expect(onReply).toHaveBeenCalledWith('c1', 'ship it');
 	});
 
-	it('stamps the newest rendered reply only after the thread expands', async () => {
+	function visibleObserver() {
+		vi.stubGlobal('IntersectionObserver', class {
+			constructor(private callback: IntersectionObserverCallback) {}
+			observe(target: Element) { this.callback([{ isIntersecting: true, intersectionRatio: 1, target } as IntersectionObserverEntry], this as unknown as IntersectionObserver); }
+			disconnect() {}
+			unobserve() {}
+			takeRecords() { return []; }
+			root = null; rootMargin = ''; thresholds = [];
+		});
+	}
+
+	it('stamps the newest reply only after it is observed inside its scroll container', async () => {
+		visibleObserver();
 		const onViewed = vi.fn().mockResolvedValue(undefined);
-		render(thread({ replyWaiting: true, replies: [{ ...reply, id: 'r1' }] }), false, { onViewed });
-		expect(onViewed).not.toHaveBeenCalled();
-		button('.ct-replies-toggle').click(); flushSync();
+		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed });
 		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'));
+		vi.unstubAllGlobals();
 	});
 
-	it('retries a failed stamp only on the next visibility change', async () => {
+	it('retries a failed visible stamp only on the next visibility change', async () => {
+		visibleObserver();
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const onViewed = vi.fn().mockRejectedValue(new Error('offline'));
-		render(thread({ replyWaiting: true, replies: [{ ...reply, id: 'r1' }] }), false, { onViewed });
-		button('.ct-replies-toggle').click(); flushSync();
+		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed });
 		await vi.waitFor(() => expect(warn).toHaveBeenCalled());
 		flushSync(); await Promise.resolve(); flushSync();
 		expect(onViewed).toHaveBeenCalledTimes(1);
 		document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); flushSync();
 		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledTimes(2));
-		warn.mockRestore();
+		warn.mockRestore(); vi.unstubAllGlobals();
+	});
+
+	it('shows only new and latest replies in a long thread until earlier replies are expanded', () => {
+		const replies = Array.from({ length: 6 }, (_, index) => ({ ...reply, id: `r${index}`, text: `reply ${index}`, createdAt: `2026-10-16T18:0${index}:00Z` }));
+		render(thread({ replies, newReplyIds: ['r4', 'r5'] }));
+		expect(host.textContent).toContain('Show 4 earlier replies');
+		expect(host.textContent).not.toContain('reply 0');
+		expect(host.textContent).toContain('reply 4');
+		expect(host.textContent).toContain('reply 5');
+		expect(host.querySelectorAll('.ct-new')).toHaveLength(2);
+		button('.ct-earlier').click(); flushSync();
+		expect(host.textContent).toContain('reply 0');
+	});
+
+	it('marks and cuts at the replies the server names, never at the viewer own newest reply', async () => {
+		visibleObserver();
+		const onViewed = vi.fn().mockResolvedValue(undefined);
+		const replies = Array.from({ length: 6 }, (_, index) => ({ ...reply, id: `r${index}`, text: `reply ${index}`, createdAt: `2026-10-16T18:0${index}:00Z` }));
+		render(thread({ replies, newReplyIds: [] }), false, { onViewed });
+		expect(host.querySelector('.ct-new')).toBeNull();
+		expect(host.textContent).toContain('Show 5 earlier replies');
+		expect(host.textContent).toContain('reply 5');
+		await Promise.resolve(); flushSync();
+		expect(onViewed).not.toHaveBeenCalled();
+		vi.unstubAllGlobals();
+	});
+
+	it('expanding earlier replies does not focus the thread', () => {
+		const onFocus = vi.fn();
+		const replies = Array.from({ length: 6 }, (_, index) => ({ ...reply, id: `r${index}`, text: `reply ${index}`, createdAt: `2026-10-16T18:0${index}:00Z` }));
+		render(thread({ replies }), false, { onFocus });
+		button('.ct-earlier').click(); flushSync();
+		expect(host.textContent).toContain('reply 0');
+		expect(onFocus).not.toHaveBeenCalled();
+	});
+
+	it('keeps a reply being typed on a thread someone else resolves, and says so', () => {
+		const { onResolve } = render(thread({ resolved: true }), false, { replyText: 'half a reply' });
+		expect(host.querySelector('.ct-res-head')).toBeNull();
+		expect((host.querySelector('.ct-input') as HTMLTextAreaElement).value).toBe('half a reply');
+		expect(host.querySelector('[data-resolved-note]')?.textContent).toContain('Send adds your reply; the thread stays resolved.');
+		expect(host.querySelector('.ct-act.ack')).toBeNull();
+		button('[data-resolved-note] .reopen').click();
+		expect(onResolve).toHaveBeenCalledWith('c1', false);
+	});
+
+	it('collapses a resolved thread with no reply being typed', () => {
+		render(thread({ resolved: true }));
+		expect(host.querySelector('.ct-res-head')).not.toBeNull();
+		expect(host.querySelector('[data-resolved-note]')).toBeNull();
+	});
+
+	it('shows no New marks on a thread whose projection names none', () => {
+		render(thread({ replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }));
+		expect(host.querySelector('.ct-new')).toBeNull();
+	});
+
+	it('keeps the reply field available after Agree', () => {
+		render(thread({ acked: true }));
+		expect(host.querySelector('.ct-input')).not.toBeNull();
+		expect(host.textContent).toContain('Agreed');
 	});
 
 	it('toggles Agree', () => {
@@ -103,10 +252,25 @@ describe('CommentThread', () => {
 		expect(onAgree).not.toHaveBeenCalled();
 	});
 
+	it('keeps the text-changed fact in the quote instead of duplicating it in a flat row', () => {
+		render(thread({ orphaned: true }), false, { flat: true });
+		expect(host.querySelector('.ct-orphan')).toBeNull();
+		unmount(component!); host.remove();
+		render(thread({ orphaned: true }));
+		expect(host.querySelector('.ct-orphan')?.textContent).toContain('text this comment was on has changed');
+	});
+
 	it('renders a suggestion diff inside the thread', () => {
 		render(thread({ anchor: 'old text', replacement: 'new text' }));
 		expect(host.querySelector('.diff')?.textContent).toContain('old text');
 		expect(host.querySelector('.diff')?.textContent).toContain('new text');
+	});
+
+	it('keeps the reply field visible on an open suggestion without Agree or Resolve', () => {
+		render(thread({ anchor: 'old text', replacement: 'new text' }));
+		expect(host.querySelector('textarea[placeholder="Reply…"]')).toBeTruthy();
+		expect(host.querySelector('.ct-act.ack')).toBeNull();
+		expect(host.querySelector('.ct-act.resolve')).toBeNull();
 	});
 
 	it('wraps the suggestion diff between words, on the open and the decided card alike', () => {
@@ -145,10 +309,9 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct-suggestion-actions')).toBeNull();
 	});
 
-	it('shows the replies on an open suggestion and takes a new one, without Agree or Resolve', async () => {
+	it('shows replies and an always-open reply field on a suggestion, without Agree or Resolve', async () => {
 		const { onReply } = render(thread({ replacement: 'new text', replies: [reply] }));
-		expect(host.querySelector('.ct-replies')).toBeNull();
-		button('.ct-replies-toggle').click(); flushSync();
+		expect(host.querySelector('.ct-replies')).not.toBeNull();
 		expect(host.querySelector('.ct-replies')?.textContent).toContain('Could we keep the old wording?');
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 		type(input, ' fine by me ');
@@ -160,10 +323,10 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct-suggestion-actions')).not.toBeNull();
 	});
 
-	it('offers no reply box on a suggestion to read-only viewers', () => {
+	it('shows replies but no reply box on a read-only suggestion', () => {
 		render(thread({ replacement: 'new text', replies: [reply] }), true);
 		expect(host.querySelector('.ct-input')).toBeNull();
-		expect(host.querySelector('.ct-replies-toggle')).not.toBeNull();
+		expect(host.querySelector('.ct-replies')).not.toBeNull();
 	});
 
 	it('shows the replies of a decided suggestion when expanded, with no reply box', () => {

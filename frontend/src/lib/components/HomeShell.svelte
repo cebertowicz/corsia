@@ -6,10 +6,7 @@
 
 	import { paneOpen } from '$lib/stores/paneOpen';
 	import { paneDragging } from '$lib/stores/paneOpen';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
-	import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
-	import { settingsActiveSection } from '$lib/stores/settingsNavigation';
 	import { createMainDrawerController } from '$lib/mainDrawerController';
 	import { get } from 'svelte/store';
 	import {
@@ -18,13 +15,12 @@
 	} from '$lib/stores/artifactWorkspace';
 	import { docPickerTarget } from '$lib/stores/docPickerTarget';
 	import { toasts } from '$lib/stores/toast';
+	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
 
 	import Sidebar from './Sidebar.svelte';
 	import Header from './Header.svelte';
 	import StatusBanners from './StatusBanners.svelte';
-	import ProjectSettingsView from './ProjectSettingsView.svelte';
 	import ThreadSettingsView from './ThreadSettingsView.svelte';
-	import WorkspaceSettingsView from './WorkspaceSettingsView.svelte';
 	import ChatPanel from './ChatPanel.svelte';
 	import ChatArtifactSplit from './ChatArtifactSplit.svelte';
 	import SettingsView from './SettingsView.svelte';
@@ -102,6 +98,7 @@
 
 	const easeOutQuint = cubicOut;
 	let mainEl = $state<HTMLElement | undefined>(undefined);
+	let artifactHeaderInset = $state<number | null>(null);
 	const mainDrawer = createMainDrawerController({
 		getMainEl: () => mainEl,
 		getSidebarOpen: () => sidebarOpen,
@@ -153,26 +150,6 @@
 
 	function openSkillDocumentsFromThreadSettings() {
 		threadSettingsOpen.set(false);
-		openDocumentsForSkills();
-	}
-
-	function openDocumentsFromProjectSettings() {
-		projectSettingsOpen.set(false);
-		openDocumentsForContextAttach();
-	}
-
-	function openSkillDocumentsFromProjectSettings() {
-		projectSettingsOpen.set(false);
-		openDocumentsForSkills();
-	}
-
-	function openDocumentsFromWorkspaceSettings() {
-		workspaceSettingsOpen.set(false);
-		openDocumentsForContextAttach();
-	}
-
-	function openSkillDocumentsFromWorkspaceSettings() {
-		workspaceSettingsOpen.set(false);
 		openDocumentsForSkills();
 	}
 
@@ -257,27 +234,18 @@
 		class="main"
 		class:open={sidebarOpen}
 		class:pane-open={paneVisible}
+		style:--artifact-header-inset={artifactHeaderInset === null ? undefined : `${artifactHeaderInset}px`}
 		bind:this={mainEl}
+		use:toastAnchorSurface
 		ontransitionstart={mainDrawer.onTransitionStart}
 		ontransitionend={mainDrawer.onTransitionEnd}
 		ontouchstart={mainDrawer.onTouchStart}
 		ontouchend={mainDrawer.onTouchEnd}
 		ontouchcancel={mainDrawer.onTouchEnd}
 	>
-		<Header onToggleSidebar={onToggleSidebar} onTogglePane={onTogglePane} {onMeasurement} {activeView} {conductorThreadId} hasPane={viewHasPane} />
+		<Header onToggleSidebar={onToggleSidebar} onTogglePane={onTogglePane} {onMeasurement} {activeView} {conductorThreadId} hasPane={viewHasPane} {artifactHeaderInset} />
 		<StatusBanners />
-		{#if $projectSettingsOpen}
-			<ProjectSettingsView
-				onBrowseContextFiles={openDocumentsFromProjectSettings}
-				onBrowseSkills={openSkillDocumentsFromProjectSettings}
-				onOpenProviders={() => { onOpenSettings(); settingsActiveSection.set('providers'); }}
-			/>
-		{:else if $workspaceSettingsOpen}
-			<WorkspaceSettingsView
-				onBrowseContextFiles={openDocumentsFromWorkspaceSettings}
-				onBrowseSkills={openSkillDocumentsFromWorkspaceSettings}
-			/>
-		{:else if $threadSettingsOpen && ($activeThread || (conductorThreadId != null && $activeThreadId === conductorThreadId))}
+		{#if $threadSettingsOpen && ($activeThread || (conductorThreadId != null && $activeThreadId === conductorThreadId))}
 			<ThreadSettingsView
 				conductor={conductorThreadId != null && $activeThreadId === conductorThreadId}
 				onBrowseContextFiles={openDocumentsFromThreadSettings}
@@ -301,9 +269,15 @@
 				onOpenLightbox={onOpenLightbox}
 				onAutoCreateThread={onAutoCreateThread}
 				onOpenDocuments={(documentId) => onDocuments('all', documentId)}
+				onArtifactHeaderInset={(width) => (artifactHeaderInset = width)}
 			/>
 		{:else if activeView === 'settings'}
-			<SettingsView onClose={onCloseSettings} {systemStatus} />
+			<SettingsView
+				onClose={onCloseSettings}
+				{systemStatus}
+				onBrowseContextFiles={openDocumentsForContextAttach}
+				onBrowseSkills={openDocumentsForSkills}
+			/>
 		{:else if activeView === 'measurement'}
 			<div class="measurement-scroller"><MeasurementPage onClose={onCloseMeasurement} /></div>
 		{:else if activeView === 'documents'}
@@ -325,7 +299,6 @@
 		<Pane
 			label={paneConfig.label}
 			sections={paneConfig.sections}
-			{conductorThreadId}
 			{protectArtifactSplit}
 			onPickProject={onPickProjectAndClosePane}
 			onBrowseDocuments={browseDocumentsForThread}
@@ -346,39 +319,51 @@
 		background: var(--bg-primary);
 		z-index: 10;
 	}
-	.main:has(:global([data-popover])) { z-index: 12; }
 	.main-close-tap {
-		display: none; position: absolute; inset: var(--header-height) 0 0; z-index: 9;
+		display: none; position: absolute; inset: var(--header-bottom) 0 0; z-index: 9;
 		background: transparent; border: none; cursor: default;
 		opacity: 0; pointer-events: none;
 		-webkit-tap-highlight-color: transparent;
 	}
 	.docs-scroller {
 		flex: 1; min-height: 0; overflow-y: auto;
-		padding: calc(var(--header-height) + 8px) 20px 0;
+		padding: calc(var(--header-bottom) + 8px) 20px 0;
 	}
 	.measurement-scroller {
 		flex: 1; min-height: 0; overflow-y: auto;
-		padding: calc(var(--header-height) + 20px) 20px 32px;
+		padding: calc(var(--header-bottom) + 20px) 20px 32px;
 	}
 	@media (max-width: 768px) {
 		/* The phone header is a translucent overlay, so a scroller that starts under it shows section titles through it. Start the scroller below the header instead. */
-		.measurement-scroller { margin-top: calc(var(--header-height) + env(safe-area-inset-top, 0px)); padding: 14px 14px 24px; }
+		.measurement-scroller { margin-top: var(--header-bottom); padding: 14px 14px 24px; }
 	}
 	:global(.spin) { animation: spin 1s linear infinite; }
 	@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 	@media (max-width: 768px) {
 		.app { bottom: auto; height: 100vh; }
+		@media (display-mode: standalone) { .app { height: 100dvh; } }
 		.main {
 			transform: translateX(0);
-			transition: transform var(--dur-spring) var(--ease-entrance);
+			/* Square corners at rest. When the drawer closes, the corners stay round until the
+			   slide back ends (a 0s radius change delayed by the slide), then square off. */
+			transition:
+				transform var(--dur-spring) var(--ease-entrance),
+				border-radius 0s var(--dur-spring);
 			will-change: transform;
-			border-top-left-radius: 32px;
-			border-bottom-left-radius: 32px;
 			overflow: hidden;
 			box-shadow:
 				-12px 0 36px rgba(0, 0, 0, 0.28),
 				-1px 0 0 rgba(255, 255, 255, 0.05);
+		}
+		/* The rounded left edge belongs to the card that slides aside over the drawer, so it shows
+		   only while the drawer is open or being dragged open. At rest the web view's top-left is
+		   inside the visible screen in an installed app that starts below the status bar, so an
+		   always-on radius showed the drawer behind it as a grey wedge there. */
+		.main.open,
+		.main:global([data-drawer-drag='sidebar']) {
+			border-top-left-radius: 32px;
+			border-bottom-left-radius: 32px;
+			transition: transform var(--dur-spring) var(--ease-entrance);
 		}
 		.main.open { transform: translateX(min(320px, 85vw)); }
 		.main-close-tap.open { display: block; pointer-events: auto; }

@@ -60,6 +60,19 @@ def test_submit_and_turn_end_close_agent_batches_with_their_exact_reasons(isolat
         db.close()
 
 
+def test_replayed_comment_with_submit_does_not_submit(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        seed_thread(db, "author")
+        artifact_id = seed_document(db, "owner", name="one.md")
+        add_comment(db, artifact_id, client_id="replayed")
+        add_comment(db, artifact_id, client_id="replayed", submit=True)
+        assert [row["state"] for row in batches(db)] == ["open"]
+    finally:
+        db.close()
+
+
 @pytest.mark.asyncio
 async def test_record_turn_end_closes_agent_author_batch_through_turn_end_effects(isolated_db):
     db = get_db()

@@ -4,7 +4,12 @@ import { StateField, type EditorState, type Extension, type Range } from '@codem
 import type { SyntaxNodeRef } from '@lezer/common';
 import { renderMarkdown } from '$lib/markdown';
 import { mountMermaid, type MermaidMount } from '$lib/mermaid';
-import { markdownImages, openSelectedImageOnEnter, renderableImage, selectImageOnClick } from './markdown-image';
+import {
+	imageContext, type ImageContext, markdownImages, openSelectedImageOnEnter, renderableImage, selectImageOnClick
+} from './markdown-image';
+import { renderedFragment } from './rendered-images';
+import { linkDecoration, openLinkOnAltEnter, openLinkOnClick } from './markdown-link';
+import { blockSource, isMermaidFence } from './widget-blocks';
 
 class BulletWidget extends WidgetType {
 	toDOM() {
@@ -29,17 +34,22 @@ class HrWidget extends WidgetType {
  * Renders a GFM table block as a real HTML table, reusing the app's canonical
  * markdown renderer so inline formatting and theming match everywhere else.
  * The table always stays rendered — it never drops to raw pipe/dash source.
+ * Its cell images resolve and load the way a standalone image does (`markdown-image.ts`).
  */
 class TableWidget extends WidgetType {
-	constructor(readonly src: string) { super(); }
-	eq(o: TableWidget) { return o.src === this.src; }
+	constructor(readonly src: string, readonly images: ImageContext | null) { super(); }
+	eq(o: TableWidget) {
+		const [a, b] = [o.images, this.images];
+		return o.src === this.src && a?.docPath === b?.docPath && a?.projectId === b?.projectId && a?.token === b?.token;
+	}
 	toDOM() {
 		const el = document.createElement('div');
 		el.className = 'cm-md-table md-content';
 		// Same trust boundary as every `{@html} renderMarkdown(...)` surface:
 		// renderMarkdown applies the canonical DOMPurify policy before HTML reaches
 		// the document. Keep this widget on that single sanitized renderer.
-		el.innerHTML = renderMarkdown(this.src);
+		el.append(renderedFragment(renderMarkdown(this.src), this.images));
+		el.dataset.srcLength = String(this.src.length); // the source range the widget stands for, for `widget-comments.ts`
 		return el;
 	}
 	ignoreEvent() { return true; }
@@ -77,9 +87,7 @@ class MermaidWidget extends WidgetType {
  * null. Reads the FencedCode node's CodeInfo (language) and CodeText children.
  */
 function mermaidFence(node: SyntaxNodeRef, doc: EditorState['doc']): string | null {
-	const info = node.node.getChild('CodeInfo');
-	if (!info) return null;
-	if (doc.sliceString(info.from, info.to).trim().toLowerCase() !== 'mermaid') return null;
+	if (!isMermaidFence(node, doc)) return null;
 	const text = node.node.getChild('CodeText');
 	return text ? doc.sliceString(text.from, text.to) : '';
 }
@@ -142,7 +150,7 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
 						break;
 					}
 					case 'Link':
-						decos.push(Decoration.mark({ class: 'cm-md-link' }).range(node.from, node.to));
+						decos.push(linkDecoration(view.state, node.node).range(node.from, node.to));
 						break;
 					case 'Image':
 						if (renderableImage(view.state, node.node)) return false; // hidden and drawn by `markdown-image.ts`
@@ -176,7 +184,7 @@ const markdownInlinePreview = ViewPlugin.fromClass(
 			this.decorations = buildInlineDecorations(view);
 		}
 		update(u: ViewUpdate) {
-			if (u.docChanged || u.viewportChanged) {
+			if (u.docChanged || u.viewportChanged || syntaxTree(u.state) !== syntaxTree(u.startState)) {
 				this.decorations = buildInlineDecorations(u.view);
 			}
 		}
@@ -192,13 +200,13 @@ const markdownInlinePreview = ViewPlugin.fromClass(
 function buildTableDecorations(state: EditorState): DecorationSet {
 	const decos: Range<Decoration>[] = [];
 	const { doc } = state;
+	const images = state.facet(imageContext)();
 	syntaxTree(state).iterate({
 		enter: (node) => {
 			if (node.name !== 'Table') return;
-			const from = doc.lineAt(node.from).from;
-			const to = doc.lineAt(Math.min(node.to, doc.length)).to;
+			const { from, to } = blockSource(doc, node);
 			const src = doc.sliceString(from, to);
-			decos.push(Decoration.replace({ widget: new TableWidget(src), block: true }).range(from, to));
+			decos.push(Decoration.replace({ widget: new TableWidget(src, images), block: true }).range(from, to));
 			return false;
 		}
 	});
@@ -242,8 +250,7 @@ function buildMermaidDecorations(state: EditorState): DecorationSet {
 			if (node.name !== 'FencedCode') return;
 			const code = mermaidFence(node, doc);
 			if (code === null) return; // a non-mermaid fence: left as styled code
-			const from = doc.lineAt(node.from).from;
-			const to = doc.lineAt(Math.min(node.to, doc.length)).to;
+			const { from, to } = blockSource(doc, node);
 			decos.push(Decoration.replace({ widget: new MermaidWidget(code), block: true }).range(from, to));
 			return false;
 		}
@@ -259,5 +266,7 @@ export const markdownLivePreview: Extension = [
 	markdownMermaidDecorations,
 	markdownImages,
 	selectImageOnClick,
-	openSelectedImageOnEnter
+	openSelectedImageOnEnter,
+	openLinkOnClick,
+	openLinkOnAltEnter
 ];

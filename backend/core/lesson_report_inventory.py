@@ -22,25 +22,31 @@ def source_record(text: str, path: str) -> dict[str, Any] | None:
         # The canonical Lesson normalizes dates to instants for scheduling.
         # Display preserves the validated source's calendar-date precision.
         block = validate_skill_text(text).metadata["corsia"]["lesson"]
-        return {
+        record = {
             "kind": "lesson", "id": lesson.id, "version": trial.behavioral_sha256,
             "name": trial.name, "state": lesson.state, "owner_id": lesson.owner,
             "review_after": block["review_after"], "review_node_id": lesson.review_node_id,
             "path": path, "raw_sha256": raw_sha256(text.encode()),
             "source_refs": list(lesson.source_refs),
         }
+        if "originating_subjects" in block:
+            record["originating_subjects"] = list(lesson.originating_subjects)
+        return record
     capture = read_capture(text)
     if capture:
         from core.skill_validation import parse_frontmatter
 
         metadata, _ = parse_frontmatter(text)
         block = metadata["corsia"]["capture"]
-        return {
+        record = {
             "kind": "capture", "id": capture.id, "version": capture.hash,
             "name": capture.id, "state": block.get("state"), "path": path,
             "owner_id": block.get("owner"), "review_after": block.get("review_after"),
             "raw_sha256": raw_sha256(text.encode()), "source_refs": list(capture.source_refs),
         }
+        if "originating_subjects" in block:
+            record["originating_subjects"] = list(capture.originating_subjects)
+        return record
     return None
 
 
@@ -140,6 +146,8 @@ def build_inventory(
                 source = matching[0]
                 row["state"] = source["state"]
                 row["review_after"] = source.get("review_after")
+                if "originating_subjects" in source:
+                    row["originating_subjects"] = list(source["originating_subjects"])
                 row["lifecycle_reason"] = None
                 row["due"] = False if row["state"] != "trial" else None
                 when, instant = parse_instant(row["review_after"]), parse_instant(now)

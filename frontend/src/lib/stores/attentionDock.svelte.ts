@@ -71,16 +71,13 @@ export const focusRequest = writable(0);
 
 export type FocusRequestResult = "requested" | "empty" | "unavailable";
 
-/**
- * A plan indicator's click handler. Refresh before handing off so an operator
- * projection that still says “1 decision” cannot silently target an already
- * settled or not-yet-loaded queue. The indicator never renders a decision; it
- * asks the one dock to open only after canonical queue truth is available.
- */
-export async function requestFocus(): Promise<FocusRequestResult> {
+/** Refresh canonical queue truth, then ask the dock to open; an optional id preserves a selected row. */
+export async function requestFocus(itemId?: string): Promise<FocusRequestResult> {
   await reload();
-  const current = get(visibleQueue).current;
+  const items = get(visibleQueue);
+  const current = itemId ? items.items.find((item) => item.external_id === itemId) ?? null : items.current;
   if (!current) return get(stale) ? "unavailable" : "empty";
+  activeId.set(current.external_id);
   focusRequest.update((n) => n + 1);
   return "requested";
 }

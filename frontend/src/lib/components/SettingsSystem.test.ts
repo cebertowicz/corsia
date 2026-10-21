@@ -84,6 +84,13 @@ afterEach(() => {
 });
 
 describe('SettingsSystem', () => {
+	it('does not expose the removed desktop server reset', () => {
+		component = mount(SettingsSystem, { target: host, props: { systemStatus: {} } });
+		flushSync();
+		expect(host.textContent).not.toContain('Reset URL');
+		expect(host.textContent).not.toContain('server picker');
+	});
+
 	it("labels the supported requester-model reviewer default without a warning", () => {
 		coreSettings.set({
 			...settingsPayload,
@@ -413,64 +420,6 @@ describe('SettingsSystem', () => {
 		expect(names()).not.toContain('Update');
 	});
 
-	it('runs the update path from the Update button, leaving Restart plain', async () => {
-		let versionReads = 0;
-		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input);
-			if (url.includes('/api/system/restart')) {
-				return { ok: true, json: async () => ({ ok: true, message: 'Updating.', operation_id: 'update-op' }) };
-			}
-			if (url.includes('/api/system/drain?')) {
-				return { ok: true, json: async () => ({ status: 'complete', phase: null, error: null }) };
-			}
-			if (url.includes('/api/version')) {
-				versionReads += 1;
-				const updated = versionReads > 1;
-				return {
-					ok: true,
-					json: async () => ({
-						frontend: { full_hash: updated ? 'bbb' : 'aaa' },
-						backend: {
-							full_hash: updated ? 'bbb' : 'aaa',
-							start_iso: updated ? 'new-start' : 'old-start',
-							current_head: { full_hash: 'bbb' },
-						},
-					}),
-				};
-			}
-			if (url.includes('/api/summaries?')) {
-				return { ok: true, json: async () => ({ summaries: [] }) };
-			}
-			return { ok: true, json: async () => settingsPayload };
-		});
-		vi.stubGlobal('fetch', fetchMock);
-
-		updateStatus.set({
-			branch: 'dev', current_sha: 'aaa', remote_sha: 'bbb', commits_behind: 4,
-			available: true, checked_at: 1, error: null,
-		});
-		component = mount(SettingsSystem, { target: host, props: { systemStatus: {} } });
-		flushSync();
-
-		expect(host.textContent).toContain('Update available');
-		expect(host.textContent).toContain('4 commits behind');
-
-		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-			.find((b) => b.textContent?.trim() === 'Update')?.click();
-		flushSync();
-		expect(host.textContent).toContain('Update + restart?');
-
-		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-			.find((b) => b.textContent?.trim() === 'Confirm')?.click();
-
-		await vi.waitFor(() => {
-			expect(fetchMock.mock.calls.some(([input]) => (
-				String(input).includes('/api/system/restart')
-				&& String(input).includes('mode=update')
-			))).toBe(true);
-		});
-	});
-
 	it('surfaces the exact restart operation failure without waiting for a global drain', async () => {
 		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
@@ -627,144 +576,6 @@ describe('SettingsSystem', () => {
 		expect(reloadWithCacheBust).not.toHaveBeenCalled();
 	});
 
-	it('waits for the exact operation to complete after versions converge', async () => {
-		let versionReads = 0;
-		let drainReads = 0;
-		let releaseComplete!: (value: object) => void;
-		const complete = new Promise<object>((resolve) => {
-			releaseComplete = resolve;
-		});
-		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input);
-			if (url.includes('/api/system/restart')) {
-				return { ok: true, json: async () => ({ ok: true, operation_id: 'transient-op' }) };
-			}
-			if (url.includes('/api/system/drain?')) {
-				drainReads += 1;
-				return {
-					ok: true,
-					json: async () => drainReads === 1 ? null : complete,
-				};
-			}
-			if (url.includes('/api/version')) {
-				versionReads += 1;
-				const restarted = versionReads > 1;
-				return {
-					ok: true,
-					json: async () => ({
-						frontend: { full_hash: restarted ? 'bbb' : 'aaa' },
-						backend: {
-							full_hash: restarted ? 'bbb' : 'aaa',
-							start_iso: restarted ? 'new-start' : 'old-start',
-							current_head: { full_hash: restarted ? 'bbb' : 'aaa' },
-						},
-					}),
-				};
-			}
-			if (url.includes('/api/summaries?')) return { ok: true, json: async () => ({ summaries: [] }) };
-			return { ok: true, json: async () => settingsPayload };
-		});
-		vi.stubGlobal('fetch', fetchMock);
-		updateStatus.set({
-			branch: 'dev', current_sha: 'aaa', remote_sha: 'bbb', commits_behind: 1,
-			available: true, checked_at: 1, error: null,
-		});
-		component = mount(SettingsSystem, { target: host, props: { systemStatus: {} } });
-		flushSync();
-
-		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-			.find((b) => b.textContent?.trim() === 'Update')?.click();
-		flushSync();
-		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-			.find((b) => b.textContent?.trim() === 'Confirm')?.click();
-
-		await vi.waitFor(() => {
-			expect(versionReads).toBeGreaterThanOrEqual(2);
-			expect(reloadWithCacheBust).not.toHaveBeenCalled();
-			expect(drainReads).toBeGreaterThanOrEqual(2);
-		});
-
-		releaseComplete({ status: 'complete', phase: null, error: null });
-		await vi.waitFor(() => expect(reloadWithCacheBust).toHaveBeenCalledOnce());
-	});
-
-	it('keeps Update in progress until backend, frontend, and checkout converge', async () => {
-		let versionReads = 0;
-		let releaseRestart!: (value: object) => void;
-		const restartedVersion = new Promise<object>((resolve) => {
-			releaseRestart = resolve;
-		});
-		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input);
-			if (url.includes('/api/system/restart')) {
-				return { ok: true, json: async () => ({ ok: true, message: 'Updating.', operation_id: 'update-op' }) };
-			}
-			if (url.includes('/api/system/drain?')) {
-				return { ok: true, json: async () => ({ status: 'complete', phase: null, error: null }) };
-			}
-			if (url.includes('/api/version')) {
-				versionReads += 1;
-				if (versionReads === 1) {
-					return {
-						ok: true,
-						json: async () => ({
-							frontend: { full_hash: 'aaa' },
-							backend: {
-								full_hash: 'aaa',
-								start_iso: 'old-start',
-								current_head: { full_hash: 'bbb' },
-							},
-						}),
-					};
-				}
-				const value = await restartedVersion;
-				return { ok: true, json: async () => value };
-			}
-			if (url.includes('/api/summaries?')) {
-				return { ok: true, json: async () => ({ summaries: [] }) };
-			}
-			return { ok: true, json: async () => settingsPayload };
-		});
-		vi.stubGlobal('fetch', fetchMock);
-		updateStatus.set({
-			branch: 'dev', current_sha: 'aaa', remote_sha: 'bbb', commits_behind: 1,
-			available: true, checked_at: 1, error: null,
-		});
-		component = mount(SettingsSystem, { target: host, props: { systemStatus: {} } });
-		flushSync();
-
-		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-			.find((b) => b.textContent?.trim() === 'Update')?.click();
-		flushSync();
-		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-			.find((b) => b.textContent?.trim() === 'Confirm')?.click();
-
-		await vi.waitFor(() => {
-			expect(fetchMock.mock.calls.some(([input]) =>
-				String(input).includes('/api/system/restart'))).toBe(true);
-			expect(versionReads).toBeGreaterThanOrEqual(2);
-		});
-		expect(host.textContent).toContain('Updating…');
-		expect(host.textContent).toContain('Update + restart?');
-		expect(host.textContent).toContain('Restart progress');
-		expect(host.textContent).toContain('Draining active work…');
-
-		releaseRestart({
-			frontend: { full_hash: 'bbb' },
-			backend: {
-				full_hash: 'bbb',
-				start_iso: 'new-start',
-				current_head: { full_hash: 'bbb' },
-			},
-		});
-		await vi.waitFor(() => {
-			expect(host.textContent).not.toContain('Updating…');
-			expect(host.textContent).not.toContain('Update + restart?');
-			expect(host.textContent).not.toContain('Restart progress');
-		});
-		expect(reloadWithCacheBust).toHaveBeenCalledOnce();
-	});
-
 	it.each([
 		['Restart', 'Drain + restart?', 'restart'],
 	])('runs %s without pulling or building', async (buttonName, confirmation, mode) => {
@@ -782,7 +593,7 @@ describe('SettingsSystem', () => {
 				return {
 					ok: true,
 					json: async () => ({
-						frontend: { full_hash: versionReads === 2 ? 'stale' : 'aaa' },
+						frontend: { full_hash: 'aaa' },
 						backend: {
 							full_hash: 'aaa',
 							start_iso: versionReads > 1 ? 'new-start' : 'old-start',
@@ -815,39 +626,8 @@ describe('SettingsSystem', () => {
 			expect(call).toBeTruthy();
 			expect(String(call![0])).toContain(`mode=${mode}`);
 			expect(String(call![0])).not.toContain('mode=update');
-			expect(versionReads).toBeGreaterThan(2);
+			expect(versionReads).toBeGreaterThan(1);
 			expect(host.textContent).not.toContain(confirmation);
 		});
-	});
-
-	it('keeps an update failure visible without pretending to restart', async () => {
-		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input);
-			if (url.includes('/api/system/restart')) {
-				return { ok: false, json: async () => ({ detail: 'Python dependency check failed.' }) };
-			}
-			if (url.includes('/api/summaries?')) {
-				return { ok: true, json: async () => ({ summaries: [] }) };
-			}
-			return { ok: true, json: async () => settingsPayload };
-		});
-		vi.stubGlobal('fetch', fetchMock);
-
-		updateStatus.set({
-			branch: 'dev', current_sha: 'aaa', remote_sha: 'bbb', commits_behind: 1,
-			available: true, checked_at: 1, error: null,
-		});
-		component = mount(SettingsSystem, { target: host, props: { systemStatus: {} } });
-		flushSync();
-		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-			.find((b) => b.textContent?.trim() === 'Update')?.click();
-		flushSync();
-		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
-			.find((b) => b.textContent?.trim() === 'Confirm')?.click();
-
-		await vi.waitFor(() => {
-			expect(host.textContent).toContain('Python dependency check failed.');
-		});
-		expect(host.textContent).toContain('Update + restart?');
 	});
 });

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from reviewer.review_thread_lifecycle import StillRaisedFinding
 from reviewer.reviewer_categories import (
     SEVERITY_BLOCK,
     SEVERITY_FLAG,
@@ -112,11 +113,29 @@ def _summary_header(
     ]
 
 
+def _still_raised_line(still_raised: StillRaisedFinding) -> str:
+    """Render one current-severity pointer to a carried reviewer comment."""
+    finding = still_raised.finding
+    carrier = still_raised.carrier_comment
+    label = {
+        SEVERITY_BLOCK: "still blocking",
+        SEVERITY_FLAG: "still flagged",
+        SEVERITY_NIT: "still a nit",
+    }.get(finding.get("severity"), "still raised")
+    path = finding.get("file") or "(PR-level)"
+    line = finding.get("line")
+    location = f"{path}:{line}" if line else path
+    html_url = carrier.get("html_url")
+    if isinstance(html_url, str) and html_url:
+        location = f"[{location}]({html_url})"
+    return f"- {label}: {location}"
+
+
 def format_summary_body(
     findings: list[dict[str, Any]],
     model_label: str,
     new_count: int,
-    unchanged_count: int,
+    still_raised: list[StillRaisedFinding],
     resolved_count: int,
     pr_level_count: int,
 ) -> str:
@@ -129,8 +148,8 @@ def format_summary_body(
         findings: All findings from the current run.
         model_label: Human model name (e.g., "Opus 4.8").
         new_count: Findings whose fingerprint is new in this run.
-        unchanged_count: Findings whose fingerprint is unchanged from a
-            prior run (their thread persists — we silently skip re-posting).
+        still_raised: Findings whose fingerprint is unchanged from a prior
+            run, paired with the existing comment that carries their text.
         resolved_count: Prior findings absent from this run (resolved
             replies posted on those threads).
         pr_level_count: New findings that could not be anchored and were
@@ -140,6 +159,7 @@ def format_summary_body(
     """
     block_count, flag_count, nit_count = _severity_counts(findings)
     severity_summary = f"{block_count} block, {flag_count} flag, {nit_count} nit"
+    unchanged_count = len(still_raised)
     delta_summary = f"{new_count} new this run · {unchanged_count} still raised this run · {resolved_count} not raised this run"
 
     lines = _summary_header(
@@ -177,11 +197,8 @@ def format_summary_body(
         )
         lines.append("")
 
-    if unchanged_count > 0:
-        lines.append(
-            f"_{unchanged_count} prior finding{'s' if unchanged_count != 1 else ''} "
-            f"still apply — see existing threads._"
-        )
+    if still_raised:
+        lines.extend(_still_raised_line(finding) for finding in still_raised)
         lines.append("")
 
     if resolved_count > 0:

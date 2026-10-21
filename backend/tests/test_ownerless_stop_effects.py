@@ -6,6 +6,7 @@ import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
+from loguru import logger
 
 from test_ownerless_stop import _stop
 from test_stop_receipts import _active_turn, _clear_live_turn_state  # noqa: F401
@@ -45,7 +46,7 @@ async def test_ownerless_stop_receipt_does_not_depend_on_successor(
 
     monkeypatch.setattr(thread_execution, "drive_claimed_batch", dispatch)
     monkeypatch.setattr(state, "send_to_client", send)
-    monkeypatch.setattr(ws.ingress.logger, "error", lambda *args: errors.append(args))
+    sink = logger.add(lambda message: errors.append(message.record), level="ERROR")
     owner_id = main_db.execute(
         "SELECT user_id FROM threads WHERE id='main-1'",
     ).fetchone()[0]
@@ -74,10 +75,15 @@ async def test_ownerless_stop_receipt_does_not_depend_on_successor(
             "SELECT id,status FROM active_turns ORDER BY turn_order",
         )] == [("orphan", "cancelled"), (batches[0].turn_id, "running")]
         if effect == "failed":
-            assert any("successor failure" in str(error) for error in errors)
+            assert any(
+                record["exception"] is not None
+                and "successor failure" in str(record["exception"].value)
+                for record in errors
+            )
         else:
             assert len(background_tasks - before) == 1
     finally:
         release.set()
         await asyncio.gather(task, return_exceptions=True)
         await asyncio.gather(*(background_tasks - before), return_exceptions=True)
+        logger.remove(sink)

@@ -1,13 +1,13 @@
-"""The tool catalog's data: one declaration per registry tool.
-
-``tools.catalog`` is the public import path; it re-exports these names with
-the packs and lookups that read them.
-"""
+"""Tool-catalog declarations, re-exported through ``tools.catalog``."""
 
 from __future__ import annotations
 
+from tools.catalog_consent_entries import CONSENT_CATALOG_ENTRIES
 from tools.catalog_entry import ToolCatalogEntry
 from tools.catalog_host_entries import HOST_ACCESS_CATALOG_ENTRIES
+from tools.catalog_library_entries import LIBRARY_CATALOG_ENTRIES
+from tools.catalog_measurement_entries import MEASUREMENT_CATALOG_ENTRIES
+from tools.catalog_microsoft_entries import MICROSOFT_CATALOG_ENTRIES
 
 _Entry = ToolCatalogEntry
 
@@ -73,8 +73,8 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Requesting checkpoint",
     ),
     "bulletin_disposition": _Entry(
-        "plans", status="substrate", authority="workspace-conductor",
-        summary="Record a workspace conductor disposition for a System bulletin",
+        "plans", status="substrate", authority="corsia-agent",
+        summary="Record a CORSIA agent disposition for a System bulletin",
         activity="Recording bulletin disposition",
     ),
     "agent_roster": _Entry(
@@ -83,33 +83,33 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Reading roster",
     ),
     "agent_roster_entry": _Entry(
-        "delegation", status="active", authority="conductor-roster-read",
+        "delegation", status="active", authority="coordination-roster-read",
         summary="Read one scoped roster entry and its current revision",
         activity="Reading roster entry",
     ),
     "agent_roster_update": _Entry(
-        "delegation", status="active", authority="conductor-roster-write",
-        summary="Edit an agent roster entry in the current designated conductor scope",
+        "delegation", status="active", authority="coordination-roster-write",
+        summary="Edit an agent roster entry in the current coordination scope",
         activity="Updating roster",
     ),
     "corsia_api": _Entry(
-        "conductor", status="active", authority="conductor-api",
-        summary="Call CORSIA API routes as a designated conductor, except the person-only list",
+        "coordination", status="active", authority="coordination-api",
+        summary="Call CORSIA API routes as the CORSIA agent or a project conductor, except the person-only list",
         activity="Calling CORSIA API",
     ),
-    "conductor_instruction_file_create": _Entry(
-        "conductor", status="active", authority="conductor-instruction-write",
+    "coordination_instruction_file_create": _Entry(
+        "coordination", status="active", authority="coordination-instruction-write",
         summary="Create and attach agent responsibility files or thread skills",
         activity="Installing instruction file",
     ),
-    "conductor_instruction_file_read": _Entry(
-        "conductor", status="active", authority="conductor-instruction-read",
+    "coordination_instruction_file_read": _Entry(
+        "coordination", status="active", authority="coordination-instruction-read",
         summary="List or read an agent's attached instruction file with its revision",
         activity="Reading instruction file",
     ),
-    "conductor_instruction_file_replace": _Entry(
-        "conductor", status="active", authority="conductor-instruction-write",
-        summary="Replace one attached instruction file in the designated conductor scope",
+    "coordination_instruction_file_replace": _Entry(
+        "coordination", status="active", authority="coordination-instruction-write",
+        summary="Replace one attached instruction file in the current coordination scope",
         activity="Updating instruction file",
     ),
     "read_tool_result": _Entry(
@@ -152,11 +152,6 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "projects", status="substrate", authority="workspace-write",
         summary="Create a new project workspace",
         activity="Creating project",
-    ),
-    "project_discovery_list": _Entry(
-        "projects", authority="consented-history-read",
-        summary="List the folders the user works in, after their consent decision",
-        activity="Finding projects",
     ),
     "worktree_create": _Entry(
         "projects", status="substrate", authority="repository-worktree-write",
@@ -240,6 +235,51 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Connect and check the agents' own GitHub account",
         activity="Checking the agents' GitHub account",
     ),
+    "email_search": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="Search the person's Gmail: headers only, no body text",
+        activity="Searching mail",
+    ),
+    "email_read": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="Read one email after the local screen; a flagged message returns no body",
+        activity="Reading mail",
+    ),
+    "google_connect": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="Start the person's Google sign-in and get the link they open",
+        activity="Starting Google sign-in",
+    ),
+    "google_status": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="Read the Google sign-in's email, scopes and status",
+        activity="Checking Google sign-in",
+    ),
+
+    "email_draft": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="Save an email as a draft document for the person to review; nothing is sent",
+        activity="Drafting email",
+    ),
+    "email_send": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="Send a saved email draft after the person says to send it",
+        activity="Sending email",
+    ),
+    "calendar_list": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="List the person's Google Calendar events, up to 31 days at a time", activity="Reading calendar",
+    ),
+    "calendar_draft_invite": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="Save a calendar invite as a draft document for the person to review; nothing is sent",
+        activity="Drafting invite",
+    ),
+    "calendar_send_invite": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="Send a saved invite draft after the person says to send it; attendees get emails",
+        activity="Sending invite",
+    ),
     "plan_read": _Entry(
         "plans", status="substrate", authority="plan-read", core=True,
         activity="Reading plan",
@@ -273,6 +313,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="List this thread's schedules",
         activity="Listing automations",
     ),
+    **MEASUREMENT_CATALOG_ENTRIES,
     "restart_resume": _Entry(
         "delegation", status="substrate", authority="restart-continuity",
         summary="Resume this turn after the pending system restart",
@@ -353,4 +394,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Releasing artifact",
     ),
     **HOST_ACCESS_CATALOG_ENTRIES,
+    **MICROSOFT_CATALOG_ENTRIES,
+    **LIBRARY_CATALOG_ENTRIES,
+    **CONSENT_CATALOG_ENTRIES,
 }

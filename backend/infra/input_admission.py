@@ -117,12 +117,12 @@ def checkpoint_cap_refusal(model: str) -> tuple[str, str]:
 
 def checkpoint_cap_impossible(window: int, model: str) -> bool:
     """Return whether the cap alone, before any history, leaves no checkpoint room."""
-    from core.checkpoint_fit import ColdFoldInputTooLarge
-    from core.checkpoint_render import require_cold_checkpoint_room
+    from core.fork_fit import ColdFoldInputTooLarge
+    from core.fork_render import require_cold_fork_room
     from prompts.checkpoint import build_checkpoint_system_prompt
 
     try:
-        require_cold_checkpoint_room(
+        require_cold_fork_room(
             window, build_checkpoint_system_prompt(), writer=model,
         )
     except ColdFoldInputTooLarge:

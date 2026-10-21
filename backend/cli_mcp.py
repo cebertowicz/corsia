@@ -1,56 +1,152 @@
-"""Operator configuration of external tools through the canonical settings owner."""
+"""MCP configuration commands over the canonical connected-apps API."""
 
+import argparse
 import json
-from pathlib import Path
 import sys
+from typing import Any
+from urllib.parse import quote
 
-from tools import mcp_secrets
-from tools.mcp_config import MCPConfigError, allowed_names, http_options, timeout_seconds
+
+SERVERS_ROUTE = "/api/mcp/servers"
 
 
-def configure_mcp(args) -> int:
-    """Validate and replace MCP server configuration.
-
-    Credential-named env and header values go to the key store; the saved
-    config keeps references. Bearer values are never persisted.
-    """
-    from infra.database import write_transaction
-    from infra.settings import get_setting, set_setting
-
+def _json_value(raw: str, expected: type, flag: str) -> Any:
+    """Parse one JSON CLI argument without admitting a different wire shape."""
     try:
-        servers = json.loads(Path(args.file).expanduser().read_text())
-        if not isinstance(servers, dict):
-            raise MCPConfigError("configuration must be an object keyed by server name")
-        for name, config in servers.items():
-            if not isinstance(config, dict):
-                raise MCPConfigError("each server configuration must be an object")
-            config, _ = mcp_secrets.split_secrets(name, config)
-            allowed_names(config)
-            timeout_seconds(config, "connect_timeout", 10)
-            timeout_seconds(config, "tool_timeout", 30)
-            if config.get("url"):
-                http_options(config)
-            elif not config.get("command") or config.get("bearer_file"):
-                raise MCPConfigError("configure an HTTP URL or a stdio command without bearer_file")
-        with write_transaction(None, scope="configure_mcp") as db:
-            tools = get_setting("tools", db=db) or {}
-            servers = mcp_secrets.replace_servers(tools.get("mcpServers") or {}, servers, db=db)
-            tools["mcpServers"] = servers
-            set_setting("tools", tools, db=db)
-    except MCPConfigError as error:
-        print(f"MCP configuration refused: {error}", file=sys.stderr)
-        return 2
-    except (OSError, ValueError, TypeError):
-        print("MCP configuration refused: cannot read a valid JSON configuration file", file=sys.stderr)
-        return 2
-    print(f"Configured {len(servers)} MCP servers. Restart this backend to discover their tools.")
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise argparse.ArgumentTypeError(f"{flag} must be valid JSON: {error.msg}") from error
+    if not isinstance(value, expected):
+        raise argparse.ArgumentTypeError(f"{flag} must be a JSON {expected.__name__}")
+    return value
+
+
+def _json_object(raw: str) -> dict[str, Any]:
+    return _json_value(raw, dict, "--config")
+
+
+def _json_list(raw: str) -> list[dict[str, Any]]:
+    value = _json_value(raw, list, "--key-refs")
+    if not all(isinstance(item, dict) for item in value):
+        raise argparse.ArgumentTypeError("--key-refs must be a JSON list of objects")
+    return value
+
+
+def _reach(raw: str) -> dict[str, Any]:
+    return _json_value(raw, dict, "--reach")
+
+
+def _server_path(server_id: str, suffix: str = "") -> str:
+    return f"{SERVERS_ROUTE}/{quote(server_id, safe='')}{suffix}"
+
+
+def _call_server_api(method: str, path: str, *, body: dict[str, Any] | None = None,
+                     query: dict[str, str] | None = None) -> int:
+    """Invoke the API as the CLI's actual token, leaving identity decisions to it."""
+    from scripts import corsia_api
+
+    response = corsia_api.request(
+        method,
+        corsia_api.resolve_base(None),
+        path,
+        corsia_api.resolve_token(None),
+        body,
+        query,
+        header_auth=True,
+    )
+    print(json.dumps(response, indent=2, sort_keys=True))
     return 0
 
 
+def list_mcp_servers(args: argparse.Namespace) -> int:
+    query = {"project": args.project} if args.project else (
+        {"place": "workspace"} if args.workspace else None
+    )
+    return _call_server_api("GET", SERVERS_ROUTE, query=query)
+
+
+def add_mcp_server(args: argparse.Namespace) -> int:
+    body = {"name": args.name, "config": args.config, "key_refs": args.key_refs}
+    if args.reach is not None:
+        body["reach"] = args.reach
+    return _call_server_api("POST", SERVERS_ROUTE, body=body)
+
+
+def edit_mcp_server(args: argparse.Namespace) -> int:
+    return _call_server_api(
+        "PATCH",
+        _server_path(args.server_id),
+        body={
+            "config": args.config,
+            "key_refs": args.key_refs,
+            "expected_revision": args.expected_revision,
+        },
+    )
+
+
+def remove_mcp_server(args: argparse.Namespace) -> int:
+    return _call_server_api("DELETE", _server_path(args.server_id))
+
+
+def reconnect_mcp_server(args: argparse.Namespace) -> int:
+    """Request reconnect; the server alone owns any live runtime effect."""
+    return _call_server_api("POST", _server_path(args.server_id, "/reconnect"))
+
+
+def approve_mcp_server(args: argparse.Namespace) -> int:
+    return _call_server_api(
+        "POST", _server_path(args.server_id, "/approve"), body={"expected_revision": args.expected_revision},
+    )
+
+
+def configure_mcp(_args) -> int:
+    """Refuse the retired settings-backed writer until it uses Connected apps."""
+    print(
+        "MCP configuration refused: Bringing apps over from other apps isn't available in this build yet; "
+        "add the app in Connected apps.",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def build_parser(subparsers) -> None:
-    """Add the MCP configuration command to CORSIA's maintenance CLI."""
+    """Add MCP connected-app and legacy configuration commands to the maintenance CLI."""
     parser = subparsers.add_parser("mcp", help="Configure external MCP tools")
     commands = parser.add_subparsers(dest="mcp_command", required=True)
-    configure = commands.add_parser("configure", help="Replace tools.mcpServers from a JSON file")
+
+    list_servers = commands.add_parser("list", help="List connected MCP servers")
+    place = list_servers.add_mutually_exclusive_group()
+    place.add_argument("--project", help="List server reach for this project")
+    place.add_argument("--workspace", action="store_true", help="List workspace-wide servers")
+    list_servers.set_defaults(func=list_mcp_servers)
+
+    add = commands.add_parser("add", help="Add a connected MCP server")
+    add.add_argument("--name", required=True)
+    add.add_argument("--config", required=True, type=_json_object, help="JSON config object")
+    add.add_argument("--key-refs", required=True, type=_json_list, help="JSON list of key references")
+    add.add_argument("--reach", type=_reach, help="JSON reach object; the server authorizes its use")
+    add.set_defaults(func=add_mcp_server)
+
+    edit = commands.add_parser("edit", help="Edit a connected MCP server")
+    edit.add_argument("server_id")
+    edit.add_argument("--config", required=True, type=_json_object, help="JSON config object")
+    edit.add_argument("--key-refs", required=True, type=_json_list, help="JSON list of key references")
+    edit.add_argument("--expected-revision", type=int, required=True)
+    edit.set_defaults(func=edit_mcp_server)
+
+    remove = commands.add_parser("remove", help="Remove a connected MCP server")
+    remove.add_argument("server_id")
+    remove.set_defaults(func=remove_mcp_server)
+
+    reconnect = commands.add_parser("reconnect", help="Ask the server to reconnect an MCP app")
+    reconnect.add_argument("server_id")
+    reconnect.set_defaults(func=reconnect_mcp_server)
+
+    approve = commands.add_parser("approve", help="Approve a pending MCP server change")
+    approve.add_argument("server_id")
+    approve.add_argument("--expected-revision", type=int, required=True)
+    approve.set_defaults(func=approve_mcp_server)
+
+    configure = commands.add_parser("configure", help="Retired; add apps through Connected apps")
     configure.add_argument("file")
     configure.set_defaults(func=configure_mcp)

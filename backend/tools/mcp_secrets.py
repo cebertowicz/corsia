@@ -9,6 +9,11 @@ a hand-edited config can name a variable but cannot point at any other key.
 The launcher resolves the lists with :func:`resolve` just before it opens a
 connection; the values live in that one call's result and nowhere else. Errors
 here carry fixed text and never a value.
+
+A header value of the form ``<scheme> <token>`` (``Authorization: Bearer abc``)
+is stored as the token alone, because the key store refuses spaces. Its scheme
+is not secret: it stays in the config as ``key_header_schemes`` and the
+launcher puts it back in front of the token when it sends the header.
 """
 
 from __future__ import annotations
@@ -25,9 +30,19 @@ from tools.mcp_config import MCPConfigError
 
 SECRET_ENV = "secret_env"
 SECRET_HEADERS = "secret_headers"
+HEADER_SCHEMES = "key_header_schemes"
 _KINDS = {SECRET_ENV: "env", SECRET_HEADERS: "headers"}
-#: Header names HTTP MCP config refuses outright, whether literal or stored.
-REFUSED_HEADERS = frozenset({"authorization", "proxy-authorization", "cookie"})
+# One auth-scheme word, never free text: it is kept in plain config and sent as is.
+_SCHEME_WORD = r"[A-Za-z][A-Za-z0-9._-]{0,31}"
+_SCHEME = re.compile(_SCHEME_WORD)
+_SCHEMED_VALUE = re.compile(rf"({_SCHEME_WORD}) (\S+)")
+# Import splits only these: an unknown first word may itself be secret (``<id> <secret>``)
+# and must not land in agent-visible config. An agent-written scheme needs only ``_SCHEME``.
+_IMPORT_SCHEMES = frozenset({"bearer", "basic", "token", "bot"})
+# Proxy credentials are never safe to replay to an imported app. Other
+# credential-named headers are lifted into the key store rather than retained
+# in the app configuration.
+REFUSED_HEADERS = frozenset({"proxy-authorization"})
 
 # 4 + 10 + 1 + 14 + 1 + 10 characters: the longest name still fits the store's 40.
 _SERVER_SLUG = 10
@@ -68,6 +83,61 @@ def referenced_entries(server: str, config: dict) -> set[str]:
     }
 
 
+def split_scheme(value: str) -> tuple[str | None, str]:
+    """``(scheme, token)`` for ``<known scheme> <token>``; ``(None, value)`` for anything else."""
+    match = _SCHEMED_VALUE.fullmatch(value.strip())
+    if match is None or match.group(1).lower() not in _IMPORT_SCHEMES:
+        return None, value
+    return match.group(1), match.group(2)
+
+
+def header_schemes(config: dict) -> dict[str, str]:
+    """The scheme kept for each stored header, by header name; only a header in ``secret_headers`` can have one.
+
+    The config holds a list of ``{"header", "scheme"}`` pairs rather than an object keyed by
+    header name: the agent API refuses and hides any object with an ``Authorization`` key.
+    """
+    entries = config.get(HEADER_SCHEMES, [])
+    shape = f"{HEADER_SCHEMES} must be a list of header and one-word scheme pairs"
+    if not isinstance(entries, list):
+        raise MCPConfigError(shape)
+    listed = set(_listed(config, SECRET_HEADERS))
+    schemes: dict[str, str] = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {"header", "scheme"}:
+            raise MCPConfigError(shape)
+        header, scheme = entry["header"], entry["scheme"]
+        if not isinstance(header, str) or not isinstance(scheme, str) or not _SCHEME.fullmatch(scheme):
+            raise MCPConfigError(shape)
+        if header not in listed:
+            raise MCPConfigError(f"{HEADER_SCHEMES} names a header that is not in {SECRET_HEADERS}")
+        if header in schemes:
+            raise MCPConfigError(f"{HEADER_SCHEMES} lists a header twice")
+        schemes[header] = scheme
+    return schemes
+
+
+def declare_codex_keys(config: dict, copied: dict) -> None:
+    """Name the header keys a Codex entry takes from its environment, never reading their values.
+
+    ``env_http_headers`` lists them by header. ``bearer_token_env_var`` is Codex's
+    ``Authorization: Bearer <value>``, so its key is the token alone with the ``Bearer`` scheme.
+    """
+    env_headers = config.get("env_http_headers")
+    names = [
+        name for name, value in env_headers.items()
+        if isinstance(name, str) and name and isinstance(value, str) and value
+    ] if isinstance(env_headers, dict) else []
+    bearer_var = config.get("bearer_token_env_var")
+    if isinstance(bearer_var, str) and bearer_var:
+        name = next((name for name in names if name.lower() == "authorization"), "Authorization")
+        if name not in names:
+            names.append(name)
+        copied[HEADER_SCHEMES] = [{"header": name, "scheme": "Bearer"}]
+    if names:
+        copied[SECRET_HEADERS] = names
+
+
 def _literals(config: dict, source: str) -> dict:
     values = config.get(source) or {}
     if not isinstance(values, dict):
@@ -84,21 +154,26 @@ def check_references(config: dict) -> None:
         if set(names) & set(_literals(config, source)):
             raise MCPConfigError(f"{field} and {source} both set the same name")
     if any(name.lower() in REFUSED_HEADERS for name in _listed(config, SECRET_HEADERS)):
-        raise MCPConfigError("literal credential headers are refused; use bearer_file for bearer authentication")
+        raise MCPConfigError("proxy authorization headers are not supported")
+    header_schemes(config)
 
 
 def split_secrets(server: str, config: dict, *, headers: bool = False) -> tuple[dict, dict[str, str]]:
     """``config`` with credential values lifted out, and those values by entry name.
 
-    Pure: nothing is stored. Existing references are kept. A credential-named
+    Pure: nothing is stored. Existing references are kept. A lifted
+    ``Authorization`` value of the form ``<scheme> <token>`` with a known scheme
+    (Bearer, Basic, Token, Bot) yields the token, and its scheme goes to
+    ``key_header_schemes``; any other value with a space, an unknown first word
+    included, is left whole for the store to refuse. A credential-named
     value that is blank or not a string stays where it is for the config's own
-    validation to judge. Headers are lifted only for ``headers=True``, which the
-    one-time migration uses: HTTP MCP config refuses a literal credential header
-    on every write path, so a write never lifts one, and the refusal stands.
+    validation to judge. Import callers pass ``headers=True`` so Authorization,
+    Cookie and other credential-named headers become managed references.
     """
     check_references(config)
     result = dict(config)
     lifted: dict[str, str] = {}
+    schemes = dict(header_schemes(config))
     fields = ((SECRET_ENV, "env"), (SECRET_HEADERS, "headers")) if headers else ((SECRET_ENV, "env"),)
     for field, source in fields:
         values = _literals(config, source)
@@ -111,6 +186,10 @@ def split_secrets(server: str, config: dict, *, headers: bool = False) -> tuple[
                 and not (source == "headers" and var.lower() in REFUSED_HEADERS)
             )
             if movable:
+                if source == "headers" and var.lower() == "authorization":
+                    scheme, value = split_scheme(value)
+                    if scheme is not None:
+                        schemes[var] = scheme
                 lifted[entry_name(server, field, var)] = value
                 names.append(var)
             else:
@@ -121,24 +200,12 @@ def split_secrets(server: str, config: dict, *, headers: bool = False) -> tuple[
                 del result[source]
         if names:
             result[field] = names
+    if schemes:
+        result[HEADER_SCHEMES] = [{"header": header, "scheme": scheme} for header, scheme in schemes.items()]
     return result, lifted
 
 
-def store_secrets(values: dict[str, str], *, db: sqlite3.Connection | None = None) -> None:
-    """Write each value to its entry, replacing any earlier one."""
-    for name, value in values.items():
-        try:
-            key_store.set_managed_value(name, value, db=db)
-        except key_store.KeyStoreError:
-            raise MCPConfigError(
-                "a credential value cannot be saved: use printable characters, with no spaces, up to 4096"
-            ) from None
-
-
-def stored_matches(values: dict[str, str], *, db: sqlite3.Connection | None = None) -> bool:
-    """Whether the store already holds exactly these values."""
-    return key_store.resolve_names(values, db=db) == values
-
+# Values are written only through the Settings > Keys API.
 
 def resolve(
     server: str, config: dict, *, db: sqlite3.Connection | None = None,
@@ -167,32 +234,4 @@ def resolve(
     return resolved[SECRET_ENV], resolved[SECRET_HEADERS]
 
 
-def replace_servers(old: dict, new: dict, *, db: sqlite3.Connection | None = None) -> dict:
-    """Store the credential values of the new set and return its configs with references.
-
-    Removes the entries the old set referenced and the new one no longer does,
-    a removed server included. Pass the settings write's connection: the
-    values, the removals and the settings commit together, so a failed write
-    leaves every old config resolvable. A reference the new set carries without
-    a value must already resolve, so the replacement cannot leave a server
-    unable to start. Nothing is stored when any server is refused.
-    """
-    cleaned: dict[str, dict] = {}
-    lifted: dict[str, str] = {}
-    for server, config in new.items():
-        cleaned[server], values = split_secrets(server, config)
-        lifted.update(values)
-    referenced = set().union(*(referenced_entries(server, config) for server, config in cleaned.items()))
-    unresolved = referenced - set(lifted) - set(key_store.resolve_names(referenced - set(lifted), db=db))
-    if unresolved:
-        raise MCPConfigError("a credential reference has no value in the key store; include the value")
-    store_secrets(lifted, db=db)
-    previous = set()
-    for server, config in old.items():
-        try:
-            previous |= referenced_entries(server, config) if isinstance(config, dict) else set()
-        except MCPConfigError:
-            continue
-    for name in sorted(previous - referenced):
-        key_store.drop_managed_entry(name, db=db)
-    return cleaned
+# Server-set replacement belonged to the retired tools.mcpServers writer path.

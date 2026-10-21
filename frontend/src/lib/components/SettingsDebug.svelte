@@ -57,7 +57,7 @@
 
 	const cpuProfilerOn = $derived($coreSettings?.features?.cpu_profiler === true);
 	const overlayOn = $derived(
-		$coreSettings?.features?.debug_version_overlay !== false,
+		$coreSettings?.features?.debug_version_overlay === true,
 	);
 	const stale = $derived($isFrontendStale);
 	const backendBehind = $derived($isBackendBehindOnDisk);
@@ -76,7 +76,7 @@
 				settingsError = result.message ?? 'Restart could not be started.';
 				return;
 			}
-			const completed = await waitForSystemRestart('restart', before, result.operation_id);
+			const completed = await waitForSystemRestart(before, result.operation_id);
 			if (!completed.ok) {
 				settingsError = completed.message ?? 'Restart did not finish.';
 				return;
@@ -242,7 +242,7 @@
 </div>
 
 <style>
-	.settings-section { padding: 24px 32px; max-width: 760px; }
+	.settings-section { max-width: 760px; }
 	.section-header { margin-bottom: 24px; }
 	.section-header h2 { font-size: var(--text-title2); font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
 	.section-header p { font-size: var(--text-subhead); color: var(--text-muted); margin: 0; }
@@ -262,7 +262,7 @@
 	.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 	.btn.sm { padding: 4px 10px; font-size: var(--text-footnote); }
 	.btn.ghost { background: none; }
-	.btn.primary { background: var(--accent); border-color: var(--accent); color: white; }
+	.btn.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--accent-on-fill); }
 	.btn.primary:hover { filter: brightness(1.06); }
 
 	.feature-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }

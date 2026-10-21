@@ -32,23 +32,26 @@ export const RESERVE_BUDGET_MS = 3000;
 export const CATCH_UP_MS = 50;
 const CHANGED = 'The document changed before your comment could be attached. Your draft is kept. Try again.';
 const OFFLINE = 'You’re offline. Your comment draft is kept. Try again when connected.';
+const UNANSWERED = 'Couldn’t attach your comment. Your draft is kept. Try again.';
 
 /**
  * One correlated capture owned by the existing draft. It asks the server to track the selection under the
  * comment's own client id, which succeeds only when the server holds the state this browser hashed. A hash a
  * remote update interrupts is simply redone. After a refusal it waits for the next applied remote update (or
- * CATCH_UP_MS), so the browser has caught up, and asks again until RESERVE_BUDGET_MS runs out. Abort or failure
- * gives the range back; abort also releases an in-progress hash.
+ * CATCH_UP_MS), so the browser has caught up, and asks again until RESERVE_BUDGET_MS runs out. Abort, refusal, or
+ * an unanswered reservation gives the range back; abort also releases an in-progress hash.
  */
 export function captureComment(selection: CommentSelection, seq: number, signal: AbortSignal): Promise<CapturedComment> {
 	const { session } = selection, clientId = newClientId();
 	return new Promise((resolve, reject) => {
 		const started = performance.now();
 		let done = false, requestId: string | null = null, sent: CapturedComment | null = null;
+		let deadline: ReturnType<typeof setTimeout> | undefined;
 		let stopFrame = () => {}, stopState = () => {}, stopWait = () => {};
 		const finish = (result?: CapturedComment, error?: Error) => {
 			if (done) return;
-			done = true; stopFrame(); stopState(); stopWait(); signal.removeEventListener('abort', abort);
+			done = true; clearTimeout(deadline); stopFrame(); stopState(); stopWait(); signal.removeEventListener('abort', abort);
+			session.cancelReservationRequest(requestId);
 			if (result) { resolve(result); return; }
 			if (sent) session.releaseReservation(clientId);
 			reject(error ?? new Error(CHANGED));
@@ -57,15 +60,21 @@ export function captureComment(selection: CommentSelection, seq: number, signal:
 		if (signal.aborted) { abort(); return; }
 		signal.addEventListener('abort', abort, { once: true });
 		stopFrame = session.onFrame(frame => {
-			if (frame.artifact_id !== session.artifactId || frame.store_id !== session.storeId || frame.request_id !== requestId) return;
-			if (frame.type === 'doc_error') { finish(undefined, new Error(frame.message ?? 'Could not check the selection. Try again.')); return; }
-			if (frame.type !== 'doc_positions' || frame.seq !== seq || !sent) return;
+			// No ask is out yet while hashing: a refusal without an id (an earlier capture's release) is not ours.
+			if (requestId === null || frame.request_id !== requestId) return;
+			if (frame.type === 'doc_error') {
+				finish(undefined, new Error((frame.kind === 'refused' || frame.kind === 'store_refused') && frame.message ? frame.message : CHANGED));
+				return;
+			}
+			if (frame.artifact_id !== session.artifactId || frame.store_id !== session.storeId || frame.type !== 'doc_positions' || frame.seq !== seq || !sent) return;
 			if (frame.reserved) finish(sent); else again(true);
 		});
 		stopState = session.subscribe(() => {
 			if (session.connection !== 'connected') finish(undefined, new Error(OFFLINE));
 		});
 		if (done) { stopState(); return; }
+		// An ask still out means the server never answered; otherwise the budget ran out on a document that kept moving.
+		deadline = setTimeout(() => finish(undefined, sent ? new Error(UNANSWERED) : undefined), RESERVE_BUDGET_MS);
 		void ask();
 		function again(refused: boolean) {
 			sent = null;

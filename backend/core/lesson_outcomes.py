@@ -28,6 +28,7 @@ from core.placement_decide import Decision, Destination, ThreadPlace
 TRIAL_ACCEPTANCE = (
     "The trial lesson is retired, promoted or extended, with the evidence for that choice."
 )
+WATCH_ACCEPTANCE = "The watch is promoted to a trial or retired, with the recurrence evidence for that choice."
 TRIAL_STEPS = (
     "After its review date this trial lesson is left out the next time a skills "
     "list is rebuilt; a conversation that already lists it keeps it. Read the skill "
@@ -41,6 +42,11 @@ TRIAL_STEPS = (
     "- Revise: record the changed rule as a continuity entry and place it with "
     "verdict trial under the same skill_name; that closes this task."
 )
+WATCH_STEPS = (
+    "This watch is not delivered as guidance. Review its linked correction anchors: "
+    "promote this same lesson record to trial on recurrence, or retire it with evidence."
+)
+
 CAPTURE_ACCEPTANCE = (
     "The captured hypothesis is completed into a trial lesson or dropped, with the reason."
 )
@@ -86,7 +92,8 @@ def _save(
     """Commit one step's files; on failure settle or defer the entry and say no."""
     from core.placement_proposal import marker
     from infra.config import WORKSPACE
-    from infra.guidance_git import GuidanceTarget, save_guidance
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import GuidanceTarget
     from infra.skill_save_validation import REFUSED
 
     trailer = marker(entry["thread_id"], entry["entry_id"], entry["revision"])
@@ -147,17 +154,21 @@ def _activate(
     current = _read(path)
     held = lesson_files.read_trial(current) if current else None
     # An unchanged version keeps the review it already has, so it stays offered.
-    kept = held.lesson.review_node_id if held and held.behavioral_sha256 == trial.behavioral_sha256 else None
+    kept = (held.lesson.review_node_id if held and held.lesson.state == trial.lesson.state
+            and held.behavioral_sha256 == trial.behavioral_sha256 else None)
     draft = lesson_files.with_review_ref(base, kept) if kept else base
     if current != draft and not _save(
         entry, place, decision, relative, {path: draft}, {path: digest(current)}, "trial written",
     ):
         return
+    is_watch = trial.lesson.state == "watch"
     node_id = _review(entry, path, relative, partial(
-        plans.ensure_lesson_review, lesson_id=trial.lesson.id,
-        behavioral_sha256=trial.behavioral_sha256, title=f"Review trial lesson: {trial.name}",
-        acceptance=TRIAL_ACCEPTANCE, review_after=trial.lesson.review_after,
-        description=(TRIAL_STEPS + "\nRead recorded evidence for this exact version with "
+        plans.ensure_lesson_review, lesson_id=trial.lesson.id, state=trial.lesson.state,
+        behavioral_sha256=trial.behavioral_sha256,
+        title=f"Review {'watch' if is_watch else 'trial'} lesson: {trial.name}",
+        acceptance=WATCH_ACCEPTANCE if is_watch else TRIAL_ACCEPTANCE,
+        review_after=trial.lesson.review_after,
+        description=((WATCH_STEPS if is_watch else TRIAL_STEPS) + "\nRead recorded evidence for this exact version with "
                      f"lesson_report(lesson_id={json.dumps(trial.lesson.id)}, "
                      f"version={json.dumps(trial.behavioral_sha256)}). "
                      "Offers and reads show exposure, not application or benefit; evidence excludes the current week."),
@@ -175,8 +186,8 @@ def _activate(
     if writes and not _save(entry, place, decision, relative, writes, expected, "trial offered"):
         return
     outcomes.settle(
-        entry, "written", "trial-activated", mark="written",
-        detail=f"{relative} (review {node_id})", retire=f"placed as a trial lesson at {relative}",
+        entry, "written", f"{trial.lesson.state}-activated", mark="written",
+        detail=f"{relative} (review {node_id})", retire=f"placed as a {trial.lesson.state} lesson at {relative}",
         source_ref=f"file:{relative}", destination=relative,
     )
 
@@ -189,6 +200,8 @@ def _capture(
     from infra.guidance_git import digest
     from plans import public as plans
 
+    from core.lesson_corrections import merge_subjects
+
     trial, reason = decision.trial, admission.hold
     assert trial is not None and reason is not None and place.tray is not None
     path = lesson_files.capture_path(place.tray, admission.capture_id)
@@ -198,11 +211,13 @@ def _capture(
     earlier = lesson_files.read_capture(current) if current else None
     # Evidence accumulates only while the hypothesis itself is unchanged.
     kept = earlier.source_refs if earlier is not None and earlier.hash == version else ()
+    subjects = earlier.originating_subjects if earlier is not None and earlier.hash == version else ()
     text = lesson_files.render_capture(
         capture_id=admission.capture_id, capture_hash=version, owner=entry["thread_id"],
         reason=reason, name=decision.skill_name, description=decision.skill_description,
         text=decision.text, trial=trial,
         source_refs=lesson_files.merged_refs(kept, entry["body"].get("source_refs") or []),
+        originating_subjects=merge_subjects(subjects, decision.originating_subjects),
     )
     if current != text and not _save(
         entry, place, decision, relative, {path: text}, {path: digest(current)},

@@ -220,13 +220,14 @@ def test_batch_never_passes_the_token_cap_however_much_room_there_is(
 
 
 def _checkpoint_request(window: int, instruction: str = "Summarize."):
-    from core.checkpoint_types import CHECKPOINT_OUTPUT_TOKENS, ProviderCheckpointRequest
+    from core.checkpoint_types import CheckpointProviderForkRequest
+    from core.fork_types import FORK_OUTPUT_TOKENS
 
-    return ProviderCheckpointRequest(
-        checkpoint_id="cp-1", thread_id="thread-1",
+    return CheckpointProviderForkRequest(
+        fork_id="cp-1", thread_id="thread-1",
         target=SimpleNamespace(context_window=window),
         instruction=instruction, reasoning_effort=None, working_dir=".",
-        max_output_tokens=CHECKPOINT_OUTPUT_TOKENS,
+        max_output_tokens=FORK_OUTPUT_TOKENS,
     )
 
 
@@ -256,25 +257,25 @@ async def test_a_smaller_window_gets_a_smaller_batch_and_a_tiny_one_none(
 
 
 def test_fork_room_is_the_launch_reserve_less_output_and_one_tool_round_trip() -> None:
-    from core.checkpoint_fit import CHECKPOINT_INSTRUCTION_BUDGET_TOKENS, soft_pressure_remaining
+    from core.fork_fit import CHECKPOINT_INSTRUCTION_BUDGET_TOKENS, soft_pressure_remaining
     from core.checkpoint_room import fork_instruction_room
-    from core.checkpoint_types import CHECKPOINT_OUTPUT_TOKENS, CHECKPOINT_TOOL_ROUND_TRIP_TOKENS
+    from core.fork_types import FORK_OUTPUT_TOKENS, FORK_TOOL_ROUND_TRIP_TOKENS
 
     # The window that launches at exactly the instruction budget is unchanged.
-    assert fork_instruction_room(200_000, CHECKPOINT_OUTPUT_TOKENS) == (
+    assert fork_instruction_room(200_000, FORK_OUTPUT_TOKENS) == (
         CHECKPOINT_INSTRUCTION_BUDGET_TOKENS
     )
     assert CHECKPOINT_INSTRUCTION_BUDGET_TOKENS == 8_192
     for window in (32_000, 64_000, 100_000, 200_000, 1_000_000):
-        assert fork_instruction_room(window, CHECKPOINT_OUTPUT_TOKENS) == max(
+        assert fork_instruction_room(window, FORK_OUTPUT_TOKENS) == max(
             soft_pressure_remaining(window)
-            - CHECKPOINT_OUTPUT_TOKENS - CHECKPOINT_TOOL_ROUND_TRIP_TOKENS, 0,
+            - FORK_OUTPUT_TOKENS - FORK_TOOL_ROUND_TRIP_TOKENS, 0,
         )
-    assert fork_instruction_room(32_000, CHECKPOINT_OUTPUT_TOKENS) == 0
+    assert fork_instruction_room(32_000, FORK_OUTPUT_TOKENS) == 0
 
 
 def test_a_checkpoint_does_not_launch_earlier_than_before() -> None:
-    from core.checkpoint_fit import WARM_FORK_RESERVE_TOKENS, soft_pressure_remaining
+    from core.fork_fit import WARM_FORK_RESERVE_TOKENS, soft_pressure_remaining
 
     assert WARM_FORK_RESERVE_TOKENS == 16_384 + 8_192 + 4_096
     assert soft_pressure_remaining(200_000) == 28_672

@@ -1,5 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
-import { loginByUrl, openSettings } from '../support/corsia';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
+import { loginByUrl, openSettingsSection } from '../support/corsia';
 
 type ScreenId = 'W1' | 'R1' | 'R2' | 'R3' | 'R4' | 'R5';
 
@@ -114,7 +115,7 @@ async function createProjectAndOpenSettings(page: Page, name: string) {
 	await modal.getByRole('button', { name: 'Create project' }).click();
 	await expect(page.getByRole('button', { name: 'Project settings' })).toBeVisible({ timeout: 10_000 });
 	await page.getByRole('button', { name: 'Project settings' }).click();
-	await expect(page.getByRole('heading', { name: 'Providers', exact: true })).toBeVisible();
+	await expect(page.getByRole('region', { name: 'Identity' }).getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(name);
 }
 
 test.describe('@surface:provider-policy Slice 2 subscription capture matrix', () => {
@@ -132,6 +133,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 				if (screen === 'W1') {
 					await openActivity(page);
 					await page.getByRole('button', { name: 'Workspace settings' }).click();
+					await openSettingsSection(page, 'Providers');
 					const region = page.getByRole('region', { name: 'Workspace providers' });
 					await expect(region).toBeVisible();
 					await expect(region.getByText('Overridden in 2 projects: Atlas migration, Field notes')).toHaveCount(2);
@@ -148,14 +150,14 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 					if (screen === 'R1') await expect(region.getByRole('button', { name: 'Use workspace settings' })).toHaveAttribute('aria-pressed', 'true');
 					if (screen === 'R2') {
 						await expect(region.getByText("Turning this on replaces this project's settings with the workspace's. Turning it off again starts from the workspace values.")).toBeVisible();
-						await expect(region.getByRole('button', { name: 'Open Workspace settings' })).toBeVisible();
+						await expect(region.getByRole('button', { name: 'Open workspace providers' })).toBeVisible();
 					}
 					if (screen === 'R3') await expect(region.getByRole('button', { name: 'Personal Max', exact: true })).toHaveAttribute('aria-pressed', 'false');
 					if (screen === 'R4') await expect(region.getByRole('button', { name: 'Sign in' })).toBeVisible();
 					await region.evaluate((element) => element.scrollIntoView({ block: 'start' }));
 					if (screen === 'R5') {
 						await expect(region.getByRole('button', { name: 'Acme (Team)' })).toBeVisible();
-						await expect(region.getByRole('button', { name: 'Pro' })).toBeVisible();
+						await expect(region.getByRole('button', { name: 'Pro', exact: true })).toBeVisible();
 						await expect(region.getByRole('button', { name: 'Roll over when an account hits its limit' })).toHaveCount(0);
 						await expect(region.getByRole('button', { name: /Move / })).toHaveCount(0);
 					}
@@ -163,9 +165,66 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 				await page.screenshot({ path: testInfo.outputPath(`${screen}-${surface}.png`), animations: 'disabled', scale: 'css' });
 				if (screen === 'R4') {
 					await page.getByRole('button', { name: 'Sign in' }).click();
-					await expect(page.getByRole('button', { name: 'Providers' })).toBeVisible();
+					await expect(page.getByRole('heading', { name: 'Accounts and rollover', exact: true })).toBeVisible();
 				}
 			}
+		}
+	});
+
+	test('keeps two account toggles usable after each policy save', async ({ page }, testInfo) => {
+		test.setTimeout(120_000);
+		let policy = policyFor('W1');
+		let saves = 0;
+		await page.route('**/api/vendor-accounts**', async (route) => {
+			if (route.request().method() === 'GET') await route.fulfill({ json: { accounts: vendorAccounts() } });
+			else await route.continue();
+		});
+		await page.route('**/api/provider-policy**', async (route) => {
+			const request = route.request();
+			const pathname = new URL(request.url()).pathname;
+			if (request.method() === 'GET' && pathname === '/api/provider-policy') {
+				await route.fulfill({ json: policy });
+				return;
+			}
+			if (request.method() === 'PUT') {
+				const body = request.postDataJSON() as { disabled: string[] };
+				const provider = policy.providers.find((item) => pathname.endsWith(item.provider_key));
+				if (!provider) throw new Error(`Unknown provider policy path: ${pathname}`);
+				const saved = {
+					...provider,
+					disabled: body.disabled,
+					revision: provider.revision + 1,
+					units: provider.units.map((unit) => ({ ...unit, enabled: !body.disabled.includes(unit.id) })),
+				};
+				policy = { ...policy, providers: policy.providers.map((item) => item.provider_key === saved.provider_key ? saved : item) };
+				saves += 1;
+				await route.fulfill({ json: saved });
+				return;
+			}
+			await route.continue();
+		});
+
+		for (const [surface, width, height, colorScheme] of surfacesFor(testInfo.project.name)) {
+			policy = policyFor('W1');
+			saves = 0;
+			await page.setViewportSize({ width, height });
+			await page.emulateMedia({ colorScheme });
+			await loginByUrl(page, { waitForComposer: false });
+			await openActivity(page);
+			await page.getByRole('button', { name: 'Workspace settings' }).click();
+			await openSettingsSection(page, 'Providers');
+			const region = page.getByRole('region', { name: 'Workspace providers' });
+			const first = region.getByRole('button', { name: 'Personal Max', exact: true });
+			const second = region.getByRole('button', { name: 'Acme (Team)', exact: true });
+			await expect(first).toBeEnabled();
+			await expect(second).toBeEnabled();
+			await first.click();
+			await expect.poll(() => saves).toBe(1);
+			await expect(second).toBeEnabled();
+			await second.click();
+			await expect.poll(() => saves).toBe(2);
+			await expect(second).toBeEnabled();
+			await page.screenshot({ path: testInfo.outputPath(`post-second-toggle-${surface}.png`), animations: 'disabled', scale: 'css' });
 		}
 	});
 });

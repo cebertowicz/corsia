@@ -1,4 +1,11 @@
-"""Sign-in — the only routes that turn a password into a token.
+"""Sign-in — the routes that turn a password into a token.
+
+An account is created by ``corsia user add`` or by the pre-auth first-account
+route ``/api/setup/first-account`` (``api/setup.py``): that route exists only
+while no account exists, only for a direct loopback browser request, behind the
+host, origin, forwarded-header, content-type and single-flight gates, and only
+for the first account. Apart from it, the routes here are the only ones that
+turn a password into a token.
 
 Three endpoints, and each is public for a reason: ``status`` because the login
 screen must be able to say "no account exists yet" before anyone can
@@ -33,7 +40,7 @@ import time
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from infra import accounts
+from infra import account_validation, accounts, token_admin
 from infra.auth import authenticate, token_from_request
 from infra.db_async import run_in_db
 from infra.time import utc_storage_iso_to_api
@@ -44,8 +51,8 @@ log = logging.getLogger(__name__)
 #: One failed password check at a time, process-wide.
 _login_lock = asyncio.Lock()
 
-#: Failed attempts per username: ``{username: (count, last_failure_monotonic)}``.
-_failures: dict[str, tuple[int, float]] = {}
+#: Failed attempts per username: ``{username: (count, last_failure_monotonic, is_account)}``.
+_failures: dict[str, tuple[int, float, bool]] = {}
 
 #: Failures allowed before a delay starts. Covers an ordinary typo or two.
 _FREE_ATTEMPTS = 3
@@ -57,13 +64,21 @@ _MAX_DELAY_SECONDS = 300
 #: Idle time after which a username's failures are forgotten entirely.
 _FAILURE_TTL_SECONDS = 3600
 #: Most usernames tracked at once. Past this, expired records are swept and
-#: then the stalest dropped, so made-up names cannot grow memory unbounded.
+#: then the stalest made-up name dropped, so made-up names cannot grow memory
+#: unbounded or push a real account's count out.
 _MAX_TRACKED_USERNAMES = 4096
-#: Most sign-in attempts allowed to wait for the hashing lock at once; the
-#: rest are refused up front rather than queued without limit.
+#: Most attempts for made-up names allowed to wait for the hashing lock at
+#: once. Accounts are not counted against it, so a burst of made-up names
+#: cannot keep the owner from signing in.
 _MAX_WAITING_ATTEMPTS = 16
+#: How long an attempt for a made-up name is held when that cap is full,
+#: before it is refused like a failed check.
+_HELD_SECONDS = 1.0
 
 _waiting_attempts = 0
+#: Usernames with an attempt waiting for the lock: one at a time per name,
+#: for every name alike, which also bounds the accounts' waiters.
+_waiting_names: set[str] = set()
 
 #: The one 401 for "no such account" and "wrong password". Telling them apart
 #: would turn this route into a username oracle.
@@ -90,7 +105,7 @@ def _retry_after(username: str) -> int:
     record = _failures.get(username)
     if record is None:
         return 0
-    failures, last_failure = record
+    failures, last_failure, _ = record
     waited = time.monotonic() - last_failure
     if waited >= _FAILURE_TTL_SECONDS:
         _failures.pop(username, None)
@@ -99,17 +114,19 @@ def _retry_after(username: str) -> int:
     return max(0, int(remaining) + 1) if remaining > 0 else 0
 
 
-def _record_failure(username: str) -> None:
+def _record_failure(username: str, *, is_account: bool) -> None:
     """Count one failed attempt for ``username``, keeping the map bounded."""
-    failures, _ = _failures.pop(username, (0, 0.0))
+    failures, _, _ = _failures.pop(username, (0, 0.0, is_account))
     now = time.monotonic()
     if len(_failures) >= _MAX_TRACKED_USERNAMES:
-        for name in [n for n, (_, at) in _failures.items() if now - at >= _FAILURE_TTL_SECONDS]:
+        for name in [n for n, (_, at, _) in _failures.items() if now - at >= _FAILURE_TTL_SECONDS]:
             del _failures[name]
-    while len(_failures) >= _MAX_TRACKED_USERNAMES:
-        # Re-insertion below keeps the dict ordered stalest-first.
-        del _failures[next(iter(_failures))]
-    _failures[username] = (failures + 1, now)
+    # Re-insertion below keeps the dict ordered stalest-first; accounts are never dropped.
+    made_up = (n for n, (_, _, account) in _failures.items() if not account)
+    while len(_failures) >= _MAX_TRACKED_USERNAMES and (stalest := next(made_up, None)) is not None:
+        del _failures[stalest]
+        made_up = (n for n, (_, _, account) in _failures.items() if not account)
+    _failures[username] = (failures + 1, now, is_account)
 
 
 def _refuse_if_penalized(username: str) -> None:
@@ -140,20 +157,35 @@ async def login(body: LoginRequest) -> dict:
     """Exchange a username and password for a 30-day session token."""
     global _waiting_attempts
     try:
-        username = accounts.normalize_username(body.username)
-    except accounts.AccountError:
+        username = account_validation.normalize_username(body.username)
+    except account_validation.AccountError:
         # No account can carry a malformed name, so there is nothing to hash
         # and nothing to count; the answer is the same generic refusal.
         raise HTTPException(401, _INVALID) from None
     _refuse_if_penalized(username)
-    if _waiting_attempts >= _MAX_WAITING_ATTEMPTS:
+    if username in _waiting_names:
         raise HTTPException(
             429,
             "Too many sign-in attempts. Try again shortly.",
             headers={"Retry-After": "1"},
         )
-
-    _waiting_attempts += 1
+    # Reserved before the first await, so two requests for one name can never both pass the check above.
+    _waiting_names.add(username)
+    counted = False
+    try:
+        is_account = await run_in_db(accounts.account_exists, username)
+        if not is_account and _waiting_attempts >= _MAX_WAITING_ATTEMPTS:
+            # Held and refused like a failed check, so the answer does not say the name is made up.
+            await asyncio.sleep(_HELD_SECONDS)
+            _record_failure(username, is_account=False)
+            log.info("Sign-in refused")
+            raise HTTPException(401, _INVALID)
+        if not is_account:
+            _waiting_attempts += 1
+            counted = True
+    except BaseException:
+        _waiting_names.discard(username)
+        raise
     try:
         async with _login_lock:
             # Re-checked under the lock: attempts that queued together must
@@ -161,9 +193,11 @@ async def login(body: LoginRequest) -> dict:
             _refuse_if_penalized(username)
             user = await run_in_db(accounts.check_password, username, body.password)
             if not user:
-                _record_failure(username)
+                _record_failure(username, is_account=is_account)
     finally:
-        _waiting_attempts -= 1
+        _waiting_names.discard(username)
+        if counted:
+            _waiting_attempts -= 1
     if not user:
         log.info("Sign-in refused")
         raise HTTPException(401, _INVALID)
@@ -186,5 +220,5 @@ async def logout(authorization: str | None = Header(None)) -> dict:
     token = token_from_request(None, authorization)
     if not authenticate(token):
         raise HTTPException(401, "Invalid or expired session")
-    await run_in_db(accounts.revoke_token, token)
+    await run_in_db(token_admin.revoke_token, token)
     return {"ok": True}

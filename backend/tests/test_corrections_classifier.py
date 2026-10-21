@@ -1,0 +1,762 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import socket
+from dataclasses import replace
+
+import pytest
+
+
+def _corrections_spec():
+    from core.corrections_classifier import CORRECTIONS_SPEC
+
+    return CORRECTIONS_SPEC
+
+
+def _load_manifest(path, *, expected_sha256=None):
+    from core.onnx_asset import load_manifest
+
+    return load_manifest(path, _corrections_spec(), expected_sha256=expected_sha256)
+
+
+def _load_pinned_manifest(asset_dir):
+    from core.onnx_asset import load_pinned_manifest
+
+    return load_pinned_manifest(asset_dir, _corrections_spec())
+
+
+def _run_self_test(asset_dir):
+    from core.onnx_asset import run_self_test
+
+    return run_self_test(asset_dir, _corrections_spec())
+
+
+def _classifier_version(manifest, head="correction"):
+    from core.corrections_recording import ClassifierVersion
+
+    return ClassifierVersion(**manifest.head_version(head))
+
+
+def _exit_before_load_reply(_connection, _manifest_path, _spec):
+    """Exit without writing the load reply, like a native child crash."""
+
+
+def _manifest(root, *, version="v1", policy="modernbert-owner-context-v2-2048", threshold=0.595681):
+    model = root / "model.onnx"
+    tokenizer = root / "tokenizer.json"
+    model.write_bytes(b"model")
+    tokenizer.write_bytes(b"tokenizer")
+    files = {
+        path.name: {"bytes": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        for path in (model, tokenizer)
+    }
+    value = {
+        "asset_id": "corrections-classifier", "version": version, "files": files,
+        "heads": [{"name": "correction", "threshold": threshold, "labels": ["not_correction", "correction"]}],
+        "input_policy_id": policy,
+        "self_test": [{"owner": f"synthetic {index}", "expected_score": 0.5} for index in range(4)],
+    }
+    path = root / "manifest.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+    return path
+
+
+class _FakeTokenizer:
+    """Two ids for any text; accepts the truncation settings ``tokenize`` applies per call."""
+
+    def encode(self, _text, add_special_tokens=False):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(ids=[1, 2])
+
+    def no_padding(self):
+        pass
+
+    def no_truncation(self):
+        pass
+
+    def enable_truncation(self, *_args, **_kwargs):
+        pass
+
+    def num_special_tokens_to_add(self, _pair):
+        return 2
+
+
+def test_training_format_keeps_context_before_the_owner_message():
+    from core.corrections_input import build_text
+
+    assert build_text([("assistant", "I shipped it."), ("user", "Earlier.")], "That is wrong.") == (
+        "[assistant] I shipped it.\n[user] Earlier.\n[OWNER] That is wrong."
+    )
+
+
+def test_verified_manifest_builds_the_named_correction_head(tmp_path):
+    path = _manifest(tmp_path)
+    manifest = _load_manifest(path, expected_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+    manifest.verify_files(_corrections_spec())
+    version = _classifier_version(manifest)
+
+    assert (version.asset_id, version.version, version.head, version.threshold) == (
+        "corrections-classifier", "v1", "correction", 0.595681,
+    )
+
+
+def _install(directory, version, *, threshold=0.595681):
+    directory.mkdir()
+    path = _manifest(directory, version=version, threshold=threshold)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.fixture
+def layout(monkeypatch, tmp_path):
+    """asset_root() is tmp_path/corrections-classifier; siblings are tmp_path/corrections-classifier-<version>."""
+    from core import corrections_classifier
+
+    pins: dict[str, str] = {}
+    monkeypatch.setattr(
+        corrections_classifier,
+        "CORRECTIONS_SPEC",
+        replace(corrections_classifier.CORRECTIONS_SPEC, pins=pins),
+    )
+    monkeypatch.setenv("CORSIA_CORRECTIONS_ASSET_DIR", str(tmp_path / "corrections-classifier"))
+    return pins
+
+
+def test_pinned_version_labels_are_all_v_and_a_number():
+    import re
+
+    from core.corrections_asset_pins import PINNED_MANIFESTS
+
+    assert PINNED_MANIFESTS
+    assert all(re.fullmatch(r"v(\d+)", key) for key in PINNED_MANIFESTS)
+
+
+@pytest.mark.parametrize("label", ["1", "v", "v1.2", "V1", "v1\n", "v-1", "v１"])
+def test_a_version_label_other_than_v_number_is_refused(label):
+    from core.onnx_asset import AssetError
+    from jobs.corrections_assets import version_number
+
+    with pytest.raises(AssetError):
+        version_number(label)
+
+
+def test_versions_order_by_number_not_by_text():
+    from jobs.corrections_assets import version_number
+
+    assert version_number("v10") > version_number("v9")
+
+
+def test_highest_verified_pin_wins_and_a_broken_newer_asset_keeps_the_older_one_serving(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+    layout["v2"] = _install(tmp_path / "corrections-classifier-v2", "v2")
+    (tmp_path / "corrections-classifier-v2" / "model.onnx").write_bytes(b"tampered")
+
+    selected, versions = corrections_realtime.select_manifest()
+
+    assert selected.version == "v1"
+    assert versions == [
+        {"location": "corrections-classifier", "version": "v1", "state": "ready", "reason": None},
+        {
+            "location": "corrections-classifier-v2", "version": None, "state": "failed",
+            "reason": "asset file model.onnx is absent or has the wrong size",
+        },
+    ]
+
+
+def test_a_verified_newer_sibling_replaces_the_installed_directory(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+    layout["v2"] = _install(tmp_path / "corrections-classifier-v2", "v2")
+
+    selected = corrections_realtime.select_manifest()[0]
+
+    assert selected.version == "v2"
+    assert selected.path.parent == tmp_path / "corrections-classifier-v2"
+
+
+def test_a_tie_goes_to_the_installed_directory(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+    assert _install(tmp_path / "corrections-classifier-v1", "v1") == layout["v1"]
+
+    assert corrections_realtime.select_manifest()[0].path.parent == tmp_path / "corrections-classifier"
+
+
+def test_the_installed_directory_alone_keeps_working(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+
+    selected, versions = corrections_realtime.select_manifest()
+    assert selected.version == "v1"
+    assert [item["state"] for item in versions] == ["ready"]
+
+
+def test_a_directory_name_never_decides_the_version(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier-v2", "v1")
+    layout["v2"] = "0" * 64
+
+    selected = corrections_realtime.select_manifest()[0]
+
+    assert selected.version == "v1"
+    assert selected.path.parent == tmp_path / "corrections-classifier-v2"
+
+
+def test_an_unpinned_sibling_directory_is_never_looked_at(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+    _install(tmp_path / "corrections-classifier-v9", "v9")
+
+    selected, versions = corrections_realtime.select_manifest()
+    assert selected.version == "v1"
+    assert [item["location"] for item in versions] == ["corrections-classifier"]
+
+
+def test_nothing_installed_reads_absent_and_nothing_verified_reads_failed(layout, tmp_path):
+    from core.onnx_asset import AssetError
+    from jobs import corrections_realtime
+
+    layout["v1"] = "0" * 64
+    with pytest.raises(AssetError, match="absent"):
+        corrections_realtime.select_manifest()[0]
+
+    _install(tmp_path / "corrections-classifier", "v1")
+    with pytest.raises(AssetError, match="no verified"):
+        corrections_realtime.select_manifest()[0]
+    assert corrections_realtime._installed() is True
+
+
+def test_every_failed_candidate_keeps_its_snapshot_reason(layout, tmp_path):
+    from jobs.corrections_assets import AssetSelectionError, select_manifest
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+    layout["v2"] = _install(tmp_path / "corrections-classifier-v2", "v2")
+    (tmp_path / "corrections-classifier" / "model.onnx").write_bytes(b"broken-v1")
+    (tmp_path / "corrections-classifier-v2" / "tokenizer.json").write_bytes(b"broken-v2")
+
+    with pytest.raises(AssetSelectionError) as raised:
+        select_manifest()
+
+    assert [(item["location"], item["reason"]) for item in raised.value.versions] == [
+        ("corrections-classifier", "asset file model.onnx is absent or has the wrong size"),
+        ("corrections-classifier-v2", "asset file tokenizer.json has a sha256 mismatch"),
+    ]
+
+
+def test_pinned_v2_with_a_retrained_threshold_is_selected_with_its_own_policy(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+    layout["v2"] = _install(tmp_path / "corrections-classifier-v2", "v2", threshold=0.71)
+
+    selected = corrections_realtime.select_manifest()[0]
+
+    assert (selected.version, _classifier_version(selected).threshold) == ("v2", 0.71)
+
+
+def test_tampered_asset_file_is_refused(tmp_path):
+    from core.onnx_asset import AssetError
+
+    path = _manifest(tmp_path)
+    manifest = _load_manifest(path)
+    (tmp_path / "model.onnx").write_bytes(b"other")
+
+    with pytest.raises(AssetError, match="sha256"):
+        manifest.verify_files(_corrections_spec())
+
+
+def test_verified_files_are_hashed_once_until_they_change(monkeypatch, tmp_path):
+    import os
+
+    from core import onnx_asset
+    from core.onnx_asset import AssetError
+
+    path = _manifest(tmp_path)
+    manifest = _load_manifest(path)
+    hashes = []
+    real_sha256 = onnx_asset.hashlib.sha256
+    monkeypatch.setattr(onnx_asset.hashlib, "sha256", lambda *a: hashes.append(1) or real_sha256(*a))
+
+    manifest.verify_files(_corrections_spec())
+    first = len(hashes)
+    manifest.verify_files(_corrections_spec())
+    assert first == 2 and len(hashes) == first
+
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"MODEL")
+    stat = model.stat()
+    os.utime(model, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    with pytest.raises(AssetError, match="sha256"):
+        manifest.verify_files(_corrections_spec())
+
+
+def test_wrong_manifest_pin_is_refused(tmp_path):
+    from core.onnx_asset import AssetError
+
+    with pytest.raises(AssetError, match="manifest sha256"):
+        _load_manifest(_manifest(tmp_path), expected_sha256="0" * 64)
+
+
+def test_wrong_input_policy_is_refused(tmp_path):
+    from core.onnx_asset import AssetError
+
+    with pytest.raises(AssetError, match="supported corrections classifier asset"):
+        _load_manifest(_manifest(tmp_path, policy="other"))
+
+
+def test_manifest_threshold_must_be_numeric(tmp_path):
+    from core.onnx_asset import AssetError
+
+    path = _manifest(tmp_path)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["heads"][0]["threshold"] = "not-a-number"
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    with pytest.raises(AssetError, match="threshold"):
+        _load_manifest(path)
+
+
+def test_child_prohibits_outbound_connections_and_enables_ort_telemetry_opt_out(monkeypatch, tmp_path):
+    from core.onnx_child import _disable_child_network
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("CORSIA_STATE_DIR", str(tmp_path / "state"))
+
+    original_connect = socket.socket.connect
+    try:
+        _disable_child_network()
+        with pytest.raises(OSError, match="prohibits outbound"):
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("127.0.0.1", 9))
+        assert not list(tmp_path.rglob("*device*"))
+    finally:
+        setattr(socket.socket, "connect", original_connect)
+
+
+def test_child_self_test_mismatch_refuses_to_serve(monkeypatch, tmp_path):
+    import sys
+    from types import SimpleNamespace
+
+    from core.onnx_child import child_main
+
+    path = _manifest(tmp_path)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["self_test"][0]["expected_score"] = 0.9
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    tokenizer = SimpleNamespace(from_file=lambda _path: _FakeTokenizer())
+
+    class Exp(list):
+        def sum(self):
+            return sum(self)
+
+    numpy = SimpleNamespace(
+        int64=object(), asarray=lambda value, dtype: value,
+        exp=lambda value: Exp([1.0, 1.0]) if isinstance(value, list) else 1.0,
+    )
+    onnx = SimpleNamespace(
+        disable_telemetry_events=lambda: None,
+        SessionOptions=lambda: SimpleNamespace(),
+        ExecutionMode=SimpleNamespace(ORT_SEQUENTIAL="sequential"),
+        InferenceSession=lambda *_args, **_kwargs: SimpleNamespace(run=lambda *_a, **_kw: [[[0.0, 0.0]]]),
+    )
+    monkeypatch.setitem(sys.modules, "tokenizers", SimpleNamespace(Tokenizer=tokenizer))
+    monkeypatch.setitem(sys.modules, "numpy", numpy)
+    monkeypatch.setitem(sys.modules, "onnxruntime", onnx)
+    sent = []
+    connection = SimpleNamespace(send=sent.append, poll=lambda _timeout: False)
+    original_connect = socket.socket.connect
+    try:
+        child_main(connection, str(path), _corrections_spec())
+    finally:
+        setattr(socket.socket, "connect", original_connect)
+
+    assert sent == [{"error": "error:AssetError", "kind": "deterministic"}]
+
+
+def test_child_marks_a_load_time_rss_breach_deterministic(self_test_asset, monkeypatch):
+    from types import SimpleNamespace
+
+    from core import onnx_child
+    from core.onnx_child import child_main
+
+    sent = []
+    connection = SimpleNamespace(send=sent.append, poll=lambda _timeout: False)
+    original_connect = socket.socket.connect
+    monkeypatch.setattr(onnx_child, "_peak_rss_bytes", lambda: 2**63)
+    try:
+        child_main(connection, str(self_test_asset / "manifest.json"), _corrections_spec())
+    finally:
+        setattr(socket.socket, "connect", original_connect)
+
+    assert sent == [{"error": "rss", "kind": "deterministic"}]
+
+
+class _FakeSession:
+    instances: list = []
+
+    def __init__(self, logits=(0.0, 0.0)):
+        self.logits = logits
+        _FakeSession.instances.append(self)
+
+    def run(self, *_args, **_kwargs):
+        return [[list(self.logits)]]
+
+
+@pytest.fixture
+def self_test_asset(monkeypatch, tmp_path):
+    """A pinned four-vector asset under a fake ORT and tokenizer; scores are 0.5."""
+    import numpy
+    import sys
+    from types import SimpleNamespace
+
+    from core import corrections_asset_pins
+
+    root = tmp_path / "v1"
+    root.mkdir()
+    path = _manifest(root)
+    monkeypatch.setitem(corrections_asset_pins.PINNED_MANIFESTS, "v1", hashlib.sha256(path.read_bytes()).hexdigest())
+    _FakeSession.instances = []
+    onnx = SimpleNamespace(
+        disable_telemetry_events=lambda: None,
+        SessionOptions=lambda: SimpleNamespace(),
+        ExecutionMode=SimpleNamespace(ORT_SEQUENTIAL="sequential"),
+        InferenceSession=lambda *_a, **_kw: _FakeSession(),
+    )
+    tokenizer = SimpleNamespace(from_file=lambda _path: _FakeTokenizer())
+    monkeypatch.setitem(sys.modules, "onnxruntime", onnx)
+    monkeypatch.setitem(sys.modules, "tokenizers", SimpleNamespace(Tokenizer=tokenizer))
+    monkeypatch.setitem(sys.modules, "numpy", numpy)
+    return root
+
+
+def _rewrite_manifest(root, mutate):
+    from core import corrections_asset_pins
+
+    path = root / "manifest.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    mutate(value)
+    path.write_text(json.dumps(value), encoding="utf-8")
+    corrections_asset_pins.PINNED_MANIFESTS["v1"] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_self_test_passes_and_releases_its_session(self_test_asset):
+    import gc
+    import weakref
+
+    from core.onnx_asset import run_self_test
+
+    assert _run_self_test(self_test_asset) is None
+    assert len(_FakeSession.instances) == 1
+    reference = weakref.ref(_FakeSession.instances.pop())
+    gc.collect()
+    assert reference() is None
+
+
+def test_self_test_refuses_a_second_session_while_one_is_running(self_test_asset):
+    from core import onnx_asset
+    from core.onnx_asset import AssetError
+
+    lock = onnx_asset._SELF_TEST_LOCKS.setdefault(_corrections_spec().asset_id, onnx_asset.threading.Lock())
+    assert lock.acquire(blocking=False)
+    try:
+        with pytest.raises(AssetError, match="already being checked"):
+            _run_self_test(self_test_asset)
+    finally:
+        lock.release()
+    assert _FakeSession.instances == []
+    _run_self_test(self_test_asset)
+
+
+def test_self_test_wrong_size_says_the_download_is_incomplete(self_test_asset):
+    from core.onnx_asset import AssetError
+
+    (self_test_asset / "model.onnx").write_bytes(b"too short")
+    with pytest.raises(AssetError) as raised:
+        _run_self_test(self_test_asset)
+    assert str(raised.value) == (
+        "The corrections classifier download is incomplete (the model file is missing or has the "
+        "wrong size). Retry setup."
+    )
+    assert _FakeSession.instances == []
+
+
+def test_self_test_sha_mismatch_says_the_download_is_damaged(self_test_asset):
+    from core.onnx_asset import AssetError
+
+    (self_test_asset / "model.onnx").write_bytes(b"MODEL")
+    with pytest.raises(AssetError) as raised:
+        _run_self_test(self_test_asset)
+    assert "damaged (the model file does not match its checksum)" in str(raised.value)
+
+
+def test_self_test_unpinned_manifest_is_refused(self_test_asset):
+    from core import corrections_asset_pins
+    from core.onnx_asset import AssetError
+
+    del corrections_asset_pins.PINNED_MANIFESTS["v1"]
+    with pytest.raises(AssetError, match="does not recognise"):
+        _run_self_test(self_test_asset)
+
+
+def test_self_test_passes_in_the_installed_location_whatever_it_is_named(self_test_asset):
+    from core.onnx_asset import run_self_test
+
+    installed = self_test_asset.rename(self_test_asset.parent / "corrections-classifier")
+    assert _run_self_test(installed) is None
+
+
+def test_runtime_refuses_an_unpinned_asset_in_the_installed_location(monkeypatch, tmp_path):
+    from core import corrections_asset_pins
+    from core.onnx_asset import AssetError
+    from jobs import corrections_realtime
+
+    root = tmp_path / "corrections-classifier"
+    root.mkdir()
+    path = _manifest(root)
+    from jobs import corrections_assets
+    monkeypatch.setattr(corrections_assets, "asset_root", lambda: root)
+    monkeypatch.setitem(corrections_asset_pins.PINNED_MANIFESTS, "v1", "0" * 64)
+    with pytest.raises(AssetError, match="sha256 does not match"):
+        corrections_realtime.select_manifest()[0]
+    monkeypatch.delitem(corrections_asset_pins.PINNED_MANIFESTS, "v1")
+    with pytest.raises(AssetError, match="not pinned"):
+        corrections_realtime.select_manifest()[0]
+    monkeypatch.setitem(
+        corrections_asset_pins.PINNED_MANIFESTS, "v1", hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
+    assert corrections_realtime.select_manifest()[0].version == "v1"
+
+
+def test_self_test_wrong_pin_hash_is_refused(self_test_asset):
+    from core import corrections_asset_pins
+    from core.onnx_asset import AssetError
+
+    corrections_asset_pins.PINNED_MANIFESTS["v1"] = "0" * 64
+    with pytest.raises(AssetError, match="not the version this app expects"):
+        _run_self_test(self_test_asset)
+
+
+def test_self_test_score_mismatch_says_the_answers_were_unexpected(self_test_asset):
+    from core.onnx_asset import AssetError
+
+    _rewrite_manifest(self_test_asset, lambda value: value["self_test"][2].update(expected_score=0.9))
+    with pytest.raises(AssetError, match="unexpected answers"):
+        _run_self_test(self_test_asset)
+    assert len(_FakeSession.instances) == 1
+
+
+def test_self_test_logs_the_cause_but_shows_people_only_the_readable_sentence(self_test_asset, monkeypatch):
+    import sys
+
+    from loguru import logger
+
+    from core.onnx_asset import AssetError
+
+    def explode(*_args, **_kwargs):
+        raise ValueError("session detail")
+
+    monkeypatch.setattr(sys.modules["onnxruntime"], "InferenceSession", explode)
+    lines: list[str] = []
+    sink = logger.add(lines.append, format="{level}|{message}", level="ERROR")
+    try:
+        with pytest.raises(AssetError) as raised:
+            _run_self_test(self_test_asset)
+    finally:
+        logger.remove(sink)
+    assert str(raised.value) == "The corrections classifier could not start on this computer. Retry setup."
+    assert "session detail" not in str(raised.value) and "ValueError" not in str(raised.value)
+    assert raised.value.__cause__ is None and raised.value.__suppress_context__
+    assert any(
+        line.startswith("ERROR|corrections classifier self-test failed: ValueError: session detail")
+        for line in lines
+    )
+
+
+def test_missing_manifest_is_a_readable_incomplete_download(tmp_path):
+    from core.onnx_asset import AssetError
+
+    with pytest.raises(AssetError, match="incomplete"):
+        _run_self_test(tmp_path)
+
+
+def _word_tokenizer():
+    """A real ``tokenizers`` pipeline with ModernBERT's single-sequence template."""
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import WhitespaceSplit
+    from tokenizers.processors import TemplateProcessing
+
+    vocab = {"[UNK]": 0, "[CLS]": 1, "[SEP]": 2, "[OWNER]": 3, "[Agent]": 4, "word": 5, "last": 6}
+    tokenizer = Tokenizer(WordLevel(vocab, unk_token="[UNK]"))
+    tokenizer.pre_tokenizer = WhitespaceSplit()
+    tokenizer.post_processor = TemplateProcessing(
+        single="[CLS] $A [SEP]", special_tokens=[("[CLS]", 1), ("[SEP]", 2)],
+    )
+    # A saved truncation setting must not leak into the call.
+    tokenizer.enable_truncation(16, direction="right")
+    return tokenizer
+
+
+def test_left_truncation_keeps_the_owner_tail_between_cls_and_sep():
+    from core.corrections_input import MAX_INPUT_TOKENS, MAX_OWNER_TOKENS, tokenize
+
+    tokenizer = _word_tokenizer()
+
+    ids, truncated, original = tokenize(tokenizer, [("Agent", "word " * 3000)], "word last")
+    assert (truncated, original, len(ids)) == (True, 3006, MAX_OWNER_TOKENS)
+    assert ids[0] == 1 and ids[-4:] == [3, 5, 6, 2]
+
+    # A long owner message widens the window to hold all of it, up to the input cap.
+    ids, truncated, _ = tokenize(tokenizer, [("Agent", "word " * 3000)], "word " * 1500 + "last")
+    assert truncated and len(ids) == 1502 + 2  # [OWNER], 1,500 words and "last", plus specials
+    assert ids[:2] == [1, 3] and ids[-2:] == [6, 2]
+    ids, truncated, _ = tokenize(tokenizer, [], "word " * 4000 + "last")
+    assert truncated and len(ids) == MAX_INPUT_TOKENS
+    assert ids[0] == 1 and ids[-2:] == [6, 2]
+
+    ids, truncated, original = tokenize(tokenizer, [("Agent", "word")], "last")
+    assert (ids, truncated, original) == ([1, 4, 5, 3, 6, 2], False, 6)
+
+
+class _FakeConnection:
+    def __init__(self, replies, *, send_error=None, recv_error=None):
+        self.replies = list(replies)
+        self.send_error = send_error
+        self.recv_error = recv_error
+
+    def poll(self, _timeout):
+        return True
+
+    def send(self, value):
+        if self.send_error is not None:
+            raise self.send_error
+
+    def recv(self):
+        if self.recv_error is not None:
+            raise self.recv_error
+        return self.replies.pop(0)
+
+    def close(self):
+        pass
+
+
+class _FakeProcess:
+    def __init__(self, **_kwargs):
+        self.killed = False
+
+    def start(self):
+        pass
+
+    def is_alive(self):
+        return not self.killed
+
+    def terminate(self):
+        self.killed = True
+
+    def kill(self):
+        self.killed = True
+
+    def join(self, timeout=None):
+        pass
+
+
+def _child_with(monkeypatch, tmp_path, connection):
+    from core import onnx_child
+
+    monkeypatch.setattr(onnx_child, "Process", _FakeProcess)
+    monkeypatch.setattr(onnx_child, "Pipe", lambda: (connection, _FakeConnection([])))
+    monkeypatch.setattr(onnx_child, "_child_rss_bytes", lambda _process: 0)
+    return onnx_child.OnnxChild(_load_manifest(_manifest(tmp_path)), _corrections_spec())
+
+
+def test_a_loaded_child_scores_without_a_second_load(monkeypatch, tmp_path):
+    version = {"asset_id": "corrections-classifier", "version": "v1", "head": "correction",
+               "threshold": 0.5, "input_policy_id": "modernbert-owner-context-v2-2048"}
+    connection = _FakeConnection([
+        {"ready": True},
+        {"score": 0.9, "version": version, "truncated": False, "original_tokens": 3},
+    ])
+    child = _child_with(monkeypatch, tmp_path, connection)
+
+    child.ensure_loaded()
+    child.ensure_loaded()  # already loaded: no second load
+    result = child.score({"context": [], "owner": "synthetic owner", "head": "correction"})
+
+    assert result["score"] == 0.9
+    assert connection.replies == []
+
+
+def test_a_call_before_load_is_an_outage_not_a_message_failure(monkeypatch, tmp_path):
+    from core.onnx_child import OnnxUnavailable
+
+    child = _child_with(monkeypatch, tmp_path, _FakeConnection([]))
+
+    with pytest.raises(OnnxUnavailable, match="not loaded"):
+        child.score({})
+
+
+@pytest.mark.parametrize("failure", [EOFError(), BrokenPipeError()])
+def test_pipe_failure_is_an_outage_during_load_and_a_message_failure_after_it(monkeypatch, tmp_path, failure):
+    from core.onnx_child import OnnxMessageFailed, OnnxUnavailable
+
+    child = _child_with(monkeypatch, tmp_path, _FakeConnection([{"ready": True}], recv_error=failure))
+    with pytest.raises(OnnxUnavailable, match="child_exited") as raised:
+        child.ensure_loaded()
+    assert raised.value.cause == "child_exited"
+    assert not child.loaded
+
+    child = _child_with(monkeypatch, tmp_path, _FakeConnection([{"ready": True}], send_error=failure))
+    child.ensure_loaded()
+    with pytest.raises(OnnxMessageFailed) as raised:
+        child.score({})
+    assert raised.value.reason == "child_error"
+    assert not child.loaded and not child.running
+
+
+def test_real_child_exit_during_load_carries_its_structured_cause(tmp_path):
+    from core.onnx_child import OnnxChild, OnnxUnavailable
+
+    child = OnnxChild(_load_manifest(_manifest(tmp_path)), _corrections_spec(), target=_exit_before_load_reply)
+
+    with pytest.raises(OnnxUnavailable, match="child_exited") as raised:
+        child.ensure_loaded()
+
+    assert (raised.value.kind, raised.value.cause) == ("transient", "child_exited")
+    assert not child.loaded and not child.running
+
+
+@pytest.mark.parametrize(("reply", "reason"), [
+    ({"error": "timeout"}, "timeout"), ({"error": "rss"}, "rss"), ({"error": "error:ValueError"}, "child_error"),
+])
+def test_a_failed_call_names_its_kind_and_stops_the_child(monkeypatch, tmp_path, reply, reason):
+    from core.onnx_child import OnnxMessageFailed
+
+    child = _child_with(monkeypatch, tmp_path, _FakeConnection([{"ready": True}, reply]))
+    child.ensure_loaded()
+
+    with pytest.raises(OnnxMessageFailed) as raised:
+        child.score({})
+
+    assert raised.value.reason == reason
+    assert not child.running
+
+
+def test_a_transient_load_error_carries_its_kind(monkeypatch, tmp_path):
+    from core.onnx_child import OnnxUnavailable
+
+    child = _child_with(monkeypatch, tmp_path, _FakeConnection([
+        {"error": "error:OSError", "kind": "transient"},
+    ]))
+
+    with pytest.raises(OnnxUnavailable, match="load error:OSError") as raised:
+        child.ensure_loaded()
+    assert raised.value.kind == "transient"
+    assert not child.loaded and not child.running

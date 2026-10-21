@@ -3,27 +3,26 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from collections.abc import Callable
 from typing import Any
 
-from core.checkpoint_capture import (
-    capture_and_install as _capture_and_install,
-    read_checkpoint as _read,
-    terminal_failure as _terminal_failure,
-)
+from core.checkpoint_capture import read_checkpoint as _read
 from core.checkpoint_cold_fallback import invoke_with_cold_correction
 from core.checkpoint_fold_gate import refuse_limited_target as _refuse_limited_target
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
+from core.fork_types import (
+    ForkNotAdmitted,
+    ProviderForkRequest,
+    ProviderForkResult,
+)
 from core.checkpoint_types import (
-    CheckpointNotAdmitted,
     CheckpointRecord,
     CheckpointRequest,
     CheckpointTargetLimited,
     IdleCheckpointAdmissionResult,
     IdleCheckpointDisposition,
     IdleCheckpointReason,
-    ProviderCheckpointRequest,
-    ProviderCheckpointResult,
 )
 from infra import checkpoint_queries
 from infra import checkpoints as checkpoint_store
@@ -33,29 +32,20 @@ from infra.db_async import run_in_db
 from infra.time import utc_now_iso
 
 
+from core.fork_runtime import ForkHandle, handles as _tasks
 
-@dataclass(slots=True)
-class _Handle:
-    task: asyncio.Task[CheckpointRecord]
-    cancel_event: asyncio.Event
-    thread_id: str
-    tool_executor: Any = None
-
-
-_tasks: dict[str, _Handle] = {}
+_wakes: set[asyncio.Task[None]] = set()
 
 
 async def _invoke(
-    request: ProviderCheckpointRequest,
+    request: ProviderForkRequest,
     cancel_event: asyncio.Event,
-) -> ProviderCheckpointResult:
-    from core.checkpoint_usage import bind_usage
-
+) -> ProviderForkResult:
     if request.cold_source is not None:
         from infra.continuity_staging import frozen_continuity_index
 
         index = await run_in_db(
-            frozen_continuity_index, request.checkpoint_id, request.thread_id,
+            frozen_continuity_index, request.fork_id, request.thread_id,
         )
         request = replace(
             request,
@@ -68,45 +58,25 @@ async def _invoke(
     from core.placement_review import attach_review
 
     request = await attach_review(request)
-    request = await bind_usage(request)
-    if request.target.harness == "native":
-        from core.checkpoint_native_fork import invoke_checkpoint
-    elif request.target.harness == "claude-code":
-        from core.checkpoint_cc_fork import invoke_checkpoint
-    elif request.target.harness == "codex":
-        from core.checkpoint_codex_fork import invoke_checkpoint
-    else:
-        raise ValueError(f"unsupported checkpoint harness: {request.target.harness}")
+    request = await CHECKPOINT_KIND.usage_binder(request)
+    from core.fork_runtime import invoke_fork
+
     async def record_input(first_included_seq: int | None) -> None:
         await run_in_db(
-            checkpoint_store.admit_cold_input, request.checkpoint_id,
+            checkpoint_store.admit_cold_input, request.fork_id,
             first_included_seq=first_included_seq,
         )
 
-    if request.target.harness == "claude-code":
-        async def bind_executor(executor):
-            handle = _tasks.get(request.checkpoint_id)
-            if handle is None or handle.thread_id != request.thread_id:
-                raise CheckpointNotAdmitted("checkpoint invocation no longer owns its tools")
-            handle.tool_executor = executor
+    async def bind_executor(executor):
+        handle = _tasks.get(request.fork_id)
+        if handle is None or handle.thread_id != request.thread_id:
+            raise ForkNotAdmitted("fork invocation no longer owns its tools")
+        handle.tool_executor = executor
 
-        return await invoke_checkpoint(
-            request, cancel_event, on_cold_input=record_input,
-            on_tool_executor=bind_executor,
-        )
-    return await invoke_checkpoint(request, cancel_event, on_cold_input=record_input)
-
-
-async def execute_checkpoint_tool(
-    thread_id: str, checkpoint_id: str, operation, call_id: str,
-    name: str, arguments: dict[str, Any],
-):
-    """Route one exact declared loopback call through its checkpoint owner."""
-    handle = _tasks.get(checkpoint_id)
-    if (handle is None or handle.thread_id != thread_id
-            or handle.task.done() or handle.tool_executor is None):
-        raise CheckpointNotAdmitted("checkpoint tool invocation is no longer owned")
-    return await handle.tool_executor(operation, call_id, name, arguments)
+    return await invoke_fork(
+        request, cancel_event, kind=CHECKPOINT_KIND,
+        on_cold_input=record_input, on_tool_executor=bind_executor,
+    )
 
 
 def _broadcast_changed(thread_id: str) -> None:
@@ -125,7 +95,6 @@ def _broadcast_changed(thread_id: str) -> None:
 async def _notify_completion(record: CheckpointRecord) -> None:
     """Invalidate the durable projection and re-drive the ordinary FIFO."""
     _broadcast_changed(record.thread_id)
-    from infra import state
     from infra.thread_execution import drive_thread
     from loguru import logger
 
@@ -145,48 +114,59 @@ async def _notify_completion(record: CheckpointRecord) -> None:
 
         placement_worker.poke()
 
+    # A failed wake belongs to its thread: the input stays in the durable FIFO
+    # for the next drive, and service health is unaffected.
     async def redrive() -> None:
         try:
             await drive_thread(record.thread_id)
-        except Exception as error:
-            state._thread_driver_failure = f"checkpoint {record.thread_id}: {error}"
+        except Exception:
             logger.exception(
                 "checkpoint completion wake failed: {}", record.thread_id,
             )
 
-    asyncio.create_task(
+    wake = asyncio.create_task(
         redrive(), name=f"checkpoint-wake:{record.thread_id}",
     )
+    _wakes.add(wake)
+    wake.add_done_callback(_wakes.discard)
 
 
 async def _execute(
     checkpoint_id: str,
-    provider_request: ProviderCheckpointRequest,
+    provider_request: ProviderForkRequest,
     cancel_event: asyncio.Event,
 ) -> CheckpointRecord:
+    # This task owns the attempt and ends its row terminal before it exits.
+    # Only process shutdown after capture, or a failure write that itself
+    # raises, leaves a row for reconcile_startup_checkpoints.
     try:
-        try:
-            if cancel_event.is_set():
-                raise asyncio.CancelledError
-            if provider_request.target.harness in {'claude-code', 'codex'}:
-                from core.checkpoint_account import admit_checkpoint
+        if cancel_event.is_set():
+            raise asyncio.CancelledError
+        if provider_request.target.harness in {'claude-code', 'codex'}:
+            from core.fork_account import admit_fork
 
-                provider_request = admit_checkpoint(provider_request)
-            result = await invoke_with_cold_correction(
-                provider_request, cancel_event, _invoke,
-            )
-            if cancel_event.is_set():
-                raise asyncio.CancelledError
-        except asyncio.CancelledError:
-            await run_in_db(
-                checkpoint_store.cancel,
-                checkpoint_id,
-                ended_at=utc_now_iso(),
-            )
-            return await _read(checkpoint_id)
-        except Exception as error:
-            return await _terminal_failure(checkpoint_id, error)
-        return await _capture_and_install(checkpoint_id, result)
+            provider_request = admit_fork(provider_request)
+        result = await invoke_with_cold_correction(
+            provider_request, cancel_event, _invoke,
+        )
+        if cancel_event.is_set():
+            raise asyncio.CancelledError
+        try:
+            return await CHECKPOINT_KIND.end_handler(checkpoint_id, result)
+        except Exception:
+            from loguru import logger
+
+            logger.exception("checkpoint capture or install raised: {}", checkpoint_id)
+            raise
+    except asyncio.CancelledError:
+        await run_in_db(
+            checkpoint_store.cancel,
+            checkpoint_id,
+            ended_at=utc_now_iso(),
+        )
+        return await _read(checkpoint_id)
+    except Exception as error:
+        return await CHECKPOINT_KIND.limit_or_failure_handler(checkpoint_id, error)
     finally:
         record = await _read(checkpoint_id)
         await _notify_completion(record)
@@ -202,10 +182,10 @@ def _forget(checkpoint_id: str, task: asyncio.Task[CheckpointRecord]) -> None:
 
 def _validate_pair(
     request: CheckpointRequest,
-    provider_request: ProviderCheckpointRequest,
+    provider_request: ProviderForkRequest,
 ) -> None:
     if (
-        provider_request.checkpoint_id != request.id
+        provider_request.fork_id != request.id
         or provider_request.thread_id != request.thread_id
     ):
         raise ValueError("checkpoint row and provider request identity differ")
@@ -217,28 +197,30 @@ def _validate_pair(
 
 def _launch_checkpoint(
     request: CheckpointRequest,
-    provider_request: ProviderCheckpointRequest,
+    provider_request: ProviderForkRequest,
 ) -> None:
     cancel_event = asyncio.Event()
     task = asyncio.create_task(
         _execute(request.id, provider_request, cancel_event),
         name=f"checkpoint:{request.id}",
     )
-    _tasks[request.id] = _Handle(task, cancel_event, request.thread_id)
+    _tasks[request.id] = ForkHandle(
+        task, cancel_event, request.thread_id, kind=CHECKPOINT_KIND, request=provider_request,
+    )
     task.add_done_callback(lambda done: _forget(request.id, done))
     _broadcast_changed(request.thread_id)
 
 
 async def request_checkpoint(
     request: CheckpointRequest,
-    provider_request: ProviderCheckpointRequest | None,
+    provider_request: ProviderForkRequest | None,
 ) -> CheckpointRecord:
     """Coalesce or start one already-admitted provider invocation."""
     active = await run_in_db(checkpoint_queries.active_for_thread, request.thread_id)
     if active is not None:
         return active
     if provider_request is None:
-        raise CheckpointNotAdmitted("checkpoint provider capacity is unavailable")
+        raise ForkNotAdmitted("checkpoint provider capacity is unavailable")
     _validate_pair(request, provider_request)
     await _refuse_limited_target(provider_request)
     try:
@@ -274,7 +256,7 @@ async def request_idle_checkpoint(turn_id: str, admission):
     provider_request = None if admission is None else admission.provider_request
     if request is not None:
         if provider_request is None:
-            raise CheckpointNotAdmitted("idle checkpoint has no warm provider request")
+            raise ForkNotAdmitted("idle checkpoint has no warm provider request")
         _validate_pair(request, provider_request)
     target_limited = False
     if request is not None and provider_request is not None:
@@ -351,21 +333,12 @@ async def cancel_checkpoint(checkpoint_id: str) -> CheckpointRecord:
     return record
 
 
-async def shutdown_checkpoint_tasks() -> None:
-    """Cancel and join the exact checkpoint calls owned by this process."""
-    handles = tuple(_tasks.items())
-    for _checkpoint_id, handle in handles:
-        handle.cancel_event.set()
-    for checkpoint_id, _handle in handles:
-        await run_in_db(
-            checkpoint_store.cancel,
-            checkpoint_id,
-            ended_at=utc_now_iso(),
-        )
-    await asyncio.gather(
-        *(handle.task for _checkpoint_id, handle in handles),
-        return_exceptions=True,
-    )
+async def shutdown_checkpoint_wakes() -> None:
+    """Cancel checkpoint-only completion wakes after shared forks are joined."""
+    wakes = tuple(_wakes)
+    for wake in wakes:
+        wake.cancel()
+    await asyncio.gather(*wakes, return_exceptions=True)
 
 
 async def reconcile_startup_checkpoints() -> tuple[CheckpointRecord, ...]:
@@ -377,8 +350,3 @@ async def reconcile_startup_checkpoints() -> tuple[CheckpointRecord, ...]:
     for record in records:
         await _notify_completion(record)
     return records
-
-
-def checkpoint_task_count() -> int:
-    """Expose live cancellation-handle count for lifecycle verification."""
-    return len(_tasks)

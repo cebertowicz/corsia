@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
-import shutil
 import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
 
+import psutil
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -32,6 +33,42 @@ def test_build_argv_minimal():
     assert argv == ["omlx", "serve", "--host", "127.0.0.1", "--port", "5200"]
 
 
+def test_build_argv_uses_the_bundled_managed_binary(monkeypatch):
+    from llm.providers import omlx_process
+
+    bundled = "/Applications/CORSIA.app/Contents/Resources/bin/omlx"
+    monkeypatch.setattr(omlx_process, "managed_omlx_executable", lambda: bundled)
+
+    assert omlx_process.build_argv("127.0.0.1", 5200, {})[0] == bundled
+
+
+def test_managed_supervisor_argv_uses_the_bundled_binary_only_for_the_managed_row(monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    bundled = "/Applications/CORSIA.app/Contents/Resources/bin/omlx"
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: bundled)
+    monkeypatch.setattr(sup.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
+    monkeypatch.setattr(sup, "_is_managed_omlx_row", lambda _settings: True)
+
+    argv = sup._managed_omlx_argv("127.0.0.1", 5200, {})
+
+    assert isinstance(argv, list)
+    assert argv[:2] == [bundled, "serve"]
+
+
+def test_legacy_supervisor_argv_uses_path_binary(monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: "/Applications/CORSIA.app/Contents/Resources/bin/omlx")
+    monkeypatch.setattr(sup.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
+    monkeypatch.setattr(sup, "_is_managed_omlx_row", lambda _settings: False)
+
+    argv = sup._managed_omlx_argv("127.0.0.1", 8000, {})
+
+    assert isinstance(argv, list)
+    assert argv[:2] == ["/opt/homebrew/bin/omlx", "serve"]
+
+
 def test_build_argv_with_settings():
     from llm.providers.omlx_supervisor import _build_argv
     settings = {
@@ -50,7 +87,7 @@ def test_build_argv_with_settings():
     assert argv[argv.index("--model-dir") + 1] == "/Users/alice/models"
     assert "--max-model-memory" in argv
     assert argv[argv.index("--max-model-memory") + 1] == "200GB"
-    assert "--api-key" in argv
+    assert any(arg.startswith("--api-key=") for arg in argv)
     assert "--max-concurrent-requests" in argv
     assert argv[argv.index("--max-concurrent-requests") + 1] == "4"
     assert "--no-cache" not in argv
@@ -63,26 +100,104 @@ def test_build_argv_no_cache_flag():
     assert "--no-cache" in argv
 
 
+def test_build_argv_binds_a_key_that_starts_with_a_dash():
+    import argparse
+
+    from llm.providers.omlx_supervisor import _build_argv
+    dashed = "-" + "x" * 42
+    argv = _build_argv("127.0.0.1", 5200, {"api_key": dashed})
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host")
+    parser.add_argument("--port")
+    parser.add_argument("--api-key")
+    assert parser.parse_args(argv[2:]).api_key == dashed
+
+
 
 def test_pid_roundtrip(isolated_runtime):
     from llm.providers.omlx_supervisor import _read_pid, _write_pid, _clear_pid
     sid = "ns-pid-test"
     assert _read_pid(sid) is None
-    _write_pid(sid, 4242)
-    assert _read_pid(sid) == 4242
+    _write_pid(sid, os.getpid())
+    assert _read_pid(sid) == os.getpid()
     _clear_pid(sid)
     assert _read_pid(sid) is None
     _clear_pid(sid)
 
 
+def test_missing_lsof_is_an_unknown_port_owner(monkeypatch):
+    from llm.providers import omlx_process
+
+    monkeypatch.setattr(omlx_process.shutil, "which", lambda _name: None)
+
+    assert omlx_process.port_owner_pid("127.0.0.1", 8200) is omlx_process.PORT_OWNER_UNKNOWN
+
+
+@pytest.mark.parametrize(("stdout", "stderr", "free", "expected"), [
+    ("", "", True, None),
+    ("", "", False, "unknown"),
+    ("", "permission denied", False, "unknown"),
+])
+def test_lsof_exit_one_only_means_no_owner_when_the_port_is_free(monkeypatch, stdout, stderr, free, expected):
+    from llm.providers import omlx_process
+
+    monkeypatch.setattr(omlx_process.shutil, "which", lambda _name: "lsof")
+    monkeypatch.setattr(omlx_process.subprocess, "run", lambda *_args, **_kwargs: subprocess.CompletedProcess(
+        ["lsof"], 1, stdout, stderr,
+    ))
+    monkeypatch.setattr(omlx_process, "port_is_free", lambda _port: free)
+
+    owner = omlx_process.port_owner_pid("127.0.0.1", 8200)
+
+    assert owner is None if expected is None else owner is omlx_process.PORT_OWNER_UNKNOWN
+
+
 def test_reconcile_clears_stale_pid(isolated_runtime):
-    from llm.providers.omlx_supervisor import reconcile, _write_pid, _read_pid
+    from llm.providers.omlx_supervisor import reconcile, _pid_path, _read_pid
     sid = "ns-reconcile-stale"
-    _write_pid(sid, 999999)
+    _pid_path(sid).write_text(json.dumps({"pid": 999999, "create_time": 1.0}))
     res = reconcile({"server_id": sid})
     assert res["adopted"] is False
     assert res["cleared"] is True
     assert _read_pid(sid) is None
+
+
+def test_legacy_pid_record_is_adopted_only_when_its_pid_owns_the_row_port(isolated_runtime, monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    sid, port = "legacy-owner", 8200
+    sup._pid_path(sid).write_text(str(os.getpid()))
+    monkeypatch.setattr(sup, "_port_owner_pid", lambda _host, observed_port: os.getpid() if observed_port == port else None)
+
+    result = sup.reconcile({"server_id": sid, "host": "127.0.0.1", "port": port})
+
+    assert result == {"adopted": True, "cleared": False, "pid": os.getpid()}
+    assert json.loads(sup._pid_path(sid).read_text())["pid"] == os.getpid()
+
+
+def test_legacy_pid_record_survives_an_unknown_or_empty_port_probe(isolated_runtime, monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    sid, port = "legacy-foreign", 8201
+    sup._pid_path(sid).write_text(str(os.getpid()))
+    monkeypatch.setattr(sup, "_port_owner_pid", lambda *_args: None)
+    monkeypatch.setattr(sup.os, "kill", lambda *_args: pytest.fail("an unproven record must not signal a process"))
+
+    result = asyncio.run(sup.stop_server({"server_id": sid, "host": "127.0.0.1", "port": port}))
+
+    assert result["already_stopped"]
+    assert sup._pid_path(sid).exists()
+
+
+def test_legacy_pid_record_is_deleted_only_for_a_positive_port_mismatch(isolated_runtime, monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    sid, port = "legacy-mismatch", 8202
+    sup._pid_path(sid).write_text(str(os.getpid()))
+    monkeypatch.setattr(sup, "_port_owner_pid", lambda *_args: 999999)
+
+    assert sup._read_pid(sid, host="127.0.0.1", port=port) is None
+    assert not sup._pid_path(sid).exists()
 
 
 def test_reconcile_adopts_live_pid(isolated_runtime):
@@ -125,7 +240,7 @@ def test_stop_server_does_not_signal_reused_pid(isolated_runtime, monkeypatch):
     from llm.providers import omlx_supervisor as sup
 
     sid = "ns-stop-pid-reuse"
-    sup._write_pid(sid, 4242)
+    sup._write_pid(sid, os.getpid())
     signals = []
     exit_checks = 0
 
@@ -155,7 +270,7 @@ def test_stop_server_confirms_forced_exit_before_clearing_pid(
     from llm.providers import omlx_supervisor as sup
 
     sid = "ns-stop-forced-exit"
-    sup._write_pid(sid, 4242)
+    sup._write_pid(sid, os.getpid())
     signals = []
     observations = iter([False, True])
 
@@ -185,9 +300,9 @@ def test_stop_server_no_pid_file(isolated_runtime):
 
 
 def test_stop_server_dead_pid_idempotent(isolated_runtime):
-    from llm.providers.omlx_supervisor import stop_server, _write_pid, _read_pid
+    from llm.providers.omlx_supervisor import stop_server, _pid_path, _read_pid
     sid = "ns-stop-stale"
-    _write_pid(sid, 999999)
+    _pid_path(sid).write_text(json.dumps({"pid": 999999, "create_time": 1.0}))
     result = asyncio.run(stop_server({"server_id": sid}))
     assert result["ok"] is True
     assert result.get("already_stopped") is True
@@ -220,7 +335,8 @@ def test_start_server_missing_host_port(isolated_runtime, monkeypatch):
 
 def test_start_server_missing_omlx_binary(isolated_runtime, monkeypatch):
     from llm.providers import omlx_supervisor as sup
-    monkeypatch.setattr(sup.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: None)
+    monkeypatch.setattr(sup.shutil, "which", lambda _name: None)
     monkeypatch.setattr(sup, "_port_owner_pid", lambda h, p: None)
     result = asyncio.run(sup.start_server(
         {"server_id": "ns-no-binary", "host": "127.0.0.1", "port": 9999},
@@ -246,7 +362,7 @@ def test_start_server_idempotent_when_pid_owns_port(isolated_runtime, monkeypatc
 def test_start_server_port_in_use_by_foreign_pid(isolated_runtime, monkeypatch):
     from llm.providers import omlx_supervisor as sup
     monkeypatch.setattr(sup, "_port_owner_pid", lambda h, p: 99999)
-    monkeypatch.setattr(sup.shutil, "which", lambda n: "/opt/homebrew/bin/omlx")
+    monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: "/opt/homebrew/bin/omlx")
     result = asyncio.run(sup.start_server(
         {"server_id": "ns-port-conflict", "host": "127.0.0.1", "port": 9999},
     ))
@@ -261,3 +377,75 @@ def test_omlx_module_reexports_real_supervisor(isolated_runtime, monkeypatch):
     result = asyncio.run(omlx.start_server({}))
     assert result["ok"] is False
     assert "server_id" in result["message"]
+
+
+def test_readiness_wait_reports_an_exited_child_at_once(monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    monkeypatch.setattr(sup, "_process_exited", lambda _pid: True)
+    began = time.monotonic()
+    assert asyncio.run(sup._wait_for_healthy("127.0.0.1", 9, timeout_s=30.0, pid=1234)) == "exited"
+    assert time.monotonic() - began < 5
+
+
+@pytest.mark.parametrize(("managed", "expected_timeout"), [(True, 600.0), (False, 30.0)])
+def test_new_omlx_start_uses_the_managed_cap_only_for_the_bundled_row(isolated_runtime, monkeypatch, managed, expected_timeout):
+    from llm.providers import omlx_supervisor as sup
+
+    class Spawned:
+        pid = 1234
+
+    waited = {}
+
+    async def healthy(_host, _port, **kwargs):
+        waited.update(kwargs)
+        return "healthy"
+
+    monkeypatch.setattr(sup, "_port_owner_pid", lambda *_args: None)
+    monkeypatch.setattr(sup, "_is_managed_omlx_row", lambda _settings: managed)
+    monkeypatch.setattr(sup, "_managed_omlx_argv", lambda *_args: ["omlx"])
+    monkeypatch.setattr(sup, "_spawn_process", lambda *_args: Spawned())
+    monkeypatch.setattr(sup, "_wait_for_healthy", healthy)
+
+    result = asyncio.run(sup.start_server({"server_id": "progress", "host": "127.0.0.1", "port": 9999}))
+
+    assert result["ok"] is True
+    assert waited == {"timeout_s": expected_timeout, "server_id": "progress", "pid": 1234}
+
+
+def test_failed_boot_names_the_reason_that_ended_the_health_wait(isolated_runtime, monkeypatch, caplog):
+    from llm.providers import omlx_supervisor as sup
+
+    monkeypatch.setattr(sup, "_read_pid", lambda _server_id: None)
+    monkeypatch.setattr(sup, "_process_exited", lambda _pid: True)
+    monkeypatch.setattr(sup, "_tail_log", lambda _server_id, lines: "secret-ish last line")
+
+    with caplog.at_level("WARNING", logger=sup.log.name):
+        exited = sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="exited", timeout_s=600.0)
+        timed_out = sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="timed_out", timeout_s=600.0)
+        short = sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="timed_out", timeout_s=30.0)
+
+    assert exited["message"] == (
+        "The local model stopped while it was starting. Start it again; "
+        "if it stops again, restart this computer, then start it."
+    )
+    assert timed_out["message"] == "Couldn’t start the local model within 10 minutes. Start it again."
+    assert short["message"] == "Couldn’t start the local model within 30 seconds. Start it again."
+    for result in (exited, timed_out, short):
+        assert "last line" not in result["message"] and "9999" not in result["message"]
+    assert "secret-ish last line" in caplog.text
+
+
+def test_failed_boot_signals_only_a_child_that_has_not_exited(isolated_runtime, monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(sup, "_read_pid", lambda _server_id: 1234)
+    monkeypatch.setattr(sup, "_process_exited", lambda _pid: True)
+    monkeypatch.setattr(sup, "_tail_log", lambda _server_id, lines: "")
+    monkeypatch.setattr(sup.os, "kill", lambda pid, sig: signals.append((pid, sig)))
+
+    sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="exited")
+    assert signals == []
+    sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="timed_out")
+    assert signals == [(1234, sup.signal.SIGTERM)]

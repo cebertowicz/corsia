@@ -1,9 +1,6 @@
 ---
 name: agent-experience
 description: Use when designing or reviewing anything an agent consumes or operates — tool schemas and errors, shells, permissions, context sources, bootloaders, skills and triggers, plan and event surfaces, briefs, prompts, CLI output. Map the agent's journey like a user's and verify on a fresh weak-model turn. Not for human-facing UI.
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Agent experience (AX)

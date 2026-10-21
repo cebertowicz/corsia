@@ -5,13 +5,15 @@ import UserMessageBubble from './UserMessageBubble.svelte';
 import { token } from '$lib/stores/auth';
 import { activeThreadId, messages } from '$lib/stores/threads';
 import { activeModelId, models, type Model } from '$lib/stores/models';
-import { WAITING_FOR_MODEL } from '$lib/messageDeliveryCopy';
+import { SWITCH_TO_LOCAL_MODEL, WAITING_FOR_LOCAL_MODEL, WAITING_FOR_MODEL, WAITING_FOR_THREAD_LOCAL_MODEL } from '$lib/messageDeliveryCopy';
 import { _resetTurnStateForTests } from '$lib/ws/turnState';
 import { formatTime } from '$lib/time';
+import { resetUpdateStoreForTests, updateStatus } from '$lib/update/store';
 
 function humanMsg(overrides: Record<string, unknown> = {}) {
 	return {
 		id: 'm-human-1',
+		thread_id: 'thread-1',
 		role: 'user',
 		content: 'hello from a human',
 		created_at: '2026-01-01T00:00:00',
@@ -19,7 +21,7 @@ function humanMsg(overrides: Record<string, unknown> = {}) {
 		delivery_state: 'delivered',
 		delivery_revision: 1,
 		...overrides,
-	};
+	} as import('$lib/stores/threads').Message;
 }
 
 function agentMsg(overrides: Record<string, unknown> = {}) {
@@ -47,6 +49,7 @@ beforeEach(() => {
 	activeThreadId.set(null);
 	messages.set([]);
 	_resetTurnStateForTests();
+	resetUpdateStoreForTests();
 });
 
 afterEach(() => {
@@ -57,6 +60,7 @@ afterEach(() => {
 	activeThreadId.set(null);
 	messages.set([]);
 	_resetTurnStateForTests();
+	resetUpdateStoreForTests();
 	vi.unstubAllGlobals();
 });
 
@@ -87,6 +91,23 @@ describe('UserMessageBubble — human message path', () => {
 		expect(wrapper.querySelector('.delivery-status.sending')).toBeNull();
 		expect(wrapper.querySelector('.delivery-failed-mark')).toBeNull();
 	});
+	it.each([
+		['a requested queue', { metadata: { delivery_intent: 'queue_after_turn' } }, 'Sends after the update'],
+		['a checkpoint hold', { write_outcome: 'proved_no_write', delivery_error: 'checkpoint unavailable' }, 'Waiting for checkpoint'],
+		['an apply-now hold', {}, 'Sends after the update'],
+	])('changes only %s to the update delivery promise', (_name, message, expected) => {
+		activeThreadId.set('thread-update');
+		updateStatus.set({
+			branch: 'dev', current_sha: 'a', remote_sha: 'b', commits_behind: 1,
+			available: true, checked_at: 1, error: null,
+			operation: { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase: 'draining' },
+		});
+		const wrapper = render(humanMsg({
+			thread_id: 'thread-update', delivery_state: 'queued', ...message,
+		}));
+		expect(wrapper.textContent).toContain(expected);
+	});
+
 	it('renders the message content', () => {
 		const wrapper = render(humanMsg());
 		expect(wrapper.querySelector('.bubble-content')?.textContent).toBe('hello from a human');
@@ -184,6 +205,26 @@ describe('UserMessageBubble — delivery state', () => {
 			models.set([]);
 			activeModelId.set(null);
 		}
+	});
+
+	it('renders the local-model hold for a cloud message blocked by project policy', () => {
+		const wrapper = render(humanMsg({
+			delivery_state: 'queued', delivery_error: 'project_cloud_off',
+			write_outcome: 'proved_no_write', active_turn_id: null,
+		}));
+		const status = wrapper.querySelector<HTMLElement>('.delivery-status');
+		expect(status?.textContent).toBe(SWITCH_TO_LOCAL_MODEL);
+		expect(status?.title).toBe(WAITING_FOR_LOCAL_MODEL.title);
+	});
+
+	it('renders the chat-local-only hold with its distinct recovery instruction', () => {
+		const wrapper = render(humanMsg({
+			delivery_state: 'queued', delivery_error: 'thread_local_only',
+			write_outcome: 'proved_no_write', active_turn_id: null,
+		}));
+		const status = wrapper.querySelector<HTMLElement>('.delivery-status');
+		expect(status?.textContent).toBe(SWITCH_TO_LOCAL_MODEL);
+		expect(status?.title).toBe(WAITING_FOR_THREAD_LOCAL_MODEL.title);
 	});
 
 	it('hides pending copy and cancel once the server says a turn owns the input', () => {
@@ -350,7 +391,7 @@ describe('UserMessageBubble — delivery state', () => {
 	it.each([
 		['cancelled', 'cancelled_by_user', 'a cancellation'],
 		['failed', 'provider_unavailable', 'a failed delivery'],
-	] as const)('shows the timestamp on an ended message (%s)', (delivery_state, delivery_error) => {
+	] as const)('shows the timestamp on an ended message (%s)', (delivery_state, delivery_error, _description) => {
 		const created_at = '2026-01-01T12:34:00';
 		const wrapper = render(humanMsg({
 			created_at,

@@ -18,8 +18,9 @@ from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_read
 from infra.packed_rows import fetch_all
 from infra.product_events import emit_product_event
-from infra.conductor import get_all_conductor_ids
+from infra.conductor import get_all_coordination_ids
 from infra.fresh_threads import create_visible_fresh_thread
+from infra.local_only import add_local_only_payload_fields
 from infra.queries import (
     get_thread_for_user,
     insert_message,
@@ -38,7 +39,7 @@ async def list_threads(token: str, archived: int = 0):
         raise HTTPException(401)
     def _query():
         db = get_db()
-        conductor_ids = get_all_conductor_ids(db=db)
+        conductor_ids = get_all_coordination_ids(db=db)
         # Sidebar visibility = parent presence (single source of truth):
         # ``spawned_by IS NULL`` ⇒ top-level/visible. By design ``spawned_by`` is
         # set ONLY for hidden subagents — every visible-peer spawn path leaves it
@@ -60,13 +61,16 @@ async def list_threads(token: str, archived: int = 0):
         # One SQLite step for every visible thread: a per-row fetch re-takes
         # the GIL once per row, which under load cost seconds for ~800 rows.
         rows = fetch_all(db, sql, params)
-        db.close()
         projected = []
         for row in rows:
             item = dict(row)
             item["archived"] = 1 if thread_is_explicitly_archived(row) else 0
             projected.append(item)
-        return projected
+        try:
+            add_local_only_payload_fields(projected, db=db)
+            return projected
+        finally:
+            db.close()
 
     threads = await run_read(_query)
     from connections.harness_refresh import schedule_refresh_for_selections

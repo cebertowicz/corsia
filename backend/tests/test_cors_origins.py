@@ -8,10 +8,7 @@ from main import app
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    from infra import state
-
-    monkeypatch.setattr(state, "_thread_driver_failure", None)
+def client() -> TestClient:
     return TestClient(app)
 
 
@@ -22,8 +19,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         "http://localhost:5173",  # Vite proxy development server.
         "http://127.0.0.1:5178",  # Playwright Vite proxy server.
         "http://localhost:5273",  # Tauri development server.
-        "http://tauri.localhost",  # Tauri 2 static picker.
-        "tauri://localhost",  # Tauri picker reset destination.
+        "http://tauri.localhost",  # Tauri 2 static startup shell.
+        "tauri://localhost",  # Tauri 2 static startup-shell origin.
     ],
 )
 def test_origin_bearing_requests_are_not_granted_cors(client: TestClient, origin: str):

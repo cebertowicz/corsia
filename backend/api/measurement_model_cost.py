@@ -22,6 +22,7 @@ from typing import Any
 from api.cost_identity import IDENTITY_GROUP, ModelIdentity, identity_columns, identity_join
 from api.measurement_chain import chain_ctes
 from api.measurement_cost import ADMISSION_SQL, IDLE_HOURS_SQL, INPUT_TIER_SQL, classify_usage_rows, endpoint_listings
+from api.measurement_prepared import CHAIN_DDL, CHAIN_TABLE
 from api.measurement_queries import outcome_ctes
 from api.measurement_scope import query_params, scope_cte
 
@@ -66,13 +67,22 @@ def materialize_chain(db, params: dict[str, Any], task_ids: Collection[str] | No
     """Walk the chains of the prepared periods' accepted tasks (or only ``task_ids``) once into a temporary table
     the readers below can share.
 
-    Returns the table to pass as ``chain_rows``; it belongs to the request connection and the next call replaces it,
-    so the caller drops it when done."""
+    Returns the table to pass as ``chain_rows``; it belongs to the request connection and the next call replaces its
+    rows, so the caller empties it when done.
+
+    The table is created once per connection, before any write (see ``create_tables``), and refilled, never dropped:
+    creating or dropping a table changes the connection's schema, which expires every statement it has prepared, so
+    each would be planned again on its next run, whichever job sends it."""
     prefix, source, bound = _chain_source(params, task_ids, None)
-    db.execute("DROP TABLE IF EXISTS temp.measurement_task_chain")
-    db.execute(f"CREATE TEMP TABLE measurement_task_chain AS {prefix} SELECT task_id,period,settled_at,node_id FROM {source}",
-               bound)
-    return "temp.measurement_task_chain"
+    db.execute(CHAIN_DDL)
+    db.execute(f"DELETE FROM {CHAIN_TABLE}")
+    db.execute(f"INSERT INTO {CHAIN_TABLE} {prefix} SELECT task_id,period,settled_at,node_id FROM {source}", bound)
+    return CHAIN_TABLE
+
+
+def clear_chain(db) -> None:
+    """Empty the table :func:`materialize_chain` filled; the pooled connection outlives the caller."""
+    db.execute(f"DELETE FROM {CHAIN_TABLE}")
 
 
 def _chain_source(params: dict[str, Any], task_ids: Collection[str] | None, chain_rows: str | None) -> tuple[str, str, dict[str, Any]]:

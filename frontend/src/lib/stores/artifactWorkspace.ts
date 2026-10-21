@@ -1,13 +1,16 @@
 import { writable, get } from 'svelte/store';
 import {
-	applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, emptyWorkspace, openTab,
-	resolveTabArtifact, restoreWorkspace, tabKey, type ArtifactTabStatus, type OpenArtifactInput,
-	openLegacyDiscussionTab, type OpenLegacyDiscussionInput, openSubagentTab, type OpenSubagentInput,
-	type RevisionCheck, type TabLoadSignal, type ThreadArtifactWorkspace,
+	applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, emptyWorkspace, newInstanceId, openTab,
+	resolveTabArtifact, restoreWorkspace, tabKey, type ArtifactTabStatus,
+	type OpenArtifactInput, openLegacyDiscussionTab, type OpenLegacyDiscussionInput,
+	openSubagentTab, type OpenSubagentInput, type RevisionCheck, type TabLoadSignal,
+	type ThreadArtifactWorkspace,
 } from '$lib/artifactTabs';
-import { clearDraft, existingDraft } from '$lib/stores/docSaveQueue';
+import { openBrowserTab } from '$lib/artifactAuxiliaryTabs';
+import { clearDraft, existingDraft, relocateDraftTarget } from '$lib/stores/docSaveQueue';
 import { closeLiveDocument } from '$lib/stores/liveDocuments';
 import { token } from '$lib/stores/auth';
+import { clearTabViewState } from '$lib/stores/tabViewState';
 
 export {
 	emptyWorkspace, tabKey, getActiveTab, isTabChanged, hasChangedTab,
@@ -106,10 +109,14 @@ function stripAuxiliaryTabs(): void {
 threadWorkspaces.subscribe(persist);
 splitWidth.subscribe(persist);
 
+// Threads whose browser an agent has revealed since this account signed in to this app session.
+const revealedBrowsers = new Set<string>();
+
 let lastToken = get(token);
 token.subscribe((value) => {
 	if (value === lastToken) return;
 	lastToken = value;
+	revealedBrowsers.clear();
 	stripAuxiliaryTabs();
 });
 
@@ -138,8 +145,15 @@ function mutate(
 		for (const tab of current.tabs) if (!remaining.has(tab.instanceId)) removed.push(tab.instanceId);
 		return { ...all, [threadId]: next };
 	});
-	// Every dropped tab takes its live binding with it (4.1 close sync), however it was removed.
-	for (const instanceId of removed) closeLiveDocument(instanceId);
+	// Every tab write passes here, so a draft's path follows its tab's whichever reducer moved it.
+	for (const tab of get(threadWorkspaces)[threadId]?.tabs ?? []) {
+		if (tab.kind === 'document') relocateDraftTarget(tab, tab.path);
+	}
+	// Every dropped tab takes its live binding and in-session camera/place with it, however it was removed.
+	for (const instanceId of removed) {
+		closeLiveDocument(instanceId);
+		clearTabViewState(threadId, instanceId);
+	}
 	return removed;
 }
 
@@ -150,6 +164,29 @@ export function openArtifactTab(threadId: string, input: OpenArtifactInput): voi
 /** Applies an agent request without overriding the user's chosen canvas surface. */
 export function openAgentDocumentTab(threadId: string, input: OpenArtifactInput): void {
 	mutate(threadId, (ws) => ({ ...openTab(ws, input), activeSurface: ws.activeSurface }));
+}
+
+/**
+ * Opens a browser pane. Only an agent's first reveal of a thread's browser in this app session takes
+ * the view; a later one adds a missing tab in the background, even after the user closed it.
+ */
+export function openBrowserPane(threadId: string, agentOpened = false): void {
+	const foreground = !agentOpened || !revealedBrowsers.has(threadId);
+	if (agentOpened) revealedBrowsers.add(threadId);
+	mutate(threadId, (ws) => openBrowserTab(ws, { threadId }, newInstanceId, foreground));
+}
+
+/** Update this thread's sole browser tab without changing its selection or lifecycle. */
+export function setBrowserPaneLabel(threadId: string, title: string): void {
+	mutate(threadId, (ws) => {
+		let changed = false;
+		const tabs = ws.tabs.map((tab) => {
+			if (tab.kind !== 'browser' || tab.title === title) return tab;
+			changed = true;
+			return { ...tab, title };
+		});
+		return changed ? { ...ws, tabs } : null;
+	});
 }
 
 /** Opens a canonical child conversation beside its still-mounted parent. */

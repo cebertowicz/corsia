@@ -1,6 +1,6 @@
+import { test } from "./support/test";
 import {
   expect,
-  test,
   type APIRequestContext,
   type Page,
 } from "@playwright/test";
@@ -58,6 +58,20 @@ function decision(over: Record<string, unknown> = {}) {
   };
 }
 
+function review(over: Record<string, unknown> = {}) {
+  return {
+    review_key: "pr-9",
+    title: "Reviewer findings on the plans PR",
+    requester: { kind: "thread", label: "Reviewer subagent", lane: "quality" },
+    pending_count: 3,
+    total_count: 5,
+    node_id: "node-review",
+    destination: null,
+    source: SOURCE,
+    ...over,
+  };
+}
+
 /** Intercepts only the queue; every other route stays the real backend. */
 async function seedQueue(page: Page, current: unknown, count: number) {
   await page.route("**/api/attention/queue", async (route) => {
@@ -102,7 +116,7 @@ async function openThread(
 ) {
   const title = `${label}-${Date.now()}`;
   await createSession(request, title);
-  // A fresh workspace has a first-run landing: once /api/conductor resolves with
+  // A fresh workspace has a first-run landing: once /api/corsia-agent resolves with
   // first_run_pending, the app opens the conductor thread and loads its
   // messages. Selecting a row before that lands races it, and the conductor can
   // end up on screen with its model-sources panel in the attention stack.
@@ -157,7 +171,7 @@ test.describe("@surface:attention The one attention dock — /_design (PLANS-AC3
     // Other → listed option: the head defect. The draft clears and Answer arms.
     const other = showcase.locator(".other-option textarea").first();
     await other.fill("Actually, split this into two.");
-    await expect(showcase.locator(".other-option").first()).toHaveClass(
+    await expect(showcase.locator(".other-option textarea").first()).toHaveClass(
       /selected/,
     );
     await showcase
@@ -190,7 +204,11 @@ test.describe("@surface:attention The one attention dock — /_design (PLANS-AC3
       showcase.getByText("Raised directly — no parent review").first(),
     ).toBeVisible();
     await shot(page, "dock-04-root-direct-labelled");
-    await showcase.getByRole("button", { name: "Done", exact: true }).click();
+    // The page also holds a Setup row named Done; the drawer's own Done is AdaptiveDrawer's `.drawer-done`.
+    await showcase
+      .getByRole("dialog")
+      .getByRole("button", { name: "Done", exact: true })
+      .click();
 
     // External review hands off and never resolves someone else's object.
     await showcase.getByRole("button", { name: "External review" }).click();
@@ -328,6 +346,9 @@ test.describe("@surface:attention The one attention dock — /_design (PLANS-AC3
       expect(closeMetrics.right, `${label} close right`).toBeLessThanOrEqual(closeMetrics.width);
       expect(closeMetrics.bottom, `${label} close bottom`).toBeLessThanOrEqual(closeMetrics.height);
       await close.press("Enter");
+      // The bar stays on screen while the drawer plays its outro, and the next width reuses this same document, so wait
+      // for the drawer itself to be gone: otherwise the next pass sees the closing drawer as open and never opens it.
+      await expect(drawer).toBeHidden();
       await expect(frame.locator(".dock-bar").first()).toBeVisible();
     }
 
@@ -578,6 +599,63 @@ test.describe("@surface:attention Hit testing — the dock is actually reachable
         [answerBox.x + answerBox.width / 2, answerBox.y + answerBox.height / 2],
       );
       expect(answerHit, `${label} Answer`).toBe("drawer");
+    });
+  }
+
+  for (const [label, width, height] of [
+    ["desktop-600", 1280, 600],
+    ["mobile-664", 390, 664],
+  ] as const) {
+    test(`the dock keeps its shadow room and scrolls an opened review inside the band at ${label}`, async ({
+      page,
+      request,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await seedQueue(
+        page,
+        {
+          external_id: "review-1",
+          renderer: "external-review",
+          detail: review({ title: "Reviewer findings on the plans PR. ".repeat(80) }),
+        },
+        1,
+      );
+      await openThread(page, request, `attention-budget-${label}`);
+
+      const dock = page.locator("[data-attention-dock]");
+      // The dock clips where it scrolls, so the collapsed card needs room inside
+      // that clip for its rounded corners and drop shadow.
+      const room = await dock.evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        const bar = el.querySelector(".dock-bar")!.getBoundingClientRect();
+        return { below: box.bottom - bar.bottom, left: bar.left - box.left, right: box.right - bar.right };
+      });
+      for (const [side, px] of Object.entries(room)) {
+        expect(px, `${label} shadow room ${side}`).toBeGreaterThanOrEqual(11.5);
+      }
+
+      await dock.locator(".dock-bar").click();
+      await expect(dock.locator(".external-review")).toBeVisible();
+      const geometry = await dock.evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        const slot = el.parentElement!.getBoundingClientRect();
+        const header = document.querySelector(".shell-header")!.getBoundingClientRect();
+        return {
+          top: box.top,
+          bottom: box.bottom,
+          slotBottom: slot.bottom,
+          headerBottom: header.bottom,
+          scrolls: el.scrollHeight > el.clientHeight + 1,
+        };
+      });
+      expect(geometry.scrolls, `${label} the review overflows the band and scrolls`).toBe(true);
+      expect(geometry.top, `${label} dock top below the header`).toBeGreaterThanOrEqual(geometry.headerBottom - 0.5);
+      expect(geometry.bottom, `${label} dock inside the band`).toBeLessThanOrEqual(geometry.slotBottom + 0.5);
+      await expect(page.getByRole("button", { name: "Collapse review" })).toBeInViewport();
+      await dock.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      await expect(dock.getByText("This review has no destination recorded.", { exact: false })).toBeInViewport();
     });
   }
 

@@ -5,24 +5,18 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime, timezone
 
-from plans import admission, operator_stopped, service, wait_causes
-from plans import node_states
+from plans import admission, node_states, operator_stopped, service, user_steering, wait_causes
 from plans.admission_projection import executor_of
 from plans import operator_node_facts as facts
 from plans.operator_display_state import (
-    NODE_LABEL_KEYS,
-    PLAN_LABEL_KEYS,
-    TERMINAL_DISPLAY,
-    TONE_KEYS,
-    _HUMAN_REVIEWS,
-    display_from_facts,
-    needs_user_from_facts,
-    retired_display,
+    NODE_LABEL_KEYS, PLAN_LABEL_KEYS, TERMINAL_DISPLAY, TONE_KEYS, _HUMAN_REVIEWS,
+    display_from_facts, needs_user_from_facts, node_paused, plan_paused, retired_display,
+    review_deferred,
 )
 #: Leaves whose primary condition opens their path by default. Paused work
 #: (a whole-plan pause or a node pause hold) is "Collapsed by default" in the
-#: PLANS-CANONICAL-STATE-MATRIX display matrix; review outranks pause, so a
-#: review raised before the pause stays current and answerable.
+#: PLANS-CANONICAL-STATE-MATRIX display matrix. A review raised before a pause
+#: stays current while a plan or item pause defers its ask (``ask_deferred``).
 CURRENT_CONDITIONS = frozenset({"running", "waiting", "blocked", "review"})
 ATTEMPT_HISTORY_LIMIT = 20
 _EMPTY_ATTEMPTS = {"attempt_count": 0, "friction_count": 0, "revision_round": 0}
@@ -148,6 +142,9 @@ def _status_reason(
         return stopped
     if sequenced_after is not None:
         return sequenced_after
+    if execution["condition"] == "review" and node_paused(execution):
+        # Pausing a raised review defers its ask, so the row names the pause.
+        return user_steering.placed_pause(execution["causes"]).get("reason")
     if execution["condition"] not in _REASONED_CONDITIONS or _child_plan_working(execution):
         return None
     # A whole-plan pause is named once in the plan header, not on every row.
@@ -161,7 +158,6 @@ def _status_reason(
     )
 
 
-
 def _needs_user(node: dict, review: dict | None, execution: dict) -> bool:
     """Whether this open row has a concrete action the user can take now."""
     return needs_user_from_facts(
@@ -173,13 +169,12 @@ def _needs_user(node: dict, review: dict | None, execution: dict) -> bool:
             link["role"] == "attention" and link.get("attention_state") == "raised"
             for link in node.get("artifact_links", [])
         ),
+        plan_paused=plan_paused(execution),
+        node_paused=node_paused(execution),
     )
 
 
-
-def _display(
-    node: dict, execution: dict, review: dict | None, *, stopped: str | None = None,
-) -> dict[str, str]:
+def _display(node: dict, execution: dict, review: dict | None, *, stopped: str | None = None) -> dict[str, str]:
     return display_from_facts(
         str(node["state"]),
         str(execution["condition"]),
@@ -192,6 +187,8 @@ def _display(
             cause.get("reason_key") == "worker_needs_input"
             for cause in execution["causes"]
         ),
+        plan_paused=plan_paused(execution),
+        node_paused=node_paused(execution),
     )
 
 
@@ -344,12 +341,16 @@ def leaf_bucket_from_facts(
     child_working: bool = False,
     quiet_block: bool = False,
     unactionable_user_block: bool = False,
+    plan_paused: bool = False,
+    node_paused: bool = False,
 ) -> str:
     """Reduce compact lifecycle facts into the canonical distribution bucket."""
     if state in service._ACCEPTED_STATES:
         return "done"
     if state == "failed":
         return state
+    if review_deferred(condition, review_kind, plan_paused=plan_paused, node_paused=node_paused):
+        return "paused"
     if condition == "review":
         return "review_human" if review_kind in _HUMAN_REVIEWS else "review_parent_agent"
     if display_label == "working":
@@ -365,18 +366,17 @@ def leaf_bucket_from_facts(
 
 def leaf_bucket(node: dict) -> str:
     """Name the one bucket a leaf counts in, by its canonical lifecycle/condition."""
-    review = node["review"] or {}
+    review, label = node["review"] or {}, str(node["display"]["label_key"])
     return leaf_bucket_from_facts(
         str(node["state"]),
         shown_condition(node),
         review.get("kind"),
-        display_label=str(node["display"]["label_key"]),
-        child_working=(
-            node["display"]["label_key"] == "working"
-            and _child_plan_working(node["execution"])
-        ),
+        display_label=label,
+        child_working=label == "working" and _child_plan_working(node["execution"]),
         quiet_block=is_quiet(node),
         unactionable_user_block=unactionable_user_hold(node),
+        plan_paused=plan_paused(node["execution"]),
+        node_paused=node_paused(node["execution"]),
     )
 
 

@@ -58,14 +58,22 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
     """
     connection = db or get_db()
     try:
-        project = thread_scope(thread_id, db=connection)["project_id"] if thread_id else project_id
+        scope = thread_scope(thread_id, db=connection) if thread_id else None
+        project = scope["project_id"] if scope else project_id
         requested = get_account(account_id, db=connection) if account_id is not None else None
+        from llm.locality import locality_cause, project_cloud_models_off
+
+        cloud_refusal = locality_cause(
+            thread_local_only=bool(scope and scope["local_only"]),
+            cloud_off=project_cloud_models_off(project, db=connection),
+        )
         result = []
         pending: dict[str, str | None] = {}
         for original in rows:
             row = dict(original)
             provider = row.get("connection")
             if provider not in ("codex", "claude-code"):
+                _apply_locality(row, cloud_refusal)
                 result.append(row)
                 continue
             permitted = permitted_accounts(provider, project_ids=[project], db=connection)
@@ -87,11 +95,21 @@ def project_accounts(rows, *, thread_id=None, project_id=None, account_id=None, 
             elif chosen["source_home"] is not None:
                 _read_discovered_evidence(row, chosen, connection)
             row["runnable"] = _runnable_status(row)
+            _apply_locality(row, cloud_refusal)
             result.append(row)
         return result
     finally:
         if db is None:
             connection.close()
+
+
+
+def _apply_locality(row: dict, refusal: str | None) -> None:
+    """Overlay project or thread locality policy without deleting scoped catalog rows."""
+    if refusal and not row.get("is_local", False):
+        row.update(status="unavailable", status_reason=refusal)
+        if "runnable" in row:
+            row["runnable"] = {"status": "unavailable", "status_reason": refusal}
 
 
 def _runs_on(account, row, project, selected, db) -> dict:

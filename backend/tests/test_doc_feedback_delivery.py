@@ -110,6 +110,8 @@ def test_user_batch_uses_fixed_user_framing_and_ui_recipient_creates_no_node(iso
         feedback_batches.close_batch(db, user_batch["id"], "send")
         user_node = service.get_node(batches(db)[0]["delivered_node_id"], db=db)
         assert user_node.description.startswith(USER_FRAMING)
+        # A reply under a comment the agent then resolves is hidden from the user.
+        assert "Leave the user's comment open for them to resolve" in user_node.description
 
         root, _ = add_comment(
             db, artifact_id, author_kind="user", author_id=None, author="Steve",

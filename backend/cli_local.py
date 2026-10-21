@@ -8,7 +8,7 @@ import time
 import urllib.error
 
 from cli_sources import READ_TIMEOUT_SECONDS, RouteMissing, _read_token, request_json
-from llm.local_profiles import setup_command
+from llm.local_setup_results import RETRY_IN_TERMINAL, SETUP_COMMAND, setup_fix
 
 SETUP_ROUTE = "/api/providers/local/setup"
 SETUP_TIMEOUT_SECONDS = 60
@@ -44,16 +44,16 @@ def _print_still_downloading(result: dict, command: str) -> int:
     return EXIT_STILL_DOWNLOADING
 
 
-def _refusal(error: urllib.error.HTTPError) -> str | None:
-    """The server's reason for refusing a profile (HTTP 400), else None."""
-    if error.code != 400:
-        return None
+def _consent_required(error: urllib.error.HTTPError) -> bool:
+    """Whether local setup needs consent that only the app can collect."""
+    if error.code != 409:
+        return False
     try:
         detail = json.loads(error.read().decode() or "null")
     except (OSError, ValueError):
-        return None
-    reason = detail.get("detail") if isinstance(detail, dict) else None
-    return reason if isinstance(reason, str) else None
+        return False
+    payload = detail.get("detail") if isinstance(detail, dict) else None
+    return isinstance(payload, dict) and payload.get("code") == "consent_required"
 
 
 def _print_skipped(result: dict) -> int:
@@ -67,8 +67,7 @@ def _backend_refused(error: OSError) -> bool:
 
 
 def _follow_server_setup(token: str, command: str) -> int:
-    """Print each stage once and settle on the server's setup flight record."""
-    seen_stages: set[str] = set()
+    """Follow the server's state vocabulary; downloading is the only exit-12 outcome."""
     deadline = time.monotonic() + FOLLOW_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         try:
@@ -79,30 +78,22 @@ def _follow_server_setup(token: str, command: str) -> int:
                 "next_action": f"Run `{command}` again after the backend is available.",
             })
         state = flight.get("state")
-        if state == "succeeded":
-            result = flight.get("result") or {}
-            if result.get("skipped"):
-                return _print_skipped(result)
-            models = result.get("models")
-            if result.get("existing") and isinstance(models, int):
-                noun = "model" if models == 1 else "models"
-                print(f"Using your oMLX ({models} {noun}). Its settings are unchanged.")
-            else:
-                print("Local model is ready.")
+        if state == "ready":
+            print("Local model is ready.")
             return 0
         if state == "downloading":
-            return _print_still_downloading(flight.get("result") or {}, command)
-        if state == "failed":
-            return _print_terminal_error(flight.get("result") or {})
-        if state == "idle":
-            return _print_terminal_error({
-                "message": "Local setup is no longer running; the CORSIA server may have restarted.",
-                "next_action": f"Run `{command}` again.",
-            })
-        stage = flight.get("stage")
-        if isinstance(stage, str) and stage not in seen_stages:
-            print(stage)
-            seen_stages.add(stage)
+            return _print_still_downloading(flight, command)
+        if state in {"failed", "setup_failed", "start_failed", "stopped"}:
+            if state == "stopped":
+                return _print_terminal_error({"message": "Local setup stopped.", "next_action": f"Run `{command}` again."})
+            # The flight says what happened; the fix gives its terminal-specific next step.
+            message = str(flight.get("message") or "Local setup failed.")
+            message += "\n" + setup_fix(flight.get("cause"), flight.get("bytes_to_free"), retry=RETRY_IN_TERMINAL)
+            if flight.get("ref"):
+                message += f" Reference: {flight['ref']}"
+            return _print_terminal_error({"message": message})
+        if state != "starting":
+            return _print_terminal_error({"message": "The server returned an unknown local setup state."})
         time.sleep(FOLLOW_INTERVAL_SECONDS)
     return _print_still_running(command)
 
@@ -112,8 +103,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         from cli_local_before_start import run_before_start
 
         return run_before_start(force_local=not args.if_no_subscription)
-    profile = getattr(args, "profile", None)
-    command = setup_command(profile)
+    command = SETUP_COMMAND
     token = _read_token()
     if not token:
         return _print_terminal_error({
@@ -123,12 +113,14 @@ def cmd_setup(args: argparse.Namespace) -> int:
     try:
         result = request_json(
             "POST", SETUP_ROUTE, token, SETUP_TIMEOUT_SECONDS,
-            {"no_subscription_only": args.if_no_subscription, "automatic": args.automatic, "profile": profile},
+            {"no_subscription_only": args.if_no_subscription, "automatic": args.automatic},
         )
     except urllib.error.HTTPError as error:
-        refusal = _refusal(error)
-        if refusal:
-            return _print_terminal_error({"message": refusal})
+        if _consent_required(error):
+            return _print_terminal_error({
+                "message": "Another copy of oMLX is already running on this computer.",
+                "next_action": "Open the CORSIA app and choose whether to stop it or keep it running.",
+            })
         return _print_terminal_error({
             "message": f"Local setup could not start on the backend: {error}",
             "next_action": f"Run `{command}` again after the backend is available.",
@@ -154,6 +146,9 @@ def cmd_setup(args: argparse.Namespace) -> int:
         return _print_terminal_error(result)
     if result.get("skipped"):
         return _print_skipped(result)
+    if result.get("existing"):
+        print(result.get("message") or "A local model is already connected. Its settings are unchanged.")
+        return 0
     if result.get("notice"):
         print(result["notice"])
     if args.start_only:
@@ -164,10 +159,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
 def build_parser(sub: argparse._SubParsersAction) -> None:
     local = sub.add_parser("local", help="Set up a local model")
     local_sub = local.add_subparsers(dest="local_cmd", required=True)
-    setup = local_sub.add_parser("setup", help="Install and configure a local model")
-    setup.add_argument(
-        "--profile", metavar="ID",
-        help="Local model profile to set up (GET /api/providers/local/setup recommends one); omitted, the default",
+    setup = local_sub.add_parser(
+        "setup", help="Install oMLX and the local model its recommender picks for this Mac",
     )
     setup.add_argument(
         "--if-no-subscription", action="store_true",

@@ -67,6 +67,7 @@ def _node_and_artifact(db, operation: str):
         params.update({
             "title": "Residual work",
             "acceptance_criteria": "Residual work is complete",
+            "size": "S",
             "verification_result": "passed",
         })
     return thread_id, plan, node, artifact, params

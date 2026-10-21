@@ -306,12 +306,13 @@ describe('ProjectRepos repository policy controls', () => {
 		});
 		await mountLoaded(fetchMock);
 
-		host.querySelector<HTMLButtonElement>('.add')?.click();
-		await vi.waitFor(() => expect(host.querySelector('[role="dialog"]')).not.toBeNull());
-		const pathField = input('Repository path');
+		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Add repository')?.click();
+		await vi.waitFor(() => expect(document.body.querySelector('[role="dialog"]')).not.toBeNull());
+		const pathField = document.body.querySelector<HTMLInputElement>('input[aria-label="Repository path"]')!;
 		pathField.value = '/Users/alice/code/app';
 		pathField.dispatchEvent(new Event('input', { bubbles: true }));
-		const submit = host.querySelector<HTMLButtonElement>('button.primary');
+		const submit = document.body.querySelector<HTMLButtonElement>('button.primary');
 		await vi.waitFor(() => expect(submit?.disabled).toBe(false));
 		submit?.click();
 
@@ -344,14 +345,15 @@ describe('ProjectRepos repository policy controls', () => {
 		});
 		await mountLoaded(fetchMock);
 
-		host.querySelector<HTMLButtonElement>('.add')?.click();
-		await vi.waitFor(() => expect(host.querySelector('[role="dialog"]')).not.toBeNull());
-		button('Pin current branch for added repository').click();
-		button('Protect base checkout for added repository').click();
-		const pathField = input('Repository path');
+		Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
+			.find((button) => button.textContent?.trim() === 'Add repository')?.click();
+		await vi.waitFor(() => expect(document.body.querySelector('[role="dialog"]')).not.toBeNull());
+		document.body.querySelector<HTMLButtonElement>('button[aria-label="Pin current branch for added repository"]')!.click();
+		document.body.querySelector<HTMLButtonElement>('button[aria-label="Protect base checkout for added repository"]')!.click();
+		const pathField = document.body.querySelector<HTMLInputElement>('input[aria-label="Repository path"]')!;
 		pathField.value = '/Users/alice/notes';
 		pathField.dispatchEvent(new Event('input', { bubbles: true }));
-		const submit = host.querySelector<HTMLButtonElement>('button.primary');
+		const submit = document.body.querySelector<HTMLButtonElement>('button.primary');
 		await vi.waitFor(() => expect(submit?.disabled).toBe(false));
 		submit?.click();
 

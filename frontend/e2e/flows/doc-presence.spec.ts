@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import {
 	createSession,
 	loginByUrl,
@@ -54,8 +55,10 @@ test.describe('@flow:doc-presence @surface:doc-presence @surface:documents docum
 		const stamp = Date.now();
 		const viewerTitle = `presence-viewer-${stamp}`;
 		const readers = [`Presence Reader A ${stamp}`, `Presence Reader B ${stamp}`];
+		// The viewer is not in their own presence row, so a first reader keeps three avatars in the stack.
+		const firstReader = `Presence Reader 0 ${stamp}`;
 		const viewerId = await createSession(request, viewerTitle);
-		for (const title of readers) await createSession(request, title);
+		for (const title of [firstReader, ...readers]) await createSession(request, title);
 
 		const tok = encodeURIComponent(TEST_TOKEN);
 		const tree = await request.get(`/api/files/tree?token=${tok}`);
@@ -87,7 +90,7 @@ test.describe('@flow:doc-presence @surface:doc-presence @surface:documents docum
 		await expect(page.locator('.cm-content')).toContainText('Agents read this document.');
 
 		const reader = await page.context().newPage();
-		for (const title of readers) await readAsAgent(reader, request, title, docPath);
+		for (const title of [firstReader, ...readers]) await readAsAgent(reader, request, title, docPath);
 		await reader.close();
 
 		const stack = page.getByRole('group', { name: '3 participants' });
@@ -99,13 +102,14 @@ test.describe('@flow:doc-presence @surface:doc-presence @surface:documents docum
 		await expect(earlier).toBeVisible();
 		await saveEvidenceScreenshot(page, testInfo, 'doc-presence-two-readers', { fullPage: false });
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
-			// Plain and detail avatars share one phone slot, so the stack steps evenly.
+			// Each avatar takes one phone slot, so the stack steps evenly (plain/detail slot parity: Avatar.test.ts).
 			const lefts = await stack.locator('.avatar').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().left));
 			expect(lefts).toHaveLength(3);
 			expect(Math.abs((lefts[1] - lefts[0]) - (lefts[2] - lefts[1]))).toBeLessThanOrEqual(1);
 		}
 
-		const detail = stack.getByRole('dialog');
+		// Popover is portaled to document.body, so it is not a descendant of its avatar stack.
+		const detail = page.getByRole('dialog');
 		await latest.focus();
 		await expect(detail).toHaveText(new RegExp(`^${escapeRegExp(readers[1])} · read `));
 		await expectUncovered(page, detail);

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { isTabChanged, type ArtifactTab } from '$lib/stores/artifactWorkspace';
 
 	let { tabs, activeKey, imageTabIds = new Set<string>(), onSelect, onClose, onCollapse }: {
@@ -12,6 +13,56 @@
 	} = $props();
 
 	let stripEl = $state<HTMLElement | undefined>(undefined);
+	let startHidden = $state(false);
+	let endHidden = $state(false);
+
+	function refreshScrollEdges() {
+		const el = stripEl;
+		if (!el) return;
+		startHidden = el.scrollLeft > 1;
+		endHidden = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+	}
+
+	function reducedMotion(): boolean {
+		return typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+	}
+
+	function revealTab(instanceId: string) {
+		const tab = Array.from(stripEl?.querySelectorAll<HTMLElement>('.tab') ?? [])
+			.find((element) => element.dataset.tabId === instanceId);
+		tab?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' });
+		requestAnimationFrame(refreshScrollEdges);
+	}
+
+	function onWheel(event: WheelEvent) {
+		const el = stripEl;
+		if (!el || event.deltaY === 0) return;
+		event.preventDefault();
+		el.scrollBy?.({ left: event.deltaY, behavior: 'auto' });
+	}
+
+	$effect(() => {
+		const el = stripEl;
+		if (!el) return;
+		refreshScrollEdges();
+		if (typeof ResizeObserver === 'undefined') return;
+		const observer = new ResizeObserver(refreshScrollEdges);
+		observer.observe(el);
+		return () => observer.disconnect();
+	});
+
+	// Saves and load signals replace `tabs` in place; only an opened or closed tab
+	// changes this, so a person scrolling the strip is not pulled back mid-save.
+	const tabIds = $derived(tabs.map((tab) => tab.instanceId).join('\n'));
+
+	$effect(() => {
+		void tabIds;
+		const active = activeKey;
+		void tick().then(() => {
+			if (active) revealTab(active);
+			else refreshScrollEdges();
+		});
+	});
 
 	function onKeydown(e: KeyboardEvent, idx: number) {
 		if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
@@ -26,7 +77,16 @@
 </script>
 
 <div class="strip">
-	<div class="tabs" role="tablist" aria-label="Open side panel items" bind:this={stripEl}>
+	<div
+		class="tabs"
+		class:start-hidden={startHidden}
+		class:end-hidden={endHidden}
+		role="tablist"
+		aria-label="Open side panel items"
+		bind:this={stripEl}
+		onscroll={refreshScrollEdges}
+		onwheel={onWheel}
+	>
 		{#each tabs as t, i (t.instanceId)}
 			{@const key = t.instanceId}
 			{@const active = key === activeKey}
@@ -38,10 +98,14 @@
 					role="tab"
 					aria-selected={active}
 					tabindex={active ? 0 : -1}
+					data-tab-id={key}
 					onclick={() => onSelect(key)}
+					onfocus={() => revealTab(key)}
 					onkeydown={(e) => onKeydown(e, i)}
 				>
-					{#if t.kind !== 'document'}
+					{#if t.kind === 'browser'}
+							<svg class="tab-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.4 2.5 3.6 5.5 3.6 9S14.4 18.5 12 21M12 3C9.6 5.5 8.4 8.5 8.4 12S9.6 18.5 12 21" /></svg>
+					{:else if t.kind !== 'document'}
 							<svg class="tab-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" /></svg>
 						{:else if imageTabIds.has(key)}
 							<svg class="tab-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="m21 16-5-5-8 9" /></svg>
@@ -86,20 +150,28 @@
 		gap: 2px;
 	}
 	.tabs::-webkit-scrollbar { display: none; }
+	/* Hidden tabs leave a soft edge instead of an extra overflow control. */
+	.tabs.start-hidden { -webkit-mask-image: linear-gradient(to right, transparent, currentColor var(--space-4)); mask-image: linear-gradient(to right, transparent, currentColor var(--space-4)); }
+	.tabs.end-hidden { -webkit-mask-image: linear-gradient(to left, transparent, currentColor var(--space-4)); mask-image: linear-gradient(to left, transparent, currentColor var(--space-4)); }
+	.tabs.start-hidden.end-hidden {
+		-webkit-mask-image: linear-gradient(to right, transparent, currentColor var(--space-4), currentColor calc(100% - var(--space-4)), transparent);
+		mask-image: linear-gradient(to right, transparent, currentColor var(--space-4), currentColor calc(100% - var(--space-4)), transparent);
+	}
+	/* A tab is a pill in the transcript's pill geometry (32 px, fully round); wide enough for a typical file name. */
 	.tab-wrap {
 		display: flex; align-items: center; flex-shrink: 0;
-		max-width: 200px; margin: 6px 0; border-radius: var(--radius-sm);
+		max-width: 260px; height: 32px; margin: auto 0; border-radius: var(--radius-pill);
 		color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-medium);
-		transition: background var(--dur-tight), color var(--dur-tight);
 	}
-	.tab-wrap:hover { background: var(--bg-hover); color: var(--text-secondary); }
-	.tab-wrap.active { background: var(--bg-active); color: var(--text-primary); }
+	/* Hover eases in; the active mark moves in the same frame as the content it labels, never fading behind it. */
+	.tab-wrap:hover { background: var(--bg-hover); color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
+	.tab-wrap.active { background: var(--bg-active); color: var(--text-primary); transition: none; }
 	.tab {
 		display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%;
-		padding: 0 2px 0 10px; background: none; border: none; cursor: pointer;
+		padding: 0 2px 0 12px; background: none; border: none; cursor: pointer;
 		color: inherit; font: inherit;
 	}
-	.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
+	.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-pill); }
 	.tab-ico { flex-shrink: 0; }
 	.tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 	.tab-err {
@@ -114,7 +186,7 @@
 	.tab-ro { flex-shrink: 0; display: flex; color: var(--text-tertiary); }
 	.tab-close {
 		display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-		width: 18px; height: 18px; margin-right: 6px; border-radius: var(--radius-2xs);
+		width: 18px; height: 18px; margin-right: 8px; border-radius: var(--radius-circle);
 		background: none; border: none; cursor: pointer; color: inherit; opacity: 0.7;
 	}
 	.tab-close:hover { opacity: 1; background: var(--bg-hover); color: var(--red); }

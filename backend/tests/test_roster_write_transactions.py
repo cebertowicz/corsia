@@ -41,7 +41,7 @@ async def _change(operation, monkeypatch, events):
             "owner", {"responsibility": "Owns delivery."}, {"id": "user"},
         )
     monkeypatch.setattr("ws.post_turn.generate_thread_title", title)
-    return await ensure_thread_title("owner", "release", send)
+    return await ensure_thread_title("owner", send)
 
 
 def _snapshot():
@@ -154,7 +154,7 @@ async def test_operator_title_during_generation_is_preserved(owner, monkeypatch)
         events.append(message)
 
     monkeypatch.setattr("ws.post_turn.generate_thread_title", title)
-    await ensure_thread_title("owner", "release", send)
+    await ensure_thread_title("owner", send)
 
     assert _snapshot() == (
         ("Operator title", "Owns releases."),

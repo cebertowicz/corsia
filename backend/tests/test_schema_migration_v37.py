@@ -34,7 +34,7 @@ def _strand(db, node_id: str, on: str) -> None:
 
 
 def test_stranded_edges_follow_the_rejections_to_the_newest_revision(monkeypatch):
-    assert SCHEMA_VERSION == 113
+    assert SCHEMA_VERSION == 133
     db = _db(monkeypatch)
     try:
         plan, step = _plain_step(db)

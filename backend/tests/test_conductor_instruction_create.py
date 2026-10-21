@@ -1,6 +1,12 @@
 """Instruction creation and actual next-turn responsibility/skill delivery."""
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 from pathlib import Path
 
@@ -8,7 +14,7 @@ import pytest
 
 from core.bootloader_management import thread_bootloader_files
 from core.skills_registry import resolve_effective_skills
-from infra.conductor import set_conductor
+from infra.conductor import set_scope_coordinator
 from infra.database import get_db
 from tests.registry_helpers import make_session
 from tools.conductor_instruction_create import ConductorInstructionFileCreateTool
@@ -16,9 +22,6 @@ from tools.conductor_instruction_create import ConductorInstructionFileCreateToo
 SKILL = """---
 name: agent-check
 description: Use when checking the installed agent.
-corsia:
-  handler:
-    kind: instruction
 ---
 Read scripts/check.py for the deterministic check.
 """
@@ -38,7 +41,7 @@ def _setup(tmp_path, monkeypatch):
         target = make_session(db, prefix="agent")
         ordinary = make_session(db, prefix="ordinary")
         foreign = make_session(db, prefix="foreign", project_id="other")
-        assert set_conductor("workspace", actor, db=db)
+        assert set_corsia_agent(actor, db=db)
         return workspace, actor, target, ordinary, foreign
     finally:
         db.close()
@@ -150,3 +153,55 @@ async def test_invalid_skill_and_support_path_do_not_write(isolated_db, tmp_path
                                     supporting_files=supports, _thread_id=actor)
         assert result.startswith("Error:"), result
     assert not (workspace / ".threads" / target / "skills").exists()
+
+
+SIDECAR_SKILL = """---
+name: agent-check
+description: Use when checking the installed agent.
+metadata:
+  corsia-data: corsia.yaml
+  corsia-format: "1"
+---
+Follow the steps.
+"""
+SIDECAR = "handler:\n  kind: instruction\nworkflow:\n  steps:\n    - id: check\n      title: Run the check\n"
+
+
+@pytest.mark.asyncio
+async def test_skill_installs_with_its_corsia_yaml_sidecar(isolated_db, tmp_path, monkeypatch):
+    workspace, actor, target, _, _ = _setup(tmp_path, monkeypatch)
+    receipt = json.loads(await ConductorInstructionFileCreateTool().execute(
+        target, "skill", "absent", SIDECAR_SKILL, name="agent-check",
+        supporting_files={"corsia.yaml": SIDECAR}, _thread_id=actor,
+    ))
+    assert receipt["ok"], receipt
+    assert (Path(receipt["path"]).parent / "corsia.yaml").read_text() == SIDECAR
+    db = get_db()
+    try:
+        skills = resolve_effective_skills(thread_id=target, project_id=None, workspace=workspace, db=db)
+    finally:
+        db.close()
+    row = next(row for row in skills.included if row.name == "agent-check")
+    assert row.corsia["workflow"]["steps"][0]["id"] == "check"
+
+
+@pytest.mark.asyncio
+async def test_pointer_without_its_sidecar_or_with_a_bad_one_does_not_install(isolated_db, tmp_path, monkeypatch):
+    workspace, actor, target, _, _ = _setup(tmp_path, monkeypatch)
+    tool = ConductorInstructionFileCreateTool()
+    for supports in ({}, {"corsia.yaml": "lesson: {}\n"}, {"other.yaml": SIDECAR}):
+        result = await tool.execute(target, "skill", "absent", SIDECAR_SKILL, name="agent-check",
+                                    supporting_files=supports, _thread_id=actor)
+        assert result.startswith("Error:"), result
+    assert not (workspace / ".threads" / target / "skills").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_name_mismatch_is_refused_as_a_name_mismatch(isolated_db, tmp_path, monkeypatch):
+    _, actor, target, _, _ = _setup(tmp_path, monkeypatch)
+    result = await ConductorInstructionFileCreateTool().execute(
+        target, "skill", "absent", SIDECAR_SKILL, name="other-check",
+        supporting_files={"corsia.yaml": SIDECAR}, _thread_id=actor,
+    )
+    assert "SKILL.md name 'agent-check' must match the skill name 'other-check'" in result, result
+    assert "corsia.yaml" not in result

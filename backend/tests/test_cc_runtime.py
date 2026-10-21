@@ -260,7 +260,7 @@ class TestSpawn:
         assert child_count == 0
 
     @pytest.mark.asyncio
-    async def test_spawn_delivers_conductor_template_without_persisting_template_bytes(
+    async def test_spawn_delivers_corsia_agent_template_without_persisting_template_bytes(
         self,
         child_db,
         fake_claude,
@@ -275,7 +275,7 @@ class TestSpawn:
         _seed_parent(child_db)
         monkeypatch.setattr(
             role_context_sources,
-            "get_conductor_scopes",
+            "get_coordination_scopes",
             lambda _thread_id, db=None: [
                 {"scope": "workspace", "scope_type": "workspace"}
             ],
@@ -302,7 +302,7 @@ class TestSpawn:
             if json.loads(row["metadata"] or "{}").get("type") == "seed"
         )
 
-        template_marker = "You are the designated conductor for this scope."
+        template_marker = "You are the CORSIA agent:"
         assert template_marker in provider_seed
         assert template_marker not in persisted_seed
         await rt.retire(child_id)
@@ -316,6 +316,7 @@ class TestSpawn:
         import subagents.cc_runtime as rt
         from infra import database
         from infra import thread_execution
+        from infra.db_loop_guard import LOOP_WRITE_STRICT_ENV
 
         _seed_parent(child_db)
         child_db.execute(
@@ -348,6 +349,7 @@ class TestSpawn:
             assert marker is not None
             marker_visibility.append(message["type"])
 
+        monkeypatch.setenv(LOOP_WRITE_STRICT_ENV, "1")
         child_id = await rt.spawn(
             "parent", "list the files", binary=fake_claude,
             target=cc_target("sonnet"),
@@ -403,6 +405,9 @@ class TestSpawn:
         assert first_frame.count("[AGENT-SEND") == 1
         assert first_frame.count("[To reply, call delegate_send(thread_id=") == 1
 
+        # This test guards the spawn path; retirement has independent durable
+        # completion work outside that scope.
+        monkeypatch.delenv(LOOP_WRITE_STRICT_ENV)
         assert rt.is_live(child_id)
         stopped = await rt.retire(
             child_id, broadcast=lambda sid, m: casts.append((sid, m)),

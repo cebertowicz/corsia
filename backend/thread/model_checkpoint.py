@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import cast
 from uuid import uuid4
 
 from core.checkpoint_resume import CheckpointAdmission
@@ -52,13 +53,17 @@ def _switch_thread_row(db, request: SwitchRequest):
 
 
 def _switch_targets(db, request: SwitchRequest):
-    from llm.resolution import ModelUnavailableError, resolve_execution_target
+    """Resolve both ends through the thread's resolver; a source its policy forbids is no source."""
+    from llm.locality import LOCALITY_REFUSALS
+    from llm.resolution import ModelUnavailableError, resolve_thread_target
 
     try:
-        source = resolve_execution_target(request.source_model, db=db)
+        source = resolve_thread_target(request.source_model, thread_id=request.thread_id, db=db)
     except (ModelUnavailableError, ValueError):
         source = None
-    destination = resolve_execution_target(request.destination_model, db=db)
+    if source is not None and source.availability_reason in LOCALITY_REFUSALS:
+        source = None
+    destination = resolve_thread_target(request.destination_model, thread_id=request.thread_id, db=db)
     if not destination.available or not destination.context_window:
         raise RuntimeError(
             destination.availability_reason or "switch destination is unavailable"
@@ -70,7 +75,7 @@ def read_switch_checkpoint_context(
     request: SwitchRequest,
 ) -> SwitchCheckpointContext:
     """Freeze the latest sealed history without changing source or switch state."""
-    from core.checkpoint_render import checkpoint_binary
+    from core.fork_render import fork_binary
     from history.projection import render_portable_history
     from history.types import HistoryBoundary
     from infra.checkpoint_queries import current_installed
@@ -98,8 +103,8 @@ def read_switch_checkpoint_context(
             projection,
             resolve_working_dir(thread_row["project_id"], db),
             effective_reasoning_effort(thread_row["reasoning_effort"], destination.catalog_id),
-            checkpoint_binary(source, db),
-            checkpoint_binary(destination, db),
+            fork_binary(source, db),
+            fork_binary(destination, db),
             _current_cc_config(request.thread_id)
             if destination.harness == "claude-code"
             else None,
@@ -115,7 +120,7 @@ async def prepare_source_checkpoint(
     """Prepare one source-authored warm fold, or report no warm source."""
     if request.checkpoint_choice == "target":
         return None
-    from core.checkpoint_render import capture_warm_checkpoint_source
+    from core.fork_render import capture_warm_fork_source
     from core.checkpoint_warm_request import build_warm_admission, warm_capture_refused
     from infra.db_async import run_in_db
 
@@ -145,7 +150,7 @@ async def prepare_source_checkpoint(
             )
         except OmlxLoadedStateError:
             return warm_capture_refused(request.thread_id, "native", "source_not_loaded")
-    warm_source = await capture_warm_checkpoint_source(
+    warm_source = await capture_warm_fork_source(
         request.thread_id,
         context.boundary,
         target=context.source_target,
@@ -173,13 +178,15 @@ def _target_cold_admission(
     request: SwitchRequest,
     checkpoint_id: str,
 ) -> CheckpointAdmission:
-    from core.checkpoint_render import build_cold_checkpoint_admission
+    from core.checkpoint_cold_admission import build_checkpoint_admission
     from infra.database import get_db
+    from llm.resolution import ExecutionTarget
 
     context = read_switch_checkpoint_context(request)
+    destination = cast(ExecutionTarget, context.destination_target)
     db = get_db()
     try:
-        return build_cold_checkpoint_admission(
+        admission = build_checkpoint_admission(
             checkpoint_id=checkpoint_id,
             thread_id=request.thread_id,
             trigger="model_switch",
@@ -194,6 +201,26 @@ def _target_cold_admission(
             binary=context.destination_binary,
             mcp_config=context.destination_mcp_config,
             db=db,
+        )
+        from connections.vendor_accounts import VENDORS
+
+        if destination.harness not in VENDORS:
+            return admission
+        from connections.account_policy import turn_account
+
+        account_id, _reason = turn_account(
+            destination.harness,
+            thread_id=request.thread_id,
+            model=destination.catalog_id,
+            db=db,
+        )
+        return replace(
+            admission,
+            provider_request=replace(
+                admission.provider_request,
+                vendor_account_id=account_id,
+                vendor_account_bound=True,
+            ),
         )
     finally:
         db.close()

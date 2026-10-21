@@ -1,6 +1,8 @@
 import path from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { openUnsentFooter, visibleHeaderSends } from '../support/docFeedbackFooter';
 
 type SeededDocument = { artifactId: string; path: string; fileName: string };
 
@@ -74,8 +76,19 @@ test('@surface:doc-send-on-close sends an open user batch exactly once before th
 	await loginByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
-	await expect(page.getByRole('button', { name: /Send 1 comment/ })).toBeVisible();
+	// Send now is in the comments drawer's footer, which says leaving sends the batch; the header has none.
+	const footer = await openUnsentFooter(page);
+	await expect(footer).toContainText(`1 message not sent yet · it goes to ${title} when you leave.`);
+	await expect(footer.getByRole('button', { name: 'Send now', exact: true })).toBeVisible();
+	expect(await visibleHeaderSends(page), 'no Send shows in the header').toEqual([]);
 
+	// A phone's comments sheet is modal over the document column, so it closes before the tab list is reachable (RSR-7).
+	if ((page.viewportSize()?.width ?? 0) <= 768) {
+		await page.getByRole('button', { name: 'Close comments', exact: true }).click();
+		await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
+		expect(sends, 'closing the sheet alone sends nothing').toHaveLength(0);
+	}
+	// Leaving delivers: closing the tab sends the batch once, without Send now.
 	await (await tabControl(page, document.fileName, 'close')).click();
 	await expect.poll(() => sends).toHaveLength(1);
 	await expect(page.getByRole('tab', { name: document.fileName })).toHaveCount(0);
@@ -90,46 +103,67 @@ test('@surface:doc-send-on-close keeps a switch-away grace and shows its server 
 	const second = await seedDocument(request, threadId, title, 'second');
 	await addUserComment(request, first.artifactId);
 	const leaves: string[] = [];
+	const sends: string[] = [];
 	page.on('request', (outgoing) => {
-		if (new URL(outgoing.url()).pathname === '/api/doc-feedback/leave') leaves.push(outgoing.url());
+		const pathname = new URL(outgoing.url()).pathname;
+		if (pathname === '/api/doc-feedback/leave') leaves.push(outgoing.url());
+		if (pathname === '/api/doc-feedback/send') sends.push(outgoing.url());
 	});
 	await page.addInitScript((state) => localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify(state)), workspaceState(threadId, [first, second], 'doc-0'));
 	await loginByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
-	await expect(page.getByRole('button', { name: /Send 1 comment/ })).toBeVisible();
+	await expect(page.getByRole('button', { name: /^1 open thread, 1 message not sent yet$/ })).toBeVisible();
 
+	// Leaving delivers: switching away starts the batch's grace.
 	await (await tabControl(page, second.fileName, 'select')).click();
 	await expect.poll(() => leaves).toHaveLength(1);
 	await (await tabControl(page, first.fileName, 'select')).click();
-	await expect(page.getByRole('status').filter({ hasText: 'Sending to' })).toContainText(`Sending to ${title} in`);
-	const sendNow = page.getByRole('button', { name: 'Send now' });
+	const footer = await openUnsentFooter(page);
+	await expect(footer.getByRole('status')).toContainText(`1 message not sent yet · sending to ${title} in`);
+	const sendNow = footer.getByRole('button', { name: 'Send now', exact: true });
 	await expect(sendNow).toBeVisible();
+	expect(await visibleHeaderSends(page), 'neither Send nor its countdown shows in the header').toEqual([]);
+	const tops = await page.evaluate(() => ({
+		count: document.querySelector<HTMLElement>('.document-header .comment-status')!.getBoundingClientRect().top,
+		review: document.querySelector<HTMLElement>('.document-header .review-request')!.getBoundingClientRect().top,
+	}));
+	expect(Math.abs(tops.review - tops.count), 'Request review shares a row with the comment count').toBeLessThanOrEqual(4);
 
-	// The long grace text gives way first: Send now keeps its whole label and the toolbar stays on one row.
-	const fit = await page.evaluate(() => {
-		const send = [...document.querySelectorAll<HTMLElement>('.document-header .btn')].find((el) => el.textContent?.trim() === 'Send now')!;
-		const count = document.querySelector<HTMLElement>('.document-header .comment-status')!;
-		const review = document.querySelector<HTMLElement>('.document-header .review-request')!;
-		// Measure the label itself: at phone width the button's ::after hit area adds 8 px to its scrollWidth.
+	// The footer is pinned at the drawer's foot and opaque; its whole text (the long owner name and the countdown) wraps, never clips.
+	const fit = await footer.evaluate((element) => {
+		const drawer = element.closest<HTMLElement>('[data-doc-comments-drawer]')!;
+		const list = drawer.querySelector<HTMLElement>('.drawer-comments')!;
+		const text = element.querySelector<HTMLElement>('[role="status"]')!;
+		const send = element.querySelector<HTMLElement>('.btn')!;
 		const label = document.createRange();
 		label.selectNodeContents(send);
 		const style = getComputedStyle(send);
-		const clipped = label.getBoundingClientRect().right - (send.getBoundingClientRect().right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth));
-		// Only the owner name may truncate: the countdown at the end of the grace text must be whole.
-		const grace = document.querySelector<HTMLElement>('.document-header .sending-grace')!;
-		const tail = document.createRange();
-		tail.setStart(grace.lastChild!, 0);
-		tail.setEnd(grace.lastChild!, grace.lastChild!.textContent!.length);
-		const countdownClipped = tail.getBoundingClientRect().right - grace.getBoundingClientRect().right;
-		const owner = grace.querySelector<HTMLElement>('.grace-owner');
-		return { clipped, countdownClipped, ownerTruncated: !!owner && owner.scrollWidth > owner.clientWidth, sendTop: send.getBoundingClientRect().top, countTop: count.getBoundingClientRect().top, reviewTop: review.getBoundingClientRect().top };
+		const probe = document.createElement('div');
+		probe.style.background = 'var(--bg-secondary)';
+		drawer.append(probe);
+		const token = getComputedStyle(probe).backgroundColor;
+		probe.remove();
+		const box = element.getBoundingClientRect(), frame = drawer.getBoundingClientRect();
+		return {
+			labelClipped: label.getBoundingClientRect().right - (send.getBoundingClientRect().right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth)),
+			textClipped: Math.max(text.scrollWidth - text.clientWidth, text.scrollHeight - text.clientHeight),
+			bottomGap: frame.bottom - box.bottom, insideX: box.left >= frame.left - 0.5 && box.right <= frame.right + 0.5,
+			belowList: box.top >= list.getBoundingClientRect().bottom - 0.5,
+			background: getComputedStyle(element).backgroundColor, token,
+		};
 	});
-	expect(fit.clipped, 'Send now label is not truncated').toBeLessThanOrEqual(0.5);
-	expect(fit.countdownClipped, 'the "in N min" countdown is not clipped').toBeLessThanOrEqual(0.5);
-	expect(fit.ownerTruncated, 'the long owner name is what truncates').toBe(true);
-	expect(Math.abs(fit.reviewTop - fit.countTop), 'Request review shares a row with the comment count').toBeLessThanOrEqual(4);
-	expect(Math.abs(fit.sendTop - fit.countTop), 'Send now shares that row').toBeLessThanOrEqual(4);
+	expect(fit.labelClipped, 'Send now label is not truncated').toBeLessThanOrEqual(0.5);
+	expect(fit.textClipped, 'the owner name and the "in N min" countdown are whole').toBeLessThanOrEqual(0);
+	expect(fit.bottomGap, 'the footer sits on the drawer\'s bottom border').toBeLessThanOrEqual(1.5);
+	expect(fit.insideX, 'the footer stays inside the drawer').toBe(true);
+	expect(fit.belowList, 'the comment list scrolls above the footer, not under it').toBe(true);
+	expect(fit.background, 'the footer is opaque --bg-secondary').toBe(fit.token);
+
+	// Send now uses the batch's own Send: one send, then the footer goes.
+	await sendNow.click();
+	await expect.poll(() => sends).toHaveLength(1);
+	await expect(footer).toHaveCount(0);
 });
 
 // The pinned header once widened the canvas at phone width: its "Send N comments to <owner>" button pushed the editor sideways.
@@ -145,8 +179,9 @@ test('@surface:doc-send-on-close at 393 px the pinned header with a pending send
 	await loginByUrl(page);
 	await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
-	await expect(page.getByRole('button', { name: /^Send 2 comments/ })).toBeVisible();
+	await expect(page.getByRole('button', { name: /^2 open threads, 2 messages not sent yet$/ })).toBeVisible();
 	await expect(page.locator('.cm-content')).toBeVisible();
+	expect(await visibleHeaderSends(page), 'no Send shows in the header').toEqual([]);
 
 	const layout = await page.evaluate(() => {
 		const doc = document.querySelector<HTMLElement>('.doc')!;
@@ -158,10 +193,20 @@ test('@surface:doc-send-on-close at 393 px the pinned header with a pending send
 			.filter(({ rect }) => rect.left < bounds.left - 0.5 || rect.right > bounds.right + 0.5)
 			.map(({ name, rect }) => `${name}: ${Math.round(rect.left)}..${Math.round(rect.right)} outside ${Math.round(bounds.left)}..${Math.round(bounds.right)}`);
 		return {
-			overflow: { doc: doc.scrollWidth - doc.clientWidth, scroller: scroller.scrollWidth - scroller.clientWidth, page: document.documentElement.scrollWidth - window.innerWidth },
+			overflow: { doc: doc.scrollWidth - doc.clientWidth, scroller: scroller.scrollWidth - scroller.clientWidth, page: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth) },
 			outside,
 		};
 	});
 	expect(layout.overflow, 'the canvas, the editor and the page have nothing to scroll sideways').toEqual({ doc: 0, scroller: 0, page: 0 });
 	expect(layout.outside, 'every header button lies inside the canvas').toEqual([]);
+
+	// The phone drawer ends in the footer: inside the canvas, a 44 px Send now under a coarse pointer.
+	const footer = await openUnsentFooter(page);
+	await expect(footer).toContainText(`2 messages not sent yet · they go to ${title} when you leave.`);
+	const send = footer.getByRole('button', { name: 'Send now', exact: true });
+	const footerBox = (await footer.boundingBox())!, sendBox = (await send.boundingBox())!;
+	expect(footerBox.x).toBeGreaterThanOrEqual(0);
+	expect(footerBox.x + footerBox.width).toBeLessThanOrEqual(393);
+	if (await page.evaluate(() => matchMedia('(pointer: coarse)').matches)) expect(sendBox.height, 'touch target').toBeGreaterThanOrEqual(44);
+	expect(await page.evaluate(() => Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth)), 'nothing scrolls sideways').toBe(0);
 });

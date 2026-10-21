@@ -1,27 +1,39 @@
 <script lang="ts">
-	import { cubicOut } from 'svelte/easing';
-	import { tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
 	import type { Snippet } from 'svelte';
 	import { focusTrap } from '$lib/actions/focusTrap';
 	import { portal } from '$lib/actions/portal';
+	import { settleHeight } from '$lib/actions/settleHeight';
+	import { trackColumnBox, type ColumnBox } from '$lib/actions/trackColumnBox';
 	import { pushBackLayer } from '$lib/historyBackLayer';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
-	import { toastClearance } from '$lib/stores/toastClearance';
+	import { sheetFly } from '$lib/sheetMotion';
+	import { createSheetDrag } from '$lib/sheetDrag.svelte';
 
 	let {
 		ariaLabel,
 		heading = null,
 		headingMeta = null,
+		contextLabel = null,
 		leading,
 		doneLabel = 'Done',
 		onClose,
 		children,
 		initialFocusSelector = '[data-drawer-autofocus]',
 		fill = false,
+		flushBottom = false,
 		followKeyboard = false,
+		headless = false,
+		opaque = false,
+		modal = true,
+		within = null,
+		detent = 'full',
+		onDetent,
 		open = true,
 		onClosed = () => {},
+		covered = false,
+		panel = $bindable(null),
 	}: {
 		ariaLabel: string;
 		/**
@@ -31,6 +43,8 @@
 		heading?: string | null;
 		/** A short fact beside the title, such as a count; shown smaller in the accent colour. */
 		headingMeta?: string | null;
+		/** Context beside Done when content owns the drawer title. */
+		contextLabel?: string | null;
 		/** An action at the leading edge; with one, the title centres between it and Done. */
 		leading?: Snippet;
 		/** Visible text of the dismiss control; it is also its accessible name. */
@@ -40,82 +54,71 @@
 		initialFocusSelector?: string;
 		/** Make the content a column bounded by the drawer, so one child can shrink and scroll while the rest stay in view. */
 		fill?: boolean;
+		/** Let a child-owned sticky footer reach the edge of the scroll region. The child owns its safe-area inset. */
+		flushBottom?: boolean;
 		/**
 		 * Sit on the visible part of the screen, above an on-screen keyboard, for a
 		 * drawer whose text field must stay in view while typing. It reads the
 		 * visual viewport the app already publishes as CSS variables.
 		 */
 		followKeyboard?: boolean;
+		/** Content may own the header, leaving the chrome with its grabber only. */
+		headless?: boolean;
+		/** Use over media or dense content where the glass material hurts reading. */
+		opaque?: boolean;
+		/** Keep the sheet interactive without blocking controls outside it. */
+		modal?: boolean;
+		/** Constrain this sheet and its scrim to a document column rather than the viewport. */
+		within?: HTMLElement | null;
+		detent?: 'full' | 'half';
+		onDetent?: (detent: 'full' | 'half') => void;
 		/** Whether the caller keeps the drawer mounted for its local close transition. */
 		open?: boolean;
 		/** Runs after the drawer's 260ms local outro completes. */
 		onClosed?: () => void;
+		/**
+		 * Something opened from the drawer covers what it belongs to (an image over its document): the drawer stays open
+		 * underneath, its place kept, but out of sight and reach, with no scrim over what covers it, until uncovered.
+		 */
+		covered?: boolean;
+		/** The sheet's own element, for a caller that has to measure where it rests. */
+		panel?: HTMLElement | null;
 	} = $props();
 
-	let panel = $state<HTMLElement | null>(null);
-	let dragY = $state(0);
-	let dragging = $state(false);
-	let dragPointer: number | null = null;
-	let dragStartY = 0;
-	let dragStartedAt = 0;
-	let stopToastClearance: (() => void) | undefined;
+	let box = $state<ColumnBox | null>(null);
+	$effect(() => {
+		if (!within) { box = null; return; }
+		return trackColumnBox(within, (next) => { box = next; });
+	});
+	const drag = createSheetDrag({
+		detent: () => detent,
+		height: () => panel?.clientHeight ?? 480,
+		onExpand: () => onDetent?.('full'),
+		onDismiss: () => onClose(),
+	});
 
-	const flyParams = $derived(
-		$prefersReducedMotion
-			? { y: 0, duration: 0 }
-			: { y: 72, duration: 260, easing: cubicOut },
-	);
-	const fadeParams = $derived({ duration: $prefersReducedMotion ? 0 : 160 });
+	// Reduced motion crossfades over --dur-tight instead of sliding: the sheet is never cut in or out.
+	// The token is read once on mount, never inside the derivation.
+	let tightMs = $state(120);
+	onMount(() => { tightMs = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-tight')) || 120; });
+	const fadeParams = $derived({ duration: $prefersReducedMotion ? tightMs : 160 });
+	// The sheet's outro ends in onClosed, so under reduced motion it holds still for the crossfade instead of ending at once.
+	const flyParams = $derived(sheetFly($prefersReducedMotion, tightMs));
 
+	// A click dismisses only a press that began on the scrim. The click that follows the tap which opened this sheet
+	// lands on the new scrim with no press of its own on it, so it is not a tap outside.
+	let pressedScrim = false;
+	function onBackdropDown(event: PointerEvent): void {
+		pressedScrim = event.target === event.currentTarget;
+	}
 	function onBackdrop(event: MouseEvent): void {
-		if (event.target === event.currentTarget) onClose();
-	}
-
-	function startDrag(event: PointerEvent): void {
-		if (event.button !== 0) return;
-		const handle = event.currentTarget as HTMLElement;
-		dragPointer = event.pointerId;
-		dragStartY = event.clientY;
-		dragStartedAt = performance.now();
-		dragY = 0;
-		dragging = true;
-		handle.setPointerCapture?.(event.pointerId);
-	}
-
-	function moveDrag(event: PointerEvent): void {
-		if (!dragging || dragPointer !== event.pointerId) return;
-		dragY = Math.max(0, event.clientY - dragStartY);
-	}
-
-	function finishDrag(event: PointerEvent): void {
-		if (!dragging || dragPointer !== event.pointerId) return;
-		const elapsed = Math.max(1, performance.now() - dragStartedAt);
-		const velocity = dragY / elapsed;
-		const threshold = Math.min(180, Math.max(96, (panel?.clientHeight ?? 480) * 0.24));
-		dragging = false;
-		dragPointer = null;
-		if (dragY >= threshold || (dragY >= 64 && velocity > 0.75)) {
-			onClose();
-			return;
-		}
-		dragY = 0;
-	}
-
-	function restingViewportBottomOccupancy(node: HTMLElement): number {
-		const bottomMargin = Number.parseFloat(getComputedStyle(node).marginBottom) || 0;
-		return node.offsetHeight + bottomMargin;
-	}
-
-	function releaseToastClearance(): void {
-		stopToastClearance?.();
-		stopToastClearance = undefined;
+		const pressed = pressedScrim;
+		pressedScrim = false;
+		if (modal && detent !== 'half' && pressed && event.target === event.currentTarget) onClose();
 	}
 
 	$effect(() => {
 		if (!open || !panel) return;
-		stopToastClearance = toastClearance.register(panel, {
-			measure: () => restingViewportBottomOccupancy(panel!),
-		});
 		const removeBackLayer = pushBackLayer(() => {
 			onClose();
 			return true;
@@ -127,7 +130,6 @@
 		});
 		return () => {
 			mounted = false;
-			releaseToastClearance();
 			removeBackLayer();
 		};
 	});
@@ -145,9 +147,19 @@
 	<div
 	class="drawer-backdrop"
 	class:follow-keyboard={followKeyboard}
+	class:within={!!box}
+	class:half={detent === 'half'}
+	class:nonmodal={!modal || detent === 'half'}
+	class:covered
+	inert={covered}
+	style:--drawer-top="{box?.top ?? 0}px"
+	style:--drawer-right="{box?.right ?? 0}px"
+	style:--drawer-bottom="{box?.bottom ?? 0}px"
+	style:--drawer-left="{box?.left ?? 0}px"
+	style:--drawer-h="{box?.height ?? 0}px"
 	data-adaptive-drawer
+	onpointerdown={onBackdropDown}
 	onclick={onBackdrop}
-		onoutrostart={releaseToastClearance}
 		in:fade|global={fadeParams}
 		out:fade={fadeParams}
 		use:portal
@@ -156,32 +168,35 @@
 		<div
 			bind:this={panel}
 			class="drawer-panel"
-			class:dragging
-			style:--drawer-drag-y="{dragY}px"
+			class:dragging={drag.dragging}
+			class:opaque
+			class:half={detent === 'half'}
+			style:--drawer-drag-y="{drag.y}px"
 			role="dialog"
-			aria-modal="true"
+			aria-modal={modal && detent !== 'half' ? 'true' : 'false'}
 			aria-label={ariaLabel}
 			tabindex="-1"
 			use:focusTrap={{ onEscape: onClose, autoFocus: false }}
+			use:settleHeight={{ enabled: open && !drag.dragging, reduced: $prefersReducedMotion }}
 		>
 			<div class="drawer-chrome">
 				<div
 					class="drawer-drag-region"
 					aria-hidden="true"
-					onpointerdown={startDrag}
-					onpointermove={moveDrag}
-					onpointerup={finishDrag}
-					onpointercancel={finishDrag}
+					onpointerdown={drag.start}
+					onpointermove={drag.move}
+					onpointerup={drag.finish}
+					onpointercancel={drag.finish}
 				>
 					<span class="drawer-grabber"></span>
 				</div>
-				<div class="drawer-head" class:centered={!!leading}>
+				{#if !headless}<div class="drawer-head" class:centered={!!leading}>
 					{#if leading}<span class="drawer-lead">{@render leading()}</span>{/if}
-					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else}<span class="drawer-head-spacer"></span>{/if}
+					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else if contextLabel}<span class="drawer-context" title={contextLabel}>{contextLabel}</span>{:else}<span class="drawer-head-spacer"></span>{/if}
 					<button class="drawer-done" type="button" onclick={onClose}>{doneLabel}</button>
-				</div>
+				</div>{/if}
 			</div>
-			<div class="drawer-body" class:fill>
+			<div class="drawer-body" class:fill class:flush-bottom={flushBottom}>
 				{@render children()}
 			</div>
 		</div>
@@ -203,14 +218,22 @@
 		background: color-mix(in srgb, var(--glass-scrim) 88%, transparent);
 		overscroll-behavior: contain;
 		pointer-events: auto;
+		transition: background-color var(--dur-standard) var(--ease-entrance);
 	}
+	.drawer-backdrop.within { inset: var(--drawer-top) var(--drawer-right) var(--drawer-bottom) var(--drawer-left); background: color-mix(in srgb, var(--glass-scrim) 88%, transparent); }
+	.drawer-backdrop.half { background-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+	.drawer-backdrop.nonmodal { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; pointer-events: none; }
+	.drawer-backdrop.nonmodal .drawer-motion { pointer-events: auto; }
+	.drawer-backdrop.covered { visibility: hidden; }
+	.within .drawer-motion { max-width: none; padding: 0; }
+	.within .drawer-panel { max-height: calc(var(--drawer-h) * 0.82); }
 	.drawer-backdrop.follow-keyboard {
 		bottom: auto;
 		top: var(--doc-visual-viewport-offset, 0px);
 		height: var(--doc-visual-viewport-height, 100dvh);
 	}
 	.follow-keyboard .drawer-panel {
-		max-height: min(82dvh, calc(var(--doc-visual-viewport-height, 100dvh) - max(16px, env(safe-area-inset-top, 0px))));
+		max-height: min(82dvh, calc(var(--doc-visual-viewport-height, 100dvh) - max(16px, var(--safe-top))));
 	}
 	.drawer-motion {
 		width: 100%;
@@ -221,12 +244,12 @@
 	.drawer-panel {
 		--drawer-drag-y: 0px;
 		width: 100%;
-		max-height: min(82dvh, calc(100dvh - max(16px, env(safe-area-inset-top, 0px))));
+		max-height: min(82dvh, calc(100dvh - max(16px, var(--safe-top))));
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
 		transform: translateY(var(--drawer-drag-y));
-		transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+		transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), max-height var(--dur-standard) var(--ease-entrance);
 		border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 		border-bottom: 0;
 		border-radius: 28px 28px 0 0;
@@ -241,6 +264,9 @@
 	.drawer-panel.dragging {
 		transition: none;
 	}
+	.drawer-panel.opaque { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
+	.drawer-panel.half { max-height: min(46dvh, calc(100dvh - max(16px, var(--safe-top)))); }
+	.within .drawer-panel.half { max-height: calc(var(--drawer-h) * 0.46); }
 	.drawer-panel:focus {
 		outline: none;
 	}
@@ -264,6 +290,7 @@
 		cursor: grab;
 		touch-action: none;
 	}
+	.drawer-panel.half .drawer-drag-region { padding-bottom: var(--space-3); }
 	.drawer-drag-region:active {
 		cursor: grabbing;
 	}
@@ -292,7 +319,7 @@
 		font-size: var(--text-caption);
 		font-weight: var(--fw-semibold);
 		font-variant-numeric: tabular-nums;
-		color: var(--accent);
+		color: var(--accent-text);
 	}
 	/* A leading action centres the title between it and Done. */
 	.drawer-head.centered { display: grid; grid-template-columns: 1fr minmax(0, auto) 1fr; }
@@ -306,12 +333,13 @@
 	.drawer-lead { justify-self: start; }
 	.drawer-head.centered .drawer-done { justify-self: end; }
 	/* Holds Done at the trailing edge when the content owns the title. */
-	.drawer-head-spacer { flex: 1; }
+	.drawer-head-spacer, .drawer-context { flex: 1; min-width: 0; }
+	.drawer-context { overflow: hidden; color: var(--text-tertiary); font-size: var(--text-caption); text-overflow: ellipsis; white-space: nowrap; }
 	.drawer-done {
 		font: inherit;
 		font-size: var(--text-subhead);
 		font-weight: var(--fw-semibold);
-		color: var(--accent);
+		color: var(--accent-text);
 		background: none;
 		border: none;
 		padding: 6px 8px;
@@ -329,6 +357,7 @@
 		scrollbar-gutter: stable;
 		padding: 0 var(--space-4) max(var(--space-4), env(safe-area-inset-bottom, 0px));
 	}
+	.drawer-body.flush-bottom { padding-bottom: 0; }
 	.drawer-body.fill { display: flex; flex-direction: column; overflow: hidden; }
 	@media (max-width: 620px) {
 		/* Touch minimum for the only dismiss control in the chrome. */

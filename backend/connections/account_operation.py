@@ -7,7 +7,7 @@ from pathlib import Path
 
 from connections.account_policy import require_claim, require_launch
 from connections.account_receipts import capture_receipt
-from connections.account_runtime import launch_homes
+from connections.account_runtime import OPERATION_KINDS, launch_homes
 from infra.database import get_db
 
 
@@ -64,6 +64,8 @@ def _model(request, model=None):
 
 
 def bind_operation_session(request, session, *, kind, model=None):
+    if kind not in OPERATION_KINDS:
+        raise ValueError(f'unknown operation kind: {kind}')
     launch = request.vendor_launch
     session.vendor_account_id = request.vendor_account_id
     session.vendor_account_receipt = request.vendor_account_receipt
@@ -96,14 +98,16 @@ def require_same_operation_home(request, source_home):
     if source_home is None and not launch.custom:
         source_home = launch.warm_home
     if source_home is None or Path(source_home).absolute() != Path(expected).absolute():
-        from core.checkpoint_types import WarmForkUnusable
-
-        raise WarmForkUnusable('warm_fork_home_mismatch')
+        _refuse_warm_source('warm_fork_home_mismatch')
     receipt = getattr(request, 'vendor_account_receipt', None)
     if getattr(request.warm_source, 'vendor_account_receipt', None) != receipt:
-        from core.checkpoint_types import WarmForkUnusable
+        _refuse_warm_source('warm_fork_login_mismatch')
 
-        raise WarmForkUnusable('warm_fork_login_mismatch')
+
+def _refuse_warm_source(reason):
+    from core.fork_types import WarmForkUnusable
+
+    raise WarmForkUnusable(reason, reason=reason)
 
 
 @contextmanager

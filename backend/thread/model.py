@@ -101,6 +101,11 @@ async def _commit_and_apply(
             source_harness=preparation.source_harness,
             source_runtime_owner=owner,
             destination_target=preparation.destination_target,
+            operation_id=(
+                preparation.input_proof.operation_id
+                if preparation.input_proof is not None
+                else None
+            ),
             source_runtime_context_epoch=preparation.source_runtime_context_epoch,
             expected_context_usage_floor=preparation.source_context_usage_floor,
             preserve_claude_thread=(
@@ -173,19 +178,20 @@ async def _inline_first_run_wake(thread_id: str, model: str) -> str | None:
     """
     from infra.database import get_db
     from infra.db_async import run_in_db
-    from infra.onboarding_events import has_held_first_run_wake
+    from infra.onboarding_events import held_first_run_path
     from onboarding import first_run_wake
 
-    def _held() -> bool:
+    def _held_path() -> str | None:
         db = get_db()
         try:
-            return has_held_first_run_wake(thread_id, db=db)
+            return held_first_run_path(thread_id, db=db)
         finally:
             db.close()
 
-    if not await run_in_db(_held):
+    path = await run_in_db(_held_path)
+    if path is None:
         return None
-    return await first_run_wake.render_for(model)
+    return await first_run_wake.render_for(model, path)
 
 
 async def _apply_first_selection(
@@ -196,8 +202,13 @@ async def _apply_first_selection(
     now: str,
     account_id: str | None = None,
     actor_thread_id: str | None = None,
+    setup_selection: bool = False,
 ) -> ModelSwitchOutcome | None:
-    """Commit a thread's first model directly, then publish and wake it."""
+    """Commit a thread's first model directly, then publish and wake it.
+
+    Only setup's own selection (``setup_selection``) records the model the first-chat switch
+    later compares against; a person's pick in the chat never does.
+    """
     from infra.db_async import run_in_db
     from infra.thread_execution import drive_thread
     from thread.model_runtime import publish_first_model_selection
@@ -217,8 +228,15 @@ async def _apply_first_selection(
     if not selected:
         return None
     from infra.onboarding_events import note_first_model_selected
+    from onboarding.first_chat_switch import record_first_model
+    from onboarding.local_download_wake import flush_pending_local_download
 
+    # ``select_first_model`` committed the rendered first-run wake above. A setup
+    # download that ended while the person was still in setup can now be delivered.
+    await flush_pending_local_download(thread_id)
     await run_in_db(note_first_model_selected, thread_id, destination_model.strip())
+    if setup_selection:
+        await run_in_db(record_first_model, thread_id, destination_model.strip())
     publish_first_model_selection(
         thread_id, new_model=destination_model.strip(), user_id=user_id, committed_at=now,
     )
@@ -243,6 +261,7 @@ async def switch_model(
     reason: str,
     checkpoint_override: str | None = None,
     account_id: str | None = None,
+    setup_selection: bool = False,
 ) -> ModelSwitchOutcome | SwitchRequest | object:
     """Freeze one FIFO cut, then resolve it now or at its next natural wake."""
     from infra.db_async import run_in_db
@@ -253,6 +272,7 @@ async def switch_model(
     first = await _apply_first_selection(
         thread_id, destination_model, user_id=user_id, now=requested_at,
         account_id=account_id, actor_thread_id=actor_id if actor_kind == "agent" else None,
+        setup_selection=setup_selection,
     )
     if first is not None:
         return first

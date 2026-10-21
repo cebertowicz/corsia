@@ -86,19 +86,25 @@ def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
     }
 
 
-def _waiting_threads(db, user_id: str, artifact_id: str | None = None) -> dict[str, str]:
-    """Map open user-touched roots with a non-user reply newer than their view to their document."""
-    rows = db.execute(
-        """SELECT DISTINCT root.id, root.artifact_id
-           FROM doc_comments reply
+def _new_reply_rows(user_id: str, artifact_id: str | None) -> tuple[str, tuple]:
+    """The one definition of a new reply: the FROM/JOIN/WHERE every read of it shares.
+
+    A reply is new for a user when someone else wrote it, in an open root the
+    user touched (wrote it or replied in it), and it is newer than the user's
+    seen stamp on that root: by time, then by reply id.
+    """
+    # A document read binds both sides to its artifact so idx_doc_comments_artifact bounds the scan to that document.
+    scoped = artifact_id is not None
+    sql = f"""FROM doc_comments reply
            JOIN doc_comments root ON root.id=reply.parent_id
            LEFT JOIN doc_comment_thread_views thread_view
              ON thread_view.user_id=? AND thread_view.root_id=root.id
            WHERE reply.author_kind<>'user' AND root.resolved=0
-             AND (? IS NULL OR root.artifact_id=?)
+             {"AND reply.artifact_id=? AND root.artifact_id=?" if scoped else ""}
              AND (root.author_kind='user' OR EXISTS (
                  SELECT 1 FROM doc_comments touched
                  WHERE touched.parent_id=root.id AND touched.author_kind='user'
+                   {"AND touched.artifact_id=?" if scoped else ""}
              ))
              AND (
                  reply.created_at>COALESCE(thread_view.seen_at, '')
@@ -107,28 +113,43 @@ def _waiting_threads(db, user_id: str, artifact_id: str | None = None) -> dict[s
                      AND reply.created_at=thread_view.seen_at
                      AND reply.id>thread_view.seen_reply_id
                  )
-             )""",
-        (user_id, artifact_id, artifact_id),
+             )"""
+    return sql, ((user_id, artifact_id, artifact_id, artifact_id) if scoped else (user_id,))
+
+
+def _new_replies(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
+    """One document's new replies as (root id, reply id) in thread order, one row per reply."""
+    sql, params = _new_reply_rows(user_id, artifact_id)
+    rows = db.execute(
+        f"SELECT root.id AS root_id, reply.id AS reply_id {sql} ORDER BY reply.created_at, reply.id",
+        params,
     ).fetchall()
-    return {str(row["id"]): str(row["artifact_id"]) for row in rows}
+    return [(str(row["root_id"]), str(row["reply_id"])) for row in rows]
 
 
 def reply_waiting_ids(db, user_id: str) -> set[str]:
-    """Return documents containing a waiting reply in an open user-touched thread."""
-    return set(_waiting_threads(db, user_id).values())
+    """Return documents containing a thread with a new reply: one row per document, not per reply."""
+    sql, params = _new_reply_rows(user_id, None)
+    rows = db.execute(f"SELECT DISTINCT root.artifact_id AS artifact_id {sql}", params).fetchall()
+    return {str(row["artifact_id"]) for row in rows}
 
 
-def annotate_reply_waiting_threads(db, user_id: str, artifact_id: str, threads: list[dict]) -> None:
-    """Attach the per-root passive marker to the comment-list projection."""
-    waiting = _waiting_threads(db, user_id, artifact_id)
+def annotate_thread_attention(db, user_id: str, artifact_id: str, threads: list[dict]) -> None:
+    """Attach each thread's new reply ids to the comment-list projection."""
+    new_by_root: dict[str, list[str]] = {}
+    for root_id, reply_id in _new_replies(db, user_id, artifact_id):
+        new_by_root.setdefault(root_id, []).append(reply_id)
     for thread in threads:
-        thread["reply_waiting"] = thread["id"] in waiting
+        thread["new_reply_ids"] = new_by_root.get(thread["id"], [])
 
 
 def mark_thread_viewed(
     db, user_id: str, artifact_id: str, root_id: str, seen_reply_id: str,
-) -> bool:
-    """Persist the newest rendered reply for one root, never moving its stamp back."""
+) -> list[str]:
+    """Persist the newest rendered reply for one root, never moving its stamp back.
+
+    Returns the root's new reply ids that remain after the stamp.
+    """
     root = db.execute(
         "SELECT id FROM doc_comments WHERE id=? AND artifact_id=? AND parent_id IS NULL",
         (root_id, artifact_id),
@@ -151,7 +172,7 @@ def mark_thread_viewed(
                   AND excluded.seen_reply_id>doc_comment_thread_views.seen_reply_id)""",
         (user_id, root_id, reply["created_at"], reply["id"]),
     )
-    return root_id not in _waiting_threads(db, user_id, artifact_id)
+    return [reply_id for waiting_root, reply_id in _new_replies(db, user_id, artifact_id) if waiting_root == root_id]
 
 
 def annotate_pane(pane: dict, user_id: str, *, db) -> dict:

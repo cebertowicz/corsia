@@ -52,7 +52,8 @@ def pr_payload(repo: str, pr_number: int, *, action: str = "opened",
         "repository": {"full_name": repo},
         "pull_request": {
             "number": pr_number, "title": "Test PR",
-            "head": {"sha": "abc123"}, "base": {"ref": "dev"}, "labels": [],
+            "head": {"sha": "abc123", "repo": {"full_name": repo}},
+            "base": {"ref": "dev", "repo": {"full_name": repo}}, "labels": [],
         },
         "sender": {"login": author, "type": author_type},
     }

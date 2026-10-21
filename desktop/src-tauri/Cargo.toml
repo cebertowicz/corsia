@@ -21,10 +21,39 @@ tauri-build = { version = "2.5.6", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-url = "2"
 tauri = { version = "2.10.3", features = ["macos-private-api"] }
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
+libc = "0.2"
+signal-hook = "0.3"
+base64 = "0.22"
+flate2 = "1"
+futures-util = "0.3"
+minisign-verify = "0.3"
+plist = "1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+semver = "1"
+tar = "0.4"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+spake2 = "0.4"
+x509-parser = "0.17"
+rustls = "0.23"
+rustls-platform-verifier = "0.7"
+tokio-rustls = "0.26"
+hyper = { version = "1", features = ["client", "server", "http1"] }
+http-body-util = "0.1"
+hyper-util = { version = "0.1", features = ["tokio", "client", "server", "http1"] }
+sha2 = "0.10"
+hkdf = "0.12"
+hmac = "0.12"
+ring = "0.17"
+
+[dev-dependencies]
+tauri = { version = "2.10.3", features = ["macos-private-api", "test"] }
+base64 = "0.22"
+rand_chacha = "0.3"
+tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Direct objc2 deps for the traffic-light positioning workaround.
@@ -34,5 +63,6 @@ tauri-plugin-opener = "2"
 # windowEffects. We re-apply the inset directly to the NSButton frames
 # after the window is shown. See lib.rs for the implementation.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "NSResponder"] }
+objc2-app-kit = { version = "0.3", features = ["NSOpenPanel", "NSResponder", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
+objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }

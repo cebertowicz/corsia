@@ -161,6 +161,18 @@ describe('load signals apply to the tab that initiated them', () => {
 		expect(ws.tabs[0].status).toBe('readonly');
 	});
 
+	it('keeps what a tab last knew of its write access through a ready signal that claims none', () => {
+		let ws = withTabs({ path: '/context/SYSTEM.md', title: 'SYSTEM.md' });
+		const instanceId = idOf(ws, '/context/SYSTEM.md');
+		ws = applyLoadSignal(ws, { instanceId, status: 'ready', revision: 'r1', writable: false })!;
+		ws = applyLoadSignal(ws, { instanceId, status: 'ready', shown: true }) ?? ws;
+		expect(ws.tabs[0].status).toBe('readonly');
+		ws = applyLoadSignal(ws, { instanceId, status: 'ready', revision: 'r1', writable: true })!;
+		expect(ws.tabs[0].status).toBe('ready');
+		ws = applyLoadSignal(ws, { instanceId, status: 'ready', shown: true }) ?? ws;
+		expect(ws.tabs[0].status).toBe('ready');
+	});
+
 	it('enriches artifact identity without changing the instance key', () => {
 		let ws = withTabs({ path: '/a.md', title: 'a' });
 		const instanceId = idOf(ws, '/a.md');
@@ -230,19 +242,38 @@ describe('changed-dot semantics', () => {
 });
 
 describe('availability and relocation', () => {
-	it('marks a deleted document unavailable', () => {
-		let ws = withTabs({ path: '/a.md', title: 'a' });
+	it('marks a genuinely deleted identified document unavailable', () => {
+		let ws = withTabs({ artifactId: 'deleted-artifact', path: '/a.md', title: 'a' });
 		ws = applyRevisionCheck(ws, idOf(ws, '/a.md'), found({ exists: false, revision: null }))!;
-		expect(ws.tabs[0].status).toBe('unavailable');
+		expect(ws.tabs[0]).toMatchObject({ artifactId: 'deleted-artifact', path: '/a.md', status: 'unavailable' });
 	});
 
 	it('relocates a resolved artifact instead of reporting it gone', () => {
-		let ws = withTabs({ artifactId: 'art-1', path: '/docs/a.md', title: 'a' });
+		let ws = withTabs({ artifactId: 'art-1', path: '/docs/a.md', title: 'a.md' });
 		const instanceId = idOf(ws, '/docs/a.md');
-		ws = applyRevisionCheck(ws, instanceId, found({ path: '/archive/a.md', revision: 'r9' }))!;
-		expect(ws.tabs[0].path).toBe('/archive/a.md');
+		ws = applyRevisionCheck(ws, instanceId, found({ path: '/archive/b.md', revision: 'r9' }))!;
+		expect(ws.tabs[0].path).toBe('/archive/b.md');
+		expect(ws.tabs[0].title).toBe('b.md');
+		expect(ws.tabs[0].artifactId).toBe('art-1');
 		expect(ws.tabs[0].instanceId).toBe(instanceId);
 		expect(ws.tabs[0].status).not.toBe('unavailable');
+	});
+
+	it('keeps a chosen title on a relocated artifact', () => {
+		let ws = withTabs({ artifactId: 'art-1', path: '/docs/design.md', title: 'Design' });
+		const instanceId = idOf(ws, '/docs/design.md');
+		ws = applyRevisionCheck(ws, instanceId, found({ path: '/archive/design-v1.md', artifactId: 'art-1' }))!;
+		expect(ws.tabs[0].path).toBe('/archive/design-v1.md');
+		expect(ws.tabs[0].title).toBe('Design');
+	});
+
+	it('keeps a chosen title on a relocated unregistered file and re-derives only the file-name default', () => {
+		let ws = withTabs({ path: '/docs/notes.md', title: 'Meeting notes' });
+		ws = applyRevisionCheck(ws, idOf(ws, '/docs/notes.md'), found({ path: '/archive/notes-old.md' }))!;
+		expect(ws.tabs[0].title).toBe('Meeting notes');
+		let plain = withTabs({ path: '/docs/a.md', title: 'a.md' });
+		plain = applyRevisionCheck(plain, idOf(plain, '/docs/a.md'), found({ path: '/archive/b.md' }))!;
+		expect(plain.tabs[0].title).toBe('b.md');
 	});
 
 	it('recovers an unavailable tab when its document comes back', () => {

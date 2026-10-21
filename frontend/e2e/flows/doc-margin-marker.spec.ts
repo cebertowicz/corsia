@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 /**
@@ -145,7 +146,7 @@ async function openDocument(page: Page, info: TestInfo, { comments = true, orpha
 	await expect(page.locator('.cm-content')).toContainText(tall ? 'Last qmlast line.' : 'Margin heading qmhead');
 	const expectedCount = (comments ? ANCHORS.length : 0) + (orphan ? 1 : 0);
 	if (expectedCount) {
-		await expect(page.getByRole('button', { name: `${expectedCount} comment${expectedCount === 1 ? '' : 's'}`, exact: true })).toBeEnabled();
+		await expect(page.getByRole('button', { name: new RegExp(`^${expectedCount} open thread${expectedCount === 1 ? '' : 's'}\\b`) })).toBeEnabled();
 	}
 	await settle(page);
 	return { threadId, title, ids, byId, artifactId };
@@ -194,7 +195,9 @@ async function reveal(page: Page, index: number) {
 		const now = marker.getBoundingClientRect();
 		const point = (x: number, y: number) => {
 			const hit = document.elementFromPoint(x, y)?.closest<HTMLElement>('.cm-comment-marker');
-			return { x, y, hit: hit?.dataset.commentIds ?? null };
+			// A marker under a bottom sheet is covered by design: only the sheet and its scrim over the document column may cover one (RSR-7).
+			const covered = !hit && !!document.elementFromPoint(x, y)?.closest('[data-adaptive-drawer]');
+			return { x, y, hit: hit?.dataset.commentIds ?? null, covered };
 		};
 		const cx = now.left + now.width / 2, cy = now.top + now.height / 2;
 		return {
@@ -253,8 +256,11 @@ const historyLayer = (page: Page) => page.evaluate(() => (history.state as { bac
 
 async function closeSurface(page: Page, layerBefore?: number | null) {
 	await page.keyboard.press('Escape');
-	if (await page.locator('[data-doc-comments-drawer]').count()) {
-		await page.getByRole('button', { name: 'Done', exact: true }).click();
+	// The drawer leaves through its outro: it is gone shortly after Escape closes it, and only a drawer still showing then needs its close button.
+	const drawer = page.locator('[data-doc-comments-drawer]');
+	await drawer.waitFor({ state: 'detached', timeout: 1500 }).catch(() => undefined);
+	if (await drawer.count()) {
+		await page.getByRole('button', { name: 'Close comments', exact: true }).click();
 	}
 	await expect.poll(() => surfaceOpen(page).then((s) => s.cards.length + (s.drawer ? 1 : 0))).toBe(0);
 	// A phone's sheet pushes a history entry and pops it asynchronously; the next open waits for that pop, as a user's next tap would.
@@ -499,18 +505,28 @@ test.describe('@flow:doc-margin-marker', () => {
 
 		// The drawer narrows the canvas: markers re-seat and stay clustered the same way.
 		const before = (await markers(page)).map((marker) => keysOf(opened, marker));
-		await page.getByRole('button', { name: `${ANCHORS.length} comments`, exact: true }).click();
+		await page.getByRole('button', { name: new RegExp(`^${ANCHORS.length} open threads\\b`) }).click();
 		await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
 		await settle(page);
 		const withDrawer = await markers(page);
 		expect(withDrawer.map((marker) => keysOf(opened, marker)), 'the drawer does not change the clusters').toEqual(before);
+		// A canvas too narrow for a side column gets the drawer as a modal bottom sheet over the document column, scrim included
+		// (RSR-7): a marker is reachable or covered by the sheet and its scrim, nothing else, and none is reachable through the scrim.
 		for (let index = 0; index < withDrawer.length; index += 1) {
 			const seen = await reveal(page, index);
-			expect.soft(seen.points[0].hit, `drawer open: marker ${index} is reachable`).toBe(seen.ids);
+			const centre = seen.points[0];
+			expect.soft(centre.covered, `drawer open: marker ${index} is covered by the sheet or its scrim`).toBe(true);
 			expect.soft(seen.rect.left + seen.rect.width, `drawer open: marker ${index} stays in the rail`).toBeLessThanOrEqual(seen.content.left + rail + 0.5);
 		}
-		await page.getByRole('button', { name: 'Done', exact: true }).click();
+		await page.getByRole('button', { name: 'Close comments', exact: true }).click();
 		await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
+		// With the sheet closed the markers are reachable again.
+		let reachable = 0;
+		for (let index = 0; index < withDrawer.length; index += 1) {
+			const seen = await reveal(page, index);
+			if (seen.points[0].hit === seen.ids) reachable += 1;
+		}
+		expect(reachable, 'with the sheet closed the markers are reachable').toBe(withDrawer.length);
 
 		// Scroll and zoom each get a canvas of their own at that size from the start, as a reload would give, rather than
 		// resizing this one: a mobile page resized mid-test is a harness state no user is ever in.
@@ -533,7 +549,7 @@ test.describe('@flow:doc-margin-marker', () => {
 		expect(await ordinary.fresh.evaluate(() => {
 			const doc = document.querySelector<HTMLElement>('.doc')!;
 			const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-			return { doc: doc.scrollWidth - doc.clientWidth, scroller: scroller.scrollWidth - scroller.clientWidth, page: document.documentElement.scrollWidth - window.innerWidth };
+			return { doc: doc.scrollWidth - doc.clientWidth, scroller: scroller.scrollWidth - scroller.clientWidth, page: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth) };
 		}), 'the canvas, the editor and the page have nothing to scroll sideways').toEqual({ doc: 0, scroller: 0, page: 0 });
 		await ordinary.fresh.close();
 		// Zoom: a 200% zoom of this viewport is half the CSS width; the rail stays 24 or 44 CSS px.
@@ -603,10 +619,15 @@ test.describe('@flow:doc-margin-marker', () => {
 		const nearId = now[nearIndex].ids[0];
 		await buttons.nth(nearIndex).focus();
 		expect(await active(), `the marker holding qmna (${keysOf(opened, now[nearIndex])}) has focus before the regroup`).toBe(now[nearIndex].ids.join(','));
+		// Each step regroups against the grouping the step before settled on: spread to 90px, a fine pointer's markers go
+		// back to the natural grouping (one thread per line), so comparing with the first grouping would never see a change.
+		const grouping = async () => (await markers(page)).map((marker) => marker.ids.length).join(',');
+		let before = all.map((marker) => marker.ids.length).join(',');
 		for (const lineHeight of ['10px', '90px']) {
 			await page.addStyleTag({ content: `.cm-line { line-height: ${lineHeight} !important; }` });
-			await expect.poll(async () => (await markers(page)).map((marker) => marker.ids.length).join(','), { message: `markers regroup at ${lineHeight}` }).not.toBe(all.map((marker) => marker.ids.length).join(','));
+			await expect.poll(grouping, { message: `markers regroup at ${lineHeight}` }).not.toBe(before);
 			await settle(page);
+			before = await grouping();
 			const holder = await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset?.commentIds ?? '');
 			expect(holder.split(','), `after ${lineHeight} lines focus is on the marker holding the thread it was on (${opened.byId[nearId]}; focus is on ${keysOf(opened, { ids: holder.split(',') })}; markers ${(await markers(page)).map((marker) => keysOf(opened, marker).join('+')).join(' | ')})`).toContain(nearId);
 			const labels = (await markers(page)).flatMap((marker) => marker.ids);

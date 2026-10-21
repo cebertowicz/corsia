@@ -15,19 +15,19 @@
 	import { stopRequestedTurns } from '$lib/ws/send';
 	import { turnStates } from '$lib/ws/turnState';
 	import { isThreadTurnActive } from '$lib/stores/threads';
-	import { subagentGlyph, subagentModelLabel, subagentTitle } from '$lib/utils/subagentLabel';
 	import type { SheetView } from './inputBarHelpers';
-	type SubagentRef = { model?: string | null; provider?: string } | undefined;
+	import { inlineSlot } from '$lib/slotMotion';
+	import SwitchingIcon from './ui/SwitchingIcon.svelte';
 
 	let {
 		threadId,
 		sheetView,
 		openSheet,
-		isSubagentThread,
-		subagentRef,
 		isActiveModelReady,
 		canSendToModel,
 		queueUntilSwitch,
+		switchState = null,
+		switchError = null,
 		modelLabel,
 		activeModelName,
 		supportsReasoning,
@@ -47,11 +47,11 @@
 		threadId: string | null;
 		sheetView: SheetView;
 		openSheet: (view: Exclude<SheetView, null>) => void;
-		isSubagentThread: boolean;
-		subagentRef: SubagentRef;
 		isActiveModelReady: boolean;
 		canSendToModel: boolean;
 		queueUntilSwitch: boolean;
+		switchState?: 'model' | 'account' | 'failed' | null;
+		switchError?: string | null;
 		modelLabel: string;
 		activeModelName: string | undefined;
 		supportsReasoning: boolean;
@@ -137,6 +137,11 @@
 
 	onDestroy(cancelQueueHold);
 
+	/** Leaving the page mid-hold ends it with nothing sent; the glyph must not stay up. */
+	function cancelHoldIfHidden() {
+		if (document.visibilityState === 'hidden') cancelQueueHold();
+	}
+
 	/** A hold that travelled is a drag or a scroll, not a deliberate hold. */
 	function trackQueueHold(event: PointerEvent) {
 		if (!holdOrigin) return;
@@ -179,6 +184,9 @@
 	}
 </script>
 
+<svelte:window onblur={cancelQueueHold} />
+<svelte:document onvisibilitychange={cancelHoldIfHidden} />
+
 <div class="action-row">
 	<button
 		type="button"
@@ -190,30 +198,37 @@
 	>
 		<svg class="plus-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 	</button>
-	{#if isSubagentThread}
-		<span class="row-chip cc-model-chip" title={subagentTitle(subagentRef?.provider)}>
-			<span class="cc-glyph">{subagentGlyph(subagentRef?.provider)}</span>
-			<span class="model-chip-name">{subagentModelLabel(subagentRef?.model, subagentRef?.provider)}</span>
-		</span>
-	{:else}
-		<button
-			type="button"
-			class="row-chip model-chip"
-			class:open={sheetView === 'model'}
-			class:unloaded={!isActiveModelReady}
-			data-sheet-trigger
-			onclick={(event) => openControlSheet(event, 'model')}
-			title={isActiveModelReady
-				? activeModelName
-				: queueUntilSwitch
-					? 'Model switch in progress'
-					: 'Pick a loaded model to send'}
-		>
-			<span class="model-chip-name">{modelLabel}</span>
-			<svg class="chevron" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>
-		</button>
-	{/if}
-	{#if !isSubagentThread && supportsReasoning && effortLabel}
+	<button
+		type="button"
+		class="row-chip model-chip"
+		class:open={sheetView === 'model'}
+		class:unloaded={!isActiveModelReady}
+		data-sheet-trigger
+		onclick={(event) => openControlSheet(event, 'model')}
+		title={switchState === 'failed'
+			? switchError ?? 'Switch failed'
+			: switchState === 'model'
+				? 'Model switch in progress'
+				: switchState === 'account'
+					? 'Account switch in progress'
+					: isActiveModelReady
+						? activeModelName
+						: queueUntilSwitch
+							? 'Model switch in progress'
+							: 'Pick a loaded model to send'}
+	>
+		{#if switchState}
+			<span class="model-switch-slot" in:inlineSlot out:inlineSlot>
+				<span class="model-switch-status" class:failed={switchState === 'failed'}>
+					<span class="model-switch-icon" aria-hidden={switchState === 'failed'}><SwitchingIcon ariaLabel={switchState === 'model' ? 'Switching model' : 'Switching account'} /></span>
+					<span class="model-status-dot" style="background: var(--red)" role="img" aria-label="Switch failed" aria-hidden={switchState !== 'failed'}></span>
+				</span>
+			</span>
+		{/if}
+		<span class="model-chip-name">{modelLabel}</span>
+		<svg class="chevron" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>
+	</button>
+	{#if supportsReasoning && effortLabel}
 		<button
 			type="button"
 			class="row-chip effort-chip"
@@ -280,9 +295,10 @@
 		onpointermove={trackQueueHold}
 		onpointerup={completeQueueHold}
 		onpointercancel={abandonQueueHold}
+		onlostpointercapture={abandonQueueHold}
 		oncontextmenu={(event) => event.preventDefault()}
 		onclick={handleSendClick}
-		disabled={(!hasMessageToSend && !isStreamingThisThread) || $connectionState !== 'connected' || (!canSendToModel && hasMessageToSend && !isSubagentThread)}
+		disabled={(!hasMessageToSend && !isStreamingThisThread) || $connectionState !== 'connected' || (!canSendToModel && hasMessageToSend)}
 		aria-label={queueArmed
 			? 'Release to queue after the current turn'
 			: isStreamingThisThread && !hasMessageToSend
@@ -292,7 +308,7 @@
 			? 'Release to queue after the current turn'
 			: queueUntilSwitch && !isStreamingThisThread
 				? 'Queues until model switch finishes'
-				: !canSendToModel && !isStreamingThisThread && !isSubagentThread
+				: !canSendToModel && !isStreamingThisThread
 					? 'Pick a loaded model to send'
 					: hasMessageToSend
 						? 'Send — hold to queue, or press Ctrl/⌘+Enter'
@@ -317,6 +333,12 @@
 
 <style>
 	.model-chip-name { min-width: 0; }
+	.model-switch-slot { display: inline-flex; flex: 0 0 auto; align-items: center; }
+	/* Icon and failed dot share one cell, so the slot keeps the icon's size as one fades into the other. */
+	.model-switch-status { display: grid; place-items: center; }
+	.model-switch-status > * { grid-area: 1 / 1; transition: opacity var(--dur-tight) var(--ease-snap); }
+	.model-switch-icon { display: inline-flex; }
+	.model-switch-status.failed .model-switch-icon, .model-switch-status:not(.failed) .model-status-dot { opacity: 0; pointer-events: none; }
 	.ctx-estimate-marker {
 		visibility: hidden;
 		font: inherit;

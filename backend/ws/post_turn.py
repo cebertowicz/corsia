@@ -22,14 +22,14 @@ DEFAULT_THREAD_TITLE = "New Chat"
 
 async def ensure_thread_title(
     thread_id: str,
-    fallback_content: str,
     ws_send: Callable[[dict], Awaitable[None]],
 ) -> None:
     """Generate a title if the session still has the placeholder title.
 
     A thread with no selected model keeps its placeholder: the title is made on
     the thread's own model, and the post-turn call after the first turn on a
-    newly selected model names it.
+    newly selected model names it. A failed generation also keeps the
+    placeholder, so the post-turn call after the next turn tries again.
     """
     try:
         def _load_context():
@@ -59,8 +59,7 @@ async def ensure_thread_title(
 
         title = await generate_thread_title(recent, model, thread_id=thread_id)
         if not title:
-            title = fallback_content[:50] + ("..." if len(fallback_content) > 50 else "")
-        if not title:
+            logger.info("Thread {} has no generated title yet; retrying after its next turn", thread_id)
             return
 
         def _save_title():
@@ -97,7 +96,6 @@ async def ensure_thread_title(
 async def start_title_early(
     thread_id: str,
     user_id: str,
-    fallback_content: str,
 ) -> None:
     """Start title generation immediately after the first message is accepted.
 
@@ -113,7 +111,7 @@ async def start_title_early(
     async def _broadcast(msg: dict) -> None:
         state.broadcast_event(thread_id, user_id, msg)
 
-    await ensure_thread_title(thread_id, fallback_content, _broadcast)
+    await ensure_thread_title(thread_id, _broadcast)
 
 
 async def run_post_turn_tasks(
@@ -122,4 +120,4 @@ async def run_post_turn_tasks(
     ws_send: Callable[[dict], Awaitable[None]],
 ) -> None:
     """Replace a placeholder title after a turn completes successfully."""
-    asyncio.create_task(ensure_thread_title(thread_id, content, ws_send))
+    asyncio.create_task(ensure_thread_title(thread_id, ws_send))

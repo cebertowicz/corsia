@@ -167,7 +167,7 @@ def test_accept_with_follow_up_records_the_verdict_too(db, scene):
     _mutate(db, scene.plan_id, "accept_with_follow_up", {
         "node_id": scene.own, "expected_revision": revision,
         "verification_result": "passed", "title": "Tidy the helper",
-        "acceptance_criteria": "The helper is tidy",
+        "acceptance_criteria": "The helper is tidy", "size": "S",
         "evidence": "Shipped; one nit follows.",
     })
 
@@ -191,6 +191,61 @@ def test_acceptance_without_evidence_leaves_the_submitted_evidence_alone(db, sce
         scene.own, requirements_revision=node.requirements_revision, db=db,
     )
     assert recorded["evidence"] == "Focused checks passed."
+
+
+@pytest.mark.parametrize("operation", ("add", "insert", "split", "add_follow_up", "accept_with_follow_up"))
+def test_task_creators_refuse_an_omitted_size(db, scene, operation):
+    from plans.size_fields import TASK_SIZE_REQUIRED
+
+    params = {"title": "New task", "acceptance_criteria": "New task is done"}
+    if operation in {"split", "add_follow_up"}:
+        params.update(node_id=scene.own, expected_revision=_revision(db, scene.own))
+    elif operation == "accept_with_follow_up":
+        params.update(
+            node_id=scene.own,
+            expected_revision=_accepted_scene(db, scene),
+            verification_result="passed",
+        )
+
+    with pytest.raises(service.PlanInputError) as refusal:
+        _mutate(db, scene.plan_id, operation, params)
+
+    assert str(refusal.value) == TASK_SIZE_REQUIRED
+
+
+def test_unknown_size_is_accepted_for_a_boundary_task(db, scene):
+    result = _mutate(db, scene.plan_id, "add", {
+        "title": "Unsized task", "acceptance_criteria": "It is recorded", "size": "unknown",
+    })
+
+    assert service.get_node(result["node"]["id"], db=db).size == "unknown"
+
+
+def test_phase_add_remains_size_optional_at_the_boundary(db, scene):
+    result = _mutate(db, scene.plan_id, "add", {
+        "kind": "phase", "title": "Phase", "acceptance_criteria": "It groups work",
+    })
+
+    assert service.get_node(result["node"]["id"], db=db).size is None
+
+
+def test_edit_refuses_clearing_a_task_size(db, scene):
+    from plans.size_fields import TASK_SIZE_REQUIRED
+
+    with pytest.raises(service.PlanInputError) as refusal:
+        _mutate(db, scene.plan_id, "edit", {
+            "node_id": scene.own, "expected_revision": _revision(db, scene.own), "size": None,
+        })
+
+    assert str(refusal.value) == TASK_SIZE_REQUIRED
+
+
+def test_server_created_task_without_size_uses_unknown(db, scene):
+    task = service.add_node(
+        scene.plan_id, kind="task", title="Server task", acceptance_criteria="It is recorded", db=db,
+    )
+
+    assert task.size == "unknown"
 
 
 def test_review_evidence_links_the_results_this_thread_owns(db, scene):

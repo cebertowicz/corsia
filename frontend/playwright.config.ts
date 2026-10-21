@@ -20,6 +20,7 @@ const backendPython =
 	process.env.CORSIA_E2E_PYTHON ||
 	'../.venv/bin/python';
 const mockMode = process.env.CORSIA_E2E_MOCK === '1';
+const includeStress = process.env.CORSIA_E2E_INCLUDE_STRESS === '1';
 const backendApp = mockMode ? 'e2e_app:app' : 'main:app';
 // A fault run is deliberately more explicit than ordinary mock E2E: callers
 // must attest the roots were freshly prepared before a process may be killed.
@@ -42,8 +43,21 @@ const backendCommand = [
 		: `CORSIA_TEST_MODE=1 CORSIA_WORKSPACE=${shellQuote(workspace)} CORSIA_STATE_DIR=${shellQuote(stateRoot)} ${shellQuote(backendPython)} -m uvicorn ${backendApp} --host 127.0.0.1 --port ${backendPort}`,
 ].filter(Boolean).join(' ');
 
+// The desktop app is a WKWebView, so the document scroll and table-cell
+// selection specs can also run in WebKit. Opt-in (CORSIA_E2E_WEBKIT=1, then `--project webkit-desktop`) because
+// the default CI browser install does not include WebKit.
+const webkitProjects = process.env.CORSIA_E2E_WEBKIT === '1'
+	? [{
+		name: 'webkit-desktop',
+		testMatch: /(document-comment-scroll|doc-table-cell-selection|doc-prose-selection-highlight)\.spec\.ts$/,
+		use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 1000 } },
+	}]
+	: [];
+
 export default defineConfig({
 	testDir: './e2e',
+	// Stress video/measurement runs are on-demand, never part of the default CI flow.
+	grepInvert: includeStress ? undefined : /@stress/,
 	globalSetup: './e2e/global-setup.ts',
 	// In mock mode, tests complete in seconds (no real LLM round-trip).
 	// In real mode, Haiku one-word replies take 1-3s but slow-network
@@ -83,6 +97,7 @@ export default defineConfig({
 				...devices['Pixel 7'],
 			},
 		},
+		...webkitProjects,
 	],
 	webServer: [
 		{

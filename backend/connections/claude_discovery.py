@@ -57,6 +57,8 @@ async def run_claude_control(
         from subagents.cc_env import apply_claude_config_dir
 
         apply_claude_config_dir(env, context.source_home)
+    # Serialize before spawning so an invalid frame cannot leave a child process behind.
+    payload = "".join(json.dumps(frame) + "\n" for frame in frames).encode()
     process = await asyncio.create_subprocess_exec(
         *claude_control_command(binary), stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -64,12 +66,7 @@ async def run_claude_control(
     )
     try:
         async with killed_on_exit(process):
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(
-                    "".join(json.dumps(frame) + "\n" for frame in frames).encode()
-                ),
-                timeout=30,
-            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(payload), timeout=30)
     except asyncio.TimeoutError:
         raise RuntimeError(f"Claude Code {operation} timed out") from None
     if process.returncode:

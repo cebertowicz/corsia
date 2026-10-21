@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+from core.checkpoint_types import CheckpointProviderForkRequest
+
 import asyncio
 from dataclasses import replace
 
 import pytest
 
-from core.checkpoint_types import (
-    CheckpointRecord,
-    ProviderCheckpointRejected,
-    ProviderCheckpointRequest,
-    ProviderCheckpointResult,
+from core.fork_types import (
+    ProviderForkRejected,
+    ProviderForkRequest,
+    ProviderForkResult,
     WarmForkUnusable,
 )
+from core.checkpoint_types import CheckpointRecord
 from llm.resolution import ExecutionTarget
 
 
@@ -29,9 +31,9 @@ def _target(harness: str) -> ExecutionTarget:
 WARM_SOURCE = object()
 
 
-def _warm_request(harness: str, *, cold_builder=None) -> ProviderCheckpointRequest:
-    return ProviderCheckpointRequest(
-        checkpoint_id="checkpoint-1", thread_id="thread-1",
+def _warm_request(harness: str, *, cold_builder=None) -> ProviderForkRequest:
+    return CheckpointProviderForkRequest(
+        fork_id="checkpoint-1", thread_id="thread-1",
         target=_target(harness), instruction="checkpoint",
         reasoning_effort=None, working_dir="/work",
         warm_source=WARM_SOURCE, same_model_cold=cold_builder,
@@ -43,14 +45,14 @@ def _cold_admission(**overrides):
     from native_checkpoint_fixtures import cold_source
 
     fields = {
-        "checkpoint_id": "checkpoint-1", "thread_id": "thread-1",
+        "fork_id": "checkpoint-1", "thread_id": "thread-1",
         "target": _target("native"), "instruction": "checkpoint",
         "reasoning_effort": None, "working_dir": "/work",
         "cold_source": cold_source(),
     }
     fields.update(overrides)
     return CheckpointAdmission(
-        request=object(), provider_request=ProviderCheckpointRequest(**fields),
+        request=object(), provider_request=CheckpointProviderForkRequest(**fields),
     )
 
 
@@ -71,7 +73,7 @@ async def test_unusable_warm_fork_runs_cold_once_on_the_same_row(monkeypatch):
         calls.append(request)
         if request.warm_source is not None:
             raise WarmForkUnusable("initial input exceeds selected context window")
-        return ProviderCheckpointResult("cold body", None)
+        return ProviderForkResult("cold body", None)
 
     request = _warm_request("native", cold_builder=_cold_admission)
     result = await fallback.invoke_with_cold_correction(
@@ -81,7 +83,7 @@ async def test_unusable_warm_fork_runs_cold_once_on_the_same_row(monkeypatch):
     assert result.raw_body == "cold body"
     assert len(calls) == 2
     assert calls[0].warm_source is not None and calls[1].warm_source is None
-    assert calls[1].checkpoint_id == "checkpoint-1"
+    assert calls[1].fork_id == "checkpoint-1"
     assert adopted == [("checkpoint-1",)]
 
 
@@ -96,7 +98,7 @@ async def test_native_warm_fork_correction_uses_canonical_refusal_log(monkeypatc
     async def invoke(request, _cancel):
         if request.warm_source is not None:
             raise WarmForkUnusable("over window")
-        return ProviderCheckpointResult("cold body", None)
+        return ProviderForkResult("cold body", None)
 
     monkeypatch.setattr(fallback, "run_in_db", fake_run_in_db)
     lines: list[str] = []
@@ -111,7 +113,7 @@ async def test_native_warm_fork_correction_uses_canonical_refusal_log(monkeypatc
         logger.remove(sink)
 
     assert lines == [
-        "checkpoint warm capture refused for thread-1 (native): warm_fork_over_window\n",
+        "fork warm capture refused for thread-1 (native): warm_fork_over_window\n",
     ]
 
 
@@ -140,9 +142,9 @@ async def test_a_provider_refusal_never_triggers_the_cold_path(monkeypatch):
 
     async def invoke(request, _cancel):
         calls.append(request)
-        raise ProviderCheckpointRejected("Codex checkpoint was not accepted")
+        raise ProviderForkRejected("Codex checkpoint was not accepted")
 
-    with pytest.raises(ProviderCheckpointRejected):
+    with pytest.raises(ProviderForkRejected):
         await fallback.invoke_with_cold_correction(
             _warm_request("codex", cold_builder=_cold_admission),
             asyncio.Event(), invoke,
@@ -156,7 +158,7 @@ async def test_impossible_cold_correction_is_terminal_not_another_attempt(
 ):
     """ColdFoldInputTooLarge from the builder ends the operation."""
     from core import checkpoint_cold_fallback as fallback
-    from core.checkpoint_fit import ColdFoldInputTooLarge
+    from core.fork_fit import ColdFoldInputTooLarge
 
     def cannot_build():
         raise ColdFoldInputTooLarge("minimum meaningful cold input does not fit")
@@ -188,7 +190,7 @@ async def test_correction_refuses_a_builder_that_leaves_the_row(monkeypatch):
         await fallback.invoke_with_cold_correction(
             _warm_request(
                 "native",
-                cold_builder=lambda: _cold_admission(checkpoint_id="other"),
+                cold_builder=lambda: _cold_admission(fork_id="other"),
             ),
             asyncio.Event(), invoke,
         )
@@ -268,9 +270,9 @@ def test_each_adapter_raises_the_typed_refusal_for_its_warm_fork(harness):
     import inspect
 
     module = {
-        "claude-code": "core.checkpoint_cc_io",
-        "codex": "core.checkpoint_codex_fork",
-        "native": "core.checkpoint_native_fork",
+        "claude-code": "core.fork_cc_io",
+        "codex": "core.fork_codex",
+        "native": "core.fork_native",
     }[harness]
     source = inspect.getsource(__import__(module, fromlist=["_"]))
 

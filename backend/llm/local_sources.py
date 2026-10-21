@@ -6,16 +6,19 @@ are visible on the next read; restarting does not change the projection.
 
 from __future__ import annotations
 
-import re
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from llm.catalog import list_models
-from llm.local_setup_ownership import installed_omlx
+from llm.managed_omlx_binary import managed_omlx_executable, managed_omlx_install_error
+from llm.locality import endpoint_on_this_mac
+from llm.network_endpoints import endpoint_base, get_endpoints
+from llm.local_setup_executable import omlx_on_path
+from llm.local_setup_gates import local_memory_ok
+from llm.local_profiles import format_size
 from llm.network_discovery import get_servers, parse_server_metadata
 
 OMLX_FIX = "Settings › Providers › Local model"
 CHECK_AGAIN = "Check again"
-_PERCENT = re.compile(r"(\d{1,3})%")
 
 
 def catalog_membership() -> tuple[set[str], set[str]]:
@@ -45,51 +48,91 @@ def _source(source: str, name: str, state: str, reason: str | None = None,
             "reason": reason, "fix": fix, "checked_at": checked_at}
 
 
-def _stage_percent(stage: str) -> int | None:
-    """The percent in a setup stage such as "Downloading Model (8.60 GiB, 45%)", else None.
+def _project_local_flight(result: dict[str, Any], flight: dict[str, Any] | None) -> None:
+    """Project the local setup flight as the row's only lifecycle vocabulary."""
+    if flight is None or flight["state"] == "stopped":
+        result["local_state"] = "stopped"
+        return
+    result.update(
+        local_state=flight["state"],
+        setup_error_code=flight.get("cause"),
+        setup_error_reference=flight.get("ref"),
+        bytes_to_free=flight.get("bytes_to_free"),
+        download_percent=flight.get("percent"),
+        download_eta_seconds=flight.get("eta_seconds"),
+        download_stalled=flight.get("stalled") is True,
+        fix=flight.get("fix"),
+    )
 
-    The percent exists only inside the stage text the flight reports; this is the one
-    place it is read, so the app gets a number instead of parsing wording.
-    """
-    match = _PERCENT.search(stage)
-    return min(100, int(match.group(1))) if match else None
+
+async def local_server_for_install(
+    report: Callable[[str], None], *,
+    start_managed: Callable[[Callable[[str], None]], Awaitable[tuple[str, int]]] | None = None,
+    start_if_absent: bool = True,
+) -> tuple[str, int, bool] | None:
+    """Resolve the one local server serving this install: connected first, else managed."""
+    import asyncio
+
+    connected = await asyncio.to_thread(connected_local_server)
+    if connected is not None:
+        return str(connected["id"]), int(connected.get("port") or 0), True
+    if not start_if_absent:
+        return None
+    if start_managed is None:
+        from llm.local_setup_runtime import start_managed_omlx
+
+        start_managed = start_managed_omlx
+    server_id, port = await start_managed(report)
+    return server_id, port, False
+
+
+def local_omlx_servers() -> list[dict]:
+    """Every registered oMLX row with a loopback endpoint, regardless of its install origin."""
+    return [server for server in get_servers(provider="omlx")
+            if server.get("status") != "disabled" and any(
+                endpoint_on_this_mac(endpoint_base(
+                    parse_server_metadata(server["id"], server.get("metadata_json")) or {},
+                    host=ep["host"], port=server.get("port"),
+                )) for ep in get_endpoints(server["id"]))]
+
+
+def connected_local_server() -> dict | None:
+    """An existing local server that is online and has a usable catalog model."""
+    available, _enabled = catalog_membership()
+    return next((server for server in local_omlx_servers()
+                 if server.get("status") == "online" and f"omlx@{server['id']}" in available), None)
 
 
 def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:
-    """A managed server decides; only with none is this host's binary asked.
+    """Project every local server row; only with none is this host's binary asked."""
+    from llm.local_setup import setup_kind
+    from llm.local_setup_prepare import known_model
+    from onboarding.local_download_state import current as local_download_state
 
-    A managed server is registered by host and port, so it may be remote.
-    """
-    from llm.local_setup import (
-        DEFAULT_PROFILE, format_size, profile_eligibility, setup_failure, setup_stage, setup_status,
-        setup_stopped_following,
-    )
-
-    eligibility = profile_eligibility(DEFAULT_PROFILE)
-    stage = setup_stage()
-    terminal = setup_failure()
+    eligible = local_memory_ok()
+    model = known_model() if eligible else None
+    settings_flight = setup_kind() == "settings"
+    flight = None if settings_flight else local_download_state()
 
     def starter_source(state: str, reason: str | None = None, fix: str | None = None,
                        checked_at: str | None = None) -> dict[str, Any]:
         result = _source("omlx", "Local model", state, reason, fix, checked_at)
         result.update(
-            eligible=eligibility.eligible,
-            estimated_context_window=eligibility.context_window,
-            download_size=format_size(DEFAULT_PROFILE.download_size_bytes),
+            eligible=eligible,
+            context_window=model.context_window if model else None,
+            download_size=format_size(model.download_size_bytes) if model else None,
         )
         return result
 
-    if stage:
-        result = starter_source("needs_setup", stage, OMLX_FIX)
-        result["setup_stage"] = stage
-        result["download_percent"] = _stage_percent(stage)
-        result["setup_downloading"] = setup_status()["state"] == "downloading"
-        return result
     name = "Local model"
-    servers = [s for s in get_servers(provider="omlx")
-               if s.get("kind") != "external" and s.get("status") != "disabled"]
+    servers = local_omlx_servers()
     if not servers:
-        if installed_omlx() is None:
+        install_error = managed_omlx_install_error()
+        if install_error:
+            result = starter_source("needs_setup")
+            _project_local_flight(result, {"state": "failed", "cause": "damaged_bundle", "fix": install_error})
+            return result
+        if managed_omlx_executable() is None and omlx_on_path() is None:
             result = starter_source("not_installed", "oMLX is not installed", "Install oMLX")
         else:
             result = starter_source("needs_setup", "No local model server is set up", OMLX_FIX)
@@ -107,14 +150,8 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
                 result["reason_code"] = "no_models"
             else:
                 result = starter_source("ready", checked_at=online[0].get("updated_at"))
-    stopped = setup_stopped_following()
-    if stopped and result["state"] != "ready":
-        result.update(reason=str(stopped["message"]), fix=OMLX_FIX, setup_downloading=True)
-        result.pop("reason_code", None)
-    if terminal and result["state"] != "ready":
-        message = str(terminal.get("message") or "Local setup failed.")
-        result.update(reason=message, fix=OMLX_FIX, setup_error=message)
-        result.pop("reason_code", None)
+    if not settings_flight:
+        _project_local_flight(result, flight if result["state"] != "ready" else None)
     return result
 
 
@@ -139,23 +176,37 @@ def external_sources(membership: tuple[set[str], set[str]] | None = None) -> lis
     return result
 
 
-def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:
-    """The local source row, with which flight a download or failure belongs to.
 
-    ``omlx_settings`` is set only for the person's own oMLX: None when unknown,
-    ``[]`` when its settings match CORSIA's recommended ones, else the differences.
-    """
-    from llm.local_setup import setup_kind
-    from llm.local_setup_ownership import existing_install_is_foreign
-    from llm.omlx_global_settings import differences, fingerprint
+def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:
+    """The registered local source row and its active download state."""
+    from llm.local_setup import download_percent, flight_model, setup_kind, setup_stage
 
     result = _omlx_state(membership)
-    flying = result.get("setup_downloading") or result.get("setup_error")
-    result["setup_kind"] = setup_kind() if flying else None
-    own = existing_install_is_foreign()
-    ids = [s["id"] for s in get_servers(provider="omlx")
-           if s.get("kind") != "external" and s.get("status") == "online"] if own else []
-    entries = differences(ids) if own and len(ids) == 1 else None
-    result["omlx_settings"] = ({"differences": entries, "fingerprint": fingerprint(ids[0], entries)}
-                               if entries else entries)
+    flying = result.get("local_state") in {"downloading", "starting", "failed", "setup_failed", "start_failed"}
+    current_kind = setup_kind()
+    kind = current_kind if flying or current_kind == "settings" else None
+    result["setup_kind"] = kind
+    # Settings downloads share the durable flight but never borrow setup's
+    # fallback semantics. A terminal Settings failure belongs to its durable
+    # Settings record so the next sources read can offer the exact retry.
+    stage = setup_stage() if kind == "settings" else None
+    if stage:
+        model = flight_model()
+        result["settings_download"] = {
+            "name": model.display_name if model else None,
+            "repository": model.repository if model else None,
+            "percent": download_percent(),
+            "failed": False,
+        }
+    else:
+        from llm import local_downloads
+
+        failed = next((entry for entry in local_downloads.all() if entry.status == "failed"), None)
+        if failed is not None:
+            result["settings_download"] = {
+                "name": failed.model.display_name,
+                "repository": failed.model.repository,
+                "percent": None,
+                "failed": True,
+            }
     return result

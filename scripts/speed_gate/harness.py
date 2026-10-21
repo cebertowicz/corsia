@@ -6,9 +6,11 @@ state roots, test mode, the one-worker-per-lane override). Only counts are
 recorded as measurements. Wall time is logged in ``info`` for people to read and
 is never an input to a verdict.
 
-Counting: a progress handler every ``PROGRESS_EVERY`` VM instructions on every
+Counting: a progress handler after every VM instruction (``PROGRESS_EVERY`` is 1) on every
 SQLite connection the process opens, so a request that uses several
-connections or threads is counted in full. A trace callback counts statements.
+connections or threads is counted in full, and exactly. A trace callback counts statements.
+Preparing a statement is not counted (SQLite also calls the handler while it plans one); planning it again
+because the application changed the connection's schema is, since that is work the application caused.
 Every connection is made by ``sqlite3.connect`` with a counting connection class (installed before the
 application is imported). SQLite keeps one progress handler per connection, so the class owns that slot:
 when the application sets its own handler (a deadline, a cancellation check) or clears it, the class stores
@@ -28,7 +30,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import gc
-import importlib.util
+import itertools
 import json
 import os
 import re
@@ -42,7 +44,12 @@ from .sqlite_pin import PINNED_PACKAGE, sqlite3  # first: pins SQLite before any
 
 from . import clock, routes
 
-PROGRESS_EVERY = 100
+#: Exact. SQLite starts a statement's handler interval from that prepared statement's lifetime instruction
+#: count, so with an interval of N the same work counts differently by up to N per statement with the cached
+#: statement's history (one more identical warm-up moved 34 routes by 100 to 500 steps at N=100).
+PROGRESS_EVERY = 1
+#: The step counter's starting supply; ``itertools.repeat`` counts down from it (see ``Counters``).
+_SUPPLY = 1 << 62
 DRAIN_TIMEOUT_SECONDS = 120
 #: The runner sets this for every harness run; ``backend/infra/db_async.py`` reads it (measurement-only).
 WORKERS_VARIABLE = "CORSIA_DB_POOL_WORKERS"
@@ -60,15 +67,18 @@ class Counters:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self.steps = 0
+        # One handler call per VM instruction, so it must be cheap: ``repeat.__next__`` is C (no Python frame),
+        # atomic under the GIL from any thread, returns 0 so it never aborts a statement, and the count is how
+        # much of the supply it has handed out.
+        self._supply = itertools.repeat(0, _SUPPLY)
+        self.tick = self._supply.__next__
         self.statements = 0
         self.trace: list[str] = []  # "<thread>: <sql>" per statement, to trace a difference between runs
         self.threads: set[str] = set()  # every thread that ran a statement
 
-    def on_progress(self) -> int:
-        with self._lock:
-            self.steps += PROGRESS_EVERY
-        return 0
+    @property
+    def steps(self) -> int:
+        return _SUPPLY - self._supply.__length_hint__()
 
     def on_statement(self, sql: str) -> None:
         if not sql.startswith("--"):  # trigger bodies are reported as comments
@@ -98,11 +108,16 @@ def counting_class(counters: Counters, base: type) -> type:
             self._app_interval = 0
             self._app_elapsed = 0
             self._app_trace = None
-            super().set_progress_handler(self._on_progress, PROGRESS_EVERY)
+            super().set_progress_handler(counters.tick, PROGRESS_EVERY)
             super().set_trace_callback(self._on_trace)
 
         def _on_progress(self) -> int:
-            counters.on_progress()
+            """The counter with the application's handler chained; installed only while the application has one."""
+            counters.tick()
+            return self._app_only()
+
+        def _app_only(self) -> int:
+            """The application's handler every ``n`` instructions; alone (uncounted) while a statement is prepared."""
             handler = self._app_progress
             if handler is None:
                 return 0
@@ -112,14 +127,27 @@ def counting_class(counters: Counters, base: type) -> type:
             self._app_elapsed = 0
             return 1 if handler() else 0  # a truthy result aborts the statement, as it does for the application
 
+        def __call__(self, sql: str):
+            """Prepare ``sql`` uncounted (``execute`` calls this on a statement-cache miss): SQLite also calls the
+            handler while it plans, and which pooled connection plans a statement first depends on how concurrent
+            jobs interleaved, so counting it would make the same work count differently from run to run."""
+            super().set_progress_handler(None if self._app_progress is None else self._app_only, PROGRESS_EVERY)
+            try:
+                return super().__call__(sql)
+            finally:
+                super().set_progress_handler(
+                    counters.tick if self._app_progress is None else self._on_progress, PROGRESS_EVERY)
+
         def _on_trace(self, sql: str) -> None:
             counters.on_statement(sql)
             if self._app_trace is not None:
                 self._app_trace(sql)
 
         def set_progress_handler(self, progress_handler, n) -> None:
-            """The application's handler runs every ``n`` instructions, rounded up to the counter's interval."""
+            """The application's handler runs every ``n`` instructions; clearing it leaves the counter alone."""
             self._app_progress, self._app_interval, self._app_elapsed = progress_handler, n, 0
+            super().set_progress_handler(counters.tick if progress_handler is None else self._on_progress,
+                                         PROGRESS_EVERY)
 
         def set_trace_callback(self, trace_callback) -> None:
             self._app_trace = trace_callback
@@ -254,8 +282,8 @@ def assert_one_worker_per_lane(counters: Counters) -> None:
 
     The runner sets ``CORSIA_DB_POOL_WORKERS=1``. This does not trust that: it reads the thread names that
     actually ran statements (and any lane thread still alive) and fails when a lane used a second thread, or
-    when no lane thread ran at all. Which pooled connection serves a call moves its step count by a few
-    samples, so a run on several threads per lane would not be exact.
+    when no lane thread ran at all. Each pooled connection holds its own temp tables and parsed schema, so
+    which one serves a call can change its step count, and a run on several threads per lane would not be exact.
     """
     names = counters.threads | {thread.name for thread in threading.enumerate()}
     used: dict[str, set[str]] = {prefix: set() for prefix in LANE_PREFIXES}
@@ -275,6 +303,13 @@ def _open_app(backend: Path, db_file: Path):
     """Import the target application with the fixture installed as its database."""
     sys.path[:0] = [str(backend), str(backend / "tests")]
     os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
+    # The document routes receive the same absolute path the frontend sends
+    # after selecting a workspace file. It is synthetic and lives under this
+    # run's disposable workspace.
+    workspace = Path(os.environ["CORSIA_WORKSPACE"])
+    document = workspace / "README.md"
+    document.write_text("speed-gate synthetic document\n")
+    os.utime(document, (1_700_000_000, 1_700_000_000))  # its mtime is part of file-route responses
     from infra.database import DB_PATH, close_thread_db
 
     shutil.copyfile(db_file, DB_PATH)
@@ -289,13 +324,6 @@ def _open_app(backend: Path, db_file: Path):
 
     return app, TestClient(app, raise_server_exceptions=False), OWNER_TOKEN
 
-
-def _extra_query(app) -> dict[str, str]:
-    """Per-route query values that need the application (the registered metric ids)."""
-    if importlib.util.find_spec("api.measurement_registry") is None:  # an older tree has no such route
-        return {}
-    from api.measurement_registry import REGISTRY
-    return {"ids": ",".join(sorted(name for name, item in REGISTRY.items() if item.available))}
 
 
 def measure_route(client, counters: Counters, background: Background, headers: dict, url: str) -> dict:
@@ -330,22 +358,24 @@ def run(backend: Path, db_file: Path) -> dict:
     background = Background(backend)
     background.attach(client)
     ids = routes.fixture_ids(str(db_file))
-    extra = _extra_query(app)
+    extra = routes.runtime_query_values()
     headers = {"Authorization": f"Bearer {owner}"}
     measured: dict[str, dict] = {}
     not_called: dict[str, str] = {}
-    for number, (template, route) in enumerate(routes.get_routes(app), 1):
-        print(f"route {number}: {template}", flush=True)  # a stuck run shows which route it stopped on
-        target = routes.build_target(template, route, ids, extra, owner)
-        if target.url is None:
-            not_called[template] = target.reason or "not callable"
-            continue
-        result = measure_route(client, counters, background, headers, target.url)
-        result["url"] = target.url.replace(owner, "<owner credential>")  # a measurement file never holds the test credential
-        measured[template] = result
-        if result["status"] >= 400:
-            not_called[template] = (f"HTTP {result['status']} from the fixture request "
-                                    f"({result['info']['detail'][:100]}), so the read it guards is not exercised")
+    number = 0
+    for template, route in routes.get_routes(app):
+        for target in routes.build_targets(template, route, ids, extra, owner):
+            number += 1
+            print(f"route {number}: {target.template}", flush=True)  # a stuck run shows which route it stopped on
+            if target.url is None:
+                not_called[target.template] = target.reason or "not callable"
+                continue
+            result = measure_route(client, counters, background, headers, target.url)
+            result["url"] = target.url.replace(owner, "<owner credential>")  # a measurement file never holds the test credential
+            measured[target.template] = result
+            if result["status"] >= 400:
+                not_called[target.template] = (f"HTTP {result['status']} from the fixture request "
+                                                f"({result['info']['detail'][:100]}), so the read it guards is not exercised")
     assert_one_worker_per_lane(counters)
     assert_all_counted()
     return {"sqlite_version": sqlite3.sqlite_version, "sqlite_package": PINNED_PACKAGE,

@@ -2,8 +2,10 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { setFocusMode } from '../support/focusMode';
 import { syntheticPng } from '../support/syntheticImages';
 
 /**
@@ -113,14 +115,6 @@ function recordAsk(artifact: Artifact, { retire = false }: { retire?: boolean } 
 	});
 }
 
-async function setFocusMode(request: APIRequestContext, enabled: boolean): Promise<void> {
-	const updated = await request.patch('/api/settings', {
-		headers: { Authorization: `Bearer ${TEST_TOKEN}` },
-		data: { features: { focus_mode: enabled } },
-	});
-	expect(updated.ok(), await updated.text()).toBeTruthy();
-}
-
 type Surface = readonly [label: string, width: number, theme: 'light' | 'dark'];
 const SURFACES: readonly Surface[] = [
 	['1440 light', 1440, 'light'],
@@ -138,6 +132,12 @@ async function openTranscript(page: Page, artifact: Artifact, width: number, the
 	await expect(page.locator(`[data-artifact-id="${artifact.artifactId}"]`)).toBeVisible();
 }
 
+// The phone's plan chip arrives with the thread's plan read, after the cards render, and moves the transcript by the
+// rail's height. A tap that lands in that move misses the card, so tap only once the chip is up.
+async function planChipUp(page: Page, width: number): Promise<void> {
+	if (width === 393) await expect(page.getByRole('button', { name: /^Open plan/ })).toBeVisible();
+}
+
 function card(page: Page, artifact: Artifact) {
 	return page.locator(`[data-artifact-id="${artifact.artifactId}"]`);
 }
@@ -148,6 +148,11 @@ async function screenshot(page: Page, name: string): Promise<void> {
 	fs.mkdirSync(directory, { recursive: true });
 	await page.screenshot({ path: path.join(directory, `${name}.png`), animations: 'disabled' });
 }
+
+// Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
+test.afterEach(async ({ request }) => {
+	await setFocusMode(request, true);
+});
 
 for (const [label, width, theme] of SURFACES) {
 	test.describe(label, () => {
@@ -161,6 +166,7 @@ for (const [label, width, theme] of SURFACES) {
 			const row = card(page, artifact);
 			await expect(row).toHaveAttribute('data-card-state', 'needs_review');
 			await expect(row).toContainText('Needs your review');
+			await planChipUp(page, width);
 			await screenshot(page, `chat-card-${width}-${theme}`);
 
 			let release!: () => void;
@@ -184,6 +190,7 @@ for (const [label, width, theme] of SURFACES) {
 			await openTranscript(page, image, width, theme);
 			const imageCard = card(page, image);
 			await expect(imageCard.locator('img.thumb')).toHaveAttribute('src', /\/api\/files\/content/);
+			await planChipUp(page, width);
 			await screenshot(page, `chat-card-image-${width}-${theme}`);
 			await imageCard.click();
 			await expect(page.locator('.review-bar')).toBeVisible();

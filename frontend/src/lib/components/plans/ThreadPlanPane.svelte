@@ -10,6 +10,9 @@
 	import { planQuery } from '$lib/stores/planQuery.svelte';
 	import { connectionState } from '$lib/stores/connection';
 	import { token } from '$lib/stores/auth';
+	import { activeThreadId } from '$lib/stores/threads';
+	import { visibleQueue } from '$lib/stores/attentionDock.svelte';
+	import type { AttentionQueueItem } from '$lib/api/attentionQueue';
 	import { mutateUserTask } from '$lib/api/plans';
 	import type { OperatorArtifactLink, OperatorNode, OperatorUserAction } from '$lib/api/plans';
 	import type { OperatorKey } from '$lib/stores/planKeys';
@@ -32,6 +35,16 @@
 	const offline = $derived($connectionState !== 'connected' && hasPayload);
 	const plan = $derived(query.payload?.plans[0] ?? null);
 	const decisionCount = $derived(query.payload?.attention.awaiting_count ?? 0);
+	/**
+	 * This thread's own decisions, each a row, once the queue has them. The plan's awaiting count also spans its
+	 * child plans, so whenever it exceeds the rows the indicator below them shows that total ("N decisions in all");
+	 * with no rows it stands alone. Each display reads one source, never a difference of the two.
+	 */
+	const activeDecisionItems = $derived(
+		$activeThreadId === threadId
+			? $visibleQueue.items.filter((item) => item.detail.source?.thread_id === threadId)
+			: [],
+	);
 	/**
 	 * Every step finished and folded (FW7): the empty state's calm, plus the
 	 * folded count below it. Nothing is left, so the count is suppressed with
@@ -136,12 +149,7 @@
 		openPlanAsk(threadId, artifact, nodeTitle, () => { void openDecisions(); });
 	}
 
-	async function openDecisions(): Promise<void> {
-		if (decisionBusy) return;
-		decisionBusy = true;
-		decisionMessage = null;
-		const outcome = await requestFocus();
-		decisionBusy = false;
+	function showDecisionOutcome(outcome: Awaited<ReturnType<typeof requestFocus>>): void {
 		if (outcome === 'requested') return;
 		if (outcome === 'empty') {
 			decisionMessage = 'That item no longer needs you. Refreshing the plan.';
@@ -149,6 +157,24 @@
 			return;
 		}
 		decisionMessage = 'The item couldn’t open. Try again.';
+	}
+
+	async function openDecision(item: AttentionQueueItem): Promise<void> {
+		if (decisionBusy) return;
+		decisionBusy = true;
+		decisionMessage = null;
+		const outcome = await requestFocus(item.external_id);
+		decisionBusy = false;
+		showDecisionOutcome(outcome);
+	}
+
+	async function openDecisions(): Promise<void> {
+		if (decisionBusy) return;
+		decisionBusy = true;
+		decisionMessage = null;
+		const outcome = await requestFocus();
+		decisionBusy = false;
+		showDecisionOutcome(outcome);
 	}
 
 	/**
@@ -222,10 +248,19 @@
 				{#if !offline}<Button variant="ghost" size="sm" onclick={() => query.retry()}>Retry</Button>{/if}
 			</div>
 		{/if}
-		{#if decisionCount > 0}
+		{#if activeDecisionItems.length > 0}
+			{#each activeDecisionItems as item (item.external_id)}
+				<button class="decision-row" type="button" disabled={decisionBusy} onclick={() => openDecision(item)}>
+					<span class="decision-mark" aria-hidden="true">!</span>
+					<span class="decision-title">{item.detail.title}</span>
+					<span class="decision-open">{decisionBusy ? 'Loading…' : 'Open'}</span>
+				</button>
+			{/each}
+		{/if}
+		{#if decisionCount > activeDecisionItems.length}
 			<button class="decision-indicator" disabled={decisionBusy} onclick={openDecisions}>
-				<b>{decisionCount}</b> {decisionCount === 1 ? 'decision' : 'decisions'}
-				<span>{decisionBusy ? 'Loading…' : 'Open →'}</span>
+				<b>{decisionCount}</b> {decisionCount === 1 ? 'decision' : 'decisions'}{activeDecisionItems.length > 0 ? ' in all' : ''}
+				<span>{decisionBusy ? 'Loading…' : 'Open'}</span>
 			</button>
 		{/if}
 		{#if decisionMessage}
@@ -286,14 +321,22 @@
 <style>
 	.thread-plan-pane { display: flex; flex-direction: column; gap: var(--space-2); }
 	.thread-plan-pane:focus { outline: none; }
+	.decision-row { display: flex; align-items: center; gap: var(--space-2); min-height: 38px; padding: 6px 8px; border: 0; border-radius: var(--radius-xs); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+	@media (hover: hover) { .decision-row:hover { background: var(--bg-hover); } }
+	.decision-mark { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex: none; border: 1px solid var(--amber); border-radius: var(--radius-circle); color: var(--amber); font-size: var(--text-caption); font-weight: var(--fw-bold); }
+	.decision-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-medium); }
+	.decision-open { flex: none; color: var(--text-tertiary); font-size: var(--text-caption); }
+	.decision-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.decision-indicator {
-		min-height: 44px; padding: var(--space-2); border: 1px solid var(--violet-line);
-		border-radius: var(--radius-sm); background: var(--violet-bg); color: var(--violet-text);
+		display: flex; align-items: center; min-height: 38px; padding: 6px 8px 6px 4px; border: 0;
+		border-radius: var(--radius-xs); background: transparent; color: var(--amber-text);
 		font: inherit; font-size: var(--text-footnote); text-align: left; cursor: pointer;
 	}
-	.decision-indicator b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
-	.decision-indicator span { margin-left: var(--space-1); color: var(--text-primary); font-weight: var(--fw-medium); }
-	.decision-indicator:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+	@media (hover: hover) { .decision-indicator:hover:not(:disabled) { background: var(--bg-hover); } }
+	@media (any-pointer: coarse) { .decision-indicator { min-height: 44px; } }
+	.decision-indicator b { margin-right: 0.3em; color: var(--amber-text); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+	.decision-indicator span { margin-left: auto; padding: 0 2px 0 var(--space-1); color: var(--text-tertiary); font-size: var(--text-caption); }
+	.decision-indicator:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.decision-indicator:disabled { cursor: wait; opacity: 0.72; }
 	.decision-message { margin: 0; padding: 0 var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); }
 	.plan-state {
@@ -310,7 +353,7 @@
 		background: var(--amber-bg); color: var(--text-primary); font-size: var(--text-caption);
 	}
 	.spinner {
-		width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--violet);
+		width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent);
 		border-radius: var(--radius-circle); animation: spin var(--dur-hero-plus) linear infinite;
 	}
 	@keyframes spin { to { transform: rotate(360deg); } }

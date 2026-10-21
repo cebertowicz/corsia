@@ -1,4 +1,6 @@
-import { expect, test, type BrowserContext } from '@playwright/test';
+import { replyField } from '../support/commentDrawer';
+import { test } from '../support/test';
+import { expect, type BrowserContext } from '@playwright/test';
 import {
 	createComment,
 	deleteRenderedLine,
@@ -56,15 +58,52 @@ test('@slice1 @surface:live-document a refused placement reload at 393 preserves
 		await openLiveDocument(writer, document);
 		await openLiveDocument(reader, document);
 		await expect(reader.locator('.cm-comment-anchor')).toHaveCount(2);
-		await reader.getByRole('button', { name: '2 comments', exact: true }).click();
+		const editor = reader.locator('.cm-content');
+		// Seed the editor's retained selection without clicking the existing comment anchor, which opens the mobile drawer.
+		await editor.evaluate((content, marker) => {
+			const line = [...content.querySelectorAll<HTMLElement>('.cm-line')].find((candidate) => candidate.textContent?.includes(marker));
+			if (!line) throw new Error('retained comment line is not rendered');
+			const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+			const text = [...Array.from({ length: 20 }, () => walker.nextNode())].find((node): node is Text => node instanceof Text && node.data.includes('keep'));
+			if (!text) throw new Error('retained comment line has no selectable keep text node');
+			const start = text.data.indexOf('keep');
+			const range = document.createRange();
+			range.setStart(text, start);
+			range.setEnd(text, start + 4);
+			const selection = window.getSelection()!;
+			selection.removeAllRanges();
+			selection.addRange(range);
+			(content as HTMLElement).focus();
+		}, retained);
+		const editorSelection = () => reader.evaluate(() => {
+			const selected = window.getSelection();
+			return { text: selected?.toString(), anchor: selected?.anchorOffset, head: selected?.focusOffset,
+				line: selected?.anchorNode?.parentElement?.closest('.cm-line')?.textContent };
+		});
+		const selectedRange = await editorSelection();
+		expect(selectedRange.text).toBe('keep');
+		await reader.getByRole('button', { name: /^2 open threads\b/ }).click();
 		const comments = reader.getByRole('region', { name: 'Document comments', exact: true });
+		await expect(comments).toBeVisible();
 		const retainedCard = comments.locator('[data-comment-id]').filter({ hasText: `Keep ${stamp}` });
 		const retainedId = await retainedCard.getAttribute('data-comment-id');
 		expect(retainedId).toBeTruthy();
-		const reply = comments.locator(`[data-comment-id="${retainedId}"]`).getByPlaceholder('Reply…');
+		const openComments = async () => {
+			await reader.getByRole('button', { name: /open thread/ }).click();
+			await expect(comments).toBeVisible();
+		};
+		const closeComments = async () => {
+			await comments.getByRole('button', { name: 'Close comments', exact: true }).click();
+			await expect(comments).toHaveCount(0);
+		};
+		let reply = await replyField(comments.locator(`[data-comment-id="${retainedId}"]`));
 		await reply.fill(`draft ${stamp}`);
 		await expect(reply).toBeFocused();
-		await reply.evaluate(element => (element as HTMLInputElement).setSelectionRange(2, 5));
+		await reply.evaluate(element => {
+			const input = element as HTMLInputElement;
+			input.setSelectionRange(2, 5);
+			input.dispatchEvent(new Event('select', { bubbles: true }));
+		});
 		const replySelection = () => reply.evaluate(element => {
 			const input = element as HTMLInputElement;
 			return [input.selectionStart, input.selectionEnd];
@@ -74,47 +113,45 @@ test('@slice1 @surface:live-document a refused placement reload at 393 preserves
 		await deleteRenderedLine(writer, removed);
 		await expect(reader.locator('.cm-content')).not.toContainText(removed);
 		await expect(reader.locator('.comment-status:has(.unplaced-dot)')).toBeVisible();
-		const reload = reader.getByRole('button', { name: 'Reload comment placements', exact: true });
+		// Place again is offered only when the orphan's quote remains in the document. Change both nearby contexts,
+		// so the real resolver has no safe range to return and leaves the restored quote replaceable.
+		await writer.keyboard.insertText(`\nchanged-before ${removed} changed-after`);
+		await expect(reader.locator('.cm-content')).toContainText(removed);
+		const reload = comments.getByRole('button', { name: 'Reload comment placements', exact: true });
 		await expect(reload).toBeVisible();
-		const editor = reader.locator('.cm-content');
-		await editor.locator('.cm-line').filter({ hasText: retained }).click();
-		await editor.press('Home');
-		for (let index = 0; index < 4; index += 1) await editor.press('Shift+ArrowRight');
-		const editorSelection = () => reader.evaluate(() => {
-			const selected = window.getSelection();
-			return { text: selected?.toString(), anchor: selected?.anchorOffset, head: selected?.focusOffset,
-				line: selected?.anchorNode?.parentElement?.closest('.cm-line')?.textContent };
-		});
-		const selectedRange = await editorSelection();
-		expect(selectedRange.text).toBe('keep');
 		await reply.focus();
 
 		// A real resolver answer with no range keeps orphan recovery available and announces the count.
 		await reload.click();
-		await expect(reader.getByRole('status').filter({ hasText: "1 comment still couldn't be placed" })).toBeVisible();
-		await expect(reload).toBeVisible();
-		await expect(reload).not.toHaveAttribute('aria-disabled', 'true');
-		await expect(reply).toHaveValue(`draft ${stamp}`);
+		await expect(comments.getByRole('status').filter({ hasText: "1 comment still couldn't be placed" })).toBeVisible();
 		await expect(reload).toBeFocused();
+		await expect(reload).not.toHaveAttribute('aria-disabled', 'true');
+		await closeComments();
+		await openComments();
+		reply = await replyField(comments.locator(`[data-comment-id="${retainedId}"]`));
+		await expect(reply).toHaveValue(`draft ${stamp}`);
+		expect(await reader.evaluate(() => document.activeElement?.getAttribute('placeholder'))).not.toBe('Reply…');
+		await reply.focus();
 		expect(await replySelection()).toEqual([2, 5]);
 		// Refocusing observes the editor's retained range; input focus owns the DOM selection meanwhile.
 		await editor.focus();
 		await expect.poll(editorSelection).toEqual(selectedRange);
-		await reload.focus();
 
 		refuse.arm();
 		await reload.click();
 		await expect.poll(refuse.refused, { timeout: 20_000 }).toBe(1);
-		await expect(reader.getByRole('status').filter({ hasText: "Couldn't reload comment placements" })).toBeVisible();
-		await expect(reload).toBeVisible();
-		await expect(reload).not.toHaveAttribute('aria-disabled', 'true');
-		await expect(reply).toHaveValue(`draft ${stamp}`);
+		await expect(comments.getByRole('status').filter({ hasText: "Couldn't reload comment placements" })).toBeVisible();
 		await expect(reload).toBeFocused();
+		await expect(reload).not.toHaveAttribute('aria-disabled', 'true');
+		await closeComments();
+		await openComments();
+		reply = await replyField(comments.locator(`[data-comment-id="${retainedId}"]`));
+		await expect(reply).toHaveValue(`draft ${stamp}`);
+		await reply.focus();
 		expect(await replySelection()).toEqual([2, 5]);
 		// Refocusing observes the editor's retained range; input focus owns the DOM selection meanwhile.
 		await editor.focus();
 		await expect.poll(editorSelection).toEqual(selectedRange);
-		await reload.focus();
 		await reader.screenshot({ path: testInfo.outputPath('comment-placement-refused-393.png') });
 	} finally {
 		await writerContext.close();
@@ -135,13 +172,63 @@ test('@slice1 @surface:live-document a disconnected 393px placement reload is de
 		const page = await context.newPage();
 		await openLiveDocument(page, document);
 		await deleteRenderedLine(page, quote);
-		const reload = page.getByRole('button', { name: 'Reload comment placements', exact: true });
+		// Place again is offered only for a comment whose text is back, in its old context, so type the quote back where the caret stayed.
+		await page.keyboard.insertText(`\n${quote}`);
+		await page.locator('.comment-status').click();
+		const comments = page.getByRole('region', { name: 'Document comments', exact: true });
+		await expect(comments).toBeVisible();
+		const reload = comments.getByRole('button', { name: 'Reload comment placements', exact: true });
 		await expect(reload).toBeVisible();
 		await link.cut();
 		await expect(reload).toHaveAttribute('aria-disabled', 'true');
 		const describedBy = await reload.getAttribute('aria-describedby');
 		expect(describedBy).toBeTruthy();
 		await expect(page.locator(`#${describedBy}`)).toHaveText(/Disconnected/);
+	} finally {
+		await context.close();
+	}
+});
+
+
+test('@slice1 @surface:live-document Place again follows the quote on screen, and detached cards stay without it', async ({ browser, request }, testInfo) => {
+	test.skip(testInfo.project.name !== 'chromium-desktop', 'The shared 1440 layout carries the footer screenshots.');
+	test.setTimeout(120_000);
+	const stamp = `placement-${Date.now()}`;
+	const quote = `placement quote ${stamp}`;
+	const document = await seedLiveDocument(request, `placement-recovery-${stamp}`, `# Placement recovery ${stamp}\n\n${quote}\n`);
+	await createComment(request, document, quote, `Probe ${stamp}`);
+	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	try {
+		const page = await context.newPage();
+		await openLiveDocument(page, document);
+		await expect(page.locator('.cm-comment-anchor')).toHaveCount(1);
+
+		// The text is gone: the drawer shows the Text changed card without Place again.
+		await deleteRenderedLine(page, quote);
+		await page.locator('.comment-status').click();
+		const comments = page.getByRole('region', { name: 'Document comments', exact: true });
+		await expect(comments).toBeVisible();
+		await expect(comments.getByText(/^Text changed:/)).toHaveCount(1);
+		await expect(comments.locator('[data-drawer-placement]')).toHaveCount(0);
+		await expect(comments.getByRole('button', { name: 'Reload comment placements', exact: true })).toHaveCount(0);
+		await page.screenshot({ path: testInfo.outputPath('place-again-text-gone-1440.png'), animations: 'disabled' });
+
+		// The text comes back: the footer offers Place again.
+		await comments.getByRole('button', { name: 'Close comments', exact: true }).click();
+		await expect(comments).toHaveCount(0);
+		await page.locator('.cm-content').click();
+		await page.keyboard.press('ControlOrMeta+End');
+		await page.keyboard.insertText(`${quote}\n`);
+		await page.locator('.comment-status').click();
+		const reload = comments.getByRole('button', { name: 'Reload comment placements', exact: true });
+		await expect(reload).toBeVisible();
+		await expect(comments.locator('[data-drawer-placement]').getByRole('status')).toHaveText("1 comment couldn't be placed");
+		await page.screenshot({ path: testInfo.outputPath('place-again-text-back-1440.png'), animations: 'disabled' });
+		await reload.click();
+		await expect(page.locator('.cm-comment-anchor')).toHaveCount(1);
+		await expect(comments.getByRole('status').filter({ hasText: 'Comments placed' })).toBeVisible();
+		await expect(reload).toHaveCount(0);
+		await page.screenshot({ path: testInfo.outputPath('place-again-placed-1440.png'), animations: 'disabled' });
 	} finally {
 		await context.close();
 	}

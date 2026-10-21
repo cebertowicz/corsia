@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { mount, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toasts } from '$lib/stores/toast';
 import ToastContainer from './ToastContainer.svelte';
@@ -82,5 +82,315 @@ describe('ToastContainer action', () => {
 		action.blur();
 		await vi.advanceTimersByTimeAsync(1001);
 		expect(get(toasts)).toHaveLength(0);
+	});
+});
+
+function mountContainer() {
+	component = mount(ToastContainer, { target: host });
+	return host.querySelector<HTMLElement>('.toast-container')!;
+}
+
+describe('ToastContainer pinned slot', () => {
+	it('shows the shared spinner and a minimize chevron on progress, with no action', () => {
+		toasts.pin('update', {
+			type: 'progress',
+			message: 'Pausing agents \u00b7 2 of 3',
+			time: '0:18',
+			closeIcon: 'minimize',
+			closeLabel: 'Minimize progress',
+		});
+		mountContainer();
+
+		expect(host.querySelector('.toast .spinner')).toBeTruthy();
+		const close = host.querySelector<HTMLButtonElement>('.toast-close')!;
+		expect(close.getAttribute('aria-label')).toBe('Minimize progress');
+		expect(close.title).toBe('Minimize progress');
+		expect(close.querySelector('svg')).toBeTruthy();
+		expect(close.textContent?.trim()).toBe('');
+		expect(host.querySelector('.toast-action')).toBeNull();
+	});
+
+	it('keeps the same toast when minimize is pressed, and calls the minimize handler', async () => {
+		const onClose = vi.fn();
+		toasts.pin('update', { type: 'progress', message: 'Restarting CORSIA', closeIcon: 'minimize', closeLabel: 'Minimize progress', onClose });
+		mountContainer();
+		const toast = host.querySelector('.toast')!;
+
+		host.querySelector<HTMLButtonElement>('.toast-close')!.click();
+		await tick();
+
+		expect(onClose).toHaveBeenCalledOnce();
+		expect(get(toasts)).toHaveLength(1);
+		expect(host.querySelector('.toast')).toBe(toast);
+	});
+
+	it('shrinks to one pill button that expands on press and on Enter', async () => {
+		const onExpand = vi.fn();
+		toasts.pin('update', { type: 'progress', message: 'Updating', compact: true, expandLabel: 'Show update progress', onExpand });
+		mountContainer();
+
+		const pill = host.querySelector<HTMLElement>('.toast--compact')!;
+		expect(pill.getAttribute('role')).toBe('button');
+		expect(pill.getAttribute('aria-label')).toBe('Show update progress');
+		expect(pill.textContent?.trim()).toBe('Updating');
+		expect(pill.querySelector('.spinner')).toBeTruthy();
+		expect(pill.querySelector('.toast-close, .toast-action, .toast-time')).toBeNull();
+
+		pill.click();
+		pill.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		expect(onExpand).toHaveBeenCalledTimes(2);
+	});
+
+	it('renders the notice as one button with no separate action or close', async () => {
+		const run = vi.fn();
+		toasts.showButton('Update ready. Open Updates', run);
+		mountContainer();
+
+		const notice = host.querySelector<HTMLElement>('.toast--button')!;
+		expect(notice.getAttribute('role')).toBe('button');
+		expect(notice.textContent?.trim()).toBe('Update ready. Open Updates');
+		expect(notice.querySelector('.toast-action, .toast-close')).toBeNull();
+
+		notice.click();
+		await tick();
+		expect(run).toHaveBeenCalledOnce();
+		expect(get(toasts)).toHaveLength(0);
+	});
+
+	it('gives a toast with a body one inset class so the mark, text and controls align', () => {
+		toasts.pin('update', { type: 'error', message: "Update didn't start", detail: 'Needs 12 GB more free space', action: { label: 'Details', run: vi.fn() } });
+		mountContainer();
+
+		expect(host.querySelector('.toast--multi')).toBeTruthy();
+		expect(host.querySelector('.toast--multi .toast-detail')?.textContent).toBe('Needs 12 GB more free space');
+	});
+
+	it('keeps the ticking time out of the live region', () => {
+		toasts.pin('update', {
+			type: 'progress',
+			message: 'Stopping agents · 2 of 3 safe',
+			time: '0:18',
+		});
+		mountContainer();
+
+		const status = host.querySelector('[role="status"]')!;
+		expect(status.textContent).toBe('Stopping agents · 2 of 3 safe');
+		const time = host.querySelector('.toast-time')!;
+		expect(time.getAttribute('aria-hidden')).toBe('true');
+		expect(time.textContent).toBe('0:18');
+		expect(status.contains(time)).toBe(false);
+	});
+
+	it('announces only the new step when the time ticks and the step changes', async () => {
+		toasts.pin('update', { type: 'progress', message: 'Stopping agents', time: '0:01' });
+		mountContainer();
+		const status = host.querySelector('[role="status"]')!;
+		toasts.pin('update', { type: 'progress', message: 'Stopping agents', time: '0:02' });
+		await tick();
+		expect(host.querySelector('[role="status"]')).toBe(status);
+		expect(status.textContent).toBe('Stopping agents');
+		toasts.pin('update', { type: 'progress', message: 'Restarting', time: '0:03' });
+		await tick();
+		expect(host.querySelector('[role="status"]')).toBe(status);
+		expect(status.textContent).toBe('Restarting');
+	});
+
+	it('shows an error as an alert with a leading icon and its Details action', () => {
+		toasts.pin('update', {
+			type: 'error',
+			message: 'Update stopped',
+			action: { label: 'Details', run: vi.fn() },
+		});
+		mountContainer();
+
+		const toast = host.querySelector('.toast')!;
+		expect(toast.getAttribute('role')).toBe('alert');
+		expect(toast.querySelector('svg.toast-icon')).toBeTruthy();
+		expect(toast.querySelector('.toast-action')?.textContent?.trim()).toBe('Details');
+		expect(toast.querySelector('.toast-close')?.getAttribute('aria-label')).toBe('Dismiss');
+	});
+
+	it('leads every pinned state with a glyph, and an ordinary info toast with none', async () => {
+		toasts.pin('update', { type: 'success', message: 'Updated' });
+		mountContainer();
+		expect(host.querySelector('.toast--success svg.toast-icon')).toBeTruthy();
+
+		toasts.pin('update', { type: 'info', message: 'An update is ready' });
+		await tick();
+		expect(host.querySelectorAll('.toast')).toHaveLength(1);
+		expect(host.querySelector('.toast--pinned.toast--info svg.toast-icon--update')).toBeTruthy();
+
+		toasts.show('Saved');
+		await tick();
+		expect(host.querySelector('.toast:not(.toast--pinned) .toast-icon')).toBeNull();
+	});
+
+	it('renders the one ordinary toast below the pinned one, replacing in place', async () => {
+		toasts.pin('update', { type: 'progress', message: 'Restarting' });
+		toasts.show('Archived');
+		mountContainer();
+		expect([...host.querySelectorAll('.toast-text')].map((el) => el.textContent)).toEqual([
+			'Restarting',
+			'Archived',
+		]);
+
+		toasts.show('Moved');
+		await tick();
+		await vi.advanceTimersByTimeAsync(300);
+		expect([...host.querySelectorAll('.toast-text')].map((el) => el.textContent)).toEqual([
+			'Restarting',
+			'Moved',
+		]);
+	});
+
+	it('uses the shipped role on ordinary toasts', () => {
+		toasts.show('Saved');
+		mountContainer();
+		expect(host.querySelector('.toast')?.getAttribute('role')).toBe('status');
+	});
+});
+
+describe('ToastContainer fit', () => {
+	// jsdom has no layout; model a row that overflows until enough has been dropped.
+	let overflowsAt: (fit: string) => boolean;
+
+	beforeEach(() => {
+		overflowsAt = () => false;
+		Object.defineProperty(HTMLElement.prototype, 'scrollWidth', {
+			configurable: true,
+			get(this: HTMLElement) {
+				return this.classList.contains('toast--pinned') &&
+					overflowsAt(this.dataset.fit ?? '')
+					? 500
+					: 100;
+			},
+		});
+		Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+			configurable: true,
+			get: () => 300,
+		});
+	});
+
+	afterEach(() => {
+		delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollWidth;
+		delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientWidth;
+	});
+
+	function pinProgress(time = '0:18') {
+		toasts.pin('update', { type: 'progress', message: 'Stopping agents · 2 of 3 safe', time });
+	}
+
+	it('keeps the whole line when it fits', async () => {
+		pinProgress();
+		mountContainer();
+		await tick();
+		expect(host.querySelector<HTMLElement>('.toast')!.dataset.fit).toBe('full');
+	});
+
+	it('drops the time first when the line would overflow', async () => {
+		overflowsAt = (fit) => fit === 'full';
+		pinProgress();
+		mountContainer();
+		await tick();
+		expect(host.querySelector<HTMLElement>('.toast')!.dataset.fit).toBe('no-time');
+	});
+
+	it('wraps the step text to two lines only when it still does not fit', async () => {
+		overflowsAt = (fit) => fit !== 'wrap';
+		pinProgress();
+		mountContainer();
+		await tick();
+		expect(host.querySelector<HTMLElement>('.toast')!.dataset.fit).toBe('wrap');
+	});
+
+	it('re-settles by measured fit when the content changes, not by breakpoint', async () => {
+		pinProgress('0:09');
+		mountContainer();
+		await tick();
+		const toast = host.querySelector<HTMLElement>('.toast')!;
+		expect(toast.dataset.fit).toBe('full');
+
+		overflowsAt = (fit) => fit === 'full';
+		pinProgress('10:00');
+		await tick();
+		expect(toast.dataset.fit).toBe('no-time');
+
+		overflowsAt = () => false;
+		pinProgress('10:01');
+		await tick();
+		expect(toast.dataset.fit).toBe('full');
+	});
+
+	it('renders a pinned failure detail as a second line', () => {
+		toasts.pin('update', { type: 'error', message: "Update didn't start", detail: 'Needs 12 GB more free space' });
+		mountContainer();
+		expect(host.querySelector('.toast-detail')?.textContent).toBe('Needs 12 GB more free space');
+	});
+
+	it('never measures an ordinary toast', async () => {
+		overflowsAt = () => true;
+		toasts.show('A long ordinary toast');
+		mountContainer();
+		await tick();
+		expect(host.querySelector<HTMLElement>('.toast')!.dataset.fit).toBe('full');
+	});
+});
+
+describe('ToastContainer leave', () => {
+	let leaveOptions: KeyframeAnimationOptions | undefined;
+
+	async function leaveKeyframes(reduced: boolean): Promise<Record<string, unknown>[]> {
+		const original = window.matchMedia;
+		window.matchMedia = ((query: string) => ({
+			matches: reduced && query.includes('prefers-reduced-motion'),
+			media: query,
+			addEventListener() {},
+			removeEventListener() {},
+			addListener() {},
+			removeListener() {},
+			dispatchEvent: () => false,
+		})) as unknown as typeof window.matchMedia;
+		const animate = vi.spyOn(Element.prototype, 'animate');
+		try {
+			toasts.show('Leaving');
+			component = mount(ToastContainer, { target: host });
+			flushSync();
+			animate.mockClear();
+			toasts.dismiss(get(toasts)[0].id);
+			flushSync();
+			await vi.advanceTimersByTimeAsync(10);
+			leaveOptions = animate.mock.calls.map(([, opts]) => opts as KeyframeAnimationOptions).find((opts) => opts?.fill === 'forwards');
+			return animate.mock.calls.flatMap(([frames]) => frames as Record<string, unknown>[]);
+		} finally {
+			animate.mockRestore();
+			window.matchMedia = original;
+		}
+	}
+
+	it('leaves at 70% of the standard duration on the snap easing, both read from the tokens', async () => {
+		const root = document.documentElement.style;
+		root.setProperty('--dur-standard', '200ms');
+		root.setProperty('--ease-snap', 'cubic-bezier(0.2, 0, 0, 1)');
+		try {
+			await leaveKeyframes(false);
+			expect(leaveOptions?.duration).toBe(140);
+			expect(leaveOptions?.easing).toBe('cubic-bezier(0.2, 0, 0, 1)');
+		} finally {
+			root.removeProperty('--dur-standard');
+			root.removeProperty('--ease-snap');
+		}
+	});
+
+	it('fades and drops a leaving toast, the last one included', async () => {
+		const frames = await leaveKeyframes(false);
+		expect(frames.length).toBeGreaterThan(1);
+		expect(frames.some((frame) => 'opacity' in frame)).toBe(true);
+		expect(frames.some((frame) => String(frame.transform ?? '').includes('translateY'))).toBe(true);
+	});
+
+	it('only fades under reduced motion', async () => {
+		const frames = await leaveKeyframes(true);
+		expect(frames.some((frame) => 'opacity' in frame)).toBe(true);
+		expect(frames.some((frame) => 'transform' in frame)).toBe(false);
 	});
 });

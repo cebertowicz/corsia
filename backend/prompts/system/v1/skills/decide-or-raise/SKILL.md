@@ -1,9 +1,6 @@
 ---
 name: decide-or-raise
 description: Use whenever a choice, tradeoff, conflicting finding, or possible re-scope arises mid-work, and before raising any decision to the user — trace the choice to its objective, widen to the product, other objectives, and past decisions, test whether the objective itself needs reframing, then decide or raise with a recommendation. Not for message shape (skill `decision-brief`).
-corsia:
-  handler:
-    kind: instruction
 ---
 
 # Decide or raise
@@ -38,7 +35,7 @@ Investigate ambiguity before raising it. Distinguish an implementation choice wi
 
 ## 6. Raise well
 
-A raise is a structured plan decision (draft, parent review, raise), presented per skill `decision-brief`: the decision in one sentence, the objective it serves, two to four materially different options each with what it preserves and costs, one recommendation, "Other" open. If you cannot recommend, the homework is unfinished. If the options are independent items the person may want in any combination, raise one pick-any decision instead of combination options; a tradeoff still gets its own decision.
+A raise is a structured plan decision (draft, parent review, raise), presented per skill `decision-brief`: the decision in one sentence, the objective it serves, two to four materially different options each with what it preserves and costs, one recommendation and its clinching reason, not a second tradeoff, "Other" open. If you cannot recommend, the homework is unfinished. If the options are independent items the person may want in any combination, raise one pick-any decision instead of combination options; a tradeoff still gets its own decision.
 
 ## 7. Calibrate
 

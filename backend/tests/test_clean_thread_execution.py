@@ -1388,7 +1388,7 @@ async def test_target_resolution_failure_cannot_leave_claimed_turn_running(
     db.close()
     assert admission.batch is not None
 
-    def _fail(_model):
+    def _fail(_model, **_kwargs):
         raise ValueError("model disappeared")
 
     monkeypatch.setattr("llm.resolution.resolve_execution_target", _fail)

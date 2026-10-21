@@ -1,8 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
+import { showAllThreads } from '../support/commentDrawer';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { openUnsentFooter } from '../support/docFeedbackFooter';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -105,8 +108,9 @@ test('@surface:doc-feedback-delivery closes a due user batch in the open canvas'
 	await loginByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
-	const send = page.getByRole('button', { name: /Send 1 comment/ });
-	await expect(send).toBeVisible();
+	// The pending batch shows as the comments drawer's Send now footer, which goes once the batch is delivered.
+	const send = await openUnsentFooter(page);
+	await expect(send.getByRole('button', { name: 'Send now', exact: true })).toBeVisible();
 	await page.evaluate(() => {
 		(window as Window & { feedbackVisibilityChanges?: number }).feedbackVisibilityChanges = 0;
 		document.addEventListener('visibilitychange', () => {
@@ -163,7 +167,8 @@ test('@surface:doc-reopen-feedback-delivery sends a re-opened comment to the doc
 	await loginByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
-	await page.getByRole('button', { name: '1 comment', exact: true }).click();
+	await page.getByRole('button', { name: /^1 open thread\b/ }).click();
+	await showAllThreads(page.getByRole('region', { name: 'Document comments', exact: true }));
 	const comment = page.getByRole('region', { name: /^Comment by / });
 	await expect(comment).toContainText('Please revisit this comment.');
 	await comment.getByRole('button', { name: 'Resolve', exact: true }).click();
@@ -173,8 +178,9 @@ test('@surface:doc-reopen-feedback-delivery sends a re-opened comment to the doc
 	// The document has an owner, so the card says a re-open reaches it.
 	await expect(resolved).toContainText('Re-open asks the agent to revisit.');
 	await resolved.getByRole('button', { name: 'Re-open', exact: true }).click();
-	await expect(page.getByRole('button', { name: /Send 1 comment/ })).toBeVisible();
-	await page.getByRole('button', { name: /Send 1 comment/ }).click();
+	const footer = page.getByRole('region', { name: 'Document comments' }).locator('[data-drawer-unsent]');
+	await expect(footer).toContainText('1 message not sent yet');
+	await footer.getByRole('button', { name: 'Send now', exact: true }).click();
 	await expect.poll(() => deliveredOwnerTask(artifactId), { timeout: 20_000 }).toMatchObject({
 		title: expect.stringMatching(/re-opened 1 comment/),
 		description: expect.stringContaining(`Comment ${commentId} (re-opened by`),

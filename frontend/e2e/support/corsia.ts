@@ -25,7 +25,7 @@ export const TEST_TOKEN = requireTestToken();
 export const TEST_SESSION_TOKEN = requireTestSessionToken();
 
 export async function openAppByUrl(page: Page, { timeout = 20_000 }: { timeout?: number } = {}) {
-	await page.goto(`/?token=${TEST_TOKEN}`);
+	await page.goto(`/?token=${TEST_SESSION_TOKEN}`);
 	await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible({ timeout });
 }
 
@@ -33,8 +33,7 @@ export async function loginByUrl(
 	page: Page,
 	{ waitForComposer = true }: { waitForComposer?: boolean } = {},
 ) {
-	await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
-	await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible({ timeout: 20_000 });
+	await openAppPastLanding(page);
 	if (waitForComposer) {
 		if ((page.viewportSize()?.width ?? 0) <= 768) {
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
@@ -46,17 +45,17 @@ export async function loginByUrl(
 
 /**
  * Runs one page load and waits out the first-run landing it can trigger. A fresh
- * workspace answers /api/conductor with first_run_pending, and on every load the
+ * workspace answers /api/corsia-agent with first_run_pending, and on every load the
  * app then opens the conductor thread, which closes the phone sidebar. Opening the
  * rail before that lands races it: the sidebar closes under the click and the
- * shell header covers the rail. The page's own /api/conductor response is not read,
+ * shell header covers the rail. The page's own /api/corsia-agent response is not read,
  * because a response from the page being left can match and its body is gone once
  * the navigation replaces it. Off the root the landing's composer is its proof. At
  * the root the composer is up before the landing, so a caller whose load lands
  * there passes `lands` and waits for the conductor's messages instead.
  */
 export async function loadPastFirstRunLanding(page: Page, load: () => Promise<unknown>, { lands = false } = {}) {
-	const conductor = await page.request.get(`/api/conductor?token=${TEST_TOKEN}`);
+	const conductor = await page.request.get(`/api/corsia-agent?token=${TEST_TOKEN}`);
 	expect(conductor.ok(), 'the conductor state is readable').toBeTruthy();
 	const state = await conductor.json();
 	const firstRunPending = state.first_run_pending === true;
@@ -70,6 +69,27 @@ export async function loadPastFirstRunLanding(page: Page, load: () => Promise<un
 	else if (firstRunPending) await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible();
 }
 
+/**
+ * Opens the signed-in shell for a spec that then picks its own thread. The
+ * conductor landing, and with it a composer at the root, exists only while the
+ * workspace's first run is pending. Every spec file starts with it pending (see
+ * `support/test.ts`), and a test of the file that hands the first run off ends it
+ * for the tests after it, so a spec must not read the composer as its ready
+ * signal: it waits for the landing when the product says one is coming, and the
+ * shell is its proof otherwise.
+ */
+export async function openAppPastLanding(page: Page) {
+	await loadPastFirstRunLanding(page, () => openAppByUrl(page));
+}
+
+/**
+ * The sidebar's row for a thread. The Activity landing lists the same title in the main column, so a bare
+ * getByText(title) matches both; a spec that means to open the thread scopes to the rail it opens it from.
+ */
+export function sidebarThread(page: Page, title: string) {
+	return page.locator('aside.sidebar').getByText(title, { exact: true });
+}
+
 export async function openSettings(page: Page) {
 	const settingsButton = page.locator('button[title="Settings"]').first();
 	if ((page.viewportSize()?.width ?? 0) <= 768) {
@@ -77,7 +97,24 @@ export async function openSettings(page: Page) {
 		await expect(settingsButton).toBeVisible();
 	}
 	await settingsButton.click();
-	await expect(page.getByRole('button', { name: 'Providers' })).toBeVisible();
+	const providers = (page.viewportSize()?.width ?? 0) <= 768
+		? page.locator('.settings-view .mobile-root [data-settings-section="providers"] button.face')
+		: page.locator('.settings-view .desktop-nav [data-settings-section="providers"]');
+	await expect(providers).toBeVisible();
+}
+
+/** Opens a Settings section through the navigation that is visible at this width. */
+export async function openSettingsSection(page: Page, section: string) {
+	if ((page.viewportSize()?.width ?? 0) <= 768) {
+		const root = page.locator('.settings-view .mobile-root');
+		if (!(await root.isVisible())) {
+			await page.locator('.shell-header .h-back').click();
+			await expect(root).toBeVisible();
+		}
+		await root.locator(`[data-settings-section]`).getByRole('button', { name: section, exact: true }).click();
+		return;
+	}
+	await page.locator('.settings-view .desktop-nav').getByRole('button', { name: section, exact: true }).click();
 }
 
 export async function saveEvidenceScreenshot(
@@ -215,7 +252,10 @@ export function captureFailedRequests(page: Page, predicate: (url: string) => bo
 	const failed: string[] = [];
 	page.on('requestfailed', (req) => {
 		const url = req.url();
-		if (predicate(url)) failed.push(url);
+		// A GET the app cancels itself (supersedingRead cancels an in-flight message read when the thread
+		// changes) is not a failure; an aborted mutation, or any other transport error, still is.
+		const cancelledRead = req.method() === 'GET' && req.failure()?.errorText === 'net::ERR_ABORTED';
+		if (predicate(url) && !cancelledRead) failed.push(url);
 	});
 	page.on('response', (resp) => {
 		const url = resp.url();
@@ -245,9 +285,11 @@ export function assistantMessages(page: Page) {
 export function captureConsoleErrors(page: Page): string[] {
 	const errors: string[] = [];
 	page.on('console', (msg) => {
-		if (msg.type() === 'error') {
-			errors.push(msg.text());
-		}
+		if (msg.type() !== 'error') return;
+		// The disposable test token is not a human user, so the lease list (`require_human_user` in
+		// backend/api/host_access.py) answers 403 and HostAccessLeaseControl hides that failure; only the browser logs it.
+		if (msg.text().includes('403 (Forbidden)') && msg.location().url.includes('/api/host-access/leases')) return;
+		errors.push(msg.text());
 	});
 	page.on('pageerror', (err) => {
 		errors.push(`pageerror: ${err.message}`);

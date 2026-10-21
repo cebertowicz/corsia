@@ -9,7 +9,7 @@ _MUTATION_REQUIRED = {
     "add": {"title", "acceptance_criteria"},
     "insert": {"title", "acceptance_criteria"},
     "edit": {"node_id", "expected_revision"},
-    "split": {"node_id", "title", "acceptance_criteria", "expected_revision"},
+    "split": {"node_id", "title", "acceptance_criteria", "size", "expected_revision"},
     "reorder": {"node_id", "order_key", "expected_revision"},
     "activate": {"node_id", "expected_revision"},
     "start": {"node_id", "expected_revision"},
@@ -30,7 +30,7 @@ _MUTATION_REQUIRED = {
     },
     "accept": {"node_id", "expected_revision"},
     "accept_with_follow_up": {
-        "node_id", "title", "acceptance_criteria", "expected_revision",
+        "node_id", "title", "acceptance_criteria", "size", "expected_revision",
     },
     # expected_event, or a reason that schedules the task instead.
     "arm_watch": {"node_id", "condition", "expected_revision"},
@@ -38,7 +38,7 @@ _MUTATION_REQUIRED = {
     "add_dependency": {"node_id", "depends_on_node_id", "expected_revision"},
     "remove_dependency": {"node_id", "depends_on_node_id", "expected_revision"},
     "add_follow_up": {
-        "node_id", "title", "acceptance_criteria", "expected_revision",
+        "node_id", "title", "acceptance_criteria", "size", "expected_revision",
     },
     "add_correction": {
         "node_id", "title", "acceptance_criteria", "affected_nodes",
@@ -150,6 +150,33 @@ def test_plan_decision_schema_covers_exact_operation_vocabulary():
             assert "decision revision" in revision["description"].lower()
 
 
+def test_plan_decision_rationale_publishes_its_purpose_and_limit():
+    from tools.plans import PlanDecisionTool
+
+    errors = PlanDecisionTool().validate_params({
+        "plan_id": "plan-1",
+        "mutation_id": "rationale-purpose",
+        "operation": "draft",
+        "params": {
+            "source_node_id": "node-1",
+            "title": "Choose a path",
+            "context": "The decision needs a concise rationale.",
+            "tradeoff": "Speed versus certainty.",
+            "recommendation": "A",
+            "rationale": "r" * 241,
+            "options": [
+                {"id": "A", "label": "A", "detail": "First"},
+                {"id": "B", "label": "B", "detail": "Second"},
+            ],
+            "other_enabled": True,
+        },
+    })
+
+    assert errors == ["params.rationale must be at most 240 chars"]
+    rationale = PlanDecisionTool().parameters["properties"]["params"]["properties"]["rationale"]
+    assert rationale["description"].startswith("Why you recommend it")
+
+
 @pytest.mark.parametrize("operation", sorted(_MUTATION_REQUIRED))
 def test_plan_update_schema_accepts_operation_shape_and_rejects_cross_fields(operation):
     from tools.plans import PlanUpdateTool
@@ -157,6 +184,7 @@ def test_plan_update_schema_accepts_operation_shape_and_rejects_cross_fields(ope
     params = {
         "node_id": "node-1",
         "kind": "task",
+        "size": "S",
         "title": "Do work",
         "description": "Bounded work",
         "acceptance_criteria": "Evidence is recorded",
@@ -213,7 +241,7 @@ _CLOSING_FIELDS = {
         "next_node_id",
     },
     "accept_with_follow_up": {
-        "node_id", "title", "acceptance_criteria", "verification_result",
+        "node_id", "title", "acceptance_criteria", "size", "verification_result",
         "evidence", "expected_revision", "next_node_id",
     },
     # Bulk archive is the one closing body with no single node to describe, so
@@ -344,7 +372,9 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # plan_decision 2,600 -> 3,000 (pick-any): `pick` and the list form of `recommendation` are published at the field, because an agent never told of them raises combination options instead.
 # plan_update 8,975 -> 9,076 (+101): `mark_done` also settles a step assigned to the user, so the line says
 # so, asks for evidence in plain words because the person reads it, and sends approvals to a decision.
-_PUBLISHED_BYTES = {"plan_update": 9_076, "plan_decision": 3_000}
+# plan_decision 3,000 -> 3,100: `rationale` publishes its purpose and 240-character limit at the field,
+# because the recommended option now shows it inline and an agent never told writes a second tradeoff.
+_PUBLISHED_BYTES = {"plan_update": 9_076, "plan_decision": 3_100}
 
 
 def test_the_operation_text_names_each_neighboring_settlement_choice():

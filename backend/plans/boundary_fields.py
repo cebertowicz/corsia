@@ -5,10 +5,16 @@ from __future__ import annotations
 from typing import Any
 
 import plans.service as service
+from plans.size_fields import require_task_size, validate_size
 
 #: Re-exported so this module's raise sites read against one taxonomy. The class
 #: is owned by `plans.errors`.
 PlanInputError = service.PlanInputError
+
+USER_STEP_TRIED_MARKER = "Already tried:"
+USER_STEP_DESCRIPTION_REFUSAL = (
+    "user steps need instructions with 'Already tried: …'; add what you tried"
+)
 
 _CREATE = {
     "kind",
@@ -64,6 +70,7 @@ OPERATION_FIELDS = {
         "title",
         "acceptance_criteria",
         "description",
+        "size",
         "expected_revision",
     },
     "reorder": {"node_id", "order_key", "expected_revision"},
@@ -76,6 +83,7 @@ OPERATION_FIELDS = {
         "node_id",
         "title",
         "acceptance_criteria",
+        "size",
         "expected_revision",
     },
     "archive_node": {"node_id", "node_ids", "expected_revision"} | _NEXT,
@@ -114,6 +122,7 @@ OPERATION_FIELDS = {
         "node_id",
         "title",
         "acceptance_criteria",
+        "size",
         "verification_result",
         "evidence",
         "expected_revision",
@@ -140,12 +149,12 @@ OPERATION_REQUIRED_FIELDS = {
     "resume": {"expected_revision"},
     "insert": {"title", "acceptance_criteria"},
     "edit": {"node_id", "expected_revision"},
-    "split": {"node_id", "title", "acceptance_criteria", "expected_revision"},
+    "split": {"node_id", "title", "acceptance_criteria", "size", "expected_revision"},
     "reorder": {"node_id", "order_key", "expected_revision"},
     "add_dependency": {"node_id", "depends_on_node_id", "expected_revision"},
     "remove_dependency": {"node_id", "depends_on_node_id", "expected_revision"},
     "add_follow_up": {
-        "node_id", "title", "acceptance_criteria", "expected_revision",
+        "node_id", "title", "acceptance_criteria", "size", "expected_revision",
     },
     # Two valid bodies, which one required set cannot express: one node with
     # its revision, or ``node_ids`` alone. ``_validate_archive_target`` is the
@@ -174,7 +183,7 @@ OPERATION_REQUIRED_FIELDS = {
     },
     "accept": {"node_id", "expected_revision"},
     "accept_with_follow_up": {
-        "node_id", "title", "acceptance_criteria", "expected_revision",
+        "node_id", "title", "acceptance_criteria", "size", "expected_revision",
     },
     "add_correction": {
         "node_id", "title", "acceptance_criteria", "affected_nodes",
@@ -264,6 +273,20 @@ def _require_revision(params: dict) -> None:
         )
 
 
+def _user_step_description(params: dict[str, Any]) -> None:
+    """Require a person-facing how-to and the agent's attempted route."""
+    if params.get("kind", "task") != "task" or params.get("assignee") != "user":
+        return
+    description = params.get("description")
+    if (
+        not isinstance(description, str)
+        or not description.strip()
+        or USER_STEP_TRIED_MARKER.casefold() not in description.casefold()
+        or not description.casefold().split(USER_STEP_TRIED_MARKER.casefold(), 1)[1].strip()
+    ):
+        raise PlanInputError(USER_STEP_DESCRIPTION_REFUSAL)
+
+
 def node_fields(
     params: dict[str, Any], *, workflow_version: str | None = None,
     include_before: bool = True,
@@ -273,8 +296,14 @@ def node_fields(
     ``workflow_version`` is resolved by the server from the named workflow
     skill, never read from caller params.
     """
+    _user_step_description(params)
+    kind = params.get("kind", "task")
+    size = (
+        require_task_size(params.get("size")) if kind == "task"
+        else validate_size(params.get("size"))
+    )
     return {
-        "kind": params.get("kind", "task"),
+        "kind": kind,
         "title": text(params, "title"),
         "acceptance_criteria": text(params, "acceptance_criteria"),
         "parent_id": params.get("parent_id"),
@@ -283,7 +312,7 @@ def node_fields(
         "workflow_version": workflow_version,
         "workflow_step": params.get("workflow_step"),
         "difficulty": params.get("difficulty"),
-        "size": params.get("size"),
+        "size": size,
         "checkpoint_exception": bool(params.get("checkpoint_exception", False)),
         "assignee": params.get("assignee"),
         "spawn_kind": params.get("spawn_kind"),
@@ -303,8 +332,6 @@ def edit_fields(params: dict[str, Any]) -> dict[str, Any]:
         if key in params
     }
     if "size" in params:
-        from plans.size_fields import validate_size
-
         fields["size"] = validate_size(params["size"])
     if "difficulty_rerated" in params:
         from plans.workflow_fields import rerating

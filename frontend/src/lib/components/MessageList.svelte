@@ -24,6 +24,8 @@
 	import { runHasMore, type RunLoad, type RunStub } from '$lib/focusRuns';
 	import { needsWakeRetry } from './pendingWakeRetry';
 	import { isHumanMessage } from './transcriptRowKinds';
+	import { NEAR_BOTTOM_PX } from '$lib/nearBottom';
+	import { createFocusWorkBlock } from './focusWorkBlock.svelte';
 
 	let { messagesEl = $bindable(), userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
 		messagesEl: HTMLDivElement | undefined;
@@ -53,6 +55,7 @@
 	const renderedThreadId = $derived(threadId ?? $activeThreadId);
 	const messageRows = $derived($messages.filter((m) => m.thread_id === renderedThreadId));
 	const renderedStreaming = $derived(isThreadTurnActive($turnStates, renderedThreadId));
+	const focusLive = createFocusWorkBlock(() => renderedThreadId, () => focusMode);
 	const checkpointState = $derived(
 		renderedThreadId ? $checkpointsByThread.get(renderedThreadId) : undefined,
 	);
@@ -116,7 +119,7 @@
 		};
 	});
 	const liveTurn = $derived(
-		renderedStreaming
+		focusLive.current.active
 			? { turnId: renderedThreadId ? $turnStates.get(renderedThreadId)?.turnId ?? null : null }
 			: null,
 	);
@@ -169,7 +172,6 @@
 			? buildTranscriptPresentation([presentation.pendingContextDigest], focusMode, null, 'run:pending-context') : []),
 		...buildTranscriptPresentation(pendingDeliveryMessages.filter((msg) => !focusMode || isHumanMessage(msg)), focusMode),
 	]);
-	const NEAR_BOTTOM_PX = 80;
 	// Programmatic scrolling ends on any real gesture; never undo a user's reread.
 	let pendingReleaseFrame: number | null = null;
 	// A deferred pin abandons itself when a newer gesture takes over.
@@ -250,11 +252,7 @@
 			if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
 		});
 	}
-	// The composer's floater and the measured attention rail both grow the
-	// transcript's terminal reservation. If either grows while the user is at
-	// live edge, that edge moves below the viewport even though the user never
-	// scrolled. Re-pin only in that case: reading history keeps its position and
-	// may intentionally pass beneath the overlay.
+	// Re-pin a live-edge transcript when the composer or attention rail grows; preserve a reader's history position.
 	let wasPinnedBeforeLayoutChange = $state(true);
 	$effect(() => {
 		wasPinnedBeforeLayoutChange = userIsNearBottom;
@@ -305,7 +303,7 @@
 			<svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 			<span>Loading this thread…</span>
 		</div>
-	{:else if messageRows.length === 0 && !renderedStreaming}
+	{:else if messageRows.length === 0 && !focusLive.current.active}
 		<EmptyChatState />
 	{/if}
 	<OlderHistoryRow loading={loadingOlderMessages} failed={olderLoadFailed} hasMore={hasMoreMessages} hasRows={messageRows.length > 0} onLoadOlder={loadOlderForVisibleEntry} />
@@ -322,6 +320,7 @@
 			{onOpenLightbox}
 			threadId={renderedThreadId}
 			{renderedStreaming}
+			liveRollup={focusLive.current}
 			checkpoint={transcriptCheckpoint}
 			{turnSummaries}
 			pauses={focusMode ? [] : pauseDescriptors}
@@ -330,7 +329,7 @@
 			{onLoadRun}
 		/>
 	</div>
-{#if !userIsNearBottom && (renderedStreaming || messageRows.length > 0)}
+{#if !userIsNearBottom && (focusLive.current.active || messageRows.length > 0)}
 	<button class="scroll-fab" onclick={scrollToBottom} aria-label="Scroll to bottom" title="Scroll to bottom">
 		<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
 	</button>
@@ -358,15 +357,15 @@
 	   sticky chrome then pins at `--sticky-top`, 8px under the header. */
 	.messages {
 		flex: 1; overflow-y: auto;
-		--sticky-top: calc(var(--header-height, 0px) + 8px);
-		--messages-lead: calc(var(--header-height) + 24px);
+		--sticky-top: calc(var(--header-bottom) + 8px);
+		--messages-lead: calc(var(--header-bottom) + 24px);
 		padding: 0 16px calc(var(--input-bar-height, 100px) + 16px);
 	}
 	.messages::before { content: ''; display: block; flex: none; height: var(--messages-lead); }
 	@media (max-width: 768px) {
 		.messages {
-			--sticky-top: calc(var(--header-height, 0px) + env(safe-area-inset-top, 0px) + 8px);
-			--messages-lead: var(--messages-pad-top, calc(var(--header-height) + 24px + env(safe-area-inset-top, 0px)));
+			--sticky-top: calc(var(--header-bottom) + 8px);
+			--messages-lead: var(--messages-pad-top, calc(var(--header-bottom) + 24px));
 			padding-left: 12px;
 			padding-right: 12px;
 			padding-bottom: calc(var(--input-bar-height, 100px) + var(--kb-toolbar-inset, 0px) + var(--empty-parallax-offset, 0px) + 16px);

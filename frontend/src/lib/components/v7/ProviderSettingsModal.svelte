@@ -7,14 +7,13 @@
 	} from '$lib/stores/providers';
 	import { removeNetworkServer, testNetworkServer } from '$lib/stores/networkServers';
 	import { hostGroups, loadHostGroups, type HostProvider } from '$lib/stores/providersV7';
-	import { projectSettingsOpen } from '$lib/stores/projectSettings';
-	import { threadSettingsOpen } from '$lib/stores/threadSettings';
-	import { workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
+	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { Button, Field, Message, Modal } from '$lib/components/ui';
 	import ConfirmDialog from '../ConfirmDialog.svelte';
 	import CostPanel from './CostPanel.svelte';
 	import ExternalProviderSettings from './ExternalProviderSettings.svelte';
 	import OmlxServerInfoPanel from './OmlxServerInfoPanel.svelte';
+
 	import ProviderEndpointsTab from './ProviderEndpointsTab.svelte';
 	import ProviderSettingsHeader from './ProviderSettingsHeader.svelte';
 	import ProviderStatusCard from './ProviderStatusCard.svelte';
@@ -23,10 +22,11 @@
 
 	interface Props {
 		provider: HostProvider;
+		initialTab?: ProviderSettingsTab;
 		onClose: () => void;
 	}
 
-	const { provider: providerProp, onClose }: Props = $props();
+	const { provider: providerProp, initialTab, onClose }: Props = $props();
 
 	const providerIndex = $derived.by((): Map<string, HostProvider> => {
 		const m = new Map<string, HostProvider>();
@@ -42,7 +42,7 @@
 		providerIndex.get(`${providerProp.name}|${providerProp.server?.id ?? ''}`) ?? providerProp,
 	);
 
-	let activeTab = $state<ProviderSettingsTab>('overview');
+	let activeTab = $state<ProviderSettingsTab>(initialTab ?? 'overview');
 	onMount(() => { if (providerProp.type === 'harness') activeTab = 'accounts'; });
 	let actionError = $state('');
 	let actionMessage = $state('');
@@ -81,11 +81,9 @@
 
 	function clearMessages() { actionError = ''; actionMessage = ''; }
 
-	function openWorkspaceSettings() {
-		threadSettingsOpen.set(false);
-		projectSettingsOpen.set(false);
-		workspaceSettingsOpen.set(true);
+	function openAccountOrder() {
 		onClose();
+		requestSettingsSection('providers', 'workspace-provider-policy');
 	}
 
 	async function handleTest() {
@@ -239,7 +237,7 @@
 
 	{#if activeTab === 'accounts' && provider.type === 'harness'}
 		<AccountsBlock {provider} />
-		<p class="policy-pointer">Rollover and account order are set in <button class="policy-link" onclick={openWorkspaceSettings}>Workspace settings</button>.</p>
+		<p class="policy-pointer">Rollover and account order are set in <button class="policy-link" onclick={openAccountOrder}>Accounts and rollover</button>.</p>
 	{:else if activeTab === 'overview'}
 		<ProviderStatusCard {provider} />
 
@@ -255,6 +253,7 @@
 						<Button variant="primary" disabled={busy} onclick={() => handleDaemonAction('start')}>Start daemon</Button>
 					{/if}
 					<Button disabled={busy} onclick={handleTestLocal}>{busy ? 'Testing…' : 'Test connection'}</Button>
+
 				{:else}
 					<Button disabled={busy} onclick={handleTestLocal}>{busy ? 'Testing…' : 'Test connection'}</Button>
 				{/if}
@@ -298,7 +297,6 @@
 	description={removeDescription}
 	confirmLabel="Remove"
 	destructive
-	icon="delete"
 	onConfirm={handleDelete}
 	onCancel={() => (confirmingRemove = false)}
 />

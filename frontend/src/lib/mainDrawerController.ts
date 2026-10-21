@@ -38,12 +38,16 @@ export function createMainDrawerController(options: DrawerControllerOptions) {
 		if (!mainEl) return;
 		mainEl.style.transition = 'none';
 		mainEl.style.transform = `translateX(${dx}px)`;
+		// Marks which drawer the finger is moving, so the phone card rounds its left edge
+		// during a sidebar drag as it does once open (HomeShell.svelte).
+		mainEl.dataset.drawerDrag = dragKind ?? 'sidebar';
 	};
 	const clearDragTransform = () => {
 		const mainEl = options.getMainEl();
 		if (!mainEl) return;
 		mainEl.style.transition = '';
 		mainEl.style.transform = '';
+		delete mainEl.dataset.drawerDrag;
 	};
 
 	const onTouchStart = (e: TouchEvent) => {

@@ -224,7 +224,7 @@ def _claimable_prefix(
     from infra.send_target import lifted_hold_ids
 
     rows = still_claimable(connection, thread_id, rows)
-    lifted = lifted_hold_ids(rows, model, db=connection)
+    lifted = lifted_hold_ids(rows, model, db=connection, thread_id=thread_id)
     rows = _deliverable_prefix(rows, lifted)
     if not rows or not any(starts_turn(row) for row in rows):
         return None
@@ -364,6 +364,10 @@ def claim_safe_boundary(
                 thread_id, turn_id,
             )
             return None
+        from automation.self_restart import restart_holds_new_work
+
+        if restart_holds_new_work(db=connection):  # draining toward a restart: queued input waits for it
+            return None
         epoch = int(turn["execution_epoch"])
         model = str(turn["model"])
         rows = _queued_epoch_prefix(
@@ -377,14 +381,7 @@ def claim_safe_boundary(
         rows = still_claimable(connection, thread_id, rows)
         lifted = boundary_account_lifted_ids(connection, thread_id, turn, rows)
         rows = _deliverable_prefix(rows, lifted)
-        last_send = next(
-            (
-                index
-                for index in range(len(rows) - 1, -1, -1)
-                if rows[index]["delivery_intent"] == "apply_now"
-            ),
-            None,
-        )
+        last_send = max((i for i, row in enumerate(rows) if row["delivery_intent"] == "apply_now"), default=None)
         if last_send is None:
             # Temporary diagnosis for silent False starvation; delete with its root-cause fix.
             # Never add retry, repair, or suppression here.

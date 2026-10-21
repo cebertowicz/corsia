@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -13,12 +14,12 @@ from connections import harness_usage
 from core import checkpoint_runtime
 from core.checkpoint_resume import ProviderBoundary, _start_checkpoint
 from core.checkpoint_runtime import CheckpointTargetLimited, request_checkpoint
+from core.checkpoint_types import CheckpointProviderForkRequest
 from core.checkpoint_types import (
     CheckpointRequest,
     CheckpointUnavailable,
     IdleCheckpointDisposition,
     IdleCheckpointReason,
-    ProviderCheckpointRequest,
 )
 from core.checkpoint_warm_request import CheckpointAdmission
 from infra.database import get_db
@@ -62,14 +63,69 @@ def _seed(thread_id: str, model: str) -> None:
         db.close()
 
 
-def _limit_sonnet() -> None:
+def _limit_sonnet(*, account_id: str | None = None, resets_at: str | None = None) -> None:
     """A Sonnet-scoped limit: Sonnet is limited, Opus on the same connection is not."""
     db = get_db()
     try:
         harness_usage.record_limited(
-            provider="claude-code", reason="weekly", resets_at=_future(),
-            scope_model="sonnet", source="test", db=db, receipt=default_receipt("claude-code", db=db),
+            provider="claude-code", reason="weekly", resets_at=resets_at or _future(),
+            scope_model="sonnet", source="test", db=db,
+            receipt=default_receipt("claude-code", db=db) if account_id is None else default_receipt_for(account_id, db=db),
         )
+    finally:
+        db.close()
+
+
+def default_receipt_for(account_id: str, *, db):
+    from connections.account_receipts import capture_receipt
+
+    receipt = capture_receipt("claude-code", account_id=account_id, db=db)
+    assert receipt is not None
+    return receipt
+
+
+def _configure_rollover(thread_id: str, *, enabled: bool) -> tuple[str, str]:
+    from connections.account_evidence import mark_discovery
+    from connections.provider_policy import effective_policy, set_policy
+    from connections.account_policy import select_account
+    from connections.vendor_accounts import add_account, set_account_state
+    from vendor_account_fixtures import default_id
+
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT OR IGNORE INTO models "
+            "(id,display_name,litellm_model,provider,provider_model_id,harness,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (SONNET, "Sonnet", SONNET, "claude-code", "sonnet", "claude-code", "t", "t"),
+        )
+        db.execute("UPDATE models SET context_window=200000 WHERE id=?", (SONNET,))
+        db.commit()
+        first = default_id("claude-code", db=db)
+        second = add_account("claude-code", "Claude rollover")
+        second = set_account_state(second["id"], "signed_in", expected_revision=0)
+        for account_id in (first, second["id"]):
+            receipt = default_receipt_for(account_id, db=db)
+            assert mark_discovery(
+                account_id, receipt=receipt, status="ready",
+                models={SONNET: {"available": True, "context_window": 200_000}}, db=db,
+            )
+        policy = effective_policy(None, "claude-code", db=db)
+        set_policy(
+            None, "claude-code", rollover=enabled, order=[first, second["id"]],
+            disabled=[], expected_revision=policy["revision"], db=db,
+        )
+        db.commit()
+        from infra.database import write_transaction
+
+        with write_transaction(db, scope="configure_rollover_account"):
+            harness_usage.record_allowed(
+                provider="claude-code", receipt=default_receipt_for(second["id"], db=db),
+                source="discovery", db=db,
+            )
+        select_account(thread_id, "claude-code", account_id=first, db=db)
+        db.commit()
+        return first, second["id"]
     finally:
         db.close()
 
@@ -77,7 +133,7 @@ def _limit_sonnet() -> None:
 def _pair(
     thread_id: str, checkpoint_id: str, target_model: str, *,
     trigger: str = "pressure", turn_id: str | None = "turn-1",
-) -> tuple[CheckpointRequest, ProviderCheckpointRequest]:
+) -> tuple[CheckpointRequest, CheckpointProviderForkRequest]:
     request = CheckpointRequest(
         id=checkpoint_id, thread_id=thread_id, history_epoch=0,
         previous_generation_id=None, through_seq=3,
@@ -86,8 +142,8 @@ def _pair(
         writer_harness="claude-code", writer_model=target_model,
         originating_turn_id=turn_id, first_included_seq=1, started_at="t1",
     )
-    provider = ProviderCheckpointRequest(
-        checkpoint_id=checkpoint_id, thread_id=thread_id,
+    provider = CheckpointProviderForkRequest(
+        fork_id=checkpoint_id, thread_id=thread_id,
         target=_target(target_model), instruction="fold", reasoning_effort=None,
         working_dir="/tmp", warm_source=object(),
     )
@@ -123,6 +179,112 @@ async def test_limited_target_is_refused_before_any_row_or_provider_call(isolate
     launch.assert_not_called()
 
 
+def test_model_switch_target_checkpoint_freezes_the_turn_claim_account(isolated_db, monkeypatch):
+    from core.checkpoint_warm_request import CheckpointAdmission
+    from thread import model_checkpoint
+
+    _seed("switch-preparation", SONNET)
+    first, second = _configure_rollover("switch-preparation", enabled=True)
+    _limit_sonnet(account_id=first)
+    checkpoint, provider = _pair("switch-preparation", "c-preparation", SONNET, trigger="model_switch")
+    context = SimpleNamespace(
+        source_target=None, destination_target=_target(SONNET), boundary=None,
+        previous=None, projection=None, working_dir="/tmp", reasoning_effort=None,
+        destination_binary=None, destination_mcp_config=None,
+    )
+    switch = SimpleNamespace(thread_id="switch-preparation", source_model=SONNET)
+    monkeypatch.setattr(model_checkpoint, "read_switch_checkpoint_context", lambda _request: context)
+    monkeypatch.setattr(
+        "core.checkpoint_cold_admission.build_checkpoint_admission",
+        lambda **_kwargs: CheckpointAdmission(checkpoint, provider),
+    )
+
+    admission = model_checkpoint._target_cold_admission(switch, "c-preparation")
+
+    assert admission.provider_request.vendor_account_id == second
+    assert admission.provider_request.vendor_account_bound is True
+
+
+@pytest.mark.asyncio
+async def test_target_checkpoint_claims_ready_rollover_account(isolated_db, launch):
+    from core.fork_account import admit_fork
+
+    _seed("rollover", SONNET)
+    first, second = _configure_rollover("rollover", enabled=True)
+    _limit_sonnet(account_id=first)
+    request, provider = _pair("rollover", "c-rollover", SONNET)
+    from connections.account_policy import turn_account
+
+    db = get_db()
+    try:
+        assert turn_account("claude-code", thread_id="rollover", model=SONNET, db=db) == (second, None)
+    finally:
+        db.close()
+
+    provider = replace(provider, vendor_account_id=second, vendor_account_bound=True)
+    record = await request_checkpoint(request, provider)
+
+    assert record.id == "c-rollover"
+    launched = launch.call_args.args[1]
+    assert admit_fork(launched).vendor_account_id == second
+
+
+@pytest.mark.asyncio
+async def test_unbound_fold_holds_on_limited_chosen_account_even_with_a_ready_rollover_account(
+    isolated_db, launch,
+):
+    """A pressure fold launches on the chosen account, so the gate checks that one."""
+    from core.fork_account import admit_fork
+
+    _seed("unbound-rollover", SONNET)
+    first, _second = _configure_rollover("unbound-rollover", enabled=True)
+    _limit_sonnet(account_id=first)
+    request, provider = _pair("unbound-rollover", "c-unbound-rollover", SONNET)
+    assert provider.vendor_account_bound is False
+    assert admit_fork(provider).vendor_account_id == first
+
+    with pytest.raises(CheckpointTargetLimited):
+        await request_checkpoint(request, provider)
+
+    assert _checkpoint_rows() == 0
+    launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_target_checkpoint_holds_on_limited_chosen_account_when_rollover_is_off(isolated_db, launch):
+    _seed("no-rollover", SONNET)
+    first, _second = _configure_rollover("no-rollover", enabled=False)
+    _limit_sonnet(account_id=first)
+    request, provider = _pair("no-rollover", "c-no-rollover", SONNET)
+
+    with pytest.raises(CheckpointTargetLimited):
+        await request_checkpoint(request, provider)
+
+    launch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_target_checkpoint_holds_with_reset_when_all_rollover_accounts_are_limited(isolated_db, launch):
+    from infra.held_admission import limited_admission
+    from infra.thread_input_types import held_admission_line
+
+    _seed("all-limited", SONNET)
+    first, second = _configure_rollover("all-limited", enabled=True)
+    _limit_sonnet(account_id=first, resets_at="2099-01-01T00:00:00+00:00")
+    _limit_sonnet(account_id=second, resets_at="2099-02-01T00:00:00+00:00")
+    request, provider = _pair("all-limited", "c-all-limited", SONNET)
+
+    with pytest.raises(CheckpointTargetLimited) as raised:
+        await request_checkpoint(request, provider)
+
+    held = limited_admission("all-limited", SONNET)
+    assert held is not None
+    assert held.resets_at == "2099-01-01T00:00:00+00:00"
+    assert str(raised.value) == held_admission_line(held)
+    assert "resets " in str(raised.value)
+    launch.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_gate_reads_the_fork_target_not_the_thread_model(isolated_db, launch):
     _seed("bound-opus", OPUS)
@@ -155,6 +317,20 @@ async def test_allowed_and_unknown_targets_launch_unchanged(isolated_db, launch,
     request, provider = _pair("t1", "c1", SONNET)
 
     record = await request_checkpoint(request, provider)
+
+    assert record.id == "c1"
+    launch.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_native_target_fold_launches_without_an_account(isolated_db, launch):
+    _seed("t1", "native/mock-model")
+    request, provider = _pair("t1", "c1", SONNET)
+    request = replace(request, source_harness="native", source_model="native/mock-model",
+                      writer_harness="native", writer_model="native/mock-model")
+    native = replace(provider.target, catalog_id="native/mock-model", harness="native", provider="mock")
+
+    record = await request_checkpoint(request, replace(provider, target=native))
 
     assert record.id == "c1"
     launch.assert_called_once()
@@ -223,11 +399,11 @@ async def test_initial_external_fold_goes_through_its_real_caller(isolated_db, l
         binary="claude",
     )
     monkeypatch.setattr(
-        "core.checkpoint_render.capture_warm_checkpoint_source",
+        "core.fork_render.capture_warm_fork_source",
         AsyncMock(return_value=object()),
     )
     monkeypatch.setattr(
-        "core.checkpoint_cc_boundary.capture_boundary_warm_source",
+        "core.fork_cc_boundary.capture_boundary_warm_source",
         AsyncMock(return_value=object()),
     )
 

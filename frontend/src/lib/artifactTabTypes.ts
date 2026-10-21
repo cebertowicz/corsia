@@ -1,8 +1,15 @@
 export type ArtifactTabStatus = 'ready' | 'loading' | 'error' | 'unavailable' | 'readonly';
 
+/** In-session camera position for an image viewport; null scale keeps it fitted to the viewport. */
+export interface ImageViewportPlace {
+	scrollLeft: number;
+	scrollTop: number;
+	scale: number | null;
+}
+
 export interface ArtifactTab {
 	/** The artifact leaf hosts documents, child conversations, and bounded legacy discussion archives. */
-	kind: 'document' | 'subagent' | 'legacy-discussion';
+	kind: 'document' | 'subagent' | 'legacy-discussion' | 'browser';
 	/** Immutable tab-instance key. Never derived from artifact identity. */
 	instanceId: string;
 	/** Primary artifact identity once resolved. */
@@ -46,6 +53,11 @@ export interface OpenSubagentInput {
 	sourceStepId?: string;
 }
 
+export interface OpenBrowserInput {
+	threadId: string;
+	title?: string;
+}
+
 export interface OpenLegacyDiscussionInput {
 	artifactId: string;
 	title: string;
@@ -68,6 +80,8 @@ export interface TabLoadSignal {
 	revision?: string | null;
 	/** False when the doc API would refuse a write to this path. */
 	writable?: boolean;
+	/** The document was already on screen, so its place is put back without covering it. */
+	shown?: boolean;
 	/**
 	 * Which viewer the backend says this file needs. Viewer-local and never stored on the tab: the
 	 * leaf reads it, the workspace store ignores it, and each load decides it again.

@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext } from '@playwright/test';
 import { e2eModel, loginByUrl, openSettings, TEST_TOKEN } from '../support/corsia';
 
 const tok = encodeURIComponent(TEST_TOKEN);
@@ -228,6 +229,13 @@ test.describe('@flow:measurement-placement-p2 @surface:navigation place Measurem
 			await page.emulateMedia({ colorScheme: scheme });
 			for (const width of [393, 412] as const) {
 				await page.setViewportSize({ width, height: 915 });
+				if (width === 393) {
+					const trigger = await page.getByRole('button', { name: /Measurement scope:/ }).boundingBox();
+					const controls = await page.locator('.measurement-page .controls').boundingBox();
+					expect(trigger).not.toBeNull();
+					expect(controls).not.toBeNull();
+					expect(trigger!.width, 'the scope trigger fills the narrow controls column').toBeCloseTo(controls!.width, 1);
+				}
 				const box = await page.locator('.picker-panel').boundingBox();
 				expect(box).not.toBeNull();
 				expect(box!.x, `${scheme}: picker starts in the ${width}px viewport`).toBeGreaterThanOrEqual(0);

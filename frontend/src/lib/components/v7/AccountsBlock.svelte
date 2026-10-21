@@ -343,7 +343,6 @@
 	description="Threads on it hold until you choose another account."
 	confirmLabel="Remove"
 	destructive
-	icon="delete"
 	onConfirm={removeAccount}
 	onCancel={() => removeTarget = null}
 />
@@ -353,11 +352,11 @@
 	.account-manager { display: contents; }
 	.account-manager :global(.field .err), .account-manager :global(.msg.err), .account-manager :global(.btn.danger) { color: var(--red-text); }
 	.account-manager :global(.btn.ghost) { color: var(--text-secondary); }
-	.account-manager :global(.btn.primary:hover:not(:disabled)) { background: var(--violet-bg); }
+	.account-manager :global(.btn.primary:hover:not(:disabled)) { background: var(--accent-wash); }
 	.accounts { display: grid; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border-subtle); }
 	.account-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-secondary); font-size: var(--text-footnote); font-weight: 600; }
 	.account { position: relative; padding: 10px 0; border-bottom: 1px solid var(--border-subtle); outline: none; }
-	.account:focus { box-shadow: 0 0 0 3px var(--violet-bg); border-radius: var(--radius-xs); }
+	.account:focus { box-shadow: 0 0 0 3px var(--accent-wash); border-radius: var(--radius-xs); }
 	.account-main { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
 	.account-copy { min-width: 0; }
 	/* The action cluster keeps its natural width; the name/meta column absorbs

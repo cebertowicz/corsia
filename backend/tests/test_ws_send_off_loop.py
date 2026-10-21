@@ -184,3 +184,20 @@ def test_a_loop_that_closes_after_the_check_is_logged_and_the_send_closed(client
         "WS broadcast dropped, no application event loop" in line for line in lines
     )
     assert len(handed) == 1 and handed[0].cr_frame is None
+
+
+def test_devices_update_schedules_one_type_only_broadcast(monkeypatch):
+    scheduled: list[str] = []
+    messages: list[dict] = []
+
+    def schedule(callback, what):
+        scheduled.append(what)
+        callback()
+
+    monkeypatch.setattr(sockets, "broadcast_from_any_thread", schedule)
+    monkeypatch.setattr(sockets, "broadcast_all", messages.append)
+
+    sockets.schedule_devices_updated()
+
+    assert scheduled == ["devices_updated"]
+    assert messages == [{"type": "devices_updated"}]

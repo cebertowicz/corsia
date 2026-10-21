@@ -112,6 +112,21 @@ def test_deleted_tracked_file_fails_and_is_named(ratchet, capsys):
     assert "remove 'backend/gone.py'   (file no longer exists)" in out
 
 
+def test_indexed_missing_file_is_reported_as_removed_not_unreadable(ratchet, monkeypatch, capsys):
+    """A staged deletion stays eligible for baseline cleanup before its index changes."""
+    import size_limit_scan
+
+    ratchet.write_baseline(limits={"backend/gone.py": 500})
+    monkeypatch.setattr(size_limit_scan, "tracked_paths", lambda _root: ["backend/gone.py"])
+
+    rc = ratchet.run([])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "remove 'backend/gone.py'   (file no longer exists)" in captured.out
+    assert "could not be measured" not in captured.err
+
+
 def test_undecodable_file_fails_the_check(ratchet, capsys):
     """A file that is not valid UTF-8 cannot evade the ratchet by being unreadable."""
     ratchet.write_undecodable("backend/binary_looking.py")

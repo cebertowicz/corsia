@@ -349,9 +349,9 @@ async def _wait(pred, tries: int = 400, delay: float = 0.02) -> bool:
 @pytest.fixture(autouse=True)
 def _omlx_leftover_probe_never_runs_a_binary(monkeypatch):
     """Tests fake `shutil.which("omlx")` paths; none of them may be executed to probe."""
-    from llm import local_setup_ownership
+    from llm import local_setup_executable
 
-    monkeypatch.setattr(local_setup_ownership, "_is_broken_leftover", lambda _path: False)
+    monkeypatch.setattr(local_setup_executable, "_is_broken_leftover", lambda _path: False)
 
 
 @pytest.fixture(autouse=True)
@@ -381,13 +381,18 @@ def _omlx_admin_request_bound_before_any_patch():
     yield
 
 
+
 @pytest.fixture(autouse=True)
-def _no_cached_omlx_ownership_between_tests():
-    """The foreign-oMLX answer is cached process-wide; each test decides it afresh."""
-    ownership = sys.modules.get("llm.local_setup_ownership")
-    if ownership is not None:
-        ownership._foreign_cache.clear()
-    yield
+def _no_local_model_between_tests(monkeypatch, tmp_path_factory):
+    """The set-up model record and Welcome's pick outlive a test; each test starts with neither."""
+    from llm import local_model
+
+    record = tmp_path_factory.mktemp("local-model") / "local-model.json"
+    monkeypatch.setattr(local_model, "_record_path", lambda: record)
+    prepare = sys.modules.get("llm.local_setup_prepare")
+    if prepare is not None:
+        monkeypatch.setattr(prepare, "_prepare", prepare._Prepare())
+
 
 
 @pytest.fixture(autouse=True)

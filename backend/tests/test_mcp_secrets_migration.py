@@ -24,6 +24,8 @@ from infra.migration_mcp_secrets import FROM_VERSION, migrate_mcp_secrets
 from infra.schema import SCHEMA_VERSION
 from tools import mcp_secrets
 
+TARGET_VERSION = FROM_VERSION + 1
+
 SERVERS = {
     "local": {
         "command": "fixture",
@@ -82,11 +84,11 @@ def _clear_backups(directory) -> None:
 def _migrate(path) -> None:
     with closing(sqlite3.connect(path)) as db:
         db.row_factory = sqlite3.Row
-        assert migrate_to_current(db, SCHEMA_VERSION).migrated
+        assert migrate_to_current(db, TARGET_VERSION).migrated
 
 
 def test_the_step_is_registered_and_current():
-    assert SCHEMA_VERSION == FROM_VERSION + 5
+    assert SCHEMA_VERSION >= TARGET_VERSION
     assert MIGRATIONS[FROM_VERSION] is migrate_mcp_secrets
     assert FROM_VERSION - 1 in MIGRATIONS  # the ladder has no gap below it
 
@@ -134,7 +136,7 @@ def test_a_second_run_of_the_step_changes_nothing(state, tmp_path):
         db.execute(f"PRAGMA user_version={FROM_VERSION}")
         db.commit()
         _clear_backups(tmp_path)
-        assert migrate_to_current(db, SCHEMA_VERSION).migrated
+        assert migrate_to_current(db, TARGET_VERSION).migrated
         assert [tuple(r) for r in db.execute("SELECT key, value FROM settings ORDER BY key")] == settings_before
     assert (key_store.keys_dir() / key_store.VALUES_FILE).read_bytes() == values_before
 
@@ -152,7 +154,7 @@ def test_a_failure_after_the_store_write_loses_nothing_on_the_next_start(state, 
     with closing(sqlite3.connect(path)) as db:
         db.row_factory = sqlite3.Row
         with pytest.raises(MigrationError):
-            migrate_to_current(db, SCHEMA_VERSION)
+            migrate_to_current(db, TARGET_VERSION)
         assert db.execute("PRAGMA user_version").fetchone()[0] == FROM_VERSION
         assert _tools(db)["mcpServers"] == SERVERS  # every inline copy still there
         # The rows rolled back with it: the values written are unreferenced leftovers.

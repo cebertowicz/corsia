@@ -3,12 +3,12 @@
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
 	import { threads, activeThreadId, activeThread, messages, isStreaming, reasoningEffort } from '$lib/stores/threads';
-	import { activeModelId, bindActiveThreadModel } from '$lib/stores/models';
-	import { workspaceConductorId } from '$lib/utils/conductor';
+	import { activeModelId, bindActiveThreadModel, threadModelVersion } from '$lib/stores/models';
+	import { corsiaAgentId } from '$lib/utils/conductor';
 	import ConductorSourcesPanel from './ConductorSourcesPanel.svelte';
 	import { loadCheckpoints } from '$lib/stores/checkpoints';
 	import { beginThreadEntry } from '$lib/stores/contextUsageByThread';
-	import { hydrateSubagentThread, subagentMeta } from '$lib/stores/subagents';
+	import { hydrateSubagentThread } from '$lib/stores/subagents';
 	import { clearWarmKeysForThread, warmActiveThread } from '$lib/chatWarm';
 	import { subscribeChatPanelEvents } from './chatPanelEvents';
 	import { startPresence, stopPresence } from '$lib/ws/presence';
@@ -19,14 +19,15 @@
 	import { coreSettings } from '$lib/stores/settings';
 	import { adoptFirstPageRuns, adoptOlderPageRuns, type RunLoad, type RunStub } from '$lib/focusRuns';
 	import { loadRunRange } from '$lib/focusRunLoader';
-
 	import InputBar from './InputBar.svelte';
+	import type { SendOutcome } from './composerSendReadiness';
 	import ChatDropOverlay from './ChatDropOverlay.svelte';
 	import ChatWarmToast from './ChatWarmToast.svelte';
 	import HostAccessLeaseControl from './HostAccessLeaseControl.svelte';
 	import MobileScrollFab from './MobileScrollFab.svelte';
 	import AttentionDock from './attention/AttentionDock.svelte';
 	import ChatAttentionStack from './attention/ChatAttentionStack.svelte';
+	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
 	import PlanDrawerControl from './plans/PlanDrawerControl.svelte';
 	import { isMobile } from '$lib/stores/viewport';
 	import { openPlanSubagentLeaf, openPlanDiscussionLeaf } from '$lib/planLeafReturn';
@@ -35,6 +36,7 @@
 		adoptFirstPage,
 		loadOlder,
 		makeGuardedPort,
+		supersedingRead,
 		PAGER_ABORT,
 		type MessagePage,
 		type TurnSummary,
@@ -87,21 +89,15 @@
 	const hasMoreMessages = $derived(!!$activeThreadId && pager.hasMore); // New chat has no history to page
 	const loadingOlderMessages = $derived(pager.loading);
 	const olderLoadFailed = $derived(pager.error);
-	export function scrollToBottom() {
-		messageListRef?.scrollToBottom();
-	}
+	export const scrollToBottom = () => messageListRef?.scrollToBottom();
 	function openPlanSubagent(nodeId: string, childThreadId: string, title: string, stepId?: string): void {
 		openPlanSubagentLeaf($activeThreadId, nodeId, childThreadId, title, stepId);
 	}
 	function openPlanDiscussion(artifactId: string, title: string): void {
 		openPlanDiscussionLeaf($activeThreadId, artifactId, title);
 	}
-	export function captureBottomOffset() {
-		messageListRef?.captureBottomOffset();
-	}
-	export function restoreBottomOffset() {
-		messageListRef?.restoreBottomOffset();
-	}
+	export const captureBottomOffset = () => messageListRef?.captureBottomOffset();
+	export const restoreBottomOffset = () => messageListRef?.restoreBottomOffset();
 	/** Warm the active thread's cache. Lives in `$lib/chatWarm`. */
 	export const triggerWarm = warmActiveThread;
 	export async function selectThread(
@@ -166,8 +162,8 @@
 			console.error('fetchThreadMessages fetch failed:', e);
 		}
 	}
-	export async function setAndSend(text: string) {
-		await inputBarRef?.setAndSend(text);
+	export async function setAndSend(text: string, preserveDraft = false): Promise<SendOutcome> {
+		return await inputBarRef?.setAndSend(text, preserveDraft) ?? 'not_sent';
 	}
 	const pagerPort: PagerPort = {
 		async fetchPage(cursor: string): Promise<MessagePage | null> {
@@ -224,6 +220,9 @@
 	function isCurrentFirstPageRequest(threadId: string, gen: number): boolean {
 		return pagerGeneration === gen && get(activeThreadId) === threadId;
 	}
+	// A newer first-page read makes the older one stale: abort it, never download both.
+	const firstPageRead = supersedingRead();
+	onDestroy(firstPageRead.abort);
 	/** Drop stale rows when the selected transcript's first page fails. */
 	function failFirstPage(threadId: string): void {
 		firstLoadFailed = true;
@@ -232,15 +231,14 @@
 	}
 	async function loadFirstPage(threadId: string, gen: number): Promise<void> {
 		const t = $token;
-		if (!t) return;
-		const mine = isCurrentFirstPageRequest(threadId, gen);
-		if (mine) {
-			lastFirstPageThreadId = threadId;
-			firstLoadFailed = false;
-			firstLoadPending = true;
-		}
+		// A stale call's page is always discarded: it must not start, and so abort, the current read.
+		if (!t || !isCurrentFirstPageRequest(threadId, gen)) return;
+		lastFirstPageThreadId = threadId;
+		firstLoadFailed = false;
+		firstLoadPending = true;
+		const signal = firstPageRead.start();
 		try {
-			const res = await fetch(`/api/threads/${threadId}/messages?token=${t}&limit=${MSG_PAGE_SIZE}${focusParam()}`);
+			const res = await fetch(`/api/threads/${threadId}/messages?token=${t}&limit=${MSG_PAGE_SIZE}${focusParam()}`, { signal });
 			if (!res.ok) {
 				console.error(`loadFirstPage ${res.status} for thread ${threadId}`);
 				if (isCurrentFirstPageRequest(threadId, gen)) failFirstPage(threadId);
@@ -258,6 +256,7 @@
 			// The first page is in the DOM now; this is what the user waits for.
 			if (isCurrentFirstPageRequest(threadId, gen)) markFirstPageRendered(threadId, hydrated.length);
 		} catch (e) {
+			if (signal.aborted) return; // replaced by a newer read, not a failure on screen
 			console.error(`loadFirstPage network error for thread ${threadId}:`, e);
 			if (isCurrentFirstPageRequest(threadId, gen)) failFirstPage(threadId);
 		} finally {
@@ -282,7 +281,8 @@
 	// Every navigation path binds the composer to the opened thread's saved model.
 	$effect(() => {
 		const id = $activeThreadId;
-		if (id) bindActiveThreadModel(id, $threads, $subagentMeta.get(id)?.model);
+		void $threadModelVersion; // a worker's model arrives as a read after the thread opens
+		if (id) bindActiveThreadModel(id, $threads);
 	});
 	$effect(() => {
 		if ($activeThreadId && $token)
@@ -325,7 +325,7 @@
 	});
 </script>
 <div class="chat-shell">
-	<div class="chat-content">
+	<div class="chat-content" use:toastAnchorSurface>
 		<MessageList
 			bind:this={messageListRef}
 			bind:messagesEl
@@ -353,7 +353,7 @@
 			its decision cannot be obscured by the dock or mobile controls.
 		-->
 		<ChatAttentionStack>
-			{#if $activeThreadId && $activeThreadId === $workspaceConductorId && !$activeModelId}
+			{#if $activeThreadId && $activeThreadId === $corsiaAgentId && !$activeModelId}
 				<ConductorSourcesPanel threadId={$activeThreadId} />
 			{/if}
 			{#if $activeThreadId}

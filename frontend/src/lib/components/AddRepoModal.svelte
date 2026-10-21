@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Modal from './ui/Modal.svelte';
+	import Button from './ui/Button.svelte';
 	import Toggle from './ui/Toggle.svelte';
 
 	let {
@@ -60,7 +61,7 @@
 							aria-label="Repository path"
 							placeholder="~/code/my-repo"
 						/>
-						<button class="btn ghost" onclick={onBrowse}>Browse…</button>
+						<Button onclick={onBrowse}>Browse…</Button>
 					</div>
 				</label>
 				<label class="fld">
@@ -109,10 +110,10 @@
 		</div>
 
 		{#snippet foot()}
-			<button class="btn ghost push" onclick={onCancel} disabled={busy}>Cancel</button>
-			<button class="btn primary" onclick={onSubmit} disabled={!canSubmit}>
+			<Button variant="ghost" onclick={onCancel} disabled={busy}>Cancel</Button>
+			<Button variant="primary" onclick={onSubmit} disabled={!canSubmit}>
 				{busy ? 'Adding…' : mode === 'link' ? 'Link repository' : 'Create repository'}
-			</button>
+			</Button>
 		{/snippet}
 	</Modal>
 {/if}
@@ -127,7 +128,7 @@
 	.fld em { font-style: normal; font-size: var(--text-footnote); color: var(--text-tertiary); }
 	.fld input { font: inherit; font-size: var(--text-subhead); padding: 9px 11px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); width: 100%; }
 	.fld input:focus { outline: none; border-color: var(--accent); }
-	.pathrow { display: flex; gap: 8px; }
+	.pathrow { display: flex; align-items: center; gap: 8px; }
 	.pathrow input { flex: 1; }
 	.add-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 	.add-setting { display: flex; align-items: center; gap: 8px; min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-primary); padding: 7px 9px; }
@@ -136,12 +137,6 @@
 	.setting-detail { font-size: var(--text-caption); color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.note { font-size: var(--text-footnote); color: var(--text-tertiary); margin: 0; }
 	.err { font-size: var(--text-subhead); color: var(--red); background: color-mix(in srgb, var(--red) 8%, transparent); border: 1px solid color-mix(in srgb, var(--red) 25%, transparent); border-radius: var(--radius-sm); padding: 8px 10px; }
-	.btn { font: inherit; font-size: var(--text-subhead); font-weight: 500; padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid transparent; }
-	.btn.push { margin-left: auto; }
-	.btn.ghost { background: none; border-color: var(--border); color: var(--text-secondary); }
-	.btn.ghost:hover { color: var(--text-primary); background: var(--bg-hover); }
-	.btn.primary { background: var(--accent); color: #fff; }
-	.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 	.mono { font-family: var(--font-mono, monospace); }
-	@media (max-width: 640px) { .add-settings { grid-template-columns: 1fr; } .pathrow { flex-direction: column; } .pathrow .btn { align-self: flex-start; } }
+	@media (max-width: 640px) { .add-settings { grid-template-columns: 1fr; } .pathrow { flex-direction: column; align-items: stretch; } .pathrow :global(.btn) { align-self: flex-start; } }
 </style>

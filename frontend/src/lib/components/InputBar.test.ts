@@ -34,12 +34,14 @@ import InputBar from './InputBar.svelte';
 import { QUEUE_ARM_MS as ARM_MS } from './InputBarActionRow.svelte';
 import { token } from '$lib/stores/auth';
 import { connectionState } from '$lib/stores/connection';
-import { activeModelId, models } from '$lib/stores/models';
+import { _resetThreadModelTruthForTests, acceptThreadModelTruth, activeModelId, models } from '$lib/stores/models';
 import { activeThreadId, messages, threads } from '$lib/stores/threads';
+import { subagentMeta } from '$lib/stores/subagents';
 import { toasts } from '$lib/stores/toast';
 import { applyLifecycle, applyTerminal, _resetTurnStateForTests } from '$lib/ws/turnState';
 import { stopRequestedTurns } from '$lib/ws/send';
 import { clearAllContextUsage, setContextUsage } from '$lib/stores/contextUsageByThread';
+import { resetUpdateStoreForTests, updateStatus } from '$lib/update/store';
 
 const attachment = {
 	file_id: 'file-1',
@@ -59,6 +61,7 @@ beforeEach(() => {
 	});
 	vibrate.mockClear();
 	_resetTurnStateForTests();
+	resetUpdateStoreForTests();
 	token.set('token');
 	connectionState.set('connected');
 	activeThreadId.set(null);
@@ -90,6 +93,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	_resetTurnStateForTests();
+	resetUpdateStoreForTests();
 	if (component) unmount(component);
 	component = null;
 	host.remove();
@@ -101,6 +105,7 @@ afterEach(() => {
 	activeModelId.set(null);
 	models.set([]);
 	threads.set([]);
+	subagentMeta.set(new Map());
 });
 
 async function mountPreparedComposer({ switchThreadOnSend = true } = {}) {
@@ -260,12 +265,45 @@ describe('InputBar send and queue preparation', () => {
 		host.querySelector<HTMLButtonElement>('.send-btn')!.click();
 		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
 
+		// The worker's own selection rides the send, never the open thread's model.
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
 			'subagent-thread',
 			'hello subagent',
-			'network/model',
+			undefined,
 			[],
 			undefined,
+		);
+	});
+
+	it('sends a worker its own model once its row has loaded', async () => {
+		activeThreadId.set('active-thread');
+		activeModelId.set('network/other');
+		models.update(rows => [...rows, {
+			id: 'network/worker', name: 'Worker Model', size: '', backend: 'network', speed: '', status: 'ready',
+		}]);
+		_resetThreadModelTruthForTests();
+		acceptThreadModelTruth('subagent-thread', 'network/worker', '2026-10-20T10:00:00.000000');
+		subagentMeta.set(new Map([['subagent-thread', {
+			childThreadId: 'subagent-thread', parentThreadId: 'active-thread', name: 'Worker',
+			provider: 'cc', status: 'running',
+		} as never]]));
+		// The worker's own catalog, read on mount, lists its model.
+		vi.stubGlobal('fetch', vi.fn(async () => ({
+			ok: true,
+			json: async () => ({ models: get(models) }),
+		})));
+		component = mount(InputBar, {
+			target: host,
+			props: { threadId: 'subagent-thread', onSend: vi.fn() },
+		});
+		flushSync();
+		await component.setText('hello worker');
+
+		host.querySelector<HTMLButtonElement>('.send-btn')!.click();
+		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
+
+		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
+			'subagent-thread', 'hello worker', 'network/worker', [], undefined,
 		);
 	});
 
@@ -550,6 +588,42 @@ describe('InputBar send and queue preparation', () => {
 	});
 });
 
+describe('InputBar while CORSIA is restarting', () => {
+	it('preserves the draft and blocks Enter and paste until CORSIA returns', async () => {
+		activeThreadId.set('thread-1');
+		const onSend = vi.fn();
+		component = mount(InputBar, { target: host, props: { onSend } });
+		flushSync();
+		await component.setText('saved before restart');
+		let composer = host.querySelector<HTMLElement>('.composer')!;
+
+		updateStatus.set({
+			branch: 'dev', current_sha: 'a', remote_sha: 'b', commits_behind: 1,
+			available: true, checked_at: 1, error: null,
+			operation: { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase: 'restarting' },
+		});
+		flushSync();
+		composer = host.querySelector<HTMLElement>('.composer')!;
+
+		expect(composer.getAttribute('contenteditable')).toBe('false');
+		expect(composer.getAttribute('aria-disabled')).toBe('true');
+		const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+		const paste = new Event('paste', { bubbles: true, cancelable: true });
+		Object.defineProperty(paste, 'clipboardData', {
+			value: { files: [], getData: () => 'new text' },
+		});
+		composer.dispatchEvent(enter);
+		composer.dispatchEvent(paste);
+		await Promise.resolve();
+
+		expect(paste.defaultPrevented).toBe(true);
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+		expect(onSend).not.toHaveBeenCalled();
+		expect(component.getInputText()).toBe('saved before restart');
+		expect(composer.textContent).toBe('saved before restart');
+	});
+});
+
 describe('InputBar model readiness at the action seam', () => {
 	it.each([
 		'enter',
@@ -592,6 +666,139 @@ describe('InputBar model readiness at the action seam', () => {
 		expect(onSend).not.toHaveBeenCalled();
 		expect(component.getInputText()).toBe('keep this thought');
 		expect(composer.textContent).toBe('keep this thought');
+	});
+
+	it('sends an automatic message without changing the saved draft or its attachment', async () => {
+		activeThreadId.set('thread-1');
+		threads.set([{
+			id: 'thread-1', user_id: 'user-1', profile: 'default',
+			title: 'CORSIA', model: 'network/model',
+			created_at: '2026-09-29T08:00:00Z', updated_at: '2026-09-29T08:00:01Z',
+		}]);
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		await component.setText('Keep this draft');
+		const fileInput = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+		Object.defineProperty(fileInput, 'files', {
+			configurable: true,
+			value: [new File(['notes'], attachment.filename, { type: attachment.mime_type })],
+		});
+		fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+		await vi.waitFor(() => expect(host.querySelector('.attachment-chip')).not.toBeNull());
+
+		await component.setAndSend('Connect a Google account for all my projects', true);
+
+		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
+			'thread-1', 'Connect a Google account for all my projects', 'network/model', [], undefined,
+		);
+		expect(component.getInputText()).toBe('Keep this draft');
+		expect(host.querySelector('.attachment-chip')).not.toBeNull();
+		expect(component.getDrafts().get('thread-1')).toMatchObject({ content: 'Keep this draft', attachments: [attachment] });
+	});
+
+	it('waits for a new thread before restoring the draft around an automatic send', async () => {
+		activeThreadId.set('thread-before-automatic-send');
+		let resolveThread!: () => void;
+		const onAutoCreateThread = vi.fn(() => new Promise<void>(resolve => {
+			resolveThread = () => {
+				activeThreadId.set('thread-created-for-automatic-send');
+				resolve();
+			};
+		}));
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn(), onAutoCreateThread } });
+		flushSync();
+		await component.setText('Keep this draft');
+		const fileInput = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+		Object.defineProperty(fileInput, 'files', {
+			configurable: true,
+			value: [new File(['notes'], attachment.filename, { type: attachment.mime_type })],
+		});
+		fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+		await vi.waitFor(() => expect(host.querySelector('.attachment-chip')).not.toBeNull());
+		activeThreadId.set(null);
+		flushSync();
+
+		const automaticSend = component.setAndSend('Connect a Google account for all my projects', true);
+		await vi.waitFor(() => expect(onAutoCreateThread).toHaveBeenCalledOnce());
+		resolveThread();
+		await automaticSend;
+
+		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
+			'thread-created-for-automatic-send', 'Connect a Google account for all my projects', 'network/model', [], undefined,
+		);
+		expect(component.getInputText()).toBe('Keep this draft');
+		expect(host.querySelector('.attachment-chip')).not.toBeNull();
+		expect(component.getDrafts().get('thread-before-automatic-send')).toMatchObject({
+			content: 'Keep this draft', attachments: [attachment],
+		});
+	});
+
+	describe('an automatic send that fails keeps the draft and reports how it failed', () => {
+		async function mountWithDraft() {
+			activeThreadId.set('thread-1');
+			threads.set([{
+				id: 'thread-1', user_id: 'user-1', profile: 'default',
+				title: 'CORSIA', model: 'network/model',
+				created_at: '2026-09-29T08:00:00Z', updated_at: '2026-09-29T08:00:01Z',
+			}]);
+			const onSend = vi.fn();
+			component = mount(InputBar, { target: host, props: { onSend } });
+			flushSync();
+			await component.setText('Keep this draft');
+			const fileInput = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+			Object.defineProperty(fileInput, 'files', {
+				configurable: true,
+				value: [new File(['notes'], attachment.filename, { type: attachment.mime_type })],
+			});
+			fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+			await vi.waitFor(() => expect(host.querySelector('.attachment-chip')).not.toBeNull());
+			return onSend;
+		}
+
+		function expectDraftKept(): void {
+			expect(component!.getInputText()).toBe('Keep this draft');
+			expect(host.querySelector<HTMLElement>('.composer')!.textContent).toBe('Keep this draft');
+			expect(host.querySelector('.attachment-chip')).not.toBeNull();
+		}
+
+		it('returns not_sent with no toast of its own when the model cannot take it', async () => {
+			const onSend = await mountWithDraft();
+			selectUnavailableModel();
+			flushSync();
+			const before = get(toasts).length;
+
+			const outcome = await component!.setAndSend('Connect a Google account for all my projects', true);
+
+			expect(outcome).toBe('not_sent');
+			expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+			expect(onSend).not.toHaveBeenCalled();
+			expect(get(toasts)).toHaveLength(before);
+			expectDraftKept();
+		});
+
+		it('returns notified after its own connection-lost toast', async () => {
+			const onSend = await mountWithDraft();
+			wsMocks.sendMessage.mockReturnValueOnce(null);
+			const before = get(toasts).length;
+
+			const outcome = await component!.setAndSend('Connect a Google account for all my projects', true);
+
+			expect(outcome).toBe('notified');
+			expect(onSend).not.toHaveBeenCalled();
+			expect(get(toasts).slice(before)).toEqual([
+				expect.objectContaining({ message: 'Connection lost before CORSIA could accept this message.', type: 'error' }),
+			]);
+			expectDraftKept();
+		});
+
+		it('restores the draft and attachment when sending rejects', async () => {
+			await mountWithDraft();
+			wsMocks.sendMessage.mockImplementationOnce(() => { throw new Error('send failed'); });
+
+			await expect(component!.setAndSend('Connect a Google account for all my projects', true)).rejects.toThrow('send failed');
+
+			expectDraftKept();
+		});
 	});
 
 	it('sends from a thread with no model yet, for the server to hold until one is chosen', async () => {
@@ -723,6 +930,68 @@ describe('InputBar model readiness at the action seam', () => {
 		vi.useRealTimers();
 		expect(send.classList.contains('queue-holding')).toBe(false);
 		expect(send.classList.contains('queue-armed')).toBe(false);
+	});
+
+	it('clears an armed hold when the window blurs or the page hides, with nothing sent', async () => {
+		// The queue glyph must never outlive the gesture: leaving the page
+		// mid-hold ends it, and no pointerup may ever arrive.
+		activeThreadId.set('thread-1');
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		await component.setText('hold this');
+		const send = host.querySelector<HTMLButtonElement>('.send-btn')!;
+		const hide = () => {
+			Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+			document.dispatchEvent(new Event('visibilitychange'));
+		};
+		const ends = [() => window.dispatchEvent(new Event('blur')), hide];
+
+		vi.useFakeTimers();
+		for (const end of ends) {
+			send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+			vi.advanceTimersByTime(ARM_MS);
+			flushSync();
+			expect(send.classList.contains('queue-armed')).toBe(true);
+			end();
+			flushSync();
+			expect(send.classList.contains('queue-armed')).toBe(false);
+			expect(send.classList.contains('queue-holding')).toBe(false);
+		}
+		Reflect.deleteProperty(document, 'visibilityState');
+		vi.useRealTimers();
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+	});
+
+	it('treats lost pointer capture like pointercancel and queues once', async () => {
+		// Capture lost is the platform taking the touch: past the arm delay the
+		// gesture is made, as for pointercancel; before it, nothing is sent. The
+		// lostpointercapture that follows a pointercancel or pointerup is a no-op.
+		activeThreadId.set('thread-1');
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		await component.setText('hold this');
+		const send = host.querySelector<HTMLButtonElement>('.send-btn')!;
+		const lose = () => send.dispatchEvent(new PointerEvent('lostpointercapture', { bubbles: true }));
+
+		vi.useFakeTimers();
+		send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+		vi.advanceTimersByTime(ARM_MS - 100);
+		lose();
+		flushSync();
+		expect(send.classList.contains('queue-holding')).toBe(false);
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+
+		send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+		vi.advanceTimersByTime(ARM_MS);
+		send.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true }));
+		lose();
+		flushSync();
+		vi.useRealTimers();
+		expect(send.classList.contains('queue-armed')).toBe(false);
+		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
+		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
+			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn',
+		);
 	});
 
 	it('still queues when iOS takes the touch away after the hold has landed', async () => {

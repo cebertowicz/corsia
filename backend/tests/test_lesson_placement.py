@@ -68,6 +68,8 @@ def env(tmp_path, monkeypatch) -> Env:
 
 
 def _due(**delta) -> str:
+    # A date, not an instant: compute it once per test and reuse it, or a run
+    # that crosses midnight UTC compares two different days.
     return (datetime.now(timezone.utc) + timedelta(**delta)).date().isoformat()
 
 
@@ -94,6 +96,31 @@ def _place(env: Env, entry: int, answer: dict | None = None) -> str:
     return env.continuity._run(
         THREAD, "place", {"entry_id": entry, "verdict": "trial", "placement": answer or _answer()},
     )
+
+
+def test_flagged_new_checkpoint_entry_records_an_overridden_trial_check(env: Env) -> None:
+    """A checkpoint-local entry has no revision yet, but the check remains non-blocking."""
+    from types import SimpleNamespace
+
+    from core import lesson_admission, placement_answer, placement_outcomes
+    from core.placement_decide import validate_decision
+
+    env.monkeypatch.setattr(lesson_admission, "admit", lambda *_args: SimpleNamespace(hold=None))
+    env.monkeypatch.setattr(placement_outcomes, "entry_text", lambda _entry: "source")
+    decision = validate_decision(_answer(
+        text="On 2026-10-15, run the check.",
+        trial={"incident_detail_reason": "needed for the test"},
+    ))
+    result = placement_answer._stage_trial(
+        env.db, THREAD, {"history_epoch": 0, "entry_id": 999, "revision": None},
+        SimpleNamespace(), decision, SimpleNamespace(), None,
+    )
+
+    assert result["placement_check"]["flags"] == ["date", "id"]
+    row = env.db.execute(
+        "SELECT revision, override_reason FROM lesson_placement_checks WHERE entry_id=999"
+    ).fetchone()
+    assert tuple(row) == (0, "needed for the test")
 
 
 def _state(env: Env, entry: int) -> tuple[str, str | None]:
@@ -177,12 +204,13 @@ def _once(env: Env, target: str, *, skip: int = 0, result: Any = None) -> None:
 
 async def test_a_hypothesis_becomes_a_reviewed_trial_the_next_install_offers(env: Env) -> None:
     entry = _entry(env)
+    due = _due(days=14)
 
-    reply = _place(env, entry)
+    reply = _place(env, entry, _answer(trial={"review_after": due}))
 
     assert reply == (
         f"Entry {entry} queued: CORSIA writes the trial skill cite-the-head, opens your "
-        f"review task for {_due(days=14)} and retires the entry. It is not in this "
+        f"review task for {due} and retires the entry. It is not in this "
         "conversation's skills list; it appears when the list is next rebuilt."
     )
     assert not _skill(env).exists() and _offered(env) == []
@@ -542,6 +570,54 @@ async def test_a_rule_inferred_from_a_persons_words_is_captured_until_it_is_deri
     assert _state(env, literal) == ("active", None)  # the person's words never expire
 
 
+async def test_a_capture_keeps_correction_subjects_when_revised_and_promoted(env: Env) -> None:
+    def start(turn_id: str, message_id: str) -> None:
+        input_order = int(env.db.execute(
+            "SELECT COALESCE(max(input_order), 0) + 1 FROM messages WHERE thread_id=?", (THREAD,),
+        ).fetchone()[0])
+        env.db.execute(
+            """INSERT INTO active_turns(
+                id,thread_id,execution_epoch,model,status,started_at,boot_epoch,usage_receipts_json
+            ) VALUES (?,? ,0,'test/model','running','now','boot','{}')""", (turn_id, THREAD),
+        )
+        env.db.execute(
+            """INSERT INTO messages(
+                id,thread_id,role,content,created_at,input_order,active_turn_id
+            ) VALUES (?,?,'user','Please correct this.','now',?,?)""",
+            (message_id, THREAD, input_order, turn_id),
+        )
+        env.db.commit()
+
+    literal = _entry(env, SAID, "the user said: that answer was wrong")
+    entry = _entry(env, SAID, "always search the history first")
+    start("turn-one", "first")
+
+    _place(env, entry)
+    await _drain(env.worker)
+    [capture_path] = (env.tray / "context" / "captures").glob("*.md")
+    assert lesson_files.read_capture(capture_path.read_text()).originating_subjects == ("message:first",)
+
+    env.db.execute("UPDATE active_turns SET status='completed' WHERE id='turn-one'")
+    start("turn-two", "second")
+    _place(env, entry)
+    await _drain(env.worker)
+    assert lesson_files.read_capture(capture_path.read_text()).originating_subjects == (
+        "message:first", "message:second",
+    )
+
+    env.db.execute("UPDATE active_turns SET status='completed' WHERE id='turn-two'")
+    start("turn-three", "third")
+    _place(env, entry, _answer(trial={
+        "derivation": "they rejected an answer that skipped the earlier decision",
+        "literal_ref": {"entry_id": literal},
+    }))
+    await _drain(env.worker)
+
+    assert lesson_files.read_trial(_skill(env).read_text()).lesson.originating_subjects == (
+        "message:first", "message:second", "message:third",
+    )
+
+
 async def test_an_expired_trial_is_no_longer_offered_and_the_persons_words_stay(
     env: Env,
 ) -> None:
@@ -754,8 +830,9 @@ async def test_the_same_trial_placed_with_another_date_moves_its_reviews_wake(en
     _place(env, _entry(env))
     await _drain(env.worker)
     later = _entry(env, [{"kind": "turn", "reference": "turn-30"}], "needs longer")
+    due = _due(days=40)
 
-    _place(env, later, _answer(trial={"review_after": _due(days=40)}))
+    _place(env, later, _answer(trial={"review_after": due}))
     await _drain(env.worker)
 
     _one_open_review_offers(env)
@@ -764,7 +841,7 @@ async def test_the_same_trial_placed_with_another_date_moves_its_reviews_wake(en
         "SELECT condition_value FROM expected_event_watches WHERE plan_node_id=? AND status='armed'",
         (review["id"],),
     ).fetchall()
-    assert watch["condition_value"][:10] == _due(days=40) == _trial(env).lesson.review_after[:10]
+    assert watch["condition_value"][:10] == due == _trial(env).lesson.review_after[:10]
 
 
 async def test_a_hypothesis_with_no_boundary_is_captured(env: Env) -> None:
@@ -811,3 +888,46 @@ async def test_a_full_lesson_budget_captures_the_next_trial(env: Env) -> None:
     assert "retire or promote a trial lesson you no longer need" in reply
     assert not _skill(env).exists() and _offered(env) == []
     assert plans.open_capture_review_counts(env.db) == {THREAD: 1}
+
+
+async def test_duplicate_watch_placement_merges_each_turns_subjects_on_one_record(env: Env) -> None:
+    def start(turn_id: str, *message_ids: str) -> None:
+        env.db.execute(
+            """INSERT INTO active_turns(
+                id,thread_id,execution_epoch,model,status,started_at,boot_epoch,usage_receipts_json
+            ) VALUES (?,? ,0,'test/model','running','now','boot','{}')""", (turn_id, THREAD),
+        )
+        first_order = int(env.db.execute(
+            "SELECT COALESCE(max(input_order), 0) + 1 FROM messages WHERE thread_id=?", (THREAD,),
+        ).fetchone()[0])
+        for order, message_id in enumerate(message_ids, first_order):
+            env.db.execute(
+                """INSERT INTO messages(
+                    id,thread_id,role,content,created_at,input_order,active_turn_id
+                ) VALUES (?,?,'user','Please correct this.','now',?,?)""",
+                (message_id, THREAD, order, turn_id),
+            )
+        env.db.commit()
+
+    start("turn-one", "first", "second")
+    first = _entry(env)
+    _place(env, first, _answer(trial={"state": "watch"}))
+    await _drain(env.worker)
+    watch = lesson_files.read_trial(_skill(env).read_text())
+    assert watch.lesson.state == "watch"
+
+    env.db.execute("UPDATE active_turns SET status='completed' WHERE id='turn-one'")
+    start("turn-two", "third")
+    second = _entry(env, text="the same correction recurred")
+    _place(env, second, _answer(duplicate_of="- same lesson"))
+    await _drain(env.worker)
+
+    promoted = lesson_files.read_trial(_skill(env).read_text())
+    assert promoted.lesson.id == watch.lesson.id
+    assert promoted.lesson.state == "trial"
+    assert promoted.lesson.review_node_id != watch.lesson.review_node_id
+    assert promoted.lesson.originating_subjects == ("message:first", "message:second", "message:third")
+    reviews = {review["id"]: review for review in _reviews(env)}
+    assert reviews[watch.lesson.review_node_id]["state"] == "closed"
+    assert reviews[watch.lesson.review_node_id]["key"] == f"lesson:{watch.lesson.id}:watch:{watch.behavioral_sha256}"
+    assert reviews[promoted.lesson.review_node_id]["title"] == "Review trial lesson: cite-the-head"

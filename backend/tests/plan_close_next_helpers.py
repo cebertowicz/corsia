@@ -62,9 +62,10 @@ def listed(shown: int, total: int) -> str:
     return f"{shown} of {total} other open tasks"
 
 
-def idle_listed(shown: int, total: int) -> str:
-    """Return the label of an idle executor's listing: nothing ready, waits first."""
-    return f"{shown} of {total} open tasks, none ready, soonest-ending first"
+def idle_listed(shown: int, total: int, *, set_aside: int = 0) -> str:
+    """Return the label of an idle executor's listing: nothing ready, self-set-aside work first."""
+    order = "set-aside work first in plan order" if set_aside else "soonest-ending first"
+    return f"{shown} of {total} open tasks, none ready, {order}"
 
 
 def serialized(value: Any) -> str:
@@ -163,7 +164,9 @@ def close_params(db, operation: str, node_id: str, *, next_node_id: Any = _MISSI
     if operation in {"accept", "accept_with_follow_up"}:
         params["verification_result"] = "passed"
     if operation == "accept_with_follow_up":
-        params.update(title="Fix the follow-up", acceptance_criteria="Follow-up is verified")
+        params.update(
+            title="Fix the follow-up", acceptance_criteria="Follow-up is verified", size="unknown",
+        )
     if next_node_id is not _MISSING:
         params["next_node_id"] = next_node_id
     return params

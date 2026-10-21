@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { coverageText, type CostState, type CostPeriod, type WorkspaceSubscriptionContext } from '$lib/stores/measurementCost';
+	import { coverageText, type CostState, type CostPeriod, type ExcludedRecords, type WorkspaceSubscriptionContext } from '$lib/stores/measurementCost';
 	import MeasurementBarChart from './MeasurementBarChart.svelte';
 	import { costBarPoints, costView } from './measurementCostRate';
 	import { grainChart } from './measurementSize';
@@ -41,6 +41,13 @@
 	/** The sentence is true only when the first served period falls after the window's own first day: the lead-in before the window is read for the averages, so a series that opens on the window's first day may have begun earlier. */
 	const startsAt = $derived(served.length && costState.data?.period && served[0].period > costState.data.period.range.from ? day.format(new Date(`${served[0].period}T00:00:00Z`)) : null);
 	const group = (value: number) => value.toLocaleString('en-US', { maximumFractionDigits: 0 });
+	/** One sentence per unpriced reason, naming up to three models in the API's order. */
+	const excludedLine = ({ text, models }: ExcludedRecords) => {
+		const named = models.slice(0, 3).map((model) => `${model.label} (${group(model.records)})`);
+		if (models.length > 3) named.push(`${group(models.length - 3)} more`);
+		const list = named.length > 1 ? `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}` : named[0];
+		return `${text.charAt(0).toUpperCase()}${text.slice(1)}: ${list}.`;
+	};
 	const usd0 = (value: number | null) => (value === null ? '–' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value));
 </script>
 
@@ -85,7 +92,7 @@
 			{:else}
 				<p class="sentence">No usage records could be priced in this range.</p>
 			{/if}
-			<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.usage_records)} in {periodText} are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.</p>
+			<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.usage_records)} in {periodText} are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.{#each costState.data.excluded as excluded}{#if excluded.models.length}<br />{excludedLine(excluded)}{/if}{/each}</p>
 		{/if}
 		{#if costState.error}<p class="error" role="alert">{costState.error}<button onclick={onRetry}>Retry</button></p>{/if}
 	{/if}

@@ -171,7 +171,7 @@ describe('usage text by window state', () => {
 		}
 		expect(checking[0].text).toBe('limited · checking');
 		expect(completed[0].text).toMatch(/^limited · back /);
-		expect(failed[0].text).toBe("limited · couldn't verify");
+		expect(failed[0].text).toMatch(/^limited · back .* · couldn't verify$/);
 		expect(back[0].text).toMatch(/^limited · back /);
 		expect(accountSegments(account(null, { state: 'signed_out' }))).toEqual([{ text: 'signed out', level: 'normal' }]);
 	});
@@ -346,6 +346,15 @@ describe('groupModels', () => {
 		expect(groupStatusText(group)).toBe('');
 	});
 
+	it('keeps legacy and CORSIA-managed local oMLX models in distinct picker groups', () => {
+		const groups = groupModels([
+			row({ id: 'legacy', connection: 'omlx', provider: 'omlx', backend: 'network', server_name: 'This Mac' }),
+			row({ id: 'managed', connection: 'omlx', provider: 'omlx', backend: 'network', server_name: "CORSIA's own oMLX" }),
+		]);
+
+		expect(groups.map(group => group.name)).toEqual(['This Mac', "CORSIA's own oMLX"]);
+	});
+
 	it('uses first back only when several accounts are limited', () => {
 		const [group] = groupModels([
 			row({ id: 'a', status: 'unavailable', status_reason: 'usage_limited', status_resets_at: '2026-10-03T05:00:00Z' }),
@@ -359,10 +368,13 @@ describe('groupModels', () => {
 	});
 
 	it('reports an account check in flight or failed, from the account', () => {
-		const [group] = groupModels([row({ status: 'unavailable', status_reason: 'usage_limited' })]);
+		const [group] = groupModels([row({ status: 'unavailable', status_reason: 'usage_limited', status_resets_at: '2026-10-03T05:00:00Z' })]);
 		expect(groupStatusText(group, [limitedAccount({ checking: true })])).toBe('limited · checking');
-		expect(groupStatusText(group, [limitedAccount({ check: { outcome: 'failed', error: 'offline' } })])).toBe("limited · couldn't verify");
-		expect(groupStatusText(group)).toBe('limited');
+		expect(groupStatusText(group, [limitedAccount({ check: { outcome: 'failed', error: 'offline' } })])).toMatch(/^limited · back .* · couldn't verify$/);
+		expect(groupStatusText(group, [limitedAccount({ check: { outcome: 'failed', error: 'offline' } }), limitedAccount({ check: { outcome: 'failed', error: 'offline' } })])).toMatch(/^All 2 accounts limited · first back .* · couldn't verify$/);
+		const [groupWithoutReset] = groupModels([row({ status: 'unavailable', status_reason: 'usage_limited' })]);
+		expect(groupStatusText(groupWithoutReset, [limitedAccount({ resets_at: null, check: { outcome: 'failed', error: 'offline' } })])).toBe("limited · couldn't verify");
+		expect(groupStatusText(groupWithoutReset)).toBe('limited');
 	});
 
 	it('reads signed out from the rows', () => {

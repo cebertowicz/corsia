@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { writable } from 'svelte/store';
 import { DocOpenError } from '$lib/docOpenRefusal';
 import { clearDraft, seedDraft } from '$lib/stores/docSaveQueue';
-import { loadViewerContent } from './docViewerLoading';
+import { liveDocumentBindings, openLiveDocument } from '$lib/stores/liveDocuments';
+import { loadViewerContent, openFromDraft } from './docViewerLoading';
 
 const api = vi.hoisted(() => ({ fetchContent: vi.fn(), fetchRevision: vi.fn(), writeContent: vi.fn() }));
 vi.mock('$lib/api/docs', () => api);
@@ -37,5 +38,72 @@ describe('a live open refused before the file snapshot arrives', () => {
 		const { error, onSnapshot } = await refusedBeforeAnySnapshot();
 		expect(onSnapshot).not.toHaveBeenCalled();
 		expect(error).toMatchObject({ code: 'setup_failed', message: "Live editing couldn't start for this document." });
+	});
+});
+
+describe('a tab whose document relocated before its draft followed', () => {
+	it('loads the tab path, taking only the artifact identity from the draft', async () => {
+		const relocated = { ...target, path: '/archive/doc.md' };
+		seedDraft(target, '# Saved');
+		api.fetchContent.mockImplementation(async (path: string) => {
+			if (path === target.path) throw new Error('404 not found');
+			return { text: '# Relocated', writable: true, freshness: null, revision: 'r2', artifact: { id: 'artifact' } };
+		});
+
+		const onReady = vi.fn();
+		await loadViewerContent({ target: relocated, isCurrent: () => true, onReady, onSnapshot: vi.fn(), onUnavailable: vi.fn() });
+
+		expect(api.fetchContent).toHaveBeenCalledExactlyOnceWith(relocated.path, expect.anything());
+		expect(onReady).toHaveBeenCalledWith(expect.objectContaining({ text: '# Relocated', artifactId: 'artifact' }));
+	});
+});
+
+describe('a live reopen that replayed a device copy', () => {
+	const fileText = '# Doc\nfirst';
+	const openWith = async (liveText: string, unwritten: boolean) => {
+		const flush = vi.fn().mockResolvedValue({});
+		const live = { text: { toString: () => liveText }, artifactId: 'artifact', writable: true, flush,
+			durability: { clean: true, unwritten }, connection: 'connected' };
+		api.fetchContent.mockResolvedValue({ text: fileText, writable: true, freshness: null, revision: 'r1', artifact: { id: 'artifact' } });
+		vi.mocked(openLiveDocument).mockResolvedValue(live as never);
+		liveDocumentBindings.set({ [target.instanceId]: live } as never);
+		seedDraft(target, liveText);
+		await loadViewerContent({ target, isCurrent: () => true, onReady: vi.fn(), onSnapshot: vi.fn(), onUnavailable: vi.fn() });
+		await new Promise(resolve => setTimeout(resolve, 0));
+		return flush;
+	};
+	afterEach(() => { liveDocumentBindings.set({}); });
+
+	it('asks for the file write when the replay left the file behind the live text', async () => {
+		const flush = await openWith('# Doc\nfirst\nsecond', true);
+		expect(flush).toHaveBeenCalledOnce();
+	});
+
+	it('writes nothing when the replay added nothing to the file text', async () => {
+		expect(await openWith(fileText, true)).not.toHaveBeenCalled();
+	});
+
+	it('writes nothing on a plain reopen with no local transactions to write', async () => {
+		expect(await openWith('# Doc\nfirst\nremote edit', false)).not.toHaveBeenCalled();
+	});
+});
+
+describe('a tab opening from its draft', () => {
+	const draft = (editText: string, savedText: string) => ({ target, editText, savedText, status: 'idle' as const }) as unknown as Parameters<typeof openFromDraft>[0];
+
+	it('waits for the loader when its draft holds nothing', () => {
+		expect(openFromDraft(undefined, 'artifact')).toEqual({ text: null, unsaved: false, confirming: false, signal: { status: 'loading' } });
+	});
+
+	it('shows saved text at once while the loader confirms it, and claims nothing about write access meanwhile', () => {
+		const opened = openFromDraft(draft('# Saved', '# Saved'), 'artifact');
+		expect(opened).toMatchObject({ text: '# Saved', unsaved: false, confirming: true });
+		expect(opened.signal).toEqual({ status: 'ready', artifactId: 'artifact', shown: true });
+	});
+
+	it('shows unsaved text at once, read-only until the loader re-checks write access', () => {
+		const opened = openFromDraft(draft('# Local', '# Saved'), 'artifact');
+		expect(opened).toMatchObject({ text: '# Local', unsaved: true, confirming: false });
+		expect(opened.signal).toEqual({ status: 'ready', artifactId: 'artifact', shown: true, writable: false });
 	});
 });

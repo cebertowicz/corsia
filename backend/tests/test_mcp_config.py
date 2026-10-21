@@ -41,25 +41,17 @@ def test_symlink_and_missing_file_are_refused(tmp_path):
             read_bearer_file(str(path))
 
 
-def test_cli_configures_paths_only_and_preserves_other_settings(tmp_path, isolated_db, capsys):
+def test_cli_configure_refuses_the_retired_settings_writer(tmp_path, isolated_db, capsys):
     from cli_mcp import configure_mcp
     from infra.settings import get_tool_config, set_setting
 
-    bearer = tmp_path / "bearer"
-    bearer.write_text("synthetic-secret")
-    bearer.chmod(0o600)
-    config = {"service": {"url": "http://127.0.0.1:1234/mcp", "bearer_file": str(bearer),
-                           "allowed_tools": ["read_profile"]}}
     path = tmp_path / "servers.json"
-    path.write_text(json.dumps(config))
+    path.write_text(json.dumps({"service": {"command": "fixture"}}))
     set_setting("tools", {"web": {"unchanged": True}, "mcpServers": {"old": {}}})
-    assert configure_mcp(SimpleNamespace(file=path)) == 0
-    assert get_tool_config() == {"web": {"unchanged": True}, "mcpServers": config}
-    assert "synthetic-secret" not in json.dumps(get_tool_config())
-    bearer.chmod(0o644)
+
     assert configure_mcp(SimpleNamespace(file=path)) == 2
-    assert get_tool_config()["mcpServers"] == config
-    assert "synthetic-secret" not in capsys.readouterr().err
+    assert get_tool_config() == {"web": {"unchanged": True}, "mcpServers": {"old": {}}}
+    assert "add the app in Connected apps" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("header", ["Authorization", "authorization", "Proxy-Authorization", "Cookie", "X-API-Key"])

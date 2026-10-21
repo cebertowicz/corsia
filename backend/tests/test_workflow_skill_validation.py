@@ -4,22 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from core.skill_validation import validate_skill_text
+from core.skill_validation import validate_skill_bundle, validate_skill_file, validate_skill_text
 from infra.system_package import system_package_dir
+from tests.skill_sidecar_helpers import POINTER
 
 
-def _skill(steps: str) -> str:
-    return f"""---
-name: workflow-test
-description: Test workflow metadata
-corsia:
-  handler: {{kind: instruction}}
-  workflow:
-    steps:
-{steps}
----
-# Workflow test
-"""
+def _validate(steps: str):
+    sidecar = f"handler: {{kind: instruction}}\nworkflow:\n  steps:\n{steps}"
+    skill = f"---\nname: workflow-test\ndescription: Test workflow metadata\n{POINTER}---\n# Workflow test\n"
+    return validate_skill_bundle(skill, {"corsia.yaml": sidecar})
 
 
 @pytest.mark.parametrize(
@@ -45,21 +38,19 @@ corsia:
     ],
 )
 def test_workflow_steps_refuse_uncheckable_or_unresolvable_metadata(steps, message):
-    result = validate_skill_text(_skill(steps))
+    result = _validate(steps)
 
     assert not result.ok
     assert any(message in error for error in result.errors)
 
 
 def test_workflow_steps_accept_required_checks_and_known_dependencies():
-    result = validate_skill_text(
-        _skill(
-            "      - id: product\n"
-            "        required: true\n"
-            "        check: Approved behavior is recorded\n"
-            "      - id: build\n"
-            "        after: [product]\n"
-        )
+    result = _validate(
+        "      - id: product\n"
+        "        required: true\n"
+        "        check: Approved behavior is recorded\n"
+        "      - id: build\n"
+        "        after: [product]\n"
     )
 
     assert result.ok
@@ -67,15 +58,13 @@ def test_workflow_steps_accept_required_checks_and_known_dependencies():
 
 def test_packaged_declared_workflow_contract_survives_system_cut():
     package = system_package_dir()
-    decision = validate_skill_text(
-        (package / "skills/decision-brief/SKILL.md").read_text(encoding="utf-8")
-    )
+    decision = validate_skill_file(package / "skills/decision-brief/SKILL.md")
     task = validate_skill_text(
         (package / "skills/task-discipline/SKILL.md").read_text(encoding="utf-8")
     )
 
-    assert decision.ok
-    steps = decision.metadata["corsia"]["workflow"]["steps"]
+    assert decision.ok, decision.errors
+    steps = decision.corsia["workflow"]["steps"]
     assert [step["id"] for step in steps] == [
         "product-chain", "long-form", "brief", "decision",
     ]

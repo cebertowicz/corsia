@@ -19,6 +19,42 @@ require_no_extra_lifecycle_args() {
     done
 }
 
+# Once the CORSIA app adopts an install it runs its own service on that state
+# root and records it in service.json (its app folder, service_file). A second
+# backend on the same state root would share one database, so start and restart
+# from a source checkout refuse. The app runs this same script on that root and
+# is never refused. A missing file, or one without state_dir, leaves the install
+# unclaimed; a file that cannot be read is treated as claimed.
+refuse_if_app_owns_install() {
+    is_app_mode && return 0
+    local verdict
+    verdict="$(cd "$BACKEND_DIR" && "$PYTHON" -I -B -c '
+import os, sys
+sys.path.insert(0, sys.argv[1])
+from infra.platform_paths import app_metadata_dir
+from infra.service_file import SERVICE_FILE, service_file_state_dir
+path = app_metadata_dir() / SERVICE_FILE
+try:
+    claimed = service_file_state_dir(path)
+except ValueError:
+    print("unreadable", path)
+else:
+    if claimed is not None and str(claimed) == os.path.realpath(sys.argv[2]):
+        print("owned", path)
+' "$BACKEND_DIR" "$CORSIA_STATE_DIR" 2>/dev/null)" || verdict="unreadable service.json"
+    case "$verdict" in
+        owned*)
+            fail "The CORSIA app owns this install (${verdict#owned }). Use the CORSIA app to start or restart it."
+            return 1
+            ;;
+        unreadable*)
+            fail "Cannot read the CORSIA app's ${verdict#unreadable }, so this install may belong to the app. Use the CORSIA app, or fix that file."
+            return 1
+            ;;
+    esac
+    return 0
+}
+
 is_backend_running() { curl -sf --max-time 3 "http://127.0.0.1:$BACKEND_PORT/api/health" > /dev/null 2>&1; }
 
 # A healthy backend must publish readiness within one minute. Provider catalog
@@ -65,13 +101,16 @@ resolve_bind_host() {
     (cd "$BACKEND_DIR" && "$PYTHON" -m cli bind-host ${BOOTSTRAP_CONFIG:+--bootstrap "$BOOTSTRAP_CONFIG"})
 }
 
+# Saved in Settings › System and printed only while Let other devices connect is on.
+resolve_remote_address() {
+    (cd "$BACKEND_DIR" && "$PYTHON" -m cli remote-address ${BOOTSTRAP_CONFIG:+--bootstrap "$BOOTSTRAP_CONFIG"})
+}
+
 print_endpoints() {
     echo "  Local:     http://localhost:$BACKEND_PORT"
-    local ts_ip
-    # A loopback-only setup is not reachable over the tailnet; don't offer it.
-    [ "$(resolve_bind_host 2>/dev/null)" = 127.0.0.1 ] && return 0
-    ts_ip=$(tailscale ip -4 2>/dev/null | head -1)
-    [ -n "$ts_ip" ] && echo "  Tailscale: http://$ts_ip:$BACKEND_PORT"
+    local outside_address
+    outside_address="$(resolve_remote_address 2>/dev/null)" || outside_address=""
+    [ -n "$outside_address" ] && echo "  Outside address: $outside_address"
     return 0
 }
 
@@ -83,15 +122,23 @@ open_after_start() {
     open_browser
 }
 
-open_browser() {
-    local url="http://localhost:$BACKEND_PORT" version commit
-    echo "     ready at $url"
+# The installed release as a person reads it. A packaged app replaces it with
+# its bundle version (corsia.d/app_mode.sh).
+installed_release_label() {
+    local version commit
     version="$(git -C "$CORSIA_DIR" describe --tags --always 2>/dev/null)" || version=unknown
     commit="$(git -C "$CORSIA_DIR" rev-parse --short HEAD 2>/dev/null)" || commit=unknown
+    echo "CORSIA $version (commit $commit)"
+}
+
+open_browser() {
+    local url="http://localhost:$BACKEND_PORT" release
+    echo "     ready at $url"
+    release="$(installed_release_label)"
     if command -v open > /dev/null 2>&1 && open "$url"; then
-        echo "     Opening your browser…  Installed CORSIA $version (commit $commit)."
+        echo "     Opening your browser…  Installed $release."
     else
-        echo "     Open $url in your browser.  Installed CORSIA $version (commit $commit)."
+        echo "     Open $url in your browser.  Installed $release."
     fi
 }
 
@@ -264,6 +311,10 @@ drain_and_wait() {
             return 1
             ;;
     esac
+    if [ "$max_wait" -gt 1800 ]; then
+        warn "Drain timeout capped at 1800 seconds (was $max_wait)"
+        max_wait=1800
+    fi
 
     local operation_id="${CORSIA_RESTART_OPERATION_ID:-}"
     local compatibility_handoff="${3:-}" handoff_status
@@ -454,6 +505,7 @@ if json.load(sys.stdin) != {"detail": "restart operation is not quiescent"}:
                 sleep 2
                 continue
             fi
+
             if [ "$ready_http_status" != "200" ]; then
                 warn "Could not mark drain ready"
                 cancel_failed_drain "$drain_url" "$operation_id" || :
@@ -483,7 +535,8 @@ if payload.get("ok") is not True or payload.get("operation_id") != expected:
 
     warn "Drain timed out; enforcing hard cap"
     local hard_cap_response hard_cap_forced
-    if ! hard_cap_response=$(curl -sf --max-time 30 -X POST "$hard_cap_url" \
+    if ! hard_cap_response=$(curl -sf --max-time 30 \
+        -X POST "$hard_cap_url" \
         -H "Content-Type: application/json" \
         -d "{\"operation_id\":\"$operation_id\"}" 2>/dev/null); then
         warn "Could not enforce drain hard cap; cancelling restart"
@@ -598,7 +651,7 @@ start_backend() {
     cd "$BACKEND_DIR"
     env -u CORSIA_RESTART_BACKEND_PORT -u CORSIA_RESTART_OPERATION_ID \
         -u CORSIA_TEST_MODE -u CORSIA_ALLOW_HOME_WORKSPACE_IN_CI \
-        BACKEND_PORT="$BACKEND_PORT" \
+        CORSIA_DEVICES_DISABLE=1 BACKEND_PORT="$BACKEND_PORT" \
         nohup "$PYTHON" -m uvicorn main:app --host "$bind" --port "$BACKEND_PORT" > "$BACKEND_LOG" 2>&1 &
 }
 
@@ -866,20 +919,28 @@ redeploy_sync_python_dependencies() {
     fi
 }
 
+UPDATE_PREPARE_FETCH_FAILED=41
+UPDATE_PREPARE_BUILD_FAILED=42
+# Refusals before any pull: nothing can change by retrying until the person acts.
+UPDATE_PREPARE_INDEX_LOCKED=43
+UPDATE_PREPARE_DETACHED=44
+UPDATE_PREPARE_DIRTY=45
+UPDATE_PREPARE_AWAITING_RESTART=46
+
 # Pull, dependency-check, and stage a build from the serving checkout's CURRENT
 # branch. The caller holds the Update mutex for this whole function.
 prepare_redeploy_locked() {
     local checkout="$1" git_dir="$2" branch fe stage prepared backup absent
 
-    recover_stale_git_index_lock "$git_dir" || return 1
+    recover_stale_git_index_lock "$git_dir" || return "$UPDATE_PREPARE_INDEX_LOCKED"
     branch="$(git -C "$checkout" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
     if [ -z "$branch" ]; then
         fail "Redeploy refused: serving checkout is in detached HEAD — no branch to pull"
-        return 1
+        return "$UPDATE_PREPARE_DETACHED"
     fi
     if [ -n "$(git -C "$checkout" status --porcelain 2>/dev/null)" ]; then
         fail "Redeploy refused: serving checkout has uncommitted changes (deployment surface must stay clean)"
-        return 1
+        return "$UPDATE_PREPARE_DIRTY"
     fi
     IFS=$'\t' read -r fe stage prepared backup absent \
         <<< "$(frontend_release_paths "$checkout")"
@@ -889,15 +950,15 @@ prepare_redeploy_locked() {
             return 1
         fi
         fail "Redeploy refused: a validated frontend update is already awaiting restart at $stage"
-        return 1
+        return "$UPDATE_PREPARE_AWAITING_RESTART"
     fi
     echo "  Pulling --ff-only ($branch) in $checkout ..."
     if ! git -C "$checkout" pull --ff-only; then
         fail "Redeploy refused: git pull --ff-only failed (diverged / non-fast-forward / offline) — checkout left untouched"
-        return 1
+        return "$UPDATE_PREPARE_FETCH_FAILED"
     fi
-    redeploy_sync_python_dependencies "$checkout" || return 1
-    redeploy_build "$checkout" || return 1
+    redeploy_sync_python_dependencies "$checkout" || return "$UPDATE_PREPARE_BUILD_FAILED"
+    redeploy_build "$checkout" || return "$UPDATE_PREPARE_BUILD_FAILED"
     echo "  Pull + dependency check + build OK"
 }
 

@@ -1,4 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { replyField } from '../support/commentDrawer';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import {
 	createComment,
 	deleteRenderedLine,
@@ -26,13 +28,13 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await openLiveDocument(writer, document);
 			await openLiveDocument(reader, document);
 			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(3);
-			await reader.getByRole('button', { name: '3 comments', exact: true }).click();
+			await reader.getByRole('button', { name: /^3 open threads\b/ }).click();
 			const comments = reader.getByRole('region', { name: 'Document comments', exact: true });
 			await expect(comments).toBeVisible();
 			const jump = comments.getByRole('button', { name: `Go to text: ${quote}`, exact: true }).first();
 			await jump.click();
 			await expect(reader.locator('.cm-comment-focused').filter({ hasText: quote })).toBeInViewport();
-			const reply = comments.getByPlaceholder('Reply…').last();
+			const reply = await replyField(comments.locator('[data-comment-id]').filter({ hasText: `Reply ${stamp}` }));
 			await reply.fill(`draft ${stamp}`);
 			await expect(reply).toBeFocused();
 
@@ -57,26 +59,27 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await expect(reader.locator('.cm-line').filter({ hasText: quote })).toHaveCount(2);
 			await expect(reader.locator('.cm-content')).toContainText(`reply anchor ${stamp}`);
 			await expect(reader.locator('.cm-content')).toContainText(`remote edit ${stamp}`);
-			const reload = reader.getByRole('button', { name: 'Reload comment placements', exact: true });
+			const reload = comments.getByRole('button', { name: 'Reload comment placements', exact: true });
 			await expect(reload).toBeVisible();
 			const reloadBox = await reload.boundingBox();
 			expect(reloadBox).not.toBeNull();
-			expect(reloadBox!.height).toBeGreaterThanOrEqual(width <= 768 ? 44 : 32);
+			// Desktop is the shared secondary sm Button's 28px (as the feedback row's Retry); narrow screens widen its hit area to 44.
+			expect(reloadBox!.height).toBeGreaterThanOrEqual(width <= 768 ? 44 : 28);
 			expect(reloadBox!.x).toBeGreaterThanOrEqual(0);
 			expect(reloadBox!.x + reloadBox!.width).toBeLessThanOrEqual(width);
 			await reader.screenshot({ path: testInfo.outputPath(`comment-reload-before-${width}.png`) });
 			await reload.click();
 			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(3);
 			await expect(reply).toHaveValue(`draft ${stamp}`);
-			await expect(reader.getByRole('button', { name: '3 comments', exact: true })).toBeFocused();
-			await expect(reader.getByRole('status').filter({ hasText: 'Comments placed' })).toBeVisible();
+			await expect(comments.getByRole('heading', { name: /^Comments\b/ })).toBeFocused();
+			await expect(comments.getByRole('status').filter({ hasText: 'Comments placed' })).toBeVisible();
 			await expect(reload).toHaveCount(0);
 			await reader.screenshot({ path: testInfo.outputPath(`comment-reload-success-${width}.png`) });
 			await reader.reload();
 			if (width <= 768) await reader.getByRole('button', { name: 'Toggle sidebar' }).click();
 			await reader.getByText(document.title, { exact: true }).first().click();
 			await expect(reader.locator('.cm-content')).toContainText(quote);
-			await reader.getByRole('button', { name: '3 comments', exact: true }).click();
+			await reader.getByRole('button', { name: /^3 open threads\b/ }).click();
 			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(3);
 			await expect(reader.getByText(`First ${stamp}`, { exact: true })).toBeVisible();
 			await expect(reader.getByText(`Second ${stamp}`, { exact: true })).toBeVisible();

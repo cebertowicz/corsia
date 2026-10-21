@@ -4,12 +4,13 @@ import { get } from 'svelte/store';
 import { activeThreadId, threads } from '$lib/stores/threads';
 import { canvasHeader } from '$lib/stores/canvasHeader';
 import { uiScope } from '$lib/stores/uiScope';
-import { projectSettingsOpen } from '$lib/stores/projectSettings';
+import { resetSettingsNavigation, selectSettingsSection, settingsNavigation } from '$lib/stores/settingsNavigation';
 import { threadSettingsOpen } from '$lib/stores/threadSettings';
 import { measurementScope } from '$lib/stores/measurement';
 import { projects } from '$lib/stores/projects';
 import { measurementOrigin } from '$lib/stores/measurementNavigation';
 import Header from './Header.svelte';
+import headerSource from './Header.svelte?raw';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -19,7 +20,7 @@ beforeEach(() => {
 	document.body.appendChild(host);
 	canvasHeader.set(null);
 	uiScope.set(null);
-	projectSettingsOpen.set(false);
+	resetSettingsNavigation();
 	threadSettingsOpen.set(false);
 	measurementScope.set({ project: 'all', agent: null });
 	measurementOrigin.set(null);
@@ -70,27 +71,37 @@ describe('Header', () => {
 		expect(host.querySelector('[aria-label="Open this thread\'s plan"]')).toBeNull();
 	});
 
-	it('labels the no-session landing as the workspace conductor', () => {
+	it('labels the no-session landing as the CORSIA agent', () => {
 		activeThreadId.set(null);
 		threads.set([]);
 		render();
 		expect(host.textContent).toContain('Workspace');
-		expect(host.textContent).toContain('conductor');
+		expect(host.textContent).toContain('CORSIA');
+		expect(host.textContent).not.toContain('conductor');
 	});
 
-	it('opens project settings from a scoped activity header, not workspace activity', () => {
+	it('opens Settings on the scoped project\'s page from a project activity header', () => {
 		activeThreadId.set(null);
 		uiScope.set({ id: 'project-1', name: 'CORSIA', color: '#d65a87' });
 		canvasHeader.set({ title: 'CORSIA' });
 		render('activity');
 		expect(host.querySelector('[aria-label="Thread settings"]')).toBeNull();
+		const before = get(settingsNavigation).openRequest;
 		(host.querySelector('[aria-label="Project settings"]') as HTMLButtonElement).click();
-		expect(host.querySelector('[aria-label="Project settings"]')).not.toBeNull();
-		let opened = false;
-		projectSettingsOpen.subscribe((value) => { opened = value; })();
-		expect(opened).toBe(true);
-		flushSync();
-		expect(host.querySelector('[aria-label="Project settings"]')).toBeNull();
+		expect(get(settingsNavigation).openRequest).toBe(before + 1);
+		expect(get(settingsNavigation).section).toBe('projects');
+		expect(get(settingsNavigation).project).toBe('project-1');
+	});
+
+	it('opens Settings at its first section from the workspace activity header', () => {
+		activeThreadId.set(null);
+		selectSettingsSection('debug');
+		render('activity');
+		const before = get(settingsNavigation).openRequest;
+		(host.querySelector('[aria-label="Workspace settings"]') as HTMLButtonElement).click();
+		expect(get(settingsNavigation).openRequest).toBe(before + 1);
+		expect(get(settingsNavigation).section).toBe('providers');
+		expect(get(settingsNavigation).project).toBeNull();
 	});
 
 	it('shows conductor settings for the designated hidden thread, not a project gear', () => {
@@ -103,6 +114,15 @@ describe('Header', () => {
 		let opened = false;
 		threadSettingsOpen.subscribe((value) => { opened = value; })();
 		expect(opened).toBe(true);
+	});
+
+	it('labels the settings gear CORSIA settings for the workspace scope\'s designated thread', () => {
+		threads.set([]);
+		activeThreadId.set('agent-1');
+		uiScope.set(null);
+		render('chat', 'agent-1');
+		expect(host.querySelector('[aria-label="CORSIA settings"]')).not.toBeNull();
+		expect(host.querySelector('[aria-label="Conductor settings"]')).toBeNull();
 	});
 
 	const agentThread = {
@@ -221,5 +241,40 @@ describe('Header title on the Measurement page', () => {
 		activeThreadId.set('thread-1');
 		render('chat');
 		expect(title()).toContain('Bugs');
+	});
+});
+
+describe('Header title overflow', () => {
+	it('lets a long scope title shrink and ellipsize before it displaces fixed controls', () => {
+		const start = headerSource.indexOf('.h-scope {');
+		const rule = headerSource.slice(start, headerSource.indexOf('}', start));
+		expect(rule).toContain('min-width: 0;');
+		expect(rule).toContain('max-width: 24rem;');
+		expect(rule).toContain('text-overflow: ellipsis;');
+	});
+});
+
+describe('Header glass layers', () => {
+	const rule = (css: string, selector: string) => {
+		const start = css.indexOf(`${selector} {`);
+		return start < 0 ? '' : css.slice(start, css.indexOf('}', start));
+	};
+	const phone = headerSource.slice(headerSource.indexOf('@media (max-width: 768px)'));
+
+	it('keeps the phone header blur on the masked layer so it fades out at the bottom', () => {
+		// An unmasked blur layer ends in a hard line across the transcript.
+		expect(rule(phone, '.shell-header::before')).not.toMatch(/backdrop-filter: none;/);
+		const base = rule(headerSource, '.shell-header::before');
+		expect(base).toMatch(/-webkit-backdrop-filter: var\(--glass-blur\);/);
+		expect(base).toMatch(/mask-image: linear-gradient/);
+	});
+
+	it('keeps the phone glass opaque behind the header row', () => {
+		// The transcript shows through wherever the mask is below 1, so it stays opaque down to
+		// the bottom of the row's glyphs, 9px below the row centre, and only then fades.
+		expect(rule(phone, '.shell-header')).toContain('padding-top: var(--header-pad-top);');
+		expect(rule(phone, '.shell-header::before')).toContain(
+			'mask-image: linear-gradient(180deg, rgba(0,0,0,1) calc(50% + var(--header-pad-top) / 2 + 9px), transparent 100%);',
+		);
 	});
 });

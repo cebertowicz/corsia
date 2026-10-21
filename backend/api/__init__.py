@@ -1,6 +1,7 @@
 """Route modules — each exports an APIRouter."""
 
 from api.auth import router as auth_router
+from api.setup import router as setup_router
 from api.threads import router as threads_router
 from api.thread_mutations import router as thread_mutations_router
 from api.thread_messages import router as thread_messages_router
@@ -23,6 +24,7 @@ from api.files_revision import router as files_revision_router
 from api.doc_comments import router as doc_comments_router
 from api.doc_comment_thread_views import router as doc_comment_thread_views_router
 from api.provider_sources import router as provider_sources_router
+from api.provider_local_models import router as provider_local_models_router
 from api.provider_cli_link import router as provider_cli_link_router
 from api.providers import router as providers_router
 from api.provider_policy import router as provider_policy_router
@@ -30,9 +32,11 @@ from api.vendor_accounts import router as vendor_accounts_router
 from api.discovered_models import router as discovered_models_router
 from api.network_servers import router as network_servers_router
 from api.version import router as version_router
+from api.devices import router as devices_router
 from api.webhooks import router as webhooks_router
 from api.cc_attach import router as cc_attach_router
 from api.conductor import router as conductor_router
+from api.corsia_agent import router as corsia_agent_router
 from api.context_bootloader import router as context_bootloader_router
 from api.delegation import router as delegation_router
 from api.delegation_docs import router as delegation_docs_router
@@ -40,11 +44,13 @@ from api.delegation_model import router as delegation_model_router
 from api.skills import router as skills_router
 from api.host_access import router as host_access_router
 from api.audit_reads import router as audit_reads_router
+from api.browser import router as browser_router
 from api.plans import router as plans_router
 from api.plans_folded import router as plans_folded_router
 
 __all__ = [
     "auth_router",
+    "setup_router",
     "threads_router",
     "thread_mutations_router",
     "thread_messages_router",
@@ -66,6 +72,7 @@ __all__ = [
     "doc_comments_router",
     "doc_comment_thread_views_router",
     "provider_sources_router",
+    "provider_local_models_router",
     "provider_cli_link_router",
     "providers_router",
     "provider_policy_router",
@@ -73,15 +80,18 @@ __all__ = [
     "discovered_models_router",
     "network_servers_router",
     "version_router",
+    "devices_router",
     "webhooks_router",
     "cc_attach_router",
     "conductor_router",
+    "corsia_agent_router",
     "delegation_router",
     "delegation_docs_router",
     "delegation_model_router",
     "skills_router",
     "host_access_router",
     "audit_reads_router",
+    "browser_router",
     "plans_router",
     "plans_folded_router",
     "agents_router",

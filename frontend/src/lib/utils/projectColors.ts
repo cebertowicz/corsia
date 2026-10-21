@@ -1,3 +1,5 @@
+import { apcaLc, contrastRatio, INK_WHITE, inkOn, over, parseColor, parseCssColour, stepToContrast, stepUntil, toHex, type Rgb } from './contrast';
+
 const PALETTE_HUES = [
 	210,
 	155,
@@ -27,6 +29,111 @@ export function projectColor(id: string | null | undefined): string {
 
 export function projectAccent(id: string | null | undefined, accentColor?: string | null): string {
 	return accentColor || projectColor(id);
+}
+
+/**
+ * The surfaces accent text sits on in each theme (`--bg-primary`, `--bg-tertiary`, `--bg-hover` and `--bg-active`),
+ * copied from `app-tokens.css` and pinned to it by `projectColors.test.ts`. The limiting one is the darkest in light
+ * (stepped text darkens) and the lightest in dark (stepped text lightens), so text that passes all of them passes on
+ * every pane. `--bg-active` is a pane because `app.css` paints it behind anything pressed (`.press-tint:active`,
+ * `.pressable-row:active`), including the rows and buttons that carry accent text.
+ */
+export const ACCENT_TEXT_SURFACES: Record<'light' | 'dark', string[]> = {
+	light: ['#ffffff', '#f0f0f2', '#e8e8ec', '#e0e0e5'],
+	dark: ['#0a0a0b', '#1c1c1f', '#242428', '#2a2a2f'],
+};
+/**
+ * The least APCA contrast (`|Lc|`) the ink must reach on an accent fill: APCA's minimum for content text. The fill
+ * steps away from its ink only below it, so a colour that already reads (the default `#007faa` is Lc 76.4 with white)
+ * fills with itself.
+ */
+export const FILL_INK_MIN_LC = 60;
+
+/**
+ * What the document editor paints a selection over: the page is `--bg-primary` (the first of `ACCENT_TEXT_SURFACES`, the
+ * pixels `doc-prose-selection-highlight.spec.ts` measures behind it: #ffffff light, #0a0a0b dark) and its text is
+ * `--text-primary`, copied from `app-tokens.css` and pinned to it by `projectColors.test.ts`.
+ */
+export const SELECTION_TEXT: Record<'light' | 'dark', Rgb> = { light: [26, 26, 30], dark: [232, 232, 237] };
+/** The least contrast a selection must reach against the page it is drawn on (the least a drag reads at), and the least its text keeps. */
+export const SELECTION_MIN_CONTRAST = 1.5;
+export const SELECTION_TEXT_MIN_CONTRAST = 4.5;
+/** The share the search starts from: the dark page needs more of the same colour than the light one to read as much. */
+const SELECTION_START_SHARE: Record<'light' | 'dark', number> = { light: 35, dark: 45 };
+
+export interface AccentRoles {
+	base: string;
+	text: string;
+	wash: string;
+	line: string;
+	fill: string;
+	onFill: string;
+	selection: string;
+}
+
+/** The token each role paints through, defined with its default in `app-tokens.css`. */
+export const ACCENT_ROLE_TOKENS: Record<keyof AccentRoles, string> = {
+	base: '--accent',
+	text: '--accent-text',
+	wash: '--accent-wash',
+	line: '--accent-line',
+	fill: '--accent-fill',
+	onFill: '--accent-on-fill',
+	selection: '--accent-selection',
+};
+
+const warnedUnparsed = new Set<string>();
+
+/**
+ * How much of the accent a selection is, as a percentage over the document page: the first from the theme's start up that
+ * reads against the page (`SELECTION_MIN_CONTRAST`) and leaves the text readable (`SELECTION_TEXT_MIN_CONTRAST`). Where
+ * no share does both (a pale accent on the light page never reaches the first), the text keeps its floor and the
+ * selection takes the most contrast that allows, which is the largest share that still leaves the text readable: the
+ * composite only moves towards the accent as the share grows. Each composite is rounded to the 8-bit pixel the browser paints.
+ */
+function selectionShare(own: Rgb, theme: 'light' | 'dark'): number {
+	const page = parseColor(ACCENT_TEXT_SURFACES[theme][0])!;
+	const ink = SELECTION_TEXT[theme];
+	const mix = (share: number) => over(own, page, share / 100).map(Math.round) as Rgb;
+	const readsText = (share: number) => contrastRatio(ink, mix(share)) >= SELECTION_TEXT_MIN_CONTRAST;
+	for (let share = SELECTION_START_SHARE[theme]; share <= 100; share++) {
+		if (contrastRatio(mix(share), page) >= SELECTION_MIN_CONTRAST && readsText(share)) return share;
+	}
+	for (let share = 100; share > 1; share--) if (readsText(share)) return share;
+	return 1;
+}
+
+/**
+ * What a project's colour becomes when it is the accent, every role from this one place.
+ * The colour is treated as opaque: an alpha component is dropped, and every role is opaque (the base is the colour
+ * itself, or its opaque hex when it carried an alpha). Text is the same hue stepped until it reads (4.5:1) on every
+ * pane. The ink on the fill is the shared APCA `inkOn` choice. The fill is the colour itself — what a person chose —
+ * unless that ink reads below `FILL_INK_MIN_LC` on it; then the fill steps away from its ink until it does.
+ * The selection is the colour at the share `selectionShare` finds, so a drag reads in the document whatever the accent.
+ * Null when the colour does not parse (the API validates it, so this should not happen): the default accent applies,
+ * with one console warning per value.
+ */
+export function accentRoles(colour: string, theme: 'light' | 'dark'): AccentRoles | null {
+	const parsed = parseCssColour(colour);
+	if (!parsed) {
+		if (!warnedUnparsed.has(colour)) {
+			warnedUnparsed.add(colour);
+			console.warn(`Project accent colour ${JSON.stringify(colour)} is not a colour; using the default accent.`);
+		}
+		return null;
+	}
+	const own = parsed.rgb;
+	const base = parsed.alpha < 1 ? toHex(own) : colour;
+	const wash = `color-mix(in srgb, ${base} 12%, transparent)`;
+	const line = `color-mix(in srgb, ${base} 30%, transparent)`;
+	const surfaces = ACCENT_TEXT_SURFACES[theme].map((hex) => parseColor(hex)!);
+	const text = toHex(stepToContrast(own, surfaces, theme, 4.5));
+	const onFill = inkOn(base);
+	const ink = parseColor(onFill)!;
+	// White ink needs a darker fill and near-black ink a lighter one: the text stepping directions of light and dark.
+	const stepped = stepUntil(own, onFill === INK_WHITE ? 'light' : 'dark', (tone) => Math.abs(apcaLc(ink, tone)) >= FILL_INK_MIN_LC);
+	const selection = `color-mix(in srgb, ${base} ${selectionShare(own, theme)}%, transparent)`;
+	return { base, text, wash, line, fill: stepped === own ? base : toHex(stepped), onFill, selection };
 }
 
 export const ACCENT_SWATCHES = [

@@ -1,5 +1,5 @@
 import { derived, get, writable } from 'svelte/store';
-import { fetchSources, localPickerStatus, setupLocalSource, type ModelSource } from '$lib/conductorSources';
+import { fetchSources, localPickerStatus, setupLocalSource, startLocalModelDownload, type LocalPickerRetry, type ModelSource } from '$lib/conductorSources';
 import { addStarterModel } from '$lib/conductorSourcesApi';
 import { on } from '$lib/ws/events';
 import { token } from './auth';
@@ -9,6 +9,8 @@ const localSource = writable<ModelSource | undefined>(undefined);
 
 /** What the picker's Local group says about a download or a failed setup; null when neither. */
 export const localStatus = derived(localSource, localPickerStatus);
+/** The picker may offer the shared add-model sheet only on Macs that pass the API memory gate. */
+export const canAddLocalModel = derived(localSource, (source) => source?.eligible === true);
 
 async function read(): Promise<void> {
 	const t = get(token);
@@ -18,17 +20,31 @@ async function read(): Promise<void> {
 	} catch { /* the line stays as it was */ }
 }
 
-/** Try again: the same action as the first-run card's for that kind. The starter route never writes oMLX settings. */
-export async function retryLocalSetup(kind: 'starter' | 'setup'): Promise<boolean> {
+/** ``message`` is the backend's specific refusal when it gave one. */
+export type LocalSetupRetry = { ok: boolean; code?: 'consent_required'; message?: string };
+
+/** Try again: preserve each download's owner route; Settings retries its durable repository. */
+export async function retryLocalSetup(kind: LocalPickerRetry, otherOmlx: 'stop' | 'keep' | null = null): Promise<LocalSetupRetry> {
 	const t = get(token);
-	if (!t) return false;
-	let ok = true;
+	if (!t) return { ok: false };
+	let result: LocalSetupRetry = { ok: true };
 	try {
-		const result = kind === 'starter' ? await addStarterModel(t) : await setupLocalSource(t);
-		ok = result.ok;
-	} catch { ok = false; }
+		if (kind === 'starter') {
+			result = { ok: (await addStarterModel(t)).ok };
+		} else if (kind === 'settings') {
+			const repository = get(localSource)?.settings_download?.repository;
+			if (!repository) result = { ok: false };
+			else {
+				await startLocalModelDownload(t, repository);
+				result = { ok: true };
+			}
+		} else {
+			const response = await setupLocalSource(t, otherOmlx);
+			result = { ok: response.ok, code: response.code };
+		}
+	} catch (caught) { result = { ok: false, message: caught instanceof Error ? caught.message : undefined }; }
 	await read();
-	return ok;
+	return result;
 }
 
 /**

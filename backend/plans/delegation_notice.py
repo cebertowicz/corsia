@@ -341,7 +341,8 @@ def _append(
 def _wake_parent(
     connection, parent_plan_id: str, worker: str, *, kind: str, subject_id: str,
     child_plan_id: str | None = None, revision: int | None = None,
-    actor_id: str | None = None, extra: dict | None = None, account_hold_state=None, **fields,
+    actor_id: str | None = None, extra: dict | None = None, account_hold_state=None,
+    template: str | None = None, **fields,
 ) -> str | None:
     """Wake the parent about its worker, through the one plan-input writer.
 
@@ -353,6 +354,7 @@ def _wake_parent(
     own. What the parent itself did (``actor_id``) is its receipt, never a
     wake. ``fields`` fill the wake line; ``extra`` adds facts to the JSON
     tail beyond node/worker, for a wake one line cannot carry (E1's draft).
+    ``template`` replaces the kind's line where the cause owns its own text.
     A delegating step already settled has nothing left for the parent to
     decide, so its worker's late news is not a wake (#1991). The step is
     ``projections.delegated_step``'s: a settled earlier step that named the
@@ -367,9 +369,10 @@ def _wake_parent(
     node = projections.delegated_step(connection, parent_plan_id, worker)
     if node is None:
         return None
-    template = (text.ACCOUNT_PENDING_RESUME_WAKE_TEMPLATE if account_hold_state == 'pending_resume'
-                else text.ACCOUNT_HELD_WAKE_TEMPLATE if account_hold_state == 'unready'
-                else getattr(text, f"WAKE_{kind.upper()}"))
+    template = template or (
+        text.ACCOUNT_PENDING_RESUME_WAKE_TEMPLATE if account_hold_state == 'pending_resume'
+        else text.ACCOUNT_HELD_WAKE_TEMPLATE if account_hold_state == 'unready'
+        else getattr(text, f"WAKE_{kind.upper()}"))
     line = template.format(
         **{"title": str(node["title"]), "worker": worker, "step": str(node["id"]), **fields},
     )

@@ -62,12 +62,29 @@ export function renderableImage(state: EditorState, node: SyntaxNode): boolean {
 }
 
 /**
+ * Draws a workspace image into `wrap`, as the document does standalone or in a table cell. A failed load shows the
+ * alt text and why, from the server's answer to the same request: the file is missing (404), refused as outside this
+ * scope (400) or not an image (415); any other status, or no answer at all, is a plain failure to load.
+ */
+export function drawImage(wrap: HTMLElement, alt: string, src: string): HTMLElement {
+	const img = document.createElement('img');
+	img.alt = alt;
+	img.decoding = 'async';
+	img.addEventListener('error', async () => {
+		const reason = await imageFailureReason(src);
+		const note = document.createElement('div');
+		note.className = 'cm-md-image-note';
+		note.textContent = alt ? `${alt} · ${reason}` : reason;
+		wrap.replaceChildren(note);
+	});
+	img.src = src;
+	wrap.append(img);
+	return wrap;
+}
+
+/**
  * The image, drawn below its line, or in place of the line when the image is all it holds. It carries the
  * range of its markdown (`data-from`, `data-to`) so a click can select it whole, and shows when it is selected.
- * A failed load shows the alt text and why, from the
- * server's answer to the same request: the file is missing (404), refused as outside this
- * scope (400) or not an image (415); any other status, or no answer at all, is a plain
- * failure to load.
  */
 class ImageWidget extends WidgetType {
 	constructor(readonly alt: string, readonly src: string, readonly from: number, readonly to: number, readonly selected: boolean) { super(); }
@@ -91,20 +108,7 @@ class ImageWidget extends WidgetType {
 		wrap.dataset.src = this.src;
 		wrap.dataset.alt = this.alt;
 		this.mark(wrap);
-		const img = document.createElement('img');
-		img.alt = this.alt;
-		img.decoding = 'async';
-		img.addEventListener('error', () => void this.showFailure(wrap));
-		img.src = this.src;
-		wrap.append(img);
-		return wrap;
-	}
-	private async showFailure(wrap: HTMLElement) {
-		const reason = await imageFailureReason(this.src);
-		const note = document.createElement('div');
-		note.className = 'cm-md-image-note';
-		note.textContent = this.alt ? `${this.alt} · ${reason}` : reason;
-		wrap.replaceChildren(note);
+		return drawImage(wrap, this.alt, this.src);
 	}
 	ignoreEvent() { return false; }
 }

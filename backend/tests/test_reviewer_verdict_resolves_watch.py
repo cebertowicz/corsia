@@ -16,6 +16,7 @@ import uuid
 from events.identity import GITHUB_INTEGRATION, PR_TYPE, pr_external_id
 from plans import admission, service
 from plans.boundary import PlanActor, mutate
+from reviewer.reviewer_types import reviewer_verdict
 from tests.event_routing_helpers import mk_session, register_pr
 
 REPO = "owner/repo"
@@ -70,6 +71,22 @@ def _call_on_backend_loop(callback, *args, **kwargs):
     return asyncio.run(invoke())
 
 
+def _clean_verdict() -> dict:
+    """Build a complete clean terminal reviewer result for delivery tests."""
+    return reviewer_verdict(
+        verdict="clean",
+        required_action="none",
+        summary="0 block, 0 flag, 0 nit -- reviewed by codex",
+        block_count=0,
+        flag_count=0,
+        nit_count=0,
+        finding_count=0,
+        model_label="codex",
+        reviewer_version="test-version",
+        reviewer_standards=["product"],
+    )
+
+
 def test_reviewer_verdict_resolves_its_armed_watch(isolated_db, monkeypatch):
     from events import delivery
     from events.connectors import github_reviewer_notifications
@@ -95,7 +112,7 @@ def test_reviewer_verdict_resolves_its_armed_watch(isolated_db, monkeypatch):
 
     result = _call_on_backend_loop(
         github_reviewer_notifications.notify_reviewer_verdict,
-        REPO, 7, "abc123def", {"verdict": "clean"},
+        REPO, 7, "abc123def", _clean_verdict(),
     )
     assert result == "delivered"
 
@@ -110,7 +127,7 @@ def test_reviewer_verdict_resolves_its_armed_watch(isolated_db, monkeypatch):
     # watch is already gone, so this is a plain no-op re-delivery.
     result2 = _call_on_backend_loop(
         github_reviewer_notifications.notify_reviewer_verdict,
-        REPO, 7, "abc123def", {"verdict": "clean"},
+        REPO, 7, "abc123def", _clean_verdict(),
     )
     assert result2 == "delivered"
     db = get_db()

@@ -48,13 +48,13 @@ def _event(kind, call_id):
 async def _install(admission, *, previous=False):
     from dataclasses import replace
     from core.checkpoint_capture import capture_and_install
-    from core.checkpoint_types import ProviderCheckpointResult
+    from core.fork_types import ProviderForkResult
     from infra import checkpoint_queries
     from infra.checkpoints import create_running
     from infra.db_async import run_in_db
 
     request = admission.request
-    result = ProviderCheckpointResult(raw_body="saved narrative", usage=None)
+    result = ProviderForkResult(raw_body="saved narrative", usage=None)
     if previous:
         predecessor = replace(
             request, id="previous", through_seq=1, through_message_id="input", mode="warm",
@@ -71,11 +71,11 @@ async def _install(admission, *, previous=False):
 
 
 async def _prepare_racing(context, live, on_event, monkeypatch, *, deferred, required, call_id="late"):
-    from core import checkpoint_render
+    from core import checkpoint_cold_admission, checkpoint_render
     from subagents.harness_checkpoint_resume import _prepare_external_checkpoint
 
     entered, release = threading.Event(), threading.Event()
-    original = checkpoint_render.build_cold_checkpoint_admission
+    original = checkpoint_cold_admission.build_checkpoint_admission
 
     def paused(**kwargs):
         # This seam is reached only AFTER the admission guard checked the real map.
@@ -84,7 +84,7 @@ async def _prepare_racing(context, live, on_event, monkeypatch, *, deferred, req
         assert release.wait(10), "event handler did not release cold builder"
         return original(**kwargs)
 
-    monkeypatch.setattr(checkpoint_render, "build_cold_checkpoint_admission", paused)
+    monkeypatch.setattr(checkpoint_cold_admission, "build_checkpoint_admission", paused)
     prepared = _prepare_external_checkpoint(
         "race", context=context, live=live, identity=live.corsia_turn,
         warm_source=SimpleNamespace(harness="codex") if deferred else None,

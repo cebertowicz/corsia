@@ -15,9 +15,13 @@ support, and the live token split in `app-tokens.css` + `app.css`.
 
 ## TL;DR
 
+- **The chat view is the reference screen (§0).** Each role (row, label,
+  status, action, card, accent) has one treatment taken from it; match it, and
+  never use a treatment §0.2 lists as out.
 - **Use the live primitives** in `frontend/src/lib/components/ui/`: `Button`,
-  `Field`, `IconButton`, `Message`, `Modal`, `Section`, `StatePill`, `Toggle`.
-  Don't roll your own.
+  `Field`, `IconButton`, `Message`, `Modal`, `Section`, `Toggle`.
+  Don't roll your own. (`StatePill` still exists, but status is a dot or
+  coloured text, never a pill: §0.2.)
 - **All design values are tokens** in `frontend/src/app-tokens.css` (imported
   by `app.css`). Never hardcode colors, spacing, type, blurs, radii, motion,
   press behavior, elevations, or scrim alphas.
@@ -33,6 +37,83 @@ support, and the live token split in `app-tokens.css` + `app.css`.
   doc must be updated in the same change.
 - If a needed primitive variant doesn't exist, **propose adding it** — don't
   build a one-off.
+
+---
+
+## 0. The reference screen: the chat view
+
+**Status:** approved look, 2026-10-15. Every other screen is brought into line
+with it, one screen at a time. Where an older section below disagrees, it
+carries a **Superseded by §0** note at that point, and this section wins.
+
+**What this section is.** For each role on the screen, it gives the treatment the approved chat view
+actually draws, with its tokens and the component that draws it. It describes
+the approved view and nothing more. A new role is added here when a screen
+first needs it, from what that screen gets approved with.
+
+**Two rules decide what's left over:**
+
+- **Frosted is where you act; plain is what you read.** Surfaces that float
+  over content and take input (the composer, the Needs-you card) are frosted
+  cards. Content you read sits flat on its pane's own surface, with no box.
+- **One treatment per role, and one token per meaning.** If two elements do
+  the same job, they look the same, whichever component draws them.
+
+### 0.1 Roles
+
+| Role | Treatment | Drawn by |
+|---|---|---|
+| Pane header | Height `--header-height`. Title `--text-body`, `--fw-semibold`, `--text-primary`. 12px side inset. No bottom line. The chat header is the one glass header over scrolling content: `--header-gradient-top` into `--glass-thin`, `--glass-blur`, `--glass-rim`. | `Header.svelte` `.shell-header`, `.h-title` |
+| Page title | Top of a full-page view's content column (Settings sections). `--text-title2`, `--fw-semibold`, `--text-primary`, the row's `--space-2` side inset, `--space-5` below. Hidden on a phone, where the app header names the page. | `SettingsView.svelte` `.page-title` |
+| Section label | `--text-footnote`, `--fw-semibold`, `--text-tertiary`, sentence case. No fill, border or rule. | `Pane.svelte` cap label; `SidebarThreadList.svelte` group label |
+| List row | Flat on the pane surface: no border or fill at rest. Min height `--list-row-min-height` (38px). Radius `--radius-sm`. Hover `--bg-hover`; selected `--accent-wash`. Label `--text-primary`. | `SidebarThreadRow.svelte`, `PlanTree.svelte` row; `SettingsRow.svelte` |
+| Second line | `--text-caption`, `--text-tertiary`. When the line states a status, it takes that status's text colour (Needs you `--amber-text`). | `SidebarThreadRow.svelte` update line; `PlanRowFace.svelte` subline |
+| Trailing detail and row action | `--text-caption`, `--text-tertiary`. An action is text that turns `--text-primary` on hover, with no button chrome at rest. | `PlanHeadControls.svelte`, `PlanChildControls.svelte`, `AttentionDock.svelte` Answer |
+| Status | A dot or coloured text, never a filled badge. Needs you: `--amber` mark, `--amber-text` text. Working: `--status-in-progress`. Done: `--green`. Failed: `--red`. | `PlanRowFace.svelte`, `SidebarThreadRow.svelte` |
+| Accent | One accent. The default is project blue (`--accent`). A project's own colour replaces it through `accentRoles`, which steps text to 4.5:1 and picks the ink. Use the role tokens (§2.1): `--accent` for focus and selection marks, `--accent-text` for text, `--accent-fill` with `--accent-on-fill` ink for a solid fill, `--accent-line` for a border, `--accent-wash` for a wash. Never a hex. | `app-tokens.css`; `+layout.svelte`; `utils/projectColors.ts` `accentRoles` |
+| Lines | Only at pane edges: 1px `--border-subtle`. A floating card's edge is 1px `--border`. No line between items inside a pane. | `Sidebar.svelte`, `PaneShell.svelte`, `ArtifactTabStrip.svelte` `.strip` |
+| Frosted card (where you act) | `--glass-thin`, 1px `--border`, `--radius-xl`, shadow `--glass-rim, --shadow-chip`. The composer adds `--glass-blur`. | `InputBar.css` composer; `AttentionDock.svelte` `.dock-bar` |
+| Buttons | The `Button` and `IconButton` primitives. A text action wherever one will do. A solid accent `Button` only for a surface's one committing action (for example, Answer). Icon buttons are `sm` 24px or `md` 32px. | `ui/Button.svelte`, `ui/IconButton.svelte` |
+| Composer chips | No fill and no border. Padding 4px 6px, `--radius-sm`. The model label is the accent colour, never grey. Effort is a caption in the accent. Context is `--text-secondary`, then amber, then red. | `InputBar.css` chip rules |
+| Text field | One shape for every free-text control: 1px `--border`, `--radius-lg`, transparent fill, `--text-input` font, `--space-7` tall, 44px (`--touch-target`) on a touch screen (a textarea grows to about six lines, then scrolls; the radius stays `--radius-lg` at every height, a capsule only at one line). Focus: `--accent` border and a 3px `--accent-wash` ring. Error: `--red-text` border. Disabled: 50% opacity. On a pane the field takes the composer chip's glass fill (`chip`); inside a card or sheet it has none (`nested`). | `ui/text-field.css`; `ui/Field.svelte` `variant`; `DecisionChip.svelte` (`.text-field` class) |
+| Row menu | Opens on right-click, long-press or Shift+F10 through the shared row menu. A row never draws a `⋯` button. | `ui/rowMenu.svelte.ts` `createRowMenu` (used by `ArtifactRow.svelte`, `plans/taskMenu.svelte.ts`); `Sidebar.svelte` |
+| Project mark | A `--project-mark-size` (9px) dot in the project's colour with the `--project-mark-ring` (8% `--text-primary`) ring, and no text. An avatar's ink comes from `inkOn`. | `Pane.svelte`; `SettingsRow.svelte`, `SettingsGroup.svelte`; `ui/Avatar.svelte` with `utils/contrast.ts` `inkOn` |
+| Artifact tab | A `--radius-pill` chip, `--text-footnote`, medium weight, `--text-tertiary`. Hover `--bg-hover`; active `--bg-active` with `--text-primary`. No border. | `ArtifactTabStrip.svelte` |
+| Time | Formatted only by `lib/time.ts` (`relLabel` for recency, `formatMoment` for plan times). Never formatted inside a component. | `time.ts` |
+| Spacing | `--space-*` tokens. A raw px value is allowed only where this table names one. | `app-tokens.css` |
+
+### 0.2 Treatments that are out
+
+These are the old treatments the chat view removed. Review refuses them on
+any screen:
+
+1. A box around content (a border, tint or shadow) that isn't a pane, an input or a frosted card.
+2. A tinted alert banner.
+3. A divider between items inside a pane.
+4. A filled badge or pill holding a count or a status.
+5. A filled or outlined button where a text action would do.
+6. A decorative icon in front of a label.
+7. A heavy border or a drop shadow.
+8. Two or more colours for one meaning.
+9. A `⋯` button on a row.
+
+### 0.3 Known gaps inside the reference screen
+
+The approved view still has members that differ from their role. They're
+recorded here so no one copies them; they're not a reason to change the
+approved look on its own. **Owner:** Product Experience. **Trigger:** each gap
+is fixed in the coherence pass of the screen that draws it (Settings is
+first), or sooner in any change that touches its component; the fix removes
+its line here.
+
+- Row insets: sidebar row `7px 10px`, plan row `6px 8px`. The artifact and document rows have no minimum height, and the document row has a 24px left inset and a 2px accent edge when selected.
+- Section labels: the artifact lane uses raw weight `600`. The document source label is caption, bold and uppercase. Every label's padding differs.
+- Second line: the artifact and document rows use `--text-footnote`.
+- Status: the child-plan dot shows working in `--blue`, not `--status-in-progress`. `--status-done` and `--status-failed` aren't used for row status.
+- Pane headers: the right pane's side inset is 18px. The leaf tab strip pads `0 6px 0 10px`.
+- Local icon button sizes: 28px (tab collapse) and 36px.
+- The Needs-you card has no `--glass-blur`; the composer does.
+- Raw spacing values off the 4px scale: 1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14 and 18px.
 
 ---
 
@@ -68,16 +149,21 @@ accessibility media queries, press behavior, and app-wide mechanics.
 
 ### 2.1 Color — semantic palette
 
-The canonical accent palette is **violet / teal / sky / amber**. Each has
-`--{name}`, `--{name}-2` (hover/emphasis), `--{name}-bg` (10% tint), and
-`--{name}-line` (28%/32% border).
+The accent is a family of **role tokens**: CORSIA blue by default, and under a
+project scope every role is derived from the project's colour
+(`accentRoles()` in `src/lib/utils/projectColors.ts`). The categorical hues are
+**purple / teal / sky / amber**, each with `--{name}`, `--{name}-bg` (tint) and
+`--{name}-line` (border).
 
 | Token | Role | Dark | Light | Notes |
 |---|---|---|---|---|
-| `--violet` | Brand accent | `#8b5cf6` | `#7c5cf6` | Aliased to `--purple` in dark; do not reach for `--purple` directly. |
-| `--violet-2` | Hover/emphasis | `#b29bff` | `#6d4ce6` | Used for hover states, active text. |
-| `--violet-bg` | Subtle fill | `rgba(139,92,246,0.10)` | `rgba(124,92,246,0.08)` | Buttons, pills, hover. |
-| `--violet-line` | Border tint | `rgba(139,92,246,0.28)` | `rgba(124,92,246,0.32)` | Pill / button borders. |
+| `--accent` | Accent: selection, focus, links, active state | `#60a5fa` | `#2563eb` | |
+| `--accent-hover` | Hover/emphasis | `#93c5fd` | `#1d4ed8` | |
+| `--accent-text` | Accent text | `var(--accent)` | `#1d4ed8` | Reaches 4.5:1 on every pane. |
+| `--accent-wash` | Subtle fill | `rgba(96,165,250,0.08)` | `rgba(37,99,235,0.10)` | Buttons, pills, hover, focus rings. |
+| `--accent-line` | Border tint | `rgba(96,165,250,0.28)` | `rgba(37,99,235,0.32)` | Pill / button borders. |
+| `--accent-fill` / `--accent-on-fill` | Solid fill and the ink on it | `var(--accent)` / `#0a0a0b` | `var(--accent)` / `#ffffff` | Send button, user bubble, swipe action. |
+| `--purple` | Categorical violet: identity and kind colours | `#8b5cf6` | `#7c5cf6` | Never the accent. `--purple-2`, `--purple-text`, `--purple-bg`, `--purple-line` alongside. |
 | `--teal` | Local-source accent | `#2dd4bf` | `#0d9488` | Used for local model surfaces. |
 | `--teal-bg` | | `rgba(45,212,191,0.10)` | `rgba(13,148,136,0.08)` | |
 | `--teal-line` | | `rgba(45,212,191,0.28)` | `rgba(13,148,136,0.32)` | |
@@ -91,15 +177,17 @@ The canonical accent palette is **violet / teal / sky / amber**. Each has
 | `--green-bg` | | `rgba(52,211,153,0.08)` | `#f0fdf4` *(solid!)* | Light-mode value is solid hex, not rgba — known wart, do not "fix" without a sweep. |
 | `--green-border` | | `rgba(52,211,153,0.25)` | `rgba(34,197,94,0.3)` | |
 | `--green-text` | | `#34d399` | `#16a34a` | Use this for green-on-green-bg text. |
-| `--red` | Destructive / error | `#f87171` | `#f87171` | |
+| `--red` | Destructive / error | `#f87171` | `#f87171` | `--red` is for fills, borders and icons; red text uses `--red-text`. |
 | `--red-bg` | | `rgba(248,113,113,0.08)` | `#fef2f2` *(solid)* | |
 | `--red-bg-hover` | | `rgba(248,113,113,0.14)` | `#fee2e2` *(solid)* | |
+| `--red-text` | Red text | `var(--red)` | `#b91c1c` | Readable on `--red-bg` and the plain surface in both themes. |
 
 **Anti-patterns:**
-- ❌ Reaching for `--purple` or `--blue` directly. Use `--violet` / `--sky`.
-- ❌ Inline `rgba(139,92,246,...)` because you "need a custom violet
-  opacity". Use `--violet-bg` / `--violet-line` or `color-mix(in srgb,
-  var(--violet) X%, transparent)`.
+- ❌ Reaching for `--blue` directly, or `--purple` for the accent. Use the
+  `--accent*` roles for the accent and `--sky` for info.
+- ❌ Inline `rgba(...)` because you "need a custom accent opacity". Use
+  `--accent-wash` / `--accent-line` or `color-mix(in srgb, var(--accent) X%,
+  transparent)`.
 - ❌ Defining a per-component fallback like `var(--bg, #fff)` — define the
   token in `app-tokens.css` instead. Color/theme fallbacks inside `var()` are
   forbidden by the "CSS Variable Convention" rule in `FRONTEND.md`.
@@ -362,7 +450,7 @@ staggered `animation-delay` (0.0 / 0.2 / 0.4s).
 
 **Hover tint (links / list rows / pills).** `transition: background
 150ms` (typical). Pure background swap — no transform, no scale. Use
-`--bg-hover` for neutral rows; `--violet-bg` + `--violet-line` for
+`--bg-hover` for neutral rows; `--accent-wash` + `--accent-line` for
 primary pills.
 
 **Page-level navigation.** No global page-transition framework today;
@@ -429,6 +517,13 @@ strengthens both border tokens.
 | Lightbox | 1000+ (legacy) | Image viewer |
 | Toast / haptic feedback | 9999 | Top-of-stack ephemera |
 
+**Every overlay (scrim, dialog, popover, drawer, menu) mounts through
+`use:portal` (`lib/actions/portal.ts`) so it is a child of `document.body`.**
+A `position: fixed` layer left inside the chat column or the open document is
+clipped to that box in the desktop app's WebKit, and a z-index cannot undo it.
+`lib/__tests__/overlay-portal.test.ts` fails on a new fixed layer that neither
+portals nor is listed there as not an overlay.
+
 Several legacy values in `app.css` (`.dialog-overlay { z-index: 200 }`)
 need an audit for collision with newer modal stack. Out of scope this
 round; flagged in §8.
@@ -457,11 +552,15 @@ Weight/line-height/tracking ladders (`--fw-*`, `--lh-*`, `--ls-*`)
 unchanged. Markdown content uses `--text-callout` and scales down inside
 `.live-reasoning-text` / `.reasoning-content` (subhead / 1.5).
 
+**Superseded by §0:** a section label is sentence case, `--text-footnote`,
+`--fw-semibold`, `--text-tertiary` (§0.1). The uppercase caps below are the
+old treatment, kept until each screen's pass removes them; don't add new ones.
+
 **Section caps** (PROJECTS, PINNED, CONVERSATIONS, etc. — used by
 `Section.svelte` and ad-hoc sidebar headers):
 - 9.5–10.5px / weight 700 / 0.10–0.12em letter-spacing / uppercase
 - Color: `var(--text-tertiary)` for `Section`; sidebar variants tint
-  with `color-mix(in srgb, var(--violet) 55%, var(--text-tertiary))`
+  with `color-mix(in srgb, var(--accent) 55%, var(--text-tertiary))`
 
 **Numeric / monospace:** `'SF Mono', 'Fira Code', monospace` for code,
 tool-call names, and IDs.
@@ -479,7 +578,7 @@ override font-size to 13px / line-height 1.5 / `--text-tertiary` color.
 | `--red-bg` | rgba 0.08 | `#fef2f2` (solid) | Same pattern. |
 | `--amber` hue | `#f59e0b` | `#d97706` | Different hue, not just opacity. Intentional for light-mode contrast. |
 | `--blue` (sky base) | `#60a5fa` | `#3b82f6` | Different hue. Intentional. |
-| `--accent` | `#8b5cf6` | `#7c5cf6` | Slightly darker violet for light-mode contrast. |
+| `--accent` | `#60a5fa` | `#2563eb` | Darker blue for light-mode contrast. |
 | `--glass-rim` opacity | 0.05 | 0.60 | Flip rationale in §2.6. |
 | `--glass-blur` saturate | 180% | 115% | Flip rationale in §2.6. |
 
@@ -554,7 +653,12 @@ Two compensating patterns:
 1. **Body pinned to `--bg-primary` on mobile** (`app.css:218–220`). The
    transparent-body trick that lets desktop vibrancy through becomes a
    non-matching color behind the iOS status bar; pinning to primary keeps
-   the status-bar bg (driven by theme-color meta) seamless.
+   the status-bar bg (driven by theme-color meta) seamless. The installed
+   iOS app uses `apple-mobile-web-app-status-bar-style=default`, so the
+   system draws the status bar above the page and the page starts below
+   it; in that standalone mode `100vh` is the full screen height while
+   the layout viewport is shorter, so the shell sizes to `100dvh` under
+   `@media (display-mode: standalone)` (`app.css`, `HomeShell.svelte`).
 2. **3-stop linear gradient on glass headers** (ChatHeader, AppShellBar
    on mobile):
    ```css
@@ -656,8 +760,19 @@ interface Props {
 
 **Behavior:** Escape closes (when enabled), backdrop click closes (when
 enabled), inner click does NOT propagate to backdrop. Body has
-`overflow-y: auto`; modal max-height 86vh desktop / 92vh mobile. Fade
-backdrop 160ms, fly content (y: 8px) 200ms.
+`overflow-y: auto`; modal max-height 86vh on desktop, and on a phone only
+the room inside the safe-area padding, so the footer clears the home
+indicator. Fade backdrop 160ms, fly content (y: 8px) 200ms.
+
+**Header and footer have no dividers** (§0.2 rule 3); space separates them
+from the body. The footer puts every action together at the trailing edge, by
+proximity: a choice pair sits side by side where every other modal puts its
+commit, so the eye finds the commit in the same place each time. One solid
+`primary` `Button` (or `danger` for a destructive commit) is the commit, and
+every secondary (Cancel, Back, Close) is a `ghost` `Button`, never an
+outlined or secondary-filled one. No `flex: 1` spacer pins Cancel to the
+left, in `foot` or in a body action row. A destructive confirm carries no
+icon tile: its title says what happens.
 
 **Backdrop is light dim only** — `rgba(0, 0, 0, 0.28)` solid. The modal
 panel does the glass; the backdrop just de-emphasizes content. Liquid
@@ -692,11 +807,11 @@ interface Props {
 10px h-padding / 11.5px font.
 
 **Variants:**
-- `primary` — locked-on violet tint (`--violet-bg` + line + text). Most
+- `primary` — locked-on accent tint (`--accent-wash` + line + text). Most
   prominent action on a page or modal foot.
 - `secondary` — neutral default (`--bg-secondary` + `--border` +
   `--text-secondary`). Hovers to violet tint.
-- `danger` — red tint. Destructive or override-with-caution.
+- `danger` — red tint, `--red-text` label (readable on the tint in both themes). Destructive or override-with-caution.
 - `ghost` — transparent, low-attention. Hovers to `--bg-tertiary`.
 
 **Loading state** shows a 12px circular spinner inside the button and
@@ -761,6 +876,8 @@ interface Props {
   error?: string;             // red text below (suppresses hint)
   required?: boolean;         // shows asterisk
   layout?: 'row' | 'stacked'; // default 'row'; auto-collapses on mobile
+  variant?: 'default' | 'chip' | 'nested'; // see Variants
+  hideLabel?: boolean;        // label stays the accessible name, not drawn
   trailing?: Snippet;         // right-of-control inline annotation
   children: Snippet;          // the control (input/select/textarea)
 }
@@ -769,10 +886,22 @@ interface Props {
 **Desktop layout (row):** 140px label col / 1fr control col / auto
 trailing col. Mobile (≤720px) collapses to single column.
 
-**Native control styling** (provided via `:global()` selectors): inputs/
-selects/textareas get `--bg-tertiary` bg, `--border` border, `--radius-xs`
-(6px), 32px height, 12.5px font. Focus ring is 3px `--violet-bg`
-box-shadow.
+**Native control styling** (provided via `:global()` selectors): in the
+`default` variant, inputs/selects/textareas get `--bg-tertiary` bg,
+`--border` border, `--radius-xs` (6px), 32px height, 12.5px font. Focus ring
+is 3px `--accent-wash` box-shadow.
+
+**Variants.** `chip` and `nested` draw the Text field role of §0.1 from
+`ui/text-field.css`, the one home of its border, radius, focus, error and
+disabled rules. `chip` is for a pane (glass fill); `nested` is for a card or
+sheet (no fill). Use `hideLabel` where the surrounding UI already names the
+field (a comment composer). A control whose own wrapper is a `<label>` (the
+decision drawer's Other and Note fields) cannot nest in Field: give it
+`class="text-field"` and import `text-field.css`. Those two have no row of their
+own: the field spans the option width, a hidden label names it, and a chosen
+Other takes the selected-option border (`--accent`) on the field itself, with no
+fill, so its background stays the chat composer's; the pick-any Note never does. Multi-line fields use the
+`autosize` action.
 
 Native chrome stripped from selects (custom chevron data-URI inside
 `Field`) and number inputs (spinners hidden). If a real number-stepper UI
@@ -783,6 +912,10 @@ own that styling. If a use-case needs a non-Field input, document why and
 match the visual contract.
 
 ### 3.5 StatePill
+
+**Superseded by §0:** show a status as a dot or coloured text (§0.1 Status);
+a filled pill holding a status is out (§0.2 item 4). Don't add new StatePill
+uses; existing ones go in each screen's pass.
 
 `ui/StatePill.svelte`. Small uppercase pill that visualizes a state.
 
@@ -806,9 +939,8 @@ interface Props {
 - `idle`, `default` → neutral (`--bg-tertiary` + `--text-tertiary`)
 
 **Don't:** Build a per-component badge with hardcoded `rgba(...)` (Timeline
-does this for active badges — flagged in §8.2). Use StatePill, or — when
-you genuinely need a smaller / non-state pill — propose adding `Badge`
-(see §4.5).
+does this for active badges — flagged in §8.2). Show the state as a dot or
+coloured text (§0.1 Status).
 
 ### 3.6 Section
 
@@ -824,6 +956,7 @@ interface Props {
 ```
 
 Title styling: 9.5px / 700 / 0.12em / uppercase / `--text-tertiary`.
+**Superseded by §0:** new and revised titles use the §0.1 Section label.
 Body uses `display: contents` (no wrapper div).
 
 Use this for a logical grouping inside a modal body or panel. **Not** for
@@ -831,6 +964,11 @@ sidebar section caps (PROJECTS, CONVERSATIONS) — those have a slightly
 different aesthetic; see §5.2.
 
 ### 3.7 Message
+
+**Superseded by §0:** a tinted banner is out (§0.2 items 1 and 2). New and
+revised screens state a result as coloured text in the §0.1 Status colours,
+with no fill or border. The banner below is the existing primitive, kept until
+each screen's pass replaces it.
 
 `ui/Message.svelte`. Inline status banner — pairs with form actions and
 modal bodies.
@@ -857,6 +995,10 @@ For Settings feature flags and other single boolean controls.
 interface Props {
   checked: boolean;
   disabled?: boolean;
+  /** Rule-held: muted, focusable, and click-inert with aria-disabled. */
+  held?: boolean;
+  /** In-flight: full colour and click-inert with aria-disabled. */
+  locked?: boolean;
   size?: 'sm' | 'md';
   ariaLabel: string;
   onchange: (next: boolean) => void;
@@ -946,6 +1088,9 @@ border-bottom.
 
 ### 4.5 Badge
 
+**Superseded by §0** for counts and statuses (§0.2 item 4): never put either
+in a badge.
+
 Smaller / less-formal than StatePill — a colored pill that semantically
 labels (e.g., "local", "tailscale", "active") rather than visualizing a
 state. Today: `entry-badge` (Timeline, hardcoded rgba), `ep-kind` (v7),
@@ -1009,10 +1154,14 @@ navigate sessions from anywhere.
 
 Material: `--glass-thick`. **Must include `box-shadow: var(--glass-rim)`.**
 
+**Superseded by §0:** sidebar group labels use the §0.1 Section label
+(sentence case, `--text-tertiary`, as `SidebarThreadList.svelte` draws it).
+The caps below are the older treatment.
+
 Section caps inside the sidebar (PROJECTS, PINNED, CONVERSATIONS) are
 unified at 10.5px / weight 700 / 0.1em letter-spacing /
-`color-mix(in srgb, var(--violet) 55%, var(--text-tertiary))`. PROJECTS
-hover goes full violet. Use these directly; they do *not* compose into
+`color-mix(in srgb, var(--accent) 55%, var(--text-tertiary))`. PROJECTS
+hover goes full accent. Use these directly; they do *not* compose into
 the `Section` primitive (different aesthetic — see §3.6 note).
 
 ### 5.3 Headers
@@ -1143,14 +1292,14 @@ The following are *don'ts*. Violations should be caught in review.
    with visible focus treatment.
 6. **Mixed gap/margin rhythm.** Don't pair `padding: 12px` with
    `margin-bottom: 16px` on the same axis — pick a rhythm and stick.
-7. **Reaching for `--purple` or `--blue`.** Use `--violet` / `--sky`.
+7. **Reaching for `--blue`, or `--purple` for the accent.** Use the `--accent*` roles / `--sky`.
 8. **Era prefixes (`v7-`, `v054-`).** Retired. Grep should stay empty.
 9. **`var(--bg, #fff)` color fallbacks.** Forbidden by FRONTEND.md's CSS
    Variable Convention rule. Numeric fallbacks (`var(--radius-xs, 4px)`)
    are fine.
 10. **Defining tokens inside components.** Tokens belong in `app-tokens.css`.
-11. **Nesting Modal inside Modal** for confirm-deletes. Use inline
-    `<Message>` + danger button instead.
+11. **Nesting Modal inside Modal** for confirm-deletes. Use an inline
+    confirm line (coloured text, §0.1 Status) + danger button instead.
 12. **Skipping the rim** on a glass surface.
 13. **Inlining new easing curves and durations.** New transitions pick a
     curve from §2.7.1 and a duration from §2.7.2, or propose adding to

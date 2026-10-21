@@ -27,25 +27,20 @@ lifecycle shell for its own loopback calls, one hour).
 from __future__ import annotations
 
 import hashlib
-import re
 import secrets
 import sqlite3
 from datetime import timedelta
 
+from infra import user_profile
+from infra.account_validation import AccountError, FirstAccountExists, normalize_username, require_password
 from infra.database import get_db, write_transaction
-from infra.passwords import MIN_PASSWORD_LENGTH, hash_password, verify_password
+from infra.passwords import hash_password, verify_password
 from infra.time import utc_now, utc_now_iso
 
-#: Lowercase, so a username cannot differ from a data-owner id by case alone.
-USERNAME_PATTERN = re.compile(r"^[a-z0-9_-]{1,32}$")
 
 TOKEN_KINDS = ("session", "api", "service")
 SESSION_TTL = timedelta(days=30)
 SERVICE_TTL = timedelta(hours=1)
-
-
-class AccountError(ValueError):
-    """A request about an account is invalid — safe to show the operator."""
 
 
 _UNKNOWN_ACCOUNT_HASH: str | None = None
@@ -73,24 +68,6 @@ def token_digest(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def normalize_username(raw: str) -> str:
-    """Lowercase and validate ``raw``, or raise :class:`AccountError`."""
-    name = (raw or "").strip().lower()
-    if not USERNAME_PATTERN.match(name):
-        raise AccountError(
-            "username must be 1-32 characters of a-z, 0-9, '-' or '_'"
-        )
-    return name
-
-
-def _require_password(password: str) -> None:
-    """Reject a password too short to be worth hashing."""
-    if len(password or "") < MIN_PASSWORD_LENGTH:
-        raise AccountError(
-            f"password must be at least {MIN_PASSWORD_LENGTH} characters"
-        )
-
-
 def has_users(db: sqlite3.Connection | None = None) -> bool:
     """True iff at least one account exists."""
     return _db(db).execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
@@ -102,6 +79,11 @@ def get_user(user_id: str, db: sqlite3.Connection | None = None) -> dict | None:
         "SELECT id FROM users WHERE id = ?", (user_id,)
     ).fetchone()
     return {"id": row["id"], "name": row["id"]} if row else None
+
+
+def account_exists(username: str, db: sqlite3.Connection | None = None) -> bool:
+    """Return whether an already-normalized username names an account."""
+    return _db(db).execute("SELECT 1 FROM users WHERE id = ?", (username,)).fetchone() is not None
 
 
 def list_users(db: sqlite3.Connection | None = None) -> list[dict]:
@@ -132,37 +114,51 @@ def data_owners_without_accounts(
     return [row["user_id"] for row in rows]
 
 
-def create_user(
-    username: str, password: str, *, db: sqlite3.Connection | None = None,
-    first_run_wake: bool = True,
-) -> str:
-    """Create an account and return its id. Raises if the name is taken.
-
-    The first account also gets the workspace conductor; ``first_run_wake``
-    queues that conductor's first-run wake in the same transaction. Only a
-    caller with no person waiting on the conductor (the eval harness)
-    passes False.
-    """
+def _credentials(username: str, password: str) -> tuple[str, str]:
+    """Return the normalized username and the password's stored hash, or raise."""
     name = normalize_username(username)
-    _require_password(password)
-    encoded = hash_password(password)
+    require_password(password)
+    return name, hash_password(password)
+
+
+def _create_account(
+    name: str, encoded: str, *, db: sqlite3.Connection | None, first_run_wake: bool,
+    require_first: bool = False, first_run_path: str = "script", claim_data_owner: bool = False,
+    before_commit=None,
+):
+    """Insert the account (and the first one's CORSIA agent) in one transaction.
+
+    ``before_commit`` runs as its last step. Returns the effects owed after
+    the commit, for the caller to run once it has seen the commit succeed.
+    """
+    if first_run_path not in {"app", "script"}:
+        raise AccountError("first_run_path must be 'app' or 'script'")
     now = utc_now_iso()
-    woke = False
+    woke = start_setup_task = False
     with write_transaction(db, scope="create_user") as conn:
         had_users = has_users(conn)
+        if require_first and had_users:
+            raise FirstAccountExists("setup is already complete")
+        owners = data_owners_without_accounts(conn) if claim_data_owner and not had_users else []
+        if owners and name not in owners:  # any other name strands the existing threads
+            raise AccountError(
+                f"'{name}' owns none of the existing data. Create the first "
+                f"account as one of: {', '.join(owners)}. Add others after."
+            )
         if conn.execute("SELECT 1 FROM users WHERE id = ?", (name,)).fetchone():
-            raise AccountError(f"account '{name}' already exists")
+            raise AccountError(f"An account named '{name}' already exists. Choose a different username.")
         conn.execute(
             "INSERT INTO users (id, password_hash, created_at, password_changed_at)"
             " VALUES (?, ?, ?, ?)",
             (name, encoded, now, now),
         )
         if not had_users:
-            from infra.conductor import WORKSPACE_SCOPE, ensure_scope_conductor
+            from infra.corsia_agent import ensure_corsia_agent
 
-            conductor_id = ensure_scope_conductor(
-                WORKSPACE_SCOPE, name, model=None, db=conn,
-            )
+            conductor_id = ensure_corsia_agent(name, model=None, db=conn)
+            from infra.setup_progress import start_after_account
+
+            start_after_account(first_run_path, db=conn)
             if not data_owners_without_accounts(conn):
                 from infra import config
                 from registry.shared_ownership_assignment import enforce_scaffold_ownership
@@ -173,16 +169,81 @@ def create_user(
                     enqueue_first_run_wake, seed_first_run_setup_plan,
                 )
 
-                seed_first_run_setup_plan(conductor_id, name, db=conn)
-                woke = enqueue_first_run_wake(conductor_id, db=conn)
-    if not had_users:
+                from onboarding.first_run_wake import app_reference_served
+
+                start_setup_task = first_run_path != "app" or not app_reference_served()
+                if start_setup_task:
+                    first_run_path = "script"  # seeded tasks mean the wake follows the script path
+                    seed_first_run_setup_plan(conductor_id, name, db=conn)
+                woke = enqueue_first_run_wake(conductor_id, first_run_path=first_run_path, db=conn)
+        if before_commit is not None:
+            before_commit()
+
+    def announce() -> None:
+        if had_users:
+            return
         from infra import onboarding_events
 
-        if woke:
+        if woke and start_setup_task:
             onboarding_events.start_first_run_task(conductor_id, name)
         onboarding_events.emit("account_created")
         if woke:
             onboarding_events.emit("first_run_wake")
+
+    return announce
+
+
+def create_user(
+    username: str, password: str, *, db: sqlite3.Connection | None = None,
+    first_run_wake: bool = True,
+) -> str:
+    """Create an account and return its id. Raises if the name is taken.
+
+    The first account also gets the CORSIA agent; ``first_run_wake``
+    queues that agent's first-run wake in the same transaction. Only a
+    caller with no person waiting on the CORSIA agent (the eval harness)
+    passes False. ``require_first`` atomically refuses if another account
+    already exists. Callers that create the install's first account on behalf of
+    a person use :func:`create_first_account`, which also enforces the
+    data-owner rule.
+    """
+    name, encoded = _credentials(username, password)
+    _create_account(name, encoded, db=db, first_run_wake=first_run_wake)()
+    return name
+
+
+def create_first_account(
+    username: str, password: str, *, call_name: str | None = None, email: str = "",
+    first_run_wake: bool = True, first_run_path: str = "script",
+) -> str:
+    """Create the install's first account: the one owner behind ``corsia user add`` and setup.
+
+    Refuses atomically (:class:`FirstAccountExists`) once any account exists, and
+    refuses a name outside the existing data owners. With ``call_name`` it also
+    writes the workspace profile: staged before the transaction, published as
+    its last step, undone if the commit fails. A blank ``call_name`` is refused
+    first; an unwritable profile folder raises ``OSError`` with no account made.
+    """
+    from infra import config
+    if call_name is not None and not user_profile.one_line(call_name):
+        raise AccountError("A name is required.")
+    name, encoded = _credentials(username, password)
+    staged = None
+    if call_name is not None:
+        staged = user_profile.stage_user_profile(
+            config.WORKSPACE, call_name, user_profile.mac_timezone(), email,
+        )
+    try:
+        announce = _create_account(
+            name, encoded, db=None, first_run_wake=first_run_wake, require_first=True,
+            first_run_path=first_run_path, claim_data_owner=True,
+            before_commit=staged.publish if staged else None,
+        )
+    except BaseException:
+        if staged:
+            staged.undo()
+        raise
+    announce()
     return name
 
 
@@ -196,7 +257,7 @@ def set_password(
     number of sessions revoked.
     """
     name = normalize_username(username)
-    _require_password(password)
+    require_password(password)
     encoded = hash_password(password)
     now = utc_now_iso()
     with write_transaction(db, scope="set_password") as conn:
@@ -239,6 +300,21 @@ def check_password(
     if not verify_password(password, row["password_hash"]):
         return None
     return {"id": row["id"], "name": row["id"]}
+
+
+def purge_expired_tokens(db: sqlite3.Connection | None = None) -> int:
+    """Delete tokens already past their expiry. Housekeeping, not enforcement.
+
+    :func:`resolve_token` already refuses an expired token, so this only keeps
+    the table from growing without bound.
+    """
+    with write_transaction(db, scope="purge_expired_tokens") as conn:
+        cursor = conn.execute(
+            "DELETE FROM auth_tokens"
+            " WHERE expires_at IS NOT NULL AND expires_at <= ?",
+            (utc_now_iso(),),
+        )
+        return cursor.rowcount or 0
 
 
 def issue_token(
@@ -289,69 +365,13 @@ def resolve_token(
     Keep credential provenance so human-only decisions cannot mistake an API
     or service credential for a browser session. No credential value escapes.
     """
-    if not token:
+    return resolve_token_digest(token_digest(token), db) if token else None
+
+
+def resolve_token_digest(digest: str, db: sqlite3.Connection | None = None) -> dict | None:
+    """:func:`resolve_token` by digest, for a check that outlives the request (a sign-in callback)."""
+    sql = "SELECT user_id, kind, expires_at FROM auth_tokens WHERE token_hash = ?"
+    row = _db(db).execute(sql, (digest,)).fetchone()
+    if row is None or (row["expires_at"] and row["expires_at"] <= utc_now_iso()):
         return None
-    row = _db(db).execute(
-        "SELECT user_id, kind, expires_at FROM auth_tokens WHERE token_hash = ?",
-        (token_digest(token),),
-    ).fetchone()
-    if row is None:
-        return None
-    if row["expires_at"] and row["expires_at"] <= utc_now_iso():
-        return None
-    return {
-        "id": row["user_id"], "name": row["user_id"], "token_kind": row["kind"],
-    }
-
-
-def revoke_token(
-    token: str, *, db: sqlite3.Connection | None = None
-) -> bool:
-    """Delete exactly this token. True iff it existed."""
-    with write_transaction(db, scope="revoke_token") as conn:
-        cursor = conn.execute(
-            "DELETE FROM auth_tokens WHERE token_hash = ?", (token_digest(token),)
-        )
-        return bool(cursor.rowcount)
-
-
-def revoke_label(
-    user_id: str, label: str, *, db: sqlite3.Connection | None = None
-) -> int:
-    """Delete ``user_id``'s tokens carrying ``label``. Returns the count."""
-    with write_transaction(db, scope="revoke_label") as conn:
-        cursor = conn.execute(
-            "DELETE FROM auth_tokens WHERE user_id = ? AND label = ?",
-            (user_id, label),
-        )
-        return cursor.rowcount or 0
-
-
-def list_tokens(
-    user_id: str | None = None, db: sqlite3.Connection | None = None
-) -> list[dict]:
-    """List tokens (never their values) for one user, or for everyone."""
-    sql = (
-        "SELECT user_id, kind, label, created_at, expires_at FROM auth_tokens"
-    )
-    params: tuple = ()
-    if user_id:
-        sql += " WHERE user_id = ?"
-        params = (user_id,)
-    sql += " ORDER BY created_at DESC"
-    return [dict(row) for row in _db(db).execute(sql, params).fetchall()]
-
-
-def purge_expired_tokens(db: sqlite3.Connection | None = None) -> int:
-    """Delete tokens already past their expiry. Housekeeping, not enforcement.
-
-    :func:`resolve_token` already refuses an expired token, so this only keeps
-    the table from growing without bound.
-    """
-    with write_transaction(db, scope="purge_expired_tokens") as conn:
-        cursor = conn.execute(
-            "DELETE FROM auth_tokens"
-            " WHERE expires_at IS NOT NULL AND expires_at <= ?",
-            (utc_now_iso(),),
-        )
-        return cursor.rowcount or 0
+    return {"id": row["user_id"], "name": row["user_id"], "token_kind": row["kind"]}

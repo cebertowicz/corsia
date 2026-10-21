@@ -5,12 +5,60 @@ export interface ToastAction {
 	run: () => void | Promise<unknown>;
 }
 
+export type OrdinaryToastType = 'info' | 'success' | 'error';
+export type ToastType = OrdinaryToastType | 'progress';
+
+/** Present only on the toast that occupies the pinned slot. */
+export interface PinnedToastState {
+	key: string;
+	/** Optional second line for a persistent outcome. */
+	detail?: string;
+	/** Accessible name and tooltip for the close button; defaults to "Dismiss". */
+	closeLabel?: string;
+	/** `minimize` draws a chevron: the close button shrinks the toast to a pill instead of removing it. */
+	closeIcon?: 'x' | 'minimize';
+	/** A minimized toast: the mark and its message in one pill that is a single tap target running `onExpand`. */
+	compact?: boolean;
+	/** Accessible name of the minimized pill. */
+	expandLabel?: string;
+	onExpand?: () => void;
+	/** A ticking segment shown after the message, dropped first when the line does not fit. */
+	time?: string;
+	/** Runs when the person closes this toast with its close button, never when the app unpins or replaces it. */
+	onClose?: () => void;
+}
+
 export interface Toast {
 	id: string;
 	message: string;
-	type?: 'info' | 'success' | 'error';
+	type?: ToastType;
 	duration?: number;
 	action?: ToastAction;
+	/** The whole toast is one button running `action`; its message is the button's label. */
+	button?: boolean;
+	pinned?: PinnedToastState;
+}
+
+export interface PinnedToastSpec {
+	message: string;
+	/** Optional secondary line, used when an outcome has a concrete next action. */
+	detail?: string;
+	/**
+	 * `progress` has no timeout and shows a spinner. `error` stays until it is
+	 * dismissed. `success` and `info` are outcomes: they last `duration` and then
+	 * free the slot.
+	 */
+	type: ToastType;
+	action?: ToastAction;
+	closeLabel?: string;
+	closeIcon?: 'x' | 'minimize';
+	compact?: boolean;
+	expandLabel?: string;
+	onExpand?: () => void;
+	time?: string;
+	onClose?: () => void;
+	/** Lifetime of a `success` or `info` outcome in ms. Default 8000. */
+	duration?: number;
 }
 
 interface ToastTimer {
@@ -19,41 +67,111 @@ interface ToastTimer {
 	startedAt: number;
 }
 
+const ORDINARY_MS = 3000;
+const ACTION_MS = 8000;
+
+function newId(): string {
+	return Math.random().toString(36).slice(2);
+}
+
+/**
+ * The stack holds at most one ordinary toast and the pinned slot. A newer
+ * ordinary toast replaces the older one; the pinned toast is never dropped to
+ * make room and always sits last, nearest the composer.
+ */
 function createToastStore() {
 	const store = writable<Toast[]>([]);
 	const timers = new Map<string, ToastTimer>();
 	const pauseReasons = new Map<string, Set<string>>();
 	const runningActions = new Set<string>();
 
+	function clearTimer(id: string) {
+		const timer = timers.get(id);
+		if (timer?.handle) clearTimeout(timer.handle);
+		timers.delete(id);
+	}
+
+	function forget(id: string) {
+		clearTimer(id);
+		pauseReasons.delete(id);
+	}
+
 	function schedule(id: string, remaining: number) {
+		clearTimer(id);
 		const timer: ToastTimer = { handle: null, remaining, startedAt: Date.now() };
 		timer.handle = setTimeout(() => dismiss(id), remaining);
 		timers.set(id, timer);
 	}
 
-	function show(message: string, type: Toast['type'] = 'info', duration = 3000) {
-		const id = Math.random().toString(36).slice(2);
-		store.update((items) => [...items, { id, message, type, duration }]);
+	/** Start a lifetime, staying paused if the pointer or focus is already inside. */
+	function arm(id: string, duration: number) {
+		if (pauseReasons.get(id)?.size) {
+			clearTimer(id);
+			timers.set(id, { handle: null, remaining: duration, startedAt: Date.now() });
+			return;
+		}
 		schedule(id, duration);
-		return id;
+	}
+
+	function addOrdinary(toast: Toast, duration: number) {
+		for (const old of get(store)) {
+			if (!old.pinned) forget(old.id);
+		}
+		store.update((items) => [toast, ...items.filter((item) => item.pinned)]);
+		schedule(toast.id, duration);
+		return toast.id;
+	}
+
+	function show(message: string, type: OrdinaryToastType = 'info', duration = ORDINARY_MS) {
+		return addOrdinary({ id: newId(), message, type, duration }, duration);
 	}
 
 	function showAction(message: string, action: ToastAction) {
-		const id = Math.random().toString(36).slice(2);
-		const duration = 8000;
-		store.update((items) => [
-			...items,
-			{ id, message, type: 'info', duration, action },
-		]);
-		schedule(id, duration);
+		return addOrdinary(
+			{ id: newId(), message, type: 'info', duration: ACTION_MS, action },
+			ACTION_MS,
+		);
+	}
+
+	/** A notice that is one button: the message is its label and the whole toast runs `run`, so it has no separate action or close. */
+	function showButton(message: string, run: ToastAction['run']) {
+		return addOrdinary({ id: newId(), message, type: 'info', duration: ACTION_MS, action: { label: message, run }, button: true }, ACTION_MS);
+	}
+
+	/**
+	 * Show, update in place, or replace with an outcome the toast owned by `key`.
+	 * The same key always keeps one element; a different key takes over the slot.
+	 */
+	function pin(key: string, spec: PinnedToastSpec) {
+		const current = get(store).find((item) => item.pinned);
+		const id = current?.pinned?.key === key ? current.id : newId();
+		if (current && current.id !== id) forget(current.id);
+		const persistent = spec.type === 'progress' || spec.type === 'error';
+		const duration = persistent ? undefined : (spec.duration ?? ACTION_MS);
+		const toast: Toast = {
+			id,
+			message: spec.message,
+			type: spec.type,
+			duration,
+			action: spec.action,
+			pinned: {
+				key, detail: spec.detail, closeLabel: spec.closeLabel, closeIcon: spec.closeIcon, compact: spec.compact,
+				expandLabel: spec.expandLabel, onExpand: spec.onExpand, time: spec.time, onClose: spec.onClose,
+			},
+		};
+		store.update((items) => [...items.filter((item) => !item.pinned), toast]);
+		if (duration === undefined) clearTimer(id);
+		else arm(id, duration);
 		return id;
 	}
 
+	function unpin(key: string) {
+		const current = get(store).find((item) => item.pinned?.key === key);
+		if (current) dismiss(current.id);
+	}
+
 	function dismiss(id: string) {
-		const timer = timers.get(id);
-		if (timer?.handle) clearTimeout(timer.handle);
-		timers.delete(id);
-		pauseReasons.delete(id);
+		forget(id);
 		store.update((items) => items.filter((toast) => toast.id !== id));
 	}
 
@@ -95,6 +213,9 @@ function createToastStore() {
 		subscribe: store.subscribe,
 		show,
 		showAction,
+		showButton,
+		pin,
+		unpin,
 		dismiss,
 		pause,
 		resume,

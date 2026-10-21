@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-restart-source-install"
+description = "Enables the restart_source_install command without any pre-configured scope."
+commands.allow = ["restart_source_install"]
+
+[[permission]]
+identifier = "deny-restart-source-install"
+description = "Denies the restart_source_install command without any pre-configured scope."
+commands.deny = ["restart_source_install"]

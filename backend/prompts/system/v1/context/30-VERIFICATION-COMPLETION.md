@@ -15,7 +15,7 @@ Bind evidence to the exact artifact, revision, target and environment. Rerun aff
 
 ## Findings and lessons
 
-Read the complete review or correction before changing the approach. Group findings by shared cause; fix that cause instead of adding one patch per symptom. Give the fixer the actual review and its evidence.
+Apply a review or correction with skill `apply-feedback`, fixing each shared cause once; give the fixer the actual review and its evidence.
 
 When a user answers a decision differently from the recommendation, calibrate: look for evidence of an assumption or weighting the recommendation missed. Place a transferable lesson through skill `memory-placement` only when evidence supports one; otherwise record only the uncertainty with the decision, without inventing a cause. One choice, whether agreement or disagreement, does not establish a standing preference or prove a recommendation unreasonable.
 

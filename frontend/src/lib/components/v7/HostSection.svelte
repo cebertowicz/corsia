@@ -48,7 +48,7 @@
 
 	.host-head {
 		display: flex; align-items: center; gap: 14px;
-		padding: 6px 4px 14px;
+		padding: 6px 0 14px;
 	}
 
 	.host-title { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
@@ -57,7 +57,7 @@
 		color: var(--text-primary);
 		display: flex; align-items: center; gap: 10px;
 	}
-	.host-head.this .host-name { color: var(--violet-text); }
+	.host-head.this .host-name { color: var(--accent-text); }
 	.host-subname {
 		font-size: var(--text-footnote); color: var(--text-tertiary); font-weight: 400;
 	}
@@ -68,8 +68,8 @@
 	}
 	.net-tag.localhost { color: var(--teal); border: 1px solid var(--teal-line); background: var(--teal-bg); }
 	.net-tag.lan       { color: var(--sky); border: 1px solid var(--sky-line); background: var(--sky-bg); }
-	.net-tag.tailscale { color: var(--violet-text); border: 1px solid var(--violet-line); background: var(--violet-bg); }
-	.net-tag.cloud     { color: var(--violet); border: 1px solid var(--violet-line); background: var(--violet-bg); }
+	.net-tag.tailscale { color: var(--purple-text); border: 1px solid var(--purple-line); background: var(--purple-bg); }
+	.net-tag.cloud     { color: var(--accent-text); border: 1px solid var(--accent-line); background: var(--accent-wash); }
 
 	.host-meta {
 		display: flex; align-items: center; gap: 12px;
@@ -91,7 +91,7 @@
 	}
 
 	@media (max-width: 480px) {
-		.host-head { padding: 4px 4px 12px; gap: 10px; }
+		.host-head { padding: 4px 0 12px; gap: 10px; }
 		.host-name { font-size: var(--text-body); gap: 8px; }
 		.host-subname { font-size: var(--text-footnote); }
 		.host-meta { font-size: var(--text-footnote); gap: 8px; }
