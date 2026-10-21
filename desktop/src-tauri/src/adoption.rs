@@ -754,63 +754,203 @@ pub fn adopt(
     write_journal(plan, Step::Stopping, None)
         .map_err(|error| AdoptionError::untouched(error).confirmed_running())?;
     if let Err(error) = stop_source(plan, lifecycle, phase) {
-        return rollback(plan, lifecycle, phase, Failure { step: "stop_old".into(), message: error }, None, false);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "stop_old".into(),
+                message: error,
+            },
+            None,
+            false,
+        );
     }
     if requested(cancel) {
-        return rollback(plan, lifecycle, phase, Failure { step: "cancelled".into(), message: "adoption cancelled".into() }, None, false);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "cancelled".into(),
+                message: "adoption cancelled".into(),
+            },
+            None,
+            false,
+        );
     }
     phase(Phase::BackingUp);
     let snapshot = match lifecycle.backup(&plan.source.state) {
         Ok(snapshot) => snapshot,
-        Err(error) => return rollback(plan, lifecycle, phase, Failure { step: "backup".into(), message: error }, None, false),
+        Err(error) => return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "backup".into(),
+                message: error,
+            },
+            None,
+            false,
+        ),
     };
     if let Err(error) = write_journal(plan, Step::BackedUp, Some(&snapshot)) {
-        return rollback(plan, lifecycle, phase, Failure { step: "record_backup".into(), message: error }, Some(&snapshot), false);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "record_backup".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            false,
+        );
     }
     if requested(cancel) {
-        return rollback(plan, lifecycle, phase, Failure { step: "cancelled".into(), message: "adoption cancelled".into() }, Some(&snapshot), false);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "cancelled".into(),
+                message: "adoption cancelled".into(),
+            },
+            Some(&snapshot),
+            false,
+        );
     }
     if let Err(error) = move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)) {
-        return rollback(plan, lifecycle, phase, Failure { step: "move_plist".into(), message: error }, Some(&snapshot), false);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "move_plist".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            false,
+        );
     }
     // The bootstrap config stays in place: it holds the workspace's identity
     // (name and id) and setup choices, which the app's backend reads from it.
     if plan.source.env_file.exists() {
         let names = match skipped_env_names(&plan.source.env_file) {
             Ok(names) => names,
-            Err(error) => return rollback(plan, lifecycle, phase, Failure { step: "read_environment".into(), message: error }, Some(&snapshot), false),
+            Err(error) => return rollback(
+                plan,
+                lifecycle,
+                phase,
+                Failure {
+                    step: "read_environment".into(),
+                    message: error,
+                },
+                Some(&snapshot),
+                false,
+            ),
         };
         if let Err(error) = move_to(
             &plan.source.env_file,
             &plan.adopted_dir().join("service.env"),
         ) {
-            return rollback(plan, lifecycle, phase, Failure { step: "move_environment".into(), message: error }, Some(&snapshot), false);
+            return rollback(
+                plan,
+                lifecycle,
+                phase,
+                Failure {
+                    step: "move_environment".into(),
+                    message: error,
+                },
+                Some(&snapshot),
+                false,
+            );
         }
         if !names.is_empty() {
             log::info!("adoption skipped source .env keys: {}", names.join(", "));
         }
     }
     if let Err(error) = write_journal(plan, Step::MetadataMoved, Some(&snapshot)) {
-        return rollback(plan, lifecycle, phase, Failure { step: "record_metadata".into(), message: error }, Some(&snapshot), false);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "record_metadata".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            false,
+        );
     }
     // Nothing of the app's is registered yet, so if the source came back the
     // backup is deleted because it is an untouched-state copy.
     if let Err(error) = lifecycle.old_is_down() {
-        return rollback(plan, lifecycle, phase, Failure { step: "old_is_down".into(), message: error }, Some(&snapshot), false);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "old_is_down".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            false,
+        );
     }
     if let Err(error) = write_service(plan) {
-        return rollback(plan, lifecycle, phase, Failure { step: "write_service".into(), message: error }, Some(&snapshot), false);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "write_service".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            false,
+        );
     }
     if let Err(error) = write_journal(plan, Step::ServiceWritten, Some(&snapshot)) {
-        return rollback(plan, lifecycle, phase, Failure { step: "record_service".into(), message: error }, Some(&snapshot), true);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "record_service".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            true,
+        );
     }
     phase(Phase::Starting);
     if let Err(error) = lifecycle.start_new(&plan.source.state, plan.source.port, &plan.app_dir) {
-        return rollback(plan, lifecycle, phase, Failure { step: "start_new".into(), message: error }, Some(&snapshot), true);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "start_new".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            true,
+        );
     }
     // The switch is made: a Quit from here finishes it and then exits.
     if let Err(error) = write_journal(plan, Step::Registered, Some(&snapshot)) {
-        return rollback(plan, lifecycle, phase, Failure { step: "record_registered".into(), message: error }, Some(&snapshot), true);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "record_registered".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            true,
+        );
     }
     Ok(())
 }

@@ -52,10 +52,11 @@ mod update_swap;
 const DEFAULT_SERVICE_PORT: u16 = 47_895;
 const ACTIVE_OPERATION_ERROR: &str = "CORSIA is still completing an operation";
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
-/// Large state roots can spend minutes in migration; lack of backend log
-/// progress, rather than a fixed health budget, detects a wedged startup.
-pub(crate) const STARTUP_STALL_WINDOW: Duration = Duration::from_secs(120);
-pub(crate) const STARTUP_ABSOLUTE_CAP: Duration = Duration::from_secs(1_800);
+/// A 20 GiB rehearsal root reached health in 71–74 s, the October 20 cold
+/// start took about 99 s, and its longest silent phase was 65 s. Six times the
+/// largest observed start leaves room for a slow migration without concealing
+/// a hang indefinitely.
+pub(crate) const STARTUP_CAP: Duration = Duration::from_secs(600);
 const RELAUNCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Default)]
@@ -390,54 +391,37 @@ fn wait_for_service(port: u16, app_dir: &Path) -> Result<(), String> {
     wait_for_startup(
         port,
         &log,
-        || release_proof::launchd_pid(&target),
-        STARTUP_STALL_WINDOW,
-        STARTUP_ABSOLUTE_CAP,
+        || Ok(release_proof::launchd_pid(&target)),
+        STARTUP_CAP,
     )
 }
 
-/// Startup can take minutes while a large state root migrates. Health is the
-/// success signal; new log metadata proves progress until the bounded stall or cap.
+/// Health is the readiness signal. A changed launchd PID proves the service
+/// restarted while starting; otherwise the fixed cap bounds a hung startup.
 pub(crate) fn wait_for_startup(
     port: u16,
     log: &Path,
-    mut service_pid: impl FnMut() -> Option<u32>,
-    stall_window: Duration,
-    absolute_cap: Duration,
+    mut service_pid: impl FnMut() -> Result<Option<u32>, String>,
+    cap: Duration,
 ) -> Result<(), String> {
     let began = Instant::now();
-    let mut marker = startup_log_marker(log);
-    let mut last_progress = began;
     let mut initial_pid = None;
     loop {
         if probe_health(port) {
             return Ok(());
         }
-        match (initial_pid, service_pid()) {
+        match (initial_pid, service_pid()?) {
             (Some(expected), Some(actual)) if actual != expected => {
-                return Err(startup_failure::timeout_message(log));
+                return Err("the CORSIA service restarted while it was starting".into());
             }
             (None, Some(pid)) => initial_pid = Some(pid),
             _ => {}
         }
-        let next_marker = startup_log_marker(log);
-        if next_marker != marker {
-            marker = next_marker;
-            last_progress = Instant::now();
-        }
-        let now = Instant::now();
-        if now.duration_since(began) >= absolute_cap
-            || now.duration_since(last_progress) >= stall_window
-        {
+        if began.elapsed() >= cap {
             return Err(startup_failure::timeout_message(log));
         }
         thread::sleep(HEALTH_POLL_INTERVAL);
     }
-}
-
-fn startup_log_marker(path: &Path) -> Option<(std::time::SystemTime, u64)> {
-    let metadata = std::fs::metadata(path).ok()?;
-    Some((metadata.modified().ok()?, metadata.len()))
 }
 
 /// The bundle's generation as the launcher reports it to the service

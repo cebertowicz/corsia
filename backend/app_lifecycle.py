@@ -20,7 +20,7 @@ import infra.app_loop as app_loop
 from infra import key_store_values, state
 from infra.db_async import run_in_db
 from infra.database import init_db, shutdown_pool
-from startup_progress import startup_progress
+
 
 async def _startup_cloud_discovery() -> None:
     from infra.key_store_providers import provider_keys
@@ -117,11 +117,10 @@ def _initialize_startup(logger) -> None:
         directory.mkdir(parents=True, exist_ok=True)
     phase_started = time.monotonic()
     logger.info("startup phase: database initialization started")
-    with startup_progress(logger, "database initialization"):
-        init_db()
-        drop_ignored_environment()
-        key_store_values.sweep_at_startup()
-        convert_legacy_project_paths(WORKSPACE_SELECTION)
+    init_db()
+    drop_ignored_environment()
+    key_store_values.sweep_at_startup()
+    convert_legacy_project_paths(WORKSPACE_SELECTION)
     elapsed = time.monotonic() - phase_started
     logger.info("startup phase: database initialization complete in {:.1f}s", elapsed)
     recover_write_intents()

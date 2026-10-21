@@ -16,8 +16,7 @@ use crate::{
     adoption::{self, ReadyError, RestartLook, StopProcess},
     release_proof, run_service_command,
     service_management::service_label,
-    unregister_service, wait_for_service, wait_for_startup, STARTUP_ABSOLUTE_CAP,
-    STARTUP_STALL_WINDOW,
+    unregister_service, wait_for_service, wait_for_startup, STARTUP_CAP,
 };
 
 /// The source's own drain wait, in seconds: its cap, and the longest a switch waits for running work.
@@ -222,14 +221,21 @@ impl SourceLifecycle {
             self.source.port,
             &log,
             || {
-                self.loaded_job()
-                    .ok()
-                    .flatten()
-                    .and_then(|job| release_proof::pid_from_launchctl_print(&job))
+                Ok(self
+                    .loaded_job()?
+                    .and_then(|job| release_proof::pid_from_launchctl_print(&job)))
             },
-            STARTUP_STALL_WINDOW,
-            STARTUP_ABSOLUTE_CAP,
+            STARTUP_CAP,
         )
+        .map_err(|error| {
+            if error.starts_with("the CORSIA service did not become ready in time") {
+                "the existing install did not answer after it was started".into()
+            } else if error == "the CORSIA service restarted while it was starting" {
+                "the existing install restarted while it was starting".into()
+            } else {
+                error
+            }
+        })
     }
 
     fn start_cli(&self) -> Result<(), String> {
@@ -589,8 +595,7 @@ impl adoption::Lifecycle for SourceLifecycle {
     }
 
     /// `corsia start` is a no-op for a job that is already loaded, so this also
-    /// holds when the install never stopped. Done is launchd listing the job and
-    /// the backend answering.
+    /// holds when the install never stopped. Done is the backend answering.
     fn start_old(&mut self) -> Result<(), String> {
         self.start_cli()?;
         self.wait_for_source()
@@ -721,68 +726,54 @@ mod tests {
     }
 
     #[test]
-    fn startup_succeeds_while_the_log_advances_past_the_stall_window() {
-        let home = home("rm -f LOADED", "exit 0", "exit 0");
-        let port = home.lifecycle.source.port;
-        let log = home.lifecycle.source.state.join("backend.log");
-        let stall_window = Duration::from_millis(500);
-        thread::spawn(move || {
-            for _ in 0..7 {
-                thread::sleep(Duration::from_millis(100));
-                fs::create_dir_all(log.parent().unwrap()).unwrap();
-                fs::write(&log, format!("{} progress\n", Instant::now().elapsed().as_nanos())).unwrap();
-            }
-            serve_health(port);
-        });
-        let began = Instant::now();
-        wait_for_startup(
-            port,
-            &home.lifecycle.source.state.join("backend.log"),
-            || None,
-            stall_window,
-            // The cap isn't under test here; leave the writer thread ample time on a loaded host.
-            Duration::from_secs(10),
-        )
-        .unwrap();
-        assert!(began.elapsed() > stall_window);
-    }
-
-    #[test]
-    fn a_restarted_service_fails_before_the_stall_window() {
+    fn a_restarted_service_fails_well_before_the_startup_cap() {
         let home = home("rm -f LOADED", "exit 0", "exit 0");
         let calls = std::sync::atomic::AtomicUsize::new(0);
-        let stall_window = Duration::from_millis(300);
+        let cap = Duration::from_secs(3);
         let began = Instant::now();
         let error = wait_for_startup(
             home.lifecycle.source.port,
             &home.lifecycle.source.state.join("backend.log"),
             || {
-                Some(
+                Ok(Some(
                     if calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
                         1
                     } else {
                         2
                     },
-                )
+                ))
             },
-            stall_window,
-            Duration::from_secs(1),
+            cap,
         )
         .unwrap_err();
-        assert_eq!(error, "the CORSIA service did not become ready in time");
-        assert!(began.elapsed() < stall_window);
+        assert_eq!(error, "the CORSIA service restarted while it was starting");
+        assert!(began.elapsed() < cap);
     }
 
     #[test]
-    fn a_startup_stall_fails_before_the_absolute_cap() {
+    fn a_pid_inspection_error_is_returned() {
+        let home = home("rm -f LOADED", "exit 0", "exit 0");
+        assert_eq!(
+            wait_for_startup(
+                home.lifecycle.source.port,
+                &home.lifecycle.source.state.join("backend.log"),
+                || Err("could not ask launchd about the existing install".into()),
+                Duration::from_secs(3),
+            )
+            .unwrap_err(),
+            "could not ask launchd about the existing install"
+        );
+    }
+
+    #[test]
+    fn a_startup_cap_reports_no_answer() {
         let stalled = home("rm -f LOADED", "exit 0", "exit 0");
         assert_eq!(
             wait_for_startup(
                 stalled.lifecycle.source.port,
                 &stalled.lifecycle.source.state.join("backend.log"),
-                || None,
+                || Ok(None),
                 Duration::from_millis(30),
-                Duration::from_secs(1),
             )
             .unwrap_err(),
             "the CORSIA service did not become ready in time"
