@@ -20,10 +20,6 @@ use crate::{
     unregister_service, wait_for_service, wait_for_startup, NOT_RUNNING_WINDOW, STARTUP_CAP,
 };
 
-/// The longest a switch waits for running work before the source's stop goes ahead anyway.
-/// Passed explicitly so the bound is the app's, whatever default the source checkout's CLI
-/// carries; the takeover copy promises "up to a minute".
-const DRAIN_MAX_WAIT_SECONDS: u64 = 60;
 /// The source's own drain cap, in seconds; a self-restart it started may drain this long.
 const SOURCE_DRAIN_CAP_SECONDS: u64 = 1800;
 /// A self-restart request is stuck only once it is older than the longest drain
@@ -102,7 +98,6 @@ impl SourceLifecycle {
             .arg(verb)
             .env_clear()
             .envs(self.env.iter().map(|(name, value)| (name, value)))
-            .env("CORSIA_DRAIN_MAX_WAIT", DRAIN_MAX_WAIT_SECONDS.to_string())
             .current_dir(
                 self.source
                     .cli
@@ -543,12 +538,13 @@ impl adoption::Lifecycle for SourceLifecycle {
             let _ = std::fs::remove_file(&path);
             line
         });
-        // The source's bootout can report a failure after launchd has already torn the job
-        // down (`bounded bootout exit 2`). Such a stop counts only once the install has let
-        // go of everything adoption touches next: launchd and the port, the process launchd
-        // ran, and the database.
+        // An exit status is a report, not proof. Whatever it says, the stop counts only once
+        // the install has let go of everything adoption touches next: launchd and the port,
+        // the process launchd ran, and the database. The source's bootout can report a failure
+        // after launchd has already torn the job down (`bounded bootout exit 2`).
+        let let_go = self.released(source_pid);
         if !status.success() {
-            match self.released(source_pid) {
+            match &let_go {
                 Ok(()) => log::warn!(
                     "`corsia stop` exited {status} but the existing install has let go: {}",
                     refusal.as_deref().unwrap_or("no output")
@@ -568,19 +564,7 @@ impl adoption::Lifecycle for SourceLifecycle {
                 "the stop could not be recorded ({why}), so the switch is being undone"
             ));
         }
-        // An exit status is a report, not proof: ask launchd and the port.
-        let mut last = String::new();
-        if self.wait_until(|| match self.is_down() {
-            Ok(()) => true,
-            Err(error) => {
-                last = error;
-                false
-            }
-        }) {
-            Ok(())
-        } else {
-            Err(format!("the existing install did not stop: {last}"))
-        }
+        let_go.map_err(|last| format!("the existing install did not stop: {last}"))
     }
 
     fn stop_is_running(&mut self, stop: &StopProcess) -> bool {
@@ -710,7 +694,8 @@ mod tests {
                 start = start.replace("LOADED", loaded.to_str().unwrap()),
             ),
         );
-        fake_launchctl(base, std::process::id());
+        // The process the fake job ran has exited, as a stopped service's has.
+        fake_launchctl(base, gone_pid());
         script(
             &base.join("resources/python/bin/python3"),
             &python.replace("COUNTS", counts),
@@ -893,7 +878,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_and_start_run_in_the_checkout_with_exactly_the_basics_and_the_drain_cap() {
+    fn stop_and_start_run_in_the_checkout_with_exactly_the_basics() {
         let mut home = home(
             "env | grep -v '^\\(PWD\\|SHLVL\\|_\\|OLDPWD\\)=' | sort > \"$HOME/stop.env\"; pwd -P > \"$HOME/stop.cwd\"; rm -f LOADED",
             "env | grep -v '^\\(PWD\\|SHLVL\\|_\\|OLDPWD\\)=' | sort > \"$HOME/start.env\"; touch LOADED",
@@ -904,7 +889,7 @@ mod tests {
             .unwrap();
         let base = home.root.path().canonicalize().unwrap();
         let expected = format!(
-            "CORSIA_DRAIN_MAX_WAIT=60\nHOME={}\nPATH=/usr/bin:/bin\n",
+            "HOME={}\nPATH=/usr/bin:/bin\n",
             home.root.path().display()
         );
         assert_eq!(fs::read_to_string(base.join("stop.env")).unwrap(), expected);
@@ -940,14 +925,33 @@ mod tests {
         // A failing exit status after launchd tore the job down (`bounded bootout exit 2`)
         // is a stop once the process launchd ran is gone and the database is free.
         let mut home = self::home("rm -f LOADED; exit 2", "exit 0", "exit 0");
-        fake_launchctl(home.root.path(), gone_pid());
         home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).unwrap();
+    }
+
+    #[test]
+    fn a_clean_stop_is_not_a_stop_while_its_process_or_database_is_held() {
+        // Exit 0, launchd no longer lists the job and the port refuses, but the process it ran lives on.
+        let mut home = home("rm -f LOADED", "exit 0", "exit 0");
+        fake_launchctl(home.root.path(), std::process::id());
+        let error = home
+            .lifecycle
+            .stop_old(&mut quiet, &mut |_| Ok(()))
+            .unwrap_err();
+        assert!(error.contains("did not stop") && error.contains("still running"), "{error}");
+        // Exit 0 and the process is gone, but something still holds the database.
+        let mut home = self::home("rm -f LOADED", "exit 0", "exit 1");
+        let error = home
+            .lifecycle
+            .stop_old(&mut quiet, &mut |_| Ok(()))
+            .unwrap_err();
+        assert!(error.contains("did not stop") && error.contains("database"), "{error}");
     }
 
     #[test]
     fn a_failed_stop_is_not_a_stop_while_its_process_or_database_is_held() {
         // launchd no longer lists the job and the port refuses, but the process it ran lives on.
         let mut home = home("rm -f LOADED; exit 2", "exit 0", "exit 0");
+        fake_launchctl(home.root.path(), std::process::id());
         let error = home
             .lifecycle
             .stop_old(&mut quiet, &mut |_| Ok(()))
@@ -955,7 +959,6 @@ mod tests {
         assert!(error.contains("exited"), "{error}");
         // The process is gone, but something still holds the database.
         let mut home = self::home("rm -f LOADED; exit 2", "exit 0", "exit 1");
-        fake_launchctl(home.root.path(), gone_pid());
         let error = home
             .lifecycle
             .stop_old(&mut quiet, &mut |_| Ok(()))
@@ -1012,7 +1015,8 @@ mod tests {
         let mut broken = self::home(
             "n=0; while [ $n -lt 500 ] && [ ! -e COUNTS ]; do sleep 0.02; n=$((n+1)); done; rm -f LOADED",
             "exit 0",
-            "echo x >> COUNTS; exit 1",
+            // Only the count fails to read; the database check after the stop still passes.
+            "case \"$*\" in *active_turns*) echo x >> COUNTS; exit 1;; esac",
         );
         let mut seen = vec![];
         broken
@@ -1301,7 +1305,7 @@ mod tests {
         assert_eq!(
             fs::read_to_string(base.join("restart.env")).unwrap(),
             format!(
-                "CORSIA_DRAIN_MAX_WAIT=60\nHOME={}\nPATH=/usr/bin:/bin\n",
+                "HOME={}\nPATH=/usr/bin:/bin\n",
                 home.root.path().display()
             )
         );
