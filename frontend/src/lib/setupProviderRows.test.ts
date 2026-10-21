@@ -97,7 +97,7 @@ describe('setup provider rows', () => {
 
 	it('names a model fit failure only when memory is its cause, retaining the reference', () => {
 		const row = setupLocalRow({ ...actions(), pick: { state: 'failed', model: null, message: null, cause: 'memory', ref: 'local-456' }, eligible: true, downloading: false, ready: false, startError: '' });
-		expect(row.meta).toBe('Couldn’t find a local model that fits this computer. Try again.');
+		expect(row.meta).toBe('Couldn’t find a local model that fits this computer. Retry.');
 		expect(row.reference).toBe('local-456');
 	});
 
