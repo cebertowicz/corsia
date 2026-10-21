@@ -11,6 +11,12 @@ from doceditor import feedback_delivery, review_lifecycle
 def claim_and_deliver(db, batch_id: str, *, from_state: str,
                       reason: str | None) -> tuple[bool, tuple[str, ...]]:
     """Claim one batch and settle its request in the caller's write transaction."""
+    batch = db.execute(
+        "SELECT * FROM doc_feedback_batches WHERE id=? AND state=?", (batch_id, from_state),
+    ).fetchone()
+    if batch is None:
+        return False, ()
+    review_lifecycle.prepare_for_batch(db, batch)
     now = datetime.now(timezone.utc).isoformat()
     closed_sql = "closed_reason=?" if reason is not None else "closed_reason=closed_reason"
     params: list[Any] = [now]
@@ -44,5 +50,6 @@ def claim_and_deliver(db, batch_id: str, *, from_state: str,
             (delivered.node_id, delivered.outcome, now, batch_id),
         )
         db.execute("DELETE FROM doc_feedback_edit_items WHERE batch_id=?", (batch_id,))
-        review_woken = review_lifecycle.settle_for_batch(db, batch)
+        if batch["review_request_id"] is None:
+            review_woken = review_lifecycle.settle_for_batch(db, batch)
     return True, delivered.woken_threads + review_woken

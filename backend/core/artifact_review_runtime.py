@@ -9,17 +9,10 @@ from typing import Any
 from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
 from core.fork_runtime import ForkHandle, cancel_fork, forget, handles
 from core.artifact_review_capture import ReviewForkFailure, submitted
+from prompts.artifact_review import instruction
 
 _starting: set[str] = set()
 
-
-def _instruction(row: Any, artifact: Any, note: str) -> str:
-    document = artifact["path"] or artifact["external_id"] or row["artifact_id"]
-    return (
-        f"Review the document {document!s}. Request: {note}\n\n"
-        "Use only the document comment tools. Create review comments or suggestions as needed, "
-        "then call doc_feedback_send for this document. Do not send messages, spawn work, or write files."
-    )
 
 
 def _cold_request(request_id: str):
@@ -54,13 +47,12 @@ def _cold_request(request_id: str):
         boundary = projection.sealed_boundary
         if boundary is None:
             raise ReviewForkFailure("no_sealed_boundary")
-        from doceditor.review_fork_intent import review_intent
         from subagents.harness_tool_bridge import build_tool_registry
 
         protected = ({"role": "user", "content": render_prior_checkpoint(previous)},) if previous else ()
         request = build_cold_fork_admission(
             fork_id=row["fork_id"], thread_id=thread["id"], target=target, kind=ARTIFACT_REVIEW_KIND,
-            instruction=_instruction(row, artifact, review_intent(db, row)),
+            instruction=instruction(row, artifact),
             source=ColdForkSource(projection, protected),
             working_dir=resolve_working_dir(thread["project_id"], db),
             reasoning_effort=thread["reasoning_effort"], binary=fork_binary(target, db),

@@ -7,6 +7,7 @@ from typing import Any
 from doceditor import review_requests as reviews
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
+from infra.write_effects import after_commit
 from infra.queries import get_thread_for_user
 from plans import public
 from tools.artifact_tool_helpers import default_workspace, tool_path
@@ -28,6 +29,21 @@ SESSION_REQUIRED = "as_session_id is required (the `corsia doc` CLI fills it aut
 SESSION_REFUSAL = "as_session_id is not owned by the authenticated principal"
 
 
+def _start_after_commit(request_id: str) -> None:
+    """Submit durable review work to the app loop after its request commits."""
+    import infra.app_loop as app_loop
+    from core.artifact_review_runtime import start
+
+    app_loop.submit(start(request_id))
+
+
+def _cancel_after_commit(fork_id: str) -> None:
+    """Signal the running fork from its owner loop after cancellation commits."""
+    from core.artifact_review_runtime import cancel
+
+    cancel(fork_id)
+
+
 def create_request(actor: reviews.ReviewActor, *, reviewer: str, note: str | None,
                    client_id: str, doc_path: str | None = None,
                    artifact_id: str | None = None) -> tuple[dict, list[str]]:
@@ -45,18 +61,15 @@ def create_request(actor: reviews.ReviewActor, *, reviewer: str, note: str | Non
             woken: list[str] = []
             with public.collect_wake_recipients(connection, woken):
                 result = reviews.request_review(connection, aid, reviewer, actor, note, client_id)
+                if result["state"] == "forked":
+                    after_commit(
+                        connection,
+                        lambda request_id=str(result["id"]): _start_after_commit(request_id),
+                    )
         return result, woken
     finally:
         db.close()
 
-
-def refresh_request(request_id: str) -> dict:
-    """Return the durable outcome after preparation may have handed work back."""
-    db = get_db()
-    try:
-        return reviews.get_request(db, request_id)
-    finally:
-        db.close()
 
 
 def cancel_request(actor: reviews.ReviewActor, request_id: str) -> tuple[dict, list[str]]:
@@ -66,6 +79,11 @@ def cancel_request(actor: reviews.ReviewActor, request_id: str) -> tuple[dict, l
             woken: list[str] = []
             with public.collect_wake_recipients(connection, woken):
                 result = reviews.cancel(connection, request_id, actor)
+                if result["state"] == "withdrawn" and result["fork_id"]:
+                    after_commit(
+                        connection,
+                        lambda fork_id=str(result["fork_id"]): _cancel_after_commit(fork_id),
+                    )
         return result, woken
     finally:
         db.close()
@@ -119,9 +137,4 @@ class DocReviewRequestTool(Tool):
         except (ValueError, PermissionError) as exc:
             return f"Error: {exc}"
         await public.drive_threads(woken)
-        if result["state"] == "forked":
-            from core.artifact_review_runtime import start
-
-            await start(result["id"])
-            result = await run_in_db(refresh_request, result["id"])
         return _json({"request": result})

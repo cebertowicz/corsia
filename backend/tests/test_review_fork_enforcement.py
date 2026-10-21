@@ -306,25 +306,27 @@ def test_startup_escalates_each_orphaned_review_once(review_env):
         review_feedback.submit_fork_feedback(db, answered["id"], "third", aid)
     before = {rid: stored(db, rid) for rid in (cancelled["id"], answered["id"])}
 
-    assert asyncio.run(reconcile_startup_reviews(frozenset(), before="9999-01-01T00:00:00+00:00")) == [orphan["id"]]
-    assert asyncio.run(reconcile_startup_reviews(frozenset(), before="9999-01-01T00:00:00+00:00")) == []
+    assert asyncio.run(reconcile_startup_reviews()) == [orphan["id"]]
+    assert asyncio.run(reconcile_startup_reviews()) == []
 
     escalated = stored(db, orphan["id"])
     assert escalated["node_id"] and escalated["fork_id"] is None
-    assert escalated["state"] == "failed" and escalated["reason"] == "process_interrupted"
+    assert escalated["state"] == "handed_back" and escalated["reason"] == "interrupted"
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 1
     assert {rid: stored(db, rid) for rid in before} == before
 
 
 @pytest.mark.asyncio
-async def test_review_request_with_a_live_fork_is_not_escalated_at_startup(review_env):
+async def test_startup_hands_back_forked_rows_without_a_live_handle_filter(review_env):
     from core.artifact_review_capture import reconcile_startup_reviews
 
     db, aid = review_env
     live = request(db, aid)
 
-    assert await reconcile_startup_reviews(frozenset({live["fork_id"]}), before="9999-01-01T00:00:00+00:00") == []
-    assert stored(db, live["id"])["node_id"] is None
+    assert await reconcile_startup_reviews() == [live["id"]]
+    recovered = stored(db, live["id"])
+    assert recovered["node_id"]
+    assert (recovered["state"], recovered["reason"]) == ("handed_back", "interrupted")
 
 
 @pytest.mark.asyncio

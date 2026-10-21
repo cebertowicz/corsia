@@ -252,10 +252,7 @@ def close_for_document(
     rows = db.execute(
         """SELECT id FROM doc_feedback_batches WHERE state='open'
            AND author_kind=? AND author_id=? AND artifact_id=?
-           AND (review_request_id IS NULL OR EXISTS (
-               SELECT 1 FROM doc_review_requests r
-               WHERE r.id=review_request_id AND r.state IN ('handed_back','failed')
-           )) ORDER BY opened_at,id""",
+           AND review_request_id IS NULL ORDER BY opened_at,id""",
         (author_kind, author_id, artifact_id),
     ).fetchall()
     woken: list[str] = []
@@ -266,20 +263,12 @@ def close_for_document(
 
 
 def close_due(now: str, *, db=None) -> list[str]:
-    """Deliver every due batch; one that raises rolls back alone, is logged, and retries next pass.
-
-    Active review batches wait for submission or the continuing Turn. Ended
-    continuations resolve their remaining undelivered comments without delivery.
-    """
+    """Deliver due ordinary batches; a raising batch rolls back alone and is logged."""
     deliveries: list[tuple[str, str]] = []
     with write_transaction(db, scope="close_due_doc_feedback") as connection:
-        review_feedback.close_ended_continuations(connection)
         rows = connection.execute(
             """SELECT id,artifact_id,author_kind,closed_reason FROM doc_feedback_batches
-               WHERE state='open' AND closes_at<=? AND (review_request_id IS NULL OR EXISTS (
-                   SELECT 1 FROM doc_review_requests r WHERE r.id=review_request_id
-                   AND r.state='submitted'
-               ))
+               WHERE state='open' AND closes_at<=? AND review_request_id IS NULL
                ORDER BY closes_at,id""",
             (now,),
         ).fetchall()
@@ -329,7 +318,8 @@ def retry_for_document(db, *, author_kind: str, author_id: str, artifact_id: str
     """Retry every undelivered recipient batch for one author's document."""
     rows = db.execute(
         """SELECT id FROM doc_feedback_batches WHERE state='undelivered'
-           AND author_kind=? AND author_id=? AND artifact_id=? ORDER BY updated_at,id""",
+           AND author_kind=? AND author_id=? AND artifact_id=?
+           AND review_request_id IS NULL ORDER BY updated_at,id""",
         (author_kind, author_id, artifact_id),
     ).fetchall()
     woken: list[str] = []

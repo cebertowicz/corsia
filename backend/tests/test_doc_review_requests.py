@@ -217,7 +217,9 @@ def test_escalation_preserves_comments_and_passes_requesting_intent(review_env, 
     assert comment["id"] in node.description and "Check claims" in node.description
     assert db.execute("SELECT state FROM doc_feedback_batches WHERE review_request_id=?", (result["id"],)).fetchone()[0] == "open"
     reviewer_turn(db, utc_now_iso())
-    close_reviewer_turn(db)
+    with write_transaction(db, scope="test_continuation_submit"):
+        from doceditor.review_lifecycle import submit_without_batch
+        submit_without_batch(db, artifact_id, "reviewer")
     assert stored(db, result["id"])["answered_batch_id"]
 
 
@@ -242,7 +244,9 @@ def test_escalated_comments_wait_for_the_reviewers_own_continuation(review_env):
     assert public.review_is_open(db, escalated["node_id"])
 
     reviewer_turn(db, utc_now_iso())
-    close_reviewer_turn(db)
+    with write_transaction(db, scope="test_continuation_submit"):
+        from doceditor.review_lifecycle import submit_without_batch
+        submit_without_batch(db, artifact_id, "reviewer")
     answered = stored(db, result["id"])["answered_batch_id"]
     assert answered
     assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (answered,)).fetchone()[0] == "delivered"
@@ -262,10 +266,8 @@ def test_escalated_comments_deliver_on_the_reviewers_submit(review_env):
     escalated = review_requests.escalate_fork(db, result["id"])
 
     with write_transaction(db, scope="test_submit_escalated") as connection:
-        feedback_batches.close_for_document(
-            connection, author_kind="agent", author_id="reviewer",
-            artifact_id=artifact_id, reason="submit",
-        )
+        from doceditor.review_lifecycle import submit_without_batch
+        submit_without_batch(connection, artifact_id, "reviewer")
 
     assert stored(db, result["id"])["answered_batch_id"]
     assert not public.review_is_open(db, escalated["node_id"])

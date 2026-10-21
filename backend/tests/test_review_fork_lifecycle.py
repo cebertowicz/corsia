@@ -141,10 +141,11 @@ async def test_startup_does_not_orphan_a_new_request_without_a_handle(review_env
                ("2026-10-20T22:00:00.000003+00:00", current["id"]))
     db.commit()
     assert current["fork_id"] not in handles
-    assert await capture.reconcile_startup_reviews({}, before=process_started) == [previous["id"]]
-    assert stored(db, previous["id"])["state"] == "failed"
-    assert stored(db, current["id"])["state"] == "forked"
-    assert stored(db, current["id"])["node_id"] is None
+    assert await capture.reconcile_startup_reviews() == [previous["id"], current["id"]]
+    for request_id in (previous["id"], current["id"]):
+        recovered = stored(db, request_id)
+        assert (recovered["state"], recovered["reason"]) == ("handed_back", "interrupted")
+        assert recovered["node_id"]
 
 
 @pytest.mark.asyncio
@@ -159,20 +160,51 @@ async def test_creation_returns_failed_outcome_after_cold_build_failure(review_e
     def broken(_request_id):
         raise capture.ReviewForkFailure("no_sealed_boundary")
 
+    from infra import app_loop
+    previous_loop = app_loop._LOOP
+    app_loop.capture(asyncio.get_running_loop())
+    launches, notifications = [], []
+    entered = asyncio.Event()
+    start, deliver = runtime.start, public.deliver_notifications
+
+    async def tracked_start(request_id):
+        launches.append(asyncio.current_task())
+        entered.set()
+        await start(request_id)
+
+    def notify(messages):
+        notifications.extend(messages)
+        return deliver(messages)
+
+    monkeypatch.setattr(runtime, "start", tracked_start)
+    monkeypatch.setattr(public, "deliver_notifications", notify)
     monkeypatch.setattr(runtime, "_cold_request", broken)
     fields = dict(artifact_id=aid, reviewer="reviewer", note="Check claims", client_id="failure")
-    if entrypoint == "http":
-        actor = review_requests.ReviewActor("agent", "requester", "requester", "owner-token", "Requester")
-        result = await _create(ReviewCreate(**fields), actor)
-    else:
-        monkeypatch.setattr(document_reviews, "_require_context", lambda _kwargs: (
-            "requester", {"user_id": "owner-token", "title": "Requester"},
-        ))
-        result = json.loads(await document_reviews.DocReviewRequestTool().execute(**fields))
-    assert result["request"]["outcome"] == "failed"
-    assert result["request"]["state"] == "failed"
-    assert result["request"]["reason"] == "no_sealed_boundary"
-    assert result["request"]["node_id"]
+    try:
+        if entrypoint == "http":
+            actor = review_requests.ReviewActor("agent", "requester", "requester", "owner-token", "Requester")
+            result = await _create(ReviewCreate(**fields), actor)
+        else:
+            monkeypatch.setattr(document_reviews, "_require_context", lambda _kwargs: (
+                "requester", {"user_id": "owner-token", "title": "Requester"},
+            ))
+            result = json.loads(await document_reviews.DocReviewRequestTool().execute(**fields))
+        assert result["request"]["state"] == "forked"
+        assert result["request"]["outcome"] == "open"
+        assert result["request"]["node_id"] is None
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        await asyncio.gather(*launches)
+        refreshed = review_requests.get_request(db, result["request"]["id"])
+        assert refreshed["outcome"] == "failed"
+        assert refreshed["state"] == "failed"
+        assert refreshed["reason"] == "no_sealed_boundary"
+        assert refreshed["node_id"]
+        assert sum(
+            frame.get("type") == "artifacts_changed" and "requester" in frame["affected_thread_ids"]
+            for _user_id, frame in notifications
+        ) >= 2  # The failure invalidates the requester after the create notification.
+    finally:
+        monkeypatch.setattr(app_loop, "_LOOP", previous_loop)
 
 
 def test_outcome_reads_lifecycle_instead_of_node_presence(review_env):

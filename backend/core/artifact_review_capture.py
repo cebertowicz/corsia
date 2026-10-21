@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 from doceditor import review_requests
 from infra.database import get_db
@@ -29,23 +30,22 @@ def submitted(request_id: str) -> bool:
         db.close()
 
 
-def orphaned_forks(live_fork_ids, before: str) -> list[str]:
-    """Only forks predating this process can be orphans of its predecessor."""
+def startup_forked_requests() -> list[str]:
+    """Return every durable fork that cannot survive a process restart."""
     db = get_db()
     try:
         rows = db.execute(
-            "SELECT id,fork_id FROM doc_review_requests WHERE state='forked' "
-            "AND created_at<? ORDER BY created_at,id", (before,),
+            "SELECT id FROM doc_review_requests WHERE state='forked' ORDER BY created_at,id"
         ).fetchall()
-        return [str(row["id"]) for row in rows if row["fork_id"] not in live_fork_ids]
+        return [str(row["id"]) for row in rows]
     finally:
         db.close()
 
 
-def _escalate_in_db(request_id: str, reason: str) -> None:
+def _escalate_in_db(request_id: str, reason: str, *, outcome: Literal["handed_back", "failed"] | None = None) -> None:
     db = get_db()
     try:
-        review_requests.escalate_fork(db, request_id, reason=reason)
+        review_requests.escalate_fork(db, request_id, reason=reason, outcome=outcome)
     finally:
         db.close()
 
@@ -69,20 +69,30 @@ def failure_reason(error) -> str:
     return f"provider_error:{type(error).__name__}"
 
 
-async def review_limit_or_failure_handler(request_id: str, error=None, *, reason: str | None = None) -> None:
+async def review_limit_or_failure_handler(
+    request_id: str,
+    error=None,
+    *,
+    reason: str | None = None,
+    outcome: Literal["handed_back", "failed"] | None = None,
+) -> None:
     if await run_in_db(submitted, request_id):
         return
     reason = reason or failure_reason(error)
     log = logger.warning if reason == "limit" else logger.error
     log("artifact review ended request_id=%s reason=%s", request_id, reason)
-    await run_in_db(_escalate_in_db, request_id, reason)
+    await run_in_db(_escalate_in_db, request_id, reason, outcome=outcome)
 
 
-async def reconcile_startup_reviews(live_fork_ids, *, before: str) -> list[str]:
-    """Fail each previous-process fork once and preserve its work in a live task."""
-    request_ids = await run_in_db(orphaned_forks, frozenset(live_fork_ids), before)
+async def reconcile_startup_reviews() -> list[str]:
+    """Hand every forked request back because no runtime fork survives startup."""
+    request_ids = await run_in_db(startup_forked_requests)
     for request_id in request_ids:
-        await review_limit_or_failure_handler(request_id, reason="process_interrupted")
+        await review_limit_or_failure_handler(
+            request_id,
+            reason="interrupted",
+            outcome="handed_back",
+        )
     return request_ids
 
 

@@ -265,12 +265,15 @@ def test_ended_review_disappears_without_requested_picker_state(client, review_e
     assert choices["reviewer"]["requested"] is False
     repeated = client.post("/api/doc-reviews", json=payload(aid, thread_id="requester", client_id="after-end"))
     assert repeated.status_code == 200
+    assert repeated.json()["request"]["outcome"] == "open"
+    import asyncio
+    from core.artifact_review_runtime import start
+    asyncio.run(start(repeated.json()["request"]["id"]))
     refreshed = client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"]
     # This fixture has no runnable review source: the new request's preparation
     # fails visibly and preserves the work in a live reviewer task.
     assert [(r["id"], r["outcome"]) for r in refreshed] == [(repeated.json()["request"]["id"], "failed")]
     assert refreshed[0]["reason"] and refreshed[0]["node_id"]
-    assert repeated.json()["request"]["outcome"] == "failed"
     assert refreshed[0]["id"] != row["id"]
 
 

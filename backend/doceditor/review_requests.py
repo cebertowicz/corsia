@@ -6,11 +6,12 @@ import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Literal
 
 from core.agent_roster_queries import agent_rows
 from doceditor import feedback_delivery
 from doceditor.review_lifecycle import FALLBACK_STATES, is_open, notify_change, transition
-from doceditor.review_feedback import drop_unsent_feedback
+from prompts.artifact_review import continuation
 from doceditor.comments import validate_client_id
 from infra.auth import is_owner_sentinel, may_access_artifact
 from infra.corsia_agent import CorsiaAgentSettingError, get_corsia_agent
@@ -240,7 +241,8 @@ def may_cancel(db, artifact, row, actor: ReviewActor) -> bool:
     return get_thread_for_user(owner_id, actor.user_id, db=db) is not None
 
 
-def escalate_fork(db, request_id: str, *, reason: str = "limit") -> dict | None:
+def escalate_fork(db, request_id: str, *, reason: str = "limit",
+                  outcome: Literal["handed_back", "failed"] | None = None) -> dict | None:
     """Turn an unfinished fork into the established reviewer node exactly once."""
     with write_transaction(db, scope="escalate_document_review_fork") as connection:
         row = connection.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone()
@@ -254,15 +256,12 @@ def escalate_fork(db, request_id: str, *, reason: str = "limit") -> dict | None:
             "WHERE b.review_request_id=? AND b.state IN ('open','undelivered') ORDER BY c.id",
             (request_id,),
         ).fetchall()
-        continuation = "Continue the requested review; comments already staged: " + (
-            ", ".join(str(comment["id"]) for comment in comments) or "none"
-        )
-        state = "handed_back" if reason == "limit" else "failed"
-        continuation += f". Fork outcome: {state} ({reason})."
+        state = outcome or ("handed_back" if reason == "limit" else "failed")
+        task_text = continuation([str(comment["id"]) for comment in comments], state, reason)
         request = {
             **dict(row),
             "requester_display": (requester["title"] if requester else None) or row["requester_id"],
-            "note": f"{row['note'] or ''}\n\n{continuation}".strip(),
+            "note": f"{row['note'] or ''}\n\n{task_text}".strip(),
         }
         node = public.create_review_node(connection, row["reviewer_thread_id"], request)
         connection.execute(
@@ -290,11 +289,6 @@ def cancel(db, request_id: str, actor: ReviewActor) -> dict:
         transition(connection, request_id, "withdrawn")
         if row["state"] in FALLBACK_STATES:
             public.close_review_node(connection, row["node_id"], reason=CANCEL_REASON)
-        else:
-            from core.artifact_review_runtime import cancel as cancel_fork
-
-            after_commit(connection, lambda: cancel_fork(str(row["fork_id"])))
-        drop_unsent_feedback(connection, request_id)
         result = get_request(connection, request_id)
         notify_change(connection, result, artifact)
         return result

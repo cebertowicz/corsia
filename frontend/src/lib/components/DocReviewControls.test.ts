@@ -270,18 +270,20 @@ describe('document review toolbar and popover', () => {
 		rows = [row('review-failure', { outcome: 'failed' })]; render(); await settle();
 		expect(document.body.querySelector('.reviewer-group')?.getAttribute('aria-label')).toBe('Reviewers: Quality Gate (The review is unfinished. Quality Gate will finish it.)');
 		await picker();
-		expect(document.body.textContent).toContain('The review is unfinished. Quality Gate will finish it.');
+		expect(document.body.textContent).toContain('Couldn’t finish the review');
+		expect(document.body.querySelector('.status')?.getAttribute('title')).toBe('The review is unfinished. Quality Gate will finish it.');
 		expect(button('Cancel request to Quality Gate')).toBeTruthy();
 	});
 	it.each([
-		['missing_credentials', "The review is unfinished: Quality Gate isn't signed in to its model. Sign in again from the model card, and Quality Gate will finish it."],
-		['target_unavailable', "The review is unfinished: Quality Gate's model isn't available. Choose another model for Quality Gate, and it will finish the review."],
-		['binary_resolution', "The review is unfinished: CORSIA can't find the app Quality Gate runs on. Ask CORSIA in chat to fix it, and Quality Gate will finish the review."],
-	])('shows the recovery step for %s on the summary and review list', async (reason, message) => {
+		['missing_credentials', 'Couldn’t finish Quality Gate’s review. Sign in again in Settings › Providers.', 'Couldn’t finish: sign-in needed'],
+		['target_unavailable', 'Couldn’t finish Quality Gate’s review. Choose another model for Quality Gate.', 'Couldn’t finish: choose a model'],
+		['binary_resolution', 'Couldn’t finish Quality Gate’s review. Ask CORSIA in chat to fix it.', 'Couldn’t finish: ask CORSIA to fix it'],
+	])('shows the recovery step for %s on the summary and review list', async (reason, message, status) => {
 		rows = [row('review-failure', { outcome: 'failed', reason })]; render(); await settle();
 		expect(document.body.querySelector('.reviewer-group')?.getAttribute('aria-label')).toBe(`Reviewers: Quality Gate (${message})`);
 		await picker();
-		expect(document.body.textContent).toContain(message);
+		expect(document.body.textContent).toContain(status);
+		expect(document.body.querySelector('.status')?.getAttribute('title')).toBe(message);
 		expect(button('Cancel request to Quality Gate')).toBeTruthy();
 	});
 	it('refetches on an artifact change and on a plan change, and cleans its listeners up', async () => {

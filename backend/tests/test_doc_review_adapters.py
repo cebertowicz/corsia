@@ -140,6 +140,10 @@ async def test_tool_uses_real_context_schema_and_approved_description(review_env
     result = json.loads(await tool.execute(artifact_id=aid, reviewer="reviewer", client_id="tool-key", _thread_id="requester"))
     assert result["request"]["requester_id"] == "requester"
     assert result["request"]["reviewer_thread_id"] == "reviewer"
+    assert result["request"]["state"] == "forked"
+    assert result["request"]["node_id"] is None
+    from core.artifact_review_runtime import start
+    await start(result["request"]["id"])
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 1
 
 

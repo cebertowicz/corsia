@@ -15,6 +15,16 @@ from tools.delegation import _require_context, _tool_schema
 from tools.documents import _json, _resolve_doc_target
 
 
+def _delivery_text(pending: bool, undelivered: list[dict]) -> str:
+    if undelivered:
+        reason = undelivered[0]["undelivered_reason"].replace("_", " ")
+        return (
+            f"Feedback is still undelivered: {reason}. Retry with "
+            "doc_feedback_send once the owner can receive it."
+        )
+    return "Feedback was delivered to the owner." if pending else "Nothing was pending for this document."
+
+
 def _send_feedback(
     actor_thread_id: str,
     actor: dict[str, Any],
@@ -73,16 +83,14 @@ def _send_feedback(
                     author_id=actor_thread_id,
                     artifact_id=resolved_id,
                 )
-        if undelivered:
-            reason = undelivered[0]["undelivered_reason"].replace("_", " ")
-            result = (
-                f"Feedback is still undelivered: {reason}. Retry with "
-                "doc_feedback_send once the owner can receive it."
-            )
-        elif pending:
-            result = "Feedback was delivered to the owner."
-        else:
-            result = "Nothing was pending for this document."
+                if not pending:
+                    from doceditor.review_lifecycle import submit_without_batch
+
+                    submitted = submit_without_batch(connection, resolved_id, actor_thread_id)
+                    pending = submitted.pending
+                    woken.extend(submitted.woken)
+                    undelivered.extend(submitted.undelivered)
+        result = _delivery_text(pending, undelivered)
         return {
             "artifact_id": resolved_id,
             "woken": woken,

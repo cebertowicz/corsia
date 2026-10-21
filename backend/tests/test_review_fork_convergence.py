@@ -39,12 +39,13 @@ def test_ended_continuation_preserves_visible_findings_without_delivery(review_e
     assert review_requests.outcome(db, stored(db, row["id"])) == "ended_without_comments"
     assert review_requests.for_document(db, aid) == []
     assert feedback_batches.close_due("2099-01-01T00:00:00+00:00", db=db) == []
-    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 0
-    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batch_items").fetchone()[0] == 0
-    assert db.execute("SELECT COUNT(*) FROM doc_feedback_edit_items").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 1
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batch_items").fetchone()[0] == 1
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_edit_items").fetchone()[0] == 1
+    assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == batch_state
     assert comments.list_for_artifact(aid, db=db) == visible
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 1
-    # Repeated cleanup preserves the visible findings and never submits feedback.
+    # Repeated ordinary closing leaves request staging inert and comments visible.
     feedback_batches.close_due("2099-01-01T00:00:00+00:00", db=db)
     assert comments.list_for_artifact(aid, db=db) == visible
     assert stored(db, row["id"])["state"] == continuation["state"]
@@ -129,12 +130,9 @@ async def test_pool_thread_withdrawal_wakes_running_fork_promptly(review_env):
     loop.set_debug(True)
 
     def withdraw():
-        connection = get_db()
-        try:
-            actor = review_requests.ReviewActor("agent", "requester", "requester", "owner-token", "Requester")
-            review_requests.cancel(connection, row["id"], actor)
-        finally:
-            connection.close()
+        from tools.document_reviews import cancel_request
+        actor = review_requests.ReviewActor("agent", "requester", "requester", "owner-token", "Requester")
+        cancel_request(actor, row["id"])
 
     started = time.monotonic()
     try:

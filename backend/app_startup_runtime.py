@@ -2,7 +2,6 @@
 
 import asyncio
 import sys
-from datetime import datetime, timezone
 
 from events.connectors.github_notifications import notifications_poll_loop
 from events.connectors.github_pr_quiet_watch import pr_quiet_watch_loop
@@ -19,8 +18,6 @@ from thread.idle_checkpoint import rearm_idle_checkpoints
 # sqlite3 releases the GIL for each fetched row, so contended fetches otherwise
 # wait a full Python thread-switch interval at every handoff.
 SQLITE_FETCH_SWITCH_INTERVAL_SECONDS = 0.0001
-# Imported before the app accepts requests; never reconcile this process's forks.
-PROCESS_STARTED_AT = datetime.now(timezone.utc).isoformat()
 
 
 def configure_sqlite_fetch_switch_interval() -> None:
@@ -197,9 +194,8 @@ async def _start_runtime_services() -> None:
 
     await reconcile_startup_checkpoints()
     from core.artifact_review_capture import reconcile_startup_reviews
-    from core.fork_runtime import handles
 
-    await reconcile_startup_reviews(handles, before=PROCESS_STARTED_AT)
+    await reconcile_startup_reviews()
     from core import placement_worker
 
     placement_worker.poke()
