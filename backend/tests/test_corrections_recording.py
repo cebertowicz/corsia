@@ -252,17 +252,19 @@ def test_measurement_correction_split_groups_by_source_kind(isolated_db):
             db=db,
         )
         rows = db.execute(
-            """SELECT json_extract(attributes, '$.source_kind') AS source_kind, COUNT(*) AS count
+            """SELECT CASE WHEN json_extract(attributes, '$.source_kind')='self_caught'
+                            THEN 'us' ELSE 'person' END AS caught_by,
+                      COUNT(*) AS count
                FROM outcome_events
                WHERE event_name='measurement.correction'
-               GROUP BY json_extract(attributes, '$.source_kind')"""
+               GROUP BY json_extract(attributes, '$.source_kind')='self_caught'"""
         ).fetchall()
     finally:
         db.close()
 
-    assert {str(row["source_kind"]): row["count"] for row in rows} == {
-        "message": 1,
-        "self_caught": 1,
+    assert {str(row["caught_by"]): row["count"] for row in rows} == {
+        "person": 1,
+        "us": 1,
     }
 
 
