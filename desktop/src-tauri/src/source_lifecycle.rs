@@ -510,7 +510,15 @@ impl adoption::Lifecycle for SourceLifecycle {
             let _ = std::fs::remove_file(&path);
             line
         });
-        if !status.success() {
+        // The source's bootout can report a failure after launchd has already torn the job
+        // down (`bounded bootout exit 2`). The exit status is a report; launchd and the port
+        // are the proof, so a stop that left the install provably down is a stop.
+        if !status.success() && self.wait_until(|| self.is_down().is_ok()) {
+            log::warn!(
+                "`corsia stop` exited {status} but the existing install is down: {}",
+                refusal.as_deref().unwrap_or("no output")
+            );
+        } else if !status.success() {
             return Err(match refusal {
                 Some(line) => format!("`corsia stop` exited {status}: {line}"),
                 None => format!("`corsia stop` exited {status}"),
