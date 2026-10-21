@@ -118,7 +118,9 @@ class DelegateTaskTool(Tool):
             ))
         except public.PlanInputError as exc:
             return f"Error: invalid request, fix and resend - {exc}"
-        started = await _spawn(parent_thread_id, parent, task.strip(), kwargs)
+        started = await _spawn(
+            parent_thread_id, parent, with_task_line(task.strip(), step, parent_thread_id), kwargs,
+        )
         if isinstance(started, str):
             return started
         started["plan_task"] = await _hand_over(step, started["thread_id"], parent, requested)
@@ -127,6 +129,24 @@ class DelegateTaskTool(Tool):
         if thread_agent_identity(parent)[1]:
             started["worker_note"] = WORKER_NOTE
         return delegation._json(started)
+
+
+def with_task_line(message: str, step, parent_thread_id: str) -> str:
+    """Append the line naming the handed plan task, or return ``message`` unchanged.
+
+    The task is named by reference, never copied: its intent can be revised
+    after dispatch, so a copy goes stale and a read stays current. The task is
+    in the parent's plan, so the worker reads it with the parent's ``thread_id``
+    (same user and project is the whole access rule), and that read does not
+    depend on the attach, so a failed attach leaves the line true.
+    """
+    if step is None:
+        return message
+    return (
+        f'{message}\n\nYour plan task: "{step.title}" ({step.node_id}). Read its intent and '
+        f"acceptance criteria with plan_read(thread_id='{parent_thread_id}', "
+        f"node_id='{step.node_id}') before you start, and again if you're told it changed."
+    )
 
 
 async def _spawn(
