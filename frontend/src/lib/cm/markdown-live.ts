@@ -7,7 +7,7 @@ import { mountMermaid, type MermaidMount } from '$lib/mermaid';
 import {
 	imageContext, type ImageContext, markdownImages, openSelectedImageOnEnter, renderableImage, selectImageOnClick
 } from './markdown-image';
-import { drawRenderedImages } from './rendered-images';
+import { renderedFragment } from './rendered-images';
 import { linkDecoration, openLinkOnAltEnter, openLinkOnClick } from './markdown-link';
 import { blockSource, isMermaidFence } from './widget-blocks';
 
@@ -48,8 +48,7 @@ class TableWidget extends WidgetType {
 		// Same trust boundary as every `{@html} renderMarkdown(...)` surface:
 		// renderMarkdown applies the canonical DOMPurify policy before HTML reaches
 		// the document. Keep this widget on that single sanitized renderer.
-		el.innerHTML = renderMarkdown(this.src);
-		drawRenderedImages(el, this.images);
+		el.append(renderedFragment(renderMarkdown(this.src), this.images));
 		el.dataset.srcLength = String(this.src.length); // the source range the widget stands for, for `widget-comments.ts`
 		return el;
 	}

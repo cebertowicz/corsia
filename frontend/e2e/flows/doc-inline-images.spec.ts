@@ -17,7 +17,10 @@ const SOURCE = {
 	gif: '![Animated render](shots/render.gif)',
 	missing: '![Gone](shots/gone.png)',
 	remote: `![Remote](https://${REMOTE_HOST}/remote.png)`,
-	table: ['| Phone | Desktop |', '| - | - |', '| ![Phone shot](shots/screen.png) | ![Desktop shot](./shots/render.gif) |'].join('\n'),
+	table: [
+		'| Phone | Desktop |', '| - | - |', '| ![Phone shot](shots/screen.png) | ![Desktop shot](./shots/render.gif) |',
+		`| ![Web cell](https://${REMOTE_HOST}/cell.png) | text |`,
+	].join('\n'),
 };
 const DOC = [
 	'# Design walkthrough', '', 'Intro paragraph before the first image.', '', SOURCE.png, '',
@@ -49,7 +52,10 @@ test.describe('@flow:doc-inline-images @surface:documents markdown images render
 
 			const outsideRequests: string[] = [];
 			await page.route(`**://${REMOTE_HOST}/**`, (route) => { outsideRequests.push(route.request().url()); return route.abort(); });
-			page.on('request', (req) => { if (req.url().includes(REMOTE_HOST)) outsideRequests.push(req.url()); });
+			// A workspace image loads only through the content route, never from its path against the app URL.
+			page.on('request', (req) => {
+				if (req.url().includes(REMOTE_HOST) || new URL(req.url()).pathname.includes('/shots/')) outsideRequests.push(req.url());
+			});
 
 			try {
 				const registered = await request.post(`/api/files/register?token=${tok}`, {
@@ -163,6 +169,7 @@ test.describe('@flow:doc-inline-images @surface:documents markdown images render
 				// Images in table cells resolve from the document folder and load as the standalone ones do.
 				const cells = page.locator('.cm-md-table td img');
 				await expect(cells).toHaveCount(2);
+				await expect(page.locator('.cm-md-table .cm-md-link', { hasText: 'Web cell' })).toHaveCount(1);
 				await cells.first().scrollIntoViewIfNeeded();
 				for (const alt of ['Phone shot', 'Desktop shot']) {
 					const cell = page.getByRole('img', { name: alt });
