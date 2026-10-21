@@ -10,7 +10,6 @@ import pytest
 from core.fork_runtime import ForkHandle, handles
 from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
 from doceditor import comments, feedback_batches, review_requests
-from doceditor.feedback_batch_identity import open_batch
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from plans import public
@@ -18,58 +17,39 @@ from test_doc_review_requests import request, review_env, staged_comment, stored
 
 
 @pytest.mark.parametrize("reason", ["limit", "target_unavailable"])
-@pytest.mark.parametrize("batch_state", ["open", "undelivered"])
-def test_ended_continuation_preserves_visible_findings_without_delivery(review_env, reason, batch_state):
+def test_ended_continuation_releases_visible_findings_for_ordinary_delivery(review_env, reason):
     db, aid = review_env
     row = request(db, aid)
     staged_comment(db, aid, row["id"])
     visible = comments.list_for_artifact(aid, db=db)
     assert len(visible) == 1 and not visible[0]["resolved"] and not visible[0]["acked"]
-    with write_transaction(db, scope="test_ended_review_staging"):
-        batch = db.execute("SELECT id FROM doc_feedback_batches").fetchone()[0]
-        db.execute("UPDATE doc_feedback_batches SET state=? WHERE id=?", (batch_state, batch))
-        db.execute(
-            "INSERT INTO doc_feedback_edit_items(batch_id,actor_display,baseline_sha256,baseline_text,"
-            "latest_sha256,latest_text,save_count,first_at,last_at) VALUES (?,?,?,?,?,?,1,?,?)",
-            (batch, "Reviewer", "before", "before", "after", "after", "t0", "t0"),
-        )
     continuation = review_requests.escalate_fork(db, row["id"], reason=reason)
     with write_transaction(db, scope="test_end_review_continuation"):
         public.close_review_node(db, continuation["node_id"], reason="The task ended without submission.")
     assert review_requests.outcome(db, stored(db, row["id"])) == "ended_without_comments"
     assert review_requests.for_document(db, aid) == []
-    assert feedback_batches.close_due("2099-01-01T00:00:00+00:00", db=db) == []
+    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 0
+    feedback_batches.close_due("2099-01-01T00:00:00+00:00", db=db)
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 1
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batch_items").fetchone()[0] == 1
-    assert db.execute("SELECT COUNT(*) FROM doc_feedback_edit_items").fetchone()[0] == 1
-    assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == batch_state
+    assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == "delivered"
     assert comments.list_for_artifact(aid, db=db) == visible
-    assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 1
-    # Repeated ordinary closing leaves request staging inert and comments visible.
+    assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 2
     feedback_batches.close_due("2099-01-01T00:00:00+00:00", db=db)
     assert comments.list_for_artifact(aid, db=db) == visible
     assert stored(db, row["id"])["state"] == continuation["state"]
 
 
-def test_batch_admission_reads_request_state_only(review_env):
+def test_comment_admission_reads_request_state_only(review_env):
     db, aid = review_env
     row = request(db, aid)
-    with write_transaction(db, scope="test_legacy_review_metadata"):
-        assert "cancelled_at" not in {column[1] for column in db.execute("PRAGMA table_info(doc_review_requests)")}
-        batch = open_batch(
-            db, author_kind="agent", author_id="reviewer", artifact_id=aid,
-            recipient_id="owner", now=row["created_at"], closes_at=row["created_at"],
-            review_request_id=row["id"],
-        )
-    assert batch
+    assert "cancelled_at" not in {column[1] for column in db.execute("PRAGMA table_info(doc_review_requests)")}
+    staged_comment(db, aid, row["id"])
+    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 1
     with write_transaction(db, scope="test_withdrawn_review"):
         db.execute("UPDATE doc_review_requests SET state='withdrawn' WHERE id=?", (row["id"],))
-        with pytest.raises(ValueError, match="no longer owns"):
-            open_batch(
-                db, author_kind="agent", author_id="reviewer", artifact_id=aid,
-                recipient_id="owner", now=row["created_at"], closes_at=row["created_at"],
-                review_request_id=row["id"],
-            )
+    with pytest.raises(ValueError, match="no longer owns"):
+        staged_comment(db, aid, row["id"])
 
 
 @pytest.mark.parametrize("text", ["binary output is malformed", "credential field is not a string", "authentication example is missing"])

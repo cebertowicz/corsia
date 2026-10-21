@@ -19,7 +19,6 @@ def undelivered_for_document(db, *, author_kind: str, author_id: str, artifact_i
     rows = db.execute(
         """SELECT id,item_count,undelivered_reason,attempts FROM doc_feedback_batches
            WHERE state='undelivered' AND author_kind=? AND author_id=? AND artifact_id=?
-             AND review_request_id IS NULL
            ORDER BY updated_at,id""",
         (author_kind, author_id, artifact_id),
     ).fetchall()
@@ -31,7 +30,6 @@ def take_unreported_undelivered(db, author_id: str, now: str) -> list[dict[str, 
     rows = db.execute(
         """SELECT id,artifact_id,item_count,undelivered_reason FROM doc_feedback_batches
            WHERE author_kind='agent' AND author_id=? AND state='undelivered'
-             AND review_request_id IS NULL
              AND author_result_notified_at IS NULL ORDER BY updated_at,id""",
         (author_id,),
     ).fetchall()
@@ -50,7 +48,6 @@ def has_pending_for_document(
     return db.execute(
         """SELECT 1 FROM doc_feedback_batches
            WHERE state IN ('open','undelivered') AND author_kind=? AND author_id=? AND artifact_id=?
-             AND review_request_id IS NULL
            LIMIT 1""",
         (author_kind, author_id, artifact_id),
     ).fetchone() is not None

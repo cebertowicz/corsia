@@ -21,7 +21,7 @@ test('@flow:review-failure-status compact failures on phone', async ({ page, req
 		['missing_credentials', 'Couldn’t finish: sign-in needed', 'Sign in again in Settings › Providers.'],
 		['target_unavailable', 'Couldn’t finish: choose a model', 'Choose another model for Quality Gate.'],
 		['binary_resolution', 'Couldn’t finish: ask CORSIA to fix it', 'Ask CORSIA in chat to fix it.'],
-		['provider_error', 'Couldn’t finish the review', 'Quality Gate will finish it.'],
+		['provider_error', 'Unfinished. Quality Gate will finish it.', 'Quality Gate will finish it.'],
 	];
 	// This fixture isolates status rendering; runtime failure delivery has backend coverage.
 	await page.route(`**/api/artifacts/${artifactId}/reviews*`, (route) => route.fulfill({ json: {

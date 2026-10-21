@@ -22,10 +22,9 @@ class ReviewTransition:
 def transition(db, request_id: str, state: str, *, reason: str | None = None) -> ReviewTransition:
     """Change the request and its staging atomically; terminal states win races.
 
-    The caller holds the write transaction. Only submission delivers scoped
-    feedback; withdrawal drops staging, while hand-back and failure leave it inert.
+    The caller holds the write transaction. Terminal transitions release staged
+    comments to ordinary feedback; withdrawal drops only the staging links.
     """
-    from doceditor import review_feedback
     from infra.product_events import emit_product_event
 
     if state not in {"forked", "submitted", "withdrawn", *FALLBACK_STATES}:
@@ -40,11 +39,7 @@ def transition(db, request_id: str, state: str, *, reason: str | None = None) ->
     ).rowcount
     if not changed:
         return ReviewTransition()
-    pending, woken, undelivered = False, [], []
-    if state == "submitted":
-        pending, woken, undelivered = review_feedback.deliver_scoped(db, request_id)
-    elif state == "withdrawn":
-        review_feedback.drop_unsent_feedback(db, request_id)
+    pending, woken, undelivered = _release_comments(db, request_id, state)
     if state != "forked":
         after_commit(db, lambda: emit_product_event(
             "documents", f"review_{state}", properties={"request_id": request_id, "reason": reason},
@@ -86,7 +81,7 @@ def admit_feedback(db, request_id: str, *, author_kind, author_id, artifact_id) 
     request = db.execute(
         "SELECT * FROM doc_review_requests WHERE id=?", (request_id,),
     ).fetchone()
-    if (request is None or not is_open(db, request)
+    if (request is None or request["state"] != "forked"
             or author_kind != "agent" or request["reviewer_thread_id"] != author_id
             or request["artifact_id"] != artifact_id):
         raise ValueError("review fork no longer owns this feedback")
@@ -101,38 +96,41 @@ def continuing_request(db, artifact_id: str, reviewer_id: str):
     return row if row is not None and row["state"] in FALLBACK_STATES and is_open(db, row) else None
 
 
-def prepare_for_batch(db, batch) -> None:
-    """Move an open continuation's scoped findings into its one ordinary delivery."""
+def _release_comments(db, request_id: str, state: str) -> tuple[bool, list[str], list[dict]]:
+    """Transfer request staging once, using the ordinary item and close paths."""
+    from doceditor import feedback_batches
     from registry import models
 
-    if batch["review_request_id"] is not None or batch["author_kind"] != "agent":
-        return
-    row = continuing_request(db, batch["artifact_id"], batch["author_id"])
-    if row is None:
-        return
-    artifact = models.get_artifact(batch["artifact_id"], db=db)
-    if artifact is None or batch["recipient_id"] != artifact["parent_thread_id"]:
-        return
-    scoped = db.execute(
-        "SELECT id FROM doc_feedback_batches WHERE review_request_id=? AND recipient_id=? "
-        "AND state IN ('open','undelivered')", (row["id"], batch["recipient_id"]),
+    if state == "forked":
+        return False, [], []
+    if state == "withdrawn":
+        db.execute("DELETE FROM doc_review_request_comments WHERE request_id=?", (request_id,))
+        return False, [], []
+    request = db.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone()
+    artifact = models.get_artifact(request["artifact_id"], db=db)
+    staged = db.execute(
+        "SELECT c.* FROM doc_comments c JOIN doc_review_request_comments s ON s.comment_id=c.id "
+        "WHERE s.request_id=? ORDER BY c.created_at,c.id", (request_id,),
     ).fetchall()
-    for source in scoped:
-        db.execute(
-            "INSERT OR IGNORE INTO doc_feedback_batch_items "
-            "(batch_id,comment_id,event,event_at,event_by) "
-            "SELECT ?,comment_id,event,event_at,event_by FROM doc_feedback_batch_items WHERE batch_id=?",
-            (batch["id"], source["id"]),
-        )
-        db.execute("UPDATE doc_feedback_edit_items SET batch_id=? WHERE batch_id=?", (batch["id"], source["id"]))
-        db.execute("DELETE FROM doc_feedback_batch_items WHERE batch_id=?", (source["id"],))
-        db.execute("DELETE FROM doc_feedback_batches WHERE id=?", (source["id"],))
-    db.execute(
-        "UPDATE doc_feedback_batches SET item_count="
-        "(SELECT COUNT(*) FROM doc_feedback_batch_items WHERE batch_id=?) + "
-        "(SELECT COUNT(*) FROM doc_feedback_edit_items WHERE batch_id=?) WHERE id=?",
-        (batch["id"], batch["id"], batch["id"]),
-    )
+    for comment in staged:
+        feedback_batches.join_open_batch(db, dict(comment), artifact["parent_thread_id"])
+    db.execute("DELETE FROM doc_review_request_comments WHERE request_id=?", (request_id,))
+    if state != "submitted":
+        return False, [], []
+    batch = db.execute(
+        "SELECT id,item_count FROM doc_feedback_batches WHERE author_kind='agent' AND author_id=? "
+        "AND artifact_id=? AND recipient_id=? AND state='open'",
+        (request["reviewer_thread_id"], request["artifact_id"], artifact["parent_thread_id"]),
+    ).fetchone()
+    if batch is None:
+        return False, [], []
+    _closed, woken = feedback_batches.close_batch(db, batch["id"], "submit")
+    if batch["item_count"]:
+        db.execute("UPDATE doc_review_requests SET answered_batch_id=? WHERE id=?", (batch["id"], request_id))
+    failures = [dict(row) for row in db.execute(
+        "SELECT * FROM doc_feedback_batches WHERE id=? AND state='undelivered'", (batch["id"],),
+    )]
+    return True, list(woken), failures
 
 
 def _submit_continuation(db, row, batch_id: str | None) -> ReviewTransition:
@@ -160,7 +158,7 @@ def _submit_continuation(db, row, batch_id: str | None) -> ReviewTransition:
 
 
 def submit_without_batch(db, artifact_id: str, reviewer_id: str) -> ReviewTransition:
-    """An explicit empty submit can finish an open continuation's staged review."""
+    """An explicit empty submit can finish an open review continuation."""
     row = continuing_request(db, artifact_id, reviewer_id)
     return _submit_continuation(db, row, None) if row is not None else ReviewTransition()
 

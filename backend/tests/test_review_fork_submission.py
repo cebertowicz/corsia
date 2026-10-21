@@ -29,7 +29,8 @@ def test_batch_delivery_cannot_submit_a_fork_but_explicit_submit_can(review_env)
     db, aid = review_env
     row = request(db, aid)
     staged_comment(db, aid, row["id"])
-    batch = db.execute("SELECT id FROM doc_feedback_batches WHERE review_request_id=?", (row["id"],)).fetchone()[0]
+    from test_review_feedback_ownership import ordinary_comment
+    batch = ordinary_comment(db, aid)
     with write_transaction(db, scope="test_delivery_before_fork_submit"):
         claim_and_deliver(db, batch, from_state="open", reason="submit")
     assert stored(db, row["id"])["state"] == "forked"
@@ -37,20 +38,22 @@ def test_batch_delivery_cannot_submit_a_fork_but_explicit_submit_can(review_env)
     with write_transaction(db, scope="test_fork_submit_after_delivery"):
         review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     assert stored(db, row["id"])["state"] == "submitted"
-    assert stored(db, row["id"])["answered_batch_id"] == batch
+    answered = stored(db, row["id"])["answered_batch_id"]
+    assert answered and answered != batch
+    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 0
 
 
-def test_submit_with_removed_batch_items_finishes_without_continuation(review_env):
+def test_submit_with_removed_staged_comments_finishes_without_continuation(review_env):
     db, aid = review_env
     row = request(db, aid)
     staged_comment(db, aid, row["id"])
     with write_transaction(db, scope="test_empty_batch_fork_submit"):
-        db.execute("DELETE FROM doc_feedback_batch_items")
+        db.execute("DELETE FROM doc_comments")
         pending, woken, failures = review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
-    assert pending and not failures and "reviewer" not in woken
+    assert not pending and not failures and "reviewer" not in woken
     assert stored(db, row["id"])["state"] == "submitted"
     assert stored(db, row["id"])["answered_batch_id"] is None
-    assert db.execute("SELECT delivery_outcome FROM doc_feedback_batches").fetchone()[0] == "empty"
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE owner_thread_id='reviewer'").fetchone()[0] == 0
 
 
@@ -58,9 +61,7 @@ def test_duplicate_comment_with_submit_delivers_existing_staging(review_env):
     db, aid = review_env
     row = request(db, aid)
     staged_comment(db, aid, row["id"])
-    comment = comments.list_for_artifact(aid, db=db)[0]
-    with write_transaction(db, scope="test_duplicate_comment_submit"):
-        result = feedback_batches.record_comment(db, comment, created=False, review_request_id=row["id"], submit=True)
+    _comment, _registered, result = staged_comment(db, aid, row["id"], submit=True)
     assert set(result) == {"batch_ids", "undelivered_batches", "woken"}
     assert not result["undelivered_batches"]
     assert stored(db, row["id"])["state"] == "submitted"

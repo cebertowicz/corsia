@@ -270,7 +270,7 @@ describe('document review toolbar and popover', () => {
 		rows = [row('review-failure', { outcome: 'failed' })]; render(); await settle();
 		expect(document.body.querySelector('.reviewer-group')?.getAttribute('aria-label')).toBe('Reviewers: Quality Gate (The review is unfinished. Quality Gate will finish it.)');
 		await picker();
-		expect(document.body.textContent).toContain('Couldn’t finish the review');
+		expect(document.body.textContent).toContain('Unfinished. Quality Gate will finish it.');
 		expect(document.body.querySelector('.status')?.getAttribute('title')).toBe('The review is unfinished. Quality Gate will finish it.');
 		expect(button('Cancel request to Quality Gate')).toBeTruthy();
 	});

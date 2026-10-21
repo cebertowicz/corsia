@@ -281,8 +281,8 @@ def test_foreground_completion_and_quiet_timer_cannot_submit_review_batch(review
     with write_transaction(db, scope="test_foreground_end_during_fork"):
         assert feedback_batches.close_for_turn_end(db, "reviewer") == []
     feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db)
-    batch = db.execute("SELECT state FROM doc_feedback_batches WHERE review_request_id=?", (row["id"],)).fetchone()
-    assert batch["state"] == "open"
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 0
+    assert db.execute("SELECT request_id FROM doc_review_request_comments").fetchone()[0] == row["id"]
     assert stored(db, row["id"])["answered_batch_id"] is None
 
 

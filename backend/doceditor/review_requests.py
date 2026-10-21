@@ -10,15 +10,15 @@ from typing import Literal
 
 from core.agent_roster_queries import agent_rows
 from doceditor import feedback_delivery
-from doceditor.review_lifecycle import FALLBACK_STATES, is_open, notify_change, transition
-from prompts.artifact_review import continuation
 from doceditor.comments import validate_client_id
+from doceditor.review_lifecycle import FALLBACK_STATES, is_open, notify_change, transition
 from infra.auth import is_owner_sentinel, may_access_artifact
 from infra.corsia_agent import CorsiaAgentSettingError, get_corsia_agent
-from infra.queries import get_thread_for_user
 from infra.database import write_transaction
+from infra.queries import get_thread_for_user
 from infra.write_effects import after_commit
 from plans import public
+from prompts.artifact_review import continuation
 from registry import models
 
 OWNER_REFUSAL = "You own this document"
@@ -250,10 +250,8 @@ def escalate_fork(db, request_id: str, *, reason: str = "limit",
             return None
         requester = connection.execute("SELECT title FROM threads WHERE id=?", (row["requester_id"],)).fetchone()
         comments = connection.execute(
-            "SELECT DISTINCT c.id FROM doc_comments c "
-            "JOIN doc_feedback_batch_items i ON i.comment_id=c.id "
-            "JOIN doc_feedback_batches b ON b.id=i.batch_id "
-            "WHERE b.review_request_id=? AND b.state IN ('open','undelivered') ORDER BY c.id",
+            "SELECT comment_id AS id FROM doc_review_request_comments "
+            "WHERE request_id=? ORDER BY comment_id",
             (request_id,),
         ).fetchall()
         state = outcome or ("handed_back" if reason == "limit" else "failed")

@@ -144,6 +144,10 @@ async def _source(request):
 
 async def _run(request_id: str, request: Any, cancel_event: asyncio.Event) -> None:
     try:
+        # start() registers the handle before this first yield/state read, so a
+        # withdrawal either appears here or signals the registered handle.
+        if await asyncio.to_thread(submitted, request_id) or cancel_event.is_set():
+            return
         from core.checkpoint_runtime import await_checkpoint
         from infra.checkpoint_queries import active_for_thread
 

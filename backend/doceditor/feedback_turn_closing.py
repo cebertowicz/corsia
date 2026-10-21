@@ -4,13 +4,13 @@ from __future__ import annotations
 
 
 def close_for_turn_end(db, thread_id: str) -> list[str]:
-    """Close only ordinary batches; request-scoped staging has its own lifecycle."""
+    """Close the author's open batches at turn end."""
     from doceditor.feedback_batches import close_batch
 
     rows = db.execute(
         """SELECT id FROM doc_feedback_batches
            WHERE state='open' AND author_kind='agent' AND author_id=?
-           AND review_request_id IS NULL ORDER BY opened_at,id""",
+           ORDER BY opened_at,id""",
         (thread_id,),
     ).fetchall()
     woken: list[str] = []

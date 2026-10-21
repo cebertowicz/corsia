@@ -59,14 +59,15 @@ async def test_partial_review_limit_and_failure_are_distinct_live_tasks(review_e
     db, aid = review_env
     row = request(db, aid)
     staged_comment(db, aid, row["id"])
-    deadline = db.execute("SELECT closes_at FROM doc_feedback_batches").fetchone()[0]
+    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 1
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 0
     await capture.review_limit_or_failure_handler(row["id"], error)
     result = stored(db, row["id"])
     assert (result["state"], result["reason"]) == (expected_state, reason)
     assert public.review_is_open(db, result["node_id"])
     note = public.get_node(result["node_id"], db=db).description
     assert reason in note and "comments already staged" in note
-    assert db.execute("SELECT closes_at FROM doc_feedback_batches").fetchone()[0] == deadline
+    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 0
     assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == "open"
     await capture.review_limit_or_failure_handler(row["id"], error)
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 1

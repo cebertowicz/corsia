@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import logging
-from doceditor.feedback_batch_identity import open_batch
-from doceditor.feedback_turn_closing import close_for_turn_end
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from doceditor import comment_notifications, feedback_comments, feedback_edits, review_feedback
+from doceditor import comment_notifications, feedback_comments, feedback_edits
 from doceditor.feedback_batch_delivery import claim_and_deliver
+from doceditor.feedback_batch_identity import open_batch
+from doceditor.feedback_turn_closing import close_for_turn_end
 from doceditor.feedback_state import (
     USER_AUTHOR_ID,
     annotate_pane,
@@ -78,9 +78,10 @@ def _add_comment_item(
     return True
 
 
-def _join_open_batch(
-    db, comment: dict[str, Any], recipient_id: str, review_request_id: str | None = None,
+def join_open_batch(
+    db, comment: dict[str, Any], recipient_id: str,
 ) -> str:
+    """Add one comment to its author's open batch for the recipient, opening one if needed."""
     author_kind = str(comment["author_kind"])
     now = str(comment["created_at"])
     batch_id = open_batch(
@@ -91,7 +92,6 @@ def _join_open_batch(
         recipient_id=recipient_id,
         now=now,
         closes_at=_new_deadline(author_kind, now),
-        review_request_id=review_request_id,
     )
     _add_comment_item(
         db,
@@ -185,38 +185,30 @@ def record_comment(
     *,
     created: bool,
     submit: bool = False,
-    review_request_id: str | None = None,
 ) -> dict[str, Any]:
     """Attach a newly inserted comment to recipient batches in the caller's write."""
     batch_ids: list[str] = []
     woken: list[str] = []
     notices = (
         take_unreported_undelivered(db, feedback_comments.author_id(comment), _now())
-        if comment["author_kind"] == "agent" and review_request_id is None
+        if comment["author_kind"] == "agent"
         else []
     )
     if created:
         feedback_comments.make_user_document_durable(db, comment)
         feedback_comments.emit_comment_created(db, comment)
         batch_ids = [
-            _join_open_batch(db, comment, recipient, review_request_id)
+            join_open_batch(db, comment, recipient)
             for recipient in feedback_comments.recipients(db, comment)
         ]
     if submit and comment["author_kind"] == "agent":
-        if review_request_id is not None:
-            _pending, woken, failures = review_feedback.submit_fork_feedback(
-                db, review_request_id, feedback_comments.author_id(comment), comment["artifact_id"],
-            )
-            notices.extend(failures)
-        else:
-            woken = close_for_document(
-                db,
-                author_kind="agent",
-                author_id=feedback_comments.author_id(comment),
-                artifact_id=comment["artifact_id"],
-                reason="submit",
-            )
-    if submit and comment["author_kind"] == "agent" and review_request_id is None:
+        woken = close_for_document(
+            db,
+            author_kind="agent",
+            author_id=feedback_comments.author_id(comment),
+            artifact_id=comment["artifact_id"],
+            reason="submit",
+        )
         current_failures = undelivered_for_document(
             db,
             author_kind="agent",
@@ -252,7 +244,7 @@ def close_for_document(
     rows = db.execute(
         """SELECT id FROM doc_feedback_batches WHERE state='open'
            AND author_kind=? AND author_id=? AND artifact_id=?
-           AND review_request_id IS NULL ORDER BY opened_at,id""",
+           ORDER BY opened_at,id""",
         (author_kind, author_id, artifact_id),
     ).fetchall()
     woken: list[str] = []
@@ -268,7 +260,7 @@ def close_due(now: str, *, db=None) -> list[str]:
     with write_transaction(db, scope="close_due_doc_feedback") as connection:
         rows = connection.execute(
             """SELECT id,artifact_id,author_kind,closed_reason FROM doc_feedback_batches
-               WHERE state='open' AND closes_at<=? AND review_request_id IS NULL
+               WHERE state='open' AND closes_at<=?
                ORDER BY closes_at,id""",
             (now,),
         ).fetchall()
@@ -319,7 +311,7 @@ def retry_for_document(db, *, author_kind: str, author_id: str, artifact_id: str
     rows = db.execute(
         """SELECT id FROM doc_feedback_batches WHERE state='undelivered'
            AND author_kind=? AND author_id=? AND artifact_id=?
-           AND review_request_id IS NULL ORDER BY updated_at,id""",
+           ORDER BY updated_at,id""",
         (author_kind, author_id, artifact_id),
     ).fetchall()
     woken: list[str] = []

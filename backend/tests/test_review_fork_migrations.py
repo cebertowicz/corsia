@@ -34,12 +34,33 @@ def test_review_fork_ladder_preserves_legacy_rows_and_is_idempotent():
         )
         columns = {row[1] for row in db.execute("PRAGMA table_info(doc_review_requests)")}
         assert not {"requesting_node_id", "requirements_revision"} & columns
-        assert db.execute("SELECT review_request_id FROM doc_feedback_batches").fetchone() == (None,)
-        db.execute("INSERT INTO doc_feedback_batches VALUES ('fork','agent','reviewer','doc','owner','open','request')")
+        assert "review_request_id" not in {row[1] for row in db.execute("PRAGMA table_info(doc_feedback_batches)")}
+        assert db.execute("SELECT id FROM doc_feedback_batches").fetchone() == ("legacy-batch",)
         with pytest.raises(sqlite3.IntegrityError):
-            db.execute("INSERT INTO doc_feedback_batches VALUES ('duplicate','agent','reviewer','doc','owner','open','request')")
+            db.execute("INSERT INTO doc_feedback_batches VALUES ('duplicate','agent','reviewer','doc','owner','open')")
+        db.execute("INSERT INTO doc_review_request_comments VALUES ('request','comment')")
         with pytest.raises(sqlite3.IntegrityError):
-            db.execute("INSERT INTO doc_feedback_batches VALUES ('normal-duplicate','agent','reviewer','doc','owner','open',NULL)")
-        db.execute("INSERT INTO doc_feedback_batches VALUES ('other-fork','agent','reviewer','doc','owner','open','other-request')")
+            db.execute("INSERT INTO doc_review_request_comments VALUES ('request','comment')")
     finally:
         db.close()
+
+
+def test_fresh_schema_matches_133_to_134_migration():
+    from infra.doc_feedback_schema import DOC_FEEDBACK_SCHEMA_SQL
+    from infra.doc_review_schema import DOC_REVIEW_REQUEST_COMMENTS_SQL, DOC_REVIEW_SCHEMA_SQL
+
+    fresh, upgraded = sqlite3.connect(":memory:"), sqlite3.connect(":memory:")
+    try:
+        fresh.executescript(DOC_REVIEW_SCHEMA_SQL + DOC_FEEDBACK_SCHEMA_SQL)
+        upgraded.executescript(
+            DOC_REVIEW_SCHEMA_SQL.replace(DOC_REVIEW_REQUEST_COMMENTS_SQL, "") + DOC_FEEDBACK_SCHEMA_SQL,
+        )
+        migrate_133_to_134(upgraded)
+        for table in ("doc_review_requests", "doc_review_request_comments", "doc_feedback_batches"):
+            assert fresh.execute(f"PRAGMA table_info({table})").fetchall() == upgraded.execute(f"PRAGMA table_info({table})").fetchall()
+            assert fresh.execute(f"PRAGMA foreign_key_list({table})").fetchall() == upgraded.execute(f"PRAGMA foreign_key_list({table})").fetchall()
+            assert fresh.execute(f"PRAGMA index_list({table})").fetchall() == upgraded.execute(f"PRAGMA index_list({table})").fetchall()
+        assert fresh.execute("SELECT name,sql FROM sqlite_master ORDER BY name").fetchall() == upgraded.execute("SELECT name,sql FROM sqlite_master ORDER BY name").fetchall()
+    finally:
+        fresh.close()
+        upgraded.close()

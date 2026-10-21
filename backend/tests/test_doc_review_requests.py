@@ -46,15 +46,17 @@ def stored(db, request_id):
 
 
 def staged_comment(db, artifact_id, request_id, *, submit=False):
-    with write_transaction(db, scope="test_fork_review_comment") as connection:
-        row, created = comments.create_with_status(
-            artifact_id, body="The claim needs evidence.", author="Reviewer",
-            author_kind="agent", author_thread_id="reviewer", review=True,
-            client_id=f"comment-{request_id}", db=connection,
-        )
-        feedback_batches.record_comment(
-            connection, row, created=created, review_request_id=request_id, submit=submit,
-        )
+    from doceditor.comment_create_db import CommentInput, create_in_db
+    from doceditor.comment_creation import CreateReceipt
+
+    return create_in_db(
+        CommentInput(
+            artifact_id=artifact_id, path=None, body="The claim needs evidence.", author="Reviewer",
+            author_kind="agent", user_id="owner-token", author_thread_id="reviewer", review=True,
+            review_request_id=request_id, submit=submit,
+        ),
+        None, f"comment-{request_id}", CreateReceipt(),
+    )
 
 
 def reviewer_turn(db, started_at):
@@ -148,12 +150,12 @@ def test_withdrawal_keeps_seen_and_replied_comments_open_without_delivering(revi
     assert db.execute("SELECT COUNT(*) FROM doc_comment_thread_views WHERE root_id=?", (root,)).fetchone()[0] == 1
     assert changed == []  # no comment write, so no comment-change announcement
     assert db.execute(
-        "SELECT COUNT(*) FROM doc_feedback_batches WHERE review_request_id=?", (first["id"],),
+        "SELECT COUNT(*) FROM doc_review_request_comments WHERE request_id=?", (first["id"],),
     ).fetchone()[0] == 0
     assert stored(db, first["id"])["answered_batch_id"] is None
 
 
-def test_withdrawal_drops_only_this_forks_undelivered_batches(review_env):
+def test_withdrawal_drops_only_this_forks_staging(review_env):
     from doceditor import review_feedback, review_requests
 
     db, artifact_id = review_env
@@ -175,7 +177,7 @@ def test_withdrawal_drops_only_this_forks_undelivered_batches(review_env):
     assert db.execute("SELECT resolved FROM doc_comments WHERE body='Unrelated feedback.'").fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM doc_comments WHERE body='Unrelated feedback.'").fetchone()[0] == 1
     assert db.execute(
-        "SELECT COUNT(*) FROM doc_feedback_batches WHERE review_request_id=?", (first["id"],),
+        "SELECT COUNT(*) FROM doc_review_request_comments WHERE request_id=?", (first["id"],),
     ).fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
 
@@ -215,7 +217,8 @@ def test_escalation_preserves_comments_and_passes_requesting_intent(review_env, 
     assert "intent_node_id" not in seen[0] and "requesting_node_id" not in seen[0]
     node = public.get_node(escalated["node_id"], db=db)
     assert comment["id"] in node.description and "Check claims" in node.description
-    assert db.execute("SELECT state FROM doc_feedback_batches WHERE review_request_id=?", (result["id"],)).fetchone()[0] == "open"
+    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 0
+    assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == "open"
     reviewer_turn(db, utc_now_iso())
     with write_transaction(db, scope="test_continuation_submit"):
         from doceditor.review_lifecycle import submit_without_batch
@@ -223,8 +226,8 @@ def test_escalation_preserves_comments_and_passes_requesting_intent(review_env, 
     assert stored(db, result["id"])["answered_batch_id"]
 
 
-def test_escalated_comments_wait_for_the_reviewers_own_continuation(review_env):
-    """D2: neither the quiet timer nor a Turn already running delivers them."""
+def test_escalated_comments_follow_the_ordinary_quiet_timer(review_env):
+    """Released comments follow ordinary feedback even before continuation starts."""
     from doceditor import review_feedback, review_requests
 
     db, artifact_id = review_env
@@ -236,12 +239,11 @@ def test_escalated_comments_wait_for_the_reviewers_own_continuation(review_env):
     feedback_batches.close_due("9999-12-31T00:00:00+00:00", db=db)
     close_reviewer_turn(db)
 
-    batch = db.execute(
-        "SELECT state FROM doc_feedback_batches WHERE review_request_id=?", (result["id"],),
-    ).fetchone()
-    assert batch["state"] == "open"
-    assert stored(db, result["id"])["answered_batch_id"] is None
-    assert public.review_is_open(db, escalated["node_id"])
+    batch = db.execute("SELECT state FROM doc_feedback_batches").fetchone()
+    assert batch["state"] == "delivered"
+    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 0
+    assert stored(db, result["id"])["answered_batch_id"]
+    assert not public.review_is_open(db, escalated["node_id"])
 
     reviewer_turn(db, utc_now_iso())
     with write_transaction(db, scope="test_continuation_submit"):
@@ -300,9 +302,10 @@ def test_clean_submit_ends_without_comments_and_never_escalates(review_env):
     assert receipt == 1
 
 
-def test_schema_scopes_open_batches_by_review_request(review_env):
+def test_schema_keeps_request_staging_outside_open_batches(review_env):
     db, artifact_id = review_env
     first = request(db, artifact_id)
     staged_comment(db, artifact_id, first["id"])
-    batch = db.execute("SELECT review_request_id FROM doc_feedback_batches").fetchone()
-    assert batch["review_request_id"] == first["id"]
+    assert db.execute("SELECT request_id FROM doc_review_request_comments").fetchone()[0] == first["id"]
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 0
+    assert "review_request_id" not in {row[1] for row in db.execute("PRAGMA table_info(doc_feedback_batches)")}
