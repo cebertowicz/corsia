@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 
 from llm import local_model
 from llm.local_model import LocalModel, pick_for_setup
@@ -55,7 +54,5 @@ def test_ask_recommender_compares_against_available_memory(monkeypatch):
         return {"best": [_model("deepseek", 163), _model("qwen", 99)]}
 
     monkeypatch.setattr(local_model, "ask_recommendations", recommendations)
-    import psutil
-
-    monkeypatch.setattr(psutil, "virtual_memory", lambda: SimpleNamespace(available=115 * GIB, free=1 * GIB))
+    monkeypatch.setattr("infra.host_resources.host_available_ram_bytes", lambda: 115 * GIB)
     assert asyncio.run(local_model.ask_recommender("server")).model == "qwen"

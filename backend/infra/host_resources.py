@@ -48,6 +48,17 @@ def host_total_ram_bytes() -> int:
     return int(psutil.virtual_memory().total)
 
 
+def host_available_ram_bytes() -> int:
+    """Return the RAM a new process could take now, in bytes.
+
+    macOS "available": free, inactive and purgeable pages. Read fresh on every
+    call, since it moves as other programs run.
+    """
+    import psutil
+
+    return int(psutil.virtual_memory().available)
+
+
 @lru_cache(maxsize=1)
 def _resolved_total_ram_bytes() -> int | None:
     """Read total RAM once, or return None when this machine will not say.

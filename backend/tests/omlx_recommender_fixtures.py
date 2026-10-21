@@ -111,6 +111,8 @@ def mac_with(monkeypatch, gib: float, answers=()) -> SimpleNamespace:
         return {"ok": True}
 
     monkeypatch.setattr("infra.host_resources.host_total_ram_bytes", lambda: int(gib * GIB))
+    # Nothing else is running, so the recorded "best" pick fits whatever host runs the test.
+    monkeypatch.setattr("infra.host_resources.host_available_ram_bytes", lambda: int(gib * GIB))
     from llm.local_setup_gates import host_ram_bytes
     host_ram_bytes.cache_clear()
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", mac.omlx.admin_request)

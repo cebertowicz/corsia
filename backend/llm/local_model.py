@@ -196,12 +196,11 @@ async def ask_recommendations(server_id: str) -> dict[str, list[LocalModel]]:
 
 async def ask_recommender(server_id: str) -> LocalModel | None:
     """Pick setup's model from the shared Settings recommender reader."""
-    import psutil
+    from infra.host_resources import host_available_ram_bytes
 
     sections = await ask_recommendations(server_id)
-    # macOS "available" (free, inactive and purgeable pages): the figure the
-    # Add model sheet compares against.
-    return pick_for_setup(sections, psutil.virtual_memory().available)
+    # The figure the Add model sheet compares against.
+    return pick_for_setup(sections, host_available_ram_bytes())
 
 
 def pick_for_setup(sections: dict[str, list[LocalModel]], available_bytes: int) -> LocalModel | None:
