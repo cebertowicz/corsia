@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from core.agent_roster_queries import agent_rows
 from doceditor import feedback_delivery
 from doceditor.review_lifecycle import FALLBACK_STATES, is_open, notify_change, transition
-from doceditor.review_feedback import withdraw_fork_feedback
+from doceditor.review_feedback import drop_unsent_feedback
 from doceditor.comments import validate_client_id
 from infra.auth import is_owner_sentinel, may_access_artifact
 from infra.corsia_agent import CorsiaAgentSettingError, get_corsia_agent
@@ -294,7 +294,7 @@ def cancel(db, request_id: str, actor: ReviewActor) -> dict:
             from core.artifact_review_runtime import cancel as cancel_fork
 
             after_commit(connection, lambda: cancel_fork(str(row["fork_id"])))
-        withdraw_fork_feedback(connection, request_id)
+        drop_unsent_feedback(connection, request_id)
         result = get_request(connection, request_id)
         notify_change(connection, result, artifact)
         return result

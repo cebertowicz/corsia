@@ -5,7 +5,7 @@ import json
 import pytest
 
 from doc_feedback_helpers import add_comment, batches, seed_thread
-from doceditor import feedback_batches, review_requests as reviews
+from doceditor import feedback_batches, review_lifecycle, review_requests as reviews
 from infra.database import write_transaction
 from plans import public
 from test_doc_review_requests import request as fork_request, review_env, stored
@@ -62,7 +62,7 @@ def test_delivered_batch_settles_once_and_selects_next_task(review_env):
     assert db.execute("SELECT released_at FROM plan_node_attempts WHERE node_id=?", (node.id,)).fetchone()[0]
     assert db.execute("SELECT node_id FROM plan_node_attempts WHERE released_at IS NULL AND executor_thread_id='reviewer'").fetchone()[0] == next_node.id
     with write_transaction(db, scope="test_repeat_settle"):
-        reviews.settle_for_batch(db, batch)
+        review_lifecycle.settle_for_batch(db, batch)
     assert db.execute("SELECT COUNT(*) FROM plan_node_events WHERE node_id=? AND new_state='accepted'", (node.id,)).fetchone()[0] == 1
 
 

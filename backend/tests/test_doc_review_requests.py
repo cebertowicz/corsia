@@ -119,8 +119,8 @@ def test_submit_settles_node_less_request_and_leaves_reviewer_unselected(review_
     assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE owner_thread_id='reviewer'").fetchone()[0] == 0
 
 
-def test_withdrawal_resolves_seen_and_replied_comments_without_delivering(review_env, monkeypatch):
-    """D1: a comment people already saw and answered is resolved, never deleted."""
+def test_withdrawal_keeps_seen_and_replied_comments_open_without_delivering(review_env, monkeypatch):
+    """A comment people already saw and answered is never deleted, resolved or agreed to."""
     from doceditor import comment_notifications, review_requests
 
     db, artifact_id = review_env
@@ -142,11 +142,11 @@ def test_withdrawal_resolves_seen_and_replied_comments_without_delivering(review
 
     assert review_requests.cancel(db, first["id"], actor)["outcome"] == "cancelled"
 
-    kept = db.execute("SELECT resolved FROM doc_comments WHERE id=?", (root,)).fetchone()
-    assert kept is not None and kept["resolved"] == 1
+    kept = db.execute("SELECT resolved, acked FROM doc_comments WHERE id=?", (root,)).fetchone()
+    assert kept is not None and kept["resolved"] == 0 and kept["acked"] == 0
     assert db.execute("SELECT COUNT(*) FROM doc_comments WHERE id=?", (reply["id"],)).fetchone()[0] == 1
     assert db.execute("SELECT COUNT(*) FROM doc_comment_thread_views WHERE root_id=?", (root,)).fetchone()[0] == 1
-    assert artifact_id in changed
+    assert changed == []  # no comment write, so no comment-change announcement
     assert db.execute(
         "SELECT COUNT(*) FROM doc_feedback_batches WHERE review_request_id=?", (first["id"],),
     ).fetchone()[0] == 0
@@ -171,7 +171,7 @@ def test_withdrawal_drops_only_this_forks_undelivered_batches(review_env):
     cancelled = review_requests.cancel(db, first["id"], actor)
 
     assert cancelled["outcome"] == "cancelled"
-    assert db.execute("SELECT resolved FROM doc_comments WHERE body='The claim needs evidence.'").fetchone()[0] == 1
+    assert db.execute("SELECT resolved FROM doc_comments WHERE body='The claim needs evidence.'").fetchone()[0] == 0
     assert db.execute("SELECT resolved FROM doc_comments WHERE body='Unrelated feedback.'").fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM doc_comments WHERE body='Unrelated feedback.'").fetchone()[0] == 1
     assert db.execute(

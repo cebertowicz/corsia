@@ -7,28 +7,15 @@ from doceditor.review_lifecycle import is_open, notify_change, transition
 from infra.passive_changes import append_thread_context_note
 
 
-def withdraw_fork_feedback(db, request_id: str) -> None:
-    """Resolve a withdrawn request's undelivered comments and drop only its batches.
+def drop_unsent_feedback(db, request_id: str) -> None:
+    """Drop a request's unsent batch, item and edit staging; never touch comments.
 
-    The comments stay: people may already see them and reply. A batch has no
-    withdrawn state, so its batch and item rows go and it can never deliver.
+    Every review that ends without a submit (withdrawn, or a continuation that
+    ended) follows this one rule. Comments are visible before delivery and may
+    already have replies, so their open/resolved and acknowledgement state stays
+    as their authors and readers left it. A batch has no withdrawn state, so its
+    rows go and it can never deliver.
     """
-    from doceditor import comments
-
-    rows = db.execute(
-        """SELECT DISTINCT item.comment_id FROM doc_feedback_batches batch
-           JOIN doc_feedback_batch_items item ON item.batch_id=batch.id
-           JOIN doc_comments comment ON comment.id=item.comment_id
-           WHERE batch.review_request_id=? AND batch.state IN ('open','undelivered')
-             AND comment.resolved=0 ORDER BY item.comment_id""",
-        (request_id,),
-    ).fetchall()
-    for row in rows:
-        comments.update(str(row["comment_id"]), {"resolved": True, "acked": True}, db=db)
-    _drop_undelivered_batches(db, request_id)
-
-
-def _drop_undelivered_batches(db, request_id: str) -> None:
     for table in ("doc_feedback_batch_items", "doc_feedback_edit_items"):
         db.execute(
             f"""DELETE FROM {table} WHERE batch_id IN (
@@ -59,7 +46,7 @@ def close_ended_continuations(db) -> None:
     for row in rows:
         if is_open(db, row):
             continue
-        _drop_undelivered_batches(db, row["id"])
+        drop_unsent_feedback(db, row["id"])
         artifact = models.get_artifact(row["artifact_id"], db=db)
         if artifact is not None:
             notify_change(db, row, artifact)
