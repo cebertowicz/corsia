@@ -27,8 +27,6 @@
 				threadId="context-chip-probe"
 				sheetView={activeSheet}
 				openSheet={() => { activeSheet = activeSheet === 'context' ? null : 'context'; }}
-				isSubagentThread={false}
-				subagentRef={undefined}
 				isActiveModelReady={true}
 				canSendToModel={true}
 				queueUntilSwitch={false}
