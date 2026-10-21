@@ -871,7 +871,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stop_is_judged_by_its_exit_status_and_launchd_never_by_its_output() {
+    fn a_stop_is_judged_by_launchd_and_the_port_never_by_its_output() {
         // Exit 0 and a loud message, but the job is still loaded.
         let mut home = home("echo 'stopped OK'", "exit 0", "exit 0");
         let error = home
@@ -880,17 +880,17 @@ mod tests {
             .unwrap_err();
         assert!(error.contains("did not stop"), "{error}");
         assert!(error.contains("launchd still lists"), "{error}");
-        // A failing exit status is a failure whatever it printed.
-        let mut home = self::home(
-            "rm -f LOADED; echo 'stopped OK'; exit 1",
-            "exit 0",
-            "exit 0",
-        );
+        // A failing exit status with the job still loaded is a failure, named by its exit.
+        let mut home = self::home("echo 'stopped OK'; exit 1", "exit 0", "exit 0");
         assert!(home
             .lifecycle
             .stop_old(&mut quiet, &mut |_| Ok(()))
             .unwrap_err()
             .contains("exited"));
+        // A failing exit status after launchd tore the job down (`bounded bootout exit 2`)
+        // is a stop: the install is provably down.
+        let mut home = self::home("rm -f LOADED; exit 2", "exit 0", "exit 0");
+        home.lifecycle.stop_old(&mut quiet, &mut |_| Ok(())).unwrap();
     }
 
     #[test]
