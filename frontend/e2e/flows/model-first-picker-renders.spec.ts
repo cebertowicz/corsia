@@ -182,12 +182,12 @@ test('renders approved M1–M8 model-first picker states with live-shaped compon
 	M9.policy = { providers: [{ provider_key: 'claude-code', capabilities: { units: 'accounts', rollover: true }, rollover: true, order: [longClaude.id, claudeC.id], units: [] }, { provider_key: 'codex', capabilities: { units: 'accounts', rollover: true }, rollover: true, order: [codexLimitedA.id, codexLimitedB.id], units: [] }] };
 	await show('M9', M9);
 	const localFallback = (source: Record<string, unknown>) => ({ rows: [...external()], accounts: [], policy: undefined, sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', ...source }] });
-	await show('Local-downloading', localFallback({ setup_stage: 'downloading', download_percent: 40 }), false, async () => {
+	await show('Local-downloading', localFallback({ local_state: 'downloading', download_percent: 40 }), false, async () => {
 		const localGroup = page.locator('section[aria-label="Local"]');
 		await expect(localGroup.locator('.model-group-head')).toHaveText('Local');
 		await expect(localGroup).toContainText('Downloading 40%');
 	});
-	await show('Local-setup-failed', localFallback({ setup_error: 'disk full', setup_kind: 'setup' }), false, async () => {
+	await show('Local-setup-failed', localFallback({ local_state: 'failed', setup_kind: 'setup' }), false, async () => {
 		const localGroup = page.locator('section[aria-label="Local"]');
 		await expect(localGroup.locator('.model-group-head')).toHaveText('Local');
 		await expect(localGroup).toContainText('Setup failed');
