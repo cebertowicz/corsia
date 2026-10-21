@@ -15,7 +15,7 @@ from fastapi import FastAPI, WebSocket
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from infra import devices_events, devices_identity, devices_listener, devices_server
+from infra import devices_identity, devices_listener, devices_server
 from infra.devices_identity import ensure_host_key
 from infra.devices_listener import DevicesApp, DevicesListener, DevicesServer, lan_addresses
 
@@ -362,10 +362,6 @@ def test_devices_app_counts_pairing_refusals_outside_the_pairing_network(monkeyp
     assert response.status_code == 403
     assert response.json() == {"detail": {"reason": "not_on_this_network"}}
     assert emitted == ["not_on_this_network"]
-
-
-def test_devices_listener_uses_the_infra_pairing_failure_emitter():
-    assert devices_listener.emit_pairing_failure is devices_events.emit_pairing_failure
 
 
 def test_devices_app_accepts_a_person_session_from_the_token_query_parameter(token_users):

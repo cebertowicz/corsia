@@ -32,7 +32,6 @@ def test_pairing_events_record_outcomes_without_secret_material(monkeypatch):
     def record(category, action, *, properties=None):
         events.append((category, action, properties))
 
-    monkeypatch.setattr(devices_api, "emit_product_event", record)
     monkeypatch.setattr(devices_events, "emit_product_event", record)
     client = TestClient(app)
 

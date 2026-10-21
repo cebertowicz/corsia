@@ -174,11 +174,9 @@ async def login(body: LoginRequest) -> dict:
     counted = False
     try:
         is_account = await run_in_db(accounts.account_exists, username)
-        if _waiting_attempts >= _MAX_WAITING_ATTEMPTS:
-            # Every normalized name gets the same minimum hold while the cap is
-            # full; an account then still waits for its own hash.
-            await asyncio.sleep(_HELD_SECONDS)
         if not is_account and _waiting_attempts >= _MAX_WAITING_ATTEMPTS:
+            # Held and refused like a failed check, so the answer does not say the name is made up.
+            await asyncio.sleep(_HELD_SECONDS)
             _record_failure(username, is_account=False)
             log.info("Sign-in refused")
             raise HTTPException(401, _INVALID)

@@ -13,10 +13,9 @@ from core.device_pairing import PairingError, transcript_prefix
 from core.devices_runtime import runtime
 from infra.auth import require_human_user
 from infra.db_async import run_in_db
-from infra.devices_events import emit_pairing_failure
+from infra.devices_events import emit_devices_event, emit_pairing_failure
 from infra.devices_identity import host_spki_der, host_spki_sha256, sign_identity_proof
 from infra.local_connection import is_direct_loopback
-from infra.product_events import emit_product_event
 from infra.settings import get_devices_outside_address, set_devices_enabled, set_devices_outside_address
 
 
@@ -40,11 +39,6 @@ def _decode(value: object, name: str) -> bytes:
         return base64.b64decode(value, validate=True)
     except ValueError as error:
         raise HTTPException(400, f"{name} must be base64") from error
-
-
-def _emit(action: str, *, reason: str | None = None) -> None:
-    properties = {"reason": reason} if reason is not None else None
-    emit_product_event("devices", action, properties=properties)
 
 
 def _outside_address(value: object) -> str | None:
@@ -101,7 +95,7 @@ async def put_devices(body: dict, request: Request, _user: dict = Depends(requir
         address = _outside_address(body["outside_address"])
         await run_in_db(set_devices_outside_address, address)
         runtime.outside_address = address
-        _emit("outside_address_saved" if address else "outside_address_cleared")
+        emit_devices_event("outside_address_saved" if address else "outside_address_cleared")
         return runtime.snapshot(include_code=True)
     enabled = body.get("enabled")
     if not isinstance(enabled, bool):
@@ -113,11 +107,11 @@ async def put_devices(body: dict, request: Request, _user: dict = Depends(requir
             return runtime.snapshot()
         if not was_enabled:
             runtime.pairing.issue_code()
-            _emit("devices_enabled")
-            _emit("pairing_code_issued")
+            emit_devices_event("devices_enabled")
+            emit_devices_event("pairing_code_issued")
     else:
         await runtime.disable()
-        _emit("devices_disabled")
+        emit_devices_event("devices_disabled")
     await run_in_db(set_devices_enabled, enabled)
     return runtime.snapshot(include_code=True)
 
@@ -129,7 +123,7 @@ async def issue_code(request: Request, _user: dict = Depends(require_human_user)
         code = runtime.pairing.issue_code()
     except PairingError as error:
         raise _pairing_error(error) from error
-    _emit("pairing_code_issued")
+    emit_devices_event("pairing_code_issued")
     return {**runtime.snapshot(include_code=True), "code": code}
 
 
@@ -160,7 +154,7 @@ async def pair_start(body: dict):
     except PairingError as error:
         emit_pairing_failure(reason=error.reason)
         if error.reason == "paused":
-            _emit("pairing_paused")
+            emit_devices_event("pairing_paused")
         raise _pairing_error(error) from error
     return {"exchange_id": exchange_id, "msg_s": base64.b64encode(msg_s).decode()}
 
@@ -187,9 +181,9 @@ async def pair_finish(body: dict):
     except PairingError as error:
         emit_pairing_failure(reason=error.reason)
         if error.reason == "paused":
-            _emit("pairing_paused")
+            emit_devices_event("pairing_paused")
         raise _pairing_error(error) from error
-    _emit("pairing_succeeded")
+    emit_devices_event("pairing_succeeded")
     result = {
         "confirm_s": base64.b64encode(confirm_s).decode(),
         "name": name,
