@@ -61,8 +61,8 @@ jobs:
               ;;
             dev)
               # Integration test build: numbered one past dev's count so the next build from dev updates it.
-              [ "$GITHUB_REF" = "refs/heads/integration/v0.4.1-test-build-2" ] || {
-                echo "this branch builds only from refs/heads/integration/v0.4.1-test-build-2" >&2
+              [ "$GITHUB_REF" = "refs/heads/integration/v0.4.1-test-build-3" ] || {
+                echo "this branch builds only from refs/heads/integration/v0.4.1-test-build-3" >&2
                 exit 1
               }
               commit_sha="$(git rev-parse HEAD)"
