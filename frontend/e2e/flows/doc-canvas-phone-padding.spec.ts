@@ -74,7 +74,8 @@ for (const width of WIDTHS) {
 			const marker = document.querySelector<HTMLElement>('.cm-comment-marker')!.getBoundingClientRect();
 			const glyph = document.querySelector('.cm-comment-marker svg')!.getBoundingClientRect();
 			const header = document.querySelector('.document-header')!.getBoundingClientRect();
-			const tools = document.querySelector('.document-tools')!.getBoundingClientRect();
+			const tool = document.querySelector<HTMLElement>('.document-tools button')!;
+			const tools = tool.getBoundingClientRect();
 			const hit = document.elementFromPoint(tools.left + tools.width / 2, tools.top + tools.height / 2);
 			resolve({
 				left: rect.left - scroller.left, right: scroller.right - rect.right,

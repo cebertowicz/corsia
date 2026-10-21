@@ -113,7 +113,15 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	await expect(drawer).toBeVisible();
 	// Every writable open thread keeps its reply field available; the selected thread stays in view.
 	await expect.poll(() => drawer.locator('.ct-input').count()).toBe(2);
-	await expect(drawer.locator('.ct-input').last()).toBeInViewport({ ratio: 1 });
+	// The drawer owns scrolling, so the reply must be fully contained in its scrollport;
+	// browser-viewport containment is unrelated once the document has scrolled underneath it.
+	const replyField = drawer.locator('.ct-input').last();
+	await expect.poll(() => replyField.evaluate((input) => {
+		const list = input.closest<HTMLElement>('.drawer-comments')!;
+		const replyRect = input.getBoundingClientRect();
+		const listRect = list.getBoundingClientRect();
+		return replyRect.top >= listRect.top - 1 && replyRect.bottom <= listRect.bottom + 1;
+	})).toBe(true);
 	await shot(page, 'rs-17-quote-jump-near-document-end', info);
 });
 
