@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { test } from '../support/test';
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
+import { LONG_PRESS_MS } from '../../src/lib/components/ui/rowMenu.svelte';
 import {
 	createSession,
 	loginByUrl,
@@ -56,7 +57,7 @@ test.describe('@flow:artifact-pin @surface:chat artifact pane pinning', () => {
 		await expect(names).toHaveText([churn, keeper]);
 
 		const keeperRow = page.locator('.row-outer').filter({ hasText: keeper });
-		await keeperRow.click({ button: 'right' });
+		await openRowMenu(page, keeperRow);
 		await page.getByRole('menuitem', { name: 'Pin to pane' }).click();
 
 		// Pinned rows lead the pane regardless of recency.
@@ -81,12 +82,25 @@ test.describe('@flow:artifact-pin @surface:chat artifact pane pinning', () => {
 		// Unpinning drops the priority tier, but the toggle itself updates the
 		// registration, so the row just acted on leads the recency tier.
 		const stillPinned = page.locator('.row-outer').filter({ hasText: keeper });
-		await stillPinned.click({ button: 'right' });
+		await openRowMenu(page, stillPinned);
 		await page.getByRole('menuitem', { name: 'Unpin from pane' }).click();
 		await expect(names).toHaveText([keeper, churn]);
 		await expect(page.locator('.row-outer .pin-mark')).toHaveCount(0);
 	});
 });
+
+/** Opens the row menu through the interaction the active viewport supports. */
+async function openRowMenu(page: Page, row: Locator) {
+	if ((page.viewportSize()?.width ?? 0) > 768) {
+		await row.click({ button: 'right' });
+		return;
+	}
+	const box = (await row.boundingBox())!;
+	const point = { clientX: box.x + box.width / 2, clientY: box.y + box.height / 2 };
+	await row.dispatchEvent('pointerdown', { pointerType: 'touch', pointerId: 1, ...point });
+	await page.waitForTimeout(LONG_PRESS_MS);
+	await row.dispatchEvent('pointerup', { pointerType: 'touch', pointerId: 1, ...point });
+}
 
 /** Open the right pane when it is visually closed. Desktop renders a closed
  *  pane at width 0 with the rows still in the DOM, mobile renders it display:

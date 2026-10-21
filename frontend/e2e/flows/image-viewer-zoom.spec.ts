@@ -194,7 +194,11 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			await page.keyboard.up('Control');
 			await expect.poll(() => frameWidth(page)).toBeLessThan(scaleMid - 20);
 			await overlay.getByRole('button', { name: 'Fit' }).click();
-			await expect.poll(() => frameWidth(page)).toBeLessThanOrEqual(viewport.width - 47);
+			// Fit follows the live viewport while the canvas settles, preserving the 24px side margins.
+			await expect.poll(async () => {
+				const currentViewport = (await page.locator('.image-overlay .viewport').boundingBox())!;
+				return (await frameWidth(page)) <= currentViewport.width - 47;
+			}).toBe(true);
 
 			// Focus ring on the bar and the reduced-motion state.
 			await page.keyboard.press('Tab');
