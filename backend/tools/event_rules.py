@@ -21,6 +21,9 @@ def _context(kwargs: dict[str, Any]):
 def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[str, Any]) -> Any:
     now = datetime.now(timezone.utc).isoformat()
     if operation in ("create", "disable"):
+        # Resolving the project's repositories runs git: never under the write lock.
+        tracked = (rule_authoring.tracked_repositories(
+            kwargs.get("connector"), kwargs.get("match"), project_id) if operation == "create" else None)
         with write_transaction(None, scope="event_rules_tool") as db:
             if operation == "create":
                 return rule_authoring.create(
@@ -28,7 +31,7 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
                     connector=kwargs.get("connector"), event_type=kwargs.get("event_type"),
                     match=kwargs.get("match"), action=kwargs.get("action", "deliver"),
                     to=kwargs.get("to"), mode=kwargs.get("mode"), note=kwargs.get("note"),
-                    scope=kwargs.get("scope"), now=now,
+                    scope=kwargs.get("scope"), now=now, tracked=tracked,
                 )
             return rule_authoring.disable(
                 db, caller=thread_id, project_id=project_id, rule_id=kwargs.get("rule_id"), now=now)

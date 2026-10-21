@@ -41,10 +41,20 @@ TRACKED = {P: frozenset({REPO, "x/y"}), Q: frozenset({"q/r"})}
 
 
 @pytest.fixture(autouse=True)
-def _tracked_repositories(monkeypatch):
-    """The repositories each project's registered source repositories track."""
+def resolved(monkeypatch):
+    """The repositories each project's registered source repositories track.
+
+    Yields, per lookup, whether the thread's connection was inside a transaction.
+    """
+    in_transaction: list[bool] = []
+
+    def _tracked(project_id=None):
+        in_transaction.append(get_db().in_transaction)
+        return TRACKED.get(project_id, frozenset())
+
     monkeypatch.setattr("events.connectors.github_notifications_feed.tracked_github_repositories",
-                        lambda project_id=None: TRACKED.get(project_id, frozenset()))
+                        _tracked)
+    yield in_transaction
 
 
 @pytest.fixture
@@ -365,7 +375,7 @@ async def test_a_burst_wakes_a_rule_once_and_the_owner_on_every_event(isolated_d
 # -- Writer limits ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_writer_limits(isolated_db, sent):
+async def test_writer_limits(isolated_db, sent, resolved, monkeypatch):
     _project(P, conductor="cond")
     _project(Q)
     _agent("cond")
@@ -389,6 +399,18 @@ async def test_writer_limits(isolated_db, sent):
                  {"field": "repo", "op": "in", "value": [REPO, "q/r"]}):
         assert await _tool("a", **base, match=[test]) == (
             "Refused: q/r isn't one of this project's repositories (o/r, x/y).")
+    # The lookup runs git, so it runs before the write transaction opens.
+    assert resolved == [False, False]
+
+    def _unreadable(project_id=None):
+        from events.connectors.github_notifications_feed import FeedError
+        raise FeedError("repo_scope_unavailable")
+
+    with monkeypatch.context() as patched:
+        patched.setattr("events.connectors.github_notifications_feed.tracked_github_repositories",
+                        _unreadable)
+        assert await _tool("a", **base, match=[{"field": "repo", "op": "eq", "value": REPO}]) == (
+            "Refused: This project's repositories can't be read right now; try again.")
     assert "role:" not in json.dumps(await _tool("a", **base, to="registered_owner"))
 
     # The conductor may give another agent in its project a digest, nothing more.

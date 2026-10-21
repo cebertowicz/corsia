@@ -87,17 +87,39 @@ def _match(raw: Any, decl: EventTypeDecl) -> list[dict[str, Any]]:
     return clean
 
 
-def _repositories(connector: str, tests: list[dict[str, Any]], project_id: str) -> None:
+_UNREADABLE = "This project's repositories can't be read right now; try again."
+
+
+def tracked_repositories(connector: Any, match: Any, project_id: str | None) -> frozenset[str] | None:
+    """The project's repositories when a test names the event's repository, else ``None``.
+
+    Resolving them runs git, so call this before opening the write transaction.
+    """
+    try:
+        manifest = get_manifest(connector) if isinstance(connector, str) else None
+    except KeyError:
+        return None  # create refuses the connector
+    if manifest is None or manifest.project_repositories is None or not project_id:
+        return None
+    if not any(isinstance(test, Mapping) and test.get("field") == manifest.repository_fact
+               for test in (match if isinstance(match, list) else ())):
+        return None
+    tracked = manifest.project_repositories(project_id)
+    if tracked is None:
+        raise RuleRefused(_UNREADABLE)
+    return tracked
+
+
+def _repositories(connector: str, tests: list[dict[str, Any]], tracked: frozenset[str] | None) -> None:
     """A test naming the event's repository must name one this project tracks."""
     manifest = get_manifest(connector)
-    fact, resolve = manifest.repository_fact, manifest.project_repositories
+    fact = manifest.repository_fact if manifest.project_repositories else None
     named = [value for test in tests if test["field"] == fact and test["op"] in rules.NAMING
              for value in (test["value"] if test["op"] == "in" else [test["value"]])]
-    if not named or resolve is None:
+    if not named:
         return
-    tracked = resolve(project_id)
     if tracked is None:
-        raise RuleRefused("This project's repositories can't be read right now; try again.")
+        raise RuleRefused(_UNREADABLE)  # fails closed when no list was read for this create
     known = {repo.casefold() for repo in tracked}
     for value in named:
         if str(value).casefold() not in known:
@@ -144,8 +166,12 @@ def create(
     db: sqlite3.Connection, *, writer: str, project_id: str | None, connector: Any,
     event_type: Any, match: Any = None, action: Any = rules.DELIVER, to: Any = None,
     mode: Any = None, note: Any = None, scope: Any = None, now: str,
+    tracked: frozenset[str] | None = None,
 ) -> dict[str, Any]:
-    """Write one rule within the writer limits, or raise :class:`RuleRefused`."""
+    """Write one rule within the writer limits, or raise :class:`RuleRefused`.
+
+    ``tracked`` is :func:`tracked_repositories`, read before the transaction.
+    """
     row = _thread(db, writer)
     if row is None:
         raise RuleRefused("this chat was not found")
@@ -161,7 +187,7 @@ def create(
             f"project ({own_scope}). {_who_sets_it_up(db, project_id)}")
     decl = _decl(connector, event_type)
     tests = _match(match, decl)
-    _repositories(connector, tests, project_id)
+    _repositories(connector, tests, tracked)
     if action not in (rules.DELIVER, rules.DROP):
         raise RuleRefused("action is deliver or drop")
     if action == rules.DROP:
