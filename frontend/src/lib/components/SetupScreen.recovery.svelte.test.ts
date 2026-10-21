@@ -74,7 +74,7 @@ describe('SetupScreen account recovery', () => {
 		fill('#setup-name', 'Ada'); fill('#setup-username', 'ada'); fill('#setup-password', 'password1'); fill('#setup-confirm-password', 'password1');
 		await settle(); click('Continue'); await settle();
 		click('Continue'); await settle();
-		expect(host.textContent).toContain('Couldn’t create your account. Retry.');
+		expect(host.textContent).toContain('Couldn’t create your account. Try again.');
 		click('Save a report'); await settle();
 		expect(invoke).toHaveBeenCalledWith('save_setup_report');
 	});

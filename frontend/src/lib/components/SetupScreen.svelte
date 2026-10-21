@@ -62,11 +62,9 @@
 		if (code === 'progress_save') return 'CORSIA couldn’t save setup progress. Try again.';
 		return 'CORSIA couldn’t finish model setup. Try again.';
 	}
-	function plainAccountError(detail: unknown): string | null {
-		if (typeof detail !== 'string') return null;
-		const message = detail.trim();
-		if (!message || message.length > 301 || /[\r\n<>\[\]{}\\`]/.test(message)) return null;
-		return /^[\p{L}\p{N}][\p{L}\p{N} .,;'"_():!?&/@+\-]*$/u.test(message) ? message : null;
+	/** The backend's own account refusal names the cause; a validation 422 has no string detail. */
+	function accountRefusal(detail: unknown): string | null {
+		return typeof detail === 'string' && detail.trim() ? detail.trim() : null;
 	}
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'account' | 'folder' | 'models' | 'hard-stop' | 'error' | 'connect';
@@ -154,7 +152,7 @@
 			if (status.macos_supported === false) { page = 'hard-stop'; return; }
 			page = 'account'; void classifier.start();
 			if (eligible) { await localPick.start(); await startLocal(); await readLocalProgress(); }
-		} catch { statusError = 'Something went wrong while starting. Retry, or save a report to send.'; page = 'error'; }
+		} catch { statusError = 'Something went wrong while starting. Try again, or save a report to send.'; page = 'error'; }
 	}
 	async function checkLocal() {
 		const current = get(token);
@@ -222,14 +220,14 @@
 			if (response.status === 409) { accountExists = true; accountError = 'This computer already has a CORSIA account. Sign in instead.'; page = 'account'; return; }
 			const result = await response.json().catch(() => null);
 			if (!response.ok) {
-				if (response.status === 422) { page = 'account'; accountError = plainAccountError(result?.detail) ?? 'Couldn’t create your account. Retry.'; }
-				else accountError = 'Couldn’t create your account. Retry.';
+				if (response.status === 422) { page = 'account'; accountError = accountRefusal(result?.detail) ?? 'Couldn’t create your account. Try again.'; }
+				else accountError = 'Couldn’t create your account. Try again.';
 				return;
 			}
 			onAccountCreated(); token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() }); connect();
 			password = ''; confirmation = ''; page = 'models';
 			await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
-		} catch { accountError = 'Couldn’t create your account. Retry.'; }
+		} catch { accountError = 'Couldn’t create your account. Try again.'; }
 		finally { accountBusy = false; }
 	}
 	async function refreshSources(strict = false) {

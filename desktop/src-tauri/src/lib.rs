@@ -304,7 +304,17 @@ fn operation_is_active(port: u16) -> Result<bool, String> {
     operation_is_active_response(&local_get(port, "/api/system/operation-active")?)
 }
 
+fn running_from_disk_image() -> Result<bool, String> {
+    let executable = env::current_exe()
+        .map_err(|error| format!("could not resolve CORSIA executable: {error}"))?;
+    Ok(service_management::is_transient_bundle_path(&executable))
+}
+
 fn run_service_command(action: &str) -> Result<(), String> {
+    // Every registration goes through here, so a copy on a disk image never leaves a service behind it.
+    if action == "register" && running_from_disk_image()? {
+        return Err("Drag CORSIA into your Applications folder, then open it from there.".into());
+    }
     let executable = env::current_exe()
         .map_err(|error| format!("could not resolve CORSIA executable: {error}"))?;
     let status = Command::new(executable)
@@ -459,7 +469,7 @@ fn start_service(
     app: &tauri::AppHandle,
     service: &AppServiceState,
 ) -> Result<ServiceStartup, String> {
-    if service_management::is_transient_bundle_path(&std::env::current_exe().map_err(|error| format!("could not resolve CORSIA executable: {error}"))?) {
+    if running_from_disk_image()? {
         return Ok(ServiceStartup::DiskImage);
     }
     let app_dir = default_app_dir(app)?;

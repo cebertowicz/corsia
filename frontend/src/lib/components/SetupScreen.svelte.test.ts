@@ -159,13 +159,11 @@ describe('SetupScreen', () => {
 	});
 
 	it.each([
-		['a plain user-facing detail', { detail: "That username isn't available. Choose another." }, "That username isn't available. Choose another."],
+		['a plain user-facing detail', { detail: 'That username isn’t available. Choose another.' }, 'That username isn’t available. Choose another.'],
 		['the backend username validation detail', { detail: "username must be 1-32 characters of a-z, 0-9, '-' or '_'" }, "username must be 1-32 characters of a-z, 0-9, '-' or '_'"],
 		['the backend password validation detail', { detail: 'password must be at least 8 characters' }, 'password must be at least 8 characters'],
-		['structured detail', { detail: { message: 'username must be valid' } }, 'Couldn’t create your account. Retry.'],
-		['markup detail', { detail: '<strong>username must be valid</strong>' }, 'Couldn’t create your account. Retry.'],
-		['multiline detail', { detail: 'username must be valid\nretry' }, 'Couldn’t create your account. Retry.'],
-		['no detail', {}, 'Couldn’t create your account. Retry.'],
+		['structured detail', { detail: { message: 'username must be valid' } }, 'Couldn’t create your account. Try again.'],
+		['no detail', {}, 'Couldn’t create your account. Try again.'],
 	] as const)('returns a 422 with %s to an editable account form', async (_case, body, expected) => {
 		await remountWide(); fillAccount(); await settle();
 		button('Continue')?.click(); await settle();
