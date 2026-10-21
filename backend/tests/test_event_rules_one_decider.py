@@ -5,17 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
-from infra.database import write_transaction
 from tests.event_routing_helpers import (
     check_suite_payload, mk_session, pr_payload, register_pr, route,
 )
-
-
-def _every_rule(db, rule_id, *, to, event_type='webhook.github.pr_merged'):
-    db.execute('''INSERT INTO event_rules
-        (id,created_at,updated_at,scope,connector,event_type,"match","on",action,"to",mode,precedence)
-        VALUES (?,'a','b','global','github',?,'[]','every','deliver',?,'wake',0)''',
-        (rule_id, event_type, to))
 
 
 def _merged():
@@ -76,20 +68,6 @@ async def test_self_authored_drop_logs_product_event_with_author_and_rule(isolat
     assert _route_events(emit) == [('suppressed', {
         'internal_event': 'webhook.github.pr_opened',
         'author': 'corsia[bot]', 'rule_id': 'rule_set:github@1:self'})]
-
-
-@pytest.mark.asyncio
-async def test_two_rule_recipients_dead_letter_instead_of_first_wins(isolated_db):
-    from events.router import RouteOutcome
-
-    register_pr('owner/repo', 7, mk_session('owner'))
-    extra = mk_session('extra')
-    with write_transaction(None, scope='two_recipients') as db:
-        _every_rule(db, 'extra-wake', to='thread:' + extra)
-    with patch('events.router.delivery.deliver_to_thread') as deliver:
-        res = await route('webhook.github.pr_merged', _merged())
-    deliver.assert_not_called()
-    assert (res.outcome, res.reason) == (RouteOutcome.DEAD_LETTERED, 'multiple_rule_recipients')
 
 
 @pytest.mark.asyncio

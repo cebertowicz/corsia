@@ -216,11 +216,6 @@ def _select_route(
                            resolve_owner=lambda: resolve_targets(envelope))
     finally:
         db.close()
-    if len(targets) > 1:
-        # One-recipient routing never picks among rule recipients.
-        logger.error("event-routing: rules chose {} recipients for {}",
-                     len(targets), internal_event)
-        return _dead_letter_result(internal_event, payload, 'multiple_rule_recipients', external_id)
     if not targets:
         return _dead_letter_result(internal_event, payload, 'no_owner', external_id)
     target = targets[0]

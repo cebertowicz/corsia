@@ -107,22 +107,15 @@ def evaluate(envelope: EventEnvelope, *,
 
     Callers run ``dropping_rule`` first. The owner callback is lazy, so an
     event whose first row does not deliver to its owner never binds an artifact.
-    Each further matching row adds a ``multiple_rule_recipients`` marker, which
-    the router dead-letters rather than picking among recipients.
     """
-    delivering = [r for r in _every_rules(envelope, db) if r.action == 'deliver']
-    if not delivering:
+    first = next((r for r in _every_rules(envelope, db) if r.action == 'deliver'), None)
+    if first is None:
         return []
-    first = delivering[0]
     if first.to == 'registered_owner':
-        targets = resolve_owner()
-    elif thread_destination(first.to) == TAG_DESTINATION:
-        targets = [_tag_target(str(envelope.facts['corsia_tag']), db)]
-    else:
-        targets = []
-    extra = [Target(None, 'rule', 'none', reason='multiple_rule_recipients',
-                    disposition='dead_letter') for _ in delivering[1:]]
-    return targets + extra
+        return resolve_owner()
+    if thread_destination(first.to) == TAG_DESTINATION:
+        return [_tag_target(str(envelope.facts['corsia_tag']), db)]
+    return []
 
 
 def _tag_target(thread_id: str, db) -> Target:
