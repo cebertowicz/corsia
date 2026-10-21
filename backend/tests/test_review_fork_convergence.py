@@ -126,6 +126,44 @@ async def test_pool_thread_withdrawal_wakes_running_fork_promptly(review_env):
         await task
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("withdrawn", [False, True])
+async def test_a_fork_that_never_exits_hands_back_at_its_time_bound(review_env, monkeypatch, withdrawn):
+    from core import artifact_review_runtime as runtime
+
+    db, aid = review_env
+    row = request(db, aid)
+
+    async def hung(_request_id, _request, cancel_event):
+        if withdrawn:
+            await run_in_db(lambda: _withdraw(row["id"]))
+            cancel_event.set()
+        await cancel_event.wait()
+        raise asyncio.CancelledError  # what every adapter raises once its stop event is set
+
+    monkeypatch.setattr(runtime, "REVIEW_WALL_SECONDS", 60 if withdrawn else 0.05)
+    monkeypatch.setattr(runtime, "_review", hung)
+    if withdrawn:
+        with pytest.raises(asyncio.CancelledError):
+            await runtime._run(row["id"], None, asyncio.Event())
+        assert stored(db, row["id"])["state"] == "withdrawn"
+        return
+    await asyncio.wait_for(runtime._run(row["id"], None, asyncio.Event()), timeout=2)
+    ended = stored(db, row["id"])
+    assert (ended["state"], ended["reason"]) == ("handed_back", "time_limit")
+    assert public.review_is_open(db, ended["node_id"])
+    assert "it ran out of time" in public.get_node(ended["node_id"], db=db).description
+
+
+def _withdraw(request_id):
+    db = get_db()
+    try:
+        with write_transaction(db, scope="test_withdraw_hung_fork"):
+            db.execute("UPDATE doc_review_requests SET state='withdrawn' WHERE id=?", (request_id,))
+    finally:
+        db.close()
+
+
 @pytest.mark.parametrize("extra", [0, 1])
 def test_source_budget_refuses_before_rendering_payloads(review_env, monkeypatch, extra):
     from core import artifact_review_source as source

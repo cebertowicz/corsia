@@ -13,6 +13,9 @@ from prompts.artifact_review import instruction
 
 _starting: set[str] = set()
 
+# A backstop for a fork that stops making progress without exiting. The step
+# budget ends an ordinary review well before it; past it the reviewer finishes.
+REVIEW_WALL_SECONDS = 30 * 60
 
 
 def _cold_request(request_id: str):
@@ -143,6 +146,28 @@ async def _source(request):
 
 
 async def _run(request_id: str, request: Any, cancel_event: asyncio.Event) -> None:
+    expired = asyncio.Event()
+
+    def expire() -> None:
+        expired.set()
+        cancel_event.set()
+
+    timer = asyncio.get_running_loop().call_later(REVIEW_WALL_SECONDS, expire)
+    try:
+        await _review(request_id, request, cancel_event)
+    except asyncio.CancelledError:
+        task = asyncio.current_task()
+        if not expired.is_set() or (task is not None and task.cancelling()):
+            raise
+    finally:
+        timer.cancel()
+    if expired.is_set():
+        await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(
+            request_id, reason="time_limit", state="handed_back",
+        )
+
+
+async def _review(request_id: str, request: Any, cancel_event: asyncio.Event) -> None:
     try:
         # start() registers the handle before this first yield/state read, so a
         # withdrawal either appears here or signals the registered handle.

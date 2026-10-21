@@ -9,6 +9,15 @@ from infra.write_effects import after_commit
 
 FALLBACK_STATES = frozenset({"handed_back", "failed"})
 
+# The one definition of a request's comments, for every reader: the reviewer's
+# comments on its document from the request's start to its end. Requires a
+# request `r` and a comment `c` in the query.
+REQUEST_COMMENTS = (
+    "c.artifact_id=r.artifact_id AND c.author_kind='agent' AND c.author_thread_id=r.reviewer_thread_id "
+    "AND c.created_at>=r.created_at "
+    "AND (r.state NOT IN ('submitted','withdrawn') OR c.created_at<=r.state_changed_at)"
+)
+
 
 @dataclass(frozen=True)
 class ReviewTransition:
@@ -122,10 +131,7 @@ def request_comment_counts(db, rows) -> dict[str, int]:
         return {}
     marks = ",".join("?" for _ in ids)
     found = db.execute(
-        "SELECT r.id, COUNT(c.id) FROM doc_review_requests r LEFT JOIN doc_comments c "
-        "ON c.artifact_id=r.artifact_id AND c.author_kind='agent' AND c.author_thread_id=r.reviewer_thread_id "
-        "AND c.created_at>=r.created_at "
-        "AND (r.state NOT IN ('submitted','withdrawn') OR c.created_at<=r.state_changed_at) "
+        f"SELECT r.id, COUNT(c.id) FROM doc_review_requests r LEFT JOIN doc_comments c ON {REQUEST_COMMENTS} "
         f"WHERE r.id IN ({marks}) GROUP BY r.id", ids,
     ).fetchall()
     return {row[0]: row[1] for row in found}
@@ -142,13 +148,14 @@ class RequestDelivery:
 
 
 def request_delivery(db, row) -> RequestDelivery:
-    """What happened to the request's comments: the reviewer's batches holding any written since it began."""
+    """What happened to the request's comments: the reviewer's batches holding any of them."""
     batches = db.execute(
-        "SELECT b.id,b.state FROM doc_feedback_batches b WHERE b.author_kind='agent' AND b.author_id=? "
-        "AND b.artifact_id=? AND b.state IN ('delivered','undelivered') AND EXISTS ("
+        "SELECT b.id,b.state FROM doc_feedback_batches b JOIN doc_review_requests r ON r.id=? "
+        "WHERE b.author_kind='agent' AND b.author_id=r.reviewer_thread_id AND b.artifact_id=r.artifact_id "
+        "AND b.state IN ('delivered','undelivered') AND EXISTS ("
         "SELECT 1 FROM doc_feedback_batch_items i JOIN doc_comments c ON c.id=i.comment_id "
-        "WHERE i.batch_id=b.id AND c.created_at>=?) ORDER BY b.updated_at,b.id",
-        (row["reviewer_thread_id"], row["artifact_id"], row["created_at"]),
+        f"WHERE i.batch_id=b.id AND {REQUEST_COMMENTS}) ORDER BY b.updated_at,b.id",
+        (row["id"],),
     ).fetchall()
     return RequestDelivery(
         tuple(batch["id"] for batch in batches if batch["state"] == "delivered"),
@@ -166,7 +173,8 @@ def _receipt(db, row) -> None:
         marks = ",".join("?" for _ in delivery.delivered_ids)
         comments = db.execute(
             "SELECT c.body FROM doc_feedback_batch_items i JOIN doc_comments c ON c.id=i.comment_id "
-            f"WHERE i.batch_id IN ({marks}) ORDER BY c.created_at,c.id LIMIT 3", delivery.delivered_ids,
+            f"JOIN doc_review_requests r ON r.id=? WHERE i.batch_id IN ({marks}) AND {REQUEST_COMMENTS} "
+            "ORDER BY c.created_at,c.id LIMIT 3", (row["id"], *delivery.delivered_ids),
         ).fetchall()
         summary = f"{count} review comments written; feedback was delivered"
         if comments:
@@ -207,6 +215,15 @@ def settle_for_batch(db, batch) -> tuple[str, ...]:
     if artifact is None or batch["recipient_id"] != artifact["parent_thread_id"]:
         return ()
     row = pending_request(db, batch["artifact_id"], batch["author_id"])
-    if row is not None and row["state"] not in FALLBACK_STATES:
+    if row is None or row["state"] not in FALLBACK_STATES or not _continued(db, row, batch["id"]):
         return ()
-    return _submit_request(db, row, batch["id"]).woken if row is not None else ()
+    return _submit_request(db, row, batch["id"]).woken
+
+
+def _continued(db, row, batch_id: str) -> bool:
+    """A continuation is answered only by feedback written after its hand-back, never the fork's own."""
+    return db.execute(
+        "SELECT 1 FROM doc_feedback_batch_items i JOIN doc_comments c ON c.id=i.comment_id "
+        f"JOIN doc_review_requests r ON r.id=? WHERE i.batch_id=? AND {REQUEST_COMMENTS} "
+        "AND c.created_at>r.state_changed_at LIMIT 1", (row["id"], batch_id),
+    ).fetchone() is not None

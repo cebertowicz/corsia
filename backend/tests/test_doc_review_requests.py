@@ -258,8 +258,8 @@ def test_list_counts_every_reviewers_comments_in_one_query(review_env):
     assert len(reads) == 1
 
 
-def test_escalated_comments_follow_the_ordinary_quiet_timer(review_env):
-    """Ordinary feedback can deliver before the continuation starts."""
+def test_escalated_comments_follow_the_ordinary_quiet_timer_without_ending_the_continuation(review_env):
+    """Ordinary feedback can deliver before the continuation starts; only the continuation answers it."""
     from doceditor import review_requests
 
     db, artifact_id = review_env
@@ -272,8 +272,8 @@ def test_escalated_comments_follow_the_ordinary_quiet_timer(review_env):
     batch = db.execute("SELECT state FROM doc_feedback_batches").fetchone()
     assert batch["state"] == "delivered"
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 1
-    assert stored(db, result["id"])["state"] == "submitted"
-    assert not public.review_is_open(db, escalated["node_id"])
+    assert stored(db, result["id"])["state"] == "handed_back"
+    assert public.review_is_open(db, escalated["node_id"])
 
 
 def test_clean_submit_ends_without_comments_and_never_escalates(review_env):

@@ -77,6 +77,41 @@ def test_ended_continuation_quiet_closer_delivers_all_ordinary_comments(review_e
     assert "The claim needs evidence." in tasks[0]["description"]
 
 
+@pytest.mark.parametrize("reason", ["limit", "target_unavailable"])
+def test_quiet_delivery_of_the_forks_own_comments_does_not_answer_its_continuation(review_env, reason):
+    db, aid = review_env
+    row = request(db, aid)
+    fork_comment(db, aid, row["id"])
+    continuation = review_requests.escalate_fork(db, row["id"], reason=reason)
+
+    feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db)
+
+    assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == "delivered"
+    assert stored(db, row["id"])["state"] == continuation["state"]
+    assert public.review_is_open(db, continuation["node_id"])
+    assert [listed["id"] for listed in review_requests.for_document(db, aid)] == [row["id"]]
+    ordinary_comment(db, aid)
+    feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db)
+    assert stored(db, row["id"])["state"] == "submitted"
+    assert not public.review_is_open(db, continuation["node_id"])
+
+
+def test_receipt_quotes_only_comments_written_since_the_request(review_env):
+    db, aid = review_env
+    ordinary_comment(db, aid)
+    row = request(db, aid)
+    fork_comment(db, aid, row["id"])
+
+    with write_transaction(db, scope="finish_fork_after_earlier_comment"):
+        review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
+
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 1
+    receipt = _receipt_text(db)
+    assert "1 review comments written" in receipt
+    assert "The claim needs evidence." in receipt
+    assert "The continuation adds evidence." not in receipt
+
+
 def _assert_running_fork_survives_trigger(db, aid, row, trigger):
     fork_comment(db, aid, row["id"])
     trigger(db, aid)

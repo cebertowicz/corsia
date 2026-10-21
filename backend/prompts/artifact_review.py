@@ -9,6 +9,7 @@ _STOP_REASONS = {
     "missing_credentials": "sign-in is needed",
     "target_unavailable": "the model was unavailable",
     "limit": "it reached its review limit",
+    "time_limit": "it ran out of time",
     "interrupted": "it was interrupted",
 }
 
