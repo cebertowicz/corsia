@@ -409,6 +409,8 @@ def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: Trac
     runs: list[CarryInRun] = []
     for fact in facts:
         record_pending(db, fact)
+        # Pending must survive a stalled or unavailable local-admission check.
+        db.commit()
         if not is_pending(db, fact):
             continue
         case = _case_for_fact(workspace, fact)
@@ -455,7 +457,8 @@ def _drain_committed_facts(
     *, adapter_factory: Callable[[str], TraceAdapter] = LocalTraceAdapter,
 ) -> None:
     """Advance a committed edit through the sole local adapter when its owner is known."""
-    for fact in _matching_facts(db, workspace, paths, commit):
+    facts = _matching_facts(db, workspace, paths, commit)
+    for fact in facts:
         user_id = _owner_user_id(db, fact.owner_thread_id)
         if user_id is None:
             record_pending(db, fact)

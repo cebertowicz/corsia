@@ -221,11 +221,10 @@ def test_matching_case_survives_a_symlinked_workspace_root(tmp_path: Path):
             "context/rule.md", ".threads/owner/skills/lesson/SKILL.md#corsia.lesson.case",
         )
     ]
-    from core.lesson_carry_in import record_pending
-    assert record_pending(db, facts[0])
-    assert db.execute(
-        "SELECT event_name FROM outcome_events WHERE event_name='learning_loop.carry_in_pending'"
-    ).fetchone()["event_name"] == "learning_loop.carry_in_pending"
+    from core.lesson_carry_in import drain_facts, is_pending
+    runs = drain_facts(db, workspace, facts, Adapter([], is_ready=False))
+    assert [run.state for run in runs] == ["pending"]
+    assert is_pending(db, facts[0])
 
 
 def test_drain_settles_a_pending_case_with_a_mocked_local_adapter(tmp_path: Path):

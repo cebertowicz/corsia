@@ -32,6 +32,12 @@ Body text.
 _IDENTITY = ["-c", "user.email=t@t", "-c", "user.name=T"]
 
 
+@pytest.fixture(autouse=True)
+def suppress_background_carry_in(monkeypatch):
+    """Keep guidance-history tests synchronous; the dedicated test asserts scheduling."""
+    monkeypatch.setattr("core.lesson_carry_in.record_committed_save", lambda *_args: None)
+
+
 @pytest.fixture
 def history_scope(isolated_db, tmp_path, monkeypatch):
     """A git workspace, an isolated database, and an owning thread."""
