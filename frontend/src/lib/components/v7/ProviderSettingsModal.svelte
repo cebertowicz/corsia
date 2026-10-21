@@ -22,10 +22,11 @@
 
 	interface Props {
 		provider: HostProvider;
+		initialTab?: ProviderSettingsTab;
 		onClose: () => void;
 	}
 
-	const { provider: providerProp, onClose }: Props = $props();
+	const { provider: providerProp, initialTab, onClose }: Props = $props();
 
 	const providerIndex = $derived.by((): Map<string, HostProvider> => {
 		const m = new Map<string, HostProvider>();
@@ -41,7 +42,7 @@
 		providerIndex.get(`${providerProp.name}|${providerProp.server?.id ?? ''}`) ?? providerProp,
 	);
 
-	let activeTab = $state<ProviderSettingsTab>('overview');
+	let activeTab = $state<ProviderSettingsTab>(initialTab ?? 'overview');
 	onMount(() => { if (providerProp.type === 'harness') activeTab = 'accounts'; });
 	let actionError = $state('');
 	let actionMessage = $state('');

@@ -30,10 +30,10 @@ function sourceFromFlight(flight: typeof flightShapes[number]) {
 }
 
 describe('setup provider rows', () => {
-	it('tells a computer under 24 GB why, what to do instead, and that smaller local models may come', () => {
+	it('tells a computer under 24 GB why and what to do instead', () => {
 		const row = setupLocalRow({ ...actions(), pick: null, eligible: false, downloading: false, ready: false, startError: '' });
 
-		expect(row.meta).toBe('Local models need at least 24 GB of memory, and this computer has less. Connect a subscription or an API provider. Smaller local models may come in a future update.');
+		expect(row.meta).toBe('Local models need at least 24 GB of memory, and this computer has less. Connect a subscription or an API provider.');
 	});
 
 	it('shows a ready local model as a completed provider row', () => {

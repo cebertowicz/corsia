@@ -44,7 +44,7 @@
 		<span class="hint">{hint}</span>
 	{/if}
 	{#if error}
-		<span class="err">{error}</span>
+		<span class="err error-text">{error}</span>
 	{/if}
 </div>
 
@@ -142,10 +142,7 @@
 		grid-area: msg;
 		font-size: var(--text-footnote); color: var(--text-tertiary);
 	}
-	.err {
-		grid-area: msg;
-		font-size: var(--text-footnote); color: var(--red-text);
-	}
+	.err { grid-area: msg; }
 
 	/* chip and nested: label above, no divider; the control's own look is in text-field.css. */
 	.field.chip, .field.nested { border-bottom: 0; padding: 0; grid-template-columns: 1fr; grid-template-areas: 'label' 'control' 'msg'; gap: var(--space-1); }

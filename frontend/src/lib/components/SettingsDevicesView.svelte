@@ -45,7 +45,7 @@
 	const endsIn = $derived((view.endsInSeconds ?? 0) < 60 ? 'Ends in under a minute' : `Ends in ${Math.ceil((view.endsInSeconds ?? 0) / 60)} min`);
 	// A connected computer sees the state even when off, so it gets the status slot too.
 	const showMore = $derived(view.load === 'ready' && (view.enabled || view.readOnly));
-	const statusLabel = $derived(view.busy === 'starting' ? 'Starting…' : view.announced ? `Visible as ${view.hostName}` : null);
+	const statusLabel = $derived(view.busy === 'starting' ? 'Starting…' : view.announced && view.hostName ? `Visible as ${view.hostName}` : null);
 	/**
 	 * Seen from a connected computer there is no switch, so the state takes the status slot: "Visible as {name}" (with its
 	 * dot) says it is on; off, and on but not visible, are plain secondary text with no dot.

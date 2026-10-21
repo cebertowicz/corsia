@@ -377,3 +377,75 @@ def test_omlx_module_reexports_real_supervisor(isolated_runtime, monkeypatch):
     result = asyncio.run(omlx.start_server({}))
     assert result["ok"] is False
     assert "server_id" in result["message"]
+
+
+def test_readiness_wait_reports_an_exited_child_at_once(monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    monkeypatch.setattr(sup, "_process_exited", lambda _pid: True)
+    began = time.monotonic()
+    assert asyncio.run(sup._wait_for_healthy("127.0.0.1", 9, timeout_s=30.0, pid=1234)) == "exited"
+    assert time.monotonic() - began < 5
+
+
+@pytest.mark.parametrize(("managed", "expected_timeout"), [(True, 600.0), (False, 30.0)])
+def test_new_omlx_start_uses_the_managed_cap_only_for_the_bundled_row(isolated_runtime, monkeypatch, managed, expected_timeout):
+    from llm.providers import omlx_supervisor as sup
+
+    class Spawned:
+        pid = 1234
+
+    waited = {}
+
+    async def healthy(_host, _port, **kwargs):
+        waited.update(kwargs)
+        return "healthy"
+
+    monkeypatch.setattr(sup, "_port_owner_pid", lambda *_args: None)
+    monkeypatch.setattr(sup, "_is_managed_omlx_row", lambda _settings: managed)
+    monkeypatch.setattr(sup, "_managed_omlx_argv", lambda *_args: ["omlx"])
+    monkeypatch.setattr(sup, "_spawn_process", lambda *_args: Spawned())
+    monkeypatch.setattr(sup, "_wait_for_healthy", healthy)
+
+    result = asyncio.run(sup.start_server({"server_id": "progress", "host": "127.0.0.1", "port": 9999}))
+
+    assert result["ok"] is True
+    assert waited == {"timeout_s": expected_timeout, "server_id": "progress", "pid": 1234}
+
+
+def test_failed_boot_names_the_reason_that_ended_the_health_wait(isolated_runtime, monkeypatch, caplog):
+    from llm.providers import omlx_supervisor as sup
+
+    monkeypatch.setattr(sup, "_read_pid", lambda _server_id: None)
+    monkeypatch.setattr(sup, "_process_exited", lambda _pid: True)
+    monkeypatch.setattr(sup, "_tail_log", lambda _server_id, lines: "secret-ish last line")
+
+    with caplog.at_level("WARNING", logger=sup.log.name):
+        exited = sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="exited", timeout_s=600.0)
+        timed_out = sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="timed_out", timeout_s=600.0)
+        short = sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="timed_out", timeout_s=30.0)
+
+    assert exited["message"] == (
+        "The local model stopped while it was starting. Start it again; "
+        "if it stops again, restart this Mac, then start it."
+    )
+    assert timed_out["message"] == "The local model didn't finish starting within 10 minutes. Start it again."
+    assert short["message"] == "The local model didn't finish starting within 30 seconds. Start it again."
+    for result in (exited, timed_out, short):
+        assert "last line" not in result["message"] and "9999" not in result["message"]
+    assert "secret-ish last line" in caplog.text
+
+
+def test_failed_boot_signals_only_a_child_that_has_not_exited(isolated_runtime, monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(sup, "_read_pid", lambda _server_id: 1234)
+    monkeypatch.setattr(sup, "_process_exited", lambda _pid: True)
+    monkeypatch.setattr(sup, "_tail_log", lambda _server_id, lines: "")
+    monkeypatch.setattr(sup.os, "kill", lambda pid, sig: signals.append((pid, sig)))
+
+    sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="exited")
+    assert signals == []
+    sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="timed_out")
+    assert signals == [(1234, sup.signal.SIGTERM)]

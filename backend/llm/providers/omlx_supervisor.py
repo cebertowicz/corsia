@@ -37,7 +37,10 @@ def _mark_endpoint_alive(server_id: str, host: str, port: int) -> None:
     except Exception as e:
         log.warning("_mark_endpoint_alive failed for %s: %s", server_id, e)
 
-HEALTH_TIMEOUT_S = 30.0
+# A first spawn pays Gatekeeper's scan of CORSIA's signed bundle and a cold Metal
+# start; ordinary user-managed servers retain the caller's shorter timeout.
+MANAGED_HEALTH_STARTUP_CAP_S = 600.0
+DEFAULT_HEALTH_TIMEOUT_S = 30.0
 HEALTH_POLL_INTERVAL_S = 0.5
 SIGTERM_GRACE_S = 5.0
 
@@ -127,13 +130,15 @@ def _managed_omlx_argv(host: str, port: int, settings: dict) -> list[str] | dict
 
 
 async def _wait_for_healthy(
-    host: str, port: int, timeout_s: float, *, server_id: str | None = None,
-) -> bool:
-    """Poll the same model-list surface the provider uses for readiness."""
+    host: str, port: int, *, timeout_s: float, server_id: str | None = None, pid: int | None = None,
+) -> str:
+    """Return whether oMLX became healthy, its child exited, or the timeout elapsed."""
     url = models_probe_url(lan_base(host, port))
-    deadline = time.monotonic() + timeout_s
+    started = time.monotonic()
     async with httpx.AsyncClient(timeout=2.0) as client:
-        while time.monotonic() < deadline:
+        while time.monotonic() - started < timeout_s:
+            if pid is not None and _process_exited(pid):
+                return "exited"
             try:
                 headers = {}
                 if server_id:
@@ -141,11 +146,11 @@ async def _wait_for_healthy(
                     headers = await public_headers({"server_id": server_id}, url=url)
                 r = await client.get(url, headers=headers)
                 if r.status_code == 200:
-                    return True
+                    return "healthy"
             except (httpx.HTTPError, OSError):
                 pass
             await asyncio.sleep(HEALTH_POLL_INTERVAL_S)
-    return False
+    return "timed_out"
 
 
 def _tail_log(server_id: str, lines: int = 20) -> str:
@@ -175,8 +180,12 @@ def _failed_boot_result(
     host: str,
     port: int,
     pid: int,
+    *,
+    reason: str = "timed_out",
+    timeout_s: float = DEFAULT_HEALTH_TIMEOUT_S,
 ) -> dict[str, Any]:
-    if _read_pid(server_id) == pid:
+    # An exited child is already reaped, and the OS may reuse its pid; only a live one is signalled.
+    if reason != "exited" and _read_pid(server_id) == pid:
         try:
             os.kill(pid, signal.SIGTERM)
         except (OSError, ProcessLookupError) as exc:
@@ -188,14 +197,27 @@ def _failed_boot_result(
             )
     if _process_exited(pid):
         _clear_pid(server_id)
-    tail = _tail_log(server_id, lines=20)
+    # The log tail is for diagnosis, so it goes to the backend log; the person gets a next step.
+    log.warning(
+        "oMLX boot failed for %s on %s:%s (%s after %ss). Last log lines:\n%s",
+        server_id, host, port, reason, int(timeout_s), _tail_log(server_id, lines=20) or "(empty log)",
+    )
     return {
         "ok": False,
         "message": (
-            f"oMLX did not become healthy on {host}:{port} within "
-            f"{int(HEALTH_TIMEOUT_S)}s. Last log lines:\n{tail or '(empty log)'}"
+            "The local model stopped while it was starting. Start it again; "
+            "if it stops again, restart this Mac, then start it."
+            if reason == "exited"
+            else f"The local model didn't finish starting within {_duration(timeout_s)}. Start it again."
         ),
     }
+
+
+def _duration(seconds: float) -> str:
+    whole = int(seconds)
+    if whole >= 120 and whole % 60 == 0:
+        return f"{whole // 60} minutes"
+    return f"{whole} seconds"
 
 
 async def start_server(cfg: dict) -> dict[str, Any]:
@@ -234,6 +256,7 @@ async def start_server(cfg: dict) -> dict[str, Any]:
         }
 
     settings = await run_in_db(_resolve_settings, cfg)
+    managed = _is_managed_omlx_row(settings)
     argv = _managed_omlx_argv(host, int(port), settings)
     if isinstance(argv, dict):
         return argv
@@ -248,13 +271,14 @@ async def start_server(cfg: dict) -> dict[str, Any]:
     log.info("start_server: spawned omlx pid=%s for server_id=%s on %s:%s",
              proc.pid, sid, host, port)
 
-    healthy = await _wait_for_healthy(
-        host, int(port), HEALTH_TIMEOUT_S, server_id=sid,
+    timeout_s = MANAGED_HEALTH_STARTUP_CAP_S if managed else DEFAULT_HEALTH_TIMEOUT_S
+    health = await _wait_for_healthy(
+        host, int(port), timeout_s=timeout_s, server_id=sid, pid=proc.pid,
     )
-    if healthy:
+    if health == "healthy":
         await run_in_db(_mark_endpoint_alive, sid, host, int(port))
-    if not healthy:
-        return _failed_boot_result(sid, host, int(port), proc.pid)
+    else:
+        return _failed_boot_result(sid, host, int(port), proc.pid, reason=health, timeout_s=timeout_s)
 
     return {
         "ok": True,

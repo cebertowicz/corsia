@@ -146,7 +146,7 @@ def _create_account(
                 f"account as one of: {', '.join(owners)}. Add others after."
             )
         if conn.execute("SELECT 1 FROM users WHERE id = ?", (name,)).fetchone():
-            raise AccountError(f"account '{name}' already exists")
+            raise AccountError(f"An account named '{name}' already exists. Choose a different username.")
         conn.execute(
             "INSERT INTO users (id, password_hash, created_at, password_changed_at)"
             " VALUES (?, ?, ?, ?)",
@@ -226,7 +226,7 @@ def create_first_account(
     """
     from infra import config
     if call_name is not None and not user_profile.one_line(call_name):
-        raise AccountError("name is required")
+        raise AccountError("A name is required.")
     name, encoded = _credentials(username, password)
     staged = None
     if call_name is not None:
