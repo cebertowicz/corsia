@@ -14,7 +14,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from automation.restart_rule import parse, row_is_active
-from infra.database_migrations import backup_room
+from infra.database_migrations import _pre_migration_backups, backup_room
 from infra.ignored_environment import IGNORED_VARIABLES
 
 #: Exit status of :func:`preflight_main` when adoption is refused with a message
@@ -60,10 +60,11 @@ def _entry_size(path: Path) -> int:
 
 
 def _snapshot_size(state_root: Path) -> int:
-    """What the snapshot will copy: the state root's regular files outside ``backups/``."""
+    """What the snapshot will copy, excluding migration backups the restore leaves in place."""
+    protected = set(_pre_migration_backups(state_root / "corsia.db"))
     total = 0
     for top in state_root.iterdir():
-        if top.name == "backups":
+        if top.name == "backups" or top in protected:
             continue
         total += _entry_size(top)
         if top.is_dir() and not top.is_symlink():
@@ -250,8 +251,9 @@ def create_adoption_snapshot(state_root: Path) -> Path:
         files = snapshot / "files"
         files.mkdir(mode=0o700)
         files.chmod(0o700)
+        protected = set(_pre_migration_backups(database))
         for entry in state_root.iterdir():
-            if entry.name in {"backups", "corsia.db", "corsia.db-wal", "corsia.db-shm"}:
+            if entry.name in {"backups", "corsia.db", "corsia.db-wal", "corsia.db-shm"} or entry in protected:
                 continue
             _copy_entry(entry, files / entry.name)
     except BaseException:
@@ -272,8 +274,9 @@ def restore_adoption_snapshot(state_root: Path, snapshot: Path) -> None:
         raise ValueError("adoption snapshot is incomplete")
     for name in ("corsia.db-wal", "corsia.db-shm"):
         (state_root / name).unlink(missing_ok=True)
+    protected = set(_pre_migration_backups(state_root / "corsia.db"))
     for entry in state_root.iterdir():
-        if entry.name == "backups":
+        if entry.name == "backups" or entry in protected:
             continue
         if entry.is_dir() and not entry.is_symlink():
             shutil.rmtree(entry)

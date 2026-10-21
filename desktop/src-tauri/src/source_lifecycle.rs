@@ -6,6 +6,7 @@
 use std::{
     collections::BTreeSet,
     ffi::OsString,
+    fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
@@ -16,7 +17,7 @@ use crate::{
     adoption::{self, ReadyError, RestartLook, StopProcess},
     probe_health, release_proof, run_service_command,
     service_management::service_label,
-    unregister_service, wait_for_service, HEALTH_POLL_INTERVAL, HEALTH_TIMEOUT,
+    unregister_service, wait_for_service, HEALTH_POLL_INTERVAL,
 };
 
 /// The source's own drain wait, in seconds: its cap, and the longest a switch waits for running work.
@@ -28,6 +29,12 @@ const STUCK_AFTER: Duration = Duration::from_secs(DRAIN_MAX_WAIT_SECONDS + 300);
 const INHERITED: [&str; 5] = ["HOME", "PATH", "USER", "LANG", "TMPDIR"];
 const COUNT_INTERVAL: Duration = Duration::from_secs(1);
 const PROOF_TIMEOUT: Duration = Duration::from_secs(15);
+/// The verified production startup took 99 seconds on a 22 GB state root; two
+/// quiet minutes identifies a wedged start without masking an active migration.
+const START_STALL_WINDOW: Duration = Duration::from_secs(120);
+/// A startup with continuous backend progress may run for a long migration, but
+/// never indefinitely.
+const START_ABSOLUTE_CAP: Duration = Duration::from_secs(1_800);
 
 /// What the source backend's drain counts as running (`turn_core.active_turn_count`).
 /// Read only, over `mode=ro` and never immutable: the database is live.
@@ -62,6 +69,8 @@ pub struct SourceLifecycle {
     env: Vec<(&'static str, OsString)>,
     proof_timeout: Duration,
     count_interval: Duration,
+    start_stall_window: Duration,
+    start_absolute_cap: Duration,
     /// Reads a process's start time; replaced in tests.
     stop_clock: fn(u32) -> Option<String>,
 }
@@ -78,6 +87,8 @@ impl SourceLifecycle {
                 .collect(),
             proof_timeout: PROOF_TIMEOUT,
             count_interval: COUNT_INTERVAL,
+            start_stall_window: START_STALL_WINDOW,
+            start_absolute_cap: START_ABSOLUTE_CAP,
             stop_clock: process_started,
         }
     }
@@ -213,14 +224,43 @@ impl SourceLifecycle {
         self.wait_for_source()
     }
 
+    /// Wait for the source to become healthy while it is demonstrably alive and
+    /// writing startup progress. A fixed health deadline falsely reports a
+    /// large, migrating state root as stopped.
     fn wait_for_source(&self) -> Result<(), String> {
-        let deadline = Instant::now() + HEALTH_TIMEOUT;
+        let began = Instant::now();
+        let mut last_progress = began;
+        let mut marker = log_marker(&self.source.state.join("logs/service.log"));
+        let mut process = None;
         loop {
-            if self.loaded_job()?.is_some() && probe_health(self.source.port) {
+            let listing = self
+                .loaded_job()?
+                .ok_or("the existing install unloaded while it was starting")?;
+            let pid = release_proof::pid_from_launchctl_print(&listing)
+                .ok_or("the existing install has no running process while it was starting")?;
+            let started = process_started(pid)
+                .ok_or("the existing install process exited while it was starting")?;
+            if let Some((expected_pid, expected_started)) = &process {
+                if *expected_pid != pid || *expected_started != started {
+                    return Err("the existing install process restarted while it was starting".into());
+                }
+            } else {
+                process = Some((pid, started));
+            }
+            if probe_health(self.source.port) {
                 return Ok(());
             }
-            if Instant::now() >= deadline {
-                return Err("the existing install did not answer after it was started".into());
+            let next_marker = log_marker(&self.source.state.join("logs/service.log"));
+            if next_marker != marker {
+                marker = next_marker;
+                last_progress = Instant::now();
+            }
+            let now = Instant::now();
+            if now.duration_since(began) >= self.start_absolute_cap {
+                return Err("the existing install exceeded its startup safety cap".into());
+            }
+            if now.duration_since(last_progress) >= self.start_stall_window {
+                return Err("the existing install stopped making startup progress".into());
             }
             thread::sleep(HEALTH_POLL_INTERVAL);
         }
@@ -252,6 +292,13 @@ fn classify_restart(answer: &str) -> RestartLook {
             RestartLook::Unknown
         }
     }
+}
+
+/// A log marker changes when the backend writes a new startup line, without
+/// copying log contents into diagnostics where they could contain private data.
+fn log_marker(path: &Path) -> Option<(std::time::SystemTime, u64)> {
+    let metadata = fs::metadata(path).ok()?;
+    Some((metadata.modified().ok()?, metadata.len()))
 }
 
 /// When the kernel says a process started, as `seconds.microseconds`; `None`
@@ -651,9 +698,10 @@ mod tests {
         script(
             &base.join("launchctl"),
             &format!(
-                "[ -e '{loaded}' ] || exit 113\necho 'working directory = {wd}'\necho 'CORSIA_SERVICE_GENERATION => gen-1'",
+                "[ -e '{loaded}' ] || exit 113\necho 'working directory = {wd}'\necho 'CORSIA_SERVICE_GENERATION => gen-1'\necho 'pid = {pid}'",
                 loaded = loaded.display(),
-                wd = base.join("checkout/backend").display()
+                wd = base.join("checkout/backend").display(),
+                pid = std::process::id()
             ),
         );
         script(
@@ -678,6 +726,8 @@ mod tests {
         lifecycle.env = vec![("HOME", base.into()), ("PATH", "/usr/bin:/bin".into())];
         lifecycle.proof_timeout = Duration::from_millis(300);
         lifecycle.count_interval = Duration::from_millis(30);
+        lifecycle.start_stall_window = Duration::from_millis(300);
+        lifecycle.start_absolute_cap = Duration::from_secs(2);
         fs::write(&loaded, "").unwrap();
         Home { root, lifecycle }
     }

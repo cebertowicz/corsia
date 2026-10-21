@@ -47,8 +47,11 @@ mod update_swap;
 
 const DEFAULT_SERVICE_PORT: u16 = 47_895;
 const ACTIVE_OPERATION_ERROR: &str = "CORSIA is still completing an operation";
-const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
+/// Large state roots can spend minutes in migration; lack of backend log
+/// progress, rather than a fixed health budget, detects a wedged startup.
+const STARTUP_STALL_WINDOW: Duration = Duration::from_secs(120);
+const STARTUP_ABSOLUTE_CAP: Duration = Duration::from_secs(1_800);
 const RELAUNCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Default)]
@@ -378,17 +381,48 @@ fn bundled_resource_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn wait_for_service(port: u16, app_dir: &Path) -> Result<(), String> {
-    let deadline = Instant::now() + HEALTH_TIMEOUT;
-    while Instant::now() < deadline {
+    let began = Instant::now();
+    let log = service_log_path(app_dir)?;
+    let mut marker = startup_log_marker(&log);
+    let mut last_progress = began;
+    let target = format!("gui/{}/{}", unsafe { libc::geteuid() }, service_management::service_label());
+    let mut process = None;
+    loop {
+        let pid = release_proof::launchd_pid(&target)
+            .ok_or("the CORSIA service unloaded while it was starting")?;
+        if release_proof::pid_is_gone(pid) {
+            return Err("the CORSIA service process exited while it was starting".into());
+        }
+        if let Some(expected) = process {
+            if expected != pid {
+                return Err("the CORSIA service process restarted while it was starting".into());
+            }
+        } else {
+            process = Some(pid);
+        }
         if probe_health(port) {
             return Ok(());
         }
+        let next_marker = startup_log_marker(&log);
+        if next_marker != marker {
+            marker = next_marker;
+            last_progress = Instant::now();
+        }
+        let now = Instant::now();
+        if now.duration_since(began) >= STARTUP_ABSOLUTE_CAP
+            || now.duration_since(last_progress) >= STARTUP_STALL_WINDOW
+        {
+            return Err(startup_failure::timeout_message(&log));
+        }
         thread::sleep(HEALTH_POLL_INTERVAL);
     }
-    Err(match service_log_path(app_dir) {
-        Ok(path) => startup_failure::timeout_message(&path),
-        Err(reason) => reason,
-    })
+}
+
+/// A progress marker never exposes log contents, which can contain private
+/// operational detail; a new line changes at least its metadata.
+fn startup_log_marker(path: &Path) -> Option<(SystemTime, u64)> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some((metadata.modified().ok()?, metadata.len()))
 }
 
 /// The bundle's generation as the launcher reports it to the service
@@ -1367,6 +1401,10 @@ fn get_service_log_path(
         .map_err(|_| "service state is unavailable")?
         .clone()
         .unwrap_or(default_app_dir(&app)?);
+    let adoption_trail = adoption::failure_log_path(&app_dir);
+    if adoption_trail.is_file() {
+        return Ok(adoption_trail.display().to_string());
+    }
     Ok(service_log_path(&app_dir)?.display().to_string())
 }
 
