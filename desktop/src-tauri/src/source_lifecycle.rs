@@ -14,9 +14,10 @@ use std::{
 
 use crate::{
     adoption::{self, ReadyError, RestartLook, StopProcess},
-    probe_health, release_proof, run_service_command,
+    release_proof, run_service_command,
     service_management::service_label,
-    unregister_service, wait_for_service, HEALTH_POLL_INTERVAL, HEALTH_TIMEOUT,
+    startup_failure::StartupFailure,
+    unregister_service, wait_for_service, wait_for_startup, NOT_RUNNING_WINDOW, STARTUP_CAP,
 };
 
 /// The source's own drain wait, in seconds: its cap, and the longest a switch waits for running work.
@@ -118,6 +119,8 @@ impl SourceLifecycle {
             .args(["-B", "-c", program])
             .env_clear()
             .envs(self.env.iter().map(|(name, value)| (name, value)))
+            .env("CORSIA_WORKSPACE", &self.source.workspace)
+            .env("CORSIA_STATE_DIR", &self.source.state)
             .env("PYTHONPATH", &self.bundled.packages)
             .env("PYTHONNOUSERSITE", "1")
             .current_dir(&self.bundled.backend);
@@ -213,17 +216,28 @@ impl SourceLifecycle {
         self.wait_for_source()
     }
 
+    /// The source writes no launcher refusals, so no log is searched; the
+    /// existing install is named by the failure's kind alone.
     fn wait_for_source(&self) -> Result<(), String> {
-        let deadline = Instant::now() + HEALTH_TIMEOUT;
-        loop {
-            if self.loaded_job()?.is_some() && probe_health(self.source.port) {
-                return Ok(());
+        wait_for_startup(
+            self.source.port,
+            None,
+            || {
+                Ok(self
+                    .loaded_job()?
+                    .and_then(|job| release_proof::pid_from_launchctl_print(&job)))
+            },
+            NOT_RUNNING_WINDOW,
+            STARTUP_CAP,
+        )
+        .map_err(|failure| match failure {
+            StartupFailure::TimedOut { .. } => {
+                "the existing install did not answer after it was started".into()
             }
-            if Instant::now() >= deadline {
-                return Err("the existing install did not answer after it was started".into());
-            }
-            thread::sleep(HEALTH_POLL_INTERVAL);
-        }
+            StartupFailure::Restarted => "the existing install restarted while it was starting".into(),
+            StartupFailure::Exited { .. } => "the existing install stopped while it was starting".into(),
+            StartupFailure::PidUnreadable(error) => error,
+        })
     }
 
     fn start_cli(&self) -> Result<(), String> {
@@ -583,8 +597,7 @@ impl adoption::Lifecycle for SourceLifecycle {
     }
 
     /// `corsia start` is a no-op for a job that is already loaded, so this also
-    /// holds when the install never stopped. Done is launchd listing the job and
-    /// the backend answering.
+    /// holds when the install never stopped. Done is the backend answering.
     fn start_old(&mut self) -> Result<(), String> {
         self.start_cli()?;
         self.wait_for_source()
@@ -651,9 +664,10 @@ mod tests {
         script(
             &base.join("launchctl"),
             &format!(
-                "[ -e '{loaded}' ] || exit 113\necho 'working directory = {wd}'\necho 'CORSIA_SERVICE_GENERATION => gen-1'",
+                "[ -e '{loaded}' ] || exit 113\necho 'working directory = {wd}'\necho 'CORSIA_SERVICE_GENERATION => gen-1'\necho 'pid = {pid}'",
                 loaded = loaded.display(),
-                wd = base.join("checkout/backend").display()
+                wd = base.join("checkout/backend").display(),
+                pid = std::process::id()
             ),
         );
         script(
@@ -695,6 +709,126 @@ mod tests {
                 let _ = stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok");
             }
         });
+    }
+
+    #[test]
+    fn bundled_python_receives_the_source_roots() {
+        let home = home("rm -f LOADED", "touch LOADED", "env | sort");
+        let output = home.lifecycle.python("ignored").output().unwrap();
+        assert!(output.status.success());
+        let environment = String::from_utf8(output.stdout).unwrap();
+        assert!(environment.contains(&format!(
+            "CORSIA_WORKSPACE={}\n",
+            home.lifecycle.source.workspace.display()
+        )));
+        assert!(environment.contains(&format!(
+            "CORSIA_STATE_DIR={}\n",
+            home.lifecycle.source.state.display()
+        )));
+    }
+
+    #[test]
+    fn a_restarted_service_fails_well_before_the_startup_cap() {
+        let home = home("rm -f LOADED", "exit 0", "exit 0");
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let cap = Duration::from_secs(3);
+        let began = Instant::now();
+        let error = wait_for_startup(
+            home.lifecycle.source.port,
+            None,
+            || {
+                Ok(Some(
+                    if calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
+                        1
+                    } else {
+                        2
+                    },
+                ))
+            },
+            cap,
+            cap,
+        )
+        .unwrap_err();
+        assert_eq!(error, StartupFailure::Restarted);
+        assert!(began.elapsed() < cap);
+    }
+
+    #[test]
+    fn a_service_that_exits_without_a_restart_fails_well_before_the_startup_cap() {
+        let home = home("rm -f LOADED", "exit 0", "exit 0");
+        let log = home.lifecycle.source.state.join("backend.log");
+        fs::create_dir_all(log.parent().unwrap()).unwrap();
+        fs::write(&log, "CORSIA bundled backend refused to start: another service owns this Mac\n").unwrap();
+        let mut exited = std::process::Command::new("/usr/bin/true").spawn().unwrap();
+        let pid = exited.id();
+        exited.wait().unwrap();
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let cap = Duration::from_secs(3);
+        let began = Instant::now();
+        let error = wait_for_startup(
+            home.lifecycle.source.port,
+            Some(&log),
+            || Ok((calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0).then_some(pid)),
+            cap,
+            cap,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "the CORSIA service stopped while it was starting: CORSIA bundled backend refused to start: another service owns this Mac"
+        );
+        assert!(began.elapsed() < cap);
+    }
+
+    #[test]
+    fn a_service_launchd_never_shows_running_fails_at_the_not_running_window() {
+        let home = home("rm -f LOADED", "exit 0", "exit 0");
+        let cap = Duration::from_secs(3);
+        let began = Instant::now();
+        assert_eq!(
+            wait_for_startup(
+                home.lifecycle.source.port,
+                None,
+                || Ok(None),
+                Duration::from_millis(30),
+                cap,
+            )
+            .unwrap_err(),
+            StartupFailure::Exited { refusal: None }
+        );
+        assert!(began.elapsed() < cap);
+    }
+
+    #[test]
+    fn a_pid_inspection_error_is_returned() {
+        let home = home("rm -f LOADED", "exit 0", "exit 0");
+        assert_eq!(
+            wait_for_startup(
+                home.lifecycle.source.port,
+                None,
+                || Err("could not ask launchd about the existing install".into()),
+                Duration::from_secs(3),
+                Duration::from_secs(3),
+            )
+            .unwrap_err(),
+            StartupFailure::PidUnreadable("could not ask launchd about the existing install".into())
+        );
+    }
+
+    #[test]
+    fn a_startup_cap_reports_no_answer() {
+        let stalled = home("rm -f LOADED", "exit 0", "exit 0");
+        assert_eq!(
+            wait_for_startup(
+                stalled.lifecycle.source.port,
+                None,
+                || Ok(Some(std::process::id())),
+                Duration::from_millis(30),
+                Duration::from_millis(30),
+            )
+            .unwrap_err(),
+            StartupFailure::TimedOut { refusal: None }
+        );
     }
 
     #[test]

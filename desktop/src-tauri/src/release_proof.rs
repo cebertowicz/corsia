@@ -15,6 +15,9 @@ use std::{
 };
 
 const PROOF_TIMEOUT: Duration = Duration::from_secs(15);
+/// Outlasts launchd's default 20 s SIGKILL grace: `SMAppService::unregister`
+/// delegates the stop to launchd, and the bundled plist has no `ExitTimeOut`.
+const PID_EXIT_TIMEOUT: Duration = Duration::from_secs(25);
 const PROOF_POLL: Duration = Duration::from_millis(100);
 
 /// The process id launchd reports for a loaded job, or none when it has none.
@@ -62,8 +65,8 @@ pub fn database_released(python: &Path, database: &Path) -> Result<(), String> {
         .ok_or_else(|| "the database is still held open".into())
 }
 
-fn wait_until(mut done: impl FnMut() -> bool) -> bool {
-    let deadline = Instant::now() + PROOF_TIMEOUT;
+fn wait_until(timeout: Duration, mut done: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + timeout;
     loop {
         if done() {
             return true;
@@ -83,17 +86,17 @@ pub fn prove_released(
     database: &Path,
 ) -> Result<(), String> {
     if let Some(pid) = pid {
-        if !wait_until(|| pid_is_gone(pid)) {
+        if !wait_until(PID_EXIT_TIMEOUT, || pid_is_gone(pid)) {
             return Err(format!("process {pid} is still running after bootout"));
         }
     }
-    if !wait_until(|| port_refuses(port)) {
+    if !wait_until(PROOF_TIMEOUT, || port_refuses(port)) {
         return Err(format!(
             "port {port} still accepts connections after bootout"
         ));
     }
     let mut last = String::new();
-    if wait_until(|| match database_released(python, database) {
+    if wait_until(PROOF_TIMEOUT, || match database_released(python, database) {
         Ok(()) => true,
         Err(error) => {
             last = error;

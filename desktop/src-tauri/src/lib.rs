@@ -21,6 +21,7 @@ use std::{
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
+use service_management::service_label;
 use source_lifecycle::{Bundled, SourceLifecycle};
 use tauri::{ipc::CapabilityBuilder, Manager};
 
@@ -43,6 +44,7 @@ mod source_lifecycle;
 mod startup_failure;
 #[cfg(test)]
 mod test_tls;
+use startup_failure::StartupFailure;
 mod trust;
 mod version_check;
 mod update_stage;
@@ -50,8 +52,14 @@ mod update_swap;
 
 const DEFAULT_SERVICE_PORT: u16 = 47_895;
 const ACTIVE_OPERATION_ERROR: &str = "CORSIA is still completing an operation";
-const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
+/// A 20 GiB rehearsal root reached health in 71–74 s, the October 20 cold
+/// start took about 99 s, and its longest silent phase was 65 s. Six times the
+/// largest observed start leaves room for a slow migration without concealing
+/// a hang indefinitely.
+pub(crate) const STARTUP_CAP: Duration = Duration::from_secs(600);
+/// How long launchd may show no process for a just-started service.
+pub(crate) const NOT_RUNNING_WINDOW: Duration = Duration::from_secs(30);
 const RELAUNCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Default)]
@@ -381,17 +389,56 @@ fn bundled_resource_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn wait_for_service(port: u16, app_dir: &Path) -> Result<(), String> {
-    let deadline = Instant::now() + HEALTH_TIMEOUT;
-    while Instant::now() < deadline {
+    let log = service_log_path(app_dir)?;
+    let target = format!("gui/{}/{}", unsafe { libc::geteuid() }, service_label());
+    wait_for_startup(
+        port,
+        Some(&log),
+        || Ok(release_proof::launchd_pid(&target)),
+        NOT_RUNNING_WINDOW,
+        STARTUP_CAP,
+    )
+    .map_err(|failure| failure.to_string())
+}
+
+/// Health is the readiness signal. A changed launchd PID proves the service
+/// restarted while starting, and a PID the kernel no longer knows with none in
+/// its place proves it exited. launchd showing no process for the whole
+/// `not_running` window means it exited before it was seen or never started;
+/// launchd's 10 s respawn throttle sits well inside the window. Otherwise the
+/// fixed cap bounds a hung startup. `log` is searched only for launcher
+/// refusals.
+pub(crate) fn wait_for_startup(
+    port: u16,
+    log: Option<&Path>,
+    mut service_pid: impl FnMut() -> Result<Option<u32>, String>,
+    not_running: Duration,
+    cap: Duration,
+) -> Result<(), StartupFailure> {
+    let began = Instant::now();
+    let mut initial_pid = None;
+    loop {
         if probe_health(port) {
             return Ok(());
         }
+        match (initial_pid, service_pid().map_err(StartupFailure::PidUnreadable)?) {
+            (Some(expected), Some(actual)) if actual != expected => {
+                return Err(StartupFailure::Restarted);
+            }
+            (Some(expected), None) if release_proof::pid_is_gone(expected) => {
+                return Err(StartupFailure::exited(log));
+            }
+            (None, None) if began.elapsed() >= not_running => {
+                return Err(StartupFailure::exited(log));
+            }
+            (None, Some(pid)) => initial_pid = Some(pid),
+            _ => {}
+        }
+        if began.elapsed() >= cap {
+            return Err(StartupFailure::timed_out(log));
+        }
         thread::sleep(HEALTH_POLL_INTERVAL);
     }
-    Err(match service_log_path(app_dir) {
-        Ok(path) => startup_failure::timeout_message(&path),
-        Err(reason) => reason,
-    })
 }
 
 /// The bundle's generation as the launcher reports it to the service
@@ -576,35 +623,41 @@ fn choose_work_folder(app: tauri::AppHandle) -> Result<Option<first_run::FolderC
 }
 
 #[tauri::command]
-fn configure_work_folder(
-    app: tauri::AppHandle,
-    service: tauri::State<'_, AppServiceState>,
-    path: PathBuf,
-) -> Result<(), String> {
-    let app_dir = default_app_dir(&app)?;
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|error| format!("could not resolve the home folder: {error}"))?;
-    first_run::ensure_folder_writable(&path)?;
-    let port = first_run::recorded_port(&app_dir).unwrap_or(DEFAULT_SERVICE_PORT);
-    let resources = bundled_resource_dir(&app).ok();
-    first_run::apply_chosen_folder(
-        &path,
-        &first_run::default_workspace(&home),
-        &app_dir,
-        port,
-        || setup_account_exists(port),
-        |workspace| {
-            first_run::git_init(
-                workspace,
-                resources.as_deref(),
-                first_run::command_line_tools_installed,
-            )
-        },
-        restart_service,
-        || wait_for_service(port, &app_dir),
-    )?;
+async fn configure_work_folder(app: tauri::AppHandle, path: PathBuf) -> Result<(), String> {
+    let configuring = app.clone();
+    let (app_dir, port) = tauri::async_runtime::spawn_blocking(move || {
+        let app_dir = default_app_dir(&configuring)?;
+        let home = configuring
+            .path()
+            .home_dir()
+            .map_err(|error| format!("could not resolve the home folder: {error}"))?;
+        first_run::ensure_folder_writable(&path)?;
+        let port = first_run::recorded_port(&app_dir).unwrap_or(DEFAULT_SERVICE_PORT);
+        let resources = bundled_resource_dir(&configuring).ok();
+        first_run::apply_chosen_folder(
+            &path,
+            &first_run::default_workspace(&home),
+            &app_dir,
+            port,
+            || setup_account_exists(port),
+            |workspace| {
+                first_run::git_init(
+                    workspace,
+                    resources.as_deref(),
+                    first_run::command_line_tools_installed,
+                )
+            },
+            restart_service,
+            || wait_for_service(port, &app_dir),
+        )?;
+        Ok::<_, String>((app_dir, port))
+    })
+    .await
+    .map_err(|error| {
+        log::error!("configuring the work folder did not finish: {error}");
+        "Couldn’t finish setting up the work folder. Quit CORSIA and open it again.".to_string()
+    })??;
+    let service = app.state::<AppServiceState>();
     grant_local_service_origin(&app, &service, port)?;
     *service
         .app_dir
