@@ -697,6 +697,21 @@ def test_an_ignored_guidance_path_reports_history_off(history_scope):
     assert result.outcome == "history-off" and "ignored" in result.line
 
 
+def test_a_committed_save_schedules_carry_in_after_history_lands(history_scope, monkeypatch):
+    workspace, _ = history_scope
+    scheduled: list[tuple[Path, tuple[Path, ...], str]] = []
+    monkeypatch.setattr(
+        "core.lesson_carry_in.record_committed_save",
+        lambda saved_workspace, paths, commit: scheduled.append((saved_workspace, paths, commit)),
+    )
+
+    path = _history(workspace)
+    result = _save(workspace, path, "carry-in target\n")
+
+    assert result.outcome == "written"
+    assert scheduled == [(workspace, (path,), result.sha)]
+
+
 def test_forty_save_burst_reports_lock_wait_p95(history_scope, monkeypatch):
     workspace, _ = history_scope
     events: list[dict] = []

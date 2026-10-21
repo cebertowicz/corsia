@@ -106,7 +106,10 @@ def _target(decision: Decision) -> str:
     from tools.filesystem_gate import canonical_target_path
 
     raw = decision.new_target_path if decision.target_file == "new" else decision.target_file
-    return canonical_target_path(str(raw), workspace=WORKSPACE)
+    target = canonical_target_path(str(raw), workspace=WORKSPACE)
+    if target == ".corsia" or target.startswith(".corsia/"):
+        raise TrialRefused("invalid-learning-metadata", "System projections cannot be lesson carry-in targets.")
+    return target
 
 
 def _target_trials(decision: Decision) -> tuple[list[tuple[Path, Any]], list[tuple[Path, Any]]]:

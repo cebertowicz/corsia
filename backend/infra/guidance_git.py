@@ -303,6 +303,14 @@ def save_guidance(
     }
     logger.info("guidance save {}", properties)
     emit_product_event("guidance_history", "save", properties=properties)
+    if result.outcome == "written" and result.sha:
+        try:
+            from core.lesson_carry_in import record_committed_save
+
+            record_committed_save(workspace, tuple(changes), result.sha)
+        except Exception:
+            # Carry-in checks are after-save work: guidance history remains authoritative.
+            logger.opt(exception=True).warning("carry-in scheduling failed")
     return result
 
 

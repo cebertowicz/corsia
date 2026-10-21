@@ -150,6 +150,20 @@ def record_github_outcome_drafts(db, drafts) -> int:
     return recorded
 
 
+def record_carry_in_regression(
+    db, *, result_event_id: str, thread_id: str | None, created_at: str,
+) -> bool:
+    """Record one 2-of-3 landed-guidance regression, or retain unresolved ownership visibly."""
+    if not thread_id:
+        return False
+    return _record(
+        db,
+        source_id=f"carry_in_regression:{result_event_id}",
+        thread_id=thread_id,
+        created_at=created_at,
+    )
+
+
 def record_merged_revert(
     db, *, reverted_repo: str, reverted_pr: str, source_id: str, created_at: str,
 ) -> bool:
