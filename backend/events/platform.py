@@ -27,7 +27,7 @@ from events.connectors import EventTypeDecl, get_manifest
 from events.delivery import enqueue_event_wake
 from events.envelope import EventEnvelope, normalize
 from events.resolve import Target, resolve_targets
-from events.rules import evaluate, event_scope
+from events.rules import Evaluation, evaluate, event_scope
 from events import route_decisions
 from infra.database import write_transaction
 from infra.db_async import run_in_db_unless_owned
@@ -201,37 +201,34 @@ def _deliver_target(
     return PlatformDelivery(event_id, thread, DIGESTED)
 
 
-def deliver_platform_event_sync(
-    connector: str,
-    raw_payload: dict[str, Any],
-    event_type: str | None = None,
-    *,
+def deliver_event_envelope_sync(
+    envelope: EventEnvelope, declaration: EventTypeDecl, *,
+    resolve_owner: Callable[[], list[Target]] | None = None,
+    scope: str | None = None,
     repair_owner: str | None = None,
     target_filter: Callable[[Target, sqlite3.Connection], str | None] | None = None,
     db: sqlite3.Connection | None = None,
-) -> list[PlatformDelivery]:
-    """Normalize, resolve and deliver one event in one write transaction."""
-    envelope = normalize(connector, raw_payload, event_type)
-    decl = get_manifest(connector).decl(envelope.type)
+) -> tuple[list[PlatformDelivery], Evaluation]:
+    """Evaluate and deliver an already-normalized event through the platform path."""
     with write_transaction(db, scope="deliver_platform_event") as conn:
-        scope = event_scope(envelope, db=conn)
+        event_rule_scope = scope or event_scope(envelope, db=conn)
         evaluated = evaluate(
-            envelope, scope=scope, db=conn,
-            resolve_owner=lambda: resolve_targets(envelope, repair_owner=repair_owner, db=conn),
+            envelope, scope=event_rule_scope, db=conn,
+            resolve_owner=resolve_owner or (lambda: resolve_targets(
+                envelope, repair_owner=repair_owner, db=conn)),
         )
         if evaluated.dropped_by:
-            record_drop(conn, envelope, evaluated.dropped_by, scope,
+            record_drop(conn, envelope, evaluated.dropped_by, event_rule_scope,
                         author=envelope.facts.get('author'))
-            return [PlatformDelivery(envelope.event_id, None, DROPPED)]
-        targets = evaluated.targets
+            return [PlatformDelivery(envelope.event_id, None, DROPPED)], evaluated
         deliveries = [
             PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
             if target_filter is not None and (reason := target_filter(target, conn)) is not None
-            else _deliver_target(conn, _traced(envelope, evaluated.rule_ids[target.thread]), target, decl)
-            for target in targets
+            else _deliver_target(conn, _traced(envelope, evaluated.rule_ids[target.thread]), target, declaration)
+            for target in evaluated.targets
         ]
         for delivered in deliveries:
-            _after_delivery(conn, envelope, delivered, evaluated.rule_ids[delivered.thread_id], scope)
+            _after_delivery(conn, envelope, delivered, evaluated.rule_ids[delivered.thread_id], event_rule_scope)
         for delivery in deliveries:
             emit_product_event(
                 "event_route", delivery.outcome,
@@ -242,7 +239,26 @@ def deliver_platform_event_sync(
                     "reason": delivery.reason,
                 },
             )
-        return deliveries
+        return deliveries, evaluated
+
+
+def deliver_platform_event_sync(
+    connector: str,
+    raw_payload: dict[str, Any],
+    event_type: str | None = None,
+    *,
+    repair_owner: str | None = None,
+    target_filter: Callable[[Target, sqlite3.Connection], str | None] | None = None,
+    db: sqlite3.Connection | None = None,
+) -> list[PlatformDelivery]:
+    """Normalize, evaluate and deliver one connector event through the platform path."""
+    envelope = normalize(connector, raw_payload, event_type)
+    declaration = get_manifest(connector).decl(envelope.type)
+    deliveries, _ = deliver_event_envelope_sync(
+        envelope, declaration, repair_owner=repair_owner,
+        target_filter=target_filter, db=db,
+    )
+    return deliveries
 
 
 async def deliver_platform_event(

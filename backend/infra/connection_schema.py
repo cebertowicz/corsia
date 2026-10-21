@@ -17,4 +17,10 @@ CONNECTION_SCHEMA_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_connections_status ON connections(type, status);
 
-""" + EVENT_RULE_SCHEMA_SQL
+""" + EVENT_RULE_SCHEMA_SQL + """
+    CREATE TABLE IF NOT EXISTS event_intake_records (
+        event_id TEXT PRIMARY KEY,
+        outcome TEXT NOT NULL CHECK(outcome='accepted'),
+        rules_matched INTEGER NOT NULL
+    );
+"""

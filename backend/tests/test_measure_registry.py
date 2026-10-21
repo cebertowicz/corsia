@@ -124,6 +124,13 @@ def test_a_namespace_another_live_agent_holds_is_refused() -> None:
         sync(connection, owner_thread_id="agent-b", path=own("agent-b"), text=MEASURES)
 
 
+def test_event_declarations_stay_in_their_namespace_and_use_a_known_mode(tmp_path: Path) -> None:
+    outside_namespace = MEASURES.replace("mail.triaged", "other.triaged")
+    assert "event other.triaged is outside namespace mail" in refused(tmp_path, outside_namespace)
+    invalid_use = MEASURES.replace("    dedupe: [message_ref, run_id]", "    dedupe: [message_ref, run_id]\n    use: wake")
+    assert "event mail.triaged use must be record, route or both" in refused(tmp_path, invalid_use)
+
+
 def test_qg_declaration_copy_syncs_with_version_attr_can_decide_and_decides_as(tmp_path: Path) -> None:
     text = (FIXTURES / "qg_measures.yaml").read_text()
     path = skill_file(tmp_path, text)

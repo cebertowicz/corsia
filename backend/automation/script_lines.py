@@ -36,6 +36,7 @@ class LineRefusal:
 @dataclass
 class ParsedOutput:
     readings: list[Reading] = field(default_factory=list)
+    events: list[dict[str, Any]] = field(default_factory=list)
     measures: list[dict[str, Any]] = field(default_factory=list)
     refused: list[LineRefusal] = field(default_factory=list)
     over_cap: int = 0
@@ -61,6 +62,11 @@ def parse_output(stdout: bytes, registered: dict[str, store.Series]) -> ParsedOu
             continue
         if isinstance(item, dict) and set(item) == {"measure"}:
             _take_measure(parsed, number, item["measure"])
+            continue
+        if isinstance(item, dict) and set(item) == {"event"}:
+            problem = _take_event(parsed, item["event"])
+            if problem:
+                parsed.problems.append(f"line {number}: {problem}")
             continue
         problem = _read_line(item, registered, readings)
         if problem:
@@ -96,11 +102,22 @@ def _measure_problem(measure: Any) -> str | None:
     return None
 
 
+def _take_event(parsed: ParsedOutput, event: Any) -> str | None:
+    if not isinstance(event, dict) or set(event) != {"type", "facts"}:
+        return '"event" must be an object with exactly "type" and "facts"'
+    if not isinstance(event["type"], str) or not event["type"]:
+        return 'event type must be a non-empty declared event name'
+    if not isinstance(event["facts"], dict):
+        return 'event facts must be an object'
+    parsed.events.append(event)
+    return None
+
+
 def _read_line(
     item: Any, registered: dict[str, store.Series], readings: dict[str, Reading],
 ) -> str | None:
     if not isinstance(item, dict) or set(item) != {"series", "value"}:
-        return 'expected exactly {"series": ..., "value": ...} or {"measure": ...}'
+        return 'expected exactly {"series": ..., "value": ...}, {"event": ...}, or {"measure": ...}'
     key, value = item["series"], item["value"]
     if not isinstance(key, str) or key not in registered:
         return "series is not registered on this schedule"

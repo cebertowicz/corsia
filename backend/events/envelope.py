@@ -31,6 +31,7 @@ class EventEnvelope:
     provenance: dict[str, Any]
     event_class: str
     ownerless_ok: bool
+    origin: str = "platform"
 
 
 def _event_class(decl: EventTypeDecl, facts: dict[str, Any]) -> str:
