@@ -300,7 +300,7 @@
 	{:else if page === 'models'}
 		<SetupAiRows rows={aiRows} />
 		{#if otherQuestion}<div class="other-omlx"><h2>Stop other oMLX processes?</h2><p>CORSIA runs its own oMLX for the local model. Stopping other oMLX processes can free memory. Login items start again when you next sign in. Other processes stay stopped until you start them.</p><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(true)}>Stop other oMLX</Button><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(false)}>Keep them running</Button></div>{/if}
-		{#if sourceError}<Message variant="err">{sourceError}</Message><Button variant="chip" onclick={() => void refreshSources(true)}>Retry</Button>{/if}
+		{#if sourceError}<p class="setup-error">{sourceError}</p><Button variant="chip" onclick={() => void refreshSources(true)}>Retry</Button>{/if}
 	{/if}
 </SetupShell>
 {#if showAdd}<AddProviderModal onClose={() => { showAdd = false; void refreshSources(); }} onSelectCloud={selectProvider} />{/if}
@@ -310,4 +310,5 @@
 	.other-omlx { margin: var(--space-4) var(--space-4); color: var(--text-secondary); }
 	h2 { font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-primary); }
 	p { font-size: var(--text-footnote); line-height: var(--lh-normal); }
+	.setup-error { color: var(--danger-text); margin: var(--space-2) var(--space-4); }
 </style>

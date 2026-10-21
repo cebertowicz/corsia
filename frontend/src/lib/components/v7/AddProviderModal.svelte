@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Button, Field, IconButton, Message, Modal } from '$lib/components/ui';
+	import { Button, Field, IconButton, Modal } from '$lib/components/ui';
 	import { providers, type ProviderEntry } from '$lib/stores/providers';
 	import { addNetworkServer, parseModelIds } from '$lib/stores/networkServers';
 	import { loadHostGroups } from '$lib/stores/providersV7';
@@ -24,13 +24,11 @@
 	let endpointUrl = $state('');
 	let endpointDialect = $state<'openai' | 'anthropic'>('openai');
 	let endpointKey = $state('');
-	let endpointWarm = $state('');
 	let endpointModels = $state('');
 	let endpointName = $state('');
+	let showEndpointOptions = $state(false);
 
 	const defaultPort = 8000;
-	// Mirrors the AddServerBody bound (24h), which also rejects anything larger.
-	const MAX_CACHE_WARM_SECONDS = 86_400;
 
 	async function handleAddRemote() {
 		actionError = '';
@@ -56,14 +54,7 @@
 			actionError = 'Enter the full endpoint URL, including https://';
 			return;
 		}
-		// Either dialect: the endpoint's provider owns its cache, not the wire format.
-		const warmText = endpointWarm.trim();
-		const warm = warmText ? Number(warmText) : undefined;
-		if (warm !== undefined && (!Number.isInteger(warm) || warm <= 0 || warm > MAX_CACHE_WARM_SECONDS)) {
-			actionError = `Checkpoint cache window must be a whole number of seconds from 1 to ${MAX_CACHE_WARM_SECONDS}`;
-			return;
-		}
-		// The URL IS the endpoint on this path: host and port are not sent, and the
+		// The URL is the endpoint on this path: host and port are not sent, and the
 		// backend derives the port from the URL's own scheme. The host part is kept
 		// only as a display name when the user did not type one.
 		const host = base.split('/')[2] ?? base;
@@ -72,7 +63,7 @@
 			base_url: base,
 			dialect: endpointDialect,
 			api_key: endpointKey.trim() || undefined,
-			cache_warm_seconds: warm,
+
 			model_ids: parseModelIds(endpointModels),
 		});
 		busy = false;
@@ -103,7 +94,7 @@
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
 					</IconButton>
 				{/if}
-				<span>{mode === 'menu' ? 'Add provider' : mode === 'remote' ? 'Add remote provider' : 'Add endpoint by URL'}</span>
+				<span>{mode === 'menu' ? 'Add provider' : mode === 'remote' ? 'Models on another computer' : 'Other provider by address'}</span>
 			</div>
 			<IconButton ariaLabel="Close" onclick={onClose}>
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6 18 18M18 6 6 18"/></svg>
@@ -111,32 +102,8 @@
 		</header>
 	{/snippet}
 
-	{#if actionError}<Message variant="err">{actionError}</Message>{/if}
 
 	{#if mode === 'menu'}
-		<div class="grp">Network</div>
-		<button type="button" class="ai press-tint" onclick={() => mode = 'remote'}>
-			<span class="ai-icon" style="color: var(--sky);">
-				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
-			</span>
-			<span class="ai-text">
-				<span class="ai-name">Add remote provider by IP</span>
-				<span class="ai-desc">oMLX on another machine (Tailscale, LAN)</span>
-			</span>
-			<svg class="arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
-		</button>
-
-		<button type="button" class="ai press-tint" onclick={() => mode = 'endpoint'}>
-			<span class="ai-icon" style="color: var(--sky);">
-				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>
-			</span>
-			<span class="ai-text">
-				<span class="ai-name">Add endpoint by URL</span>
-				<span class="ai-desc">Any OpenAI-compatible or Anthropic cloud API</span>
-			</span>
-			<svg class="arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
-		</button>
-
 		{#if cloudUnconfigured.length > 0}
 			<div class="grp">Cloud</div>
 			{#each cloudUnconfigured as p (p.name)}
@@ -153,37 +120,59 @@
 			{/each}
 		{/if}
 
+		<div class="grp">Other ways to connect</div>
+		<button type="button" class="ai press-tint" onclick={() => mode = 'remote'}>
+			<span class="ai-icon" style="color: var(--sky);">
+				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+			</span>
+			<span class="ai-text">
+				<span class="ai-name">Models on another computer</span>
+				<span class="ai-desc">Use models running on another computer</span>
+			</span>
+			<svg class="arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
+		</button>
+
+		<button type="button" class="ai press-tint" onclick={() => mode = 'endpoint'}>
+			<span class="ai-icon" style="color: var(--sky);">
+				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>
+			</span>
+			<span class="ai-text">
+				<span class="ai-name">Other provider by address</span>
+				<span class="ai-desc">Add a provider with its web address</span>
+			</span>
+			<svg class="arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
+		</button>
+
 		{#if cloudUnconfigured.length === 0}
-			<div class="empty">All known providers are configured. Use <em>Add remote provider</em> for oMLX on another machine, or <em>Add endpoint by URL</em> for any other API.</div>
+			<div class="empty">All known providers are configured. You can still add models on another computer or another provider by address.</div>
 		{/if}
 	{:else if mode === 'endpoint'}
-		<p class="hint">
-			Register any OpenAI-compatible or Anthropic endpoint by its full URL —
-			including cloud bases that carry a path. CORSIA probes it before saving,
-			so a provider listed as online is one it actually reached.
-		</p>
+		<p class="hint">Add a provider using the full web address it gives you.</p>
 
-		<Field label="Endpoint URL" hint="the base URL your provider documents for its SDK, used exactly as typed">
+		<Field label="Web address" hint="Use the address exactly as your provider gives it.">
 			<input placeholder="https://host.example.com/compatible-mode/v1" bind:value={endpointUrl} />
 		</Field>
-		<Field label="Wire dialect">
-			<select bind:value={endpointDialect}>
-				<option value="openai">OpenAI-compatible</option>
-				<option value="anthropic">Anthropic</option>
-			</select>
-		</Field>
-		<Field label="API key" hint="stored on this server only, never shown again">
+		<Field label="API key" hint="Stored on this computer only. Never shown again.">
 			<input type="password" placeholder="(leave empty for a keyless endpoint)" bind:value={endpointKey} />
 		</Field>
-		<Field label="Model IDs" hint="only if the endpoint doesn't list its models, as Alibaba's Token Plan and Coding Plan don't. One per line or comma-separated.">
-			<textarea rows="2" placeholder="glm-5.3, deepseek-v4.1-flash" bind:value={endpointModels}></textarea>
-		</Field>
-		<Field label="Checkpoint cache window (seconds)" hint="CORSIA's checkpoint setting: how long this endpoint keeps its prompt cache warm. Saved for checkpoint timing, not used yet, never sent to the provider. At most 86400.">
-			<input placeholder="300 · 3600" inputmode="numeric" bind:value={endpointWarm} />
-		</Field>
-		<Field label="Friendly name">
-			<input placeholder="(optional — uses the host)" bind:value={endpointName} />
-		</Field>
+		<button type="button" class="more-options" aria-expanded={showEndpointOptions} onclick={() => showEndpointOptions = !showEndpointOptions}>
+			{showEndpointOptions ? 'Fewer options' : 'More options'}
+		</button>
+		{#if showEndpointOptions}
+			<Field label="Connection type">
+				<select bind:value={endpointDialect}>
+					<option value="openai">OpenAI-compatible</option>
+					<option value="anthropic">Anthropic</option>
+				</select>
+			</Field>
+			<Field label="Model names" hint="Only needed when the provider does not list its models. One per line or comma-separated.">
+				<textarea rows="2" placeholder="model-one, model-two" bind:value={endpointModels}></textarea>
+			</Field>
+			<Field label="Name">
+				<input placeholder="(optional — uses the address)" bind:value={endpointName} />
+			</Field>
+		{/if}
+		{#if actionError}<p class="field-error">{actionError}</p>{/if}
 
 		<div class="actions">
 			<Button variant="ghost" disabled={busy} onclick={() => mode = 'menu'}>Back</Button>
@@ -197,21 +186,18 @@
 			</Button>
 		</div>
 	{:else}
-		<p class="hint">
-			Register an oMLX server running on another machine — it is identified
-			by IP, not by service-specific discovery. For a cloud API or any other
-			endpoint, use <em>Add endpoint by URL</em>.
-		</p>
+		<p class="hint">Add models that are already running on another computer.</p>
 
-		<Field label="Host or IP">
+		<Field label="Computer address">
 			<input placeholder="100.64.1.5  ·  macbook-m4.local" bind:value={remoteHost} />
 		</Field>
 		<Field label="Port" hint="leave empty for default ({defaultPort})">
 			<input placeholder={`${defaultPort}`} bind:value={remotePort} />
 		</Field>
-		<Field label="Friendly name">
-			<input placeholder="(optional — auto-detected)" bind:value={remoteName} />
+		<Field label="Name">
+			<input placeholder="(optional — uses the address)" bind:value={remoteName} />
 		</Field>
+		{#if actionError}<p class="field-error">{actionError}</p>{/if}
 
 		<div class="actions">
 			<Button variant="ghost" disabled={busy} onclick={() => mode = 'menu'}>Back</Button>
@@ -292,6 +278,17 @@
 		margin: 0 0 10px;
 	}
 
+	.more-options {
+		align-self: flex-start;
+		border: 0;
+		padding: 0;
+		background: transparent;
+		color: var(--text-link);
+		font: inherit;
+		font-size: var(--text-footnote);
+		cursor: pointer;
+	}
+	.field-error { margin: var(--space-2) 0 0; color: var(--danger-text); font-size: var(--text-footnote); line-height: var(--lh-normal); }
 	.actions {
 		display: flex; gap: 8px; margin-top: 18px; align-items: center; justify-content: flex-end;
 	}
