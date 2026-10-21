@@ -15,7 +15,7 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 	const row = { key: 'omlx', name: 'Local model' };
 	const model = pick?.model?.name ?? source?.settings_download?.name ?? 'Local model';
 	const size = pick?.model ? `${pick.model.download_size_gb} GB` : source?.download_size ?? '';
-	if (!eligible) return { ...row, meta: LOW_MEMORY_LOCAL_MODEL_MESSAGE };
+	if (!eligible || pick?.state === 'low_memory') return { ...row, meta: LOW_MEMORY_LOCAL_MODEL_MESSAGE };
 	if (ready) return { ...row, meta: `${model} · runs on this computer`, pill: { state: 'success', label: 'Ready' } };
 	if (downloading) {
 		if (source?.local_state === 'starting') return { ...row, meta: 'Starting the local model…', busy: true };
@@ -43,5 +43,5 @@ export function setupStartNote(ready: boolean, eligible: boolean, downloading: b
 	if (ready) return downloading ? 'The local model keeps downloading. Follow it in Settings › Providers.' : '';
 	if (!eligible) return 'Set up a subscription or add an API provider to continue.';
 	if (downloading) return `Ready when the local model finishes downloading${measuredDownloadTime(eta) ? `, in ${measuredDownloadTime(eta)}` : ''}.`;
-	return 'Download the local model or set up a subscription to continue.';
+	return 'Download the local model, set up a subscription or add an API provider to continue.';
 }

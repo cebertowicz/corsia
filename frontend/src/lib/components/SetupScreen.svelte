@@ -73,7 +73,7 @@
 	let status = $state<Status>({}), statusError = $state(''), reportError = $state('');
 	let name = $state(''), username = $state(''), password = $state(''), confirmation = $state(''), email = $state('');
 	let folder = $state('~/CORSIA'), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
-	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
+	let accountBusy = $state(false), accountError = $state(''), accountUsernameError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
 	let localStartError = $state<'other' | 'other_omlx' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false), otherQuestion = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
@@ -87,7 +87,7 @@
 	const tested = $derived($testedProviders.map((source) => ({ source })));
 	const best = $derived(bestSetupModel(catalog, tested));
 	const canFinish = $derived(Boolean(best));
-	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? 'Use up to 32 lowercase letters, numbers, dashes or underscores.' : '');
+	const usernameError = $derived(accountUsernameError || (username && !/^[a-z0-9_-]{1,32}$/.test(username) ? 'Use up to 32 lowercase letters, numbers, dashes or underscores.' : ''));
 	const accountValid = $derived(Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password));
 	const steps = $derived<SetupStep[]>(page === 'connect' ? remote.steps : [
 		{ label: 'Your account', icon: 'person', state: ['checking', 'account', 'error', 'hard-stop'].includes(page) ? 'current' : 'done' },
@@ -106,7 +106,10 @@
 	const aiRows = $derived.by((): AiRow[] => {
 		const rows = ['claude-code', 'codex'].map((vendor): AiRow => {
 			const source = sources.find((row) => row.source === vendor);
-			if (!source) return { key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', meta: '', busy: true };
+			if (!source) {
+				const name = vendor === 'codex' ? 'Codex' : 'Claude Code';
+				return sourceError ? { key: vendor, name, meta: `Couldn’t check ${name}.`, error: true, action: { label: 'Retry', run: () => void refreshSources(true) } } : { key: vendor, name, meta: '', busy: true };
+			}
 			const view = connectFlow.row(source);
 			const works = catalog.some((row) => row.connection === vendor && setupModelWorks(row));
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, pill: works ? { state: 'success', label: 'Ready' } : undefined });
@@ -209,13 +212,17 @@
 	}
 	async function createAccount() {
 		if (!accountValid || accountBusy) return;
-		accountBusy = true; accountError = '';
+		accountBusy = true; accountError = ''; accountUsernameError = '';
 		try {
 			if (folderChanged) { await applyWorkFolder(folder); folderChanged = false; }
 			const response = await fetch('/api/setup/first-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null }) });
 			if (response.status === 409) { accountExists = true; accountError = 'This computer already has a CORSIA account. Sign in instead.'; page = 'account'; return; }
 			const result = await response.json().catch(() => null);
-			if (!response.ok) { accountError = 'Couldn’t create your account. Retry.'; return; }
+			if (!response.ok) {
+				if (response.status === 422) { page = 'account'; accountUsernameError = "That username isn't available. Choose another."; }
+				else accountError = 'Couldn’t create your account. Retry.';
+				return;
+			}
 			onAccountCreated(); token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() }); connect();
 			password = ''; confirmation = ''; page = 'models';
 			await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
