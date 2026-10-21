@@ -197,15 +197,27 @@ def _failed_boot_result(
             )
     if _process_exited(pid):
         _clear_pid(server_id)
-    tail = _tail_log(server_id, lines=20)
+    # The log tail is for diagnosis, so it goes to the backend log; the person gets a next step.
+    log.warning(
+        "oMLX boot failed for %s on %s:%s (%s after %ss). Last log lines:\n%s",
+        server_id, host, port, reason, int(timeout_s), _tail_log(server_id, lines=20) or "(empty log)",
+    )
     return {
         "ok": False,
         "message": (
-            f"oMLX exited before becoming healthy on {host}:{port}."
+            "The local model stopped while it was starting. Start it again; "
+            "if it stops again, restart this Mac, then start it."
             if reason == "exited"
-            else f"oMLX did not become healthy on {host}:{port} within {int(timeout_s)}s."
-        ) + f" Last log lines:\n{tail or '(empty log)'}",
+            else f"The local model didn't finish starting within {_duration(timeout_s)}. Start it again."
+        ),
     }
+
+
+def _duration(seconds: float) -> str:
+    whole = int(seconds)
+    if whole >= 120 and whole % 60 == 0:
+        return f"{whole // 60} minutes"
+    return f"{whole} seconds"
 
 
 async def start_server(cfg: dict) -> dict[str, Any]:

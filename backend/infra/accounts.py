@@ -146,7 +146,7 @@ def _create_account(
                 f"account as one of: {', '.join(owners)}. Add others after."
             )
         if conn.execute("SELECT 1 FROM users WHERE id = ?", (name,)).fetchone():
-            raise AccountError(f"An account named '{name}' already exists.")
+            raise AccountError(f"An account named '{name}' already exists. Choose a different username.")
         conn.execute(
             "INSERT INTO users (id, password_hash, created_at, password_changed_at)"
             " VALUES (?, ?, ?, ?)",

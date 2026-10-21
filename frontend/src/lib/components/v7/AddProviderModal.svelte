@@ -33,7 +33,7 @@
 	async function handleAddRemote() {
 		actionError = '';
 		const host = remoteHost.trim();
-		if (!host) { actionError = 'Host or IP is required'; return; }
+		if (!host) { actionError = 'Enter the computer address.'; return; }
 		const port = remotePort.trim() ? parseInt(remotePort.trim(), 10) : defaultPort;
 		const name = remoteName.trim() || host;
 		busy = true;

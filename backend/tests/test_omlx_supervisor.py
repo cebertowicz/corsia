@@ -413,18 +413,27 @@ def test_new_omlx_start_uses_the_managed_cap_only_for_the_bundled_row(isolated_r
     assert waited == {"timeout_s": expected_timeout, "server_id": "progress", "pid": 1234}
 
 
-def test_failed_boot_names_the_reason_that_ended_the_health_wait(isolated_runtime, monkeypatch):
+def test_failed_boot_names_the_reason_that_ended_the_health_wait(isolated_runtime, monkeypatch, caplog):
     from llm.providers import omlx_supervisor as sup
 
     monkeypatch.setattr(sup, "_read_pid", lambda _server_id: None)
     monkeypatch.setattr(sup, "_process_exited", lambda _pid: True)
-    monkeypatch.setattr(sup, "_tail_log", lambda _server_id, lines: "last line")
+    monkeypatch.setattr(sup, "_tail_log", lambda _server_id, lines: "secret-ish last line")
 
-    exited = sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="exited", timeout_s=600.0)
-    timed_out = sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="timed_out", timeout_s=30.0)
+    with caplog.at_level("WARNING", logger=sup.log.name):
+        exited = sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="exited", timeout_s=600.0)
+        timed_out = sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="timed_out", timeout_s=600.0)
+        short = sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="timed_out", timeout_s=30.0)
 
-    assert exited["message"].startswith("oMLX exited before becoming healthy on 127.0.0.1:9999. Last log lines:")
-    assert timed_out["message"].startswith("oMLX did not become healthy on 127.0.0.1:9999 within 30s. Last log lines:")
+    assert exited["message"] == (
+        "The local model stopped while it was starting. Start it again; "
+        "if it stops again, restart this Mac, then start it."
+    )
+    assert timed_out["message"] == "The local model didn't finish starting within 10 minutes. Start it again."
+    assert short["message"] == "The local model didn't finish starting within 30 seconds. Start it again."
+    for result in (exited, timed_out, short):
+        assert "last line" not in result["message"] and "9999" not in result["message"]
+    assert "secret-ish last line" in caplog.text
 
 
 def test_failed_boot_signals_only_a_child_that_has_not_exited(isolated_runtime, monkeypatch):

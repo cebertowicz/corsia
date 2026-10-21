@@ -55,7 +55,7 @@ html, body {
 body { max-width: 100vw; }
 #svelte { max-width: 100vw; overflow-x: hidden; }
 
-/* The one inline error-text treatment: field errors (ui/Field) and inline recovery lines. Placement stays with each caller. */
+/* A one-line error under a field or row (ui/Field, setup and provider rows). A boxed error with its own layout uses <Message variant="err">. Placement stays with each caller. */
 .error-text { color: var(--red-text); font-size: var(--text-footnote); line-height: var(--lh-normal); }
 
 /* The opaque color the header's top edge is drawn over: the base of the desktop header's
