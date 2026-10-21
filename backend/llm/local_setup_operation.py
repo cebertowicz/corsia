@@ -42,6 +42,7 @@ class Operation:
     result: dict | None = None
     downloaded: bool = False
     notified: bool = False
+    resident_bytes: int | None = None
 
     @classmethod
     def for_model(cls, model: LocalModel | None, kind: str, task_id: str | None = None, *, onboarding: bool = False) -> Operation:
@@ -51,6 +52,7 @@ class Operation:
         return cls(
             model.repository, model.download_size_bytes, model.context_window, kind, task_id,
             model.name, model.level, model.fp16, model.relative_speed, onboarding,
+            resident_bytes=model.resident_bytes,
         )
 
     @property
@@ -60,7 +62,7 @@ class Operation:
             return None
         return LocalModel(
             self.repository, self.download_size_bytes, self.context_window, self.name,
-            self.level, self.fp16, self.relative_speed,
+            self.level, self.fp16, self.relative_speed, self.resident_bytes,
         )
 
 

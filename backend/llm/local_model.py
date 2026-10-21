@@ -2,8 +2,9 @@
 
 There is no hand-kept model list. CORSIA's managed oMLX answers
 ``GET /admin/api/hf/recommendations`` (first shipped in oMLX 0.7.1rc1), and the
-pick is the first row of its "best" section with at least CORSIA's agent minimum
-of context. Under 24 GiB of memory there is no local model at all. This module
+pick is its first row, "best" section first, with at least CORSIA's agent minimum
+of context that fits the memory free now. Under 24 GiB of memory there is no
+local model at all. This module
 is the one owner of that rule; every other reader goes through it.
 """
 
@@ -51,6 +52,8 @@ class LocalModel:
     level: float | None = field(default=None, compare=False)
     fp16: bool | None = field(default=None, compare=False)
     relative_speed: float | None = field(default=None, compare=False)
+    #: Memory oMLX says the model needs once loaded; absent when oMLX gives none.
+    resident_bytes: int | None = field(default=None, compare=False)
 
     @property
     def model(self) -> str:
@@ -87,6 +90,8 @@ class LocalModel:
             result["quantization_bits"] = self.quantization_bits
         if self.relative_speed is not None:
             result["relative_speed"] = self.relative_speed
+        if self.resident_bytes is not None:
+            result["resident_bytes"] = self.resident_bytes
         return result
 
 
@@ -124,11 +129,13 @@ def from_recommendation(raw: object) -> LocalModel | None:
     level = raw.get("level")
     fp16 = raw.get("fp16")
     relative_speed = raw.get("relative_speed")
+    resident = raw.get("resident_bytes")
     return LocalModel(
         repository, size, min(context, MAX_CONTEXT), name if isinstance(name, str) and name.strip() else None,
         float(level) if isinstance(level, (int, float)) and not isinstance(level, bool) else None,
         fp16 if isinstance(fp16, bool) else None,
         float(relative_speed) if isinstance(relative_speed, (int, float)) and not isinstance(relative_speed, bool) else None,
+        resident if isinstance(resident, int) and not isinstance(resident, bool) and resident > 0 else None,
     )
 
 
@@ -144,6 +151,8 @@ def to_record(model: LocalModel) -> dict:
         record["fp16"] = model.fp16
     if model.relative_speed is not None:
         record["relative_speed"] = model.relative_speed
+    if model.resident_bytes is not None:
+        record["resident_bytes"] = model.resident_bytes
     return record
 
 
@@ -187,8 +196,27 @@ async def ask_recommendations(server_id: str) -> dict[str, list[LocalModel]]:
 
 async def ask_recommender(server_id: str) -> LocalModel | None:
     """Pick setup's model from the shared Settings recommender reader."""
+    import psutil
+
     sections = await ask_recommendations(server_id)
-    return next((model for model in sections.get("best", [])), None)
+    # macOS "available" (free, inactive and purgeable pages): the figure the
+    # Add model sheet compares against.
+    return pick_for_setup(sections, psutil.virtual_memory().available)
+
+
+def pick_for_setup(sections: dict[str, list[LocalModel]], available_bytes: int) -> LocalModel | None:
+    """The first row that fits ``available_bytes``, "best" first; when none fits, the smallest.
+
+    A row without oMLX's loaded size counts as fitting, as in the Add model
+    sheet. ``unlock`` rows need more memory than this Mac has and are never picked.
+    """
+    rows = [*sections.get("best", []),
+            *(model for name, models in sections.items() if name not in ("best", "unlock") for model in models)]
+    fitting = next((model for model in rows
+                    if model.resident_bytes is None or model.resident_bytes <= available_bytes), None)
+    if fitting is not None or not rows:
+        return fitting
+    return min(rows, key=lambda model: model.resident_bytes or 0)
 
 
 def _record_path() -> Path:

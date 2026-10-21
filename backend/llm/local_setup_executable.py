@@ -121,7 +121,7 @@ def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False) 
     if current is not None:
         if needs_repair or _is_broken_leftover(current):
             raise OwnOmlxUpgradeRequired(
-                "Run `brew upgrade jundot/omlx/omlx` (or `brew reinstall jundot/omlx/omlx` "
+                "Run brew upgrade jundot/omlx/omlx in Terminal (or brew reinstall jundot/omlx/omlx "
                 "for a broken installation), then try again; or install the CORSIA app to use its bundled oMLX."
             )
         return

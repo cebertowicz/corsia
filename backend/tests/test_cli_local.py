@@ -131,7 +131,7 @@ def test_local_setup_prints_failed_flight_result_and_returns_two(monkeypatch, ca
     ("disk_full", "Free 0.1 GB, then run `corsia local setup` again."),
     ("connection", "Check the connection, then run `corsia local setup` again."),
     ("memory", "Choose a subscription or API provider instead."),
-    ("own_omlx_upgrade_required", "Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then run `corsia local setup` again."),
+    ("own_omlx_upgrade_required", "Run brew upgrade jundot/omlx/omlx in Terminal, or install the CORSIA app to use its bundled oMLX, then run `corsia local setup` again."),
     ("other", "CORSIA couldn’t set up the local model. Run `corsia local setup` again."),
 ])
 def test_cli_prints_the_shared_fix_with_the_command_as_its_only_retry(monkeypatch, capsys, cause, expected):

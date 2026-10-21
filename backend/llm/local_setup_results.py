@@ -32,7 +32,7 @@ def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN
             return "CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running."
         return f"CORSIA couldn’t stop another oMLX server. {retry[0].upper() + retry[1:]}"
     if cause == "own_omlx_upgrade_required":
-        return f"Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then {retry}"
+        return f"Run brew upgrade jundot/omlx/omlx in Terminal, or install the CORSIA app to use its bundled oMLX, then {retry}"
     return f"CORSIA couldn’t set up the local model. {retry[0].upper() + retry[1:]}"
 
 

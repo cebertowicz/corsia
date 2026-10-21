@@ -137,11 +137,21 @@ def test_recommender_metadata_survives_in_the_structured_settings_view():
         "download_size_bytes": row["download_bytes"],
         "download_size_gb": round(row["download_bytes"] / 1000**3, 1),
         "context_window": row["max_context"], "quantization_bits": row["level"],
-        "relative_speed": row["relative_speed"],
+        "relative_speed": row["relative_speed"], "resident_bytes": row["resident_bytes"],
     }
     restored = local_model.from_recommendation(local_model.to_record(model))
     assert restored == model and restored.view() == model.view()
     assert local_setup_operation.Operation.for_model(model, "settings").model.view() == model.view()
+
+
+def test_resident_bytes_is_kept_only_when_oMLX_gives_a_positive_number():
+    row = {"repo_id": "org/big-oQ4e", "download_bytes": 10, "max_context": 65_536}
+
+    assert local_model.from_recommendation(row).resident_bytes is None
+    assert "resident_bytes" not in local_model.from_recommendation(row).view()
+    assert local_model.from_recommendation({**row, "resident_bytes": 0}).resident_bytes is None
+    assert local_model.from_recommendation({**row, "resident_bytes": True}).resident_bytes is None
+    assert local_model.from_recommendation({**row, "resident_bytes": 42}).view()["resident_bytes"] == 42
 
 
 def test_recommendation_rows_below_32k_are_unusable_and_the_window_caps_at_256k():
