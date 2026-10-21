@@ -28,8 +28,7 @@ deliver/drop rows. `backend/events/rules.py` matches both and alone decides
 drops and the webhook recipient; the binder retains declaration priority and
 conflict repair. Webhooks run one global drop pass after recording source
 facts (check events: before identity resolution), then deliver their one
-evaluated recipient; platform delivery owns post-delivery watch resolution
-through `plans.public`.
+evaluated recipient. Watch settlement is unchanged.
 
 ## Code map
 

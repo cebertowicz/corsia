@@ -20,8 +20,8 @@ def migrate_133_to_134(conn) -> None:
         for row in conn.execute('SELECT * FROM connection_rules').fetchall():
             conn.execute(
                 'INSERT INTO event_rules '
-                '(id,created_at,updated_at,enabled,scope,connector,event_type,"match","on",action,"to",mode,precedence) '
-                "VALUES (?,?,?,?,?,?,'*',?,'first_seen','deliver',?,'default',?)",
+                '(id,created_at,updated_at,enabled,scope,connector,event_type,"match","on",action,"to",precedence) '
+                "VALUES (?,?,?,?,?,?,'*',?,'first_seen','deliver',?,?)",
                 (row['id'], row['created_at'], row['updated_at'], row['enabled'],
                  row['scope'], row['connector'],
                  json.dumps([{'field': row['fact'], 'op': 'eq', 'value': row['value']}]),

@@ -46,19 +46,6 @@ class PlatformDelivery:
     reason: str | None = None
 
 
-def _after_delivery(db, envelope: EventEnvelope, delivered: PlatformDelivery) -> None:
-    """Transport owns the delivery; Plans alone owns watch settlement."""
-    if delivered.outcome in (WOKE, DIGESTED) and envelope.artifact_ref:
-        from events.identity import RoutingIdentity
-        from plans.public import resolve_delivered_event
-
-        ref = envelope.artifact_ref
-        resolve_delivered_event(
-            RoutingIdentity(ref['integration'], ref['type'], ref['external_id']),
-            envelope.type, recipient=delivered.thread_id, db=db,
-        )
-
-
 def _wake_message_id(event_id: str, thread_id: str) -> str:
     return f"platform-event:{event_id}:{thread_id}"
 
@@ -185,8 +172,6 @@ def deliver_platform_event_sync(
             else _deliver_target(conn, envelope, target, decl)
             for target in targets
         ]
-        for delivered in deliveries:
-            _after_delivery(conn, envelope, delivered)
         for delivery in deliveries:
             emit_product_event(
                 "event_route", delivery.outcome,

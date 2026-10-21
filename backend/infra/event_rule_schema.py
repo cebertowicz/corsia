@@ -29,37 +29,37 @@ EVENT_RULE_SCHEMA_SQL = f"""
         "on" TEXT NOT NULL CHECK("on" IN ('first_seen','every')),
         action TEXT NOT NULL CHECK(action IN ('deliver','drop')),
         "to" TEXT,
-        mode TEXT,
         precedence INTEGER NOT NULL DEFAULT 100,
-        CHECK((action = 'drop' AND "to" IS NULL AND mode IS NULL) OR
-              (action = 'deliver' AND "to" IS NOT NULL AND
-               ("to" = 'registered_owner' OR
-                ("to" LIKE 'thread:%' AND length("to") > 7)) AND
-               mode IS NOT NULL AND mode IN ('wake','digest','default'))),
-        CHECK("on" = 'every' OR (action = 'deliver' AND event_type = '*' AND
-              "to" LIKE 'thread:%' AND "to" != 'thread:$corsia_tag' AND
-              mode = 'default' AND json_array_length("match") = 1 AND
-              json_extract("match", '$[0].op') = 'eq' AND
-              json_type("match", '$[0].value') = 'text'))
+        CHECK(("on" = 'every' AND scope = 'global' AND
+               ((action = 'drop' AND "to" IS NULL) OR
+                (action = 'deliver' AND "to" IS NOT NULL AND
+                 "to" IN ('registered_owner', 'thread:$corsia_tag')))) OR
+              ("on" = 'first_seen' AND action = 'deliver' AND event_type = '*' AND
+               "to" IS NOT NULL AND "to" LIKE 'thread:%' AND length("to") > 7 AND
+               "to" != 'thread:$corsia_tag' AND json_array_length("match") = 1 AND
+               json_extract("match", '$[0].op') = 'eq' AND
+               json_type("match", '$[0].value') = 'text'))
     );
     CREATE INDEX IF NOT EXISTS idx_event_rules_match
         ON event_rules(connector, "on", enabled, event_type, scope, precedence, created_at);
 """
 
+# Storage admits only the shapes 2.1 evaluates for every rows: global scope,
+# drop, or deliver to the registered owner or the tag's thread.
 # These rows describe webhook behavior only. Poller events keep their current
 # disposition. In particular tags override ownership, and all self-authored
 # events are suppressed until the rule-authoring behavior change ships.
 GITHUB_RULE_SEEDS = (
     ('rule_set:github@1:cancelled', 'webhook.github.check_suite_completed',
-     '[{"field":"conclusion","op":"eq","value":"cancelled"}]', 'drop', None, None, 0),
+     '[{"field":"conclusion","op":"eq","value":"cancelled"}]', 'drop', None, 0),
     ('rule_set:github@1:self', '*',
-     '[{"field":"webhook_self_authored","op":"eq","value":true}]', 'drop', None, None, 1),
+     '[{"field":"webhook_self_authored","op":"eq","value":true}]', 'drop', None, 1),
     ('rule_set:github@1:tag', '*',
      '[{"field":"webhook","op":"eq","value":true},{"field":"corsia_tag","op":"present"}]',
-     'deliver', 'thread:$corsia_tag', 'wake', 10),
+     'deliver', 'thread:$corsia_tag', 10),
     ('rule_set:github@1:owner', '*',
      '[{"field":"webhook","op":"eq","value":true},{"field":"corsia_tag","op":"eq","value":null}]',
-     'deliver', 'registered_owner', 'wake', 100),
+     'deliver', 'registered_owner', 100),
 )
 
 
@@ -73,11 +73,11 @@ def _literal(value: str | int | None) -> str:
 
 # Seeds belong to the schema itself: direct fresh-schema users (including
 # fixtures) and both migration branches get exactly the same rule set.
-for _id, _type, _match, _action, _to, _mode, _precedence in GITHUB_RULE_SEEDS:
+for _id, _type, _match, _action, _to, _precedence in GITHUB_RULE_SEEDS:
     _values = (_id, '2026-10-21', '2026-10-21', 'github', _type, _match,
-               'every', _action, _to, _mode, _precedence)
+               'every', _action, _to, _precedence)
     EVENT_RULE_SCHEMA_SQL += (
         'INSERT OR IGNORE INTO event_rules '
-        '(id,created_at,updated_at,connector,event_type,"match","on",action,"to",mode,precedence) VALUES ('
+        '(id,created_at,updated_at,connector,event_type,"match","on",action,"to",precedence) VALUES ('
         + ','.join(_literal(value) for value in _values) + ');\n'
     )

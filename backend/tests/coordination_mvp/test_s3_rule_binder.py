@@ -156,9 +156,9 @@ class TestStaleFieldsFailLoud:
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
             '''INSERT INTO event_rules
-               (id, scope, connector, "match", "to", "on", action, mode,
+               (id, scope, connector, "match", "to", "on", action,
                 precedence, enabled, created_at, updated_at)
-               VALUES (?,?,?,? ,?,'first_seen','deliver','default',?,1,?,?)''',
+               VALUES (?,?,?,? ,?,'first_seen','deliver',?,1,?,?)''',
             (str(uuid.uuid4())[:12], "global", "gmail",
              '[{"field":"removed_field","op":"eq","value":"x"}]',
              'thread:' + owner, 100, now, now),

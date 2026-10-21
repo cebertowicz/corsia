@@ -122,9 +122,9 @@ def create_rule(
         now = _now()
         _db.execute(
             '''INSERT INTO event_rules
-               (id, scope, connector, "match", "to", "on", action, mode,
+               (id, scope, connector, "match", "to", "on", action,
                 precedence, enabled, created_at, updated_at)
-               VALUES (?,?,?,?,?,'first_seen','deliver','default',?,1,?,?)''',
+               VALUES (?,?,?,?,?,'first_seen','deliver',?,1,?,?)''',
             (rule.id, scope, connector,
              json.dumps([{'field': fact, 'op': 'eq', 'value': str(value)}]),
              THREAD_PREFIX + destination_thread_id, precedence, now, now),

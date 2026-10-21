@@ -17,27 +17,6 @@ def _event():
     return payload
 
 
-def test_watch_resolves_after_platform_delivery(isolated_db):
-    from tests.test_plan_event_wait_boundary import _owner, _watching, _armed
-
-    db = get_db()
-    actor = _owner(db)
-    register_pr('owner/repo', 7, 'owner')
-    _, node = _watching(db, actor, external_id='owner/repo#7', event='pr.merged')
-    db.close()
-    with patch('plans.public.resolve_delivered_event', wraps=__import__(
-        'plans.public', fromlist=['resolve_delivered_event']).resolve_delivered_event) as resolve:
-        delivered = deliver_platform_event_sync('github', _event(), 'pr.merged')
-    db = get_db()
-    assert delivered[0].outcome in ('woke', 'digested')
-    assert resolve.call_count == 1
-    assert _armed(db, node.id) == 0
-    with patch('plans.public.resolve_delivered_event') as duplicate_resolve:
-        assert deliver_platform_event_sync('github', _event(), 'pr.merged')[0].outcome == 'duplicate'
-    duplicate_resolve.assert_not_called()
-    db.close()
-
-
 @pytest.mark.asyncio
 async def test_legacy_webhook_name_watch_resolves_on_platform_path(isolated_db):
     from tests.test_plan_event_wait_boundary import _owner, _watching, _armed
@@ -63,7 +42,7 @@ def test_selection_returns_registry_routing_state(isolated_db):
     register_pr('owner/repo', 7, owner)
     identity = resolve_identity('webhook.github.pr_merged', _event())
     selected = router._select_route('webhook.github.pr_merged', _event(), identity,
-                                    identity.external_id, None, None, False)
+                                    identity.external_id, None, False)
     assert not isinstance(selected, router.RouteResult)
     assert set(selected[2]) == {'identity', 'owner', 'subscribers', 'triage'}
 
@@ -92,9 +71,9 @@ def test_designation_unicode_lookup_enabled_filter_and_current_designee(isolated
         # Deliberately differs from json.dumps spacing/escaping, as a legacy
         # SQLite JSON serializer did. Lookup must use values, never JSON text.
         db.execute('''INSERT INTO event_rules
-            (id,created_at,updated_at,scope,connector,"match","on",action,"to",mode)
+            (id,created_at,updated_at,scope,connector,"match","on",action,"to")
             VALUES ('unicode','a','b','designation:workspace','gmail',?,
-                    'first_seen','deliver',?,'default')''',
+                    'first_seen','deliver',?)''',
             ('[{"field":"from","op":"eq","value":"Élise@例.example"}]', 'thread:' + owner))
     rule = binder.ensure_designation_rule(connector='gmail', fact='from', value='Élise@例.example')
     assert rule.id == 'unicode'
@@ -110,9 +89,9 @@ def test_designation_reads_are_batched_across_forty_scopes(isolated_db):
     db = get_db()
     with write_transaction(db, scope='designation_scale'):
         db.executemany('''INSERT INTO event_rules
-            (id,created_at,updated_at,scope,connector,"match","on",action,"to",mode)
+            (id,created_at,updated_at,scope,connector,"match","on",action,"to")
             VALUES (?,'a','b',?,'gmail','[{"field":"from","op":"eq","value":"sender"}]',
-                    'first_seen','deliver','thread:placeholder','default')''',
+                    'first_seen','deliver','thread:placeholder')''',
             [(f'designation-{i}', f'designation:project-{i}') for i in range(40)])
     statements = []
     db.set_trace_callback(statements.append)

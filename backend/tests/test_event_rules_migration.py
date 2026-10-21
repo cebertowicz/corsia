@@ -46,21 +46,25 @@ def test_missing_legacy_table_and_fresh_install_share_exact_schema():
     fresh.close()
 
 
-@pytest.mark.parametrize('match,on,action,to,mode', [
-    ('{}', 'every', 'deliver', 'registered_owner', 'wake'),
-    ('[{"field":"repo","op":"prefix","value":"x"}]', 'every', 'deliver', 'registered_owner', 'wake'),
-    ('[{"op":"eq","value":"x"}]', 'every', 'deliver', 'registered_owner', 'wake'),
-    ('[{"field":"repo","op":"eq"}]', 'every', 'deliver', 'registered_owner', 'wake'),
-    ('[]', 'first_seen', 'deliver', 'thread:owner', 'default'),
-    ('[{"field":"repo","op":"eq","value":1}]', 'first_seen', 'deliver', 'thread:owner', 'default'),
-    ('[]', 'every', 'drop', 'thread:owner', 'wake'),
-    ('[]', 'every', 'deliver', None, 'wake'),
+@pytest.mark.parametrize('match,on,action,to,scope', [
+    ('{}', 'every', 'deliver', 'registered_owner', 'global'),
+    ('[{"field":"repo","op":"prefix","value":"x"}]', 'every', 'deliver', 'registered_owner', 'global'),
+    ('[{"op":"eq","value":"x"}]', 'every', 'deliver', 'registered_owner', 'global'),
+    ('[{"field":"repo","op":"eq"}]', 'every', 'deliver', 'registered_owner', 'global'),
+    ('[]', 'first_seen', 'deliver', 'thread:owner', 'global'),
+    ('[{"field":"repo","op":"eq","value":1}]', 'first_seen', 'deliver', 'thread:owner', 'global'),
+    ('[]', 'every', 'drop', 'thread:owner', 'global'),
+    ('[]', 'every', 'deliver', None, 'global'),
+    # An every row that 2.1 does not evaluate is not storable.
+    ('[]', 'every', 'deliver', 'thread:owner', 'global'),
+    ('[]', 'every', 'deliver', 'registered_owner', 'project:p'),
+    ('[]', 'every', 'drop', None, 'project:p'),
 ])
-def test_invalid_states_are_rejected_by_storage(match, on, action, to, mode):
+def test_invalid_states_are_rejected_by_storage(match, on, action, to, scope):
     db = sqlite3.connect(':memory:')
     db.executescript(EVENT_RULE_SCHEMA_SQL)
     with pytest.raises(sqlite3.IntegrityError):
         db.execute('''INSERT INTO event_rules
-            (id,created_at,updated_at,connector,"match","on",action,"to",mode)
-            VALUES ('bad','a','b','github',?,?,?,?,?)''', (match, on, action, to, mode))
+            (id,created_at,updated_at,scope,connector,"match","on",action,"to")
+            VALUES ('bad','a','b',?,'github',?,?,?,?)''', (scope, match, on, action, to))
     db.close()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -10,7 +11,7 @@ from typing import Any
 from loguru import logger
 
 from events import dead_letter, delivery, guard
-from events.rules import dropping_rule, evaluate
+from events.rules import TAG_RELATIONSHIP, dropping_rule, evaluate
 from infra.database import get_db
 from events.identity import (
     CHECK_SUITE_COMPLETED_EVENTS,
@@ -26,7 +27,6 @@ from events.connectors.github import (
     identity_from_check_pr_metadata,
 )
 from events.github_mapper import pr_terminal_state
-from events.routing_inputs import structured_tag
 from events.connectors.github_route_preparation import (
     prepare_route_ordered,
     release_notice_off_loop,
@@ -202,7 +202,6 @@ def _select_route(
     payload: dict[str, Any],
     identity,
     external_id: str | None,
-    tag: dict[str, str] | None,
     check_suite_base_ref: str | None,
     check_suite_pr_selected: bool,
 ) -> tuple[str, str, dict[str, Any]] | RouteResult:
@@ -212,18 +211,21 @@ def _select_route(
     envelope = github_routing_envelope(internal_event, identity, payload)
     db = get_db()
     try:
+        # Owner resolution keeps dev's connector-less envelope: first-seen binding
+        # rules do not run for webhooks.
+        unbound = dataclasses.replace(envelope, connector=None)
         targets = evaluate(envelope, db=db,
-                           resolve_owner=lambda: resolve_targets(envelope))
+                           resolve_owner=lambda: resolve_targets(unbound))
     finally:
         db.close()
-    if not targets:
-        return _dead_letter_result(internal_event, payload, 'no_owner', external_id)
     target = targets[0]
+    if target.reason == 'rule_table_invalid':
+        return _dead_letter_result(internal_event, payload, 'rule_table_invalid', external_id)
     routing_state = target.routing_state or (
         registry_models.routing_registrations(*identity) if identity else routing_state)
     if target.thread is not None and target.disposition == 'dead_letter':
         return _dead_letter_result(internal_event, payload, str(target.reason), external_id)
-    if tag is not None and identity is not None:
+    if target.relationship == TAG_RELATIONSHIP:
         return str(target.thread), 'tag', routing_state
     if target.thread is not None:
         reason = "triage" if target.relationship == "triage" else "owner"

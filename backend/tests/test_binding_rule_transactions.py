@@ -28,9 +28,9 @@ def rules(isolated_db):
         )
         db.execute(
             '''INSERT INTO event_rules
-            (id,connector,"match","to","on",action,mode,created_at,updated_at)
+            (id,connector,"match","to","on",action,created_at,updated_at)
             VALUES ('seed','gmail','[{"field":"from","op":"eq","value":"seed"}]',
-                    'thread:rule-owner','first_seen','deliver','default','t','t')'''
+                    'thread:rule-owner','first_seen','deliver','t','t')'''
         )
         db.commit()
     return isolated_db

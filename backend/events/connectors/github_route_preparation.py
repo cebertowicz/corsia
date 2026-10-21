@@ -89,7 +89,7 @@ def _prepare_route(
     external_id = identity.external_id if identity else None
     tag_provenance = structured_tag(payload)
     selected = router._select_route(
-        internal_event, payload, identity, external_id, tag_provenance,
+        internal_event, payload, identity, external_id,
         check_suite_base_ref, check_suite_pr_selected,
     )
     if isinstance(selected, router.RouteResult):

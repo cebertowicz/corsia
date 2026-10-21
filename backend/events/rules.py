@@ -16,6 +16,7 @@ from infra.database import get_db
 
 THREAD_PREFIX = 'thread:'
 TAG_DESTINATION = '$corsia_tag'
+TAG_RELATIONSHIP = 'tag'  # A Target's relationship when the tag row matched.
 
 
 @dataclass(frozen=True)
@@ -28,7 +29,6 @@ class EventRule:
     on: str
     action: str
     to: str | None
-    mode: str | None
     precedence: int
     enabled: bool
 
@@ -44,7 +44,7 @@ def from_row(row) -> EventRule:
     return EventRule(
         row['id'], row['scope'], row['connector'], row['event_type'],
         json.loads(row['match']), row['on'], row['action'], row['to'],
-        row['mode'], row['precedence'], bool(row['enabled']),
+        row['precedence'], bool(row['enabled']),
     )
 
 
@@ -108,20 +108,27 @@ def evaluate(envelope: EventEnvelope, *,
     Callers run ``dropping_rule`` first. The owner callback is lazy, so an
     event whose first row does not deliver to its owner never binds an artifact.
     """
-    first = next((r for r in _every_rules(envelope, db) if r.action == 'deliver'), None)
-    if first is None:
-        return []
+    return decide(_every_rules(envelope, db), envelope,
+                  resolve_owner=resolve_owner, db=db)
+
+
+def decide(rows: list[EventRule], envelope: EventEnvelope, *,
+           resolve_owner: Callable[[], list[Target]], db=None) -> list[Target]:
+    """The first deliver row decides. The schema admits only the two shapes below
+    for an ``every`` deliver row, so any other outcome is a broken rule table."""
+    first = next((r for r in rows if r.action == 'deliver'), None)
+    if first is None or first.to not in ('registered_owner', THREAD_PREFIX + TAG_DESTINATION):
+        return [Target(None, 'rule', 'none', reason='rule_table_invalid',
+                       disposition='dead_letter')]
     if first.to == 'registered_owner':
         return resolve_owner()
-    if thread_destination(first.to) == TAG_DESTINATION:
-        return [_tag_target(str(envelope.facts['corsia_tag']), db)]
-    return []
+    return [_tag_target(str(envelope.facts['corsia_tag']), db)]
 
 
 def _tag_target(thread_id: str, db) -> Target:
     from events.delivery import thread_exists_and_active
 
     if not thread_exists_and_active(thread_id, db=db):
-        return Target(thread_id, 'rule', 'owner', reason='invalid_tag_target',
+        return Target(thread_id, 'rule', TAG_RELATIONSHIP, reason='invalid_tag_target',
                       disposition='dead_letter')
-    return Target(thread_id, 'rule', 'owner', disposition='owner_wake')
+    return Target(thread_id, 'rule', TAG_RELATIONSHIP, disposition='owner_wake')
