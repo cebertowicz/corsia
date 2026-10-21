@@ -1,9 +1,11 @@
 """The one pass over a script's stdout: readings, measure lines and what was wrong.
 
 Each line is JSON and is dispatched on its single top-level key: ``{"series", "value"}``
-is a reading, ``{"measure": {...}}`` is a measure line. A reading problem is a run
-error. A measure line that is malformed, or past the per-run cap, is refused and
+is a reading, ``{"measure": {...}}`` is a measure line, ``{"event": {...}}`` an event line.
+A reading problem is a run error. A measure line that is malformed is refused and
 counted instead: it never fails the run or wakes the owner (design section 4.4.5).
+Measure and event lines share one per-run cap, since a ``both`` event line also writes
+a measurement row; lines past it are counted as over the cap and dropped.
 """
 
 from __future__ import annotations
@@ -75,9 +77,15 @@ def parse_output(stdout: bytes, registered: dict[str, store.Series]) -> ParsedOu
     return parsed
 
 
+def _over_cap(parsed: ParsedOutput) -> bool:
+    if len(parsed.measures) + len(parsed.refused) + len(parsed.events) < MAX_MEASURE_LINES:
+        return False
+    parsed.over_cap += 1
+    return True
+
+
 def _take_measure(parsed: ParsedOutput, number: int, measure: Any) -> None:
-    if len(parsed.measures) + len(parsed.refused) >= MAX_MEASURE_LINES:
-        parsed.over_cap += 1
+    if _over_cap(parsed):
         return
     problem = _measure_problem(measure)
     if problem is None:
@@ -109,6 +117,8 @@ def _take_event(parsed: ParsedOutput, event: Any) -> str | None:
         return 'event type must be a non-empty declared event name'
     if not isinstance(event["facts"], dict):
         return 'event facts must be an object'
+    if _over_cap(parsed):
+        return None
     parsed.events.append(event)
     return None
 

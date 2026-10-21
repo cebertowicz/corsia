@@ -145,11 +145,12 @@ def _check_event(name: str, spec: dict[str, Any], lines: Lines) -> None:
         raise fail(lines, path + ("keep_days",), f"event {name} {exc}; the default is {KEEP_DAYS_DEFAULT}.") from None
     if spec.get("use", "record") not in {"record", "route", "both"}:
         raise fail(lines, path + ("use",), f"event {name} use must be record, route or both.")
-    # A both type's facts are routed into agents' context, so only ids, counts and enums.
-    if spec.get("use") == "both":
+    # A routed type's facts reach other agents' wakes, so no person's login; a record stays in the
+    # owner's store. num may ride along: rules can't match on it (enforced at rule create).
+    if spec.get("use") in ("route", "both"):
         for key, kind in attrs.items():
-            if kind in ("login", "num"):
-                raise fail(lines, path + ("attributes", key), f'event {name} is use: both, so attribute {key} cannot be "{kind}"; use id, count or enum.')
+            if kind == "login":
+                raise fail(lines, path + ("attributes", key), f'event {name} is use: {spec["use"]}, so attribute {key} cannot be "login"; use id, or declare use: record.')
 
 
 def _check_version_attr(data: dict[str, Any], events: dict[str, dict[str, Any]], lines: Lines) -> None:

@@ -237,3 +237,39 @@ def test_script_event_lines_route_and_a_refusal_becomes_an_owner_error(intake_wo
     assert refused.signals[-1].kind == "error" and "undeclared_fact" in refused.signals[-1].summary
     # The run's stamp, the same one a measure line from this run gets, so the two dedupe together.
     assert _stored(intake_world, "qa.both") == [(OWNER, "project", "ok", f"script:{schedule.id}:run-3")]
+
+
+def test_a_both_row_from_a_workflow_without_a_version_is_counted_unversioned_once(intake_world, tmp_path):
+    path = tmp_path / "events.py"
+    path.write_text("print('event')")
+    schedule = script_schedules.create_script(
+        OWNER, "project", script_path=path, script_sha256=script_schedules.file_sha256(path),
+        cadence_seconds=600, series=[], timeout_seconds=30,
+        now="2026-01-01T00:00:00+00:00", db=intake_world, workflow="retired-flow",
+    )
+    line = {"type": "qa.both", "facts": {"code": "ok"}}
+    # Two lines, two event_ids, one run stamp: the store dedupes the second, which still routes.
+    report = asyncio.run(script_runner._admit_events(
+        schedule, RunReport("ok", [], [], events=[line, line], run_id="run-1"),
+    ))
+    counted = intake_world.execute(
+        "SELECT agent_thread_id, n FROM outcome_event_counters WHERE counter='unversioned' AND event_name='qa.both'",
+    ).fetchall()
+    routed = intake_world.execute(
+        "SELECT COUNT(DISTINCT event_id) FROM event_route_decisions WHERE event_id LIKE ?", (f"script:{schedule.id}:run-1:%",),
+    ).fetchone()[0]
+
+    assert report.status == "ok" and len(_stored(intake_world, "qa.both")) == 1
+    assert [tuple(row) for row in counted] == [(OWNER, 1)] and routed == 2
+
+
+def test_event_lines_share_the_measure_line_cap(intake_world):
+    from automation.script_lines import MAX_MEASURE_LINES, parse_output
+
+    event = json.dumps({"event": {"type": "qa.route", "facts": {"code": "ok"}}})
+    measure = json.dumps({"measure": {"event.name": "qa.record", "attributes": {"code": "ok"}}})
+    stdout = "\n".join([measure] * 150 + [event] * 55).encode()
+    parsed = parse_output(stdout, {})
+
+    assert len(parsed.measures) + len(parsed.events) == MAX_MEASURE_LINES
+    assert len(parsed.events) == 50 and parsed.over_cap == 5 and parsed.problems == []

@@ -182,6 +182,7 @@ async def _admit_events(schedule: Schedule, report: RunReport) -> RunReport:
     stamps = MeasureStamps(
         run_id=f"script:{schedule.id}:{report.run_id}", workflow_ref=ref, workflow_version=version,
         project_id=None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id,
+        unversioned=bool((schedule.payload or {}).get("workflow")) and version is None,
     )
     refusals: list[str] = []
     for index, event in enumerate(report.events):

@@ -63,7 +63,7 @@ def settle_measures(db: sqlite3.Connection, schedule: Schedule, report: RunRepor
     if report.measures_over_cap:
         refuse_line(
             db, schedule.thread_id,
-            f"{report.measures_over_cap} measure line(s) past the {MAX_MEASURE_LINES}-line cap were dropped; print fewer per run.",
+            f"{report.measures_over_cap} measure or event line(s) past the {MAX_MEASURE_LINES}-line cap were dropped; print fewer per run.",
             event_name=UNNAMED_LINE, count=report.measures_over_cap,
         )
     refused = len(report.measure_refusals) + report.measures_over_cap + (len(report.measures) - accepted)

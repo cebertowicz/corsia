@@ -17,6 +17,7 @@ from events.resolve import Target
 from infra.database import get_db, write_transaction
 from infra.measure_admission import admit as admit_measure
 from infra.measure_registry import REGISTRY
+from infra.outcome_events import count_outcome_event
 
 _MAX_FACT_BYTES = 64 * 1024
 _ERROR_FIXES = {
@@ -67,6 +68,7 @@ class MeasureStamps:
     workflow_ref: str | None = None
     workflow_version: str | None = None
     project_id: str | None = None
+    unversioned: bool = False  # the schedule names a workflow its stamp has no version for
 
 
 def _now() -> str:
@@ -257,7 +259,13 @@ def _store(conn, event_type: str, facts: dict[str, Any], owner: str, event_id: s
         project_id=stamps.project_id or _owner_project(conn, owner), run_id=stamps.run_id or event_id,
         workflow_ref=stamps.workflow_ref, workflow_version=stamps.workflow_version,
     )
-    return None if admission.refusal is None else _refusal("record_refused", admission.refusal)
+    if admission.refusal is not None:
+        return _refusal("record_refused", admission.refusal)
+    # A record that dedupes (inserted False) under a fresh event_id still routes: routing
+    # dedupes by event_id, the store by its declared keys, and each is right for its consumer.
+    if stamps.unversioned and admission.result is not None and admission.result.inserted:
+        count_outcome_event(conn, "unversioned", event_type, agent_thread_id=owner)
+    return None
 
 
 def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: str, event_id: str,
