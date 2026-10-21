@@ -41,7 +41,7 @@ def document_reviews(db, artifact_id: str, actor: reviews.ReviewActor) -> dict:
         {
             **row, "reviewer_name": names.get(row["reviewer_thread_id"], row["reviewer_thread_id"]),
             "requester_name": _requester_name(db, row, actor, names),
-            "may_cancel": reviews.is_open(db, row) and reviews.may_cancel(db, artifact, row, actor),
+            "may_cancel": row["state"] != "submitted" and reviews.may_cancel(db, artifact, row, actor),
         }
         for row in rows
     ]}
@@ -52,7 +52,7 @@ def document_reviews(db, artifact_id: str, actor: reviews.ReviewActor) -> dict:
     except reviews.ReviewRosterError:
         result["reviewers_error"] = "roster_error"
         return result
-    requested = {row["reviewer_thread_id"] for row in rows if reviews.is_open(db, row)}
+    requested = {row["reviewer_thread_id"] for row in rows if row["state"] != "submitted"}
     result["reviewers"] = [
         {**row, "requested": row["id"] in requested} for row in eligible.choices
     ]

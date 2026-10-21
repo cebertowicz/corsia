@@ -13,22 +13,22 @@ from doceditor import comments, feedback_batches, review_requests
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from plans import public
-from test_doc_review_requests import request, review_env, staged_comment, stored  # noqa: F401
+from test_doc_review_requests import request, review_env, fork_comment, stored  # noqa: F401
 
 
 @pytest.mark.parametrize("reason", ["limit", "target_unavailable"])
-def test_ended_continuation_releases_visible_findings_for_ordinary_delivery(review_env, reason):
+def test_ended_continuation_keeps_visible_findings_for_ordinary_delivery(review_env, reason):
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
+    fork_comment(db, aid, row["id"])
     visible = comments.list_for_artifact(aid, db=db)
     assert len(visible) == 1 and not visible[0]["resolved"] and not visible[0]["acked"]
     continuation = review_requests.escalate_fork(db, row["id"], reason=reason)
     with write_transaction(db, scope="test_end_review_continuation"):
         public.close_review_node(db, continuation["node_id"], reason="The task ended without submission.")
-    assert review_requests.outcome(db, stored(db, row["id"])) == "ended_without_comments"
+    assert not review_requests.is_open(db, stored(db, row["id"]))
     assert review_requests.for_document(db, aid) == []
-    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 0
+    assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == "open"
     feedback_batches.close_due("2099-01-01T00:00:00+00:00", db=db)
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 1
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batch_items").fetchone()[0] == 1
@@ -44,12 +44,12 @@ def test_comment_admission_reads_request_state_only(review_env):
     db, aid = review_env
     row = request(db, aid)
     assert "cancelled_at" not in {column[1] for column in db.execute("PRAGMA table_info(doc_review_requests)")}
-    staged_comment(db, aid, row["id"])
-    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 1
+    fork_comment(db, aid, row["id"])
+    assert db.execute("SELECT item_count FROM doc_feedback_batches").fetchone()[0] == 1
     with write_transaction(db, scope="test_withdrawn_review"):
         db.execute("UPDATE doc_review_requests SET state='withdrawn' WHERE id=?", (row["id"],))
     with pytest.raises(ValueError, match="no longer owns"):
-        staged_comment(db, aid, row["id"])
+        fork_comment(db, aid, row["id"])
 
 
 @pytest.mark.parametrize("text", ["binary output is malformed", "credential field is not a string", "authentication example is missing"])

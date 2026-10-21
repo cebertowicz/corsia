@@ -1,11 +1,11 @@
-"""Request staging releases into the ordinary feedback lifecycle."""
+"""Fork comments share ordinary feedback from creation."""
 
 import pytest
 
 from doceditor import comments, feedback_batches, feedback_state, review_feedback, review_requests
 from infra.database import write_transaction
 from plans import public
-from test_doc_review_requests import request, review_env, staged_comment, stored  # noqa: F401
+from test_doc_review_requests import request, review_env, fork_comment, stored  # noqa: F401
 from tools.document_feedback import _send_feedback
 
 
@@ -25,7 +25,7 @@ def submit(aid):
 def test_continuation_adds_one_comment_produces_one_feedback_task_with_all_findings(review_env):
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
+    fork_comment(db, aid, row["id"])
     continuation = review_requests.escalate_fork(db, row["id"])
     ordinary = ordinary_comment(db, aid)
 
@@ -39,14 +39,14 @@ def test_continuation_adds_one_comment_produces_one_feedback_task_with_all_findi
     assert len(tasks) == 1
     assert "The claim needs evidence." in tasks[0]["description"]
     assert "The continuation adds evidence." in tasks[0]["description"]
-    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments WHERE request_id=?", (row["id"],)).fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 1
     assert db.execute("SELECT item_count FROM doc_feedback_batches WHERE id=?", (ordinary,)).fetchone()[0] == 2
 
 
-def test_empty_continuation_submit_delivers_staged_comments_once(review_env):
+def test_empty_continuation_submit_delivers_existing_feedback_once(review_env):
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
+    fork_comment(db, aid, row["id"])
     continuation = review_requests.escalate_fork(db, row["id"])
 
     submit(aid)
@@ -58,10 +58,10 @@ def test_empty_continuation_submit_delivers_staged_comments_once(review_env):
     assert db.execute("SELECT COUNT(*) FROM plan_nodes n JOIN plans p ON p.id=n.plan_id WHERE p.owner_kind='thread' AND p.owner_id='owner'").fetchone()[0] == 1
 
 
-def test_ended_continuation_has_no_staging_and_quiet_closer_delivers_all_comments(review_env):
+def test_ended_continuation_quiet_closer_delivers_all_ordinary_comments(review_env):
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
+    fork_comment(db, aid, row["id"])
     continuation = review_requests.escalate_fork(db, row["id"])
     with write_transaction(db, scope="test_end_without_submit"):
         public.close_review_node(db, continuation["node_id"], reason="No longer needed")
@@ -71,7 +71,7 @@ def test_ended_continuation_has_no_staging_and_quiet_closer_delivers_all_comment
 
     assert stored(db, row["id"])["state"] == "handed_back"
     assert stored(db, row["id"])["answered_batch_id"] is None
-    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batch_items").fetchone()[0] >= 1
     batch = db.execute("SELECT state FROM doc_feedback_batches").fetchone()
     assert batch["state"] == "delivered"
     tasks = db.execute("SELECT n.description FROM plan_nodes n JOIN plans p ON p.id=n.plan_id WHERE p.owner_kind='thread' AND p.owner_id='owner'").fetchall()
@@ -81,10 +81,10 @@ def test_ended_continuation_has_no_staging_and_quiet_closer_delivers_all_comment
 
 
 @pytest.mark.parametrize("state", ["forked", "handed_back", "failed"])
-def test_generic_closers_only_see_comments_after_terminal_release(review_env, state):
+def test_generic_closers_deliver_fork_comments_in_every_open_request_state(review_env, state):
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
+    fork_comment(db, aid, row["id"])
     if state != "forked":
         review_requests.escalate_fork(db, row["id"], reason="limit" if state == "handed_back" else "target_unavailable")
     with write_transaction(db, scope="test_generic_closers"):
@@ -92,23 +92,30 @@ def test_generic_closers_only_see_comments_after_terminal_release(review_env, st
         assert feedback_batches.close_for_turn_end(db, "reviewer") == []
     assert feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db) == []
     batch = db.execute("SELECT state FROM doc_feedback_batches").fetchone()
-    assert (batch["state"] if batch else None) == (None if state == "forked" else "delivered")
-    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == (1 if state == "forked" else 0)
-    assert stored(db, row["id"])["state"] == ("forked" if state == "forked" else "submitted")
+    assert batch["state"] == "delivered"
+    assert stored(db, row["id"])["answered_batch_id"]
+    assert stored(db, row["id"])["state"] == "submitted"
 
 
-def test_active_fork_staging_is_absent_from_ordinary_retry_and_pending_views(review_env):
+def test_active_fork_feedback_uses_ordinary_pending_notices_and_retry(review_env, monkeypatch):
+    from doceditor import feedback_delivery
+
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
-    with write_transaction(db, scope="test_scoped_undelivered"):
-        db.execute("UPDATE doc_feedback_batches SET state='undelivered',undelivered_reason='owner_unavailable'")
-        assert feedback_batches.retry_for_document(db, author_kind="agent", author_id="reviewer", artifact_id=aid) == []
-        assert not feedback_state.has_pending_for_document(db, author_kind="agent", author_id="reviewer", artifact_id=aid)
-        assert feedback_state.undelivered_for_document(db, author_kind="agent", author_id="reviewer", artifact_id=aid) == []
-        assert feedback_state.take_unreported_undelivered(db, "reviewer", "now") == []
-    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 0
-    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 1
+    fork_comment(db, aid, row["id"])
+    identity = dict(author_kind="agent", author_id="reviewer", artifact_id=aid)
+    original = feedback_delivery.recipient_problem
+    monkeypatch.setattr(feedback_delivery, "recipient_problem", lambda *args: "owner_unavailable")
+    with write_transaction(db, scope="test_ordinary_undelivered"):
+        feedback_batches.close_for_document(db, **identity, reason="submit")
+        assert feedback_state.has_pending_for_document(db, **identity)
+        assert len(feedback_state.undelivered_for_document(db, **identity)) == 1
+        assert len(feedback_state.take_unreported_undelivered(db, "reviewer", "now")) == 1
+    monkeypatch.setattr(feedback_delivery, "recipient_problem", original)
+    with write_transaction(db, scope="test_ordinary_retry"):
+        feedback_batches.retry_for_document(db, **identity)
+    assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == "delivered"
+    assert stored(db, row["id"])["state"] == "submitted"
     assert len(comments.list_for_artifact(aid, db=db)) == 1
 
 
@@ -137,30 +144,32 @@ def test_submitted_fork_failure_is_noticed_and_retry_delivers_ordinary_batch(rev
     from doceditor import feedback_delivery
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
+    fork_comment(db, aid, row["id"])
     original = feedback_delivery.recipient_problem
     monkeypatch.setattr(feedback_delivery, "recipient_problem", lambda *args: "owner_unavailable")
     with write_transaction(db, scope="test_submit_delivery_failure"):
         pending, woken, failures = review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     assert pending and failures and not woken
-    assert stored(db, row["id"])["state"] == "submitted"
+    assert stored(db, row["id"])["state"] == "forked"
     batch = db.execute("SELECT * FROM doc_feedback_batches").fetchone()
     assert batch["state"] == "undelivered"
-    assert stored(db, row["id"])["answered_batch_id"] == batch["id"]
-    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 0
+    attempts = batch["attempts"]
+    assert stored(db, row["id"])["answered_batch_id"] is None
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batch_items").fetchone()[0] >= 1
     kwargs = dict(author_kind="agent", author_id="reviewer", artifact_id=aid)
     assert feedback_state.undelivered_for_document(db, **kwargs)[0]["id"] == batch["id"]
     with write_transaction(db, scope="test_failure_notice_and_retry"):
         assert feedback_state.take_unreported_undelivered(db, "reviewer", "now")[0]["id"] == batch["id"]
         monkeypatch.setattr(feedback_delivery, "recipient_problem", original)
         feedback_batches.retry_for_document(db, **kwargs)
-    assert db.execute("SELECT state,attempts FROM doc_feedback_batches WHERE id=?", (batch["id"],)).fetchone()[:] == ("delivered", 2)
-    assert review_requests.outcome(db, stored(db, row["id"])) == "commented"
+    assert db.execute("SELECT state,attempts FROM doc_feedback_batches WHERE id=?", (batch["id"],)).fetchone()[:] == ("delivered", attempts + 1)
+    assert stored(db, row["id"])["state"] == "submitted"
+    assert stored(db, row["id"])["answered_batch_id"] == batch["id"]
     assert feedback_state.undelivered_for_document(db, **kwargs) == []
 
 
 @pytest.mark.parametrize("state", ["submitted", "withdrawn", "handed_back", "failed"])
-def test_outcome_event_is_emitted_once_only_after_commit(review_env, monkeypatch, state):
+def test_state_event_is_emitted_once_only_after_commit(review_env, monkeypatch, state):
     from doceditor.review_lifecycle import transition
     from infra import product_events
     db, aid = review_env
@@ -178,12 +187,12 @@ def test_outcome_event_is_emitted_once_only_after_commit(review_env, monkeypatch
     assert events[0][1]["properties"] == {"request_id": row["id"], "reason": reason}
 
 
-def test_rollback_leaves_no_outcome_event_or_staging_change(review_env, monkeypatch):
+def test_rollback_leaves_no_state_event_or_feedback_change(review_env, monkeypatch):
     from doceditor.review_lifecycle import transition
     from infra import product_events
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
+    fork_comment(db, aid, row["id"])
     events = []
     monkeypatch.setattr(product_events, "emit_product_event", lambda *args, **kwargs: events.append(args))
     with pytest.raises(RuntimeError, match="abort"):
@@ -192,15 +201,14 @@ def test_rollback_leaves_no_outcome_event_or_staging_change(review_env, monkeypa
             raise RuntimeError("abort")
     assert not events
     assert stored(db, row["id"])["state"] == "forked"
-    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 1
-    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 0
+    assert db.execute("SELECT item_count,state FROM doc_feedback_batches").fetchone()[:] == (1, "open")
 
 
 def test_coalescing_rolls_back_with_a_raising_delivery(review_env, monkeypatch):
     from doceditor import feedback_delivery
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
+    fork_comment(db, aid, row["id"])
     review_requests.escalate_fork(db, row["id"])
     ordinary_comment(db, aid)
     before = [tuple(batch) for batch in db.execute("SELECT id,state,item_count FROM doc_feedback_batches ORDER BY id")]

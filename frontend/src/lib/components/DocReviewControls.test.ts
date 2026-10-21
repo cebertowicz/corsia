@@ -19,7 +19,7 @@ let rosterError = false;
 let fetchMock: ReturnType<typeof vi.fn>;
 const NAMES: Record<string, string> = { quality: 'Quality Gate', product: 'Product Experience', plans: 'Structured Plans' };
 const reviewer = (id: string, extras = {}) => ({ id, name: NAMES[id] ?? id, responsibility: 'Review documents', requested: false, unavailable_reason: null, unavailable_text: null, ...extras });
-const row = (id = 'review-1', extras = {}) => ({ id, reviewer_thread_id: 'quality', reviewer_name: 'Quality Gate', requester_name: 'Steve', may_cancel: true, outcome: 'open', created_at: '2026-10-02T16:14:00Z', ...extras });
+const row = (id = 'review-1', extras = {}) => ({ id, reviewer_thread_id: 'quality', reviewer_name: 'Quality Gate', requester_name: 'Steve', may_cancel: true, state: 'forked', created_at: '2026-10-02T16:14:00Z', ...extras });
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const list = () => ({ reviews: rows, ...(rosterError ? { reviewers_error: 'roster_error' } : { reviewers }) });
 async function settle() { await new Promise((resolve) => setTimeout(resolve, 0)); flushSync(); }
@@ -57,7 +57,7 @@ beforeEach(() => {
 			rows = [...rows, made]; reviewers = reviewers.map((item) => item.id === sent ? { ...item, requested: true } : item);
 			return json({ request: made });
 		}
-		if (init?.method === 'DELETE') { rows = []; return json({ request: { outcome: 'cancelled' } }); }
+		if (init?.method === 'DELETE') { rows = []; return json({ request: { state: 'withdrawn' } }); }
 		return json({ woken: [], undelivered_batches: [] });
 	});
 	vi.stubGlobal('fetch', fetchMock);
@@ -119,8 +119,10 @@ describe('document review toolbar and popover', () => {
 		expect(document.body.querySelector('[data-popover]')).toBeNull();
 		expect(toastShow).toHaveBeenCalledWith('Review requested from Quality Gate and Product Experience', 'success');
 		const group = document.body.querySelector<HTMLElement>('.reviewer-group')!;
-		expect(group.getAttribute('aria-label')).toBe('Reviewers: Quality Gate (requested), Product Experience (requested)');
-		expect([...group.querySelectorAll('.reviewer')].map((item) => item.getAttribute('title'))).toEqual(['Quality Gate: requested', 'Product Experience: requested']);
+		expect(group.getAttribute('aria-label')).toMatch(/^Reviewers: Quality Gate \(Requested \d.*[AP]M\), Product Experience \(Requested \d.*[AP]M\)$/);
+		const titles = [...group.querySelectorAll('.reviewer')].map((item) => item.getAttribute('title'));
+		expect(titles[0]).toMatch(/^Quality Gate: Requested /);
+		expect(titles[1]).toMatch(/^Product Experience: Requested /);
 		expect(document.activeElement).toBe(button('Request review'));
 	});
 	it('keeps chips and note on a refusal, names who was already asked after a partial send, and reuses the retry key for the one that failed', async () => {
@@ -175,24 +177,33 @@ describe('document review toolbar and popover', () => {
 		expect(document.body.querySelector('[role="alert"]')).toBeNull();
 	});
 	it('lists current requests as compact rows with their state and a Cancel that follows may_cancel', async () => {
-		rows = [row('review-1'), row('review-2', { reviewer_thread_id: 'product', reviewer_name: 'Product Experience', may_cancel: false }), row('review-3', { reviewer_thread_id: 'plans', reviewer_name: 'Structured Plans', outcome: 'ended_without_comments', may_cancel: false })];
+		rows = [row('review-1'), row('review-2', { reviewer_thread_id: 'product', reviewer_name: 'Product Experience', may_cancel: false }), row('review-3', { reviewer_thread_id: 'plans', reviewer_name: 'Structured Plans', state: 'handed_back', may_cancel: false })];
 		render(); await settle();
-		button('Reviewers: Quality Gate (requested), Product Experience (requested), Structured Plans (ended without comments)').click(); await settle();
+		(document.body.querySelector<HTMLButtonElement>('.reviewer-group')!).click(); await settle();
 		const items = [...document.body.querySelectorAll('[data-review-request]')];
 		expect(items).toHaveLength(3);
 		expect(items[0].querySelector('.status')?.textContent).toMatch(/^Requested \d.*[AP]M$/);
-		expect(items[2].querySelector('.status')?.textContent).toBe('Ended without comments');
+		expect(items[2].querySelector('.status')?.textContent).toBe('Unfinished. Structured Plans will finish it.');
 		expect(maybeButton('Cancel request to Product Experience')).toBeUndefined();
 		expect(maybeButton('Cancel request to Structured Plans')).toBeUndefined();
 		button('Cancel request to Quality Gate').click(); await settle();
 		expect(fetchMock.mock.calls.some(([input, init]) => String(input).startsWith('/api/doc-reviews/') && init?.method === 'DELETE')).toBe(true);
 	});
+	it('keeps a submitted review in the summary with a terminal marker and no Cancel', async () => {
+		rows = [row('review-submitted', { state: 'submitted', may_cancel: false })];
+		render(); await settle();
+		const group = document.body.querySelector<HTMLElement>('.reviewer-group')!;
+		expect(group.querySelector('.mark')?.classList.contains('submitted')).toBe(true);
+		group.click(); await settle();
+		expect(document.body.querySelector('.status')?.textContent).toBe('Submitted.');
+		expect(maybeButton('Cancel request to Quality Gate')).toBeUndefined();
+	});
 	it('returns focus to the comments pill in the header when cancelling the last request removed its trigger', async () => {
 		rows = [row('review-1')];
 		render({ viewingThreadId: null, commentCount: 1 }); await settle();
-		button('Reviewers: Quality Gate (requested)').click(); await settle();
+		(document.body.querySelector<HTMLButtonElement>('.reviewer-group')!).click(); await settle();
 		button('Cancel request to Quality Gate').click(); await settle();
-		expect(maybeButton('Reviewers: Quality Gate (requested)')).toBeUndefined();
+		expect(document.body.querySelector('.reviewer-group')).toBeNull();
 		key(document.activeElement as HTMLElement ?? document.body, 'Escape'); await settle();
 		expect(document.activeElement).toBe(button('1 open thread'));
 	});
@@ -201,7 +212,7 @@ describe('document review toolbar and popover', () => {
 		render(); await settle();
 		const group = document.body.querySelector('.reviewer-group')!;
 		expect(group.querySelectorAll('.reviewer')).toHaveLength(3); expect(group.querySelector('.more')?.textContent).toBe('+2');
-		expect(group.getAttribute('aria-label')).toContain('Reviewer 4 (requested)');
+		expect(group.getAttribute('aria-label')).toContain('Reviewer 4 (Requested ');
 	});
 	it('closes on Escape and on an outside press, returning focus to the trigger', async () => {
 		for (const close of ['Escape', 'outside']) {
@@ -267,20 +278,20 @@ describe('document review toolbar and popover', () => {
 		expect(fetchMock.mock.calls.length).toBe(calls);
 	});
 	it('names an interrupted review and keeps its continuation cancellable', async () => {
-		rows = [row('review-failure', { outcome: 'failed' })]; render(); await settle();
-		expect(document.body.querySelector('.reviewer-group')?.getAttribute('aria-label')).toBe('Reviewers: Quality Gate (The review is unfinished. Quality Gate will finish it.)');
+		rows = [row('review-failure', { state: 'failed' })]; render(); await settle();
+		expect(document.body.querySelector('.reviewer-group')?.getAttribute('aria-label')).toBe('Reviewers: Quality Gate (Unfinished. Quality Gate will finish it.)');
 		await picker();
 		expect(document.body.textContent).toContain('Unfinished. Quality Gate will finish it.');
 		expect(document.body.querySelector('.status')?.getAttribute('title')).toBe('The review is unfinished. Quality Gate will finish it.');
 		expect(button('Cancel request to Quality Gate')).toBeTruthy();
 	});
 	it.each([
-		['missing_credentials', 'Couldn’t finish Quality Gate’s review. Sign in again in Settings › Providers.', 'Couldn’t finish: sign-in needed'],
-		['target_unavailable', 'Couldn’t finish Quality Gate’s review. Choose another model for Quality Gate.', 'Couldn’t finish: choose a model'],
-		['binary_resolution', 'Couldn’t finish Quality Gate’s review. Ask CORSIA in chat to fix it.', 'Couldn’t finish: ask CORSIA to fix it'],
+		['missing_credentials', 'Couldn’t finish Quality Gate’s review. Sign in again in Settings › Providers.', 'Couldn’t finish because sign-in is needed.'],
+		['target_unavailable', 'Couldn’t finish Quality Gate’s review. Choose another model for Quality Gate.', 'Couldn’t finish. Choose another model.'],
+		['binary_resolution', 'Couldn’t finish Quality Gate’s review. Ask CORSIA in chat to fix it.', 'Couldn’t finish. Ask CORSIA to fix it.'],
 	])('shows the recovery step for %s on the summary and review list', async (reason, message, status) => {
-		rows = [row('review-failure', { outcome: 'failed', reason })]; render(); await settle();
-		expect(document.body.querySelector('.reviewer-group')?.getAttribute('aria-label')).toBe(`Reviewers: Quality Gate (${message})`);
+		rows = [row('review-failure', { state: 'failed', reason })]; render(); await settle();
+		expect(document.body.querySelector('.reviewer-group')?.getAttribute('aria-label')).toBe(`Reviewers: Quality Gate (${status})`);
 		await picker();
 		expect(document.body.textContent).toContain(status);
 		expect(document.body.querySelector('.status')?.getAttribute('title')).toBe(message);
@@ -289,10 +300,10 @@ describe('document review toolbar and popover', () => {
 	it('refetches on an artifact change and on a plan change, and cleans its listeners up', async () => {
 		rows = [row()]; render(); await settle();
 		const calls = fetchMock.mock.calls.length;
-		rows = [row('review-1', { outcome: 'ended_without_comments', may_cancel: false })];
+		rows = [];
 		for (const callback of events.get('plans_changed') ?? []) callback({ type: 'plans_changed', plans: [] });
 		await settle(); expect(fetchMock.mock.calls.length).toBe(calls + 1);
-		expect(document.body.querySelector('.reviewer-group')?.getAttribute('aria-label')).toBe('Reviewers: Quality Gate (ended without comments)');
+		expect(document.body.querySelector('.reviewer-group')).toBeNull();
 		rows = []; emit('doc-a'); await settle();
 		expect(document.body.querySelector('.reviewer-group')).toBeNull();
 		component.$destroy(); expect(events.get('plans_changed')?.size).toBe(0);

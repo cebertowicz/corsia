@@ -18,16 +18,16 @@ test('@flow:review-failure-status compact failures on phone', async ({ page, req
 	expect(seeded.ok()).toBeTruthy();
 	const artifactId = (await seeded.json()).artifact.id as string;
 	const cases = [
-		['missing_credentials', 'Couldn’t finish: sign-in needed', 'Sign in again in Settings › Providers.'],
-		['target_unavailable', 'Couldn’t finish: choose a model', 'Choose another model for Quality Gate.'],
-		['binary_resolution', 'Couldn’t finish: ask CORSIA to fix it', 'Ask CORSIA in chat to fix it.'],
+		['missing_credentials', 'Couldn’t finish because sign-in is needed.', 'Sign in again in Settings › Providers.'],
+		['target_unavailable', 'Couldn’t finish. Choose another model.', 'Choose another model for Quality Gate.'],
+		['binary_resolution', 'Couldn’t finish. Ask CORSIA to fix it.', 'Ask CORSIA in chat to fix it.'],
 		['provider_error', 'Unfinished. Quality Gate will finish it.', 'Quality Gate will finish it.'],
 	];
 	// This fixture isolates status rendering; runtime failure delivery has backend coverage.
 	await page.route(`**/api/artifacts/${artifactId}/reviews*`, (route) => route.fulfill({ json: {
 		reviews: cases.map(([reason], i) => ({ id: `status-${i}`, reviewer_thread_id: `reviewer-${i}`,
 			reviewer_name: 'Quality Gate', requester_name: 'Requester', created_at: new Date().toISOString(),
-			may_cancel: true, outcome: 'failed', reason })), reviewers: [],
+			may_cancel: true, state: 'failed', reason })), reviewers: [],
 	} }));
 	await page.addInitScript(({ threadId, artifactId, docPath, title }) => {
 		localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({ threads: { [threadId]: {
@@ -49,11 +49,13 @@ test('@flow:review-failure-status compact failures on phone', async ({ page, req
 			const range = document.createRange(); range.selectNodeContents(element);
 			const style = getComputedStyle(element);
 			return { lines: range.getClientRects().length, whiteSpace: style.whiteSpace,
-				overflow: style.textOverflow, height: element.getBoundingClientRect().height };
+				overflow: style.textOverflow, height: element.getBoundingClientRect().height,
+				clientWidth: element.clientWidth, scrollWidth: element.scrollWidth };
 		});
 		expect(measured.lines).toBe(1);
 		expect(measured.whiteSpace).toBe('nowrap');
 		expect(measured.overflow).toBe('ellipsis');
+		expect(measured.scrollWidth).toBeLessThanOrEqual(measured.clientWidth);
 		await info.attach(`status-${i}-geometry`, { body: JSON.stringify(measured), contentType: 'application/json' });
 	}
 	await saveEvidenceScreenshot(page, info, 'review-failure-status-phone', { fullPage: false });

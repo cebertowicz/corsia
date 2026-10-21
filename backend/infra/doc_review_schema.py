@@ -5,14 +5,6 @@ DOC_REVIEW_REVIEWER_INDEX_SQL = (
     "ON doc_review_requests(reviewer_thread_id,created_at)"
 )
 
-DOC_REVIEW_REQUEST_COMMENTS_SQL = """
-    CREATE TABLE IF NOT EXISTS doc_review_request_comments (
-        request_id TEXT NOT NULL REFERENCES doc_review_requests(id) ON DELETE CASCADE,
-        comment_id TEXT NOT NULL REFERENCES doc_comments(id) ON DELETE CASCADE,
-        PRIMARY KEY (request_id, comment_id)
-    );
-"""
-
 DOC_REVIEW_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS doc_review_requests (
         id TEXT PRIMARY KEY,
@@ -33,4 +25,4 @@ DOC_REVIEW_SCHEMA_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_doc_review_reviewer
         ON doc_review_requests(artifact_id,reviewer_thread_id,created_at);
-""" + DOC_REVIEW_REVIEWER_INDEX_SQL + ";" + DOC_REVIEW_REQUEST_COMMENTS_SQL
+""" + DOC_REVIEW_REVIEWER_INDEX_SQL + ";"

@@ -1,4 +1,4 @@
-"""Approach-reset regressions: explicit outcomes, start admission and boot races."""
+"""Approach-reset regressions: explicit states, start admission and boot races."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from core.fork_runtime import ForkHandle, ForkStepLimitReached, handles
 from doceditor import review_feedback, review_requests
 from infra.database import write_transaction
 from plans import public
-from test_doc_review_requests import request, review_env, staged_comment, stored
+from test_doc_review_requests import request, review_env, fork_comment, stored
 from test_checkpoint_provider_adapters import _request
 
 
@@ -41,7 +41,7 @@ async def test_start_build_failure_records_reason_and_hands_back(review_env, mon
         await runtime.start(row["id"])
     failed = stored(db, row["id"])
     assert failed["state"] == "failed" and failed["reason"] == reason
-    assert review_requests.outcome(db, failed) == "failed"
+    assert review_requests.is_open(db, failed)
     assert reason in public.get_node(failed["node_id"], db=db).description
     assert failed["fork_id"] is None and row["fork_id"] not in handles
     assert any(reason in record.message for record in caplog.records)
@@ -58,17 +58,15 @@ async def test_start_build_failure_records_reason_and_hands_back(review_env, mon
 async def test_partial_review_limit_and_failure_are_distinct_live_tasks(review_env, error, expected_state, reason):
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
-    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 1
-    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 0
+    fork_comment(db, aid, row["id"])
+    assert db.execute("SELECT state,item_count FROM doc_feedback_batches").fetchone()[:] == ("open", 1)
     await capture.review_limit_or_failure_handler(row["id"], error)
     result = stored(db, row["id"])
     assert (result["state"], result["reason"]) == (expected_state, reason)
     assert public.review_is_open(db, result["node_id"])
     note = public.get_node(result["node_id"], db=db).description
-    assert reason in note and "comments already staged" in note
-    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 0
-    assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == "open"
+    assert reason in note and "comments already written" in note
+    assert db.execute("SELECT state,item_count FROM doc_feedback_batches").fetchone()[:] == ("open", 1)
     await capture.review_limit_or_failure_handler(row["id"], error)
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 1
 
@@ -151,7 +149,7 @@ async def test_startup_does_not_orphan_a_new_request_without_a_handle(review_env
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("entrypoint", ["http", "tool"])
-async def test_creation_returns_failed_outcome_after_cold_build_failure(review_env, monkeypatch, entrypoint):
+async def test_creation_reports_failed_state_after_cold_build_failure(review_env, monkeypatch, entrypoint):
     import json
     from api.doc_reviews import ReviewCreate, _create
     from tools import document_reviews
@@ -191,12 +189,12 @@ async def test_creation_returns_failed_outcome_after_cold_build_failure(review_e
             ))
             result = json.loads(await document_reviews.DocReviewRequestTool().execute(**fields))
         assert result["request"]["state"] == "forked"
-        assert result["request"]["outcome"] == "open"
+        assert "outcome" not in result["request"]
         assert result["request"]["node_id"] is None
         await asyncio.wait_for(entered.wait(), timeout=5)
         await asyncio.gather(*launches)
         refreshed = review_requests.get_request(db, result["request"]["id"])
-        assert refreshed["outcome"] == "failed"
+        assert "outcome" not in refreshed
         assert refreshed["state"] == "failed"
         assert refreshed["reason"] == "no_sealed_boundary"
         assert refreshed["node_id"]
@@ -208,13 +206,12 @@ async def test_creation_returns_failed_outcome_after_cold_build_failure(review_e
         monkeypatch.setattr(app_loop, "_LOOP", previous_loop)
 
 
-def test_outcome_reads_lifecycle_instead_of_node_presence(review_env):
+def test_pending_reads_lifecycle_and_checks_only_continuation_tasks(review_env):
     db, aid = review_env
     row = request(db, aid)
-    # A linked node is no longer an alternative source of request state.
     snapshot = {**stored(db, row["id"]), "node_id": "unrelated-node"}
-    assert review_requests.outcome(db, snapshot) == "open"
+    assert review_requests.is_open(db, snapshot)
     snapshot.update(state="submitted", answered_batch_id=None)
-    assert review_requests.outcome(db, snapshot) == "ended_without_comments"
+    assert not review_requests.is_open(db, snapshot)
     snapshot.update(state="failed", reason="no_sealed_boundary")
-    assert review_requests.outcome(db, snapshot) == "ended_without_comments"
+    assert not review_requests.is_open(db, snapshot)

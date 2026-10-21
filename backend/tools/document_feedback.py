@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from doceditor import feedback_batches, feedback_state, review_feedback, review_requests as reviews
+from doceditor import review_feedback
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
@@ -58,38 +58,9 @@ def _send_feedback(
                     connection, review_request_id, actor_thread_id, resolved_id,
                 )
             else:
-                pending = feedback_state.has_pending_for_document(
-                    connection,
-                    author_kind="agent",
-                    author_id=actor_thread_id,
-                    artifact_id=resolved_id,
+                pending, woken, undelivered = review_feedback.send_document_feedback(
+                    connection, actor_thread_id, resolved_id,
                 )
-                woken = feedback_batches.close_for_document(
-                    connection,
-                    author_kind="agent",
-                    author_id=actor_thread_id,
-                    artifact_id=resolved_id,
-                    reason="submit",
-                )
-                woken.extend(feedback_batches.retry_for_document(
-                    connection,
-                    author_kind="agent",
-                    author_id=actor_thread_id,
-                    artifact_id=resolved_id,
-                ))
-                undelivered = feedback_state.undelivered_for_document(
-                    connection,
-                    author_kind="agent",
-                    author_id=actor_thread_id,
-                    artifact_id=resolved_id,
-                )
-                if not pending:
-                    from doceditor.review_lifecycle import submit_without_batch
-
-                    submitted = submit_without_batch(connection, resolved_id, actor_thread_id)
-                    pending = submitted.pending
-                    woken.extend(submitted.woken)
-                    undelivered.extend(submitted.undelivered)
         result = _delivery_text(pending, undelivered)
         return {
             "artifact_id": resolved_id,

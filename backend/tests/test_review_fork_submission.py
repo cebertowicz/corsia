@@ -1,4 +1,4 @@
-"""Fork submission owns terminal state and preserves unrelated reviewer notices."""
+"""Fork sends and receipts follow ordinary reviewer feedback delivery."""
 
 import asyncio
 from types import SimpleNamespace
@@ -7,17 +7,21 @@ import pytest
 
 from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
 from core.fork_tools import execute_fork_tool
-from doceditor import comments, feedback_batches, review_feedback
-from doceditor.feedback_batch_delivery import claim_and_deliver
+from doceditor import comments, review_feedback
+from doceditor.feedback_batches import claim_and_deliver
 from infra.database import write_transaction
-from test_doc_review_requests import request, review_env, staged_comment, stored  # noqa: F401
+from test_doc_review_requests import request, review_env, fork_comment, stored  # noqa: F401
 
 
-def test_empty_submit_finishes_once_without_feedback_or_reviewer_wake(review_env):
+@pytest.mark.parametrize("deleted_comment", [False, True])
+def test_empty_submit_finishes_once_without_feedback_or_reviewer_wake(review_env, deleted_comment):
     db, aid = review_env
     row = request(db, aid)
+    if deleted_comment:
+        fork_comment(db, aid, row["id"])
     with write_transaction(db, scope="test_empty_fork_submit"):
-        assert review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid) == (False, [], [])
+        db.execute("DELETE FROM doc_comments")
+        assert review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid) == (deleted_comment, [], [])
     assert stored(db, row["id"])["state"] == "submitted"
     assert stored(db, row["id"])["answered_batch_id"] is None
     with write_transaction(db, scope="test_repeated_empty_fork_submit"):
@@ -25,61 +29,84 @@ def test_empty_submit_finishes_once_without_feedback_or_reviewer_wake(review_env
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
 
 
-def test_batch_delivery_cannot_submit_a_fork_but_explicit_submit_can(review_env):
+def test_owner_batch_delivery_answers_a_running_fork(review_env):
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
+    fork_comment(db, aid, row["id"])
     from test_review_feedback_ownership import ordinary_comment
     batch = ordinary_comment(db, aid)
     with write_transaction(db, scope="test_delivery_before_fork_submit"):
         claim_and_deliver(db, batch, from_state="open", reason="submit")
-    assert stored(db, row["id"])["state"] == "forked"
-    assert stored(db, row["id"])["answered_batch_id"] is None
-    with write_transaction(db, scope="test_fork_submit_after_delivery"):
-        review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     assert stored(db, row["id"])["state"] == "submitted"
-    answered = stored(db, row["id"])["answered_batch_id"]
-    assert answered and answered != batch
-    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 0
+    assert stored(db, row["id"])["answered_batch_id"] == batch
+    assert db.execute("SELECT item_count FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == 2
 
 
-def test_submit_with_removed_staged_comments_finishes_without_continuation(review_env):
+def test_duplicate_comment_with_submit_delivers_existing_ordinary_feedback(review_env):
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
-    with write_transaction(db, scope="test_empty_batch_fork_submit"):
-        db.execute("DELETE FROM doc_comments")
-        pending, woken, failures = review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
-    assert not pending and not failures and "reviewer" not in woken
-    assert stored(db, row["id"])["state"] == "submitted"
-    assert stored(db, row["id"])["answered_batch_id"] is None
-    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 0
-    assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE owner_thread_id='reviewer'").fetchone()[0] == 0
-
-
-def test_duplicate_comment_with_submit_delivers_existing_staging(review_env):
-    db, aid = review_env
-    row = request(db, aid)
-    staged_comment(db, aid, row["id"])
-    _comment, _registered, result = staged_comment(db, aid, row["id"], submit=True)
+    fork_comment(db, aid, row["id"])
+    _comment, _registered, result = fork_comment(db, aid, row["id"], submit=True)
     assert set(result) == {"batch_ids", "undelivered_batches", "woken"}
     assert not result["undelivered_batches"]
     assert stored(db, row["id"])["state"] == "submitted"
     assert db.execute("SELECT COUNT(*) FROM doc_comments").fetchone()[0] == 1
 
 
-def test_fork_does_not_consume_unrelated_delivery_notices(review_env, monkeypatch):
+@pytest.mark.parametrize("root_kind,root_author,recipient", [
+    ("user", None, "ui"), ("agent", "second", "second"),
+])
+def test_fork_reply_reaches_root_author_through_ordinary_routing(review_env, root_kind, root_author, recipient):
+    from doceditor.comment_create_db import CommentInput, create_in_db
+    from doceditor.comment_creation import CreateReceipt
+
     db, aid = review_env
+    root = comments.create(
+        aid, body="Which claim needs evidence?", author="Reader", author_kind=root_kind,
+        author_thread_id=root_author, review=True, db=db,
+    )
     row = request(db, aid)
-    taken = []
-    monkeypatch.setattr(feedback_batches, "take_unreported_undelivered", lambda *args: taken.append(args) or [])
-    staged_comment(db, aid, row["id"])
-    assert taken == []
-    comment = comments.list_for_artifact(aid, db=db)[0]
-    with write_transaction(db, scope="test_foreground_notices"):
-        result = feedback_batches.record_comment(db, comment, created=False)
-    assert len(taken) == 1
-    assert set(result) == {"batch_ids", "undelivered_batches", "woken"}
+    reply, _registered, feedback = create_in_db(
+        CommentInput(
+            artifact_id=aid, path=None, body="The delivery claim.", author="Reviewer",
+            author_kind="agent", user_id="owner-token", author_thread_id="reviewer",
+            parent_id=root["id"], review_request_id=row["id"],
+        ), None, f"reply-{root_kind}", CreateReceipt(),
+    )
+    assert len(feedback["batch_ids"]) == 2
+    with write_transaction(db, scope="test_send_fork_reply"):
+        review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
+    batches = db.execute("SELECT id,recipient_id,state,delivered_node_id FROM doc_feedback_batches").fetchall()
+    assert {batch["recipient_id"] for batch in batches} == {"owner", recipient}
+    assert all(batch["state"] == "delivered" for batch in batches)
+    recipient_batch = next(batch for batch in batches if batch["recipient_id"] == recipient)
+    assert db.execute(
+        "SELECT comment_id FROM doc_feedback_batch_items WHERE batch_id=?", (recipient_batch["id"],),
+    ).fetchone()[0] == reply["id"]
+    if root_kind == "agent":
+        node = db.execute("SELECT description FROM plan_nodes WHERE id=?", (recipient_batch["delivered_node_id"],)).fetchone()
+        assert "The delivery claim." in node["description"]
+    assert stored(db, row["id"])["state"] == "submitted"
+
+
+def test_empty_fork_sends_reviewers_existing_batch_and_receipt_counts_it(review_env):
+    from test_review_feedback_ownership import ordinary_comment
+
+    db, aid = review_env
+    batch = ordinary_comment(db, aid)
+    row = request(db, aid)
+    with write_transaction(db, scope="test_fork_sends_reviewer_batch"):
+        pending, _woken, failures = review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
+    assert pending and not failures
+    assert stored(db, row["id"])["state"] == "submitted"
+    assert stored(db, row["id"])["answered_batch_id"] == batch
+    receipt = db.execute(
+        "SELECT summary FROM context_change_journal WHERE object_kind='thread_context' "
+        "AND object_id='reviewer' ORDER BY created_at DESC LIMIT 1",
+    ).fetchone()["summary"]
+    assert "1 feedback items delivered" in receipt
+    assert "The continuation adds evidence." in receipt
+    assert "nothing was sent to the document owner" not in receipt
 
 
 @pytest.mark.asyncio

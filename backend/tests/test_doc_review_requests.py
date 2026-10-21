@@ -1,4 +1,4 @@
-"""Fork-first document review lifecycle and feedback-isolation tests."""
+"""Fork-first document reviews use the reviewer's ordinary feedback."""
 from __future__ import annotations
 
 import json
@@ -8,7 +8,6 @@ import pytest
 from doc_feedback_helpers import seed_document, seed_thread
 from doceditor import comments, feedback_batches, review_feedback
 from infra.database import get_db, write_transaction
-from infra.time import utc_now_iso
 from plans import public
 
 
@@ -45,7 +44,7 @@ def stored(db, request_id):
     return dict(db.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone())
 
 
-def staged_comment(db, artifact_id, request_id, *, submit=False):
+def fork_comment(db, artifact_id, request_id, *, submit=False):
     from doceditor.comment_create_db import CommentInput, create_in_db
     from doceditor.comment_creation import CreateReceipt
 
@@ -59,25 +58,6 @@ def staged_comment(db, artifact_id, request_id, *, submit=False):
     )
 
 
-def reviewer_turn(db, started_at):
-    """Start the reviewer's next Turn at ``started_at``, ending any running one."""
-    with write_transaction(db, scope="test_reviewer_turn") as connection:
-        connection.execute(
-            "UPDATE active_turns SET status='completed',ended_at=? WHERE thread_id='reviewer'"
-            " AND status='running'", (started_at,),
-        )
-        connection.execute(
-            """INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch)
-               VALUES (?,'reviewer',0,'test-model','running',?,'boot')""",
-            (f"turn-{started_at}", started_at),
-        )
-
-
-def close_reviewer_turn(db):
-    with write_transaction(db, scope="test_reviewer_turn_end") as connection:
-        return feedback_batches.close_for_turn_end(connection, "reviewer")
-
-
 def test_request_is_node_less_and_persists_a_running_fork(review_env):
     db, artifact_id = review_env
 
@@ -86,7 +66,7 @@ def test_request_is_node_less_and_persists_a_running_fork(review_env):
     assert result["fork_id"] and result["node_id"] is None
     assert result["state"] == "forked"
     assert "requesting_node_id" not in result and "requirements_revision" not in result
-    assert result["outcome"] == "open"
+    assert "outcome" not in result
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
 
 
@@ -107,7 +87,7 @@ def test_submit_settles_node_less_request_and_leaves_reviewer_unselected(review_
 
     db, artifact_id = review_env
     result = request(db, artifact_id)
-    staged_comment(db, artifact_id, result["id"])
+    fork_comment(db, artifact_id, result["id"])
 
     with write_transaction(db, scope="test_submit_fork_feedback"):
         pending, woken, undelivered = review_feedback.submit_fork_feedback(
@@ -116,18 +96,18 @@ def test_submit_settles_node_less_request_and_leaves_reviewer_unselected(review_
 
     assert pending and not undelivered
     assert stored(db, result["id"])["answered_batch_id"]
-    assert review_requests.outcome(db, stored(db, result["id"])) == "commented"
+    assert stored(db, result["id"])["state"] == "submitted"
     assert "reviewer" not in woken
     assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE owner_thread_id='reviewer'").fetchone()[0] == 0
 
 
-def test_withdrawal_keeps_seen_and_replied_comments_open_without_delivering(review_env, monkeypatch):
+def test_cancel_preserves_seen_and_replied_comments_and_ordinary_feedback(review_env, monkeypatch):
     """A comment people already saw and answered is never deleted, resolved or agreed to."""
     from doceditor import comment_notifications, review_requests
 
     db, artifact_id = review_env
     first = request(db, artifact_id)
-    staged_comment(db, artifact_id, first["id"])
+    fork_comment(db, artifact_id, first["id"])
     root = db.execute("SELECT id FROM doc_comments WHERE body='The claim needs evidence.'").fetchone()["id"]
     reply = comments.create(artifact_id, body="Which claim?", author="Steve", parent_id=root, db=db)
     with write_transaction(db, scope="test_thread_view") as connection:
@@ -142,26 +122,24 @@ def test_withdrawal_keeps_seen_and_replied_comments_open_without_delivering(revi
     )
     actor = review_requests.ReviewActor("agent", "requester", "requester", "owner-token", "Requester")
 
-    assert review_requests.cancel(db, first["id"], actor)["outcome"] == "cancelled"
+    assert review_requests.cancel(db, first["id"], actor)["state"] == "withdrawn"
 
     kept = db.execute("SELECT resolved, acked FROM doc_comments WHERE id=?", (root,)).fetchone()
     assert kept is not None and kept["resolved"] == 0 and kept["acked"] == 0
     assert db.execute("SELECT COUNT(*) FROM doc_comments WHERE id=?", (reply["id"],)).fetchone()[0] == 1
     assert db.execute("SELECT COUNT(*) FROM doc_comment_thread_views WHERE root_id=?", (root,)).fetchone()[0] == 1
     assert changed == []  # no comment write, so no comment-change announcement
-    assert db.execute(
-        "SELECT COUNT(*) FROM doc_review_request_comments WHERE request_id=?", (first["id"],),
-    ).fetchone()[0] == 0
+    assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == "open"
     assert stored(db, first["id"])["answered_batch_id"] is None
 
 
-def test_withdrawal_drops_only_this_forks_staging(review_env):
+def test_cancel_keeps_fork_and_reviewer_comments_in_one_ordinary_batch(review_env):
     from doceditor import review_feedback, review_requests
 
     db, artifact_id = review_env
     first = request(db, artifact_id)
-    staged_comment(db, artifact_id, first["id"])
-    # An unrelated reviewer batch must survive a fork withdrawal.
+    fork_comment(db, artifact_id, first["id"])
+    # The reviewer's own comments share the fork's ordinary batch.
     with write_transaction(db, scope="test_unrelated_comment") as connection:
         row, created = comments.create_with_status(
             artifact_id, body="Unrelated feedback.", author="Reviewer", author_kind="agent",
@@ -172,13 +150,11 @@ def test_withdrawal_drops_only_this_forks_staging(review_env):
 
     cancelled = review_requests.cancel(db, first["id"], actor)
 
-    assert cancelled["outcome"] == "cancelled"
+    assert cancelled["state"] == "withdrawn"
     assert db.execute("SELECT resolved FROM doc_comments WHERE body='The claim needs evidence.'").fetchone()[0] == 0
     assert db.execute("SELECT resolved FROM doc_comments WHERE body='Unrelated feedback.'").fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM doc_comments WHERE body='Unrelated feedback.'").fetchone()[0] == 1
-    assert db.execute(
-        "SELECT COUNT(*) FROM doc_review_request_comments WHERE request_id=?", (first["id"],),
-    ).fetchone()[0] == 0
+    assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == "open"
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
 
 
@@ -202,7 +178,7 @@ def test_escalation_preserves_comments_and_passes_requesting_intent(review_env, 
 
     db, artifact_id = review_env
     result = request(db, artifact_id)
-    staged_comment(db, artifact_id, result["id"])
+    fork_comment(db, artifact_id, result["id"])
     seen = []
     create = public.create_review_node
 
@@ -217,60 +193,27 @@ def test_escalation_preserves_comments_and_passes_requesting_intent(review_env, 
     assert "intent_node_id" not in seen[0] and "requesting_node_id" not in seen[0]
     node = public.get_node(escalated["node_id"], db=db)
     assert comment["id"] in node.description and "Check claims" in node.description
-    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 1
     assert db.execute("SELECT state FROM doc_feedback_batches").fetchone()[0] == "open"
-    reviewer_turn(db, utc_now_iso())
     with write_transaction(db, scope="test_continuation_submit"):
-        from doceditor.review_lifecycle import submit_without_batch
-        submit_without_batch(db, artifact_id, "reviewer")
+        review_feedback.send_document_feedback(db, "reviewer", artifact_id)
     assert stored(db, result["id"])["answered_batch_id"]
 
 
 def test_escalated_comments_follow_the_ordinary_quiet_timer(review_env):
-    """Released comments follow ordinary feedback even before continuation starts."""
-    from doceditor import review_feedback, review_requests
+    """Ordinary feedback can deliver before the continuation starts."""
+    from doceditor import review_requests
 
     db, artifact_id = review_env
     result = request(db, artifact_id)
-    staged_comment(db, artifact_id, result["id"])
-    reviewer_turn(db, utc_now_iso())  # running before the fork gives up
+    fork_comment(db, artifact_id, result["id"])
     escalated = review_requests.escalate_fork(db, result["id"])
 
     feedback_batches.close_due("9999-12-31T00:00:00+00:00", db=db)
-    close_reviewer_turn(db)
 
     batch = db.execute("SELECT state FROM doc_feedback_batches").fetchone()
     assert batch["state"] == "delivered"
-    assert db.execute("SELECT COUNT(*) FROM doc_review_request_comments").fetchone()[0] == 0
-    assert stored(db, result["id"])["answered_batch_id"]
-    assert not public.review_is_open(db, escalated["node_id"])
-
-    reviewer_turn(db, utc_now_iso())
-    with write_transaction(db, scope="test_continuation_submit"):
-        from doceditor.review_lifecycle import submit_without_batch
-        submit_without_batch(db, artifact_id, "reviewer")
-    answered = stored(db, result["id"])["answered_batch_id"]
-    assert answered
-    assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (answered,)).fetchone()[0] == "delivered"
-    assert not public.review_is_open(db, escalated["node_id"])
-    reviewer_turn(db, utc_now_iso())
-    assert close_reviewer_turn(db) == []
-    assert stored(db, result["id"])["answered_batch_id"] == answered
-
-
-def test_escalated_comments_deliver_on_the_reviewers_submit(review_env):
-    """D2: the reviewer's own submit after escalation delivers and settles once."""
-    from doceditor import review_feedback, review_requests
-
-    db, artifact_id = review_env
-    result = request(db, artifact_id)
-    staged_comment(db, artifact_id, result["id"])
-    escalated = review_requests.escalate_fork(db, result["id"])
-
-    with write_transaction(db, scope="test_submit_escalated") as connection:
-        from doceditor.review_lifecycle import submit_without_batch
-        submit_without_batch(connection, artifact_id, "reviewer")
-
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 1
     assert stored(db, result["id"])["answered_batch_id"]
     assert not public.review_is_open(db, escalated["node_id"])
 
@@ -290,22 +233,22 @@ def test_clean_submit_ends_without_comments_and_never_escalates(review_env):
 
     assert not pending and not undelivered
     row = stored(db, result["id"])
-    assert review_requests.outcome(db, row) == "ended_without_comments"
+    assert row["answered_batch_id"] is None
     assert row["state"] == "submitted"
     assert artifact_review_capture.submitted(result["id"])
     assert review_requests.escalate_fork(db, result["id"]) is None
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
     receipt = db.execute(
         "SELECT COUNT(*) FROM context_change_journal WHERE object_kind='thread_context'"
-        " AND object_id='reviewer' AND summary LIKE '%no comments were left%'",
+        " AND object_id='reviewer' AND summary LIKE '%nothing was sent to the document owner%'",
     ).fetchone()[0]
     assert receipt == 1
 
 
-def test_schema_keeps_request_staging_outside_open_batches(review_env):
+def test_fork_comment_immediately_joins_an_ordinary_open_batch(review_env):
     db, artifact_id = review_env
     first = request(db, artifact_id)
-    staged_comment(db, artifact_id, first["id"])
-    assert db.execute("SELECT request_id FROM doc_review_request_comments").fetchone()[0] == first["id"]
-    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 0
+    fork_comment(db, artifact_id, first["id"])
+    batch = db.execute("SELECT state,author_id,item_count FROM doc_feedback_batches").fetchone()
+    assert tuple(batch) == ("open", "reviewer", 1)
     assert "review_request_id" not in {row[1] for row in db.execute("PRAGMA table_info(doc_feedback_batches)")}

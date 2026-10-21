@@ -42,10 +42,10 @@ def startup_forked_requests() -> list[str]:
         db.close()
 
 
-def _escalate_in_db(request_id: str, reason: str, *, outcome: Literal["handed_back", "failed"] | None = None) -> None:
+def _escalate_in_db(request_id: str, reason: str, *, state: Literal["handed_back", "failed"] | None = None) -> None:
     db = get_db()
     try:
-        review_requests.escalate_fork(db, request_id, reason=reason, outcome=outcome)
+        review_requests.escalate_fork(db, request_id, reason=reason, state=state)
     finally:
         db.close()
 
@@ -74,14 +74,14 @@ async def review_limit_or_failure_handler(
     error=None,
     *,
     reason: str | None = None,
-    outcome: Literal["handed_back", "failed"] | None = None,
+    state: Literal["handed_back", "failed"] | None = None,
 ) -> None:
     if await run_in_db(submitted, request_id):
         return
     reason = reason or failure_reason(error)
     log = logger.warning if reason == "limit" else logger.error
     log("artifact review ended request_id=%s reason=%s", request_id, reason)
-    await run_in_db(_escalate_in_db, request_id, reason, outcome=outcome)
+    await run_in_db(_escalate_in_db, request_id, reason, state=state)
 
 
 async def reconcile_startup_reviews() -> list[str]:
@@ -91,7 +91,7 @@ async def reconcile_startup_reviews() -> list[str]:
         await review_limit_or_failure_handler(
             request_id,
             reason="interrupted",
-            outcome="handed_back",
+            state="handed_back",
         )
     return request_ids
 

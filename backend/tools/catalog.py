@@ -162,10 +162,7 @@ def fork_tool_definitions(
     registry: ToolRegistry, tool_allowlist: frozenset[str],
 ) -> tuple[dict, ...]:
     """Disclose only a disposable fork's fixed tools through the catalog boundary."""
-    source = (
-        registry.get_definitions()
-        if hasattr(registry, "get_definitions") else advertised_tool_definitions(registry)
-    )
+    source = registry.get_definitions()
     definitions = [
         deepcopy(definition)
         for definition in source

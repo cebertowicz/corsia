@@ -16,8 +16,8 @@ def instruction(row, artifact) -> str:
 
 
 def continuation(comment_ids: list[str], state: str, reason: str) -> str:
-    staged = ", ".join(comment_ids) or "none"
+    written = ", ".join(comment_ids) or "none"
     return (
-        f"Continue the requested review; comments already staged: {staged}"
-        f". Fork outcome: {state} ({reason})."
+        f"Continue the requested review; comments already written: {written}"
+        f". Fork state: {state} ({reason})."
     )

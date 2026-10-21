@@ -15,7 +15,7 @@ from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
 from infra.database import write_transaction
 from core.fork_runtime import ForkKindDefinitionError, handles
 from core.fork_tools import execute_fork_tool
-from test_doc_review_requests import request, review_env, staged_comment, stored
+from test_doc_review_requests import request, review_env, fork_comment, stored
 
 
 def test_every_harness_requires_an_explicit_limit():
@@ -61,7 +61,7 @@ def test_read_cannot_bypass_document_scope_with_an_owned_parent(review_env):
 
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
+    fork_comment(db, aid, row["id"])
     comment = db.execute("SELECT id FROM doc_comments WHERE artifact_id=?", (aid,)).fetchone()
     with pytest.raises(PermissionError, match="only read its requested document"):
         authorize_tool(SimpleNamespace(fork_id=row["fork_id"], thread_id="reviewer", working_dir="/workspace"),
@@ -252,7 +252,7 @@ def test_submitted_receipt_and_owner_reply_reach_next_reviewer_context(review_en
 
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
+    fork_comment(db, aid, row["id"])
     with write_transaction(db, scope="test_receipt_submit"):
         review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE owner_thread_id='reviewer'").fetchone()[0] == 0
@@ -272,18 +272,18 @@ def test_submitted_receipt_and_owner_reply_reach_next_reviewer_context(review_en
     assert delivered and delivered["delivered_node_id"]
 
 
-def test_foreground_completion_and_quiet_timer_cannot_submit_review_batch(review_env):
+def test_foreground_completion_delivers_fork_feedback_through_ordinary_batch(review_env):
     from doceditor import feedback_batches
 
     db, aid = review_env
     row = request(db, aid)
-    staged_comment(db, aid, row["id"])
+    fork_comment(db, aid, row["id"])
     with write_transaction(db, scope="test_foreground_end_during_fork"):
-        assert feedback_batches.close_for_turn_end(db, "reviewer") == []
-    feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db)
-    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 0
-    assert db.execute("SELECT request_id FROM doc_review_request_comments").fetchone()[0] == row["id"]
-    assert stored(db, row["id"])["answered_batch_id"] is None
+        feedback_batches.close_for_turn_end(db, "reviewer")
+    assert feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db) == []
+    assert db.execute("SELECT state,item_count FROM doc_feedback_batches").fetchone()[:] == ("delivered", 1)
+    assert stored(db, row["id"])["answered_batch_id"]
+    assert stored(db, row["id"])["state"] == "submitted"
 
 
 def test_startup_escalates_each_orphaned_review_once(review_env):
@@ -297,7 +297,7 @@ def test_startup_escalates_each_orphaned_review_once(review_env):
     db.execute("UPDATE threads SET agent_enabled=1,agent_responsibility='Review documents' WHERE id='third'")
     db.commit()
     orphan = request(db, aid)
-    staged_comment(db, aid, orphan["id"])
+    fork_comment(db, aid, orphan["id"])
     cancelled = request(db, aid, reviewer="second", key="second-key")
     actor = review_requests.ReviewActor("agent", "requester", "requester", "owner-token", "Requester")
     review_requests.cancel(db, cancelled["id"], actor)

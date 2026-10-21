@@ -1,10 +1,9 @@
 <script lang="ts">
-	import { reviewContinuationText, reviewFailureStatus } from '$lib/reviewCopy';
+	import { reviewContinuationText, reviewStatus } from '$lib/reviewCopy';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { agentColor } from '$lib/docPresence';
 	import type { DocumentReviewState } from '$lib/docReviewState.svelte';
 	let { model }: { model: DocumentReviewState } = $props();
-	const timeLabel = (value: string) => new Date(value).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 </script>
 
 {#if model.requests.length}
@@ -14,7 +13,7 @@
 				<Avatar name={request.reviewer_name} color={agentColor(request.reviewer_thread_id)} hidden size="md" />
 				<span class="who">
 					<span class="name">{request.reviewer_name}</span>
-					<span class="status" title={request.outcome === 'failed' ? reviewContinuationText(request.reviewer_name, request.reason) : undefined}>{request.outcome === 'failed' ? reviewFailureStatus(request.reviewer_name, request.reason) : request.outcome === 'ended_without_comments' ? 'Ended without comments' : `Requested ${timeLabel(request.created_at)}`}</span>
+					<span class="status" title={request.state === 'failed' ? reviewContinuationText(request.reviewer_name, request.reason) : undefined}>{reviewStatus(request.state, request.reviewer_name, request.created_at, request.reason)}</span>
 					{#if model.cancelErrors[request.id]}<span class="error" role="alert">{model.cancelErrors[request.id]}</span>{/if}
 				</span>
 				{#if request.may_cancel}
@@ -32,7 +31,7 @@
 	li { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 2px 0; }
 	.who { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 	.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
-	.status { color: var(--text-secondary); font-size: var(--text-footnote); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.status { color: var(--text-secondary); font-size: var(--text-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.error { color: var(--red); font-size: var(--text-footnote); }
 	.cancel { flex: none; padding: 2px 6px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); cursor: pointer; }
 	.cancel:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-hover); }

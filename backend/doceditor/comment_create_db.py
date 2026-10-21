@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
-from doceditor import comments, doc_images, feedback_batches, feedback_comments, image_regions, review_lifecycle
+from doceditor import comments, doc_images, feedback_batches, image_regions, review_lifecycle
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
@@ -116,24 +115,9 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                     connection, request.review_request_id, author_kind=request.author_kind,
                     author_id=request.author_thread_id, artifact_id=artifact_id,
                 )
-                connection.execute(
-                    "INSERT OR IGNORE INTO doc_review_request_comments (request_id,comment_id) VALUES (?,?)",
-                    (request.review_request_id, row["id"]),
-                )
-                if created:
-                    feedback_comments.emit_comment_created(connection, row)
-                feedback: dict[str, Any] = {"batch_ids": [], "woken": [], "undelivered_batches": []}
-                if request.submit:
-                    from doceditor.review_feedback import submit_fork_feedback
-
-                    _pending, woken, failures = submit_fork_feedback(
-                        connection, request.review_request_id, request.author_thread_id, artifact_id,
-                    )
-                    feedback.update(woken=woken, undelivered_batches=failures)
-            else:
-                feedback = feedback_batches.record_comment(
-                    connection, row, created=created, submit=request.submit,
-                )
+            feedback = feedback_batches.record_comment(
+                connection, row, created=created, submit=request.submit,
+            )
         return row, registered, feedback
     except BaseException:
         receipt.failed(identifier, db, artifact_id=request.artifact_id, author=request.author)

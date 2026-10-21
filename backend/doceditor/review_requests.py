@@ -40,8 +40,6 @@ DEFAULT_REVIEWER_UNAVAILABLE = "Not available right now"
 REVIEWER_NOT_IN_ROSTER = "reviewer_not_in_roster"
 DEFAULT_REQUEST_ERROR_CODE = "review_request_refused"
 CANCEL_REASON = "Review request cancelled by its requester or document owner."
-#: Outcome of a request whose review task ended before any batch reached the owner.
-ENDED_WITHOUT_COMMENTS = "ended_without_comments"
 IN_REVIEW_REFUSAL = "A review is already in progress. Wait for it to finish, or cancel it and request a new review with your note."
 
 
@@ -134,8 +132,8 @@ def _reviewer(db, artifact, reviewer: str, actor: ReviewActor) -> None:
 
 
 def _view(db, row) -> dict:
-    """A stored request with its outcome, the only form callers receive."""
-    return {**dict(row), "outcome": outcome(db, row)}
+    """Expose the stored lifecycle without a parallel status vocabulary."""
+    return dict(row)
 
 
 def get_request(db, request_id: str) -> dict:
@@ -206,17 +204,6 @@ def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: Rev
         return result
 
 
-def outcome(db, row) -> str:
-    """Compatibility labels derived from the explicit request lifecycle."""
-    if row["state"] == "withdrawn":
-        return "cancelled"
-    if row["state"] == "submitted":
-        return "commented" if row["answered_batch_id"] else ENDED_WITHOUT_COMMENTS
-    if row["state"] == "failed":
-        return "failed" if is_open(db, row) else ENDED_WITHOUT_COMMENTS
-    return "open" if is_open(db, row) else ENDED_WITHOUT_COMMENTS
-
-
 def for_document(db, artifact_id: str) -> list[dict]:
     """Each reviewer's latest request, while it is open or ended without comments."""
     rows = db.execute(
@@ -242,7 +229,7 @@ def may_cancel(db, artifact, row, actor: ReviewActor) -> bool:
 
 
 def escalate_fork(db, request_id: str, *, reason: str = "limit",
-                  outcome: Literal["handed_back", "failed"] | None = None) -> dict | None:
+                  state: Literal["handed_back", "failed"] | None = None) -> dict | None:
     """Turn an unfinished fork into the established reviewer node exactly once."""
     with write_transaction(db, scope="escalate_document_review_fork") as connection:
         row = connection.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone()
@@ -250,11 +237,13 @@ def escalate_fork(db, request_id: str, *, reason: str = "limit",
             return None
         requester = connection.execute("SELECT title FROM threads WHERE id=?", (row["requester_id"],)).fetchone()
         comments = connection.execute(
-            "SELECT comment_id AS id FROM doc_review_request_comments "
-            "WHERE request_id=? ORDER BY comment_id",
-            (request_id,),
+            "SELECT DISTINCT i.comment_id AS id FROM doc_feedback_batch_items i "
+            "JOIN doc_feedback_batches b ON b.id=i.batch_id "
+            "WHERE b.artifact_id=? AND b.author_kind='agent' AND b.author_id=? "
+            "AND b.state='open' AND i.comment_id IS NOT NULL ORDER BY i.comment_id",
+            (row["artifact_id"], row["reviewer_thread_id"]),
         ).fetchall()
-        state = outcome or ("handed_back" if reason == "limit" else "failed")
+        state = state or ("handed_back" if reason == "limit" else "failed")
         task_text = continuation([str(comment["id"]) for comment in comments], state, reason)
         request = {
             **dict(row),
@@ -293,7 +282,7 @@ def cancel(db, request_id: str, actor: ReviewActor) -> dict:
 
 
 def _latest(db, artifact_id: str, reviewer_thread_id: str):
-    """The reviewer's latest request on this document, whatever its outcome."""
+    """The reviewer's latest request on this document, whatever its state."""
     return db.execute(
         "SELECT * FROM doc_review_requests WHERE artifact_id=? AND reviewer_thread_id=? ORDER BY created_at DESC,id DESC LIMIT 1",
         (artifact_id, reviewer_thread_id)).fetchone()

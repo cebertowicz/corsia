@@ -73,11 +73,11 @@ def test_undelivered_batch_stays_open_then_retry_settles(review_env):
     db.commit()
     add_comment(db, aid, author_id="reviewer", submit=True)
     assert batches(db)[0]["state"] == "undelivered"
-    assert reviews.outcome(db, stored(db, result["id"])) == "open"
+    assert stored(db, result["id"])["state"] == "handed_back"
     db.execute("UPDATE threads SET lifecycle_state='active' WHERE id='owner'")
     db.commit()
     feedback_batches.retry_batch(db, batches(db)[0]["id"])
-    assert reviews.outcome(db, stored(db, result["id"])) == "commented"
+    assert stored(db, result["id"])["state"] == "submitted"
     assert public.get_node(result["node_id"], db=db).state == "accepted"
 
 

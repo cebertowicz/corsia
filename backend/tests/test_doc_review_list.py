@@ -231,7 +231,7 @@ def test_list_cancel_permission_matches_mutation(client, review_env, monkeypatch
     stored = db.execute("SELECT * FROM doc_review_requests WHERE id=?", (row["id"],)).fetchone()
     assert stored["state"] == ("withdrawn" if expected else "forked")
     assert "cancelled_at" not in stored.keys()
-    assert reviews.outcome(db, stored) == ("cancelled" if expected else "open")
+    assert "outcome" not in body["reviews"][0]
 
 
 def test_projection_uses_canonical_cancel_permission_helper(client, review_env, monkeypatch):
@@ -265,14 +265,14 @@ def test_ended_review_disappears_without_requested_picker_state(client, review_e
     assert choices["reviewer"]["requested"] is False
     repeated = client.post("/api/doc-reviews", json=payload(aid, thread_id="requester", client_id="after-end"))
     assert repeated.status_code == 200
-    assert repeated.json()["request"]["outcome"] == "open"
+    assert repeated.json()["request"]["state"] == "forked"
     import asyncio
     from core.artifact_review_runtime import start
     asyncio.run(start(repeated.json()["request"]["id"]))
     refreshed = client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"]
     # This fixture has no runnable review source: the new request's preparation
     # fails visibly and preserves the work in a live reviewer task.
-    assert [(r["id"], r["outcome"]) for r in refreshed] == [(repeated.json()["request"]["id"], "failed")]
+    assert [(r["id"], r["state"]) for r in refreshed] == [(repeated.json()["request"]["id"], "failed")]
     assert refreshed[0]["reason"] and refreshed[0]["node_id"]
     assert refreshed[0]["id"] != row["id"]
 
@@ -287,7 +287,7 @@ def test_clean_fork_without_comments_remains_named_in_http_list(client, review_e
         review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
     body = client.get(f"/api/artifacts/{aid}/reviews", params={"thread_id": "requester"}).json()
     shown = body["reviews"][0]
-    assert (shown["id"], shown["outcome"], shown["may_cancel"]) == (row["id"], "ended_without_comments", False)
+    assert (shown["id"], shown["answered_batch_id"], shown["may_cancel"]) == (row["id"], None, False)
     assert shown["state"] == "submitted"
     assert next(choice for choice in body["reviewers"] if choice["id"] == "reviewer")["requested"] is False
 

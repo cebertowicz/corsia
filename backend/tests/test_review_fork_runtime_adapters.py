@@ -12,7 +12,7 @@ from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
 from core.fork_runtime import ForkHandle, handles
 from doceditor import review_requests
 from infra.db_async import run_in_db
-from test_doc_review_requests import request, review_env, staged_comment, stored
+from test_doc_review_requests import request, review_env, fork_comment, stored
 from tools import document_reviews
 
 
@@ -101,7 +101,7 @@ async def test_db_thread_cancel_signals_running_fork_after_commit(review_env):
     """Cancellation commits first, then the pool-thread callback wakes the owner loop."""
     db, artifact_id = review_env
     row = request(db, artifact_id)
-    staged_comment(db, artifact_id, row["id"])
+    fork_comment(db, artifact_id, row["id"])
     cancel_event = asyncio.Event()
     task = asyncio.create_task(cancel_event.wait())
     handles[row["fork_id"]] = ForkHandle(task, cancel_event, "reviewer", ARTIFACT_REVIEW_KIND)
@@ -111,7 +111,7 @@ async def test_db_thread_cancel_signals_running_fork_after_commit(review_env):
         assert result["state"] == "withdrawn"
         assert stored(db, row["id"])["state"] == "withdrawn"
         assert not woken
-        assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 0
+        assert db.execute("SELECT state,item_count FROM doc_feedback_batches").fetchone()[:] == ("open", 1)
         assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM doc_comments").fetchone()[0] == 1
     finally:

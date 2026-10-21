@@ -10,7 +10,7 @@ import pytest
 from doc_feedback_helpers import add_comment, seed_thread
 from infra.database import write_transaction
 from plans import public
-from test_doc_review_requests import request, review_env, stored, staged_comment  # noqa: F401
+from test_doc_review_requests import request, review_env, stored, fork_comment  # noqa: F401
 
 
 def test_create_settle_cancel_emit_one_artifact_frame_after_commit_and_none_on_rollback(review_env, monkeypatch):
@@ -24,7 +24,7 @@ def test_create_settle_cancel_emit_one_artifact_frame_after_commit_and_none_on_r
     monkeypatch.setattr(state, "broadcast_to_user", broadcast)
     first = request(db, aid)
     assert len(frames) == 1
-    staged_comment(db, aid, first["id"], submit=True)
+    fork_comment(db, aid, first["id"], submit=True)
     assert len(frames) == 2
     second = request(db, aid, reviewer="second", key="second")
     assert len(frames) == 3
@@ -37,22 +37,22 @@ def test_create_settle_cancel_emit_one_artifact_frame_after_commit_and_none_on_r
             request(db, aid, key="rolled-back")
             raise RuntimeError("rollback")
     assert len(frames) == 4
-    assert reviews.outcome(db, stored(db, first["id"])) == "commented"
+    assert stored(db, first["id"])["state"] == "submitted"
     third = request(db, aid, key="settlement-rollback")
     assert len(frames) == 5
     with pytest.raises(RuntimeError, match="rollback"):
         with write_transaction(db, scope="test_settlement_rollback"):
-            staged_comment(db, aid, third["id"], submit=True)
+            fork_comment(db, aid, third["id"], submit=True)
             raise RuntimeError("rollback")
     assert len(frames) == 5
-    assert reviews.outcome(db, stored(db, third["id"])) == "open"
+    assert stored(db, third["id"])["state"] == "forked"
     assert third["node_id"] is None
     with pytest.raises(RuntimeError, match="rollback"):
         with write_transaction(db, scope="test_cancel_rollback"):
             reviews.cancel(db, third["id"], actor)
             raise RuntimeError("rollback")
     assert len(frames) == 5
-    assert reviews.outcome(db, stored(db, third["id"])) == "open"
+    assert stored(db, third["id"])["state"] == "forked"
     assert third["node_id"] is None
 
 
@@ -108,10 +108,10 @@ def test_wrong_recipient_batch_and_cancelled_request_do_not_settle(review_env):
     db.commit()
     add_comment(db, aid, author_id="reviewer", parent_id=root, submit=True)
     assert any(b["recipient_id"] == "second" and b["state"] == "delivered" for b in batches(db))
-    assert reviews.outcome(db, stored(db, first["id"])) == "open"
+    assert stored(db, first["id"])["state"] == "forked"
     actor = reviews.ReviewActor("agent", "requester", "requester", "owner-token", "Requester")
     reviews.cancel(db, first["id"], actor)
-    assert reviews.outcome(db, stored(db, first["id"])) == "cancelled"
+    assert stored(db, first["id"])["state"] == "withdrawn"
 
 
 def test_review_requested_node_accepts_and_terminal_node_cancel_preserves_verdict(review_env):
@@ -124,7 +124,7 @@ def test_review_requested_node_accepts_and_terminal_node_cancel_preserves_verdic
     add_comment(db, aid, author_id="reviewer", submit=True)
     assert public.get_node(row["node_id"], db=db).state == "accepted"
     actor = reviews.ReviewActor("agent", "requester", "requester", "owner-token", "Requester")
-    assert reviews.cancel(db, row["id"], actor)["outcome"] == "commented"
+    assert reviews.cancel(db, row["id"], actor)["state"] == "submitted"
     assert public.get_node(row["node_id"], db=db).state == "accepted"
 
 
@@ -144,7 +144,7 @@ def test_foreign_artifact_note_limit_and_unauthorized_cancel_refuse(review_env):
     with pytest.raises(PermissionError) as caught:
         request(db, aid, key="foreign-key")
     assert str(caught.value) == reviews.ARTIFACT_REFUSAL
-    assert reviews.outcome(db, stored(db, row["id"])) == "open"
+    assert stored(db, row["id"])["state"] == "forked"
 
 
 @pytest.mark.parametrize("owner", ["ui", "project:test"])
@@ -158,9 +158,9 @@ def test_sentinel_cancel_requires_original_requester_even_for_users(review_env, 
     with pytest.raises(PermissionError) as caught:
         reviews.cancel(db, row["id"], foreign)
     assert str(caught.value) == reviews.CANCEL_REFUSAL
-    assert reviews.outcome(db, stored(db, row["id"])) == "open"
+    assert stored(db, row["id"])["state"] == "forked"
     requester = reviews.ReviewActor("user", "owner-token", "", "owner-token", "Steve")
-    assert reviews.cancel(db, row["id"], requester)["outcome"] == "cancelled"
+    assert reviews.cancel(db, row["id"], requester)["state"] == "withdrawn"
 
 
 @pytest.mark.parametrize("kind", ["agent", "user"])
@@ -172,9 +172,9 @@ def test_real_document_owner_can_cancel_and_foreign_user_cannot(review_env, kind
     with pytest.raises(PermissionError) as caught:
         reviews.cancel(db, row["id"], foreign)
     assert str(caught.value) == reviews.ARTIFACT_REFUSAL
-    assert reviews.outcome(db, stored(db, row["id"])) == "open"
+    assert stored(db, row["id"])["state"] == "forked"
     owner = reviews.ReviewActor(kind, "owner" if kind == "agent" else "owner-token", "owner", "owner-token", "Owner")
-    assert reviews.cancel(db, row["id"], owner)["outcome"] == "cancelled"
+    assert reviews.cancel(db, row["id"], owner)["state"] == "withdrawn"
 
 
 def test_same_user_cross_project_reviewer_is_not_visible(review_env):

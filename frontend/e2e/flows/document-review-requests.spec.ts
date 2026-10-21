@@ -305,7 +305,7 @@ test('@flow:document-review-requests request, list, cancel and settlement withou
 	await saveEvidenceScreenshot(page, info, 'review-settled-without-reload', { fullPage: false });
 });
 
-test('@flow:document-review-requests silent end refreshes on Plans change without reload', async ({ page, request }, info) => {
+test('@flow:document-review-requests closed continuation refreshes on Plans change without reload', async ({ page, request }, info) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable synthetic state');
 	test.setTimeout(100_000);
 	const mobile = info.project.name.includes('mobile');
@@ -316,8 +316,32 @@ test('@flow:document-review-requests silent end refreshes on Plans change withou
 	await requestReview(request, doc, agents[0].id);
 	const listed = await request.get(`/api/artifacts/${doc.artifactId}/reviews`, { headers: auth() });
 	expect(listed.ok(), await listed.text()).toBeTruthy();
-	const row = (await listed.json()).reviews[0];
-	expect(row.outcome).toBe('open');
+	let row = (await listed.json()).reviews[0];
+	expect(row).toMatchObject({ state: 'forked', node_id: null });
+	// Reuse this suite's disposable SQLite fixture route to exercise the real continuation creator.
+	const stateRoot = process.env.CORSIA_E2E_STATE_DIR;
+	if (process.env.CORSIA_E2E_MOCK !== '1' || !stateRoot) throw new Error('Requires disposable E2E mock state');
+	execFileSync(process.env.CORSIA_E2E_BACKEND_PYTHON ?? path.join(repoRoot, '.venv/bin/python'), ['-c', [
+		'import os, sqlite3, sys',
+		"sys.path.insert(0, os.path.join(os.getcwd(), 'backend'))",
+		'from doceditor.review_requests import escalate_fork',
+		'connection = sqlite3.connect(sys.argv[1])',
+		'connection.row_factory = sqlite3.Row',
+		"changed = connection.execute(\"UPDATE doc_review_requests SET state='forked', node_id=NULL, fork_id='e2e-fixture', answered_batch_id=NULL, reason=NULL WHERE id=?\", (sys.argv[2],)).rowcount",
+		'assert changed == 1, changed',
+		'connection.commit()',
+		'request = escalate_fork(connection, sys.argv[2])',
+		"assert request and request['state'] == 'handed_back' and request['node_id'], request",
+	].join('\n'), path.join(stateRoot, 'corsia.db'), row.id], {
+		cwd: repoRoot,
+		encoding: 'utf8',
+		env: { ...process.env, CORSIA_WORKSPACE: process.env.CORSIA_E2E_WORKSPACE, CORSIA_STATE_DIR: stateRoot, CORSIA_TEST_MODE: '1', CORSIA_ANALYTICS_DISABLE: '1' },
+	});
+	const handedBack = await request.get(`/api/artifacts/${doc.artifactId}/reviews`, { headers: auth() });
+	expect(handedBack.ok(), await handedBack.text()).toBeTruthy();
+	row = (await handedBack.json()).reviews[0];
+	expect(row).toMatchObject({ state: 'handed_back' });
+	expect(row.node_id).toEqual(expect.any(String));
 	const frames: { type?: string; artifact_id?: string }[] = [];
 	page.on('websocket', (socket) => socket.on('framereceived', (frame) => {
 		try { frames.push(JSON.parse(String(frame.payload))); } catch { /* Only inspect JSON frames. */ }
@@ -338,17 +362,16 @@ test('@flow:document-review-requests silent end refreshes on Plans change withou
 	const node = plan.nodes.find((item: { id: string }) => item.id === row.node_id);
 	const closed = await request.post(`/api/plans/${plan.plan.id}/mutations`, { headers: auth(), data: {
 		operation: 'close_node', mutation_id: crypto.randomUUID(), params: {
-			node_id: node.id, expected_revision: node.revision, reason: 'Review ended without comments',
+			node_id: node.id, expected_revision: node.revision, reason: 'Review continuation completed',
 		},
 	} });
 	expect(closed.ok(), await closed.text()).toBeTruthy();
 	await expect.poll(() => frames.some((frame) => frame.type === 'plans_changed'), { timeout: 10_000 }).toBe(true);
-	await expect(list).toContainText('Ended without comments');
-	await expect(page.locator('.reviewer-group')).toHaveAttribute('aria-label', /ended without comments/);
-	await expect(list.getByRole('button', { name: /^Cancel request to / })).toHaveCount(0);
+	await expect(list.locator('[data-review-request]')).toHaveCount(0);
+	await expect(page.locator('.reviewer-group')).toHaveCount(0);
 	expect(frames.some((frame) => frame.type === 'artifacts_changed' && frame.artifact_id === doc.artifactId)).toBe(false);
 	expect(reads).toBe(0); expect(navigations).toBe(0);
-	await saveEvidenceScreenshot(page, info, 'review-ended-without-comments', { fullPage: false });
+	await saveEvidenceScreenshot(page, info, 'review-handed-back-closed-without-reload', { fullPage: false });
 	const late = await request.post('/api/delegation/docs/comments', { params: { token: TEST_TOKEN }, data: {
 		artifact_id: doc.artifactId, as_session_id: agents[0].id, review: true, body: 'A later review comment.', submit: true,
 	} });
