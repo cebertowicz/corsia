@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable
 
 from llm.catalog import list_models
-from llm.managed_omlx_binary import managed_omlx_executable
+from llm.managed_omlx_binary import managed_omlx_executable, managed_omlx_install_error
 from llm.locality import endpoint_on_this_mac
 from llm.network_endpoints import endpoint_base, get_endpoints
 from llm.local_setup_executable import omlx_on_path
@@ -49,16 +49,20 @@ def _source(source: str, name: str, state: str, reason: str | None = None,
 
 
 def _project_local_flight(result: dict[str, Any], flight: dict[str, Any] | None) -> None:
-    """Give an unavailable signed-in row the same safe flight fields as Welcome."""
-    if flight is not None and result["state"] != "ready":
-        result.update(
-            local_state=flight["state"],
-            setup_error_code=flight.get("cause"),
-            setup_error_reference=flight.get("ref"),
-            bytes_to_free=flight.get("bytes_to_free"),
-        )
-        if flight.get("fix"):
-            result["fix"] = flight["fix"]
+    """Project the local setup flight as the row's only lifecycle vocabulary."""
+    if flight is None or flight["state"] == "stopped":
+        result["local_state"] = "stopped"
+        return
+    result.update(
+        local_state=flight["state"],
+        setup_error_code=flight.get("cause"),
+        setup_error_reference=flight.get("ref"),
+        bytes_to_free=flight.get("bytes_to_free"),
+        download_percent=flight.get("percent"),
+        download_eta_seconds=flight.get("eta_seconds"),
+        download_stalled=flight.get("stalled") is True,
+        fix=flight.get("fix"),
+    )
 
 
 async def local_server_for_install(
@@ -101,10 +105,7 @@ def connected_local_server() -> dict | None:
 
 def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:
     """Project every local server row; only with none is this host's binary asked."""
-    from llm.local_setup import (
-        download_estimate, download_percent, setup_failure, setup_kind, setup_stage,
-        setup_stopped_following,
-    )
+    from llm.local_setup import setup_kind
     from llm.local_setup_prepare import known_model
     from onboarding.local_download_state import current as local_download_state
 
@@ -112,8 +113,6 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
     model = known_model() if eligible else None
     settings_flight = setup_kind() == "settings"
     flight = None if settings_flight else local_download_state()
-    stage = None if settings_flight else setup_stage()
-    terminal = None if settings_flight else setup_failure()
 
     def starter_source(state: str, reason: str | None = None, fix: str | None = None,
                        checked_at: str | None = None) -> dict[str, Any]:
@@ -125,19 +124,14 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
         )
         return result
 
-    if stage:
-        result = starter_source("needs_setup", stage, OMLX_FIX)
-        result["setup_stage"] = stage
-        result["download_percent"] = download_percent()
-        eta_seconds, stalled = download_estimate()
-        result["download_eta_seconds"] = eta_seconds
-        result["download_stalled"] = stalled
-        result["setup_downloading"] = flight is not None and flight["state"] == "downloading"
-        _project_local_flight(result, flight)
-        return result
     name = "Local model"
     servers = local_omlx_servers()
     if not servers:
+        install_error = managed_omlx_install_error()
+        if install_error:
+            result = starter_source("needs_setup")
+            _project_local_flight(result, {"state": "failed", "cause": "damaged_bundle", "fix": install_error})
+            return result
         if managed_omlx_executable() is None and omlx_on_path() is None:
             result = starter_source("not_installed", "oMLX is not installed", "Install oMLX")
         else:
@@ -156,15 +150,8 @@ def _omlx_state(membership: tuple[set[str], set[str]] | None = None) -> dict[str
                 result["reason_code"] = "no_models"
             else:
                 result = starter_source("ready", checked_at=online[0].get("updated_at"))
-    stopped = setup_stopped_following()
-    if stopped and result["state"] != "ready":
-        result.update(reason=str(stopped["message"]), fix=OMLX_FIX, setup_downloading=True)
-        result.pop("reason_code", None)
-    if terminal and result["state"] != "ready":
-        message = str(terminal.get("message") or "Local setup failed.")
-        result.update(reason=message, fix=OMLX_FIX, setup_error=message)
-        result.pop("reason_code", None)
-    _project_local_flight(result, flight)
+    if not settings_flight:
+        _project_local_flight(result, flight if result["state"] != "ready" else None)
     return result
 
 
@@ -195,7 +182,7 @@ def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str
     from llm.local_setup import download_percent, flight_model, setup_kind, setup_stage
 
     result = _omlx_state(membership)
-    flying = result.get("setup_downloading") or result.get("setup_error")
+    flying = result.get("local_state") in {"downloading", "starting", "failed", "setup_failed", "start_failed"}
     current_kind = setup_kind()
     kind = current_kind if flying or current_kind == "settings" else None
     result["setup_kind"] = kind

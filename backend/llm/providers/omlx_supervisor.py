@@ -59,7 +59,8 @@ def _log_path(server_id: str):
 
 
 def _read_pid(server_id: str, *, host: str | None = None, port: int | None = None) -> int | None:
-    owner = _port_owner_pid(host, port) if host is not None and port is not None else None
+    owner = (_port_owner_pid(host, port) if host is not None and port is not None
+             else process.PORT_OWNER_UNKNOWN)
     return process.read_pid(RUNTIME_DIR, server_id, legacy_port_owner_pid=owner)
 
 
@@ -84,7 +85,7 @@ def _process_exited(pid: int) -> bool:
     return waited_pid == pid or not _process_alive(pid)
 
 
-def _port_owner_pid(host: str, port: int) -> int | None:
+def _port_owner_pid(host: str, port: int) -> process.PortOwnerPid:
     return process.port_owner_pid(host, port)
 
 
@@ -107,10 +108,10 @@ def _is_managed_omlx_row(settings: dict) -> bool:
 def _managed_omlx_argv(host: str, port: int, settings: dict) -> list[str] | dict[str, Any]:
     """Resolve the bundled executable only for CORSIA's setup-created row."""
     if _is_managed_omlx_row(settings):
-        try:
-            executable = process.managed_omlx_executable()
-        except RuntimeError as exc:
-            return {"ok": False, "message": str(exc)}
+        install_error = process.managed_omlx_install_error()
+        if install_error:
+            return {"ok": False, "message": install_error}
+        executable = process.managed_omlx_executable()
     else:
         executable = None
     executable = executable or shutil.which("omlx")
@@ -223,7 +224,7 @@ async def start_server(cfg: dict) -> dict[str, Any]:
                 "message": "The local model isn't responding. Stop it in Settings › Providers, then retry."}
 
     owner = _port_owner_pid(host, port)
-    if owner is not None and (existing_pid is None or owner != existing_pid):
+    if isinstance(owner, int) and (existing_pid is None or owner != existing_pid):
         return {
             "ok": False,
             "message": (

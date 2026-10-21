@@ -20,14 +20,25 @@ MANAGED_PORTS = range(8210, 8310)
 
 
 def managed_omlx_executable(path: str | Path | None = None) -> str | None:
-    """Return the bundled executable by absolute path, or None for a source install."""
+    """Return the bundled executable by absolute path, or None when it is unavailable."""
     bundle = app_bundle_root(path)
     if bundle is None:
         return None
     executable = bundle / "Contents" / "Resources" / "bin" / "omlx"
-    if not executable.is_file():
-        raise RuntimeError("The CORSIA app is damaged: its bundled oMLX executable is missing.")
-    return str(executable)
+    return str(executable) if executable.is_file() else None
+
+
+def managed_omlx_install_error(path: str | Path | None = None) -> str | None:
+    """Describe a damaged packaged install without turning a source read into an exception."""
+    bundle = app_bundle_root(path)
+    if bundle is None:
+        return None
+    executable = bundle / "Contents" / "Resources" / "bin" / "omlx"
+    if executable.is_file():
+        return None
+    from llm.local_setup_results import setup_fix
+
+    return setup_fix("damaged_bundle")
 
 
 def is_managed_omlx_executable(path: str | Path) -> bool:
@@ -79,8 +90,15 @@ def reserve_managed_omlx_port() -> tuple[ManagedOmlxPaths, int]:
     server = server_value if isinstance(server_value, dict) else {}
     configured = server.get("port")
     if isinstance(configured, int) and configured in MANAGED_PORTS:
-        port = configured
-    else:
+        from llm.providers.omlx_process import PORT_OWNER_UNKNOWN, port_owner_pid
+        from llm.providers.omlx_supervisor import is_corsia_process
+
+        owner = port_owner_pid("127.0.0.1", configured)
+        if owner is None or (owner is not PORT_OWNER_UNKNOWN and is_corsia_process(owner)):
+            port = configured
+        else:
+            configured = None
+    if not isinstance(configured, int) or configured not in MANAGED_PORTS:
         free_port = next((candidate for candidate in MANAGED_PORTS if port_is_free(candidate)), None)
         if free_port is None:
             raise ManagedPortUnavailable("CORSIA couldn't reserve a private port for its local model server. Try again.")
@@ -167,9 +185,14 @@ def foreign_omlx_processes() -> tuple[OmlxProcess, ...] | None:
     from llm.network_endpoints import get_endpoints
     from llm.providers.omlx_process import port_owner_pid
 
+    from llm.providers.omlx_process import PORT_OWNER_UNKNOWN
+
     processes = omlx_processes()
     if processes is None:
         return None
-    in_use = {port_owner_pid(ep["host"], int(server["port"]))
-              for server in local_omlx_servers() for ep in get_endpoints(server["id"])}
+    owners = [port_owner_pid(ep["host"], int(server["port"]))
+              for server in local_omlx_servers() for ep in get_endpoints(server["id"])]
+    if PORT_OWNER_UNKNOWN in owners:
+        return None
+    in_use = {owner for owner in owners if isinstance(owner, int)}
     return tuple(p for p in processes if p.owner == "personal" and p.pid not in in_use)

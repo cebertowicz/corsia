@@ -67,6 +67,24 @@ def test_port_reservation_fails_as_its_own_error_when_no_port_binds(monkeypatch,
         reserve_managed_omlx_port()
 
 
+def test_port_reservation_replaces_a_saved_foreign_port(monkeypatch, tmp_path) -> None:
+    from llm import managed_omlx_binary
+    from llm.providers import omlx_process, omlx_supervisor
+
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    paths = managed_omlx_binary.managed_omlx_paths()
+    paths.base_path.mkdir()
+    paths.settings_path.write_text('{"server": {"port": 8210}}')
+    monkeypatch.setattr(omlx_process, "port_owner_pid", lambda *_args: 4321)
+    monkeypatch.setattr(omlx_supervisor, "is_corsia_process", lambda _pid: False)
+    monkeypatch.setattr(omlx_process, "port_is_free", lambda port: port == 8211)
+
+    _paths, port = managed_omlx_binary.reserve_managed_omlx_port()
+
+    assert port == 8211
+    assert '8211' in paths.settings_path.read_text()
+
+
 def test_backfill_with_no_bindable_port_records_nothing_and_does_not_raise(monkeypatch, tmp_path) -> None:
     """The L3 sandbox denies every bind; startup's record backfill must still finish."""
     from llm import local_model

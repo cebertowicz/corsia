@@ -163,6 +163,10 @@ def test_post_setup_returns_complete_code(client, method, path):
 
 
 def test_polling_setup_status_and_local_download_spawn_no_processes(client, monkeypatch):
+    from llm import local_setup
+
+    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
+
     def forbidden(*_args, **_kwargs):
         pytest.fail("polling must not inspect processes")
 

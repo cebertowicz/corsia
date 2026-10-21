@@ -55,7 +55,7 @@ When `setup.setup_decisions` holds the import decision (title `Bring over what y
 
    Claim nothing beyond this, and offer no list of folders to mark off limits. Then go straight to the hand-off.
 
-Silently, saying something only if a check fails (then name the problem and its fix): re-check each model source with `model_sources` `recheck: true` (a local source with `setup_stage` set or `setup_downloading` true is still setting up, not failed: say nothing about it), and schedule the daily health check as the Wrap-up in `references/first-run.md` does (its `automation_schedule` part only).
+Silently, saying something only if a check fails (then name the problem and its fix): re-check each model source with `model_sources` `recheck: true` (a local source whose `local_state` is `starting` or `downloading` is still setting up, not failed: say nothing about it), and schedule the daily health check as the Wrap-up in `references/first-run.md` does (its `automation_schedule` part only).
 
 ## The hand-off
 

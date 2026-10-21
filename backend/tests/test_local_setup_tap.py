@@ -68,13 +68,12 @@ def test_homebrew_inspection_has_a_bounded_timeout(monkeypatch):
     assert seen["timeout"] == 30
 
 
-@pytest.mark.parametrize("broken", [False, True])
-def test_existing_binary_repair_is_actionable_and_never_runs_brew(monkeypatch, broken):
+def test_existing_binary_repair_is_actionable_and_never_runs_brew(monkeypatch):
     monkeypatch.setattr(local_setup_executable.shutil, "which", lambda name: "/opt/bin/brew" if name == "brew" else "/opt/bin/omlx")
     monkeypatch.setattr(local_setup_executable, "run_command", lambda _cmd: pytest.fail("existing oMLX must stay untouched"))
     monkeypatch.setattr(managed_omlx_binary, "command_output", lambda _cmd: pytest.fail("never infer ownership from a brew keg"))
     with pytest.raises(local_setup_executable.OwnOmlxUpgradeRequired) as failure:
-        local_setup_executable.ensure_omlx(lambda _stage: None, needs_repair=True, broken=broken)
+        local_setup_executable.ensure_omlx(lambda _stage: None, needs_repair=True)
     assert "brew upgrade jundot/omlx/omlx" in str(failure.value)
     assert "brew reinstall jundot/omlx/omlx" in str(failure.value)
     assert "install the CORSIA app to use its bundled oMLX" in str(failure.value)

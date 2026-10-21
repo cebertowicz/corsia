@@ -68,7 +68,7 @@ def test_setup_refuses_to_repair_a_broken_entry_point(leftover, monkeypatch):
 
     monkeypatch.setattr(own.managed, "command_output", lambda command: str(leftover.parent) if "--prefix" in command else "omlx 0.7.1")
     with pytest.raises(own.OwnOmlxUpgradeRequired, match="brew reinstall jundot/omlx/omlx"):
-        own.ensure_omlx(lambda stage: None, needs_repair=True, broken=True)
+        own.ensure_omlx(lambda stage: None, needs_repair=True)
     assert commands == []
 
 
@@ -78,7 +78,7 @@ def test_source_setup_leaves_an_unowned_broken_leftover_untouched(leftover, monk
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path / "state")
     monkeypatch.setattr(own, "run_command", commands.append)
     with pytest.raises(own.OwnOmlxUpgradeRequired, match="brew reinstall jundot/omlx/omlx"):
-        own.ensure_omlx(lambda _stage: None, needs_repair=True, broken=True)
+        own.ensure_omlx(lambda _stage: None, needs_repair=True)
     assert commands == []
     assert not (tmp_path / "state" / "managed-omlx-installed").exists()
 
@@ -87,7 +87,7 @@ def test_packaged_setup_ignores_a_broken_path_leftover_without_brew(leftover, mo
     monkeypatch.setattr(own.managed, "managed_omlx_executable", lambda: "/Applications/CORSIA.app/Contents/Resources/bin/omlx")
     monkeypatch.setattr(own, "omlx_on_path", lambda: pytest.fail("bundle must not probe PATH"))
     monkeypatch.setattr(own, "run_command", lambda _command: pytest.fail("bundle must not call brew"))
-    own.ensure_omlx(lambda _stage: None, needs_repair=True, broken=True)
+    own.ensure_omlx(lambda _stage: None, needs_repair=True)
 
 
 def test_a_real_install_failure_names_homebrew_and_the_reason(leftover, monkeypatch):
@@ -102,4 +102,4 @@ def test_a_real_install_failure_names_homebrew_and_the_reason(leftover, monkeypa
     monkeypatch.setattr(own.shutil, "which", lambda name: "/opt/bin/brew" if name == "brew" else None)
 
     with pytest.raises(RuntimeError, match=r"Homebrew couldn't install oMLX: Error: disk full\. Try again\."):
-        own.ensure_omlx(lambda stage: None, needs_repair=True, broken=True)
+        own.ensure_omlx(lambda stage: None, needs_repair=True)

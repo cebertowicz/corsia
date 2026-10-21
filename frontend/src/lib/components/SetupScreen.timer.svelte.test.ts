@@ -37,7 +37,7 @@ function mountResume() {
 		if (url === '/api/setup/progress') return json({ setup_completed: false, step: 'models', local_ai: false, status: { local_eligible: true, work_folder: '~/CORSIA' } });
 		if (url === '/api/providers/sources' || url === '/api/providers/sources/recheck') return json({ sources: [
 			{ source: 'codex', name: 'Codex', state: sourceState },
-			...(localFailure ? [{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_error: 'start_failed', setup_error_code: 'start_failed' }] : []),
+			...(localFailure ? [{ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'start_failed', setup_error_code: 'start_failed', fix: 'CORSIA couldn’t set up the local model. Press Retry.' }] : []),
 		] });
 		if (url.startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
 		if (url.startsWith('/api/models?')) return json({ models: [] });
@@ -174,7 +174,7 @@ describe('SetupScreen owned-job polling', () => {
 		expect(intervalSpy).toHaveBeenCalledOnce();
 		localState = terminal;
 		await vi.advanceTimersByTimeAsync(3000); await tick();
-		if (terminal === 'start_failed') expect(host.textContent).toContain('Couldn’t start the local model');
+		if (terminal === 'start_failed') expect(host.textContent).toContain('Couldn’t start local setup');
 		expect(clearIntervalSpy).toHaveBeenCalledOnce();
 		expect(vi.getTimerCount()).toBe(0);
 	});

@@ -49,7 +49,7 @@ async def test_terminal_outcome_finished_before_first_run_render_persists_then_d
     assert delivered.await_count == 1
     assert delivered.await_args.kwargs["delivery_id"] == "local-download:flight-1:failed"
     notice = delivered.await_args.kwargs["notice"]
-    assert "Free 0.1 GB, then retry in Settings › Providers." in notice
+    assert "Free 0.1 GB, then press Retry." in notice
     assert '"ref": "setup-42"' in notice
     assert records.read().notified is True
     assert await wake.flush_pending_local_download("conductor") is False
@@ -175,7 +175,7 @@ def test_wake_does_not_classify_start_path_other_omlx_as_a_flight_cause():
     from onboarding import local_download_wake
 
     payload = local_download_wake._payload("failed", model=None, cause="other_omlx", ref=None, bytes_to_free=None)
-    assert payload["cause"] == "other"
+    assert payload["cause"] == "other_omlx"
 
 
 @pytest.mark.parametrize("cause", ["disk_full", "connection", "memory", "own_omlx_upgrade_required", "other"])

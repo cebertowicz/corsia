@@ -668,6 +668,12 @@ def _model(litellm_model, *, enabled=1, available=1):
 
 
 class TestOmlx:
+    @pytest.fixture(autouse=True)
+    def reset_local_flight(self, monkeypatch):
+        from llm import local_setup
+
+        monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
+
     def test_no_binary_is_not_installed(self, isolated_db, client, monkeypatch):
         monkeypatch.setattr("llm.local_sources.omlx_on_path", lambda: None)
         omlx = _sources(client)["omlx"]
@@ -1027,7 +1033,7 @@ class TestRecheck:
         local_setup._flight.result = failure
         failed = client.get("/api/providers/local/setup").json()
         assert failed["state"] == "failed" and failed["local_model"] == not_checked
-        assert failed["fix"] == "Retry in Settings › Providers." and idle["fix"] is None
+        assert failed["fix"] == "CORSIA couldn’t set up the local model. Press Retry." and idle["fix"] is None
 
         # A finished setup's model is what the conductor's offer and Welcome read.
         installed = local_model.LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 262_144)

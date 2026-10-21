@@ -8,25 +8,24 @@ const actions = () => ({
 	check: vi.fn(),
 });
 
-// Matches the four fields the signed-in source row receives from local-download.
+// Mirrors the emitted projection: one local state, cause, recovery line and optional reference.
 const flightShapes = [
-	{ state: 'failed', cause: 'connection', expected: 'Couldn’t download the local model because the connection was lost. Check your internet connection, then try again.' },
-	{ state: 'failed', cause: 'disk_full', bytes_to_free: 4_000_000_000, fix: 'Free 4.0 GB, then retry in Settings › Providers.', expected: 'Free 4.0 GB, then retry in Settings › Providers.' },
-	{ state: 'failed', cause: 'memory', expected: 'This computer doesn’t have enough memory to run the local model. Choose a subscription or API provider instead.' },
-	{ state: 'failed', cause: 'other', ref: 'setup-report-123', expected: 'CORSIA couldn’t set up the local model. Try again.' },
-	{ state: 'failed', cause: undefined, ref: 'setup-report-234', expected: 'CORSIA couldn’t set up the local model. Try again.' },
-	{ state: 'setup_failed', cause: 'other', ref: 'setup-report-456', expected: 'CORSIA couldn’t set up the local model. Try again, or save a report.' },
-	{ state: 'start_failed', cause: 'connection', ref: 'setup-report-789', expected: 'The local model downloaded but couldn’t start. Try again, or save a report.' },
-	{ state: 'setup_failed', cause: 'own_omlx_upgrade_required', ref: 'setup-report-999', expected: 'Update your oMLX, then try again.' }
+	{ state: 'failed', cause: 'connection', fix: 'Check the connection, then press Retry.' },
+	{ state: 'failed', cause: 'disk_full', bytes_to_free: 4_000_000_000, fix: 'Free 4.0 GB, then press Retry.' },
+	{ state: 'failed', cause: 'memory', fix: 'Choose a subscription or API provider instead.' },
+	{ state: 'failed', cause: 'other', ref: 'setup-report-123', fix: 'CORSIA couldn’t set up the local model. Press Retry.' },
+	{ state: 'setup_failed', cause: 'other', ref: 'setup-report-456', fix: 'CORSIA couldn’t set up the local model. Press Retry.' },
+	{ state: 'start_failed', cause: 'connection', ref: 'setup-report-789', fix: 'Check the connection, then press Retry.' },
+	{ state: 'setup_failed', cause: 'own_omlx_upgrade_required', ref: 'setup-report-999', fix: 'Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then press Retry.' }
 ] as const;
 
 function sourceFromFlight(flight: typeof flightShapes[number]) {
 	return {
-		source: 'omlx', name: 'Local model', state: 'needs_setup' as const, setup_error: 'failed',
+		source: 'omlx', name: 'Local model', state: 'needs_setup' as const,
 		local_state: flight.state, setup_error_code: flight.cause,
 		setup_error_reference: 'ref' in flight ? flight.ref : undefined,
 		bytes_to_free: 'bytes_to_free' in flight ? flight.bytes_to_free : undefined,
-		fix: 'fix' in flight ? flight.fix : undefined,
+		fix: flight.fix,
 	};
 }
 
@@ -67,7 +66,7 @@ describe('setup provider rows', () => {
 			startError: '',
 		});
 
-		expect(row.meta).toBe(flight.expected);
+		expect(row.meta).toBe(flight.fix);
 		expect(row.reference).toBe('ref' in flight ? flight.ref : undefined);
 		expect(row.action?.label).toBe('Retry');
 		row.action?.run();
@@ -77,7 +76,7 @@ describe('setup provider rows', () => {
 	it('keeps a request failure reference and offers its report action', () => {
 		const row = setupLocalRow({ ...actions(), pick: null, eligible: true, downloading: false, ready: false, startError: 'other', startReference: 'local-request-123' });
 
-		expect(row).toMatchObject({ meta: 'CORSIA couldn’t set up the local model. Try again.', reference: 'local-request-123', reportable: true });
+		expect(row).toMatchObject({ meta: 'CORSIA couldn’t start local setup. Press Retry, or save a report.', reference: 'local-request-123', reportable: true });
 	});
 
 	it('shows the actionable oMLX update when preparing a pick fails for that cause', () => {

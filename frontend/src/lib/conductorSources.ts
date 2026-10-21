@@ -28,9 +28,6 @@ export interface ModelSource {
 	context_window?: number | null;
 	/** The picked local model's download size, formatted by the backend; null before there is a pick. */
 	download_size?: string | null;
-	setup_stage?: string;
-	/** A download is running (the starter model for the person's own oMLX, or the full setup). */
-	setup_downloading?: boolean;
 	/** Which download is running or failed: the starter model for the person's own oMLX, or the full setup. */
 	setup_kind?: 'starter' | 'setup' | 'settings';
 	/** A Settings-initiated local download; its repository is retained so a durable failure can retry the same recommendation. */
@@ -47,8 +44,6 @@ export interface ModelSource {
 	cli_package_manager?: 'homebrew' | 'npm';
 	/** Set when the CLI is installed but the service cannot see it; Fix links it. */
 	invisible_binary?: string | null;
-	/** A failed local setup's reason, kept until the next attempt. */
-	setup_error?: string;
 	accounts?: SourceAccount[];
 	/** The conductor's bound account when it can no longer run here: removed, or turned off for the project. */
 	lost_binding?: { label: string; reason: 'removed' | 'turned_off' } | null;
@@ -93,12 +88,14 @@ export function localPickerStatus(source: ModelSource | undefined): { line: stri
 		line: `Couldn't download ${settings.name}.`,
 		retry: settings.repository ? 'settings' : null,
 	};
-	if (source.setup_stage || source.setup_downloading) {
+	if (source.local_state === 'downloading') {
 		const percent = source.download_percent ?? null;
 		if (source.download_stalled) return { line: percent === null ? 'Download paused' : `Download paused at ${percent}%`, retry: null };
 		return { line: percent === null ? 'Downloading' : `Downloading ${percent}%`, retry: null };
 	}
-	if (source.setup_error) return { line: 'Setup failed', retry: source.setup_kind === 'settings' ? null : source.setup_kind ?? null };
+	if (['failed', 'setup_failed', 'start_failed'].includes(source.local_state ?? '')) {
+		return { line: 'Setup failed', retry: source.setup_kind === 'settings' ? null : source.setup_kind ?? null };
+	}
 	return null;
 }
 

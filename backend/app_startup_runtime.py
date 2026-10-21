@@ -69,7 +69,7 @@ async def resume_local_setup() -> None:
         except Exception:
             ref = new_reference("local")
             logging.getLogger(__name__).warning("Local setup startup step failed (%s) reference=%s", label, ref, exc_info=True)
-            if label in {"resume local setup", "resume local download notice"}:
+            if label in {"record an earlier setup's model", "resume local setup", "resume local download notice"}:
                 record_resume_failure(ref)
 
 

@@ -12,7 +12,15 @@ from pathlib import Path
 
 import psutil
 
-from llm.managed_omlx_binary import managed_omlx_executable
+from llm.managed_omlx_binary import managed_omlx_executable, managed_omlx_install_error
+
+
+class _PortOwnerUnknown:
+    """Sentinel for a port inspection that could not establish ownership."""
+
+
+PORT_OWNER_UNKNOWN = _PortOwnerUnknown()
+PortOwnerPid = int | None | _PortOwnerUnknown
 
 
 def pid_path(runtime_dir: Path, server_id: str) -> Path:
@@ -23,9 +31,9 @@ def log_path(runtime_dir: Path, server_id: str) -> Path:
     return runtime_dir / f"omlx-{server_id}.log"
 
 
-def read_pid(runtime_dir: Path, server_id: str, *, legacy_port_owner_pid: int | None = None,
+def read_pid(runtime_dir: Path, server_id: str, *, legacy_port_owner_pid: PortOwnerPid = PORT_OWNER_UNKNOWN,
              preserve_legacy: bool = False) -> int | None:
-    """Return a live spawn record, adopting only a legacy PID that owns its row's port."""
+    """Return a live spawn record, preserving a legacy one unless a probe proves a mismatch."""
     try:
         record = json.loads(pid_path(runtime_dir, server_id).read_text())
         if type(record) is int:
@@ -34,7 +42,8 @@ def read_pid(runtime_dir: Path, server_id: str, *, legacy_port_owner_pid: int | 
             if record > 0 and legacy_port_owner_pid == record:
                 write_pid(runtime_dir, server_id, record)
                 return read_pid(runtime_dir, server_id)
-            clear_pid(runtime_dir, server_id)
+            if isinstance(legacy_port_owner_pid, int) and legacy_port_owner_pid != record:
+                clear_pid(runtime_dir, server_id)
             return None
         pid = record["pid"]
         if type(pid) is int and pid > 0:
@@ -78,10 +87,11 @@ def process_alive(pid: int) -> bool:
         return True
 
 
-def port_owner_pid(host: str, port: int) -> int | None:
+def port_owner_pid(host: str, port: int) -> PortOwnerPid:
+    """Return a listening PID, no owner, or unknown when the probe is unreadable."""
     lsof = shutil.which("lsof")
     if not lsof:
-        return None
+        return PORT_OWNER_UNKNOWN
     try:
         out = subprocess.run(
             [lsof, "-nPiTCP:" + str(port), "-sTCP:LISTEN"],
@@ -90,8 +100,10 @@ def port_owner_pid(host: str, port: int) -> int | None:
             timeout=2,
         )
     except (subprocess.SubprocessError, OSError):
-        return None
-    if out.returncode != 0 or not out.stdout:
+        return PORT_OWNER_UNKNOWN
+    if out.returncode != 0:
+        return PORT_OWNER_UNKNOWN
+    if not out.stdout:
         return None
     for line in out.stdout.splitlines()[1:]:
         parts = line.split()
@@ -100,7 +112,7 @@ def port_owner_pid(host: str, port: int) -> int | None:
                 return int(parts[1])
             except ValueError:
                 continue
-    return None
+    return PORT_OWNER_UNKNOWN
 
 
 def port_is_free(port: int) -> bool:

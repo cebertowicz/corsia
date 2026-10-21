@@ -10,13 +10,15 @@ from fastapi import HTTPException
 
 #: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
 SETUP_COMMAND = "corsia local setup"
-CAUSES = frozenset({"connection", "disk_full", "memory", "other", "own_omlx_upgrade_required"})
-RETRY_IN_APP = "retry in Settings › Providers."
+CAUSES = frozenset({"connection", "damaged_bundle", "disk_full", "memory", "other", "other_omlx", "own_omlx_upgrade_required"})
+RETRY_IN_APP = "press Retry."
 RETRY_IN_TERMINAL = f"run `{SETUP_COMMAND}` again."
 
 
 def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN_APP) -> str:
-    """The one next step for a failed setup, read by the wake, the status route and the CLI (with its own retry)."""
+    """Return the one cause-specific recovery line for setup, sources, wakes and the CLI."""
+    if cause == "damaged_bundle":
+        return f"The CORSIA app is damaged because its bundled oMLX executable is missing. Download CORSIA again, replace this app, then {retry}"
     if cause == "disk_full":
         free = (f"Free {math.ceil(bytes_to_free / 100_000_000) / 10:.1f} GB,"
                 if isinstance(bytes_to_free, int) and bytes_to_free > 0 else "Free space,")
@@ -25,9 +27,13 @@ def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN
         return f"Check the connection, then {retry}"
     if cause == "memory":
         return "Choose a subscription or API provider instead."
+    if cause == "other_omlx":
+        if retry == RETRY_IN_APP:
+            return "CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running."
+        return f"CORSIA couldn’t stop another oMLX server. {retry[0].upper() + retry[1:]}"
     if cause == "own_omlx_upgrade_required":
         return f"Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then {retry}"
-    return retry[0].upper() + retry[1:]
+    return f"CORSIA couldn’t set up the local model. {retry[0].upper() + retry[1:]}"
 
 
 def local_setup_error(message: str) -> dict:

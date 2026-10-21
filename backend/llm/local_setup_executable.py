@@ -109,8 +109,11 @@ def homebrew_failure_message(action: str, exc: OSError | subprocess.SubprocessEr
     return f"{prefix}: {detail}. Try again." if detail else f"{prefix}. Try again."
 
 
-def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False, broken: bool = False) -> None:
+def ensure_omlx(progress: Callable[[str], None], *, needs_repair: bool = False) -> None:
     """Use the bundled executable, install an absent one, or repair a managed source install."""
+    install_error = managed.managed_omlx_install_error()
+    if install_error:
+        raise RuntimeError(install_error)
     if managed.managed_omlx_executable() is not None:
         return
     current = omlx_on_path()

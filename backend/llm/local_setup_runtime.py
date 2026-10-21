@@ -63,7 +63,7 @@ async def start_managed_omlx(report: Callable[[str], None]) -> tuple[str, int]:
     version = await asyncio.to_thread(omlx_version)
     needs_repair = (not await asyncio.to_thread(_omlx_supports_loopback_auth)
                     or not omlx_has_recommender(version))
-    await asyncio.to_thread(ensure_omlx, report, needs_repair=needs_repair, broken=version is None)
+    await asyncio.to_thread(ensure_omlx, report, needs_repair=needs_repair)
     if not await asyncio.to_thread(_omlx_supports_loopback_auth):
         raise RuntimeError(UPDATE_OMLX_MESSAGE)
     paths, port = await asyncio.to_thread(reserve_managed_omlx_port)

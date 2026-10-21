@@ -68,14 +68,15 @@
 	let folder = $state('~/CORSIA'), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
-	let localPending = $state(false), localStartError = $state<'other' | 'other_omlx' | ''>(''), localStartReference = $state(''), localBusy = $state(false), otherQuestion = $state(false);
+	let localStartError = $state<'other' | 'other_omlx' | ''>(''), localStartReference = $state(''), localBusy = $state(false), otherQuestion = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources });
 	const canConnect = shellInfo() !== null;
 	let preauthLocal = $state<LocalRowState | undefined>();
 	const local = $derived(($token ? sources.find((source) => source.source === 'omlx') : preauthLocal) as LocalRowState | undefined);
 	const eligible = $derived(status.local_eligible !== false);
-	const downloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage || localPending));
+	const downloading = $derived(['downloading', 'starting'].includes(local?.local_state ?? ''));
+	const localFailed = $derived(['failed', 'setup_failed', 'start_failed'].includes(local?.local_state ?? '') || Boolean(localStartError));
 	const tested = $derived($testedProviders.map((source) => ({ source })));
 	const best = $derived(bestSetupModel(catalog, tested));
 	const canFinish = $derived(Boolean(best));
@@ -90,8 +91,8 @@
 		return row.reportable ? { ...row, more: [...(row.more ?? []), { label: 'Save a report', run: () => void saveSetupReport() }] } : row;
 	}
 	const jobs = $derived<SetupJob[]>([
-		...(page !== 'models' && (downloading || local?.setup_error || localStartError) ? [{ label: 'Local model', state: local?.setup_error || localStartError ? 'error' as const : 'busy' as const,
-			meta: local?.setup_error || localStartError ? (local?.local_state === 'start_failed' || local?.setup_error_code === 'start_failed' ? 'Couldn’t start the local model' : 'Couldn’t download') : ['Downloading', `${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), progress: (local?.download_percent ?? 0) / 100 }] : []),
+		...(page !== 'models' && (downloading || localFailed) ? [{ label: 'Local model', state: localFailed ? 'error' as const : 'busy' as const,
+			meta: localFailed ? local?.fix ?? 'Couldn’t start local setup' : local?.local_state === 'starting' ? 'Starting the local model…' : ['Downloading', `${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), progress: (local?.download_percent ?? 0) / 100 }] : []),
 		...(classifier.job ? [classifier.job] : []),
 		...(accountBusy ? [{ label: 'Starting CORSIA', state: 'busy' as const }] : []),
 	]);
@@ -149,11 +150,8 @@
 			if (!response.ok) return;
 			const live = await response.json();
 			preauthLocal = { source: 'omlx', name: live.model ?? 'Local model', state: live.state, local_state: live.state,
-				setup_downloading: live.state === 'downloading', setup_stage: live.state === 'starting' ? 'starting' : undefined,
 				download_percent: live.percent, download_eta_seconds: live.eta_seconds, download_size: live.download_size, download_stalled: live.stalled,
-				setup_error: ['failed', 'setup_failed', 'start_failed'].includes(live.state) ? live.cause ?? live.state : undefined,
 				setup_error_code: live.cause, setup_error_reference: live.ref, bytes_to_free: live.bytes_to_free, fix: live.fix };
-			localPending = false;
 		} catch { /* Preserve the last job projection until the next successful read. */ }
 	}
 	async function startLocal() {
@@ -166,7 +164,6 @@
 			if (result === 'consent_required') otherQuestion = true;
 			else if (result === 'foreign_omlx_changed') localStartError = 'other_omlx';
 			else if (result === 'failed') localStartError = 'other';
-			else localPending = true;
 			if (current) await refreshSources();
 		} catch { localStartError = 'other'; }
 		finally { localBusy = false; }
@@ -179,7 +176,7 @@
 			localStartReference = reference ?? '';
 			if (result === 'foreign_omlx_changed') { localStartError = 'other_omlx'; return; }
 			if (result !== 'started') { localStartError = 'other'; return; }
-			otherQuestion = false; localPending = true;
+			otherQuestion = false;
 			if (current) await refreshSources();
 		} catch { localStartError = 'other'; }
 		finally { localBusy = false; }
@@ -188,7 +185,6 @@
 		const current = get(token);
 		if (current) { await cancelLocalDownload(current); await refreshSources(); }
 		else await fetch('/api/setup/local-download/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-		localPending = false;
 	}
 	async function connectToAnotherComputer() {
 		await stopLocal();
@@ -214,7 +210,7 @@
 		try {
 			sources = await (strict ? recheckSources(current) : fetchSources(current));
 			catalog = (await setupCatalog(current)).models;
-			localPending = false; sourceError = '';
+			sourceError = '';
 		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
 	}
 	async function finishSetup() {

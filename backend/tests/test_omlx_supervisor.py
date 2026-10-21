@@ -112,6 +112,14 @@ def test_pid_roundtrip(isolated_runtime):
     _clear_pid(sid)
 
 
+def test_missing_lsof_is_an_unknown_port_owner(monkeypatch):
+    from llm.providers import omlx_process
+
+    monkeypatch.setattr(omlx_process.shutil, "which", lambda _name: None)
+
+    assert omlx_process.port_owner_pid("127.0.0.1", 8200) is omlx_process.PORT_OWNER_UNKNOWN
+
+
 def test_reconcile_clears_stale_pid(isolated_runtime):
     from llm.providers.omlx_supervisor import reconcile, _pid_path, _read_pid
     sid = "ns-reconcile-stale"
@@ -135,17 +143,28 @@ def test_legacy_pid_record_is_adopted_only_when_its_pid_owns_the_row_port(isolat
     assert json.loads(sup._pid_path(sid).read_text())["pid"] == os.getpid()
 
 
-def test_legacy_pid_record_without_port_ownership_is_cleared_and_never_signalled(isolated_runtime, monkeypatch):
+def test_legacy_pid_record_survives_an_unknown_or_empty_port_probe(isolated_runtime, monkeypatch):
     from llm.providers import omlx_supervisor as sup
 
     sid, port = "legacy-foreign", 8201
     sup._pid_path(sid).write_text(str(os.getpid()))
     monkeypatch.setattr(sup, "_port_owner_pid", lambda *_args: None)
-    monkeypatch.setattr(sup.os, "kill", lambda *_args: pytest.fail("stale record must not signal a process"))
+    monkeypatch.setattr(sup.os, "kill", lambda *_args: pytest.fail("an unproven record must not signal a process"))
 
     result = asyncio.run(sup.stop_server({"server_id": sid, "host": "127.0.0.1", "port": port}))
 
     assert result["already_stopped"]
+    assert sup._pid_path(sid).exists()
+
+
+def test_legacy_pid_record_is_deleted_only_for_a_positive_port_mismatch(isolated_runtime, monkeypatch):
+    from llm.providers import omlx_supervisor as sup
+
+    sid, port = "legacy-mismatch", 8202
+    sup._pid_path(sid).write_text(str(os.getpid()))
+    monkeypatch.setattr(sup, "_port_owner_pid", lambda *_args: 999999)
+
+    assert sup._read_pid(sid, host="127.0.0.1", port=port) is None
     assert not sup._pid_path(sid).exists()
 
 

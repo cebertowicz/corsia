@@ -19,6 +19,26 @@ def flight(monkeypatch, tmp_path):
     return local_setup
 
 
+def test_signed_in_row_projection_uses_the_normalized_flight_shape(flight):
+    from llm import local_sources
+    from onboarding.local_download_state import normalize
+
+    normalized = normalize({
+        "state": "failed", "cause": "disk_full", "percent": 41, "eta_seconds": 80,
+        "bytes_to_free": 4_000_000_000, "ref": "local-42", "fix": "Free 4.0 GB, then press Retry.",
+    })
+    row = {"state": "needs_setup", "reason": None, "fix": None}
+
+    local_sources._project_local_flight(row, normalized)
+
+    assert row == {
+        "state": "needs_setup", "reason": None, "fix": "Free 4.0 GB, then press Retry.",
+        "local_state": "failed", "setup_error_code": "disk_full", "setup_error_reference": "local-42",
+        "bytes_to_free": 4_000_000_000, "download_percent": 41, "download_eta_seconds": 80,
+        "download_stalled": False,
+    }
+
+
 @pytest.mark.asyncio
 async def test_known_model_is_starting_until_an_accepted_download_and_starting_again_after_it(flight):
     from llm.local_profiles import STARTER_MODEL

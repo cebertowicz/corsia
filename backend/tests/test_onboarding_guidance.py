@@ -278,9 +278,8 @@ def test_app_path_sends_the_message_then_seven_steps_and_ends_on_the_handoff():
 def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
     assert "`model_sources` `recheck: true`" in app
-    # A running flight sets only setup_stage; a backgrounded one sets setup_downloading
-    # (test_local_source_sends_the_download_percent_as_a_number). The setup screen reads both.
-    assert "`setup_stage` set or `setup_downloading` true is still setting up, not failed: say nothing about it" in app
+    # The flight alone publishes its live state to every local-model consumer.
+    assert "`local_state` is `starting` or `downloading` is still setting up, not failed: say nothing about it" in app
 
 
 def test_app_path_email_step_records_the_email_app_where_the_microsoft_fact_reads_it():
