@@ -68,7 +68,7 @@ function localFlight(state: LocalFixture | undefined) {
 	if (state === 'other-ref') return { state: 'failed', cause: 'other', ref: 'setup-report-123', fix: 'CORSIA couldn’t set up the local model.' };
 	if (state === 'other-no-ref') return { state: 'failed', cause: 'other', fix: 'CORSIA couldn’t set up the local model.' };
 	if (state === 'setup-failed') return { state: 'setup_failed', cause: 'other', fix: 'CORSIA couldn’t set up the local model.' };
-	if (state === 'start-failed') return { state: 'start_failed', cause: 'connection' };
+	if (state === 'start-failed') return { state: 'start_failed', cause: 'connection', fix: 'CORSIA couldn’t set up the local model. Press Retry.' };
 	return { state: state === 'other-omlx' ? 'stopped' : state ?? 'stopped' };
 }
 function localSource(state?: LocalFixture) {
@@ -133,7 +133,7 @@ async function serve(page: Page, fixture: Fixture) {
 		} else if (path === '/api/setup/local-model') json = { state: fixture.local === 'pick-failed' ? 'failed' : 'picked', model: fixture.local === 'pick-failed' ? null : { name: 'Qwen 3.8', repository: 'example/model', download_size_bytes: 30000000000, download_size_gb: 30, context_window: 65536 }, message: null, ...(fixture.local === 'pick-failed' ? { cause: 'memory' } : {}) };
 		else if (path === '/api/setup/local-download') {
 			if (method === 'GET') json = { ...flight, model: 'Qwen 3.8', percent: 42, eta_seconds: 720 };
-			else if (fixture.local === 'other-omlx') { await route.fulfill({ status: 409, json: { code: 'foreign_omlx_changed' } }); return; }
+			else if (fixture.local === 'other-omlx') { await route.fulfill({ status: 409, json: { code: 'foreign_omlx_changed', fix: 'CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running.' } }); return; }
 			else if (fixture.other) { await route.fulfill({ status: 409, json: { code: 'consent_required' } }); return; }
 			else json = { ok: true };
 		}
@@ -253,6 +253,7 @@ async function navigate(page: Page, fixture: Fixture) {
 		await expect(page.getByRole('button', { name: 'Start using CORSIA', exact: true })).toBeDisabled();
 		await expect(page.getByRole('region', { name: 'Claude Code' }).getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
 	}
+	if (fixture.local === 'other-omlx') await expect(page.getByRole('region', { name: 'Local model' }).getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
 	if (fixture.api) {
 		await page.getByRole('button', { name: 'Add provider', exact: true }).click();
 		if (fixture.api === 'address') await page.getByRole('button', { name: 'Other provider by address', exact: true }).click();
@@ -328,7 +329,7 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.local) {
 		const row = page.getByRole('region', { name: 'Local model' });
 		const expected = fixture.local === 'ready' ? 'Ready'
-			: fixture.local === 'memory' ? 'Local models need at least 24 GB of memory, and this computer has less. Connect a subscription or an API provider. Smaller local models may come in a future update.'
+			: fixture.local === 'memory' ? 'Local models need at least 24 GB of memory, and this computer has less. Connect a subscription or an API provider.'
 			: fixture.local === 'downloading' ? 'Downloading 42%'
 			: fixture.local === 'paused' ? 'Download paused. It continues when the connection returns.'
 			: fixture.local === 'starting' ? 'Starting the local model…'
@@ -340,8 +341,8 @@ async function assertState(page: Page, fixture: Fixture) {
 			: fixture.local === 'other-ref' ? 'CORSIA couldn’t set up the local model. Reference: setup-report-123'
 			: fixture.local === 'other-no-ref' ? 'CORSIA couldn’t set up the local model.'
 			: fixture.local === 'setup-failed' ? 'CORSIA couldn’t set up the local model.'
-			: fixture.local === 'start-failed' ? 'The local model downloaded but couldn’t start. Try again, or save a report.'
-			: fixture.local === 'other-omlx' ? 'The other oMLX copies changed or couldn’t stop. Retry asks again, or keep them running.'
+			: fixture.local === 'start-failed' ? 'CORSIA couldn’t set up the local model. Press Retry.'
+			: fixture.local === 'other-omlx' ? 'CORSIA couldn’t stop another oMLX server. Press Retry to ask again, or leave it running.'
 			: 'Free and private. Runs on this computer, even offline. 30 GB download.';
 		await expect(row).toContainText(expected);
 		if (fixture.local === 'other-no-ref' || fixture.local === 'start-failed') await expect(row.getByText(/Reference:/)).toHaveCount(0);
