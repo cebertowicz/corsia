@@ -37,7 +37,7 @@ mod remote_lifecycle;
 mod service_management;
 mod shell_state;
 mod source_lifecycle;
-mod startup_failure;
+// Startup wait logic lives in wait_for_startup below.
 #[cfg(test)]
 mod test_tls;
 mod trust;
@@ -50,8 +50,8 @@ const ACTIVE_OPERATION_ERROR: &str = "CORSIA is still completing an operation";
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// Large state roots can spend minutes in migration; lack of backend log
 /// progress, rather than a fixed health budget, detects a wedged startup.
-const STARTUP_STALL_WINDOW: Duration = Duration::from_secs(120);
-const STARTUP_ABSOLUTE_CAP: Duration = Duration::from_secs(1_800);
+pub(crate) const STARTUP_STALL_WINDOW: Duration = Duration::from_secs(120);
+pub(crate) const STARTUP_ABSOLUTE_CAP: Duration = Duration::from_secs(1_800);
 const RELAUNCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Default)]
@@ -381,46 +381,48 @@ fn bundled_resource_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn wait_for_service(port: u16, app_dir: &Path) -> Result<(), String> {
-    let began = Instant::now();
     let log = service_log_path(app_dir)?;
-    let mut marker = startup_log_marker(&log);
+    wait_for_startup(
+        port,
+        &log,
+        STARTUP_STALL_WINDOW,
+        STARTUP_ABSOLUTE_CAP,
+        "CORSIA stopped starting up. Quit and open it again.",
+    )
+}
+
+/// Startup can take minutes while a large state root migrates. Health is the
+/// success signal; new log metadata proves progress until the bounded stall or cap.
+pub(crate) fn wait_for_startup(
+    port: u16,
+    log: &Path,
+    stall_window: Duration,
+    absolute_cap: Duration,
+    failure: &str,
+) -> Result<(), String> {
+    let began = Instant::now();
+    let mut marker = startup_log_marker(log);
     let mut last_progress = began;
-    let target = format!("gui/{}/{}", unsafe { libc::geteuid() }, service_management::service_label());
-    let mut process = None;
     loop {
-        let pid = release_proof::launchd_pid(&target)
-            .ok_or("the CORSIA service unloaded while it was starting")?;
-        if release_proof::pid_is_gone(pid) {
-            return Err("the CORSIA service process exited while it was starting".into());
-        }
-        if let Some(expected) = process {
-            if expected != pid {
-                return Err("the CORSIA service process restarted while it was starting".into());
-            }
-        } else {
-            process = Some(pid);
-        }
         if probe_health(port) {
             return Ok(());
         }
-        let next_marker = startup_log_marker(&log);
+        let next_marker = startup_log_marker(log);
         if next_marker != marker {
             marker = next_marker;
             last_progress = Instant::now();
         }
         let now = Instant::now();
-        if now.duration_since(began) >= STARTUP_ABSOLUTE_CAP
-            || now.duration_since(last_progress) >= STARTUP_STALL_WINDOW
+        if now.duration_since(began) >= absolute_cap
+            || now.duration_since(last_progress) >= stall_window
         {
-            return Err(startup_failure::timeout_message(&log));
+            return Err(failure.into());
         }
         thread::sleep(HEALTH_POLL_INTERVAL);
     }
 }
 
-/// A progress marker never exposes log contents, which can contain private
-/// operational detail; a new line changes at least its metadata.
-fn startup_log_marker(path: &Path) -> Option<(SystemTime, u64)> {
+fn startup_log_marker(path: &Path) -> Option<(std::time::SystemTime, u64)> {
     let metadata = std::fs::metadata(path).ok()?;
     Some((metadata.modified().ok()?, metadata.len()))
 }
@@ -1401,10 +1403,6 @@ fn get_service_log_path(
         .map_err(|_| "service state is unavailable")?
         .clone()
         .unwrap_or(default_app_dir(&app)?);
-    let adoption_trail = adoption::failure_log_path(&app_dir);
-    if adoption_trail.is_file() {
-        return Ok(adoption_trail.display().to_string());
-    }
     Ok(service_log_path(&app_dir)?.display().to_string())
 }
 

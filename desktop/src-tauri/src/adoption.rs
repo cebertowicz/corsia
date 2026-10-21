@@ -289,8 +289,7 @@ struct Journal {
     snapshot: Option<PathBuf>,
     #[serde(default)]
     stop: Option<StopProcess>,
-    #[serde(default)]
-    failure: Option<Failure>,
+    // Rollback details remain in the restored service log.
 }
 
 fn read_journal(plan: &Plan) -> Result<Option<Journal>, String> {
@@ -319,30 +318,17 @@ fn journal_path(plan: &Plan) -> PathBuf {
     plan.adopted_dir().join(JOURNAL)
 }
 
-/// A durable, app-owned failure trail. It is intentionally outside the adopted
-/// state root because rollback replaces that root from its snapshot.
-pub fn failure_log_path(app_dir: &Path) -> PathBuf {
-    app_dir.join("adoption-failure.log")
-}
-
+/// Preserve rollback detail alongside the restored install that can act on it.
 fn write_failure_trail(plan: &Plan, failure: &Failure) {
-    let path = failure_log_path(&plan.app_dir);
+    let path = plan.source.state.join("logs/service.log");
     let result = (|| -> Result<(), std::io::Error> {
-        fs::create_dir_all(&plan.app_dir)?;
+        fs::create_dir_all(path.parent().expect("service log has a parent"))?;
         let mut file = OpenOptions::new().create(true).append(true).open(path)?;
         writeln!(file, "adoption rollback: {}: {}", failure.step, failure.message)?;
         file.sync_all()
     })();
     if let Err(error) = result {
-        log::warn!("could not write adoption failure trail: {error}");
-    }
-}
-
-fn clear_failure_trail(plan: &Plan) {
-    if let Err(error) = fs::remove_file(failure_log_path(&plan.app_dir)) {
-        if error.kind() != std::io::ErrorKind::NotFound {
-            log::warn!("could not clear prior adoption failure trail: {error}");
-        }
+        log::warn!("could not write adoption rollback detail: {error}");
     }
 }
 
@@ -376,12 +362,12 @@ fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
 }
 
 fn write_journal(plan: &Plan, step: Step, snapshot: Option<&Path>) -> Result<(), String> {
-    write_journal_with(plan, step, snapshot, None, None)
+    write_journal_with(plan, step, snapshot, None)
 }
 
 /// The Stopping step again, now naming the stop process that is draining.
 fn write_stopping(plan: &Plan, stop: &StopProcess) -> Result<(), String> {
-    write_journal_with(plan, Step::Stopping, None, Some(stop.clone()), None)
+    write_journal_with(plan, Step::Stopping, None, Some(stop.clone()))
 }
 
 fn write_journal_with(
@@ -389,14 +375,12 @@ fn write_journal_with(
     step: Step,
     snapshot: Option<&Path>,
     stop: Option<StopProcess>,
-    failure: Option<Failure>,
 ) -> Result<(), String> {
     let journal = Journal {
         step,
         source: plan.source.clone(),
         snapshot: snapshot.map(Path::to_path_buf),
         stop,
-        failure,
     };
     write_atomically(
         &journal_path(plan),
@@ -766,7 +750,7 @@ pub fn adopt(
         )
         .confirmed_running());
     }
-    clear_failure_trail(plan);
+    // Rollback records are written only after the source files are restored.
     // From the stop request on the source may be down, so the journal says so
     // first and every failure after it ends in the old install's start.
     write_journal(plan, Step::Stopping, None)
@@ -971,7 +955,6 @@ fn rollback(
     restore_snapshot: bool,
 ) -> Result<(), AdoptionError> {
     phase(Phase::StartingExisting);
-    write_failure_trail(plan, &failure);
     // Any `?` before the journal says Reverted may leave files part-way
     // between homes, which converts to Recovery::Reopen.
     if restore_snapshot {
@@ -983,6 +966,7 @@ fn rollback(
             .map_err(|error| format!("{}; backup could not be restored, so the old install was not restarted: {error}", failure.message))?;
     }
     restore_files(plan)?;
+    write_failure_trail(plan, &failure);
     if let Some(snapshot) = snapshot.filter(|_| !restore_snapshot) {
         if let Err(error) = fs::remove_dir_all(snapshot) {
             if error.kind() != std::io::ErrorKind::NotFound {
@@ -995,7 +979,6 @@ fn rollback(
         Step::Reverted,
         snapshot.filter(|_| restore_snapshot),
         None,
-        Some(failure.clone()),
     )?;
     // From here every file is back, so starting the source again is safe to repeat.
     if let Err(error) = lifecycle.start_old() {
@@ -1009,7 +992,6 @@ fn rollback(
             Step::Reverted,
             snapshot.filter(|_| restore_snapshot),
             None,
-            Some(failure.clone()),
         )?;
         return Err(AdoptionError::start_again(failure.message));
     }
@@ -1544,16 +1526,16 @@ mod tests {
     }
 
     #[test]
-    fn rollback_keeps_the_failing_step_and_writes_an_app_owned_trail() {
+    fn rollback_writes_failure_detail_to_the_restored_service_log() {
         let (_home, plan) = plan(false);
         let mut fake = fake_for(&plan, Some("start_new"));
         fake.also_fail = Some("start_old");
         let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
         assert_eq!(error.recovery, Some(Recovery::StartAgain));
-        let journal = read_journal(&plan).unwrap().unwrap();
-        assert_eq!(journal.step, Step::Reverted);
-        assert_eq!(journal.failure.unwrap().step, "start_old");
-        assert!(fs::read_to_string(failure_log_path(&plan.app_dir)).unwrap().contains("start_new"));
+        assert_eq!(read_journal(&plan).unwrap().unwrap().step, Step::Reverted);
+        let log = fs::read_to_string(plan.source.state.join("logs/service.log")).unwrap();
+        assert!(log.contains("start_new"));
+        assert!(log.contains("start_old"));
     }
 
     #[test]

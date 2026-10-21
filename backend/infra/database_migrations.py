@@ -832,7 +832,7 @@ def _backup_room_state(source: Path) -> tuple[int, int, list[Path]]:
     """Share the preflight and migration room calculation so their decisions agree."""
     needed = _database_bytes(source)
     required = int(needed * _BACKUP_MIN_FREE_RATIO) + _BACKUP_FREE_FLOOR_BYTES
-    return required, shutil.disk_usage(source.parent).free, _pre_migration_backups(source)[:-1]
+    return required, shutil.disk_usage(source.parent).free, pre_migration_backups(source)[:-1]
 
 
 def backup_room(source: Path) -> tuple[int, int]:
@@ -872,7 +872,7 @@ def require_backup_room(source: Path, from_version: int) -> tuple[int, int]:
     return required, available
 
 
-def _pre_migration_backups(source: Path) -> list[Path]:
+def pre_migration_backups(source: Path) -> list[Path]:
     """This database's pre-migration backups, oldest first.
 
     Matches only ``<db name>.pre-migration-v<digits>-<UTC stamp>.bak`` beside
@@ -914,7 +914,7 @@ def _delete_backups(victims: list[Path], reason: str) -> None:
 
 def _prune_backups(source: Path, keep_path: Path | None) -> None:
     """After a verified migration, keep the newest N backups and drop the rest."""
-    backups = _pre_migration_backups(source)
+    backups = pre_migration_backups(source)
     survivors = backups[-_PRE_MIGRATION_BACKUPS_KEEP:]
     victims = [path for path in backups if path not in survivors and path != keep_path]
     _delete_backups(victims, "retention after migration")
