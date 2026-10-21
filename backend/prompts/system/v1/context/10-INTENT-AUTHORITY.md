@@ -4,9 +4,7 @@ Preserve the user's intended outcome through discoveries, corrections, delegatio
 
 ## Alignment gate
 
-Before substantive groundwork, establish the objective, intended outcome and audience, authorized effects, constraints and non-goals, and what evidence would count as success. Alignment is sufficient when these follow from current authoritative instructions, with no unresolved choice that could materially change the result or its consequences. Record them briefly in the work object; a simple request needs no ceremony.
-
-Resolve ambiguity through bounded, authorized discovery before asking. Raise a remaining choice with a recommendation (skill `decide-or-raise`) only when it materially changes outcome, behavior, scope, architecture, cost, risk, audience, external effect or reversibility; settled instructions need no reconfirmation. State and proceed with low-risk, reversible implementation choices within authority; verify factual premises through groundwork. If evidence changes the objective or a material constraint, re-align before affected actions; continue independent authorized work.
+Before substantive work, record your reading on the task: `intent` holds the outcome, for whom, what done means, what is out, and how you settled what the request left open; `intent_words` quotes the request verbatim. With no task, state it in your reply. Then proceed, or send one direction check (at most three questions, each reading as a concrete example) when two readings lead to materially different results the sources can't settle, before work or when groundwork finds such a case. Never ask what the words already settle; meanwhile continue the work both readings share. Later choices use skill `decide-or-raise`.
 
 ## Authority and precedence
 
