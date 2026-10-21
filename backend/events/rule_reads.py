@@ -63,3 +63,20 @@ def cloud_off(db: sqlite3.Connection, projects: Iterable[str | None]) -> set[str
         wanted,
     ).fetchall()
     return {row["project_id"] for row in rows}
+
+
+def wake_budget(
+    db: sqlite3.Connection, rule_id: str, thread: str, *, cap: str, since: str,
+) -> tuple[int, int]:
+    """R9: this rule's wakes of this thread since ``since``, and how many of its
+    events the cap has digested there since its last wake, in one read."""
+    row = db.execute(
+        "SELECT (SELECT COUNT(*) FROM event_route_decisions WHERE rule_id=:rule "
+        "        AND thread_id=:thread AND outcome='woke' AND via='rule' AND at>=:since) AS spent, "
+        "       (SELECT COUNT(*) FROM event_route_decisions WHERE rule_id=:rule "
+        "        AND thread_id=:thread AND outcome='digested' AND reason=:cap "
+        "        AND id>COALESCE((SELECT MAX(id) FROM event_route_decisions WHERE rule_id=:rule "
+        "                AND thread_id=:thread AND outcome='woke' AND via='rule'), 0)) AS capped",
+        {"rule": rule_id, "thread": thread, "cap": cap, "since": since},
+    ).fetchone()
+    return int(row["spent"]), int(row["capped"])

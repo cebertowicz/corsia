@@ -228,22 +228,6 @@ def project_scope(project_id: str) -> str:
     return PROJECT_PREFIX + project_id
 
 
-def _wake_budget(db: sqlite3.Connection, rule_id: str, thread: str) -> tuple[bool, int]:
-    """R9: whether this rule already woke this thread within the hour, and how many
-    of its events the cap has digested there since its last wake, in one read."""
-    row = db.execute(
-        "SELECT (SELECT COUNT(*) FROM event_route_decisions WHERE rule_id=:rule "
-        "        AND thread_id=:thread AND outcome='woke' AND via='rule' AND at>=:since) AS spent, "
-        "       (SELECT COUNT(*) FROM event_route_decisions WHERE rule_id=:rule "
-        "        AND thread_id=:thread AND outcome='digested' AND reason=:cap "
-        "        AND id>COALESCE((SELECT MAX(id) FROM event_route_decisions WHERE rule_id=:rule "
-        "                AND thread_id=:thread AND outcome='woke' AND via='rule'), 0)) AS capped",
-        {"rule": rule_id, "thread": thread, "cap": WAKE_CAP,
-         "since": _iso(_now() - timedelta(hours=1))},
-    ).fetchone()
-    return int(row["spent"]) >= WAKES_PER_HOUR, int(row["capped"])
-
-
 def _in_scope(rule: Rule, event_project: str | None) -> bool:
     """An event with a project matches only that project's rules. One with no owner
     and nothing routed has no project, so only a writer's rule to itself that names
@@ -280,9 +264,32 @@ def _apply_drops(plan: RulePlan, rules: list[Rule], by_thread: Mapping[str, Rout
         dropped_by.setdefault(writer, rule.id)
         if writer in by_thread:
             plan.drops.setdefault(writer, rule.id)
-        plan.settled.append(Outcome(rule.id, writer, DROPPED,
-                            reason=None if writer in by_thread else "nothing routed to drop"))
+        plan.settled.append(Outcome(
+            rule.id, writer, DROPPED,
+            reason=None if writer in by_thread else "nothing routed to drop"))
     return dropped_by
+
+
+def _settle_unreachable(
+    plan: RulePlan, rules: list[Rule], recipients: Mapping[str, str | None],
+    threads: Mapping[str, Mapping[str, Any]],
+) -> list[Rule]:
+    """Settle each rule whose affected thread (a delivery's recipient, a drop's
+    writer) is unavailable or no longer in the rule's project; return the rest."""
+    current = []
+    for rule in rules:
+        thread = recipients[rule.id] if rule.action == DELIVER else rule.created_by
+        row = threads.get(thread) if thread else None
+        if rule.action == DELIVER and (row is None or not row["available"]):
+            reason = "no registered owner" if thread is None else "recipient unavailable"
+            plan.settled.append(Outcome(rule.id, thread, DEAD_LETTERED, reason=reason))
+        elif row is not None and row["project_id"] != rule.scope.removeprefix(PROJECT_PREFIX):
+            plan.settled.append(Outcome(rule.id, thread, HELD, reason=OUT_OF_PROJECT))
+        else:
+            current.append(rule)
+    return current
+
+
 def _wake_for(
     db: sqlite3.Connection, rule: Rule, thread: str, routed_wake: bool,
 ) -> tuple[bool, str | None, int]:
@@ -293,8 +300,9 @@ def _wake_for(
         return False, None, 0  # routing already wakes it; the rule only rides
     if _paused(db, thread):
         return False, PAUSED, 0  # R7
-    spent, capped = _wake_budget(db, rule.id, thread)
-    if spent:
+    spent, capped = rule_reads.wake_budget(
+        db, rule.id, thread, cap=WAKE_CAP, since=_iso(_now() - timedelta(hours=1)))
+    if spent >= WAKES_PER_HOUR:
         return False, WAKE_CAP, capped + 1  # R9
     return True, None, 0
 
@@ -319,10 +327,12 @@ def evaluate(
         rule.id: (owner if rule.to == REGISTERED_OWNER else thread_target(rule.to))
         for rule in rules
     }
-    threads = rule_reads.threads(db, [owner, *by_thread, *recipients.values(), *(rule.created_by for rule in rules)])
+    writers = [rule.created_by for rule in rules]
+    threads = rule_reads.threads(db, [owner, *by_thread, *recipients.values(), *writers])
     event_project = threads[owner]["project_id"] if owner in threads else None
     if event_project is None:
-        event_project = next((threads[item.thread]["project_id"] for item in routed if item.thread in threads), None)
+        event_project = next(
+            (threads[item.thread]["project_id"] for item in routed if item.thread in threads), None)
     account_id = event.facts.get("account_id")
     if account_id is None:
         rules = [rule for rule in rules if _in_scope(rule, event_project)]
@@ -333,25 +343,14 @@ def evaluate(
         # R27: an ended artifact's later activity fires no rule.
         plan.settled = [Outcome(rule.id, recipients[rule.id], ENDED) for rule in rules]
         return plan
-    current = []
-    for rule in rules:
-        thread = recipients[rule.id] if rule.action == DELIVER else rule.created_by
-        row = threads.get(thread) if thread else None
-        if thread is None or row is None or not row["available"]:
-            unavailable_reason = "no registered owner" if thread is None else "recipient unavailable"
-            plan.settled.append(Outcome(rule.id, thread, DEAD_LETTERED, reason=unavailable_reason))
-        elif row["project_id"] != rule.scope.removeprefix(PROJECT_PREFIX):
-            plan.settled.append(Outcome(rule.id, thread, HELD, reason=OUT_OF_PROJECT))
-        else:
-            current.append(rule)
-    rules = current
+    rules = _settle_unreachable(plan, rules, recipients, threads)
     if not rules:
         return plan
     dropped_by = _apply_drops(plan, rules, by_thread)
     cloud_off: set[str] | None = None
     for rule in (rule for rule in rules if rule.action == DELIVER):
         thread = recipients[rule.id]
-        if thread is None:  # The guard above already settled this rule.
+        if thread is None:  # dead-lettered above
             continue
         row = threads[thread]
         if thread in dropped_by:
