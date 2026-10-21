@@ -137,6 +137,11 @@
 
 	onDestroy(cancelQueueHold);
 
+	/** Leaving the page mid-hold ends it with nothing sent; the glyph must not stay up. */
+	function cancelHoldIfHidden() {
+		if (document.visibilityState === 'hidden') cancelQueueHold();
+	}
+
 	/** A hold that travelled is a drag or a scroll, not a deliberate hold. */
 	function trackQueueHold(event: PointerEvent) {
 		if (!holdOrigin) return;
@@ -178,6 +183,9 @@
 		onSendClick();
 	}
 </script>
+
+<svelte:window onblur={cancelQueueHold} />
+<svelte:document onvisibilitychange={cancelHoldIfHidden} />
 
 <div class="action-row">
 	<button
@@ -287,6 +295,7 @@
 		onpointermove={trackQueueHold}
 		onpointerup={completeQueueHold}
 		onpointercancel={abandonQueueHold}
+		onlostpointercapture={abandonQueueHold}
 		oncontextmenu={(event) => event.preventDefault()}
 		onclick={handleSendClick}
 		disabled={(!hasMessageToSend && !isStreamingThisThread) || $connectionState !== 'connected' || (!canSendToModel && hasMessageToSend)}
