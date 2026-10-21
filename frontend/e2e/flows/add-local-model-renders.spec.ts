@@ -151,7 +151,7 @@ test('renders the approved local-model evidence states from intercepted fixtures
 					await expect(card.getByRole('button', { name: 'Add model', exact: true })).toBeVisible();
 				} else {
 					await expect(page.getByText('16 GB memory', { exact: true })).toBeVisible();
-					await expect(card).toContainText('Local models need at least 24 GB of memory, and this computer has less. Connect a subscription or an API provider. Smaller local models may come in a future update.');
+					await expect(card).toContainText('Local models need at least 24 GB of memory, and this computer has less. Connect a subscription or an API provider.');
 					await expect(card).not.toContainText('No models yet.');
 					await expect(card.getByRole('button', { name: 'Add model', exact: true })).toHaveCount(0);
 					await expect(card.getByRole('button', { name: 'Add provider', exact: true })).toBeVisible();
