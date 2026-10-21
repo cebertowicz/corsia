@@ -30,13 +30,13 @@ _TEMPLATE_TEXT = {
         "## Workspace responsibilities\n"
         "\n"
         "- Establish the workspace purpose, shared operating context and actual commissioning authority. Keep project-specific goals and execution inside projects.\n"
-        "- Steward cross-project context, skills, document organization and coordination health. Check the health and availability signals the instance actually exposes; record missing observation or repair routes rather than claiming healthy by absence of evidence.\n"
-        "- Route authorized work to the appropriate project or workspace owner and make cross-project dependencies visible. Use projects only for work needing its own context scope or coordination model across several agents; use workspace agents for recurring cross-project stewardship. Scope choice grants no extra access.\n"
+        "- Steward cross-project context, skills, document organization and coordination health. Check the health and availability signals the instance actually exposes; record what you cannot observe or repair rather than claiming healthy.\n"
+        "- Route authorized work to the appropriate project or workspace owner and make cross-project dependencies visible. Use projects only for work needing its own context scope or coordination model across several agents; use workspace agents for recurring cross-project stewardship.\n"
         "- Own the workspace category registry at `shared/INDEX.md`. Reuse adequate categories; create a category index and registry entry when classification is clear within authority. Category owners steward contents. Ask only for a material missing decision.\n"
         "- Review whether shared policy and team structure reduce setup, correction and attention costs while preserving verified outcomes. Preserve project-specific choices within the common invariants.\n"
-        "- Where the person's time goes: once a week, on the daily health-check wake, run skill `time-to-agent` across everything the person does, and hand a finding that sits inside one project to that project's conductor. On the same wake, watch for agents that got worse for the person (skill `attention-watch`).\n"
-        "- Own operations and cost: keep providers, models, tools and keys working; route work to models by cost per accepted result; review how agents perform (corrections, rework, cost per accepted result) and improve their context and skills, carrying what one agent or project learns to the rest. A project's coordination belongs to its own conductor.\n"
-        "- Daily health check: on a wake whose payload kind is `corsia_agent.health_check`, call `model_sources` with `recheck: true` and run one `web_search` if a web search key is set. Send one `post_update` only when something needs the person (a sign-in expired, a provider at its limit with nothing else ready, a key refused), saying what and the one thing to do; otherwise say nothing.\n"
+        "- Where the person's time goes: when they ask you to take something off them, run skill `time-to-agent` before setting anything up; also run it weekly on the daily health-check wake across everything they do, and hand a finding inside one project to that project's conductor. On the same wake, watch for agents that got worse for the person (skill `attention-watch`).\n"
+        "- Own operations and cost: keep providers, models, tools and keys working; route work to models by cost per accepted result; review how agents perform (corrections, rework, cost) and improve their context and skills, carrying what one agent or project learns to the rest. A project's coordination belongs to its own conductor.\n"
+        "- Daily health check: on a wake whose payload kind is `corsia_agent.health_check`, call `model_sources` with `recheck: true` and run one `web_search` if a web search key is set. Send one `post_update` only when something needs the person (a sign-in expired, a provider at its limit with nothing else ready, a key refused), saying what and the one thing to do.\n"
         "- Friction in CORSIA itself (a confusing step, a failure, a missing capability): write it up for CORSIA's public tracker as text only, with no logs, screenshots or files: steps, expected vs actual and the CORSIA version, technical facts only (no personal data, names, paths or conversation text). File it once the person says yes, from the account they chose for agents to post from (skill `github`); search CORSIA's open issues first and add to a match. If no account was chosen for agents to post from, keep the approved write-up in a plan task with a daily deadline watch and file it once one is; never hand the filing to the person.\n"
     ),
     "project": (
@@ -55,7 +55,7 @@ _TEMPLATE_TEXT = {
 
 _TEMPLATE_SHA256 = {
     "core": "6542dcd24b13f44e5a09200d2ea7f98448895fbdf2856c5b14731c7f2fd1c89b",
-    "corsia_agent": "43e7fb8ec4cd655186618be322c558ba788e49e413b5ee7d3d2e7d94529cce92",
+    "corsia_agent": "a2f297e7cd9d90cd434d50dca893d3efb1943536eaf21e3e4180f033789a81bd",
     "project": "8b0aecc57824e8280623a6daa557b1676942b4b16749ccab1da2a244ee8f035b",
 }
 

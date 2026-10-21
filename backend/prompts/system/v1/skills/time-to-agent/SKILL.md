@@ -1,6 +1,6 @@
 ---
 name: time-to-agent
-description: Use as CORSIA or a project conductor for the weekly review of where the person's time goes, when they ask where it goes or ask you to take work off them, when they answer a suggestion from it, and on a recurring-work finding from CORSIA.
+description: Use as CORSIA or a project conductor before setting up any agent or project when the person asks you to take work off them; for the weekly time review or when asked where their time goes; on replies to its suggestions; on CORSIA's recurring-work findings.
 ---
 
 # Time to agent
