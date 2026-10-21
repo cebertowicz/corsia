@@ -40,3 +40,14 @@ def explain(db, *, scopes: tuple[str, ...], event_id: str | None = None,
         sql += 'AND artifact_integration=? AND artifact_type=? AND artifact_external_id=? '
         args.extend([ref.get('integration'), ref.get('type'), ref.get('external_id')])
     return [dict(row) for row in db.execute(sql + 'ORDER BY id DESC LIMIT ?', (*args, limit))]
+
+
+def explain_refusals(db, *, scopes: tuple[str, ...], event_type: str, limit: int = 100) -> list[dict]:
+    """Return recent CLI/tool admission refusals visible to the caller's project."""
+    sql = 'SELECT r.event_id,r.event_type,r.refusal_code,r.producer,r.origin,r.at '
+    sql += 'FROM event_intake_records r JOIN threads t ON t.id=r.producer '
+    sql += "WHERE r.outcome='refused' AND r.event_type=? AND r.at >= ? AND "
+    sql += "CASE WHEN t.project_id IS NULL THEN 'global' ELSE 'project:' || t.project_id END IN ("
+    sql += ','.join('?' for _ in scopes) + ') '
+    args: list[Any] = [event_type, (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(), *scopes]
+    return [dict(row) for row in db.execute(sql + 'ORDER BY r.id DESC LIMIT ?', (*args, limit))]

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
+from uuid import uuid4
 
 from events.connectors import EventTypeDecl
 from events.disposition import delivery_disposition
@@ -16,6 +18,17 @@ from infra.database import get_db, write_transaction
 from infra.measure_registry import REGISTRY
 
 _MAX_FACT_BYTES = 64 * 1024
+_ERROR_FIXES = {
+    "facts_not_object": "Pass a JSON object to --facts.",
+    "bad_json": "Pass valid JSON to --facts.",
+    "too_large": "Send fewer or shorter facts.",
+    "undeclared_type": "Use a declared route or both event type.",
+    "undeclared_fact": "Use only facts declared for this event type.",
+    "bad_fact_kind": "Match each declared fact kind.",
+    "not_your_namespace": "Use a type declared by this session's rule set.",
+    "reserved_type": "worker.* events are produced by CORSIA only.",
+    "intake_unreachable": "Retry with the same --id.",
+}
 
 
 @dataclass(frozen=True)
@@ -46,6 +59,18 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def emitted_event_id(event_type: str, identity: str | None) -> str:
+    """Make optional emitter retry identities unique to their declared type."""
+    if not identity:
+        return uuid4().hex
+    return hashlib.sha256(f"{event_type}\0{identity}".encode()).hexdigest()
+
+
+def format_event_error(code: str, text: str) -> str:
+    """Render the common caller-facing error copy without exposing event facts."""
+    return f"{code}: {text.rstrip('.')}. {_ERROR_FIXES.get(code, 'Correct the event and try again.')}"
+
+
 def _refusal(code: str, text: str) -> IntakeResult:
     return IntakeResult(False, False, IntakeRefusal(code, text), 0)
 
@@ -57,6 +82,23 @@ def _resolution_refusal(code: str, text: str) -> _ResolvedEvent:
 def _split_type(event_type: str) -> tuple[str, str] | None:
     namespace, separator, suffix = event_type.partition(".")
     return (namespace, suffix) if separator and suffix else None
+
+
+def resolve_event_type(conn, event_type: str) -> tuple[EventTypeDecl, Any | None] | None:
+    """Resolve declared types before connector manifests for every event-facing surface."""
+    split = _split_type(event_type)
+    if split is None:
+        return None
+    namespace, suffix = split
+    entry = REGISTRY.ensure_loaded(conn).events.get(event_type)
+    if entry is not None:
+        return EventTypeDecl(suffix, (), tuple(entry.declared)), entry
+    from events.connectors import get_manifest
+
+    try:
+        return get_manifest(namespace).decl(suffix), None
+    except KeyError:
+        return None
 
 
 def _facts_problem(facts: Any) -> IntakeResult | None:
@@ -113,12 +155,13 @@ def _connector_event(conn, event_type: str, facts: dict[str, Any], producer: str
 
 def _declared_event(conn, event_type: str, facts: dict[str, Any], producer: str, origin: str) -> _ResolvedEvent:
     split = _split_type(event_type)
-    if split is None:
+    resolved = resolve_event_type(conn, event_type)
+    if split is None or resolved is None:
         return _resolution_refusal("undeclared_type", "event type is not declared")
     namespace, suffix = split
-    entry = REGISTRY.ensure_loaded(conn).events.get(event_type)
+    declaration, entry = resolved
     if entry is None:
-        return _resolution_refusal("undeclared_type", "event type is not declared")
+        return _resolution_refusal("not_your_namespace", "producer does not own this event namespace")
     owner = _script_owner(conn, producer) if producer.startswith("script:") else producer
     if owner is None or entry.owner != owner:
         return _resolution_refusal("not_your_namespace", "producer does not own this event namespace")
@@ -131,7 +174,6 @@ def _declared_event(conn, event_type: str, facts: dict[str, Any], producer: str,
         return _resolution_refusal("undeclared_fact", "facts include a name not declared for this event type")
     if next((name for name, value in facts.items() if not entry.specs[name].accepts(value)), None) is not None:
         return _resolution_refusal("bad_fact_kind", "a fact does not match its declared kind")
-    declaration = EventTypeDecl(suffix, (), tuple(entry.declared))
     return _ResolvedEvent(
         EventEnvelope(
             event_id="", type=suffix, connector=namespace, facts=facts, relationships=(),
@@ -160,20 +202,39 @@ def _registered_owner_targets(owner: str, envelope: EventEnvelope, conn) -> list
     return [Target(None, "dead_letter", "none", reason="owner_inactive", disposition="dead_letter")]
 
 
-def _record_acceptance(conn, event_id: str, rules_matched: int) -> None:
+def _record_acceptance(conn, *, event_id: str, event_type: str, origin: str,
+                       producer: str, rules_matched: int) -> None:
     conn.execute(
-        "INSERT INTO event_intake_records (event_id,outcome,rules_matched) VALUES (?,?,?) "
-        "ON CONFLICT(event_id) DO UPDATE SET outcome=excluded.outcome,rules_matched=excluded.rules_matched",
-        (event_id, "accepted", rules_matched),
+        "INSERT INTO event_intake_records "
+        "(event_id,outcome,rules_matched,producer,origin,event_type,at) VALUES (?,?,?,?,?,?,?)",
+        (event_id, "accepted", rules_matched, producer, origin, event_type, _now()),
     )
+
+
+def record_refusal(*, event_id: str, event_type: str, origin: Literal["emitter", "agent"],
+                   producer: str, refusal: IntakeRefusal) -> None:
+    """Retain a caller-visible CLI or tool refusal without retaining event facts or text."""
+    with write_transaction(None, scope="record_event_refusal") as conn:
+        conn.execute(
+            "INSERT INTO event_intake_records "
+            "(event_id,outcome,rules_matched,refusal_code,producer,origin,event_type,at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (event_id, "refused", 0, refusal.code, producer, origin, event_type, _now()),
+        )
+        conn.execute(
+            "DELETE FROM event_intake_records WHERE id IN "
+            "(SELECT id FROM event_intake_records WHERE outcome='refused' AND at < ? ORDER BY id LIMIT 1000)",
+            ((datetime.now(timezone.utc) - timedelta(days=30)).isoformat(),)
+        )
 
 
 def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: str, event_id: str) -> IntakeResult:
     with write_transaction(None, scope="admit_event") as conn:
         row = conn.execute(
-            "SELECT outcome,rules_matched FROM event_intake_records WHERE event_id=?", (event_id,),
+            "SELECT rules_matched FROM event_intake_records "
+            "WHERE event_id=? AND outcome='accepted'", (event_id,),
         ).fetchone()
-        if row is not None and row["outcome"] == "accepted":
+        if row is not None:
             return IntakeResult(True, True, None, int(row["rules_matched"]))
         if event_type.startswith("worker.") and origin != "platform":
             return _refusal("reserved_type", "worker events are produced by the platform only")
@@ -198,7 +259,10 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
         rule_ids = {rule_id for ids in evaluated.rule_ids.values() for rule_id in ids if rule_id != "builtin:0"}
         if evaluated.dropped_by:
             rule_ids.add(evaluated.dropped_by)
-        _record_acceptance(conn, event_id, len(rule_ids))
+        _record_acceptance(
+            conn, event_id=event_id, event_type=event_type, origin=origin,
+            producer=producer, rules_matched=len(rule_ids),
+        )
         return IntakeResult(True, all(delivery.outcome == "duplicate" for delivery in deliveries), None, len(rule_ids))
 
 

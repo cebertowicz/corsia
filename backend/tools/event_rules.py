@@ -1,24 +1,28 @@
-"""Read-only event rule inspection, using the live evaluator."""
+"""Event rule inspection and declared-event emission using the live evaluator."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
 from typing import Any
 
-from events.connectors import get_manifest
 from events.envelope import EventEnvelope, _event_class
 from events.resolve import resolve_targets
 from events.rules import evaluate, event_scope
-from events.route_decisions import explain
+from events.route_decisions import explain, explain_refusals
 from infra.database import get_db
 from infra.db_async import run_in_db
 from tools.base import Tool
 from tools.delegation import _require_context, _tool_schema
 
+logger = logging.getLogger(__name__)
+
 
 def inspect_rules(db, *, action: str, project_id: str | None,
                   connector: str | None = None, event: dict | None = None,
-                  event_id: str | None = None, artifact_ref: dict | None = None,
+                  event_id: str | None = None, event_type: str | None = None,
+                  artifact_ref: dict | None = None,
                   limit: int = 100) -> dict:
     if artifact_ref is not None and (not isinstance(artifact_ref, dict) or
             not all(isinstance(artifact_ref.get(k), str) and artifact_ref[k]
@@ -44,12 +48,14 @@ def inspect_rules(db, *, action: str, project_id: str | None,
             result.append(item)
         return {'rules': result, 'limit': limit}
     if action == 'explain':
+        if event_type:
+            return {'refusals': explain_refusals(db, scopes=scopes, event_type=event_type, limit=limit)}
         if not event_id and not artifact_ref:
-            raise ValueError('explain needs event_id or artifact_ref (integration, type, external_id)')
+            raise ValueError('explain needs event_id, event_type, or artifact_ref (integration, type, external_id)')
         return {'decisions': explain(db, scopes=scopes, event_id=event_id,
                                      artifact_ref=artifact_ref, limit=limit)}
     if action != 'test':
-        raise ValueError('action must be list, test, or explain; this tool is read-only')
+        raise ValueError('action must be list, test, explain, or emit; rules are read-only here and emit sends an event')
     if not event or not isinstance(event.get('connector'), str) or not isinstance(event.get('type'), str):
         raise ValueError('test needs event.connector, event.type and event.facts (normalized facts)')
     facts = event.get('facts')
@@ -59,9 +65,13 @@ def inspect_rules(db, *, action: str, project_id: str | None,
     if ref is not None and (not isinstance(ref, dict) or
                            not all(isinstance(ref.get(k), str) for k in ('integration', 'type', 'external_id'))):
         raise ValueError('event.artifact_ref needs integration, type and external_id')
-    manifest = get_manifest(event['connector'])
-    decl = manifest.event_types.get(event['type'])
-    event_class = event.get('event_class') or (_event_class(decl, facts) if decl else None)
+    from events.intake import resolve_event_type
+
+    resolved = resolve_event_type(db, f"{event['connector']}.{event['type']}")
+    if resolved is None:
+        raise ValueError('event type is not declared')
+    decl, _ = resolved
+    event_class = event.get('event_class') or _event_class(decl, facts)
     if event_class not in ('actionable', 'informational'):
         raise ValueError('event.event_class must be actionable or informational; include it for webhook events')
     envelope = EventEnvelope(
@@ -91,26 +101,29 @@ class EventRulesTool(Tool):
     @property
     def description(self) -> str:
         return (
-            'Inspect event routing without changing it. list returns at most 100 rules '
-            'in your project plus global rules. test previews the live evaluator on '
-            'normalized event facts; nothing is bound, delivered or written. explain '
-            'reads actual delivery decisions from the last 30 days by event_id or '
-            'artifact_ref {integration,type,external_id}; for a GitHub PR use '
-            '{integration: github, type: pull-request, external_id: owner/repo#7}. An empty explain result means '
-            'no retained decision matches; check the event source next. No create/disable.'
+            'Inspect rules or emit one declared event. list returns up to 100 rules in your project plus global '
+            'rules. test previews the live evaluator on normalized event facts; nothing is bound, delivered '
+            'or written. emit sends declared facts as your thread and returns its receipt; event_id is a '
+            'retry identity scoped to event_type. explain reads delivery '
+            'decisions by event_id or artifact_ref {integration,type,external_id}, or recent emitted-event '
+            'refusals by event_type. For a GitHub PR use {integration: github, type: pull-request, '
+            'external_id: owner/repo#7}. An empty explain result means no retained decision or refusal '
+            'matches; check the event source next. No create/disable.'
         )
 
     @property
     def parameters(self) -> dict[str, Any]:
         return _tool_schema({
-            'action': {'type': 'string', 'enum': ['list', 'test', 'explain']},
+            'action': {'type': 'string', 'enum': ['list', 'test', 'explain', 'emit']},
             'connector': {'type': 'string', 'description': 'Optional source filter for list.'},
             'event': {'type': 'object', 'description': (
                 'For test: connector, type, facts (normalized facts), optional artifact_ref '
                 '{integration,type,external_id} and event_class (actionable or informational; required for webhook types). '
                 'Webhook facts include webhook=true, webhook_self_authored and corsia_tag when present.'
             )},
-            'event_id': {'type': 'string'},
+            'event_id': {'type': 'string', 'description': 'For explain or a retry-safe emit identity.'},
+            'event_type': {'type': 'string', 'description': 'For emit or explain recent refusals of one declared type.'},
+            'facts': {'type': 'object', 'description': 'For emit: declared event facts.'},
             'artifact_ref': {
                 'type': 'object',
                 'properties': {key: {'type': 'string'} for key in ('integration', 'type', 'external_id')},
@@ -122,13 +135,42 @@ class EventRulesTool(Tool):
 
     async def execute(self, action: str, connector: str | None = None,
                       event: dict | None = None, event_id: str | None = None,
+                      event_type: str | None = None, facts: dict | None = None,
                       artifact_ref: dict | None = None, limit: int = 100, **kwargs: Any) -> str:
         context = _require_context(kwargs)
         if isinstance(context, str):
             return context
-        _, actor = context
+        thread_id, actor = context
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
             return 'Error: limit must be an integer from 1 to 100.'
+        if action == 'emit':
+            if not isinstance(event_type, str) or not event_type:
+                return 'Error: emit needs event_type.'
+            from events.intake import admit_event, emitted_event_id, record_refusal
+
+            emitted_id = emitted_event_id(event_type, event_id)
+            try:
+                result = await admit_event(
+                    event_type=event_type, facts=facts, origin='agent', producer=thread_id,
+                    event_id=emitted_id,
+                )
+            except Exception:  # noqa: BLE001
+                return 'Error: intake_unreachable: event intake is unavailable; retry with event_id.'
+            if result.refusal is not None:
+                try:
+                    await asyncio.to_thread(
+                        record_refusal, event_id=emitted_id, event_type=event_type,
+                        origin='agent', producer=thread_id, refusal=result.refusal,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception('could not record agent event refusal')
+                from events.intake import format_event_error
+                return f'Error: {format_event_error(result.refusal.code, result.refusal.text)}'
+            return json.dumps({
+                'event_id': emitted_id,
+                'duplicate': result.duplicate,
+                'rules_matched': result.rules_matched,
+            }, ensure_ascii=False)
 
         def inspect() -> dict:
             db = get_db()
@@ -137,7 +179,7 @@ class EventRulesTool(Tool):
                 db.execute('PRAGMA query_only=ON')
                 return inspect_rules(db, action=action, project_id=actor.get('project_id'),
                                      connector=connector, event=event, event_id=event_id,
-                                     artifact_ref=artifact_ref, limit=limit)
+                                     event_type=event_type, artifact_ref=artifact_ref, limit=limit)
             finally:
                 db.execute(f'PRAGMA query_only={int(query_only)}')
                 db.close()
