@@ -75,7 +75,7 @@ def test_startup_drops_them_after_the_database_migration_has_read_them(launch_en
 
 
 def test_database_initialization_heartbeats_during_one_long_step():
-    import app_lifecycle
+    from startup_progress import startup_progress
 
     class Logger:
         messages: list[str] = []
@@ -84,7 +84,7 @@ def test_database_initialization_heartbeats_during_one_long_step():
             self.messages.append(message.format(*args))
 
     logger = Logger()
-    with app_lifecycle._startup_progress(logger, "database initialization", interval=0.01):
+    with startup_progress(logger, "database initialization", interval=0.01):
         time.sleep(0.03)
 
     assert any("database initialization still running" in message for message in logger.messages)
