@@ -7,8 +7,12 @@ import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from events.connectors.github import event_chip, summarize_event
+
 if TYPE_CHECKING:
     from events.router import RouteResult
+    from events.envelope import EventEnvelope
+    from events.rules import Evaluation
 
 
 @dataclass
@@ -23,6 +27,8 @@ class PreparedRoute:
     chip: str | None = None
     notice: str | None = None
     reap_payload: dict[str, Any] | None = None
+    envelope: EventEnvelope | None = None
+    evaluation: Evaluation | None = None
 
 
 @dataclass
@@ -80,10 +86,7 @@ def _prepare_route(
         return
     if identity is not None and router._record_source_facts_db(internal_event, identity, payload):
         prepared.reap_payload = payload
-    suppressed = router._self_authored_result(internal_event, payload)
-    if suppressed is not None:
-        prepared.result = suppressed
-        return
+
     external_id = identity.external_id if identity else None
     tag_provenance = structured_tag(payload)
     selected = router._select_route(
@@ -94,16 +97,18 @@ def _prepare_route(
         prepared.result = selected
         return
     thread_id, wake_reason, routing_state = selected
-    summary, details = router._summarize(internal_event, payload, external_id)
+    summary, details = summarize_event(internal_event, payload, external_id)
     if tag_provenance:
         details["tag_provenance"] = tag_provenance
-    chip = router._chip_line(payload, external_id, summary)
+    chip = event_chip(payload, external_id, summary)
     router._record_passive_change(
         routing_state=routing_state, wake_thread_id=thread_id,
         internal_event=internal_event, external_id=external_id,
         summary=summary, chip=chip, wake_reason=wake_reason,
         tag_provenance=tag_provenance,
     )
+    prepared.envelope = routing_state.get('_envelope')
+    prepared.evaluation = routing_state.get('_evaluation')
     prepared.thread_id, prepared.identity = thread_id, identity
     prepared.summary, prepared.details, prepared.chip = summary, details, chip
     prepared.notice = router.github_pr_notice.notice_for_routed_event(thread_id, identity)

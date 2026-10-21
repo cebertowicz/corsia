@@ -10,7 +10,7 @@ import pytest
 
 def _rows(path):
     with closing(sqlite3.connect(str(path))) as db:
-        return db.execute("SELECT value,enabled FROM connection_rules ORDER BY value").fetchall()
+        return db.execute('''SELECT json_extract("match", '$[0].value') AS value,enabled FROM event_rules WHERE "on"='first_seen' ORDER BY value''').fetchall()
 
 
 def _writer_available(path):
@@ -27,9 +27,10 @@ def rules(isolated_db):
             "VALUES ('rule-owner','test-user','t','t')"
         )
         db.execute(
-            "INSERT INTO connection_rules "
-            "(id,connector,fact,value,destination_thread_id,created_at,updated_at) "
-            "VALUES ('seed','gmail','from','seed','rule-owner','t','t')"
+            '''INSERT INTO event_rules
+            (id,connector,"match","to","on",action,mode,created_at,updated_at)
+            VALUES ('seed','gmail','[{"field":"from","op":"eq","value":"seed"}]',
+                    'thread:rule-owner','first_seen','deliver','default','t','t')'''
         )
         db.commit()
     return isolated_db
@@ -53,7 +54,7 @@ def test_standalone_rule_write_refuses_unknown_owner(rules, operation):
     from infra.database import TransactionOwnershipError, get_db
 
     db = get_db()
-    db.execute("UPDATE connection_rules SET value='outer' WHERE id='seed'")
+    db.execute('''UPDATE event_rules SET "match"=json_set("match", '$[0].value', 'outer') WHERE id='seed' ''')
     try:
         with pytest.raises(TransactionOwnershipError):
             _change(operation)
@@ -84,17 +85,17 @@ def test_rule_statement_failure_preserves_outer_work(rules, operation, event):
 
     with closing(sqlite3.connect(str(rules))) as db:
         db.execute(
-            f"CREATE TRIGGER reject_rule AFTER {event} ON connection_rules "
+            f"CREATE TRIGGER reject_rule AFTER {event} ON event_rules "
             "BEGIN SELECT RAISE(FAIL, 'rule rejected'); END"
         )
         db.commit()
     with write_transaction(None, scope="test_rule_owner") as db:
-        db.execute("UPDATE connection_rules SET value='outer' WHERE id='seed'")
+        db.execute('''UPDATE event_rules SET "match"=json_set("match", '$[0].value', 'outer') WHERE id='seed' ''')
         with pytest.raises(sqlite3.IntegrityError, match="rule rejected"):
             _change(operation, db=db)
         assert db.in_transaction
         assert [tuple(row) for row in db.execute(
-            "SELECT value,enabled FROM connection_rules ORDER BY value"
+            '''SELECT json_extract("match", '$[0].value') AS value,enabled FROM event_rules WHERE "on"='first_seen' ORDER BY value'''
         )] == [("outer", 1)]
     assert _rows(rules) == [("outer", 1)]
 
@@ -146,7 +147,7 @@ def test_rule_validation_rejects_before_touching_caller_work(rules):
     from infra.database import get_db
 
     db = get_db()
-    db.execute("UPDATE connection_rules SET value='outer' WHERE id='seed'")
+    db.execute('''UPDATE event_rules SET "match"=json_set("match", '$[0].value', 'outer') WHERE id='seed' ''')
     try:
         with pytest.raises(binder.StaleRuleFieldError):
             binder.create_rule(connector="gmail", fact="undeclared", value="target",

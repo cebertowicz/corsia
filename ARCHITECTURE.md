@@ -23,6 +23,13 @@ Two axes stay separate:
 Inbound user turns, delegated messages, and routed events converge on shared
 send and dispatch services before entering the selected execution provider.
 
+`event_rules` stores first-seen ownership bindings and per-event deliver/drop
+rules. `backend/events/rules.py` matches both; the binder retains declaration
+priority and conflict repair. Webhook preparation keeps source ordering and
+notice cleanup, while platform delivery owns post-delivery watch resolution
+through `plans.public`. Scoped decision records retain 30 days of routing
+explanations; the `event_rules` tool lists, previews and explains without writes.
+
 ## Code map
 
 | Area | Path | Responsibility |

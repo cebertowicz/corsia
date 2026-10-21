@@ -55,6 +55,21 @@ def get_project_conductor(project_id: str, db=None) -> str | None:
             _db.close()
 
 
+def get_scope_coordinators(scopes: set[str], *, db) -> dict[str, str | None]:
+    """Resolve a rule batch in at most two reads, independent of row count."""
+    result: dict[str, str | None] = {scope: None for scope in scopes}
+    projects = sorted(scopes - {WORKSPACE_SCOPE})
+    if projects:
+        placeholders = ','.join('?' for _ in projects)
+        rows = db.execute(
+            'SELECT id,conductor_thread_id FROM projects WHERE id IN (' + placeholders + ')', projects,
+        ).fetchall()
+        result.update({row['id']: row['conductor_thread_id'] for row in rows})
+    if WORKSPACE_SCOPE in scopes:
+        result[WORKSPACE_SCOPE] = get_corsia_agent(db=db)
+    return result
+
+
 def get_all_coordination_ids(db=None) -> list[str]:
     """Return every designated thread id across all scopes.
 

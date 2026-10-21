@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from tools.catalog_consent_entries import CONSENT_CATALOG_ENTRIES
-from tools.catalog_entry import ToolCatalogEntry
+from tools.catalog_entry import ToolCatalogEntry as _Entry
 from tools.catalog_host_entries import HOST_ACCESS_CATALOG_ENTRIES
 from tools.catalog_library_entries import LIBRARY_CATALOG_ENTRIES
 from tools.catalog_measurement_entries import MEASUREMENT_CATALOG_ENTRIES
 from tools.catalog_microsoft_entries import MICROSOFT_CATALOG_ENTRIES
-
-_Entry = ToolCatalogEntry
 
 POST_UPDATE_SUMMARY = "Leave the user a marked update they see in Focus mode"
 
@@ -26,7 +24,9 @@ POST_UPDATE_ATTENTION_GUIDANCE = (
     + " Silence never answers; raise a plan decision for a choice."
 )
 
-TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
+TOOL_CATALOG: dict[str, _Entry] = {
+    'event_rules': _Entry('events', summary='Inspect rules, preview routing, or explain a delivery',
+                          activity='Inspecting event rules'),
     "continuity_edit": _Entry(
         "memory", status="substrate", authority="continuity-write", core=True,
         activity="Updating continuity",

@@ -32,6 +32,13 @@ def _fresh() -> sqlite3.Connection:
 def _dev_128() -> sqlite3.Connection:
     """Reconstruct dev schema 128, including the measure registry, in memory."""
     db = _fresh()
+    db.execute('DROP TABLE event_route_decisions')
+    db.execute('DROP TABLE event_rules')
+    db.execute('''CREATE TABLE connection_rules (
+        id TEXT PRIMARY KEY, scope TEXT NOT NULL DEFAULT 'global',
+        connector TEXT NOT NULL, fact TEXT NOT NULL, value TEXT NOT NULL,
+        destination_thread_id TEXT NOT NULL, precedence INTEGER NOT NULL DEFAULT 100,
+        enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)''')
     db.execute("DROP TABLE connected_account_reach")
     db.execute("DROP TABLE connected_account_audit")
 
@@ -71,7 +78,7 @@ def _seed_legacy(db: sqlite3.Connection) -> None:
 
 
 def test_v128_registers_connected_accounts_step() -> None:
-    assert SCHEMA_VERSION == 133
+    assert SCHEMA_VERSION == 134
     assert MIGRATIONS[128] is migrate_128_to_129
     assert 129 in MIGRATIONS
 
@@ -83,7 +90,7 @@ def test_runner_migrates_legacy_google_once_and_removes_the_singleton_path() -> 
         db.commit()
 
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 128, 133)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 128, 134)
         account = google_account(db=db)
         assert account is not None
         assert account["address"] == ACCOUNT
@@ -165,7 +172,7 @@ def test_incomplete_legacy_credentials_become_needs_sign_in_without_blocking_sta
         db.commit()
 
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.to_version) == (True, 133)
+        assert (result.migrated, result.to_version) == (True, 134)
         account = google_account(db=db)
         assert account is not None
         assert account["address"] == ACCOUNT
@@ -185,7 +192,7 @@ def test_addressless_legacy_data_is_retired_without_an_account() -> None:
         db.commit()
 
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.to_version) == (True, 133)
+        assert (result.migrated, result.to_version) == (True, 134)
         assert google_account(db=db) is None
         assert get_setting("google_account", db=db) is None
         assert get_setting("gmail_poll_cursor", db=db) is None
@@ -232,7 +239,7 @@ def test_failed_multistep_ladder_rolls_back_earlier_schema_changes_and_retries(m
         ).fetchone() is None
 
         monkeypatch.undo()
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 133
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 134
 
 
 def _screen(db: sqlite3.Connection, account: str, message_id: str) -> None:

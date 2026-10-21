@@ -12,6 +12,7 @@ against the connector manifest's live filterable fields.
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -71,13 +72,20 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _row_to_rule(row: Any) -> Rule:
+def _binding_rule(rule: Any) -> Rule:
+    condition = rule.match[0]
     return Rule(
-        id=row["id"], scope=row["scope"], connector=row["connector"],
-        fact=row["fact"], value=row["value"],
-        destination_thread_id=row["destination_thread_id"],
-        precedence=int(row["precedence"]), enabled=bool(row["enabled"]),
+        id=rule.id, scope=rule.scope, connector=rule.connector,
+        fact=condition['field'], value=condition['value'],
+        destination_thread_id=rule.to[7:],
+        precedence=rule.precedence, enabled=rule.enabled,
     )
+
+
+def _row_to_rule(row: Any) -> Rule:
+    from events.rules import from_row
+
+    return _binding_rule(from_row(row))
 
 
 def live_filterable_fields(connector: str) -> set[str]:
@@ -115,12 +123,13 @@ def create_rule(
     with write_transaction(db, scope="create_binding_rule") as _db:
         now = _now()
         _db.execute(
-            """INSERT INTO connection_rules
-               (id, scope, connector, fact, value, destination_thread_id,
+            '''INSERT INTO event_rules
+               (id, scope, connector, "match", "to", "on", action, mode,
                 precedence, enabled, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,1,?,?)""",
-            (rule.id, scope, connector, fact, str(value), destination_thread_id,
-             precedence, now, now),
+               VALUES (?,?,?,?,?,'first_seen','deliver','default',?,1,?,?)''',
+            (rule.id, scope, connector,
+             json.dumps([{'field': fact, 'op': 'eq', 'value': str(value)}]),
+             'thread:' + destination_thread_id, precedence, now, now),
         )
         return rule
 
@@ -129,7 +138,7 @@ def disable_rule(rule_id: str, *, db=None) -> None:
     """Disable a rule (config, not deletion)."""
     with write_transaction(db, scope="disable_binding_rule") as _db:
         _db.execute(
-            "UPDATE connection_rules SET enabled=0, updated_at=? WHERE id=?",
+            "UPDATE event_rules SET enabled=0, updated_at=? WHERE id=? AND \"on\"='first_seen'",
             (_now(), rule_id),
         )
 
@@ -138,12 +147,10 @@ def list_rules(connector: str, *, enabled_only: bool = True, db=None) -> list[Ru
     """Rules for a connector, in precedence order (lowest precedence first)."""
     _db = db or get_db()
     try:
-        sql = ("SELECT * FROM connection_rules WHERE connector=? "
-               + ("AND enabled=1 " if enabled_only else "")
-               + "ORDER BY precedence ASC, created_at ASC")
-        rows = _db.execute(sql, (connector,)).fetchall()
-        resolved = (_resolve_designation(_row_to_rule(r), _db) for r in rows)
-        return [r for r in resolved if r is not None]
+        from events.rules import list_rules as event_rules
+
+        rows = event_rules(connector, on='first_seen', enabled_only=enabled_only, db=_db)
+        return _resolve_bindings(rows, _db)
     finally:
         if not db:
             _db.close()
@@ -159,10 +166,15 @@ def stale_rules(connector: str, *, db=None) -> list[Rule]:
 
 def evaluate(facts: dict[str, Any], connector: str, *, db=None) -> list[Rule]:
     """Enabled rules whose fact==value matches, in precedence order."""
-    return [
-        r for r in list_rules(connector, db=db)
-        if str(facts.get(r.fact)) == r.value
-    ]
+    from events.rules import matching_rules
+
+    _db = db or get_db()
+    try:
+        rows = matching_rules(facts, connector, on='first_seen', db=_db)
+        return _resolve_bindings(rows, _db)
+    finally:
+        if db is None:
+            _db.close()
 
 
 def _create_repair_artifact(
@@ -215,7 +227,7 @@ def _declared_owner(facts: dict[str, Any], *, db=None) -> str | None:
 
 def bind_owner_for(
     artifact_ref: dict | None, facts: dict[str, Any], connector: str | None, *,
-    repair_owner: str | None = None, db=None,
+    repair_owner: str | None = None, db=None, preview: bool = False,
 ) -> BindResult:
     """Resolve an artifact identity to an owner: ownership, declaration, else rule.
 
@@ -240,6 +252,8 @@ def bind_owner_for(
             return BindResult(record, via="unbound")
         declared_owner = _declared_owner(facts, db=_db)
         if declared_owner is not None:
+            if preview:
+                return BindResult(replace(record, owner_thread=declared_owner), via='declaration')
             bound = AR.register_or_resolve(
                 artifact_ref, owner_intent=declared_owner, db=_db,
             )
@@ -263,12 +277,18 @@ def bind_owner_for(
             conflict = ConflictInfo(
                 fact=top[0].fact, value=top[0].value, precedence=min_prec,
                 rule_ids=tuple(r.id for r in top), destinations=tuple(destinations))
-            repair = _create_repair_artifact(
-                _db, connector, artifact_ref, conflict, repair_owner)
+            if preview:
+                repair = AR.ArtifactRecord({}, repair_owner, (), 'unregistered')
+            else:
+                repair = _create_repair_artifact(
+                    _db, connector, artifact_ref, conflict, repair_owner)
             return BindResult(record, via="repair", conflict=conflict,
                               repair_artifact=repair)
 
         winner = top[0]
+        if preview:
+            return BindResult(replace(record, owner_thread=winner.destination_thread_id),
+                              via='rule', matched_rule_id=winner.id)
         bound = AR.register_or_resolve(
             artifact_ref, owner_intent=winner.destination_thread_id, db=_db)
         _record_rule_provenance(_db, artifact_ref, winner)
@@ -304,8 +324,10 @@ def ensure_designation_rule(
     rule_scope = DESIGNATION_PREFIX + designation
     with write_transaction(db, scope="ensure_designation_rule") as _db:
         existing = _db.execute(
-            "SELECT * FROM connection_rules WHERE scope=? AND connector=? "
-            "AND fact=? AND value=? AND enabled=1",
+            '''SELECT * FROM event_rules WHERE scope=? AND connector=?
+               AND "on"='first_seen' AND enabled=1
+               AND json_extract("match", '$[0].field')=?
+               AND json_extract("match", '$[0].value')=?''',
             (rule_scope, connector, fact, str(value)),
         ).fetchone()
         if existing is not None:
@@ -324,6 +346,26 @@ def _designated_thread(designation: str, db) -> str | None:
     from infra.conductor import get_scope_coordinator
 
     return get_scope_coordinator(designation, db=db)
+
+
+def _resolve_bindings(rows, db) -> list[Rule]:
+    """Batch designation reads before the row loop, independent of rule count."""
+    from infra.conductor import get_scope_coordinators
+
+    scopes = {row.scope[len(DESIGNATION_PREFIX):] for row in rows
+              if row.scope.startswith(DESIGNATION_PREFIX)}
+    designations = get_scope_coordinators(scopes, db=db)
+    result = []
+    for row in rows:
+        rule = _binding_rule(row)
+        if rule.scope.startswith(DESIGNATION_PREFIX):
+            designation = rule.scope[len(DESIGNATION_PREFIX):]
+            destination = designations[designation]
+            if destination is None:
+                continue
+            rule = replace(rule, destination_thread_id=destination)
+        result.append(rule)
+    return result
 
 
 def _resolve_designation(rule: Rule, db) -> Rule | None:

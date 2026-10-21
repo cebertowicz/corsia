@@ -245,7 +245,12 @@ def github_routing_envelope(
     payload: dict[str, Any],
 ) -> EventEnvelope:
     """Wrap a resolved GitHub identity for generic owner resolution."""
+    import hashlib
+    import json
+
     from events.envelope import EventEnvelope
+    from events.guard import is_bot_or_self_authored
+    from events.routing_inputs import structured_tag
 
     artifact_ref = None
     if identity is not None:
@@ -254,17 +259,64 @@ def github_routing_envelope(
             "type": identity.type,
             "external_id": identity.external_id,
         }
+    facts = declaration_facts(payload)
+    facts.update({'repo': (payload.get('repository') or {}).get('full_name'),
+                  'conclusion': (payload.get('check_suite') or {}).get('conclusion'),
+                  'webhook': True,
+                  'webhook_self_authored': is_bot_or_self_authored(payload)})
+    tag = structured_tag(payload) if identity is not None else None
+    if tag:
+        facts['corsia_tag'] = tag['thread_id']
+    event_id = hashlib.sha256(json.dumps(
+        [internal_event, payload], sort_keys=True, separators=(',', ':'),
+    ).encode()).hexdigest()
     return EventEnvelope(
-        event_id="",
+        event_id=event_id,
         type=internal_event,
-        connector=None,
-        facts=declaration_facts(payload),
+        connector='github',
+        facts=facts,
         relationships=(),
         artifact_ref=artifact_ref,
-        provenance={},
+        provenance={'source': 'github', 'rule_trace': []},
         event_class=github_event_class(payload),
         ownerless_ok=False,
     )
+
+
+def summarize_event(
+    internal_event: str, payload: dict[str, Any], external_id: str | None,
+) -> tuple[str, dict[str, Any]]:
+    """Build the connector's existing event summary and details."""
+    repo = (payload.get('repository') or {}).get('full_name', '')
+    pr = payload.get('pull_request') or {}
+    comment = payload.get('comment') or {}
+    details: dict[str, Any] = {'repo': repo, 'external_id': external_id}
+    if comment:
+        author = (comment.get('user') or {}).get('login', '?')
+        body = (comment.get('body') or '')[:280]
+        details.update({'author': author, 'comment': body, 'url': comment.get('html_url')})
+        return f'{external_id} comment from {author}: {body[:100]}', details
+    if pr:
+        details.update({'pr_title': pr.get('title'), 'head_sha': (pr.get('head') or {}).get('sha'),
+                        'base_ref': (pr.get('base') or {}).get('ref'), 'url': pr.get('html_url')})
+        action = payload.get('action', '')
+        return f"{external_id} {action}: {pr.get('title', '')}", details
+    check_suite = payload.get('check_suite') or {}
+    if check_suite:
+        conclusion = check_suite.get('conclusion') or 'completed'
+        details.update({'check_suite_id': check_suite.get('id'), 'head_sha': check_suite.get('head_sha'),
+                        'check_suite_updated_at': check_suite.get('updated_at')})
+        return f'{internal_event} on {external_id or repo} ({conclusion})', details
+    return f'{internal_event} on {external_id or repo}', details
+
+
+def event_chip(payload: dict[str, Any], external_id: str | None, summary: str) -> str:
+    """Keep the existing machine CI line and plain PR/comment chip."""
+    suite = payload.get('check_suite') or {}
+    if suite and not (payload.get('comment') or payload.get('pull_request')):
+        target = external_id or (payload.get('repository') or {}).get('full_name', '')
+        return f"CI {suite.get('conclusion') or 'completed'} on {target}"
+    return summary
 
 
 def identity_from_check_pr_metadata(

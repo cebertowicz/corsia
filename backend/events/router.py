@@ -9,7 +9,9 @@ from typing import Any
 
 from loguru import logger
 
-from events import dead_letter, delivery, guard
+from events import dead_letter, delivery, route_decisions
+from events.rules import evaluate, event_scope, matching_rules
+from infra.database import get_db, write_transaction
 from events.identity import (
     CHECK_SUITE_COMPLETED_EVENTS,
     PrResolutionError,
@@ -116,10 +118,15 @@ def _record_passive_change(
 def _cancelled_check_result(
     internal_event: str, payload: dict[str, Any],
 ) -> RouteResult | None:
-    if internal_event not in _CHECK_EVENTS:
+    envelope = github_routing_envelope(internal_event, None, payload)
+    rules = matching_rules(envelope.facts, 'github', on='every', event_type=internal_event,
+                           scopes=('global',))
+    cancelled = next((r for r in rules if r.id == 'rule_set:github@1:cancelled' and r.action == 'drop'), None)
+    if cancelled is None:
         return None
-    if (payload.get("check_suite") or {}).get("conclusion") != "cancelled":
-        return None
+    with write_transaction(None, scope='cancelled_event_rule') as db:
+        route_decisions.record(db, envelope, rule_ids=[cancelled.id], thread_id=None,
+                               outcome='dropped', scope='global')
     logger.info("event-routing: dropping cancelled check_suite — superseded")
     emit_product_event(
         "event_route", RouteOutcome.PARKED.value,
@@ -151,24 +158,6 @@ async def _resolve_event_identity(
         # The ordered DB stage owns error parking as well as normal route writes.
         return exc, None, False
 
-
-def _self_authored_result(
-    internal_event: str, payload: dict[str, Any],
-) -> RouteResult | None:
-    if not guard.is_bot_or_self_authored(payload):
-        return None
-    comment = payload.get("comment", {})
-    comment_user = comment.get("user") if isinstance(comment, dict) else None
-    author = comment_user if comment_user is not None else payload.get("sender", {})
-    logger.info(
-        "event-routing: suppressing {} — authored by bot/self ({})",
-        internal_event, author.get("login", "?"),
-    )
-    emit_product_event(
-        "event_route", "suppressed",
-        properties={"internal_event": internal_event, "author": author.get("login")},
-    )
-    return RouteResult(RouteOutcome.SUPPRESSED)
 
 
 def _unowned_check_result(
@@ -219,23 +208,30 @@ def _select_route(
     routing_state: dict[str, Any] = {
         "identity": None, "owner": None, "subscribers": [], "triage": None,
     }
+    envelope = github_routing_envelope(internal_event, identity, payload)
+    db = get_db()
+    try:
+        scope = event_scope(envelope, db=db)
+        evaluated = evaluate(envelope, scope=scope, db=db,
+                             resolve_owner=lambda: resolve_targets(envelope))
+        if evaluated.dropped_by:
+            with write_transaction(db, scope='dropped_webhook_rule'):
+                route_decisions.record(db, envelope, rule_ids=[evaluated.dropped_by],
+                                       thread_id=None, outcome='dropped', scope=scope)
+            return RouteResult(RouteOutcome.SUPPRESSED)
+    finally:
+        db.close()
+    if not evaluated.targets:
+        return _dead_letter_result(internal_event, payload, 'no_owner', external_id)
+    target = evaluated.targets[0]
+    routing_state = target.routing_state or (
+        registry_models.routing_registrations(*identity) if identity else routing_state)
+    routing_state['_evaluation'] = evaluated
+    routing_state['_envelope'] = envelope
     if tag is not None and identity is not None:
-        routing_state = registry_models.routing_registrations(*identity)
-        thread_id = tag["thread_id"]
-        if not delivery.thread_exists_and_active(thread_id):
-            logger.warning(
-                "event-routing: structured tag target {} inactive/missing for {}",
-                thread_id, internal_event,
-            )
-            return _dead_letter_result(
-                internal_event, payload, "invalid_tag_target", external_id,
-            )
-        return thread_id, "tag", routing_state
-
-    target = resolve_targets(
-        github_routing_envelope(internal_event, identity, payload),
-    )[0]
-    routing_state = target.routing_state or routing_state
+        if not delivery.thread_exists_and_active(target.thread):
+            return _dead_letter_result(internal_event, payload, 'invalid_tag_target', external_id)
+        return str(target.thread), 'tag', routing_state
     if target.thread is not None:
         reason = "triage" if target.relationship == "triage" else "owner"
         return str(target.thread), reason, routing_state
@@ -254,6 +250,14 @@ def _select_route(
     return _dead_letter_result(internal_event, payload, reason, external_id)
 
 
+def _recipient_delivery_id(delivery_id: str | None, thread_id: str, prepared) -> str | None:
+    """Preserve the primary input key and scope additional recipients' keys."""
+    if thread_id == prepared.thread_id:
+        return delivery_id
+    assert prepared.envelope is not None
+    return f'{delivery_id or prepared.envelope.event_id}:recipient:{thread_id}'
+
+
 async def route_event(
     internal_event: str,
     payload: dict[str, Any],
@@ -261,9 +265,14 @@ async def route_event(
     delivery_id: str | None = None,
 ) -> RouteResult:
     """Resolve an event's owning thread and deliver it as a thread input."""
-    cancelled = _cancelled_check_result(internal_event, payload)
-    if cancelled is not None:
-        return cancelled
+    # Check identity may require a provider read. Consult its drop row first,
+    # off-loop, before the connector attempts that read.
+    if internal_event in _CHECK_EVENTS:
+        from infra.db_async import run_in_db
+
+        cancelled = await run_in_db(_cancelled_check_result, internal_event, payload)
+        if cancelled is not None:
+            return cancelled
     resolved = await _resolve_event_identity(internal_event, payload)
 
     identity, check_suite_base_ref, check_suite_pr_selected = resolved
@@ -284,16 +293,23 @@ async def route_event(
     external_id = identity.external_id if identity else None
     delivered = False
     try:
-        delivered = await delivery.deliver_and_resolve_to_thread(
-            prepared.thread_id,
-            prepared.identity,
-            internal_event,
-            prepared.summary,
-            prepared.details,
-            delivery_id=delivery_id,
-            chip=prepared.chip,
-            notice=prepared.notice,
-        )
+        from events.platform import _traced
+
+        targets = prepared.evaluation.targets if prepared.evaluation else [None]
+        results = []
+        for target in targets:
+            thread_id = target.thread if target else prepared.thread_id
+            envelope = None
+            details = prepared.details
+            if prepared.envelope is not None and prepared.evaluation is not None:
+                envelope = _traced(prepared.envelope, prepared.evaluation.rule_ids[thread_id])
+            results.append(await delivery.deliver_and_resolve_to_thread(
+                thread_id, prepared.identity, internal_event, prepared.summary, details,
+                delivery_id=_recipient_delivery_id(delivery_id, thread_id, prepared), chip=prepared.chip,
+                notice=prepared.notice if thread_id == prepared.thread_id else None,
+                envelope=envelope, target=target,
+            ))
+        delivered = all(results)
     finally:
         # A refused or raising delivery (StaleContinuation, cancellation) releases
         # the claim so the next event carries the notice; a repeat beats a loss.
@@ -351,50 +367,4 @@ def _record_source_facts(
         schedule_merged_pr_reap(payload)
 
 
-def _summarize(
-    internal_event: str, payload: dict[str, Any], external_id: str | None
-) -> tuple[str, dict[str, Any]]:
-    """Build a one-line summary and structured details for the thread input."""
-    repo = (payload.get("repository") or {}).get("full_name", "")
-    pr = payload.get("pull_request") or {}
-    comment = payload.get("comment") or {}
-    details: dict[str, Any] = {"repo": repo, "external_id": external_id}
-
-    if comment:
-        author = (comment.get("user") or {}).get("login", "?")
-        body = (comment.get("body") or "")[:280]
-        details.update({"author": author, "comment": body,
-                        "url": comment.get("html_url")})
-        return f"{external_id} comment from {author}: {body[:100]}", details
-
-    if pr:
-        details.update({"pr_title": pr.get("title"),
-                        "head_sha": (pr.get("head") or {}).get("sha"),
-                        "base_ref": (pr.get("base") or {}).get("ref"),
-                        "url": pr.get("html_url")})
-        action = payload.get("action", "")
-        return f"{external_id} {action}: {pr.get('title', '')}", details
-
-    check_suite = payload.get("check_suite") or {}
-    if check_suite:
-        conclusion = check_suite.get("conclusion") or "completed"
-        details.update(
-            {
-                "check_suite_id": check_suite.get("id"),
-                "head_sha": check_suite.get("head_sha"),
-                "check_suite_updated_at": check_suite.get("updated_at"),
-            }
-        )
-        return f"{internal_event} on {external_id or repo} ({conclusion})", details
-
-    return f"{internal_event} on {external_id or repo}", details
-
-
-def _chip_line(payload: dict[str, Any], external_id: str | None, summary: str) -> str:
-    """The chip's line for a routed event (``summary`` is the agent's): only the
-    check-suite summary reads as machine text, the rest are already sentences."""
-    suite = payload.get("check_suite") or {}
-    if suite and not (payload.get("comment") or payload.get("pull_request")):
-        target = external_id or (payload.get("repository") or {}).get("full_name", "")
-        return f"CI {suite.get('conclusion') or 'completed'} on {target}"
-    return summary
+# Source summaries are declared by the connector, alongside its normalized facts.

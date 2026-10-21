@@ -39,6 +39,8 @@ EXCLUDED: dict[str, str] = {
     "network_servers": _small(7),
     "vendor_accounts": _small(7),
     "connections": _small(3),
+    "event_rules": "four seeded webhook rules; binding-rule production census 2026-10-21: zero",
+    "event_route_decisions": "new 30-day routing ledger; no production volume yet; bounded reads covered by rule tests",
     "provider_policies": _small(2),
     "project_policy_overrides": _small(1),
     "system_bulletin_identity": _small(1),
@@ -47,7 +49,7 @@ EXCLUDED: dict[str, str] = {
     **{table: NOT_IN_CENSUS for table in (
         "action_drafts", "artifact_relocation_intents", "connected_account_audit",
         "connected_account_reach", "connected_accounts",
-        "connected_app_audit", "connected_app_reach", "connected_apps", "connection_rules",
+        "connected_app_audit", "connected_app_reach", "connected_apps",
         "doc_feedback_edit_items", "durable_write_intents",
         "email_screens", "key_store_entries", "key_write_attempts", "lesson_placement_checks",
         "limit_observations", "managed_process_retirements", "measure_definitions", "plan_ask_deferrals",

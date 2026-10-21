@@ -155,12 +155,13 @@ class TestStaleFieldsFailLoud:
         db = get_db()
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
-            """INSERT INTO connection_rules
-               (id, scope, connector, fact, value, destination_thread_id,
+            '''INSERT INTO event_rules
+               (id, scope, connector, "match", "to", "on", action, mode,
                 precedence, enabled, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,1,?,?)""",
-            (str(uuid.uuid4())[:12], "global", "gmail", "removed_field", "x",
-             owner, 100, now, now),
+               VALUES (?,?,?,? ,?,'first_seen','deliver','default',?,1,?,?)''',
+            (str(uuid.uuid4())[:12], "global", "gmail",
+             '[{"field":"removed_field","op":"eq","value":"x"}]',
+             'thread:' + owner, 100, now, now),
         )
         db.commit()
         db.close()

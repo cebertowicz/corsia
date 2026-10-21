@@ -69,13 +69,13 @@ def _resolution_for(relationship: str) -> str:
             "repair": "repair"}.get(relationship, "path_a_resolve")
 
 
-def _dead_letter(reason: str, routing_state: dict | None, *, db=None) -> Target:
+def _dead_letter(reason: str, routing_state: dict | None, *, db=None, preview: bool = False) -> Target:
     """A no-owner dead-letter whose terminus is a guaranteed-live health sink."""
-    sink = health_sink.resolve_live_health_owner(
+    sink = None if preview else health_sink.resolve_live_health_owner(
         _triage_chain(routing_state), db=db)
     return Target(None, "dead_letter", "none", reason=reason,
                   routing_state=routing_state, disposition="dead_letter",
-                  health_owner=sink, health_sink_is_live=True)
+                  health_owner=sink, health_sink_is_live=None if preview else True)
 
 
 def _triage_chain(routing_state: dict | None) -> list[str | None]:
@@ -86,12 +86,12 @@ def _triage_chain(routing_state: dict | None) -> list[str | None]:
 
 
 def resolve_targets(
-    envelope: EventEnvelope, *, repair_owner: str | None = None, db=None
+    envelope: EventEnvelope, *, repair_owner: str | None = None, db=None, preview: bool = False
 ) -> list[Target]:
     """Resolve a normalized envelope to its recipient target(s)."""
     ref = envelope.artifact_ref
     if ref is None:
-        return [_dead_letter("no_artifact", None, db=db)]
+        return [_dead_letter("no_artifact", None, db=db, preview=preview)]
 
     routing_state = _routing(ref, db=db)
     owner = routing_state.get("owner")
@@ -102,17 +102,17 @@ def resolve_targets(
         thread = owner["parent_thread_id"]
         if delivery.thread_exists_and_active(thread, db=db):
             return [_deliverable(thread, "owner", routing_state, ec)]
-        return [_dead_letter("owner_inactive", routing_state, db=db)]
+        return [_dead_letter("owner_inactive", routing_state, db=db, preview=preview)]
 
     if triage is not None:
         thread = triage["parent_thread_id"]
         if delivery.thread_exists_and_active(thread, db=db):
             return [_deliverable(thread, "triage", routing_state, ec)]
-        return [_dead_letter("owner_inactive", routing_state, db=db)]
+        return [_dead_letter("owner_inactive", routing_state, db=db, preview=preview)]
 
     # No registered owner — try connector-agnostic declaration then rule binding.
     bind = binder.bind_owner_for(
-        ref, envelope.facts, envelope.connector, repair_owner=repair_owner, db=db)
+        ref, envelope.facts, envelope.connector, repair_owner=repair_owner, db=db, preview=preview)
 
     if bind.via in ("declaration", "rule", "ownership"):
         resolution = {
@@ -138,7 +138,7 @@ def resolve_targets(
                        reason="ownerless_awaiting_triage_owner",
                        routing_state=routing_state,
                        disposition=_disp("triage", ec))]
-    return [_dead_letter("no_owner", routing_state, db=db)]
+    return [_dead_letter("no_owner", routing_state, db=db, preview=preview)]
 
 
 def resolve_delivery_failure(

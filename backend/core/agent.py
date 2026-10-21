@@ -194,6 +194,7 @@ def _register_agent_roster_tools(agent: CORSIAAgent) -> None:
 
 def _register_artifact_tools(agent: CORSIAAgent, workspace: Path) -> None:
     from tools.artifact_list import ArtifactListTool
+    from tools.event_rules import EventRulesTool
     from tools.artifact_ownership import ArtifactReleaseTool, ArtifactRehomeTool
     from tools.artifacts import (
         ArtifactReconcileTool,
@@ -205,6 +206,7 @@ def _register_artifact_tools(agent: CORSIAAgent, workspace: Path) -> None:
 
     agent.tools.register(ArtifactResolveTool(workspace=workspace))
     agent.tools.register(ArtifactListTool(workspace=workspace))
+    agent.tools.register(EventRulesTool())
     agent.tools.register(ArtifactRegisterTool(workspace=workspace))
     agent.tools.register(ArtifactUpdateTool())
     agent.tools.register(ArtifactReconcileTool())

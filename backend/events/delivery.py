@@ -118,6 +118,7 @@ async def deliver_to_thread(
     delivery_id: str | None = None,
     chip: str | None = None,
     notice: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> bool:
     """Accept, visibly project, and drive one routed event exactly once."""
     thread_row = get_thread(thread_id)
@@ -132,7 +133,7 @@ async def deliver_to_thread(
             thread_row,
             format_event_input(internal_event, summary, details, notice=notice),
             role="system",
-            metadata=_event_metadata(internal_event, summary, details, None, chip),
+            metadata=_event_metadata(internal_event, summary, details, metadata, chip),
             idempotency_key=_event_idempotency_key(
                 internal_event, summary, details, delivery_id=delivery_id,
             ),
@@ -166,6 +167,8 @@ async def deliver_and_resolve_to_thread(
     delivery_id: str | None = None,
     chip: str | None = None,
     notice: str | None = None,
+    envelope=None,
+    target=None,
 ) -> bool:
     """Deliver one event, then resolve the watches this exact delivery ends.
 
@@ -173,18 +176,13 @@ async def deliver_and_resolve_to_thread(
     event to a thread: resolving only after a successful delivery, never
     before, so a task never loses its wait without the payload it waited for.
     """
-    delivered = await deliver_to_thread(
-        thread_id, internal_event, summary, details,
-        delivery_id=delivery_id, chip=chip, notice=notice,
-    )
-    if delivered:
-        from infra.db_async import run_in_db
-        from plans.public import resolve_delivered_event
+    from events.platform import deliver_routed_event
 
-        await run_in_db(
-            resolve_delivered_event, identity, internal_event, recipient=thread_id,
-        )
-    return delivered
+    return await deliver_routed_event(
+        thread_id, identity, internal_event, summary, details,
+        delivery_id=delivery_id, chip=chip, notice=notice,
+        envelope=envelope, target=target,
+    )
 
 
 def _event_idempotency_key(
