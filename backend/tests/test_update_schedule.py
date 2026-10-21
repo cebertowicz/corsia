@@ -571,6 +571,9 @@ def test_due_tonight_launches_when_the_packaged_manifest_is_newer(isolated_db, m
         def read(self):
             return json.dumps({"version": "1.1.0", "platforms": {"darwin-aarch64": {}}}).encode()
 
+    # This test supplies a fully stubbed packaged-install feed and exercises
+    # real-install scheduling behavior, not test-environment isolation.
+    monkeypatch.setenv("CORSIA_TEST_MODE", "0")
     update_status.invalidate_cache()
     monkeypatch.setattr(update_status.platform_paths, "app_bundle_root", lambda: bundle)
     monkeypatch.setattr(update_status, "_bundle_current_version", lambda: "1.0.0")

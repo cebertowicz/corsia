@@ -87,7 +87,7 @@ def test_build_argv_with_settings():
     assert argv[argv.index("--model-dir") + 1] == "/Users/alice/models"
     assert "--max-model-memory" in argv
     assert argv[argv.index("--max-model-memory") + 1] == "200GB"
-    assert "--api-key" in argv
+    assert any(arg.startswith("--api-key=") for arg in argv)
     assert "--max-concurrent-requests" in argv
     assert argv[argv.index("--max-concurrent-requests") + 1] == "4"
     assert "--no-cache" not in argv
@@ -98,6 +98,19 @@ def test_build_argv_no_cache_flag():
     from llm.providers.omlx_supervisor import _build_argv
     argv = _build_argv("127.0.0.1", 5200, {"no_cache": True})
     assert "--no-cache" in argv
+
+
+def test_build_argv_binds_a_key_that_starts_with_a_dash():
+    import argparse
+
+    from llm.providers.omlx_supervisor import _build_argv
+    dashed = "-" + "x" * 42
+    argv = _build_argv("127.0.0.1", 5200, {"api_key": dashed})
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host")
+    parser.add_argument("--port")
+    parser.add_argument("--api-key")
+    assert parser.parse_args(argv[2:]).api_key == dashed
 
 
 
