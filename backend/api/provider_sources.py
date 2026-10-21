@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -19,6 +19,8 @@ from connections.source_state import HARNESS_PROVIDERS, check_harness_source, ro
 from infra.auth import require_user, require_user_header_only
 from infra.db_async import run_in_db, run_off_db
 from llm import local_sources, network_discovery
+from llm.local_setup_foreign import apply_foreign_omlx_choice
+from llm.local_setup_results import setup_fix
 from llm.local_sources import CHECK_AGAIN, external_sources, omlx_source
 
 log = logging.getLogger(__name__)
@@ -136,32 +138,23 @@ async def get_sources(_user: dict = Depends(require_user)) -> dict[str, Any]:
 async def setup_local_source(
     no_subscription_only: bool = Body(False, embed=True),
     automatic: bool = Body(False, embed=True),
-    consent_existing: bool = Body(False, embed=True),
-    manage_existing: bool | None = Body(None, embed=True),
+    onboarding: bool = Body(False, embed=True),
+    other_omlx: Literal["stop", "keep"] | None = Body(None, embed=True),
     _user: dict = Depends(require_user_header_only),
 ) -> dict[str, Any]:
-    """Start the local setup flight, or report the one already running.
+    """Start managed setup after an explicit choice about an identified foreign process."""
+    if refusal := await asyncio.to_thread(
+        apply_foreign_omlx_choice,
+        other_omlx=other_omlx,
+    ):
+        detail = {"code": refusal}
+        if refusal == "foreign_omlx_changed":
+            detail["fix"] = setup_fix("other_omlx")
+        raise HTTPException(status_code=409, detail=detail)
+    from llm.local_setup_flow import begin_local_setup
 
-    The model is the one CORSIA's own oMLX picks for this Mac (``local_model`` on GET).
-    ``manage_existing`` is the person's choice for their own oMLX: True "Let CORSIA
-    manage it", False "Use mine", absent where neither was shown.
-    """
-    from llm.local_setup import begin_local_setup
-    from llm.local_setup_ownership import existing_omlx_requires_consent, record_existing_omlx_consent
+    return await begin_local_setup(no_subscription_only=no_subscription_only, automatic=automatic, onboarding=onboarding)
 
-    if existing_omlx_requires_consent():
-        if not consent_existing:
-            raise HTTPException(status_code=409, detail={"code": "consent_required"})
-        record_existing_omlx_consent(manage=manage_existing)
-    return await begin_local_setup(no_subscription_only=no_subscription_only, automatic=automatic)
-
-
-@router.post("/local/starter")
-async def add_starter_model(_user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
-    """Download the starter model into the person's own oMLX, writing none of its settings."""
-    from llm.local_setup import begin_add_starter_model
-
-    return await begin_add_starter_model()
 
 
 @router.post("/local/cancel")
@@ -174,20 +167,11 @@ async def cancel_local_source(_user: dict = Depends(require_user_header_only)) -
 
 @router.get("/local/setup")
 async def get_local_setup(_user: dict = Depends(require_user)) -> dict[str, Any]:
-    """The local setup flight record, whose oMLX this is, and the model CORSIA's oMLX picked.
-
-    ``omlx_is_persons_own`` is true when the oMLX here is one CORSIA did not install;
-    setup adds no models to it. ``local_model`` is Welcome's pick state: its
-    ``model`` is set only once CORSIA's own oMLX has picked (``state`` ``picked``);
-    ``low_memory`` means this Mac gets no local model. A ``picked`` model carries a
-    ``message`` when it is the starter model, chosen because oMLX recommended none.
-    """
+    """The managed local setup flight and CORSIA's current model pick."""
     from llm.local_setup import setup_status
-    from llm.local_setup_ownership import existing_install_is_foreign
     from llm.local_setup_prepare import pick_view
 
-    foreign = await asyncio.to_thread(existing_install_is_foreign)
-    return {**setup_status(), "omlx_is_persons_own": foreign, "local_model": await pick_view()}
+    return {**setup_status(), "local_model": await pick_view()}
 
 
 async def recheck_sources_once() -> list[dict[str, Any]]:
@@ -207,59 +191,6 @@ async def recheck_sources_once() -> list[dict[str, Any]]:
         log.warning("one or more model source checks could not be completed")
         raise SourceChecksIncomplete(_INCOMPLETE) from None
 
-
-async def _own_omlx_server() -> dict[str, Any] | None:
-    """The one reachable oMLX of the person's own, else None; a CORSIA-installed one is refused."""
-    from llm.local_setup_ownership import existing_install_is_foreign
-
-    if not await asyncio.to_thread(existing_install_is_foreign):
-        raise HTTPException(409, "oMLX settings cannot be changed through this route")
-    servers = [server for server in await run_in_db(network_discovery.get_servers)
-               if server.get("provider") == "omlx" and server.get("kind") != "external"
-               and server.get("status") == "online"]
-    return servers[0] if len(servers) == 1 else None
-
-
-@router.post("/sources/omlx/settings/apply")
-async def apply_foreign_omlx_settings(
-    body: dict = Body(...), _user: dict = Depends(require_user_header_only),
-) -> dict[str, Any]:
-    """Apply precisely the foreign-oMLX diff the conductor just showed."""
-    from llm import own_omlx_apply
-
-    supplied = body.get("fingerprint") if isinstance(body, dict) and set(body) == {"fingerprint"} else None
-    if not isinstance(supplied, str) or not supplied:
-        raise HTTPException(400, "A shown oMLX settings fingerprint is required")
-    server = await _own_omlx_server()
-    if server is None:
-        raise HTTPException(409, "Exactly one reachable foreign oMLX is required")
-    try:
-        return await own_omlx_apply.apply(server, supplied)
-    except own_omlx_apply.ApplyRefused as refused:
-        raise HTTPException(refused.status, str(refused)) from None
-
-
-@router.post("/sources/omlx/management/start")
-async def start_managing_own_omlx(_user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
-    """Settings' "Let CORSIA manage it": the consent, then the setup flight that uses it."""
-    from llm.local_setup import begin_local_setup
-    from llm.local_setup_ownership import existing_install_is_foreign, record_existing_omlx_consent
-
-    if not await asyncio.to_thread(existing_install_is_foreign):
-        raise HTTPException(409, "CORSIA already manages the oMLX it installed")
-    await asyncio.to_thread(record_existing_omlx_consent, manage=True)
-    return await begin_local_setup()
-
-
-@router.post("/sources/omlx/management/stop")
-async def stop_managing_own_omlx(_user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
-    """Settings' "Stop managing": put back every value CORSIA replaced, then stop using the key."""
-    from llm import own_omlx_apply
-
-    try:
-        return await own_omlx_apply.stop(await _own_omlx_server())
-    except own_omlx_apply.ApplyRefused as refused:
-        raise HTTPException(refused.status, str(refused)) from None
 
 
 @router.post("/sources/recheck")

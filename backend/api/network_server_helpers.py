@@ -243,7 +243,7 @@ async def update_external_server(server_id: str, body) -> dict:
                 fields["agent_use_restriction"] = limit
             if declared:
                 fields[META_KEY] = declared
-            cleared = (META_KEY,) if declared == [] else ()
+            cleared: tuple[str, ...] = (META_KEY,) if declared == [] else ()
             if moved:
                 # The private mark vouched for the old address; the person marks the new one if they mean it.
                 cleared += ("private",)

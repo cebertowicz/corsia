@@ -24,7 +24,7 @@ async function read(): Promise<void> {
 export type LocalSetupRetry = { ok: boolean; code?: 'consent_required'; message?: string };
 
 /** Try again: preserve each download's owner route; Settings retries its durable repository. */
-export async function retryLocalSetup(kind: LocalPickerRetry, consentExisting = false): Promise<LocalSetupRetry> {
+export async function retryLocalSetup(kind: LocalPickerRetry, otherOmlx: 'stop' | 'keep' | null = null): Promise<LocalSetupRetry> {
 	const t = get(token);
 	if (!t) return { ok: false };
 	let result: LocalSetupRetry = { ok: true };
@@ -39,7 +39,7 @@ export async function retryLocalSetup(kind: LocalPickerRetry, consentExisting = 
 				result = { ok: true };
 			}
 		} else {
-			const response = await setupLocalSource(t, consentExisting);
+			const response = await setupLocalSource(t, otherOmlx);
 			result = { ok: response.ok, code: response.code };
 		}
 	} catch (caught) { result = { ok: false, message: caught instanceof Error ? caught.message : undefined }; }

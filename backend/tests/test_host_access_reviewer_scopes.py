@@ -327,9 +327,9 @@ def test_model_unavailable_everywhere_rejects(accounts):
 def _native(db, *, enabled: int):
     db.execute(
         "INSERT INTO models(id,harness,provider,provider_model_id,litellm_model,"
-        "display_name,backend,enabled,available,context_window,created_at,updated_at) "
+        "display_name,backend,source,enabled,available,context_window,created_at,updated_at) "
         "VALUES ('omlx/native','native','omlx','native','omlx/native','Native',"
-        "'network',?,1,32768,'t','t')",
+        "'network','test',?,1,32768,'t','t')",
         (enabled,),
     )
     db.commit()

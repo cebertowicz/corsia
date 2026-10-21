@@ -8,13 +8,14 @@ advisory lock makes a second backend wait rather than issue another download.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 import fcntl
 import json
 import logging
 import os
+from uuid import uuid4
 from pathlib import Path
-from typing import Any, IO
+from typing import IO
 
 from llm.local_model import LocalModel, from_recommendation, to_record
 
@@ -27,7 +28,7 @@ _LOCK_NAME = "local-setup-operation.lock"
 
 @dataclass(frozen=True)
 class Operation:
-    repository: str
+    repository: str | None
     download_size_bytes: int
     context_window: int
     kind: str
@@ -36,16 +37,27 @@ class Operation:
     level: float | None = None
     fp16: bool | None = None
     relative_speed: float | None = None
+    onboarding: bool = False
+    flight_id: str = field(default_factory=lambda: uuid4().hex)
+    result: dict | None = None
+    downloaded: bool = False
+    notified: bool = False
 
     @classmethod
-    def for_model(cls, model: LocalModel, kind: str, task_id: str | None = None) -> Operation:
+    def for_model(cls, model: LocalModel | None, kind: str, task_id: str | None = None, *, onboarding: bool = False) -> Operation:
+        """Create a flight before model selection, or with its selected model."""
+        if model is None:
+            return cls(None, 0, 0, kind, onboarding=onboarding)
         return cls(
             model.repository, model.download_size_bytes, model.context_window, kind, task_id,
-            model.name, model.level, model.fp16, model.relative_speed,
+            model.name, model.level, model.fp16, model.relative_speed, onboarding,
         )
 
     @property
-    def model(self) -> LocalModel:
+    def model(self) -> LocalModel | None:
+        """The selected model, if the flight reached model selection."""
+        if self.repository is None:
+            return None
         return LocalModel(
             self.repository, self.download_size_bytes, self.context_window, self.name,
             self.level, self.fp16, self.relative_speed,
@@ -60,10 +72,6 @@ def _state_root() -> Path:
 
 def record_path() -> Path:
     return _state_root() / _RECORD_NAME
-
-
-def lock_path() -> Path:
-    return _state_root() / _LOCK_NAME
 
 
 def read() -> Operation | None:
@@ -82,13 +90,20 @@ def read() -> Operation | None:
     # A record from before it kept the recommender row (a profile id, or flat model
     # fields): malformed here, so it is discarded and the next request starts afresh.
     if (
-        model is None
-        or not isinstance(kind, str)
+        "model" not in payload or (model is None and payload.get("model") is not None)
+        or kind not in {"setup", "settings"}
         or (task_id is not None and not isinstance(task_id, str))
+        or (payload.get("result") is not None and not isinstance(payload["result"], dict))
     ):
-        logger.warning("local setup operation record is malformed; treating it as absent")
+        logger.warning("discarding an invalid or retired local setup operation record")
+        clear()
         return None
-    return Operation.for_model(model, kind, task_id)
+    return replace(
+        Operation.for_model(model, kind, task_id, onboarding=payload.get("onboarding") is True),
+        flight_id=payload.get("flight_id") or (model.repository if model else "local-model"),
+        result=payload.get("result"), downloaded=payload.get("downloaded") is True,
+        notified=payload.get("notified") is True,
+    )
 
 
 def write(operation: Operation) -> None:
@@ -97,8 +112,10 @@ def write(operation: Operation) -> None:
     staged = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     try:
         with staged.open("w", encoding="utf-8") as handle:
-            json.dump({"model": to_record(operation.model), "kind": operation.kind,
-                       "task_id": operation.task_id}, handle, sort_keys=True)
+            json.dump({"model": to_record(operation.model) if operation.model else None, "kind": operation.kind,
+                       "task_id": operation.task_id, "onboarding": operation.onboarding,
+                       "flight_id": operation.flight_id, "result": operation.result,
+                       "downloaded": operation.downloaded, "notified": operation.notified}, handle, sort_keys=True)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(staged, target)
@@ -117,7 +134,7 @@ def clear() -> None:
 
 
 def try_lock() -> IO[str] | None:
-    path = lock_path()
+    path = _state_root() / _LOCK_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = path.open("a+", encoding="utf-8")
     try:
@@ -128,13 +145,12 @@ def try_lock() -> IO[str] | None:
     return handle
 
 
-async def wait_for_lock(flight: Any) -> None:
-    """Wait for the durable local-operation lock and retain it on ``flight``."""
-    while flight.operation_lock is None:
+async def wait_for_lock() -> IO[str]:
+    """Wait for the durable operation lock; its owner retains the returned handle."""
+    while True:
         handle = try_lock()
         if handle is not None:
-            flight.operation_lock = handle
-            return
+            return handle
         await asyncio.sleep(0.25)
 
 
@@ -145,18 +161,3 @@ def unlock(handle: IO[str] | None) -> None:
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
     finally:
         handle.close()
-
-
-def finish(flight: Any, result: dict) -> dict:
-    """Record a flight's terminal result on ``flight`` and release the operation (setup and Settings)."""
-    flight.result = result
-    flight.stage = None
-    flight.following = False
-    if not result.get("downloading"):
-        # A finished task needs no follow, and a terminal oMLX error cannot be
-        # followed: removing its task id lets an explicit retry create one new
-        # task instead of replaying it. A still-downloading task keeps its id.
-        clear()
-    unlock(flight.operation_lock)
-    flight.operation_lock = None
-    return result

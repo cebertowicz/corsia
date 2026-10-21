@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from llm import local_model, local_setup, local_setup_operation, local_sources
-from llm import local_setup_prepare as prepare
+from llm import local_setup_prepare as prepare, local_setup_flow as flow, local_setup_runtime as runtime
 from llm.local_model import LocalModel
 from llm.local_profiles import MODEL_SETTINGS, STARTER_MODEL
 from omlx_recommender_fixtures import FIXTURE, THINKING, best_rows as _best, mac_with as _mac
@@ -51,7 +51,7 @@ async def _prepared() -> dict:
 
 async def _flown(**kwargs) -> dict:
     """Get started: run the setup flight to its result."""
-    first = await local_setup.begin_local_setup(**kwargs)
+    first = await flow.begin_local_setup(**kwargs)
     task = local_setup._flight.task
     return await task if task is not None else first
 
@@ -106,7 +106,8 @@ def test_get_started_downloads_the_pick_and_every_reader_sees_that_model(monkeyp
     assert path == f"/models/{repository.split('/')[1]}/settings" and settings["max_context_window"] == window
     recorded = local_model.set_up_model()
     assert (recorded.repository, recorded.context_window) == (repository, window)
-    assert local_setup_operation.read() is None
+    operation = local_setup_operation.read()
+    assert operation.repository == repository and operation.result == result and operation.downloaded
     # A later server process has no prepare state; it reads the same model from the record.
     monkeypatch.setattr(prepare, "_prepare", prepare._Prepare())
     assert asyncio.run(prepare.pick_view())["model"]["repository"] == repository
@@ -174,7 +175,7 @@ def test_the_starter_names_itself_from_its_profile_and_keeps_the_name_through_it
     # The name is the profile's, never the repository id's, and the records that carry the model keep it.
     assert LocalModel(STARTER_MODEL.repository, 1, 32_768).display_name == "Ternary Bonsai 2 27B"
     assert local_model.from_recommendation(local_model.to_record(STARTER_MODEL)).display_name == "Ternary Bonsai 2"
-    operation = local_setup_operation.Operation.for_model(STARTER_MODEL, "starter")
+    operation = local_setup_operation.Operation.for_model(STARTER_MODEL, "setup")
     assert operation.model.display_name == "Ternary Bonsai 2"
 
 
@@ -262,7 +263,9 @@ def test_a_flight_whose_recommender_never_answers_fails_without_downloading(monk
     result = asyncio.run(_flown())
 
     assert result["ok"] is False and "Couldn't get model recommendations from oMLX" in result["message"]
-    assert mac.downloads == [] and local_setup_operation.read() is None
+    assert mac.downloads == []
+    operation = local_setup_operation.read()
+    assert operation.repository is None and operation.result == result and not operation.downloaded
 
 
 def test_an_omlx_without_the_recommender_cannot_check(monkeypatch):
@@ -307,8 +310,8 @@ def test_turning_the_switch_off_while_checking_stops_the_pick_and_downloads_noth
 
     # Welcome's waiting request answers too, so nothing is left hanging on a stopped pick.
     assert view == answered == {"state": "not_checked", "model": None, "message": None}
-    # Prepare started that oMLX, so it stops it; nothing was downloaded or written.
-    assert mac.commands == [["omlx", "stop"]]
+    # Prepare owns this private managed server, so it stops that exact server id.
+    assert mac.stopped == ["srv"]
     assert mac.downloads == [] and mac.omlx.puts() == [] and local_setup_operation.read() is None
 
 
@@ -318,30 +321,17 @@ def test_turning_the_switch_off_after_the_pick_forgets_it(monkeypatch):
 
     view = asyncio.run(prepare.stop_prepare())
 
-    assert view["state"] == "not_checked" and mac.commands == [["omlx", "stop"]] and mac.downloads == []
+    assert view["state"] == "not_checked" and mac.stopped == ["srv"] and mac.downloads == []
 
 
-def test_the_switch_leaves_an_omlx_that_was_already_answering_running(monkeypatch):
+def test_the_switch_stops_only_its_private_managed_server(monkeypatch):
     mac = _mac(monkeypatch, 64)
 
-    async def answering(_port):
-        return True
-
-    monkeypatch.setattr(local_setup, "_omlx_answers", answering)
     asyncio.run(_prepared())
     asyncio.run(prepare.stop_prepare())
 
-    assert mac.commands == []
+    assert mac.stopped == ["srv"]
 
-
-def test_welcome_never_starts_a_second_omlx_beside_the_persons_own(monkeypatch):
-    mac = _mac(monkeypatch, 64)
-    monkeypatch.setattr(local_setup, "existing_install_is_foreign", lambda: True)
-
-    view = asyncio.run(_prepared())
-
-    assert view == {"state": "own_omlx", "model": None, "message": None}
-    assert mac.started == [] and mac.omlx.calls == []
 
 
 @pytest.mark.parametrize("gib, allowed", [(23.9, False), (24, True)])
@@ -364,7 +354,7 @@ def test_each_picked_family_thinks_on_an_agent_turn_with_its_own_sampling(monkey
     mac = _mac(monkeypatch, 64)
     model = LocalModel(f"Jundot/{model_id}", 1, 65_536)
 
-    asyncio.run(local_setup._configure_model_settings("srv", model))
+    asyncio.run(runtime.configure_model_settings("srv", model))
 
     [(path, settings)] = mac.omlx.puts()
     assert path == f"/models/{model_id}/settings"
@@ -383,12 +373,12 @@ def test_a_model_with_no_thinking_toggle_gets_none_and_a_missing_model_fails(mon
     mac = _mac(monkeypatch, 64)
     monkeypatch.setitem(THINKING, "plain-oQ4e", None)
 
-    asyncio.run(local_setup._configure_model_settings("srv", LocalModel("org/plain-oQ4e", 1, 40_960)))
+    asyncio.run(runtime.configure_model_settings("srv", LocalModel("org/plain-oQ4e", 1, 40_960)))
 
     [(_path, settings)] = mac.omlx.puts()
     assert "enable_thinking" not in settings and "mtp_enabled" not in settings
     with pytest.raises(RuntimeError, match="does not list Absent"):
-        asyncio.run(local_setup._configure_model_settings("srv", LocalModel("org/absent-oQ4e", 1, 40_960)))
+        asyncio.run(runtime.configure_model_settings("srv", LocalModel("org/absent-oQ4e", 1, 40_960)))
 
 
 def test_the_set_up_record_round_trips_and_a_bad_one_reads_as_absent():
