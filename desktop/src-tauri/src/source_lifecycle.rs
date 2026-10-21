@@ -20,11 +20,14 @@ use crate::{
     unregister_service, wait_for_service, wait_for_startup, NOT_RUNNING_WINDOW, STARTUP_CAP,
 };
 
-/// The source's own drain wait, in seconds: its cap, and the longest a switch waits for running work.
-const DRAIN_MAX_WAIT_SECONDS: u64 = 1800;
+/// The longest a switch waits for running work before the source's stop goes ahead anyway:
+/// the CLI's own default, since the source's drain can stay unready with no turn running.
+const DRAIN_MAX_WAIT_SECONDS: u64 = 60;
+/// The source's own drain cap, in seconds; a self-restart it started may drain this long.
+const SOURCE_DRAIN_CAP_SECONDS: u64 = 1800;
 /// A self-restart request is stuck only once it is older than the longest drain
 /// plus a margin for the teardown and boot after it.
-const STUCK_AFTER: Duration = Duration::from_secs(DRAIN_MAX_WAIT_SECONDS + 300);
+const STUCK_AFTER: Duration = Duration::from_secs(SOURCE_DRAIN_CAP_SECONDS + 300);
 /// The variables of the app's own environment the CLI is given.
 const INHERITED: [&str; 5] = ["HOME", "PATH", "USER", "LANG", "TMPDIR"];
 const COUNT_INTERVAL: Duration = Duration::from_secs(1);
@@ -843,7 +846,7 @@ mod tests {
             .unwrap();
         let base = home.root.path().canonicalize().unwrap();
         let expected = format!(
-            "CORSIA_DRAIN_MAX_WAIT=1800\nHOME={}\nPATH=/usr/bin:/bin\n",
+            "CORSIA_DRAIN_MAX_WAIT=60\nHOME={}\nPATH=/usr/bin:/bin\n",
             home.root.path().display()
         );
         assert_eq!(fs::read_to_string(base.join("stop.env")).unwrap(), expected);
@@ -1220,7 +1223,7 @@ mod tests {
         assert_eq!(
             fs::read_to_string(base.join("restart.env")).unwrap(),
             format!(
-                "CORSIA_DRAIN_MAX_WAIT=1800\nHOME={}\nPATH=/usr/bin:/bin\n",
+                "CORSIA_DRAIN_MAX_WAIT=60\nHOME={}\nPATH=/usr/bin:/bin\n",
                 home.root.path().display()
             )
         );
