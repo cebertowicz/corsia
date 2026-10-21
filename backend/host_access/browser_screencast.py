@@ -31,12 +31,17 @@ class PaneScreencast:
     """
 
     QUALITY = 80
+    # A compact pane (a phone, or a narrow desktop pane) gets smaller JPEGs. The quality stays fixed while input
+    # moves: changing it needs a screencast restart, which delayed real frames when measured.
+    COMPACT_QUALITY = 60
 
     def __init__(self, endpoint: str, deliver: Callable[[str], object]) -> None:
         self.endpoint = endpoint
         self._deliver = deliver
         self._size: tuple[int, int] | None = None
+        self._compact = False
         self._page: tuple[int, int] | None = None
+        self._scroll_max: tuple[float, float] | None = None
         self._unmeasured = 0  # Measurements sent and not yet answered.
         self._held = False
         self._cdp: CdpClient | None = None
@@ -68,9 +73,10 @@ class PaneScreencast:
             finally:
                 self._cdp = None
 
-    def capture_at(self, width: int, height: int) -> None:
+    def capture_at(self, width: int, height: int, *, compact: bool = False) -> None:
         """Capture at most this many device pixels from the next start on."""
         self._size = (width, height)
+        self._compact = compact
 
     def hold(self) -> None:
         """Show no frame from now until the next start's measurement: the page's metrics are changing."""
@@ -93,11 +99,14 @@ class PaneScreencast:
         self._held = False  # The measurement now holds frames until it answers.
         self._measures.add(cdp.next_request())
         await cdp.send("Page.getLayoutMetrics")
-        params: dict[str, object] = {"format": "jpeg", "quality": self.QUALITY}
+        params: dict[str, object] = {"format": "jpeg", "quality": self._quality()}
         if self._size is not None:
             params.update(maxWidth=self._size[0], maxHeight=self._size[1])
         self._starts.add(cdp.next_request())
         await cdp.send("Page.startScreencast", **params)
+
+    def _quality(self) -> int:
+        return self.COMPACT_QUALITY if self._compact else self.QUALITY
 
     def _measured(self, result: object) -> None:
         viewport = result.get("cssLayoutViewport") if isinstance(result, dict) else None
@@ -106,6 +115,13 @@ class PaneScreencast:
         if not isinstance(width, int) or not isinstance(height, int):
             raise BrowserSessionError("This page couldn't be shown")
         self._page = (width, height)
+        content = result.get("cssContentSize") if isinstance(result, dict) else None
+        content_width = content.get("width") if isinstance(content, dict) else None
+        content_height = content.get("height") if isinstance(content, dict) else None
+        if isinstance(content_width, (int, float)) and isinstance(content_height, (int, float)):
+            self._scroll_max = (max(0, content_width - width), max(0, content_height - height))
+        else:
+            self._scroll_max = None
         self._unmeasured -= 1
 
     async def _relay_frame(self, cdp: CdpClient, params: object) -> None:
@@ -121,4 +137,6 @@ class PaneScreencast:
             width, height = metadata.get("deviceWidth"), metadata.get("deviceHeight")
             if self._page is not None and isinstance(width, (int, float)) and isinstance(height, (int, float)):
                 metadata = {**metadata, "deviceWidth": min(width, self._page[0]), "deviceHeight": min(height, self._page[1])}
+            if self._scroll_max is not None:
+                metadata = {**metadata, "scrollMaxX": self._scroll_max[0], "scrollMaxY": self._scroll_max[1]}
             self._deliver(json.dumps({"type": "frame", "data": data, "metadata": metadata}, separators=(",", ":")))

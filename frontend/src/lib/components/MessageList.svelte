@@ -25,6 +25,7 @@
 	import { needsWakeRetry } from './pendingWakeRetry';
 	import { isHumanMessage } from './transcriptRowKinds';
 	import { NEAR_BOTTOM_PX } from '$lib/nearBottom';
+	import { createFocusWorkBlock } from './focusWorkBlock.svelte';
 
 	let { messagesEl = $bindable(), userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
 		messagesEl: HTMLDivElement | undefined;
@@ -54,6 +55,7 @@
 	const renderedThreadId = $derived(threadId ?? $activeThreadId);
 	const messageRows = $derived($messages.filter((m) => m.thread_id === renderedThreadId));
 	const renderedStreaming = $derived(isThreadTurnActive($turnStates, renderedThreadId));
+	const focusLive = createFocusWorkBlock(() => renderedThreadId, () => focusMode);
 	const checkpointState = $derived(
 		renderedThreadId ? $checkpointsByThread.get(renderedThreadId) : undefined,
 	);
@@ -117,7 +119,7 @@
 		};
 	});
 	const liveTurn = $derived(
-		renderedStreaming
+		focusLive.current.active
 			? { turnId: renderedThreadId ? $turnStates.get(renderedThreadId)?.turnId ?? null : null }
 			: null,
 	);
@@ -301,7 +303,7 @@
 			<svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 			<span>Loading this thread…</span>
 		</div>
-	{:else if messageRows.length === 0 && !renderedStreaming}
+	{:else if messageRows.length === 0 && !focusLive.current.active}
 		<EmptyChatState />
 	{/if}
 	<OlderHistoryRow loading={loadingOlderMessages} failed={olderLoadFailed} hasMore={hasMoreMessages} hasRows={messageRows.length > 0} onLoadOlder={loadOlderForVisibleEntry} />
@@ -318,6 +320,7 @@
 			{onOpenLightbox}
 			threadId={renderedThreadId}
 			{renderedStreaming}
+			liveRollup={focusLive.current}
 			checkpoint={transcriptCheckpoint}
 			{turnSummaries}
 			pauses={focusMode ? [] : pauseDescriptors}
@@ -326,7 +329,7 @@
 			{onLoadRun}
 		/>
 	</div>
-{#if !userIsNearBottom && (renderedStreaming || messageRows.length > 0)}
+{#if !userIsNearBottom && (focusLive.current.active || messageRows.length > 0)}
 	<button class="scroll-fab" onclick={scrollToBottom} aria-label="Scroll to bottom" title="Scroll to bottom">
 		<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
 	</button>

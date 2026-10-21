@@ -19,6 +19,8 @@
 	import LocalOnlySwitchRow from './LocalOnlySwitchRow.svelte';
 	import PickerLocalOnlyNote from './PickerLocalOnlyNote.svelte';
 	import AddLocalModelSheet from './v7/AddLocalModelSheet.svelte';
+	import { inlineSlot } from '$lib/slotMotion';
+	import SwitchingIcon from './ui/SwitchingIcon.svelte';
 	import { canAddLocalModel, localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
 	import type { LocalPickerRetry } from '$lib/conductorSources';
 	import { toasts } from '$lib/stores/toast';
@@ -201,6 +203,7 @@
 									chooser={accountRows.length > 0}
 									open={accountOpen}
 									rollover={policy?.rollover === true}
+									switching={accountRows.some((row) => row.pending)}
 									recovery={recovery?.account}
 									onchoose={$activeThreadId && recovery ? () => chooseAccount(recovery) : undefined}
 									breakdown={breakdown}
@@ -261,13 +264,11 @@
 											<span class="row-note" class:usage-amber={note.level === 'amber'} class:usage-red={note.level === 'red'} aria-label={note.label}>{note.text}</span>
 										{/if}
 										{#if modelMatchesId(model, pendingModelId)}
-											<span
-												class="switch-marker"
-												class:failed={pendingStatus === 'failed'}
-												title={activeThread?.switch_error ?? undefined}
-											>
-												{pendingStatus === 'failed' ? 'Switch failed' : 'Switching…'}
-											</span>
+											{#if pendingStatus === 'failed'}
+												<span class="switch-marker failed" title={activeThread?.switch_error ?? undefined}>Switch failed</span>
+											{:else}
+												<span class="switching-slot" in:inlineSlot out:inlineSlot><SwitchingIcon ariaLabel="Switching model" /></span>
+											{/if}
 										{/if}
 										{#if model.cache_marker === 'Cached'}
 											<span class="cached-marker">Cached</span>
@@ -323,12 +324,10 @@
 		padding: 1px 6px;
 	}
 
-	.switch-marker {
-		font-size: var(--text-caption);
-		color: var(--accent-text);
-	}
-
+	.switching-slot { display: inline-flex; flex: 0 0 auto; align-items: center; }
+	/* Only a failed switch keeps words; a pending one is the SwitchingIcon. */
 	.switch-marker.failed {
+		font-size: var(--text-caption);
 		color: var(--red);
 	}
 

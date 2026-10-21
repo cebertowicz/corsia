@@ -14,6 +14,11 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any
 
+from infra.transient_read import (
+    TRANSIENT_READ_ATTEMPTS,
+    TRANSIENT_READ_INTERVAL_S,
+    retry_transient_read,
+)
 from reviewer.gh_api import run_gh
 
 log = logging.getLogger(__name__)
@@ -214,7 +219,26 @@ def _add_thread_state(
 def _fetch_comments(
     api_path: str, pr_number: int,
 ) -> list[dict[str, Any]] | None:
-    """Fetch every page of one comment collection, or None when unreadable."""
+    """Fetch one comment collection, retrying transient unreadable reads.
+
+    One brief GitHub error (rate limit, timeout, 5xx) must not discard a
+    finished review, so this mirrors the reviewer gate's bounded PR-info
+    retry: re-read on None, return the first readable result, and return
+    None after the full budget so callers' error paths are unchanged.
+    """
+    return retry_transient_read(
+        lambda: _fetch_comments_once(api_path, pr_number),
+        attempts=TRANSIENT_READ_ATTEMPTS,
+        interval_s=TRANSIENT_READ_INTERVAL_S,
+        log_label=lambda: f"reviewer: PR #{pr_number} comment history unreadable",
+        log_retry=log.info,
+    )
+
+
+def _fetch_comments_once(
+    api_path: str, pr_number: int,
+) -> list[dict[str, Any]] | None:
+    """Fetch every page of one comment collection once, or None when unreadable."""
     try:
         result = run_gh(
             ["api", api_path, "--paginate", "--slurp"],

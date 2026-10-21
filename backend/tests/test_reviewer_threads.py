@@ -241,16 +241,22 @@ def test_classify_no_existing_all_new():
     new, resolves, unchanged = classify_findings(findings, [])
     assert len(new) == 2
     assert len(resolves) == 0
-    assert unchanged == 0
+    assert unchanged == []
 
 
-def test_classify_unchanged_finding_not_in_new_list():
-    f = _finding()
-    fp = fingerprint_finding(f)
-    new, resolves, unchanged = classify_findings([f], [_existing(fp, 1)])
-    assert len(new) == 0
-    assert len(resolves) == 0
-    assert unchanged == 1
+def test_classify_unchanged_finding_keeps_current_finding_and_carrier_comment():
+    current = _finding(severity="block")
+    fingerprint = fingerprint_finding(current)
+    carrier = _existing(fingerprint, 1)
+    carrier["html_url"] = "https://github.com/owner/repo/pull/1#discussion_r1"
+
+    new, resolves, still_raised = classify_findings([current], [carrier])
+
+    assert new == []
+    assert resolves == []
+    assert len(still_raised) == 1
+    assert still_raised[0].finding is current
+    assert still_raised[0].carrier_comment is carrier
 
 
 def test_classify_resolved_when_prior_finding_absent_now():
@@ -260,7 +266,7 @@ def test_classify_resolved_when_prior_finding_absent_now():
     assert len(new) == 0
     assert len(resolves) == 1
     assert resolves[0]["id"] == 1
-    assert unchanged == 0
+    assert unchanged == []
 
 
 def test_classify_mixed_new_unchanged_resolved():
@@ -274,7 +280,9 @@ def test_classify_mixed_new_unchanged_resolved():
     assert new[0]["file"] == "new.py"
     assert len(resolves) == 1
     assert resolves[0]["id"] == 2
-    assert unchanged == 1
+    assert len(unchanged) == 1
+    assert unchanged[0].finding is f_unchanged
+    assert unchanged[0].carrier_comment["id"] == 1
 
 
 def test_classify_skips_already_resolved_threads():
@@ -290,7 +298,7 @@ def test_classify_skips_already_resolved_threads():
     new, resolves, unchanged = classify_findings([], [parent, reply])
     assert len(new) == 0
     assert len(resolves) == 0  # already resolved; don't reply again
-    assert unchanged == 0
+    assert unchanged == []
 
 
 def test_classify_ignores_existing_replies_for_fingerprint_indexing():
@@ -304,7 +312,7 @@ def test_classify_ignores_existing_replies_for_fingerprint_indexing():
     }
     parent = _existing(fp, 1)
     new, resolves, unchanged = classify_findings([f], [parent, reply_with_marker])
-    assert unchanged == 1
+    assert len(unchanged) == 1
     assert len(new) == 0
 
 
@@ -317,7 +325,7 @@ def test_classify_skips_comments_with_no_fingerprint_marker():
     new, resolves, unchanged = classify_findings([f], [foreign])
     assert len(new) == 1
     assert len(resolves) == 0
-    assert unchanged == 0
+    assert unchanged == []
 
 
 
@@ -328,7 +336,7 @@ def test_classify_dedups_a_finding_published_at_pr_level():
     new, resolves, unchanged = classify_findings([f], [_existing_pr_level(fp, 7)])
     assert len(new) == 0
     assert len(resolves) == 0
-    assert unchanged == 1
+    assert len(unchanged) == 1
 
 
 def test_classify_resolves_a_pr_level_finding_that_is_gone():

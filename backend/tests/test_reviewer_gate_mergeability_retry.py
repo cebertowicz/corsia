@@ -44,9 +44,8 @@ class TestMergeabilityRetry:
             gate_mod.github_reviewer_gate,
             "fetch_pr_info",
             side_effect=[None, ready],
-        ) as fetch_pr_info, patch.object(
-            gate_mod.github_reviewer_gate.time,
-            "sleep",
+        ) as fetch_pr_info, patch(
+            "infra.transient_read.time.sleep",
         ) as sleep, patch.object(
             gate_mod.github_reviewer_gate,
             "checks_green",
@@ -63,7 +62,7 @@ class TestMergeabilityRetry:
             )
 
         assert fetch_pr_info.call_count == 2
-        sleep.assert_called_once_with(gate_mod.github_reviewer_gate.MERGEABILITY_POLL_INTERVAL_S)
+        sleep.assert_called_once_with(gate_mod.github_reviewer_gate.TRANSIENT_READ_INTERVAL_S)
         run_reviewer.assert_called_once()
 
     def test_pr_info_fetch_exhaustion_returns_none_after_full_budget(self, _reload_gate):
@@ -73,17 +72,16 @@ class TestMergeabilityRetry:
             gate_mod.github_reviewer_gate,
             "fetch_pr_info",
             return_value=None,
-        ) as fetch_pr_info, patch.object(
-            gate_mod.github_reviewer_gate.time,
-            "sleep",
+        ) as fetch_pr_info, patch(
+            "infra.transient_read.time.sleep",
         ) as sleep:
             result = gate_mod.github_reviewer_gate.fetch_pr_info_awaiting_mergeability(
                 "owner/repo", 42, "abc123def",
             )
 
         assert result is None
-        assert fetch_pr_info.call_count == gate_mod.github_reviewer_gate.MERGEABILITY_POLL_ATTEMPTS
-        assert sleep.call_count == gate_mod.github_reviewer_gate.MERGEABILITY_POLL_ATTEMPTS - 1
+        assert fetch_pr_info.call_count == gate_mod.github_reviewer_gate.TRANSIENT_READ_ATTEMPTS
+        assert sleep.call_count == gate_mod.github_reviewer_gate.TRANSIENT_READ_ATTEMPTS - 1
 
     def test_unknown_then_mergeable_retry_fires_reviewer(self, _reload_gate):
         gate_mod = _reload_gate
@@ -232,3 +230,71 @@ class TestMergeabilityRetry:
         assert task in gate_mod._PENDING_RETRIES
         task.finish()
         assert task not in gate_mod._PENDING_RETRIES
+
+
+class TestChecksGreenReadRetry:
+    """The check-run read re-polls an unreadable result with the same bounded
+    budget as the PR-info read (#1168), so one brief GitHub error cannot make
+    the gate emit checks_unreadable and wake the owner."""
+
+    def test_unreadable_read_retries_then_reports_green(self, _reload_gate):
+        gate_mod = _reload_gate
+        green = [{"name": "Backend unit tests", "state": "SUCCESS"}]
+
+        with patch(
+            "reviewer.gh_helpers.get_check_runs_for_sha",
+            side_effect=[None, green],
+        ) as fetch_checks, patch(
+            "infra.transient_read.time.sleep",
+        ) as sleep:
+            result = gate_mod.github_reviewer_gate.checks_green(
+                "owner/repo", 42, "abc123def",
+            )
+
+        assert result is True
+        assert fetch_checks.call_count == 2
+        sleep.assert_called_once_with(
+            gate_mod.github_reviewer_gate.TRANSIENT_READ_INTERVAL_S,
+        )
+
+    def test_persistent_unreadable_exhausts_full_budget_then_returns_none(
+        self, _reload_gate
+    ):
+        gate_mod = _reload_gate
+
+        with patch(
+            "reviewer.gh_helpers.get_check_runs_for_sha", return_value=None,
+        ) as fetch_checks, patch(
+            "infra.transient_read.time.sleep",
+        ) as sleep:
+            result = gate_mod.github_reviewer_gate.checks_green(
+                "owner/repo", 42, "abc123def",
+            )
+
+        assert result is None
+        assert fetch_checks.call_count == (
+            gate_mod.github_reviewer_gate.TRANSIENT_READ_ATTEMPTS
+        )
+        assert sleep.call_count == (
+            gate_mod.github_reviewer_gate.TRANSIENT_READ_ATTEMPTS - 1
+        )
+
+    def test_readable_pending_result_returns_without_retrying(self, _reload_gate):
+        gate_mod = _reload_gate
+        pending = [
+            {"name": "Backend unit tests", "state": "SUCCESS"},
+            {"name": "Frontend unit tests", "state": "PENDING"},
+        ]
+
+        with patch(
+            "reviewer.gh_helpers.get_check_runs_for_sha", return_value=pending,
+        ) as fetch_checks, patch(
+            "infra.transient_read.time.sleep",
+        ) as sleep:
+            result = gate_mod.github_reviewer_gate.checks_green(
+                "owner/repo", 42, "abc123def",
+            )
+
+        assert result is False
+        assert fetch_checks.call_count == 1
+        sleep.assert_not_called()

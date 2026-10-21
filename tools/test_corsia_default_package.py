@@ -1,15 +1,14 @@
 """Structural guards for the bundled ``corsia-default`` coordination model.
 
 The package at ``docs/coordination-models/corsia-default`` ships charter and
-safety templates, pinned starter-kit references and declared KPIs. Four
+safety templates, responsibility materials, a routing policy and declared KPIs. Four
 invariants keep it installable by a conductor:
 
 1. every fill placeholder in the templates is covered by a manifest parameter
    (its ``parameters[].id`` or one of its ``parameters[].fills`` entries);
 2. the pack envelope declares its schema and a semver version, while legacy
    installed copies carrying bare integer ``0`` remain readable;
-3. every ``files[]`` pin still matches the file's byte length and sha256, with
-   non-ref paths relative to the package and ``ref: true`` paths repo-relative;
+3. every ``files[]`` pin still matches the file's byte length and sha256;
 4. the manifest's ``notes`` list holds strings only.
 
 Each break case runs on a ``tmp_path`` copy of the package with one deliberate
@@ -113,7 +112,7 @@ def _coverage_failures(package_dir: Path) -> list[str]:
     return [f"<{token}> has no manifest parameter or fills entry" for token in sorted(uncovered)]
 
 
-def _pin_failures(package_dir: Path, repo_root: Path) -> list[str]:
+def _pin_failures(package_dir: Path) -> list[str]:
     """``files[]`` pins whose byte length or sha256 no longer matches."""
     failures: list[str] = []
     files = _load_manifest(package_dir).get("files")
@@ -124,8 +123,7 @@ def _pin_failures(package_dir: Path, repo_root: Path) -> list[str]:
             failures.append(f"files entry {entry!r} is not a mapping")
             continue
         relative = str(entry.get("path"))
-        base = repo_root if entry.get("ref") else package_dir
-        target = base / relative
+        target = package_dir / relative
         if not target.is_file():
             failures.append(f"{relative}: pinned file missing at {target}")
             continue
@@ -196,7 +194,7 @@ def test_invalid_version_is_rejected(tmp_path: Path) -> None:
 
 def test_pins_match_their_files() -> None:
     """Every shipped pin matches its file's bytes and sha256."""
-    assert _pin_failures(PACKAGE_DIR, REPO_ROOT) == []
+    assert _pin_failures(PACKAGE_DIR) == []
 
 
 def test_notes_are_all_strings() -> None:
@@ -222,9 +220,9 @@ def test_stale_pin_fails(tmp_path: Path) -> None:
     package = _copy_package(tmp_path)
     pinned = package / "context" / "COORDINATION-CORE.md"
     pinned.write_text(pinned.read_text(encoding="utf-8") + "\n", encoding="utf-8")
-    failures = _pin_failures(package, REPO_ROOT)
+    failures = _pin_failures(package)
     assert failures, "pin guard did not fire on a stale pin"
-    # Only the edited entry is stale: the repo-relative ref pins still match.
+    # Only the edited entry is stale.
     assert {failure.split(":", 1)[0] for failure in failures} == {
         "context/COORDINATION-CORE.md"
     }
@@ -239,4 +237,4 @@ def test_non_string_note_fails(tmp_path: Path) -> None:
     )
     failures = _note_failures(package)
     assert failures, "notes guard did not fire on a non-string note"
-    assert failures == ["notes[6] is int, not str: 42"]
+    assert failures == ["notes[5] is int, not str: 42"]

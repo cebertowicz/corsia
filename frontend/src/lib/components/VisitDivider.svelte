@@ -1,10 +1,10 @@
 <script lang="ts">
 	// Where this visit's new material starts (AS18); frozen for the visit.
-	let { truncated = false }: { truncated?: boolean } = $props();
+	let { truncated = false, attached = false }: { truncated?: boolean; attached?: boolean } = $props();
 	const LABEL = $derived(truncated ? 'Since your last visit · more above' : 'Since your last visit');
 </script>
 
-<div class="visit-divider" role="separator" aria-label={LABEL} data-visit-divider>
+<div class="visit-divider" class:attached role="separator" aria-label={LABEL} data-visit-divider>
 	<span>{LABEL}</span>
 </div>
 
@@ -25,4 +25,7 @@
 		border-top: 1px solid var(--accent);
 		opacity: 0.5;
 	}
+	/* In a collapsed new-work block the chip is the divider's left anchor. */
+	.visit-divider.attached { max-width: none; margin: 0 0 0 calc(var(--space-1) / 2); gap: var(--space-2); }
+	.visit-divider.attached::before { display: none; }
 </style>

@@ -98,11 +98,6 @@ product behavior starts implementation without the owner's approval.
   prioritizes and pulls it. Filing is not authorization: work starts only with
   the owner's approval or a standing grant.
 
-## Asks
-
-- A hands-on step only the owner can take is a plan task assigned to them, how-to in its
-  description; a question only they can answer is asked in chat.
-
 ## Context and memory layers
 
 | Layer | Use |

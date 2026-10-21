@@ -145,7 +145,10 @@ def test_standing_reads_the_same_rows_however_much_history_the_plan_holds(db, mo
     rows_before = list(reads)
     reads.clear()
 
-    for index in range(500):
+    # Each write's status drain projects the whole plan, so building history through
+    # the write path is quadratic; 100 rows outnumber the scene several times over and
+    # still prove the exact read counts never change.
+    for index in range(100):
         settled = add_task(db, plan["id"], f"History {index}")
         _settle(db, settled.id, "failed")
 
