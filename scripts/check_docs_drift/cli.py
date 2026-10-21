@@ -6,11 +6,10 @@ import argparse
 from pathlib import Path
 
 from .citation_check import check_citations
-from .discovery import DEFAULT_WORKSPACE, repo_root, resolve_workspace
+from .discovery import repo_root
 from .owner_identity import OwnerProfileTokens, read_owner_profile
 from .private_scan_check import check_private_names, read_token_file
 from .report import overall_ok, to_json, to_text
-from .starter_kit_check import check_starter_kit
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,14 +17,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Check for drift between published docs and their sources: "
-            "starter-kit copies, cited commands/routes/paths/versions, and "
-            "private names/paths in publicly-shipped files."
+            "cited commands/routes/paths/versions and private names/paths "
+            "in publicly-shipped files."
         )
-    )
-    parser.add_argument(
-        "--workspace",
-        default=None,
-        help=f"Workspace root (default: $CORSIA_WORKSPACE or {DEFAULT_WORKSPACE})",
     )
     parser.add_argument(
         "--internal-names-file",
@@ -54,14 +48,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Workspace USER.md profile; overridden by --owner-name and --owner-identity-file",
     )
     parser.add_argument(
-        "--allow-missing-workspace",
-        action="store_true",
-        help=(
-            "Treat a missing maintainers' workspace as an accepted skip instead of a "
-            "failure -- for an outside contributor's plain clone, not a release gate"
-        ),
-    )
-    parser.add_argument(
         "--allow-missing-owner-identity",
         action="store_true",
         help=(
@@ -80,11 +66,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str]) -> int:
-    """Run all three docs-drift checks and print a report."""
+    """Run both docs-drift checks and print a report."""
     parser = build_parser()
     args = parser.parse_args(argv)
     root = repo_root()
-    workspace = resolve_workspace(args.workspace)
     # One owner source wins, in this order. The profile path resolves token
     # KINDS; --owner-name is a person token and nothing else, and the gate
     # reports what actually resolved either way.
@@ -108,9 +93,6 @@ def main(argv: list[str]) -> int:
         owner_profile = read_owner_profile(args.owner_profile)
         owner_identity_skip_reason = owner_profile.read_error or owner_profile.skip_reason
 
-    starter_kit = check_starter_kit(
-        root, workspace, require_workspace=not args.allow_missing_workspace
-    )
     citations = check_citations(root)
     private_scan = check_private_names(
         root,
@@ -121,8 +103,8 @@ def main(argv: list[str]) -> int:
         require_owner_identity=not args.allow_missing_owner_identity,
     )
 
-    report_json = to_json(starter_kit, citations, private_scan)
+    report_json = to_json(citations, private_scan)
     if args.json_out is not None:
         args.json_out.write_text(report_json + "\n", encoding="utf-8")
-    print(report_json if args.json else to_text(starter_kit, citations, private_scan))
-    return 0 if overall_ok(starter_kit, citations, private_scan) else 1
+    print(report_json if args.json else to_text(citations, private_scan))
+    return 0 if overall_ok(citations, private_scan) else 1

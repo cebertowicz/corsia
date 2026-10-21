@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-import re
-
 from registry.doc_freshness import CADENCE_DAYS, format_freshness, freshness
 
 _NOW = datetime(2026, 9, 30, 12, tzinfo=timezone.utc)
@@ -88,28 +85,3 @@ def test_never_verified_is_distinct_from_overdue_and_formats_separately():
     assert format_freshness(rows[1], "Documents & Artifacts") == (
         "Owner: Documents & Artifacts · verified 31 days ago · review overdue"
     )
-
-
-def test_workspace_standard_cadence_row_matches_freshness_table():
-    standard = (
-        Path(__file__).parents[2]
-        / "docs/contributing/bootstrap/starter-kit/shared/standards/WORKSPACE-STANDARD.md"
-    )
-    # Find the cadence row by its label so an unrelated row insertion cannot fail it.
-    (line,) = [
-        row for row in standard.read_text(encoding="utf-8").splitlines()
-        if row.startswith("| How often is it checked? |")
-    ]
-    patterns = {
-        "standard": r"Charters, standards, contracts: (\d+) days",
-        "prd_rfc": r"Current PRDs and RFCs: (\d+) days",
-        "domain_reference": r"Domain references and runbooks: (\d+) days",
-        "draft": r"Drafts: (\d+) days",
-    }
-    parsed = {
-        key: int(re.search(pattern, line).group(1))
-        for key, pattern in patterns.items()
-    }
-
-    assert parsed == CADENCE_DAYS
-    assert "Dated evidence: never audited" in line
