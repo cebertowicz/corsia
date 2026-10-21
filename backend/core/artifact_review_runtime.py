@@ -91,12 +91,7 @@ async def start(request_id: str) -> None:
         try:
             _row, request = await asyncio.to_thread(_cold_request, request_id)
         except Exception as error:
-            from core.artifact_review_capture import failure_reason
-
-            reason = failure_reason(error)
-            if reason.startswith("provider_error:"):
-                reason = f"cold_request_build:{type(error).__name__}"
-            await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id, error, reason=reason)
+            await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id, error, reason=_build_reason(error))
             return
         if await asyncio.to_thread(fork_ended, request_id):
             return
@@ -109,6 +104,16 @@ async def start(request_id: str) -> None:
         task.add_done_callback(lambda done: forget(fork_id, done))
     finally:
         _starting.discard(request_id)
+
+
+def _build_reason(error: Exception) -> str:
+    """A failure building the request is internal, never a provider failure."""
+    from core.artifact_review_capture import failure_reason
+
+    reason = failure_reason(error)
+    if reason.startswith("provider_error:"):
+        return f"cold_request_build:{type(error).__name__}"
+    return reason
 
 
 def _already_started(request_id: str) -> bool:
@@ -182,6 +187,7 @@ async def _run(request_id: str, request: Any, cancel_event: asyncio.Event) -> No
 
 
 async def _review(request_id: str, request: Any, cancel_event: asyncio.Event) -> None:
+    building = False
     try:
         # start() registers the handle before this first yield/state read, so a
         # withdrawal either appears here or signals the registered handle.
@@ -195,8 +201,9 @@ async def _review(request_id: str, request: Any, cancel_event: asyncio.Event) ->
             from core.fork_native_tools import await_or_cancel
 
             await await_or_cancel(await_checkpoint(active.id), cancel_event)
-            prepared = await asyncio.to_thread(_cold_request, request_id)
-            _row, request = prepared
+            building = True
+            _row, request = await asyncio.to_thread(_cold_request, request_id)
+            building = False
         request = await ARTIFACT_REVIEW_KIND.usage_binder(await _source(request))
         from core.fork_runtime import invoke_fork
 
@@ -207,6 +214,7 @@ async def _review(request_id: str, request: Any, cancel_event: asyncio.Event) ->
         raise
     except Exception as error:
         if not cancel_event.is_set():
-            await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id, error)
+            reason = _build_reason(error) if building else None
+            await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id, error, reason=reason)
         else:
             logger.warning("artifact review raised after cancel request_id=%s", request_id, exc_info=error)
