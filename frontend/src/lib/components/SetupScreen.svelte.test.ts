@@ -18,6 +18,11 @@ let calls: Array<{ url: string; method: string }>;
 
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
 function button(label: string) { return Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.trim() === label); }
+function getByRole(role: string) {
+	const match = host.querySelector(`[role="${role}"]`);
+	if (!match) throw new Error(`Expected an element with role ${role}`);
+	return match;
+}
 function setInput(id: string, value: string) {
 	const input = host.querySelector<HTMLInputElement>(`#${id}`)!;
 	input.value = value;
@@ -170,6 +175,7 @@ describe('SetupScreen', () => {
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input) === '/api/setup/first-account' ? json(body, 422) : json({})));
 		button('Continue')?.click(); await settle();
 		expect(host.textContent).toContain(expected);
+		expect(getByRole('alert').textContent).toContain(expected);
 		expect(button('Continue')?.disabled).toBe(false);
 	});
 
