@@ -4,6 +4,7 @@ The writer limits live here, checked when a rule is written:
 
 - an agent's rule covers events in its own project, and delivers only to itself
   or to the registered owner of the file the event is about;
+- a test naming a repository names one the writer's project tracks;
 - an agent's ``drop`` removes only deliveries to itself;
 - the project's conductor may also send another agent in its project a digest;
 - anything else is refused with the reason and who can set it up.
@@ -86,6 +87,25 @@ def _match(raw: Any, decl: EventTypeDecl) -> list[dict[str, Any]]:
     return clean
 
 
+def _repositories(connector: str, tests: list[dict[str, Any]], project_id: str) -> None:
+    """A test naming the event's repository must name one this project tracks."""
+    manifest = get_manifest(connector)
+    fact, resolve = manifest.repository_fact, manifest.project_repositories
+    named = [value for test in tests if test["field"] == fact and test["op"] in rules.NAMING
+             for value in (test["value"] if test["op"] == "in" else [test["value"]])]
+    if not named or resolve is None:
+        return
+    tracked = resolve(project_id)
+    if tracked is None:
+        raise RuleRefused("This project's repositories can't be read right now; try again.")
+    known = {repo.casefold() for repo in tracked}
+    for value in named:
+        if str(value).casefold() not in known:
+            raise RuleRefused(
+                f"{value} isn't one of this project's repositories "
+                f"({', '.join(sorted(tracked)) or 'it tracks none'}).")
+
+
 def _who_sets_it_up(db: sqlite3.Connection, project_id: str) -> str:
     conductor = _conductor(db, project_id)
     if conductor:
@@ -141,6 +161,7 @@ def create(
             f"project ({own_scope}). {_who_sets_it_up(db, project_id)}")
     decl = _decl(connector, event_type)
     tests = _match(match, decl)
+    _repositories(connector, tests, project_id)
     if action not in (rules.DELIVER, rules.DROP):
         raise RuleRefused("action is deliver or drop")
     if action == rules.DROP:

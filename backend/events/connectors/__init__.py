@@ -80,6 +80,11 @@ class ConnectorManifest:
     resolve_relationships: Callable[[str, dict, dict], tuple[dict, ...]] = (
         lambda event_type, facts, raw: ()
     )
+    # The fact naming the repository an event comes from, and the repositories a
+    # project tracks (``None`` when they can't be read). Declared together: a
+    # rule's test on that fact must name one the writer's project tracks.
+    repository_fact: str | None = None
+    project_repositories: Callable[[str], frozenset[str] | None] | None = None
 
     def decl(self, event_type: str) -> EventTypeDecl:
         """Return a declared event type or reject loudly (EM7)."""

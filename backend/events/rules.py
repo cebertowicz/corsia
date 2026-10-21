@@ -32,6 +32,7 @@ REGISTERED_OWNER = "registered_owner"
 THREAD_PREFIX = "thread:"
 PROJECT_PREFIX = "project:"
 OPERATORS = ("eq", "not_eq", "in", "prefix", "present")
+NAMING = ("eq", "in")  # the operators whose values name what an event must be
 MAX_TESTS = 4
 NOTE_LIMIT = 500
 
@@ -244,11 +245,18 @@ def _wake_budget(db: sqlite3.Connection, rule_id: str, thread: str) -> tuple[boo
 
 def _in_scope(rule: Rule, event_project: str | None) -> bool:
     """An event with a project matches only that project's rules. One with no owner
-    and nothing routed has no project, so only a rule delivering to its own writer
-    sees it: that writer already reads the source, and no one else is reached."""
+    and nothing routed has no project, so only a writer's rule to itself that names
+    the event's repository sees it: create checked that the writer's project tracks
+    that repository, and no one else is reached."""
     if event_project is not None:
         return rule.scope == project_scope(event_project)
-    return rule.action == DELIVER and thread_target(rule.to) == rule.created_by
+    if rule.action != DELIVER or thread_target(rule.to) != rule.created_by:
+        return False
+    from events.connectors import get_manifest
+
+    manifest = get_manifest(rule.connector)
+    fact = manifest.repository_fact if manifest.project_repositories else None
+    return any(test["field"] == fact and test["op"] in NAMING for test in rule.match)
 
 
 def _paused(db: sqlite3.Connection, thread: str) -> bool:

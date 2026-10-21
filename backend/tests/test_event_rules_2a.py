@@ -37,6 +37,16 @@ def _no_analytics(monkeypatch):
     monkeypatch.setenv("CORSIA_ANALYTICS_DISABLE", "1")
 
 
+TRACKED = {P: frozenset({REPO, "x/y"}), Q: frozenset({"q/r"})}
+
+
+@pytest.fixture(autouse=True)
+def _tracked_repositories(monkeypatch):
+    """The repositories each project's registered source repositories track."""
+    monkeypatch.setattr("events.connectors.github_notifications_feed.tracked_github_repositories",
+                        lambda project_id=None: TRACKED.get(project_id, frozenset()))
+
+
 @pytest.fixture
 def sent():
     """What the router's own delivery hands to each thread: (thread, content)."""
@@ -267,9 +277,12 @@ async def test_a_self_rule_fires_on_a_pr_routing_gave_no_thread(isolated_db, sen
     _agent("b")
     rule = await _tool("a", operation="create", connector="github", event_type="pr.merged",
                        match=[{"field": "repo", "op": "eq", "value": REPO}], note="Unowned PR merged.")
-    # A rule for someone else can't see an event no project claims.
+    # A rule for someone else can't see an event no project claims, nor can a
+    # self-rule that doesn't name the event's repository.
     other = await _tool("cond", operation="create", connector="github", event_type="pr.merged",
                         to="thread:b", mode="digest")
+    unnamed = await _tool("b", operation="create", connector="github", event_type="pr.merged",
+                          note="Any PR merged.")
 
     with patch("events.connectors.github_rules.apply_routed_rules", lambda *a, **k: None):
         today = await route(MERGED, _merged(41))
@@ -288,6 +301,7 @@ async def test_a_self_rule_fires_on_a_pr_routing_gave_no_thread(isolated_db, sen
     assert (decision["rule_id"], decision["thread_id"], decision["outcome"], decision["via"]) == (
         rule["id"], "a", "woke", "rule")
     assert _decisions(rule_id=other["id"]) == [] and _notes("b") == []
+    assert _decisions(rule_id=unnamed["id"]) == [] and _wakes("b") == []
 
 
 @pytest.mark.asyncio
@@ -304,10 +318,12 @@ async def test_webhook_reads_when_routing_chose_no_thread(isolated_db, sent):
         await run(60)
         before = await run(61)
     no_rule = await run(62)
-    await _tool("a", operation="create", connector="github", event_type="pr.merged")
+    await _tool("a", operation="create", connector="github", event_type="pr.merged",
+                match=[{"field": "repo", "op": "eq", "value": REPO}])
     matched = await run(63)
 
     assert len(no_rule) - len(before) == 1
+    assert _decisions(thread_id="a")[-1]["outcome"] == "woke"
     print(f"unrouted webhook reads: dev={len(before)} no_rule=+{len(no_rule) - len(before)} "
           f"matched=+{len(matched) - len(before)}")
 
@@ -368,6 +384,11 @@ async def test_writer_limits(isolated_db, sent):
     assert "temporary agent can't write rules" in await _tool("worker", **base)
     assert "no field 'title'" in await _tool(
         "a", **base, match=[{"field": "title", "op": "eq", "value": "x"}])
+    # A repository test names one of the writer's project's repositories.
+    for test in ({"field": "repo", "op": "eq", "value": "q/r"},
+                 {"field": "repo", "op": "in", "value": [REPO, "q/r"]}):
+        assert await _tool("a", **base, match=[test]) == (
+            "Refused: q/r isn't one of this project's repositories (o/r, x/y).")
     assert "role:" not in json.dumps(await _tool("a", **base, to="registered_owner"))
 
     # The conductor may give another agent in its project a digest, nothing more.

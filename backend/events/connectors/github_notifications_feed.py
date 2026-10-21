@@ -56,13 +56,15 @@ class GhSignedOut(FeedError):
         super().__init__("gh_signed_out")
 
 
-def tracked_github_repositories() -> frozenset[str]:
-    """Resolve tracked GitHub repositories from the registered source repositories."""
+def tracked_github_repositories(project_id: str | None = None) -> frozenset[str]:
+    """Resolve tracked GitHub repositories from the registered source repositories,
+    of one project when ``project_id`` is given."""
     from infra.project_repo_policy import RepoPolicyQueryError, list_registered_repo_policies
     from infra.worktree_reaper_probe import ReaperGitError, github_remote_full_name
 
     try:
-        policies = list_registered_repo_policies()
+        policies = (list_registered_repo_policies(project_id=project_id) if project_id
+                    else list_registered_repo_policies())
         repositories = {
             repository
             for policy in policies

@@ -183,6 +183,16 @@ def _relationships(event_type: str, facts: dict, raw: dict) -> tuple[dict, ...]:
              "to_ref": pr_external_id(facts.get("repo"), number)},)
 
 
+def _project_repositories(project_id: str) -> frozenset[str] | None:
+    """The repositories a project's registered source repositories track."""
+    from events.connectors.github_notifications_feed import FeedError, tracked_github_repositories
+
+    try:
+        return tracked_github_repositories(project_id)
+    except FeedError:
+        return None
+
+
 _PR_FILTERABLE = ("repo", "branch", "sha", "pr_number", "author")
 _CHECK_FILTERABLE = ("repo", "branch", "head_sha", "check_suite_id", "conclusion")
 
@@ -234,6 +244,8 @@ MANIFEST = register(ConnectorManifest(
         ),
     ),
     resolve_relationships=_relationships,
+    repository_fact="repo",
+    project_repositories=_project_repositories,
 ))
 
 
