@@ -19,12 +19,12 @@ def test_review_fork_ladder_preserves_legacy_rows_and_is_idempotent():
             INSERT INTO doc_review_requests VALUES ('legacy', 'review-node', NULL, NULL, '2026-01-01');
             CREATE TABLE doc_feedback_batches (
                 id TEXT PRIMARY KEY, author_kind TEXT, author_id TEXT,
-                artifact_id TEXT, recipient_id TEXT, state TEXT
+                artifact_id TEXT, recipient_id TEXT, state TEXT, updated_at TEXT
             );
             CREATE UNIQUE INDEX idx_doc_feedback_batches_open
                 ON doc_feedback_batches(author_kind,author_id,artifact_id,recipient_id)
                 WHERE state='open';
-            INSERT INTO doc_feedback_batches VALUES ('legacy-batch','agent','reviewer','doc','owner','open');
+            INSERT INTO doc_feedback_batches VALUES ('legacy-batch','agent','reviewer','doc','owner','open','2026-01-01');
         """)
         for _ in range(2):
             migrate_132_to_133(db)
@@ -33,7 +33,7 @@ def test_review_fork_ladder_preserves_legacy_rows_and_is_idempotent():
         )
         assert db.execute("SELECT id FROM doc_feedback_batches").fetchone() == ("legacy-batch",)
         with pytest.raises(sqlite3.IntegrityError):
-            db.execute("INSERT INTO doc_feedback_batches VALUES ('duplicate','agent','reviewer','doc','owner','open')")
+            db.execute("INSERT INTO doc_feedback_batches VALUES ('duplicate','agent','reviewer','doc','owner','open','2026-01-01')")
     finally:
         db.close()
 
@@ -46,7 +46,33 @@ def test_migrated_legacy_request_with_a_closed_node_is_listed_as_ended_without_c
     row = review_requests.escalate_fork(db, request(db, aid)["id"])
     public.transition_node(row["node_id"], "closed", db=db)
     db.commit()
-    # Rebuild the table as schema 132 stored this request, then run the real migration.
+    _as_legacy_132(db, row)
+    listed = review_requests.for_document(db, aid)
+    assert [(item["id"], item["state"], item["outcome"], item["comment_count"]) for item in listed] == [
+        (row["id"], "handed_back", "ended_without_comments", 0)]
+
+
+def test_migrated_legacy_answered_request_keeps_its_comments_and_leaves_the_list(review_env):
+    from doceditor import review_feedback, review_requests
+    from doceditor.review_lifecycle import request_comment_count
+    from infra.database import write_transaction
+    from test_doc_review_requests import fork_comment
+
+    db, aid = review_env
+    row = request(db, aid)
+    fork_comment(db, aid, row["id"])
+    with write_transaction(db, scope="test_legacy_answered_review"):
+        review_feedback.submit_fork_feedback(db, row["id"], "reviewer", aid)
+    batch = db.execute("SELECT id FROM doc_feedback_batches WHERE state='delivered'").fetchone()["id"]
+    _as_legacy_132(db, row, answered_batch_id=batch)
+    migrated = db.execute("SELECT * FROM doc_review_requests WHERE id=?", (row["id"],)).fetchone()
+    assert migrated["state"] == "submitted"
+    assert request_comment_count(db, migrated) == 1
+    assert review_requests.for_document(db, aid) == []
+
+
+def _as_legacy_132(db, row, *, answered_batch_id=None):
+    """Rebuild the table as schema 132 stored this request, then run the real migration."""
     db.execute("PRAGMA foreign_keys=OFF")
     db.execute("DROP TABLE doc_review_requests")
     db.execute(
@@ -60,15 +86,12 @@ def test_migrated_legacy_request_with_a_closed_node_is_listed_as_ended_without_c
     )
     db.execute(
         "INSERT INTO doc_review_requests(id,artifact_id,requester_kind,requester_id,reviewer_thread_id,"
-        "note,client_ids,node_id,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
-        (row["id"], aid, row["requester_kind"], row["requester_id"], row["reviewer_thread_id"],
-         row["note"], row["client_ids"], row["node_id"], row["created_at"]),
+        "note,client_ids,node_id,answered_batch_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (row["id"], row["artifact_id"], row["requester_kind"], row["requester_id"], row["reviewer_thread_id"],
+         row["note"], row["client_ids"], row["node_id"], answered_batch_id, row["created_at"]),
     )
     migrate_132_to_133(db)
     db.execute("PRAGMA foreign_keys=ON")
-    listed = review_requests.for_document(db, aid)
-    assert [(item["id"], item["state"], item["outcome"], item["comment_count"]) for item in listed] == [
-        (row["id"], "handed_back", "ended_without_comments", 0)]
 
 
 def test_fresh_schema_matches_edited_review_migration_chain():

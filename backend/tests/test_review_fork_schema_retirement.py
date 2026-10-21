@@ -15,6 +15,8 @@ def test_v132_cancellation_backfills_state_and_removes_column_preserving_schema(
             CREATE TABLE artifacts (id TEXT PRIMARY KEY);
             INSERT INTO artifacts VALUES ('doc');
             CREATE TABLE audit (request_id TEXT);
+            CREATE TABLE doc_feedback_batches (id TEXT PRIMARY KEY, updated_at TEXT NOT NULL);
+            INSERT INTO doc_feedback_batches VALUES ('batch','delivered-time');
             CREATE TABLE doc_review_requests (
                 id TEXT PRIMARY KEY,
                 artifact_id TEXT NOT NULL REFERENCES artifacts(id),
@@ -36,7 +38,7 @@ def test_v132_cancellation_backfills_state_and_removes_column_preserving_schema(
             migrate_132_to_133(db)
         assert "cancelled_at" not in {row[1] for row in db.execute("PRAGMA table_info(doc_review_requests)")}
         assert db.execute("SELECT id,state,state_changed_at FROM doc_review_requests ORDER BY id").fetchall() == [
-            ("answered", "submitted", "created"), ("cancelled", "withdrawn", "cancel-time"),
+            ("answered", "submitted", "delivered-time"), ("cancelled", "withdrawn", "cancel-time"),
             ("pending", "handed_back", "created"),
         ]
         assert db.execute("SELECT artifact_id,note,client_ids FROM doc_review_requests WHERE id='cancelled'").fetchone() == (

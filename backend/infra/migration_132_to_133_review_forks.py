@@ -58,7 +58,8 @@ def migrate_132_to_133(conn: sqlite3.Connection) -> None:
         conn.execute(
             "UPDATE doc_review_requests SET state=CASE WHEN cancelled_at IS NOT NULL THEN 'withdrawn' "
             "WHEN answered_batch_id IS NOT NULL THEN 'submitted' ELSE 'handed_back' END, "
-            "state_changed_at=COALESCE(cancelled_at,created_at) WHERE state_changed_at IS NULL"
+            "state_changed_at=COALESCE(cancelled_at,(SELECT b.updated_at FROM doc_feedback_batches b "
+            "WHERE b.id=answered_batch_id),created_at) WHERE state_changed_at IS NULL"
         )
         _remove_cancelled_at(conn)
     else:
