@@ -31,7 +31,7 @@
 		loading = true; error = ''; retryable = true;
 		const t = get(token);
 		if (!t) {
-			error = "Couldn't check which models fit this computer.";
+			error = "Couldn’t check which models fit this computer.";
 			loading = false;
 			return;
 		}
@@ -44,7 +44,7 @@
 			runningName = running && !running.failed ? running.name ?? 'A model' : null;
 			runningRepository = running && !running.failed ? running.repository : null;
 			if (body?.state !== 'ready') {
-				error = body?.message ?? "Couldn't check which models fit this computer.";
+				error = body?.message ?? "Couldn’t check which models fit this computer.";
 				retryable = body?.message === undefined;
 				return;
 			}
@@ -57,7 +57,7 @@
 		} catch (caught) {
 			// A backend answer carries its status and its own sentence; anything else is a failed request.
 			const status = (caught as { status?: number }).status;
-			error = typeof status === 'number' && caught instanceof Error ? caught.message : "Couldn't check which models fit this computer.";
+			error = typeof status === 'number' && caught instanceof Error ? caught.message : "Couldn’t check which models fit this computer.";
 			retryable = typeof status !== 'number' || status >= 500;
 		}
 		finally { loading = false; }

@@ -13,7 +13,7 @@ MODEL = LocalModel("Jundot/new-model", 1_000_000, 32_768)
 
 @pytest.fixture
 def calls(monkeypatch):
-    seen = {"pins": [], "loads": [], "can_load": {"ok": True}, "pin": {"ok": True}, "load": {"ok": True}}
+    seen = {"pins": [], "loads": [], "events": [], "can_load": {"ok": True}, "pin": {"ok": True}, "load": {"ok": True}}
 
     def set_rows(rows, room_gib):
         async def model_rows(_server_id):
@@ -33,7 +33,12 @@ def calls(monkeypatch):
         seen["loads"].append(model)
         return seen["load"]
 
+    def emit_product_event(category, action, *, properties):
+        seen["events"].append((f"{category}.{action}", properties))
+        return True
+
     monkeypatch.setattr(local_keep_loaded, "check_can_load", check_can_load)
+    monkeypatch.setattr(local_keep_loaded, "emit_product_event", emit_product_event)
     monkeypatch.setattr("llm.providers.omlx_settings.update_model_settings", update_model_settings)
     monkeypatch.setattr("llm.providers.omlx_lifecycle.load_model", load_model)
     monkeypatch.setattr("llm.network_discovery.notify_cached_model_loaded", lambda *_a: None)
@@ -59,6 +64,9 @@ async def test_a_model_that_fits_the_pin_room_is_pinned_then_loaded(calls) -> No
 
     assert calls["pins"] == [("new-model", {"pinned": True})]
     assert calls["loads"] == ["new-model"] and local_keep_loaded.failures("server") == {}
+    # The pin route's own event names, marked automatic: CORSIA pinned and loaded it, not the person.
+    common = {"provider": "omlx", "model_id": "new-model", "server_id": "server", "automatic": True}
+    assert calls["events"] == [("model.pin", common), ("model.load.completed", common)]
 
 
 @pytest.mark.asyncio
@@ -81,6 +89,9 @@ async def test_a_pin_that_cannot_be_written_stops_with_its_line(calls) -> None:
     await local_keep_loaded.keep_loaded("server", MODEL)
 
     assert local_keep_loaded.failures("server") == {"new-model": local_keep_loaded.NOT_KEPT} and calls["loads"] == []
+    assert [(name, props.get("automatic"), props.get("error")) for name, props in calls["events"]] == [
+        ("model.pin", True, "Pin refused"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -102,17 +113,51 @@ async def test_a_load_oMLX_refuses_says_so_on_the_row(calls) -> None:
 
     await local_keep_loaded.keep_loaded("server", MODEL)
 
-    assert local_keep_loaded.failures("server") == {"new-model": local_keep_loaded.NOT_LOADED}
+    # The row is pinned, so its switch is already on: the line names the retry from that state.
+    assert local_keep_loaded.failures("server") == {
+        "new-model": "Not loaded: oMLX couldn’t load it. Turn it off and on again to retry.",
+    }
+    assert [(name, props["automatic"], props.get("error")) for name, props in calls["events"]] == [
+        ("model.pin", True, None),
+        ("model.load.failed", True, "Load failed"),
+    ]
 
 
 @pytest.mark.asyncio
-async def test_no_usable_size_from_oMLX_says_so_on_the_row(calls) -> None:
+async def test_a_refused_load_on_an_unpinned_row_says_turn_it_on(calls) -> None:
+    calls["set_rows"]([_row("new-model", 10), _row("other", 15, pinned=True)], room_gib=20)
+    calls["load"] = {"ok": False}
+
+    await local_keep_loaded.keep_loaded("server", MODEL)
+
+    # Pins full left it unpinned, so its switch is off: turning it on is the retry.
+    assert calls["pins"] == []
+    assert local_keep_loaded.failures("server") == {
+        "new-model": "Not loaded: oMLX couldn’t load it. Turn it on to try again.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_no_usable_size_records_nothing_and_the_row_says_so_live(calls) -> None:
     calls["set_rows"]([{"id": "new-model"}], room_gib=20)
 
     await local_keep_loaded.keep_loaded("server", MODEL)
 
+    # annotate_keep_loaded writes the no-size line on every read; nothing is pinned, loaded or emitted.
+    assert calls["pins"] == [] and calls["loads"] == [] and calls["events"] == []
+    assert local_keep_loaded.failures("server") == {}
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_model_list_says_it_could_not_keep_it_loaded(calls) -> None:
+    calls["set_rows"](None, room_gib=20)
+
+    await local_keep_loaded.keep_loaded("server", MODEL)
+
     assert calls["pins"] == [] and calls["loads"] == []
-    assert local_keep_loaded.failures("server") == {"new-model": local_keep_loaded.NOT_KEPT}
+    assert local_keep_loaded.failures("server") == {
+        "new-model": "Downloaded, but couldn’t keep it loaded. Turn it on to try again.",
+    }
 
 
 @pytest.mark.asyncio

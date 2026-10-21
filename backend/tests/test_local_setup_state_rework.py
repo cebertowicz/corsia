@@ -174,7 +174,8 @@ async def test_a_persons_own_omlx_is_left_alone_and_never_stands_in_for_corsias_
     before = discovery.get_server(sid)
 
     assert await local_sources.local_server_for_install(lambda _s: None, start_if_absent=False) is None
-    assert local_sources.omlx_source()["corsia_omlx_online"] is False
+    source = local_sources.omlx_source()
+    assert source["corsia_omlx"] is False and source["corsia_omlx_online"] is False
     assert discovery.get_server(sid) == before
 
 

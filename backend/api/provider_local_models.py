@@ -26,9 +26,9 @@ router = APIRouter(prefix="/api/providers/local", tags=["providers"])
 async def _server() -> dict[str, Any]:
     server = await run_in_db(corsia_omlx_server)
     if server is None:
-        raise HTTPException(409, "Local models aren't set up. Select Set up to continue.")
+        raise HTTPException(409, "Local models aren’t set up. Select Set up to continue.")
     if server.get("status") != "online":
-        raise HTTPException(409, "CORSIA's local model server isn't running. Open its settings and select Start daemon.")
+        raise HTTPException(409, "CORSIA’s local model server isn’t running. Open its settings and select Start.")
     return server
 
 
@@ -58,7 +58,7 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
     try:
         sections = await ask_recommendations(str(server["id"]))
     except PickUnavailable as exc:
-        raise HTTPException(503, "Couldn't check which models fit this computer.") from exc
+        raise HTTPException(503, "Couldn’t check which models fit this computer.") from exc
     model_dir = await download_dir(str(server["id"]))
 
     # The room setup's pick and the preload check judge a model against, read once so the

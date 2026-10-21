@@ -32,11 +32,11 @@
 		provider.name === 'omlx'
 			? localEmptyMessage
 			: isExternal
-				? "This endpoint hasn't listed any models. Some providers never list them: add their model IDs in the provider settings. Otherwise, check its URL and key there."
+				? "This endpoint hasn’t listed any models. Some providers never list them: add their model IDs in the provider settings. Otherwise, check its URL and key there."
 				: isHarness
-					? `${provider.label} hasn't reported any models. Check that its CLI is installed and signed in.`
+					? `${provider.label} hasn’t reported any models. Check that its CLI is installed and signed in.`
 					: provider.type === 'cloud'
 						? 'No models exposed by this provider. Try Refresh models in the provider settings.'
-						: "No models discovered. Check the provider's logs."
+						: "No models discovered. Check the provider’s logs."
 	} />
 {/if}

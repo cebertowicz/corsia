@@ -13,9 +13,9 @@ export const localStatus = derived(localSource, localPickerStatus);
 export const canAddLocalModel = derived(localSource, (source) =>
 	source?.eligible === true && source.corsia_omlx_online === true,
 );
-/** Without CORSIA's local service, preserve the existing setup route. */
+/** Without CORSIA's local service, online or offline, preserve the existing setup route. */
 export const canSetUpLocalModel = derived(localSource, (source) =>
-	source?.eligible === true && source.corsia_omlx_online !== true,
+	source?.eligible === true && source.corsia_omlx !== true,
 );
 
 async function read(): Promise<void> {

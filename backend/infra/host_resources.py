@@ -264,7 +264,11 @@ def pins_full_line(used_bytes: int, room_bytes: int, *, loaded: bool = False) ->
     """
     line = (f"Models kept loaded use {_gb_text(used_bytes)} of {_gb_text(room_bytes)} GB. "
             "Turn one off to keep this one loaded.")
-    return f"{line} It's loaded, but won't load at the next start." if loaded else line
+    return f"{line} It’s loaded, but won’t load at the next start." if loaded else line
+
+
+#: Without a size CORSIA can't judge the room for pins, so turning the switch on only loads the model.
+NO_SIZE_LINE = "CORSIA can’t keep this model loaded: oMLX didn’t report its size. Turning it on loads it until the next start."
 
 
 def not_loaded_line(size_bytes: int, safe_free_bytes: int) -> str | None:
@@ -280,9 +284,9 @@ def annotate_keep_loaded(models: list[dict], failed: dict[str, str] | None = Non
 
     ``pin_fits`` says whether turning the model on may pin it. ``keep_line`` is the row's one
     sentence about keeping it loaded, and this is its only writer: a failed keep attempt
-    (``failed``, by model id, from ``local_keep_loaded.failures``), else pins full for an
-    unpinned model the pins can't take, else a pinned model that didn't load because it
-    doesn't fit now. A row oMLX reported no size for gets only a failure line.
+    (``failed``, by model id, from ``local_keep_loaded.failures``), else the no-size line for
+    an unpinned model with no size (it can't be pinned), else pins full for an unpinned model
+    the pins can't take, else a pinned model that didn't load because it doesn't fit now.
     """
     room, free = pin_room_bytes(), model_room_bytes()
     size_of = {m["id"]: int(m.get("size_bytes") or 0) for m in models}
@@ -292,7 +296,9 @@ def annotate_keep_loaded(models: list[dict], failed: dict[str, str] | None = Non
         if size > 0:
             m["pin_fits"] = pin_fits(size, used - (size if m.get("pinned") else 0), room)
         line = (failed or {}).get(m["id"])
-        if line is None and size > 0:
+        if line is None and size <= 0 and not m.get("pinned"):
+            line = NO_SIZE_LINE
+        elif line is None and size > 0:
             if not m.get("pinned") and not m["pin_fits"]:
                 line = pins_full_line(used, room, loaded=bool(m.get("loaded")))
             elif m.get("pinned") and not m.get("loaded") and not m.get("starting"):

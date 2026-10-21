@@ -176,12 +176,12 @@
 		_ensurePolling();
 		const loaded = await _checkAndLoad(m);
 		if (!loaded) markModelOptimistic(provider.raw, provider.server, m.id, 'default');
-		if (loaded && m.pinFits && !(await setPinned(m, true))) actionError = "Couldn't keep this model loaded. Try again.";
+		if (loaded && m.pinFits && !(await setPinned(m, true))) actionError = "Couldn’t keep this model loaded. Try again.";
 		await loadProviderModelsFor(provider.raw, provider.server);
 		loadModels();
 	}
 	async function turnOffLocal(m: ProviderModel) {
-		if (m.pinned && !(await setPinned(m, false))) actionError = "Couldn't turn this model off. Try again.";
+		if (m.pinned && !(await setPinned(m, false))) actionError = "Couldn’t turn this model off. Try again.";
 		else if (m.state === 'loaded') {
 			markModelOptimistic(provider.raw, provider.server, m.id, 'default');
 			await _doUnload(m);

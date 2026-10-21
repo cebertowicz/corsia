@@ -144,7 +144,7 @@ async function fixtureOwnershipState(
 	await page.route('**/api/providers/sources', async (route) => route.fulfill({ json: { sources: [source] } }));
 	await page.route('**/api/providers/local/recommendations**', async (route) => route.fulfill(
 		recommendationFailure
-			? { status: 503, json: { detail: "Couldn't check which models fit this computer." } }
+			? { status: 503, json: { detail: "Couldn’t check which models fit this computer." } }
 			: { json: recommendations },
 	));
 	await page.route('**/api/providers/local/downloads**', async (route) => route.fulfill({ json: [] }));
@@ -297,7 +297,7 @@ test('renders ownership, picker, recommender-failure, and picker-download eviden
 		await failureCard.locator('.pr-expand').click();
 		await failureCard.getByRole('button', { name: 'Add model', exact: true }).click();
 		const failureSheet = page.locator('.modal').filter({ hasText: 'Add model' });
-		await expect(failureSheet).toContainText("Couldn't check which models fit this computer.");
+		await expect(failureSheet).toContainText("Couldn’t check which models fit this computer.");
 		await expect(failureSheet.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
 		await capture(page, `e-recommender-failed-${viewport.name}-${theme}`);
 

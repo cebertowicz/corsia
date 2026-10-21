@@ -247,10 +247,10 @@
 			{:else if hasServer}
 				{#if isLocalhostDaemon}
 					{#if daemonRunning}
-						<Button disabled={busy} onclick={() => handleDaemonAction('stop')}>Stop daemon</Button>
+						<Button disabled={busy} onclick={() => handleDaemonAction('stop')}>Stop</Button>
 						<Button disabled={busy} onclick={() => handleDaemonAction('reload')}>Reload models</Button>
 					{:else}
-						<Button variant="primary" disabled={busy} onclick={() => handleDaemonAction('start')}>Start daemon</Button>
+						<Button variant="primary" disabled={busy} onclick={() => handleDaemonAction('start')}>Start</Button>
 					{/if}
 					<Button disabled={busy} onclick={handleTestLocal}>{busy ? 'Testing…' : 'Test connection'}</Button>
 

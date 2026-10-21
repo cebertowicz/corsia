@@ -129,7 +129,7 @@ describe('ProvidersV7View card request', () => {
 		if (component) unmount(component);
 		component = null; document.body.innerHTML = '';
 
-		await render({ source: 'omlx', eligible: true, corsia_omlx_online: true });
+		await render({ source: 'omlx', eligible: true, corsia_omlx: true, corsia_omlx_online: true });
 		expect(document.querySelector('[data-provider-card="local-setup"]')).toBeNull();
 		if (component) unmount(component);
 		component = null; document.body.innerHTML = '';
@@ -139,7 +139,7 @@ describe('ProvidersV7View card request', () => {
 			id: 'corsia', provider: 'omlx', instance_name: 'Local model', status: 'offline', corsia_omlx: true,
 			endpoints: [{ host: '127.0.0.1', port: 8210 }],
 		};
-		await render({ source: 'omlx', eligible: true, corsia_omlx_online: false }, [ownOffline]);
+		await render({ source: 'omlx', eligible: true, corsia_omlx: true, corsia_omlx_online: false }, [ownOffline]);
 		await vi.waitFor(() => expect(document.querySelector('[data-server-card="corsia"]')).not.toBeNull());
 		expect(document.querySelector('[data-provider-card="local-setup"]')).toBeNull();
 	});
@@ -174,7 +174,7 @@ describe('ProvidersV7View card request', () => {
 		const serverReads = () => fetchMock.mock.calls.filter((call) => String((call as unknown[])[0]).includes('/settings/network-servers')).length;
 		const fetchMock = vi.fn(async (url: string) => {
 			if (String(url).includes('/providers/sources')) {
-				return { ok: true, json: async () => ({ sources: [{ source: 'omlx', eligible: true, corsia_omlx_online: online }] }) };
+				return { ok: true, json: async () => ({ sources: [{ source: 'omlx', eligible: true, corsia_omlx: online, corsia_omlx_online: online }] }) };
 			}
 			return { ok: true, json: async () => ({ providers: [], servers: [], accounts: [], models: [] }) };
 		});

@@ -52,6 +52,8 @@ export interface ModelSource {
 	setup_error_code?: string;
 	setup_error_reference?: string;
 	bytes_to_free?: number;
+	/** CORSIA's own local service exists, online or offline. */
+	corsia_omlx?: boolean;
 	/** CORSIA's own local service is online and can safely receive downloads. */
 	corsia_omlx_online?: boolean;
 }
@@ -93,7 +95,7 @@ export function localPickerStatus(source: ModelSource | undefined): { line: stri
 		return { line: `Downloading ${settings.name} · ${settings.percent ?? 0}%`, retry: null };
 	}
 	if (settings?.failed) return {
-		line: settings.downloaded ? `${settings.name} is downloaded but couldn't be added.` : `Couldn't download ${settings.name}.`,
+		line: settings.downloaded ? `${settings.name} is downloaded but couldn’t be added.` : `Couldn’t download ${settings.name}.`,
 		retry: settings.repository ? 'settings' : null,
 	};
 	if (source.local_state === 'downloading') {
@@ -173,7 +175,7 @@ async function localRouteError(response: Response, fallback: string): Promise<Er
 /** Settings' local-model recommendations, checked by oMLX for this computer. */
 export async function fetchLocalModelRecommendations(t: string): Promise<LocalModelRecommendations> {
 	const response = await fetch('/api/providers/local/recommendations', { headers: { Authorization: `Bearer ${t}` } });
-	if (!response.ok) throw await localRouteError(response, "Couldn't check which models fit this computer.");
+	if (!response.ok) throw await localRouteError(response, "Couldn’t check which models fit this computer.");
 	return response.json();
 }
 

@@ -99,7 +99,6 @@ async def test_check_can_load_warns_when_load_exceeds_total_free():
     assert res["ok"] is False
     # One sentence with the numbers, in the app's own word (memory); the dialog's hint owns the swap/kill consequence.
     assert res["warning"] == "Loading would need 70.0 GB more memory than is free."
-    assert "RAM" not in res["warning"]
 
 
 @pytest.mark.asyncio

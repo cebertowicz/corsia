@@ -94,9 +94,9 @@ describe('localPickerStatus', () => {
 
 	it('says downloaded-but-not-listed when only listing failed, and keeps the retry', () => {
 		const flight = { name: 'Qwen', repository: 'org/qwen', percent: null, failed: true };
-		expect(localPickerStatus(source('omlx', 'Local', 'ready', { settings_download: flight }))?.line).toBe("Couldn't download Qwen.");
+		expect(localPickerStatus(source('omlx', 'Local', 'ready', { settings_download: flight }))?.line).toBe('Couldn’t download Qwen.');
 		const listed = localPickerStatus(source('omlx', 'Local', 'ready', { settings_download: { ...flight, downloaded: true } }));
-		expect(listed?.line).toBe("Qwen is downloaded but couldn't be added.");
+		expect(listed?.line).toBe("Qwen is downloaded but couldn’t be added.");
 		expect(listed?.retry).toBe('settings');
 	});
 });

@@ -39,12 +39,12 @@ describe('AddLocalModelSheet', () => {
 	const tryAgain = () => [...document.body.querySelectorAll('button')].some((button) => button.textContent?.includes('Try again'));
 
 	it('shows the backend sentence for a failed check and offers Try again, since asking again can help', async () => {
-		await renderFailure(503, "Couldn't check which models fit this computer.");
+		await renderFailure(503, "Couldn’t check which models fit this computer.");
 		expect(tryAgain()).toBe(true);
 	});
 
 	it('shows a cause the person must fix first without a Try again that cannot succeed', async () => {
-		await renderFailure(409, "Local models aren't set up. Select Set up to continue.");
+		await renderFailure(409, "Local models aren’t set up. Select Set up to continue.");
 		expect(tryAgain()).toBe(false);
 	});
 

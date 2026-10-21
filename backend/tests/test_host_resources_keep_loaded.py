@@ -35,7 +35,7 @@ def test_the_pins_full_sentence_has_one_writer_and_adds_the_loaded_note_only_for
     base = "Models kept loaded use 14 of 20 GB. Turn one off to keep this one loaded."
 
     assert pins_full_line(14 * GIB, 20 * GIB) == base
-    assert pins_full_line(14 * GIB, 20 * GIB, loaded=True) == f"{base} It's loaded, but won't load at the next start."
+    assert pins_full_line(14 * GIB, 20 * GIB, loaded=True) == f"{base} It’s loaded, but won’t load at the next start."
 
 
 def test_the_not_loaded_sentence_rounds_the_need_up_and_is_absent_when_it_fits() -> None:
@@ -111,12 +111,24 @@ def test_a_pinned_model_oMLX_is_still_loading_says_nothing(room) -> None:
     assert "keep_line" not in models[0]
 
 
-def test_a_row_without_a_size_gets_no_verdict(room) -> None:
+def test_a_pinned_row_without_a_size_gets_no_verdict(room) -> None:
     models = [{"id": "unsized", "pinned": True, "loaded": False}]
 
     annotate_keep_loaded(models)
 
     assert "pin_fits" not in models[0] and "keep_line" not in models[0]
+
+
+def test_an_unpinned_row_without_a_size_says_it_cannot_be_kept_loaded(room) -> None:
+    """Its switch loads it but can never pin it, so the row says so instead of failing silently."""
+    models = [{"id": "unsized", "pinned": False, "loaded": False}]
+
+    annotate_keep_loaded(models)
+
+    assert "pin_fits" not in models[0]
+    assert models[0]["keep_line"] == (
+        "CORSIA can’t keep this model loaded: oMLX didn’t report its size. Turning it on loads it until the next start."
+    )
 
 
 def test_a_model_that_fits_and_is_unpinned_needs_no_line(room) -> None:
@@ -152,3 +164,30 @@ def test_a_download_will_pin_by_the_same_rule(monkeypatch) -> None:
 
     assert fits[0]["settings_download"]["will_pin"] is True
     assert full[0]["settings_download"]["will_pin"] is False
+
+
+def test_a_will_pin_estimate_oMLX_outgrows_ends_on_the_finished_rows_pins_full_line(monkeypatch, room) -> None:
+    """will_pin reads the download size; the finished row's live verdict reconciles oMLX's real size."""
+    from llm import local_keep_loaded, local_sources
+
+    async def rows(_server_id):
+        return [{"id": "a", "estimated_size": 14 * GIB, "pinned": True}]
+
+    async def run_in_db(fn, *args):
+        return fn(*args)
+
+    monkeypatch.setattr(local_keep_loaded, "_model_rows", rows)
+    monkeypatch.setattr(local_keep_loaded, "pin_room_bytes", lambda: 20 * GIB)
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [{"id": "managed", "status": "online"}])
+    monkeypatch.setattr(local_sources, "is_corsia_managed_server", lambda _server: True)
+    monkeypatch.setattr("infra.db_async.run_in_db", run_in_db)
+    downloading = [{"source": "omlx", "settings_download": {"size_bytes": 6 * GIB, "failed": False}}]
+    asyncio.run(local_keep_loaded.annotate_download_will_pin(downloading))
+    assert downloading[0]["settings_download"]["will_pin"] is True
+
+    # oMLX then reports 7 GB for the finished model: it no longer fits the room for pins.
+    finished = [_model("new", 7, loaded=True), _model("a", 14, pinned=True, loaded=True)]
+    annotate_keep_loaded(finished)
+
+    assert finished[0]["pin_fits"] is False
+    assert finished[0]["keep_line"] == pins_full_line(14 * GIB, 20 * GIB, loaded=True)

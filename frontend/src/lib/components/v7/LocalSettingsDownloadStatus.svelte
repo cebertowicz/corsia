@@ -65,7 +65,7 @@
 	<ModelRow
 		name={download.name ?? 'Model'}
 		state={download.failed ? 'error' : 'default'}
-		meta={download.failed ? (download.downloaded ? "Downloaded, but couldn't be added. Retry to finish adding it." : "Couldn't download this model. Try again.") : [sizeLabel, `Downloading ${download.percent ?? 0}%`].filter(Boolean).join(' · ')}
+		meta={download.failed ? (download.downloaded ? "Downloaded, but couldn’t be added. Retry to finish adding it." : "Couldn’t download this model. Try again.") : [sizeLabel, `Downloading ${download.percent ?? 0}%`].filter(Boolean).join(' · ')}
 		progress={download.percent ?? 0}
 		downloading={!download.failed}
 		downloadingOn={download.will_pin === true}

@@ -63,13 +63,15 @@ def test_a_download_past_its_bytes_projects_as_finishing(monkeypatch) -> None:
     monkeypatch.setattr(local_setup, "setup_kind", lambda: "settings")
     monkeypatch.setattr(local_setup, "flight_model", lambda: model)
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
-    shown = {}
-    for stage in ("Downloading Qwen3.8-27B-oQ4e (1 MB, 100%)", "Refreshing model catalog", "Loading model"):
-        monkeypatch.setattr(local_setup, "setup_stage", lambda stage=stage: stage)
-        shown[stage] = local_sources.omlx_source((set(), set()))["settings_download"]["finishing"]
+    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
+    monkeypatch.setattr(local_setup, "_running", lambda: True)
+    shown = []
+    # The phase is what the caller passes, never read back from the stage wording.
+    for stage, finishing in (("Loading model", False), ("Downloading (100%)", False), ("Any wording", True)):
+        local_setup.report_stage(stage, finishing=finishing)
+        shown.append(local_sources.omlx_source((set(), set()))["settings_download"]["finishing"])
 
-    assert shown == {"Downloading Qwen3.8-27B-oQ4e (1 MB, 100%)": False,
-                     "Refreshing model catalog": True, "Loading model": True}
+    assert shown == [False, False, True]
 
 
 # --- the flight after the bytes land ---------------------------------------------------------
@@ -136,6 +138,20 @@ def test_a_server_marked_offline_mid_download_is_listed_with_no_failed_record(mo
     assert not [entry for entry in local_downloads.all() if entry.status == "failed"]
 
 
+def test_the_steps_after_the_bytes_land_report_the_finishing_phase(monkeypatch, tmp_path) -> None:
+    import asyncio
+
+    from llm import local_settings_download
+
+    model, _server_id, _listed = _flight_world(monkeypatch, tmp_path, server_status="online")
+    reported: list[tuple[str, bool]] = []
+    monkeypatch.setattr(local_setup, "report_stage", lambda stage, *, finishing=False: reported.append((stage, finishing)))
+
+    asyncio.run(local_settings_download._run_flight(model))
+
+    assert reported == [("Refreshing model catalog", True), ("Loading model", True)]
+
+
 def test_a_disabled_server_is_never_revived_by_the_download(monkeypatch, tmp_path) -> None:
     import asyncio
 
@@ -164,8 +180,7 @@ def test_a_refresh_that_really_fails_says_the_model_is_downloaded(monkeypatch, t
     result = asyncio.run(local_settings_download._run_flight(model))
 
     assert result["ok"] is False and result["downloaded"] is True
-    assert result["message"] == "Qwen 3.8 27B is downloaded but couldn't be added. Retry to finish adding it."
-    assert "Couldn't download" not in result["message"]
+    assert result["message"] == "Qwen 3.8 27B is downloaded but couldn’t be added. Retry to finish adding it."
     record = local_downloads.get(model.model)
     assert record.status == "failed" and record.downloaded is True
     monkeypatch.setattr(local_sources, "_omlx_state", lambda _membership, _servers=None: {"state": "ready"})

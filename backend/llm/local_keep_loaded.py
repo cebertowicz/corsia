@@ -5,20 +5,24 @@ starts and is never unloaded to make room for another, so CORSIA keeps no pin
 list. Setup's download and Add model's download both finish here.
 
 Everything a row says about keeping a model loaded is derived live by
-``host_resources.annotate_keep_loaded`` (pins full, not loaded because it doesn't
-fit now), except one thing that can't be derived: that this keep attempt failed.
-That event lives in ``_FAILED``, an in-memory map keyed by (server id, model id),
-written only by ``keep_loaded`` and read on every model list:
+``host_resources.annotate_keep_loaded`` (no size, pins full, not loaded because it
+doesn't fit now), except one thing that can't be derived: that this keep attempt
+failed. That event lives in ``_FAILED``, an in-memory map keyed by (server id,
+model id), written only by ``keep_loaded`` and read on every model list. Each
+step also emits oMLX's ``model`` product event, marked ``automatic``:
 
-| Event | Transition | Row line |
-|---|---|---|
-| oMLX gave no usable size | set NOT_KEPT | NOT_KEPT |
-| pin write refused | set NOT_KEPT | NOT_KEPT |
-| pins full | none (derived live) | pins-full line |
-| doesn't fit now | none (derived live) | not-loaded line, if pinned |
-| load refused, or the memory check or load raised | set NOT_LOADED | NOT_LOADED |
-| person turns the switch, loads or loads anyway | cleared (``forget_failure``) | live verdicts only |
-| CORSIA restarts | cleared (memory) | live verdicts only: oMLX reloads pins at start |
+| Event | Transition | Row line | Product event |
+|---|---|---|---|
+| oMLX's model list couldn't be read | set NOT_KEPT | NOT_KEPT | none |
+| oMLX gave no usable size | none (derived live) | no-size line | none |
+| pin written | none | live verdicts | ``model.pin`` |
+| pin write refused | set NOT_KEPT | NOT_KEPT | ``model.pin`` with ``error`` |
+| pins full | none (derived live) | pins-full line | none |
+| doesn't fit now | none (derived live) | not-loaded line, if pinned | none |
+| loaded | none | live verdicts | ``model.load.completed`` |
+| load refused, or the memory check or load raised | set NOT_LOADED (pinned) or NOT_LOADED_UNPINNED | that line | ``model.load.failed`` |
+| person turns the switch, loads or loads anyway | cleared (``forget_failure``) | live verdicts only | the route's own |
+| CORSIA restarts | cleared (memory) | live verdicts only: oMLX reloads pins at start | none |
 """
 
 from __future__ import annotations
@@ -26,12 +30,15 @@ from __future__ import annotations
 import logging
 
 from infra.host_resources import GIB, check_can_load, pin_fits, pin_room_bytes
+from infra.product_events import emit_product_event
 from llm.local_model import LocalModel
 
 log = logging.getLogger(__name__)
 
-NOT_KEPT = "Downloaded, but couldn't keep it loaded. Turn it on to try again."
-NOT_LOADED = "Not loaded: oMLX couldn't load it. Turn it on to try again."
+# The switch of an unpinned row is off, so turning it on retries; a pinned row's is on.
+NOT_KEPT = "Downloaded, but couldn’t keep it loaded. Turn it on to try again."
+NOT_LOADED = "Not loaded: oMLX couldn’t load it. Turn it off and on again to retry."
+NOT_LOADED_UNPINNED = "Not loaded: oMLX couldn’t load it. Turn it on to try again."
 
 _FAILED: dict[tuple[str, str], str] = {}
 
@@ -97,19 +104,31 @@ async def keep_loaded(server_id: str, model: LocalModel) -> None:
 
     key = (server_id, model.model)
     _FAILED.pop(key, None)
+
+    def emit(action: str, error: str | None = None) -> None:
+        properties = {"provider": "omlx", "model_id": model.model, "server_id": server_id, "automatic": True}
+        emit_product_event("model", action, properties={**properties, **({"error": error[:200]} if error else {})})
+
     rows = await _model_rows(server_id)
     row = next((item for item in rows or [] if item.get("id") == model.model), None)
-    size = row.get("estimated_size") if row else None
-    if not isinstance(size, (int, float)) or size <= 0:
-        log.warning("Not keeping the downloaded local model loaded: oMLX gave no usable size")
+    if row is None:
+        log.warning("Not keeping the downloaded local model loaded: oMLX's model list couldn't be read")
         _FAILED[key] = NOT_KEPT
         return
-    if pin_fits(int(size), _pinned_bytes(rows, skip=model.model), pin_room_bytes()):
+    size = row.get("estimated_size")
+    if not isinstance(size, (int, float)) or size <= 0:
+        log.warning("Not keeping the downloaded local model loaded: oMLX gave no usable size")
+        return
+    pinned = pin_fits(int(size), _pinned_bytes(rows, skip=model.model), pin_room_bytes())
+    if pinned:
         pin = await update_model_settings({"server_id": server_id}, model.model, {"pinned": True})
         if not pin.get("ok"):
             log.warning("Couldn't pin the downloaded local model")
+            emit("pin", pin.get("message") or "Pin refused")
             _FAILED[key] = NOT_KEPT
             return
+        emit("pin")
+    not_loaded = NOT_LOADED if pinned else NOT_LOADED_UNPINNED
     step = "memory check"
     try:
         decision = await check_can_load(float(size) / GIB, "omlx")
@@ -120,12 +139,15 @@ async def keep_loaded(server_id: str, model: LocalModel) -> None:
         result = await load_model({"server_id": server_id}, model.model)
         if not result.get("ok"):
             log.warning("Couldn't load the downloaded local model")
-            _FAILED[key] = NOT_LOADED
+            emit("load.failed", result.get("message") or "Load failed")
+            _FAILED[key] = not_loaded
             return
+        emit("load.completed")
         notify_cached_model_loaded(server_id, model.model)
         step = "catalog refresh"
         await discover_and_notify(server_id)
-    except Exception:
+    except Exception as exc:
         log.warning("Not loading the downloaded local model after %s failed", step, exc_info=True)
         if step != "catalog refresh":
-            _FAILED[key] = NOT_LOADED
+            emit("load.failed", f"{step} failed: {type(exc).__name__}")
+            _FAILED[key] = not_loaded

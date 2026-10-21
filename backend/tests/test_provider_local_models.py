@@ -58,7 +58,7 @@ async def test_server_refuses_a_persons_own_omlx_without_an_admin_call(monkeypat
         await provider_local_models._recommendations()
 
     assert raised.value.status_code == 409
-    assert raised.value.detail == "Local models aren't set up. Select Set up to continue."
+    assert raised.value.detail == "Local models aren’t set up. Select Set up to continue."
     assert not called
 
 
@@ -79,7 +79,7 @@ async def test_offline_managed_omlx_is_not_selected(monkeypatch) -> None:
         await provider_local_models._server()
 
     # Set up is hidden beside CORSIA's own offline row, so the fix named is the row's own Start.
-    assert raised.value.detail == "CORSIA's local model server isn't running. Open its settings and select Start daemon."
+    assert raised.value.detail == "CORSIA’s local model server isn’t running. Open its settings and select Start."
 
 
 @pytest.mark.parametrize("status", ["online", "offline"])
@@ -95,7 +95,9 @@ async def test_every_consumer_resolves_corsias_own_omlx_alike(monkeypatch, statu
     monkeypatch.setattr(local_sources, "catalog_membership", lambda: ({"omlx@corsia", "omlx@studio"}, set()))
 
     assert local_sources.corsia_omlx_server()["id"] == "corsia"
-    assert local_sources.omlx_source()["corsia_omlx_online"] is (status == "online")
+    source = local_sources.omlx_source()
+    assert source["corsia_omlx"] is True
+    assert source["corsia_omlx_online"] is (status == "online")
     assert (local_sources.connected_local_server() or {}).get("id") == ("corsia" if status == "online" else None)
 
     async def run_in_db(function, *args, **kwargs):

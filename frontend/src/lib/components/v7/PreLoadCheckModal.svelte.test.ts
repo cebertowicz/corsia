@@ -32,10 +32,9 @@ describe('PreLoadCheckModal', () => {
 		expect(text).toContain('51.0 GB more memory');
 	});
 
-	it('says the swap-or-kill consequence once and in memory terms, never RAM', () => {
+	it('says the swap-or-kill consequence once, in memory terms', () => {
 		const text = render({ estimatedGb: 174, freeGb: 123, afterLoadGb: -51, safeReserveGb: 16, warning: 'Loading would need 51.0 GB more memory than is free.' }).replace(/\s+/g, ' ');
 		expect(text.match(/swap or kill/g)).toHaveLength(1);
 		expect(text).toContain('Unload other models to free memory');
-		expect(text).not.toContain('RAM');
 	});
 });

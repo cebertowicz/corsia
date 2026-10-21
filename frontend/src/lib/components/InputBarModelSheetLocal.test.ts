@@ -75,13 +75,13 @@ const button = (label: string) => [...host.querySelectorAll('button')].find((b) 
 
 describe('the picker\'s Local group', () => {
 	it('offers the shared add-model sheet on an eligible Mac with no local rows', async () => {
-		omlx = { eligible: true, corsia_omlx_online: true };
+		omlx = { eligible: true, corsia_omlx: true, corsia_omlx_online: true };
 		await render();
 		expect(button('Add a local model')).toBeDefined();
 	});
 
 	it('keeps the Add a local model link when no other model group exists', async () => {
-		omlx = { eligible: true, corsia_omlx_online: true };
+		omlx = { eligible: true, corsia_omlx: true, corsia_omlx_online: true };
 		models.set([]);
 		await render();
 		expect(host.textContent).not.toContain('No available models');
@@ -101,6 +101,13 @@ describe('the picker\'s Local group', () => {
 		models.set([]);
 		await render();
 		expect(host.textContent).toContain('No available models');
+	});
+
+	it('offers neither Set up nor Add a local model while CORSIA\'s own local service exists offline', async () => {
+		omlx = { eligible: true, corsia_omlx: true, corsia_omlx_online: false };
+		await render();
+		expect(button('Set up')).toBeUndefined();
+		expect(button('Add a local model')).toBeUndefined();
 	});
 
 	it('hides Add a local model without CORSIA\'s local service and keeps Set up', async () => {
@@ -163,7 +170,7 @@ describe('the picker\'s Local group', () => {
 	it('retries a durable Settings download failure with its stored repository', async () => {
 		omlx = { settings_download: { name: 'Qwen 3.8 27B', repository: 'Jundot/Qwen3.8-27B-oQ4e', percent: 42, failed: true } };
 		await render();
-		expect(host.textContent).toContain("Couldn't download Qwen 3.8 27B.");
+		expect(host.textContent).toContain('Couldn’t download Qwen 3.8 27B.');
 		button('Try again')!.click();
 		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/downloads'));
 		expect(downloadBodies).toEqual([{ repository: 'Jundot/Qwen3.8-27B-oQ4e' }]);

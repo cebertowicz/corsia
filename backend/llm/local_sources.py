@@ -48,10 +48,6 @@ def _source(source: str, name: str, state: str, reason: str | None = None,
             "reason": reason, "fix": fix, "checked_at": checked_at}
 
 
-#: Stages after the bytes are on disk: the model is no longer downloading.
-_FINISHING_STAGES = {"Refreshing model catalog", "Loading model"}
-
-
 def _project_local_flight(result: dict[str, Any], flight: dict[str, Any] | None) -> None:
     """Project the local setup flight as the row's only lifecycle vocabulary."""
     if flight is None or flight["state"] == "stopped":
@@ -204,11 +200,13 @@ def external_sources(membership: tuple[set[str], set[str]] | None = None) -> lis
 
 def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str, Any]:
     """The registered local source row and its active download state."""
-    from llm.local_setup import download_percent, flight_model, setup_kind, setup_stage
+    from llm.local_setup import download_percent, flight_model, setup_finishing, setup_kind, setup_stage
 
     servers = get_servers(provider="omlx")
     result = _omlx_state(membership, servers)
     own = corsia_omlx_server(servers)
+    # Identity apart from status, as on the server rows: Set up shows only without CORSIA's own oMLX.
+    result["corsia_omlx"] = own is not None
     result["corsia_omlx_online"] = own is not None and own.get("status") == "online"
     flying = result.get("local_state") in {"downloading", "starting", "failed", "setup_failed", "start_failed"}
     current_kind = setup_kind()
@@ -229,7 +227,7 @@ def omlx_source(membership: tuple[set[str], set[str]] | None = None) -> dict[str
             "size_bytes": (model.resident_bytes or model.download_size_bytes) if model else None,
             "percent": download_percent(),
             "failed": False,
-            "finishing": stage in _FINISHING_STAGES,
+            "finishing": setup_finishing(),
         }
     else:
         from llm import local_downloads

@@ -42,10 +42,10 @@
 		const current = get(token);
 		if (!current) return;
 		try {
-			const wasOnline = localSource?.corsia_omlx_online === true;
+			const existed = localSource?.corsia_omlx === true;
 			localSource = (await fetchSources(current)).find((source) => source.source === 'omlx');
 			// CORSIA's oMLX registers while setup runs: its row replaces Set up the moment it exists.
-			if (!wasOnline && localSource?.corsia_omlx_online === true) void loadHostGroups();
+			if (!existed && localSource?.corsia_omlx === true) void loadHostGroups();
 		} catch { /* Keep the last projected state; a failed read must not invent a setup action. */ }
 	}
 
@@ -56,7 +56,7 @@
 		toggleError = '';
 		try {
 			const result = await retryLocalSetup('setup');
-			if (!result.ok) toggleError = "Couldn't set up the local model. Try again.";
+			if (!result.ok) toggleError = "Couldn’t set up the local model. Try again.";
 		} finally {
 			await Promise.all([refreshLocalSource(), loadHostGroups()]);
 			loadModels();
@@ -68,16 +68,15 @@
 	const setupFailed = $derived(localSetupFailed(localSource));
 	const setupRunning = $derived(['starting', 'downloading'].includes(localSource?.local_state ?? ''));
 	const setupLine = $derived.by(() => {
-		if (setupFailed) return localSource?.fix || "CORSIA couldn't set up the local model. Press Retry.";
+		if (setupFailed) return localSource?.fix || "CORSIA couldn’t set up the local model. Press Retry.";
 		if (setupRunning) return localPickerStatus(localSource)?.line ?? 'Setting up…';
 		return 'This computer';
 	});
 
 	const baseGroups = $derived($hostGroups.length > 0 ? $hostGroups : $liveHostGroups);
-	// CORSIA's own oMLX row, online or offline, is the local model: Set up shows only without one.
-	const hasCorsiaOmlx = $derived(baseGroups.some((group) => group.providers.some((p) => p.server?.corsia_omlx === true)));
+	// CORSIA's own oMLX, online or offline, is the local model: Set up shows only without one.
 	const localSetupRow = $derived.by<HostProvider | null>(() => {
-		if (!localSource || localSource.corsia_omlx_online === true || hasCorsiaOmlx) return null;
+		if (!localSource || localSource.corsia_omlx === true) return null;
 		return {
 			name: 'local-setup', label: 'Local model', type: 'local', statusDot: setupFailed ? 'error' : 'disabled', subline: setupLine,
 			raw: { name: 'local-setup', label: 'Local model' } as ProviderEntry,

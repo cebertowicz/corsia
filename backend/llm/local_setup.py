@@ -27,6 +27,8 @@ log = logging.getLogger(__name__)
 class _Flight:
     task: asyncio.Task | None = None
     stage: str | None = None
+    # The bytes are on disk and the flight is adding and loading the model; set with each stage.
+    finishing: bool = False
     result: dict | None = None
     model: LocalModel | None = None
     downloaded: bool = False
@@ -94,7 +96,7 @@ def start_flight(work: Coroutine[Any, Any, dict], stage: str, *,
         _flight.kind, _flight.model = operation.kind, operation.model
         _flight.onboarding = operation.onboarding
         _flight.downloaded = False
-    _flight.result, _flight.stage = None, stage
+    _flight.result, _flight.stage, _flight.finishing = None, stage, False
     _flight.server_id = None
     _flight.download_eta_seconds, _flight.download_stalled, _flight.download_percent = None, False, None
     _flight.task = asyncio.create_task(work)
@@ -108,9 +110,13 @@ async def wait_for_operation() -> None:
         _flight.operation_lock = await local_setup_operation.wait_for_lock()
 
 
-def report_stage(stage: str) -> None:
-    """Publish the current stage from setup or Settings work."""
-    _flight.stage = stage
+def report_stage(stage: str, *, finishing: bool = False) -> None:
+    """Publish the current stage from setup or Settings work.
+
+    ``stage`` is wording only; ``finishing`` says the bytes are on disk, so the model's
+    own row takes over from the download row.
+    """
+    _flight.stage, _flight.finishing = stage, finishing
     _notify_models_changed()
 
 
@@ -204,6 +210,11 @@ def flight_model() -> LocalModel | None:
 def setup_stage() -> str | None:
     """The current stage while work is running."""
     return (_flight.stage or "Setting up local model") if _running() else None
+
+
+def setup_finishing() -> bool:
+    """Whether running work is past its download: adding and loading the model."""
+    return _flight.finishing and _running()
 
 
 def setup_kind() -> str | None:

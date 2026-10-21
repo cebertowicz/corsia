@@ -59,7 +59,7 @@ describe('LocalSettingsDownloadStatus', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ sources: [{ source: 'omlx', settings_download: { repository: 'org/model', name: 'Model', failed: true, downloaded: true } }] }) })));
 		component = mount(LocalSettingsDownloadStatus, { target: host });
 		await tick(); await tick(); flushSync();
-		expect(host.textContent).toContain("Downloaded, but couldn't be added. Retry to finish adding it.");
+		expect(host.textContent).toContain("Downloaded, but couldn’t be added. Retry to finish adding it.");
 		expect(host.textContent).not.toContain("Couldn't download");
 	});
 

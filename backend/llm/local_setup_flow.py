@@ -17,7 +17,7 @@ from llm.local_setup_results import SETUP_COMMAND, failure_cause, failure_messag
 from llm.local_setup_runtime import apply_optimal_settings, configure_model_settings, start_managed_omlx
 
 
-async def _setup_new_omlx(report: Callable[[str], None], events: list[str],
+async def _setup_new_omlx(report: Callable[..., None], events: list[str],
                          model: LocalModel | None = None) -> dict:
     from llm.local_sources import local_server_for_install
 
@@ -40,14 +40,14 @@ async def _setup_new_omlx(report: Callable[[str], None], events: list[str],
     optimal = await apply_optimal_settings(server_id, model)
     if optimal.status != "applied" and not optimal.writer_attempted:
         await configure_model_settings(server_id, model)
-    report("Refreshing model catalog")
+    report("Refreshing model catalog", finishing=True)
     from llm.catalog_network_models import discover_network_models
 
     result = await discover_network_models(server_id)
     if not result.get("ok"):
         raise RuntimeError(result.get("error") or "The local model catalog could not refresh.")
     await asyncio.to_thread(record_set_up, model)
-    report("Loading model")
+    report("Loading model", finishing=True)
     await keep_loaded(server_id, model)
     ls._emit("completed", model=model.repository)
     return {"ok": True, "server_id": server_id, "model": model.model,
@@ -58,8 +58,8 @@ async def _run_flight(*, model: LocalModel | None = None,
                       on_stage: Callable[[str], None] | None = None) -> dict:
     events: list[str] = []
 
-    def report(stage: str) -> None:
-        ls.report_stage(stage)
+    def report(stage: str, *, finishing: bool = False) -> None:
+        ls.report_stage(stage, finishing=finishing)
         events.append(stage)
         if on_stage is not None:
             on_stage(stage)

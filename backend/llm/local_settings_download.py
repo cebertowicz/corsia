@@ -49,8 +49,8 @@ async def _run_flight(model: LocalModel) -> dict:
 
     events: list[str] = []
 
-    def report(value: str) -> None:
-        ls.report_stage(value)
+    def report(value: str, *, finishing: bool = False) -> None:
+        ls.report_stage(value, finishing=finishing)
         events.append(value)
 
     try:
@@ -65,7 +65,7 @@ async def _run_flight(model: LocalModel) -> dict:
         ls._emit("failed", kind="settings", model=model.repository, error_type=type(exc.__cause__ or exc).__name__)
         result = {
             "ok": False, "downloaded": True, "detail": str(exc), "progress": events,
-            "message": f"{model.display_name} is downloaded but couldn't be added. Retry to finish adding it.",
+            "message": f"{model.display_name} is downloaded but couldn’t be added. Retry to finish adding it.",
         }
     except Exception as exc:
         ls.log.exception("Settings model download failed")
@@ -83,15 +83,15 @@ async def _run_flight(model: LocalModel) -> dict:
 
 
 
-async def run(report: Callable[[str], None], model: LocalModel) -> dict:
+async def run(report: Callable[..., None], model: LocalModel) -> dict:
     """Complete a Settings download and preserve a separate terminal result."""
     from llm.local_setup_runtime import apply_optimal_settings, configure_model_settings
     from llm.catalog_network_models import discover_network_models
 
     events: list[str] = []
 
-    def stage(value: str) -> None:
-        report(value)
+    def stage(value: str, *, finishing: bool = False) -> None:
+        report(value, finishing=finishing)
         events.append(value)
 
     server_id = await _managed_download(stage, model)
@@ -106,7 +106,7 @@ async def run(report: Callable[[str], None], model: LocalModel) -> dict:
         if optimal.status != "applied" and not optimal.writer_attempted:
             await configure_model_settings(server_id, model)
         speed = optimal.speed if optimal.status == "applied" else None
-        stage("Refreshing model catalog")
+        stage("Refreshing model catalog", finishing=True)
         refreshed = await discover_network_models(server_id)
         if not refreshed.get("ok"):
             raise RuntimeError(refreshed.get("error") or "The local model catalog could not refresh.")
@@ -114,6 +114,6 @@ async def run(report: Callable[[str], None], model: LocalModel) -> dict:
         raise DownloadedNotListed(str(exc)) from exc
     # The durable record belongs to this exact local server; UI metadata never crosses servers.
     local_downloads.write(local_downloads.Download(model, speed=speed, server_id=server_id))
-    stage("Loading model")
+    stage("Loading model", finishing=True)
     await keep_loaded(server_id, model)
     return {"ok": True, "server_id": server_id, "model": model.model, "progress": events, "speed": speed}

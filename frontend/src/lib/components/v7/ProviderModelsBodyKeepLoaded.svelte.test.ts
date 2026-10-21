@@ -16,7 +16,7 @@ const localProvider = {
 type Row = { id: string; display_name: string; size_bytes: number; pinned?: boolean; starting?: boolean; pin_fits?: boolean; keep_line?: string };
 const row = (id: string, gb: number, extra: Partial<Row> = {}): Row => ({ id, display_name: id, size_bytes: gb * GIB, ...extra });
 const NOT_LOADED = 'Not loaded: needs 12 GB, 8 GB free for a model now';
-const PINS_FULL = "Models kept loaded use 14 of 20 GB. Turn one off to keep this one loaded. It's loaded, but won't load at the next start.";
+const PINS_FULL = "Models kept loaded use 14 of 20 GB. Turn one off to keep this one loaded. It’s loaded, but won’t load at the next start.";
 
 let component: ReturnType<typeof mount> | null = null;
 let calls: Array<{ method: string; url: string; body: unknown }> = [];
@@ -134,10 +134,17 @@ describe('local model lines', () => {
 	});
 
 	it("shows the backend's line for a keep attempt that failed, on a model that isn't pinned, without Load anyway", async () => {
-		const notKept = "Downloaded, but couldn't keep it loaded. Turn it on to try again.";
+		const notKept = "Downloaded, but couldn’t keep it loaded. Turn it on to try again.";
 		await render({ available: [row('new-one', 4, { pin_fits: true, keep_line: notKept })] });
 		await vi.waitFor(() => expect(rowFor('new-one').textContent).toContain(notKept));
 		expect([...rowFor('new-one').querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Load anyway')).toBe(false);
+	});
+
+	it("names a retry from the switch's on state when oMLX couldn't load a pinned model", async () => {
+		const failed = 'Not loaded: oMLX couldn’t load it. Turn it off and on again to retry.';
+		await render({ available: [row('pinned-new', 4, { pinned: true, pin_fits: true, keep_line: failed })] });
+		await vi.waitFor(() => expect(rowFor('pinned-new').textContent).toContain(failed));
+		expect(switchOf('pinned-new').classList.contains('on')).toBe(true);
 	});
 
 	it('shows neither line for an unpinned, unloaded model', async () => {
