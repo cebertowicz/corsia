@@ -6,6 +6,7 @@ from dataclasses import replace
 
 from core.artifact_review_capture import ReviewForkFailure
 from history.projection import in_read_snapshot, render_portable_history
+from history.scoped_source import segment_start
 from history.types import HistoryBoundary
 
 # A review pass is an optimization over the ordinary continuation task. Refuse
@@ -18,10 +19,15 @@ REVIEW_TAIL_MAX_ROWS = 1024
 
 def _bounded_history(thread_id, previous, *, db):
     start = HistoryBoundary.of_checkpoint(previous) if previous else None
+    first_seq = segment_start(db, thread_id, start).first_seq if start else None
+    if first_seq is None:
+        predicate, params = "", (thread_id, REVIEW_TAIL_MAX_ROWS + 1)
+    else:
+        predicate, params = " AND seq >= ?", (thread_id, first_seq, REVIEW_TAIL_MAX_ROWS + 1)
     rows = db.execute(
-        "SELECT seq FROM messages WHERE thread_id=? AND delivery_state='delivered' "
-        "ORDER BY seq LIMIT ?",
-        (thread_id, REVIEW_TAIL_MAX_ROWS + 1),
+        "SELECT seq FROM messages WHERE thread_id=? AND delivery_state='delivered'"
+        f"{predicate} ORDER BY seq LIMIT ?",
+        params,
     ).fetchall()
     if len(rows) > REVIEW_TAIL_MAX_ROWS:
         raise ReviewForkFailure("history_tail_bound")
@@ -36,8 +42,9 @@ def _bounded_history(thread_id, previous, *, db):
 def bounded_review_history(thread_id, previous, *, db):
     """Render a tail only when its full validation source has at most 1,024 rows.
 
-    The guard fetches at most 1,025 integer rows, never message payloads. It
-    includes covered rows to bound anchor-segment validation as well as the
-    tail. Above the cap the request follows its failure-to-continuation path.
+    The guard fetches at most 1,025 integer rows, never message payloads. With
+    a checkpoint it starts at the anchor's owning segment; without one it
+    counts the entire delivered history. Above the cap the request follows its
+    failure-to-continuation path.
     """
     return in_read_snapshot(db, _bounded_history, thread_id, previous)

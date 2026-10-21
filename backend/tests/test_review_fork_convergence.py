@@ -9,7 +9,7 @@ import pytest
 
 from core.fork_runtime import ForkHandle, handles
 from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
-from doceditor import feedback_batches, review_requests
+from doceditor import comments, feedback_batches, review_requests
 from doceditor.feedback_batch_identity import open_batch
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
@@ -18,10 +18,21 @@ from test_doc_review_requests import request, review_env, staged_comment, stored
 
 
 @pytest.mark.parametrize("reason", ["limit", "target_unavailable"])
-def test_ended_continuation_resolves_staged_feedback_without_delivery(review_env, reason):
+@pytest.mark.parametrize("batch_state", ["open", "undelivered"])
+def test_ended_continuation_preserves_visible_findings_without_delivery(review_env, reason, batch_state):
     db, aid = review_env
     row = request(db, aid)
     staged_comment(db, aid, row["id"])
+    visible = comments.list_for_artifact(aid, db=db)
+    assert len(visible) == 1 and not visible[0]["resolved"] and not visible[0]["acked"]
+    with write_transaction(db, scope="test_ended_review_staging"):
+        batch = db.execute("SELECT id FROM doc_feedback_batches").fetchone()[0]
+        db.execute("UPDATE doc_feedback_batches SET state=? WHERE id=?", (batch_state, batch))
+        db.execute(
+            "INSERT INTO doc_feedback_edit_items(batch_id,actor_display,baseline_sha256,baseline_text,"
+            "latest_sha256,latest_text,save_count,first_at,last_at) VALUES (?,?,?,?,?,?,1,?,?)",
+            (batch, "Reviewer", "before", "before", "after", "after", "t0", "t0"),
+        )
     continuation = review_requests.escalate_fork(db, row["id"], reason=reason)
     with write_transaction(db, scope="test_end_review_continuation"):
         public.close_review_node(db, continuation["node_id"], reason="The task ended without submission.")
@@ -29,11 +40,13 @@ def test_ended_continuation_resolves_staged_feedback_without_delivery(review_env
     assert review_requests.for_document(db, aid) == []
     assert feedback_batches.close_due("2099-01-01T00:00:00+00:00", db=db) == []
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches").fetchone()[0] == 0
-    comment = db.execute("SELECT resolved,acked FROM doc_comments").fetchone()
-    assert tuple(comment) == (1, 1)
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batch_items").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_edit_items").fetchone()[0] == 0
+    assert comments.list_for_artifact(aid, db=db) == visible
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 1
-    # The cleanup is repeatable and never turns staged feedback into a submission.
+    # Repeated cleanup preserves the visible findings and never submits feedback.
     feedback_batches.close_due("2099-01-01T00:00:00+00:00", db=db)
+    assert comments.list_for_artifact(aid, db=db) == visible
     assert stored(db, row["id"])["state"] == continuation["state"]
 
 

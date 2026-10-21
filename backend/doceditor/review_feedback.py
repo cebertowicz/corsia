@@ -25,13 +25,18 @@ def withdraw_fork_feedback(db, request_id: str) -> None:
     ).fetchall()
     for row in rows:
         comments.update(str(row["comment_id"]), {"resolved": True, "acked": True}, db=db)
-    db.execute(
-        """DELETE FROM doc_feedback_batch_items WHERE batch_id IN (
-               SELECT id FROM doc_feedback_batches
-               WHERE review_request_id=? AND state IN ('open','undelivered')
-           )""",
-        (request_id,),
-    )
+    _drop_undelivered_batches(db, request_id)
+
+
+def _drop_undelivered_batches(db, request_id: str) -> None:
+    for table in ("doc_feedback_batch_items", "doc_feedback_edit_items"):
+        db.execute(
+            f"""DELETE FROM {table} WHERE batch_id IN (
+                   SELECT id FROM doc_feedback_batches
+                   WHERE review_request_id=? AND state IN ('open','undelivered')
+               )""",
+            (request_id,),
+        )
     db.execute(
         "DELETE FROM doc_feedback_batches WHERE review_request_id=? AND state IN ('open','undelivered')",
         (request_id,),
@@ -39,10 +44,10 @@ def withdraw_fork_feedback(db, request_id: str) -> None:
 
 
 def close_ended_continuations(db) -> None:
-    """Resolve staged feedback after its continuing task ends without submission.
+    """Drop unsent staging after its continuing task ends without submission.
 
-    Never deliver an unsubmitted review or wake its reviewer. Retain the visible
-    comments, resolved and acknowledged, exactly as on request withdrawal.
+    Comments are already visible independently of batch delivery. Preserve their
+    open/resolved and acknowledgement state without delivery or a reviewer wake.
     """
     from registry import models
 
@@ -54,7 +59,7 @@ def close_ended_continuations(db) -> None:
     for row in rows:
         if is_open(db, row):
             continue
-        withdraw_fork_feedback(db, row["id"])
+        _drop_undelivered_batches(db, row["id"])
         artifact = models.get_artifact(row["artifact_id"], db=db)
         if artifact is not None:
             notify_change(db, row, artifact)
