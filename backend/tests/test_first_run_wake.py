@@ -243,7 +243,7 @@ class TestAppPath:
             "first_run_path": "app", "harness_ready": ["codex"], "sources_missing": {},
             "agents_found": ["hermes"], "local_download": {"state": "stopped"},
             "tool_attempts": {"claude_code": {"attempt": "none"}, "codex": {"attempt": "none"}},
-            "other_omlx": "none", "bound_model": None,
+            "bound_model": None,
             "web_search_ready": False, "github_ready": False, "setup": {"setup_decisions": []},
             "user_profile": {"name": "Pat", "work": None, "place": None, "check_first": None, "answer_style": None},
         }
@@ -288,9 +288,7 @@ class TestAppPath:
         monkeypatch.setattr("llm.local_setup.setup_status", lambda: status)
         monkeypatch.setattr(first_run_wake, "_app_setup_handoff", lambda: {
             "tools": {"claude-code": {"attempt": "none"}, "codex": {"attempt": "install_failed", "cause": "download_unavailable"}},
-            "other_omlx": "stale_handoff_value",
         })
-        monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_answer", lambda: "kept_both")
         monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
         monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
         monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=False))
@@ -304,7 +302,6 @@ class TestAppPath:
             "claude_code": {"attempt": "none"},
             "codex": {"attempt": "install_failed", "cause": "download_unavailable"},
         }
-        assert facts["other_omlx"] == "kept_both"
         assert facts["bound_model"] is None
         assert facts["agents_found"] == ["openclaw"]
         assert set(facts) == first_run_wake.APP_FACT_KEYS
@@ -387,7 +384,6 @@ class TestAppPath:
             "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
         monkeypatch.setattr(first_run_wake, "_app_setup_handoff", lambda: None)
-        monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_answer", lambda: "kept_both")
         monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=True))
         monkeypatch.setattr(first_run_wake, "app_reference_served", lambda: True)
         monkeypatch.setattr(first_run_wake, "instructions", lambda path="script": "safe instructions")
@@ -396,7 +392,6 @@ class TestAppPath:
         wake = first_run_wake.render(facts, "safe instructions")
 
         assert facts["tool_attempts"] is None
-        assert facts["other_omlx"] == "kept_both"
         assert facts["bound_model"] is None
         assert facts["user_profile"] == {"name": "Pat " + "n" * 116, "work": None, "place": None, "check_first": None, "answer_style": None}
         assert "the address you give me in chat" in wake
@@ -411,7 +406,6 @@ class TestAppPath:
         ("model_sources", ("harness_ready", "sources_missing", "github_ready")),
         ("local_download", ("local_download",)),
         ("setup_handoff", ("tool_attempts",)),
-        ("other_omlx", ("other_omlx",)),
         ("web_search_ready", ("web_search_ready",)),
         ("setup", ("setup",)),
         ("user_profile", ("user_profile",)),
@@ -438,8 +432,6 @@ class TestAppPath:
             monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(side_effect=OSError("unavailable")))
         elif failed == "setup_handoff":
             monkeypatch.setattr(first_run_wake, "_app_setup_handoff", fail)
-        elif failed == "other_omlx":
-            monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_answer", fail)
         elif failed == "setup":
             monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(side_effect=OSError("unavailable")))
         elif failed == "agents_found":

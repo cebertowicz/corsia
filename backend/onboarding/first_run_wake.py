@@ -22,7 +22,7 @@ APP_REFERENCE = "skills/conductor-bootstrap/references/first-run-app.md"
 FACTS_TIMEOUT_SECONDS = 5.0
 APP_FACT_KEYS = frozenset({
     "first_run_path", "harness_ready", "sources_missing", "agents_found", "local_download",
-    "tool_attempts", "other_omlx", "bound_model", "web_search_ready", "github_ready", "setup", "user_profile",
+    "tool_attempts", "bound_model", "web_search_ready", "github_ready", "setup", "user_profile",
 })
 UNAVAILABLE_READS = {
     "your_model": "none; omit task 1's bracket",
@@ -38,7 +38,6 @@ UNAVAILABLE_READS = {
     "local_download": "corsia_api GET /api/providers/local/setup",
     "setup_handoff": "setup progress handoff saved before model binding",
     "tool_attempts": "setup progress handoff saved before model binding",
-    "other_omlx": "server-owned foreign oMLX choice record",
     "web_search_ready": "one web_search call",
     "github_ready": "tool model_sources, once, without recheck",
     "user_profile": "preferred-name read from the workspace profile",
@@ -221,14 +220,12 @@ async def _script_setup_facts(model: str, path: str) -> dict[str, Any]:
 async def _app_setup_facts(model: str) -> dict[str, Any]:
     from infra.db_async import run_in_db, run_off_db
     from onboarding import setup_decisions
-    from llm.local_setup_foreign import foreign_omlx_answer
 
     reads = await _read_facts({
         "bound_model": lambda: run_in_db(_bound_model, model),
         "model_sources": lambda: run_in_db(_model_sources),
         "agents_found": lambda: asyncio.to_thread(_app_agents_found),
         "local_download": lambda: asyncio.to_thread(_app_local_download),
-        "other_omlx": lambda: asyncio.to_thread(foreign_omlx_answer),
         "web_search_ready": setup_decisions.web_search_works,
         "setup_handoff": lambda: run_in_db(_app_setup_handoff),
         "setup": lambda: _app_setup(model),
@@ -264,7 +261,6 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "agents_found": reads["agents_found"],
         "local_download": reads["local_download"],
         "tool_attempts": tool_attempts,
-        "other_omlx": reads["other_omlx"],
         "bound_model": reads["bound_model"],
         "web_search_ready": reads["web_search_ready"],
         "github_ready": github_ready,

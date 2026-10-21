@@ -2,6 +2,8 @@ import { fetchLocalModelDownloads, fetchSources } from '$lib/conductorSources';
 
 export type LocalDownloadRows = {
 	active?: boolean;
+	/** The model id CORSIA is loading after its download, else undefined. */
+	finishing?: string | null;
 	speeds?: Map<string, number>;
 };
 
@@ -16,7 +18,9 @@ export async function localDownloadRows(token: string, serverId: string): Promis
 	]);
 	const result: LocalDownloadRows = {};
 	if (sources.status === 'fulfilled') {
-		result.active = sources.value.some((source) => source.source === 'omlx' && source.settings_download);
+		const flight = sources.value.find((source) => source.source === 'omlx')?.settings_download;
+		result.active = Boolean(flight);
+		result.finishing = flight?.finishing && flight.repository ? flight.repository.split('/').pop() ?? null : null;
 	}
 	if (downloads.status === 'fulfilled') {
 		const entries = downloads.value.filter((entry) =>

@@ -21,7 +21,7 @@
 	import AddLocalModelSheet from './v7/AddLocalModelSheet.svelte';
 	import { inlineSlot } from '$lib/slotMotion';
 	import SwitchingIcon from './ui/SwitchingIcon.svelte';
-	import { canAddLocalModel, localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
+	import { canAddLocalModel, canSetUpLocalModel, localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
 	import type { LocalPickerRetry } from '$lib/conductorSources';
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
@@ -74,15 +74,7 @@
 	$effect(() => watchLocalStatus());
 	async function retryLocal(kind: LocalPickerRetry) {
 		const result = await retryLocalSetup(kind);
-		if (result.code === 'consent_required') {
-			toasts.showAction(
-				'Another oMLX is running. Keep it running to set up the local model.',
-				{ label: 'Keep running', run: async () => {
-					const consented = await retryLocalSetup('setup', 'keep');
-					if (!consented.ok) toasts.show("Couldn't set up the local model.", 'error');
-				} },
-			);
-		} else if (!result.ok) {
+		if (!result.ok) {
 			toasts.show(kind === 'settings' ? result.message ?? "Couldn't retry the local model download. Try again." : "Couldn't set up the local model.", 'error');
 		}
 	}
@@ -170,7 +162,7 @@
 		<div class="sheet-section-label">Model</div>
 		<div class="model-list">
 			{#if cloudModelsOff && !hasReadyGroup}<PickerLocalOnlyNote kind="empty" {projectCloudOff} onsetuplocal={() => showAddLocal = true} onprojectsettings={openProjectPolicy} />{/if}
-			{#if groups.length === 0 && !cloudModelsOff && !$localStatus}
+			{#if groups.length === 0 && !cloudModelsOff && !$localStatus && !$canAddLocalModel && !$canSetUpLocalModel}
 				<div class="model-list-empty">No available models</div>
 			{:else}
 				{#each groups as group (group.key)}
@@ -295,7 +287,7 @@
 					</section>
 				{/each}
 				{#if cloudModelsOff && hasReadyGroup}<PickerLocalOnlyNote kind="quiet" {projectCloudOff} inherited={inheritedLocalOnly} onsetuplocal={() => showAddLocal = true} onprojectsettings={openProjectPolicy} />{/if}
-				{#if !hasLocalSetupGroup && ($localStatus || $canAddLocalModel)}
+				{#if (!hasLocalSetupGroup && ($localStatus || $canAddLocalModel)) || $canSetUpLocalModel}
 					<section class="model-group" aria-label="Local">
 						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />
 						{#if $localStatus}
@@ -304,7 +296,8 @@
 								{:else}
 									<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />
 								{/if}
-							{:else}<button type="button" class="add-local-link" onclick={() => showAddLocal = true}>Add a local model</button>{/if}
+							{:else if $canAddLocalModel}<button type="button" class="add-local-link" onclick={() => showAddLocal = true}>Add a local model</button>
+							{:else}<button type="button" class="add-local-link" onclick={() => retryLocal('setup')}>Set up</button>{/if}
 					</section>
 				{/if}
 			{/if}

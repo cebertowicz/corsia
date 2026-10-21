@@ -30,24 +30,18 @@
 	import { WELCOME_ACCOUNT_LINE, WELCOME_TITLE } from '$lib/setupWelcome';
 	import { isSetupWide } from '$lib/stores/viewport';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
-	type LocalStartResult = 'started' | 'consent_required' | 'foreign_omlx_changed' | 'failed';
+	type LocalStartResult = 'started' | 'failed';
 	type LocalStartResponse = { result: LocalStartResult; reference?: string; fix?: string };
 	const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';
-	async function requestLocalStart(session: string | null, otherOmlx: 'stop' | 'keep' | null = null): Promise<LocalStartResponse> {
+	async function requestLocalStart(session: string | null): Promise<LocalStartResponse> {
 		const response = await fetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session}` } : {}) },
-			body: JSON.stringify({ other_omlx: otherOmlx, ...(session ? { onboarding: true } : {}) }),
+			body: JSON.stringify(session ? { onboarding: true } : {}),
 		});
 		const body = await response.json().catch(() => null);
-		const code = body?.detail?.code ?? body?.code;
 		const reference = typeof body?.detail?.ref === 'string' ? body.detail.ref : typeof body?.ref === 'string' ? body.ref : undefined;
 		const fix = typeof body?.detail?.fix === 'string' ? body.detail.fix : typeof body?.fix === 'string' ? body.fix : undefined;
-		if (response.status === 409 && code === 'consent_required') return { result: 'consent_required', reference };
-		if (response.status === 409 && code === 'foreign_omlx_changed') {
-			if (!fix) throw new Error('local start response omitted recovery');
-			return { result: 'foreign_omlx_changed', reference, fix };
-		}
 		if (response.ok && body?.ok !== false) return { result: 'started', reference };
 		if (!fix) throw new Error('local start response omitted recovery');
 		return { result: 'failed', reference, fix };
@@ -79,7 +73,7 @@
 	let folder = $state('~/CORSIA'), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
-	let localStartError = $state<'other' | 'other_omlx' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false), otherQuestion = $state(false);
+	let localStartError = $state<'other' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources });
 	const canConnect = shellInfo() !== null;
@@ -182,22 +176,7 @@
 			const current = get(token);
 			const { result, reference, fix } = await requestLocalStart(current);
 			localStartReference = reference ?? '';
-			if (result === 'consent_required') otherQuestion = true;
-			else if (result === 'foreign_omlx_changed') { localStartError = 'other_omlx'; startFix = fix; }
-			else if (result === 'failed') { localStartError = 'other'; startFix = fix; }
-			if (current) await refreshSources();
-		} catch { localStartError = 'other'; startFix = LOCAL_START_NETWORK_FAILURE; }
-		finally { localBusy = false; }
-	}
-	async function chooseOther(stop: boolean) {
-		localBusy = true; localStartError = ''; localStartReference = ''; startFix = undefined;
-		try {
-			const current = get(token);
-			const { result, reference, fix } = await requestLocalStart(current, stop ? 'stop' : 'keep');
-			localStartReference = reference ?? '';
-			if (result === 'foreign_omlx_changed') { localStartError = 'other_omlx'; startFix = fix; return; }
-			if (result !== 'started') { localStartError = 'other'; startFix = fix; return; }
-			otherQuestion = false;
+			if (result === 'failed') { localStartError = 'other'; startFix = fix; }
 			if (current) await refreshSources();
 		} catch { localStartError = 'other'; startFix = LOCAL_START_NETWORK_FAILURE; }
 		finally { localBusy = false; }
@@ -300,7 +279,6 @@
 	{:else if page === 'folder'}<SetupWorkFolder bind:folder bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} error={accountError} />
 	{:else if page === 'models'}
 		<SetupAiRows rows={aiRows} />
-		{#if otherQuestion}<div class="other-omlx"><h2>Stop other oMLX processes?</h2><p>CORSIA runs its own oMLX for the local model. Stopping other oMLX processes can free memory. Login items start again when you next sign in. Other processes stay stopped until you start them.</p><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(true)}>Stop other oMLX</Button><Button variant="chip" disabled={localBusy} onclick={() => void chooseOther(false)}>Keep them running</Button></div>{/if}
 		{#if sourceError}<p class="error-text" role="alert">{sourceError}</p><Button variant="chip" onclick={() => void refreshSources(true)}>Retry</Button>{/if}
 	{/if}
 </SetupShell>
@@ -308,8 +286,6 @@
 {#if openProvider}<ProviderSettingsModal provider={openProvider} initialTab="advanced" onClose={() => { openProvider = null; void refreshSources(); }} />{/if}
 
 <style>
-	.other-omlx { margin: var(--space-4) var(--space-4); color: var(--text-secondary); }
-	h2 { font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-primary); }
 	p { font-size: var(--text-footnote); line-height: var(--lh-normal); }
 	.error-text { margin: var(--space-2) var(--space-4); }
 </style>

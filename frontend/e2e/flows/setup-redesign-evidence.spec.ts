@@ -10,8 +10,8 @@ import { setFocusMode } from '../support/focusMode';
 import { localSetupFix } from '../support/localSetupFix';
 import { WELCOME_ACCOUNT_LINE, WELCOME_LINES, WELCOME_ROWS, WELCOME_TITLE } from '../../src/lib/setupWelcome';
 
-type LocalFixture = 'downloading' | 'paused' | 'starting' | 'ready' | 'stopped' | 'disk-space' | 'pick-failed' | 'connection' | 'disk-full' | 'memory' | 'other-ref' | 'other-no-ref' | 'setup-failed' | 'start-failed' | 'other-omlx';
-type Fixture = { name: string; element: string; screen?: 'checking' | 'error' | 'old-macos' | 'account' | 'invalid' | 'mismatch' | 'short-password' | 'folder' | 'protected' | 'unwritable' | 'creating' | 'create-failed' | 'account-exists' | 'welcome' | 'account-form' | 'back-to-form'; only?: 'narrow' | 'short'; cli?: string; local?: LocalFixture; finish?: 'no-model' | 'progress-save'; api?: 'ready' | 'failed' | 'menu' | 'address'; other?: boolean; classifier?: 'downloading' | 'failed'; requiredUsername?: string };
+type LocalFixture = 'downloading' | 'paused' | 'starting' | 'ready' | 'stopped' | 'disk-space' | 'pick-failed' | 'connection' | 'disk-full' | 'memory' | 'other-ref' | 'other-no-ref' | 'setup-failed' | 'start-failed';
+type Fixture = { name: string; element: string; screen?: 'checking' | 'error' | 'old-macos' | 'account' | 'invalid' | 'mismatch' | 'short-password' | 'folder' | 'protected' | 'unwritable' | 'creating' | 'create-failed' | 'account-exists' | 'welcome' | 'account-form' | 'back-to-form'; only?: 'narrow' | 'short'; cli?: string; local?: LocalFixture; finish?: 'no-model' | 'progress-save'; api?: 'ready' | 'failed' | 'menu' | 'address'; classifier?: 'downloading' | 'failed'; requiredUsername?: string };
 const fixtures: Fixture[] = [
 	{ name: 'checking', screen: 'checking', element: 'Checking this computer' },
 	{ name: 'status-error', screen: 'error', element: 'CORSIA couldn’t start; Retry and Save a report' },
@@ -36,8 +36,7 @@ const fixtures: Fixture[] = [
 	{ name: 'create-failed', screen: 'create-failed', element: 'Couldn’t create your account. Try again.' },
 	...['ready', 'signed-out', 'not-installed', 'installing', 'signing-in', 'install-connection', 'install-failed', 'signin-failed', 'unusable', 'shadow', 'limited', 'both-ready', 'codex-ready', 'claude-ready-codex-signed-out', 'bind-failed'].map((cli): Fixture => ({ name: `cli-${cli}`, cli, element: `Claude Code ${cli} row` })),
 	{ name: 'cli-ready-background-download', cli: 'ready', local: 'downloading', element: 'Claude Code Ready; Local model Downloading 42%' },
-	...['downloading', 'paused', 'starting', 'ready', 'stopped', 'disk-space', 'pick-failed', 'connection', 'disk-full', 'memory', 'other-ref', 'other-no-ref', 'setup-failed', 'start-failed', 'other-omlx'].map((local): Fixture => ({ name: `local-${local}`, local, element: `Local model ${local} row` })),
-	{ name: 'other-omlx', other: true, element: 'Stop other oMLX processes?; Stop other oMLX; Keep them running' },
+	...['downloading', 'paused', 'starting', 'ready', 'stopped', 'disk-space', 'pick-failed', 'connection', 'disk-full', 'memory', 'other-ref', 'other-no-ref', 'setup-failed', 'start-failed'].map((local): Fixture => ({ name: `local-${local}`, local, element: `Local model ${local} row` })),
 	{ name: 'finish-no-model', cli: 'ready', finish: 'no-model', element: 'CORSIA couldn’t find a working model; Retry' },
 	{ name: 'finish-progress-save', cli: 'ready', finish: 'progress-save', element: 'CORSIA couldn’t save setup progress; Retry' },
 	{ name: 'api-add-menu', api: 'menu', element: 'Add provider: Cloud providers before other ways to connect' },
@@ -66,7 +65,7 @@ function localFlight(state: LocalFixture | undefined) {
 	if (state === 'other-no-ref') return { state: 'failed', cause: 'other', fix: localSetupFix('other') };
 	if (state === 'setup-failed') return { state: 'setup_failed', cause: 'other', fix: localSetupFix('other') };
 	if (state === 'start-failed') return { state: 'start_failed', cause: 'connection', fix: localSetupFix('connection') };
-	return { state: state === 'other-omlx' ? 'stopped' : state ?? 'stopped' };
+	return { state: state ?? 'stopped' };
 }
 function localSource(state?: LocalFixture) {
 	const flight = localFlight(state);
@@ -120,7 +119,7 @@ async function serve(page: Page, fixture: Fixture) {
 		else if (path === '/api/setup/status') {
 			statusReads += 1;
 			if (fixture.screen === 'error') { await route.fulfill({ status: 500, json: {} }); return; }
-			json = { apple_silicon: true, macos_supported: fixture.screen !== 'old-macos', local_eligible: fixture.local !== 'memory', work_folder: '~/CORSIA', free_disk_gb: fixture.local === 'disk-space' ? 12 : 500, existing_omlx: fixture.other, required_username: fixture.requiredUsername, classifier: fixture.classifier === 'downloading' ? { state: 'downloading', bytes_done: 60, bytes_total: 100 } : fixture.classifier === 'failed' ? { state: 'failed', reason: 'Couldn’t download' } : undefined };
+			json = { apple_silicon: true, macos_supported: fixture.screen !== 'old-macos', local_eligible: fixture.local !== 'memory', work_folder: '~/CORSIA', free_disk_gb: fixture.local === 'disk-space' ? 12 : 500, required_username: fixture.requiredUsername, classifier: fixture.classifier === 'downloading' ? { state: 'downloading', bytes_done: 60, bytes_total: 100 } : fixture.classifier === 'failed' ? { state: 'failed', reason: 'Couldn’t download' } : undefined };
 			if (fixture.screen === 'checking' && statusReads > 1) {
 				const release = new Promise<void>((resolve) => { releasePending = resolve; });
 				pendingSettled = release.then(() => route.fulfill({ json }));
@@ -130,8 +129,6 @@ async function serve(page: Page, fixture: Fixture) {
 		} else if (path === '/api/setup/local-model') json = { state: fixture.local === 'pick-failed' ? 'failed' : 'picked', model: fixture.local === 'pick-failed' ? null : { name: 'Qwen 3.8', repository: 'example/model', download_size_bytes: 30000000000, download_size_gb: 30, context_window: 65536 }, message: null, ...(fixture.local === 'pick-failed' ? { cause: 'memory' } : {}) };
 		else if (path === '/api/setup/local-download') {
 			if (method === 'GET') json = { ...flight, model: 'Qwen 3.8', percent: 42, eta_seconds: 720 };
-			else if (fixture.local === 'other-omlx') { await route.fulfill({ status: 409, json: { code: 'foreign_omlx_changed', fix: localSetupFix('other_omlx') } }); return; }
-			else if (fixture.other) { await route.fulfill({ status: 409, json: { code: 'consent_required' } }); return; }
 			else json = { ok: true };
 		}
 		else if (path === '/api/setup/classifier') json = fixture.classifier === 'downloading' ? { state: 'downloading', bytes_done: 60, bytes_total: 100 } : fixture.classifier === 'failed' ? { state: 'failed', reason: 'Couldn’t download' } : { state: 'ready' };
@@ -250,7 +247,6 @@ async function navigate(page: Page, fixture: Fixture) {
 		await expect(page.getByRole('button', { name: 'Start using CORSIA', exact: true })).toBeDisabled();
 		await expect(page.getByRole('region', { name: 'Claude Code' }).getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
 	}
-	if (fixture.local === 'other-omlx') await expect(page.getByRole('region', { name: 'Local model' }).getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
 	if (fixture.api) {
 		await page.getByRole('button', { name: 'Add provider', exact: true }).click();
 		if (fixture.api === 'address') await page.getByRole('button', { name: /^Other provider by address/ }).click();
@@ -313,7 +309,6 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.classifier === 'failed') { await expect(text('Finishing setup')).toBeVisible(); await expect(page.getByRole('button', { name: /^Retry: Finishing setup/ })).toBeVisible(); }
 	if (fixture.screen === 'account') { await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible(); if (fixture.local === 'connection') await expect(text(localSetupFix('connection'))).toBeVisible(); return; }
 	if (fixture.screen === 'folder') { await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible(); return; }
-	if (fixture.other) { await expect(page.getByRole('heading', { name: 'Stop other oMLX processes?' })).toBeVisible(); await expect(page.getByRole('button', { name: 'Stop other oMLX', exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'Keep them running', exact: true })).toBeVisible(); return; }
 	if (fixture.api === 'menu') { await expect(page.getByText('Cloud', { exact: true })).toBeVisible(); await expect(page.getByText('Other ways to connect', { exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: /^oMLX on another Mac/ })).toBeVisible(); return; }
 	if (fixture.api === 'address') { await expect(page.getByRole('dialog').getByText('Other provider by address', { exact: true })).toBeVisible(); await expect(page.getByPlaceholder('https://host.example.com/compatible-mode/v1', { exact: true })).toBeVisible(); await expect(page.getByPlaceholder('(leave empty when the web address needs no key)', { exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'More options', exact: true })).toBeVisible(); await expect(page.getByText('Connection type', { exact: true })).toHaveCount(0); return; }
 	if (fixture.api === 'ready') { await expect(page.getByRole('region', { name: 'API provider' }).getByText('Anthropic · passed a test call')).toBeVisible(); return; }
@@ -342,7 +337,6 @@ async function assertState(page: Page, fixture: Fixture) {
 			: fixture.local === 'other-no-ref' ? localSetupFix('other')
 			: fixture.local === 'setup-failed' ? localSetupFix('other')
 			: fixture.local === 'start-failed' ? localSetupFix('connection')
-			: fixture.local === 'other-omlx' ? localSetupFix('other_omlx')
 			: 'Free and private. Runs on this computer, even offline. 30 GB download.';
 		await expect(row).toContainText(expected);
 		if (fixture.local === 'other-no-ref' || fixture.local === 'start-failed') await expect(row.getByText(/Reference:/)).toHaveCount(0);

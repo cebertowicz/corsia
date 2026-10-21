@@ -110,6 +110,9 @@ async def update_daemon_model_settings(
         status = result.get("status", 502)
         raise HTTPException(status if status < 500 else 502, detail=result.get("message"))
     if "pinned" in body:
+        from llm.local_keep_loaded import forget_failure
+
+        forget_failure(server_id, model_id)
         action = "pin" if body["pinned"] else "unpin"
         emit_product_event(
             "model", action,
