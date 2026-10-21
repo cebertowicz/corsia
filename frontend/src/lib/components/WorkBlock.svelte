@@ -65,11 +65,13 @@
 	let dividerAttached = $state(true);
 	let lastDividerContainerWidth: number | undefined;
 	let lastToggleWidth: number | undefined;
-	const dividerText = $derived(entry.divider?.truncated ?? null);
+	const dividerVariant = $derived(entry.divider?.truncated ?? null);
 
+	// A wrapped divider starts its own flex line, left of the chip's right edge. Compare across, not
+	// down: the sticky chip can slide vertically at the pinned edge but never sideways.
 	function dividerWrapped(): boolean {
 		if (!visitDivider || !toggleButton) return false;
-		return visitDivider.offsetTop >= toggleButton.offsetTop + toggleButton.offsetHeight;
+		return visitDivider.offsetLeft < toggleButton.offsetLeft + toggleButton.offsetWidth;
 	}
 
 	async function updateDividerAttachment(): Promise<void> {
@@ -104,7 +106,7 @@
 	});
 
 	$effect(() => {
-		if (expanded || dividerText === null) {
+		if (expanded || dividerVariant === null) {
 			dividerAttached = true;
 			return;
 		}

@@ -139,7 +139,7 @@ describe('WorkBlock new marker (F2)', () => {
 		expect(toggle().getAttribute('aria-label')).toMatch(/^Expand .*, new since your last visit$/);
 	});
 
-	it('makes a wrapped collapsed divider standalone, then reattaches it when the chip fits', async () => {
+	it('makes a wrapped collapsed divider standalone, even with the pinned chip slid down, then reattaches it when the chip fits', async () => {
 		const entries = markNew(present([work('a', 1, '10:01:00'), said('reply', 5, '10:10:00')]))
 			.map((entry) => entry.kind === 'fold' ? { ...entry, divider: { truncated: false, first_seq: 1 } } : entry);
 		render(entries);
@@ -147,16 +147,17 @@ describe('WorkBlock new marker (F2)', () => {
 		const block = host.querySelector<HTMLElement>('[data-work-block]')!;
 		const divider = host.querySelector<HTMLElement>('[data-visit-divider]')!;
 		setGeometry(block, { clientWidth: 393 });
-		setGeometry(toggle(), { offsetTop: 0, offsetHeight: 32, offsetWidth: 393 });
-		setGeometry(divider, { offsetTop: 32 });
+		// Pinned at the sticky edge, the chip has slid down over the wrapped line.
+		setGeometry(toggle(), { offsetTop: 28, offsetLeft: 0, offsetHeight: 32, offsetWidth: 393 });
+		setGeometry(divider, { offsetTop: 32, offsetLeft: 0 });
 		ResizeObserverStub.trigger();
 		await tick();
 		flushSync();
 		await tick();
 		expect(divider.classList.contains('attached')).toBe(false);
 
-		setGeometry(toggle(), { offsetTop: 0, offsetHeight: 32, offsetWidth: 92 });
-		setGeometry(divider, { offsetTop: 0 });
+		setGeometry(toggle(), { offsetTop: 0, offsetLeft: 0, offsetHeight: 32, offsetWidth: 92 });
+		setGeometry(divider, { offsetTop: 0, offsetLeft: 100 });
 		ResizeObserverStub.trigger();
 		await tick();
 		flushSync();
