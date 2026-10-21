@@ -115,6 +115,7 @@ fn command_line_mode(args: &[OsString]) -> Result<Option<CommandLineMode>, Strin
 enum ServiceStartup {
     Ready { url: String },
     RequiresApproval,
+    DiskImage,
     /// An existing install this app can adopt: the window asks the person first.
     AdoptionOffered { workspace: String },
     /// An earlier adoption's undo could not finish; the window offers the recovery the backend chose.
@@ -458,6 +459,9 @@ fn start_service(
     app: &tauri::AppHandle,
     service: &AppServiceState,
 ) -> Result<ServiceStartup, String> {
+    if service_management::is_transient_bundle_path(&std::env::current_exe().map_err(|error| format!("could not resolve CORSIA executable: {error}"))?) {
+        return Ok(ServiceStartup::DiskImage);
+    }
     let app_dir = default_app_dir(app)?;
     // The undo finishes before anything else, then launch goes on as if
     // nothing had been tried: the restored install is offered for adoption again.

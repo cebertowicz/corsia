@@ -501,6 +501,10 @@
 					showExistingInstall(startup.workspace);
 				} else if (startup.state === 'adoption_failed') {
 					await showAdoptionFailure(startup.failure);
+				} else if (startup.state === 'disk_image') {
+					status.textContent = 'Move CORSIA to Applications';
+					line.textContent = 'Drag CORSIA into your Applications folder, then open it from there. It can’t update itself from the disk image.';
+					line.hidden = false; spinner.hidden = true; retry.textContent = 'Check again'; retryAction = start; actions.hidden = false;
 				} else {
 					await showBackgroundApproval();
 				}

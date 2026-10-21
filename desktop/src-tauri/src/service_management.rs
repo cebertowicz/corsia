@@ -283,6 +283,11 @@ fn current_service(
     Ok(current)
 }
 
+pub fn is_transient_bundle_path(executable: &Path) -> bool {
+    let parts = executable.components().map(|part| part.as_os_str().to_string_lossy()).collect::<Vec<_>>();
+    parts.get(1).is_some_and(|part| part == "Volumes") || parts.iter().any(|part| part == "AppTranslocation")
+}
+
 fn bundle_root(executable: &Path) -> Result<PathBuf, String> {
     executable
         .parent()
@@ -470,6 +475,9 @@ pub fn ensure_registered_from_app(
 ) -> Result<ServiceStatus, String> {
     let executable = env::current_exe()
         .map_err(|error| format!("could not resolve CORSIA executable: {error}"))?;
+    if is_transient_bundle_path(&executable) {
+        return Err("Move CORSIA to Applications before starting it.".into());
+    }
     ensure_service_registered(
         &NativeServiceManager,
         &SystemLaunchctl,
@@ -522,6 +530,13 @@ pub fn command_from_environment() -> Option<i32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn transient_bundle_paths_are_never_registered() {
+        assert!(super::is_transient_bundle_path(std::path::Path::new("/Volumes/CORSIA/CORSIA.app/Contents/MacOS/CORSIA")));
+        assert!(super::is_transient_bundle_path(std::path::Path::new("/private/var/folders/x/AppTranslocation/CORSIA.app/Contents/MacOS/CORSIA")));
+        assert!(!super::is_transient_bundle_path(std::path::Path::new("/Applications/CORSIA.app/Contents/MacOS/CORSIA")));
+    }
+
     use super::*;
     use std::{cell::Cell, fs};
 
