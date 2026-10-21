@@ -1,4 +1,4 @@
-"""One disposable Native checkpoint invocation over a warm or cold prefix."""
+"""One disposable Native fork invocation over a warm or cold prefix."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any
 from history.types import HistoryBoundary
 from subagents.provider_context_limits import is_provider_context_limit
 
-from core.checkpoint_native_tools import (
+from core.fork_native_tools import (
     await_or_cancel as _await_or_cancel,
     input_fits_off_loop as _input_fits,
     input_room,
@@ -26,9 +26,9 @@ from core.fork_types import (
     ProviderForkRequest,
     ProviderForkResult,
 )
-from core.checkpoint_types import (
-    CHECKPOINT_CONTEXT_TRUNCATED,
-    CHECKPOINT_TOOL_ROUND_TRIP_TOKENS,
+from core.fork_types import (
+    FORK_CONTEXT_TRUNCATED,
+    FORK_TOOL_ROUND_TRIP_TOKENS,
     ColdInputCallback,
 )
 
@@ -128,10 +128,10 @@ def _fit_cold_input(
     request: ProviderForkRequest, tools: list[dict[str, Any]],
 ) -> Any:
     """Count the tool surface and fit the cold input; blocking, run off the loop."""
-    from core.checkpoint_cold_count import cold_input_tokens
-    from core.checkpoint_render import fit_cold_checkpoint_input
+    from core.fork_cold_count import cold_input_tokens
+    from core.fork_render import fit_cold_fork_input
 
-    return fit_cold_checkpoint_input(
+    return fit_cold_fork_input(
         request,
         provider_surface_tokens=cold_input_tokens(tools, request.target),
         round_trip_tokens=request.max_output_tokens,
@@ -183,7 +183,7 @@ async def warm_input_fits(
     input before the call that writes the narrative.
     """
     messages, tools, _first_included_seq = await _messages_and_tools(request, None, kind)
-    return await _input_fits(request, messages, tools, CHECKPOINT_TOOL_ROUND_TRIP_TOKENS)
+    return await _input_fits(request, messages, tools, FORK_TOOL_ROUND_TRIP_TOKENS)
 
 
 async def _complete(request, messages, tools, model, provider, cancel_event):
@@ -220,11 +220,11 @@ async def _truncated_result(
     """
     if bodies:
         return ProviderForkResult(
-            "\n".join(bodies), {"calls": usage_calls}, CHECKPOINT_CONTEXT_TRUNCATED,
+            "\n".join(bodies), {"calls": usage_calls}, FORK_CONTEXT_TRUNCATED,
         )
     room = await asyncio.to_thread(input_room, request, messages, tools)
     raise ProviderForkRejected(
-        f"{CHECKPOINT_CONTEXT_TRUNCATED}: path={path} iteration={iteration} "
+        f"{FORK_CONTEXT_TRUNCATED}: path={path} iteration={iteration} "
         f"counted={room.counted} bound={room.bound} unusable={room.unusable} "
         f"finish_reason={getattr(response, 'finish_reason', None)} "
         f"error_kind={getattr(response, 'error_kind', None)}"
@@ -254,7 +254,7 @@ async def invoke_fork(
     kind: ForkKind,
     on_cold_input: ColdInputCallback | None = None,
 ) -> ProviderForkResult:
-    """Run a disposable fork of either kind through the Native tool loop."""
+    """Run one disposable fork through the Native tool loop."""
     if request.target.harness != "native":
         raise TypeError("Native adapter requires a Native target")
     agent = await _get_agent()
@@ -279,7 +279,7 @@ async def invoke_fork(
         for _iteration in range(step_limit):
             if cancel_event.is_set():
                 raise asyncio.CancelledError
-            first_reserve = CHECKPOINT_TOOL_ROUND_TRIP_TOKENS if _iteration == 0 else 0
+            first_reserve = FORK_TOOL_ROUND_TRIP_TOKENS if _iteration == 0 else 0
             if not await _input_fits(request, messages, tools, first_reserve):
                 if _iteration == 0:
                     raise _initial_input_refusal(request, kind)

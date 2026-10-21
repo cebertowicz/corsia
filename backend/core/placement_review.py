@@ -254,8 +254,10 @@ async def attach_review(request):
         "placement.review_offered thread={} checkpoint={}",
         request.thread_id, request.fork_id,
     )
+    reviewed_instruction = request.instruction + "\n\n" + block
     return replace(
         request,
-        instruction=request.instruction + "\n\n" + block,
+        instruction=reviewed_instruction,
+        instruction_candidates=(reviewed_instruction, request.instruction),
         instruction_without_review=request.instruction,
     )

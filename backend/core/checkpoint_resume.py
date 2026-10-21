@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from loguru import logger
 
-from core.checkpoint_fit import (
+from core.fork_fit import (
     BoundaryDecision, ColdFoldInputTooLarge, ProviderPayload, evaluate_boundary,
 )
 from core.checkpoint_wait import CheckpointWaitScope, await_checkpoint_or_stop

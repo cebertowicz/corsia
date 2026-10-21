@@ -13,9 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
-from core import checkpoint_cc_commands
+from core import fork_cc_commands
 
-from core.fork_types import ProviderForkRequest
+from core.checkpoint_types import CheckpointProviderForkRequest
 from history.types import HistoryBoundary
 from llm.resolution import ExecutionTarget
 from vendor_account_fixtures import default_receipt, seed_turn_on_default
@@ -49,7 +49,7 @@ def vendor_thread(isolated_db):
 
 
 def _request(target, source, *, binary: str):
-    return ProviderForkRequest(
+    return CheckpointProviderForkRequest(
         fork_id="checkpoint-1",
         thread_id="thread-1",
         target=target,
@@ -64,7 +64,7 @@ def _request(target, source, *, binary: str):
 
 def test_cc_tool_boundary_prefix_stops_before_the_current_step() -> None:
     """The warm snapshot excludes the assistant record that owns the live tool."""
-    from core import checkpoint_cc_boundary as boundary
+    from core import fork_cc_boundary as boundary
 
     previous_result = {
         "type": "user",
@@ -123,7 +123,7 @@ def _cc_frame_uuid(text: str, row_id: str | None) -> str:
 
 def test_cc_boundary_uses_exact_row_identity_not_duplicate_text() -> None:
     """Duplicate display text cannot choose a different canonical provider row."""
-    from core import checkpoint_cc_boundary as boundary
+    from core import fork_cc_boundary as boundary
 
     duplicate = _cc_written_user(_cc_frame_uuid("same visible text", "other-row"), "same visible text")
     through = _cc_written_user(_cc_frame_uuid("same visible text", "canonical-row"), "same visible text")
@@ -161,8 +161,8 @@ def test_cc_boundary_uses_exact_row_identity_not_duplicate_text() -> None:
 def test_cc_user_boundary_without_corsia_uuid_names_the_missing_row() -> None:
     """A frame sent without the anchor row id gets a Claude-assigned uuid, so
     the user boundary cannot be proved and the refusal says which check failed."""
-    from core.checkpoint_cc_boundary import ClaudeTranscriptBoundary
-    from core.checkpoint_cc_boundary_records import tool_prefix_from_stream
+    from core.fork_cc_boundary import ClaudeTranscriptBoundary
+    from core.fork_cc_boundary_records import tool_prefix_from_stream
 
     current = {
         "type": "assistant",
@@ -184,7 +184,7 @@ def test_cc_user_boundary_without_corsia_uuid_names_the_missing_row() -> None:
 
 def test_cc_tool_boundary_uses_call_identity_not_projected_result_text() -> None:
     """Media labels and invocation markers do not change tool-result identity."""
-    from core import checkpoint_cc_boundary as boundary
+    from core import fork_cc_boundary as boundary
 
     provider_group = {
         "type": "assistant",
@@ -244,7 +244,7 @@ def test_cc_tool_boundary_uses_call_identity_not_projected_result_text() -> None
 
 def test_cc_tool_boundary_prefix_stops_before_all_records_of_current_message() -> None:
     """One Claude assistant step may span thinking, text, and tool-use records."""
-    from core import checkpoint_cc_boundary as boundary
+    from core import fork_cc_boundary as boundary
 
     previous_result = {
         "type": "user",
@@ -317,7 +317,7 @@ def test_cc_tool_boundary_path_streams_without_reading_the_full_transcript(
     tmp_path, monkeypatch,
 ) -> None:
     """The live-lock boundary proof must not materialize a session transcript."""
-    from core import checkpoint_cc_boundary as boundary
+    from core import fork_cc_boundary as boundary
 
     older_records = [
         {"type": "user", "message": {"content": f"older result {index}"}}
@@ -388,7 +388,7 @@ def test_cc_tool_boundary_prefix_proves_every_durable_boundary_role(
     previous, durable_boundary,
 ) -> None:
     """The frozen prefix ends at the exact user, assistant, or tool through row."""
-    from core import checkpoint_cc_boundary as boundary
+    from core import fork_cc_boundary as boundary
 
     current = {
         "type": "assistant",
@@ -419,7 +419,7 @@ def test_cc_tool_boundary_prefix_proves_every_durable_boundary_role(
 @pytest.mark.asyncio
 async def test_cc_durable_capture_survives_process_eviction(tmp_path, monkeypatch):
     """A missing in-memory CC process must not turn a resumable transcript cold."""
-    from core import checkpoint_cc_fork as cc
+    from core import fork_cc as cc
     from subagents.cc_invocation import ClaudeInvocation
 
     transcript = tmp_path / "source.jsonl"
@@ -456,7 +456,7 @@ async def test_cc_durable_capture_survives_process_eviction(tmp_path, monkeypatc
 
 @pytest.mark.asyncio
 async def test_cc_capture_refuses_a_short_proven_prefix(tmp_path, monkeypatch):
-    from core import checkpoint_cc_fork as cc
+    from core import fork_cc as cc
 
     transcript = tmp_path / "source.jsonl"
     transcript.write_bytes(b"proven")
@@ -488,7 +488,7 @@ async def test_cc_capture_refuses_a_short_proven_prefix(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_cc_registered_capture_fails_closed_after_real_cleanup(tmp_path, monkeypatch):
     """A cleaned registered process cannot warm with only part of its launch."""
-    from core import checkpoint_cc_fork as cc
+    from core import fork_cc as cc
     from subagents import cc_destination
     from subagents.cc_invocation import ClaudeInvocation
     from subagents.cc_runtime_quiescence import cleanup_ephemeral_live
@@ -543,7 +543,7 @@ async def test_cc_warm_capture_uses_the_already_locked_live_handle(
     tmp_path, monkeypatch,
 ):
     """Pressure capture must not reacquire CC's non-reentrant live lock."""
-    from core import checkpoint_cc_fork as cc
+    from core import fork_cc as cc
     from subagents.cc_invocation import ClaudeInvocation
     from subagents.cc_runtime_state import _LIVE
 
@@ -599,7 +599,7 @@ async def test_cc_initial_boundary_capture_does_not_reacquire_the_transition_loc
     """The initial-boundary capture runs inside the CC feed, which already holds
     ``_LIVE.lock(thread_id)``. Re-acquiring that non-reentrant lock deadlocked every
     over-window Claude Code thread in production on 2026-09-16."""
-    from core import checkpoint_cc_boundary as cc_boundary
+    from core import fork_cc_boundary as cc_boundary
     from subagents.cc_runtime_state import _LIVE
 
     live = SimpleNamespace(session=None, claude_dir=None, tool_step_ids={})
@@ -628,8 +628,8 @@ async def test_cc_tool_boundary_capture_freezes_matching_row_and_live_launch(
     tmp_path, monkeypatch,
 ):
     """The idle CC lock captures only the durable prefix and exact launch shape."""
-    from core import checkpoint_cc_boundary as cc_boundary
-    from core import checkpoint_cc_fork as cc
+    from core import fork_cc_boundary as cc_boundary
+    from core import fork_cc as cc
     from subagents.cc_invocation import ClaudeInvocation
     from subagents.cc_runtime_state import _LIVE
 
@@ -730,7 +730,7 @@ async def test_cc_tool_boundary_capture_freezes_matching_row_and_live_launch(
         snapshot_id, snapshot = cc._snapshot(source)
         try:
             assert snapshot.read_bytes() == transcript.read_bytes()[:source.transcript_bytes]
-            command = checkpoint_cc_commands.warm_command(
+            command = fork_cc_commands.warm_command(
                 source,
                 _request(_target("claude-code"), source, binary="claude"),
                 CHECKPOINT_KIND, snapshot_id,
@@ -764,7 +764,7 @@ async def test_cc_preserves_launch_and_accepts_error_envelope_body(
     tmp_path, monkeypatch, vendor_thread
 ):
     """CC keeps cwd/model/effort/tools and returns a body even on is_error."""
-    from core import checkpoint_cc_fork as cc
+    from core import fork_cc as cc
     from subagents.cc_invocation import ClaudeInvocation
 
     transcript = tmp_path / "source.jsonl"
@@ -1331,7 +1331,7 @@ def test_codex_tool_boundary_prefix_fails_closed(
 @pytest.mark.asyncio
 async def test_codex_durable_capture_and_exact_rollout_resume(tmp_path, monkeypatch, vendor_thread):
     """Codex resumes a frozen durable rollout after its process was evicted."""
-    from core import checkpoint_codex_fork as codex
+    from core import fork_codex as codex
 
     home = tmp_path / "codex-home"
     monkeypatch.setattr("llm.codex_rollout_files.default_codex_sessions_root", lambda: home / "sessions")
@@ -1357,7 +1357,7 @@ async def test_codex_durable_capture_and_exact_rollout_resume(tmp_path, monkeypa
         "",
     )))
     (home / "config.toml").write_text('model_verbosity = "low"\n')
-    from core.checkpoint_codex_root import RegisteredRollout
+    from core.fork_codex_root import RegisteredRollout
 
     receipt = seed_turn_on_default("thread-1", _target("codex").catalog_id)
     monkeypatch.setattr(
@@ -1426,7 +1426,7 @@ async def test_codex_warm_capture_yields_during_rollout_discovery(
     tmp_path, monkeypatch,
 ) -> None:
     """Rollout registration and path discovery stay off the event loop."""
-    from core import checkpoint_codex_fork as codex
+    from core import fork_codex as codex
 
     rollout = tmp_path / "sessions" / "2026" / "09" / "04" / "rollout.jsonl"
     rollout.parent.mkdir(parents=True)
@@ -1441,7 +1441,7 @@ async def test_codex_warm_capture_yields_during_rollout_discovery(
     def blocked_registration(_thread_id):
         started.set()
         assert release.wait(timeout=1)
-        from core.checkpoint_codex_root import RegisteredRollout
+        from core.fork_codex_root import RegisteredRollout
 
         return RegisteredRollout(provider_id, rollout, "high", None)
 
@@ -1471,7 +1471,7 @@ async def test_codex_cold_writer_thread_arms_managed_tool_receipts(tmp_path, ven
     Disposability comes from the writer's temporary CODEX_HOME, not from
     ``ephemeral`` (#1934).
     """
-    from core import checkpoint_codex_fork as codex
+    from core import fork_codex as codex
 
     request = replace(
         _request(_target("codex"), None, binary="codex"),
@@ -1481,14 +1481,14 @@ async def test_codex_cold_writer_thread_arms_managed_tool_receipts(tmp_path, ven
         },),
     )
     isolated_home = tmp_path / "isolated"
-    from core.checkpoint_account import admit_checkpoint
+    from core.fork_account import admit_fork
     from connections.account_operation import prepare_operation_home
 
-    request = prepare_operation_home(admit_checkpoint(request), isolated_home, kind='checkpoint')
-    session = codex._checkpoint_session(
+    request = prepare_operation_home(admit_fork(request), isolated_home, kind='checkpoint')
+    session = codex._fork_session(
         request, None, source_home=tmp_path / "source", isolated_home=isolated_home,
         cwd=str(tmp_path), on_event=None, on_exit=None,
-        checkpoint_tool_result_fits=lambda *_args: True,
+        fork_tool_result_fits=lambda *_args: True,
         kind=CHECKPOINT_KIND,
     )
     rollout = isolated_home / "sessions" / "rollout-writer.jsonl"
@@ -1512,7 +1512,7 @@ async def test_codex_cold_checkpoint_starts_callback_session_in_disposable_home(
     tmp_path, monkeypatch, vendor_thread
 ):
     """Cold checkpoint uses the callback-capable session in a temporary home."""
-    from core import checkpoint_codex_fork as codex
+    from core import fork_codex as codex
 
     observed = {}
 
@@ -1540,7 +1540,7 @@ async def test_codex_cold_checkpoint_starts_callback_session_in_disposable_home(
     assert result.raw_body == "cold checkpoint"
     assert observed["codex_thread_id"] is None
     assert observed["ephemeral"] is False
-    assert Path(observed["codex_home"]).name.startswith("corsia-codex-checkpoint-")
+    assert Path(observed["codex_home"]).name.startswith("corsia-codex-fork-")
     assert not Path(observed["codex_home"]).exists()  # Removed with its rollout.
     assert "cold history" in observed["task"]
 
@@ -1550,7 +1550,7 @@ async def test_codex_checkpoint_uses_callback_capable_app_server(
     tmp_path, monkeypatch, vendor_thread,
 ):
     """Checkpoint tools must execute through the ordinary Codex callback bridge."""
-    from core import checkpoint_codex_fork as codex
+    from core import fork_codex as codex
     from infra.provider_usage import TokenUsage
 
     home = tmp_path / "home"
@@ -1628,7 +1628,7 @@ async def test_codex_checkpoint_uses_callback_capable_app_server(
         "effective_input_tokens": 500,
         "total_tokens": 540,
     }
-    assert observed["checkpoint_id"] == "checkpoint-1"
+    assert observed["fork_id"] == "checkpoint-1"
     assert observed["corsia_thread_id"] == "thread-1"
     assert observed["codex_thread_id"] == provider_id
     assert observed["source_codex_home"] == str(home)
@@ -1643,17 +1643,17 @@ async def test_checkpoint_session_runs_dynamic_tool_without_foreground_step(
     """The real checkpoint session keeps tool calls outside foreground lineage."""
     from unittest.mock import AsyncMock
 
-    from core import checkpoint_codex_fork as codex
+    from core import fork_codex as codex
 
     request = replace(
         _request(_target("codex"), None, binary="codex"),
         tool_registry=object(), dynamic_tool_specs=(),
     )
-    from core.checkpoint_account import admit_checkpoint
+    from core.fork_account import admit_fork
     from connections.account_operation import prepare_operation_home
 
-    request = prepare_operation_home(admit_checkpoint(request), tmp_path / "isolated", kind='checkpoint')
-    session = codex._checkpoint_session(
+    request = prepare_operation_home(admit_fork(request), tmp_path / "isolated", kind='checkpoint')
+    session = codex._fork_session(
         request, None,
         source_home=tmp_path / "source", isolated_home=tmp_path / "isolated",
         cwd=str(tmp_path), on_event=None, on_exit=None,
@@ -1671,7 +1671,7 @@ async def test_checkpoint_session_runs_dynamic_tool_without_foreground_step(
     call = execute.await_args
     assert call is not None
     assert call.kwargs["assistant_step_id"] is None
-    assert call.kwargs["checkpoint_id"] == "checkpoint-1"
+    assert call.kwargs["fork_id"] == "checkpoint-1"
 
 
 @pytest.mark.asyncio
@@ -1686,7 +1686,7 @@ async def test_checkpoint_cancel_terminates_exact_provider_handle(
     # loaded runner and cancelled before any handle was created.
     started = asyncio.Event()
     if adapter == "cc":
-        from core import checkpoint_cc_fork as module
+        from core import fork_cc as module
         from subagents.cc_invocation import ClaudeInvocation
 
         transcript = tmp_path / "source.jsonl"
@@ -1719,7 +1719,7 @@ async def test_checkpoint_cancel_terminates_exact_provider_handle(
 
         monkeypatch.setattr(module, "_spawn_process", _spawn)
     else:
-        from core import checkpoint_codex_fork as module
+        from core import fork_codex as module
 
         home = tmp_path / "home"
         monkeypatch.setattr("llm.codex_rollout_files.default_codex_sessions_root", lambda: home / "sessions")

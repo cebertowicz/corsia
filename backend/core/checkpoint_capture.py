@@ -7,11 +7,12 @@ from dataclasses import replace
 
 from core.checkpoint_render import carry_partial_narrative, usable_result
 from core.fork_types import (
+    FORK_CONTEXT_TRUNCATED,
     ProviderForkRejected,
     ProviderForkResult,
 )
 from core.checkpoint_types import (
-    CHECKPOINT_CONTEXT_TRUNCATED,
+
     CheckpointRecord,
 )
 from infra import checkpoint_queries
@@ -62,7 +63,7 @@ async def capture_and_install(checkpoint_id: str, result: ProviderForkResult) ->
         return await terminal_failure(
             checkpoint_id, ProviderForkRejected("checkpoint provider produced no content"),
         )
-    truncated = result.diagnostic == CHECKPOINT_CONTEXT_TRUNCATED
+    truncated = result.diagnostic == FORK_CONTEXT_TRUNCATED
     if truncated:
         current = await read_checkpoint(checkpoint_id)
         if current.previous_generation_id:

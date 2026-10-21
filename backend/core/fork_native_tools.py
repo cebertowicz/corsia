@@ -1,4 +1,4 @@
-"""Private tool-loop mechanics for one disposable Native checkpoint."""
+"""Private tool-loop mechanics for one disposable Native fork."""
 
 from __future__ import annotations
 
@@ -15,15 +15,9 @@ from tools.recorded_call import (
     enrich_completed_failure,
 )
 
-#: The only tool a Native checkpoint call may execute (#2350). A cold fork
-#: also uses this to decide what it advertises at all (#2116): offering a
-#: tool it can only refuse invites a round trip that bills output tokens for
-#: a refusal instead of narrative text.
-CHECKPOINT_TOOL_NAME = "continuity_edit"
-
 
 async def await_or_cancel(awaitable, cancel_event: asyncio.Event):
-    """Await one provider operation while honoring the checkpoint stop signal."""
+    """Await one provider operation while honoring the fork stop signal."""
     operation = asyncio.create_task(awaitable)
     stopped = asyncio.create_task(cancel_event.wait())
     try:
@@ -75,7 +69,7 @@ def input_room(request, messages, tools, reserve: int = 0) -> InputRoom:
     if source is None:
         # Cold must count exactly what its admission counted, or an admitted
         # fold is refused (or overflows) inside the loop that runs it.
-        from core.checkpoint_cold_count import cold_input_tokens
+        from core.fork_cold_count import cold_input_tokens
 
         counted = cold_input_tokens(messages, request.target) + cold_input_tokens(
             tools, request.target,
@@ -131,11 +125,10 @@ async def run_tool_calls(
     *,
     kind: ForkKind,
 ) -> bool:
-    """Run a Native checkpoint batch while retaining every completed effect.
+    """Run a Native fork batch while retaining every completed effect.
 
     A result that would not fit the remaining room is never sent: its effect
-    stands, and the fork sees a short error telling it to write the
-    checkpoint (#2514). Only when even that does not fit does the batch fail.
+    stands, and the fork sees its kind's short instruction to finish. Only when even that does not fit does the batch fail.
     """
     _append_assistant_message(messages, response)
     completed: list[CompletedToolCall] = []
@@ -159,13 +152,13 @@ async def run_tool_calls(
                         thread_id=request.thread_id,
                         invocation_id=call.id,
                         provider_tool_call_id=call.id,
-                        checkpoint_id=request.fork_id,
+                        fork_id=request.fork_id,
                     )
                     raise
                 completed.append(CompletedToolCall(
                     name=call.name, result=result, arguments=dict(call.arguments),
                     thread_id=request.thread_id, invocation_id=call.id,
-                    provider_tool_call_id=call.id, checkpoint_id=request.fork_id,
+                    provider_tool_call_id=call.id, fork_id=request.fork_id,
                 ))
             reply = {
                 "role": "tool",

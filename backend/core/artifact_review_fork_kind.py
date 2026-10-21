@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.fork_runtime import ForkKind
+from core.fork_runtime import FORK_HARNESSES, ForkKind
 from core.artifact_review_capture import (
     preserve_on_shutdown, provider_failure, review_end_handler, review_limit_or_failure_handler,
 )
@@ -25,17 +25,19 @@ async def execute_review_tool(
     agent: Any, name: str, arguments: dict[str, Any], cancel_event: Any, request: Any,
 ) -> str:
     """Run a permitted document tool as the reviewer, bound to this request."""
-    from core.checkpoint_native_tools import await_or_cancel
-    from doceditor.review_fork_context import review_fork_scope
+    from core.fork_native_tools import await_or_cancel
+    from doceditor.review_fork_scope import authorize_tool
     from infra.state.context import tool_invocation_context
-
     from infra.db_async import run_in_db
-    from doceditor.review_fork_context import authorize_tool
 
-    request_id = await run_in_db(authorize_tool, request, name, arguments)
-    with review_fork_scope(request_id):
-        with tool_invocation_context(None):
-            return await await_or_cancel(agent.tools.execute(name, arguments), cancel_event)
+    try:
+        request_id = await run_in_db(authorize_tool, request, name, arguments)
+    except PermissionError:
+        return ARTIFACT_REVIEW_KIND.tool_refusal
+    with tool_invocation_context(None):
+        return await await_or_cancel(
+            agent.tools.execute(name, arguments, review_request_id=request_id), cancel_event,
+        )
 
 
 ARTIFACT_REVIEW_KIND = ForkKind(
@@ -47,7 +49,7 @@ ARTIFACT_REVIEW_KIND = ForkKind(
         "leave your comments and call doc_feedback_send now."
     ),
     tool_executor=execute_review_tool,
-    step_limits={harness: REVIEW_STEP_BUDGET for harness in ("native", "claude-code", "codex")},
+    step_limits={harness: REVIEW_STEP_BUDGET for harness in FORK_HARNESSES},
     end_handler=review_end_handler,
     limit_or_failure_handler=review_limit_or_failure_handler,
     usage_binder=bind_usage,

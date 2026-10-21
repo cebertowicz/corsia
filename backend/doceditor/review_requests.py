@@ -41,7 +41,7 @@ DEFAULT_REQUEST_ERROR_CODE = "review_request_refused"
 CANCEL_REASON = "Review request cancelled by its requester or document owner."
 #: Outcome of a request whose review task ended before any batch reached the owner.
 ENDED_WITHOUT_COMMENTS = "ended_without_comments"
-IN_REVIEW_REFUSAL = "A review is already in progress. Wait for it, or withdraw it and request a new review with your note."
+IN_REVIEW_REFUSAL = "A review is already in progress. Wait for it to finish, or cancel it and request a new review with your note."
 
 
 class ReviewRequestError(ValueError):

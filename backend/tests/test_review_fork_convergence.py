@@ -54,7 +54,7 @@ def test_batch_admission_reads_request_state_only(review_env):
     db, aid = review_env
     row = request(db, aid)
     with write_transaction(db, scope="test_legacy_review_metadata"):
-        db.execute("UPDATE doc_review_requests SET cancelled_at='legacy' WHERE id=?", (row["id"],))
+        assert "cancelled_at" not in {column[1] for column in db.execute("PRAGMA table_info(doc_review_requests)")}
         batch = open_batch(
             db, author_kind="agent", author_id="reviewer", artifact_id=aid,
             recipient_id="owner", now=row["created_at"], closes_at=row["created_at"],
@@ -62,7 +62,7 @@ def test_batch_admission_reads_request_state_only(review_env):
         )
     assert batch
     with write_transaction(db, scope="test_withdrawn_review"):
-        db.execute("UPDATE doc_review_requests SET state='withdrawn',cancelled_at=NULL WHERE id=?", (row["id"],))
+        db.execute("UPDATE doc_review_requests SET state='withdrawn' WHERE id=?", (row["id"],))
         with pytest.raises(ValueError, match="no longer owns"):
             open_batch(
                 db, author_kind="agent", author_id="reviewer", artifact_id=aid,
@@ -88,7 +88,7 @@ def test_typed_failure_reasons_ignore_exception_wording():
 
 
 def test_native_auth_result_raises_typed_failure_at_source():
-    from core.checkpoint_native_fork import _provider_failure
+    from core.fork_native import _provider_failure
     from core.fork_failures import ForkCredentialsUnavailable
     from llm.router import LLMResponse
 
@@ -99,7 +99,7 @@ def test_native_auth_result_raises_typed_failure_at_source():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("missing", ["claude", "/missing-directory"])
 async def test_cc_launch_types_only_missing_executable(monkeypatch, missing):
-    from core import checkpoint_cc_fork as cc
+    from core import fork_cc as cc
     from core.fork_failures import ForkBinaryResolutionError
 
     async def spawn(*args, **kwargs):
@@ -142,7 +142,7 @@ async def test_pool_thread_withdrawal_wakes_running_fork_promptly(review_env):
         await asyncio.wait_for(task, timeout=0.5)
         assert time.monotonic() - started < 0.5
         assert stored(db, row["id"])["state"] == "withdrawn"
-        assert stored(db, row["id"])["cancelled_at"] is None
+        assert "cancelled_at" not in stored(db, row["id"])
     finally:
         loop.set_debug(original_debug)
         handles.pop(row["fork_id"], None)

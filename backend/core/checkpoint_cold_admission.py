@@ -1,9 +1,13 @@
 """Checkpoint-only durable admission around a generic provider-fork request."""
 
+from dataclasses import fields
+
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from core.checkpoint_render import render_prior_checkpoint
 from core.checkpoint_resume import CheckpointAdmission, installed_replay
-from core.checkpoint_types import CheckpointRequest, CheckpointTrigger
+from core.checkpoint_types import (
+    CheckpointProviderForkRequest, CheckpointRequest, CheckpointTrigger,
+)
 from core.fork_admission import build_cold_fork_admission
 from core.fork_types import ColdForkSource
 from history.projection import slice_portable_projection
@@ -46,4 +50,7 @@ def build_checkpoint_admission(
         originating_turn_id=originating_turn_id, first_included_seq=None,
         started_at=utc_now_iso(),
     )
-    return CheckpointAdmission(request, provider)
+    checkpoint_provider = CheckpointProviderForkRequest(**{
+        field.name: getattr(provider, field.name) for field in fields(provider)
+    })
+    return CheckpointAdmission(request, checkpoint_provider)

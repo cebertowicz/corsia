@@ -722,7 +722,7 @@ async def test_cancelled_runtime_launches_a_committed_idle_admission(
     import asyncio
 
     from core import checkpoint_runtime
-    from core.fork_types import ProviderForkRequest
+    from core.checkpoint_types import CheckpointProviderForkRequest
     from core.checkpoint_types import (
     IdleCheckpointAdmissionResult,
     IdleCheckpointDisposition,
@@ -745,7 +745,7 @@ async def test_cancelled_runtime_launches_a_committed_idle_admission(
         supports_reasoning=True,
         preserve_thinking_default=True,
     )
-    provider = ProviderForkRequest(
+    provider = CheckpointProviderForkRequest(
         fork_id=request.id,
         thread_id=request.thread_id,
         target=target,
@@ -924,7 +924,7 @@ async def test_idle_preparation_uses_same_source_warm_capture(
     monkeypatch.setattr(idle_checkpoint, "run_in_db", immediate)
     monkeypatch.setattr(idle_checkpoint, "read_idle_context", lambda _due: context)
     monkeypatch.setattr(
-        "core.checkpoint_render.capture_warm_checkpoint_source", capture
+        "core.fork_render.capture_warm_fork_source", capture
     )
 
     preparation = await idle_checkpoint.prepare_idle_checkpoint(due, "cp-1")
@@ -999,7 +999,7 @@ async def test_idle_native_fold_forks_its_receipt_warm(
     No cold correction rides along, and the generic harness capture never runs.
     """
     from core.checkpoint_fork_kind import CHECKPOINT_KIND
-    from core.checkpoint_native_fork import NativeWarmSource, _messages_and_tools
+    from core.fork_native import NativeWarmSource, _messages_and_tools
     from infra.idle_checkpoints import IdleCheckpointDue
     from thread import idle_checkpoint
 
@@ -1017,7 +1017,7 @@ async def test_idle_native_fold_forks_its_receipt_warm(
 
     monkeypatch.setattr(idle_checkpoint, "run_in_db", immediate)
     monkeypatch.setattr(idle_checkpoint, "read_idle_context", lambda _due: context)
-    monkeypatch.setattr("core.checkpoint_render.capture_warm_checkpoint_source", capture)
+    monkeypatch.setattr("core.fork_render.capture_warm_fork_source", capture)
 
     preparation = await idle_checkpoint.prepare_idle_checkpoint(due, "cp-1")
     admission = await idle_checkpoint.complete_idle_checkpoint(preparation)

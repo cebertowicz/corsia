@@ -41,7 +41,7 @@ async def test_bridge_binds_only_current_invocation(monkeypatch, invocation, che
     with tool_invocation_context("outer"):
         result = await bridge.execute_tool(
             Registry(), thread_id="thread", invocation_id=invocation,
-            provider_tool_call_id="must-not-be-used", checkpoint_id=checkpoint,
+            provider_tool_call_id="must-not-be-used", fork_id=checkpoint,
             name="bash", arguments={"command": "fake"},
         )
         assert _current_tool_invocation_id.get() == "outer"
@@ -116,7 +116,7 @@ async def test_native_call_binds_its_request_id_and_restores_after_failure():
 
 @pytest.mark.asyncio
 async def test_checkpoint_native_clears_inherited_foreground_invocation(monkeypatch):
-    from core import checkpoint_native_tools as checkpoint
+    from core import fork_native_tools as checkpoint
 
     observed = []
 

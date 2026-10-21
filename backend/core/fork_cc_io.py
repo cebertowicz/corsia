@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from core.checkpoint_cc_context import CCCheckpointContext
+from core.fork_cc_context import CCForkContext
 from core.fork_types import (
     ProviderForkRejected,
     WarmForkUnusable,
@@ -18,7 +18,7 @@ _PROCESS_EXIT_TIMEOUT = 5.0
 
 
 @dataclass(frozen=True, slots=True)
-class CCCheckpointOutput:
+class CCForkOutput:
     stdout: bytes
     stderr: bytes
     truncated: bool
@@ -84,14 +84,14 @@ class _ToolBoundary:
     async def _ready(self, call_id: str) -> None:
         while not self.context.ready(call_id):
             if self.context.finished and call_id in self.context.tool_ids:
-                self.failure = "Claude checkpoint did not report its complete tool-call context"
+                self.failure = "Claude fork did not report its complete tool-call context"
                 self.closed = True
                 self.changed.set()
                 await _stop_process(self.process)
                 raise ProviderForkRejected(self.failure)
             if self.closed or self.process.returncode is not None:
                 await _stop_process(self.process)
-                raise ProviderForkRejected("checkpoint process has ended")
+                raise ProviderForkRejected("fork process has ended")
             self.changed.clear()
             if not self.context.ready(call_id):
                 await self.changed.wait()
@@ -100,7 +100,7 @@ class _ToolBoundary:
         self.truncated = self.closed = True
         self.changed.set()
         await _stop_process(self.process)
-        raise ProviderForkRejected("checkpoint reached its context limit")
+        raise ProviderForkRejected("fork reached its context limit")
 
     async def execute(
         self, operation, call_id: str, name: str, arguments: dict[str, Any],
@@ -121,18 +121,18 @@ class _ToolBoundary:
                 or declared[1] != arguments
                 or call_id in self.claimed_tool_calls
             ):
-                raise ToolResultBindingError("checkpoint provider tool call is undeclared or replayed")
+                raise ToolResultBindingError("fork provider tool call is undeclared or replayed")
             self.claimed_tool_calls.add(call_id)
             if self.closed or self.process.returncode is not None:
                 await _stop_process(self.process)
-                raise ProviderForkRejected("checkpoint process has ended")
+                raise ProviderForkRejected("fork process has ended")
             if not self.context.fits:
                 await self._cutoff()
             try:
                 content = await operation()
                 fits = self.context.accept_tool_result(content)
             except Exception as error:
-                self.failure = f"Claude checkpoint tool failed: {error}"
+                self.failure = f"Claude fork tool failed: {error}"
                 self.closed = True
                 self.changed.set()
                 await _stop_process(self.process)
@@ -145,7 +145,7 @@ class _ToolBoundary:
         self.closed = True
         self.changed.set()
         if not self.cancel_event.is_set():
-            # A completed continuity edit must settle before its snapshot installs.
+            # A completed tool effect must settle before the fork returns.
             async with self.lock:
                 pass
 
@@ -169,22 +169,22 @@ async def _exchange(
     process, request, cancel_event, on_cold_input, boundary, captured, errors, spawned_at,
 ):
     if request.warm_source is None:
-        from core.checkpoint_cc_cold import prepare_cold_payload
+        from core.fork_cc_cold import prepare_cold_payload
 
         payload = await prepare_cold_payload(
             process, request, cancel_event, on_cold_input, spawned_at,
         )
     else:
-        from core.checkpoint_cc_cold import prepare_warm_payload
+        from core.fork_cc_cold import prepare_warm_payload
 
         payload = await prepare_warm_payload(
             process, request, cancel_event, spawned_at,
         )
         if payload is None:
-            raise WarmForkUnusable("Claude checkpoint initial input exceeds selected context window")
-    from core.checkpoint_account import require_checkpoint_write
+            raise WarmForkUnusable("Claude fork initial input exceeds selected context window")
+    from core.fork_account import require_fork_write
 
-    require_checkpoint_write(request)
+    require_fork_write(request)
     process.stdin.write(payload)
     await process.stdin.drain()
     process.stdin.close()
@@ -205,11 +205,11 @@ async def _exchange(
         await asyncio.gather(*readers, return_exceptions=True)
 
 
-async def communicate_checkpoint(
+async def communicate_fork(
     process, request, cancel_event, on_cold_input=None, *, on_tool_executor=None, spawned_at: float,
-) -> CCCheckpointOutput:
+) -> CCForkOutput:
     """Capture buffered narrative on cutoff; explicit Stop still cancels the call."""
-    context = CCCheckpointContext(request.target, 0)
+    context = CCForkContext(request.target, 0)
     boundary = _ToolBoundary(process, context, cancel_event, on_usage=request.on_usage)
     if on_tool_executor is not None:
         try:
@@ -232,7 +232,7 @@ async def communicate_checkpoint(
             try:
                 await asyncio.wait_for(asyncio.shield(operation), _PROCESS_EXIT_TIMEOUT)
             except TimeoutError:
-                boundary.failure = "Claude checkpoint output drain timed out after process exit"
+                boundary.failure = "Claude fork output drain timed out after process exit"
         elif operation.done():
             await operation
     finally:
@@ -245,4 +245,4 @@ async def communicate_checkpoint(
                     task.cancel()
             await asyncio.gather(operation, stopped, exited, return_exceptions=True)
             await boundary.close()
-    return CCCheckpointOutput(bytes(captured), bytes(errors), boundary.truncated, boundary.failure)
+    return CCForkOutput(bytes(captured), bytes(errors), boundary.truncated, boundary.failure)

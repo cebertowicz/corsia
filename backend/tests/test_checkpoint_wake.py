@@ -6,6 +6,7 @@ import asyncio
 
 import httpx
 import pytest
+from core import fork_runtime
 from loguru import logger
 
 from core.fork_types import ProviderForkResult
@@ -16,9 +17,11 @@ from tests.test_checkpoint_runtime import _checkpoint, _provider, _seed
 async def _clean_runtime():
     from core import checkpoint_runtime
 
-    await checkpoint_runtime.shutdown_fork_tasks()
+    await fork_runtime.shutdown_forks()
+    await checkpoint_runtime.shutdown_checkpoint_wakes()
     yield
-    await checkpoint_runtime.shutdown_fork_tasks()
+    await fork_runtime.shutdown_forks()
+    await checkpoint_runtime.shutdown_checkpoint_wakes()
 
 
 async def _install(monkeypatch, thread_id: str, drive) -> None:
@@ -94,7 +97,8 @@ async def test_wake_is_held_until_done_and_shutdown_joins_it(
     assert wake.get_name() == "checkpoint-wake:thread-held"
     assert not wake.done()
 
-    await runtime.shutdown_fork_tasks()
+    await fork_runtime.shutdown_forks()
+    await runtime.shutdown_checkpoint_wakes()
 
     assert cancelled
     assert wake.done()

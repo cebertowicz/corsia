@@ -11,6 +11,7 @@ export interface DocumentReview {
 	created_at: string;
 	may_cancel: boolean;
 	outcome: 'open' | 'ended_without_comments' | 'failed';
+	reason?: string | null;
 }
 export interface DocumentReviewer {
 	id: string;

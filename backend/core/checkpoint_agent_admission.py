@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
-from core.checkpoint_fit import ColdFoldInputTooLarge
-from core.fork_types import ProviderForkRequest
+from core.fork_fit import ColdFoldInputTooLarge
+from core.checkpoint_types import CheckpointProviderForkRequest
 from core.checkpoint_types import (
     CLOUD_OFF_CHECKPOINT_MESSAGE,
     CheckpointRequest,
@@ -70,7 +70,7 @@ def read_checkpoint_preparation(
 ) -> CheckpointPreparationContext | None:
     """Read one user-owned external checkpoint boundary and cost measurement."""
     from core.checkpoint_eligibility import checkpoint_eligibility
-    from core.checkpoint_render import checkpoint_binary
+    from core.fork_render import fork_binary
     from infra.database import get_db
     from subagents.codex_runtime_support import resolve_working_dir
 
@@ -89,7 +89,7 @@ def read_checkpoint_preparation(
         previous = eligibility.previous
         foldable_tokens = 0
         if trigger == "agent":
-            from core.checkpoint_fit import foldable_tail_tokens
+            from core.fork_fit import foldable_tail_tokens
 
             foldable_tokens = foldable_tail_tokens(
                 eligibility.projection,
@@ -116,7 +116,7 @@ def read_checkpoint_preparation(
             reasoning_effort=effective_reasoning_effort(
                 thread_row["reasoning_effort"], target.catalog_id,
             ),
-            binary=checkpoint_binary(target, db),
+            binary=fork_binary(target, db),
             foldable_tokens=foldable_tokens,
         )
     finally:
@@ -192,9 +192,9 @@ async def prepare_external_checkpoint(
     user_id: str,
     *,
     trigger: CheckpointTrigger,
-) -> tuple[CheckpointRequest, ProviderForkRequest] | None:
+) -> tuple[CheckpointRequest, CheckpointProviderForkRequest] | None:
     """Prepare a requested external checkpoint without starting its operation."""
-    from core.checkpoint_render import capture_warm_checkpoint_source
+    from core.fork_render import capture_warm_fork_source
     from infra.db_async import run_in_db
     from infra.time import utc_now_iso
     from prompts.checkpoint import build_checkpoint_system_prompt
@@ -204,7 +204,7 @@ async def prepare_external_checkpoint(
     )
     if context is None:
         return None
-    source = await capture_warm_checkpoint_source(
+    source = await capture_warm_fork_source(
         context.thread_id,
         context.boundary,
         target=context.target,
@@ -244,11 +244,13 @@ async def prepare_external_checkpoint(
         first_included_seq=None,
         started_at=utc_now_iso(),
     )
-    provider = ProviderForkRequest(
+    instruction = build_checkpoint_system_prompt()
+    provider = CheckpointProviderForkRequest(
         fork_id=checkpoint_id,
         thread_id=thread_id,
         target=context.target,
-        instruction=build_checkpoint_system_prompt(),
+        instruction=instruction,
+        instruction_candidates=(instruction,),
         reasoning_effort=context.reasoning_effort,
         working_dir=context.working_dir,
         binary=context.binary,

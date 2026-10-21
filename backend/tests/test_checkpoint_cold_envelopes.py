@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
-from core.fork_types import ProviderForkRequest
+from core.checkpoint_types import CheckpointProviderForkRequest
 from llm.resolution import ExecutionTarget
 from native_checkpoint_fixtures import cold_source, seed_vendor_checkpoint_thread
 
@@ -64,28 +64,28 @@ def _admission(monkeypatch, harness: str, *, window=262_144, projection=None):
 def test_cold_fits_reserve_output_and_five_percent_framing(
     monkeypatch, harness: str, window: int, allowance: int,
 ) -> None:
-    from core.checkpoint_fit import ColdFoldInputTooLarge
-    from core.checkpoint_render import fit_cold_checkpoint_input
+    from core.fork_fit import ColdFoldInputTooLarge
+    from core.fork_render import fit_cold_fork_input
 
     admission = _admission(monkeypatch, harness, window=window)
     request = admission.provider_request
-    baseline = fit_cold_checkpoint_input(request, provider_surface_tokens=0)
+    baseline = fit_cold_fork_input(request, provider_surface_tokens=0)
     surface = allowance - baseline.input_tokens
-    exact = fit_cold_checkpoint_input(request, provider_surface_tokens=surface)
+    exact = fit_cold_fork_input(request, provider_surface_tokens=surface)
 
     assert admission.request.first_included_seq is None
     assert exact.input_tokens == allowance
     assert exact.messages == baseline.messages
     assert exact.first_included_seq == 1
     with pytest.raises(ColdFoldInputTooLarge):
-        fit_cold_checkpoint_input(request, provider_surface_tokens=surface + 1)
+        fit_cold_fork_input(request, provider_surface_tokens=surface + 1)
 
 
 def test_one_million_cold_fit_omits_old_source_only_with_explicit_boundary(
     monkeypatch,
 ) -> None:
     from cache_warm_fixtures import make_exact_replay_selection
-    from core.checkpoint_render import fit_cold_checkpoint_input
+    from core.fork_render import fit_cold_fork_input
 
     # Dense identifiers are the worst real case: they tokenize near one token
     # per byte, so this old turn cannot fit even a 1M window.
@@ -100,7 +100,7 @@ def test_one_million_cold_fit_omits_old_source_only_with_explicit_boundary(
     admission = _admission(
         monkeypatch, "claude-code", window=1_000_000, projection=source,
     )
-    fitted = fit_cold_checkpoint_input(
+    fitted = fit_cold_fork_input(
         admission.provider_request, provider_surface_tokens=29_384,
     )
     body = "\n".join(message["content"] for message in fitted.messages)
@@ -116,28 +116,28 @@ def test_one_million_cold_fit_omits_old_source_only_with_explicit_boundary(
 @pytest.mark.parametrize("protected", ["abcdef09" * 128, "约束🌍" * 128], ids=["hex", "unicode"])
 def test_cold_boundary_preserves_every_protected_byte(monkeypatch, window, protected):
     from dataclasses import replace
-    from core.checkpoint_fit import ColdFoldInputTooLarge
-    from core.checkpoint_render import fit_cold_checkpoint_input
+    from core.fork_fit import ColdFoldInputTooLarge
+    from core.fork_render import fit_cold_fork_input
 
     request = _admission(monkeypatch, "claude-code", window=window).provider_request
     block = {"role": "user", "content": protected}
     request = replace(request, cold_source=replace(request.cold_source, protected_blocks=(block,)))
-    baseline = fit_cold_checkpoint_input(request, provider_surface_tokens=0)
+    baseline = fit_cold_fork_input(request, provider_surface_tokens=0)
     surface = window - 16_384 - window // 20 - baseline.input_tokens
-    fitted = fit_cold_checkpoint_input(request, provider_surface_tokens=surface)
+    fitted = fit_cold_fork_input(request, provider_surface_tokens=surface)
 
     assert fitted.messages[0]["content"].partition("\n\n")[0].encode() == protected.encode()
     assert fitted.messages == baseline.messages
     assert fitted.first_included_seq == 1
     with pytest.raises(ColdFoldInputTooLarge):
-        fit_cold_checkpoint_input(request, provider_surface_tokens=surface + 1)
+        fit_cold_fork_input(request, provider_surface_tokens=surface + 1)
 
 
 def test_codex_cold_surface_counts_and_freezes_nested_schemas(
     monkeypatch,
 ) -> None:
-    from core.checkpoint_cold_count import cold_input_tokens
-    from core.checkpoint_render import _codex_cold_surface
+    from core.fork_cold_count import cold_input_tokens
+    from core.fork_render import codex_cold_surface
     from subagents.codex_app_server_events import to_dynamic_tool_specs
     from subagents.managed_launch import CODEX_WRITE_PATH_DEVELOPER_INSTRUCTIONS
 
@@ -159,7 +159,7 @@ def test_codex_cold_surface_counts_and_freezes_nested_schemas(
     )
 
     writer = _target("codex")
-    count, frozen_registry, specs, developer = _codex_cold_surface(
+    count, frozen_registry, specs, developer = codex_cold_surface(
         "/work/project", writer=writer,
     )
     payload = {
@@ -175,7 +175,7 @@ def test_codex_cold_surface_counts_and_freezes_nested_schemas(
 
 
 def test_external_cold_prompt_does_not_strip_protected_trailing_bytes():
-    from core.checkpoint_fit import ColdFoldInput
+    from core.fork_fit import ColdFoldInput
 
     body = "protected continuation\n\n"
     fitted = ColdFoldInput(({"role": "user", "content": body},), 10, None, 0)
@@ -183,7 +183,7 @@ def test_external_cold_prompt_does_not_strip_protected_trailing_bytes():
 
 
 def test_luna_131k_fits_the_actual_default_tool_surface(monkeypatch, tmp_path):
-    from core.checkpoint_codex_fork import _fit_cold_request
+    from core.fork_codex import _fit_cold_request
 
     request = _admission(monkeypatch, "codex", window=131_072).provider_request
     frozen, fitted = _fit_cold_request(request, str(tmp_path), kind=CHECKPOINT_KIND)
@@ -197,13 +197,13 @@ def test_luna_131k_fits_the_actual_default_tool_surface(monkeypatch, tmp_path):
 def test_cc_cold_env_enforces_output_cap_without_changing_warm_env(
     monkeypatch,
 ) -> None:
-    from core import checkpoint_cc_fork as cc
+    from core import fork_cc as cc
 
     monkeypatch.setattr("subagents.cc_env.clean_claude_env", lambda: {"BASE": "1"})
     monkeypatch.setattr(
         "subagents.cc_env.apply_claude_config_dir", lambda _env, _root: None,
     )
-    request = ProviderForkRequest(
+    request = CheckpointProviderForkRequest(
         fork_id="checkpoint-1",
         thread_id="thread-1",
         target=_target("claude-code"),
@@ -213,24 +213,24 @@ def test_cc_cold_env_enforces_output_cap_without_changing_warm_env(
         max_output_tokens=16_384,
     )
 
-    cold = cc._checkpoint_env(None, request)
-    warm = cc._checkpoint_env(SimpleNamespace(claude_dir=None), request)
+    cold = cc._fork_env(None, request)
+    warm = cc._fork_env(SimpleNamespace(claude_dir=None), request)
 
     assert cold["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "16384"
     assert "CLAUDE_CODE_MAX_OUTPUT_TOKENS" not in warm
 
 
 def test_cc_declared_context_limit_cannot_be_installed_as_checkpoint() -> None:
-    from core.checkpoint_cc_result import result
+    from core.fork_cc_result import result
     from core.checkpoint_fork_kind import CHECKPOINT_KIND
     from core.fork_types import ProviderForkRejected
-    from core.checkpoint_types import CHECKPOINT_CONTEXT_TRUNCATED
+    from core.fork_types import FORK_CONTEXT_TRUNCATED
 
     too_long = json.dumps({
         "type": "result", "is_error": True, "result": "Prompt is too long",
     }).encode()
     # Provider error prose is never checkpoint content, and no body fails named.
-    with pytest.raises(ProviderForkRejected, match=CHECKPOINT_CONTEXT_TRUNCATED):
+    with pytest.raises(ProviderForkRejected, match=FORK_CONTEXT_TRUNCATED):
         result(too_long, kind=CHECKPOINT_KIND)
 
     unrelated = json.dumps({
@@ -242,7 +242,7 @@ def test_cc_declared_context_limit_cannot_be_installed_as_checkpoint() -> None:
 
 
 def test_cc_checkpoint_preserves_every_auto_continued_generation() -> None:
-    from core.checkpoint_cc_result import result
+    from core.fork_cc_result import result
     from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
     stdout = b"\n".join((
@@ -267,9 +267,9 @@ async def test_codex_cold_adapter_uses_the_surface_admission_counted(
     tmp_path, monkeypatch, isolated_db,
 ) -> None:
     seed_vendor_checkpoint_thread([_target("codex")])
-    from core import checkpoint_codex_fork as codex
-    from core import checkpoint_render
-    from core.checkpoint_cold_count import cold_input_tokens
+    from core import fork_codex as codex
+    from core import fork_render
+    from core.fork_cold_count import cold_input_tokens
 
     registry = object()
     definitions = ({
@@ -282,14 +282,14 @@ async def test_codex_cold_adapter_uses_the_surface_admission_counted(
     },)
     observed = {}
     counted = {}
-    real_fit = checkpoint_render.fit_cold_checkpoint_input
+    real_fit = fork_render.fit_cold_fork_input
 
     def observe_fit(request, *, provider_surface_tokens):
         counted["request"] = request
         counted["surface"] = provider_surface_tokens
         return real_fit(request, provider_surface_tokens=provider_surface_tokens)
 
-    monkeypatch.setattr(checkpoint_render, "fit_cold_checkpoint_input", observe_fit)
+    monkeypatch.setattr(fork_render, "fit_cold_fork_input", observe_fit)
 
     class Session:
         def __init__(self, **kwargs):
@@ -307,7 +307,7 @@ async def test_codex_cold_adapter_uses_the_surface_admission_counted(
     monkeypatch.setattr(
         "subagents.codex_app_server.CodexAppServerSession", Session,
     )
-    request = ProviderForkRequest(
+    request = CheckpointProviderForkRequest(
         fork_id="checkpoint-1",
         thread_id="thread-1",
         target=_target("codex"),
@@ -380,7 +380,7 @@ async def test_codex_checkpoint_keeps_body_after_unrelated_terminal_failure(
     tmp_path, monkeypatch, isolated_db,
 ) -> None:
     seed_vendor_checkpoint_thread([_target("codex")])
-    from core import checkpoint_codex_fork as codex
+    from core import fork_codex as codex
 
     class Session:
         def __init__(self, **kwargs):
@@ -404,7 +404,7 @@ async def test_codex_checkpoint_keeps_body_after_unrelated_terminal_failure(
     monkeypatch.setattr(
         "subagents.codex_app_server.CodexAppServerSession", Session,
     )
-    request = ProviderForkRequest(
+    request = CheckpointProviderForkRequest(
         fork_id="checkpoint-1",
         thread_id="thread-1",
         target=_target("codex"),
@@ -426,8 +426,8 @@ async def test_codex_context_limit_retains_partial_checkpoint(
     tmp_path, monkeypatch, isolated_db,
 ) -> None:
     seed_vendor_checkpoint_thread([_target("codex")])
-    from core import checkpoint_codex_fork as codex
-    from core.checkpoint_types import CHECKPOINT_CONTEXT_TRUNCATED
+    from core import fork_codex as codex
+    from core.fork_types import FORK_CONTEXT_TRUNCATED
 
     class Session:
         def __init__(self, **kwargs):
@@ -451,7 +451,7 @@ async def test_codex_context_limit_retains_partial_checkpoint(
     monkeypatch.setattr(
         "subagents.codex_app_server.CodexAppServerSession", Session,
     )
-    request = ProviderForkRequest(
+    request = CheckpointProviderForkRequest(
         fork_id="checkpoint-1",
         thread_id="thread-1",
         target=_target("codex"),
@@ -464,4 +464,4 @@ async def test_codex_context_limit_retains_partial_checkpoint(
 
     result = await codex.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert result.raw_body == "incomplete checkpoint"
-    assert result.diagnostic == CHECKPOINT_CONTEXT_TRUNCATED
+    assert result.diagnostic == FORK_CONTEXT_TRUNCATED

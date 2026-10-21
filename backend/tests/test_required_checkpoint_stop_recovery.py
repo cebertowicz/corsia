@@ -13,6 +13,7 @@ from dataclasses import replace
 from unittest.mock import AsyncMock
 
 import pytest
+from core import fork_runtime
 
 from codex_runtime_fixtures import declare_codex_tool_step
 from core.fork_types import ProviderForkResult
@@ -189,7 +190,8 @@ async def test_stop_ends_the_awaited_attempt_and_the_next_turn_proceeds(
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        await runtime.shutdown_fork_tasks()
+        await fork_runtime.shutdown_forks()
+        await runtime.shutdown_checkpoint_wakes()
         await live.session.terminate()
         reset()
         db.close()

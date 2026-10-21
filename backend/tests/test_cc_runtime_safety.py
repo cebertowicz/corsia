@@ -120,7 +120,7 @@ async def test_detached_checkpoint_does_not_touch_live_or_durable_cc_state(
 ):
     import asyncio
 
-    from core import checkpoint_cc_fork as checkpoint_fork
+    from core import fork_cc as checkpoint_fork
     from core.fork_types import ProviderForkRequest
     from native_checkpoint_fixtures import cold_source
     from registry.service import register_cc_session

@@ -230,7 +230,7 @@ def test_list_cancel_permission_matches_mutation(client, review_env, monkeypatch
     assert response.status_code == (200 if expected else 403)
     stored = db.execute("SELECT * FROM doc_review_requests WHERE id=?", (row["id"],)).fetchone()
     assert stored["state"] == ("withdrawn" if expected else "forked")
-    assert stored["cancelled_at"] is None
+    assert "cancelled_at" not in stored.keys()
     assert reviews.outcome(db, stored) == ("cancelled" if expected else "open")
 
 

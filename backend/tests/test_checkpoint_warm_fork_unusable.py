@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.checkpoint_types import CheckpointProviderForkRequest
+
 import asyncio
 from dataclasses import replace
 
@@ -30,7 +32,7 @@ WARM_SOURCE = object()
 
 
 def _warm_request(harness: str, *, cold_builder=None) -> ProviderForkRequest:
-    return ProviderForkRequest(
+    return CheckpointProviderForkRequest(
         fork_id="checkpoint-1", thread_id="thread-1",
         target=_target(harness), instruction="checkpoint",
         reasoning_effort=None, working_dir="/work",
@@ -50,7 +52,7 @@ def _cold_admission(**overrides):
     }
     fields.update(overrides)
     return CheckpointAdmission(
-        request=object(), provider_request=ProviderForkRequest(**fields),
+        request=object(), provider_request=CheckpointProviderForkRequest(**fields),
     )
 
 
@@ -111,7 +113,7 @@ async def test_native_warm_fork_correction_uses_canonical_refusal_log(monkeypatc
         logger.remove(sink)
 
     assert lines == [
-        "checkpoint warm capture refused for thread-1 (native): warm_fork_over_window\n",
+        "fork warm capture refused for thread-1 (native): warm_fork_over_window\n",
     ]
 
 
@@ -156,7 +158,7 @@ async def test_impossible_cold_correction_is_terminal_not_another_attempt(
 ):
     """ColdFoldInputTooLarge from the builder ends the operation."""
     from core import checkpoint_cold_fallback as fallback
-    from core.checkpoint_fit import ColdFoldInputTooLarge
+    from core.fork_fit import ColdFoldInputTooLarge
 
     def cannot_build():
         raise ColdFoldInputTooLarge("minimum meaningful cold input does not fit")
@@ -268,9 +270,9 @@ def test_each_adapter_raises_the_typed_refusal_for_its_warm_fork(harness):
     import inspect
 
     module = {
-        "claude-code": "core.checkpoint_cc_io",
-        "codex": "core.checkpoint_codex_fork",
-        "native": "core.checkpoint_native_fork",
+        "claude-code": "core.fork_cc_io",
+        "codex": "core.fork_codex",
+        "native": "core.fork_native",
     }[harness]
     source = inspect.getsource(__import__(module, fromlist=["_"]))
 

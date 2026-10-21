@@ -315,7 +315,7 @@ async def test_cc_checkpoint_tool_skips_canonical_turn_lineage(monkeypatch):
     execute.assert_awaited_once_with(
         live.tool_registry,
         thread_id="cc-thread",
-        checkpoint_id="cp-1",
+        fork_id="cp-1",
         name="capture_turn",
         arguments={"value": "safe"},
         harness="claude-code",

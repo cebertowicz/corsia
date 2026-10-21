@@ -8,7 +8,7 @@ import pytest
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 from test_checkpoint_external_adapters import _target, vendor_thread
-from core.checkpoint_fit import ColdFoldInput
+from core.fork_fit import ColdFoldInput
 
 
 def target(window=131_072):
@@ -18,7 +18,7 @@ def target(window=131_072):
 
 def test_warm_checkpoint_session_uses_governed_catalog_for_receipt_ids(tmp_path, vendor_thread):
     """Warm checkpoint callbacks must stay top-level so receipt IDs match."""
-    from core.checkpoint_codex_fork import CodexWarmSource, _checkpoint_session
+    from core.fork_codex import CodexWarmSource, _fork_session
     from connections.account_operation import admit_operation, prepare_operation_home
     from test_checkpoint_external_adapters import _boundary, _request
 
@@ -33,7 +33,7 @@ def test_warm_checkpoint_session_uses_governed_catalog_for_receipt_ids(tmp_path,
         working_dir=str(tmp_path),
         reasoning_effort="high",
     )
-    session = _checkpoint_session(
+    session = _fork_session(
         prepare_operation_home(admit_operation("codex", target().catalog_id,
             _request(target(), source, binary="codex")),
             tmp_path / "isolated-home", kind="checkpoint", model=target().catalog_id),
@@ -43,7 +43,7 @@ def test_warm_checkpoint_session_uses_governed_catalog_for_receipt_ids(tmp_path,
         cwd=str(tmp_path),
         on_event=lambda event: None,
         on_exit=lambda code, error: None,
-        checkpoint_tool_result_fits=lambda reply, usage=None: True,
+        fork_tool_result_fits=lambda reply, usage=None: True,
         kind=CHECKPOINT_KIND,
     )
 
@@ -54,14 +54,14 @@ def test_warm_checkpoint_session_uses_governed_catalog_for_receipt_ids(tmp_path,
 async def test_first_input_nonfit_never_starts_a_codex_session(monkeypatch, tmp_path):
     import asyncio
     from unittest.mock import Mock
-    from core import checkpoint_codex_fork as codex
+    from core import fork_codex as codex
     from core.fork_types import ProviderForkRejected
     from test_checkpoint_external_adapters import _request
 
     session = Mock()
-    monkeypatch.setattr(codex, "_checkpoint_session", session)
+    monkeypatch.setattr(codex, "_fork_session", session)
     with pytest.raises(ProviderForkRejected, match="initial.*input"):
-        await codex._run_app_server_checkpoint(
+        await codex._run_app_server_fork(
             _request(target(100), None, binary="unused"), None,
             source_home=tmp_path, isolated_home=tmp_path, cwd=str(tmp_path),
             cancel_event=asyncio.Event(), cold_input=ColdFoldInput((), 101, None, 0),
@@ -71,7 +71,7 @@ async def test_first_input_nonfit_never_starts_a_codex_session(monkeypatch, tmp_
 
 
 def test_frozen_context_uses_last_receipt_not_cumulative_volume(tmp_path):
-    from core.checkpoint_codex_context import frozen_context_tokens
+    from core.fork_codex_context import frozen_context_tokens
 
     last = {"input_tokens": 80_000, "output_tokens": 20}
     receipt = {"type": "event_msg", "payload": {"type": "token_count", "info": {
@@ -92,9 +92,9 @@ def test_frozen_context_uses_last_receipt_not_cumulative_volume(tmp_path):
 
 @pytest.mark.asyncio
 async def test_aggregate_tool_replies_cut_off_before_the_oversized_reply():
-    from core.checkpoint_codex_context import CodexCheckpointContext
+    from core.fork_codex_context import CodexForkContext
 
-    context = CodexCheckpointContext(target(), 80_000)
+    context = CodexForkContext(target(), 80_000)
     released = []
     for _ in range(16):
         context.record_receipt({
@@ -110,9 +110,9 @@ async def test_aggregate_tool_replies_cut_off_before_the_oversized_reply():
 
 
 def test_repeated_current_receipt_keeps_results_not_yet_in_the_reported_prompt():
-    from core.checkpoint_codex_context import CodexCheckpointContext
+    from core.fork_codex_context import CodexForkContext
 
-    context = CodexCheckpointContext(target(), 80_000)
+    context = CodexForkContext(target(), 80_000)
     receipt = {
         "last": {"inputTokens": 80_030, "outputTokens": 25},
         "total": {"inputTokens": 19_000_000, "outputTokens": 200_000},
@@ -127,10 +127,10 @@ def test_repeated_current_receipt_keeps_results_not_yet_in_the_reported_prompt()
 
 @pytest.mark.asyncio
 async def test_real_codex_callback_withholds_oversized_reply_and_closes_only_its_process(monkeypatch):
-    from core.checkpoint_codex_context import CodexCheckpointContext
+    from core.fork_codex_context import CodexForkContext
     from subagents.codex_app_server import CodexAppServerSession
 
-    context = CodexCheckpointContext(target(100), 90)
+    context = CodexForkContext(target(100), 90)
     writes, killed, calls = [], [], []
 
     class Pipe:
@@ -150,8 +150,8 @@ async def test_real_codex_callback_withholds_oversized_reply_and_closes_only_its
     monkeypatch.setattr("subagents.harness_tool_bridge.execute_tool", execute)
     session = CodexAppServerSession(
         binary="unused", task="checkpoint", codex_thread_id="provider",
-        corsia_thread_id="thread", checkpoint_id="checkpoint", tool_registry=object(),
-        checkpoint_tool_result_fits=boundary,
+        corsia_thread_id="thread", fork_id="checkpoint", tool_registry=object(),
+        fork_tool_result_fits=boundary,
     )
     session._active_turn_id = "turn"
     session._proc = SimpleNamespace(stdin=Pipe(), returncode=None, kill=lambda: killed.append(True))
@@ -169,7 +169,7 @@ async def test_real_codex_callback_withholds_oversized_reply_and_closes_only_its
 @pytest.mark.asyncio
 async def test_codex_invocation_returns_partial_checkpoint_when_reply_does_not_fit(monkeypatch, tmp_path, vendor_thread):
     import asyncio
-    from core import checkpoint_codex_fork as codex
+    from core import fork_codex as codex
     from connections.account_operation import admit_operation, prepare_operation_home
     from test_checkpoint_external_adapters import _request
 
@@ -182,7 +182,7 @@ async def test_codex_invocation_returns_partial_checkpoint_when_reply_does_not_f
             self._turn_volume = CumulativeTurnVolume()
             self.active_turn_id = "checkpoint-turn"
             self.event = kwargs["on_event"]
-            self.boundary = kwargs["checkpoint_tool_result_fits"]
+            self.boundary = kwargs["fork_tool_result_fits"]
             assert kwargs["model"] == "gpt-4"
 
         async def start(self):
@@ -209,7 +209,7 @@ async def test_codex_invocation_returns_partial_checkpoint_when_reply_does_not_f
     request = replace(_request(target(100), None, binary="unused"), tool_registry=object())
     request = prepare_operation_home(admit_operation("codex", request.target.catalog_id, request),
         tmp_path, kind="checkpoint", model=request.target.catalog_id)
-    result = await codex._run_app_server_checkpoint(
+    result = await codex._run_app_server_fork(
         request, None, source_home=tmp_path, isolated_home=tmp_path, cwd=str(tmp_path),
         cancel_event=asyncio.Event(), cold_input=ColdFoldInput((), 90, None, 0),
         kind=CHECKPOINT_KIND,

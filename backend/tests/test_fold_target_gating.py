@@ -14,7 +14,7 @@ from connections import harness_usage
 from core import checkpoint_runtime
 from core.checkpoint_resume import ProviderBoundary, _start_checkpoint
 from core.checkpoint_runtime import CheckpointTargetLimited, request_checkpoint
-from core.fork_types import ProviderForkRequest
+from core.checkpoint_types import CheckpointProviderForkRequest
 from core.checkpoint_types import (
     CheckpointRequest,
     CheckpointUnavailable,
@@ -133,7 +133,7 @@ def _configure_rollover(thread_id: str, *, enabled: bool) -> tuple[str, str]:
 def _pair(
     thread_id: str, checkpoint_id: str, target_model: str, *,
     trigger: str = "pressure", turn_id: str | None = "turn-1",
-) -> tuple[CheckpointRequest, ProviderForkRequest]:
+) -> tuple[CheckpointRequest, CheckpointProviderForkRequest]:
     request = CheckpointRequest(
         id=checkpoint_id, thread_id=thread_id, history_epoch=0,
         previous_generation_id=None, through_seq=3,
@@ -142,7 +142,7 @@ def _pair(
         writer_harness="claude-code", writer_model=target_model,
         originating_turn_id=turn_id, first_included_seq=1, started_at="t1",
     )
-    provider = ProviderForkRequest(
+    provider = CheckpointProviderForkRequest(
         fork_id=checkpoint_id, thread_id=thread_id,
         target=_target(target_model), instruction="fold", reasoning_effort=None,
         working_dir="/tmp", warm_source=object(),
@@ -207,7 +207,7 @@ def test_model_switch_target_checkpoint_freezes_the_turn_claim_account(isolated_
 
 @pytest.mark.asyncio
 async def test_target_checkpoint_claims_ready_rollover_account(isolated_db, launch):
-    from core.checkpoint_account import admit_checkpoint
+    from core.fork_account import admit_fork
 
     _seed("rollover", SONNET)
     first, second = _configure_rollover("rollover", enabled=True)
@@ -226,7 +226,7 @@ async def test_target_checkpoint_claims_ready_rollover_account(isolated_db, laun
 
     assert record.id == "c-rollover"
     launched = launch.call_args.args[1]
-    assert admit_checkpoint(launched).vendor_account_id == second
+    assert admit_fork(launched).vendor_account_id == second
 
 
 @pytest.mark.asyncio
@@ -234,14 +234,14 @@ async def test_unbound_fold_holds_on_limited_chosen_account_even_with_a_ready_ro
     isolated_db, launch,
 ):
     """A pressure fold launches on the chosen account, so the gate checks that one."""
-    from core.checkpoint_account import admit_checkpoint
+    from core.fork_account import admit_fork
 
     _seed("unbound-rollover", SONNET)
     first, _second = _configure_rollover("unbound-rollover", enabled=True)
     _limit_sonnet(account_id=first)
     request, provider = _pair("unbound-rollover", "c-unbound-rollover", SONNET)
     assert provider.vendor_account_bound is False
-    assert admit_checkpoint(provider).vendor_account_id == first
+    assert admit_fork(provider).vendor_account_id == first
 
     with pytest.raises(CheckpointTargetLimited):
         await request_checkpoint(request, provider)
@@ -399,11 +399,11 @@ async def test_initial_external_fold_goes_through_its_real_caller(isolated_db, l
         binary="claude",
     )
     monkeypatch.setattr(
-        "core.checkpoint_render.capture_warm_checkpoint_source",
+        "core.fork_render.capture_warm_fork_source",
         AsyncMock(return_value=object()),
     )
     monkeypatch.setattr(
-        "core.checkpoint_cc_boundary.capture_boundary_warm_source",
+        "core.fork_cc_boundary.capture_boundary_warm_source",
         AsyncMock(return_value=object()),
     )
 

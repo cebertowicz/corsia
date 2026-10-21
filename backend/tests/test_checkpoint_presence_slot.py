@@ -246,7 +246,7 @@ async def test_external_resume_entry_points_pass_the_frozen_text(pdb, pacific, m
 
 
 def test_fit_estimate_includes_the_line(pdb, pacific):
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
     from core.checkpoint_resume import installed_replay
 
     thread = _away_thread(pdb, "fit", MID_TURN)

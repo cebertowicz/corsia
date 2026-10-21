@@ -1,8 +1,7 @@
 """Canonical DB create/feedback transaction for validated comment adapters."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from doceditor.review_fork_context import current_request_id
+from dataclasses import dataclass
 
 from doceditor import comments, doc_images, feedback_batches, image_regions
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
@@ -37,7 +36,7 @@ class CommentInput:
     live_capture: bool = False
     registration: dict | None = None
     submit: bool = False
-    review_request_id: str | None = field(default_factory=current_request_id)
+    review_request_id: str | None = None
     # A checked (x, y, w, h) in fractions of the image (DCOL-FR13.3).
     region: tuple[float, float, float, float] | None = None
 

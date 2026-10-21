@@ -21,6 +21,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from core import fork_runtime
 
 from cc_runtime_fixtures import cc_target, fake_claude, trust_live_tool_step_ids  # noqa: F401
 from core.turn_core import TurnIdentity
@@ -101,7 +102,7 @@ def _bridge_result(identity):
 
 
 def _retiring_live(target, identity, tmp_path: Path, port: int, monkeypatch, on_kill):
-    from core.checkpoint_cc_context import CCCheckpointContext
+    from core.fork_cc_context import CCForkContext
     from subagents.cc_runtime_state import _LIVE, _Live, activate_bound_turn
     from subagents.cc_stream import CCStreamSession
 
@@ -122,7 +123,7 @@ def _retiring_live(target, identity, tmp_path: Path, port: int, monkeypatch, on_
 
     monkeypatch.setattr(session, "record_tool_reply", record_tool_reply)
     monkeypatch.setattr(session, "_request_terminate", busy_loop_after_kill)
-    session.tool_context = CCCheckpointContext(target, 32788)
+    session.tool_context = CCForkContext(target, 32788)
     live = _Live(session=session, parent_thread_id=None, name="old",
         catalog_model_id=target.catalog_id, context_window=target.context_window,
         corsia_turn=identity, tool_registry=object(),
@@ -324,7 +325,8 @@ async def test_cc_tool_boundary_swap_survives_its_retired_callers_disconnect(
         server.should_exit = True
         await asyncio.wait_for(serve_task, 10)
         await asyncio.gather(*stops, return_exceptions=True)
-        await runtime.shutdown_fork_tasks()
+        await fork_runtime.shutdown_forks()
+        await runtime.shutdown_checkpoint_wakes()
         for session in [old.session, *launches]:
             await session.terminate()
         _LIVE.reset()

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from core.checkpoint_types import CheckpointProviderForkRequest
+
 import asyncio
 import json
 from dataclasses import replace
 
 import pytest
+from core import fork_runtime
 
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
 from core.fork_types import (
@@ -82,7 +85,7 @@ def _checkpoint(thread_id: str, checkpoint_id: str) -> CheckpointRequest:
 
 
 def _provider(thread_id: str, checkpoint_id: str) -> ProviderForkRequest:
-    return ProviderForkRequest(
+    return CheckpointProviderForkRequest(
         fork_id=checkpoint_id,
         thread_id=thread_id,
         target=_target(),
@@ -96,9 +99,11 @@ def _provider(thread_id: str, checkpoint_id: str) -> ProviderForkRequest:
 async def _clean_runtime():
     from core import checkpoint_runtime
 
-    await checkpoint_runtime.shutdown_fork_tasks()
+    await fork_runtime.shutdown_forks()
+    await checkpoint_runtime.shutdown_checkpoint_wakes()
     yield
-    await checkpoint_runtime.shutdown_fork_tasks()
+    await fork_runtime.shutdown_forks()
+    await checkpoint_runtime.shutdown_checkpoint_wakes()
 
 
 @pytest.mark.asyncio
@@ -145,7 +150,7 @@ async def test_non_admission_creates_no_row_or_queued_work(isolated_db, trigger)
         assert db.execute("SELECT COUNT(*) FROM checkpoints").fetchone()[0] == 0
     finally:
         db.close()
-    assert runtime.fork_task_count() == 0
+    assert fork_runtime.fork_task_count() == 0
 
 
 @pytest.mark.asyncio
@@ -466,7 +471,7 @@ async def test_cancelling_a_joiner_detaches_from_independent_checkpoint(
     with pytest.raises(asyncio.CancelledError):
         await joiner
 
-    assert runtime.fork_task_count() == 1
+    assert fork_runtime.fork_task_count() == 1
     assert (await runtime._read("cp-1")).status == "running"
     release.set()
     assert (await runtime.await_checkpoint("cp-1")).status == "installed"
@@ -683,7 +688,7 @@ async def test_cold_invoke_adds_frozen_continuity_index_after_creation(
         captured["instruction"] = request.instruction
         return ProviderForkResult("body", None)
 
-    monkeypatch.setattr("core.checkpoint_native_fork.invoke_fork", invoke)
+    monkeypatch.setattr("core.fork_native.invoke_fork", invoke)
     request = replace(
         _provider("thread-1", "cp-1"),
         cold_source=cold_source(thread_id="thread-1"),
@@ -701,9 +706,9 @@ async def test_cold_invoke_adds_frozen_continuity_index_after_creation(
 @pytest.mark.parametrize(
     ("harness", "adapter"),
     [
-        ("native", "core.checkpoint_native_fork"),
-        ("claude-code", "core.checkpoint_cc_fork"),
-        ("codex", "core.checkpoint_codex_fork"),
+        ("native", "core.fork_native"),
+        ("claude-code", "core.fork_cc"),
+        ("codex", "core.fork_codex"),
     ],
 )
 async def test_placement_is_decided_by_the_fork_on_the_threads_model_and_effort(
@@ -770,9 +775,10 @@ async def test_shutdown_cancels_and_joins_every_exact_checkpoint(
             _provider(thread_id, f"cp-{thread_id}"),
         )
 
-    await runtime.shutdown_fork_tasks()
+    await fork_runtime.shutdown_forks()
+    await runtime.shutdown_checkpoint_wakes()
 
-    assert runtime.fork_task_count() == 0
+    assert fork_runtime.fork_task_count() == 0
     assert (await runtime.await_checkpoint("cp-one")).status == "cancelled"
     assert (await runtime.await_checkpoint("cp-two")).status == "cancelled"
 

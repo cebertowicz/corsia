@@ -1,29 +1,6 @@
-"""Task-local ownership for feedback produced by an artifact-review fork."""
+"""Validate a review fork's explicit request and document scope."""
 
 from __future__ import annotations
-
-import contextvars
-from contextlib import contextmanager
-from collections.abc import Iterator
-
-_review_request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "review_fork_request_id", default=None,
-)
-
-
-def current_request_id() -> str | None:
-    """Return the request whose isolated fork is currently writing feedback."""
-    return _review_request_id.get()
-
-
-@contextmanager
-def review_fork_scope(request_id: str) -> Iterator[None]:
-    """Bind one request so comments and submit stay in its own batch."""
-    token = _review_request_id.set(request_id)
-    try:
-        yield
-    finally:
-        _review_request_id.reset(token)
 
 
 def authorize_tool(request, name: str, arguments: dict) -> str:
@@ -41,6 +18,8 @@ def authorize_tool(request, name: str, arguments: dict) -> str:
         if (row is None or row["reviewer_thread_id"] != request.thread_id
                 or row["state"] != "forked"):
             raise PermissionError("review fork no longer owns this request")
+        if arguments.get("artifact_id") and arguments["artifact_id"] != row["artifact_id"]:
+            raise PermissionError("review fork may only use its requested document")
         if parent_id := arguments.get("parent_id"):
             parent = db.execute("SELECT artifact_id FROM doc_comments WHERE id=?", (parent_id,)).fetchone()
             if parent is None or parent["artifact_id"] != row["artifact_id"]:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.checkpoint_types import CheckpointProviderForkRequest
+
 import asyncio
 from types import SimpleNamespace
 
@@ -76,7 +78,7 @@ def _admission(thread_id: str, checkpoint_id: str, turn: TurnIdentity):
         first_included_seq=None,
         started_at="t1",
     )
-    provider = ProviderForkRequest(
+    provider = CheckpointProviderForkRequest(
         fork_id=checkpoint_id,
         thread_id=thread_id,
         target=target,
@@ -94,7 +96,7 @@ async def test_hard_wait_installs_once_and_returns_same_turn_continuation(
     monkeypatch,
 ) -> None:
     from core import checkpoint_runtime
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import (
         CheckpointWaitScope,
         InstalledContinuation,
@@ -155,7 +157,7 @@ async def test_soft_pressure_starts_background_checkpoint_without_stop_ownership
     monkeypatch,
 ) -> None:
     from core import checkpoint_runtime
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import (
         CheckpointWaitScope,
         InstalledContinuation,

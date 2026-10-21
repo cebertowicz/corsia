@@ -14,7 +14,7 @@ FORK_KINDS: dict[str, ForkKind] = {
 
 
 def require_fork_kind(name: str) -> ForkKind:
-    """Resolve a persisted kind name without silently falling back to checkpoint."""
+    """Resolve a persisted kind name or report an unknown kind."""
     try:
         return FORK_KINDS[name]
     except KeyError as error:

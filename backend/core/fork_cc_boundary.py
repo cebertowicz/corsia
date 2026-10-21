@@ -6,11 +6,11 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from core.checkpoint_cc_boundary_records import (
+from core.fork_cc_boundary_records import (
     boundary_prefix_cut,
     tool_prefix_from_stream,
 )
-from core.checkpoint_warm_request import warm_capture_refused
+from core.fork_capture import warm_capture_refused
 from history.types import DurableBoundaryMessage as ClaudeTranscriptBoundary
 
 
@@ -95,7 +95,7 @@ async def capture_tool_boundary_warm_source(
         return warm_capture_refused(thread_id, "claude-code", "no_warm_boundary")
     if not isinstance(current_tool_call_id, str) or not current_tool_call_id:
         return warm_capture_refused(thread_id, "claude-code", "no_current_call")
-    from core.checkpoint_cc_fork import _identity_from_live, capture_warm_source
+    from core.fork_cc import _identity_from_live, capture_warm_source
     from subagents.cc_runtime_state import _LIVE
 
     async with _LIVE.lock(thread_id):
@@ -153,7 +153,7 @@ async def capture_boundary_warm_source(
         return warm_capture_refused(thread_id, "claude-code", "no_boundary")
     if not isinstance(getattr(context, "warm_boundary", None), ClaudeTranscriptBoundary):
         return warm_capture_refused(thread_id, "claude-code", "no_warm_boundary")
-    from core.checkpoint_cc_fork import _identity_from_live
+    from core.fork_cc import _identity_from_live
     from subagents.cc_runtime_state import _LIVE
 
     if _LIVE.get(thread_id) is not live:
@@ -184,7 +184,7 @@ async def _capture_boundary_identity(
     identity,
     live: Any | None,
 ):
-    from core.checkpoint_cc_fork import capture_warm_source
+    from core.fork_cc import capture_warm_source
 
     provider_id, _invocation, _claude_dir, transcript_path = identity[:4]
     try:
@@ -218,7 +218,7 @@ async def capture_registered_boundary_warm_source(
     live: Any | None = None,
 ):
     """Prove and freeze a registered/live Claude prefix for non-pressure routes."""
-    from core.checkpoint_cc_fork import (
+    from core.fork_cc import (
         _identity_from_live,
         _live_identity,
         _registered_identity,

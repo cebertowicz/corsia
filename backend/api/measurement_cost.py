@@ -69,7 +69,7 @@ IDLE_HOURS_SQL = f"CASE {_IDLE_CASES} ELSE 0 END" if _IDLE_CASES else "0"
 # were always written disjoint (#1215). Two more Claude Code writers have kept
 # Anthropic's disjoint buckets since their first ledger row: source 'checkpoint'
 # began with #1764 (2026-09-15), whose Claude Code rows are
-# ``from_anthropic(...).ledger_row()`` in ``core.checkpoint_cc_io``; the
+# ``from_anthropic(...).ledger_row()`` in ``core.fork_cc_io``; the
 # host-access reviewer has copied the CLI's input, cache-creation and cache-read
 # counts field for field since its first row (2026-07-21,
 # ``llm.isolated_structured._capture_claude_telemetry``). Codex rows before the 2026-08-20
@@ -80,7 +80,7 @@ IDLE_HOURS_SQL = f"CASE {_IDLE_CASES} ELSE 0 END" if _IDLE_CASES else "0"
 # only writers of that shape, both later than the contract. The checkpoint Codex
 # path is per-call and disjoint: ``subagents.codex_app_server_notifications.record_usage``
 # emits ``CumulativeTurnVolume.observe`` deltas as ``TokenUsage.ledger_row()``, and
-# ``core.checkpoint_codex_result.CodexForkCapture.publish_calls`` writes each
+# ``core.fork_codex_result.CodexForkCapture.publish_calls`` writes each
 # one. Direct writes use ``uuid4()[:12]`` (hyphenated, so never 24 hex). The
 # host-access reviewer's Codex rows always recorded cache creation NULL, as
 # Codex reports no cache-creation count (``infra.provider_usage.from_codex``),

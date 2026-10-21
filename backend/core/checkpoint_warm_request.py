@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from loguru import logger
+from core.fork_capture import warm_capture_refused
 
-from core.fork_types import ProviderForkRequest
+from core.checkpoint_types import CheckpointProviderForkRequest
 from core.checkpoint_types import (
     CheckpointRequest,
     CheckpointTrigger,
@@ -21,7 +21,7 @@ class CheckpointAdmission:
     """One complete checkpoint operation prepared at a provider boundary."""
 
     request: CheckpointRequest
-    provider_request: ProviderForkRequest
+    provider_request: CheckpointProviderForkRequest
 
 
 def build_warm_request(
@@ -84,14 +84,6 @@ def refuse_no_live_handle(thread_id: str, context, prepared) -> None:
     )
 
 
-def warm_capture_refused(thread_id: str, harness: str, reason: str) -> None:
-    """Log the one reason a warm source was not captured, then return None."""
-    logger.info(
-        "checkpoint warm capture refused for {} ({}): {}",
-        thread_id, harness, reason,
-    )
-    return None
-
 
 def complete_warm_admission(
     request: CheckpointRequest,
@@ -105,11 +97,13 @@ def complete_warm_admission(
     """Pair frozen provenance with one already-captured warm provider source."""
     from prompts.checkpoint import build_checkpoint_system_prompt
 
-    provider = ProviderForkRequest(
+    instruction = build_checkpoint_system_prompt()
+    provider = CheckpointProviderForkRequest(
         fork_id=request.id,
         thread_id=request.thread_id,
         target=target,
-        instruction=build_checkpoint_system_prompt(),
+        instruction=instruction,
+        instruction_candidates=(instruction,),
         reasoning_effort=reasoning_effort,
         working_dir=working_dir,
         binary=binary,

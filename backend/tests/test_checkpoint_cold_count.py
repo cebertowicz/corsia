@@ -89,7 +89,7 @@ def test_prose_history_that_fits_the_writer_is_not_truncated(
     monkeypatch, target, surface, chunk,
 ):
     """Bytes refused history the writer can hold; the count must not."""
-    from core.checkpoint_render import fit_cold_checkpoint_input
+    from core.fork_render import fit_cold_fork_input
 
     body = (PROSE * (chunk // len(PROSE) + 1))[:chunk]
     request = _cold_request(monkeypatch, target, [
@@ -97,14 +97,14 @@ def test_prose_history_that_fits_the_writer_is_not_truncated(
         [("user", "newest ask"), ("assistant", body)],
     ])
 
-    fitted = fit_cold_checkpoint_input(request, provider_surface_tokens=surface)
+    fitted = fit_cold_fork_input(request, provider_surface_tokens=surface)
 
     assert fitted.first_included_seq == 1
     assert fitted.omitted_units == 0
 
 
 def test_codex_point_release_counts_exact_o200k():
-    from core.checkpoint_cold_count import cold_input_tokens
+    from core.fork_cold_count import cold_input_tokens
 
     payload = ({"role": "system", "content": "instruction"},
                {"role": "user", "content": PROSE * 40})
@@ -113,7 +113,7 @@ def test_codex_point_release_counts_exact_o200k():
 
 
 def test_claude_count_uses_the_calibrated_ratio_below_bytes():
-    from core.checkpoint_cold_count import cold_input_tokens
+    from core.fork_cold_count import cold_input_tokens
 
     payload = ({"role": "user", "content": PROSE * 40},)
     text = _serialized(payload)
@@ -125,7 +125,7 @@ def test_claude_count_uses_the_calibrated_ratio_below_bytes():
 
 def test_claude_identifier_corpus_is_capped_by_bytes_not_undercounted():
     """E0: Haiku grew 29,094 tokens on 44,999 bytes of 8-hex identifiers."""
-    from core.checkpoint_cold_count import cold_input_tokens
+    from core.fork_cold_count import cold_input_tokens
 
     corpus = _e0_identifiers()
     assert len(corpus.encode()) == 44_999
@@ -142,7 +142,7 @@ def test_claude_identifier_corpus_is_capped_by_bytes_not_undercounted():
             expected_reported_model=None),
 ))
 def test_family_selection_is_exact_bytes_or_claude(target):
-    from core.checkpoint_cold_count import cold_input_tokens
+    from core.fork_cold_count import cold_input_tokens
 
     payload = {"text": PROSE * 10}
     size = len(_serialized(payload).encode())
@@ -156,14 +156,14 @@ def test_family_selection_is_exact_bytes_or_claude(target):
 
 def test_native_cold_loop_counts_like_its_admission():
     """The cold fork's per-call check uses the admission count, not chars/3."""
-    from core.checkpoint_cold_count import cold_input_tokens
-    from core.checkpoint_native_tools import input_fits
-    from core.fork_types import ProviderForkRequest
+    from core.fork_cold_count import cold_input_tokens
+    from core.fork_native_tools import input_fits
+    from core.checkpoint_types import CheckpointProviderForkRequest
 
     messages = [{"role": "user", "content": "约束🌍" * 4_000}]
     tools = [{"type": "function", "function": {"name": "noop"}}]
     counted = cold_input_tokens(messages, LOCAL) + cold_input_tokens(tools, LOCAL)
-    request = ProviderForkRequest(
+    request = CheckpointProviderForkRequest(
         fork_id="checkpoint-1", thread_id="thread-1",
         target=replace(LOCAL, context_window=counted + 99),
         instruction="checkpoint", reasoning_effort=None, working_dir="/work",

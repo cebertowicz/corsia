@@ -78,14 +78,14 @@ async def maintain_initial_boundary(
     live: _LiveCodex,
 ) -> TurnIdentity | None:
     """Checkpoint only after the initial Codex attempt owns its exact Turn."""
-    from core.checkpoint_codex_context import CodexCheckpointContext
+    from core.fork_codex_context import CodexForkContext
 
     prepared = spec.prepared_context
     refresh = spec.refresh_prepared_context
     if prepared is None or refresh is None:
         _require_provider_fit(spec, prepared)
         if prepared is not None:
-            live.session.tool_context = CodexCheckpointContext(
+            live.session.tool_context = CodexForkContext(
                 None, prepared.fit_ledger.rendered_input_tokens,
             )
         return None
@@ -98,7 +98,7 @@ async def maintain_initial_boundary(
     )
     if adopted is None:
         _require_provider_fit(spec, prepared)
-        live.session.tool_context = CodexCheckpointContext(
+        live.session.tool_context = CodexForkContext(
             None, prepared.fit_ledger.rendered_input_tokens,
         )
         return None

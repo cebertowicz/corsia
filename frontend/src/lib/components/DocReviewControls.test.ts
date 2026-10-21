@@ -273,6 +273,17 @@ describe('document review toolbar and popover', () => {
 		expect(document.body.textContent).toContain('The review is unfinished. Quality Gate will finish it.');
 		expect(button('Cancel request to Quality Gate')).toBeTruthy();
 	});
+	it.each([
+		['missing_credentials', "The review is unfinished: Quality Gate isn't signed in to its model. Sign in again from the model card, and Quality Gate will finish it."],
+		['target_unavailable', "The review is unfinished: Quality Gate's model isn't available. Choose another model for Quality Gate, and it will finish the review."],
+		['binary_resolution', "The review is unfinished: CORSIA can't find the app Quality Gate runs on. Ask CORSIA in chat to fix it, and Quality Gate will finish the review."],
+	])('shows the recovery step for %s on the summary and review list', async (reason, message) => {
+		rows = [row('review-failure', { outcome: 'failed', reason })]; render(); await settle();
+		expect(document.body.querySelector('.reviewer-group')?.getAttribute('aria-label')).toBe(`Reviewers: Quality Gate (${message})`);
+		await picker();
+		expect(document.body.textContent).toContain(message);
+		expect(button('Cancel request to Quality Gate')).toBeTruthy();
+	});
 	it('refetches on an artifact change and on a plan change, and cleans its listeners up', async () => {
 		rows = [row()]; render(); await settle();
 		const calls = fetchMock.mock.calls.length;

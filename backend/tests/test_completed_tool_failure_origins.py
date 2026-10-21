@@ -84,14 +84,14 @@ async def test_checkpoint_publication_failure_keeps_cause_and_harness_identity(
     completion = CompletedToolCall(
         name="read_file", result=_Result("private checkpoint result"),
         invocation_id="call-1", provider_tool_call_id="call-1",
-        thread_id="thread-1", turn_id="turn-1", checkpoint_id="checkpoint-1",
+        thread_id="thread-1", turn_id="turn-1", fork_id="checkpoint-1",
     )
     from core import media_delivery
 
     monkeypatch.setattr(media_delivery, "tool_result_media_for_reference", raising_media)
     with caplog.at_level(logging.ERROR, logger="tools.recorded_call"):
         with pytest.raises(CompletedToolFailure) as failure:
-            await harness_tool_publication._checkpoint_result(
+            await harness_tool_publication._fork_result(
                 completion, None, harness=harness,
             )
 
@@ -112,7 +112,7 @@ async def test_checkpoint_publication_failure_keeps_cause_and_harness_identity(
 async def test_checkpoint_native_tool_loop_failure_keeps_cause(monkeypatch, caplog):
     """The Native checkpoint tool loop is a wrapper, not a bypass, like the
     other harness_tool_publication boundaries above."""
-    from core import checkpoint_native_tools
+    from core import fork_native_tools
 
     cause = RuntimeError("native checkpoint boundary failed")
 
@@ -144,10 +144,10 @@ async def test_checkpoint_native_tool_loop_failure_keeps_cause(monkeypatch, capl
             return True
         raise cause
 
-    monkeypatch.setattr(checkpoint_native_tools, "input_fits_off_loop", failing_fits)
+    monkeypatch.setattr(fork_native_tools, "input_fits_off_loop", failing_fits)
     with caplog.at_level(logging.ERROR, logger="tools.recorded_call"):
         with pytest.raises(CompletedToolFailure) as failure:
-            await checkpoint_native_tools.run_tool_calls(
+            await fork_native_tools.run_tool_calls(
                 agent, response, [], asyncio.Event(), request, [], kind=CHECKPOINT_KIND,
             )
 

@@ -51,7 +51,7 @@ def _prepare(monkeypatch, request_id: str, target: ExecutionTarget = TARGET):
     from core.artifact_review_runtime import _cold_request
 
     monkeypatch.setattr("llm.resolution.resolve_thread_target", lambda *_args, **_kwargs: target)
-    monkeypatch.setattr("core.checkpoint_render.checkpoint_binary", lambda *_args, **_kwargs: "claude")
+    monkeypatch.setattr("core.fork_render.fork_binary", lambda *_args, **_kwargs: "claude")
     return _cold_request(request_id)
 
 

@@ -9,9 +9,9 @@ from core.fork_types import (
     ProviderForkRejected,
     ProviderForkResult,
 )
-from core.checkpoint_types import CHECKPOINT_CONTEXT_TRUNCATED
+from core.fork_types import FORK_CONTEXT_TRUNCATED
 from core.fork_runtime import ForkKind, ForkStepLimitReached
-from infra.provider_usage import TokenUsage, checkpoint_receipt, from_anthropic
+from infra.provider_usage import TokenUsage, fork_receipt, from_anthropic
 from subagents.provider_context_limits import is_provider_context_limit
 
 
@@ -34,7 +34,7 @@ def _result_body(record: dict[str, Any], *, has_body: bool) -> str:
     if record.get("type") != "result":
         return ""
     if record.get("is_error") is True and is_provider_context_limit(record):
-        return ""  # Context errors are never checkpoint narrative.
+        return ""  # Context errors are never fork output.
     terminal = record.get("result")
     return terminal if not has_body and isinstance(terminal, str) else ""
 
@@ -69,12 +69,12 @@ def result(stdout: bytes, *, kind: ForkKind, truncated: bool = False) -> Provide
                 if not truncated:
                     kind.provider_failure("claude-code", diagnostic)
     if not (body := "\n".join(bodies)).strip():
-        detail = f"{CHECKPOINT_CONTEXT_TRUNCATED}: {diagnostic or 'no narrative'}" if truncated else None
+        detail = f"{FORK_CONTEXT_TRUNCATED}: {diagnostic or 'no narrative'}" if truncated else None
         raise ProviderForkRejected(detail or f"Claude Code {kind.name} produced no body")
     measured = from_anthropic(usage)
     if measured is None and calls:
         measured = sum(calls.values(), TokenUsage())
-    return ProviderForkResult(body, checkpoint_receipt(measured), CHECKPOINT_CONTEXT_TRUNCATED if truncated else diagnostic)
+    return ProviderForkResult(body, fork_receipt(measured), FORK_CONTEXT_TRUNCATED if truncated else diagnostic)
 
 
 def process_diagnostic(stderr: bytes | str, returncode: int | None, *, kind: ForkKind) -> str | None:
@@ -92,7 +92,7 @@ def result_after_process(stdout: bytes, diagnostic: str | None, returncode: int 
         if diagnostic and str(error) == f"Claude Code {kind.name} produced no body":
             raise ProviderForkRejected(diagnostic) from error
         raise
-    if parsed.diagnostic == CHECKPOINT_CONTEXT_TRUNCATED or not diagnostic or diagnostic == parsed.diagnostic:
+    if parsed.diagnostic == FORK_CONTEXT_TRUNCATED or not diagnostic or diagnostic == parsed.diagnostic:
         return parsed
     combined = f"{parsed.diagnostic}; {diagnostic}" if parsed.diagnostic else diagnostic
     return ProviderForkResult(parsed.raw_body, parsed.usage, combined)

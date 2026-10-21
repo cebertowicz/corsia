@@ -37,7 +37,7 @@ def warm_command(
 def cold_command(request: Any, kind: ForkKind) -> list[str]:
     """Build the one-shot cold command with the kind's explicit turn bound."""
     if not request.binary:
-        raise ForkBinaryResolutionError("Claude Code checkpoint requires its harness binary")
+        raise ForkBinaryResolutionError("Claude Code fork requires its harness binary")
     invocation = ClaudeInvocation(
         binary=request.binary,
         permission_mode="bypassPermissions",

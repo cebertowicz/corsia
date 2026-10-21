@@ -126,11 +126,9 @@ class DocFeedbackSendTool(Tool):
             return "Error: pass exactly one of artifact_id or doc_path"
         if doc_path:
             doc_path = tool_path(doc_path, self._workspace)
-        from doceditor.review_fork_context import current_request_id
-
         try:
             result = await run_in_db(
-                _send_feedback, actor_thread_id, actor, artifact_id, doc_path, current_request_id(),
+                _send_feedback, actor_thread_id, actor, artifact_id, doc_path, kwargs.get("_review_request_id"),
             )
         except PermissionError as exc:
             if str(exc) == "Artifact not found":

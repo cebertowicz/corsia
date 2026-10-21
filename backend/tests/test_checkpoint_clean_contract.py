@@ -62,7 +62,7 @@ def _decision_value(value: object) -> object:
 
 @pytest.mark.parametrize("case", DECISION_CASES, ids=lambda case: case.name)
 def test_all_harnesses_share_one_boundary_decision(case) -> None:
-    from core.checkpoint_fit import ProviderPayload, evaluate_boundary
+    from core.fork_fit import ProviderPayload, evaluate_boundary
 
     payload = ProviderPayload(
         context_window=262_144,
@@ -88,7 +88,7 @@ def test_all_harnesses_share_one_boundary_decision(case) -> None:
     ),
 )
 def test_soft_pressure_is_one_static_bounded_formula(window, expected) -> None:
-    from core.checkpoint_fit import soft_pressure_remaining
+    from core.fork_fit import soft_pressure_remaining
 
     assert soft_pressure_remaining(window) == expected
 
@@ -96,13 +96,13 @@ def test_soft_pressure_is_one_static_bounded_formula(window, expected) -> None:
 @pytest.mark.parametrize("window", (131_072, 200_000, 262_144))
 def test_soft_zone_entry_leaves_a_warm_fork_room_to_finish(window) -> None:
     """R08: soft pressure starts a checkpoint with room to finish, one tool round trip included."""
-    from core.checkpoint_fit import (
+    from core.fork_fit import (
         CHECKPOINT_INSTRUCTION_BUDGET_TOKENS,
         ProviderPayload,
         evaluate_boundary,
         soft_pressure_remaining,
     )
-    from core.checkpoint_types import CHECKPOINT_OUTPUT_TOKENS, CHECKPOINT_TOOL_ROUND_TRIP_TOKENS
+    from core.fork_types import FORK_OUTPUT_TOKENS, FORK_TOOL_ROUND_TRIP_TOKENS
 
     entry = window - soft_pressure_remaining(window)
     payload = ProviderPayload(
@@ -118,7 +118,7 @@ def test_soft_zone_entry_leaves_a_warm_fork_room_to_finish(window) -> None:
     assert _decision_value(evaluate_boundary(payload)) == "proceed_and_fold"
     fork = (
         entry + CHECKPOINT_INSTRUCTION_BUDGET_TOKENS
-        + CHECKPOINT_OUTPUT_TOKENS + CHECKPOINT_TOOL_ROUND_TRIP_TOKENS
+        + FORK_OUTPUT_TOKENS + FORK_TOOL_ROUND_TRIP_TOKENS
     )
     assert fork <= window
 
@@ -133,7 +133,7 @@ def test_warm_fork_room_is_a_stated_limit_below_115k(window, fits) -> None:
     Raising the reserve past a quarter of the window would fold a small model
     at low occupancy and loop, so its warm fork at soft entry cannot fit.
     """
-    from core.checkpoint_fit import WARM_FORK_RESERVE_TOKENS, soft_pressure_remaining
+    from core.fork_fit import WARM_FORK_RESERVE_TOKENS, soft_pressure_remaining
 
     assert WARM_FORK_RESERVE_TOKENS * 4 == 114_688
     assert soft_pressure_remaining(window) <= max(window // 4, 8_192)
@@ -141,7 +141,7 @@ def test_warm_fork_room_is_a_stated_limit_below_115k(window, fits) -> None:
 
 
 def test_live_wall_reserves_no_arbitrary_output_budget() -> None:
-    from core.checkpoint_fit import ProviderPayload, evaluate_boundary
+    from core.fork_fit import ProviderPayload, evaluate_boundary
 
     exact_fit = ProviderPayload(
         context_window=262_144,
@@ -157,7 +157,7 @@ def test_live_wall_reserves_no_arbitrary_output_budget() -> None:
 
 
 def test_capped_window_above_live_usage_waits_then_adopts() -> None:
-    from core.checkpoint_fit import ProviderPayload, evaluate_boundary
+    from core.fork_fit import ProviderPayload, evaluate_boundary
 
     waiting = ProviderPayload(
         context_window=262_144,
@@ -188,7 +188,7 @@ async def test_new_installed_generation_adopts_from_boundary_snapshot(
 ) -> None:
     """An install seen by the core read cannot permit old-context generation."""
     from core import checkpoint_resume
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import InstalledContinuation
     from core.turn_core import TurnIdentity
 
@@ -224,7 +224,7 @@ async def test_new_installed_generation_adopts_from_boundary_snapshot(
 @pytest.mark.asyncio
 async def test_same_installed_generation_does_not_adopt_twice() -> None:
     from core import checkpoint_resume
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.turn_core import TurnIdentity
 
     record = SimpleNamespace(id="checkpoint-current", status="installed")

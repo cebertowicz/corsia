@@ -101,7 +101,7 @@ async def execute(handle, body):
 
         return await execute_tool(
             handle.tool_registry, thread_id=handle.thread_id,
-            checkpoint_id=handle.request.fork_id, name=name, arguments=arguments,
+            fork_id=handle.request.fork_id, name=name, arguments=arguments,
             fork_policy=ForkToolBoundary(
                 handle.kind, handle.request, handle.tool_registry, handle.cancel_event, None,
             ), harness="claude-code", model=handle.request.target.catalog_id,

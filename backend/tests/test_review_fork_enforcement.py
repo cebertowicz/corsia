@@ -8,6 +8,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from core import fork_runtime
 from starlette.requests import Request
 
 from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
@@ -24,7 +25,7 @@ def test_every_harness_requires_an_explicit_limit():
 
 @pytest.mark.asyncio
 async def test_native_refuses_unenforceable_limit_before_provider_call(monkeypatch):
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from core.fork_runtime import ForkStepLimitError
     from test_checkpoint_provider_adapters import _request, _source
 
@@ -56,7 +57,7 @@ async def test_review_refuses_send_spawn_and_file_write_before_dispatch(name):
 
 
 def test_read_cannot_bypass_document_scope_with_an_owned_parent(review_env):
-    from doceditor.review_fork_context import authorize_tool
+    from doceditor.review_fork_scope import authorize_tool
 
     db, aid = review_env
     row = request(db, aid)
@@ -137,7 +138,7 @@ async def test_codex_counts_only_distinct_owned_completed_items_and_terminates()
 @pytest.mark.asyncio
 async def test_codex_cancel_closes_exact_session_while_start_is_waiting():
     from core.fork_codex_control import CompletedItemLimit, run_session
-    from core.checkpoint_codex_result import CodexForkCapture
+    from core.fork_codex_result import CodexForkCapture
 
     started, cancel = asyncio.Event(), asyncio.Event()
     closed = []
@@ -163,7 +164,7 @@ async def test_codex_cancel_closes_exact_session_while_start_is_waiting():
 @pytest.mark.asyncio
 async def test_codex_missing_completed_identity_wakes_and_closes_waiting_session():
     from core.fork_codex_control import CompletedItemLimit, ForkItemLimitReached, run_session
-    from core.checkpoint_codex_result import CodexForkCapture
+    from core.fork_codex_result import CodexForkCapture
 
     started = asyncio.Event()
     closed = []
@@ -194,7 +195,7 @@ async def test_codex_missing_completed_identity_wakes_and_closes_waiting_session
 
 @pytest.mark.asyncio
 async def test_busy_reviewer_pass_writes_as_reviewer_without_turn_or_node(review_env, monkeypatch):
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from core.artifact_review_runtime import _run
     from llm.router import LLMResponse, ToolCallRequest
     from tools.documents import DocCommentCreateTool
@@ -338,29 +339,30 @@ async def test_shutdown_cancels_only_checkpoint_rows_and_counts_all_forks(monkey
         checkpoint_runtime.checkpoint_store, "cancel",
         lambda checkpoint_id, **_kw: cancelled_rows.append(checkpoint_id),
     )
-    monkeypatch.setattr(checkpoint_runtime, "_tasks", {})
+    monkeypatch.setattr(fork_runtime, "handles", {})
 
     def fork(fork_id, kind):
         event = asyncio.Event()
-        checkpoint_runtime._tasks[fork_id] = ForkHandle(
+        fork_runtime.handles[fork_id] = ForkHandle(
             asyncio.create_task(event.wait()), event, "thread", kind=kind,
         )
         return event
 
     events = [fork("cp-1", CHECKPOINT_KIND), fork("review-1", ARTIFACT_REVIEW_KIND)]
-    assert checkpoint_runtime.fork_task_count() == 2
+    assert fork_runtime.fork_task_count() == 2
 
-    await checkpoint_runtime.shutdown_fork_tasks()
+    await fork_runtime.shutdown_forks()
+    await checkpoint_runtime.shutdown_checkpoint_wakes()
 
     assert cancelled_rows == ["cp-1"]
     assert all(event.is_set() for event in events)
-    assert all(handle.task.done() for handle in checkpoint_runtime._tasks.values())
+    assert all(handle.task.done() for handle in fork_runtime.handles.values())
 
 
 @pytest.mark.asyncio
 async def test_review_fork_usage_records_each_call_once_unattributed(review_env, monkeypatch):
     """(b): a review fork's provider calls reach the ledger, once per call key."""
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from core.artifact_review_runtime import _run
     from core.fork_types import ProviderForkResult
     from infra.turn_usage_receipts import PLAN_FIELDS
@@ -406,7 +408,7 @@ async def test_review_fork_usage_records_each_call_once_unattributed(review_env,
 ])
 async def test_over_room_result_tells_each_kind_its_own_next_step(monkeypatch, kind_name, expected):
     """(c): the over-room reply names the kind's own finishing action."""
-    from core import checkpoint_native_tools
+    from core import fork_native_tools
     from core.checkpoint_fork_kind import CHECKPOINT_KIND
     from llm.router import LLMResponse, ToolCallRequest
     from test_checkpoint_provider_adapters import _request
@@ -423,14 +425,14 @@ async def test_over_room_result_tells_each_kind_its_own_next_step(monkeypatch, k
     async def input_fits(*_args):
         return next(fits)
 
-    monkeypatch.setattr(checkpoint_native_tools, "input_fits_off_loop", input_fits)
+    monkeypatch.setattr(fork_native_tools, "input_fits_off_loop", input_fits)
     monkeypatch.setattr(
-        checkpoint_native_tools, "input_room", lambda *_args: SimpleNamespace(counted=110, bound=100),
+        fork_native_tools, "input_room", lambda *_args: SimpleNamespace(counted=110, bound=100),
     )
     messages = []
     response = LLMResponse(content=None, tool_calls=[ToolCallRequest(id="big", name=tool, arguments={})])
 
-    assert await checkpoint_native_tools.run_tool_calls(
+    assert await fork_native_tools.run_tool_calls(
         SimpleNamespace(), response, messages, asyncio.Event(), _request(None), [], kind=kind,
     )
     assert messages[-1]["content"] == "Error: this result (50 characters) is " + expected
@@ -464,7 +466,7 @@ async def test_warm_cc_review_advertises_the_source_tool_list(review_env, frozen
 
 @pytest.mark.asyncio
 async def test_cc_warm_capture_carries_the_live_tool_list(tmp_path, monkeypatch):
-    from core import checkpoint_cc_fork as cc
+    from core import fork_cc as cc
     from test_checkpoint_external_adapters import _boundary, _target
     from subagents.cc_invocation import ClaudeInvocation
 
@@ -492,7 +494,7 @@ async def test_cc_warm_capture_carries_the_live_tool_list(tmp_path, monkeypatch)
 
 def test_warm_codex_review_advertises_the_full_source_surface(tmp_path):
     """B1: Codex narrows only a cold fork; a warm one keeps the resumed surface."""
-    from core.checkpoint_codex_fork import _checkpoint_tools
+    from core.fork_codex import _fork_tools
     from subagents.harness_tool_bridge import build_tool_registry, dynamic_tool_definitions
     from test_checkpoint_provider_adapters import _request
 
@@ -502,8 +504,8 @@ def test_warm_codex_review_advertises_the_full_source_surface(tmp_path):
     warm = replace(_request(None), warm_source=object(), tool_registry=registry)
     cold = replace(_request(None), warm_source=None, tool_registry=None)
 
-    warm_registry, warm_tools = _checkpoint_tools(warm, cwd, ARTIFACT_REVIEW_KIND)
-    _cold_registry, cold_tools = _checkpoint_tools(cold, cwd, ARTIFACT_REVIEW_KIND)
+    warm_registry, warm_tools = _fork_tools(warm, cwd, ARTIFACT_REVIEW_KIND)
+    _cold_registry, cold_tools = _fork_tools(cold, cwd, ARTIFACT_REVIEW_KIND)
 
     assert warm_registry is registry
     assert json.dumps(warm_tools) == json.dumps(full)

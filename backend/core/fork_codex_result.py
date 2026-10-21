@@ -1,4 +1,4 @@
-"""Capture Codex checkpoint narrative without mistaking an error for content."""
+"""Capture Codex fork output without mistaking an error for content."""
 
 from __future__ import annotations
 
@@ -9,15 +9,15 @@ from core.fork_types import (
     ProviderForkRejected,
     ProviderForkResult,
 )
-from core.checkpoint_types import CHECKPOINT_CONTEXT_TRUNCATED
+from core.fork_types import FORK_CONTEXT_TRUNCATED
 from core.fork_runtime import ForkKind
-from infra.provider_usage import TokenUsage, checkpoint_receipt
+from infra.provider_usage import TokenUsage, fork_receipt
 from subagents.provider_context_limits import is_provider_context_limit
 
 
 def fork_usage_receipt(volume: object) -> dict[str, int | None] | None:
     """Keep canonical disjoint usage rather than re-encoding provider subsets."""
-    return checkpoint_receipt(volume) if isinstance(volume, TokenUsage) else None
+    return fork_receipt(volume) if isinstance(volume, TokenUsage) else None
 
 
 class CodexForkCapture:
@@ -57,11 +57,11 @@ class CodexForkCapture:
                 self.terminal.set_exception(error)
                 return
         if self.bodies or self.partial.strip():
-            self.diagnostic = CHECKPOINT_CONTEXT_TRUNCATED if truncated else detail
+            self.diagnostic = FORK_CONTEXT_TRUNCATED if truncated else detail
             self.terminal.set_result(None)
         else:  # No narrative: fail named, never as an empty success.
             self.terminal.set_exception(ProviderForkRejected(
-                f"{CHECKPOINT_CONTEXT_TRUNCATED}: {detail}" if truncated else detail))
+                f"{FORK_CONTEXT_TRUNCATED}: {detail}" if truncated else detail))
 
     def truncate(self) -> None:
         """Finish capture through the existing degraded-completion outcome."""
@@ -106,7 +106,7 @@ class CodexForkCapture:
 
     def result(self) -> ProviderForkResult:
         """Normal completion uses its final body; cutoff preserves all partial work."""
-        if self.diagnostic == CHECKPOINT_CONTEXT_TRUNCATED:
+        if self.diagnostic == FORK_CONTEXT_TRUNCATED:
             body = "\n".join(part for part in (*self.bodies, self.partial) if part.strip())
         else:
             body = self.partial or (self.bodies[-1] if self.bodies else "")

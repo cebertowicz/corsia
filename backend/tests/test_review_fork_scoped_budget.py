@@ -69,7 +69,7 @@ def _install_checkpoint(db, through_seq: int, through_message_id: str | None = N
 
 def _prepare_cold_target(monkeypatch) -> None:
     monkeypatch.setattr("llm.resolution.resolve_thread_target", lambda *_args, **_kwargs: TARGET)
-    monkeypatch.setattr("core.checkpoint_render.checkpoint_binary", lambda *_args, **_kwargs: "claude")
+    monkeypatch.setattr("core.fork_render.fork_binary", lambda *_args, **_kwargs: "claude")
 
 
 @pytest.mark.asyncio

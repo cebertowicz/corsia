@@ -8,7 +8,7 @@ from loguru import logger
 
 from infra.db_async import run_in_db
 from infra.llm_usage_events import emit_llm_usage_recorded
-from infra.vendor_turn_binding import checkpoint_account_id
+from infra.vendor_turn_binding import fork_account_id
 from infra.turn_usage_receipts import PLAN_FIELDS
 from llm.pricing import recorded_cost
 from plans import public
@@ -32,7 +32,7 @@ async def bind_usage(request, *, source, freeze_binding, record_call):
     account_id = None
     try:
         account_id = (request.vendor_account_id if request.vendor_account_bound else
-                      await run_in_db(checkpoint_account_id, request.thread_id, request.target.harness))
+                      await run_in_db(fork_account_id, request.thread_id, request.target.harness))
         binding, errors = await freeze_binding(request, account_id)
         for error in errors:
             await defect("binding", error)

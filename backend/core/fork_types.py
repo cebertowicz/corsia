@@ -9,8 +9,12 @@ from typing import Any, TypeAlias
 from history.types import PortableHistoryProjection
 from llm.resolution import ExecutionTarget
 
-# Output every fork call reserves; checkpoint fit math reads the same value.
+# Output and tool round-trip room reserved by every disposable fork.
 FORK_OUTPUT_TOKENS = 16_384
+FORK_TOOL_ROUND_TRIP_TOKENS = 4_096
+# Persisted diagnostic value; retained checkpoint rows must still render warnings.
+FORK_CONTEXT_TRUNCATED = "checkpoint_context_truncated"
+ColdInputCallback: TypeAlias = Callable[[int | None], Awaitable[None]]
 
 # (call key, model the vendor reported for the call or None, measured usage)
 ForkUsageCallback: TypeAlias = Callable[[str, str | None, dict[str, Any]], Awaitable[None]]
@@ -38,6 +42,8 @@ class ProviderForkRequest:
     instruction: str
     reasoning_effort: str | None
     working_dir: str
+    #: Ordered warm-admission alternatives; adapters fall back to ``instruction``.
+    instruction_candidates: tuple[str, ...] = ()
     cold_source: ColdForkSource | None = None
     binary: str | None = None
     warm_source: object | None = None
@@ -51,8 +57,6 @@ class ProviderForkRequest:
     vendor_account_bound: bool = False
     vendor_account_receipt: object | None = None
     vendor_launch: object | None = None
-    same_model_cold: Callable[[], object] | None = None
-    instruction_without_review: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

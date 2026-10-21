@@ -81,9 +81,7 @@ def settle_for_batch(db, batch) -> tuple[str, ...]:
             "SELECT * FROM doc_review_requests WHERE artifact_id=? AND reviewer_thread_id=? "
             "ORDER BY created_at DESC,id DESC LIMIT 1", (batch["artifact_id"], batch["author_id"]),
         ).fetchone()
-    if row is None or row["state"] not in PENDING_STATES:
-        return ()
-    if not request_id and row["state"] == "forked":
+    if row is None or row["state"] not in FALLBACK_STATES:
         return ()
     still_open = row["state"] in FALLBACK_STATES and is_open(db, row)
     transition(db, row["id"], "submitted")

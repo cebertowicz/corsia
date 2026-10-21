@@ -11,10 +11,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from core import checkpoint_cc_commands
+from core import fork_cc_commands
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
-from core.fork_types import ProviderForkRequest
-from core.checkpoint_fit import ColdFoldInput
+from core.checkpoint_types import CheckpointProviderForkRequest
+from core.fork_fit import ColdFoldInput
 from history.types import HistoryBoundary
 from llm.resolution import ExecutionTarget
 from llm.router import LLMResponse, ToolCallRequest
@@ -49,7 +49,7 @@ def vendor_thread(isolated_db):
 
 
 def _request(source):
-    return ProviderForkRequest(
+    return CheckpointProviderForkRequest(
         fork_id="checkpoint-1",
         thread_id="thread-1",
         target=_target(),
@@ -80,8 +80,8 @@ def _source(
 
 def test_native_warm_fit_uses_provider_anchor_plus_only_added_delta(monkeypatch):
     """A warm fork must not recount its accepted prefix with a new heuristic."""
-    from core import checkpoint_native_fork as native
-    from core.checkpoint_native_tools import input_fits
+    from core import fork_native as native
+    from core.fork_native_tools import input_fits
     from core.token_estimation import TokenMeasurement
 
     source = _source(
@@ -118,7 +118,7 @@ def test_native_warm_fit_uses_provider_anchor_plus_only_added_delta(monkeypatch)
 @pytest.mark.asyncio
 async def test_native_warm_initial_fit_reserves_max_output_before_provider_call(monkeypatch):
     """A warm fork that cannot fit its generation budget must correct before calling."""
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from core.fork_types import WarmForkUnusable
     from core.token_estimation import TokenMeasurement
 
@@ -153,7 +153,7 @@ async def test_native_warm_initial_fit_reserves_max_output_before_provider_call(
 @pytest.mark.asyncio
 async def test_native_checkpoint_refuses_non_continuity_tools_and_keeps_continuity_edit(monkeypatch):
     """Only the checkpoint's continuity tool may execute in its private loop."""
-    from core import checkpoint_native_tools
+    from core import fork_native_tools
 
     executed = []
 
@@ -170,11 +170,11 @@ async def test_native_checkpoint_refuses_non_continuity_tools_and_keeps_continui
         ],
     )
     monkeypatch.setattr(
-        checkpoint_native_tools, "input_fits_off_loop", lambda *_args: _async_value(True),
+        fork_native_tools, "input_fits_off_loop", lambda *_args: _async_value(True),
     )
 
     messages = []
-    result = await checkpoint_native_tools.run_tool_calls(
+    result = await fork_native_tools.run_tool_calls(
         SimpleNamespace(tools=Tools()),
         response,
         messages,
@@ -204,8 +204,8 @@ async def test_native_cold_fork_never_offers_a_tool_it_can_only_refuse(monkeypat
     grow, and a tightly-fit cold input can run out of room before any
     narrative text is ever produced -- an installable body of "".
     """
-    from core import checkpoint_native_fork as native
-    from core.checkpoint_native_tools import CHECKPOINT_TOOL_NAME
+    from core import fork_native as native
+    from core.checkpoint_fork_kind import CHECKPOINT_TOOL_NAME
 
     catalog = (
         {"type": "function", "function": {"name": CHECKPOINT_TOOL_NAME}},
@@ -218,7 +218,7 @@ async def test_native_cold_fork_never_offers_a_tool_it_can_only_refuse(monkeypat
     # fits -- exactly the tightly-fit cold input this failure needs, without
     # depending on real token counts.
     monkeypatch.setattr(
-        "core.checkpoint_native_tools.input_fits_off_loop",
+        "core.fork_native_tools.input_fits_off_loop",
         lambda *_args: _async_value(False),
     )
 
@@ -271,9 +271,9 @@ async def test_native_cold_fold_at_its_allowance_completes_edit_then_narrative(m
     the room that round trip needs.
     """
     from cache_warm_fixtures import make_exact_replay_selection
-    from core import checkpoint_native_fork as native
-    from core.checkpoint_cold_count import cold_input_tokens
-    from core.checkpoint_native_tools import CHECKPOINT_TOOL_NAME
+    from core import fork_native as native
+    from core.fork_cold_count import cold_input_tokens
+    from core.checkpoint_fork_kind import CHECKPOINT_TOOL_NAME
     from core.fork_types import ColdForkSource
 
     window, max_output = 100_000, 8_000
@@ -333,8 +333,8 @@ async def test_native_cold_fold_at_its_allowance_completes_edit_then_narrative(m
 
 def test_native_cold_admission_keeps_room_for_its_output_budget():
     """A cold input admitted with framing margin also passes the loop check."""
-    from core import checkpoint_native_fork as native
-    from core.checkpoint_native_tools import input_fits
+    from core import fork_native as native
+    from core.fork_native_tools import input_fits
 
     request = _request(None)
     fitted = native._fit_cold_input(request, [])
@@ -349,7 +349,7 @@ def test_native_cold_admission_keeps_room_for_its_output_budget():
 @pytest.mark.asyncio
 async def test_native_warm_capture_reuses_prefix_tools_and_tool_loop(monkeypatch):
     """Changing the prefix/tools or skipping the tool continuation is a bug."""
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from infra import state
 
     prefix = (
@@ -429,7 +429,7 @@ async def test_native_warm_capture_reuses_prefix_tools_and_tool_loop(monkeypatch
 @pytest.mark.asyncio
 async def test_native_provider_failure_cannot_be_installed_as_checkpoint(monkeypatch):
     """A transport failure is not model output, even when it carries text."""
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from core.fork_types import ProviderForkRejected
 
     response = LLMResponse(
@@ -451,7 +451,7 @@ async def test_native_provider_failure_cannot_be_installed_as_checkpoint(monkeyp
 @pytest.mark.asyncio
 async def test_native_checkpoint_cancel_cancels_exact_provider_call(monkeypatch):
     """Native Stop cancels the owned oMLX/provider task, not only its caller."""
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
 
     provider_cancelled = asyncio.Event()
 
@@ -479,16 +479,16 @@ async def test_native_checkpoint_cancel_cancels_exact_provider_call(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_cc_usable_body_retains_process_exit_diagnostic(monkeypatch, vendor_thread):
-    from core import checkpoint_cc_fork as cc
-    from core.checkpoint_render import fit_cold_checkpoint_input
+    from core import fork_cc as cc
+    from core.fork_render import fit_cold_fork_input
 
     async def prepare(_process, request, _cancel, _on_input, _spawned_at):
         from subagents.cc_stream_frames import build_user_frame
 
-        fitted = fit_cold_checkpoint_input(request, provider_surface_tokens=25_685)
+        fitted = fit_cold_fork_input(request, provider_surface_tokens=25_685)
         return build_user_frame(fitted.as_prompt(request.instruction))
 
-    monkeypatch.setattr("core.checkpoint_cc_cold.prepare_cold_payload", prepare)
+    monkeypatch.setattr("core.fork_cc_cold.prepare_cold_payload", prepare)
 
     stdout = json.dumps({
         "type": "assistant",
@@ -500,8 +500,8 @@ async def test_cc_usable_body_retains_process_exit_diagnostic(monkeypatch, vendo
 
         return FakeProcess(stdout, returncode=7, stderr=b"quota/auth process terminal")
 
-    monkeypatch.setattr(checkpoint_cc_commands, "cold_command", lambda _request, _kind: ["claude"])
-    monkeypatch.setattr(cc, "_checkpoint_env", lambda *_args: {})
+    monkeypatch.setattr(fork_cc_commands, "cold_command", lambda _request, _kind: ["claude"])
+    monkeypatch.setattr(cc, "_fork_env", lambda *_args: {})
     monkeypatch.setattr(cc, "_spawn_process", spawn)
     request = replace(_request(None), target=_target("claude-code"))
 
@@ -513,16 +513,16 @@ async def test_cc_usable_body_retains_process_exit_diagnostic(monkeypatch, vendo
 
 @pytest.mark.asyncio
 async def test_cc_process_context_limit_retains_partial_body(monkeypatch, vendor_thread):
-    from core import checkpoint_cc_fork as cc
-    from core.checkpoint_render import fit_cold_checkpoint_input
+    from core import fork_cc as cc
+    from core.fork_render import fit_cold_fork_input
 
     async def prepare(_process, request, _cancel, _on_input, _spawned_at):
         from subagents.cc_stream_frames import build_user_frame
 
-        fitted = fit_cold_checkpoint_input(request, provider_surface_tokens=25_685)
+        fitted = fit_cold_fork_input(request, provider_surface_tokens=25_685)
         return build_user_frame(fitted.as_prompt(request.instruction))
 
-    monkeypatch.setattr("core.checkpoint_cc_cold.prepare_cold_payload", prepare)
+    monkeypatch.setattr("core.fork_cc_cold.prepare_cold_payload", prepare)
 
     stdout = json.dumps({
         "type": "assistant",
@@ -534,8 +534,8 @@ async def test_cc_process_context_limit_retains_partial_body(monkeypatch, vendor
 
         return FakeProcess(stdout, returncode=1, stderr=b"Prompt is too long")
 
-    monkeypatch.setattr(checkpoint_cc_commands, "cold_command", lambda _request, _kind: ["claude"])
-    monkeypatch.setattr(cc, "_checkpoint_env", lambda *_args: {})
+    monkeypatch.setattr(fork_cc_commands, "cold_command", lambda _request, _kind: ["claude"])
+    monkeypatch.setattr(cc, "_fork_env", lambda *_args: {})
     monkeypatch.setattr(cc, "_spawn_process", spawn)
     request = replace(_request(None), target=_target("claude-code"))
 
@@ -546,7 +546,7 @@ async def test_cc_process_context_limit_retains_partial_body(monkeypatch, vendor
 
 def test_cc_warm_command_preserves_vetted_live_launch_files(tmp_path):
     """A live warm fork keeps the cache-bearing seed and continuity tools."""
-    from core import checkpoint_cc_fork as cc
+    from core import fork_cc as cc
     from subagents.cc_invocation import ClaudeInvocation
 
     seed_file = tmp_path / "seed.txt"
@@ -579,7 +579,7 @@ def test_cc_warm_command_preserves_vetted_live_launch_files(tmp_path):
         binary="current-claude",
     )
 
-    command = checkpoint_cc_commands.warm_command(source, request, CHECKPOINT_KIND, "snapshot-session")
+    command = fork_cc_commands.warm_command(source, request, CHECKPOINT_KIND, "snapshot-session")
 
     assert command[0] == "current-claude"
     assert command[command.index("--resume") + 1] == "snapshot-session"
@@ -595,7 +595,7 @@ def test_cc_warm_command_preserves_vetted_live_launch_files(tmp_path):
 
 @pytest.mark.asyncio
 async def test_cc_registered_warm_recreates_then_removes_seed(tmp_path, monkeypatch, vendor_thread):
-    from core import checkpoint_cc_fork as cc
+    from core import fork_cc as cc
     from subagents.cc_invocation import ClaudeInvocation
 
     transcript = tmp_path / "source.jsonl"
@@ -635,7 +635,7 @@ async def test_cc_registered_warm_recreates_then_removes_seed(tmp_path, monkeypa
 async def test_codex_usable_body_retains_process_exit_diagnostic(
     tmp_path, monkeypatch, vendor_thread,
 ):
-    from core import checkpoint_codex_fork as codex
+    from core import fork_codex as codex
 
     class Session:
         def __init__(self, **kwargs):
@@ -659,11 +659,11 @@ async def test_codex_usable_body_retains_process_exit_diagnostic(
         tool_registry=object(),
     )
 
-    from core.checkpoint_account import admit_checkpoint
+    from core.fork_account import admit_fork
     from connections.account_operation import prepare_operation_home
 
-    request = prepare_operation_home(admit_checkpoint(request), Path(tmp_path), kind='checkpoint')
-    result = await codex._run_app_server_checkpoint(
+    request = prepare_operation_home(admit_fork(request), Path(tmp_path), kind='checkpoint')
+    result = await codex._run_app_server_fork(
         request,
         None,
         source_home=Path(tmp_path),

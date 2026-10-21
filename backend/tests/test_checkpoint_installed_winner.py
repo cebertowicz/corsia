@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from core.checkpoint_types import CheckpointProviderForkRequest
+
 from dataclasses import replace
 
 import pytest
+from core import fork_runtime
 
 from core.fork_types import (
     ProviderForkRequest,
@@ -81,7 +84,7 @@ def _admission(
             first_included_seq=None,
             started_at="t1",
         ),
-        ProviderForkRequest(
+        CheckpointProviderForkRequest(
             fork_id=checkpoint_id,
             thread_id=thread_id,
             target=target,
@@ -163,7 +166,7 @@ async def test_shared_hard_wait_adopts_installed_race_winner_without_stale_write
     assert continuation.checkpoint_id == "installed-winner"
     assert continuation.payload == {"checkpoint_id": "installed-winner"}
     assert provider_calls == 0
-    assert checkpoint_runtime.fork_task_count() == 0
+    assert fork_runtime.fork_task_count() == 0
     assert scope.checkpoint_id is None
     assert await cancel_waiting_checkpoint(scope) is None
     db = get_db()

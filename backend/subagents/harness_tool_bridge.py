@@ -211,19 +211,6 @@ async def settle_codex_tool_result(app_session: Any, result: str, reply: dict) -
         )
 
 
-async def _execute_registry_tool(
-    registry: ToolRegistry,
-    name: str,
-    arguments: dict[str, Any],
-    checkpoint_id: str | None,
-) -> str:
-    if checkpoint_id is None:
-        return await registry.execute(name, arguments)
-    from infra.continuity_staging import checkpoint_execution_scope
-
-    with checkpoint_execution_scope(checkpoint_id):
-        return await registry.execute(name, arguments)
-
 
 async def _media_delivery(delivery: "ToolExecutionResult", model: str | None):
     """Resolve harness media off-loop through the canonical delivery owner."""
@@ -333,7 +320,7 @@ async def execute_tool(
     invocation_id: str | None = None,
     provider_tool_call_id: str | None = None,
     assistant_step_id: str | None = None,
-    checkpoint_id: str | None = None,
+    fork_id: str | None = None,
     fork_policy: Any = None,
     model: str | None = None,
     name: str,
@@ -345,17 +332,17 @@ async def execute_tool(
     turn_token = state._current_turn_identity.set(turn_identity)
     completion = None
     try:
-        with state.tool_invocation_context(invocation_id, checkpoint_id=checkpoint_id if fork_policy is None else None,
+        with state.tool_invocation_context(invocation_id, fork_id=fork_id,
                                            provider_call_id=provider_tool_call_id):
             if fork_policy is None:
-                content = await _execute_registry_tool(registry, name, arguments, checkpoint_id)
+                content = await registry.execute(name, arguments)
             else:
                 content = await fork_policy.execute(name, arguments)
         completion = CompletedToolCall(
             name=name, result=content, arguments=dict(arguments), thread_id=thread_id,
             turn_id=turn_identity.turn_id if turn_identity else None,
             invocation_id=invocation_id, provider_tool_call_id=provider_tool_call_id,
-            assistant_step_id=assistant_step_id, checkpoint_id=checkpoint_id,
+            assistant_step_id=assistant_step_id, fork_id=fork_id,
         )
         from tools.tool_surface import resolve_dispatch
 
@@ -369,7 +356,7 @@ async def execute_tool(
             completion,
             thread_id=thread_id,
             turn_identity=turn_identity,
-            checkpoint_id=checkpoint_id,
+            fork_id=fork_id,
             model=model,
             persist_delivery=_persist_delivery_off_loop,
             media_delivery=_media_delivery,
@@ -386,7 +373,7 @@ async def execute_tool(
             invocation_id=invocation_id,
             provider_tool_call_id=provider_tool_call_id,
             assistant_step_id=assistant_step_id,
-            checkpoint_id=checkpoint_id,
+            fork_id=fork_id,
         )
         raise
     finally:

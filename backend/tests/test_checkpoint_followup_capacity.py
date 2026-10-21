@@ -11,7 +11,7 @@ from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 @pytest.mark.asyncio
 async def test_native_checkpoint_aggregate_results_cannot_exceed_selected_window(monkeypatch):
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from core.token_estimation import measure_request
     from llm.router import LLMResponse, ToolCallRequest
     from test_checkpoint_provider_adapters import _request, _source
@@ -109,7 +109,7 @@ async def test_cutoff_installs_prior_state_and_warning_without_inventing_complet
 @pytest.mark.parametrize("body", ["", "Partial checkpoint narrative."])
 @pytest.mark.parametrize("failure_surface", ["result", "stderr"])
 def test_cc_context_limit_preserves_partial_output(body, failure_surface):
-    from core.checkpoint_cc_result import result_after_process as _result_after_process
+    from core.fork_cc_result import result_after_process as _result_after_process
     from core.fork_types import ProviderForkRejected
 
     records = [{"type": "assistant", "message": {"content": body}}]
@@ -133,7 +133,7 @@ def test_cc_context_limit_preserves_partial_output(body, failure_surface):
 async def test_codex_context_limit_preserves_streamed_partial_output(
     monkeypatch, tmp_path, body, prior,
 ):
-    from core import checkpoint_codex_fork as codex
+    from core import fork_codex as codex
     from test_checkpoint_external_adapters import _request, _target
 
     terminated = []
@@ -156,8 +156,8 @@ async def test_codex_context_limit_preserves_streamed_partial_output(
         return Session()
 
     events = None
-    monkeypatch.setattr(codex, "_checkpoint_session", session)
-    run = codex._run_app_server_checkpoint(
+    monkeypatch.setattr(codex, "_fork_session", session)
+    run = codex._run_app_server_fork(
         _request(_target("codex"), None, binary="unused"), None,
         source_home=tmp_path, isolated_home=tmp_path, cwd=str(tmp_path),
         cancel_event=asyncio.Event(),
@@ -264,7 +264,7 @@ async def test_first_checkpoint_cutoff_without_edits_cannot_advance_coverage(
 @pytest.mark.asyncio
 async def test_native_first_input_nonfit_is_not_partial_completion(monkeypatch):
     from unittest.mock import AsyncMock
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from core.fork_types import ProviderForkRejected
     from test_checkpoint_provider_adapters import _request, _source
 
@@ -282,7 +282,7 @@ async def test_native_first_input_nonfit_is_not_partial_completion(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("normalized", [False, True])
 async def test_native_provider_context_limit_is_degraded_not_error_prose(monkeypatch, normalized):
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from llm.router import LLMResponse, ToolCallRequest
     from test_checkpoint_provider_adapters import _request, _source
     from llm.provider_overflow import context_overflow_response

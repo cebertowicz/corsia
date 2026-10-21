@@ -192,7 +192,7 @@ def record_comment(
     woken: list[str] = []
     notices = (
         take_unreported_undelivered(db, feedback_comments.author_id(comment), _now())
-        if comment["author_kind"] == "agent"
+        if comment["author_kind"] == "agent" and review_request_id is None
         else []
     )
     if created:
@@ -202,12 +202,13 @@ def record_comment(
             _join_open_batch(db, comment, recipient, review_request_id)
             for recipient in feedback_comments.recipients(db, comment)
         ]
-        if submit and comment["author_kind"] == "agent" and review_request_id is not None:
-            pending, woken, failures = review_feedback.submit_fork_feedback(
+    if submit and comment["author_kind"] == "agent":
+        if review_request_id is not None:
+            _pending, woken, failures = review_feedback.submit_fork_feedback(
                 db, review_request_id, feedback_comments.author_id(comment), comment["artifact_id"],
             )
-            return {"batch_ids": batch_ids, "woken": woken, "undelivered": failures}
-        if submit and comment["author_kind"] == "agent":
+            notices.extend(failures)
+        else:
             woken = close_for_document(
                 db,
                 author_kind="agent",
@@ -215,7 +216,7 @@ def record_comment(
                 artifact_id=comment["artifact_id"],
                 reason="submit",
             )
-    if submit and comment["author_kind"] == "agent":
+    if submit and comment["author_kind"] == "agent" and review_request_id is None:
         current_failures = undelivered_for_document(
             db,
             author_kind="agent",

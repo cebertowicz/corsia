@@ -81,7 +81,7 @@ def _source(*, late_result_synthetic: bool) -> PortableHistoryProjection:
 @pytest.mark.parametrize("late_result_synthetic", (True, False))
 def test_late_result_is_omitted_with_its_step(late_result_synthetic) -> None:
     """The cut is by Step in delivery order, so a late seq cannot block it."""
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
 
     rendered = render_cold_fold_input(
         _source(late_result_synthetic=late_result_synthetic), max_input_tokens=800,

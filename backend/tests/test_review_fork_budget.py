@@ -27,7 +27,7 @@ def review_tools(tmp_path):
 
 
 async def native_review(provider, registry, calls, cancel, request_id, monkeypatch):
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from core.artifact_review_runtime import _run
     from llm.router import LLMResponse, ToolCallRequest
 
@@ -56,8 +56,8 @@ async def native_review(provider, registry, calls, cancel, request_id, monkeypat
 
 async def cc_review(provider, calls, cancel):
     from core.fork_cc_bridge import bind_bridge, execute
-    from core.checkpoint_cc_commands import cold_command
-    from core.checkpoint_cc_result import result
+    from core.fork_cc_commands import cold_command
+    from core.fork_cc_result import result
 
     command = cold_command(replace(provider, binary="claude"), ARTIFACT_REVIEW_KIND)
     limit = int(command[command.index("--max-turns") + 1])
@@ -136,7 +136,7 @@ async def test_ordinary_review_submits_before_shared_budget(review_env, tmp_path
 
 
 def test_cc_limit_and_provider_failures_are_not_review_verdicts():
-    from core.checkpoint_cc_result import result
+    from core.fork_cc_result import result
     from core.artifact_review_capture import failure_reason
     from core.fork_runtime import ForkStepLimitReached
     from core.fork_types import ProviderForkRejected

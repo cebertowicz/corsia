@@ -1,7 +1,7 @@
-"""Review usage belongs to the requester, never the reviewer's current task."""
+"""review fork spend is recorded on the reviewer thread without a plan binding; per-request attribution is a later Structured Plans read"""
 
 from core import fork_usage
-from infra import checkpoint_usage
+from infra.fork_usage import record_fork_call
 from infra.db_async import run_in_db
 from infra.time import utc_now_iso
 from infra.turn_usage_receipts import PLAN_FIELDS
@@ -13,7 +13,7 @@ async def _unattributed(request, account_id):
 
 async def _record_call(request, account_id, call_key, model, measured):
     return await run_in_db(
-        checkpoint_usage.record_fork_call, request.fork_id, request.thread_id,
+        record_fork_call, request.fork_id, request.thread_id,
         call_key, model, measured, vendor_account_id=account_id,
         now_iso=utc_now_iso(), source="artifact_review",
     )

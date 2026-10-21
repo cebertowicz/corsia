@@ -22,9 +22,9 @@ def _steer_target():
 
 
 def _steer_session(steer, **kwargs):
-    from core.checkpoint_codex_context import CodexCheckpointContext
+    from core.fork_codex_context import CodexForkContext
 
-    return SimpleNamespace(steer=steer, tool_context=CodexCheckpointContext(_steer_target(), 100),
+    return SimpleNamespace(steer=steer, tool_context=CodexForkContext(_steer_target(), 100),
                            **kwargs)
 
 

@@ -100,8 +100,8 @@ def read_idle_context(
     db=None,
 ) -> IdleCheckpointContext | IdleCheckpointSkip:
     """Freeze one marker's current source facts without consuming the marker."""
-    from core.checkpoint_fit import foldable_tail_tokens
-    from core.checkpoint_render import checkpoint_binary
+    from core.fork_fit import foldable_tail_tokens
+    from core.fork_render import fork_binary
     from history.projection import render_portable_history
     from history.types import HistoryBoundary
     from infra.checkpoint_queries import active_for_thread, current_installed
@@ -166,7 +166,7 @@ def read_idle_context(
             reasoning_effort=effective_reasoning_effort(
                 thread_row["reasoning_effort"], target.catalog_id
             ),
-            binary=checkpoint_binary(target, connection),
+            binary=fork_binary(target, connection),
         )
     finally:
         if db is None:
@@ -201,13 +201,13 @@ async def complete_idle_checkpoint(
     preparation: IdleCheckpointPreparation,
 ) -> CheckpointAdmission | IdleCheckpointSkip:
     """Capture the same-source handle for one frozen idle request."""
-    from core.checkpoint_render import capture_warm_checkpoint_source
+    from core.fork_render import capture_warm_fork_source
     from core.checkpoint_warm_request import complete_warm_admission
 
     context = preparation.context
     if context.target.harness == "native":
         return await _complete_native_idle_checkpoint(preparation)
-    warm_source = await capture_warm_checkpoint_source(
+    warm_source = await capture_warm_fork_source(
         preparation.due.thread_id,
         context.boundary,
         target=context.target,
@@ -231,7 +231,7 @@ async def _complete_native_idle_checkpoint(
 ) -> CheckpointAdmission | IdleCheckpointSkip:
     """Fork the receipt's live prefix warm, or skip before any row exists."""
     from core.checkpoint_fork_kind import CHECKPOINT_KIND
-    from core.checkpoint_native_fork import capture_live_warm_source, warm_input_fits
+    from core.fork_native import capture_live_warm_source, warm_input_fits
     from core.checkpoint_warm_request import complete_warm_admission
 
     context = preparation.context

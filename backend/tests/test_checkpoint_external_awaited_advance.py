@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from core.checkpoint_types import CheckpointProviderForkRequest
+
 import asyncio
 from types import SimpleNamespace
 
 import pytest
+from core import fork_runtime
 
 from core.checkpoint_resume import CheckpointAdmission, CheckpointWaitScope
 from core.fork_types import (
@@ -88,7 +91,7 @@ def _earlier_admission(
     )
     return CheckpointAdmission(
         request,
-        ProviderForkRequest(
+        CheckpointProviderForkRequest(
             fork_id=checkpoint_id,
             thread_id=thread_id,
             target=target,
@@ -110,9 +113,11 @@ async def _clean_checkpoint_runtime(monkeypatch):
 
     # These tests prove the cut, not the FIFO re-drive after it.
     monkeypatch.setattr(thread_execution, "drive_thread", no_redrive)
-    await checkpoint_runtime.shutdown_fork_tasks()
+    await fork_runtime.shutdown_forks()
+    await checkpoint_runtime.shutdown_checkpoint_wakes()
     yield
-    await checkpoint_runtime.shutdown_fork_tasks()
+    await fork_runtime.shutdown_forks()
+    await checkpoint_runtime.shutdown_checkpoint_wakes()
 
 
 @pytest.mark.asyncio
@@ -233,7 +238,7 @@ async def test_external_tool_boundary_advances_after_awaited_earlier_cut(
         )
     finally:
         db.close()
-    assert checkpoint_runtime.fork_task_count() == 0
+    assert fork_runtime.fork_task_count() == 0
 
 
 @pytest.mark.asyncio
@@ -355,4 +360,4 @@ async def test_external_initial_boundary_advances_after_awaited_earlier_cut(
     assert (head.through_seq, head.through_message_id) == (
         4, f"{thread_id}-m4",
     )
-    assert checkpoint_runtime.fork_task_count() == 0
+    assert fork_runtime.fork_task_count() == 0

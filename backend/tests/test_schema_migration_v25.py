@@ -44,7 +44,7 @@ def _input(db, message_id, thread_id, order, model, epoch, **fields):
 def _hold(**extra):
     return {
         "write_outcome": "proved_no_write", "delivery_attempt_id": "old-attempt",
-        "delivery_error": "minimum meaningful cold checkpoint input does not fit",
+        "delivery_error": "minimum meaningful cold fork input does not fit",
         **extra,
     }
 

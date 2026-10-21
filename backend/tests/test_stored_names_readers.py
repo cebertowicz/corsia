@@ -184,7 +184,7 @@ def _boundary():
 
 
 def test_a_transcript_written_by_this_build_matches_warm() -> None:
-    from core.checkpoint_cc_boundary_records import boundary_prefix_from_stream
+    from core.fork_cc_boundary_records import boundary_prefix_from_stream
     from subagents.cc_transcript_projection import _assistant_message_id, _stable_uuid
 
     transcript = _transcript(NEW)
@@ -199,8 +199,8 @@ def test_a_transcript_written_by_this_build_matches_warm() -> None:
 
 @pytest.mark.asyncio
 async def test_a_transcript_with_former_ids_refuses_warm_capture(tmp_path: Path) -> None:
-    from core.checkpoint_cc_boundary import _capture_boundary_identity
-    from core.checkpoint_cc_boundary_records import boundary_prefix_cut
+    from core.fork_cc_boundary import _capture_boundary_identity
+    from core.fork_cc_boundary_records import boundary_prefix_cut
 
     transcript = _transcript(OLD)
     path = tmp_path / "old-session.jsonl"
@@ -219,7 +219,7 @@ async def test_a_transcript_with_former_ids_refuses_warm_capture(tmp_path: Path)
     # checkpoint. It is never a match on some other row.
     assert source is None
     assert lines == [
-        f"checkpoint warm capture refused for {THREAD_ID} (claude-code): boundary_not_found:assistant"
+        f"fork warm capture refused for {THREAD_ID} (claude-code): boundary_not_found:assistant"
     ]
     assert boundary_prefix_cut(BytesIO(transcript), _boundary(), _SESSION) == (
         "boundary_not_found:assistant"

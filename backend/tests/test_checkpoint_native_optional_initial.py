@@ -114,7 +114,7 @@ def folds(monkeypatch):
     monkeypatch.setattr(turn_iteration_context, "run_in_db", iteration_db)
     monkeypatch.setattr(checkpoint_native_admission, "run_in_db", admission_db)
     monkeypatch.setattr(
-        "core.checkpoint_native_fork.capture_live_warm_source",
+        "core.fork_native.capture_live_warm_source",
         lambda *_args, **_kwargs: object(),
     )
     monkeypatch.setattr("core.checkpoint_warm_request.build_warm_admission", build_warm_admission)

@@ -1,4 +1,4 @@
-"""One disposable Codex checkpoint over a frozen rollout prefix."""
+"""One disposable Codex fork over a frozen rollout prefix."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from history.types import HistoryBoundary
-from core.checkpoint_account import admit_checkpoint, bind_checkpoint_session
+from core.fork_account import admit_fork, bind_fork_session
 
 from core.fork_runtime import ForkKind
 from llm.resolution import ExecutionTarget
-from core.checkpoint_codex_result import (
+from core.fork_codex_result import (
     CodexForkCapture,
 )
 
@@ -23,9 +23,9 @@ from core.fork_types import (
     ProviderForkRequest,
     ProviderForkResult,
 )
-from core.checkpoint_types import ColdInputCallback
-from core.checkpoint_codex_root import registered_rollout as _registered_rollout
-from core.checkpoint_warm_request import warm_capture_refused
+from core.fork_types import ColdInputCallback
+from core.fork_codex_root import registered_rollout as _registered_rollout
+from core.fork_capture import warm_capture_refused
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +135,7 @@ async def _capture_tool_boundary_warm_source(
         return warm_capture_refused(thread_id, "codex", "no_boundary")
     if context.warm_boundary is None:
         return warm_capture_refused(thread_id, "codex", "no_warm_boundary")
-    from core.checkpoint_render import capture_warm_checkpoint_source
+    from core.fork_render import capture_warm_fork_source
     from subagents.codex_runtime_state import _LIVE
 
     if refused := _live_refusal(thread_id, live, _LIVE):
@@ -149,8 +149,8 @@ async def _capture_tool_boundary_warm_source(
         return warm_capture_refused(thread_id, "codex", prefix_bytes)
     if refused := _live_refusal(thread_id, live, _LIVE):
         return warm_capture_refused(thread_id, "codex", refused)
-    # capture_warm_checkpoint_source logs its own reason for every refusal.
-    source = await capture_warm_checkpoint_source(
+    # capture_warm_fork_source logs its own reason for every refusal.
+    source = await capture_warm_fork_source(
         thread_id,
         context.boundary,
         target=context.target,
@@ -185,7 +185,7 @@ def _copy_rollout(source: CodexWarmSource, isolated_home: Path) -> None:
     )
 
 
-def _checkpoint_tools(request: ProviderForkRequest, cwd: str, kind: ForkKind):
+def _fork_tools(request: ProviderForkRequest, cwd: str, kind: ForkKind):
     """Use the exact cold surface frozen at fit, or rebuild warm callbacks."""
     from core.fork_tools import allowed_definitions
     from subagents.harness_tool_bridge import build_tool_registry, dynamic_tool_definitions
@@ -211,7 +211,7 @@ def _checkpoint_tools(request: ProviderForkRequest, cwd: str, kind: ForkKind):
     return registry, definitions
 
 
-def _checkpoint_session(
+def _fork_session(
     request: ProviderForkRequest,
     source: CodexWarmSource | None,
     *,
@@ -221,7 +221,7 @@ def _checkpoint_session(
     on_event: Any,
     on_exit: Any,
     cold_input=None,
-    checkpoint_tool_result_fits=None,
+    fork_tool_result_fits=None,
     kind: ForkKind,
     cancel_event: asyncio.Event | None = None,
     on_raw_message=None,
@@ -231,11 +231,11 @@ def _checkpoint_session(
 
     from core.fork_tools import ForkToolBoundary
 
-    registry, definitions = _checkpoint_tools(request, cwd, kind)
+    registry, definitions = _fork_tools(request, cwd, kind)
     boundary = ForkToolBoundary(
-        kind, request, registry, cancel_event or asyncio.Event(), checkpoint_tool_result_fits,
+        kind, request, registry, cancel_event or asyncio.Event(), fork_tool_result_fits,
     )
-    return bind_checkpoint_session(request, CodexAppServerSession(
+    return bind_fork_session(request, CodexAppServerSession(
         binary=request.binary or "",
         task=cold_input.as_prompt(request.instruction) if cold_input else request.instruction,
         codex_thread_id=source.provider_thread_id if source is not None else None,
@@ -245,7 +245,7 @@ def _checkpoint_session(
         dynamic_tools=definitions,
         tool_registry=registry,
         corsia_thread_id=request.thread_id,
-        checkpoint_id=request.fork_id,
+        fork_id=request.fork_id,
         on_raw_message=on_raw_message,
         # Managed tool receipts read the rollout, and Codex gives an ephemeral
         # thread none. The temporary isolated home keeps the writer disposable.
@@ -260,15 +260,15 @@ def _checkpoint_session(
         ),
         on_event=on_event,
         on_exit=on_exit,
-        checkpoint_tool_result_fits=boundary,
-    ))
+        fork_tool_result_fits=boundary,
+    ), kind=kind)
 
 
 def _fit_cold_request(request: ProviderForkRequest, cwd: str, *, kind: ForkKind):
-    from core.checkpoint_render import _codex_cold_surface, fit_cold_checkpoint_input
+    from core.fork_render import codex_cold_surface, fit_cold_fork_input
 
-    registry, definitions = _checkpoint_tools(request, cwd, kind)
-    surface, registry, definitions, developer = _codex_cold_surface(
+    registry, definitions = _fork_tools(request, cwd, kind)
+    surface, registry, definitions, developer = codex_cold_surface(
         cwd, writer=request.target, registry=registry, definitions=definitions,
         developer=request.developer_instructions,
     )
@@ -276,10 +276,10 @@ def _fit_cold_request(request: ProviderForkRequest, cwd: str, *, kind: ForkKind)
         request, tool_registry=registry, dynamic_tool_specs=definitions,
         developer_instructions=developer,
     )
-    return request, fit_cold_checkpoint_input(request, provider_surface_tokens=surface)
+    return request, fit_cold_fork_input(request, provider_surface_tokens=surface)
 
 
-async def _run_app_server_checkpoint(
+async def _run_app_server_fork(
     request: ProviderForkRequest,
     source: CodexWarmSource | None,
     *,
@@ -288,7 +288,7 @@ async def _run_app_server_checkpoint(
     cold_input=None,
     kind: ForkKind,
 ) -> ProviderForkResult:
-    from core.checkpoint_codex_context import CodexCheckpointContext, frozen_context_tokens
+    from core.fork_codex_context import CodexForkContext, frozen_context_tokens
     from core.token_estimation import measure_request
 
     if source is None:
@@ -304,7 +304,7 @@ async def _run_app_server_checkpoint(
             }, target=request.target).tokens,
         )
         initial_tokens += measure_request(request.instruction, target=request.target).tokens
-    context = CodexCheckpointContext(request.target, initial_tokens)
+    context = CodexForkContext(request.target, initial_tokens)
     capture = CodexForkCapture(on_usage=request.on_usage, kind=kind)
 
     async def tool_boundary(reply, usage=None):
@@ -334,7 +334,7 @@ async def _run_app_server_checkpoint(
         if event.get("kind") != "call_usage" or event.get("turn_id") == session.active_turn_id:
             await capture.on_event(event)
 
-    session = _checkpoint_session(
+    session = _fork_session(
         request,
         source,
         source_home=source_home,
@@ -343,7 +343,7 @@ async def _run_app_server_checkpoint(
         on_event=on_event,
         on_exit=capture.on_exit,
         cold_input=cold_input,
-        checkpoint_tool_result_fits=tool_boundary,
+        fork_tool_result_fits=tool_boundary,
         kind=kind,
         cancel_event=cancel_event,
         on_raw_message=on_raw_message,
@@ -360,10 +360,10 @@ async def invoke_fork(
     kind: ForkKind,
     on_cold_input: ColdInputCallback | None = None,
 ) -> ProviderForkResult:
-    """Run either disposable fork kind through one Codex process."""
+    """Run one disposable fork through the Codex process."""
     if request.target.harness != "codex":
         raise TypeError("Codex adapter requires a Codex target")
-    request = admit_checkpoint(request)
+    request = admit_fork(request)
     source = request.warm_source
     if source is not None and not isinstance(source, CodexWarmSource):
         raise TypeError(f"Codex {kind.name} received another harness's warm source")
@@ -382,10 +382,12 @@ async def invoke_fork(
     from connections.account_operation import operation_directory, require_same_operation_home
 
     require_same_operation_home(request, source_home if source else None)
-    with operation_directory(request, prefix='corsia-codex-checkpoint-', kind='checkpoint') as (request, isolated_home):
+    with operation_directory(
+        request, prefix='corsia-codex-fork-', kind=kind.name,
+    ) as (request, isolated_home):
         if source is not None:
             _copy_rollout(source, isolated_home)
-        return await _run_app_server_checkpoint(
+        return await _run_app_server_fork(
             request,
             source,
             source_home=source_home,

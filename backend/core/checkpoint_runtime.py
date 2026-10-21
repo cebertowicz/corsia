@@ -59,33 +59,23 @@ async def _invoke(
 
     request = await attach_review(request)
     request = await CHECKPOINT_KIND.usage_binder(request)
-    if request.target.harness == "native":
-        from core.checkpoint_native_fork import invoke_fork
-    elif request.target.harness == "claude-code":
-        from core.checkpoint_cc_fork import invoke_fork
-    elif request.target.harness == "codex":
-        from core.checkpoint_codex_fork import invoke_fork
-    else:
-        raise ValueError(f"unsupported checkpoint harness: {request.target.harness}")
+    from core.fork_runtime import invoke_fork
+
     async def record_input(first_included_seq: int | None) -> None:
         await run_in_db(
             checkpoint_store.admit_cold_input, request.fork_id,
             first_included_seq=first_included_seq,
         )
 
-    if request.target.harness == "claude-code":
-        async def bind_executor(executor):
-            handle = _tasks.get(request.fork_id)
-            if handle is None or handle.thread_id != request.thread_id:
-                raise ForkNotAdmitted("checkpoint invocation no longer owns its tools")
-            handle.tool_executor = executor
+    async def bind_executor(executor):
+        handle = _tasks.get(request.fork_id)
+        if handle is None or handle.thread_id != request.thread_id:
+            raise ForkNotAdmitted("fork invocation no longer owns its tools")
+        handle.tool_executor = executor
 
-        return await invoke_fork(
-            request, cancel_event, kind=CHECKPOINT_KIND,
-            on_cold_input=record_input, on_tool_executor=bind_executor,
-        )
     return await invoke_fork(
-        request, cancel_event, kind=CHECKPOINT_KIND, on_cold_input=record_input,
+        request, cancel_event, kind=CHECKPOINT_KIND,
+        on_cold_input=record_input, on_tool_executor=bind_executor,
     )
 
 
@@ -153,9 +143,9 @@ async def _execute(
         if cancel_event.is_set():
             raise asyncio.CancelledError
         if provider_request.target.harness in {'claude-code', 'codex'}:
-            from core.checkpoint_account import admit_checkpoint
+            from core.fork_account import admit_fork
 
-            provider_request = admit_checkpoint(provider_request)
+            provider_request = admit_fork(provider_request)
         result = await invoke_with_cold_correction(
             provider_request, cancel_event, _invoke,
         )
@@ -343,23 +333,8 @@ async def cancel_checkpoint(checkpoint_id: str) -> CheckpointRecord:
     return record
 
 
-async def shutdown_fork_tasks() -> None:
-    """Cancel and join the exact fork calls and wakes owned by this process.
-
-    Every fork stops before its provider transport; only checkpoints have a
-    checkpoint row to cancel. A review fork's request is escalated at the next
-    startup (``artifact_review_capture.reconcile_startup_reviews``).
-    """
-    handles = tuple(_tasks.items())
-    for _fork_id, handle in handles:
-        handle.cancel_event.set()
-    for fork_id, handle in handles:
-        await handle.kind.shutdown_handler(fork_id)
-    await asyncio.gather(
-        *(handle.task for _fork_id, handle in handles),
-        return_exceptions=True,
-    )
-    # Joined calls start their wakes on the way out, so take wakes last.
+async def shutdown_checkpoint_wakes() -> None:
+    """Cancel checkpoint-only completion wakes after shared forks are joined."""
     wakes = tuple(_wakes)
     for wake in wakes:
         wake.cancel()
@@ -375,8 +350,3 @@ async def reconcile_startup_checkpoints() -> tuple[CheckpointRecord, ...]:
     for record in records:
         await _notify_completion(record)
     return records
-
-
-def fork_task_count() -> int:
-    """Expose live cancellation-handle count for lifecycle verification."""
-    return len(_tasks)

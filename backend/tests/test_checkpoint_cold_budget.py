@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
-from core.checkpoint_fit import ColdFoldInputTooLarge
+from core.fork_fit import ColdFoldInputTooLarge
 from core.checkpoint_cold_admission import build_checkpoint_admission
 from history.types import (
     PORTABLE_HISTORY_FORMAT_VERSION,
@@ -110,7 +110,7 @@ def test_cold_prior_carries_narrative_without_continuity_bodies() -> None:
 @pytest.mark.asyncio
 async def test_native_oversized_tool_surface_never_reaches_provider(monkeypatch):
     """Ignoring tool schemas during cold fit must not permit an oversized write."""
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
 
     definition = {
         "type": "function",
@@ -220,7 +220,7 @@ class _ColdClaudeProcess:
 
 
 def _claude_process(monkeypatch, **values):
-    from core import checkpoint_cc_fork as cc
+    from core import fork_cc as cc
 
     process = _ColdClaudeProcess(**values)
     launches = []
@@ -353,7 +353,7 @@ async def test_cc_silent_process_times_out_without_generating(monkeypatch):
     """A non-reporting process is refused, not waited on (#2078)."""
     from core.fork_types import ProviderForkRejected
 
-    monkeypatch.setattr("core.checkpoint_cc_cold._CONTEXT_ADMISSION_TIMEOUT_S", 0.05)
+    monkeypatch.setattr("core.fork_cc_cold._CONTEXT_ADMISSION_TIMEOUT_S", 0.05)
     cc, process, _launches = _claude_process(monkeypatch, respond=False, init_mcp_status=None)
     with pytest.raises(ProviderForkRejected, match=r"cold context admission timed out.*init status: not received.*elapsed from process spawn: [0-9.]+s"):
         await cc.invoke_fork(_admission(monkeypatch, "claude-code").provider_request, asyncio.Event(), kind=CHECKPOINT_KIND)
@@ -364,7 +364,7 @@ async def test_cc_silent_process_times_out_without_generating(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cc_context_timeout_starts_at_control_write_not_process_spawn(monkeypatch):
-    from core import checkpoint_cc_cold as cold
+    from core import fork_cc_cold as cold
     from core.fork_types import ProviderForkRejected
 
     waits = []
@@ -428,7 +428,7 @@ async def test_cc_missing_or_invalid_context_never_sends_generation(monkeypatch,
 @pytest.mark.usefixtures("seeded_cc_thread")
 async def test_cc_ignores_uncorrelated_context_and_honors_smaller_reported_window(monkeypatch):
     cc, process, _launches = _claude_process(monkeypatch, respond=False)
-    for request_id, window in (("unrelated", 1_000_000), ("corsia-checkpoint-context", 16_384)):
+    for request_id, window in (("unrelated", 1_000_000), ("corsia-fork-context", 16_384)):
         process.stdout.feed_data((json.dumps({
             "type": "control_response",
             "response": {

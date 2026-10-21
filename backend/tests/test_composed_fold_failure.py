@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.checkpoint_fit import ColdFoldInputTooLarge
+from core.fork_fit import ColdFoldInputTooLarge
 from core.checkpoint_resume import ProviderBoundary, maintain_before_provider_call
 from core.checkpoint_types import CheckpointUnavailable
 from core.checkpoint_wait import CheckpointWaitScope
@@ -60,19 +60,19 @@ def _cold_admission(monkeypatch, harness: str, *, window: int = WINDOW):
 
 def _surface_that_just_fits(request) -> int:
     """The largest loaded writer surface this source still folds under."""
-    from core.checkpoint_render import fit_cold_checkpoint_input
+    from core.fork_render import fit_cold_fork_input
 
     allowance = WINDOW - request.max_output_tokens - WINDOW // 20
-    baseline = fit_cold_checkpoint_input(request, provider_surface_tokens=0)
+    baseline = fit_cold_fork_input(request, provider_surface_tokens=0)
     return allowance - baseline.input_tokens
 
 
 def _refuse_the_fold(request) -> ColdFoldInputTooLarge:
     """Refuse this exact fold the way its own writer's surface would."""
-    from core.checkpoint_render import fit_cold_checkpoint_input
+    from core.fork_render import fit_cold_fork_input
 
     with pytest.raises(ColdFoldInputTooLarge) as refusal:
-        fit_cold_checkpoint_input(
+        fit_cold_fork_input(
             request, provider_surface_tokens=_surface_that_just_fits(request) + 1,
         )
     return refusal.value
@@ -131,12 +131,12 @@ def test_each_writer_refuses_only_the_fold_its_surface_cannot_hold(
     monkeypatch, harness: str,
 ) -> None:
     """The refusal is decided per writer family, before any provider call."""
-    from core.checkpoint_render import fit_cold_checkpoint_input
+    from core.fork_render import fit_cold_fork_input
 
     request = _cold_admission(monkeypatch, harness).provider_request
     surface = _surface_that_just_fits(request)
 
-    fitted = fit_cold_checkpoint_input(request, provider_surface_tokens=surface)
+    fitted = fit_cold_fork_input(request, provider_surface_tokens=surface)
     refusal = _refuse_the_fold(request)
 
     # One token apart: the boundary is the measured surface, not a guess.

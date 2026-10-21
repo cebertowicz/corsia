@@ -14,7 +14,7 @@ from test_checkpoint_external_adapters import _request, _target
 
 @pytest.mark.asyncio
 async def test_checkpoint_tool_infrastructure_failure_stops_its_writer_before_error():
-    from core.checkpoint_cc_io import _ToolBoundary
+    from core.fork_cc_io import _ToolBoundary
     from test_checkpoint_cc_capacity import _context
     from test_checkpoint_external_adapters import WaitingProcess
 
@@ -39,7 +39,7 @@ async def test_checkpoint_tool_infrastructure_failure_stops_its_writer_before_er
 @pytest.mark.asyncio
 async def test_checkpoint_tool_rejects_substitution_and_replay_before_execution():
     from core._tool_result_delivery_support import ToolResultBindingError
-    from core.checkpoint_cc_io import _ToolBoundary
+    from core.fork_cc_io import _ToolBoundary
     from test_checkpoint_cc_capacity import _context
     from test_checkpoint_external_adapters import WaitingProcess
 
@@ -71,7 +71,7 @@ async def test_checkpoint_tool_rejects_substitution_and_replay_before_execution(
 
 @pytest.mark.asyncio
 async def test_failed_executor_registration_closes_the_spawned_checkpoint():
-    from core.checkpoint_cc_io import communicate_checkpoint
+    from core.fork_cc_io import communicate_fork
     from test_checkpoint_external_adapters import WaitingProcess
 
     process = WaitingProcess()
@@ -80,7 +80,7 @@ async def test_failed_executor_registration_closes_the_spawned_checkpoint():
         raise RuntimeError("checkpoint no longer owned")
 
     with pytest.raises(RuntimeError, match="no longer owned"):
-        await communicate_checkpoint(
+        await communicate_fork(
             process,
             _request(_target("claude-code"), None, binary="unused"),
             asyncio.Event(),
@@ -96,7 +96,7 @@ async def test_cc_cutoff_drains_partial_stdout_and_never_releases_oversized_resu
     monkeypatch, through_adapter, isolated_db,
 ):
     seed_vendor_checkpoint_thread([_target("claude-code")])
-    from core.checkpoint_cc_io import communicate_checkpoint
+    from core.fork_cc_io import communicate_fork
     from core.fork_types import ProviderForkRejected
 
     records = [
@@ -132,12 +132,12 @@ async def test_cc_cutoff_drains_partial_stdout_and_never_releases_oversized_resu
     async def execute():
         return " x" * 100
 
-    monkeypatch.setattr("core.checkpoint_cc_cold.prepare_cold_payload", prepare)
+    monkeypatch.setattr("core.fork_cc_cold.prepare_cold_payload", prepare)
     target = replace(_target("claude-code"), context_window=1000,
                      transport_model="gpt-4", expected_reported_model="gpt-4")
     request = _request(target, None, binary="unused")
     if through_adapter:
-        from core import checkpoint_cc_fork as cc
+        from core import fork_cc as cc
 
         async def spawn(*_args, **_kwargs):
             return process
@@ -147,7 +147,7 @@ async def test_cc_cutoff_drains_partial_stdout_and_never_releases_oversized_resu
             request, asyncio.Event(), on_tool_executor=register, kind=CHECKPOINT_KIND,
         ))
     else:
-        operation = asyncio.create_task(communicate_checkpoint(
+        operation = asyncio.create_task(communicate_fork(
             process, request, asyncio.Event(), on_tool_executor=register, spawned_at=0.0,
         ))
     try:

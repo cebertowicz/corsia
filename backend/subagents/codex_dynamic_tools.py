@@ -40,9 +40,9 @@ def dynamic_tool_response(content: Any) -> dict:
     return {"contentItems": items, "success": not is_error}
 
 
-async def checkpoint_reply_fits(session, reply, usage=None) -> bool:
-    """Await a checkpoint's accounting handoff on its existing tool boundary."""
-    boundary = session.checkpoint_tool_result_fits
+async def fork_reply_fits(session, reply, usage=None) -> bool:
+    """Await a fork's accounting handoff on its existing tool boundary."""
+    boundary = session.fork_tool_result_fits
     if boundary is None:
         return True
     result = boundary(reply) if usage is None else boundary(reply, usage)
@@ -50,26 +50,26 @@ async def checkpoint_reply_fits(session, reply, usage=None) -> bool:
 
 
 async def execute_dynamic_tool(session, name: str, arguments: dict, params: dict):
-    """Execute one admitted callback and check checkpoint replies before writing."""
+    """Execute one admitted callback and check fork replies before writing."""
     from subagents.harness_tool_bridge import execute_tool, settle_codex_tool_result
 
-    boundary = session.checkpoint_tool_result_fits if session.checkpoint_id else None
-    if boundary is not None and not await checkpoint_reply_fits(session, None):
+    boundary = session.fork_tool_result_fits if session.fork_id else None
+    if boundary is not None and not await fork_reply_fits(session, None):
         session._request_terminate()
         return None, None
     provider_call_id = str(params.get("callId") or params.get("id") or "")
     assistant_step_id = (
         session.declared_tool_step_ids.get(provider_call_id)
-        if session.checkpoint_id is None else None
+        if session.fork_id is None else None
     )
-    if session.checkpoint_id is None and not assistant_step_id:
+    if session.fork_id is None and not assistant_step_id:
         from core._tool_result_delivery_support import ToolResultBindingError
 
         raise ToolResultBindingError(
             "Codex dynamic tool request lacks its exact Assistant Step identity"
         )
-    checkpoint_kwargs = (
-        {"checkpoint_id": session.checkpoint_id} if session.checkpoint_id is not None else {}
+    fork_kwargs = (
+        {"fork_id": session.fork_id} if session.fork_id is not None else {}
     )
     # Capability follows the selected catalog entry, not a transport alias.
     model_identity = session.catalog_model_id or session.model
@@ -77,19 +77,19 @@ async def execute_dynamic_tool(session, name: str, arguments: dict, params: dict
     from core.fork_tools import ForkToolBoundary
 
     if isinstance(boundary, ForkToolBoundary):
-        checkpoint_kwargs["fork_policy"] = boundary
+        fork_kwargs["fork_policy"] = boundary
     content = await execute_tool(
         session.tool_registry, thread_id=session.corsia_thread_id,
         turn_identity=session.corsia_turn_identity,
         invocation_id=provider_call_id, provider_tool_call_id=provider_call_id,
         assistant_step_id=assistant_step_id,
-        name=name, arguments=arguments, harness="codex", **model_kwargs, **checkpoint_kwargs,
+        name=name, arguments=arguments, harness="codex", **model_kwargs, **fork_kwargs,
     )
     try:
         reply = dynamic_tool_response(content)
-        if session.checkpoint_id is None:
+        if session.fork_id is None:
             await settle_codex_tool_result(session, content, reply)
-        if boundary is not None and not await checkpoint_reply_fits(session, reply):
+        if boundary is not None and not await fork_reply_fits(session, reply):
             # The session writer sees _closing and cannot release even an error reply.
             session._request_terminate()
             return None, None
@@ -102,7 +102,7 @@ async def execute_dynamic_tool(session, name: str, arguments: dict, params: dict
             turn_id=session.corsia_turn_identity.turn_id if session.corsia_turn_identity else None,
             invocation_id=provider_call_id, provider_tool_call_id=provider_call_id,
             assistant_step_id=assistant_step_id,
-            checkpoint_id=session.checkpoint_id,
+            fork_id=session.fork_id,
         )
         raise completed_tool_failure(
             (completion,), error, harness="codex",

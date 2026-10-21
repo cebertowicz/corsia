@@ -93,8 +93,21 @@ def submit_fork_feedback(db, request_id: str, reviewer_thread_id: str,
         ).fetchall()
         summary = "; ".join(str(row["body"])[:200] for row in comments)
     else:
-        transition(db, request_id, "submitted")
         summary = "no comments were left"
+    transition(db, request_id, "submitted")
+    from registry import models
+
+    artifact = models.get_artifact(artifact_id, db=db)
+    if artifact is not None:
+        answered = db.execute(
+            "SELECT id FROM doc_feedback_batches WHERE review_request_id=? "
+            "AND state='delivered' AND delivery_outcome IN ('node','ui') AND recipient_id=? "
+            "ORDER BY opened_at,id LIMIT 1", (request_id, artifact["parent_thread_id"]),
+        ).fetchone()
+        if answered is not None:
+            db.execute("UPDATE doc_review_requests SET answered_batch_id=? WHERE id=?",
+                       (answered["id"], request_id))
+        notify_change(db, request, artifact)
     append_thread_context_note(
         db, thread_id=reviewer_thread_id,
         summary=f"Document review submitted for {artifact_id}: {summary}",

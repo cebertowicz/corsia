@@ -16,25 +16,23 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 
-from core.checkpoint_warm_request import warm_capture_refused
+from core.fork_capture import warm_capture_refused
 
-from core.fork_types import (
-    ProviderForkRequest,
-    WarmForkUnusable,
-)
+from core.checkpoint_types import CheckpointProviderForkRequest
+from core.fork_types import WarmForkUnusable
 from infra.checkpoints import adopt_cold
 from infra.db_async import run_in_db
 
 
-def cold_correction_available(request: ProviderForkRequest) -> bool:
+def cold_correction_available(request: CheckpointProviderForkRequest) -> bool:
     """Whether this exact request may correct itself once to cold."""
     return request.warm_source is not None and request.same_model_cold is not None
 
 
 async def build_cold_request(
-    request: ProviderForkRequest,
+    request: CheckpointProviderForkRequest,
     reason: str = "warm_fork_over_window",
-) -> ProviderForkRequest:
+) -> CheckpointProviderForkRequest:
     """Build the cold request this caller would have built with no warm source.
 
     ``reason`` is the refused warm fork's own token, logged as the cause.

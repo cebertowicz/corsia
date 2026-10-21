@@ -14,7 +14,7 @@
 				<Avatar name={request.reviewer_name} color={agentColor(request.reviewer_thread_id)} hidden size="md" />
 				<span class="who">
 					<span class="name">{request.reviewer_name}</span>
-					<span class="status">{request.outcome === 'failed' ? reviewContinuationText(request.reviewer_name) : request.outcome === 'ended_without_comments' ? 'Ended without comments' : `Requested ${timeLabel(request.created_at)}`}</span>
+					<span class="status">{request.outcome === 'failed' ? reviewContinuationText(request.reviewer_name, request.reason) : request.outcome === 'ended_without_comments' ? 'Ended without comments' : `Requested ${timeLabel(request.created_at)}`}</span>
 					{#if model.cancelErrors[request.id]}<span class="error" role="alert">{model.cancelErrors[request.id]}</span>{/if}
 				</span>
 				{#if request.may_cancel}

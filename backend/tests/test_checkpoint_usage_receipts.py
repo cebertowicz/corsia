@@ -67,10 +67,10 @@ def _cache_share(receipt: dict) -> float:
 
 
 def _cc_receipt(payload):
-    """Exactly the composition `checkpoint_cc_fork` runs on a result block."""
-    from infra.provider_usage import checkpoint_receipt, from_anthropic
+    """Exactly the composition `fork_cc` runs on a result block."""
+    from infra.provider_usage import fork_receipt, from_anthropic
 
-    return checkpoint_receipt(from_anthropic(payload))
+    return fork_receipt(from_anthropic(payload))
 
 
 class TestOneShapeAcrossHarnesses:
@@ -86,7 +86,7 @@ class TestOneShapeAcrossHarnesses:
         }
 
     def test_codex_checkpoint_usage_is_canonical(self):
-        from core.checkpoint_codex_result import fork_usage_receipt
+        from core.fork_codex_result import fork_usage_receipt
 
         receipt = fork_usage_receipt(_codex_volume())
         # The prompt side must stay disjoint: 1_000 uncached + 8_000 cached,
@@ -104,7 +104,7 @@ class TestOneShapeAcrossHarnesses:
 
     def test_the_same_workload_reads_identically_on_every_harness(self):
         """The regression the audit hit: one workload, three answers."""
-        from core.checkpoint_codex_result import fork_usage_receipt
+        from core.fork_codex_result import fork_usage_receipt
 
         cc = _cc_receipt(_anthropic_payload())
         native = _sum_calls(_native_ledger_rows())

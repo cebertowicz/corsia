@@ -72,7 +72,7 @@ class ForkKind:
 
 
 def native_iteration_limit(agent: Any) -> int:
-    """Checkpoint Native calls retain the ordinary agent iteration bound."""
+    """Use the ordinary agent iteration bound for a kind's Native calls."""
     return agent.max_iterations
 
 
@@ -105,6 +105,53 @@ def forget(fork_id: str, task: asyncio.Task) -> None:
         handles.pop(fork_id, None)
     if not task.cancelled():
         task.exception()
+
+
+async def shutdown_forks() -> None:
+    """Cancel and join every live disposable fork before provider shutdown."""
+    active = tuple(handles.items())
+    for _fork_id, handle in active:
+        handle.cancel_event.set()
+    for fork_id, handle in active:
+        await handle.kind.shutdown_handler(fork_id)
+    await asyncio.gather(
+        *(handle.task for _fork_id, handle in active), return_exceptions=True,
+    )
+
+
+def fork_task_count() -> int:
+    """Expose live cancellation-handle count for lifecycle verification."""
+    return len(handles)
+
+
+async def invoke_fork(
+    request: Any,
+    cancel_event: asyncio.Event,
+    *,
+    kind: ForkKind,
+    on_cold_input=None,
+    on_tool_executor=None,
+) -> Any:
+    """Dispatch each disposable fork through its sole harness adapter."""
+    from core.fork_cc import invoke_fork as invoke_cc
+    from core.fork_codex import invoke_fork as invoke_codex
+    from core.fork_native import invoke_fork as invoke_native
+
+    adapters = {
+        "native": invoke_native,
+        "claude-code": invoke_cc,
+        "codex": invoke_codex,
+    }
+    try:
+        adapter = adapters[request.target.harness]
+    except KeyError as error:
+        raise ValueError(f"unsupported fork harness: {request.target.harness}") from error
+    if request.target.harness == "claude-code":
+        return await adapter(
+            request, cancel_event, kind=kind, on_cold_input=on_cold_input,
+            on_tool_executor=on_tool_executor,
+        )
+    return await adapter(request, cancel_event, kind=kind, on_cold_input=on_cold_input)
 
 
 def cancel_fork(fork_id: str) -> None:

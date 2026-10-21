@@ -14,7 +14,7 @@ from test_checkpoint_external_adapters import FakeProcess, _request, _target
 @pytest.mark.parametrize("loaded, truncated", [(100, False), (90_000, True), (120_000, True)])
 async def test_warm_instruction_waits_for_loaded_capacity(loaded, truncated, isolated_db):
     seed_vendor_checkpoint_thread([_target("claude-code")])
-    from core.checkpoint_cc_io import communicate_checkpoint
+    from core.fork_cc_io import communicate_fork
     from core.fork_types import ProviderForkRejected
 
     writes = []
@@ -35,9 +35,9 @@ async def test_warm_instruction_waits_for_loaded_capacity(loaded, truncated, iso
     request = _request(target, object(), binary="unused")
     if truncated:
         with pytest.raises(ProviderForkRejected, match="initial.*input"):
-            await asyncio.wait_for(communicate_checkpoint(process, request, asyncio.Event(), spawned_at=0.0), 2)
+            await asyncio.wait_for(communicate_fork(process, request, asyncio.Event(), spawned_at=0.0), 2)
     else:
-        output = await asyncio.wait_for(communicate_checkpoint(process, request, asyncio.Event(), spawned_at=0.0), 2)
+        output = await asyncio.wait_for(communicate_fork(process, request, asyncio.Event(), spawned_at=0.0), 2)
         assert not output.truncated
     assert json.loads(writes[0])["request"] == {"subtype": "get_context_usage"}
     assert process.returncode is not None

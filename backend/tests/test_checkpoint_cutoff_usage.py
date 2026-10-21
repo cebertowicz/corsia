@@ -8,7 +8,7 @@ from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 @pytest.mark.parametrize("terminal", [False, True])
 def test_cc_completed_call_ids_count_once_and_terminal_does_not_double_them(terminal):
-    from core.checkpoint_cc_result import result as _result
+    from core.fork_cc_result import result as _result
 
     def record(call_id, usage):
         return {"type": "assistant", "message": {
@@ -34,7 +34,7 @@ def test_cc_completed_call_ids_count_once_and_terminal_does_not_double_them(term
 
 @pytest.mark.asyncio
 async def test_codex_receipt_and_notification_share_existing_volume_and_call_identity():
-    from core.checkpoint_codex_result import CodexForkCapture
+    from core.fork_codex_result import CodexForkCapture
     from infra.provider_usage import TokenUsage
     from subagents.codex_app_server import CodexAppServerSession
     from subagents.codex_app_server_notifications import record_usage
@@ -68,7 +68,7 @@ async def test_native_completed_effect_failure_records_checkpoint_usage_once(iso
     from dataclasses import replace
     from types import SimpleNamespace
 
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from llm.router import LLMResponse, ToolCallRequest
     from tests.plan_execution_helpers import ProbeTool, registry_of
     from tests.test_checkpoint_provider_adapters import _request, _source

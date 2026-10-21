@@ -1,4 +1,4 @@
-"""Stateless Claude transcript record proof for checkpoint boundaries."""
+"""Stateless Claude transcript record proof for fork source boundaries."""
 
 from __future__ import annotations
 

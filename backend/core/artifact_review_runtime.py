@@ -24,7 +24,8 @@ def _instruction(row: Any, artifact: Any, note: str) -> str:
 
 def _cold_request(request_id: str):
     """Freeze the latest installed checkpoint plus the reviewer's sealed tail."""
-    from core.checkpoint_render import checkpoint_binary, render_prior_checkpoint
+    from core.checkpoint_render import render_prior_checkpoint
+    from core.fork_render import fork_binary
     from core.fork_admission import build_cold_fork_admission
     from core.fork_types import ColdForkSource
     from core.artifact_review_source import bounded_review_history
@@ -62,7 +63,7 @@ def _cold_request(request_id: str):
             instruction=_instruction(row, artifact, review_intent(db, row)),
             source=ColdForkSource(projection, protected),
             working_dir=resolve_working_dir(thread["project_id"], db),
-            reasoning_effort=thread["reasoning_effort"], binary=checkpoint_binary(target, db),
+            reasoning_effort=thread["reasoning_effort"], binary=fork_binary(target, db),
         )
         return row, replace(request, tool_registry=build_tool_registry(request.working_dir))
     finally:
@@ -117,7 +118,7 @@ def cancel(fork_id: str) -> None:
 
 
 async def _source(request):
-    from core.checkpoint_render import capture_warm_checkpoint_source
+    from core.fork_render import capture_warm_fork_source
     from infra.database import get_db
 
     def busy():
@@ -132,7 +133,7 @@ async def _source(request):
 
     if await asyncio.to_thread(busy):
         return request
-    source = await capture_warm_checkpoint_source(
+    source = await capture_warm_fork_source(
         request.thread_id, request.cold_source.projection.sealed_boundary, target=request.target,
         binary=request.binary, reasoning_effort=request.reasoning_effort,
     )
@@ -142,7 +143,7 @@ async def _source(request):
         return request
     warm = replace(request, warm_source=source)
     if request.target.harness == "native":
-        from core.checkpoint_native_fork import warm_input_fits
+        from core.fork_native import warm_input_fits
 
         if not await warm_input_fits(warm, kind=ARTIFACT_REVIEW_KIND):
             return request
@@ -156,20 +157,14 @@ async def _run(request_id: str, request: Any, cancel_event: asyncio.Event) -> No
 
         active = await asyncio.to_thread(active_for_thread, request.thread_id)
         if active is not None:
-            from core.checkpoint_native_tools import await_or_cancel
+            from core.fork_native_tools import await_or_cancel
 
             await await_or_cancel(await_checkpoint(active.id), cancel_event)
             prepared = await asyncio.to_thread(_cold_request, request_id)
             _row, request = prepared
         request = await ARTIFACT_REVIEW_KIND.usage_binder(await _source(request))
-        if request.target.harness == "native":
-            from core.checkpoint_native_fork import invoke_fork
-        elif request.target.harness == "claude-code":
-            from core.checkpoint_cc_fork import invoke_fork
-        elif request.target.harness == "codex":
-            from core.checkpoint_codex_fork import invoke_fork
-        else:
-            raise ValueError(f"unsupported artifact-review harness: {request.target.harness}")
+        from core.fork_runtime import invoke_fork
+
         result = await invoke_fork(request, cancel_event, kind=ARTIFACT_REVIEW_KIND)
         if not cancel_event.is_set():
             await ARTIFACT_REVIEW_KIND.end_handler(request_id, result)

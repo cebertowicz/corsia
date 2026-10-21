@@ -75,7 +75,7 @@ def read_switch_checkpoint_context(
     request: SwitchRequest,
 ) -> SwitchCheckpointContext:
     """Freeze the latest sealed history without changing source or switch state."""
-    from core.checkpoint_render import checkpoint_binary
+    from core.fork_render import fork_binary
     from history.projection import render_portable_history
     from history.types import HistoryBoundary
     from infra.checkpoint_queries import current_installed
@@ -103,8 +103,8 @@ def read_switch_checkpoint_context(
             projection,
             resolve_working_dir(thread_row["project_id"], db),
             effective_reasoning_effort(thread_row["reasoning_effort"], destination.catalog_id),
-            checkpoint_binary(source, db),
-            checkpoint_binary(destination, db),
+            fork_binary(source, db),
+            fork_binary(destination, db),
             _current_cc_config(request.thread_id)
             if destination.harness == "claude-code"
             else None,
@@ -120,7 +120,7 @@ async def prepare_source_checkpoint(
     """Prepare one source-authored warm fold, or report no warm source."""
     if request.checkpoint_choice == "target":
         return None
-    from core.checkpoint_render import capture_warm_checkpoint_source
+    from core.fork_render import capture_warm_fork_source
     from core.checkpoint_warm_request import build_warm_admission, warm_capture_refused
     from infra.db_async import run_in_db
 
@@ -150,7 +150,7 @@ async def prepare_source_checkpoint(
             )
         except OmlxLoadedStateError:
             return warm_capture_refused(request.thread_id, "native", "source_not_loaded")
-    warm_source = await capture_warm_checkpoint_source(
+    warm_source = await capture_warm_fork_source(
         request.thread_id,
         context.boundary,
         target=context.source_target,

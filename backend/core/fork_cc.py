@@ -1,4 +1,4 @@
-"""One disposable Claude Code checkpoint over a frozen transcript prefix."""
+"""One disposable Claude Code fork over a frozen transcript prefix."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from history.types import HistoryBoundary
 from llm.resolution import ExecutionTarget
-from core import checkpoint_cc_commands
+from core import fork_cc_commands
 from subagents.cc_invocation import ClaudeInvocation
 from subagents.cc_sessions import resolve_claude_dir
 from core.fork_runtime import ForkKind
@@ -21,8 +21,8 @@ from core.fork_types import (
     ProviderForkRequest,
     ProviderForkResult,
 )
-from core.checkpoint_types import ColdInputCallback
-from core.checkpoint_warm_request import warm_capture_refused
+from core.fork_types import ColdInputCallback
+from core.fork_capture import warm_capture_refused
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,7 +158,7 @@ async def capture_warm_source(
     )
 
 
-def _checkpoint_env(source: CCWarmSource | None, request: ProviderForkRequest):
+def _fork_env(source: CCWarmSource | None, request: ProviderForkRequest):
     from subagents.cc_env import apply_claude_config_dir, clean_claude_env
 
     env = clean_claude_env()
@@ -204,7 +204,7 @@ def _snapshot(source: CCWarmSource) -> tuple[str, Path]:
         len(prefix) != source.transcript_bytes
         or hashlib.sha256(prefix).hexdigest() != source.transcript_sha256
     ):
-        raise RuntimeError("Claude checkpoint transcript prefix changed")
+        raise RuntimeError("Claude fork transcript prefix changed")
     snapshot_id = str(uuid4())
     snapshot = path.with_name(f"{snapshot_id}.jsonl")
     with open(snapshot, "xb") as stream:
@@ -213,7 +213,7 @@ def _snapshot(source: CCWarmSource) -> tuple[str, Path]:
 
 
 
-from core import checkpoint_cc_result
+from core import fork_cc_result
 
 
 async def invoke_fork(request, cancel_event, *, kind: ForkKind,
@@ -241,25 +241,25 @@ async def _invoke_fork(
     on_cold_input: ColdInputCallback | None = None,
     on_tool_executor=None,
 ) -> ProviderForkResult:
-    """Run either disposable fork kind through one Claude Code process."""
+    """Run one disposable fork through the Claude Code process."""
     if request.target.harness != "claude-code":
         raise TypeError("Claude adapter requires a Claude Code target")
-    from core.checkpoint_account import admit_checkpoint
+    from core.fork_account import admit_fork
 
-    request = admit_checkpoint(request)
+    request = admit_fork(request)
     source = request.warm_source
     if source is not None and not isinstance(source, CCWarmSource):
         raise TypeError(f"Claude {kind.name} received another harness's warm source")
-    from core.checkpoint_account import require_checkpoint_write
+    from core.fork_account import require_fork_write
     from connections.account_operation import require_same_operation_home
 
     require_same_operation_home(request, source.claude_dir if source else None)
-    require_checkpoint_write(request)
+    require_fork_write(request)
     snapshot = None
     restored_seed = None
     try:
         if source is None:
-            argv = checkpoint_cc_commands.cold_command(request, kind)
+            argv = fork_cc_commands.cold_command(request, kind)
             cwd = request.working_dir
         else:
             if source.restored_seed_text is not None:
@@ -273,15 +273,15 @@ async def _invoke_fork(
                     invocation=replace(source.invocation, seed_file=str(restored_seed)),
                 )
             snapshot_id, snapshot = _snapshot(source)
-            argv = checkpoint_cc_commands.warm_command(source, request, kind, snapshot_id)
+            argv = fork_cc_commands.warm_command(source, request, kind, snapshot_id)
             cwd = source.invocation.working_dir or request.working_dir
         spawned_at = time.monotonic()
         process = await _spawn_process(
-            argv, cwd=cwd, env=_checkpoint_env(source, request)
+            argv, cwd=cwd, env=_fork_env(source, request)
         )
-        from core.checkpoint_cc_io import communicate_checkpoint
+        from core.fork_cc_io import communicate_fork
 
-        output = await communicate_checkpoint(
+        output = await communicate_fork(
             process,
             request,
             cancel_event,
@@ -290,9 +290,9 @@ async def _invoke_fork(
             spawned_at=spawned_at,
         )
         if output.truncated:
-            return checkpoint_cc_result.result(output.stdout, truncated=True, kind=kind)
-        diagnostic = output.failure or checkpoint_cc_result.process_diagnostic(output.stderr, process.returncode, kind=kind)
-        return checkpoint_cc_result.result_after_process(output.stdout, diagnostic, process.returncode, kind=kind)
+            return fork_cc_result.result(output.stdout, truncated=True, kind=kind)
+        diagnostic = output.failure or fork_cc_result.process_diagnostic(output.stderr, process.returncode, kind=kind)
+        return fork_cc_result.result_after_process(output.stdout, diagnostic, process.returncode, kind=kind)
     finally:
         if snapshot is not None:
             snapshot.unlink(missing_ok=True)
