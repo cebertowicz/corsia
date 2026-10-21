@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { setupLocalRow, setupStartNote } from './setupProviderRows';
+import { localSetupFix } from '../../e2e/support/localSetupFix';
 
 const actions = () => ({
 	start: vi.fn(),
@@ -10,13 +11,13 @@ const actions = () => ({
 
 // Mirrors the emitted projection: one local state, cause, recovery line and optional reference.
 const flightShapes = [
-	{ state: 'failed', cause: 'connection', fix: 'Check your internet connection, then try again.' },
-	{ state: 'failed', cause: 'disk_full', bytes_to_free: 4_000_000_000, fix: 'The local model needs 4.0 GB more free space. Free it up, then try again.' },
-	{ state: 'failed', cause: 'memory', fix: 'Choose a subscription or API provider instead.' },
-	{ state: 'failed', cause: 'other', ref: 'setup-report-123', fix: 'CORSIA couldn’t set up the local model.' },
-	{ state: 'setup_failed', cause: 'other', ref: 'setup-report-456', fix: 'CORSIA couldn’t set up the local model.' },
-	{ state: 'start_failed', cause: 'connection', ref: 'setup-report-789', fix: 'Check your internet connection, then try again.' },
-	{ state: 'setup_failed', cause: 'own_omlx_upgrade_required', ref: 'setup-report-999', fix: 'The oMLX on this computer is out of date or broken. Update it, then try again.' }
+	{ state: 'failed', cause: 'connection', fix: localSetupFix('connection') },
+	{ state: 'failed', cause: 'disk_full', bytes_to_free: 4_000_000_000, fix: localSetupFix('disk_full', 4_000_000_000) },
+	{ state: 'failed', cause: 'memory', fix: localSetupFix('memory') },
+	{ state: 'failed', cause: 'other', ref: 'setup-report-123', fix: localSetupFix('other') },
+	{ state: 'setup_failed', cause: 'other', ref: 'setup-report-456', fix: localSetupFix('other') },
+	{ state: 'start_failed', cause: 'connection', ref: 'setup-report-789', fix: localSetupFix('connection') },
+	{ state: 'setup_failed', cause: 'own_omlx_upgrade_required', ref: 'setup-report-999', fix: localSetupFix('own_omlx_upgrade_required') }
 ] as const;
 
 function sourceFromFlight(flight: typeof flightShapes[number]) {
@@ -30,7 +31,7 @@ function sourceFromFlight(flight: typeof flightShapes[number]) {
 }
 
 describe('setup provider rows', () => {
-	it('tells a computer under 24 GB why, what to do instead, and that smaller local models may come', () => {
+	it('tells a computer under 24 GB why and what to do instead', () => {
 		const row = setupLocalRow({ ...actions(), pick: null, eligible: false, downloading: false, ready: false, startError: '' });
 
 		expect(row.meta).toBe('Local models need at least 24 GB of memory, and this computer has less. Connect a subscription or an API provider.');
@@ -97,7 +98,7 @@ describe('setup provider rows', () => {
 
 	it('names a model fit failure only when memory is its cause, retaining the reference', () => {
 		const row = setupLocalRow({ ...actions(), pick: { state: 'failed', model: null, message: null, cause: 'memory', ref: 'local-456' }, eligible: true, downloading: false, ready: false, startError: '' });
-		expect(row.meta).toBe('Couldn’t find a local model that fits this computer. Retry.');
+		expect(row.meta).toBe('Couldn’t find a local model that fits this computer. Try again.');
 		expect(row.reference).toBe('local-456');
 	});
 
