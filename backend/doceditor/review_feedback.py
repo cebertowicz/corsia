@@ -16,14 +16,12 @@ def drop_unsent_feedback(db, request_id: str) -> None:
     as their authors and readers left it. A batch has no withdrawn state, so its
     rows go and it can never deliver.
     """
-    for table in ("doc_feedback_batch_items", "doc_feedback_edit_items"):
-        db.execute(
-            f"""DELETE FROM {table} WHERE batch_id IN (
-                   SELECT id FROM doc_feedback_batches
-                   WHERE review_request_id=? AND state IN ('open','undelivered')
-               )""",
-            (request_id,),
-        )
+    unsent = (
+        "SELECT id FROM doc_feedback_batches "
+        "WHERE review_request_id=? AND state IN ('open','undelivered')"
+    )
+    db.execute(f"DELETE FROM doc_feedback_batch_items WHERE batch_id IN ({unsent})", (request_id,))
+    db.execute(f"DELETE FROM doc_feedback_edit_items WHERE batch_id IN ({unsent})", (request_id,))
     db.execute(
         "DELETE FROM doc_feedback_batches WHERE review_request_id=? AND state IN ('open','undelivered')",
         (request_id,),

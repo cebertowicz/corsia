@@ -130,7 +130,7 @@ async def test_checkpoint_native_clears_inherited_foreground_invocation(monkeypa
         content="", reasoning_content=None,
         tool_calls=[SimpleNamespace(id="fork-call", name="continuity_edit", arguments={})],
     )
-    request = SimpleNamespace(checkpoint_id="fork", thread_id="thread")
+    request = SimpleNamespace(fork_id="fork", thread_id="thread")
     with tool_invocation_context("outer"):
         assert await checkpoint.run_tool_calls(
             SimpleNamespace(tools=Tools()), response, [], asyncio.Event(), request, [],

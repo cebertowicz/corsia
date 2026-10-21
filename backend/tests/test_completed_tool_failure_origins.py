@@ -134,7 +134,7 @@ async def test_checkpoint_native_tool_loop_failure_keeps_cause(monkeypatch, capl
             SimpleNamespace(id="call-2", name="continuity_edit", arguments={}),
         ],
     )
-    request = SimpleNamespace(thread_id="thread-1", checkpoint_id="checkpoint-1")
+    request = SimpleNamespace(thread_id="thread-1", fork_id="checkpoint-1")
     fits_calls = 0
 
     async def failing_fits(_request, _messages, _tools):
