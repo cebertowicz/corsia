@@ -503,11 +503,13 @@ def test_nesting_deeper_than_the_interpreter_stack_still_rolls_up(db):
     columns = ",".join(seed)
     marks = ",".join("?" for _ in seed)
     parent_id = seed["id"]
-    for depth in range(1, 1500):
-        row = dict(seed, id=f"deep-{depth}", parent_id=parent_id, title=f"Depth {depth}")
-        with raw_plan_seed(db):
+    # One seed block: its exit rebuilds every plan's aggregates, so a block per
+    # row would rebuild the growing chain 1,499 times.
+    with raw_plan_seed(db):
+        for depth in range(1, 1500):
+            row = dict(seed, id=f"deep-{depth}", parent_id=parent_id, title=f"Depth {depth}")
             db.execute(f"INSERT INTO plan_nodes ({columns}) VALUES ({marks})", tuple(row.values()))
-        parent_id = row["id"]
+            parent_id = row["id"]
     deepest = service.get_node(parent_id, db=db)
     _usage(db, deepest, tokens=7, cost=0.0, usage_id="u-deep")
 

@@ -19,10 +19,10 @@
       "sha256": "9152041eda76f984f0cf25d753d7abd5ef7e106988fe7e004f7d6244a2480935"
     },
     {
-      "bytes": 3059,
+      "bytes": 3039,
       "kind": "context",
       "path": "context/40-HUMAN-AGENT-INTERFACE.md",
-      "sha256": "3a5f8f31889f9deea2b8bb4ccdf2209ea228d5f0ed46fe97a58380aaad8afced"
+      "sha256": "221d609a98fa2e2b11a8befad0d7b4d6f73fc6c83d777ea595715349c6439208"
     },
     {
       "bytes": 862,
@@ -64,10 +64,10 @@
       "sha256": "33a8d6359786e2644ed7749f7aeac428ebe9e4eed8196de80ecccad8eba98f94"
     },
     {
-      "bytes": 728,
+      "bytes": 729,
       "kind": "coordination-model",
       "path": "coordination-models/INDEX.md",
-      "sha256": "c57f28b2ba0e95826eb56a94ff678daf673f38b5b2c2767a6d275c7a803de6e5"
+      "sha256": "35165771157fb085aa539a1dc78f78bb88a7c6957f05dbe5df25c1ca5ef4598d"
     },
     {
       "bytes": 807,
@@ -76,10 +76,10 @@
       "sha256": "9df2a5a0dde7b703026ee62c360aa0ff5b40225008ddfed546061ac26fff1b07"
     },
     {
-      "bytes": 9176,
+      "bytes": 9012,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/context/COORDINATION-CORE.md",
-      "sha256": "a3dca4e0d0f1095d552c6f87f36a52aa539abc26430f22535eb296b4f2c105c9"
+      "sha256": "28f0fa4fb738d19025e9d1453fb34be33bdbdba39d9f3f7dee2a61438f202890"
     },
     {
       "bytes": 740,
@@ -100,6 +100,12 @@
       "sha256": "11c3dfc5f0945fb5ceb9af78ed8751e3c96adcf6f4b28d3e41d0feac66c5d0bf"
     },
     {
+      "bytes": 4534,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/context/SPAWN-POLICY.md",
+      "sha256": "9121f7c87f5ae8e4922a6bd99d2eb505a4f97a624f214dc4b342cfed2f0be192"
+    },
+    {
       "bytes": 730,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/context/roles/agent/05-waiting-is-work.md",
@@ -112,10 +118,22 @@
       "sha256": "3bff6d1f27574b6082e14c4cbee914e1e937b8b6fcc9a19f742a03506a01265f"
     },
     {
-      "bytes": 6115,
+      "bytes": 5721,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/manifest.yaml",
-      "sha256": "8e052af8aaf95dd992993647f757a9779c70066ec465c86d98a8f72145d456a8"
+      "sha256": "cd08dc6eb35db976ea2f3916ebd45b113f9b7f6abdeea371fd15f3f941124edc"
+    },
+    {
+      "bytes": 3492,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/standards/RESPONSIBILITY-STANDARD.md",
+      "sha256": "1afe075f552a1ab4a3930e73308cdf7d5e4654aa416bba91495136225a27f06e"
+    },
+    {
+      "bytes": 4580,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/templates/RESPONSIBILITY.md",
+      "sha256": "1ca79f669304f24f60c13235a91b8d9c7edf0f35d125b9f4f21117d012fafc6f"
     },
     {
       "bytes": 3541,

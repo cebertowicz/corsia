@@ -15,7 +15,7 @@ def _minimal_repo(tmp_path, monkeypatch):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "corsia").write_text("#!/bin/sh\n", encoding="utf-8")
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
-    (tmp_path / "docs" / "contributing" / "bootstrap" / "starter-kit").mkdir(parents=True)
+    (tmp_path / "docs").mkdir()
     fake_home = tmp_path / "fake-home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))
@@ -27,37 +27,17 @@ def _minimal_repo(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_build_parser_defaults_require_workspace_and_owner_identity():
+def test_build_parser_defaults_require_owner_identity():
     args = cli.build_parser().parse_args([])
 
-    assert args.allow_missing_workspace is False
     assert args.allow_missing_owner_identity is False
     assert args.owner_name is None
 
 
-def test_main_fails_when_workspace_is_missing_and_not_allowed(tmp_path, monkeypatch, capsys):
+def test_main_passes_with_an_owner_name(tmp_path, monkeypatch, capsys):
     _minimal_repo(tmp_path, monkeypatch)
-    monkeypatch.delenv("CORSIA_WORKSPACE", raising=False)
 
-    exit_code = cli.main(["--workspace", str(tmp_path / "no-such-workspace")])
-
-    assert exit_code == 1
-    assert "FAIL" in capsys.readouterr().out
-
-
-def test_main_passes_when_missing_workspace_is_explicitly_allowed(tmp_path, monkeypatch, capsys):
-    _minimal_repo(tmp_path, monkeypatch)
-    monkeypatch.delenv("CORSIA_WORKSPACE", raising=False)
-
-    exit_code = cli.main(
-        [
-            "--workspace",
-            str(tmp_path / "no-such-workspace"),
-            "--allow-missing-workspace",
-            "--owner-name",
-            "Alice Anderson",
-        ]
-    )
+    exit_code = cli.main(["--owner-name", "Alice Anderson"])
 
     assert exit_code == 0
     assert "PASS" in capsys.readouterr().out
@@ -68,7 +48,7 @@ def test_json_out_preserves_text_stdout(tmp_path, monkeypatch, capsys):
 
     _minimal_repo(tmp_path, monkeypatch)
     output = tmp_path / "result.json"
-    exit_code = cli.main(["--allow-missing-workspace", "--owner-name", "Alice", "--json-out", str(output)])
+    exit_code = cli.main(["--owner-name", "Alice", "--json-out", str(output)])
 
     assert exit_code == 0
     assert capsys.readouterr().out.startswith("# Documentation drift report")
@@ -80,16 +60,7 @@ def test_main_json_output_is_valid_json(tmp_path, monkeypatch, capsys):
 
     _minimal_repo(tmp_path, monkeypatch)
 
-    cli.main(
-        [
-            "--workspace",
-            str(tmp_path / "no-such-workspace"),
-            "--allow-missing-workspace",
-            "--owner-name",
-            "Alice Anderson",
-            "--json",
-        ]
-    )
+    cli.main(["--owner-name", "Alice Anderson", "--json"])
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
@@ -101,8 +72,7 @@ def _owner_identity_case(tmp_path, monkeypatch, owner_lines):
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
     owner_file = repo / "fake-home" / ".owner-identity"
     owner_file.write_text(owner_lines, encoding="utf-8")
-    return ["--workspace", str(repo / "no-such-workspace"), "--allow-missing-workspace",
-            "--owner-identity-file", str(owner_file)]
+    return ["--owner-identity-file", str(owner_file)]
 
 
 def test_owner_identity_file_overrides_git_identity(tmp_path, monkeypatch, capsys):
@@ -131,7 +101,7 @@ def test_missing_owner_identity_file_is_a_usage_error(tmp_path, monkeypatch):
     _minimal_repo(tmp_path, monkeypatch)
 
     with pytest.raises(SystemExit) as exc:
-        cli.main(["--allow-missing-workspace", "--owner-identity-file", str(tmp_path / "absent")])
+        cli.main(["--owner-identity-file", str(tmp_path / "absent")])
 
     assert exc.value.code == 2
 
@@ -160,7 +130,7 @@ def _profile_hit(tmp_path, monkeypatch, planted):
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
     profile = tmp_path / "USER.md"
     _profile(profile)
-    return cli.main(["--allow-missing-workspace", "--owner-profile", str(profile)])
+    return cli.main(["--owner-profile", str(profile)])
 
 
 def test_profile_name_phrase_is_case_insensitive_and_literal(tmp_path, monkeypatch, capsys):
@@ -178,7 +148,7 @@ def test_profile_name_phrase_has_word_boundaries(tmp_path, monkeypatch):
 
     (repo / "README.md").write_text("standalone Rae\n", encoding="utf-8")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    assert cli.main(["--allow-missing-workspace", "--owner-profile", str(profile)]) == 1
+    assert cli.main(["--owner-profile", str(profile)]) == 1
 
 
 def test_lowercase_id_seed_exemption_is_scoped_to_a_fixture_seed_value():
@@ -215,7 +185,7 @@ def test_registry_tokens_keep_the_case_the_maintainer_chose(tmp_path, monkeypatc
     owner_file = repo / "fake-home" / ".owner-identity"
     owner_file.write_text("Bea Brown\n", encoding="utf-8")
 
-    assert cli.main(["--allow-missing-workspace", "--owner-identity-file", str(owner_file)]) == 0
+    assert cli.main(["--owner-identity-file", str(owner_file)]) == 0
 
 
 def test_profile_contact_tokens_match_any_case(tmp_path, monkeypatch, capsys):
@@ -247,7 +217,7 @@ def test_another_person_named_in_the_profile_is_not_scanned_as_the_owner(
     (repo / "README.md").write_text("Mentions Bob Other only.\n", encoding="utf-8")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
 
-    assert cli.main(["--allow-missing-workspace", "--owner-profile", str(profile)]) == 0
+    assert cli.main(["--owner-profile", str(profile)]) == 0
     assert "OWNER IDENTITY" not in capsys.readouterr().out
 
 
@@ -320,7 +290,7 @@ def test_one_number_matches_whatever_separators_or_country_code_a_file_uses(tmp_
 
     (repo / "README.md").write_text("Call 555-010-2345.\n", encoding="utf-8")
     subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-    assert cli.main(["--allow-missing-workspace", "--owner-profile", str(profile)]) == 1
+    assert cli.main(["--owner-profile", str(profile)]) == 1
 
 
 def test_dates_and_clause_boundaries_never_become_a_phone_token(tmp_path):
@@ -352,7 +322,7 @@ def test_the_run_reports_which_owner_kinds_actually_ran(tmp_path, monkeypatch):
     )
     json_out = tmp_path / "report.json"
 
-    assert cli.main(["--allow-missing-workspace", "--owner-profile", str(profile), "--json-out", str(json_out)]) == 0
+    assert cli.main(["--owner-profile", str(profile), "--json-out", str(json_out)]) == 0
     private = json.loads(json_out.read_text(encoding="utf-8"))["private_names"]
 
     assert private["owner_identity_kinds"] == ["contact"]
@@ -391,7 +361,7 @@ def test_the_eval_stub_profile_shape_still_matches_prose(tmp_path, monkeypatch, 
     profile = tmp_path / "USER.md"
     profile.write_text("# User (eval)\n\nName: Eval User.\n", encoding="utf-8")
 
-    assert cli.main(["--allow-missing-workspace", "--owner-profile", str(profile)]) == 1
+    assert cli.main(["--owner-profile", str(profile)]) == 1
     assert "OWNER IDENTITY: README.md: ['Eval User']" in capsys.readouterr().out
 
 
@@ -412,7 +382,7 @@ def test_missing_owner_profile_is_a_usage_error(tmp_path, monkeypatch):
     _minimal_repo(tmp_path, monkeypatch)
 
     with pytest.raises(SystemExit) as exc:
-        cli.main(["--allow-missing-workspace", "--owner-profile", str(tmp_path / "absent")])
+        cli.main(["--owner-profile", str(tmp_path / "absent")])
 
     assert exc.value.code == 2
 

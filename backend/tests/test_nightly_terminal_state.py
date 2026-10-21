@@ -18,29 +18,14 @@ import pytest
 
 
 @pytest.fixture
-def run_db(tmp_path, monkeypatch):
-    """Give the nightly scheduler an isolated run table."""
-    path = tmp_path / "nightly-runs.db"
-    with sqlite3.connect(path) as db:
-        db.execute(
-            """CREATE TABLE fact_extraction_runs (
-                   run_date TEXT PRIMARY KEY,
-                   status TEXT NOT NULL DEFAULT 'ok',
-                   result_json TEXT,
-                   ran_at TEXT NOT NULL
-               )"""
-        )
+def run_db(isolated_db):
+    """Run every nightly step on the test database.
 
-    def factory():
-        db = sqlite3.connect(path)
-        db.row_factory = sqlite3.Row
-        return db
-
-    from jobs import nightly
-
-    monkeypatch.setattr(nightly, "get_db", factory)
-    monkeypatch.setattr("infra.database.get_db", factory)
-    return path
+    ``isolated_db`` repoints the database path itself, so every ``get_db`` binding
+    opens it however it was imported. Patching module names instead missed the ones
+    bound at import, and the drain and reaper then read the suite's database.
+    """
+    return isolated_db
 
 
 def _read_run(path):
@@ -71,6 +56,28 @@ async def test_successful_sweep_records_ok_and_runs_retention(run_db, monkeypatc
     retention.assert_called_once_with()
     row = _read_run(run_db)
     assert row["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_retirement_drain_runs_on_the_isolated_database(run_db, monkeypatch):
+    """The drain must consume this fixture's outbox, never the suite's database."""
+    from jobs import nightly
+
+    handle = "nightly-isolation-probe"
+    with sqlite3.connect(run_db) as db:
+        db.execute(
+            "INSERT INTO managed_process_retirements"
+            " (handle, thread_id, head_log_name, tail_log_name, staged_at)"
+            " VALUES (?, 'thread-probe', ?, NULL, '2026-10-20T00:00:00Z')",
+            (handle, f"{handle}.log"),
+        )
+    _install_retention(monkeypatch)
+    await nightly._run_job_safely()
+
+    with sqlite3.connect(run_db) as db:
+        left = db.execute("SELECT COUNT(*) FROM managed_process_retirements").fetchone()[0]
+    assert left == 0
+    assert _read_run(run_db)["status"] == "ok"
 
 
 @pytest.mark.asyncio
