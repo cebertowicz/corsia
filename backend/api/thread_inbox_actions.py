@@ -89,7 +89,11 @@ async def run_inbox_message_action(
         raise HTTPException(409, str(exc)) from exc
     projected["thread_id"] = thread_id
     _broadcast(projected)
+    from infra.send_broadcast import broadcast_newest_error
     from infra.thread_execution import drive_thread
+
+    # A held error stops being held once nothing waits behind it.
+    await broadcast_newest_error(thread_id)
 
     await drive_thread(thread_id)
     return {"thread_id": thread_id, "message": projected}

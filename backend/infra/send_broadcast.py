@@ -12,6 +12,7 @@ from core.reply_context import REPLY_CONTEXT_KEY
 from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY
 from infra.database import get_db
 from infra.db_async import run_in_db
+from infra.turn_errors import apply_error_next_steps, last_turn_error_id
 
 
 _PRIVATE_METADATA_KEYS = (
@@ -66,7 +67,7 @@ def read_input_broadcast_row(
     owns_connection = db is None
     try:
         row = connection.execute(
-            "SELECT id,role,content,metadata,created_at,delivery_state,delivery_error,"
+            "SELECT id,thread_id,role,content,metadata,created_at,delivery_state,delivery_error,"
             "delivery_revision,seq,active_turn_id,write_outcome,delivery_intent FROM messages WHERE id=? "
             "AND (role IN ('user','system') "
             "OR (role='assistant' AND json_extract(metadata,'$.for_user')=1))",
@@ -84,6 +85,9 @@ def read_input_broadcast_row(
                 metadata = {}
             if not isinstance(metadata, dict):
                 metadata = {}
+        apply_error_next_steps(
+            connection, str(row["thread_id"]), [{"id": str(row["id"]), "metadata": metadata}],
+        )
         return InputBroadcastRow(
             str(row["id"]),
             str(row["content"]),
@@ -232,6 +236,25 @@ async def broadcast_message_rows(
     rows = await run_in_db(_read_input_broadcast_rows, message_ids)
     if rows:
         broadcast_input_rows(thread_id, rows, broadcast=broadcast)
+
+
+def _read_last_turn_error(thread_id: str) -> str | None:
+    connection = get_db()
+    try:
+        return last_turn_error_id(connection, thread_id)
+    finally:
+        connection.close()
+
+
+async def broadcast_newest_error(thread_id: str) -> None:
+    """Re-project the error of the thread's latest, failed Turn after the queue changes.
+
+    Its next step is projected from the queue, so a stored row the client
+    already shows as 'failed' becomes 'held' only through this re-broadcast.
+    """
+    error_id = await run_in_db(_read_last_turn_error, thread_id)
+    if error_id is not None:
+        await broadcast_message_rows(thread_id, (error_id,))
 
 
 async def broadcast_claimed_batch(batch) -> None:
