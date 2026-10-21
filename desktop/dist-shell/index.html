@@ -222,9 +222,9 @@
 			const quit = document.getElementById('quit');
 			const ADOPTION_COPY = {
 				questionTitle: 'Use the CORSIA already on this computer?',
-				questionLine: (workDir) => `CORSIA found your existing install, with your work in ${workDir}. This app can run it from now on. It waits for running work to finish, backs up your data, and restarts CORSIA from the app. Your data and work folder stay where they are. Nothing is deleted.`,
+				questionLine: (workDir) => `CORSIA found your existing install, with your work in ${workDir}. This app can run it from now on. It gives running work up to a minute to finish, backs up your data, and restarts CORSIA from the app. Your data and work folder stay where they are. Nothing is deleted.`,
 
-				waitingTitle: 'Waiting for running work to finish…',
+				waitingTitle: 'Giving running work up to a minute to finish…',
 				waitingCount: (count) => `${count} ${count === 1 ? 'task' : 'tasks'} still running`,
 				waitingRestartTitle: 'Your existing CORSIA is restarting. This app will continue when it’s back.',
 				backingUpTitle: 'Backing up your data…',

@@ -292,14 +292,14 @@ for (const theme of ['light', 'dark']) {
 	// While the source install drains, the window shows the backend's phase. The count is display
 	// only: one that is missing, zero or unreadable shows the title alone, never "0 tasks".
 	for (const { name, progress, title: expectedTitle, line: expectedLine, note: expectedNote = null } of [
-		{ name: 'progress-waiting-count', progress: { phase: 'waiting', running: 3 }, title: 'Waiting for running work to finish…', line: '3 tasks still running' },
-		{ name: 'progress-waiting-one', progress: { phase: 'waiting', running: 1 }, title: 'Waiting for running work to finish…', line: '1 task still running' },
-		{ name: 'progress-waiting-unread', progress: { phase: 'waiting', running: null }, title: 'Waiting for running work to finish…', line: null },
-		{ name: 'progress-waiting-zero', progress: { phase: 'waiting', running: 0 }, title: 'Waiting for running work to finish…', line: null },
+		{ name: 'progress-waiting-count', progress: { phase: 'waiting', running: 3 }, title: 'Giving running work up to a minute to finish…', line: '3 tasks still running' },
+		{ name: 'progress-waiting-one', progress: { phase: 'waiting', running: 1 }, title: 'Giving running work up to a minute to finish…', line: '1 task still running' },
+		{ name: 'progress-waiting-unread', progress: { phase: 'waiting', running: null }, title: 'Giving running work up to a minute to finish…', line: null },
+		{ name: 'progress-waiting-zero', progress: { phase: 'waiting', running: 0 }, title: 'Giving running work up to a minute to finish…', line: null },
 		{ name: 'progress-backing-up', progress: { phase: 'backing_up', running: null }, title: 'Backing up your data…', line: null },
 		{ name: 'progress-waiting-restart', progress: { phase: 'waiting_restart', quit_pending: false }, title: restartingTitle, line: null },
 		// A Quit that is waiting on the switch says when the app will close.
-		{ name: 'progress-quit-pending-waiting', progress: { phase: 'waiting', running: 2, quit_pending: true }, title: 'Waiting for running work to finish…', line: '2 tasks still running', note: quitPendingNote },
+		{ name: 'progress-quit-pending-waiting', progress: { phase: 'waiting', running: 2, quit_pending: true }, title: 'Giving running work up to a minute to finish…', line: '2 tasks still running', note: quitPendingNote },
 		{ name: 'progress-quit-pending-backing-up', progress: { phase: 'backing_up', quit_pending: true }, title: 'Backing up your data…', line: null, note: quitPendingNote },
 		{ name: 'progress-starting', progress: { phase: 'starting', running: null }, title: 'Starting CORSIA…', line: null },
 		{ name: 'progress-starting-existing', progress: { phase: 'starting_existing', running: null }, title: 'Starting your existing CORSIA…', line: null },
