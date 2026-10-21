@@ -23,7 +23,7 @@ def added_root(monkeypatch, tmp_path) -> Path:
 
 def test_switch_warm_source_reads_the_added_account_root(isolated_db, added_root, tmp_path):
     """checkpoint_model=target captures the registered session from the thread's own root."""
-    from core.checkpoint_cc_fork import _registered_identity
+    from core.fork_cc import _registered_identity
     from infra.database import get_db
     from registry.service import register_cc_session
     from subagents.cc_invocation import ClaudeInvocation

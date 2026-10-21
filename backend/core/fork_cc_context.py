@@ -1,4 +1,4 @@
-"""Count a Claude checkpoint's completed model response and private tool replies."""
+"""Count a Claude fork's completed model response and private tool replies."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from core.token_estimation import measure_request
 from infra.provider_usage import from_anthropic
 
 
-class CCCheckpointContext:
+class CCForkContext:
     """Use current-call input/output receipts, never cumulative result-envelope usage."""
 
     def __init__(self, target, input_tokens: int | None) -> None:

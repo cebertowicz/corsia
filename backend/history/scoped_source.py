@@ -27,6 +27,8 @@ from history.source import (
 from history.types import HistoryBoundary, PortableHistoryError
 from infra.context_preview_timing import record_rows_read
 
+_SEGMENT_COLUMNS = "id,thread_id,role,metadata,seq,active_turn_id"
+
 
 @dataclass(frozen=True)
 class ScopedSource:
@@ -52,33 +54,38 @@ def _segment_key(row: dict[str, Any]) -> tuple[str, str] | None:
     return ("legacy", str(legacy_reason))
 
 
-def _anchor(db, thread_id: str, start: HistoryBoundary):
-    row = db.execute(
-        f"SELECT {SOURCE_COLUMNS} FROM messages WHERE thread_id = ? "
+@dataclass(frozen=True)
+class _SegmentStart:
+    """Metadata-only bounds of the anchor segment and its semantic predecessor."""
+
+    first_seq: int
+    predecessor_seq: int | None
+    key: tuple[str, str] | None
+
+
+def segment_start(db, thread_id: str, start: HistoryBoundary) -> _SegmentStart:
+    """Locate a checkpoint anchor's source segment without fetching payloads.
+
+    The caller still reads and validates every returned source row with payloads.
+    """
+    source = db.execute(
+        f"SELECT {_SEGMENT_COLUMNS} FROM messages WHERE thread_id = ? "
         "AND delivery_state = 'delivered' AND seq = ?",
         (thread_id, start.seq),
     ).fetchone()
-    record_rows_read(int(row is not None))
-    if row is None or str(row["id"]) != start.message_id:
+    record_rows_read(int(source is not None))
+    if source is None or str(source["id"]) != start.message_id:
         raise PortableHistoryError(
             "history boundary message does not match durable source"
         )
-    return row
-
-
-def _segment_before(db, thread_id: str, start_seq: int, anchor: dict[str, Any]):
-    """Walk back to the first row of the anchor's segment and the row before it.
-
-    A non-semantic anchor sits inside the segment of the nearest semantic row
-    before it; a legacy segment begins at its user row.
-    """
+    anchor = validate_source_rows((source,), thread_id)[0]
     key = _segment_key(anchor)
     started = key is not None and key[0] == "legacy" and anchor["role"] == "user"
-    earlier: list[Any] = []
+    first_seq = start.seq
     cursor = db.execute(
-        f"SELECT {SOURCE_COLUMNS} FROM messages WHERE thread_id = ? "
+        f"SELECT {_SEGMENT_COLUMNS} FROM messages WHERE thread_id = ? "
         "AND delivery_state = 'delivered' AND seq < ? ORDER BY seq DESC",
-        (thread_id, start_seq),
+        (thread_id, start.seq),
     )
     try:
         for source_row in cursor:
@@ -86,32 +93,47 @@ def _segment_before(db, thread_id: str, start_seq: int, anchor: dict[str, Any]):
             row = validate_source_rows((source_row,), thread_id)[0]
             row_key = _segment_key(row)
             if row_key is not None and key is not None and (started or row_key != key):
-                return list(reversed(earlier)), row, key
+                return _SegmentStart(first_seq, int(source_row["seq"]), key)
             if not started:
-                earlier.append(source_row)
+                first_seq = int(source_row["seq"])
             if row_key is not None:
                 key = key or row_key
                 started = started or (key[0] == "legacy" and row["role"] == "user")
     finally:
         cursor.close()
-    return list(reversed(earlier)), None, key
+    return _SegmentStart(first_seq, None, key)
 
 
 def scoped_source(db, thread_id: str, start: HistoryBoundary) -> ScopedSource:
     """Read B's owning segment through the thread head, validated like seq 0."""
-    anchor_source = _anchor(db, thread_id, start)
-    anchor = validate_source_rows((anchor_source,), thread_id)[0]
-    earlier, predecessor, key = _segment_before(db, thread_id, start.seq, anchor)
+    segment = segment_start(db, thread_id, start)
+    predecessor = None
+    if segment.predecessor_seq is not None:
+        before = db.execute(
+            f"SELECT {SOURCE_COLUMNS} FROM messages WHERE thread_id = ? "
+            "AND delivery_state = 'delivered' AND seq = ?",
+            (thread_id, segment.predecessor_seq),
+        ).fetchone()
+        record_rows_read(int(before is not None))
+        # The lookup already validated intervening non-semantic metadata.
+        predecessor = validate_source_rows((before,), thread_id)[0]
+    covered = db.execute(
+        f"SELECT {SOURCE_COLUMNS} FROM messages WHERE thread_id = ? "
+        "AND delivery_state = 'delivered' AND seq >= ? AND seq <= ? ORDER BY seq",
+        (thread_id, segment.first_seq, start.seq),
+    ).fetchall()
+    record_rows_read(len(covered))
     later = db.execute(
         f"SELECT {SOURCE_COLUMNS} FROM messages WHERE thread_id = ? "
         "AND delivery_state = 'delivered' AND seq > ? ORDER BY seq",
         (thread_id, start.seq),
     ).fetchall()
     record_rows_read(len(later))
+    rows = validate_source_rows((*covered, *later), thread_id)
     return ScopedSource(
-        rows=validate_source_rows((*earlier, anchor_source, *later), thread_id),
+        rows=rows,
         predecessor=predecessor,
-        starts_bound_turn=key is not None and key[0] == "turn",
+        starts_bound_turn=segment.key is not None and segment.key[0] == "turn",
     )
 
 

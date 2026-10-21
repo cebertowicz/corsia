@@ -34,7 +34,7 @@ class ExternalCheckpointContext:
 
 
 def _tail_tokens(projection, boundary, *, project_arguments: bool, model: str) -> int:
-    from core.checkpoint_fit import foldable_tail_tokens
+    from core.fork_fit import foldable_tail_tokens
 
     return foldable_tail_tokens(
         projection, boundary, project_arguments=project_arguments, model=model,
@@ -119,63 +119,6 @@ def _external_boundary(
     return boundary
 
 
-def _warm_boundary(projection, boundary):
-    """Return the one harness-neutral descriptor of the durable through row."""
-    if boundary is None:
-        return None
-    matches = [
-        message
-        for message in projection.messages
-        if message.seq == boundary.seq and message.message_id == boundary.message_id
-    ]
-    if len(matches) != 1:
-        return None
-    message = matches[0]
-    if message.role not in {"user", "assistant", "tool"}:
-        return None
-    if message.role == "tool" and not message.tool_call_id:
-        return None
-    # A harness proves a row by its own message id, then cuts after that
-    # message's whole record group; a later row in the same group would land
-    # inside the frozen prefix, so only the group's last row is provable.
-    if message.provider_message_id and any(
-        later.seq > message.seq
-        and later.provider_message_id == message.provider_message_id
-        for later in projection.messages
-    ):
-        return None
-    assistant_step_id = (
-        message.assistant_step_id
-        if message.role == "tool"
-        else (message.message_id if message.role == "assistant" else None)
-    )
-    assistant = next(
-        (
-            candidate
-            for candidate in projection.messages
-            if assistant_step_id is not None
-            and candidate.role == "assistant"
-            and candidate.message_id == assistant_step_id
-        ),
-        None,
-    )
-    tool_call_ids = tuple(
-        str(call["id"])
-        for call in (assistant.tool_calls if assistant is not None else ())
-        if isinstance(call, dict) and isinstance(call.get("id"), str) and call["id"]
-    )
-    from history.types import DurableBoundaryMessage
-
-    return DurableBoundaryMessage(
-        role=message.role,
-        content=message.content,
-        tool_call_id=message.tool_call_id if message.role == "tool" else None,
-        message_id=message.message_id,
-        assistant_step_id=assistant_step_id,
-        tool_call_ids=tool_call_ids,
-        provider_message_id=message.provider_message_id,
-    )
-
 
 def _harness_boundaries(
     harness,
@@ -191,12 +134,14 @@ def _harness_boundaries(
         current_turn_id=current_turn_id,
         step_precedes_start=step_precedes_start,
     )
-    warm_boundary = (
-        _warm_boundary(projection, boundary)
+    from core.fork_capture import warm_boundary
+
+    source_boundary = (
+        warm_boundary(projection, boundary)
         if harness in {"codex", "claude-code"}
         else None
     )
-    return boundary, warm_boundary
+    return boundary, source_boundary
 
 
 def _read_history(db, thread_id: str, previous, *, exact_history: bool):
@@ -222,7 +167,7 @@ def read_external_checkpoint_context(
     exact_history: bool = False,
 ) -> ExternalCheckpointContext | None:
     """Read one harness's checkpoint decision inputs in a single snapshot."""
-    from core.checkpoint_render import checkpoint_binary
+    from core.fork_render import fork_binary
     from infra.checkpoint_queries import current_installed
     from infra.database import get_db
     from infra.runtime_truth import provider_boundary_snapshot, registered_checkpoint_id
@@ -288,7 +233,7 @@ def read_external_checkpoint_context(
             reasoning_effort=effective_reasoning_effort(
                 thread_row["reasoning_effort"], target.catalog_id
             ),
-            binary=checkpoint_binary(target, db),
+            binary=fork_binary(target, db),
             warm_boundary=warm_boundary,
         )
     finally:

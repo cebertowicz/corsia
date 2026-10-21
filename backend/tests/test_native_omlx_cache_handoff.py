@@ -62,7 +62,7 @@ async def test_native_warm_send_and_checkpoint_freeze_same_external_tools(
     monkeypatch, main_db,
 ) -> None:
     from api import thread_cache_warm as thread_runtime
-    from core import checkpoint_native_fork, native_context_prefix, turn_context
+    from core import fork_native, native_context_prefix, turn_context
     from infra import state
     selection = exact_selection()
     boundary = selection.sealed_boundary
@@ -112,7 +112,7 @@ async def test_native_warm_send_and_checkpoint_freeze_same_external_tools(
     pending = state._active_warm_tasks.get(boundary.thread_id)
     if pending is not None:
         await pending
-    fork = checkpoint_native_fork.capture_live_warm_source(
+    fork = fork_native.capture_live_warm_source(
         boundary.thread_id,
         boundary,
         messages=list(prepared.messages),

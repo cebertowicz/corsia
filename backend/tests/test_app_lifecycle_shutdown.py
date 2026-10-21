@@ -11,7 +11,7 @@ import pytest
 
 import app_lifecycle
 import app_startup_runtime
-from core import checkpoint_runtime
+from core import checkpoint_runtime, fork_runtime
 from infra import state
 from infra.config import RUNTIME_DIR
 
@@ -113,8 +113,8 @@ def _isolate_lifespan(monkeypatch) -> None:
     monkeypatch.setattr("infra.db_async.shutdown", lambda: None)
 
     monkeypatch.setattr(checkpoint_runtime, "reconcile_startup_checkpoints", _noop)
-    monkeypatch.setattr(checkpoint_runtime, "shutdown_checkpoint_tasks", _noop)
-    monkeypatch.setattr(checkpoint_runtime, "checkpoint_task_count", lambda: 0)
+    monkeypatch.setattr(fork_runtime, "shutdown_forks", _noop)
+    monkeypatch.setattr(fork_runtime, "fork_task_count", lambda: 0)
 
     monkeypatch.setattr(state, "_active_turns", {})
     monkeypatch.setattr(state, "_active_llm_tasks", {})
@@ -485,8 +485,8 @@ async def test_checkpoint_tasks_join_before_provider_teardown(monkeypatch):
         events.append("providers")
 
     monkeypatch.setattr(
-        checkpoint_runtime,
-        "shutdown_checkpoint_tasks",
+        fork_runtime,
+        "shutdown_forks",
         shutdown_checkpoints,
     )
     monkeypatch.setattr(
@@ -526,8 +526,8 @@ async def test_checkpoint_tasks_join_before_provider_and_storage_teardown(
             events.append("serving")
 
     monkeypatch.setattr(
-        checkpoint_runtime,
-        "shutdown_checkpoint_tasks",
+        fork_runtime,
+        "shutdown_forks",
         shutdown_checkpoints,
     )
     monkeypatch.setattr(harness_models, "shutdown_refresh_tasks", shutdown_refreshes)
@@ -579,8 +579,8 @@ async def test_host_access_supervisors_join_before_checkpoint_cleanup(monkeypatc
         shutdown_host_access,
     )
     monkeypatch.setattr(
-        checkpoint_runtime,
-        "shutdown_checkpoint_tasks",
+        fork_runtime,
+        "shutdown_forks",
         shutdown_checkpoints,
     )
 
@@ -759,8 +759,8 @@ async def test_checkpoint_cleanup_defers_caller_cancellation(monkeypatch):
             events.append("serving")
 
     monkeypatch.setattr(
-        checkpoint_runtime,
-        "shutdown_checkpoint_tasks",
+        fork_runtime,
+        "shutdown_forks",
         shutdown_checkpoints,
     )
     _record_tail(monkeypatch, events)
@@ -804,13 +804,13 @@ async def test_surviving_checkpoint_task_blocks_product_and_storage(monkeypatch)
         events.append("refresh")
 
     monkeypatch.setattr(
-        checkpoint_runtime,
-        "shutdown_checkpoint_tasks",
+        fork_runtime,
+        "shutdown_forks",
         shutdown_checkpoints,
     )
     monkeypatch.setattr(
-        checkpoint_runtime,
-        "checkpoint_task_count",
+        fork_runtime,
+        "fork_task_count",
         lambda: 1,
     )
     monkeypatch.setattr(harness_models, "shutdown_refresh_tasks", shutdown_refreshes)
@@ -1235,8 +1235,8 @@ async def test_runtime_owner_failure_blocks_product_and_storage(monkeypatch, own
             events.append("serving")
 
     monkeypatch.setattr(
-        checkpoint_runtime,
-        "shutdown_checkpoint_tasks",
+        fork_runtime,
+        "shutdown_forks",
         shutdown_failure if owner == "checkpoint" else _noop,
     )
     monkeypatch.setattr(

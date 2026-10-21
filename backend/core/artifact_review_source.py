@@ -1,0 +1,51 @@
+"""Bounded synchronous source capture for a disposable review pass."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+
+from core.artifact_review_capture import ReviewForkFailure
+from history.projection import in_read_snapshot, render_portable_history
+from history.scoped_source import segment_start
+from history.types import HistoryBoundary
+
+# A review pass is an optimization over the ordinary continuation task. Refuse
+# its synchronous capture above this source-row budget rather than truncate an
+# exact tail or make request creation grow with an unbounded conversation.
+# Include covered rows: scoped history validates the anchor's owning segment,
+# which can begin arbitrarily far before the installed checkpoint.
+REVIEW_TAIL_MAX_ROWS = 1024
+
+
+def _bounded_history(thread_id, previous, *, db):
+    start = HistoryBoundary.of_checkpoint(previous) if previous else None
+    first_seq = segment_start(db, thread_id, start).first_seq if start else None
+    if first_seq is None:
+        predicate, params = "", (thread_id, REVIEW_TAIL_MAX_ROWS + 1)
+    else:
+        predicate, params = " AND seq >= ?", (thread_id, first_seq, REVIEW_TAIL_MAX_ROWS + 1)
+    rows = db.execute(
+        "SELECT seq FROM messages WHERE thread_id=? AND delivery_state='delivered'"
+        f"{predicate} ORDER BY seq LIMIT ?",
+        params,
+    ).fetchall()
+    if len(rows) > REVIEW_TAIL_MAX_ROWS:
+        raise ReviewForkFailure("history_tail_bound")
+    projection = render_portable_history(thread_id, db=db, start_exclusive=start)
+    if previous is not None:
+        from infra.checkpoint_receipts import frozen_presence_line
+
+        projection = replace(projection, resume_presence_line=frozen_presence_line(db, previous.id))
+    return projection
+
+
+def bounded_review_history(thread_id, previous, *, db):
+    """Render a tail only when its full validation source has at most 1,024 rows.
+
+    The counting guard fetches at most 1,025 integer rows, never message
+    payloads. With a checkpoint the segment walk starts at the anchor's owning
+    segment and is bounded by that segment; without one it counts the entire
+    delivered history. Above the cap the request follows its
+    failure-to-continuation path.
+    """
+    return in_read_snapshot(db, _bounded_history, thread_id, previous)

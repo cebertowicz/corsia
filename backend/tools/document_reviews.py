@@ -7,6 +7,7 @@ from typing import Any
 from doceditor import review_requests as reviews
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
+from infra.write_effects import after_commit
 from infra.queries import get_thread_for_user
 from plans import public
 from tools.artifact_tool_helpers import default_workspace, tool_path
@@ -15,9 +16,9 @@ from tools.delegation import _require_context, _tool_schema
 from tools.documents import _json, _resolve_doc_target
 
 TOOL_DESCRIPTION = (
-    "Ask an agent whose scope this document touches to review it. Queues a review "
-    "task in the reviewer's plan; its comments on this document reach the owner "
-    "and settle the task. The reviewer comments; it does not do the work. Ask only about a "
+    "Ask an agent whose scope this document touches to review it. Runs a short private "
+    "review without interrupting the reviewer; its comments on this document reach the owner. "
+    "If the review cannot finish, it becomes a reviewer plan task. The reviewer comments; it does not do the work. Ask only about a "
     "section that changes the reviewer's area: name that section and your question in `note`. "
     "The reviewer reads only that section and leaves its changes as suggestions. `reviewer` "
     "is a thread ID from `agent_roster`; the document's owner cannot be the reviewer."
@@ -26,6 +27,21 @@ TARGET_REFUSAL = "exactly one of doc_path / artifact_id is required"
 UNREGISTERED_REFUSAL = "doc_path is not registered; register it first or retry with its artifact_id"
 SESSION_REQUIRED = "as_session_id is required (the `corsia doc` CLI fills it automatically)"
 SESSION_REFUSAL = "as_session_id is not owned by the authenticated principal"
+
+
+def _start_after_commit(request_id: str) -> None:
+    """Submit durable review work to the app loop after its request commits."""
+    import infra.app_loop as app_loop
+    from core.artifact_review_runtime import start
+
+    app_loop.submit(start(request_id))
+
+
+def _cancel_after_commit(fork_id: str) -> None:
+    """Signal the running fork from its owner loop after cancellation commits."""
+    from core.artifact_review_runtime import cancel
+
+    cancel(fork_id)
 
 
 def create_request(actor: reviews.ReviewActor, *, reviewer: str, note: str | None,
@@ -45,9 +61,15 @@ def create_request(actor: reviews.ReviewActor, *, reviewer: str, note: str | Non
             woken: list[str] = []
             with public.collect_wake_recipients(connection, woken):
                 result = reviews.request_review(connection, aid, reviewer, actor, note, client_id)
+                if result["state"] == "forked":
+                    after_commit(
+                        connection,
+                        lambda request_id=str(result["id"]): _start_after_commit(request_id),
+                    )
         return result, woken
     finally:
         db.close()
+
 
 
 def cancel_request(actor: reviews.ReviewActor, request_id: str) -> tuple[dict, list[str]]:
@@ -57,6 +79,11 @@ def cancel_request(actor: reviews.ReviewActor, request_id: str) -> tuple[dict, l
             woken: list[str] = []
             with public.collect_wake_recipients(connection, woken):
                 result = reviews.cancel(connection, request_id, actor)
+                if result["state"] == "withdrawn" and result["fork_id"]:
+                    after_commit(
+                        connection,
+                        lambda fork_id=str(result["fork_id"]): _cancel_after_commit(fork_id),
+                    )
         return result, woken
     finally:
         db.close()
@@ -87,8 +114,8 @@ class DocReviewRequestTool(Tool):
                 "Reviewer thread ID from agent_roster; must be an active agent in your visible roster.")},
             "note": {"type": ["string", "null"], "maxLength": 500},
             "client_id": {"type": "string", "maxLength": 64, "description": (
-                "Stable retry key. Reuse it when retrying this request; a new key on an open "
-                "request appends a supplied note once.")},
+                "Stable retry key. Reuse it to retrieve the same request. To change a review "
+                "already running, withdraw it and request again with your note.")},
         }, ["reviewer", "client_id"])
 
     async def execute(self, **kwargs: Any) -> str:

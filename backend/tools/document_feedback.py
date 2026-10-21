@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from doceditor import feedback_batches, feedback_state
+from doceditor import review_feedback
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
@@ -15,11 +15,22 @@ from tools.delegation import _require_context, _tool_schema
 from tools.documents import _json, _resolve_doc_target
 
 
+def _delivery_text(pending: bool, undelivered: list[dict]) -> str:
+    if undelivered:
+        reason = undelivered[0]["undelivered_reason"].replace("_", " ")
+        return (
+            f"Feedback is still undelivered: {reason}. Retry with "
+            "doc_feedback_send once the owner can receive it."
+        )
+    return "Feedback was delivered to the owner." if pending else "Nothing was pending for this document."
+
+
 def _send_feedback(
     actor_thread_id: str,
     actor: dict[str, Any],
     artifact_id: str | None,
     doc_path: str | None,
+    review_request_id: str | None = None,
 ) -> dict[str, Any]:
     """Close and retry one agent's batches in the canonical state owner."""
     db = get_db()
@@ -42,41 +53,15 @@ def _send_feedback(
                 "doc_path is not registered; register it first or retry with its artifact_id"
             )
         with write_transaction(db, scope="send_agent_doc_feedback") as connection:
-            pending = feedback_state.has_pending_for_document(
-                connection,
-                author_kind="agent",
-                author_id=actor_thread_id,
-                artifact_id=resolved_id,
-            )
-            woken = feedback_batches.close_for_document(
-                connection,
-                author_kind="agent",
-                author_id=actor_thread_id,
-                artifact_id=resolved_id,
-                reason="submit",
-            )
-            woken.extend(feedback_batches.retry_for_document(
-                connection,
-                author_kind="agent",
-                author_id=actor_thread_id,
-                artifact_id=resolved_id,
-            ))
-            undelivered = feedback_state.undelivered_for_document(
-                connection,
-                author_kind="agent",
-                author_id=actor_thread_id,
-                artifact_id=resolved_id,
-            )
-        if undelivered:
-            reason = undelivered[0]["undelivered_reason"].replace("_", " ")
-            result = (
-                f"Feedback is still undelivered: {reason}. Retry with "
-                "doc_feedback_send once the owner can receive it."
-            )
-        elif pending:
-            result = "Feedback was delivered to the owner."
-        else:
-            result = "Nothing was pending for this document."
+            if review_request_id is not None:
+                pending, woken, undelivered = review_feedback.submit_fork_feedback(
+                    connection, review_request_id, actor_thread_id, resolved_id,
+                )
+            else:
+                pending, woken, undelivered = review_feedback.send_document_feedback(
+                    connection, actor_thread_id, resolved_id,
+                )
+        result = _delivery_text(pending, undelivered)
         return {
             "artifact_id": resolved_id,
             "woken": woken,
@@ -122,7 +107,7 @@ class DocFeedbackSendTool(Tool):
             doc_path = tool_path(doc_path, self._workspace)
         try:
             result = await run_in_db(
-                _send_feedback, actor_thread_id, actor, artifact_id, doc_path,
+                _send_feedback, actor_thread_id, actor, artifact_id, doc_path, kwargs.get("_review_request_id"),
             )
         except PermissionError as exc:
             if str(exc) == "Artifact not found":

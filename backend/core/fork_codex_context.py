@@ -1,4 +1,4 @@
-"""Checkpoint-local Codex occupancy: a last-call receipt plus unsent growth."""
+"""Fork-local Codex occupancy: a last-call receipt plus unsent growth."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from core.checkpoint_types import CHECKPOINT_TOOL_ROUND_TRIP_TOKENS
+from core.fork_types import FORK_TOOL_ROUND_TRIP_TOKENS
 from core.token_estimation import measure_request
 from subagents.codex_durable_receipts import normalize_receipt, usage_identity
 
@@ -39,7 +39,7 @@ def frozen_context_tokens(
         while remaining:
             line = stream.readline(remaining)
             if not line:
-                raise ValueError("checkpoint rollout ended before its frozen boundary")
+                raise ValueError("fork rollout ended before its frozen boundary")
             remaining -= len(line)
             record = json.loads(line)
             payload = record.get("payload") or {}
@@ -68,7 +68,7 @@ def frozen_context_tokens(
     return tokens
 
 
-class CodexCheckpointContext:
+class CodexForkContext:
     """Count one fork's complete model receipt plus its aggregate tool replies."""
 
     def __init__(self, target, input_tokens: int | None) -> None:
@@ -89,8 +89,8 @@ class CodexCheckpointContext:
         return self.tokens <= self.target.context_window
 
     def leaves_output_room(self, max_output_tokens: int) -> bool:
-        """True when the input still leaves room for the checkpoint's own output."""
-        reserve = max_output_tokens + CHECKPOINT_TOOL_ROUND_TRIP_TOKENS
+        """True when the input still leaves room for the fork's own output."""
+        reserve = max_output_tokens + FORK_TOOL_ROUND_TRIP_TOKENS
         return self.tokens + reserve <= self.target.context_window
 
     def record_receipt(self, usage: dict[str, Any]) -> None:
@@ -98,7 +98,7 @@ class CodexCheckpointContext:
         last = _last_total(usage.get("last"), camel=True)
         identity = usage_identity(usage)
         if last is None or _last_total(usage.get("total"), camel=True) is None:
-            raise ValueError("Codex checkpoint usage receipt lacks input/output counts")
+            raise ValueError("Codex fork usage receipt lacks input/output counts")
         if identity != self.receipt_identity:
             self.base, self.results = last, 0
             self.receipt_identity = identity

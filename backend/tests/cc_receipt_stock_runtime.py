@@ -127,16 +127,16 @@ class StockClaudeRuntime:
 
     async def _arrange_checkpoint(self):
         if self.scenario == "required_failure":
-            from core.checkpoint_runtime import CheckpointNotAdmitted
+            from core.checkpoint_runtime import ForkNotAdmitted
 
             async def unavailable(*_a, **_k):
-                raise CheckpointNotAdmitted("fixture required checkpoint unavailable")
+                raise ForkNotAdmitted("fixture required checkpoint unavailable")
 
             async def cold(*_a, **_k):
                 return None
 
             self.monkeypatch.setattr("subagents.harness_checkpoint_resume._prepare_external_checkpoint", unavailable)
-            self.monkeypatch.setattr("core.checkpoint_cc_boundary.capture_tool_boundary_warm_source", cold)
+            self.monkeypatch.setattr("core.fork_cc_boundary.capture_tool_boundary_warm_source", cold)
         elif self.scenario == "cutover":
             self.release_checkpoint, self.waiting, self.await_checkpoint = await _start_checkpoint(
                 self.monkeypatch, self.target, self.root, self.identity)

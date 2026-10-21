@@ -9,7 +9,7 @@ from infra.schema import SCHEMA_VERSION
 
 
 def test_registers_the_lesson_placement_check_migration():
-    assert SCHEMA_VERSION == 132
+    assert SCHEMA_VERSION == 133
     assert MIGRATIONS[118] is migrate_118_to_119
 
 

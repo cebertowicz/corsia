@@ -84,7 +84,7 @@ async def test_native_live_warm_source_freezes_correlated_provider_receipt(monke
         captured["kwargs"] = kwargs
         return object()
 
-    monkeypatch.setattr("core.checkpoint_native_fork.capture_live_warm_source", capture)
+    monkeypatch.setattr("core.fork_native.capture_live_warm_source", capture)
 
     result = await checkpoint_native_admission.capture_native_checkpoint_source(
         "thread-1", state, context, "high",
@@ -259,7 +259,7 @@ def test_native_checkpoint_matches_selected_transport_to_catalog_target(isolated
 async def test_native_adopts_each_new_installed_generation_once(monkeypatch):
     """One Turn replaces its context once for each newly installed checkpoint."""
     from core import checkpoint_resume, turn_iteration_context
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import CheckpointWaitScope, ProviderContinuation
     from core.turn_core import TurnIdentity
 

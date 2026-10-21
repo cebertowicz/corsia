@@ -258,7 +258,7 @@ def test_pressure_trigger_uses_the_current_window_not_the_recorded_one(isolated_
     recorded number to the predicate. 600k measured tokens fit the fiction and
     overflow the fact.
     """
-    from core.checkpoint_fit import (
+    from core.fork_fit import (
         BoundaryDecision,
         ProviderPayload,
         evaluate_boundary,

@@ -95,7 +95,11 @@ def test_a_settled_request_journals_no_edit(ownership_scope, settle):
     _write(scope, "done.md", "one\n")
     node_id = _wait(scope, "done.md")
     if settle == "cancelled":
-        scope["db"].execute("UPDATE doc_review_requests SET cancelled_at='2026-01-02T00:00:00+00:00'")
+        from doceditor.review_lifecycle import transition
+        from infra.database import write_transaction
+
+        with write_transaction(scope["db"], scope="test_review_withdrawal"):
+            transition(scope["db"], "req-done.md", "withdrawn")
     else:  # Neither cancelled nor answered: only Plans knows the review ended.
         plans_public.close_review_node(scope["db"], node_id, reason="Reviewed; nothing to add")
         assert not plans_public.review_is_open(scope["db"], node_id)

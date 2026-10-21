@@ -13,14 +13,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from automation.restart_messages import TURN_STOPPED_REFUSAL
-from core.checkpoint_codex_context import CodexCheckpointContext
+from core.fork_codex_context import CodexForkContext
 from infra import provider_usage, turn_volume
 from subagents import codex_app_server_events as ev
 from subagents import codex_app_server_notifications as notifications
-from subagents.codex_app_server_errors import (
-    CodexAppServerError,
-    CodexWriteSurfaceError,
-)
+from subagents.codex_app_server_errors import CodexAppServerError
 from subagents.codex_app_server_reader import read_app_server
 from subagents.codex_tool_requests import ToolRequests
 from subagents.codex_process import CodexProcessGroup, cancel_reader_bounded, signal_process
@@ -72,8 +69,8 @@ class CodexAppServerSession:
         tool_registry: Any | None = None,
         corsia_thread_id: str | None = None,
         corsia_turn_identity: TurnIdentity | None = None,
-        checkpoint_id: str | None = None,
-        checkpoint_tool_result_fits: Callable[..., bool | Awaitable[bool]] | None = None,
+        fork_id: str | None = None,
+        fork_tool_result_fits: Callable[..., bool | Awaitable[bool]] | None = None,
         project_id: str | None = None,
         sandbox_mode: str = "read-only",
         approval_policy: str = "never",
@@ -99,9 +96,9 @@ class CodexAppServerSession:
         self.tool_registry = tool_registry
         self.corsia_thread_id, self.corsia_turn_identity = corsia_thread_id, corsia_turn_identity
         self.declared_tool_step_ids: dict[str, str] = {}
-        self.checkpoint_id, self.checkpoint_tool_result_fits = checkpoint_id, checkpoint_tool_result_fits
+        self.fork_id, self.fork_tool_result_fits = fork_id, fork_tool_result_fits
         self._tool_requests = ToolRequests.for_session(self)
-        self.tool_context = CodexCheckpointContext(None, None)
+        self.tool_context = CodexForkContext(None, None)
         self.project_id = project_id
         self.sandbox_mode = sandbox_mode
         self.approval_policy = approval_policy
@@ -335,25 +332,10 @@ class CodexAppServerSession:
         )
 
     def _assert_launch_write_surface(self) -> None:
-        """Fail fast at spawn if a task-bearing session cannot write.
+        """Validate the enforced kind or ordinary task write surface."""
+        from subagents.codex_launch_policy import assert_launch_write_surface
 
-        The native filesystem is read-only by design, so the only sanctioned
-        write path is the CORSIA dynamic tool surface. A dispatched
-        write-bearing subagent that reaches ``thread/start`` without any write
-        tool would silently discover it mid-task; refuse the launch instead.
-        """
-        if self.control_only or self.task is None:
-            return
-        if not self._is_write_capable():
-            raise CodexWriteSurfaceError(
-                "codex session was dispatched with a task but has no "
-                "write-capable CORSIA tool; its harness cannot write to the "
-                "workspace. Rebuild the tool registry before dispatch.",
-                {
-                    "sandbox": self.sandbox_mode,
-                    "dynamic_tools": sorted(self._dynamic_tool_names()),
-                },
-            )
+        assert_launch_write_surface(self)
 
     async def _start_or_resume_thread(self) -> None:
         """Start a new provider thread or resume the persisted one."""

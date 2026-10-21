@@ -1,4 +1,4 @@
-"""Private tool-loop mechanics for one disposable Native checkpoint."""
+"""Private tool-loop mechanics for one disposable Native fork."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import asyncio
 import json
 from typing import Any, NamedTuple
 
-from core.checkpoint_types import ProviderCheckpointRequest
-from infra.state.context import tool_invocation_context
+from core.fork_types import ProviderForkRequest
+from core.fork_runtime import ForkKind
 from tools.recorded_call import (
     CompletedToolCall,
     CompletedToolFailure,
@@ -15,15 +15,9 @@ from tools.recorded_call import (
     enrich_completed_failure,
 )
 
-#: The only tool a Native checkpoint call may execute (#2350). A cold fork
-#: also uses this to decide what it advertises at all (#2116): offering a
-#: tool it can only refuse invites a round trip that bills output tokens for
-#: a refusal instead of narrative text.
-CHECKPOINT_TOOL_NAME = "continuity_edit"
-
 
 async def await_or_cancel(awaitable, cancel_event: asyncio.Event):
-    """Await one provider operation while honoring the checkpoint stop signal."""
+    """Await one provider operation while honoring the fork stop signal."""
     operation = asyncio.create_task(awaitable)
     stopped = asyncio.create_task(cancel_event.wait())
     try:
@@ -34,8 +28,10 @@ async def await_or_cancel(awaitable, cancel_event: asyncio.Event):
             raise asyncio.CancelledError
         return await operation
     finally:
-        stopped.cancel()
-        await asyncio.gather(stopped, return_exceptions=True)
+        for task in (operation, stopped):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(operation, stopped, return_exceptions=True)
 
 
 def _tool_call_dicts(response) -> list[dict[str, Any]]:
@@ -73,7 +69,7 @@ def input_room(request, messages, tools, reserve: int = 0) -> InputRoom:
     if source is None:
         # Cold must count exactly what its admission counted, or an admitted
         # fold is refused (or overflows) inside the loop that runs it.
-        from core.checkpoint_cold_count import cold_input_tokens
+        from core.fork_cold_count import cold_input_tokens
 
         counted = cold_input_tokens(messages, request.target) + cold_input_tokens(
             tools, request.target,
@@ -104,20 +100,7 @@ async def input_fits_off_loop(request, messages, tools, reserve: int = 0) -> boo
     return await asyncio.to_thread(input_fits, request, messages, tools, reserve)
 
 
-async def run_tool_calls(
-    agent: Any,
-    response: Any,
-    messages: list[dict[str, Any]],
-    cancel_event: asyncio.Event,
-    request: ProviderCheckpointRequest,
-    tools: list[dict[str, Any]],
-) -> bool:
-    """Run a Native checkpoint batch while retaining every completed effect.
-
-    A result that would not fit the remaining room is never sent: its effect
-    stands, and the fork sees a short error telling it to write the
-    checkpoint (#2514). Only when even that does not fit does the batch fail.
-    """
+def _append_assistant_message(messages: list[dict[str, Any]], response: Any) -> None:
     messages.append(
         {
             "role": "assistant",
@@ -130,19 +113,36 @@ async def run_tool_calls(
             ),
         }
     )
+
+
+async def run_tool_calls(
+    agent: Any,
+    response: Any,
+    messages: list[dict[str, Any]],
+    cancel_event: asyncio.Event,
+    request: ProviderForkRequest,
+    tools: list[dict[str, Any]],
+    *,
+    kind: ForkKind,
+) -> bool:
+    """Run a Native fork batch while retaining every completed effect.
+
+    A result that would not fit the remaining room is never sent: its effect
+    stands, and the fork sees its kind's short instruction to finish. Only when even that does not fit does the batch fail.
+    """
+    _append_assistant_message(messages, response)
     completed: list[CompletedToolCall] = []
     try:
         if not await input_fits_off_loop(request, messages, tools):
             return False
         for call in response.tool_calls:
-            if call.name != CHECKPOINT_TOOL_NAME:
-                result = "Native checkpoints may only use continuity_edit."
+            if call.name not in kind.tool_allowlist:
+                result = kind.tool_refusal
             else:
                 try:
-                    with tool_invocation_context(None, checkpoint_id=request.checkpoint_id):
-                        result = await await_or_cancel(
-                            agent.tools.execute(call.name, call.arguments), cancel_event
-                        )
+                    result = await kind.tool_executor(
+                        agent, call.name, call.arguments, cancel_event, request,
+                    )
                 except CompletedToolFailure as failure:
                     enrich_completed_failure(
                         failure,
@@ -152,13 +152,13 @@ async def run_tool_calls(
                         thread_id=request.thread_id,
                         invocation_id=call.id,
                         provider_tool_call_id=call.id,
-                        checkpoint_id=request.checkpoint_id,
+                        fork_id=request.fork_id,
                     )
                     raise
                 completed.append(CompletedToolCall(
                     name=call.name, result=result, arguments=dict(call.arguments),
                     thread_id=request.thread_id, invocation_id=call.id,
-                    provider_tool_call_id=call.id, checkpoint_id=request.checkpoint_id,
+                    provider_tool_call_id=call.id, fork_id=request.fork_id,
                 ))
             reply = {
                 "role": "tool",
@@ -171,8 +171,7 @@ async def run_tool_calls(
                 room = await asyncio.to_thread(input_room, request, messages, tools)
                 reply["content"] = (
                     f"Error: this result ({len(result)} characters) is "
-                    f"{room.counted - room.bound} tokens over the remaining checkpoint "
-                    "room and was not sent; write the checkpoint now."
+                    + kind.over_room_text.format(excess=room.counted - room.bound)
                 )
                 if not await input_fits_off_loop(request, messages, tools):
                     return False

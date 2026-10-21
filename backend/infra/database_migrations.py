@@ -188,6 +188,7 @@ from infra.migration_128_to_129_connected_accounts import migrate_128_to_129
 from infra.migration_129_to_130_project_inference_policy import migrate_129_to_130
 from infra.migration_130_to_131_local_only_threads import migrate_130_to_131
 from infra.migration_131_to_132_microsoft_accounts import migrate_131_to_132
+from infra.migration_132_to_133_review_forks import migrate_132_to_133
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -804,6 +805,7 @@ MIGRATIONS[128] = migrate_128_to_129
 MIGRATIONS[129] = migrate_129_to_130
 MIGRATIONS[130] = migrate_130_to_131
 MIGRATIONS[131] = migrate_131_to_132
+MIGRATIONS[132] = migrate_132_to_133
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

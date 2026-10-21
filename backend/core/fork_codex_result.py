@@ -1,28 +1,30 @@
-"""Capture Codex checkpoint narrative without mistaking an error for content."""
+"""Capture Codex fork output without mistaking an error for content."""
 
 from __future__ import annotations
 
 import asyncio
 from typing import Any
 
-from core.checkpoint_types import (
-    CHECKPOINT_CONTEXT_TRUNCATED,
-    ProviderCheckpointRejected,
-    ProviderCheckpointResult,
+from core.fork_types import (
+    ProviderForkRejected,
+    ProviderForkResult,
 )
-from infra.provider_usage import TokenUsage, checkpoint_receipt
+from core.fork_types import FORK_CONTEXT_TRUNCATED
+from core.fork_runtime import ForkKind
+from infra.provider_usage import TokenUsage, fork_receipt
 from subagents.provider_context_limits import is_provider_context_limit
 
 
-def checkpoint_usage(volume: object) -> dict[str, int | None] | None:
+def fork_usage_receipt(volume: object) -> dict[str, int | None] | None:
     """Keep canonical disjoint usage rather than re-encoding provider subsets."""
-    return checkpoint_receipt(volume) if isinstance(volume, TokenUsage) else None
+    return fork_receipt(volume) if isinstance(volume, TokenUsage) else None
 
 
-class CodexCheckpointCapture:
+class CodexForkCapture:
     """The output of one disposable process, including unfinished text deltas."""
 
-    def __init__(self, *, on_usage=None) -> None:
+    def __init__(self, *, kind: ForkKind, on_usage=None) -> None:
+        self.kind = kind
         self.terminal: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self.bodies: list[str] = []
         self.partial = ""
@@ -48,16 +50,22 @@ class CodexCheckpointCapture:
     def _failure(self, detail: str, *, truncated: bool) -> None:
         if self.terminal.done():
             return
+        if not truncated:
+            try:
+                self.kind.provider_failure("codex", detail)
+            except ProviderForkRejected as error:
+                self.terminal.set_exception(error)
+                return
         if self.bodies or self.partial.strip():
-            self.diagnostic = CHECKPOINT_CONTEXT_TRUNCATED if truncated else detail
+            self.diagnostic = FORK_CONTEXT_TRUNCATED if truncated else detail
             self.terminal.set_result(None)
         else:  # No narrative: fail named, never as an empty success.
-            self.terminal.set_exception(ProviderCheckpointRejected(
-                f"{CHECKPOINT_CONTEXT_TRUNCATED}: {detail}" if truncated else detail))
+            self.terminal.set_exception(ProviderForkRejected(
+                f"{FORK_CONTEXT_TRUNCATED}: {detail}" if truncated else detail))
 
     def truncate(self) -> None:
         """Finish capture through the existing degraded-completion outcome."""
-        self._failure("fork input outgrew its checkpoint window", truncated=True)
+        self._failure(f"fork input outgrew its {self.kind.name} window", truncated=True)
 
     async def on_event(self, event: dict[str, Any]) -> None:
         """Replace streamed copies at item completion; keep earlier fragments."""
@@ -71,14 +79,14 @@ class CodexCheckpointCapture:
             self.record_call(event["turn_id"], event["ordinal"], event["usage"])
             await self.publish_calls()
         elif kind == "result":
-            self.usage = checkpoint_usage(event.get("token_volume")) or self.usage
+            self.usage = fork_usage_receipt(event.get("token_volume")) or self.usage
             if not self.calls and self.on_usage is not None:
                 await self.on_usage("aggregate", None, self.usage or {})
             if not self.terminal.done():
                 self.terminal.set_result(None)
         elif kind == "turn_failed":
             self._failure(
-                str(event.get("message") or event.get("cause") or "Codex checkpoint failed"),
+                str(event.get("message") or event.get("cause") or f"Codex {self.kind.name} failed"),
                 truncated=is_provider_context_limit(event),
             )
 
@@ -91,18 +99,18 @@ class CodexCheckpointCapture:
                 self.terminal.set_exception(stderr)
             return
         detail = stderr if isinstance(stderr, str) else str(stderr)
-        failure = detail.strip() or "Codex checkpoint process exited"
+        failure = detail.strip() or f"Codex {self.kind.name} process exited"
         if code not in {None, 0} and not detail.strip():
-            failure = f"Codex checkpoint process exited with code {code}"
+            failure = f"Codex {self.kind.name} process exited with code {code}"
         self._failure(failure, truncated=is_provider_context_limit(failure))
 
-    def result(self) -> ProviderCheckpointResult:
+    def result(self) -> ProviderForkResult:
         """Normal completion uses its final body; cutoff preserves all partial work."""
-        if self.diagnostic == CHECKPOINT_CONTEXT_TRUNCATED:
+        if self.diagnostic == FORK_CONTEXT_TRUNCATED:
             body = "\n".join(part for part in (*self.bodies, self.partial) if part.strip())
         else:
             body = self.partial or (self.bodies[-1] if self.bodies else "")
             if not body.strip():
-                raise ProviderCheckpointRejected("Codex checkpoint produced no body")
+                raise ProviderForkRejected(f"Codex {self.kind.name} produced no body")
         usage = {"calls": list(self.calls.values())} if self.calls else self.usage
-        return ProviderCheckpointResult(body, usage, self.diagnostic)
+        return ProviderForkResult(body, usage, self.diagnostic)

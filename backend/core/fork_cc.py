@@ -1,10 +1,9 @@
-"""One disposable Claude Code checkpoint over a frozen transcript prefix."""
+"""One disposable Claude Code fork over a frozen transcript prefix."""
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -12,20 +11,18 @@ from typing import Any
 from uuid import uuid4
 
 from history.types import HistoryBoundary
-from infra.provider_usage import TokenUsage, checkpoint_receipt, from_anthropic
 from llm.resolution import ExecutionTarget
-from subagents.cc_invocation import ClaudeInvocation, build_claude_cmd
+from core import fork_cc_commands
+from subagents.cc_invocation import ClaudeInvocation
 from subagents.cc_sessions import resolve_claude_dir
-from subagents.provider_context_limits import is_provider_context_limit
-
-from core.checkpoint_types import (
-    CHECKPOINT_CONTEXT_TRUNCATED,
-    ColdInputCallback,
-    ProviderCheckpointRejected,
-    ProviderCheckpointRequest,
-    ProviderCheckpointResult,
+from core.fork_runtime import ForkKind
+from core.fork_failures import ForkBinaryResolutionError
+from core.fork_types import (
+    ProviderForkRequest,
+    ProviderForkResult,
 )
-from core.checkpoint_warm_request import warm_capture_refused
+from core.fork_types import ColdInputCallback
+from core.fork_capture import warm_capture_refused
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +39,8 @@ class CCWarmSource:
     claude_dir: str | None
     restored_seed_text: str | None = None
     vendor_account_receipt: object | None = None
+    #: The live session's tool list, re-advertised so the resumed prefix stays cached.
+    tool_definitions: tuple[dict[str, Any], ...] | None = None
 
 
 def _transcript_path(provider_id: str, claude_dir: str) -> str | None:
@@ -65,7 +64,9 @@ def _identity_from_live(live: Any):
     transcript = _transcript_path(provider_id, claude_dir or resolve_claude_dir()) if provider_id else None
     if transcript is None:
         return None
-    return provider_id, invocation, claude_dir, transcript, getattr(session, 'vendor_account_receipt', None)
+    definitions = getattr(live, "tool_definitions", None)
+    return (provider_id, invocation, claude_dir, transcript, getattr(session, 'vendor_account_receipt', None),
+            tuple(definitions) if definitions is not None else None)
 
 
 async def _live_identity(thread_id: str):
@@ -97,7 +98,7 @@ def _registered_identity(thread_id: str):
     transcript = _transcript_path(provider_id, claude_dir)
     if transcript is None:
         return None
-    return provider_id, invocation, claude_dir, transcript, receipt
+    return provider_id, invocation, claude_dir, transcript, receipt, None
 
 
 def _read_prefix(path: Path, prefix_bytes: int | None) -> bytes:
@@ -153,16 +154,21 @@ async def capture_warm_source(
         invocation,
         claude_dir,
         restored_seed_text,
-        identity[4] if len(identity) == 5 else None,
+        *(tuple(identity[4:]) + (None, None))[:2],
     )
 
 
-def _checkpoint_env(source: CCWarmSource | None, request: ProviderCheckpointRequest):
+def _fork_env(source: CCWarmSource | None, request: ProviderForkRequest):
     from subagents.cc_env import apply_claude_config_dir, clean_claude_env
 
     env = clean_claude_env()
     env["CORSIA_THREAD_ID"] = request.thread_id
-    env["CORSIA_CHECKPOINT_ID"] = request.checkpoint_id
+    env["CORSIA_FORK_ID"] = request.fork_id
+    from core.fork_runtime import running_fork
+
+    handle = running_fork(request.thread_id, request.fork_id)
+    if handle is not None:
+        env["CORSIA_FORK_TOOL_TOKEN"] = handle.tool_token
     env["CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"] = "1"
     env["CLAUDE_CODE_DISABLE_TERMINAL_TITLE"] = "1"
     if source is None:
@@ -174,15 +180,20 @@ def _checkpoint_env(source: CCWarmSource | None, request: ProviderCheckpointRequ
 async def _spawn_process(argv: list[str], *, cwd: str, env: dict[str, str]):
     from subagents.cc_stream import STDOUT_LIMIT
 
-    return await asyncio.create_subprocess_exec(
-        *argv,
-        cwd=cwd,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        limit=STDOUT_LIMIT,
-        env=env,
-    )
+    try:
+        return await asyncio.create_subprocess_exec(
+            *argv,
+            cwd=cwd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            limit=STDOUT_LIMIT,
+            env=env,
+        )
+    except (FileNotFoundError, PermissionError) as error:
+        if error.filename != argv[0]:
+            raise
+        raise ForkBinaryResolutionError("Claude Code harness executable is unavailable") from error
 
 
 def _snapshot(source: CCWarmSource) -> tuple[str, Path]:
@@ -193,7 +204,7 @@ def _snapshot(source: CCWarmSource) -> tuple[str, Path]:
         len(prefix) != source.transcript_bytes
         or hashlib.sha256(prefix).hexdigest() != source.transcript_sha256
     ):
-        raise RuntimeError("Claude checkpoint transcript prefix changed")
+        raise RuntimeError("Claude fork transcript prefix changed")
     snapshot_id = str(uuid4())
     snapshot = path.with_name(f"{snapshot_id}.jsonl")
     with open(snapshot, "xb") as stream:
@@ -201,165 +212,54 @@ def _snapshot(source: CCWarmSource) -> tuple[str, Path]:
     return snapshot_id, snapshot
 
 
-def _warm_command(
-    source: CCWarmSource,
-    request: ProviderCheckpointRequest,
-    snapshot_id: str,
-) -> list[str]:
-    invocation = replace(
-        source.invocation,
-        binary=request.binary or source.invocation.binary,
-        resume_session_id=snapshot_id,
-    )
-    return build_claude_cmd(
-        invocation,
-        stream_input=True,
-        extra_args=["--fork-session", "--no-session-persistence"],
-    )
+
+from core import fork_cc_result
 
 
-def _cold_command(request: ProviderCheckpointRequest) -> list[str]:
-    if not request.binary:
-        raise ValueError("Claude Code checkpoint requires its harness binary")
-    invocation = ClaudeInvocation(
-        binary=request.binary,
-        permission_mode="bypassPermissions",
-        mcp_config=request.mcp_config,
-        working_dir=request.working_dir,
-        model=request.target.transport_model,
-        effort=request.reasoning_effort,
-    )
-    return build_claude_cmd(
-        invocation, stream_input=True, extra_args=["--no-session-persistence"]
-    )
+async def invoke_fork(request, cancel_event, *, kind: ForkKind,
+                            on_cold_input=None, on_tool_executor=None):
+    from core.fork_cc_bridge import bind_bridge
+
+    kind.step_limit("claude-code", request)
+    with bind_bridge(request, kind, cancel_event) as (request, handle):
+        async def bind_executor(executor):
+            handle.tool_executor = executor
+            if on_tool_executor is not None:
+                await on_tool_executor(executor)
+
+        return await _invoke_fork(
+            request, cancel_event, kind=kind, on_cold_input=on_cold_input,
+            on_tool_executor=bind_executor,
+        )
 
 
-def _assistant_text(record: dict[str, Any]) -> str:
-    message = record.get("message")
-    content = message.get("content") if isinstance(message, dict) else None
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return ""
-    return "\n".join(
-        block["text"]
-        for block in content
-        if isinstance(block, dict)
-        and isinstance(block.get("text"), str)
-        and block["text"].strip()
-    )
-
-
-def _result_body(record: dict[str, Any], *, has_body: bool) -> str:
-    if record.get("type") == "assistant":
-        return _assistant_text(record)
-    if record.get("type") != "result":
-        return ""
-    terminal = record.get("result")
-    if record.get("is_error") is True and is_provider_context_limit(record):
-        return ""  # Provider error text is not checkpoint narrative.
-    if not has_body and isinstance(terminal, str):
-        return terminal
-    return ""
-
-
-def _result(stdout: bytes, *, truncated: bool = False) -> ProviderCheckpointResult:
-    bodies: list[str] = []
-    usage, diagnostic = None, None
-    calls: dict[str, TokenUsage] = {}
-    for line in stdout.splitlines():
-        try:
-            record = json.loads(line)
-        except (TypeError, json.JSONDecodeError):
-            continue
-        if not isinstance(record, dict):
-            continue
-        part = _result_body(record, has_body=bool(bodies))
-        if part.strip():
-            bodies.append(part)
-        if record.get("type") == "assistant":
-            message = record.get("message") or {}
-            measured = from_anthropic(message.get("usage")) if isinstance(message, dict) else None
-            if measured is not None:
-                # Repeated completed frames update the same provider call.
-                calls[str(message.get("id") or f"unidentified-{len(calls)}")] = measured
-        if record.get("type") == "result":
-            usage = (
-                record.get("usage") if isinstance(record.get("usage"), dict) else usage
-            )
-            if record.get("is_error") is True:
-                terminal = record.get("result")
-                diagnostic = str(terminal) if terminal is not None else "result error"
-                truncated = truncated or is_provider_context_limit(record)
-    if not (body := "\n".join(bodies)).strip():  # Fail named, never as an empty success.
-        detail = f"{CHECKPOINT_CONTEXT_TRUNCATED}: {diagnostic or 'no narrative'}" if truncated else None
-        raise ProviderCheckpointRejected(detail or "Claude Code checkpoint produced no body")
-    measured = from_anthropic(usage)
-    if measured is None and calls:
-        measured = sum(calls.values(), TokenUsage())
-    return ProviderCheckpointResult(
-        body, checkpoint_receipt(measured),
-        CHECKPOINT_CONTEXT_TRUNCATED if truncated else diagnostic,
-    )
-
-
-def _process_diagnostic(stderr: bytes | str, returncode: int | None) -> str | None:
-    detail = (
-        stderr.decode("utf-8", "replace").strip()
-        if isinstance(stderr, bytes)
-        else str(stderr or "").strip()
-    )
-    if detail or returncode in {None, 0}:
-        return detail or None
-    return f"Claude Code checkpoint process exited with code {returncode}"
-
-
-def _result_after_process(
-    stdout: bytes,
-    diagnostic: str | None,
-    returncode: int | None,
-) -> ProviderCheckpointResult:
-    truncated = bool(diagnostic and returncode not in {None, 0}
-                     and is_provider_context_limit(diagnostic))
-    try:
-        result = _result(stdout, truncated=truncated)
-    except ProviderCheckpointRejected as error:
-        if diagnostic and str(error) == "Claude Code checkpoint produced no body":
-            raise ProviderCheckpointRejected(diagnostic) from error
-        raise
-    if (result.diagnostic == CHECKPOINT_CONTEXT_TRUNCATED
-            or not diagnostic or diagnostic == result.diagnostic):
-        return result
-    combined = f"{result.diagnostic}; {diagnostic}" if result.diagnostic else diagnostic
-    return ProviderCheckpointResult(result.raw_body, result.usage, combined)
-
-
-async def invoke_checkpoint(
-    request: ProviderCheckpointRequest,
+async def _invoke_fork(
+    request: ProviderForkRequest,
     cancel_event: asyncio.Event,
     *,
+    kind: ForkKind,
     on_cold_input: ColdInputCallback | None = None,
     on_tool_executor=None,
-) -> ProviderCheckpointResult:
-    """Run one CC process; any captured body is authoritative."""
+) -> ProviderForkResult:
+    """Run one disposable fork through the Claude Code process."""
     if request.target.harness != "claude-code":
         raise TypeError("Claude adapter requires a Claude Code target")
-    from core.checkpoint_account import admit_checkpoint
+    from core.fork_account import admit_fork
 
-    request = admit_checkpoint(request)
+    request = admit_fork(request)
     source = request.warm_source
     if source is not None and not isinstance(source, CCWarmSource):
-        raise TypeError("Claude checkpoint received another harness's warm source")
-    from core.checkpoint_account import require_checkpoint_write
+        raise TypeError(f"Claude {kind.name} received another harness's warm source")
+    from core.fork_account import require_fork_write
     from connections.account_operation import require_same_operation_home
 
     require_same_operation_home(request, source.claude_dir if source else None)
-    require_checkpoint_write(request)
+    require_fork_write(request)
     snapshot = None
     restored_seed = None
     try:
         if source is None:
-            argv = _cold_command(request)
+            argv = fork_cc_commands.cold_command(request, kind)
             cwd = request.working_dir
         else:
             if source.restored_seed_text is not None:
@@ -373,15 +273,15 @@ async def invoke_checkpoint(
                     invocation=replace(source.invocation, seed_file=str(restored_seed)),
                 )
             snapshot_id, snapshot = _snapshot(source)
-            argv = _warm_command(source, request, snapshot_id)
+            argv = fork_cc_commands.warm_command(source, request, kind, snapshot_id)
             cwd = source.invocation.working_dir or request.working_dir
         spawned_at = time.monotonic()
         process = await _spawn_process(
-            argv, cwd=cwd, env=_checkpoint_env(source, request)
+            argv, cwd=cwd, env=_fork_env(source, request)
         )
-        from core.checkpoint_cc_io import communicate_checkpoint
+        from core.fork_cc_io import communicate_fork
 
-        output = await communicate_checkpoint(
+        output = await communicate_fork(
             process,
             request,
             cancel_event,
@@ -390,9 +290,9 @@ async def invoke_checkpoint(
             spawned_at=spawned_at,
         )
         if output.truncated:
-            return _result(output.stdout, truncated=True)
-        diagnostic = output.failure or _process_diagnostic(output.stderr, process.returncode)
-        return _result_after_process(output.stdout, diagnostic, process.returncode)
+            return fork_cc_result.result(output.stdout, truncated=True, kind=kind)
+        diagnostic = output.failure or fork_cc_result.process_diagnostic(output.stderr, process.returncode, kind=kind)
+        return fork_cc_result.result_after_process(output.stdout, diagnostic, process.returncode, kind=kind)
     finally:
         if snapshot is not None:
             snapshot.unlink(missing_ok=True)

@@ -205,12 +205,12 @@ async def _capture_external_tool_boundary_warm_source(
 ):
     """Capture the harness-owned warm source at one settled tool boundary."""
     if harness == "claude-code":
-        from core.checkpoint_cc_boundary import capture_tool_boundary_warm_source
+        from core.fork_cc_boundary import capture_tool_boundary_warm_source
 
         return await capture_tool_boundary_warm_source(
             context, live, thread_id, current_tool_call_id,
         )
-    from core.checkpoint_codex_fork import _capture_tool_boundary_warm_source
+    from core.fork_codex import _capture_tool_boundary_warm_source
 
     return await _capture_tool_boundary_warm_source(context, live, thread_id)
 
@@ -307,17 +307,17 @@ async def _prepare_initial_external_checkpoint(
     warm_source = None
     if getattr(prepared, "mode", None) == "provider_resume":
         if context.target.harness == "codex":
-            from core.checkpoint_codex_fork import _capture_tool_boundary_warm_source
+            from core.fork_codex import _capture_tool_boundary_warm_source
 
             warm_source = await _capture_tool_boundary_warm_source(context, live, thread_id)
         elif context.target.harness == "claude-code":
-            from core.checkpoint_cc_boundary import capture_boundary_warm_source
+            from core.fork_cc_boundary import capture_boundary_warm_source
 
             warm_source = await capture_boundary_warm_source(context, live, thread_id)
     elif context.target.harness == "codex":
-        from core.checkpoint_render import capture_warm_checkpoint_source
+        from core.fork_render import capture_warm_fork_source
 
-        warm_source = await capture_warm_checkpoint_source(
+        warm_source = await capture_warm_fork_source(
             thread_id, context.boundary, target=context.target,
             binary=context.binary, reasoning_effort=context.reasoning_effort, live=live,
         )

@@ -23,11 +23,11 @@ def test_startup_adds_review_requests_preserving_existing_state(tmp_path):
         db.commit()
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 132
+        assert SCHEMA_VERSION == 133
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert db.execute("SELECT title FROM threads WHERE id='keep'").fetchone()[0] == "Kept"
         columns = {r[1] for r in db.execute("PRAGMA table_info(doc_review_requests)")}
-        assert columns == {"id", "artifact_id", "requester_kind", "requester_id", "reviewer_thread_id", "note", "client_ids", "node_id", "cancelled_at", "answered_batch_id", "created_at"}
+        assert columns == {"id", "artifact_id", "requester_kind", "requester_id", "reviewer_thread_id", "note", "client_ids", "node_id", "created_at", "fork_id", "state", "state_changed_at", "reason"}
         indexes = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='doc_review_requests' AND sql IS NOT NULL")}
         assert indexes == {"idx_doc_review_reviewer", "idx_doc_review_requests_reviewer"}
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated

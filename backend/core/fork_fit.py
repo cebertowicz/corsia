@@ -6,7 +6,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
-from core.checkpoint_types import CHECKPOINT_OUTPUT_TOKENS, CHECKPOINT_TOOL_ROUND_TRIP_TOKENS
+from core.fork_types import FORK_OUTPUT_TOKENS, FORK_TOOL_ROUND_TRIP_TOKENS
 from core.token_estimation import _estimate_messages_tokens
 from core.checkpoint_fold_blocks import (
     COLD_FOLD_OLD_TOOL_BUDGET_TOKENS,
@@ -73,7 +73,7 @@ class ColdFoldInput:
 
 
 class ColdFoldInputTooLarge(RuntimeError):
-    """Even the protected minimum cannot fit one checkpoint call."""
+    """Even the protected minimum cannot fit one fork call."""
 
 
 # R08: a warm fork started at soft-zone entry must fit its output reserve, the
@@ -82,7 +82,7 @@ class ColdFoldInputTooLarge(RuntimeError):
 # fold at low occupancy and loop.
 CHECKPOINT_INSTRUCTION_BUDGET_TOKENS = 8_192
 WARM_FORK_RESERVE_TOKENS = (
-    CHECKPOINT_OUTPUT_TOKENS + CHECKPOINT_INSTRUCTION_BUDGET_TOKENS + CHECKPOINT_TOOL_ROUND_TRIP_TOKENS
+    FORK_OUTPUT_TOKENS + CHECKPOINT_INSTRUCTION_BUDGET_TOKENS + FORK_TOOL_ROUND_TRIP_TOKENS
 )
 
 
@@ -339,7 +339,7 @@ def render_cold_fold_input(
         measured = count_tokens(messages)
         if measured <= max_input_tokens:
             return ColdFoldInput(messages, measured, None, 0)
-        raise ColdFoldInputTooLarge("minimum meaningful cold checkpoint input does not fit")
+        raise ColdFoldInputTooLarge("minimum meaningful cold fork input does not fit")
     exact = _candidate(
         source,
         units,
@@ -397,4 +397,4 @@ def render_cold_fold_input(
     )
     if fitted is not None:
         return fitted
-    raise ColdFoldInputTooLarge("minimum meaningful cold checkpoint input does not fit")
+    raise ColdFoldInputTooLarge("minimum meaningful cold fork input does not fit")

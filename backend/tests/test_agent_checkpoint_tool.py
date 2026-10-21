@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.checkpoint_types import CheckpointRequest, ProviderCheckpointRequest
+from core.checkpoint_types import CheckpointProviderForkRequest
+from core.checkpoint_types import CheckpointRequest
 from infra.checkpoint_admission import IDLE_MIN_DELTA_TOKENS
 from llm.resolution import ExecutionTarget
 
@@ -36,15 +37,15 @@ def _request(trigger: str = "agent") -> CheckpointRequest:
     )
 
 
-def _provider() -> ProviderCheckpointRequest:
+def _provider() -> CheckpointProviderForkRequest:
     target = ExecutionTarget(
         catalog_id="codex/test", harness="codex", provider="openai", backend="api",
         transport_model="test", expected_reported_model=None, context_window=200_000,
         available=True, availability_reason=None, display_name="test",
         supports_reasoning=True, preserve_thinking_default=True,
     )
-    return ProviderCheckpointRequest(
-        checkpoint_id="agent-cp", thread_id=THREAD, target=target,
+    return CheckpointProviderForkRequest(
+        fork_id="agent-cp", thread_id=THREAD, target=target,
         instruction="checkpoint", reasoning_effort=None, working_dir="/tmp",
     )
 
@@ -85,7 +86,7 @@ def _seed() -> None:
 async def test_manual_no_claude_warm_source_builds_same_model_cold(isolated_db, monkeypatch):
     """A switched Claude thread needs no live session or registration to fold."""
     from core import checkpoint_agent_admission
-    from core import checkpoint_render
+    from core import checkpoint_cold_admission, fork_render
     from history import projection
     from infra import db_async
 
@@ -113,10 +114,10 @@ async def test_manual_no_claude_warm_source_builds_same_model_cold(isolated_db, 
         lambda *_args, **_kwargs: context,
     )
     monkeypatch.setattr(
-        checkpoint_render, "capture_warm_checkpoint_source", AsyncMock(return_value=None),
+        fork_render, "capture_warm_fork_source", AsyncMock(return_value=None),
     )
     monkeypatch.setattr(projection, "slice_portable_projection", lambda value, **_kwargs: value)
-    monkeypatch.setattr(checkpoint_render, "build_cold_checkpoint_admission", build_cold)
+    monkeypatch.setattr(checkpoint_cold_admission, "build_checkpoint_admission", build_cold)
 
     request, provider = await checkpoint_agent_admission.prepare_external_checkpoint(
         THREAD, "user-1", trigger="manual",
@@ -131,7 +132,7 @@ async def test_manual_no_claude_warm_source_builds_same_model_cold(isolated_db, 
 @pytest.mark.asyncio
 async def test_manual_checkpoint_stays_warm_when_source_is_available(isolated_db, monkeypatch):
     from core import checkpoint_agent_admission
-    from core import checkpoint_render
+    from core import fork_render
     from infra import db_async
 
     context = _claude_context()
@@ -146,7 +147,7 @@ async def test_manual_checkpoint_stays_warm_when_source_is_available(isolated_db
         lambda *_args, **_kwargs: context,
     )
     monkeypatch.setattr(
-        checkpoint_render, "capture_warm_checkpoint_source", AsyncMock(return_value=warm_source),
+        fork_render, "capture_warm_fork_source", AsyncMock(return_value=warm_source),
     )
     monkeypatch.setattr(
         checkpoint_agent_admission, "_build_manual_cold_admission",
@@ -177,8 +178,8 @@ async def test_manual_cold_too_large_is_a_typed_409(
 
     from api import checkpoints
     from core import checkpoint_agent_admission
-    from core import checkpoint_render
-    from core.checkpoint_fit import ColdFoldInputTooLarge
+    from core import fork_render
+    from core.fork_fit import ColdFoldInputTooLarge
     from infra import db_async, input_admission
     from llm import context_window
 
@@ -198,7 +199,7 @@ async def test_manual_cold_too_large_is_a_typed_409(
         lambda *_args, **_kwargs: context,
     )
     monkeypatch.setattr(
-        checkpoint_render, "capture_warm_checkpoint_source", AsyncMock(return_value=None),
+        fork_render, "capture_warm_fork_source", AsyncMock(return_value=None),
     )
     monkeypatch.setattr(checkpoint_agent_admission, "_build_manual_cold_admission", too_large)
     monkeypatch.setattr(
@@ -225,7 +226,7 @@ async def test_manual_cold_too_large_is_a_typed_409(
 @pytest.mark.asyncio
 async def test_agent_checkpoint_without_warm_source_still_refuses(isolated_db, monkeypatch):
     from core import checkpoint_agent_admission
-    from core import checkpoint_render
+    from core import fork_render
     from infra import db_async
 
     context = _claude_context()
@@ -239,7 +240,7 @@ async def test_agent_checkpoint_without_warm_source_still_refuses(isolated_db, m
         lambda *_args, **_kwargs: context,
     )
     monkeypatch.setattr(
-        checkpoint_render, "capture_warm_checkpoint_source", AsyncMock(return_value=None),
+        fork_render, "capture_warm_fork_source", AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
         checkpoint_agent_admission, "_build_manual_cold_admission",

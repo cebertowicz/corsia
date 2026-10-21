@@ -449,7 +449,7 @@ async def test_reviewed_private_key_read_reaches_effect_and_model_output_is_sani
 
     registry = ToolRegistry()
 
-    async def unredacted(_name, _params):
+    async def unredacted(_name, _params, *, review_request_id=None):
         return result
 
     monkeypatch.setattr(registry, "_execute_unredacted", unredacted)

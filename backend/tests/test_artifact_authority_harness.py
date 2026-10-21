@@ -66,7 +66,7 @@ async def _codex_call(db, tmp_path, arguments: dict) -> str:
     }], turn_id=identity.turn_id, db=db)
     db.commit()
     session = SimpleNamespace(
-        checkpoint_id="checkpoint", checkpoint_tool_result_fits=None,
+        fork_id="checkpoint", fork_tool_result_fits=None,
         tool_registry=build_tool_registry(str(tmp_path)),
         corsia_thread_id="thread-1", corsia_turn_identity=identity,
         declared_tool_step_ids={"call": step}, catalog_model_id=None, model=None,

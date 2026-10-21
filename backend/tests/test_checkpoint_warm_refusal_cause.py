@@ -9,16 +9,18 @@ from unittest.mock import Mock
 import pytest
 from loguru import logger
 
-from core.checkpoint_types import (
-    CHECKPOINT_OUTPUT_TOKENS,
-    CHECKPOINT_TOOL_ROUND_TRIP_TOKENS,
-    ProviderCheckpointResult,
+from core.fork_types import (
+    ProviderForkResult,
     WarmForkUnusable,
+)
+from core.fork_types import (
+    FORK_OUTPUT_TOKENS,
+    FORK_TOOL_ROUND_TRIP_TOKENS,
 )
 from test_checkpoint_warm_fork_unusable import _cold_admission, _warm_request
 
 WINDOW = 262_144
-RESERVE = CHECKPOINT_OUTPUT_TOKENS + CHECKPOINT_TOOL_ROUND_TRIP_TOKENS
+RESERVE = FORK_OUTPUT_TOKENS + FORK_TOOL_ROUND_TRIP_TOKENS
 BARE_TOKENS, REVIEWED_TOKENS = 100, 8_000
 
 
@@ -31,7 +33,7 @@ async def _refusal_lines(monkeypatch, refusal: WarmForkUnusable) -> list[str]:
     async def invoke(request, _cancel):
         if request.warm_source is not None:
             raise refusal
-        return ProviderCheckpointResult("cold body", None)
+        return ProviderForkResult("cold body", None)
 
     monkeypatch.setattr(fallback, "run_in_db", no_db)
     lines: list[str] = []
@@ -55,21 +57,21 @@ async def test_refusal_line_names_the_account_mismatch_not_over_window(monkeypat
         _refuse_warm_source(reason)
 
     assert await _refusal_lines(monkeypatch, caught.value) == [
-        f"checkpoint warm capture refused for thread-1 (native): {reason}\n",
+        f"fork warm capture refused for thread-1 (native): {reason}\n",
     ]
 
 
 @pytest.mark.asyncio
 async def test_refusal_line_defaults_to_over_window_for_the_adapters_own_refusal(monkeypatch):
-    refusal = WarmForkUnusable("Claude checkpoint initial input exceeds selected context window")
+    refusal = WarmForkUnusable("Claude fork initial input exceeds selected context window")
 
     assert await _refusal_lines(monkeypatch, refusal) == [
-        "checkpoint warm capture refused for thread-1 (native): warm_fork_over_window\n",
+        "fork warm capture refused for thread-1 (native): warm_fork_over_window\n",
     ]
 
 
 def _patch_fork(monkeypatch, loaded: int) -> None:
-    from core import checkpoint_cc_cold as cold
+    from core import fork_cc_cold as cold
 
     async def loaded_context(_process, _request, _spawned_at):
         return loaded, WINDOW
@@ -87,14 +89,14 @@ def _reviewed_request():
     return replace(
         request,
         instruction="checkpoint\n\nreview block",
-        instruction_without_review="checkpoint",
+        instruction_candidates=("checkpoint\n\nreview block", "checkpoint"),
     )
 
 
 @pytest.mark.asyncio
 async def test_warm_fork_that_cannot_hold_the_review_block_runs_without_it(monkeypatch):
     """The fork fits its bare instruction: the review must not turn that into a cold fold."""
-    from core.checkpoint_cc_cold import prepare_warm_payload
+    from core.fork_cc_cold import prepare_warm_payload
 
     # Room for the bare instruction and the reserve, but not for the review block.
     _patch_fork(monkeypatch, WINDOW - BARE_TOKENS - RESERVE)
@@ -112,7 +114,7 @@ async def test_warm_fork_that_cannot_hold_the_review_block_runs_without_it(monke
 
 @pytest.mark.asyncio
 async def test_warm_fork_with_room_for_the_review_block_keeps_it(monkeypatch):
-    from core.checkpoint_cc_cold import prepare_warm_payload
+    from core.fork_cc_cold import prepare_warm_payload
 
     _patch_fork(monkeypatch, WINDOW - REVIEWED_TOKENS - RESERVE)
 
@@ -124,7 +126,7 @@ async def test_warm_fork_with_room_for_the_review_block_keeps_it(monkeypatch):
 @pytest.mark.asyncio
 async def test_warm_fork_that_cannot_hold_even_the_bare_instruction_stays_unusable(monkeypatch):
     """The fit check is not loosened: no room for the bare instruction still refuses."""
-    from core.checkpoint_cc_cold import prepare_warm_payload
+    from core.fork_cc_cold import prepare_warm_payload
 
     _patch_fork(monkeypatch, WINDOW - BARE_TOKENS - RESERVE + 1)
 
@@ -146,5 +148,3 @@ async def test_attach_review_remembers_the_instruction_it_extended(monkeypatch):
     reviewed = await placement_review.attach_review(request)
 
     assert reviewed.instruction == "checkpoint\n\nreview block"
-    assert reviewed.instruction_without_review == "checkpoint"
-    assert request.instruction_without_review is None

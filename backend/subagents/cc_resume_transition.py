@@ -183,9 +183,9 @@ async def replace_same_turn_after_checkpoint_locked(
         target=target,
         prepared_context=prepared_context,
     )
-    from core.checkpoint_cc_context import CCCheckpointContext
+    from core.fork_cc_context import CCForkContext
 
-    replacement.session.tool_context = CCCheckpointContext(
+    replacement.session.tool_context = CCForkContext(
         target, prepared_context.fit_ledger.rendered_input_tokens,
     )
     return replacement, frame, identity

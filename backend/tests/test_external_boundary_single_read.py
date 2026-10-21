@@ -25,7 +25,7 @@ COMPLETE = 5_000
 
 
 async def _boundary(monkeypatch, harness, measured, complete_input_tokens):
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import CheckpointWaitScope, ProviderContinuation
     from core.turn_core import TurnIdentity
     from subagents import harness_checkpoint_resume as bridge
@@ -67,7 +67,7 @@ HARNESSES = pytest.mark.parametrize("harness", ("claude-code", "codex"))
 async def test_complete_input_with_measurement_reads_history_once(
     isolated_db, monkeypatch, harness,
 ):
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
 
     _prepare(monkeypatch, harness)
     _settle_next_step(LARGE, 2)

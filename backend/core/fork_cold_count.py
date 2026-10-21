@@ -1,4 +1,4 @@
-"""One owner for counting cold checkpoint input, by the writer's tokenizer.
+"""One owner for counting cold fork input, by the writer's tokenizer.
 
 The cold admission, its send-time capacity check, and every harness fork must
 agree on what "input tokens" means, or an admitted fold overflows or a possible

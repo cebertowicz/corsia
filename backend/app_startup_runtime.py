@@ -193,6 +193,9 @@ async def _start_runtime_services() -> None:
     from core.checkpoint_runtime import reconcile_startup_checkpoints
 
     await reconcile_startup_checkpoints()
+    from core.artifact_review_capture import reconcile_startup_reviews
+
+    await reconcile_startup_reviews()
     from core import placement_worker
 
     placement_worker.poke()

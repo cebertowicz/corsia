@@ -121,9 +121,9 @@ async def test_codex_anchor_id_leaves_provider_request_bytes_unchanged(monkeypat
 
 
 def test_codex_steer_consumption_and_duplicate_usage_do_not_clear_pending_inputs():
-    from core.checkpoint_codex_context import CodexCheckpointContext
+    from core.fork_codex_context import CodexForkContext
 
-    context = CodexCheckpointContext(target(), 100)
+    context = CodexForkContext(target(), 100)
     def receipt(ordinal):
         return {"last": {"inputTokens": 100, "outputTokens": 10},
                 "total": {"inputTokens": ordinal * 100, "outputTokens": ordinal * 10}}

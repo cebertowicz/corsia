@@ -7,7 +7,7 @@ from typing import Any
 
 from loguru import logger
 
-from core.checkpoint_fit import at_checkpoint_launch_point, soft_pressure_remaining
+from core.fork_fit import at_checkpoint_launch_point, soft_pressure_remaining
 from thread.model_projection import (
     _default_model_switch_renderer,
     _live_model_switch_fit,

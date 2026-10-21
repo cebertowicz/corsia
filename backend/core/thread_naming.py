@@ -82,14 +82,14 @@ def _validate_title_payload(raw: object) -> str:
 
 def _resolve_title_target(model: str, thread_id: str | None):
     """Resolve the thread model's exact target, through the thread's resolver, and its harness binary."""
-    from core.checkpoint_render import checkpoint_binary
+    from core.fork_render import fork_binary
     from infra.database import get_db
     from llm.resolution import resolve_thread_target
 
     db = get_db()
     try:
         target = resolve_thread_target(model, thread_id=thread_id, db=db)
-        return target, checkpoint_binary(target, db)
+        return target, fork_binary(target, db)
     finally:
         db.close()
 

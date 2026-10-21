@@ -397,6 +397,11 @@ def test_staged_add_can_be_replaced_then_dropped_before_install(
 
 @pytest.mark.asyncio
 async def test_checkpoint_harness_tools_skip_turn_lineage_and_keep_scope() -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
+    from core.fork_tools import ForkToolBoundary
     from infra.continuity_staging import current_checkpoint_id
     from subagents.harness_tool_bridge import execute_tool
 
@@ -406,15 +411,21 @@ async def test_checkpoint_harness_tools_skip_turn_lineage_and_keep_scope() -> No
 
         async def execute(self, name, arguments):
             assert (name, arguments, current_checkpoint_id()) == (
-                "ordinary_tool", {"value": 1}, "cp-1"
+                "continuity_edit", {"value": 1}, "cp-1"
             )
             return "ordinary result"
 
+    registry = Registry()
+    boundary = ForkToolBoundary(
+        CHECKPOINT_KIND, SimpleNamespace(fork_id="cp-1", thread_id="thread-1"),
+        registry, asyncio.Event(), None,
+    )
     result = await execute_tool(
-        Registry(),
+        registry,
         thread_id="thread-1",
-        checkpoint_id="cp-1",
-        name="ordinary_tool",
+        fork_id="cp-1",
+        fork_policy=boundary,
+        name="continuity_edit",
         arguments={"value": 1},
     )
 
