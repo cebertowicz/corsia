@@ -427,10 +427,10 @@ def test_failed_boot_names_the_reason_that_ended_the_health_wait(isolated_runtim
 
     assert exited["message"] == (
         "The local model stopped while it was starting. Start it again; "
-        "if it stops again, restart this Mac, then start it."
+        "if it stops again, restart this computer, then start it."
     )
-    assert timed_out["message"] == "The local model didn't finish starting within 10 minutes. Start it again."
-    assert short["message"] == "The local model didn't finish starting within 30 seconds. Start it again."
+    assert timed_out["message"] == "Couldn’t start the local model within 10 minutes. Start it again."
+    assert short["message"] == "Couldn’t start the local model within 30 seconds. Start it again."
     for result in (exited, timed_out, short):
         assert "last line" not in result["message"] and "9999" not in result["message"]
     assert "secret-ish last line" in caplog.text

@@ -19,7 +19,7 @@
 	}
 </script>
 <FolderRow {folder} {notice} {changing} onChange={changeFolder} />
-{#if error}<p class="error-text">{error}</p>{/if}
+{#if error}<p class="error-text" role="alert">{error}</p>{/if}
 
 <style>
 	.error-text { margin: var(--space-2) 0 0; }

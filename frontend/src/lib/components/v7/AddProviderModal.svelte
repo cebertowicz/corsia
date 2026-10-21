@@ -171,7 +171,7 @@
 				<input placeholder="(optional — uses the address)" bind:value={endpointName} />
 			</Field>
 		{/if}
-		{#if actionError}<p class="error-text">{actionError}</p>{/if}
+		{#if actionError}<p class="error-text" role="alert">{actionError}</p>{/if}
 
 		<div class="actions">
 			<Button variant="ghost" disabled={busy} onclick={() => mode = 'menu'}>Back</Button>
@@ -196,7 +196,7 @@
 		<Field label="Name">
 			<input placeholder="(optional — uses the address)" bind:value={remoteName} />
 		</Field>
-		{#if actionError}<p class="error-text">{actionError}</p>{/if}
+		{#if actionError}<p class="error-text" role="alert">{actionError}</p>{/if}
 
 		<div class="actions">
 			<Button variant="ghost" disabled={busy} onclick={() => mode = 'menu'}>Back</Button>

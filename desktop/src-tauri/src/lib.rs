@@ -318,11 +318,16 @@ fn running_from_disk_image() -> Result<bool, String> {
     Ok(service_management::is_transient_bundle_path(&executable))
 }
 
-fn run_service_command(action: &str) -> Result<(), String> {
-    // Every registration goes through here, so a copy on a disk image never leaves a service behind it.
-    if action == "register" && running_from_disk_image()? {
+fn service_command_is_allowed(action: &str, from_disk_image: bool) -> Result<(), String> {
+    if action == "register" && from_disk_image {
         return Err("Drag CORSIA into your Applications folder, then open it from there.".into());
     }
+    Ok(())
+}
+
+fn run_service_command(action: &str) -> Result<(), String> {
+    // Every registration goes through here, so a copy on a disk image never leaves a service behind it.
+    service_command_is_allowed(action, action == "register" && running_from_disk_image()?)?;
     let executable = env::current_exe()
         .map_err(|error| format!("could not resolve CORSIA executable: {error}"))?;
     let status = Command::new(executable)
@@ -2610,6 +2615,16 @@ mod tests {
         );
         assert!(setup_account_exists_response("HTTP/1.1 409 Conflict\r\n\r\n{\"code\":\"other\"}").is_err());
         assert!(setup_account_exists_response("HTTP/1.1 500 Server Error\r\n\r\n").is_err());
+    }
+
+    #[test]
+    fn disk_image_refuses_only_service_registration() {
+        assert_eq!(
+            service_command_is_allowed("register", true),
+            Err("Drag CORSIA into your Applications folder, then open it from there.".into())
+        );
+        assert_eq!(service_command_is_allowed("register", false), Ok(()));
+        assert_eq!(service_command_is_allowed("unregister", true), Ok(()));
     }
 
     #[test]

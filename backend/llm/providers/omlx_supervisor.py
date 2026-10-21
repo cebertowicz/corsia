@@ -206,9 +206,9 @@ def _failed_boot_result(
         "ok": False,
         "message": (
             "The local model stopped while it was starting. Start it again; "
-            "if it stops again, restart this Mac, then start it."
+            "if it stops again, restart this computer, then start it."
             if reason == "exited"
-            else f"The local model didn't finish starting within {_duration(timeout_s)}. Start it again."
+            else f"Couldn’t start the local model within {_duration(timeout_s)}. Start it again."
         ),
     }
 

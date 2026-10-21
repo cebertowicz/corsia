@@ -24,7 +24,7 @@
 		<Field variant="chip" layout="stacked" label="Confirm password" labelFor="setup-confirm-password" error={confirmationError}><input id="setup-confirm-password" type="password" autocomplete="new-password" bind:value={confirmation} onblur={onValidateConfirmation} /></Field>
 	</div>
 	<Field variant="chip" layout="stacked" label="Email (optional)" labelFor="setup-email"><input id="setup-email" type="email" autocomplete="email" bind:value={email} /></Field>
-	{#if accountError}<p class="error-text">{accountError}</p>{/if}
+	{#if accountError}<p class="error-text" role="alert">{accountError}</p>{/if}
 </form>
 
 <style>
