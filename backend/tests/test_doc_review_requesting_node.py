@@ -62,13 +62,7 @@ def test_the_turns_live_node_is_stored(review_env):
     assert result["state"] == "forked" and result["requesting_node_id"] == node
 
 
-def test_no_param_uses_the_turns_live_node(review_env):
-    db, aid = review_env
-    node = _task(db, "requester")
-    assert _ask(aid, origin=_current(db, "requester", node))["requesting_node_id"] == node
-
-
-def test_no_param_and_no_live_node_is_null(review_env):
+def test_no_live_node_is_null(review_env):
     db, aid = review_env
     _task(db, "requester")
     assert _ask(aid)["requesting_node_id"] is None

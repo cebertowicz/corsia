@@ -23,8 +23,8 @@ TOOL_DESCRIPTION = (
     "section that changes the reviewer's area: name that section and your question in `note`. "
     "The reviewer reads only that section and leaves its changes as suggestions. `reviewer` "
     "is a thread ID from `agent_roster`; the document's owner cannot be the reviewer. "
-    "The reviewer is given the intent of the task you are on when you request (the task's own, "
-    "or the one it inherits from the task it was handed for); request from that task."
+    "The private review is given the intent of the task you are on when you request (the task's "
+    "own, or the one it inherits from the task it was handed for); request from that task."
 )
 TARGET_REFUSAL = "exactly one of doc_path / artifact_id is required"
 UNREGISTERED_REFUSAL = "doc_path is not registered; register it first or retry with its artifact_id"

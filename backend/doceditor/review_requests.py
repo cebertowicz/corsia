@@ -43,8 +43,8 @@ DEFAULT_REQUEST_ERROR_CODE = "review_request_refused"
 CANCEL_REASON = "Review request cancelled by its requester or document owner."
 IN_REVIEW_REFUSAL = "A review is already in progress. Wait for it to finish, or cancel it and request a new review with your note."
 DIFFERENT_TASK_REFUSAL = (
-    "This reviewer already has an open review of this document for another task, so it would not "
-    "check it against yours. Wait for it to finish, then request again."
+    "This reviewer already has an open review of this document, started from another task or "
+    "none, so your task would not reach the reviewer. Wait for that review to finish, then request again."
 )
 
 
