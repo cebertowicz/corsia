@@ -19,7 +19,7 @@ from llm.network_endpoints import (
     is_cloud_external,
     upsert_endpoint,
 )
-from llm.server_observation import record_reachable, record_unreachable
+from llm.server_observation import record_discovery, record_reachable, record_unreachable
 
 log = logging.getLogger(__name__)
 
@@ -349,9 +349,14 @@ async def _discover_and_notify(server_id: str) -> dict:
                 from llm.catalog import discover_network_models
                 result = await discover_network_models(server_id)
         except Exception as e:
-            log.warning("discover_and_notify(%s) failed: %s", server_id, e)
-            return {"ok": False, "error": str(e)}
-        _notify_models_changed_safe()
+            result = {"ok": False, "error": str(e)}
+            if is_external:
+                log.warning("discover_and_notify(%s) failed: %s", server_id, e)
+            else:
+                record_discovery(server_id, result)
+            return result
+        if is_external or record_discovery(server_id, result):
+            _notify_models_changed_safe()
         if not result.get("ok"):
             return result
         if is_external:
@@ -379,16 +384,6 @@ async def _discover_and_notify(server_id: str) -> dict:
 async def discover_and_notify(server_id: str) -> dict:
     """Public single-server discovery entry point, returning its core receipt."""
     return await _discover_and_notify(server_id)
-
-
-async def refresh_online_servers() -> list[str]:
-    """Discover all online servers, managed and external; return their refreshed ids."""
-    refreshed: list[str] = []
-    for server in await run_in_db(get_servers):
-        if server.get("status") == "online":
-            await _discover_and_notify(server["id"])
-            refreshed.append(server["id"])
-    return refreshed
 
 
 def _notify_models_changed_safe() -> None:
