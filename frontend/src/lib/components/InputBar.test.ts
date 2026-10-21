@@ -932,6 +932,68 @@ describe('InputBar model readiness at the action seam', () => {
 		expect(send.classList.contains('queue-armed')).toBe(false);
 	});
 
+	it('clears an armed hold when the window blurs or the page hides, with nothing sent', async () => {
+		// The queue glyph must never outlive the gesture: leaving the page
+		// mid-hold ends it, and no pointerup may ever arrive.
+		activeThreadId.set('thread-1');
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		await component.setText('hold this');
+		const send = host.querySelector<HTMLButtonElement>('.send-btn')!;
+		const hide = () => {
+			Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+			document.dispatchEvent(new Event('visibilitychange'));
+		};
+		const ends = [() => window.dispatchEvent(new Event('blur')), hide];
+
+		vi.useFakeTimers();
+		for (const end of ends) {
+			send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+			vi.advanceTimersByTime(ARM_MS);
+			flushSync();
+			expect(send.classList.contains('queue-armed')).toBe(true);
+			end();
+			flushSync();
+			expect(send.classList.contains('queue-armed')).toBe(false);
+			expect(send.classList.contains('queue-holding')).toBe(false);
+		}
+		Reflect.deleteProperty(document, 'visibilityState');
+		vi.useRealTimers();
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+	});
+
+	it('treats lost pointer capture like pointercancel and queues once', async () => {
+		// Capture lost is the platform taking the touch: past the arm delay the
+		// gesture is made, as for pointercancel; before it, nothing is sent. The
+		// lostpointercapture that follows a pointercancel or pointerup is a no-op.
+		activeThreadId.set('thread-1');
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		await component.setText('hold this');
+		const send = host.querySelector<HTMLButtonElement>('.send-btn')!;
+		const lose = () => send.dispatchEvent(new PointerEvent('lostpointercapture', { bubbles: true }));
+
+		vi.useFakeTimers();
+		send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+		vi.advanceTimersByTime(ARM_MS - 100);
+		lose();
+		flushSync();
+		expect(send.classList.contains('queue-holding')).toBe(false);
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+
+		send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+		vi.advanceTimersByTime(ARM_MS);
+		send.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true }));
+		lose();
+		flushSync();
+		vi.useRealTimers();
+		expect(send.classList.contains('queue-armed')).toBe(false);
+		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
+		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
+			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn',
+		);
+	});
+
 	it('still queues when iOS takes the touch away after the hold has landed', async () => {
 		// USER-REPORTS #1 root cause: Safari claims a long-press and fires
 		// `pointercancel`, which disarmed the hold — so a deliberate queue was
