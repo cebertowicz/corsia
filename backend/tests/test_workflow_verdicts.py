@@ -17,7 +17,7 @@ from core.workflow_verdict_rules import (
     decide_arms, freeze_plan,
 )
 from core.workflow_verdicts import (
-    BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, MIXED, CorrectionFact, KpiRow, PlannedMeasure, Run, measure_call,
+    BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, MIXED, CorrectionFact, KpiRow, MeasureCall, PlannedMeasure, Run, measure_call,
     parse_ts,
 )
 from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
@@ -372,20 +372,35 @@ def test_rule_3_cost_worse_with_no_gain_reverts() -> None:
     assert (result.word, result.reason, result.inputs["cost_worse"]) == ("revert", "cost_worse_no_gain", [COST])
 
 
-@pytest.mark.parametrize(("cost", "cheaper"), [(0.5, True), (1.0, False)])
-def test_rule_3_no_worse_keeps_and_says_when_cheaper(cost, cheaper) -> None:
+@pytest.mark.parametrize(("cost", "expected", "cheaper"), [
+    (0.5, ("keep", "no_worse"), True),
+    (1.0, ("revert", "no_gain_not_cheaper"), False),
+])
+def test_rule_3_no_worse_keeps_only_when_cheaper(cost, expected, cheaper) -> None:
     result = verdict(history(_priced("v1", 1, 1.0, started=40, ended=30), _priced("v2", 1, cost)))
-    assert (result.word, result.reason, result.inputs["cheaper"]) == ("keep", "no_worse", cheaper)
+    assert (result.word, result.reason) == expected
+    assert (result.inputs.get("cheaper") is True) is cheaper
 
 
-def test_rule_4_unclear_at_40_continues_once_to_80_then_keeps() -> None:
+def test_rule_3_unclear_spend_with_no_quality_gain_reverts() -> None:
+    from core.workflow_verdict_rules import _rule
+
+    result = _rule([
+        MeasureCall(CORRECTIONS, "quality", "no_worse", difference=0.0, interval=(-0.01, 0.01), margin=0.02),
+        MeasureCall(COST, "spend", "unclear"),
+    ], (), 1)
+
+    assert result is not None and (result.word, result.reason) == ("revert", "no_gain_not_cheaper")
+
+
+def test_rule_4_unclear_at_40_continues_once_to_80_then_reverts() -> None:
     old = runs("v1", 1, count=80, started=60, ended=30)
     first = verdict(history(old, runs("v2", NOISY, count=20)))
     assert (first.word, first.reason, first.look) == ("collecting", "wait_for_look_2", 1)
     second = verdict(history(old, runs("v2", NOISY, count=40)))
     assert (second.word, second.reason, second.look) == ("collecting", "wait_for_look_3", 2)
     final = verdict(history(old, runs("v2", NOISY, count=80)))
-    assert (final.word, final.reason, final.look) == ("keep", "no_clear_difference", 3)
+    assert (final.word, final.reason, final.look) == ("revert", "unclear_after_look_3", 3)
 
 
 def test_generic_two_arm_rule_does_not_depend_on_workflow_version_names() -> None:

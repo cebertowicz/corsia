@@ -262,7 +262,7 @@ def _near_zero(call: MeasureCall) -> bool:
 
 
 def _rule(calls: Sequence[MeasureCall], measures: Sequence[PlannedMeasure], look: int) -> Verdict | None:
-    """Rules 1 to 4 at a look; a final unclear guard retains the current arm."""
+    """Apply the keep-only-for-improvement-or-cheaper rule at one look."""
     quality = [c for c in calls if c.role == "quality" and c.call not in BLOCKED]
     spend = [c for c in calls if c.role == "spend"]
     worse = [c.name for c in quality if c.call == "worse"]
@@ -278,14 +278,16 @@ def _rule(calls: Sequence[MeasureCall], measures: Sequence[PlannedMeasure], look
         if costly:
             return Verdict("revert", "cost_worse_no_gain", look, tuple(calls), {"cost_worse": costly})
         cheaper = any(c.call == "better" for c in spend)
-        if cheaper and not all(_near_zero(c) for c in quality):
+        if not cheaper:
+            return Verdict("revert", "no_gain_not_cheaper", look, tuple(calls))
+        if not all(_near_zero(c) for c in quality):
             return Verdict("revert", "cheaper_not_near_zero", look, tuple(calls))
-        return Verdict("keep", "no_worse", look, tuple(calls), {"cheaper": cheaper})
+        return Verdict("keep", "no_worse", look, tuple(calls), {"cheaper": True})
     guarded = sorted({c.name for c in quality if c.name in guards and c.call == "unclear"})
     if look == 3:
         if guarded:
             return Verdict("revert", "guard_unclear", look, tuple(calls), {"guards": guarded})
-        return Verdict("keep", "no_clear_difference", look, tuple(calls))
+        return Verdict("revert", "unclear_after_look_3", look, tuple(calls))
     return None
 
 
