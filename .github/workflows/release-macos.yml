@@ -60,15 +60,16 @@ jobs:
               should_build=true
               ;;
             dev)
-              [ "$GITHUB_REF" = "refs/heads/dev" ] || {
-                echo "dev channel builds must be dispatched from refs/heads/dev" >&2
+              # Integration test build: numbered one past dev's count so the next build from dev updates it.
+              [ "$GITHUB_REF" = "refs/heads/integration/v0.4.1-test-build-2" ] || {
+                echo "this branch builds only from refs/heads/integration/v0.4.1-test-build-2" >&2
                 exit 1
               }
               commit_sha="$(git rev-parse HEAD)"
               latest_tag="$(GH_TOKEN="${{ github.token }}" gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
               desktop/scripts/test-validate-next-release-version.sh
               desktop/scripts/validate-next-release-version.sh "$NEXT_RELEASE_VERSION" "$latest_tag"
-              dev_count="$(git rev-list --count "$commit_sha")"
+              dev_count="$(( $(git rev-list --count origin/dev) + 1 ))"
               version="$NEXT_RELEASE_VERSION-dev.$dev_count"
               [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]] || {
                 echo "computed dev version is invalid: $version" >&2
@@ -141,7 +142,7 @@ jobs:
           # The marketing version is the release tag without v. Previews use
           # 0.x.y-dev.N but macOS requires an integer-only build sequence.
           macos_short_version="${release_version%%-dev.*}"
-          macos_bundle_version="1.0.$(git rev-list --count HEAD)"
+          macos_bundle_version="1.0.${release_version##*-dev.}"
           [[ "$macos_short_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid macOS short version: $macos_short_version" >&2; exit 1; }
           [[ "$macos_bundle_version" =~ ^1\.0\.[0-9]+$ ]] || { echo "invalid macOS bundle version: $macos_bundle_version" >&2; exit 1; }
           CORSIA_APP_VERSION="$release_version" CORSIA_MACOS_SHORT_VERSION="$macos_short_version" CORSIA_MACOS_BUNDLE_VERSION="$macos_bundle_version" desktop/scripts/build-macos-bundle.sh --skip-dmg
