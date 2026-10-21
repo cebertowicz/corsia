@@ -46,7 +46,7 @@ def _owner_user_id(db, thread_id: str) -> str | None:
 
 def _drain_committed_facts(
     db, workspace: Path, paths: Sequence[Path], commit: str,
-    *, adapter_factory: Callable[..., TraceAdapter] = LocalTraceAdapter,
+    *, adapter_factory: Callable[..., TraceAdapter] | None = None,
 ) -> None:
     """Advance committed target edits through the owned local adapter."""
     facts = _matching_facts(db, workspace, paths, commit)
@@ -56,7 +56,7 @@ def _drain_committed_facts(
             record_pending(db, fact)
             continue
         scope = _fresh_scope(db, workspace, fact.target_path)
-        adapter = LocalTraceAdapter(user_id, scope) if adapter_factory is LocalTraceAdapter else adapter_factory(user_id)
+        adapter = LocalTraceAdapter(user_id, scope) if adapter_factory is None else adapter_factory(user_id)
         drain_facts(db, workspace, [fact], adapter)
 
 

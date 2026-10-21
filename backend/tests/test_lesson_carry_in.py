@@ -418,7 +418,7 @@ def test_drain_settles_a_pending_case_with_a_mocked_local_adapter(tmp_path: Path
 
 
 def test_ready_free_save_starts_the_admitted_drain_without_another_trigger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    from core.lesson_carry_in import _drain_committed_facts
+    from core.lesson_carry_in import record_committed_save
     from core.lesson_files import render_trial
     from core.lesson_trials import Trial
 
@@ -439,12 +439,32 @@ def test_ready_free_save_starts_the_admitted_drain_without_another_trigger(tmp_p
     passed = [_call("read_file", {"path": "context/rule.md"}), _call("plan_update", {"operation": "mark_done"})]
     users: list[str] = []
 
-    def adapter_factory(user_id: str) -> Adapter:
-        users.append(user_id)
-        return Adapter([passed, passed, passed])
+    class ReadyAdapter(Adapter):
+        def __init__(self, user_id: str, *_args):
+            users.append(user_id)
+            super().__init__([passed, passed, passed])
+
+    class ImmediateThread:
+        def __init__(self, *, target, args, **_kwargs):
+            self.target = target
+            self.args = args
+
+        def start(self):
+            self.target(*self.args)
+
+    class NoCloseDb:
+        def __getattr__(self, name):
+            return getattr(db, name)
+
+        def close(self):
+            pass
 
     monkeypatch.setattr("core.lesson_carry_in._target_snapshot", lambda *_args: ("target-hash", None))
-    _drain_committed_facts(db, workspace, [target], "a" * 40, adapter_factory=adapter_factory)
+    monkeypatch.setattr("core.lesson_carry_in_drain.LocalTraceAdapter", ReadyAdapter)
+    monkeypatch.setattr("core.lesson_carry_in_drain._fresh_scope", lambda *_args: None)
+    monkeypatch.setattr("core.lesson_carry_in_drain.threading.Thread", ImmediateThread)
+    monkeypatch.setattr("infra.database.get_db", lambda: NoCloseDb())
+    record_committed_save(workspace, [target], "a" * 40)
 
     assert users == ["user"]
     assert db.execute("SELECT event_name FROM outcome_events WHERE event_name='learning_loop.carry_in_result'").fetchone()
@@ -473,13 +493,16 @@ def test_committed_save_returns_before_its_background_drain_runs(monkeypatch: py
 
 
 def test_busy_save_stays_pending_until_the_existing_pending_drain_trigger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    from core.lesson_carry_in import CarryInFact, drain_facts, is_pending, record_pending
+    from core.lesson_carry_in import CarryInFact, is_pending, record_committed_save
     from core.lesson_carry_in_drain import _drain_pending
     from core.lesson_files import render_trial
     from core.lesson_trials import Trial
 
     workspace = tmp_path / "workspace"
-    source = workspace / "case.md"
+    target = workspace / "context" / "rule.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("rule\n")
+    source = workspace / ".threads" / "owner" / "skills" / "lesson" / "SKILL.md"
     source.parent.mkdir(parents=True)
     source.write_text(render_trial(
         lesson_id="12345678-1234-5678-1234-567812345678", owner="owner", name="lesson",
@@ -488,18 +511,21 @@ def test_busy_save_stays_pending_until_the_existing_pending_drain_trigger(tmp_pa
         target_file="context/rule.md", case={"what_happened": "Missed.", "right_call": "Read.",
         "does_not_apply": "Draft.", "correction_subject": "message:1", "actions": ACTIONS},
     ))
-    fact = CarryInFact("12345678-1234-5678-1234-567812345678", "owner", "a" * 40, "context/rule.md", "case.md#corsia.lesson.case")
+    fact = CarryInFact("12345678-1234-5678-1234-567812345678", "owner", "a" * 40, "context/rule.md", ".threads/owner/skills/lesson/SKILL.md#corsia.lesson.case")
     db = _event_db()
     passed = [_call("read_file", {"path": "context/rule.md"}), _call("plan_update", {"operation": "mark_done"})]
 
-    monkeypatch.setattr("core.lesson_carry_in._target_snapshot", lambda *_args: ("target-hash", None))
-    assert record_pending(db, fact)
-    assert [run.state for run in drain_facts(db, workspace, [fact], Adapter([], is_ready=False))] == ["pending"]
-    assert is_pending(db, fact)
-
-    class ReadyAdapter(Adapter):
+    class BusyAdapter(Adapter):
         def __init__(self, *_args):
-            super().__init__([passed, passed, passed])
+            super().__init__([], is_ready=False)
+
+    class ImmediateThread:
+        def __init__(self, *, target, args, **_kwargs):
+            self.target = target
+            self.args = args
+
+        def start(self):
+            self.target(*self.args)
 
     class NoCloseDb:
         def __getattr__(self, name):
@@ -507,6 +533,18 @@ def test_busy_save_stays_pending_until_the_existing_pending_drain_trigger(tmp_pa
 
         def close(self):
             pass
+
+    monkeypatch.setattr("core.lesson_carry_in._target_snapshot", lambda *_args: ("target-hash", None))
+    monkeypatch.setattr("core.lesson_carry_in_drain.LocalTraceAdapter", BusyAdapter)
+    monkeypatch.setattr("core.lesson_carry_in_drain._fresh_scope", lambda *_args: None)
+    monkeypatch.setattr("core.lesson_carry_in_drain.threading.Thread", ImmediateThread)
+    monkeypatch.setattr("infra.database.get_db", lambda: NoCloseDb())
+    record_committed_save(workspace, [target], "a" * 40)
+    assert is_pending(db, fact)
+
+    class ReadyAdapter(Adapter):
+        def __init__(self, *_args):
+            super().__init__([passed, passed, passed])
 
     monkeypatch.setattr("core.lesson_carry_in_drain._pending_facts", lambda _db: [fact])
     monkeypatch.setattr("core.lesson_carry_in_drain.LocalTraceAdapter", ReadyAdapter)
