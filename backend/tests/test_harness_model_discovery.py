@@ -201,6 +201,47 @@ def test_claude_normalization_uses_exact_selector_and_hides_mutable_default():
     }
 
 
+def test_claude_normalization_marks_listed_default_over_alias():
+    from connections.claude_unlisted import ALIAS_KEY
+    from connections.harness_models import normalize_claude_models
+
+    rows = normalize_claude_models(
+        {
+            "models": [
+                {"value": "default", "resolvedModel": "claude-fable-5"},
+                {
+                    "value": "claude-fable-5-legacy",
+                    "resolvedModel": "claude-fable-5",
+                    ALIAS_KEY: "claude-fable-5",
+                },
+                {
+                    "value": "claude-fable-5",
+                    "resolvedModel": "claude-fable-5",
+                },
+            ]
+        },
+        harness_version="2.1.206",
+        timestamp="2026-07-11T00:00:00+00:00",
+    )
+
+    assert [row["selector_id"] for row in rows] == [
+        "claude-fable-5-legacy", "claude-fable-5"
+    ]
+    assert [row["is_default"] for row in rows] == [False, True]
+
+
+def test_claude_normalization_without_vendor_default_marks_no_row():
+    from connections.harness_models import normalize_claude_models
+
+    rows = normalize_claude_models(
+        {"models": [{"value": "claude-fable-5", "resolvedModel": "claude-fable-5"}]},
+        harness_version="2.1.206",
+        timestamp="2026-07-11T00:00:00+00:00",
+    )
+
+    assert [row["is_default"] for row in rows] == [False]
+
+
 def test_codex_normalization_preserves_protocol_identity_and_capabilities():
     from connections.harness_models import normalize_codex_models
 

@@ -19,10 +19,10 @@
       "sha256": "9152041eda76f984f0cf25d753d7abd5ef7e106988fe7e004f7d6244a2480935"
     },
     {
-      "bytes": 3059,
+      "bytes": 3039,
       "kind": "context",
       "path": "context/40-HUMAN-AGENT-INTERFACE.md",
-      "sha256": "3a5f8f31889f9deea2b8bb4ccdf2209ea228d5f0ed46fe97a58380aaad8afced"
+      "sha256": "221d609a98fa2e2b11a8befad0d7b4d6f73fc6c83d777ea595715349c6439208"
     },
     {
       "bytes": 862,
@@ -64,10 +64,10 @@
       "sha256": "33a8d6359786e2644ed7749f7aeac428ebe9e4eed8196de80ecccad8eba98f94"
     },
     {
-      "bytes": 728,
+      "bytes": 729,
       "kind": "coordination-model",
       "path": "coordination-models/INDEX.md",
-      "sha256": "c57f28b2ba0e95826eb56a94ff678daf673f38b5b2c2767a6d275c7a803de6e5"
+      "sha256": "35165771157fb085aa539a1dc78f78bb88a7c6957f05dbe5df25c1ca5ef4598d"
     },
     {
       "bytes": 807,
@@ -76,10 +76,10 @@
       "sha256": "9df2a5a0dde7b703026ee62c360aa0ff5b40225008ddfed546061ac26fff1b07"
     },
     {
-      "bytes": 9176,
+      "bytes": 9012,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/context/COORDINATION-CORE.md",
-      "sha256": "a3dca4e0d0f1095d552c6f87f36a52aa539abc26430f22535eb296b4f2c105c9"
+      "sha256": "28f0fa4fb738d19025e9d1453fb34be33bdbdba39d9f3f7dee2a61438f202890"
     },
     {
       "bytes": 740,
@@ -100,6 +100,12 @@
       "sha256": "11c3dfc5f0945fb5ceb9af78ed8751e3c96adcf6f4b28d3e41d0feac66c5d0bf"
     },
     {
+      "bytes": 4534,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/context/SPAWN-POLICY.md",
+      "sha256": "9121f7c87f5ae8e4922a6bd99d2eb505a4f97a624f214dc4b342cfed2f0be192"
+    },
+    {
       "bytes": 730,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/context/roles/agent/05-waiting-is-work.md",
@@ -112,10 +118,22 @@
       "sha256": "3bff6d1f27574b6082e14c4cbee914e1e937b8b6fcc9a19f742a03506a01265f"
     },
     {
-      "bytes": 6115,
+      "bytes": 5721,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/manifest.yaml",
-      "sha256": "8e052af8aaf95dd992993647f757a9779c70066ec465c86d98a8f72145d456a8"
+      "sha256": "cd08dc6eb35db976ea2f3916ebd45b113f9b7f6abdeea371fd15f3f941124edc"
+    },
+    {
+      "bytes": 3492,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/standards/RESPONSIBILITY-STANDARD.md",
+      "sha256": "1afe075f552a1ab4a3930e73308cdf7d5e4654aa416bba91495136225a27f06e"
+    },
+    {
+      "bytes": 4580,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/templates/RESPONSIBILITY.md",
+      "sha256": "1ca79f669304f24f60c13235a91b8d9c7edf0f35d125b9f4f21117d012fafc6f"
     },
     {
       "bytes": 3541,
@@ -166,16 +184,16 @@
       "sha256": "e7dab36e3d55d8b9eb8c06ac3bb155057e87906567c199c9c800a82e48009939"
     },
     {
-      "bytes": 12131,
+      "bytes": 14568,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "30f47f7348f1b46cbf7342a380b13c824c179124e16f953a277e18067ce90326"
+      "sha256": "b01856b8484baf989388bb2c5a6e5bf811969576a3201212a5bcda446c65aeac"
     },
     {
-      "bytes": 17594,
+      "bytes": 17410,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run.md",
-      "sha256": "7d5e7448f89867b1b8a51aae0a142e88e8f1f3cec63679f0254783ac9f8ecf3e"
+      "sha256": "2c0dfc8002d61de0f441618dcec737e6648657d8cbcefdb4def2ef48b21b70aa"
     },
     {
       "bytes": 642,
@@ -184,16 +202,10 @@
       "sha256": "a743fa588e4c5dacd441061c6f65c3e1ec3eddbd2f659a3dfa5f2dea470d375f"
     },
     {
-      "bytes": 3775,
+      "bytes": 4312,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/local-model-offer.md",
-      "sha256": "cfb14d9355aacbf0da15522c15f06f524037da6092db7ce9daa568cc76e29e47"
-    },
-    {
-      "bytes": 694,
-      "kind": "skill",
-      "path": "skills/conductor-bootstrap/references/omlx-setting.md",
-      "sha256": "30c746accd265006079ab9f1194a4c47b37569db8c6fa9b776c51182a9f7e304"
+      "sha256": "52fd642e62e8aaee0bbfa652f01ebbe130b35cf65fcb25fb7611d6a7ebff50a5"
     },
     {
       "bytes": 5753,
@@ -214,10 +226,10 @@
       "sha256": "586b814c75cde6491212911ba8c4af4c9131e726585fb2e587a639e000c3a566"
     },
     {
-      "bytes": 5114,
+      "bytes": 5174,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/web-search.md",
-      "sha256": "8c11d102b6b8ca00a143efb88c67eba152d1f68754b980a2bccee34b1f16bb43"
+      "sha256": "d47dff72abeba9631215f76969db69855bccaa48f2fd95abb62d95f550478042"
     },
     {
       "bytes": 3767,
@@ -280,10 +292,10 @@
       "sha256": "eb4d36a083dfcd4a8c10d9f54d1e96f2216ca51d43e25229a7220a183cede3b3"
     },
     {
-      "bytes": 4822,
+      "bytes": 5173,
       "kind": "skill",
       "path": "skills/google-setup/SKILL.md",
-      "sha256": "41cf5c0c74c6aa38896f7ef2bd35dbff34d2191d06ae5f5db538c88764a6a611"
+      "sha256": "2161c85e00f9d2bc4dd732323a166f548e797cb50d252ffc1e5c718061302f17"
     },
     {
       "bytes": 9080,

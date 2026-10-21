@@ -79,7 +79,7 @@ def fresh_local_setup(monkeypatch):
     local_setup_operation.clear()
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
     monkeypatch.setattr(local_setup, "_emit", lambda action, **properties: None)
-    monkeypatch.setattr(local_setup, "existing_install_is_foreign", lambda: False)
+    # The fixture uses a private managed oMLX flight.
     yield
     local_setup_operation.clear()
 
@@ -88,22 +88,24 @@ def mac_with(monkeypatch, gib: float, answers=()) -> SimpleNamespace:
     """A Mac with ``gib`` of memory whose managed oMLX answers from the recording."""
     import infra.state.ws
     import llm.catalog_network_models
-    import llm.local_setup_new_omlx
+    import llm.local_setup_flow
 
-    mac = SimpleNamespace(omlx=FakeOmlx(int(gib), answers), started=[], health=[], downloads=[], commands=[])
+    mac = SimpleNamespace(omlx=FakeOmlx(int(gib), answers), started=[], health=[], downloads=[], stopped=[])
 
     async def start(report):
         mac.started.append(True)
         return "srv", 5200
 
-    async def answers_now(_port):
-        return False
 
-    async def healthy(port):
+    async def health(port):
         mac.health.append(port)
 
     async def download(server_id, report, model):
         mac.downloads.append(model)
+
+    async def stop(config):
+        mac.stopped.append(config["server_id"])
+        return {"ok": True}
 
     async def discover(_server_id):
         return {"ok": True}
@@ -112,12 +114,12 @@ def mac_with(monkeypatch, gib: float, answers=()) -> SimpleNamespace:
     from llm.local_setup_gates import host_ram_bytes
     host_ram_bytes.cache_clear()
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", mac.omlx.admin_request)
-    monkeypatch.setattr(llm.local_setup_new_omlx, "start_managed_omlx", start)
-    monkeypatch.setattr(local_setup, "own_omlx_port", lambda: 5200)
-    monkeypatch.setattr(local_setup, "_omlx_answers", answers_now)
-    monkeypatch.setattr(local_setup, "_wait_for_health", healthy)
-    monkeypatch.setattr(local_setup, "_run", lambda command: mac.commands.append(command))
+    monkeypatch.setattr(llm.local_setup_flow, "start_managed_omlx", start)
+    monkeypatch.setattr("llm.local_setup_prepare.start_managed_omlx", start)
+    # start_managed_omlx owns the managed process lifecycle and supplies its port above.
     monkeypatch.setattr(local_setup, "_download", download)
+    monkeypatch.setattr("llm.local_setup_runtime.wait_for_health", health)
+    monkeypatch.setattr("llm.providers.omlx_supervisor.stop_server", stop)
     monkeypatch.setattr(llm.catalog_network_models, "discover_network_models", discover)
     monkeypatch.setattr(infra.state.ws, "notify_models_changed", lambda: None)
     return mac

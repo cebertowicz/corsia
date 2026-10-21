@@ -82,7 +82,7 @@ describe('the picker\'s Local group', () => {
 	});
 
 	it('uses the shared status-less Local fallback header while the starter model downloads', async () => {
-		omlx = { setup_stage: 'downloading', download_percent: 40 };
+		omlx = { local_state: 'downloading', download_percent: 40 };
 		await render();
 		const fallback = host.querySelector('section[aria-label="Local"]')!;
 		expect(fallback.querySelector('.model-group-bar')?.getAttribute('data-variant')).toBe('fallback');
@@ -93,14 +93,14 @@ describe('the picker\'s Local group', () => {
 	});
 
 	it('says only Downloading before a percent is known', async () => {
-		omlx = { setup_stage: 'downloading', download_percent: null };
+		omlx = { local_state: 'downloading', download_percent: null };
 		await render();
 		expect(host.textContent).toContain('Downloading');
 		expect(host.textContent).not.toContain('%');
 	});
 
 	it('keeps the fallback Local header plain when setup fails', async () => {
-		omlx = { setup_error: 'disk full', setup_kind: 'setup' };
+		omlx = { local_state: 'failed', setup_kind: 'setup' };
 		await render();
 		const fallback = host.querySelector('section[aria-label="Local"]')!;
 		expect(fallback.querySelector('.model-group-bar')?.textContent?.trim()).toBe('Local');
@@ -109,7 +109,7 @@ describe('the picker\'s Local group', () => {
 	});
 
 	it('retries a failed setup through the setup route', async () => {
-		omlx = { setup_error: 'disk full', setup_kind: 'setup' };
+		omlx = { local_state: 'failed', setup_kind: 'setup' };
 		await render();
 		button('Try again')!.click();
 		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/setup'));
@@ -117,7 +117,7 @@ describe('the picker\'s Local group', () => {
 	});
 
 	it('retries a failed starter download through the starter route, never the setup route', async () => {
-		omlx = { setup_error: 'network down', setup_kind: 'starter' };
+		omlx = { local_state: 'failed', setup_kind: 'starter' };
 		await render();
 		button('Try again')!.click();
 		await vi.waitFor(() => expect(calls).toContain('POST /api/providers/local/starter'));
@@ -142,27 +142,27 @@ describe('the picker\'s Local group', () => {
 		expect(calls).not.toContain('POST /api/providers/local/starter');
 	});
 
-	it('offers informed consent in the picker and retries setup with it', async () => {
-		omlx = { setup_error: 'disk full', setup_kind: 'setup' };
+	it('offers to keep another oMLX running and retries setup with that choice', async () => {
+		omlx = { local_state: 'failed', setup_kind: 'setup' };
 		await render();
 		setupResponses = ['consent', 'ok'];
 		button('Try again')!.click();
-		await vi.waitFor(() => expect(setupBodies).toEqual([{ consent_existing: false }]));
+		await vi.waitFor(() => expect(setupBodies).toEqual([{ other_omlx: null }]));
 		expect(setupResponses).toEqual(['ok']);
 		await vi.waitFor(() => expect(get(toasts)).toHaveLength(1));
-		expect(setupBodies).toEqual([{ consent_existing: false }]);
-		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe('CORSIA can read the existing oMLX version, settings, and local server to adopt it without changing its settings.'));
+		expect(setupBodies).toEqual([{ other_omlx: null }]);
+		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe('Another oMLX is running. Keep it running to set up the local model.'));
 		const consent = get(toasts)[0]!;
-		expect(consent.action?.label).toBe('Use existing oMLX');
+		expect(consent.action?.label).toBe('Keep running');
 
 		await toasts.runAction(consent.id);
 
-		expect(setupBodies).toEqual([{ consent_existing: false }, { consent_existing: true }]);
+		expect(setupBodies).toEqual([{ other_omlx: null }, { other_omlx: 'keep' }]);
 		expect(calls.filter((call) => call === 'GET /api/providers/sources')).toHaveLength(3);
 	});
 
-	it('shows a setup failure if the picker consent action cannot complete', async () => {
-		omlx = { setup_error: 'disk full', setup_kind: 'setup' };
+	it('shows a setup failure if the picker choice cannot complete', async () => {
+		omlx = { local_state: 'failed', setup_kind: 'setup' };
 		await render();
 		setupResponses = ['consent', 'failure'];
 		button('Try again')!.click();
@@ -172,7 +172,7 @@ describe('the picker\'s Local group', () => {
 	});
 
 	it('shows a failure with no setup_kind without Try again', async () => {
-		omlx = { setup_error: 'unknown' };
+		omlx = { local_state: 'failed' };
 		await render();
 		expect(host.textContent).toContain('Setup failed');
 		expect(button('Try again')).toBeUndefined();
@@ -180,7 +180,7 @@ describe('the picker\'s Local group', () => {
 
 	it('puts the line inside the existing Local group when it already lists models', async () => {
 		models.set([claude, localModel]);
-		omlx = { setup_stage: 'downloading', download_percent: 10 };
+		omlx = { local_state: 'downloading', download_percent: 10 };
 		await render();
 		expect(host.querySelector('section[aria-label="Local"]')).toBeNull();
 		expect(host.querySelector('section[aria-label="oMLX"]')?.textContent).toContain('Downloading 10%');

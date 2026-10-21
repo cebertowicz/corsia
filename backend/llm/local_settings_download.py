@@ -10,35 +10,29 @@ import asyncio
 import logging
 from typing import Callable
 
-from api.network_daemon_models import notify_cached_model_loaded
+from llm.network_discovery import notify_cached_model_loaded
 from llm import local_downloads
 from llm.local_model import LocalModel
 from llm.local_setup_download import StillDownloading
+from llm.local_setup_runtime import start_managed_omlx
 
 log = logging.getLogger(__name__)
 
 
-async def _managed_download(report: Callable[[str], None], model: LocalModel) -> tuple[str, bool]:
-    """Download to the appropriate oMLX and report whether CORSIA may configure it."""
+async def _download_to_local_server(report: Callable[[str], None], model: LocalModel) -> str:
+    """Download through this install's connected local server, else its managed one."""
     from llm import local_setup as ls
-    from llm.local_setup_new_omlx import start_managed_omlx
-    from llm.local_setup_existing import download_into_own_omlx
-    from llm.local_setup_ownership import existing_install_is_foreign
-    from llm import own_omlx_management
+    from llm.local_sources import local_server_for_install
 
-    if await asyncio.to_thread(existing_install_is_foreign):
-        result = await download_into_own_omlx(report, [], model)
-        return str(result["server_id"]), await asyncio.to_thread(own_omlx_management.active)
-    server_id, _port = await start_managed_omlx(report)
+    resolved = await local_server_for_install(report, start_managed=start_managed_omlx)
+    assert resolved is not None
+    server_id, _port, _existing = resolved
     await ls._download(server_id, report, model)
-    return server_id, True
+    return server_id
 
 
-async def _auto_load(server_id: str, model: LocalModel, *, allowed: bool) -> None:
-    """Load only a downloaded CORSIA-managed model that the existing memory gate permits."""
-    if not allowed:
-        log.warning("Skipping automatic local-model load: CORSIA does not manage this oMLX")
-        return
+async def _auto_load(server_id: str, model: LocalModel) -> None:
+    """Load a downloaded local model when the existing memory gate permits."""
     from llm.providers.omlx_endpoints import OmlxAdminError, admin_request
 
     try:
@@ -95,11 +89,9 @@ async def _run_flight(model: LocalModel) -> dict:
     events: list[str] = []
 
     def report(value: str) -> None:
-        ls._flight.stage = value
-        ls._notify_models_changed()
+        ls.report_stage(value)
         events.append(value)
 
-    ls._flight.following = False
     try:
         result = await run(report, model)
     except asyncio.CancelledError:
@@ -118,53 +110,12 @@ async def _run_flight(model: LocalModel) -> dict:
         local_downloads.write(local_downloads.Download(
             model, status="failed", detail=str(result.get("detail") or result.get("message") or ""),
         ))
-    return ls.local_setup_operation.finish(ls._flight, result)
+    return ls.finish_flight(result)
 
-
-async def begin(model: LocalModel) -> dict:
-    """Start the single Settings flight, or report the already-owned operation."""
-    from llm import local_setup as ls
-    from llm import local_setup_operation
-
-    if ls._running():
-        return ls._in_progress_result()
-    if local_setup_operation.read() is not None:
-        if await ls.resume_pending_setup():
-            return ls._in_progress_result()
-        return {"ok": False, "reason": "recovery_failed", "message": "Couldn't resume the local model download. Try again."}
-    if not await asyncio.to_thread(ls.local_memory_ok):
-        return {"ok": False, "reason": "mac_cannot_run", "message": "This computer can't run a local model well."}
-    if not ls._claim_operation("settings", model):
-        await ls.resume_pending_setup()
-        return ls._in_progress_result()
-    ls._flight.result = None
-    ls._flight.stage = "Preparing download"
-
-    async def flight() -> dict:
-        return await _run_flight(model)
-
-    ls._flight.task = asyncio.create_task(flight())
-    ls._flight.task.add_done_callback(ls._observe_setup_task)
-    ls._flight.task.add_done_callback(lambda _task: ls._notify_models_changed())
-    ls._emit("started", model=model.repository, kind="settings")
-    return ls._in_progress_result()
-
-
-async def resume(model: LocalModel) -> dict:
-    """Re-follow a persisted Settings download after restart without adopting setup."""
-    from llm import local_setup as ls
-
-    await ls.local_setup_operation.wait_for_lock(ls._flight)
-    ls._flight.kind = "settings"
-    ls._flight.model = model
-    ls._flight.stage = "Waiting to resume local model download"
-    return await _run_flight(model)
 
 
 async def run(report: Callable[[str], None], model: LocalModel) -> dict:
     """Complete a Settings download and preserve a separate terminal result."""
-    from llm import local_setup as ls
-    from llm import own_omlx_management
     from llm.local_setup_runtime import apply_optimal_settings, configure_model_settings
     from llm.catalog_network_models import discover_network_models
 
@@ -174,25 +125,20 @@ async def run(report: Callable[[str], None], model: LocalModel) -> dict:
         report(value)
         events.append(value)
 
-    server_id, may_configure = await _managed_download(stage, model)
-    if may_configure:
-        # An applied benchmark owns the one settings PUT and carries CORSIA's
-        # required fields first.  A missing/offline benchmark falls back to the
-        # ordinary per-model writer without treating that best-effort step as a
-        # download failure.
-        optimal = await apply_optimal_settings(server_id, model)
-        # A failed optimal PUT has already consumed this model's single settings
-        # write.  Do not turn an unavailable oMLX into a second mutation.
-        if optimal.status != "applied" and not optimal.writer_attempted:
-            await configure_model_settings(server_id, model)
-        speed = optimal.speed if optimal.status == "applied" else None
-    else:
-        speed = None
+    server_id = await _download_to_local_server(stage, model)
+    # An applied benchmark owns the one settings PUT and carries CORSIA's
+    # required fields first. A missing/offline benchmark falls back to the
+    # ordinary per-model writer without treating that best-effort step as a
+    # download failure.
+    optimal = await apply_optimal_settings(server_id, model)
+    if optimal.status != "applied" and not optimal.writer_attempted:
+        await configure_model_settings(server_id, model)
+    speed = optimal.speed if optimal.status == "applied" else None
     stage("Refreshing model catalog")
     refreshed = await discover_network_models(server_id)
     if not refreshed.get("ok"):
         raise RuntimeError(refreshed.get("error") or "The local model catalog could not refresh.")
     # The durable record belongs to this exact local server; UI metadata never crosses servers.
     local_downloads.write(local_downloads.Download(model, speed=speed, server_id=server_id))
-    await _auto_load(server_id, model, allowed=may_configure and not await asyncio.to_thread(own_omlx_management.uses_mine))
+    await _auto_load(server_id, model)
     return {"ok": True, "server_id": server_id, "model": model.model, "progress": events, "speed": speed}

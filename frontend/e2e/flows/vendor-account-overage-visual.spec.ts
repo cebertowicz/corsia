@@ -32,6 +32,8 @@ const MODELS = [
 async function serveAccounts(page: Page, writes: { url: string; body: unknown }[]) {
 	const accounts = ACCOUNTS.map((account) => ({ ...account }));
 	await page.route('**/api/settings/models?**', (route) => route.fulfill({ json: { models: MODELS } }));
+	await page.route('**/api/settings/providers?**', (route) => route.fulfill({ json: { providers: [] } }));
+	await page.route('**/api/settings/network-servers?**', (route) => route.fulfill({ json: { servers: [] } }));
 	await page.route('**/api/models**', (route) => new URL(route.request().url()).pathname === '/api/models' && route.request().method() === 'GET'
 		? route.fulfill({ json: { models: MODELS.map(catalogRow), active_local_threads: 0 } }) : route.continue());
 	await page.route('**/api/vendor-accounts?**', (route) => route.fulfill({ json: { accounts } }));

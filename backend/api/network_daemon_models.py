@@ -74,11 +74,6 @@ async def list_daemon_models(server_id: str, server: dict) -> dict:
     return {"loaded": loaded, "available": available}
 
 
-def notify_cached_model_loaded(server_id: str, model_id: str) -> None:
-    """Optimistically mark a model loaded and notify clients."""
-    nd._LOADED_BY_SERVER.setdefault(server_id, set()).add(model_id)
-    notify_models_changed()
-
 
 def notify_cached_model_unloaded(server_id: str, model_id: str) -> None:
     """Optimistically mark a model unloaded and notify clients."""

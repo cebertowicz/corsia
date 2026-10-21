@@ -71,7 +71,7 @@ afterEach(async () => {
 	vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
-describe('Welcome’s link', () => {
+describe('account-screen link', () => {
 	it('offers Connect to CORSIA on another computer inside the desktop app', async () => {
 		await mountSetup();
 		expect(button('Connect to CORSIA on another computer')).toBeTruthy();
@@ -79,8 +79,21 @@ describe('Welcome’s link', () => {
 	it('never shows it in a browser or the phone app, which have no shell', async () => {
 		delete (window as unknown as Record<string, unknown>).__CORSIA_SHELL__;
 		await mountSetup();
-		expect(button('Get started')).toBeTruthy();
+		expect(button('Continue')).toBeTruthy();
 		expect(button('Connect to CORSIA on another computer')).toBeUndefined();
+	});
+	it('stops the pre-account local download before opening the remote-computer flow', async () => {
+		const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' });
+			if (url === '/api/setup/local-download' && init?.method === 'POST') return json({ ok: true, in_progress: true });
+			if (url === '/api/setup/local-download') return json({ state: 'downloading', model: 'Qwen' });
+			return json({});
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		await mountSetup();
+		await openConnect();
+		expect(fetchMock).toHaveBeenCalledWith('/api/setup/local-download/stop', expect.objectContaining({ method: 'POST' }));
 	});
 });
 
@@ -205,22 +218,23 @@ describe('Enter the code (r7)', () => {
 		expect(host.querySelector('h1')?.textContent).toBe('Enter the code');
 	});
 
-	const onChooseScreen: Array<[PairReason, string, string]> = [
+	const unreachable: Array<[PairReason, string, string]> = [
 		['server', '', 'Alex’s Mac mini answered, but CORSIA isn’t running there.'],
 		['network', '', 'CORSIA can’t reach Alex’s Mac mini. Check that it’s on and on the same network as this computer.'],
 		['incompatible', '1.4/1.2', 'This computer has CORSIA 1.4 and Alex’s Mac mini has 1.2. Update the older one, then try again.'],
 		['too_old', '', 'Alex’s Mac mini has an older CORSIA. Update it, then try again.'],
 		['local', '', 'CORSIA couldn’t finish connecting to Alex’s Mac mini.'],
 	];
-	it.each(onChooseScreen)('maps %s to the choose screen’s line under the address field', async (reason, versions, line) => {
+	it.each(unreachable)('keeps the entered code and shows %s beside it when the other computer cannot be reached', async (reason, versions, line) => {
 		const [app_version, host_version] = versions ? versions.split('/') : [undefined, undefined];
 		pairResult = { ok: false, reason, app_version, host_version };
 		await mountSetup();
 		await toCodeScreen();
 		paste('K7QX');
 		await settle();
-		expect(host.querySelector('h1')?.textContent).toBe('Connect to CORSIA on another computer');
-		expect(flat(host.querySelector('.field .err')?.textContent)).toContain(line);
+		expect(host.querySelector('h1')?.textContent).toBe('Enter the code');
+		expect(flat(host.querySelector('p.err')?.textContent)).toContain(line);
+		expect(boxes().map((box) => box.value)).toEqual(['K', '7', 'Q', 'X']);
 	});
 
 	it('Back from the code returns to Choose a computer', async () => {

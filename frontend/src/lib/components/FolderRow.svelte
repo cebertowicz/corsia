@@ -4,6 +4,7 @@
 	type FolderNotice =
 		| { kind: 'protected'; folder: string }
 		| { kind: 'unwritable'; reason: string }
+		| { kind: 'picker_failed' }
 		| null;
 
 	interface Props {
@@ -23,9 +24,11 @@
 		<Button variant="chip" size="sm" loading={changing} disabled={changing} onclick={onChange}>Change</Button>
 	</p>
 	{#if notice?.kind === 'protected'}
-		<p class="note">macOS will ask before CORSIA can use {notice.folder}.</p>
+		<p class="note">macOS asks you once to let CORSIA use your {notice.folder} folder. Choose Allow when it does.</p>
 	{:else if notice?.kind === 'unwritable'}
-		<p class="note error">CORSIA can’t write here: {notice.reason}.</p>
+		<p class="note error">CORSIA can’t write to this folder. Choose another one.</p>
+	{:else if notice?.kind === 'picker_failed'}
+		<p class="note error">Couldn’t check that folder. Choose it again.</p>
 	{/if}
 </div>
 

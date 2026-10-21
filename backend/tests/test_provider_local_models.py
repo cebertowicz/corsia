@@ -53,18 +53,15 @@ async def test_delete_known_omlx_model_without_settings_record(monkeypatch, tmp_
     async def discovered(_server_id):
         return {"ok": True}
 
-    forgotten: list[str] = []
     changed: list[bool] = []
     emitted: list[tuple[str, dict]] = []
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
     monkeypatch.setattr("llm.catalog_network_models.discover_network_models", discovered)
-    monkeypatch.setattr("llm.own_omlx_management.forget_model_originals", forgotten.append)
     monkeypatch.setattr("llm.local_setup._emit", lambda action, **properties: emitted.append((action, properties)))
     monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: changed.append(True))
 
     assert await provider_local_models.delete_download(MODEL.repository, {}) == {"ok": True}
     assert requests == [("DELETE", f"/hf/models/{MODEL.model}"), ("GET", "/models")]
-    assert forgotten == [MODEL.model]
     assert emitted == [("deleted", {"kind": "settings", "model": MODEL.model})]
     assert changed == [True]
 
@@ -78,15 +75,12 @@ async def test_delete_clears_an_available_record_missing_from_disk(monkeypatch, 
     async def missing_from_disk(_config):
         return []
 
-    forgotten: list[str] = []
     changed: list[bool] = []
     monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", missing_from_disk)
-    monkeypatch.setattr("llm.own_omlx_management.forget_model_originals", forgotten.append)
     monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: changed.append(True))
 
     assert await provider_local_models.delete_download(MODEL.repository, {}) == {"ok": True}
     assert local_downloads.get(MODEL.model) is None
-    assert forgotten == [MODEL.model]
     assert changed == [True]
 
 
@@ -104,7 +98,6 @@ async def test_delete_removes_durable_settings_record_after_catalog_confirms_abs
 
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
     monkeypatch.setattr("llm.catalog_network_models.discover_network_models", discovered)
-    monkeypatch.setattr("llm.own_omlx_management.forget_model_originals", lambda _model: None)
     monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
 
     assert await provider_local_models.delete_download(MODEL.repository, {}) == {"ok": True}
@@ -182,7 +175,6 @@ async def test_recommendations_remove_available_records_missing_from_disk(monkey
     async def missing_from_disk(_config):
         return []
 
-    forgotten: list[str] = []
     failed_model = LocalModel("Jundot/Other", 1_000_000, 32_768)
     monkeypatch.setattr(local_downloads, "_path", lambda: tmp_path / "local-downloads.json")
     local_downloads.write(local_downloads.Download(MODEL))
@@ -192,14 +184,12 @@ async def test_recommendations_remove_available_records_missing_from_disk(monkey
     monkeypatch.setattr(provider_local_models, "omlx_has_recommender", lambda _version: False)
     monkeypatch.setattr(provider_local_models, "omlx_version", lambda: "0.7.0")
     monkeypatch.setattr("llm.providers.omlx_lifecycle.list_disk_models", missing_from_disk)
-    monkeypatch.setattr("llm.own_omlx_management.forget_model_originals", forgotten.append)
 
     result, _sections = await provider_local_models._recommendations()
 
     assert result["downloads"] == [local_downloads.Download(failed_model, status="failed").view()]
     assert local_downloads.get(MODEL.model) is None
     assert local_downloads.get(failed_model.model) is not None
-    assert forgotten == [MODEL.model]
 
 
 @pytest.mark.asyncio
@@ -290,7 +280,7 @@ async def test_download_resumes_the_same_model_operation(monkeypatch) -> None:
         resumed.append(model)
         return {"ok": True, "resumed": True}
 
-    monkeypatch.setattr("llm.local_setup.begin_settings_download", begin)
+    monkeypatch.setattr("llm.local_setup_flow.begin_settings_download", begin)
 
     assert await provider_local_models.download_model({"repository": MODEL.repository}, {}) == {"ok": True, "resumed": True}
     assert resumed == [MODEL]

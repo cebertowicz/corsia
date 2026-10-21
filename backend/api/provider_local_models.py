@@ -14,7 +14,7 @@ from llm.local_model import OMLX_PIN, LocalModel, PickUnavailable, ask_recommend
 from llm.local_setup_auth import omlx_version
 from llm.local_setup_gates import host_ram_bytes, local_memory_ok
 from llm.local_setup_download import download_dir
-from llm.local_setup_ownership import download_disk_space
+from llm.local_setup_disk import download_disk_space
 from llm.network_discovery import get_servers
 
 router = APIRouter(prefix="/api/providers/local", tags=["providers"])
@@ -117,7 +117,7 @@ async def download_model(body: dict = Body(...), _user: dict = Depends(require_u
     operation = local_setup_operation.read()
     if operation is not None and operation.model.model != model_id:
         raise HTTPException(409, f"{operation.model.display_name} is already downloading.")
-    from llm.local_setup import begin_settings_download
+    from llm.local_setup_flow import begin_settings_download
 
     return await begin_settings_download(model)
 
@@ -144,10 +144,8 @@ async def delete_download(model_id: str, _user: dict = Depends(require_user_head
     if not any(row.get("identifier") == model_id for row in disk_models):
         if local_downloads.get(model_id) is not None:
             local_downloads.forget(model_id)
-            from llm.own_omlx_management import forget_model_originals
             from infra.state.ws import notify_models_changed
 
-            forget_model_originals(model_id)
             notify_models_changed()
             return {"ok": True}
         raise HTTPException(404, "Couldn't find this local model download. Refresh the list and try again.")
@@ -169,11 +167,9 @@ async def delete_download(model_id: str, _user: dict = Depends(require_user_head
         raise HTTPException(502, "Couldn't delete this local model download. Try again.")
     if downloaded is not None:
         local_downloads.forget(model_id)
-    from llm.own_omlx_management import forget_model_originals
     from llm.local_setup import _emit
     from infra.state.ws import notify_models_changed
 
-    forget_model_originals(model_id)
     _emit("deleted", kind="settings", model=model_id)
     notify_models_changed()
     return {"ok": True}

@@ -19,8 +19,9 @@ from api.key_session_guard import audit_key_write, require_person_for_key
 from api.locality_policy_guard import require_person_for_locality
 from api.providers import mask_key
 from api.network_daemon_models import (
-    list_daemon_models, notify_cached_model_loaded, notify_cached_model_unloaded,
+    list_daemon_models, notify_cached_model_unloaded,
 )
+from llm.network_discovery import notify_cached_model_loaded
 from api.network_server_helpers import (
     _add_omlx_server,
     add_external_server,

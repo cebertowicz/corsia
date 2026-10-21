@@ -8,7 +8,7 @@ from pathlib import Path
 from llm.local_model import LocalModel, from_recommendation
 
 _PATH = Path(__file__).with_name("local_profiles.json")
-_TOP_KEYS = {"omlx_global_settings", "model_settings", "starter_model"}
+_TOP_KEYS = {"managed_global_settings", "model_settings", "starter_model"}
 
 
 def load_settings(path: Path = _PATH) -> tuple[dict, dict, LocalModel]:
@@ -19,7 +19,7 @@ def load_settings(path: Path = _PATH) -> tuple[dict, dict, LocalModel]:
         raise RuntimeError(f"Local settings {path.name} are unreadable: {exc}") from exc
     if not isinstance(raw, dict) or set(raw) != _TOP_KEYS:
         raise RuntimeError(f"Local settings {path.name} must have exactly the keys {sorted(_TOP_KEYS)}")
-    globals_ = raw["omlx_global_settings"]
+    globals_ = raw["managed_global_settings"]
     model = raw["model_settings"]
     starter = from_recommendation(raw["starter_model"])
     if not isinstance(globals_, dict) or not isinstance(model, dict) or starter is None:

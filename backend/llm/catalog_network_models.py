@@ -380,9 +380,6 @@ async def discover_network_models(server_id: str) -> dict:
         result["error"] = f"Connection failed: {exc}"
         return result
 
-    from llm.omlx_global_settings import record_observation
-
-    await record_observation(server)
 
     try:
         return await run_in_db(
