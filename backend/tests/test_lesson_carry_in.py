@@ -847,6 +847,68 @@ def test_pending_drain_retires_caseless_first_fact_before_running_later_fact(
     ).fetchone()["attributes"]
 
 
+def test_pending_drain_advances_past_missing_owner_without_retiring_first_fact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from core.lesson_carry_in import CarryInFact, is_pending, record_pending
+    from core.lesson_carry_in_drain import _drain_pending
+
+    db = _event_db()
+    first = CarryInFact("first", "vanished-owner", "a" * 40, "context/first.md", "case")
+    second = CarryInFact("second", "owner", "b" * 40, "context/second.md", "case")
+    assert record_pending(db, first)
+    assert record_pending(db, second)
+    drained: list[CarryInFact] = []
+
+    monkeypatch.setattr("infra.database.get_db", lambda: _NoCloseDb(db))
+    monkeypatch.setattr("core.lesson_carry_in_drain._pending_facts", lambda _db: [first, second])
+    monkeypatch.setattr("core.lesson_carry_in_drain._case_for_fact", lambda *_args: {"actions": ACTIONS})
+    monkeypatch.setattr("core.lesson_carry_in_drain._target_snapshot", lambda *_args: ("target", None))
+    monkeypatch.setattr("core.lesson_carry_in_drain._fresh_scope", lambda *_args: None)
+    monkeypatch.setattr("core.lesson_carry_in_drain.LocalTraceAdapter", lambda *_args: object())
+    monkeypatch.setattr("core.lesson_carry_in_drain.drain_facts", lambda _db, _workspace, facts, _adapter: drained.extend(facts))
+
+    _drain_pending(tmp_path)
+    assert drained == []
+    assert is_pending(db, first)
+
+    _drain_pending(tmp_path)
+
+    assert drained == [second]
+    assert is_pending(db, first)
+
+
+def test_pending_drain_retires_target_changed_first_fact_before_running_later_fact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from core.lesson_carry_in import CarryInFact, is_pending, record_pending
+    from core.lesson_carry_in_drain import _drain_pending
+
+    db = _event_db()
+    first = CarryInFact("first", "owner", "a" * 40, "context/first.md", "case")
+    second = CarryInFact("second", "owner", "b" * 40, "context/second.md", "case")
+    assert record_pending(db, first)
+    assert record_pending(db, second)
+    drained: list[CarryInFact] = []
+
+    monkeypatch.setattr("infra.database.get_db", lambda: _NoCloseDb(db))
+    monkeypatch.setattr("core.lesson_carry_in_drain._pending_facts", lambda _db: [first, second])
+    monkeypatch.setattr("core.lesson_carry_in_drain._case_for_fact", lambda *_args: {"actions": ACTIONS})
+    monkeypatch.setattr(
+        "core.lesson_carry_in_drain._target_snapshot",
+        lambda _workspace, fact: ("target", "target_changed_after_commit") if fact == first else ("target", None),
+    )
+    monkeypatch.setattr("core.lesson_carry_in_drain._fresh_scope", lambda *_args: None)
+    monkeypatch.setattr("core.lesson_carry_in_drain.LocalTraceAdapter", lambda *_args: object())
+    monkeypatch.setattr("core.lesson_carry_in_drain.drain_facts", lambda _db, _workspace, facts, _adapter: drained.extend(facts))
+
+    _drain_pending(tmp_path)
+
+    assert drained == [second]
+    assert not is_pending(db, first)
+    assert is_pending(db, second)
+
+
 def test_nonunique_or_cloud_ready_rows_do_not_admit_a_local_model(monkeypatch: pytest.MonkeyPatch):
     from core.lesson_carry_in_contract import ready_local_target
 

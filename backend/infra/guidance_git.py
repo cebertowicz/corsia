@@ -8,7 +8,8 @@ and no path writes over a file that changed since the caller read it.
 
 from __future__ import annotations
 
-import fcntl, os
+import fcntl
+import os
 import shlex
 import stat
 import subprocess
@@ -27,6 +28,7 @@ from infra.guidance_messages import (
     SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_STALE, SAVE_UNRECORDED, SAVE_UNSYNCED,
     commit_message, recorded_reason,
 )
+from infra.guidance_startup import startup_sweep
 from infra.guidance_targets import GuidanceTarget
 from infra.skill_save_validation import refused_save
 
@@ -46,9 +48,13 @@ class _LockBusy(GitFault):
     pass
 
 
+
 @dataclass(frozen=True)
 class SaveResult:
-    """Guidance-save outcome, exact commit SHA, and any unsynced paths or validation errors."""
+    """``outcome``: written, unchanged, failed, deferred, stale, history-off, ordinary or refused; ``sha`` is full.
+    ``unsynced`` names paths whose commit landed while the real index kept the old blob (reason
+    ``index-unsynced``): a partial success the caller must show, never a plain "committed". ``refused``
+    (reason ``invalid-skill``) wrote nothing; ``errors`` holds the validation errors and ``line`` the fix."""
 
     outcome: str
     reason: str = ""
@@ -304,6 +310,7 @@ def save_guidance(
 
             record_committed_save(workspace, tuple(changes), result.sha)
         except Exception:
+            # Carry-in checks are after-save work: guidance history remains authoritative.
             logger.opt(exception=True).warning("carry-in scheduling failed")
     return result
 
@@ -384,17 +391,3 @@ def _save(
             "written", "index-unsynced" if landed.unsynced else "", sha=landed.sha,
             line="\n".join(lines), unsynced=landed.unsynced,
         )
-
-
-def startup_sweep(workspace: Path) -> None:
-    """Commit outside guidance edits once at server start; without a repository, do nothing."""
-    repo, _why = workspace_repository(workspace)
-    if repo is None:
-        return
-    try:
-        with _locked(_acquire(repo)[0]) as db:
-            lines = _sweep_others(repo, workspace, db, set())
-        if lines:
-            logger.info("startup guidance sweep: {}", "; ".join(lines))
-    except Exception:  # startup must not fail on history
-        logger.opt(exception=True).warning("startup guidance sweep failed")

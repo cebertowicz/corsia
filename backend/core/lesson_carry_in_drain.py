@@ -70,7 +70,7 @@ def _pending_facts(db) -> list[CarryInFact]:
            WHERE pending.event_name=? AND pending.retracted_at IS NULL AND NOT EXISTS (
              SELECT 1 FROM outcome_events terminal WHERE terminal.subject_key=pending.subject_key
                AND terminal.retracted_at IS NULL AND terminal.event_name IN (?, ?)
-           )""",
+           ) ORDER BY pending.observed_ts, pending.id""",
         (PENDING_EVENT, RESULT_EVENT, RETIREMENT_EVENT),
     ).fetchall()
     facts: dict[str, CarryInFact] = {}
@@ -102,6 +102,15 @@ def _drainable_pending_facts(db, workspace: Path, facts: Sequence[CarryInFact]) 
     return drainable
 
 
+def _pending_event_count(db) -> int:
+    """Keep bounded rotation in the existing append-only pending-fact lifecycle."""
+    row = db.execute(
+        "SELECT COUNT(*) FROM outcome_events WHERE event_name=? AND retracted_at IS NULL",
+        (PENDING_EVENT,),
+    ).fetchone()
+    return int(row[0])
+
+
 def _drain_pending(workspace: Path) -> None:
     """Use existing startup/catalog-ready triggers for the bounded pending drain."""
     from infra.database import get_db
@@ -110,12 +119,16 @@ def _drain_pending(workspace: Path) -> None:
     with _DRAIN_LOCK:
         db = get_db()
         try:
+            cap = contract.CASES_PER_EDIT_CAP
             facts = rotated_cases(
                 _drainable_pending_facts(db, workspace, _pending_facts(db)),
-                cap=contract.CASES_PER_EDIT_CAP,
-                edit_number=0,
+                cap=cap,
+                edit_number=0 if cap is None or cap <= 0 else _pending_event_count(db) // cap,
             )
             for fact in facts:
+                record_pending(
+                    db, fact, reason="pending drain attempted", attempt=_pending_event_count(db) + 1,
+                )
                 user_id = _owner_user_id(db, fact.owner_thread_id)
                 if user_id is not None:
                     drain_facts(db, workspace, [fact], LocalTraceAdapter(user_id, _fresh_scope(db, workspace, fact.target_path)))

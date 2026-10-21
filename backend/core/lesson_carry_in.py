@@ -98,9 +98,13 @@ def _record(db, *, event_name: str, fact: CarryInFact, dedupe_suffix: str, attri
     return result.inserted
 
 
-def record_pending(db, fact: CarryInFact, *, reason: str | None = None) -> bool:
+def record_pending(
+    db, fact: CarryInFact, *, reason: str | None = None, attempt: int | None = None,
+) -> bool:
     """Record a local-model-unavailable carry-in check without adding a queue."""
-    suffix = "pending" if reason is None else f"pending:{reason}"
+    suffix = f"pending:attempt:{attempt}" if attempt is not None else "pending"
+    if reason is not None and attempt is None:
+        suffix = f"pending:{reason}"
     return _record(db, event_name=PENDING_EVENT, fact=fact, dedupe_suffix=suffix, attributes={} if reason is None else {"reason": reason})
 
 
