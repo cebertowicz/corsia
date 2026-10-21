@@ -361,11 +361,10 @@ def _summarize(
     details: dict[str, Any] = {"repo": repo, "external_id": external_id}
 
     if comment:
+        # A wake names the comment, never its text: the owner reads it through the tool.
         author = (comment.get("user") or {}).get("login", "?")
-        body = (comment.get("body") or "")[:280]
-        details.update({"author": author, "comment": body,
-                        "url": comment.get("html_url")})
-        return f"{external_id} comment from {author}: {body[:100]}", details
+        details.update({"author": author, "url": comment.get("html_url")})
+        return f"{external_id} comment from {author}", details
 
     if pr:
         details.update({"pr_title": pr.get("title"),
