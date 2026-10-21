@@ -19,6 +19,7 @@ from infra.settings import get_agent_defaults, get_tool_config
 from core.context_builder import ContextBuilder
 from tools.base import Tool
 from tools.registry import ToolRegistry
+from tools.register_events import register as register_event_tools
 
 
 class CORSIAAgent:
@@ -194,7 +195,6 @@ def _register_agent_roster_tools(agent: CORSIAAgent) -> None:
 
 def _register_artifact_tools(agent: CORSIAAgent, workspace: Path) -> None:
     from tools.artifact_list import ArtifactListTool
-    from tools.event_rules import EventRulesTool
     from tools.artifact_ownership import ArtifactReleaseTool, ArtifactRehomeTool
     from tools.artifacts import (
         ArtifactReconcileTool,
@@ -206,7 +206,6 @@ def _register_artifact_tools(agent: CORSIAAgent, workspace: Path) -> None:
 
     agent.tools.register(ArtifactResolveTool(workspace=workspace))
     agent.tools.register(ArtifactListTool(workspace=workspace))
-    agent.tools.register(EventRulesTool())
     agent.tools.register(ArtifactRegisterTool(workspace=workspace))
     agent.tools.register(ArtifactUpdateTool())
     agent.tools.register(ArtifactReconcileTool())
@@ -381,7 +380,7 @@ def _register_tools(agent: CORSIAAgent, tool_cfg: dict, workspace: Path):
     _register_document_tools(agent, workspace)
 
     _register_artifact_tools(agent, workspace)
-
+    register_event_tools(agent.tools)
     _register_delegation_tools(agent)
 
     from tools.restart import RestartResumeTool

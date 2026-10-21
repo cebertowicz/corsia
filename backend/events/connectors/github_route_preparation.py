@@ -91,7 +91,7 @@ def _prepare_route(
     tag_provenance = structured_tag(payload)
     selected = router._select_route(
         internal_event, payload, identity, external_id, tag_provenance,
-        check_suite_base_ref, check_suite_pr_selected,
+        check_suite_base_ref, check_suite_pr_selected, prepared=prepared,
     )
     if isinstance(selected, router.RouteResult):
         prepared.result = selected
@@ -107,8 +107,6 @@ def _prepare_route(
         summary=summary, chip=chip, wake_reason=wake_reason,
         tag_provenance=tag_provenance,
     )
-    prepared.envelope = routing_state.get('_envelope')
-    prepared.evaluation = routing_state.get('_evaluation')
     prepared.thread_id, prepared.identity = thread_id, identity
     prepared.summary, prepared.details, prepared.chip = summary, details, chip
     prepared.notice = router.github_pr_notice.notice_for_routed_event(thread_id, identity)

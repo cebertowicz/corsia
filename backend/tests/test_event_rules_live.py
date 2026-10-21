@@ -111,6 +111,48 @@ def test_drop_runs_before_binding_and_test_matches_live_without_writes(isolated_
     db.close()
 
 
+@pytest.mark.parametrize('enabled', [True, False])
+def test_cancelled_preflight_uses_evaluator_with_any_rule_id(isolated_db, enabled):
+    from events import router
+
+    with write_transaction(None, scope='custom_cancel_drop') as db:
+        db.execute("UPDATE event_rules SET enabled=0 WHERE action='drop'")
+        _rule(db, 'custom-cancel-drop', action='drop',
+              event_type='webhook.github.check_suite_completed',
+              conditions=[{'field': 'conclusion', 'op': 'eq', 'value': 'cancelled'}])
+        db.execute('UPDATE event_rules SET enabled=? WHERE id=?',
+                   (int(enabled), 'custom-cancel-drop'))
+    payload = {'repository': {'full_name': 'owner/repo'},
+               'check_suite': {'conclusion': 'cancelled', 'head_sha': 'abc'}}
+    with (patch.object(router, 'evaluate', wraps=router.evaluate) as evaluate,
+          patch.object(router, 'check_suite_pr_metadata_from_event') as resolve_pr):
+        result = router._cancelled_check_result('webhook.github.check_suite_completed', payload)
+    evaluate.assert_called_once()
+    resolve_pr.assert_not_called()
+    assert (result is not None) == enabled
+    db = get_db()
+    assert [r['rule_id'] for r in db.execute('SELECT rule_id FROM event_route_decisions')] == (
+        ['custom-cancel-drop'] if enabled else [])
+    db.close()
+
+
+def test_selection_keeps_registry_state_separate_from_prepared_rule_fields(isolated_db):
+    from events import router
+    from events.connectors.github_route_preparation import PreparedRoute
+    from events.identity import resolve_identity
+
+    owner = mk_session('owner')
+    register_pr('owner/repo', 7, owner)
+    identity = resolve_identity('webhook.github.pr_merged', _event())
+    prepared = PreparedRoute()
+    selected = router._select_route('webhook.github.pr_merged', _event(), identity,
+                                    identity.external_id, None, None, False, prepared=prepared)
+    assert not isinstance(selected, router.RouteResult)
+    assert set(selected[2]) == {'identity', 'owner', 'subscribers', 'triage'}
+    assert prepared.envelope.type == 'webhook.github.pr_merged'
+    assert prepared.evaluation.targets[0].thread == owner
+
+
 def test_readonly_preview_predicts_first_seen_binding_and_delivery(isolated_db):
     owner = mk_session('owner')
     binder.create_rule(connector='github', fact='repo', value='owner/repo', destination_thread_id=owner)

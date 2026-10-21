@@ -10,7 +10,7 @@ from typing import Any
 from loguru import logger
 
 from events import dead_letter, delivery, route_decisions
-from events.rules import evaluate, event_scope, matching_rules
+from events.rules import evaluate, event_scope
 from infra.database import get_db, write_transaction
 from events.identity import (
     CHECK_SUITE_COMPLETED_EVENTS,
@@ -28,6 +28,7 @@ from events.connectors.github import (
 from events.github_mapper import pr_terminal_state
 from events.routing_inputs import structured_tag
 from events.connectors.github_route_preparation import (
+    PreparedRoute,
     prepare_route_ordered,
     release_notice_off_loop,
 )
@@ -118,14 +119,15 @@ def _record_passive_change(
 def _cancelled_check_result(
     internal_event: str, payload: dict[str, Any],
 ) -> RouteResult | None:
-    envelope = github_routing_envelope(internal_event, None, payload)
-    rules = matching_rules(envelope.facts, 'github', on='every', event_type=internal_event,
-                           scopes=('global',))
-    cancelled = next((r for r in rules if r.id == 'rule_set:github@1:cancelled' and r.action == 'drop'), None)
-    if cancelled is None:
+    if (payload.get('check_suite') or {}).get('conclusion') != 'cancelled':
         return None
+    # Evaluate cancellation before PR identity resolution to avoid its API lookup.
+    envelope = github_routing_envelope(internal_event, None, payload)
     with write_transaction(None, scope='cancelled_event_rule') as db:
-        route_decisions.record(db, envelope, rule_ids=[cancelled.id], thread_id=None,
+        evaluated = evaluate(envelope, resolve_owner=lambda: [], db=db)
+        if evaluated.dropped_by is None:
+            return None
+        route_decisions.record(db, envelope, rule_ids=[evaluated.dropped_by], thread_id=None,
                                outcome='dropped', scope='global')
     logger.info("event-routing: dropping cancelled check_suite — superseded")
     emit_product_event(
@@ -204,6 +206,8 @@ def _select_route(
     tag: dict[str, str] | None,
     check_suite_base_ref: str | None,
     check_suite_pr_selected: bool,
+    *,
+    prepared: PreparedRoute,
 ) -> tuple[str, str, dict[str, Any]] | RouteResult:
     routing_state: dict[str, Any] = {
         "identity": None, "owner": None, "subscribers": [], "triage": None,
@@ -226,8 +230,8 @@ def _select_route(
     target = evaluated.targets[0]
     routing_state = target.routing_state or (
         registry_models.routing_registrations(*identity) if identity else routing_state)
-    routing_state['_evaluation'] = evaluated
-    routing_state['_envelope'] = envelope
+    prepared.evaluation = evaluated
+    prepared.envelope = envelope
     if tag is not None and identity is not None:
         if not delivery.thread_exists_and_active(target.thread):
             return _dead_letter_result(internal_event, payload, 'invalid_tag_target', external_id)
