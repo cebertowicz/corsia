@@ -27,33 +27,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from eval.null_tool import NULL_TOOL_NAME
+from tools.registry import ToolRegistry
 
 MODEL = "openai/test-checkpoint"
 PROMPT = "run the probe"
 EVAL_TOKEN = "eval-test-token"
 PROBE_ARGUMENTS = {"probe_id": "probe-1"}
-
-
-class _RegisteredTools:
-    """The slice of the tool registry the eval route and the loop actually use."""
-
-    def __init__(self):
-        self._registered: dict = {}
-
-    def has(self, name: str) -> bool:
-        return name in self._registered
-
-    def register(self, tool) -> None:
-        self._registered[tool.name] = tool
-
-    def unregister(self, name: str) -> None:
-        self._registered.pop(name, None)
-
-    def get_definitions(self) -> list:
-        return []
-
-    async def execute(self, name: str, arguments: dict) -> str:
-        return await self._registered[name].execute(**arguments)
 
 
 class _Agent:
@@ -66,7 +45,7 @@ class _Agent:
 
         self.context = ContextBuilder(workspace)
         self.workspace = workspace
-        self.tools = _RegisteredTools()
+        self.tools = ToolRegistry()
 
     async def _connect_mcp(self):
         return None
@@ -92,9 +71,16 @@ def eval_client(isolated_db, monkeypatch, tmp_path):
         dispatched.append({"messages": messages, "tools": tools, **kwargs})
         return responses.pop(0)
 
-    agent = _Agent(tmp_path)
+    agent = None
+
+    async def get_agent():
+        nonlocal agent
+        if agent is None:
+            agent = _Agent(tmp_path)
+        return agent
+
     monkeypatch.setattr(endpoint, "authenticate", lambda _token: {"id": "steve"})
-    monkeypatch.setattr("core.agent.get_agent", AsyncMock(return_value=agent))
+    monkeypatch.setattr("core.agent.get_agent", AsyncMock(side_effect=get_agent))
     monkeypatch.setattr(router, "_dispatch_openai", dispatch_openai)
     monkeypatch.setattr(turns_steps, "emit_reasoning", AsyncMock())
     app = FastAPI()
@@ -144,7 +130,7 @@ def _rows(query: str):
         db.close()
 
 
-def test_eval_tool_loop_persists_its_canonical_row_and_projects_it(eval_client):
+def test_scope_none_eval_turn_executes_null_probe_through_the_real_registry(eval_client):
     client, dispatched, responses = eval_client
     responses.extend([_tool_call_response(), _answer_response()])
 

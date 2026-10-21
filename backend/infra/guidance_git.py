@@ -24,8 +24,8 @@ from loguru import logger
 from infra.guidance_cas import stale_path
 from infra.guidance_history_paths import digest, file_version, find_commit
 from infra.guidance_messages import (
-    SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_STALE, SAVE_UNRECORDED,
-    SAVE_UNSYNCED, commit_message, recorded_reason,
+    SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_STALE, SAVE_UNRECORDED, SAVE_UNSYNCED,
+    commit_message, recorded_reason,
 )
 from infra.guidance_targets import GuidanceTarget
 from infra.skill_save_validation import refused_save
@@ -37,8 +37,10 @@ _OUTSIDE = "Unknown editor <outside-edit@corsia.local>"
 MAX_GUIDANCE_BYTES = 1024 * 1024
 _SWEEP_LIMIT = 100
 
+
 class GitFault(RuntimeError):
     """A Git or OS failure; callers surface it and never read it as clean."""
+
 
 class _LockBusy(GitFault):
     pass
@@ -46,7 +48,7 @@ class _LockBusy(GitFault):
 
 @dataclass(frozen=True)
 class SaveResult:
-    """Stable save contract: outcome/reason, landed SHA, caller line, and recovery detail."""
+    """Guidance-save outcome, exact commit SHA, and any unsynced paths or validation errors."""
 
     outcome: str
     reason: str = ""

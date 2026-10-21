@@ -281,7 +281,7 @@ def _fresh_scope(db, workspace: Path, target_path: str):
         "SELECT project_id FROM threads WHERE id=?", (owner,),
     ).fetchone()
     project_id = None if row is None or row[0] is None else str(row[0])
-    return FreshTurnScope(project_id=project_id, owner_thread_id=owner)
+    return FreshTurnScope(project_id=project_id, owner_thread_id=owner, carry_in=True)
 
 
 

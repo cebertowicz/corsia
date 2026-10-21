@@ -13,10 +13,13 @@ from core.lesson_carry_in import (
     RESULT_EVENT,
     RETIREMENT_EVENT,
     CarryInFact,
+    _case_for_fact,
     _fresh_scope,
     _matching_facts,
+    _target_snapshot,
     drain_facts,
     record_pending,
+    record_retirement,
 )
 from core.lesson_carry_in_contract import LocalTraceAdapter, TraceAdapter, rotated_cases
 
@@ -84,6 +87,21 @@ def _pending_facts(db) -> list[CarryInFact]:
     return list(facts.values())
 
 
+def _drainable_pending_facts(db, workspace: Path, facts: Sequence[CarryInFact]) -> list[CarryInFact]:
+    """Retire facts that can no longer run so one bounded drain cannot starve later work."""
+    drainable: list[CarryInFact] = []
+    for fact in facts:
+        if _case_for_fact(workspace, fact) is None:
+            record_retirement(db, fact, "carry-in case is unavailable")
+            continue
+        _target_hash, reason = _target_snapshot(workspace, fact)
+        if reason == "target_changed_after_commit":
+            record_retirement(db, fact, "target changed after recorded commit")
+            continue
+        drainable.append(fact)
+    return drainable
+
+
 def _drain_pending(workspace: Path) -> None:
     """Use existing startup/catalog-ready triggers for the bounded pending drain."""
     from infra.database import get_db
@@ -92,7 +110,11 @@ def _drain_pending(workspace: Path) -> None:
     with _DRAIN_LOCK:
         db = get_db()
         try:
-            facts = rotated_cases(_pending_facts(db), cap=contract.CASES_PER_EDIT_CAP, edit_number=0)
+            facts = rotated_cases(
+                _drainable_pending_facts(db, workspace, _pending_facts(db)),
+                cap=contract.CASES_PER_EDIT_CAP,
+                edit_number=0,
+            )
             for fact in facts:
                 user_id = _owner_user_id(db, fact.owner_thread_id)
                 if user_id is not None:

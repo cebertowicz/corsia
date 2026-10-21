@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import json
 import sqlite3
@@ -64,6 +65,123 @@ async def test_carry_in_eval_creates_its_own_unattributed_thread(monkeypatch: py
     assert creation.keywords["parent_thread_id"] is None
     assert creation.keywords["spawned_by"] is None
     assert "actor_thread_id" not in creation.keywords
+
+
+def test_carry_in_scope_marks_only_carry_in_turns_for_record_only_tools(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from core.lesson_carry_in import _fresh_scope
+
+    db = _event_db()
+    monkeypatch.setattr("core.lesson_carry_in.target_scope_owner", lambda *_args: "owner")
+
+    scope = _fresh_scope(db, tmp_path, "context/rule.md")
+
+    assert scope.owner_thread_id == "owner"
+    assert scope.carry_in is True
+
+
+def _fenced_context_db(workspace: Path):
+    from infra.database import get_db
+
+    db = get_db()
+    owner_file = workspace / ".threads" / "owner" / "context" / "OWNER.md"
+    owner_file.parent.mkdir(parents=True)
+    owner_file.write_text("owner context\n")
+    db.execute(
+        "UPDATE threads SET bootloader_files=? WHERE id='owner'",
+        (json.dumps([str(owner_file)]),),
+    )
+    db.execute(
+        "INSERT INTO threads (id,user_id,model,history_epoch,next_message_seq,created_at,updated_at) "
+        "VALUES ('eval-1', 'user', 'native/test', 0, 1, 't', 't')"
+    )
+    db.commit()
+    return db
+
+
+class _NoCloseDb:
+    def __init__(self, db: sqlite3.Connection):
+        self._db = db
+
+    def __getattr__(self, name):
+        return getattr(self._db, name)
+
+    def close(self):
+        pass
+
+
+def test_fenced_context_attach_journals_and_detach_removes_fixture_and_thread(
+    isolated_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from eval.fresh_turn_context import FencedTarget, attach_fenced_context, detach_and_delete
+    from infra import config
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    db = _fenced_context_db(workspace)
+    monkeypatch.setattr(config, "WORKSPACE", workspace)
+    monkeypatch.setattr("eval.fresh_turn_context._normally_delivered_target", lambda *_args: False)
+    receipt = attach_fenced_context(
+        "eval-1", "user", owner_thread_id="owner", project_id=None,
+        target=FencedTarget(".threads/owner/context/OWNER.md", "a" * 40, b"fenced target\n", "edit"),
+    )
+
+    assert receipt.fixture is not None and receipt.fixture.read_bytes() == b"fenced target\n"
+    assert db.execute("SELECT action FROM context_bootloader_events").fetchone()["action"] == "attach_eval_fenced_context"
+    assert str(receipt.fixture) in json.loads(db.execute("SELECT bootloader_files FROM threads WHERE id='eval-1'").fetchone()[0])
+
+    asyncio.run(detach_and_delete(receipt))
+
+    assert not receipt.fixture.exists()
+    assert db.execute("SELECT id FROM threads WHERE id='eval-1'").fetchone() is None
+    assert [row["action"] for row in db.execute("SELECT action FROM context_bootloader_events ORDER BY created_at")] == [
+        "attach_eval_fenced_context", "detach_eval_fenced_context",
+    ]
+
+
+def test_fenced_context_failed_attach_unlinks_its_fixture(
+    isolated_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from eval.fresh_turn_context import FencedTarget, attach_fenced_context
+    from infra import config
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    db = _fenced_context_db(workspace)
+    monkeypatch.setattr(config, "WORKSPACE", workspace)
+    monkeypatch.setattr("eval.fresh_turn_context._normally_delivered_target", lambda *_args: False)
+
+    def refuse(*_args, **_kwargs):
+        raise ValueError("attach refused")
+
+    monkeypatch.setattr("api.context_bootloader._write_context_change", refuse)
+    with pytest.raises(ValueError, match="attach refused"):
+        attach_fenced_context(
+            "eval-1", "user", owner_thread_id="owner", project_id=None,
+            target=FencedTarget(".threads/owner/context/OWNER.md", "a" * 40, b"fenced target\n", "edit"),
+        )
+    assert not (workspace / ".threads" / "eval-1" / "context" / "CARRY_IN_TARGET.md").exists()
+
+
+def test_normally_delivered_fenced_context_skips_fixture_and_still_deletes_thread(
+    isolated_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from eval.fresh_turn_context import FencedTarget, attach_fenced_context, detach_and_delete
+    from infra import config
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    db = _fenced_context_db(workspace)
+    monkeypatch.setattr(config, "WORKSPACE", workspace)
+    monkeypatch.setattr("eval.fresh_turn_context._normally_delivered_target", lambda *_args: True)
+    receipt = attach_fenced_context(
+        "eval-1", "user", owner_thread_id="owner", project_id=None,
+        target=FencedTarget(".threads/owner/context/OWNER.md", "a" * 40, b"fenced target\n", "edit"),
+    )
+
+    assert receipt.fixture is None
+    assert db.execute("SELECT action FROM context_bootloader_events").fetchall() == []
+    asyncio.run(detach_and_delete(receipt))
+    assert db.execute("SELECT id FROM threads WHERE id='eval-1'").fetchone() is None
 
 
 def test_project_context_target_uses_normal_fresh_turn_delivery(
@@ -685,11 +803,48 @@ def test_pending_round_trip_recovers_owner_and_drains_without_a_cap_override(
     monkeypatch.setattr("infra.database.get_db", lambda: NoCloseDb())
     monkeypatch.setattr("core.lesson_carry_in_drain.LocalTraceAdapter", Adapter)
     monkeypatch.setattr("core.lesson_carry_in_drain._fresh_scope", lambda *_args: None)
+    monkeypatch.setattr("core.lesson_carry_in_drain._case_for_fact", lambda *_args: {"actions": ACTIONS})
+    monkeypatch.setattr("core.lesson_carry_in_drain._target_snapshot", lambda *_args: ("target", None))
     monkeypatch.setattr("core.lesson_carry_in_drain.drain_facts", drain)
 
     _drain_pending(tmp_path)
 
     assert drained == [fact]
+
+
+def test_pending_drain_retires_caseless_first_fact_before_running_later_fact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from core.lesson_carry_in import CarryInFact, is_pending, record_pending
+    from core.lesson_carry_in_drain import _drain_pending
+
+    db = _event_db()
+    first = CarryInFact("first", "owner", "a" * 40, "context/first.md", "missing-case")
+    second = CarryInFact("second", "owner", "b" * 40, "context/second.md", "case")
+    assert record_pending(db, first)
+    assert record_pending(db, second)
+    drained: list[CarryInFact] = []
+
+    monkeypatch.setattr("infra.database.get_db", lambda: _NoCloseDb(db))
+    monkeypatch.setattr("core.lesson_carry_in_drain._pending_facts", lambda _db: [first, second])
+    monkeypatch.setattr(
+        "core.lesson_carry_in_drain._case_for_fact",
+        lambda _workspace, fact: None if fact == first else {"actions": ACTIONS},
+    )
+    monkeypatch.setattr("core.lesson_carry_in_drain._target_snapshot", lambda *_args: ("target", None))
+    monkeypatch.setattr("core.lesson_carry_in_drain._owner_user_id", lambda *_args: "user")
+    monkeypatch.setattr("core.lesson_carry_in_drain._fresh_scope", lambda *_args: None)
+    monkeypatch.setattr("core.lesson_carry_in_drain.LocalTraceAdapter", lambda *_args: object())
+    monkeypatch.setattr("core.lesson_carry_in_drain.drain_facts", lambda _db, _workspace, facts, _adapter: drained.extend(facts))
+
+    _drain_pending(tmp_path)
+
+    assert drained == [second]
+    assert not is_pending(db, first)
+    assert is_pending(db, second)
+    assert "case is unavailable" in db.execute(
+        "SELECT attributes FROM outcome_events WHERE event_name='learning_loop.carry_in_retirement'"
+    ).fetchone()["attributes"]
 
 
 def test_nonunique_or_cloud_ready_rows_do_not_admit_a_local_model(monkeypatch: pytest.MonkeyPatch):

@@ -27,6 +27,7 @@ class FreshTurnScope:
 
     project_id: str | None = None
     owner_thread_id: str | None = None
+    carry_in: bool = False
     fenced_target: object | None = None
 
 
@@ -164,9 +165,11 @@ async def run_fresh_turn(
 
             await delete_owned_thread(thread_id, user_id, [])
             return FreshTurn(thread_id, None, f"Eval context setup errored: {_failure_detail(exc)}")
+    from contextlib import nullcontext
     from eval.tool_allowlist import carry_in_tool_isolation
 
-    with carry_in_tool_isolation():
+    isolation = carry_in_tool_isolation() if scope is not None and scope.carry_in else nullcontext()
+    with isolation:
         turn_id, error = await _run_turn(
             thread_id=thread_id,
             thread_row=thread_row,
