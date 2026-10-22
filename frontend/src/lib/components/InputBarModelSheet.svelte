@@ -71,6 +71,12 @@
 	const hostsLocalSetup = (group: ModelGroup) => group.rows.some((model) => getModelDispatchId(model).startsWith('omlx@'));
 	const hasLocalSetupGroup = $derived(groups.some(hostsLocalSetup));
 	const hasReadyGroup = $derived(groups.some((group) => group.state === 'ready'));
+	// The Local section is the one place to add a local model; the Local only row and note link only when it is absent.
+	const showsLocalSection = $derived((!hasLocalSetupGroup && (!!$localStatus || $canAddLocalModel)) || $canSetUpLocalModel);
+	const setUpLocalElsewhere = $derived(showsLocalSection ? undefined : () => { showAddLocal = true; });
+	// The note links only when the Local only row is not already showing that link.
+	let rowOffersSetup = $state(false);
+	const noteSetUpLocal = $derived(sel.isOpen && rowOffersSetup ? undefined : setUpLocalElsewhere);
 	$effect(() => watchLocalStatus());
 	async function retryLocal(kind: LocalPickerRetry) {
 		const result = await retryLocalSetup(kind);
@@ -157,11 +163,11 @@
 </script>
 
 <div class="action-sheet model-sheet">
-	{#if sel.isOpen}<LocalOnlySwitchRow onsetuplocal={() => showAddLocal = true} onleave={onclose} focusOnMount={focusLocalOnly} onfocusconsumed={onfocusconsumed} />{/if}
+	{#if sel.isOpen}<LocalOnlySwitchRow onsetuplocal={setUpLocalElsewhere} bind:offerssetup={rowOffersSetup} onleave={onclose} focusOnMount={focusLocalOnly} onfocusconsumed={onfocusconsumed} />{/if}
 	<div class="sheet-section">
 		<div class="sheet-section-label">Model</div>
 		<div class="model-list">
-			{#if cloudModelsOff && !hasReadyGroup}<PickerLocalOnlyNote kind="empty" {projectCloudOff} onsetuplocal={() => showAddLocal = true} onprojectsettings={openProjectPolicy} />{/if}
+			{#if cloudModelsOff && !hasReadyGroup}<PickerLocalOnlyNote kind="empty" {projectCloudOff} onsetuplocal={noteSetUpLocal} onprojectsettings={openProjectPolicy} />{/if}
 			{#if groups.length === 0 && !cloudModelsOff && !$localStatus && !$canAddLocalModel && !$canSetUpLocalModel}
 				<div class="model-list-empty">No available models</div>
 			{:else}
@@ -286,8 +292,8 @@
 						{/if}
 					</section>
 				{/each}
-				{#if cloudModelsOff && hasReadyGroup}<PickerLocalOnlyNote kind="quiet" {projectCloudOff} inherited={inheritedLocalOnly} onsetuplocal={() => showAddLocal = true} onprojectsettings={openProjectPolicy} />{/if}
-				{#if (!hasLocalSetupGroup && ($localStatus || $canAddLocalModel)) || $canSetUpLocalModel}
+				{#if cloudModelsOff && hasReadyGroup}<PickerLocalOnlyNote kind="quiet" {projectCloudOff} inherited={inheritedLocalOnly} onprojectsettings={openProjectPolicy} />{/if}
+				{#if showsLocalSection}
 					<section class="model-group" aria-label="Local">
 						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />
 						{#if $localStatus}
