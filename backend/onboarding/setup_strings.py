@@ -88,7 +88,7 @@ ASK_FOR_ADDRESS = "the address you give me in chat"
 # The two questions that come before GitHub: whether agents use and offer the community's proven
 # improvements. Both sit under the GitHub task; GitHub comes up only on a yes to sharing.
 COMMUNITY = {
-    "title": "Should your agents use improvements the community has proven, and offer the ones proven here?",
+    "title": "Use and share community improvements?",
     "context": ("You can always turn down a change and keep your own version, and nothing private ever goes "
                 "into what's shared."),
     "tradeoff": "Sharing goes through GitHub, so use and share leads to one question about your account.",
