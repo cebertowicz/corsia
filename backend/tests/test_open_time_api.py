@@ -66,3 +66,37 @@ def test_a_duplicate_id_or_a_naive_time_is_refused(pdb, client):
     item = {"id": "run", "thread_id": lead, "since": datetime.now(UTC).isoformat()}
     assert client.post("/api/open-time", json={"items": [item, item]}).status_code == 422
     assert client.post("/api/open-time", json={"items": [{**item, "since": "2026-10-21T10:00:00"}]}).status_code == 422
+
+
+def test_two_runs_of_one_thread_each_get_their_own_number_from_one_family_read(pdb, client, monkeypatch):
+    from infra import open_time
+
+    lead = new_thread(pdb, "lead")
+    new_thread(pdb, "worker", parent=lead)
+    start = datetime.now(UTC) - timedelta(hours=3)
+    _turn(pdb, lead, start, start + timedelta(minutes=10))
+    _turn(pdb, "worker", start + timedelta(minutes=5), start + timedelta(minutes=20))
+    _turn(pdb, lead, start + timedelta(minutes=120), start + timedelta(minutes=130))
+    pdb.commit()
+    family_reads = []
+    real = open_time.thread_and_descendants
+    monkeypatch.setattr(
+        open_time, "thread_and_descendants", lambda db, thread: family_reads.append(thread) or real(db, thread),
+    )
+
+    def at(minutes):
+        return (start + timedelta(minutes=minutes)).isoformat()
+
+    body = {"items": [
+        {"id": "early", "thread_id": lead, "since": at(0), "until": at(30)},
+        {"id": "late", "thread_id": lead, "since": at(110), "until": at(140)},
+        {"id": "clipped", "thread_id": lead, "since": at(8), "until": at(125)},
+    ]}
+    items = client.post("/api/open-time", json=body).json()["items"]
+
+    # The worker's overlap with the lead counts once: minutes 0 to 20.
+    assert items["early"]["seconds"] == 20 * 60
+    assert items["late"]["seconds"] == 10 * 60
+    # Minutes 8 to 20 of the first run plus 120 to 125 of the second.
+    assert items["clipped"]["seconds"] == (12 + 5) * 60
+    assert family_reads == [lead]

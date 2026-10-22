@@ -47,7 +47,11 @@ def thread_and_descendants(db: Any, thread_id: str) -> list[str]:
 
 
 def turn_intervals(db: Any, thread_ids: list[str], *, since: float, until: float) -> list[Interval]:
-    """Every stored Turn of ``thread_ids`` that touches [since, until]; a running Turn ends at ``until``."""
+    """Every stored Turn of ``thread_ids`` that touches [since, until]; a running Turn ends at ``until``.
+
+    The range is filtered here, not in SQL: ``started_at`` is stored both naive and offset-aware, so a text
+    comparison in SQL is not reliable across rows.
+    """
     if not thread_ids:
         return []
     marks = ",".join("?" for _ in thread_ids)
@@ -77,6 +81,46 @@ def union(intervals: list[Interval], *, since: float, until: float) -> list[Inte
     return merged
 
 
+def open_times(
+    db: Any,
+    thread_id: str,
+    ranges: list[tuple[datetime, datetime | None]],
+    *,
+    as_of: datetime,
+) -> list[dict]:
+    """``{seconds, open_now, as_of}`` for each range of one lead thread, in order.
+
+    The family, its Turns and its waits are read once over the widest range asked, then clipped per range.
+    """
+    from plans import public
+
+    now = epoch(as_of)
+    bounds = [(epoch(since), now if until is None else min(epoch(until), now)) for since, until in ranges]
+    live = [(low, high) for low, high in bounds if high > low]
+    answers: list[dict] = []
+    if live:
+        wide_low = min(low for low, _ in live)
+        wide_high = max(high for _, high in live)
+        family = thread_and_descendants(db, thread_id)
+        waits = public.open_wait_intervals(
+            family,
+            since=datetime.fromtimestamp(wide_low, UTC),
+            until=datetime.fromtimestamp(wide_high, UTC),
+            db=db,
+        )
+        intervals = turn_intervals(db, family, since=wide_low, until=wide_high)
+        intervals += [pair for pairs in waits.values() for pair in pairs]
+    for low, high in bounds:
+        merged = union(intervals, since=low, until=high) if high > low else []
+        answers.append({
+            "seconds": sum(end - start for start, end in merged),
+            # Something is running or waited on right now only for a range that reaches now.
+            "open_now": high >= now and bool(merged) and merged[-1][1] >= now,
+            "as_of": api_time(as_of),
+        })
+    return answers
+
+
 def open_time(
     db: Any,
     thread_id: str,
@@ -86,26 +130,4 @@ def open_time(
     as_of: datetime,
 ) -> dict:
     """``{seconds, open_now, as_of}`` for one lead thread over [since, until or now]."""
-    from plans import public
-
-    now = epoch(as_of)
-    low = epoch(since)
-    high = now if until is None else min(epoch(until), now)
-    family = thread_and_descendants(db, thread_id)
-    if high <= low:
-        return {"seconds": 0.0, "open_now": False, "as_of": api_time(as_of)}
-    waits = public.open_wait_intervals(
-        family,
-        since=datetime.fromtimestamp(low, UTC),
-        until=datetime.fromtimestamp(high, UTC),
-        db=db,
-    )
-    intervals = turn_intervals(db, family, since=low, until=high)
-    intervals += [pair for pairs in waits.values() for pair in pairs]
-    merged = union(intervals, since=low, until=high)
-    return {
-        "seconds": sum(end - start for start, end in merged),
-        # Something is running or waited on right now only for a range that reaches now.
-        "open_now": high >= now and bool(merged) and merged[-1][1] >= now,
-        "as_of": api_time(as_of),
-    }
+    return open_times(db, thread_id, [(since, until)], as_of=as_of)[0]

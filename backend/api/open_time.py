@@ -39,17 +39,18 @@ def _read(user_id: str, items: list[OpenTimeItem]) -> dict[str, dict]:
     as_of = datetime.now(UTC)
     db = get_db()
     try:
-        allowed: dict[str, bool] = {}
-        found = {}
+        by_thread: dict[str, list[OpenTimeItem]] = {}
         for item in items:
-            if item.thread_id not in allowed:
-                thread = get_thread_for_user(item.thread_id, user_id, db=db)
-                allowed[item.thread_id] = thread is not None and thread["purged_at"] is None
-            if not allowed[item.thread_id]:
+            by_thread.setdefault(item.thread_id, []).append(item)
+        found = {}
+        for thread_id, asked in by_thread.items():
+            thread = get_thread_for_user(thread_id, user_id, db=db)
+            if thread is None or thread["purged_at"] is not None:
                 continue
-            found[item.id] = open_time.open_time(
-                db, item.thread_id, since=item.since, until=item.until, as_of=as_of,
+            answers = open_time.open_times(
+                db, thread_id, [(item.since, item.until) for item in asked], as_of=as_of,
             )
+            found.update({item.id: answer for item, answer in zip(asked, answers, strict=True)})
         return found
     finally:
         db.close()
