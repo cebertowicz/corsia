@@ -8,7 +8,12 @@ from typing import Any
 
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
 from plans import admission, artifact_links, service
-from plans.feedback_delivery import PROVENANCE, _existing, settle_feedback_node
+from plans.feedback_delivery import (
+    PROVENANCE,
+    _existing,
+    feedback_node_has_started,
+    settle_feedback_node,
+)
 from registry.identity_metadata import last_written_sha256, sha256_file
 from registry.shared_edit_classification import combine_capped_diffs, capped_unified_diff
 
@@ -297,14 +302,6 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
 
 
 
-def _node_has_started(db, recipient_thread_id: str, node_id: str) -> bool:
-    return db.execute(
-        """SELECT 1 FROM active_turns
-           WHERE thread_id=? AND plan_node_id=?
-             AND status IN ('running','waiting_retry')""",
-        (recipient_thread_id, node_id),
-    ).fetchone() is not None
-
 
 def create_feedback_node(
     db,
@@ -318,7 +315,7 @@ def create_feedback_node(
     artifact_id = str(_batch_value(batch, "artifact_id"))
     existing = _existing(db, recipient_thread_id, batch_id)
     if existing is not None:
-        if not _node_has_started(db, recipient_thread_id, existing):
+        if not feedback_node_has_started(db, recipient_thread_id, existing):
             loaded = items if items is not None else load_feedback_items(db, batch)
             if loaded:
                 author, document = feedback_display(db, batch, loaded)
