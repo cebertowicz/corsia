@@ -1,1 +1,1 @@
-"""Bounded continuation queue, admission, sources, and runner."""
+"""Bounded continuation queue, sources, and runner."""

@@ -341,12 +341,8 @@ async def test_a_trigger_reaches_a_busy_owner_in_the_sweep_it_falls_due(continua
     result = await runner.sweep(NOW, sources=[Source()], deliver=deliver)
 
     assert result["woken"] == ["owner"] and delivered == ["owner"]
-    [row] = [current(trigger_id) for trigger_id in _trigger_ids(continuation_db)]
-    assert (row.state, row.deferrals) == ("delivered", 0)
-
-
-def current(trigger_id):
-    return triggers.get(trigger_id, db=database.get_db())
+    [trigger_id] = _trigger_ids(continuation_db)
+    assert triggers.get(trigger_id, db=database.get_db()).state == "delivered"
 
 
 def _trigger_ids(path):

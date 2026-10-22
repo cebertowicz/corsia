@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from automation.continuation import admission
+from automation.continuation import restart_jitter
 from automation.continuation.runner import sweep
 import infra.sweep_wake as sweep_wake
 from infra.db_async import run_in_db
@@ -32,7 +32,7 @@ async def continuation_sweep_loop() -> None:
 
     started = datetime.now(timezone.utc)
     startup_until = started + timedelta(
-        seconds=admission.RESTART_JITTER_SECONDS
+        seconds=restart_jitter.RESTART_JITTER_SECONDS
     )
     first = True
     nudged = sweep_wake.attach()
@@ -42,7 +42,7 @@ async def continuation_sweep_loop() -> None:
             await sweep(
                 now.isoformat(),
                 startup_jitter_seconds=(
-                    admission.RESTART_JITTER_SECONDS if first else 0
+                    restart_jitter.RESTART_JITTER_SECONDS if first else 0
                 ),
             )
         except Exception as exc:  # noqa: BLE001

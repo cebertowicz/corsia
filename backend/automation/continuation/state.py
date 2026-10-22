@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
-from automation.continuation import admission
+from automation.continuation import restart_jitter
 
 
 def parse_iso(value: str) -> datetime:
@@ -20,7 +20,7 @@ def with_startup_jitter(request, now: str, maximum: int):
 
     if maximum <= 0 or request.not_before is not None:
         return request
-    seconds = admission.restart_jitter_seconds(
+    seconds = restart_jitter.restart_jitter_seconds(
         request.thread_id,
         maximum=maximum,
     )
