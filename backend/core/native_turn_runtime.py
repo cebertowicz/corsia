@@ -49,6 +49,7 @@ class NativeTurn:
     #: answer and whose terminal claim this Turn wins; ``None`` otherwise. A
     #: later Turn supersedes it by clearing the idle marker it would ride on.
     idle_receipt: NativeIdleReceipt | None = None
+    catalog_id: str | None = None
 
 
 def native_provider_params(target: Any, resolved: dict) -> dict:
@@ -138,6 +139,16 @@ async def _run_native_turn(
         # the canonical persisted row returned by ``tool_complete``.
         return await turn.handler.handle(kind, payload)
 
+    from core.thread_warm import join_requested_warm_for_delivery
+
+    # Wait only after the runtime and activity frame belong to this Turn.
+    # Stop then cancels this waiter through the same terminal owner as a call.
+    already_cancelled = turn.cancel_event.is_set()
+    await join_requested_warm_for_delivery(
+        turn.thread_id, turn.catalog_id or turn.model,
+    )
+    if not already_cancelled and turn.cancel_event.is_set():
+        return "cancelled"
     await run_turn_with_steps(
         agent=turn.agent,
         user_content=turn.content,
