@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from api import setup_account
 from api.setup_requests import FirstAccountRequest, LocalDownloadRequest, SetupProgressUpdate, SetupReportRequest
 from core.corrections_asset_download import FLIGHT as CLASSIFIER_DOWNLOAD
 from core.corrections_asset_download import public_state as classifier_state
@@ -383,3 +384,14 @@ async def first_account(request: Request) -> dict | Response:
         "user": user,
         "expires_at": utc_storage_iso_to_api(expires_at),
     }
+
+
+@router.put("/account", response_model=None)
+async def update_account(request: Request, authorization: str | None = Header(None)) -> dict | Response:
+    """Change the name, email or password the account screen collected, until setup is finished."""
+    user = authenticate(token_from_request(None, authorization))
+    if not user:
+        return Response(status_code=401)
+    if not _trusted_json_post(request):
+        return Response(status_code=403)
+    return await setup_account.apply_update(user["id"], request)

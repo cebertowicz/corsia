@@ -189,3 +189,54 @@ def stage_user_profile(workspace: Path, full_name: str, timezone: str, email: st
         temp.unlink(missing_ok=True)
         raise
     return StagedProfile(path, temp, previous)
+
+
+def _with_line(lines: list[str], label: str, value: str, *, after: str | None = None) -> list[str]:
+    """``lines`` with the one ``label`` line set to ``value`` (removed when empty), kept where it was or put after ``after``."""
+    kept = [line for line in lines if not line.startswith(label)]
+    if not value:
+        return kept
+    new = f"{label} {value}"
+    for index, line in enumerate(lines):
+        if line.startswith(label):
+            return [*lines[:index], new, *[rest for rest in lines[index + 1:] if not rest.startswith(label)]]
+    place = max((i for i, line in enumerate(kept) if after and line.startswith(after)), default=len(kept) - 1)
+    return [*kept[:place + 1], new, *kept[place + 1:]]
+
+
+def stage_profile_update(workspace: Path, *, full_name: str | None = None, email: str | None = None) -> StagedProfile | None:
+    """Prepare a change to the name and email the person gave during setup, leaving every other line as it is.
+
+    ``full_name`` also resets the preferred name to its first word; ``email`` empty removes the line. ``None`` leaves
+    that field alone. A missing profile is created. Returns ``None`` when the file would not change.
+    Raises ``ValueError`` for a blank name and ``OSError`` when the folder cannot be written.
+    """
+    if full_name is not None and not one_line(full_name):
+        raise ValueError("a name is required")
+    path = Path(workspace) / PROFILE_RELATIVE_PATH
+    if not path.exists():
+        if full_name is None:
+            return None
+        return stage_user_profile(workspace, full_name, mac_timezone(), email or "")
+    previous = path.read_text(encoding="utf-8")
+    lines = previous.splitlines()
+    if full_name is not None:
+        name = one_line(full_name)
+        lines = _with_line(lines, _FULL_NAME_LABEL, name, after="# User profile")
+        lines = _with_line(lines, _NAME_LABEL, name.split(" ", 1)[0], after="# User profile")
+    if email is not None:
+        lines = _with_line(lines, _EMAIL_LABEL, one_line(email), after=_FULL_NAME_LABEL)
+    text = "\n".join(lines) + "\n"
+    if text == previous:
+        return None
+    mode = stat.S_IMODE(path.stat().st_mode)
+    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    descriptor = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.chmod(temp, mode)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+    return StagedProfile(path, temp, previous)

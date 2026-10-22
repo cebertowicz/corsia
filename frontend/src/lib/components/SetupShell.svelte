@@ -4,8 +4,10 @@
 	import { fade } from 'svelte/transition';
 	import { Button, RailRow, RailSection } from '$lib/components/ui';
 	import { peerFade } from '$lib/popoverMotion';
+	import { isSetupWide } from '$lib/stores/viewport';
+	import LivingMark from './LivingMark.svelte';
 
-	export type SetupStep = { label: string; icon: 'sparkle' | 'person' | 'chip' | 'computer' | 'code'; state: 'current' | 'todo' | 'done' };
+	export type SetupStep = { label: string; icon: 'sparkle' | 'person' | 'chip' | 'computer' | 'code' | 'card'; state: 'current' | 'todo' | 'done' };
 	export type SetupJob = { label: string; state: 'busy' | 'done' | 'error'; meta?: string; progress?: number; action?: { label: string; onclick: () => void } };
 
 	interface Props {
@@ -17,14 +19,12 @@
 		title: string;
 		lede?: string;
 		primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean };
-		/** Sits at the top of the brand column beside the body (from 1280 wide), with the mark filling the space beneath it. Comes after the body in reading order. */
-		aside?: Snippet;
 		onPrimary?: () => void;
 		secondary?: Snippet;
 		children?: Snippet;
 	}
 
-	const { steps, section = 'Setup', jobs = [], page, title, lede, primary, aside, onPrimary, secondary, children }: Props = $props();
+	const { steps, section = 'Setup', jobs = [], page, title, lede, primary, onPrimary, secondary, children }: Props = $props();
 	let shownJobs = $state<SetupJob[]>(untrack(() => jobs));
 	let jobRegionOpen = $state(untrack(() => jobs.length > 0));
 	let sceneHeading = $state<HTMLHeadingElement | null>(null);
@@ -35,6 +35,12 @@
 	let pendingWidthFrame: number | undefined;
 	let removeWidthTransitionListener: (() => void) | undefined;
 	let mounted = false;
+	let mark = $state<LivingMark | undefined>();
+
+	/** Plays the mark's exit and resolves when it is done (at once where no mark shows or motion is reduced). Setup calls this once, as it hands over to the first chat. */
+	export function exitMark(): Promise<void> {
+		return mark ? mark.exit() : Promise.resolve();
+	}
 
 	$effect(() => {
 		const scene = page;
@@ -177,25 +183,6 @@
 		return { destroy() { node.removeEventListener('scroll', sync); resize?.disconnect(); mutate?.disconnect(); } };
 	}
 
-	/** The mark fills the brand column under any aside text and shows only while at least `--mark-min` rem of height is left there, so text never runs over it. */
-	function markRoom(node: HTMLElement) {
-		const sync = () => {
-			const text = node.querySelector<HTMLElement>(':scope > :not(.mark)');
-			const style = getComputedStyle(node);
-			const min = (Number.parseFloat(style.getPropertyValue('--mark-min')) || 0) * (Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16);
-			const gap = text ? Number.parseFloat(style.rowGap) || 0 : 0;
-			node.dataset.room = String(node.clientHeight - (text?.offsetHeight ?? 0) - gap >= min);
-		};
-		const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(sync);
-		resize?.observe(node);
-		const mutate = typeof MutationObserver === 'undefined' ? null : new MutationObserver(() => { sync(); const text = node.querySelector(':scope > :not(.mark)'); if (text) resize?.observe(text); });
-		mutate?.observe(node, { childList: true, subtree: true });
-		const text = node.querySelector(':scope > :not(.mark)');
-		if (text) resize?.observe(text);
-		sync();
-		return { destroy() { resize?.disconnect(); mutate?.disconnect(); } };
-	}
-
 	function sceneMotion(node: HTMLElement, params: undefined, options: { direction: 'in' | 'out' | 'both' }) {
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
 			const tight = Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0;
@@ -228,12 +215,13 @@
 	<main class="pane">
 		<div class="drag" data-tauri-drag-region></div>
 		<div class="pane-scenes">
+			<!-- Outside the keyed scene, so a screen change never rebuilds the mark or restarts its motion. From 1280 wide it fills the right half. -->
+			{#if $isSetupWide}<div class="brand"><LivingMark bind:this={mark} /></div>{/if}
 			{#key page}
 				<section class="pane-scene" data-setup-page={page} in:sceneMotion out:sceneMotion onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
 					<header><h1 bind:this={sceneHeading} tabindex="-1">{title}</h1></header>
 					{#if lede}<p class="lede">{lede}</p>{/if}
 					<div class="body" use:scrollCue>{@render children?.()}</div>
-					<div class="brand" use:markRoom>{#if aside}{@render aside()}{/if}<img class="mark" src="/icons/corsia-mark.svg" alt="" /></div>
 				</section>
 			{/key}
 		</div>
@@ -261,19 +249,13 @@
 	.traffic-space { height: calc(var(--space-7) + var(--space-5)); }
 	.pane { position: relative; flex: 1; min-width: 0; height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; padding: calc(var(--space-8) + var(--space-4)) var(--space-4) var(--space-6) var(--space-7); }
 	.drag { position: absolute; inset: 0 0 auto; height: var(--space-8); }
-	.pane-scenes { display: grid; flex: 1; min-height: 0; }
+	.pane-scenes { position: relative; display: grid; flex: 1; min-height: 0; }
 	.pane-scene { position: relative; grid-area: 1 / 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 	header { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); }
-	/* From 1280 wide every scene is two columns: content on the left, the brand column on the right. Below that there is no brand column. */
-	.brand { display: none; }
+	/* From 1280 wide every scene is two columns: content on the left, the mark in the right half. Below that there is no mark. */
+	.brand { position: absolute; top: calc(var(--space-7) + var(--space-3)); right: 0; bottom: 0; width: 50%; box-sizing: border-box; padding-left: var(--space-5); pointer-events: none; }
 	@media (min-width: 80em) {
 		.pane-scene header, .pane-scene .lede, .pane-scene .body { width: 50%; box-sizing: border-box; padding-right: var(--space-5); }
-		/* Level with the lede, which starts one header and --space-3 down (--space-2 at the setup floor). */
-		.brand { display: flex; flex-direction: column; gap: var(--space-5); --mark-min: 8; /* in rem */ position: absolute; top: calc(var(--space-7) + var(--space-3)); right: 0; bottom: 0; width: 50%; box-sizing: border-box; padding-left: var(--space-5); overflow-y: auto; scrollbar-width: thin; }
-		.brand > :global(:not(.mark)) { flex: none; }
-		.brand > .mark { flex: 1 1 0; min-height: 0; width: 100%; object-fit: contain; pointer-events: none; }
-		/* data-room is set by the markRoom action, which Svelte cannot see: without :global it prunes the rule as unused. */
-		.brand:global([data-room='false']) > .mark { display: none; }
 	}
 	h1 { margin: 0; font-size: var(--text-title1); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }
 	.pane-scene h1:focus { outline: none; }
