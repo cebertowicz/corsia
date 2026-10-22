@@ -63,6 +63,14 @@ Follow up once on anything vague. On "not now", carry on and learn as you go.
 1. Write into the workspace `USER.md` only what they said or didn't correct, the way `references/project-import.md` does for role and working style. Where they are based sets their time zone.
 2. If the name they go by is not the one you searched, run one more search with it (within the limit of 6), show what it finds the same way, and ask nothing more about it.
 
+## G. Check question 2 against what is connected
+
+Do this quietly after they answer question 2, and say nothing about it here.
+
+1. Compare their words with what the import brought over (`GET /api/mcp/sources` apps, skills, projects) and what step 3 connected (`GET /api/mcp/servers`): a repository, a project, a folder or a tracker that matches what they are working toward.
+2. Keep what matches and its source (where it came from). Keep nothing that only shares a common word.
+3. Hold it for the hand-off in `references/first-run-app.md`: one match is named there, several are named up to three, none means the fallback line.
+
 ## Worked examples
 
 **1. One clear match.** Inputs: name `Dana Ruiz`; email `dana@harborworks.com` (a company domain); the import kept `Operations lead`. You search `Dana Ruiz Harbor Works`. Page A is the company's team page (Dana Ruiz, Operations lead, 2025); page B is a conference talk listing (Dana Ruiz, Harbor Works). Grouping: A and B share the employer, so one group. Decision: the name matches plus the employer, which is a strong match, so this group is the person. Post: `Here's what I found. Tell me if any of it is wrong.` / `Operations lead at Harbor Works (2025): https://harborworks.com/team` / `Spoke at the Port Logistics Summit: https://portlogistics.example/talks`. Then post questions 2 and 3 in one message. Question 1 is left out because the pages answered what they do and where they work; ask only `Where are you based?` if no page said.
