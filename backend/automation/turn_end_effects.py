@@ -96,10 +96,15 @@ async def record_turn_end(complete, thread_id: str, **outcome) -> TurnEndEffects
     to a held lock (#2772). Any other failure, a refusal after the write
     committed included, is the caller's.
     """
-    return await retry_until_committed(
+    effects = await retry_until_committed(
         lambda: run_in_db(_record_turn_end, complete, thread_id, outcome),
         subject=f"thread {thread_id}",
     )
+    from automation import worker_runner
+
+    # Best-effort and never awaited: a Claude Code slot may have freed, a rule's worker may be done.
+    worker_runner.poke(if_open=True)
+    return effects
 
 
 async def record_external_turn_end(thread_id: str, **outcome) -> TurnEndEffects:

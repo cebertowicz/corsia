@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 
 import subagents.cc_trust as cc_trust
 from core.turn_core import BOOT_EPOCH
@@ -35,6 +36,8 @@ from subagents.cc_spawn_prepare import CCSpawnRequest, PreparedCCSpawn, prepare_
 from subagents.cc_stream import CCStreamSession
 
 log = logging.getLogger("subagents.cc_runtime")
+#: Records a rule-started worker's id on its start before its first turn can run.
+RuleStart = Callable[[str], Awaitable[None]]
 
 
 def _admit_initial_task(prepared: PreparedCCSpawn) -> InputAdmission:
@@ -209,12 +212,14 @@ async def spawn(
     account_id: str | None = None,
     confinement: str = CONFINEMENT_NONE,
     add_dirs: tuple[str, ...] = (),
+    rule_start: RuleStart | None = None,
     db=None,
 ) -> str:
     """Spawn one Claude Code subagent child thread.
 
     A ``review`` confinement runs it read-only over ``add_dirs`` from its own
     empty working directory; the caller has already checked those reads.
+    ``rule_start(child_id)`` records a rule-started worker before its first turn can run.
     """
     require_owned_accept_db(db)
     if not task:
@@ -226,6 +231,8 @@ async def spawn(
     )
     prepared = await prepare_spawn(request, get_db())
     try:
+        if rule_start is not None:
+            await rule_start(prepared.child_id)
         await _start_process(prepared)
         log.info(
             "Spawned CC subagent child=%s from parent=%s",
