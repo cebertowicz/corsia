@@ -1,6 +1,6 @@
-"""Event rules (slice 2.A): a failed repository lookup, decision rows outliving their
-rule or thread, repository case, malformed facts, the preparation gate, and reads per
-recipient thread."""
+"""Event rules: a failed repository lookup, decision rows outliving their rule or
+thread, how long a disabled rule is listed, repository case, malformed facts, the
+preparation gate, and reads per recipient thread."""
 
 from __future__ import annotations
 
@@ -105,6 +105,22 @@ async def test_pruning_a_disabled_rule_deletes_its_decisions(isolated_db):
 
     assert stale["id"] not in {row["id"] for row in _rows("SELECT id FROM event_rules")}
     assert [row["rule_id"] for row in _decisions()] == [live["id"]]
+
+
+@pytest.mark.asyncio
+async def test_a_disabled_rule_leaves_the_list_after_retention_with_nothing_else_written(isolated_db):
+    _project(P)
+    _agent("writer")
+    stale = await _self_rule("writer")
+    recent = await _self_rule("writer")
+    live = await _self_rule("writer")
+    for rule in (stale, recent):
+        await _tool("writer", operation="disable", rule_id=rule["id"])
+    _write("UPDATE event_rules SET updated_at=? WHERE id=?", "2026-08-01T00:00:00+00:00", stale["id"])
+
+    listed = (await _tool("writer", operation="list"))["rules"]
+
+    assert {rule["id"] for rule in listed} == {recent["id"], live["id"]}
 
 
 # -- 3. Repository facts match without case, as create validates them -------------------------

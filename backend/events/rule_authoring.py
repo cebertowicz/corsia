@@ -257,12 +257,18 @@ def _shape(rule: rules.Rule) -> dict[str, Any]:
 
 
 def list_rules(db: sqlite3.Connection, *, project_id: str | None, now: str) -> list[dict[str, Any]]:
-    """The project's rules with when each last acted and its wakes in the last 24 hours."""
+    """The project's rules with when each last acted and its wakes in the last 24 hours.
+
+    A disabled rule is listed for the retention window whether or not anything
+    has pruned it yet.
+    """
     if not project_id:
         return []
+    cutoff = (datetime.fromisoformat(now) - rules.RETENTION).isoformat()
     found = [rules.from_row(row) for row in db.execute(
-        "SELECT * FROM event_rules WHERE scope=? ORDER BY created_at, id",
-        (rules.project_scope(project_id),),
+        "SELECT * FROM event_rules WHERE scope=? AND (enabled=1 OR updated_at>=?) "
+        "ORDER BY created_at, id",
+        (rules.project_scope(project_id), cutoff),
     ).fetchall()]
     if not found:
         return []

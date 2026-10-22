@@ -82,7 +82,12 @@ def rule_scope(
     event_type = MANIFEST.routed_type(internal_event)
     if event_type is None:
         return RuleScope(any_rule=False)
-    any_rule, self_rule = rule_reads.type_rules(MANIFEST.connector, event_type)
+    try:
+        any_rule, self_rule = rule_reads.type_rules(MANIFEST.connector, event_type)
+    except Exception:
+        # Rules only add: a failed read costs this webhook its rules, never its routing.
+        logger.exception("event rules: no rule evaluated {}: rule read failed", internal_event)
+        return RuleScope(any_rule=False)
     if not self_rule:
         return RuleScope(any_rule=any_rule)
     try:
@@ -103,11 +108,24 @@ def apply_routed_rules(
 
     ``prepared.thread_id`` is ``None`` when routing chose no thread; ``prepared.result``
     then already holds today's result, which rules never change, and the
-    ``scope`` read before the gate (:func:`rule_scope`) scopes the rules.
+    ``scope`` read before the gate (:func:`rule_scope`) scopes the rules. Rules
+    only add: when evaluating them fails, the routed delivery and its notice go
+    ahead as routing prepared them.
     """
     scope = scope or RuleScope()
     if not scope.any_rule:
         return
+    try:
+        _apply(prepared, internal_event, payload, selected_pr, routing_state, wake_reason, scope)
+    except Exception:
+        logger.exception("event rules: evaluation failed on {}; routing unchanged", internal_event)
+
+
+def _apply(
+    prepared: PreparedRoute, internal_event: str, payload: dict[str, Any],
+    selected_pr: dict[str, Any] | None, routing_state: dict[str, Any],
+    wake_reason: str | None, scope: RuleScope,
+) -> None:
     try:
         envelope = _envelope(internal_event, payload, selected_pr)
     except MalformedEventError as exc:
@@ -143,13 +161,14 @@ def _drop(prepared: PreparedRoute, internal_event: str, reason: str) -> None:
         github_pr_notice.release_notice(prepared.thread_id, prepared.identity)
         prepared.notice = None
     external_id = prepared.identity.external_id if prepared.identity else None
+    # Suppressed before anything else can fail: a released notice is never delivered.
+    prepared.result = RouteResult(RouteOutcome.SUPPRESSED, thread_id=prepared.thread_id,
+                                  external_id=external_id, reason=reason)
     emit_product_event(
         "event_route", RouteOutcome.SUPPRESSED.value,
         properties={"internal_event": internal_event, "thread_id": prepared.thread_id,
                     "external_id": external_id, "reason": reason},
     )
-    prepared.result = RouteResult(RouteOutcome.SUPPRESSED, thread_id=prepared.thread_id,
-                                  external_id=external_id, reason=reason)
 
 
 def record_routed_rides(prepared: PreparedRoute, delivered: bool) -> None:

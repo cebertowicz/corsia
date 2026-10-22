@@ -1,9 +1,10 @@
-"""Event rules (slice 2.A): rules only add, even when a recipient they add refuses
-the delivery; a rule whose writer left its project turns itself off."""
+"""Event rules only add: a recipient refusing the delivery or rule evaluation failing
+never costs routing its delivery; a rule whose writer left its project turns itself off."""
 
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 
 import pytest
 
@@ -51,6 +52,30 @@ async def test_a_refused_rule_recipient_never_costs_the_routed_owner_its_webhook
     assert _rows("SELECT key FROM settings WHERE key LIKE '%o/r#7'")
     assert _wakes("watcher") == [] and _notes("watcher") == []
     assert _outcomes(rule["id"]) == [UNAVAILABLE]
+
+
+def _locked(*_args, **_kwargs):
+    raise sqlite3.OperationalError("database is locked")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing", ["apply_webhook_rules_sync", "rule_reads.type_rules"])
+async def test_failing_rule_evaluation_never_costs_the_routed_owner_its_webhook(
+        isolated_db, sent, monkeypatch, failing):
+    _project(P)
+    _agent("owner")
+    _agent("watcher")
+    register_pr(REPO, 7, "owner")
+    await _watch_pushes("watcher", note="Re-run the load check.")
+    monkeypatch.setattr(f"events.connectors.github_rules.{failing}", _locked)
+
+    result = await route(SYNC, _sync(7, 1))
+
+    assert result.outcome == RouteOutcome.ACCEPTED
+    [(thread, content)] = sent
+    assert thread == "owner" and "[CORSIA PR notice] You own PR o/r#7" in content
+    assert _rows("SELECT key FROM settings WHERE key LIKE '%o/r#7'")
+    assert _wakes("watcher") == []
 
 
 def test_a_refused_rule_recipient_never_rolls_back_the_platform_delivery(isolated_db):
