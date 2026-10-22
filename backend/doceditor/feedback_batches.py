@@ -117,40 +117,6 @@ def _add_comment_item(
     return True
 
 
-def _join_open_batch(db, comment: dict[str, Any], recipient_id: str) -> tuple[str, bool]:
-    author_kind = str(comment["author_kind"])
-    author_id = feedback_comments.author_id(comment)
-    artifact_id = str(comment["artifact_id"])
-    now = str(comment["created_at"])
-    from plans.public import unstarted_feedback_batch_id
-
-    batch_id = unstarted_feedback_batch_id(
-        db,
-        recipient_thread_id=recipient_id,
-        author_kind=author_kind,
-        author_id=author_id,
-        artifact_id=artifact_id,
-    )
-    delivered = batch_id is not None
-    if batch_id is None:
-        batch_id = _open_batch(
-            db,
-            author_kind=author_kind,
-            author_id=author_id,
-            artifact_id=artifact_id,
-            recipient_id=recipient_id,
-            now=now,
-        )
-    _add_comment_item(
-        db,
-        batch_id=batch_id,
-        comment_id=str(comment["id"]),
-        author_kind=author_kind,
-        now=now,
-        touch=not delivered,
-    )
-    return batch_id, delivered
-
 
 def record_reopen(
     db,
@@ -244,7 +210,8 @@ def record_comment(
     if created:
         feedback_comments.make_user_document_durable(db, comment)
         feedback_comments.emit_comment_created(db, comment)
-        joins = [_join_open_batch(db, comment, recipient) for recipient in feedback_comments.recipients(db, comment)]
+        joins = [feedback_delivery.join_unstarted_batch(db, comment, recipient)
+                 for recipient in feedback_comments.recipients(db, comment)]
         batch_ids = [batch_id for batch_id, _delivered in joins]
         delivered_joins = [(batch_id, delivered) for batch_id, delivered in joins if delivered]
         if delivered_joins:

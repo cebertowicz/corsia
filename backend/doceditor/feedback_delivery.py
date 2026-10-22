@@ -15,6 +15,7 @@ from plans.public import (
     feedback_display,
     feedback_item_counts,
     load_feedback_items,
+    unstarted_feedback_batch_id,
 )
 from registry import models as registry_models
 
@@ -33,6 +34,42 @@ class DeliveryResult:
 
 def _value(batch: Any, key: str) -> Any:
     return batch[key] if hasattr(batch, "keys") else getattr(batch, key)
+
+
+def join_unstarted_batch(db, comment: dict[str, Any], recipient_id: str) -> tuple[str, bool]:
+    """Add feedback to an eligible delivered task or open the next batch."""
+    from doceditor import feedback_batches, feedback_comments
+
+    author_kind = str(comment["author_kind"])
+    author_id = feedback_comments.author_id(comment)
+    artifact_id = str(comment["artifact_id"])
+    now = str(comment["created_at"])
+    batch_id = unstarted_feedback_batch_id(
+        db,
+        recipient_thread_id=recipient_id,
+        author_kind=author_kind,
+        author_id=author_id,
+        artifact_id=artifact_id,
+    )
+    delivered = batch_id is not None
+    if batch_id is None:
+        batch_id = feedback_batches._open_batch(
+            db,
+            author_kind=author_kind,
+            author_id=author_id,
+            artifact_id=artifact_id,
+            recipient_id=recipient_id,
+            now=now,
+        )
+    feedback_batches._add_comment_item(
+        db,
+        batch_id=batch_id,
+        comment_id=str(comment["id"]),
+        author_kind=author_kind,
+        now=now,
+        touch=not delivered,
+    )
+    return batch_id, delivered
 
 
 def recipient_problem(db, recipient_id: str) -> str | None:
