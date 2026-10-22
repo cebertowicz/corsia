@@ -64,6 +64,14 @@ def _capture_frames(monkeypatch, target):
     return frames
 
 
+def _assert_stopped_before_warm_release(db, turn_id, runtime_task):
+    status = db.execute('SELECT status FROM active_turns WHERE id=?', (turn_id,)).fetchone()[0]
+    assert status != 'running'
+    delivery = db.execute("SELECT delivery_state,write_outcome FROM messages WHERE id='warm-input'").fetchone()
+    assert tuple(delivery) == ('cancelled', 'proved_no_write')
+    assert runtime_task is not None and runtime_task.done()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('stop', [False, True], ids=['prefix-reuse', 'stop'])
 async def test_native_warm_wait_has_one_turn_owner(isolated_db, monkeypatch, tmp_path, stop):
@@ -133,6 +141,7 @@ async def test_native_warm_wait_has_one_turn_owner(isolated_db, monkeypatch, tmp
                 state._active_llm_tasks.get('warm-thread'), turn,
                 owns_thread_fn=AsyncMock(return_value=True))
             assert receipt.outcome == 'stopped'
+            _assert_stopped_before_warm_release(db, turn, runtime_task)
         release_warm.set()
         await asyncio.gather(task, return_exceptions=True)
         if runtime_task is not None:
@@ -145,3 +154,23 @@ async def test_native_warm_wait_has_one_turn_owner(isolated_db, monkeypatch, tmp
         release_warm.set()
         await asyncio.gather(task, warm_task, *([runtime_task] if runtime_task else []), return_exceptions=True)
         db.close()
+
+
+@pytest.mark.asyncio
+async def test_preset_cancellation_bypasses_warm_and_keeps_provider_loop_validation(monkeypatch):
+    from core import native_turn_runtime, thread_warm
+
+    cancel = asyncio.Event()
+    cancel.set()
+    join = AsyncMock(side_effect=AssertionError('a cancelled turn must not wait for warm'))
+    runner = AsyncMock()
+    monkeypatch.setattr(thread_warm, 'join_requested_warm_for_delivery', join)
+    monkeypatch.setattr(native_turn_runtime, 'run_turn_with_steps', runner)
+    turn = native_turn_runtime.NativeTurn(
+        agent=object(), thread_id='cancelled-thread', content='', model='test/model',
+        turn_provider={}, handler=object(), cancel_event=cancel, identity=object(),
+    )
+
+    assert await native_turn_runtime._run_native_turn(turn, {}) == 'cancelled'
+    join.assert_not_awaited()
+    runner.assert_awaited_once()
