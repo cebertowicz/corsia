@@ -13,6 +13,7 @@ import {
 	requestInput,
 } from './turnState';
 import { beginPendingSnapshot } from './streamState';
+import { takeReplyContext } from '../stores/replyContextCapture';
 
 export function hasActiveTurn(threadId: string): boolean {
 	return reducerHasActiveTurn(threadId);
@@ -144,9 +145,12 @@ export function sendMessage(
 	});
 
 	const effort = get(reasoningEffort);
+	// What the person was answering, taken at send so the window it accumulated in ends with it.
+	const replyContext = takeReplyContext(threadId);
 	ws.send(JSON.stringify({
 		type: 'message',
 		...viewingPayload,
+		...(replyContext ? { reply_context: replyContext } : {}),
 		thread_id: threadId,
 		content,
 		input_id: inputId,

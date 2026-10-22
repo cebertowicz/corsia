@@ -130,6 +130,8 @@ async def _send_native_input(
         metadata["edited"] = True
     if "viewing_document" in data:
         metadata["viewing_document"] = data["viewing_document"]
+    if "reply_context" in data:
+        metadata["reply_context"] = data["reply_context"]
 
     async def _after_persist_before_dispatch(_final_target: ExecutionTarget) -> None:
         if is_retry:
