@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import io
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -69,6 +70,14 @@ def test_community_consent_rejects_missing_or_misplaced_labels(tmp_path):
     profile.write_text(f"other {label} Yes\n", encoding="utf-8")
 
     assert reader(tmp_path) is False
+
+
+def test_the_first_chat_writes_the_line_the_consent_reader_reads():
+    first_chat = (Path(__file__).resolve().parents[1] / "prompts/system/v1/skills/conductor-bootstrap"
+                  / "references/first-run-app.md").read_text(encoding="utf-8")
+
+    for answer in ("Yes", "No"):
+        assert f"`{user_profile.USE_COMMUNITY_LABEL} {answer}`" in first_chat
 
 
 def test_the_seeded_profile_reaches_agents_as_workspace_context(first_account, monkeypatch):
