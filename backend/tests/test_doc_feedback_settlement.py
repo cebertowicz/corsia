@@ -216,8 +216,7 @@ def test_a_batch_a_person_left_is_not_an_agents_to_settle(isolated_db):
         seed_thread(db, "owner")
         artifact_id = seed_document(db, "owner", name="Person.md")
         comment, _ = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Robin")
-        feedback_batches.close_batch(db, batches(db, state="open")[0]["id"], "send")
-        delivered = batches(db)[0]
+        delivered = batches(db, state="delivered")[0]
         assert delivered["delivered_node_id"]
 
         comments.update(comment["id"], {"resolved": True}, db=db)

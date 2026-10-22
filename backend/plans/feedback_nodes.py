@@ -7,12 +7,17 @@ from pathlib import Path
 from typing import Any
 
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
-from plans import admission, artifact_links, review_requests, service
-from plans.plan_write import transaction
+from plans import admission, artifact_links, service
+from plans.feedback_delivery import (
+    PROVENANCE,
+    _existing,
+    feedback_node_has_started,
+    settle_feedback_node,
+)
 from registry.identity_metadata import last_written_sha256, sha256_file
 from registry.shared_edit_classification import combine_capped_diffs, capped_unified_diff
 
-PROVENANCE = "document.feedback_batch"
+
 COMMENT_ACCEPTANCE = "Every item is acknowledged, resolved, or replied to."
 EDIT_ACCEPTANCE = (
     "The edit is checked against current intent and kept, adjusted, or reverted "
@@ -33,8 +38,8 @@ STOPPED_NOTE = (
 USER_FRAMING = (
     "The user's comments. They state the user's intent; still check factual claims against "
     "the current source. A comment with a suggested replacement is already their change: "
-    "accept it if you agree, otherwise reply with your reason and leave it for them. Send each "
-    "other change you agree with to them as a suggested change "
+    "accept it if you agree, otherwise reply with your reason and leave it for them. Answer with "
+    "suggested changes for each other change you agree with "
     "(doc_comment_create with quote and replacement); make it directly only when it cannot be one "
     "(it moves text across sections, or other changes depend on it), with a comment on the changed "
     "text saying what changed and why. Acknowledge each comment you agree with or that needs no answer. "
@@ -298,30 +303,7 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
     return "\n\n".join(blocks)
 
 
-def _existing(db, recipient_thread_id: str, batch_id: str, provenance: str = PROVENANCE) -> str | None:
-    row = db.execute(
-        """SELECT l.node_id FROM plan_node_artifact_links l
-           JOIN plan_nodes n ON n.id=l.node_id
-           JOIN plans p ON p.id=n.plan_id
-           WHERE p.owner_kind='thread' AND p.owner_id=?
-             AND l.provenance=? AND l.source_event_id=?
-           ORDER BY l.created_at LIMIT 1""",
-        (recipient_thread_id, provenance, batch_id),
-    ).fetchone()
-    return str(row["node_id"]) if row else None
 
-
-def settle_feedback_node(db, recipient_thread_id: str, batch_id: str, *, evidence: str) -> None:
-    """Record the evidence and accept a batch's task once, atomically; a finished task stays as it is and a stopped one gets a note."""
-    node_id = _existing(db, recipient_thread_id, batch_id)
-    if node_id is None:
-        return
-    with transaction(db) as connection:
-        review_requests.settle_node(
-            connection, node_id, evidence=evidence, provenance=PROVENANCE,
-            verified_by="system:document.feedback_batch", stopped_note=STOPPED_NOTE,
-            stopped_event="feedback_settled_while_stopped",
-        )
 
 
 def create_feedback_node(
@@ -331,11 +313,21 @@ def create_feedback_node(
     *,
     items: list[dict[str, Any]] | None = None,
 ) -> FeedbackNodeResult:
-    """Create one queued recipient-plan task, idempotently keyed by batch id."""
+    """Create one queued recipient-plan task, refreshing it only before admission starts it."""
     batch_id = str(_batch_value(batch, "id"))
     artifact_id = str(_batch_value(batch, "artifact_id"))
     existing = _existing(db, recipient_thread_id, batch_id)
     if existing is not None:
+        if not feedback_node_has_started(db, recipient_thread_id, existing):
+            loaded = items if items is not None else load_feedback_items(db, batch)
+            if loaded:
+                author, document = feedback_display(db, batch, loaded)
+                service.touch_node(
+                    db, existing,
+                    title=_title(author, document, loaded),
+                    acceptance_criteria=_acceptance(loaded),
+                    description=_description(batch, loaded),
+                )
         return FeedbackNodeResult(existing, (), False)
     loaded = items if items is not None else load_feedback_items(db, batch)
     if not loaded:
