@@ -7,10 +7,13 @@ resolved) and never re-derive it. A rule an agent wrote only adds to it:
 
 - a ``deliver`` rule adds a recipient, or rides a delivery routing already made
   to that thread (its note joins it, and a wake beats a digest);
-- a ``drop`` rule removes its writer's own delivery, nothing else.
+- a ``drop`` rule removes its writer's own delivery, nothing else;
+- a ``run_script`` rule queues one run of its writer's script and changes no
+  delivery (``events.rule_runs``).
 
 Every outcome of a rule goes through :func:`record`, the one writer of
-``event_route_decisions``. With no enabled rule for an event's type in the
+``event_route_decisions`` rows; ``events.rule_runs`` only advances a queued
+run's row. With no enabled rule for an event's type in the
 event's project, evaluation costs one indexed read and nothing else. Whether a
 rule's wake ask wakes is the disposition table's answer. Names no connector.
 """
@@ -24,15 +27,21 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from loguru import logger
+
 from events import rule_reads
 from events.rule_match import matches, repository_fact
 from events.disposition import WAKE as TABLE_WAKE, disposition
 from events.resolve import Target, lifecycle
+from events.rule_outcomes import (  # noqa: F401 - re-exported: callers read them as rules.*
+    DEAD_LETTERED, DIGESTED, DROPPED, DUPLICATE, ENDED, HELD, WAKE_CAP, WOKE, Delivery, Entry, Outcome,
+)
 from infra.queries import thread_is_temporary
 from registry.retirement_predicate import identity_ended
 
 DELIVER = "deliver"
 DROP = "drop"
+RUN_SCRIPT = "run_script"
 WAKE = "wake"
 DIGEST = "digest"
 REGISTERED_OWNER = "registered_owner"
@@ -43,17 +52,7 @@ NAMING = ("eq", "in")  # the operators whose values name what an event must be
 MAX_TESTS = 4
 NOTE_LIMIT = 500
 
-# Outcomes, as event_route_decisions stores them.
-WOKE = "woke"
-DIGESTED = "digested"
-DROPPED = "dropped"
-HELD = "held"
-DEAD_LETTERED = "dead_lettered"
-ENDED = "ended"
-DUPLICATE = "duplicate"
-
 # Reasons a guard gives.
-WAKE_CAP = "wake cap"
 PAUSED = "paused"
 NEVER_WAKES = "this recipient never wakes for this artifact"
 OTHER_OWNER = "the registered owner is another agent"
@@ -79,6 +78,7 @@ class Rule:
     note: str | None
     created_by: str
     enabled: bool = True
+    script_id: str | None = None  # run_script: the writer's script schedule it runs
 
 
 @dataclass(frozen=True)
@@ -94,68 +94,7 @@ class RuleEvent:
     ends_artifact: bool = False
     # Read only when routing gave the event no thread: the projects tracking its repository.
     repository_projects: frozenset[str] = frozenset()
-
-
-@dataclass(frozen=True)
-class Entry:
-    """One rule's part in a delivery: whether it asks to wake, and why not."""
-
-    rule_id: str
-    wake: bool
-    reason: str | None = None  # why its wake ask became a digest (R7, R9, 4.4, the table)
-    since_wake: int = 0  # R9: this rule's capped digests to the thread since it last woke it
-
-
-@dataclass
-class Delivery:
-    """What rules add to one thread's delivery.
-
-    ``routed_wake`` is today's routing's own choice for a delivery rules ride; a
-    delivery rules add has none. Wake beats digest.
-    """
-
-    routed_wake: bool = False
-    notes: list[str] = field(default_factory=list)
-    entries: list[Entry] = field(default_factory=list)
-
-    @property
-    def wake(self) -> bool:
-        return self.routed_wake or any(entry.wake for entry in self.entries)
-
-    @property
-    def capped(self) -> list[Entry]:
-        """The rules whose wake the hourly cap turned into this digest."""
-        return [] if self.wake else [entry for entry in self.entries if entry.reason == WAKE_CAP]
-
-    def add(self, rule: Rule, wake: bool, reason: str | None, since_wake: int = 0) -> None:
-        self.entries.append(Entry(rule.id, wake, reason, since_wake))
-        if rule.note:
-            self.notes.append(rule.note)
-
-    def outcomes(self, thread: str, delivered: str, *, ride: bool) -> list[Outcome]:
-        """Each rule's outcome once the delivery is made (woke, digested or duplicate).
-
-        ``via='rule'`` marks the rule that caused the wake or digest; a rule that
-        rode one something else caused is ``via='routed'``. R9 counts only the first.
-        """
-        results = []
-        for entry in self.entries:
-            if delivered == WOKE:
-                caused = entry.wake and not self.routed_wake
-            else:
-                caused = not ride
-            results.append(Outcome(entry.rule_id, thread, delivered,
-                                   via="rule" if caused else "routed", reason=entry.reason))
-        return results
-
-
-@dataclass(frozen=True)
-class Outcome:
-    rule_id: str
-    thread: str | None
-    outcome: str
-    via: str = "rule"  # "routed": the rule rode a delivery something else made
-    reason: str | None = None
+    trace: tuple[str, ...] = ()  # the rules whose script runs led to this event, oldest first
 
 
 @dataclass
@@ -183,7 +122,7 @@ def from_row(row: Mapping[str, Any]) -> Rule:
         id=row["id"], scope=row["scope"], connector=row["connector"],
         event_type=row["event_type"], match=tuple(json.loads(row["match"])),
         action=row["action"], to=row["to"], mode=row["mode"], note=row["note"],
-        created_by=row["created_by"], enabled=bool(row["enabled"]),
+        created_by=row["created_by"], enabled=bool(row["enabled"]), script_id=row["script_id"],
     )
 
 
@@ -201,13 +140,27 @@ def lookup(
 
 def self_on_repository(rule: Rule) -> bool:
     """An event with no owner and nothing routed reaches only a writer's rule to
-    itself that names the event's repository: create checked that the writer's
-    project tracks that repository, and no one else is reached."""
-    if rule.action != DELIVER or thread_target(rule.to) != rule.created_by:
+    itself (a delivery or its own script) that names the event's repository: create
+    checked that the writer's project tracks that repository, and no one else is reached."""
+    if rule.action == DROP or thread_target(rule.to) != rule.created_by:
         return False
     fact = repository_fact(rule.connector)
     return fact is not None and any(
         test["field"] == fact and test["op"] in NAMING for test in rule.match)
+
+
+def lookup_failed(db: sqlite3.Connection, event: RuleEvent) -> list[Outcome]:
+    """Fail closed, as ``create`` does: no self-rule fires on an event routing gave no
+    thread when the projects tracking its repository can't be read; each that matched
+    is dead-lettered with the reason."""
+    repository = event.facts.get(repository_fact(event.connector) or "")
+    logger.warning("event rules: repository lookup failed for {} {} on {}; no self-rule fired",
+                   event.connector, event.event_type, repository)
+    return [
+        Outcome(rule.id, rule.created_by, DEAD_LETTERED, reason=LOOKUP_FAILED)
+        for rule in map(from_row, rule_reads.self_rules(db, event.connector, event.event_type))
+        if matches(rule, event.facts) and self_on_repository(rule)
+    ]
 
 
 def thread_target(to: str) -> str | None:
@@ -237,8 +190,8 @@ def _apply_drops(
     recipients: Mapping[str, str | None],
 ) -> dict[str, str]:
     """Each drop rule removes its writer's own delivery, routed or rule-added, and
-    records an outcome only when it removed one; returns writer -> rule."""
-    added = {recipients[rule.id] for rule in rules if rule.action == DELIVER}
+    records an outcome only when it removed one (a script run counts); returns writer -> rule."""
+    added = {recipients[rule.id] for rule in rules if rule.action != DROP}
     dropped_by: dict[str, str] = {}
     for rule in (rule for rule in rules if rule.action == DROP):
         writer = rule.created_by
@@ -268,7 +221,7 @@ def _settle_unreachable(
             turn_off(db, rule.id, rule.scope, _iso(_now()))
             plan.settled.append(Outcome(rule.id, rule.created_by, DEAD_LETTERED,
                                         reason=WRITER_LEFT))
-        elif rule.action == DELIVER and (row is None or not row["available"]):
+        elif rule.action != DROP and (row is None or not row["available"]):
             reason = "no registered owner" if thread is None else UNAVAILABLE
             plan.settled.append(Outcome(rule.id, thread, DEAD_LETTERED, reason=reason))
         elif row is not None and row["project_id"] != rule.scope.removeprefix(PROJECT_PREFIX):
@@ -353,6 +306,9 @@ def evaluate(
         db, [*recipients.values(), *(rule.created_by for rule in rules)])
     rules = _settle_unreachable(db, plan, rules, recipients, threads)
     dropped_by = _apply_drops(plan, rules, by_thread, recipients)
+    from events.rule_runs import queue  # it imports this module
+
+    plan.settled += queue(db, event, rules, dropped_by)
     delivering: list[tuple[Rule, str, Target | None]] = []
     answers: dict[str, tuple[bool, str | None, int]] = {}
     asking: dict[str, list[str]] = {}
@@ -389,11 +345,11 @@ def record(db: sqlite3.Connection, event: RuleEvent, outcomes: Iterable[Outcome]
     db.executemany(
         "INSERT INTO event_route_decisions (at, event_id, connector, event_type, watch_event, "
         "artifact_integration, artifact_type, artifact_external_id, rule_id, thread_id, "
-        "outcome, via, reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "outcome, via, reason, run_input) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
             (_iso(now), event.event_id, event.connector, event.event_type, event.watch_event,
              ref.get("integration"), ref.get("type"), ref.get("external_id"),
-             item.rule_id, item.thread, item.outcome, item.via, item.reason)
+             item.rule_id, item.thread, item.outcome, item.via, item.reason, item.run_input)
             for item in outcomes
         ],
     )

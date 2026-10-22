@@ -271,13 +271,18 @@ def hash_mismatch_report(schedule: Schedule) -> RunReport:
 
 def emit_report(
     db: sqlite3.Connection, schedule: Schedule, report: RunReport, *, now: str,
+    rule_run: bool = False,
 ) -> bool:
-    """Write a run's events, notes and wakes and settle it; True if the owner was woken."""
+    """Write a run's events, notes and wakes and settle it; True if the owner was woken.
+
+    A run an event rule started may print nothing, so it never reports ``no_data``.
+    """
     registered = {s.key: s for s in store.series_of(schedule)}
     # Measure refusals are intake data, counted for measure_status: never run errors or wakes.
     measures = settle_measures(db, schedule, report)
     signals, status = list(report.signals), report.status
-    if status == "ok" and not report.readings and not report.events and measures.accepted == 0:
+    if (not rule_run and status == "ok" and not report.readings and not report.events
+            and measures.accepted == 0):
         signals.append(_no_data(schedule))  # a silently broken measure script still surfaces
         status = "no_data"
     woken = False
@@ -286,7 +291,8 @@ def emit_report(
     noted = _note_readings(db, schedule, report, registered, now)
     store.finish_run(
         schedule.id, ran_at=now, status=status, error=report.error,
-        noted=noted, last_measures=measures.line if (measures.accepted or measures.refused) else None, db=db,
+        noted=noted, last_measures=measures.line if (measures.accepted or measures.refused) else None,
+        db=db,
     )
     return woken
 

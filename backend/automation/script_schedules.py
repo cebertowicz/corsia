@@ -27,6 +27,8 @@ from host_access.credential_sanitizer import sanitize_credential_text
 from infra.database import write_transaction
 
 SCRIPT_KIND = "script"
+#: The spec of a script with no cadence: only ``run_script`` event rules start it.
+RULES_ONLY = "rules"
 MIN_CADENCE_SECONDS = 300
 DEFAULT_TIMEOUT_SECONDS = 60
 MAX_TIMEOUT_SECONDS = 300
@@ -147,17 +149,22 @@ def create_script(
     *,
     script_path: Path,
     script_sha256: str,
-    cadence_seconds: int,
+    cadence_seconds: int | None,
     series: list[Series],
     timeout_seconds: int,
     now: str,
     db,
     workflow: str | None = None,
 ) -> Schedule:
-    """Register one script schedule, due at once, under the per-agent and instance caps."""
-    if isinstance(cadence_seconds, bool) or not (
+    """Register one script schedule, due at once, under the per-agent and instance caps.
+
+    ``cadence_seconds=None`` registers a script only event rules start: it has no next
+    run, so the sweep never claims it, it never runs without an event and never reports
+    no data.
+    """
+    if cadence_seconds is not None and (isinstance(cadence_seconds, bool) or not (
         MIN_CADENCE_SECONDS <= cadence_seconds <= MAX_CADENCE_SECONDS
-    ):
+    )):
         raise ValueError(
             f"cadence_seconds must be between {MIN_CADENCE_SECONDS} and "
             f"{MAX_CADENCE_SECONDS}"
@@ -177,8 +184,9 @@ def create_script(
                 script_path,script_sha256,timeout_seconds)
                VALUES (?,?,?,'script',?,?,?,'active',?,?,?,?,?,?,?)""",
             (
-                schedule_id, thread_id, scope_id, str(cadence_seconds), now,
-                UNBOUNDED_RUNS, payload, thread_id, now, now,
+                schedule_id, thread_id, scope_id,
+                RULES_ONLY if cadence_seconds is None else str(cadence_seconds),
+                None if cadence_seconds is None else now, UNBOUNDED_RUNS, payload, thread_id, now, now,
                 str(script_path), script_sha256, timeout_seconds,
             ),
         )
@@ -219,6 +227,8 @@ def next_slot(due_at: str, cadence_seconds: int, now: str) -> str:
 
 def claim(schedule: Schedule, now: str, *, db) -> bool:
     """Mark one due run in flight and move the row to its next slot, exactly once."""
+    if schedule.next_run_at is None:
+        return False  # only event rules start it (claim_for_rule)
     cursor = db.execute(
         """UPDATE automation_schedules
            SET running_since=?, next_run_at=?, updated_at=?
@@ -235,8 +245,21 @@ def claim(schedule: Schedule, now: str, *, db) -> bool:
     return cursor.rowcount == 1
 
 
+def claim_for_rule(schedule_id: str, now: str, *, db) -> bool:
+    """Mark a rule-started run in flight on the script's own claim, leaving its next slot.
+
+    Scheduled and rule-started runs take the same claim, so at most one run of a
+    script is in flight; False while another run holds it.
+    """
+    return db.execute(
+        """UPDATE automation_schedules SET running_since=?, updated_at=?
+           WHERE id=? AND kind='script' AND state='active' AND running_since IS NULL""",
+        (now, now, schedule_id),
+    ).rowcount == 1
+
+
 def due_scripts(now: str, *, db) -> list[Schedule]:
-    """Active script schedules due and not in flight, oldest first."""
+    """Active script schedules due and not in flight, oldest first (a rules-only one has no next run)."""
     rows = db.execute(
         """SELECT * FROM automation_schedules
            WHERE kind='script' AND state='active' AND running_since IS NULL

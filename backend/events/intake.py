@@ -310,7 +310,7 @@ def _store(conn, event_type: str, facts: dict[str, Any], owner: str, event_id: s
 
 
 def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: str, event_id: str,
-                stamps: MeasureStamps | None = None) -> IntakeResult:
+                stamps: MeasureStamps | None = None, trace: tuple[str, ...] = ()) -> IntakeResult:
     # A declared type always has its declaring thread as owner; only a connector's can be unrouted.
     projects = _unrouted_projects(event_type, facts) if origin == "connector" else frozenset()
     with write_transaction(None, scope="admit_event") as conn:
@@ -331,7 +331,10 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
             return IntakeResult(False, False, resolved.refusal, 0)
         if resolved.envelope is None or resolved.declaration is None:
             return _refusal("unresolved_event", "event could not be resolved; this is a platform fault")
-        envelope = EventEnvelope(**{**resolved.envelope.__dict__, "event_id": event_id})
+        envelope = EventEnvelope(**{
+            **resolved.envelope.__dict__, "event_id": event_id,
+            "provenance": {**resolved.envelope.provenance, "rule_trace": list(trace)},
+        })
         owner = resolved.registered_owner
         if resolved.stored and owner is not None:
             refused = _store(conn, event_type, facts, owner, event_id, stamps)
@@ -353,16 +356,20 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
 
 
 async def admit_event(*, event_type: str, facts: dict, origin: Literal["connector", "emitter", "agent", "platform"],
-                      producer: str, event_id: str, stamps: MeasureStamps | None = None) -> IntakeResult:
+                      producer: str, event_id: str, stamps: MeasureStamps | None = None,
+                      trace: tuple[str, ...] = ()) -> IntakeResult:
     """Validate, deduplicate, evaluate and deliver one declared event without trusting producer input.
 
     A use: both type is also recorded as a measure in the same transaction, before routing.
+    ``trace`` is set only for a run a rule started, by the script runner or by
+    ``corsia event emit`` from the run's ``events.trace_env``: the rules in the event's
+    causal chain, which the loop guard reads (``events.rule_runs``).
     An emitter or agent refusal is retained here, the one owner of that receipt; failing to
     retain it only logs and never changes the result.
     """
     problem = _facts_problem(facts)
     result = problem if problem is not None else await asyncio.to_thread(
-        _admit_sync, event_type, facts, origin, producer, event_id, stamps,
+        _admit_sync, event_type, facts, origin, producer, event_id, stamps, trace,
     )
     if result.refusal is not None and origin in ("emitter", "agent"):
         try:

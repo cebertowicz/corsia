@@ -21,7 +21,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
-from events import rule_declarations, rule_reads, rules
+from events import rule_declarations, rule_explain, rule_reads, rules
 from events.connectors import EventTypeDecl, get_manifest
 from events.rule_match import matches
 from infra.queries import thread_available_sql, thread_is_temporary
@@ -179,7 +179,7 @@ def create(
     db: sqlite3.Connection, *, writer: str, project_id: str | None, connector: Any,
     event_type: Any, match: Any = None, action: Any = rules.DELIVER, to: Any = None,
     mode: Any = None, note: Any = None, scope: Any = None, now: str,
-    tracked: frozenset[str] | None = None,
+    tracked: frozenset[str] | None = None, script_id: Any = None,
 ) -> dict[str, Any]:
     """Write one rule within the writer limits, or raise :class:`RuleRefused`.
 
@@ -205,9 +205,16 @@ def create(
     if problem:
         raise RuleRefused(problem)
     _repositories(connector, tests, tracked)
-    if action not in (rules.DELIVER, rules.DROP):
-        raise RuleRefused("action is deliver or drop")
-    if action == rules.DROP:
+    if action not in (rules.DELIVER, rules.DROP, rules.RUN_SCRIPT):
+        raise RuleRefused("action is deliver, drop or run_script")
+    if script_id is not None and action != rules.RUN_SCRIPT:
+        raise RuleRefused("script_id goes only with action run_script.")
+    if action == rules.RUN_SCRIPT:
+        from events.rule_runs import check_script
+
+        # Refuses to, mode and note; the run is its writer's own, so it stores to: self.
+        script_id = check_script(db, writer, script_id, {"to": to, "mode": mode, "note": note})
+    elif action == rules.DROP:
         if mode is not None or note is not None:
             raise RuleRefused("A drop takes no mode or note.")
     else:
@@ -219,11 +226,11 @@ def create(
     stored_to, authority = _recipient(db, writer, project_id, to, action, mode)
     rule_id = "rule_" + uuid.uuid4().hex[:12]
     db.execute(
-        'INSERT INTO event_rules (id, created_at, updated_at, enabled, scope, connector, '
-        'event_type, "match", action, "to", mode, note, origin, created_by, authority_ref) '
-        "VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?)",
+        'INSERT INTO event_rules (id, created_at, updated_at, enabled, scope, connector, event_type, '
+        '"match", action, "to", mode, note, origin, created_by, authority_ref, script_id) '
+        "VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?)",
         (rule_id, now, now, own_scope, connector, event_type, json.dumps(tests), action,
-         stored_to, mode, note, f"agent:{writer}", writer, authority),
+         stored_to, mode, note, f"agent:{writer}", writer, authority, script_id),
     )
     _prune_disabled(db, own_scope, now)
     return _shape(rules.from_row(db.execute("SELECT * FROM event_rules WHERE id=?", (rule_id,)).fetchone()))
@@ -263,11 +270,13 @@ def _shape(rule: rules.Rule) -> dict[str, Any]:
         "id": rule.id, "enabled": rule.enabled, "connector": rule.connector,
         "event_type": rule.event_type, "match": list(rule.match), "action": rule.action,
         "to": rule.to, "mode": rule.mode, "note": rule.note, "written_by": rule.created_by,
+        "script_id": rule.script_id,
     }
 
 
 def list_rules(db: sqlite3.Connection, *, project_id: str | None, now: str) -> list[dict[str, Any]]:
-    """The project's rules (disabled ones only within retention), last action and 24h wakes."""
+    """The project's rules (disabled ones only within retention), last action, and 24h wakes,
+    script starts and skipped runs."""
     if not project_id:
         return []
     cutoff = (datetime.fromisoformat(now) - rules.RETENTION).isoformat()
@@ -282,16 +291,20 @@ def list_rules(db: sqlite3.Connection, *, project_id: str | None, now: str) -> l
     marks = ",".join("?" * len(found))
     stats = {
         row["rule_id"]: row for row in db.execute(
-            "SELECT rule_id, MAX(CASE WHEN outcome IN ('woke','digested','dropped') THEN at END) "
-            "AS last_fired, SUM(outcome='woke' AND via='rule' AND at>=?) AS wakes "
+            "SELECT rule_id, MAX(CASE WHEN outcome IN ('woke','digested','dropped','queued','running',"
+            "'ran','failed') THEN at END) AS last_fired, SUM(outcome='woke' AND via='rule' AND at>=?) "
+            "AS wakes, SUM(outcome IN ('queued','running','ran','failed') AND at>=?) AS starts, "
+            "SUM(outcome='skipped' AND at>=?) AS skips "
             f"FROM event_route_decisions WHERE rule_id IN ({marks}) GROUP BY rule_id",
-            (since, *(rule.id for rule in found)),
+            (since, since, since, *(rule.id for rule in found)),
         ).fetchall()
     }
     return [
         {**_shape(rule),
          "last_fired": stats[rule.id]["last_fired"] if rule.id in stats else None,
-         "wakes_24h": int(stats[rule.id]["wakes"] or 0) if rule.id in stats else 0}
+         "wakes_24h": int(stats[rule.id]["wakes"] or 0) if rule.id in stats else 0,
+         "starts_24h": int(stats[rule.id]["starts"] or 0) if rule.id in stats else 0,
+         "skips_24h": int(stats[rule.id]["skips"] or 0) if rule.id in stats else 0}
         for rule in found
     ]
 
@@ -320,6 +333,8 @@ def dry_run(
 def _would(rule: rules.Rule) -> str:
     if rule.action == rules.DROP:
         return f"drop deliveries to {rules.thread_target(rule.to)}"
+    if rule.action == rules.RUN_SCRIPT:
+        return f"run {rules.thread_target(rule.to)}'s script {rule.script_id} with the event"
     who = "the registered owner" if rule.to == rules.REGISTERED_OWNER else rules.thread_target(rule.to)
     return f"{rule.mode} {who}"
 
@@ -358,39 +373,6 @@ def explain(
         f"WHERE {' AND '.join(where)} ORDER BY d.id DESC LIMIT ?",
         (*args, _EXPLAIN_LIMIT),
     ).fetchall()
-    decisions = [_decision(db, row) for row in rows]
+    decisions = [rule_explain.decision(db, row) for row in rows]
     return {"decisions": decisions, "summary": rule_reads.explain_summary(event_id, len(decisions))}
 
-
-def _decision(db: sqlite3.Connection, row: Mapping[str, Any]) -> dict[str, Any]:
-    outcome, reason, thread = row["outcome"], row["reason"], row["thread_id"]
-    text = {
-        rules.WOKE: f"rule {row['rule_id']} woke {thread}",
-        rules.DIGESTED: f"rule {row['rule_id']} put it in {thread}'s digest",
-        rules.DROPPED: f"rule {row['rule_id']} dropped it for {thread}",
-        rules.HELD: f"rule {row['rule_id']} held it from {thread}",
-        rules.DEAD_LETTERED: f"rule {row['rule_id']} could not deliver it",
-        rules.ENDED: f"rule {row['rule_id']} did not fire: the file had already ended",
-        rules.DUPLICATE: f"rule {row['rule_id']}: {thread} already had it",
-    }[outcome]
-    if row["via"] == "routed" and outcome in (rules.WOKE, rules.DIGESTED):
-        text += " (with the delivery routing already made)"
-    if reason:
-        text += f": {reason}"
-    shaped: dict[str, Any] = {
-        "at": row["at"], "event_id": row["event_id"], "event_type": row["event_type"],
-        "artifact": row["artifact_external_id"], "rule_id": row["rule_id"], "thread_id": thread,
-        "outcome": outcome, "reason": reason, "explanation": text,
-    }
-    if outcome == rules.DROPPED and thread and row["artifact_external_id"]:
-        watches = [w["id"] for w in db.execute(
-            "SELECT id FROM expected_event_watches WHERE artifact_integration=? AND artifact_type=? "
-            "AND artifact_external_id=? AND expected_event=? AND owner_thread_id=? AND status='armed'",
-            (row["artifact_integration"], row["artifact_type"], row["artifact_external_id"],
-             row["watch_event"], thread),
-        ).fetchall()]
-        if watches:
-            shaped["armed_watches_left_waiting"] = watches
-            shaped["explanation"] += (
-                f"; armed watch {', '.join(watches)} still waits, since a dropped event doesn't end it")
-    return shaped
