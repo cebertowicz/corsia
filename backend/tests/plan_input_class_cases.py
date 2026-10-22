@@ -489,7 +489,11 @@ def _missing_intent_word(_db, _scene):
 
 def _too_many_intent_words(db, scene):
     words = [{"quote": f"Word {index}", "author": "agent"} for index in range(intent_words.MAX_WORDS_PER_CALL + 1)]
-    return partial(intent_words.resolve_words, db, scene.plan_id, words, actor_id=None)
+    return partial(intent_words.resolve_words, db, words, actor_id=None)
+
+
+def _person_quote_without_thread(db, _scene):
+    return partial(intent_words.resolve_words, db, [{"quote": "Build it", "role": "authority"}], actor_id=None)
 
 
 def _oversized_intent_word(_db, _scene):
@@ -584,7 +588,8 @@ _CASES = {
     ("intent_words.py", '"intent_words items require quote, author?, and role?"'): _missing_intent_word,
     ("intent_words.py", '"intent word author must be person or agent"'): _missing_intent_word,
     ("intent_words.py", '"intent word role must be origin, bears_on, or authority"'): _missing_intent_word,
-    ("intent_words.py", '"quote was not found; quote exactly, or pass it as your own words with author: agent"'): _missing_intent_word,
+    ("intent_words.py", "QUOTE_NOT_FOUND"): _missing_intent_word,
+    ("intent_words.py", '"person quotes must be recorded from the agent\'s own thread"'): _person_quote_without_thread,
     # --- plans/boundary_dispatch.py ---
     ("intent_creation.py", '"task creation needs intent_words with an exact person quote and role: authority"'): _missing_authority_quote,
     # --- plans/boundary_fields.py ---

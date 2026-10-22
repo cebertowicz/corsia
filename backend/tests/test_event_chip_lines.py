@@ -334,4 +334,4 @@ def test_a_lone_non_roster_event_keeps_its_summary_line_as_the_digest_summary():
 
 def test_the_intent_chips_use_the_copy_glossary():
     assert plan_wakes.WAKE_CHIPS["plan.intent_revised"] == "A task’s goal changed"
-    assert plan_wakes.WAKE_CHIPS["plan.intent_input"] == "Your message may affect a running task"
+    assert plan_wakes.WAKE_CHIPS["plan.intent_input"] == "What you said may affect a running task"

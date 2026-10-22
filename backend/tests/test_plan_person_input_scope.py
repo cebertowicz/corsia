@@ -57,6 +57,47 @@ def test_another_users_task_is_not_woken(db):
     assert _hear(db, "message", "m1") == []
 
 
+def test_scoring_runs_before_the_write_transaction_opens(db, monkeypatch):
+    from contextlib import contextmanager
+
+    import infra.database
+    from plans import person_input
+
+    owner = _task(db, _thread(db, "owner"), EXPORT)
+    _say(db, _thread(db, "speaker"), SAID)
+    seen: list[tuple[str, bool]] = []
+    score, write = person_input.scored, infra.database.write_transaction
+
+    def scored(read, nodes, text):
+        seen.append(("scored", read.in_transaction))
+        return score(read, nodes, text)
+
+    @contextmanager
+    def watched(connection, *, scope):
+        seen.append(("write", False))
+        with write(connection, scope=scope) as opened:
+            yield opened
+
+    monkeypatch.setattr(person_input, "scored", scored)
+    monkeypatch.setattr(infra.database, "write_transaction", watched)
+
+    assert _hear(db, "message", "m1") == [f"plan-wake:intent_input:{owner}:message:m1"]
+    assert seen == [("scored", False), ("write", False)]
+
+
+def test_a_relayed_message_wakes_nobody(db):
+    _task(db, _thread(db, "owner"), EXPORT)
+    from infra.input_admission import accept_thread_input
+
+    accept_thread_input(
+        _thread(db, "speaker"), role="user", content=SAID, intent="apply_now", message_id="m1",
+        metadata={"sender_kind": "agent"}, db=db,
+    )
+    db.commit()
+
+    assert _hear(db, "message", "m1") == []
+
+
 def test_a_no_project_chat_does_not_reach_another_users_no_project_plan(db):
     _task(db, _thread(db, "owner", user="u-other", project=None), EXPORT)
     _say(db, _thread(db, "speaker", project=None), SAID)

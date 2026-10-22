@@ -21,6 +21,22 @@ def test_the_earliest_wait_is_chosen_across_offset_forms():
     assert (summary["label"], summary["until"], summary["more"]) == ("Sooner", "2026-10-22T16:00:00Z", 1)
 
 
+def test_a_wait_nothing_names_is_labelled_with_the_waiting_task():
+    summary = wait_summary.from_nodes([_node({"kind": "waiting", "ends_at": "2026-10-22T16:00:00Z"})])
+
+    assert summary["label"] == "Task"
+
+
+def test_a_child_plans_unnamed_wait_is_labelled_with_its_task(monkeypatch):
+    from plans import node_waits
+
+    cause = {"kind": "waiting", "ends_at": "2026-10-22T16:00:00Z"}
+    monkeypatch.setattr(node_waits, "armed_in_plans", lambda _db, _ids: {"plan": [("watch-row", "Ship the export")]})
+    monkeypatch.setattr(node_waits, "named_watch_cause", lambda row: cause if row == "watch-row" else {})
+
+    assert wait_summary.for_plans(None, ["plan"])["plan"]["label"] == "Ship the export"
+
+
 def test_set_aside_until_is_the_earliest_instant_as_written():
     nodes = [
         _node(_wait("2026-10-22T09:30:00-07:00", "Later", scheduled_reason="set aside")),

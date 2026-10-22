@@ -47,17 +47,20 @@ def test_more_than_three_quotes_in_one_call_are_refused_with_the_next_step(db):
     assert str(refusal.value) == "intent_words takes at most 3 quotes per call; keep the strongest 3"
 
 
-def test_the_plans_project_is_read_once_per_call(db, monkeypatch):
+def test_a_quote_reads_at_most_one_bounded_page_of_candidates_per_source_kind(db, monkeypatch):
+    from plans import person_input
+
     _init_messages_fts(db)
-    for index in range(3):
-        _doc_comment(db, f"once-{index}", f"Keep scope {index} narrow.", "2026-10-01")
-    reads = []
-    original = intent_words._project_id
-    monkeypatch.setattr(intent_words, "_project_id", lambda *args: reads.append(args) or original(*args))
+    for index in range(30):
+        _doc_comment(db, f"near-{index}", f"Keep the narrowest scope {index}.", f"2026-10-{index + 1:02d}")
+    loads = []
+    original = person_input.load
+    monkeypatch.setattr(person_input, "load", lambda *args: loads.append(args[1]) or original(*args))
 
-    _add(db, [{"quote": f"Keep scope {index} narrow.", "role": "authority"} for index in range(3)], "one-read")
+    with pytest.raises(service.PlanInputError):
+        _add(db, [{"quote": "Keep the narrowest scope wide.", "role": "authority"}], "bounded-reads")
 
-    assert len(reads) == 1
+    assert loads == ["doc_comment"] * intent_words._QUOTE_CANDIDATES
 
 
 def test_an_exact_older_comment_is_found_behind_many_newer_unrelated_ones(db):

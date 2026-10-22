@@ -5,7 +5,7 @@ PLAN_INTENT_SCHEMA_SQL = """
         node_id TEXT NOT NULL REFERENCES plan_nodes(id) ON DELETE CASCADE,
         author TEXT NOT NULL CHECK (author IN ('person', 'agent')),
         source_kind TEXT NOT NULL CHECK (
-            source_kind IN ('message', 'doc_comment', 'decision_answer', 'plan_edit')
+            source_kind IN ('message', 'doc_comment', 'plan_decision_answer', 'plan_edit')
         ),
         source_id TEXT NOT NULL,
         quote TEXT NOT NULL CHECK (length(trim(quote)) > 0),

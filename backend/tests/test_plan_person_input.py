@@ -177,8 +177,8 @@ def test_a_decision_answer_wakes_its_task_with_no_text_match_and_before_text_mat
     woken = _hear(db, "plan_decision_answer", "dec")
 
     assert woken == [
-        f"plan-wake:intent_input:{linked}:decision_answer:dec:2",
-        f"plan-wake:intent_input:{text_node}:decision_answer:dec:2",
+        f"plan-wake:intent_input:{linked}:plan_decision_answer:dec:2",
+        f"plan-wake:intent_input:{text_node}:plan_decision_answer:dec:2",
     ]
 
 
@@ -188,7 +188,7 @@ def test_a_decision_on_a_worker_step_reaches_the_canonical_owner(db):
     step = _task(db, worker, "Unrelated nightly backup", intent_node_id=canonical)
     _decision(db, "dec", thread=worker, source_node=step, text="Use the second one")
 
-    assert _hear(db, "plan_decision_answer", "dec") == [f"plan-wake:intent_input:{canonical}:decision_answer:dec:2"]
+    assert _hear(db, "plan_decision_answer", "dec") == [f"plan-wake:intent_input:{canonical}:plan_decision_answer:dec:2"]
 
 
 def test_a_comment_on_a_document_a_task_asked_about_wakes_that_task(db):

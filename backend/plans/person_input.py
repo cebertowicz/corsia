@@ -14,6 +14,12 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from core.corrections_recording import (
+    SOURCE_KIND_DECISION_ANSWER,
+    SOURCE_KIND_DOC_COMMENT,
+    SOURCE_KIND_MESSAGE,
+    is_owner_authored_message,
+)
 from plans import intent_words, node_states, service
 
 #: The (shared, title_shared) counts a text match must reach: stricter than Context & Memory's
@@ -64,26 +70,56 @@ async def _off_path(source_kind: str, source_id: str) -> None:
 
 
 def hear(source_kind: str, source_id: str) -> list[str]:
-    """Wake the owners of the running tasks these words bear on; return the wake ids."""
-    from infra.database import write_transaction
+    """Wake the owners of the running tasks these words bear on; return the wake ids.
 
-    with write_transaction(None, scope="person_words_arrived") as db:
-        source = load(db, source_kind, source_id)
+    Reading and scoring run without the writer; the write transaction only
+    re-checks the few picked tasks are still running and appends their wakes.
+    """
+    from infra.database import get_db, write_transaction
+
+    read = get_db()
+    try:
+        source = load(read, source_kind, source_id)
         if source is None or not source.words.strip():
             return []
-        return _wake(db, source, _picked(db, source))
+        picked = [str(node["id"]) for node, _plan in _picked(read, source)]
+    finally:
+        read.close()
+    if not picked:
+        return []
+    with write_transaction(None, scope="person_words_arrived") as db:
+        return _wake(db, source, running(db, _rows(db, picked)))
+
+
+def _rows(db, node_ids: list[str]) -> list:
+    """The current rows of ``node_ids``, in that order; a node gone since is dropped."""
+    import json
+
+    found = {str(row["id"]): row for row in db.execute(
+        "SELECT * FROM plan_nodes WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(node_ids),),
+    )}
+    return [found[node_id] for node_id in node_ids if node_id in found]
 
 
 def load(db, kind: str, source_id: str) -> Source | None:
-    if kind == "message":
+    """The one reader of the person's words: what they said, where and when, or None.
+
+    ``kind`` is a corrections source kind; a decision answer is read by the
+    decision's id and named by its answered revision's source id.
+    """
+    if kind == SOURCE_KIND_MESSAGE:
         row = db.execute(
-            """SELECT m.content,m.thread_id,m.created_at,t.project_id FROM messages m
+            """SELECT m.role,m.content,m.metadata,m.thread_id,m.created_at,t.project_id FROM messages m
                JOIN threads t ON t.id=m.thread_id WHERE m.id=?""", (source_id,),
         ).fetchone()
-        return None if row is None else Source(
+        if row is None or not is_owner_authored_message(
+            role=row["role"], content=row["content"], metadata=row["metadata"],
+        ):
+            return None
+        return Source(
             kind, source_id, str(row["content"]), str(row["created_at"]), str(row["thread_id"]), row["project_id"],
         )
-    if kind == "doc_comment":
+    if kind == SOURCE_KIND_DOC_COMMENT:
         from jobs.corrections_scanning import source_candidate
 
         found = source_candidate(db, kind, source_id)
@@ -96,7 +132,7 @@ def load(db, kind: str, source_id: str) -> Source | None:
         ).fetchall()
         return Source(kind, source_id, found.quote or "", found.created_at, found.thread_id, found.project_id,
                       tuple(str(row["node_id"]) for row in links))
-    if kind in ("decision_answer", "plan_decision_answer"):  # the correction hook's name for it, and the words table's
+    if kind == SOURCE_KIND_DECISION_ANSWER:
         return _decision(db, source_id)
     return None
 
@@ -117,7 +153,7 @@ def _decision(db, decision_id: str) -> Source | None:
         return None
     node = body.get("source_node_id")
     return Source(
-        "decision_answer", decision_answer_source_id(decision_id, body.get("revision")),
+        SOURCE_KIND_DECISION_ANSWER, decision_answer_source_id(decision_id, body.get("revision")),
         answer_note(body.get("answer")) or "", str(body.get("answered_at") or ""), str(body["thread_id"]),
         thread["project_id"], (str(node),) if node else (),
     )
@@ -144,7 +180,10 @@ def _picked(db, source: Source) -> list[tuple]:
 def text_candidates(db, project_id: str | None) -> list:
     """Every started canonical task in the project's plans (running is decided after).
 
-    Who may hear the words is decided per owner in ``_wake``.
+    Bound: the in-work canonical tasks of one project, no more. There is no
+    LIMIT, since one could drop the task the words match; ``hear`` scores them
+    on a read connection, never inside the write transaction. Who may hear
+    the words is decided per owner in ``_wake``.
     """
     return db.execute(
         f"""SELECT n.* FROM plan_nodes n JOIN plans p ON p.id=n.plan_id

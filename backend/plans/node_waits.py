@@ -117,8 +117,8 @@ def armed_watches(
     return dict(found)
 
 
-def armed_in_plans(connection: sqlite3.Connection, plan_ids) -> dict[str, list]:
-    """Each listed plan's armed watches (``armed_watches`` rows), in two reads.
+def armed_in_plans(connection: sqlite3.Connection, plan_ids) -> dict[str, list[tuple]]:
+    """Each listed plan's armed watches (``armed_watches`` rows), each with its task's title, in two reads.
 
     For a parent's child summaries, whose rollups list no nodes. The read is
     driven from the few armed watches, never from a plan's node history.
@@ -126,19 +126,20 @@ def armed_in_plans(connection: sqlite3.Connection, plan_ids) -> dict[str, list]:
     ids = list(dict.fromkeys(str(plan_id) for plan_id in plan_ids))
     if not ids:
         return {}
-    plan_of = {
-        str(row["plan_node_id"]): str(row["plan_id"])
+    node_of = {
+        str(row["plan_node_id"]): (str(row["plan_id"]), str(row["title"]))
         for row in fetch_all(
             connection,
-            """SELECT w.plan_node_id,n.plan_id
+            """SELECT w.plan_node_id,n.plan_id,n.title
                 FROM expected_event_watches w CROSS JOIN plan_nodes n ON n.id=w.plan_node_id
                 WHERE w.status='armed' AND n.plan_id IN (SELECT value FROM json_each(?))""",
             (encoded_ids(ids),),
         )
     }
-    found: dict[str, list] = defaultdict(list)
-    for node_id, rows in armed_watches(connection, plan_of).items():
-        found[plan_of[node_id]].extend(rows)
+    found: dict[str, list[tuple]] = defaultdict(list)
+    for node_id, rows in armed_watches(connection, node_of).items():
+        plan_id, title = node_of[node_id]
+        found[plan_id].extend((row, title) for row in rows)
     return dict(found)
 
 

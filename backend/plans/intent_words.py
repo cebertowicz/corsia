@@ -7,7 +7,13 @@ from collections.abc import Iterable
 from typing import Any
 
 import plans.service as service
-from core.corrections_recording import is_owner_authored_message
+from core.corrections_recording import (
+    SOURCE_KIND_DECISION_ANSWER,
+    SOURCE_KIND_DOC_COMMENT,
+    SOURCE_KIND_MESSAGE,
+    is_owner_authored_message,
+    owner_message_sql_predicate,
+)
 
 MAX_INTENT_BYTES = 600
 MAX_QUOTE_BYTES = 400
@@ -15,6 +21,10 @@ MAX_WORDS_PER_CALL = 3  # the read budget `newest` already shows
 _WORD_AUTHORS = frozenset({"person", "agent"})
 _WORD_ROLES = frozenset({"origin", "bears_on", "authority"})
 _WS = re.compile(r"\s+")
+#: How many newest content matches each source kind offers before the scope rule decides.
+_QUOTE_CANDIDATES = 20
+#: One refusal for a quote that is missing and one that is out of scope, so it tests nothing across scopes.
+QUOTE_NOT_FOUND = "quote was not found; quote exactly, or pass it as your own words with author: agent"
 
 
 def _normal(value: str) -> str:
@@ -31,17 +41,6 @@ def _limited(value: object, *, field: str, limit: int) -> str:
 
 def validate_intent(value: object) -> str:
     return _limited(value, field="intent", limit=MAX_INTENT_BYTES)
-
-
-def _project_id(connection: sqlite3.Connection, plan_id: str) -> str | None:
-    row = connection.execute(
-        """SELECT CASE p.owner_kind WHEN 'thread' THEN t.project_id
-                                    WHEN 'project_scope' THEN p.owner_id END AS project_id
-             FROM plans p LEFT JOIN threads t ON p.owner_kind='thread' AND t.id=p.owner_id
-            WHERE p.id=?""",
-        (plan_id,),
-    ).fetchone()
-    return None if row is None else row["project_id"]
 
 
 def _phrase(quote: str) -> str:
@@ -65,56 +64,81 @@ def _token(quote: str) -> str:
     return max(_normal(quote).split(" "), key=len)
 
 
-def _message_quote(connection: sqlite3.Connection, project_id: str | None, quote: str):
-    rows = connection.execute(
-        """SELECT m.id,m.content,m.role,m.metadata,m.created_at FROM messages m
-           JOIN messages_fts f ON f.rowid=m.rowid
-           JOIN threads t ON t.id=m.thread_id
-           WHERE messages_fts MATCH ? AND t.project_id IS ?
-           ORDER BY m.created_at DESC LIMIT 20""",
-        (_phrase(quote), project_id),
-    ).fetchall()
+#: The recipient's owner: a superset filter only, so no newer words of another person starve its candidates.
+_SAME_OWNER = "t.user_id=(SELECT user_id FROM threads WHERE id=:recipient)"
+
+
+def _message_ids(connection: sqlite3.Connection, quote: str, recipient: str) -> list[str]:
+    owner, params = owner_message_sql_predicate("m")
+    return [row["id"] for row in connection.execute(
+        f"""SELECT m.id FROM messages m
+            JOIN messages_fts f ON f.rowid=m.rowid
+            JOIN threads t ON t.id=m.thread_id
+            WHERE messages_fts MATCH :phrase AND {owner} AND {_SAME_OWNER}
+            ORDER BY m.created_at DESC,m.id DESC LIMIT :limit""",
+        {**params, "phrase": _phrase(quote), "recipient": recipient, "limit": _QUOTE_CANDIDATES},
+    )]
+
+
+def _comment_ids(connection: sqlite3.Connection, quote: str, recipient: str) -> list[str]:
+    from core.correction_targets import comment_target_sql
+
+    return [str(row["id"]) for row in connection.execute(
+        f"""SELECT c.id FROM doc_comments c JOIN threads t ON t.id=({comment_target_sql('c')})
+            WHERE c.author_kind='user' AND instr(c.body, :token) > 0 AND {_SAME_OWNER}
+            ORDER BY c.created_at DESC,c.id DESC LIMIT :limit""",
+        {"token": _token(quote), "recipient": recipient, "limit": _QUOTE_CANDIDATES},
+    )]
+
+
+def _decision_ids(connection: sqlite3.Connection, quote: str, recipient: str) -> list[str]:
+    from plans.decision_projection import DECISION_TYPE
+
+    return [row["external_id"] for row in connection.execute(
+        f"""SELECT a.external_id FROM artifact_identities a
+            JOIN threads t ON t.id=json_extract(a.metadata,'$.plan_decision.thread_id')
+            WHERE a.integration='local' AND a.type=:type AND a.state='active'
+              AND json_extract(a.metadata,'$.plan_decision.state')='answered'
+              AND instr(json_extract(a.metadata,'$.plan_decision.answer.text'), :token) > 0 AND {_SAME_OWNER}
+            ORDER BY json_extract(a.metadata,'$.plan_decision.answered_at') DESC,a.external_id DESC LIMIT :limit""",
+        {"type": DECISION_TYPE, "token": _token(quote), "recipient": recipient, "limit": _QUOTE_CANDIDATES},
+    )]
+
+
+_CANDIDATES = (
+    (SOURCE_KIND_MESSAGE, _message_ids),
+    (SOURCE_KIND_DOC_COMMENT, _comment_ids),
+    (SOURCE_KIND_DECISION_ANSWER, _decision_ids),
+)
+
+
+def _quoted(connection: sqlite3.Connection, quote: str, recipient: str) -> tuple[str, str] | None:
+    """The newest source of the person's words holding ``quote`` that may reach ``recipient``.
+
+    Candidates are chosen by content alone; ``person_input.load`` is the one
+    reader of the person's words and ``source_reaches_thread`` the one scope rule.
+    """
+    from memory.node_start_recall import source_reaches_thread
+    from plans import person_input
+
     wanted = _normal(quote)
-    return next(
-        (row for row in rows if _is_person_message(row) and wanted in _normal(row["content"])),
-        None,
-    )
-
-
-def _comment_quote(connection: sqlite3.Connection, project_id: str | None, quote: str):
-    rows = connection.execute(
-        """SELECT c.id,c.body,c.created_at FROM doc_comments c
-           JOIN artifact_registrations r ON r.artifact_id=c.artifact_id
-           JOIN threads t ON t.id=r.parent_thread_id
-           WHERE c.author_kind='user' AND t.project_id IS ? AND instr(c.body, ?) > 0
-           ORDER BY c.created_at DESC LIMIT 20""",
-        (project_id, _token(quote)),
-    ).fetchall()
-    wanted = _normal(quote)
-    return next((row for row in rows if wanted in _normal(row["body"])), None)
-
-
-def _decision_quote(connection: sqlite3.Connection, project_id: str | None, quote: str):
-    rows = connection.execute(
-        """SELECT a.id,a.external_id,json_extract(a.metadata, '$.plan_decision.answer') AS answer
-           FROM artifact_identities a
-           JOIN threads t ON t.id=json_extract(a.metadata, '$.plan_decision.thread_id')
-           WHERE a.integration='local' AND a.type='plan-decision'
-             AND t.project_id IS ?
-             AND json_type(a.metadata, '$.plan_decision.answer')='text'
-             AND instr(json_extract(a.metadata, '$.plan_decision.answer'), ?) > 0
-           ORDER BY a.updated_at DESC LIMIT 20""",
-        (project_id, _token(quote)),
-    ).fetchall()
-    wanted = _normal(quote)
-    return next((row for row in rows if wanted in _normal(row["answer"])), None)
+    for kind, candidates in _CANDIDATES:
+        for candidate in candidates(connection, quote, recipient):
+            source = person_input.load(connection, kind, candidate)
+            if (source is not None and wanted in _normal(source.words)
+                    and source_reaches_thread(connection, source.thread_id, recipient)):
+                return kind, source.id
+    return None
 
 
 def resolve_words(
-    connection: sqlite3.Connection, plan_id: str, words: Iterable[dict[str, Any]] | None,
-    *, actor_id: str | None,
+    connection: sqlite3.Connection, words: Iterable[dict[str, Any]] | None, *, actor_id: str | None,
 ) -> list[dict[str, str]]:
-    """Resolve caller-provided quotations to their newest authoritative source."""
+    """Resolve caller-provided quotations to their newest authoritative source.
+
+    ``actor_id`` is the acting thread, the one the person's words must reach;
+    None for any other actor, which cannot record the person's words.
+    """
     if words is None:
         return []
     if not isinstance(words, list) or not words:
@@ -123,7 +147,6 @@ def resolve_words(
         raise service.PlanInputError(
             f"intent_words takes at most {MAX_WORDS_PER_CALL} quotes per call; keep the strongest {MAX_WORDS_PER_CALL}"
         )
-    project_id = _project_id(connection, plan_id)
     resolved: list[dict[str, str]] = []
     for raw in words:
         if not isinstance(raw, dict) or set(raw) - {"quote", "author", "role"}:
@@ -137,26 +160,15 @@ def resolve_words(
             raise service.PlanInputError("intent word role must be origin, bears_on, or authority")
         if author == "agent":
             resolved.append({"quote": quote, "author": author, "role": role,
-                             "source_kind": "message", "source_id": actor_id or "agent"})
+                             "source_kind": "plan_edit", "source_id": actor_id or "system"})
             continue
-        message = _message_quote(connection, project_id, quote)
-        if message is not None:
-            resolved.append({"quote": quote, "author": author, "role": role,
-                             "source_kind": "message", "source_id": message["id"]})
-            continue
-        comment = _comment_quote(connection, project_id, quote)
-        if comment is not None:
-            resolved.append({"quote": quote, "author": author, "role": role,
-                             "source_kind": "doc_comment", "source_id": comment["id"]})
-            continue
-        decision = _decision_quote(connection, project_id, quote)
-        if decision is not None:
-            resolved.append({"quote": quote, "author": author, "role": role,
-                             "source_kind": "decision_answer", "source_id": decision["external_id"]})
-            continue
-        raise service.PlanInputError(
-            "quote was not found; quote exactly, or pass it as your own words with author: agent"
-        )
+        if actor_id is None:
+            raise service.PlanInputError("person quotes must be recorded from the agent's own thread")
+        found = _quoted(connection, quote, actor_id)
+        if found is None:
+            raise service.PlanInputError(QUOTE_NOT_FOUND)
+        resolved.append({"quote": quote, "author": author, "role": role,
+                         "source_kind": found[0], "source_id": found[1]})
     return resolved
 
 

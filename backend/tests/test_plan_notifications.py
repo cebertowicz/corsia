@@ -311,7 +311,6 @@ def test_api_mutation_via_real_db_worker_reaches_registered_socket(
                     "kind": "task",
                     "title": "Deliver",
                     "acceptance_criteria": "Socket receives the nudge", "size": "unknown", "intent": "Deliver the plan change to its socket",
-                    "intent_words": [{"quote": _AUTHORITY_QUOTE, "role": "authority"}],
                 },
             },
         )

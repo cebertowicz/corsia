@@ -279,7 +279,7 @@ WAKE_CHIPS = {
     "plan.child_returned": "Delegated work returned for your review",
     "plan.revision_requested": "Returned work was rejected",
     "plan.intent_revised": "A task’s goal changed",
-    "plan.intent_input": "Your message may affect a running task",
+    "plan.intent_input": "What you said may affect a running task",
     "plan.prerequisite_settled": "A task you depend on settled",
     "plan.conductor_task_settled": "A task you added settled",
     "plan.child_returned_nothing": "Delegated worker returned nothing",
