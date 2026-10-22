@@ -59,8 +59,8 @@ def bootstrap_state() -> None:
         conn = sqlite3.connect(str(path))
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA_SQL)
-        seed_test_accounts(conn)
-        conn.commit()
+        with conn:
+            seed_test_accounts(conn)
         conn.close()
 
     config.STATE_ROOT = ROOT / "state"
@@ -75,9 +75,9 @@ def make_corsia_thread() -> str:
 
     db = database.get_db()
     thread_id, now = "demo-corsia-thread", datetime.now(timezone.utc).isoformat()
-    db.execute("INSERT INTO threads (id,user_id,title,project_id,model,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
-               (thread_id, "steve", "demo", None, "native/test", now, now))
-    db.commit()
+    with database.write_transaction(db, scope="mail_host_demo") as conn:
+        conn.execute("INSERT INTO threads (id,user_id,title,project_id,model,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+                     (thread_id, "steve", "demo", None, "native/test", now, now))
     assert set_corsia_agent(thread_id, db=db)
     return thread_id
 
