@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from infra import config, setup_progress
+from infra.conductor import WORKSPACE_SCOPE
+from registry.document_ownership import ADOPTION_SETTING_PREFIX
 from infra.corsia_agent import SETTINGS_KEY as CORSIA_AGENT_KEY
 from infra.corsia_agent import get_corsia_agent
 from infra.database import write_transaction
@@ -27,18 +29,12 @@ from infra.send_target import NO_MODEL_SELECTED
 
 logger = logging.getLogger(__name__)
 
-#: The default work folder's name under the home folder, as the desktop shell's ``default_workspace`` names it.
-DEFAULT_WORK_FOLDER = "CORSIA"
-
-
 @dataclass(frozen=True)
 class ResetResult:
     """Whether the unfinished setup was reset, or the one guard that refused it."""
 
     reset: bool
     refused: str | None = None
-    #: Set when setup's stored work-folder choice is not the default one: the shell restores the default.
-    default_work_folder: str | None = None
 
 
 def _refused(reason: str) -> ResetResult:
@@ -56,17 +52,25 @@ def _only_held_inputs(db, thread_id: str) -> bool:
     )
 
 
-def _guard(db, record: dict | None, user_id: str) -> tuple[str | None, str | None]:
-    """The refusal reason (or None) and the agent thread the reset would delete."""
+def _marker_refusal(record: dict | None, user_id: str) -> str | None:
+    """Guard 1 on the stored record alone: setup unfinished and made by this app for this person and folder."""
     if record is None or record.get("setup_completed") is True:
-        return "no_unfinished_setup", None
+        return "no_unfinished_setup"
     marker = record.get(setup_progress.CREATED_BY_APP)
     if (
         not isinstance(marker, dict)
         or marker.get("user_id") != user_id
         or marker.get("workspace") != str(config.WORKSPACE)
     ):
-        return "not_created_by_app", None
+        return "not_created_by_app"
+    return None
+
+
+def _guard(db, record: dict | None, user_id: str) -> tuple[str | None, str | None]:
+    """The refusal reason (or None) and the agent thread the reset would delete."""
+    refusal = _marker_refusal(record, user_id)
+    if refusal is not None:
+        return refusal, None
     if [row["id"] for row in db.execute("SELECT id FROM users")] != [user_id]:
         return "other_accounts", None
     agent = get_corsia_agent(db=db)
@@ -93,21 +97,15 @@ def _remove_unchanged_files(workspace: Path, files: object) -> None:
             logger.exception("Could not remove a file the unfinished setup created")
 
 
-def _default_work_folder_if_changed() -> str | None:
-    default = Path.home() / DEFAULT_WORK_FOLDER
-    try:
-        if config.WORKSPACE.resolve() == default.resolve():
-            return None
-    except OSError:
-        pass
-    return str(default)
-
-
 def reset_unfinished_setup(user_id: str) -> ResetResult:
     """Reset the unfinished setup ``user_id`` is signed into, or refuse it whole and change nothing."""
     from core.thread_family import delete_thread_family, thread_family_ids
     from plans import public
 
+    # Every launch of a finished install asks: refuse it from a plain read, never opening a write transaction.
+    early = _marker_refusal(setup_progress.read(), user_id)
+    if early is not None:
+        return _refused(early)
     with write_transaction(None, scope="setup_reset") as db:
         record = setup_progress.read(db=db)
         refusal, agent = _guard(db, record, user_id)
@@ -118,8 +116,10 @@ def reset_unfinished_setup(user_id: str) -> ResetResult:
             delete_thread_family(db, thread_family_ids(db, agent))
         db.execute("DELETE FROM auth_tokens WHERE user_id = ?", (user_id,))
         db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        # The scaffold's ownership assignment (written with the account) goes too, so the next first account assigns it again.
         db.execute(
-            "DELETE FROM settings WHERE key IN (?, ?)", (CORSIA_AGENT_KEY, setup_progress.KEY),
+            "DELETE FROM settings WHERE key IN (?, ?, ?)",
+            (CORSIA_AGENT_KEY, setup_progress.KEY, f"{ADOPTION_SETTING_PREFIX}{WORKSPACE_SCOPE}"),
         )
     _remove_unchanged_files(config.WORKSPACE, files)
-    return ResetResult(reset=True, default_work_folder=_default_work_folder_if_changed())
+    return ResetResult(reset=True)

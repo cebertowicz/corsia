@@ -4,10 +4,10 @@ The record is the only owner of "did this person finish setup". It holds the
 step reached after the account exists, the person's local-AI choice, which
 subscriptions they said they pay for (``picks``), the setup-to-chat handoff, and
 ``setup_completed``, which is written only when they finish. Eligibility facts
-(memory, disk, sources) are never stored here: a resumed setup re-reads them.
+(memory, disk, sources) are never stored here: a reopened setup re-reads them.
 
 An install with no record, or one made by ``corsia user add``, has no setup to
-resume: with an account present it counts as completed. Only a record that
+reopen: with an account present it counts as completed. Only a record that
 reached a step and was never completed reopens setup.
 """
 
@@ -37,7 +37,7 @@ def read(*, db: sqlite3.Connection | None = None) -> dict | None:
 
 
 def view(*, db: sqlite3.Connection | None = None) -> dict:
-    """What the signed-in app reads: whether setup is completed, and where to reopen it if not."""
+    """What the signed-in app reads: whether setup is completed, and where an unfinished one stands."""
     record = read(db=db) or {}
     incomplete = record.get("step") in STEPS and record.get("setup_completed") is not True
     local_ai = record.get("local_ai")

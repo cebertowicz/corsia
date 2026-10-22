@@ -90,6 +90,33 @@ def test_a_reset_install_takes_a_new_first_account_that_starts_setup_again(works
     assert setup_progress.read()[setup_progress.CREATED_BY_APP]["user_id"] == second
 
 
+def test_the_scaffold_ownership_assignment_is_undone_with_the_account(workspace):
+    """Account creation records that the scaffold's documents were assigned; a reset clears it so the next account assigns them again."""
+    from infra.conductor import WORKSPACE_SCOPE
+    from infra.settings import get_setting, set_setting
+    from registry.document_ownership import ADOPTION_SETTING_PREFIX
+
+    key = f"{ADOPTION_SETTING_PREFIX}{WORKSPACE_SCOPE}"
+    first = _app_account()
+    with write_transaction(None, scope="test_assignment") as db:
+        set_setting(key, {"shared_ownership_enforced_at": "2026-10-22T00:00:00+00:00"}, db=db)
+    assert reset_unfinished_setup(first).reset is True
+    assert get_setting(key, db=get_db()) is None
+
+
+def test_a_refusal_from_the_stored_record_opens_no_write_transaction(workspace, monkeypatch):
+    user_id = _app_account()
+    with write_transaction(None, scope="test_complete") as db:
+        setup_progress.set_setting(setup_progress.KEY, {**setup_progress.read(), "setup_completed": True}, db=db)
+    from onboarding import setup_reset
+
+    def boom(*args, **kwargs):
+        raise AssertionError("a finished install must not open a write transaction")
+
+    monkeypatch.setattr(setup_reset, "write_transaction", boom)
+    assert reset_unfinished_setup(user_id).refused == "no_unfinished_setup"
+
+
 def test_an_install_without_the_marker_never_resets(workspace):
     """The counterexample: one account, setup unfinished, but not made by the app (adopted, taken over, older)."""
     user_id = _app_account()
@@ -229,23 +256,6 @@ def test_a_symlinked_profile_is_never_followed(workspace, tmp_path):
     (workspace / PROFILE).symlink_to(target)
     reset_unfinished_setup(user_id)
     assert target.exists()
-
-
-def test_the_default_work_folder_is_named_only_when_the_choice_differs(workspace, monkeypatch):
-    user_id = _app_account()
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: workspace.parent))
-    monkeypatch.setattr(config, "WORKSPACE", workspace.parent / "CORSIA")
-    record = setup_progress.read()
-    record[setup_progress.CREATED_BY_APP]["workspace"] = str(workspace.parent / "CORSIA")
-    with write_transaction(None, scope="test_marker_workspace") as db:
-        setup_progress.set_setting(setup_progress.KEY, record, db=db)
-    assert reset_unfinished_setup(user_id).default_work_folder is None
-
-
-def test_a_chosen_work_folder_is_reported_so_the_shell_restores_the_default(workspace, monkeypatch):
-    user_id = _app_account()
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: workspace.parent))
-    assert reset_unfinished_setup(user_id).default_work_folder == str(workspace.parent / "CORSIA")
 
 
 # Guard 4: installed tools stay.

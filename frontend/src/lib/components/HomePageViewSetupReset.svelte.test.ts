@@ -60,25 +60,15 @@ afterEach(async () => {
 
 describe('HomePageView unfinished setup', () => {
 	it('starts over at the setup flow, signed out, when the backend reset an unfinished app-made setup', async () => {
-		answer = { reset: true, refused: null, default_work_folder: null };
+		answer = { reset: true, refused: null };
 		await open(true);
 
 		expect(seen.mounts).toBeGreaterThan(0);
 		expect(get(token)).toBeNull();
 	});
 
-	it('restores the default work folder through the shell when the backend names one', async () => {
-		const invoke = vi.fn(async () => undefined);
-		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
-		answer = { reset: true, refused: null, default_work_folder: '/home/person/CORSIA' };
-		await open(true);
-
-		expect(invoke).toHaveBeenCalledWith('configure_work_folder', { path: '/home/person/CORSIA' });
-		expect(seen.mounts).toBeGreaterThan(0);
-	});
-
 	it.each(['not_created_by_app', 'in_use', 'no_unfinished_setup'])('leaves the app and the session alone when the backend refuses (%s)', async (refused) => {
-		answer = { reset: false, refused, default_work_folder: null };
+		answer = { reset: false, refused };
 		await open(true);
 
 		expect(posts).toBe(1);
@@ -94,7 +84,7 @@ describe('HomePageView unfinished setup', () => {
 	});
 
 	it('asks nothing of the backend while signed out', async () => {
-		answer = { reset: true, refused: null, default_work_folder: null };
+		answer = { reset: true, refused: null };
 		await open(false);
 
 		expect(posts).toBe(0);

@@ -229,7 +229,7 @@ async def reset_unfinished_setup(user: dict = Depends(require_user_header_only))
     if not is_person_session(user):  # a machine token never starts someone's setup over
         return JSONResponse(status_code=403, content={"detail": "Only the signed-in person can start setup over."})
     result = await run_in_db(reset, user["id"])
-    return {"reset": result.reset, "refused": result.refused, "default_work_folder": result.default_work_folder}
+    return {"reset": result.reset, "refused": result.refused}
 
 
 @router.post("/report", response_model=None)

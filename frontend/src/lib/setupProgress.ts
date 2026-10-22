@@ -50,7 +50,7 @@ export async function recordSetupProgress(change: SetupProgressChange, sessionTo
 }
 
 /** What starting an unfinished app-made setup over did: nothing (a guard refused) or a full reset. */
-export type SetupReset = { reset: boolean; refused: string | null; default_work_folder: string | null };
+export type SetupReset = { reset: boolean; refused: string | null };
 
 /**
  * Ask the backend to start the signed-in person's unfinished setup over. It resets only an account the app's own setup

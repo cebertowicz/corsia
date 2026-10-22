@@ -12,8 +12,7 @@
 	import type { ProjectPick } from '$lib/stores/projects';
 	import { logout, token } from '$lib/stores/auth';
 	import { resetUnfinishedSetup } from '$lib/setupProgress';
-	import { applyWorkFolder } from '$lib/remoteShell';
-
+	
 	let {
 		isAuthenticated,
 		activeView,
@@ -101,7 +100,6 @@
 		void resetUnfinishedSetup(get(token)).then(async (result) => {
 			// An unreadable answer leaves the app as it is: a failed read must never lock out someone who finished setup.
 			if (!result?.reset) return;
-			if (result.default_work_folder) await applyWorkFolder(result.default_work_folder).catch(() => undefined);
 			await logout();
 			setupMode = 'flow';
 		});
