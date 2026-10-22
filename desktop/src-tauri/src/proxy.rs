@@ -292,8 +292,6 @@ fn rewrite_request<B>(request: &mut Request<B>, authority: &str) -> Result<(), S
     );
     let path_and_query = request.uri().path_and_query().map(|value| value.as_str()).unwrap_or("/");
     *request.uri_mut() = Uri::builder()
-        .scheme("https")
-        .authority(authority)
         .path_and_query(path_and_query)
         .build()
         .map_err(|error| error.to_string())?;
@@ -358,6 +356,35 @@ mod tests {
                 .with_upgrades()
                 .await
                 .unwrap();
+        });
+        (port, task)
+    }
+
+    /// A minimal TLS WebSocket router that inspects the HTTP request target exactly as received.
+    /// Unlike Hyper's service API, it rejects absolute-form targets, matching Uvicorn's route lookup.
+    async fn start_raw_target_websocket_server(config: Arc<rustls::ServerConfig>) -> (u16, JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let Ok(mut tls) = tokio_rustls::TlsAcceptor::from(config).accept(stream).await else {
+                return;
+            };
+            let mut request = Vec::new();
+            let mut byte = [0; 1];
+            while !request.ends_with(b"\r\n\r\n") {
+                tls.read_exact(&mut byte).await.unwrap();
+                request.push(byte[0]);
+            }
+            let accepted = request.starts_with(b"GET /ws?from=desktop HTTP/1.1\r\n")
+                && request.windows(b"\r\norigin: http://127.0.0.1:".len()).any(|window| window.eq_ignore_ascii_case(b"\r\norigin: http://127.0.0.1:"));
+            tls.write_all(if accepted {
+                b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: test\r\n\r\n"
+            } else {
+                b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"
+            })
+            .await
+            .unwrap();
         });
         (port, task)
     }
@@ -452,6 +479,27 @@ mod tests {
         assert_eq!(first, Bytes::from_static(b"data: first\n\n"));
         release_send.send(()).unwrap();
         assert!(response.chunk().await.unwrap().is_none());
+        proxy.stop();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn real_tls_proxy_routes_websocket_upgrade_with_an_origin_form_target() {
+        let identity = crate::test_tls::generated_self_signed_identity();
+        let (port, server) = start_raw_target_websocket_server(identity.config).await;
+        let proxy = proxy_for(port, identity.pin, || {}).await;
+        let mut client = TcpStream::connect(("127.0.0.1", proxy.port)).await.unwrap();
+        client.write_all(format!(
+            "GET /ws?from=desktop HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nOrigin: http://127.0.0.1:{}\r\nSec-WebSocket-Key: test\r\nSec-WebSocket-Version: 13\r\n\r\n",
+            proxy.port, proxy.port,
+        ).as_bytes()).await.unwrap();
+        let mut response = Vec::new();
+        let mut byte = [0; 1];
+        while !response.ends_with(b"\r\n\r\n") {
+            client.read_exact(&mut byte).await.unwrap();
+            response.push(byte[0]);
+        }
+        assert!(response.starts_with(b"HTTP/1.1 101"), "raw-target router rejected: {}", String::from_utf8_lossy(&response));
         proxy.stop();
         server.await.unwrap();
     }
@@ -680,11 +728,11 @@ mod tests {
     }
 
     #[test]
-    fn rewrite_brackets_an_ipv6_authority_in_the_host_header_and_uri() {
+    fn rewrite_brackets_an_ipv6_authority_in_the_host_header_and_keeps_an_origin_form_uri() {
         let mut request = Request::builder().uri("/api/health?x=1").body(()).unwrap();
         let authority = RemoteHost::parse("fe80::1%4").unwrap().authority(47901);
         rewrite_request(&mut request, &authority).unwrap();
         assert_eq!(request.headers().get(HOST).unwrap(), "[fe80::1]:47901");
-        assert_eq!(request.uri().to_string(), "https://[fe80::1]:47901/api/health?x=1");
+        assert_eq!(request.uri().to_string(), "/api/health?x=1");
     }
 }
