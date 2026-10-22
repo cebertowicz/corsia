@@ -6,7 +6,7 @@ schema library:
 
 - every node has ``type``: ``object``, ``array``, ``string``, ``integer``, ``number`` or
   ``boolean``, and may have ``description`` and ``default`` (used when an object's
-  property is missing);
+  optional property is missing; a missing required one is invalid, default or not);
 - ``object`` has ``properties`` (name to node) and ``required`` (names among them);
 - ``array`` has ``items`` (one node);
 - ``string`` may have ``enum`` and ``unknown``, an enum value a string outside the enum
@@ -14,8 +14,9 @@ schema library:
 - ``integer`` and ``number`` may have ``coerce: true``, which reads a numeric string.
 
 :func:`schema_errors` checks a declaration, for the skill validator; :func:`check_result`
-checks a final message: it extracts the JSON payload from fenced or surrounding text,
-applies the declared defaults and coercions, and only what fails after that is invalid.
+checks a final message: its payload is the whole message as JSON, else its last fenced
+block that parses (never a bracket found in prose, which may be an example); it applies
+the declared defaults and coercions, and only what fails after that is invalid.
 """
 
 from __future__ import annotations
@@ -37,8 +38,6 @@ _COMMON = {"type", "description", "default"}
 _MAX_DEPTH = 8
 #: A final message larger than this is not read for a payload.
 MAX_MESSAGE = 256 * 1024
-#: Brackets tried as a payload's start in surrounding text, so a long message costs bounded work.
-_MAX_STARTS = 64
 _FENCE = re.compile(r"```[A-Za-z0-9_-]*[ \t]*\n(.*?)```", re.DOTALL)
 
 
@@ -98,10 +97,10 @@ def conform(value: Any, schema: dict[str, Any], path: str = "result") -> Any:
         for name, node in schema.get("properties", {}).items():
             if name in out:
                 out[name] = conform(out[name], node, f"{path}.{name}")
-            elif "default" in node:
-                out[name] = node["default"]
             elif name in schema.get("required", []):
                 raise ResultInvalid(f"{path}.{name} is required")
+            elif "default" in node:
+                out[name] = node["default"]
         return out
     if kind == "array":
         if not isinstance(value, list):
@@ -138,29 +137,19 @@ def _number(value: Any, schema: dict[str, Any], path: str) -> int | float:
 
 
 def extract_payload(text: str) -> Any:
-    """The JSON object or array a final message carries: the whole message, else its first
-    fenced block that parses, else the first object or array inside its text."""
+    """The JSON object or array a final message carries: the whole message, else its last
+    fenced block that parses. Brackets in prose are never read: they may be an example."""
     if len(text) > MAX_MESSAGE:
         raise ResultInvalid(f"the final message is over {MAX_MESSAGE} bytes")
-    stripped = text.strip()
-    for candidate in (stripped, *(block.strip() for block in _FENCE.findall(text))):
+    blocks = [block.strip() for block in _FENCE.findall(text)]
+    for candidate in (text.strip(), *reversed(blocks)):
         try:
             found = json.loads(candidate)
         except ValueError:
             continue
         if isinstance(found, (dict, list)):
             return found
-    decoder = json.JSONDecoder()
-    for attempt, match in enumerate(re.finditer(r"[\[{]", text)):
-        if attempt == _MAX_STARTS:
-            break
-        try:
-            found, _end = decoder.raw_decode(text, match.start())
-        except ValueError:
-            continue
-        if isinstance(found, (dict, list)):
-            return found
-    raise ResultInvalid("the final message has no JSON object or array")
+    raise ResultInvalid("the final message is not JSON and has no fenced JSON block")
 
 
 def check_result(text: str | None, schema: dict[str, Any]) -> Any:

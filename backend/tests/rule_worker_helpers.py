@@ -129,7 +129,7 @@ def world(isolated_db, tmp_path, monkeypatch, _cc_runtime_cleanup):
 
     monkeypatch.setattr(script_runner, "_drive_owner", drive_owner)
     monkeypatch.setattr(worker_runner, "_state",
-                        {"lock": None, "task": None, "again": False, "open": False})
+                        {"lock": None, "task": None, "again": False, "open": False, "waited": 0})
     yield {"root": root, "folder": folder, "project": project, "reply": reply, "driven": driven,
            "staging": folder / "staging" / "req"}
     shutil.rmtree(root, ignore_errors=True)
@@ -178,12 +178,12 @@ def worker_events() -> list[tuple[str, str]]:
 
 
 def owner_wakes() -> list[str]:
-    """The worker wakes queued for the rule owner."""
+    """The wakes a rule start queued for the rule owner: nothing came back, or no start."""
     from infra.database import get_db
 
     return [row["content"] for row in get_db().execute(
-        "SELECT content FROM messages WHERE thread_id=? AND content LIKE '%worker returned no result%'",
-        (OWNER,)).fetchall()]
+        "SELECT content FROM messages WHERE thread_id=? AND (content LIKE '%returned no result:%' "
+        "OR content LIKE '%A rule couldn’t start %')", (OWNER,)).fetchall()]
 
 
 def owner_script(world, monkeypatch, name: str) -> str:

@@ -31,7 +31,6 @@ _ACTION_TEXT = {
     },
     outcomes.START_WORKER: {
         outcomes.QUEUED: "rule {rule} will start a worker for {thread} with it",
-        outcomes.HELD: "rule {rule} is holding {thread}'s worker start",
         outcomes.STARTED: "rule {rule} started a worker for {thread}",
         outcomes.RETURNED: "rule {rule}'s worker for {thread} returned a result",
         outcomes.INVALID: "rule {rule}'s worker for {thread} returned a result its workflow refuses",

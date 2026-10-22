@@ -84,9 +84,10 @@ EVENT_RULE_SCHEMA_SQL = f"""
         -- 'routed': the rule rode a delivery today's routing already made.
         via TEXT NOT NULL CHECK (via IN ('rule', 'routed')),
         reason TEXT,
-        -- A queued run's or start's input (the event and its rule chain), cleared when it is
-        -- claimed, or a made worker's result check, cleared when it settles.
-        run_input TEXT CHECK (run_input IS NULL OR (outcome IN ('queued', 'held', 'started')
+        -- A queued run's input (the event and its rule chain), cleared when it is claimed. A
+        -- start's input stays until its worker is made, then holds the worker's result check
+        -- until the start settles.
+        run_input TEXT CHECK (run_input IS NULL OR (outcome IN ('queued', 'started')
                                                     AND json_valid(run_input))),
         -- A worker start's request identity (R24) and, once started, its worker thread.
         request_identity TEXT,

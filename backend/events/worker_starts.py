@@ -4,15 +4,15 @@ Evaluation runs inside the event's write transaction, and a start makes a thread
 so the rule's row in ``event_route_decisions`` is the start's durable queue, its
 request identity (R24) and, once started, its worker's record. Evaluation records it
 ``queued`` with the start's input and the identity, or ``skipped`` (a duplicate
-request, a loop, a missing identity); the worker runner claims it and makes it
-``started`` (or ``held`` at a full worker limit, with its worker already made), or
-ends it ``skipped`` or ``refused``; the worker's result settles it once as
-``returned``, ``invalid`` or ``no_result``.
+request, a loop, a missing identity). It stays ``queued`` while the Claude Code limit
+is full (R23): no worker exists until the runner claims it with a free slot and makes
+it ``started``, or ends it ``skipped`` or ``refused``. The worker's result settles it
+once as ``returned``, ``invalid`` or ``no_result``.
 
-R24: while a request's start is queued, held, started, or has returned a result
-(valid or not), another match of the same rule and identity starts nothing. A start
-that ends with nothing returned, or is skipped or refused, releases the identity.
-Identities age out with the row, after ``rules.RETENTION``. Names no connector.
+R24: while a request's start is queued, started, or has returned a result (valid or
+not), another match of the same rule and identity starts nothing. A start that ends
+with nothing returned, or is skipped or refused, releases the identity. Identities age
+out with the row, after ``rules.RETENTION``. Names no connector.
 """
 
 from __future__ import annotations
@@ -23,17 +23,14 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from events.rule_outcomes import (
-    DROPPED, HELD, INVALID, NO_RESULT, QUEUED, REFUSED, RETURNED, SKIPPED, START_WORKER, STARTED,
+    DROPPED, INVALID, NO_RESULT, QUEUED, REFUSED, RETURNED, SKIPPED, START_WORKER, STARTED,
     Outcome, Rule, RuleEvent,
 )
 
 DUPLICATE_REQUEST = "duplicate request"
-WORKER_CAPACITY = "worker capacity"  # why a made worker's first turn waits
 LOOP = "loop"
 #: The outcomes that keep a request's identity in use.
-IN_USE = (QUEUED, HELD, STARTED, RETURNED, INVALID)
-#: A start whose worker is made and whose result has not settled it.
-LIVE = (HELD, STARTED)
+IN_USE = (QUEUED, STARTED, RETURNED, INVALID)
 _REASON_LIMIT = 500
 
 
@@ -80,13 +77,13 @@ def queue(
 
 
 def any_open(db: sqlite3.Connection | None = None) -> bool:
-    """Whether any start is queued, held or started: the runner's one read when it has none."""
+    """Whether any start is queued or started: the runner's one read when it has none."""
     from infra.database import get_db
 
     connection = db if db is not None else get_db()
     return connection.execute(
-        "SELECT 1 FROM event_route_decisions WHERE outcome IN (?,?,?) "
-        "AND request_identity IS NOT NULL LIMIT 1", (QUEUED, *LIVE),
+        "SELECT 1 FROM event_route_decisions WHERE outcome IN (?,?) "
+        "AND request_identity IS NOT NULL LIMIT 1", (QUEUED, STARTED),
     ).fetchone() is not None
 
 
@@ -105,27 +102,34 @@ def queued(db: sqlite3.Connection, limit: int) -> list[Mapping[str, Any]]:
 
 
 def claim(db: sqlite3.Connection, decision_id: int) -> dict[str, Any] | None:
-    """Claim one queued start exactly once and return its input, which leaves storage with
-    the claim; ``None`` if it was no longer queued. A claimed start is ``started`` with no
-    worker until :func:`made` records one; :func:`orphans` finds one a restart cut short."""
+    """Claim one queued start exactly once and return its input; ``None`` if it was no
+    longer queued. A claimed start is ``started`` with no worker, its input kept, until
+    :func:`made` records one or :func:`requeue` puts it back."""
     row = db.execute("SELECT run_input FROM event_route_decisions WHERE id=? AND outcome=?",
                      (decision_id, QUEUED)).fetchone()
     if row is None or db.execute(
-        "UPDATE event_route_decisions SET outcome=?, run_input=NULL WHERE id=? AND outcome=?",
+        "UPDATE event_route_decisions SET outcome=? WHERE id=? AND outcome=?",
         (STARTED, decision_id, QUEUED),
     ).rowcount != 1:
         return None
     return json.loads(row["run_input"] or "{}")
 
 
-def made(db: sqlite3.Connection, decision_id: int, worker: str, *, held: bool, check: str) -> None:
-    """Record the claimed start's worker, whether its first turn waits for a slot, and
-    ``check``, what its result is checked and reported with, kept until it settles."""
+def requeue(db: sqlite3.Connection, decision_id: int) -> bool:
+    """Put a claimed start with no worker back in the queue, at its place (its id)."""
+    return db.execute(
+        "UPDATE event_route_decisions SET outcome=? WHERE id=? AND outcome=? "
+        "AND worker_thread_id IS NULL", (QUEUED, decision_id, STARTED),
+    ).rowcount == 1
+
+
+def made(db: sqlite3.Connection, decision_id: int, worker: str, check: str) -> None:
+    """Record the claimed start's worker and ``check``, what its result is checked and
+    reported with, kept in place of its input until it settles."""
     db.execute(
-        "UPDATE event_route_decisions SET worker_thread_id=?, outcome=?, reason=?, run_input=? "
-        "WHERE id=? AND outcome=?",
-        (worker, HELD if held else STARTED, WORKER_CAPACITY if held else None, check,
-         decision_id, STARTED),
+        "UPDATE event_route_decisions SET worker_thread_id=?, run_input=? "
+        "WHERE id=? AND outcome=? AND worker_thread_id IS NULL",
+        (worker, check, decision_id, STARTED),
     )
 
 
@@ -133,65 +137,43 @@ def end(db: sqlite3.Connection, decision_id: int, outcome: str, reason: str | No
     """Settle one start once: skipped or refused before a worker, or the worker's
     ``returned``, ``invalid`` or ``no_result``. False if it was already settled."""
     assert outcome in (SKIPPED, REFUSED, RETURNED, INVALID, NO_RESULT), outcome
-    marks = ",".join("?" * (1 + len(LIVE)))
     return db.execute(
-        f"UPDATE event_route_decisions SET outcome=?, reason=?, run_input=NULL "
-        f"WHERE id=? AND outcome IN ({marks})",
-        (outcome, reason[:_REASON_LIMIT] if reason else None, decision_id, QUEUED, *LIVE),
+        "UPDATE event_route_decisions SET outcome=?, reason=?, run_input=NULL "
+        "WHERE id=? AND outcome IN (?,?)",
+        (outcome, reason[:_REASON_LIMIT] if reason else None, decision_id, QUEUED, STARTED),
     ).rowcount == 1
 
 
 def started_by(db: sqlite3.Connection, worker: str) -> Mapping[str, Any] | None:
-    """The live start whose worker is ``worker``, with its rule (``idx_..._worker``)."""
-    marks = ",".join("?" * len(LIVE))
+    """The started start whose worker is ``worker``, with its rule (``idx_..._worker``)."""
     return db.execute(
         "SELECT d.id, d.rule_id, d.thread_id, d.outcome, d.request_identity, d.event_id, "
         "d.artifact_integration, d.artifact_type, d.artifact_external_id, r.workflow_id "
         "FROM event_route_decisions d JOIN event_rules r ON r.id=d.rule_id "
-        f"WHERE d.worker_thread_id=? AND d.outcome IN ({marks})", (worker, *LIVE),
+        "WHERE d.worker_thread_id=? AND d.outcome=?", (worker, STARTED),
     ).fetchone()
 
 
 _START = ("SELECT id, rule_id, thread_id, worker_thread_id, request_identity, event_id, connector, "
           "event_type, artifact_integration, artifact_type, artifact_external_id, run_input "
-          "FROM event_route_decisions ")
+          "FROM event_route_decisions d ")
 
 
-def with_workers(db: sqlite3.Connection, outcome: str) -> list[Mapping[str, Any]]:
-    """Every held or started start with its worker made, oldest first, with what its
-    result is checked and reported with."""
-    assert outcome in LIVE, outcome
+def with_workers(db: sqlite3.Connection) -> list[Mapping[str, Any]]:
+    """Every started start with its worker made, oldest first, with what its result is
+    checked and reported with."""
     return db.execute(_START + "WHERE outcome=? AND worker_thread_id IS NOT NULL ORDER BY id",
-                      (outcome,)).fetchall()
+                      (STARTED,)).fetchall()
 
 
 def orphans(db: sqlite3.Connection) -> list[Mapping[str, Any]]:
-    """Claimed starts with no worker. The runner claims and makes each under one lock, so
-    when it holds that lock, one of these is a start a restart cut short."""
+    """Started starts a restart may have cut short: no worker, or a worker with no turn and
+    no queued input. The runner claims and spawns under one lock, so when it holds that
+    lock, one of these whose worker has no live process was cut short."""
     return db.execute(
-        _START + "WHERE outcome=? AND worker_thread_id IS NULL AND request_identity IS NOT NULL",
+        _START + "WHERE outcome=? AND request_identity IS NOT NULL AND (worker_thread_id IS NULL "
+        "OR (NOT EXISTS (SELECT 1 FROM active_turns t WHERE t.thread_id=d.worker_thread_id) "
+        "AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.thread_id=d.worker_thread_id "
+        "AND m.input_order IS NOT NULL AND m.delivery_state='queued')))",
         (STARTED,),
     ).fetchall()
-
-
-def held_before(db: sqlite3.Connection, worker: str) -> int:
-    """Held starts older than ``worker``'s whose worker has no turn running: the ones a
-    freed slot goes to first. Only a held worker's own start makes this count."""
-    row = db.execute(
-        "SELECT id FROM event_route_decisions WHERE worker_thread_id=? AND outcome=?",
-        (worker, HELD),
-    ).fetchone()
-    if row is None:
-        return 0
-    return db.execute(
-        "SELECT COUNT(*) FROM event_route_decisions d WHERE d.outcome=? AND d.id<? "
-        "AND NOT EXISTS (SELECT 1 FROM active_turns t WHERE t.thread_id=d.worker_thread_id "
-        "AND t.status='running')",
-        (HELD, row["id"]),
-    ).fetchone()[0]
-
-
-def running(db: sqlite3.Connection, decision_id: int) -> None:
-    """A held start whose worker's first turn has begun."""
-    db.execute("UPDATE event_route_decisions SET outcome=?, reason=NULL WHERE id=? AND outcome=?",
-               (STARTED, decision_id, HELD))

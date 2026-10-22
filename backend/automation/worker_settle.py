@@ -11,12 +11,14 @@ admits it again as a duplicate and then settles the row, which settles once
 (``worker_starts.end``). The event goes on the request's own artifact, so rule 0 reaches
 its registered owner; never to the rule owner as a delegated reply. When nothing usable
 came back, the rule owner is woken once unless one of its own ``run_script`` rules took
-the event.
+the event. A reason the owner reads is classified; raw error text stays in the log.
+Each settled start emits one product event, here and nowhere else.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from collections.abc import Mapping
@@ -28,15 +30,18 @@ from loguru import logger
 from core.workflow_result import ResultInvalid, check_result
 from events import worker_starts
 from events.connectors import worker as worker_events
-from events.rule_outcomes import INVALID, NO_RESULT, QUEUED, REFUSED, RETURNED, STARTED
+from events.rule_outcomes import INVALID, NO_RESULT, QUEUED, REFUSED, RETURNED
 from infra.database import write_transaction
 from infra.db_async import run_in_db
+from infra.product_events import emit_product_event
 
 #: The largest checked payload an event carries; intake's own limit for all facts is 64 KB.
 MAX_RESULT = 48 * 1024
 #: How a refusal reads in the owner's ``worker.no_result`` reason.
 REFUSAL_PREFIX = "refused: "
 _ENDED = ("completed", "cancelled", "error")
+#: A turn error the owner may read as is: a short code, never free text.
+_ERROR_CODE = re.compile(r"[A-Za-z][\w.:-]{0,63}\Z")
 
 
 @dataclass(frozen=True)
@@ -50,6 +55,7 @@ class Settle:
     event_id: str
     facts: dict[str, Any]
     trace: tuple[str, ...]
+    waited: bool = False  # whether the start waited for a free Claude Code slot
 
 
 def last_turn(db: sqlite3.Connection, worker: str) -> Mapping[str, Any] | None:
@@ -79,15 +85,16 @@ def final_message(db: sqlite3.Connection, worker: str, turn_id: str) -> str | No
 def verdict(turn: Mapping[str, Any], text: str | None, schema: dict[str, Any]
             ) -> tuple[str, dict[str, Any]]:
     """The start's outcome and the facts that say it, for one ended turn."""
-    from infra.worker_capacity import WORKER_CAPACITY
-
-    if turn["status"] == "cancelled" or turn["error"] == WORKER_CAPACITY:
-        # A held first turn ends with the hold as its error; nothing left queued means a Stop.
-        return NO_RESULT, {"reason": "the worker was stopped"}
+    if turn["status"] == "cancelled":
+        return NO_RESULT, {"reason": "the agent was stopped"}
     if turn["status"] != "completed":
-        return NO_RESULT, {"reason": f"the worker's turn failed: {turn['error'] or 'unknown error'}"[:500]}
+        error = str(turn["error"] or "")
+        if _ERROR_CODE.match(error):
+            return NO_RESULT, {"reason": f"the agent's turn failed ({error})"}
+        logger.warning("rule-started agent turn {} failed: {}", turn["id"], error)
+        return NO_RESULT, {"reason": "the agent's turn failed"}
     if text is None:
-        return NO_RESULT, {"reason": "the worker returned no final message"}
+        return NO_RESULT, {"reason": "the agent returned no final message"}
     try:
         payload = json.dumps(check_result(text, schema), ensure_ascii=False, separators=(",", ":"))
     except ResultInvalid as exc:
@@ -100,7 +107,7 @@ def verdict(turn: Mapping[str, Any], text: str | None, schema: dict[str, Any]
 def ready(db: sqlite3.Connection, decision_ids: set[int] | None = None) -> list[Settle]:
     """Every started worker whose last turn has ended, with what settles it."""
     settles = []
-    for row in worker_starts.with_workers(db, STARTED):
+    for row in worker_starts.with_workers(db):
         if decision_ids is not None and row["id"] not in decision_ids:
             continue
         turn = last_turn(db, row["worker_thread_id"])
@@ -128,11 +135,12 @@ def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
     }
     return Settle(row["id"], row["thread_id"], outcome, f"{worker_events.NAMESPACE}.{kind}",
                   f"worker:{row['id']}:{kind}", {k: v for k, v in facts.items() if v is not None},
-                  tuple(check.get("trace") or ()))
+                  tuple(check.get("trace") or ()), bool(check.get("waited")))
 
 
 async def settle(item: Settle) -> None:
-    """Admit the start's event, then settle its row once and tell the owner if nothing came back."""
+    """Admit the start's event, then settle its row once, record it, and tell the owner if
+    nothing came back."""
     from events.intake import admit_event
 
     admitted = await admit_event(event_type=item.event_type, facts=item.facts, origin="platform",
@@ -142,15 +150,24 @@ async def settle(item: Settle) -> None:
     if admitted.refusal is not None:
         logger.error("worker start {}: its event was refused: {}", item.decision_id, admitted.refusal.code)
         reason = f"its result event was refused ({admitted.refusal.code})"
-    woke = await run_in_db(_end, item, reason, admitted.refusal is not None)
+    settled = await run_in_db(_end, item, reason, admitted.refusal is not None)
+    if settled is None:
+        return
+    outcome, woke = settled
+    emit_product_event("event_rule", "start_settled", thread_id=item.owner, properties={
+        "rule_id": item.facts.get("rule_id"), "workflow": item.facts.get("workflow"),
+        "outcome": outcome, "waited_for_capacity": item.waited,
+    })
     if woke:
         from automation import script_runner
 
         await script_runner._drive_owner(item.owner)  # the one owner drive after a model-free wake
 
 
-def _end(item: Settle, reason: str | None, event_refused: bool, db: sqlite3.Connection | None = None) -> bool:
-    """Settle the row and, when nothing usable came back, wake its owner once; whether it woke."""
+def _end(item: Settle, reason: str | None, event_refused: bool,
+         db: sqlite3.Connection | None = None) -> tuple[str, bool] | None:
+    """Settle the row and, when nothing usable came back, wake its owner once: the outcome
+    and whether it woke, or ``None`` when the row was already settled."""
     from events.delivery import enqueue_event_wake
 
     outcome = NO_RESULT if event_refused and item.outcome != REFUSED else item.outcome
@@ -158,17 +175,19 @@ def _end(item: Settle, reason: str | None, event_refused: bool, db: sqlite3.Conn
     stored = reason.removeprefix(REFUSAL_PREFIX) if reason and outcome == REFUSED else reason
     with write_transaction(db, scope="worker_settle") as conn:
         if not worker_starts.end(conn, item.decision_id, outcome, stored):
-            return False
+            return None
         if outcome == RETURNED or _owner_took(conn, item):
-            return False
+            return outcome, False
+        workflow = item.facts.get("workflow") or "a workflow"
+        said = (f"A rule couldn’t start {workflow}: {stored}" if outcome == REFUSED
+                else f"The agent a rule started for {workflow} returned no result: {reason}")
         enqueue_event_wake(
-            item.owner, item.event_type,
-            f"Your {item.facts.get('workflow')} worker returned no result: {reason}",
+            item.owner, item.event_type, said,
             {"run_id": str(item.decision_id), "rule_id": item.facts.get("rule_id"),
              "request_event": item.facts.get("request_event")},
             message_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia:{item.event_id}:wake")), db=conn,
         )
-        return True
+        return outcome, True
 
 
 def _owner_took(conn: sqlite3.Connection, item: Settle) -> bool:

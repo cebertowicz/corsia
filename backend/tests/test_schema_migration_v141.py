@@ -90,7 +90,7 @@ def test_the_rebuild_keeps_every_row_matches_a_fresh_install_and_is_repeatable()
     db.execute(_START, ("w1", "flow", "request"))
     db.execute("INSERT INTO event_route_decisions (at,event_id,connector,event_type,watch_event,rule_id,"
                "thread_id,outcome,via,run_input,request_identity,worker_thread_id) VALUES ('b','e2','qa',"
-               "'request','request','w1','w','held','rule','{}','pr-1@a1','child')")
+               "'request','request','w1','w','started','rule','{}','pr-1@a1','child')")
     assert db.execute("SELECT MAX(id) FROM event_route_decisions").fetchone()[0] == 3
 
 
@@ -101,10 +101,11 @@ def test_storage_takes_a_start_worker_rule_only_with_its_workflow_and_identity_f
     for rule_id, workflow, fact in (("no-flow", None, "request"), ("no-fact", "flow", None)):
         with pytest.raises(sqlite3.IntegrityError):
             db.execute(_START, (rule_id, workflow, fact))
-    with pytest.raises(sqlite3.IntegrityError):  # an input rides only a queued, held or started row
-        db.execute("INSERT INTO event_route_decisions (at,event_id,connector,event_type,watch_event,rule_id,"
-                   "outcome,via,run_input) VALUES ('a','e','qa','request','request','ok','returned',"
-                   "'rule','{}')")
+    for outcome in ("returned", "held"):  # an input rides only a queued or started row
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute("INSERT INTO event_route_decisions (at,event_id,connector,event_type,watch_event,"
+                       "rule_id,outcome,via,run_input) VALUES ('a','e','qa','request','request','ok',?,"
+                       "'rule','{}')", (outcome,))
 
 
 def test_a_full_v140_install_takes_the_step_and_ends_where_a_fresh_install_starts():

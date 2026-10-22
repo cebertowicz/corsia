@@ -46,7 +46,7 @@ async def test_a_killed_worker_returns_no_result_and_releases_its_request(world)
     live.session._proc.kill()
     await settle_all()
     [(outcome, reason, identity, _worker)] = starts(rule)
-    assert outcome == "no_result" and reason.startswith("the worker's turn failed") and identity
+    assert outcome == "no_result" and reason.startswith("the agent's turn failed") and identity
     assert [kind for kind, _ in worker_events()] == ["worker.no_result"]
     assert len(owner_wakes()) == 1 and world["driven"] == [OWNER]
 
@@ -69,8 +69,79 @@ async def test_a_start_cut_short_by_a_restart_returns_no_result(world):
         decision = db.execute("SELECT id FROM event_route_decisions WHERE rule_id=?", (rule,)).fetchone()[0]
         assert worker_starts.claim(db, decision) is not None
     await settle_all()
-    assert starts(rule)[0][:2] == ("no_result", "the backend restarted before the worker was made")
+    assert starts(rule)[0][:2] == ("no_result", "a restart cut the start short")
     assert len(owner_wakes()) == 1
+
+
+# 3 (restart) -- a worker made but cut short before its first input or turn settles once.
+@pytest.mark.asyncio
+async def test_a_worker_cut_short_before_its_first_turn_returns_no_result_once(world):
+    from events import worker_starts
+    from infra.database import write_transaction
+
+    rule = await make_rule()
+    await request()
+    with write_transaction(None, scope="rule_worker_claim") as db:
+        decision = db.execute("SELECT id FROM event_route_decisions WHERE rule_id=?", (rule,)).fetchone()[0]
+        assert worker_starts.claim(db, decision) is not None
+        worker_starts.made(db, decision, "rw-cut-short", "{}")
+    await settle_all()
+    await settle_all()
+    assert starts(rule) == [("no_result", "a restart cut the start short", "pr-1@a1", "rw-cut-short")]
+    assert [kind for kind, _ in worker_events()] == ["worker.no_result"] and len(owner_wakes()) == 1
+
+
+# The owner reads a classified reason; the exception's own text stays in the log.
+@pytest.mark.asyncio
+async def test_the_owner_wake_and_event_carry_no_exception_text(world, monkeypatch):
+    from automation import worker_inputs
+    from automation.worker_settle import verdict
+    from events import intake
+    from infra.database import get_db
+
+    def broken(*_args):
+        raise RuntimeError("secret /private/path detail")
+
+    real, admitted = intake.admit_event, []
+
+    async def recorded(**kwargs):
+        admitted.append(kwargs["facts"])
+        return await real(**kwargs)
+
+    monkeypatch.setattr(worker_inputs, "brief", broken)
+    monkeypatch.setattr(intake, "admit_event", recorded)
+    rule = await make_rule()
+    await request()
+    await settle_all()
+    [(outcome, reason, *_)] = starts(rule)
+    [wake] = owner_wakes()
+    stored = [row[0] for row in get_db().execute("SELECT content FROM messages")]
+    assert outcome in {"refused", "no_result"} and "RuntimeError" in reason and "RuntimeError" in wake
+    assert all("secret" not in text for text in (reason, *stored, *map(json.dumps, admitted)))
+    turn = {"id": "t", "status": "error", "error": "Traceback (most recent call last): secret"}
+    assert verdict(turn, None, {}) == ("no_result", {"reason": "the agent's turn failed"})
+    assert verdict({**turn, "error": "process_exited"}, None, {})[1] == {
+        "reason": "the agent's turn failed (process_exited)"}
+
+
+# Each settled start is recorded once as a product event: rule, workflow, outcome, waited.
+@pytest.mark.asyncio
+async def test_each_settled_start_emits_one_product_event(world, monkeypatch):
+    from automation import worker_settle
+
+    emitted = []
+    monkeypatch.setattr(worker_settle, "emit_product_event",
+                        lambda category, action, **kw: emitted.append((category, action, kw)))
+    rule = await make_rule()
+    await request()
+    await settle_all()
+    await settle_all()
+    [(category, action, kw)] = emitted
+    assert (category, action, kw["thread_id"]) == ("event_rule", "start_settled", OWNER)
+    props = kw["properties"]
+    assert (props["rule_id"], props["outcome"], props["waited_for_capacity"]) == (rule, "returned", False)
+    assert props["workflow"].startswith("worker-flow@") and set(props) == {
+        "rule_id", "workflow", "outcome", "waited_for_capacity"}
 
 
 # 4 -- schema-invalid output: no_result {reason: invalid}; the same request starts nothing, a bumped attempt starts one.

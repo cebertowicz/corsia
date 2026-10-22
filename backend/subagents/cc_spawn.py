@@ -36,8 +36,8 @@ from subagents.cc_spawn_prepare import CCSpawnRequest, PreparedCCSpawn, prepare_
 from subagents.cc_stream import CCStreamSession
 
 log = logging.getLogger("subagents.cc_runtime")
-#: Records a rule-started worker (its id, whether its first turn is held) before it can run.
-RuleStart = Callable[[str, bool], Awaitable[None]]
+#: Records a rule-started worker's id on its start before its first turn can run.
+RuleStart = Callable[[str], Awaitable[None]]
 
 
 def _admit_initial_task(prepared: PreparedCCSpawn) -> InputAdmission:
@@ -160,29 +160,6 @@ async def _start_process(prepared: PreparedCCSpawn) -> None:
     await _deliver_initial_task(prepared, admission)
 
 
-async def _hold_initial_task(prepared: PreparedCCSpawn) -> None:
-    """Make the child's first turn wait for a working slot: no process starts, and the
-    task is held at its FIFO head until the idle claim lifts it (``infra.worker_capacity``).
-    The child's confined launch record is already stored, so it cold-starts confined."""
-    from infra.unavailable_model_recovery import hold_unavailable_model_input
-    from infra.worker_capacity import WORKER_CAPACITY
-
-    request = prepared.request
-    cleanup_ephemeral_live(prepared.live, thread_id=prepared.child_id)
-    admission = await run_in_db(_admit_initial_task, prepared)
-    marker_id = await run_in_db(
-        persist_subagent_marker, request.parent_thread_id, prepared.child_id, prepared.name, None,
-    )
-    broadcast_subagent_marker(
-        request.parent_thread_id, prepared.child_id, prepared.name, prepared.bcast, marker_id, None,
-    )
-    from infra.thread_input_types import ClaimedBatch
-
-    if not isinstance(admission.batch, ClaimedBatch):
-        raise RuntimeError("fresh Claude Code child did not claim its initial task")
-    await hold_unavailable_model_input(admission.batch, request.target, cause=WORKER_CAPACITY)
-
-
 async def _cleanup_failed_start(prepared: PreparedCCSpawn, error: BaseException) -> None:
     live = prepared.live
     child_id = prepared.child_id
@@ -242,9 +219,7 @@ async def spawn(
 
     A ``review`` confinement runs it read-only over ``add_dirs`` from its own
     empty working directory; the caller has already checked those reads.
-    ``rule_start`` makes it a rule-started worker (R23): at a full working-process
-    cap the child is made and its task held for a slot instead of refused, and
-    ``rule_start(child_id, held)`` records it before its first turn can run.
+    ``rule_start(child_id)`` records a rule-started worker before its first turn can run.
     """
     require_owned_accept_db(db)
     if not task:
@@ -254,20 +229,15 @@ async def spawn(
         project_id, claude_dir, broadcast, account_id,
         confinement=confinement, add_dirs=add_dirs,
     )
-    from infra.worker_capacity import full
-
-    hold = rule_start is not None and await run_in_db(full)
-    prepared = await prepare_spawn(request, get_db(), check_cap=rule_start is None)
+    prepared = await prepare_spawn(request, get_db())
     try:
         if rule_start is not None:
-            await rule_start(prepared.child_id, hold)
-        if hold:
-            await _hold_initial_task(prepared)
-        else:
-            await _start_process(prepared)
+            await rule_start(prepared.child_id)
+        await _start_process(prepared)
         log.info(
-            "%s CC subagent child=%s from parent=%s",
-            "Held" if hold else "Spawned", prepared.child_id, parent_thread_id,
+            "Spawned CC subagent child=%s from parent=%s",
+            prepared.child_id,
+            parent_thread_id,
         )
         return prepared.child_id
     except BaseException as error:

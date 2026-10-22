@@ -102,7 +102,8 @@ async def record_turn_end(complete, thread_id: str, **outcome) -> TurnEndEffects
     )
     from automation import worker_runner
 
-    worker_runner.poke(if_open=True)  # a Claude Code slot may have freed; a rule's worker may be done
+    # Best-effort and never awaited: a Claude Code slot may have freed, a rule's worker may be done.
+    worker_runner.poke(if_open=True)
     return effects
 
 

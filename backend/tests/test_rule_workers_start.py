@@ -55,6 +55,7 @@ async def test_a_matching_rule_starts_one_review_worker_that_reads_only_its_inpu
     assert outcome == "started" and identity == "pr-1@a1" and _workers() == [worker]
     child = get_db().execute("SELECT spawned_by, model FROM threads WHERE id=?", (worker,)).fetchone()
     assert (child["spawned_by"], child["model"]) == (OWNER, "claude-code/sonnet")
+    assert get_db().execute("SELECT title FROM threads WHERE id=?", (worker,)).fetchone()[0] == "worker-flow"
     launch = _launch(worker)
     start_dir = world["folder"] / "workers" / str(_decision(rule))
     assert launch["confinement"] == "review"
@@ -91,7 +92,7 @@ async def test_a_staging_path_outside_the_folder_is_refused_and_the_owner_told(w
     assert reason.startswith("staging_path ../../.. is outside your staging folder")
     assert _workers() == [] and [kind for kind, _ in worker_events()] == ["worker.no_result"]
     [wake] = owner_wakes()
-    assert "refused: staging_path ../../.. is outside your staging folder" in wake
+    assert "couldn’t start worker-flow: staging_path ../../.. is outside your staging folder" in wake
     # The refusal released the identity: the same request with a good path starts.
     await request()
     await settle_all()
@@ -176,7 +177,7 @@ async def test_a_paused_owner_skips_and_a_request_after_resume_starts(world, mon
     assert len(_workers()) == 1
 
 
-# 12 -- a Local-only owner's start is refused (no confined local worker yet), never bound to cloud.
+# 12 -- a Local-only owner's start is refused with what to do, never bound to cloud.
 @pytest.mark.asyncio
 async def test_a_local_only_owner_is_refused_and_no_worker_is_made(world):
     from infra.database import write_transaction
@@ -186,9 +187,12 @@ async def test_a_local_only_owner_is_refused_and_no_worker_is_made(world):
         db.execute("UPDATE threads SET local_only=1 WHERE id=?", (OWNER,))
     await request()
     await settle_all()
-    assert starts(rule)[0][:2] == ("refused", "local only, no confined local worker yet")
+    said = ("this chat is set to Local only, and a rule can start a workflow only on a cloud "
+            "model. Run the workflow yourself, or turn off Local only for this chat.")
+    assert starts(rule)[0][:2] == ("refused", said)
     assert _workers() == []
-    assert "refused: local only, no confined local worker yet" in owner_wakes()[0]
+    [wake] = owner_wakes()
+    assert f"Summary: A rule couldn’t start worker-flow: {said}\n" in wake
 
 
 # Non-Claude-Code owners: the confined launch exists only for Claude Code.

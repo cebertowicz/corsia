@@ -1,7 +1,7 @@
 """``explain`` tells each worker start in its own words, and ``list`` counts the starts (R25).
 
-The held start is told in ``test_rule_workers_hold``; a refused launch's own causes in
-``test_rule_workers_start``.
+A start waiting for a free Claude Code slot is told in ``test_rule_workers_capacity``; a
+refused launch's own causes in ``test_rule_workers_start``.
 """
 
 from __future__ import annotations

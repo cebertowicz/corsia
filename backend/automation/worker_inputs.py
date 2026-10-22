@@ -21,6 +21,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 #: The request facts a ``start_worker`` rule's worker reads (named in the tool's description).
 STAGING_FACT = "staging_path"
 HEAD_REPO_FACT = "head_repo"
@@ -102,7 +104,9 @@ def write_head(source: tuple[Path, str, str], dest: Path) -> None:
                 tar.extractall(head, filter="data")
         except tarfile.TarError as exc:
             archive.kill()
-            raise StartRefused(f"refused: commit {sha[:12]} could not be written: {exc}") from None
+            logger.warning("head tree of {} at {} could not be written: {}", repo, sha, exc)
+            raise StartRefused(f"refused: commit {sha[:12]} could not be written "
+                               f"({type(exc).__name__})") from None
     if archive.returncode:
         raise StartRefused(f"refused: commit {sha[:12]} could not be read from {repo}")
 
@@ -128,6 +132,6 @@ def brief(workflow: str, body: str, schema: Mapping[str, Any], read_paths: list[
         f"{json.dumps(event.get('facts') or {}, ensure_ascii=False, indent=1, default=str)}",
         body,
         "End with one final message whose answer is a JSON value matching this schema, "
-        "alone or in its first fenced json block:\n"
+        "alone or as its last fenced json block:\n"
         f"{json.dumps(schema, ensure_ascii=False, indent=1)}",
     ))

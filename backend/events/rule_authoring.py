@@ -280,9 +280,8 @@ def list_rules(db: sqlite3.Connection, *, project_id: str | None, now: str) -> l
         return []
     since = (datetime.fromisoformat(now) - timedelta(hours=24)).isoformat()
     marks = ",".join("?" * len(found))
-    # A start is a script run queued or begun, or a worker started or held for a slot (a held
-    # start has its worker; a held delivery has none).
-    started = f"(outcome IN ({_STARTS}) OR (outcome='held' AND worker_thread_id IS NOT NULL))"
+    # A start is a script run or a worker start, queued or begun.
+    started = f"outcome IN ({_STARTS})"
     stats = {
         row["rule_id"]: row for row in db.execute(
             "SELECT rule_id, MAX(CASE WHEN outcome IN ('woke','digested','dropped') OR "

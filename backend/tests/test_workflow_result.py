@@ -79,8 +79,30 @@ def test_a_fenced_payload_is_read_with_defaults_coercions_and_the_unknown_value(
     }
 
 
-def test_a_payload_inside_prose_is_found():
-    assert check_result('Result: {"findings": []} as asked.', FINDINGS) == {"findings": []}
+def test_the_last_fenced_block_that_parses_is_the_payload():
+    text = ('Shape:\n```json\n{"findings": []}\n```\nAnswer:\n```json\n'
+            '{"findings": [{"title": "leak"}]}\n```\n```\nnot json\n```')
+
+    assert check_result(text, FINDINGS) == {"findings": [{"title": "leak", "blocking": False}]}
+
+
+@pytest.mark.parametrize(
+    "text",
+    ['I could not finish. An empty answer would look like [] or {"findings": []}.',
+     'Result: {"findings": []} as asked.'],
+)
+def test_an_example_bracket_in_prose_is_not_a_payload(text):
+    with pytest.raises(ResultInvalid, match="not JSON and has no fenced JSON block"):
+        check_result(text, FINDINGS)
+
+
+def test_a_default_never_satisfies_a_required_name():
+    schema = {"type": "object", "required": ["findings"],
+              "properties": {"findings": {"type": "array", "items": {"type": "string"}, "default": []}}}
+
+    with pytest.raises(ResultInvalid, match="result.findings is required"):
+        check_result("{}", schema)
+    assert check_result('{"findings": []}', schema) == {"findings": []}
 
 
 @pytest.mark.parametrize(
@@ -88,7 +110,7 @@ def test_a_payload_inside_prose_is_found():
     [
         (None, "no final message"),
         ("   ", "no final message"),
-        ("I could not finish.", "no JSON object or array"),
+        ("I could not finish.", "not JSON and has no fenced JSON block"),
         ('{"other": 1}', "result.findings is required"),
         ('{"findings": [{"title": "x", "line": "twelve"}]}', "result.findings[0].line must be an integer"),
         ('{"findings": [{"title": "x", "blocking": "no"}]}', "must be true or false"),
