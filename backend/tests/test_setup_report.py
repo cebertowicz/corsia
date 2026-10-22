@@ -65,3 +65,25 @@ def test_report_route_returns_the_body_before_the_first_account(monkeypatch, tmp
     assert "Codex: Sign-in didn’t finish." in response.json()["text"]
     assert "codex sign-in failed cause=vendor_login_failed" in response.json()["text"]
     assert client.post("/api/setup/report", json={"rows": [{"key": "shell", "name": "x"}]}).status_code == 422
+    # Only a minted reference is accepted, so a one-letter "reference" cannot select log lines.
+    loose = {"key": "api", "name": "API", "reference": "e"}
+    assert client.post("/api/setup/report", json={"rows": [loose]}).status_code == 422
+
+
+def test_a_reference_selects_only_its_whole_log_token():
+    row = {"key": "api", "name": "API", "reference": "signin-0123456789abcdef"}
+    lines = ["sign-in failed reference=signin-0123456789abcdef cause=x",
+             "other reference=signin-0123456789abcdef0 cause=y",
+             "mentions signin-0123456789abcdef in passing"]
+    assert relevant_lines(lines, [row]) == lines[:1]
+    assert relevant_lines(lines, [{**row, "reference": "e"}]) == []
+
+
+@pytest.mark.parametrize("line", [
+    "claude-code opened https://example.test/oauth?code=abc&state=xyz",
+    "codex enter the one-time device code ABCD-1234",
+    "claude-code signed in as person@example.test",
+])
+def test_sign_in_codes_and_emails_are_withheld_whole(line):
+    rows = [{"key": "claude-code"}, {"key": "codex"}]
+    assert relevant_lines([line], rows) == [WITHHELD]

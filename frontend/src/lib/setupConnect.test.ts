@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createSetupConnect, installCause, installFailureCopy } from './setupConnect.svelte';
+import { createSetupConnect, installCause, installFailureCopy, signinFailureCopy } from './setupConnect.svelte';
 
 describe('setup CLI installer failure copy', () => {
 	it.each([
@@ -45,5 +45,21 @@ describe('setup CLI installer failure copy', () => {
 
 		expect(flow.row({ source: 'claude-code', name: 'Claude Code', state: 'ready', limited: true }).meta)
 			.toBe('Signed in, but your Claude subscription has reached its usage limit.');
+	});
+});
+
+describe('setup sign-in failure copy', () => {
+	it('never puts an unknown cause code into the sentence', () => {
+		const copy = signinFailureCopy('codex', 'some_new_cause');
+		expect(copy).toEqual({ meta: 'Couldn’t finish signing in to Codex. Sign in again, or save a report.', reportable: true });
+	});
+
+	it('names a missing CORSIA agent apart from an unreachable service', () => {
+		expect(signinFailureCopy('codex', 'agent_unavailable').meta).not.toBe(signinFailureCopy('codex', 'unreachable').meta);
+		expect(signinFailureCopy('codex', 'agent_unavailable').reportable).toBe(true);
+	});
+
+	it('tells a person who signed in to the same account what to do next', () => {
+		expect(signinFailureCopy('claude-code', 'same_account').meta).toContain('sign in again with a different Claude account');
 	});
 });

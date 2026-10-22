@@ -22,6 +22,7 @@ let sourceState: 'not_installed' | 'ready' | 'unverified' | 'needs_auth' = 'not_
 let calls: string[];
 let signinState: 'waiting' | 'completed' | 'failed' = 'waiting';
 let localFailure = false;
+let catalogModels: Record<string, unknown>[] = [];
 let intervalSpy: ReturnType<typeof vi.spyOn>, clearIntervalSpy: ReturnType<typeof vi.spyOn>;
 
 async function settle() { await vi.advanceTimersByTimeAsync(10); await tick(); }
@@ -40,10 +41,11 @@ function mountResume() {
 			...(localFailure ? [{ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'start_failed', setup_error_code: 'start_failed', fix: 'CORSIA couldn’t set up the local model.' }] : []),
 		] });
 		if (url.startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
-		if (url.startsWith('/api/models?')) return json({ models: [] });
+		if (url.startsWith('/api/models?')) return json({ models: catalogModels });
+		if (url === '/api/settings/network-servers') return json({}, 500);
 		if (url.startsWith('/api/vendor-accounts?')) return json({ accounts: [] });
 		if (url === '/api/vendor-accounts' && method === 'POST') return json({ id: 'account-1' });
-		if (url === '/api/vendor-accounts/account-1/signin/check' && method === 'POST') return json({ status: signinState });
+		if (url === '/api/vendor-accounts/account-1/signin/check' && method === 'POST') return json(signinState === 'failed' ? { status: 'failed', cause: 'vendor_status_failed', ref: 'signin-0123456789abcdef' } : { status: signinState });
 		if (url === '/api/vendor-accounts/account-1/signin' && method === 'POST') return json({ status: 'waiting' });
 		if (url === '/api/providers/cli/codex/install' && method === 'POST') return json({ state: 'running', reason: null, ref: null, path_shadowed_by: null });
 		if (url === '/api/providers/cli/codex/install' && method === 'DELETE') return json({ state: 'cancelled', reason: null, ref: null, path_shadowed_by: null });
@@ -61,7 +63,7 @@ function click(label: string) {
 }
 
 beforeEach(() => {
-	vi.useFakeTimers(); listeners.clear(); calls = []; installState = 'running'; sourceState = 'not_installed'; signinState = 'waiting'; localFailure = false;
+	vi.useFakeTimers(); listeners.clear(); calls = []; installState = 'running'; sourceState = 'not_installed'; signinState = 'waiting'; localFailure = false; catalogModels = [];
 	intervalSpy = vi.spyOn(globalThis, 'setInterval'); clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
 });
 afterEach(async () => {
@@ -101,7 +103,8 @@ describe('SetupScreen owned-job polling', () => {
 		await vi.advanceTimersByTimeAsync(3000); await tick();
 		click('Save a report'); await settle();
 		expect(calls).toContain('POST /api/setup/report');
-		expect(invoke).toHaveBeenCalledWith('save_setup_report', { details: '' });
+		// The stub service answers without details, and the report says so instead of saving blank.
+		expect(invoke).toHaveBeenCalledWith('save_setup_report', { details: expect.stringContaining('couldn’t read the setup details') });
 	});
 
 	it.each([
@@ -117,6 +120,8 @@ describe('SetupScreen owned-job polling', () => {
 		expect(signinReads()).toBe(1);
 		expect(clearIntervalSpy).toHaveBeenCalledOnce();
 		expect(vi.getTimerCount()).toBe(0);
+		// A failed sign-in shows the reference its service-log line carries.
+		if (terminal === 'failed') expect(host.textContent).toContain('Reference: signin-0123456789abcdef');
 	});
 
 	it('cleans up an active sign-in timer when the screen unmounts', async () => {
@@ -178,7 +183,16 @@ describe('SetupScreen owned-job polling', () => {
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke }); localFailure = true;
 		mountResume(); await settle();
 		click('Save a report'); await settle();
-		expect(invoke).toHaveBeenCalledWith('save_setup_report', { details: '' });
+		// The stub service answers without details, and the report says so instead of saving blank.
+		expect(invoke).toHaveBeenCalledWith('save_setup_report', { details: expect.stringContaining('couldn’t read the setup details') });
+	});
+
+	it('keeps a failed local turn-off on screen after the sources refresh', async () => {
+		catalogModels = [{ id: 'local', connection: 'omlx', status: 'ready' }, { id: 'cloud', connection: 'anthropic', status: 'ready' }];
+		mountResume(); await settle();
+		(host.querySelector('button[aria-label="Local model"]') as HTMLButtonElement | null)?.click(); await settle();
+		expect(calls).toContain('GET /api/settings/network-servers');
+		expect(host.textContent).toContain('CORSIA couldn’t turn off the local model. Try again.');
 	});
 
 	it('cleans up a pre-account local download timer when the screen unmounts', async () => {

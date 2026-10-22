@@ -7,7 +7,10 @@ export const setupReportInvoke = () => typeof window === 'undefined' ? undefined
 /** One failed setup row, as the screen shows it. */
 export type SetupReportRow = { key: 'claude-code' | 'codex' | 'omlx' | 'api'; name: string; cause?: string; reference?: string };
 
-/** The service's allowlisted report body for these rows; '' when it can't be read, so the report still saves. */
+/** Saved in place of the details when the service can't give them, so the report says what's missing. */
+export const DETAILS_UNREAD = 'CORSIA couldn’t read the setup details from its service';
+
+/** The service's allowlisted report body for these rows; a line saying why when it can't be read, so the report still saves. */
 export async function setupReportDetails(rows: SetupReportRow[]): Promise<string> {
 	const session = get(token);
 	try {
@@ -16,10 +19,11 @@ export async function setupReportDetails(rows: SetupReportRow[]): Promise<string
 			headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session}` } : {}) },
 			body: JSON.stringify({ rows: rows.map(({ key, name, cause, reference }) => ({ key, name, cause: cause || null, reference: reference || null })) }),
 		});
-		const body = response.ok ? await response.json() : null;
-		return typeof body?.text === 'string' ? body.text : '';
+		if (!response.ok) return `${DETAILS_UNREAD} (HTTP ${response.status}).\n`;
+		const body = await response.json().catch(() => null);
+		return typeof body?.text === 'string' ? body.text : `${DETAILS_UNREAD} (unexpected answer).\n`;
 	} catch {
-		return '';
+		return `${DETAILS_UNREAD} (no answer).\n`;
 	}
 }
 

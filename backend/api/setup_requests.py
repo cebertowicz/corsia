@@ -32,7 +32,8 @@ class SetupReportRow(BaseModel):
     key: Literal["claude-code", "codex", "omlx", "api"]
     name: str = Field(min_length=1, max_length=80)
     cause: str | None = Field(default=None, max_length=400)
-    reference: str | None = Field(default=None, max_length=160, pattern=r"^[A-Za-z0-9_-]+$")
+    # Only a reference CORSIA minted: cli-, local- or signin- and 16 hex digits.
+    reference: str | None = Field(default=None, pattern=r"^(?:cli|local|signin)-[0-9a-f]{16}$")
 
 
 class SetupReportRequest(BaseModel):

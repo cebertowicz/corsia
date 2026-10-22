@@ -78,7 +78,7 @@ describe('SetupScreen account recovery', () => {
 		click('Continue'); await settle();
 		expect(host.textContent).toContain('Couldn’t create your account. Try again.');
 		click('Save a report'); await settle();
-		expect(invoke).toHaveBeenCalledWith('save_setup_report', { details: '' });
+		expect(invoke).toHaveBeenCalledWith('save_setup_report', { details: expect.stringContaining('couldn’t read the setup details') });
 	});
 });
 

@@ -11,13 +11,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 from connections import account_signin_prompt, harness_models
-from connections.account_identity import codex_identity, refresh_default_identity
+from connections.account_identity import refresh_default_identity, vendor_status as _vendor_status
 from connections.account_lifecycle import change_state
 from connections.account_profiles import profile_for, sign_out_account
 from connections.account_receipts import account_receipt
@@ -34,6 +33,7 @@ from connections.vendor_accounts import (
     record_auth_cleanup,
 )
 from infra.db_async import run_in_db
+from infra.failure_reference import new_reference
 from infra.time import utc_now_iso
 
 log = logging.getLogger(__name__)
@@ -61,6 +61,7 @@ class SignIn:
     prompt: dict[str, str] | None = None  # what the vendor asked the person to do, when its profile reads it
     prompted: asyncio.Event = field(default_factory=asyncio.Event)
     bind: FirstRunBind | None = None  # the first-run screen's conductor, bound once this login reads Ready
+    ref: str | None = None  # a failed sign-in's public reference, logged beside its cause
 
     @property
     def held(self) -> bool:
@@ -70,6 +71,8 @@ class SignIn:
     def public(self) -> dict[str, Any]:
         """The sign-in as shown to the user: never the vendor's output, only a prompt its profile matched."""
         shown = {"account_id": self.account_id, "route": "browser", "status": self.status, "cause": self.cause}
+        if self.ref is not None:
+            shown["ref"] = self.ref
         if self.prompt is not None and self.status == "waiting":
             shown |= self.prompt
         if self.status == "completed" and self.bind is not None:
@@ -124,34 +127,6 @@ async def _run(provider: str, home: str, binary: str, action: str) -> tuple[int,
     return int(process.returncode or 0), stdout
 
 
-async def _vendor_status(provider: str, home: str, binary: str) -> tuple[bool | None, dict[str, str], str | None]:
-    """Whether the vendor says this home is signed in, its identity facts, and a cause when unknown."""
-    try:
-        code, stdout = await _run(provider, home, binary, "status")
-    except (OSError, TimeoutError):
-        return None, {}, "vendor_status_unavailable"
-    profile = profile_for(provider)
-    if profile.parse_status is not None:
-        signed_in, facts = profile.parse_status(code, stdout)
-        return signed_in, facts, None if signed_in is not None else "vendor_status_unreadable"
-    if code == 1:
-        return False, {}, None
-    if code != 0:
-        return None, {}, "vendor_status_failed"
-    if not profile.status_report_keys:
-        # A vendor that names no facts in its status report keeps them in its auth file.
-        return True, await run_in_db(codex_identity, home), None
-    try:
-        report = json.loads(stdout)
-    except ValueError:
-        report = None
-    if not isinstance(report, dict) or not isinstance(report.get("loggedIn"), bool):
-        return None, {}, "vendor_status_unreadable"
-    if not report["loggedIn"]:
-        return False, {}, None
-    return True, profile.facts_from_status(report), None
-
-
 async def _hold(operation: SignIn, home: str, binary: str) -> None:
     """Wait for the vendor login to exit by itself, then let the vendor's status decide."""
     process = operation.process
@@ -200,8 +175,15 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
         if operation.status == "waiting":
             operation.status, operation.cause = "failed", "signin_check_failed"
     finally:
-        if operation.status == "failed":  # a setup report finds this line by the vendor's name
-            log.warning("%s sign-in failed cause=%s", operation.provider, operation.cause)
+        if operation.status == "failed":
+            operation.ref = _failure_reference(operation.provider, operation.cause)
+
+
+def _failure_reference(provider: str, cause: str | None) -> str:
+    """Log a failed sign-in once, under the reference its row shows and a setup report quotes."""
+    ref = new_reference("signin")
+    log.warning("%s sign-in failed reference=%s cause=%s", provider, ref, cause)
+    return ref
 
 
 async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> dict[str, Any]:
@@ -212,7 +194,9 @@ async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> 
     provider = account["provider"]
     binary = await _binary(provider)
     if binary is None:
-        return {"account_id": account_id, "route": None, "status": "unavailable", "cause": profile_for(provider).missing_cause}
+        cause = profile_for(provider).missing_cause
+        return {"account_id": account_id, "route": None, "status": "unavailable", "cause": cause,
+                "ref": _failure_reference(provider, cause)}
     # No await between these checks and the record, so two starts cannot both pass.
     current = _SIGNINS.get(account_id)
     if current is not None and current.held:
@@ -232,6 +216,7 @@ async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> 
             await _run(provider, account["source_home"], binary, "logout")
         except (OSError, TimeoutError):
             operation.status, operation.cause = "failed", "vendor_logout_unavailable"
+            operation.ref = _failure_reference(provider, operation.cause)
             return operation.public()
     if operation.status != "waiting":  # cancelled while the stale login was removed
         return operation.public()
@@ -239,6 +224,7 @@ async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> 
         operation.process = await _spawn(provider, account["source_home"], binary, "login")
     except OSError:
         operation.status, operation.cause = "failed", "vendor_login_unavailable"
+        operation.ref = _failure_reference(provider, operation.cause)
         return operation.public()
     if operation.status != "waiting":  # cancelled while the vendor process was starting
         await _stop(operation)

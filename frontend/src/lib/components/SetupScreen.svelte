@@ -96,6 +96,7 @@
 	// A working cloud model frees the local download to be turned off.
 	const cloudReady = $derived(catalog.some((row) => row.connection !== 'omlx' && setupModelWorks(row)));
 	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? 'Use up to 32 lowercase letters, numbers, dashes or underscores.' : '');
+	const accountName = $derived(username.trim() || $user?.name || '');
 	const accountValid = $derived(Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password));
 	const steps = $derived<SetupStep[]>(page === 'connect' ? remote.steps : [
 		{ label: 'Your account', icon: 'person', state: ['checking', 'account', 'hard-stop'].includes(page) || (page === 'error' && !$token) ? 'current' : 'done' },
@@ -233,8 +234,10 @@
 	async function turnOffLocal() {
 		const current = get(token);
 		if (!current) return;
-		if (!await stopLocalServer(current).catch(() => false)) sourceError = 'CORSIA couldn’t turn off the local model. Try again.';
+		const stopped = await stopLocalServer(current).catch(() => false);
 		await refreshSources();
+		// After the refresh, which clears sourceError, so a failed stop stays shown.
+		if (!stopped) sourceError = 'CORSIA couldn’t turn off the local model. Try again.';
 	}
 	async function connectToAnotherComputer() {
 		await stopLocal();
@@ -317,7 +320,7 @@
 <SetupShell {steps} section={page === 'connect' ? 'Connect' : 'Setup'} {jobs} page={page === 'connect' ? `connect-${remote.stage}` : screen} title={view.title} lede={view.lede} primary={view.primary} mark={view.mark} aside={page === 'account' && $isSetupWide ? welcomeAside : undefined} onPrimary={view.onPrimary}>
 	{#snippet secondary()}
 		{#if page === 'connect'}<SetupConnectBack onclick={() => remote.stage === 'code' ? remote.toChoose() : leaveConnect()} />
-		{:else if (screen === 'welcome' || page === 'account') && canConnect}<Button variant="chip" onclick={() => void connectToAnotherComputer()}>Connect to CORSIA on another computer</Button>
+		{:else if (screen === 'welcome' || page === 'account') && canConnect && !$token}<Button variant="chip" onclick={() => void connectToAnotherComputer()}>Connect to CORSIA on another computer</Button>
 		{:else if page === 'folder'}<Button variant="chip" disabled={accountBusy} onclick={() => { page = 'account'; }}>Back</Button>{#if accountError}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>{/if}
 		{:else if page === 'subscriptions'}<Button variant="chip" onclick={() => { page = 'folder'; }}>Back</Button>
 		{:else if page === 'models'}<Button variant="chip" disabled={finishing} onclick={() => { page = subscriptionsSkipped ? 'folder' : 'subscriptions'; }}>Back</Button>
@@ -326,6 +329,9 @@
 	{/snippet}
 	{#if page === 'connect'}<SetupConnect {remote} />
 	{:else if screen === 'welcome'}<SetupWelcome />
+	{:else if page === 'account' && $token}
+		<!-- Created already: Back shows it read-only, since nothing typed here would be applied. -->
+		<p class="account-made" data-testid="setup-account-made">Your CORSIA account{accountName ? ` ${accountName}` : ''} is created. Continue to keep setting up.</p>
 	{:else if page === 'account'}
 		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} onSubmit={toFolder} onValidateConfirmation={validateConfirmation} />
 		{#if accountExists}<Button variant="chip" onclick={onExistingAccount}>Sign in</Button>{/if}
@@ -342,4 +348,5 @@
 <style>
 	p { font-size: var(--text-footnote); line-height: var(--lh-normal); }
 	.error-text { margin: var(--space-2) var(--space-4); }
+	.account-made { margin: 0; font-size: var(--text-body); color: var(--text-primary); }
 </style>

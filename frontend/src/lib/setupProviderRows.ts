@@ -49,8 +49,9 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 		}
 		return { ...row, meta, toggle };
 	}
-	// The download finished: the model is being listed and loaded, never offered for download again.
-	if (source?.local_state === 'ready') return { ...row, meta: `${model} · Finishing setup…`, busy: true };
+	// The download finished: the model is being listed and loaded, never offered for download again;
+	// Check again asks the service now rather than waiting on the next refresh.
+	if (source?.local_state === 'ready') return { ...row, meta: `${model} · Finishing setup…`, busy: true, spinning: true, action: { label: 'Check again', run: check } };
 	if (pick?.model && freeDisk !== undefined && freeDisk < pick.model.download_size_gb) return { ...row, meta: `Needs ${size} free, and this computer has ${freeDisk} GB. Free up space, then check again.`, action: { label: 'Check again', run: check } };
 	if (LOCAL_FAILURE_STATES.has(source?.local_state ?? '') || startError) {
 		const cause = source?.setup_error_code ?? startError;

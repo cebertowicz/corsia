@@ -118,6 +118,8 @@ export interface Signin {
 	cause: string | null;
 	outcome: SigninOutcome | null;
 	bind_reason: string | null;
+	/** A failed sign-in's public reference, matching its service-log line. */
+	ref?: string | null;
 }
 
 function signinOf(body: Record<string, unknown> | null, accountId: string): Signin {
@@ -127,6 +129,7 @@ function signinOf(body: Record<string, unknown> | null, accountId: string): Sign
 		cause: (body?.cause as string | null) ?? null,
 		outcome: (body?.outcome as SigninOutcome | null) ?? null,
 		bind_reason: (body?.bind_reason as string | null) ?? null,
+		ref: typeof body?.ref === 'string' ? body.ref : null,
 	};
 }
 

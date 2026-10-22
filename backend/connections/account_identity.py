@@ -139,3 +139,33 @@ async def refresh_default_identity(provider: str):
     except Exception:  # noqa: BLE001 - a failed ambient read must clear the old comparison snapshot
         identity = {}
     return await run_in_db(record_default_identity, provider, identity, token=token)
+
+
+async def vendor_status(provider: str, home: str, binary: str) -> tuple[bool | None, dict[str, str], str | None]:
+    """Whether the vendor says this home is signed in, its identity facts, and a cause when unknown."""
+    from connections.account_controls import _run
+
+    try:
+        code, stdout = await _run(provider, home, binary, "status")
+    except (OSError, TimeoutError):
+        return None, {}, "vendor_status_unavailable"
+    profile = profile_for(provider)
+    if profile.parse_status is not None:
+        signed_in, facts = profile.parse_status(code, stdout)
+        return signed_in, facts, None if signed_in is not None else "vendor_status_unreadable"
+    if code == 1:
+        return False, {}, None
+    if code != 0:
+        return None, {}, "vendor_status_failed"
+    if not profile.status_report_keys:
+        # A vendor that names no facts in its status report keeps them in its auth file.
+        return True, await run_in_db(codex_identity, home), None
+    try:
+        report = json.loads(stdout)
+    except ValueError:
+        report = None
+    if not isinstance(report, dict) or not isinstance(report.get("loggedIn"), bool):
+        return None, {}, "vendor_status_unreadable"
+    if not report["loggedIn"]:
+        return False, {}, None
+    return True, profile.facts_from_status(report), None

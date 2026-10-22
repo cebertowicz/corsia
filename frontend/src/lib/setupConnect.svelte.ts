@@ -46,15 +46,17 @@ export function installFailureCopy(cli: string, cause?: InstallFailureCause | nu
 export function signinFailureCopy(vendor: string, cause?: string | null): { meta: string; reportable: boolean } {
 	const { cli, account } = VENDOR_COPY[vendor] ?? { cli: vendor, account: vendor };
 	if (cause === 'unreachable') return { meta: `CORSIA couldn’t reach its service to start signing in. Sign in again.`, reportable: true };
+	if (cause === 'agent_unavailable') return { meta: `CORSIA couldn’t reach its agent to start signing in. Sign in again, or save a report.`, reportable: true };
 	if (cause?.endsWith('_executable_missing')) return { meta: `CORSIA couldn’t find ${cli} on this computer. Sign in again to install it.`, reportable: true };
 	if (cause?.endsWith('_signin_in_progress')) return { meta: `Another ${cli} sign-in is already open. Finish it in your browser, or sign in again.`, reportable: false };
 	if (cause === 'vendor_login_failed') return { meta: `Signing in to ${cli} didn’t finish in the browser. Sign in again.`, reportable: false };
 	if (cause === 'vendor_not_signed_in') return { meta: `${cli} didn’t report a signed-in ${account} account. Sign in again.`, reportable: false };
-	if (cause === 'same_account') return { meta: `That ${account} account is already signed in here.`, reportable: false };
+	if (cause === 'same_account') return { meta: `That ${account} account is already signed in here. To add another, sign in again with a different ${account} account.`, reportable: false };
 	if (cause === 'signin_check_failed' || cause === 'vendor_status_failed') return { meta: `CORSIA couldn’t check the ${cli} sign-in. Sign in again, or save a report.`, reportable: true };
 	if (cause === 'vendor_login_unavailable' || cause === 'vendor_logout_unavailable') return { meta: `CORSIA couldn’t start the ${cli} sign-in. Sign in again, or save a report.`, reportable: true };
 	if (cause === 'prompt_unrecognized') return { meta: `${cli} asked something CORSIA didn’t expect. Sign in again, or save a report.`, reportable: true };
-	return { meta: `Couldn’t finish signing in to ${cli}${cause ? ` (${cause.replaceAll('_', ' ')})` : ''}. Sign in again, or save a report.`, reportable: true };
+	// The cause code itself goes to the report, never into the sentence.
+	return { meta: `Couldn’t finish signing in to ${cli}. Sign in again, or save a report.`, reportable: true };
 }
 
 /** The ready account's name for its row: an email, plan, or the vendor's own label. */
@@ -71,8 +73,8 @@ export function createSetupConnect(deps: ConnectDeps) {
 		flow = { ...flow, [vendor]: next };
 		if (next?.phase === 'failed') attempts = { ...attempts, [vendor]: { attempt: next.failed === 'signin' ? 'signin_failed' : 'install_failed', cause: next.failed === 'signin' ? next.signinCause ?? 'signin_failed' : installCause(next.cause), ref: next.ref ?? undefined } };
 	}
-	function signinFailed(vendor: string, result?: Signin | null, installed?: boolean) {
-		setConnect(vendor, { phase: 'failed', failed: 'signin', installed, signinCause: result ? result.cause ?? result.status : 'unreachable' });
+	function signinFailed(vendor: string, result?: Signin | null, installed?: boolean, cause = 'unreachable') {
+		setConnect(vendor, { phase: 'failed', failed: 'signin', installed, signinCause: result ? result.cause ?? result.status : cause, ref: result?.ref ?? null });
 	}
 	async function beginSignIn(source: ModelSource, installed = false) {
 		const current = deps.token();
@@ -81,7 +83,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		let result: Signin | null = null;
 		try {
 			const lookup = await fetchCorsiaAgent(current);
-			if (lookup.kind !== 'target') throw new Error('CORSIA agent unavailable');
+			if (lookup.kind !== 'target') { signinFailed(source.source, null, installed, 'agent_unavailable'); return; }
 			const accountId = await accountToSignIn(current, source.source, source.name);
 			result = await startSignin(current, accountId, lookup.target.thread_id);
 			if (['failed', 'unavailable', 'refused'].includes(result.status)) { signinFailed(source.source, result, installed); return; }
@@ -183,7 +185,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (entry?.phase === 'signing-in') return { meta: 'Finish signing in in your browser', busy: true, action: { label: 'Open sign-in again', run: () => void openSignInAgain(source) } };
 		if (entry?.phase === 'failed' && entry.failed === 'signin') {
 			const failure = signinFailureCopy(source.source, entry.signinCause);
-			return { meta: failure.meta, error: true, reportable: failure.reportable, action: signInAction };
+			return { meta: failure.meta, reference: entry.ref ?? undefined, error: true, reportable: failure.reportable, action: signInAction };
 		}
 		if (entry?.phase === 'failed') {
 			const failure = installFailureCopy(copy.cli, entry.cause, entry.ref);

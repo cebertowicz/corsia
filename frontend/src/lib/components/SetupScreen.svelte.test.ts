@@ -204,6 +204,9 @@ describe('SetupScreen', () => {
 		button('Back')?.click(); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Choose your work folder');
 		button('Back')?.click(); await settle();
+		// The account exists, so it reads back without an editable form whose changes would be dropped.
+		expect(host.querySelector('[data-testid="setup-account-made"]')?.textContent).toContain('is created');
+		expect(host.querySelector('#setup-password')).toBeNull();
 		expect(button('Continue')?.disabled).toBe(false);
 		button('Continue')?.click(); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Choose your work folder');

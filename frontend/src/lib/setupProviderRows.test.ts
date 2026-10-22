@@ -117,8 +117,9 @@ describe('setup local row switch', () => {
 
 	it('never offers Download again once the download finished and the model is still being listed', () => {
 		const row = setupLocalRow({ ...actions(), source: { source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'ready' }, pick: null, eligible: true, downloading: false, ready: false, startError: '' });
-		expect(row.action).toBeUndefined();
+		expect(row.action?.label).toBe('Check again');
 		expect(row.busy).toBe(true);
+		expect(row.spinning).toBe(true);
 		expect(row.meta).toContain('Finishing setup');
 	});
 
