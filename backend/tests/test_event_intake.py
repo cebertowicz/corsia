@@ -187,16 +187,12 @@ def test_declared_event_uses_the_live_every_evaluator_and_platform_path(intake_w
         "SELECT rule_id,thread_id,outcome FROM event_route_decisions WHERE event_id=?",
         ("every-event",),
     ).fetchall()
-    receipt = intake_world.execute(
-        "SELECT rules_matched FROM event_intake_records WHERE event_id=?", ("every-event",),
-    ).fetchone()
 
     assert result.accepted and result.rules_matched == 1
-    assert receipt["rules_matched"] == 1
     assert len(wakes) == 1
-    # 2.A records only rules' outcomes; own-turn delivery is filtered before it reaches the owner.
+    # 2.A records only rules' outcomes; the owner's own delivery is today's routing, seen in its digest.
     assert {(row[0], row[1], row[2]) for row in decisions} == {("intake-every", OTHER, "woke")}
-    assert _digested(intake_world, OWNER, "every-event") == 0
+    assert _digested(intake_world, OWNER, "every-event") == 1
 
 
 def test_refused_id_can_retry_after_fix_without_persisting_facts(intake_world):
@@ -251,12 +247,24 @@ def test_a_declared_events_owner_is_the_registered_owner_rules_read(intake_world
     _rule(intake_world, "to-owner", OTHER, to="registered_owner", mode="digest")
 
     result = _admit(event_id="owned")
-    explained = rule_authoring.explain(intake_world, project_id="project-a", event_id="owned")
 
-    # The owner remains the rule anchor, but an event it emitted does not return to it.
+    # The declaring thread is the event's registered owner, so the rule rides its digest.
     assert result.accepted and result.rules_matched == 1
-    assert _decisions(intake_world, "owned") == {("to-owner", OWNER, "held", "sent by this chat")}
+    assert _decisions(intake_world, "owned") == {("to-owner", OWNER, "digested", None)}
+
+
+def test_an_agents_own_emit_tool_event_does_not_come_back_to_it(intake_world, monkeypatch):
+    monkeypatch.setattr("events.platform.enqueue_event_wake", lambda *args, **kwargs: None)
+    _rule(intake_world, "to-owner", OTHER, to="registered_owner", mode="digest")
+
+    own = _admit(event_id="own-turn", origin="agent")
+    explained = rule_authoring.explain(intake_world, project_id="project-a", event_id="own-turn")
+
+    # Only the emit tool knows its sender; a CLI emit as the session still reaches it (test above).
+    assert own.accepted and own.rules_matched == 1
+    assert _decisions(intake_world, "own-turn") == {("to-owner", OWNER, "held", "sent by this chat")}
     assert explained["decisions"][0]["reason"] == "sent by this chat"
+    assert _digested(intake_world, OWNER, "own-turn") == 0
 
 
 def test_a_rule_fires_when_intake_dead_letters_for_an_inactive_owner(intake_world, monkeypatch):
@@ -428,7 +436,7 @@ def test_a_both_event_is_stored_once_and_routed(intake_world):
     retry = _admit(event_type="qa.both", event_id="both-1")
     assert result.accepted and not result.duplicate and retry.duplicate
     assert _stored(intake_world, "qa.both") == [(OWNER, "project-a", "ok", "both-1")]
-    assert _digested(intake_world, OWNER, "both-1") == 0
+    assert _digested(intake_world, OWNER, "both-1") == 1
     assert _admit(event_id="route-1").accepted and _stored(intake_world, "qa.route") == []
 
 

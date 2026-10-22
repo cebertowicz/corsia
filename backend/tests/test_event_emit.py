@@ -70,7 +70,7 @@ def _cli(*args: str) -> list[str]:
     return ["event", "emit", *args, "--as-session", OWNER]
 
 
-def test_cli_accepted_event_skips_its_session_and_retries(emit_world, capsys):
+def test_cli_accepted_event_delivers_to_its_session_and_retries(emit_world, capsys):
     args = _cli("qa.route", "--facts", '{"code":"ok"}', "--id", "hook-1")
     rc, out, err = _run(args, capsys)
     again, repeat_out, repeat_err = _run(args, capsys)
@@ -84,36 +84,6 @@ def test_cli_accepted_event_skips_its_session_and_retries(emit_world, capsys):
     db = get_db()
     delivered = _digested(db, receipt["event_id"])
     db.close()
-    assert delivered == []
-
-
-def test_cli_emit_inside_a_script_run_reaches_the_schedule_owner(emit_world, capsys, monkeypatch, tmp_path):
-    from automation import script_schedules
-
-    path = tmp_path / "emits.sh"
-    path.write_text("corsia event emit qa.route --facts '{}'")
-    db = get_db()
-    schedule = script_schedules.create_script(
-        OWNER, "project-a", script_path=path, script_sha256=script_schedules.file_sha256(path),
-        cadence_seconds=600, series=[], timeout_seconds=30,
-        now="2026-01-01T00:00:00+00:00", db=db,
-    )
-    db.commit()
-    db.close()
-    # What the script runner sets: the owner's session plus the run's schedule (events.trace_env).
-    monkeypatch.setenv("CORSIA_THREAD_ID", OWNER)
-    monkeypatch.setenv("CORSIA_EVENT_SCRIPT", schedule.id)
-    rc, out, err = _run(["event", "emit", "qa.route", "--facts", '{"code":"from-script"}'], capsys)
-
-    assert rc == 0 and not err
-    event_id = json.loads(out)["event_id"]
-    db = get_db()
-    producer = db.execute(
-        "SELECT producer FROM event_intake_records WHERE event_id=?", (event_id,),
-    ).fetchone()[0]
-    delivered = _digested(db, event_id)
-    db.close()
-    assert producer == f"script:{schedule.id}"
     assert delivered == [OWNER]
 
 
@@ -252,6 +222,7 @@ def test_agent_emit_identity_is_scoped_to_declared_event_type(emit_world):
     assert first["duplicate"] is False and second["duplicate"] is False
     assert first["event_id"] != second["event_id"]
     assert retry == {**first, "duplicate": True}
+    # The emit tool's own events never come back to the chat that emitted them.
     assert delivered == []
 
 

@@ -53,20 +53,11 @@ def _trace() -> tuple[str, ...] | None:
         return None
 
 
-def _producer(args: argparse.Namespace) -> str | None:
-    """``script:<schedule id>`` inside a script run, as its printed lines are; else the session."""
-    from events.trace_env import SCRIPT_ENV
-
-    if schedule_id := os.environ.get(SCRIPT_ENV):
-        return f"script:{schedule_id}"
-    return args.as_thread or os.environ.get("CORSIA_THREAD_ID")
-
-
 def _cmd_emit(args: argparse.Namespace) -> int:
     from events.intake import admit_event, emitted_event_id, failure_code
 
-    producer = _producer(args)
-    if not producer:
+    session = args.as_thread or os.environ.get("CORSIA_THREAD_ID")
+    if not session:
         print("error: usage: pass --as-session or set CORSIA_THREAD_ID. Run corsia event emit --help.", file=sys.stderr)
         return 2
     trace = _trace()
@@ -77,7 +68,7 @@ def _cmd_emit(args: argparse.Namespace) -> int:
     try:
         result = asyncio.run(admit_event(
             event_type=args.event_type, facts=facts, origin="emitter",
-            producer=producer, event_id=event_id, trace=trace,
+            producer=session, event_id=event_id, trace=trace,
         ))
     except Exception as exc:  # noqa: BLE001 - split into retryable and defect below
         if failure_code(exc) == "internal_error":
@@ -108,6 +99,5 @@ def build_parser(subparsers: argparse._SubParsersAction) -> None:
     emit.add_argument("event_type", help="Declared event type, such as qa.review_completed.")
     emit.add_argument("--facts", required=True, help="JSON object, or - to read one JSON object from stdin.")
     emit.add_argument("--id", dest="identity", help="Stable identity for a retry-safe event.")
-    emit.add_argument("--as-session", dest="as_thread", help=("Chat id the event is emitted as (default: $CORSIA_THREAD_ID). "
-                            "Inside a script run the script is the emitter."))
+    emit.add_argument("--as-session", dest="as_thread", help="Chat id the event is emitted as (default: $CORSIA_THREAD_ID).")
     emit.set_defaults(func=_cmd_emit)

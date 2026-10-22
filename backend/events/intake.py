@@ -343,7 +343,8 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
             if refused is not None:
                 return refused
         target_filter = None
-        if origin in ("agent", "emitter") and not producer.startswith("script:"):
+        # Only the emit tool knows its sender; a CLI emit names a session, which a hook or script may also claim.
+        if origin == "agent":
             target_filter = lambda target, _db: (
                 rules.OWN_EMIT if target.thread == producer else None)
         deliveries, plan = deliver_envelope_sync(

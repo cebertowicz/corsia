@@ -129,7 +129,7 @@ def test_safehouse_argv_is_direct_and_ignores_workdir_config(
     assert (
         "--env-pass=CORSIA_THREAD_ID,CORSIA_PROCESS_OWNER_MARKER,"
         "CORSIA_TOOL_INVOCATION_ID,AGENT_BROWSER_ARGS,"
-        "npm_config_cache,PIP_CACHE_DIR,UV_CACHE_DIR,CORSIA_EVENT_TRACE,CORSIA_EVENT_SCRIPT,"
+        "npm_config_cache,PIP_CACHE_DIR,UV_CACHE_DIR,CORSIA_EVENT_TRACE,"
         "GH_CONFIG_DIR,GIT_CONFIG_COUNT,"
         + ",".join(f"GIT_CONFIG_KEY_{i},GIT_CONFIG_VALUE_{i}" for i in range(7)) in argv
     )

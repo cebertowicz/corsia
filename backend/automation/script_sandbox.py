@@ -16,7 +16,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from events.trace_env import SCRIPT_ENV, TRACE_ENV
+from events.trace_env import TRACE_ENV
 from events.trace_env import encode as encode_trace
 from host_access.processes import PROCESS_OWNER, ForegroundProcessResult
 from host_access.refusal_messages import safehouse_unavailable_refusal
@@ -96,7 +96,6 @@ async def run_script(
     project_id: str | None,
     script: Path,
     *,
-    schedule_id: str,
     run_id: str,
     timeout_seconds: int,
     stdin: bytes | None = None,
@@ -106,12 +105,11 @@ async def run_script(
 
     ``stdin`` is written to a private file in the thread's own temp root, which
     the envelope grants read-write, and removed once the run ends. ``trace`` is a
-    rule-started run's rule chain, and ``schedule_id`` the run's producer, both
-    handed to ``corsia event emit`` (``events.trace_env``).
+    rule-started run's rule chain, handed to ``corsia event emit`` (``events.trace_env``).
     """
     await _checked_environment()
     if stdin is None:
-        return await _run(thread_id, project_id, script, schedule_id, run_id, timeout_seconds, None, trace)
+        return await _run(thread_id, project_id, script, run_id, timeout_seconds, None, trace)
     try:
         fd, name = tempfile.mkstemp(prefix="rule-input-", suffix=".json",
                                     dir=corsia_temp_root_for_bind(thread_id))
@@ -120,17 +118,16 @@ async def run_script(
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(stdin)
-        return await _run(thread_id, project_id, script, schedule_id, run_id, timeout_seconds, Path(name), trace)
+        return await _run(thread_id, project_id, script, run_id, timeout_seconds, Path(name), trace)
     finally:
         Path(name).unlink(missing_ok=True)
 
 
 async def _run(
-    thread_id: str, project_id: str | None, script: Path, schedule_id: str, run_id: str,
-    timeout_seconds: int, stdin: Path | None, trace: tuple[str, ...],
+    thread_id: str, project_id: str | None, script: Path, run_id: str, timeout_seconds: int,
+    stdin: Path | None, trace: tuple[str, ...],
 ) -> ScriptRun:
     env = safehouse_subprocess_env(thread_id)
-    env[SCRIPT_ENV] = schedule_id
     if trace:
         env[TRACE_ENV] = encode_trace(trace)
     try:
