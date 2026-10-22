@@ -7,7 +7,7 @@ import os
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 
-from claude_controls import confined_claude_controls
+from claude_controls import CONFINED_PERMISSION_MODE, confined_claude_controls
 from subagents.managed_launch import claude_project_discovery_args
 
 #: A launch with every CORSIA tool, as every managed child had before confinement.
@@ -67,9 +67,25 @@ def _require_confinement(confinement: object, add_dirs: object) -> None:
         raise ValueError("only a review launch has add-dirs, and it needs at least one")
 
 
+@dataclass(frozen=True)
+class LaunchConfinement:
+    """What one launch of a thread may reach, read once at the launch's start."""
+
+    mode: str = CONFINEMENT_NONE
+    add_dirs: tuple[str, ...] = ()
+    working_dir: str | None = None  # a review child's own directory
+
+    @property
+    def confined(self) -> bool:
+        return self.mode != CONFINEMENT_NONE
+
+
+UNCONFINED = LaunchConfinement()
+
+
 def permission_mode_for(confinement: str) -> str:
-    """The permission mode a launch runs with; review's comes from its profile."""
-    return "dontAsk" if confinement == CONFINEMENT_REVIEW else "bypassPermissions"
+    """The permission mode a launch runs with; review's is its profile's own."""
+    return CONFINED_PERMISSION_MODE if confinement == CONFINEMENT_REVIEW else "bypassPermissions"
 
 
 def stored_confinement(value: dict) -> tuple[str, tuple[str, ...]]:

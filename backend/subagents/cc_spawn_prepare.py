@@ -184,8 +184,7 @@ async def _build_live(
         context_snapshot=reconstruction.snapshot.to_dict(),
         source_artifacts=artifacts,
         tool_definitions=(
-            dynamic_tool_definitions(tool_registry)
-            if request.confinement == CONFINEMENT_NONE else ()
+            () if tool_registry is None else dynamic_tool_definitions(tool_registry)
         ),
     )
     return live, resolved_dir
@@ -229,7 +228,8 @@ async def prepare_spawn(request: CCSpawnRequest, db) -> PreparedCCSpawn:
     name = request.title or request.task[:60]
     from subagents.harness_tool_bridge import build_tool_registry
 
-    tool_registry = build_tool_registry(working_dir)
+    # A review child has no tool bridge, so no CORSIA tools, as on every later launch.
+    tool_registry = None if request.confinement != CONFINEMENT_NONE else build_tool_registry(working_dir)
     user_id = _parent_user_id(request.parent_thread_id, db)
     epoch = await run_in_db(
         _register_lineage,

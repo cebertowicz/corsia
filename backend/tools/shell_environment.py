@@ -31,6 +31,11 @@ _SHELL_PASS_NAMES = ("CORSIA_THREAD_ID", "CORSIA_PROCESS_OWNER_MARKER", "CORSIA_
                      "AGENT_BROWSER_ARGS", *agent_shell_tools.ENV_NAMES, TRACE_ENV)
 
 
+def is_credential_env_name(name: str) -> bool:
+    """Whether a variable carries a credential or a GitHub or Git identity no child inherits."""
+    return bool(_SENSITIVE_ENV_NAME_RE.search(name)) or is_host_identity_name(name)
+
+
 def shell_env_pass_names() -> str:
     """The one ``--env-pass`` list: the backend's names, then the agents' account's.
 
@@ -84,8 +89,7 @@ def safehouse_subprocess_env(
         if (
             not name.startswith("SAFEHOUSE_")
             and name not in _ENV_CONTROL_NAMES
-            and not _SENSITIVE_ENV_NAME_RE.search(name)
-            and not is_host_identity_name(name)
+            and not is_credential_env_name(name)
             and name not in {
                 "CORSIA_THREAD_ID", "CORSIA_PROCESS_OWNER_MARKER",
                 "CORSIA_TOOL_INVOCATION_ID", TRACE_ENV,

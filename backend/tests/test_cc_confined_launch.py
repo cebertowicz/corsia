@@ -184,28 +184,90 @@ def test_stored_record_without_confinement_reads_unconfined():
     assert claude_invocation_metadata(restored) == old
 
 
-def test_registered_confinement_defaults_none_and_fails_closed(child_db):
-    """(iii) a row without the field is unconfined; a damaged one never is."""
-    from registry.cc_session import persist_cc_session
-    from subagents.cc_confinement import ConfinementRefused, registered_confinement
+@pytest.mark.asyncio
+async def test_review_launches_read_confinement_once_and_install_no_tools(
+    child_db, fake_claude, launches, reviewed_dir, monkeypatch, tmp_path,
+):
+    """A cold start and a provider resume read confinement once each, before the
+    destination is prepared, and build, install and budget no CORSIA tools."""
+    import connections.models as cm
+    import registry.cc_session as cc_session
+    import subagents.cc_runtime as rt
+    from subagents import cc_destination, harness_tool_bridge
 
-    _seed_parent(child_db, sid="old-thread")
-    persist_cc_session(
-        "old-thread", "old-session", cwd="/w",
-        invocation=ClaudeInvocation(binary="claude", permission_mode="bypassPermissions"),
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / ".claude"))
+    monkeypatch.setattr(
+        cm, "get_connection", lambda provider, db=None: {"config": {"binary": fake_claude}},
     )
-    assert registered_confinement("old-thread", child_db) == ("none", (), None)
-    assert registered_confinement("parentless", child_db) == ("none", (), None)
+    _seed_parent(child_db)
+    child_id = await rt.spawn(
+        "parent", "review this", binary=fake_claude, target=cc_target("sonnet"),
+        broadcast=lambda _sid, _message: None,
+        confinement="review", add_dirs=(reviewed_dir,),
+    )
+    reads = []
+    reader = cc_session.registered_confinement
+    monkeypatch.setattr(cc_session, "registered_confinement",
+                        lambda *args, **kwargs: reads.append(args[0]) or reader(*args, **kwargs))
+    fits = []
+    fit = cc_destination._fit_sections
+    monkeypatch.setattr(cc_destination, "_fit_sections",
+                        lambda **kwargs: fits.append(fit(**kwargs)) or fits[-1])
 
-    _seed_parent(child_db, sid="damaged")
-    persist_cc_session("damaged", "damaged-session", cwd="/w")
-    child_db.execute(
-        "UPDATE artifact_identities SET metadata=? WHERE external_id='damaged-session'",
-        (json.dumps({"claude_invocation": {"confinement": "review", "add_dirs": []}}),),
+    def no_tools(*_args, **_kwargs):
+        raise AssertionError("a review launch built the CORSIA tool registry")
+
+    monkeypatch.setattr(harness_tool_bridge, "build_tool_registry", no_tools)
+
+    # Provider resume with no live handle.
+    live, in_root = cc_destination._LIVE, cc_destination._require_session_in_root
+    monkeypatch.setattr(cc_destination, "_LIVE", {})
+    monkeypatch.setattr(cc_destination, "_require_session_in_root", lambda *_a: None)
+    resumed = cc_destination.prepare_cc_destination_payload(
+        child_id, target=cc_target("sonnet"), current_user_text="again",
+        selection=None, provider_resume=True,
     )
-    child_db.commit()
-    with pytest.raises(ConfinementRefused, match="damaged"):
-        registered_confinement("damaged", child_db)
+    assert reads == [child_id] and resumed.confinement.mode == "review"
+    assert resumed.tool_registry is None and resumed.tool_definitions == ()
+    assert resumed.fit_section_tokens["tools"] == 0 and fits[-1][0]["tools"] == 0
+    monkeypatch.setattr(cc_destination, "_LIVE", live)
+    monkeypatch.setattr(cc_destination, "_require_session_in_root", in_root)
+
+    # Cold start after retirement.
+    await rt.retire(child_id)
+    reads.clear()
+    did = await feed_with_persisted_input(
+        child_id, "again", target=cc_target("sonnet"),
+        turn_id="11111111-2222-4333-8444-555555555555",
+    )
+    assert did is not None and rt.is_live(child_id)
+    assert reads.count(child_id) == 1  # the parent's own launches read their own
+    assert fits[-1][0]["tools"] == 0
+    assert rt._LIVE.get(child_id).tool_definitions == ()
+    await rt.retire(child_id)
+
+
+@pytest.mark.asyncio
+async def test_review_spawn_launches_nothing_without_its_record(
+    child_db, fake_claude, launches, reviewed_dir, monkeypatch,
+):
+    """A review child whose launch record can't be written never starts, so no
+    confined child is ever described by "no record"."""
+    import registry.cc_session as cc_session
+    import subagents.cc_runtime as rt
+
+    def unwritable(*_args, **_kwargs):
+        raise RuntimeError("launch record write failed")
+
+    monkeypatch.setattr(cc_session, "persist_cc_session", unwritable)
+    _seed_parent(child_db)
+    with pytest.raises(RuntimeError, match="launch record write failed"):
+        await rt.spawn(
+            "parent", "review this", binary=fake_claude, target=cc_target("sonnet"),
+            broadcast=lambda _sid, _message: None,
+            confinement="review", add_dirs=(reviewed_dir,),
+        )
+    assert launches == [] and rt._LIVE.count() == 0
 
 
 @pytest.mark.asyncio

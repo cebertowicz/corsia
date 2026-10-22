@@ -7,6 +7,7 @@ import pytest
 
 def _prepared_destination(*, is_subagent: bool):
     from subagents.cc_context_types import CCPreparedDestination
+    from subagents.cc_invocation import UNCONFINED
 
     destination = CCPreparedDestination(
         thread_id="thread-1",
@@ -29,6 +30,7 @@ def _prepared_destination(*, is_subagent: bool):
         source_tokens=0,
         source_section_tokens={},
         fit_section_tokens={},
+        confinement=UNCONFINED,
     )
     tail = SimpleNamespace(
         thread_id="thread-1",
