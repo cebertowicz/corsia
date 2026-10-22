@@ -189,9 +189,9 @@ async def setup_progress_view(_user: dict = Depends(require_user)) -> dict:
 
 @router.put("/progress", response_model=None)
 async def setup_progress_update(request: Request, authorization: str | None = Header(None)) -> dict | Response:
-    """Record a setup step, the local-AI choice, Welcome's picks or completion.
+    """Record a setup step, the local-AI choice, the subscriptions they pay for or completion.
 
-    Before the first account only the local-AI choice and Welcome's picks are taken, on the same loopback boundary as the
+    Before the first account only the local-AI choice and the subscriptions they pay for are taken, on the same loopback boundary as the
     other pre-account routes; after it, any signed-in session may record all of them.
     """
     signed_in = await run_in_db(accounts.has_users)

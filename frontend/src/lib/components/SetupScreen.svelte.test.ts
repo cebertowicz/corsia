@@ -15,6 +15,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 let calls: Array<{ url: string; method: string }>;
+let progressBodies: string[];
 let sources: Array<{ source: string; name: string; state: string }>;
 
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
@@ -37,9 +38,10 @@ function fillAccount() {
 }
 
 beforeEach(() => {
-	token.set(null); user.set(null); calls = []; sources = [];
+	token.set(null); user.set(null); calls = []; progressBodies = []; sources = [];
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input); const method = init?.method ?? 'GET'; calls.push({ url, method });
+		if (url === '/api/setup/progress' && method === 'PUT') progressBodies.push(String(init?.body));
 		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, work_folder: '~/CORSIA' });
 		if (url === '/api/setup/first-account') return json({ token: 'setup-token', user: { id: 'user', name: 'Ada Lovelace' } });
 		if (url.includes('/sources')) return json({ sources });
@@ -175,6 +177,8 @@ describe('SetupScreen', () => {
 		expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
 		expect(calls).toContainEqual({ url: '/api/providers/cli/claude-code/install', method: 'POST' });
 		expect(calls.some((call) => call.url === '/api/providers/cli/codex/install')).toBe(false);
+		// The answer is kept in setup progress, where the first chat reads which subscriptions they pay for.
+		expect(progressBodies.map((body) => JSON.parse(body))).toContainEqual({ picks: { claude: true, chatgpt: false } });
 		expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
 		expect(button('Sign in')).toBeTruthy();
 	});

@@ -1,13 +1,15 @@
 """The setup decisions of a new install's first run, built by CORSIA.
 
-The conductor raises each decision unchanged and in order; the model never
-writes or edits one. Every payload is computed from facts read here: which apps
+The conductor raises a decision unchanged; the model never writes or edits one.
+The GitHub cards are alternatives: the person's chat answer about having an
+account (or, on the script path, the install's own question) picks which one
+is raised, so the list holds every card a path may raise, not a sequence. Every payload is computed from facts read here: which apps
 have a session folder (a stat, never a read), the email saved at install, and
 whether web search works. Strings live in ``setup_strings``.
 
 The find-projects decision's option A is the session-read consent;
 ``consent_wordings`` renders what that consent must match. The import decision's
-option A is the consent to read the person's other AI tools, built only when one
+option A is the consent to read the person's other tools, built only when one
 is found and the model the CORSIA agent runs on is known; it goes first.
 ``agent_import_wordings`` renders every card that may authorize that read now.
 
@@ -112,7 +114,7 @@ def find_projects(session_apps: tuple[str, ...]) -> dict[str, Any] | None:
 
 
 def agent_import(card: ImportCard | None) -> dict[str, Any] | None:
-    """The consent to read the person's other AI tools, or None when none was found."""
+    """The consent to read the person's other tools, or None when none was found."""
     if card is None or not card.tools:
         return None
     connections = text.AGENT_IMPORT_CONNECTIONS.format(
@@ -162,20 +164,26 @@ def consent_wordings(session_apps: tuple[str, ...]) -> list[tuple[str, str, str]
     return [(rendered["title"], rendered["context"], rendered["options"][0]["label"])]
 
 
-def _github(email: str) -> dict[str, Any]:
-    return _decision(tasks.TASK_GITHUB, text.GITHUB, options=_lettered(text.GITHUB),
+def _community(strings: dict[str, Any]) -> dict[str, Any]:
+    return _decision(tasks.TASK_GITHUB, strings, options=_lettered(strings), recommendation="A")
+
+
+def _github(email: str, strings: dict[str, Any] = text.GITHUB) -> dict[str, Any]:
+    return _decision(tasks.TASK_GITHUB, strings, options=_lettered(strings),
                      recommendation="A",
                      sign_up_with=agents_email(email) or text.ASK_FOR_ADDRESS)
 
 
 
 def build_decisions(facts: Facts) -> list[dict[str, Any]]:
-    """The complete decisions to raise, in setup-task order, each as-is."""
+    """Every decision a path may raise, in setup-task order, each as-is. The GitHub cards are alternatives: raise the one that fits."""
     projects = find_projects(facts.session_apps)
     imported = agent_import(facts.agent_import)
     return [
         *([imported] if imported else []),
+        _community(text.COMMUNITY),
         _github(facts.email),
+        _github(facts.email, text.GITHUB_NO_ACCOUNT),
         *([projects] if projects else []),
     ]
 
