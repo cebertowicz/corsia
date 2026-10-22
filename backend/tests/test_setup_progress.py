@@ -106,7 +106,9 @@ def test_eligibility_facts_are_read_fresh_each_time_never_replayed(client, facts
     facts["free_disk_gb"] = 4.0
     facts["existing_omlx"] = True
 
-    assert _progress(client, token)["status"] == {"local_eligible": True, "free_disk_gb": 4.0, "existing_omlx": True}
+    status = _progress(client, token)["status"]
+    assert isinstance(status.pop("local_started"), bool)  # its values are pinned in test_setup_local_started
+    assert status == {"local_eligible": True, "free_disk_gb": 4.0, "existing_omlx": True}
     assert "free_disk_gb" not in (setup_progress.read() or {})
 
 
