@@ -109,11 +109,8 @@ def _add_comment_item(
     if rearm_deadline:
         _touch_batch(db, batch_id, author_kind=author_kind, now=now, item_delta=1)
     else:
-        db.execute(
-            """UPDATE doc_feedback_batches SET last_item_at=?,item_count=item_count+?,updated_at=?
-               WHERE id=?""",
-            (now, 1, now, batch_id),
-        )
+        db.execute("UPDATE doc_feedback_batches SET last_item_at=?,item_count=item_count+1,updated_at=? WHERE id=?",
+                   (now, now, batch_id))
     return True
 
 
@@ -133,11 +130,7 @@ def join_unstarted_batch(
     batch_id = None
     if author_kind == "user":
         batch_id = unstarted_feedback_batch_id(
-            db,
-            recipient_thread_id=recipient_id,
-            author_kind=author_kind,
-            author_id=author_id,
-            artifact_id=artifact_id,
+            db, recipient_thread_id=recipient_id, author_kind=author_kind, author_id=author_id, artifact_id=artifact_id,
         )
     delivered = batch_id is not None
     if batch_id is None:
@@ -255,16 +248,13 @@ def record_comment(
         joins = [join_unstarted_batch(db, comment, recipient)
                  for recipient in feedback_comments.recipients(db, comment)]
         batch_ids = [batch_id for batch_id, _delivered in joins]
-        delivered_joins = [(batch_id, delivered) for batch_id, delivered in joins if delivered]
-        if delivered_joins:
-            for batch_id, _delivered in delivered_joins:
+        for batch_id, delivered in joins:
+            if delivered:
                 batch = db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
                 feedback_delivery.refresh_unstarted_node(db, batch)
-        if comment["author_kind"] == "user":
-            for batch_id, delivered in joins:
-                if not delivered:
-                    _closed, selected = _claim_and_deliver(db, batch_id, from_state="open", reason="send")
-                    woken.extend(feedback_delivery.wake_after_unselected_person_delivery(db, batch_id, selected))
+            elif comment["author_kind"] == "user":
+                _closed, selected = _claim_and_deliver(db, batch_id, from_state="open", reason="send")
+                woken.extend(feedback_delivery.wake_after_unselected_person_delivery(db, batch_id, selected))
         if submit and comment["author_kind"] == "agent":
             woken = close_for_document(
                 db,
