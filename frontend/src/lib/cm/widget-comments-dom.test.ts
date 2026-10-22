@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorState, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { forceParsing } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
 import { GFM } from '@lezer/markdown';
 import { commentRanges, setCommentRanges, type CommentRange } from './comment-marks';
+import { markdownLivePreview } from './markdown-live';
 import { pendingCommentMark } from './pending-comment-mark';
 import { selectionIn, widgetComments, type WidgetSelection } from './widget-comments';
 
-const TABLE = '| Item | Note |\n|---|---|\n| Alpha | ab ab |\n| Bravo | Eli |';
+const TABLE = '| Item | Note |\n|---|---|\n| Alpha | ab ab |\n| Bravo | Eli |\n| Charlie ||';
 const DOC = `intro\n\n${TABLE}\n\n\`\`\`mermaid\ngraph TD; A-->B\n\`\`\`\n`;
 const TABLE_FROM = DOC.indexOf('| Item');
 const FENCE_FROM = DOC.indexOf('```mermaid');
@@ -16,15 +18,21 @@ const FENCE_TO = DOC.length - 1;
 const rect = (top: number) => ({ top, height: 40, bottom: top + 40, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
 const label = (selection: WidgetSelection | null) => typeof selection?.label === 'function' ? selection.label() : selection?.label;
 
+/** The first parse stops after 20ms of wall time and finishes on a timer these tests never run, so parse the document now. */
+function parsed(view: EditorView) {
+	if (!forceParsing(view, view.state.doc.length, 1_000)) throw new Error('markdown parser did not finish');
+	return view;
+}
+
 const open = (extra: Extension = []) =>
-	new EditorView({ state: EditorState.create({ doc: DOC, extensions: [markdown({ extensions: GFM }), commentRanges, pendingCommentMark, ...(extra ? [extra] : [])] }), parent: document.body });
+	parsed(new EditorView({ state: EditorState.create({ doc: DOC, extensions: [markdown({ extensions: GFM }), commentRanges, pendingCommentMark, ...(extra ? [extra] : [])] }), parent: document.body }));
 
 /** A drawn table widget for TABLE; header and two body rows. */
 function drawnTable(view: EditorView) {
 	const el = document.createElement('div');
 	el.className = 'cm-md-table';
 	el.dataset.srcLength = String(TABLE.length);
-	el.innerHTML = '<table><thead><tr><th>Item</th><th>Note</th></tr></thead><tbody><tr><td>Alpha</td><td>ab ab</td></tr><tr><td>Bravo</td><td>Eli</td></tr></tbody></table>';
+	el.innerHTML = '<table><thead><tr><th>Item</th><th>Note</th></tr></thead><tbody><tr><td>Alpha</td><td>ab ab</td></tr><tr><td>Bravo</td><td>Eli</td></tr><tr><td>Charlie</td><td></td></tr></tbody></table>';
 	view.posAtDOM = () => TABLE_FROM;
 	return el;
 }
@@ -92,6 +100,14 @@ describe('selectionIn a table', () => {
 		range.setEnd(cell(el, 1, 0).firstChild!, 2);
 		expect(selectionIn(view, el, range)).toBeNull();
 	});
+
+	it('maps a collapsed press in an empty cell to its structural source anchor', () => {
+		const view = open(), el = drawnTable(view), range = document.createRange(), empty = cell(el, 3, 1);
+		range.selectNodeContents(empty);
+		const start = TABLE_FROM + TABLE.indexOf('||', TABLE.indexOf('Charlie'));
+		expect(selectionIn(view, el, range)).toMatchObject({ from: start, to: start + 1, text: '|', inWidget: true });
+		expect(label(selectionIn(view, el, range))).toBe('“Empty cell” · Charlie, Note');
+	});
 });
 
 describe('selectionIn a diagram', () => {
@@ -105,6 +121,34 @@ describe('selectionIn a diagram', () => {
 		const selection = selectionIn(view, el, range)!;
 		expect(selection).toMatchObject({ from: FENCE_FROM, to: FENCE_TO, inWidget: true });
 		expect(label(selection)).toBe('The whole diagram');
+	});
+});
+
+describe('a selection raised inside a rendered table', () => {
+	it('survives the editor updates that follow it when the editor held focus', () => {
+		vi.useFakeTimers({ toFake: ['requestAnimationFrame'] });
+		let view!: EditorView;
+		const raised: Array<WidgetSelection | null> = [];
+		// As the document viewer does: raising a widget selection draws its pending mark, an editor update that repaints the cell.
+		const onSelect = (selection: WidgetSelection | null) => {
+			raised.push(selection);
+			view.plugin(pendingCommentMark)!.range = selection && { from: selection.from, to: selection.to };
+			view.dispatch({ effects: setCommentRanges.of([]) });
+		};
+		view = parsed(new EditorView({ state: EditorState.create({ doc: DOC, extensions: [markdown({ extensions: GFM }), markdownLivePreview, commentRanges, pendingCommentMark, widgetComments({ onSelect, onFocus: vi.fn() })] }), parent: document.body }));
+		view.focus();
+		expect(view.hasFocus, 'setup: the editor holds focus, as after any click in the document').toBe(true);
+		const table = view.contentDOM.querySelector<HTMLElement>('.cm-md-table')!;
+		expect(table, 'setup: the table rendered').toBeTruthy();
+		const text = table.querySelector('table')!.rows[1].cells[0].firstChild!;
+		document.getSelection()!.setBaseAndExtent(text, 1, text, 4);
+		document.dispatchEvent(new Event('selectionchange'));
+		vi.advanceTimersByTime(50);
+		document.dispatchEvent(new Event('selectionchange'));
+		vi.advanceTimersByTime(50);
+		expect(table.querySelector('.cm-comment-pending')?.textContent, 'the pending mark is drawn under the selection').toBe('lph');
+		expect(document.getSelection()!.toString()).toBe('lph');
+		expect(raised.at(-1)).toMatchObject({ text: 'lph', inWidget: true });
 	});
 });
 

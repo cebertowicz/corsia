@@ -62,12 +62,6 @@ def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
              AND batch.author_id=? AND batch.artifact_id=?""",
         (USER_AUTHOR_ID, artifact_id),
     ).fetchone()[0]
-    grace_deadline = db.execute(
-        """SELECT MIN(closes_at) FROM doc_feedback_batches
-           WHERE state='open' AND author_kind='user' AND author_id=?
-             AND artifact_id=? AND closed_reason='leave'""",
-        (USER_AUTHOR_ID, artifact_id),
-    ).fetchone()[0]
     artifact = registry_models.get_artifact(artifact_id, db=db)
     owner = db.execute(
         "SELECT title FROM threads WHERE id=?",
@@ -76,7 +70,6 @@ def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
     return {
         "open_count": count,
         "owner_label": owner["title"] if owner else None,
-        "grace_closes_at": grace_deadline,
         "undelivered_batches": undelivered_for_document(
             db,
             author_kind="user",
@@ -188,3 +181,14 @@ def annotate_pane(pane: dict, user_id: str, *, db) -> dict:
 
     visit(pane.get("nodes") or [])
     return pane
+
+
+def seconds_until_next_due(now: datetime, *, db) -> float | None:
+    """Seconds until the earliest open batch still ahead of its deadline, or None when there is none.
+
+    An already-overdue batch is left to the ordinary sweep, so one that keeps failing cannot hide the others.
+    """
+    row = db.execute(
+        "SELECT MIN(closes_at) FROM doc_feedback_batches WHERE state='open' AND closes_at>?", (now.isoformat(),),
+    ).fetchone()
+    return None if row[0] is None else (datetime.fromisoformat(row[0]) - now).total_seconds()

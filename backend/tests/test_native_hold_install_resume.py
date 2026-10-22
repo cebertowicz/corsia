@@ -6,6 +6,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from core import fork_runtime
 
 
 @pytest.mark.asyncio
@@ -109,4 +110,5 @@ async def test_native_checkpoint_hold_exits_by_install_or_independent_stop(
         if not task.done():
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-        await runtime.shutdown_checkpoint_tasks()
+        await fork_runtime.shutdown_forks()
+        await runtime.shutdown_checkpoint_wakes()

@@ -80,16 +80,16 @@ def _validate_title_payload(raw: object) -> str:
     return title
 
 
-def _resolve_title_target(model: str):
-    """Resolve the thread model's exact target and its harness binary."""
-    from core.checkpoint_render import checkpoint_binary
+def _resolve_title_target(model: str, thread_id: str | None):
+    """Resolve the thread model's exact target, through the thread's resolver, and its harness binary."""
+    from core.fork_render import fork_binary
     from infra.database import get_db
-    from llm.resolution import resolve_execution_target
+    from llm.resolution import resolve_thread_target
 
     db = get_db()
     try:
-        target = resolve_execution_target(model, db=db)
-        return target, checkpoint_binary(target, db)
+        target = resolve_thread_target(model, thread_id=thread_id, db=db)
+        return target, fork_binary(target, db)
     finally:
         db.close()
 
@@ -119,7 +119,11 @@ async def _call_title_llm(prompt: str, model: str, *, thread_id: str | None = No
     from llm.isolated_structured import invoke_isolated_structured
 
     try:
-        target, binary = await run_in_db(_resolve_title_target, model)
+        target, binary = await run_in_db(_resolve_title_target, model, thread_id)
+        if not target.available:
+            # Keep the current title; never pick another model for this thread's history.
+            logger.info("Title generation skipped: model={} reason={}", model, target.availability_reason)
+            return None
         raw = await invoke_isolated_structured(
             target,
             system_prompt=_TITLE_SYSTEM_PROMPT,

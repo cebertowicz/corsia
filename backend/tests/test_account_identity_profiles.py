@@ -9,6 +9,7 @@ import asyncio
 from dataclasses import replace
 import json
 import logging
+import os
 from pathlib import Path
 import shutil
 import sqlite3
@@ -573,7 +574,7 @@ def test_ordered_policy_api_and_thread_ownership(client_refuses_unsigned_api, ac
     assert saved == response.json()
     assert client_refuses_unsigned_api.put(route, json=body).status_code == 409
     assert client_refuses_unsigned_api.get("/api/projects/missing/vendor-accounts/codex").status_code == 404
-    assert client_refuses_unsigned_api.put("/api/provider-policy/codex?project_id=missing", json=body).status_code == 409
+    assert client_refuses_unsigned_api.put("/api/provider-policy/codex?project_id=missing", json=body).status_code == 404
     assert client_refuses_unsigned_api.get("/api/threads/destination/vendor-account").status_code == 200
     db.execute("UPDATE threads SET user_id='someone-else' WHERE id='destination'")
     db.commit()
@@ -605,6 +606,48 @@ def test_policy_put_returns_the_matching_get_provider_entry_in_workspace_and_pro
     project_entry = next(provider for provider in project_payload["providers"] if provider["provider_key"] == "codex")
     assert project_response.json()["units"] == project_entry["units"]
     assert project_response.json() == project_entry
+
+
+def test_policy_write_drops_its_own_removed_account_ids_but_refuses_foreign_ones(client, accounts):
+    db, legacy, second, third = accounts
+    first = client.put("/api/provider-policy/codex", json={
+        "rollover": True, "order": [third["id"], second["id"]], "disabled": [second["id"]], "expected_revision": 0})
+    assert first.status_code == 200
+    db.execute("UPDATE vendor_accounts SET state='removed' WHERE id=?", (second["id"],))
+    db.commit()
+
+    echoed = client.put("/api/provider-policy/codex", json={
+        "rollover": True, "order": [third["id"], second["id"]], "disabled": [second["id"]], "expected_revision": 1})
+    assert echoed.status_code == 200
+    assert echoed.json()["order"] == [third["id"]] and echoed.json()["disabled"] == []
+
+    foreign = client.put("/api/provider-policy/codex", json={
+        "rollover": True, "order": [third["id"], "not-an-account"], "disabled": [], "expected_revision": 2})
+    assert foreign.status_code == 422 and foreign.json()["code"] == "account_conflict"
+    assert "belong to this provider" in foreign.json()["detail"]
+
+
+def test_policy_routes_classify_a_stale_revision_and_a_missing_project(client, accounts):
+    _db, _legacy, second, _third = accounts
+    body = {"rollover": False, "order": [second["id"]], "disabled": [], "expected_revision": 0}
+    scope = {"use_workspace": False, "expected_revision": 0}
+    assert client.put("/api/provider-policy/codex", json=body).status_code == 200
+    assert client.put("/api/projects/destination-project/provider-policy/use-workspace", json=scope).status_code == 200
+
+    stale = {
+        "policy": client.put("/api/provider-policy/codex", json=body),
+        "scope": client.put("/api/projects/destination-project/provider-policy/use-workspace", json=scope),
+    }
+    for response in stale.values():
+        assert response.status_code == 409 and response.json()["code"] == "policy_changed"
+        assert isinstance(response.json()["detail"], str)
+
+    missing = {
+        "policy": client.put("/api/provider-policy/codex?project_id=missing", json=body),
+        "scope": client.put("/api/projects/missing/provider-policy/use-workspace", json=scope),
+    }
+    for response in missing.values():
+        assert response.status_code == 404 and response.json() == {"detail": "project does not exist", "code": "project_not_found"}
 
 
 def test_person_account_pin_ignores_the_runtime_epoch_holds_a_busy_choice_and_keeps_vendor_refusals(
@@ -1153,7 +1196,7 @@ def test_project_policy_is_refused_for_a_provider_that_is_not_a_vendor(client, a
     refused = client.put("/api/provider-policy/unregistered?project_id=destination-project", json={
         "rollover": False, "order": None, "disabled": [], "expected_revision": 0,
     })
-    assert refused.status_code == 409
+    assert refused.status_code == 422
     assert refused.json()["detail"] == "provider policy is not available for this provider"
     assert db.execute("SELECT COUNT(*) FROM provider_policies").fetchone()[0] == 0
 
@@ -1287,7 +1330,7 @@ def test_register_refuses_duplicates_and_built_in_vendors(client, synthetic, acc
     refused = client.put("/api/provider-policy/synthetic?project_id=destination-project", json={
         "rollover": False, "order": None, "disabled": [], "expected_revision": 0,
     })
-    assert refused.status_code == 409
+    assert refused.status_code == 422
     assert refused.json()["detail"] == "provider policy is not available for this provider"
 
 
@@ -1420,6 +1463,12 @@ def test_unknown_existing_regular_or_retargeted_path_is_never_relinked(accounts,
     assert auth.stat() == before
 
 
+def _link_identity(path: Path) -> tuple:
+    """The link left in place, not replaced. Reading it can move its access time, so that is left out."""
+    st = path.lstat()
+    return st.st_ino, st.st_dev, st.st_mode, st.st_size, st.st_mtime_ns, st.st_ctime_ns, os.readlink(path)
+
+
 def test_first_exact_link_can_be_adopted_after_establishment_crash(accounts, tmp_path):
     from connections.vendor_accounts import get_account
 
@@ -1428,9 +1477,9 @@ def test_first_exact_link_can_be_adopted_after_establishment_crash(accounts, tmp
     home.mkdir()
     auth = home / 'auth.json'
     auth.symlink_to(Path(custom['source_home']) / 'auth.json')
-    before = auth.lstat()
+    before = _link_identity(auth)
     _establish(db, custom, receipt, home, 'discovery')
-    assert auth.lstat() == before
+    assert _link_identity(auth) == before
     assert get_account(custom['id'], db=db)['discovery']['auth_projection']['homes'][str(auth)]['phase'] == 'established'
 
 
@@ -1470,8 +1519,8 @@ def test_fresh_login_cleanup_is_fenced_and_never_deletes_new_projection(accounts
     assert cleanup_stale(current, quiesced=True, db=db)
     assert not auth.exists()
     _establish(db, updated, current)
-    before = auth.lstat()
+    before = _link_identity(auth)
     assert not cleanup_stale(old, quiesced=True, db=db)
-    assert auth.lstat() == before
+    assert _link_identity(auth) == before
     validate_projection(current, home=auth.parent, db=db)
     assert get_account(custom['id'], db=db)['discovery']['auth_projection']['stale'] == []

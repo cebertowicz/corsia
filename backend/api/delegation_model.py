@@ -5,9 +5,11 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
+from api.locality_refusal import agent_locality_refused_response
 from infra.auth import authenticate
 from infra.database import get_db
 from infra.db_async import run_in_db
+from infra.local_only import LocalityRefused
 from infra.queries import get_thread_for_user
 from thread.model import switch_model
 from thread.model_row import continuity_note
@@ -141,6 +143,8 @@ async def set_thread_model(thread_id: str, token: str, body: dict):
             checkpoint_override=checkpoint_override,
             **({"account_id": body["account_id"]} if body.get("account_id") is not None else {}),
         )
+    except LocalityRefused as exc:
+        return agent_locality_refused_response(exc)
     except (ModelSwitchPreparationError, ModelSwitchConflict) as exc:
         raise HTTPException(409, str(exc)) from exc
     if not isinstance(result, ModelSwitchOutcome):

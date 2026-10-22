@@ -56,6 +56,7 @@ class PasswordEpisode:
 
 
 _panes: dict[str, set[str]] = {}
+_capture_sizes: dict[str, tuple[int, int, bool]] = {}
 _pane_reports: dict[str, dict[str, Callable[[dict], None]]] = {}
 # Each connected pane's probe of the shared page, over the page endpoint it already holds.
 _pane_probes: dict[str, dict[str, Probe]] = {}
@@ -104,6 +105,7 @@ def pane_disconnected(thread_id: str, connection_token: str) -> None:
     connections.discard(connection_token)
     if not connections:
         del _panes[thread_id]
+        _capture_sizes.pop(thread_id, None)
 
 
 def has_pane(thread_id: str) -> bool:
@@ -113,6 +115,15 @@ def has_pane(thread_id: str) -> bool:
 
 def screencast_started(thread_id: str, connection_token: str, cast: PaneScreencast) -> None:
     _screencasts.setdefault(thread_id, {})[connection_token] = cast
+    if (size := _capture_sizes.get(thread_id)) is not None:
+        cast.capture_at(size[0], size[1], compact=size[2])
+
+
+def capture_at(thread_id: str, width: int, height: int, *, compact: bool) -> None:
+    """Size current and not-yet-connected screencasts from the pane's latest appearance."""
+    _capture_sizes[thread_id] = (width, height, compact)
+    for cast in screencasts(thread_id):
+        cast.capture_at(width, height, compact=compact)
 
 
 def screencast_ended(thread_id: str, connection_token: str, cast: PaneScreencast) -> None:

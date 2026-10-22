@@ -1,38 +1,30 @@
-"""Calendar tools through the person's Google sign-in.
+"""Calendar tools through one of the person's Google accounts, named on every call.
 
 Invites follow the email draft/send lifecycle: the draft document is what the
-person reviews, action_drafts owns its state, and the action gate approves the
-exact revision before an event can be created.
+person reviews, action_drafts owns its state and the account it is bound to,
+and the action gate approves the exact revision before an event can be created.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
-import uuid
 from datetime import timedelta
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 from connections.google import client as google_client
-from connections.google import oauth
-from connections.google.calendar_document import OFFSET_REQUIRED, attendee_emails, compose_document, one_line_text, parse_time
+from connections.google.accounts import ACCOUNT_PARAM, resolve_for_thread
+from connections.calendar_document import OFFSET_REQUIRED, compose_document, parse_time, read_draft, read_invite
+from connections.google.calendar_document import event_summaries
 from connections.google.client import GoogleError, GoogleRequestFailed
 from infra import config
 from infra.db_async import run_in_db
-from tools.action_drafts import (
-    DraftError,
-    claim_for_send,
-    create_draft,
-    mark_sent,
-    record_draft,
-    release_claim,
-)
+from tools.action_delivery import deliver_claimed
+from tools.action_drafts import DraftError
+from tools.reviewed_drafts import DraftStorageRefused, draft_target, open_draft, save_draft
 from tools.action_gate import Approved, Refusal, STALE_REVISION, check_action
 from tools.base import Tool
-from tools.google_account import _designated
 
 log = logging.getLogger(__name__)
 
@@ -59,71 +51,19 @@ UNCONFIRMED = (
     "again: check the person's calendar first."
 )
 CUT_NOTE = "The list was cut at 250 events; narrow the range."
+OTHER_ACCOUNT = "This invite was drafted from {address}; save a new one (omit draft_id) to use another account."
 
 
-def _workspace_root() -> Path:
-    return config.WORKSPACE.resolve()
+async def _account(kwargs: dict[str, Any]) -> dict:
+    """The account the call names and this thread may use, or :class:`GoogleError`."""
+    return await run_in_db(resolve_for_thread, kwargs.get("account_id"), kwargs.get("_thread_id"))
 
 
-def _new_draft_path(thread_id: str) -> Path:
-    from core.workspace_layout import (
-        resolve_project_root,
-        resolve_thread_working_root,
-        resolve_workspace_root,
-    )
-    from infra.database import get_db
-
-    workspace = resolve_workspace_root(config.WORKSPACE)
-    db = get_db()
-    try:
-        row = db.execute("SELECT project_id FROM threads WHERE id = ?", (thread_id,)).fetchone()
-        project_id = row["project_id"] if row else None
-        scope = resolve_project_root(workspace, project_id, db=db) if project_id else workspace
-    finally:
-        db.close()
-    if scope is None:
-        raise ValueError("The project's folder is unavailable, so the invite was not saved.")
-    return resolve_thread_working_root(scope, thread_id) / DRAFT_DIR / f"invite-{uuid.uuid4().hex[:12]}.md"
-
-
-def _relative(path: Path) -> str:
-    relative = os.path.relpath(path.resolve(), _workspace_root())
-    if relative.startswith(".."):
-        raise ValueError("The invite's folder is outside the workspace, so it was not saved.")
-    return relative
-
-
-def _open_draft(thread_id: str, draft_id: str) -> dict | None:
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        row = db.execute(
-            "SELECT id, path, state, target_json FROM action_drafts"
-            " WHERE id=? AND thread_id=? AND kind='invite'",
-            (draft_id, thread_id),
-        ).fetchone()
-    finally:
-        db.close()
-    return dict(row) if row else None
-
-
-def _read_document(relative: str) -> bytes | None:
-    from tools.action_gate import _read_bytes
-
-    return _read_bytes(relative)
-
+# Reviewed-draft storage is shared by provider families in tools.reviewed_drafts.
 
 def _event_url(calendar_id: str) -> str:
     return f"{CALENDAR}/calendars/{quote(calendar_id, safe='')}/events"
 
-
-def _event_time(event: dict, key: str) -> str | None:
-    value = event.get(key)
-    if not isinstance(value, dict):
-        return None
-    candidate = value.get("dateTime", value.get("date"))
-    return candidate if isinstance(candidate, str) else None
 
 class CalendarListTool(Tool):
     self_describing_errors = True
@@ -134,7 +74,7 @@ class CalendarListTool(Tool):
 
     @property
     def description(self) -> str:
-        return "List the person's Google Calendar events in a time range of up to 31 days"
+        return "List the Google Calendar events of the account named by account_id, in a range of up to 31 days"
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -144,13 +84,16 @@ class CalendarListTool(Tool):
                 "time_min": {"type": "string", "description": "RFC3339 time with a UTC offset."},
                 "time_max": {"type": "string", "description": "RFC3339 time with a UTC offset."},
                 "calendar_id": {"type": "string", "description": "Google calendar id; defaults to primary."},
+                "account_id": ACCOUNT_PARAM,
             },
             "required": ["time_min", "time_max"],
         }
 
     async def execute(self, **kwargs: Any) -> str:
-        if refusal := await _designated(kwargs):
-            return refusal
+        try:
+            account_id = str((await _account(kwargs))["id"])
+        except GoogleError as exc:
+            return f"Error: {exc}"
         try:
             time_min, start = parse_time(kwargs.get("time_min"))
             time_max, end = parse_time(kwargs.get("time_max"))
@@ -161,7 +104,7 @@ class CalendarListTool(Tool):
             calendar_id = kwargs.get("calendar_id", "primary")
             if not isinstance(calendar_id, str) or not calendar_id:
                 return "Error: calendar_id must be a calendar id."
-            response = await google_client.get_json(_event_url(calendar_id), params={
+            response = await google_client.get_json(account_id, _event_url(calendar_id), params={
                 "timeMin": time_min, "timeMax": time_max, "maxResults": 250,
                 "singleEvents": "true", "orderBy": "startTime",
             })
@@ -173,18 +116,7 @@ class CalendarListTool(Tool):
             log.exception("calendar_list failed")
             return "Error: Couldn't read the calendar. Try again later."
         items = response.get("items") if isinstance(response, dict) else None
-        events = []
-        for event in items if isinstance(items, list) else []:
-            if not isinstance(event, dict):
-                continue
-            attendees = event.get("attendees")
-            events.append({
-                "id": event.get("id"), "start": _event_time(event, "start"),
-                "end": _event_time(event, "end"), "title": event.get("summary", ""),
-                "attendees": [item["email"] for item in attendees if isinstance(item, dict) and isinstance(item.get("email"), str)] if isinstance(attendees, list) else [],
-                "free/busy": "free" if event.get("transparency") == "transparent" else "busy",
-            })
-        result: dict[str, Any] = {"events": events}
+        result: dict[str, Any] = {"events": event_summaries(items)}
         if isinstance(response, dict) and response.get("nextPageToken"):
             result["note"] = CUT_NOTE
         return json.dumps(result)
@@ -199,7 +131,8 @@ class CalendarDraftInviteTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Save a calendar invite as a draft document for the person to review; nothing is sent"
+        return ("Save a calendar invite from the account named by account_id as a draft document for "
+                "the person to review; nothing is sent, and it is later sent from the same account")
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -212,15 +145,18 @@ class CalendarDraftInviteTool(Tool):
                 "end": {"type": "string", "description": "RFC3339 end with a UTC offset."},
                 "attendees": {"type": "array", "items": {"type": "string"}, "description": "Attendee email addresses."},
                 "description": {"type": "string", "description": "Optional event description."},
+                "account_id": ACCOUNT_PARAM,
             },
             "required": ["title", "start", "end", "attendees"],
         }
 
     async def execute(self, **kwargs: Any) -> str:
-        if refusal := await _designated(kwargs):
-            return refusal
         try:
-            return await self._save(kwargs["_thread_id"], kwargs)
+            account = await _account(kwargs)
+        except GoogleError as exc:
+            return f"Error: {exc}"
+        try:
+            return await self._save(str(kwargs["_thread_id"]), account, kwargs)
         except ValueError as exc:
             return f"Error: {exc}"
         except GoogleError as exc:
@@ -231,48 +167,24 @@ class CalendarDraftInviteTool(Tool):
             log.exception("calendar_draft_invite failed")
             return "Error: Couldn't save the invite draft."
 
-    async def _save(self, thread_id: str, kwargs: dict[str, Any]) -> str:
-        from tools.filesystem import WriteFileTool
-
-        title = one_line_text(kwargs.get("title"), "title")
-        start, parsed_start = parse_time(kwargs.get("start"))
-        end, parsed_end = parse_time(kwargs.get("end"))
-        if parsed_end <= parsed_start:
-            raise ValueError("The invite end must be after its start.")
-        attendees = attendee_emails(kwargs.get("attendees"))
-        description = kwargs.get("description", "")
-        if not isinstance(description, str):
-            raise ValueError("The invite description must be text.")
+    async def _save(self, thread_id: str, account: dict, kwargs: dict[str, Any]) -> str:
+        invite = read_invite(kwargs)
         draft_id = kwargs.get("draft_id")
-        existing = None
-        if draft_id is not None:
-            existing = await run_in_db(_open_draft, thread_id, str(draft_id))
-            if existing is None or existing["state"] != "open":
-                raise ValueError(NO_OPEN_DRAFT)
-        account = await run_in_db(oauth.account_status)
-        email = account.get("email")
-        if not isinstance(email, str) or not email:
-            raise GoogleError(google_client.NOT_CONNECTED)
-        text = compose_document(email, title, start, end, attendees, description)
-        path = _workspace_root() / existing["path"] if existing is not None else await run_in_db(_new_draft_path, thread_id)
-        relative = _relative(path)
-        context = {key: value for key, value in kwargs.items() if key.startswith("_")}
-        written = await WriteFileTool(workspace=config.WORKSPACE).execute(
-            path=str(path), content=text,
-            description="Calendar invite draft; the person reviews it before anything is sent.",
-            **context,
-        )
-        if isinstance(written, str) and written.startswith("Error"):
-            return written
-        data = await run_in_db(_read_document, relative)
-        if data != text.encode("utf-8"):
-            raise ValueError("The invite draft changed while it was being saved, so it is not recorded. "
-                             "Save it again with calendar_draft_invite.")
-        target = {"account": email, "title": title, "start": start, "end": end,
-                  "attendees": attendees, "description": description}
-        saved = await run_in_db(record_draft, existing["id"], data, target) if existing else await run_in_db(create_draft, thread_id, "invite", relative, data, target)
-        return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": relative,
-                           "from": email, "next": AFTER_DRAFT})
+        email = str(account["address"])
+        text = compose_document(email, invite.title, invite.start, invite.end, invite.attendees, invite.description)
+        target = {"account": email, "account_id": account["id"], "title": invite.title, "start": invite.start,
+                  "end": invite.end, "attendees": invite.attendees, "description": invite.description}
+        try:
+            saved = await save_draft(
+                thread_id=thread_id, kind="invite", extension=".md", prefix="calendar-invites",
+                account_id=str(account["id"]), target=target, text=text, draft_id=draft_id,
+                context=kwargs, description="Calendar invite draft; the person reviews it before anything is sent.",
+            )
+        except DraftStorageRefused as exc:
+            raise ValueError(str(exc)) from None
+        path = (await run_in_db(open_draft, thread_id, saved["draft_id"], "invite"))["path"]
+        return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": path,
+                           "from": email, "account_id": account["id"], "next": AFTER_DRAFT})
 
 class CalendarSendInviteTool(Tool):
     self_describing_errors = True
@@ -283,7 +195,8 @@ class CalendarSendInviteTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Send a saved invite draft after the person says to send it; attendees get emails"
+        return ("Send a saved invite draft, from the account it was drafted from, after the person "
+                "says to send it; attendees get emails")
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -297,22 +210,20 @@ class CalendarSendInviteTool(Tool):
         }
 
     async def execute(self, **kwargs: Any) -> str:
-        if refusal := await _designated(kwargs):
-            return refusal
         draft_id, revision = kwargs.get("draft_id"), kwargs.get("revision")
         if not isinstance(draft_id, str) or not draft_id or not isinstance(revision, str) or not revision:
             return "Error: Pass the draft_id and revision calendar_draft_invite returned."
         try:
-            prepared = await self._prepare(kwargs["_thread_id"], draft_id, revision)
+            prepared = await self._prepare(kwargs.get("_thread_id"), draft_id, revision)
         except Exception:
             log.exception("calendar_send_invite could not check the invite")
             return "Error: Not sent: couldn't check the invite draft. Try again."
         if isinstance(prepared, str):
             return prepared
-        return await self._deliver(draft_id, prepared)
+        return await self._deliver(draft_id, *prepared)
 
-    async def _prepare(self, thread_id: str, draft_id: str, revision: str) -> dict | str:
-        row = await run_in_db(_open_draft, thread_id, draft_id)
+    async def _prepare(self, thread_id: Any, draft_id: str, revision: str) -> tuple[str, dict] | str:
+        row = await run_in_db(open_draft, str(thread_id), draft_id, "invite")
         if row is None:
             return f"Error: {NO_OPEN_DRAFT}"
         if row["state"] == "sending":
@@ -323,78 +234,40 @@ class CalendarSendInviteTool(Tool):
                 return f"Error: {NO_OPEN_DRAFT}"
             return f"Error: {verdict.text}"
         try:
-            if not verdict.data.decode("utf-8").startswith("From: "):
-                return f"Error: {BAD_DOCUMENT}"
-            target = json.loads(verdict.draft.get("target_json") or "{}")
-            if not isinstance(target, dict):
-                return f"Error: {BAD_DOCUMENT}"
-            title = one_line_text(target.get("title"), "title")
-            start, parsed_start = parse_time(target.get("start"))
-            end, parsed_end = parse_time(target.get("end"))
-            if parsed_end <= parsed_start:
-                return f"Error: {BAD_DOCUMENT}"
-            attendees = attendee_emails(target.get("attendees"))
-            description = target.get("description", "")
-            account = target.get("account")
-            if not isinstance(description, str) or not isinstance(account, str) or not account:
-                return f"Error: {BAD_DOCUMENT}"
-            current = await run_in_db(oauth.account_status)
-            current_email = current.get("email") if isinstance(current, dict) else None
-            if current_email != account:
-                current_display = current_email if isinstance(current_email, str) and current_email else "no account"
-                return (
-                    f"Error: Not sent: Google is now signed in as {current_display}, but this invite was "
-                    f"drafted from {account}. Save it again with calendar_draft_invite and show the person."
-                )
+            draft = read_draft(verdict.data, verdict.draft.get("target_json"), require_account_id=True)
         except (UnicodeDecodeError, ValueError):
             return f"Error: {BAD_DOCUMENT}"
-        return {"summary": title, "start": {"dateTime": start}, "end": {"dateTime": end},
-                "attendees": [{"email": email} for email in attendees], "description": description}
-
-    async def _deliver(self, draft_id: str, body: dict) -> str:
         try:
-            await run_in_db(claim_for_send, draft_id)
-        except DraftError:
-            return f"Error: {STILL_SENDING}"
-        except Exception:
-            log.exception("calendar_send_invite could not claim the invite")
-            return "Error: Not sent: couldn't check the invite draft. Try again."
-        try:
-            bearer = await google_client.access_token()
+            account = await run_in_db(resolve_for_thread, draft.account_id, thread_id)
         except GoogleError as exc:
-            await self._release(draft_id)
             return f"Error: Not sent: {exc}"
-        except Exception:
-            log.exception("calendar_send_invite could not get a Google sign-in")
-            await self._release(draft_id)
-            return "Error: Not sent: couldn't reach Google. Try again later."
-        try:
-            sent = await google_client.request_json(
-                "POST", _event_url("primary"), body=body, params={"sendUpdates": "all"}, token=bearer,
-            )
-        except google_client.GoogleSignInRejected as exc:
-            await self._release(draft_id)
-            return f"Error: Not sent: {exc}"
-        except GoogleRequestFailed as exc:
-            if exc.never_sent:
-                await self._release(draft_id)
-                return f"Error: Not sent: {exc}"
-            return f"Error: {UNCONFIRMED}"
-        except Exception:
-            log.exception("calendar_send_invite outcome unknown")
-            return f"Error: {UNCONFIRMED}"
-        event_id = sent.get("id") if isinstance(sent, dict) else None
-        if not isinstance(event_id, str) or not event_id:
-            return f"Error: {UNCONFIRMED}"
-        try:
-            await run_in_db(mark_sent, draft_id, event_id)
-        except Exception:
-            log.exception("calendar_send_invite: Google accepted the event but the draft could not be marked sent")
-        return json.dumps({"event_id": event_id, "html_link": sent.get("htmlLink")})
+        if str(account["address"]).lower() != draft.address.lower():
+            return f"Error: {BAD_DOCUMENT}"
+        invite = draft.invite
+        return str(account["id"]), {"summary": invite.title, "start": {"dateTime": invite.start},
+                "end": {"dateTime": invite.end},
+                "attendees": [{"email": email} for email in invite.attendees], "description": invite.description}
 
-    @staticmethod
-    async def _release(draft_id: str) -> None:
-        try:
-            await run_in_db(release_claim, draft_id)
-        except Exception:
-            log.exception("calendar_send_invite: the claim could not be released")
+    async def _deliver(self, draft_id: str, account_id: str, body: dict) -> str:
+        return await deliver_claimed(
+            draft_id,
+            acquire=lambda: google_client.access_token(account_id),
+            provider_errors=(GoogleError,),
+            send=lambda bearer: google_client.request_json(
+                "POST", _event_url("primary"), account_id=account_id, body=body,
+                params={"sendUpdates": "all"}, token=bearer,
+            ),
+            result_id=lambda sent: sent.get("id") if isinstance(sent, dict) else None,
+            success=lambda sent, event_id: json.dumps({
+                "event_id": event_id,
+                "html_link": sent.get("htmlLink") if isinstance(sent, dict) else None,
+            }),
+            sign_in_error=lambda exc: str(exc) if isinstance(exc, GoogleError) else "couldn't reach Google. Try again later.",
+            request_error=str,
+            never_sent=lambda exc: isinstance(exc, google_client.GoogleSignInRejected)
+            or isinstance(exc, GoogleRequestFailed) and exc.never_sent,
+            still_sending=STILL_SENDING,
+            claim_error="Not sent: couldn't check the invite draft. Try again.",
+            unconfirmed=UNCONFIRMED,
+            label="calendar_send_invite",
+        )

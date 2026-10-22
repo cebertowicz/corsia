@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
 
 // The model picker groups /api/models rows by account. The catalog and the vendor accounts are
@@ -87,7 +88,7 @@ const codex = (entryOver = {}) => [
 const local = () => ['Qwen 3.8 Flash', 'DeepSeek V4.1 Flash'].map((label, i) => ({
 	id: `omlx-${i}`, selector: `omlx@srv/${i}`, litellm_model: `omlx@srv/${i}`, name: label, display_name: label,
 	connection: 'omlx', provider: 'omlx', backend: 'network', server_name: 'This Mac',
-	desc: '', size: '', speed: '', status: 'ready', capabilities: CAPS,
+	desc: '', size: '', speed: '', status: 'ready', is_local: true, capabilities: CAPS,
 }));
 
 async function serve(page: Page, rows: unknown[], accounts?: unknown[]) {

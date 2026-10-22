@@ -134,16 +134,16 @@ def test_unit_jobs_use_hosted_runners_and_controlled_shards() -> None:
     assert "matrix:" not in workflow
     assert "pytest-xdist" not in workflow
     assert "run_backend_shard()" in workflow
-    assert "mapfile -t cgr_files < <(linux_files backend/tests/test_[cgr]*.py)" in workflow
-    assert "mapfile -t aehilsuw_files < <(linux_files backend/tests/test_[aehilsuw]*.py)" in workflow
-    assert 'run_backend_shard core-cgr "${cgr_files[@]}"' in workflow
-    assert 'run_backend_shard core-aehilsuw "${aehilsuw_files[@]}"' in workflow
+    assert "mapfile -t cdgmr_files < <(linux_files backend/tests/test_[cdgmr]*.py)" in workflow
+    assert "mapfile -t aehilostuw_files < <(linux_files backend/tests/test_[aehilostuw]*.py)" in workflow
+    assert 'run_backend_shard core-cdgmr "${cdgmr_files[@]}"' in workflow
+    assert 'run_backend_shard core-aehilostuw "${aehilostuw_files[@]}"' in workflow
     assert "run_backend_shard remainder backend/tests" in workflow
     assert '"${macos_ignores[@]}"' in workflow
     # The remainder must skip exactly what the named shards run, so every
     # test file runs once.
-    assert "'--ignore-glob=backend/tests/test_[cgr]*.py'" in workflow
-    assert "'--ignore-glob=backend/tests/test_[aehilsuw]*.py'" in workflow
+    assert "'--ignore-glob=backend/tests/test_[cdgmr]*.py'" in workflow
+    assert "'--ignore-glob=backend/tests/test_[aehilostuw]*.py'" in workflow
     assert workflow.count("--ignore-glob=") == 2
     assert 'pids+=("$!")' in workflow
     assert 'wait "${pids[$index]}"' in workflow

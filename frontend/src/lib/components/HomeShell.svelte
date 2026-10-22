@@ -243,7 +243,7 @@
 		ontouchend={mainDrawer.onTouchEnd}
 		ontouchcancel={mainDrawer.onTouchEnd}
 	>
-		<Header onToggleSidebar={onToggleSidebar} onTogglePane={onTogglePane} {onMeasurement} {activeView} {conductorThreadId} hasPane={viewHasPane} />
+		<Header onToggleSidebar={onToggleSidebar} onTogglePane={onTogglePane} {onMeasurement} {activeView} {conductorThreadId} hasPane={viewHasPane} {artifactHeaderInset} />
 		<StatusBanners />
 		{#if $threadSettingsOpen && ($activeThread || (conductorThreadId != null && $activeThreadId === conductorThreadId))}
 			<ThreadSettingsView
@@ -319,7 +319,6 @@
 		background: var(--bg-primary);
 		z-index: 10;
 	}
-	.main:has(:global([data-popover])) { z-index: 12; }
 	.main-close-tap {
 		display: none; position: absolute; inset: var(--header-bottom) 0 0; z-index: 9;
 		background: transparent; border: none; cursor: default;

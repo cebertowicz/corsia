@@ -3,6 +3,7 @@
 	import { backOut } from 'svelte/easing';
 	import { onMount, tick } from 'svelte';
 	import type { Snippet } from 'svelte';
+	import { portal } from '$lib/actions/portal';
 	import IconButton from './IconButton.svelte';
 
 	interface Props {
@@ -91,9 +92,14 @@
 	});
 </script>
 
+<!--
+	Portaled to `document.body`, like AdaptiveDrawer and Menu. Mounted inside the chat
+	column or the open document, the scrim and card were clipped to that column in a
+	WebKit webview and sat behind the other panes.
+-->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="bg" onclick={onBackdropClick} transition:fade={{ duration: 120 }}>
+<div class="bg" onclick={onBackdropClick} transition:fade={{ duration: 120 }} use:portal>
 	<div
 		bind:this={modalElement}
 		class="modal {size}"

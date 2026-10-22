@@ -12,8 +12,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from infra.host_resources import (  # noqa: E402
     LOCAL_PROVIDER_TYPES, MIN_IMAGE_DECODE_PIXELS, SAFE_RESERVE_BYTES,
     _resolved_total_ram_bytes, check_can_load, get_host_resources,
-    host_total_ram_bytes, image_decode_pixel_budget, log_image_decode_budget,
-    max_image_decode_pixels,
+    host_total_ram_bytes, image_decode_pixel_budget, load_reserve_bytes,
+    log_image_decode_budget, max_image_decode_pixels, model_room_bytes,
 )
 
 GIB = 1024 ** 3
@@ -80,13 +80,14 @@ async def test_check_can_load_ok_with_plenty_of_room():
 @pytest.mark.asyncio
 async def test_check_can_load_warns_when_exceeds_safe_reserve():
     fake_loaded = {"omlx": [], "lmstudio": [], "llama": []}
-    with patch("psutil.virtual_memory", return_value=_vmstub(64, 30)):
+    with patch("psutil.virtual_memory", return_value=_vmstub(64, 25)):
         with patch("infra.host_resources._gather_local_loaded", return_value=fake_loaded):
             res = await check_can_load(estimated_gb=20, target_provider="omlx")
     assert res["ok"] is False
     assert res["warning"] is not None
-    assert "below" in res["warning"].lower()
-    assert res["after_load_gb"] == 10
+    assert res["warning"] == "Loading would leave 5.0 GB of memory free (below the 8 GB safe reserve)."
+    assert res["after_load_gb"] == 5
+    assert res["safe_reserve_gb"] == 8
 
 
 @pytest.mark.asyncio
@@ -96,8 +97,8 @@ async def test_check_can_load_warns_when_load_exceeds_total_free():
         with patch("infra.host_resources._gather_local_loaded", return_value=fake_loaded):
             res = await check_can_load(estimated_gb=100, target_provider="omlx")
     assert res["ok"] is False
-    assert "exceed" in res["warning"].lower()
-    assert "kill" in res["warning"].lower() or "swap" in res["warning"].lower()
+    # One sentence with the numbers, in the app's own word (memory); the dialog's hint owns the swap/kill consequence.
+    assert res["warning"] == "Loading would need 70.0 GB more memory than is free."
 
 
 @pytest.mark.asyncio
@@ -123,6 +124,33 @@ async def test_local_provider_types_defined():
 
 def test_safe_reserve_default_is_16gb():
     assert SAFE_RESERVE_BYTES == 16 * 1024 * 1024 * 1024
+
+
+def test_the_load_reserve_is_an_eighth_of_ram_up_to_16gb():
+    assert load_reserve_bytes(24 * GIB) == 3 * GIB
+    assert load_reserve_bytes(64 * GIB) == 8 * GIB
+    assert load_reserve_bytes(128 * GIB) == SAFE_RESERVE_BYTES
+    assert load_reserve_bytes(256 * GIB) == SAFE_RESERVE_BYTES
+
+
+def test_model_room_is_available_memory_less_the_reserve(monkeypatch):
+    monkeypatch.setattr("infra.host_resources.host_total_ram_bytes", lambda: 24 * GIB)
+    monkeypatch.setattr("infra.host_resources.host_available_ram_bytes", lambda: 12 * GIB)
+    assert model_room_bytes() == 9 * GIB
+    monkeypatch.setattr("infra.host_resources.host_available_ram_bytes", lambda: 2 * GIB)
+    assert model_room_bytes() == 0
+
+
+@pytest.mark.asyncio
+async def test_the_preload_check_and_setup_pick_share_one_reserve(monkeypatch):
+    fake_loaded = {"omlx": []}
+    monkeypatch.setattr("infra.host_resources.host_total_ram_bytes", lambda: 24 * GIB)
+    monkeypatch.setattr("infra.host_resources.host_available_ram_bytes", lambda: 12 * GIB)
+    with patch("psutil.virtual_memory", return_value=_vmstub(24, 12)):
+        with patch("infra.host_resources._gather_local_loaded", return_value=fake_loaded):
+            res = await get_host_resources()
+    assert res["safe_reserve_gb"] == 3
+    assert res["safe_free_gb"] * GIB == model_room_bytes()
 
 
 def test_a_workstation_never_refuses_an_image_a_laptop_must():

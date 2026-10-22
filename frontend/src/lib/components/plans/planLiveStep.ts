@@ -10,7 +10,6 @@
  * solely so visibility can move between parent and child rows without losing
  * what that same Turn already showed; none of it is persisted.
  */
-import { readable } from 'svelte/store';
 import type { OperatorNode } from '$lib/api/plans';
 import type { ActiveTool } from '$lib/stores/threads';
 import type { ThreadTurnState } from '$lib/ws/turnState';
@@ -84,6 +83,8 @@ export interface LiveRollup {
 	threads: Map<string, string[]>;
 	/** Rows with a step at or beneath them that the server shows moving (`stepMoves`). */
 	moving: Set<string>;
+	/** The step each live thread belongs to: the row whose first try its open time counts from, wherever the line shows. */
+	owners: Map<string, OperatorNode>;
 }
 
 export function rolledLive(nodes: readonly OperatorNode[]): LiveRollup {
@@ -91,8 +92,10 @@ export function rolledLive(nodes: readonly OperatorNode[]): LiveRollup {
 	const parentOf = new Map(nodes.map((node) => [node.id, node.parent_id]));
 	const branches = new Set(nodes.map((node) => node.parent_id));
 	const moving = new Set<string>();
+	const owners = new Map<string, OperatorNode>();
 	for (const node of nodes) {
 		const own = liveStepThreads(node);
+		for (const threadId of own) if (!owners.has(threadId)) owners.set(threadId, node);
 		// A branch's label is its steps' rolled up, so only a step says whether work moves.
 		const moves = !branches.has(node.id) && stepMoves(node);
 		if (own.length === 0 && !moves) continue;
@@ -103,7 +106,7 @@ export function rolledLive(nodes: readonly OperatorNode[]): LiveRollup {
 		}
 		if (moves) moving.add(node.id);
 	}
-	return { threads, moving };
+	return { threads, moving, owners };
 }
 
 /**
@@ -260,28 +263,3 @@ export function planLiveStep(
 	}
 	return null;
 }
-
-/** Whole minutes: the subline counts work, it is not a stopwatch. */
-export function elapsedLabel(ms: number): string {
-	const minutes = Math.floor(Math.max(0, ms) / 60_000);
-	if (minutes < 1) return 'under 1 min';
-	if (minutes < 60) return `${minutes} min`;
-	const hours = Math.floor(minutes / 60);
-	const rest = minutes % 60;
-	return rest ? `${hours} h ${rest} min` : `${hours} h`;
-}
-
-export function liveStepLabel(step: LiveStep, now: number): string {
-	if (step.startedAt === null) return step.phrase;
-	const elapsed = elapsedLabel(now - step.startedAt);
-	return step.phrase === UNKNOWN_STEP ? `Working ${elapsed}` : `Working ${elapsed} · ${step.phrase}`;
-}
-
-const TICK_MS = 15_000;
-
-/** One shared clock for every live row, running only while a row shows. */
-export const liveStepClock = readable(Date.now(), (set) => {
-	set(Date.now());
-	const timer = setInterval(() => set(Date.now()), TICK_MS);
-	return () => clearInterval(timer);
-});

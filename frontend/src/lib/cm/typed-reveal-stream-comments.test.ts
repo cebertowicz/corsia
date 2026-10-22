@@ -202,6 +202,23 @@ describe('a suggestion that streamed nothing still types its insert', () => {
 		expect(r.lanes().flatMap((l) => l.previews)).toHaveLength(0);
 	});
 
+	it('types a suggestion the editor placed away from the server offsets, instead of drawing it whole', async () => {
+		// A busy document: the committed suggestion sits at the editor's own place, three characters from the arrival's.
+		const r = make(DOC, [commentMarks, suggestionMarks(pointer)]);
+		const insert = 'there, friend';
+		const { outcomes } = arrive(r, { insert, from: 6, to: 11 });
+		await settle();
+		r.view.dispatch({ effects: setCommentRanges.of([{
+			from: 9, to: 14, id: 'comment-1', suggestion: { quote: 'world', insert, color: '#8b5cf6', inline: true },
+		}]) });
+		expect(outcomes).toEqual(['ended']);
+		expect(inserts(r)).not.toContain(insert);
+		const lengths = shownLengths(r, 12_000);
+		expect([...lengths].some((n) => n > 0 && n < insert.length)).toBe(true);
+		expect(inserts(r)).toEqual([insert]);
+		expect(r.lanes().flatMap((l) => l.previews)).toHaveLength(0);
+	});
+
 	it('drops the typing when no suggestion ever commits, so nothing is left half drawn', async () => {
 		const r = make(DOC, [commentMarks, suggestionMarks(pointer)]);
 		arrive(r, { insert: 'there, friend' });

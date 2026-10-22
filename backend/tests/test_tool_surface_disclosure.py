@@ -133,6 +133,8 @@ def test_google_connect_surface_requires_status_before_reconnect():
     assert description.startswith("Call google_status first.")
     assert "needs_action, follow it before calling google_connect" in description
     assert description.index("needs_action") < description.index("returns a URL")
+    assert "With account_id, it returns {reply, link}" in description
+    assert "post its reply verbatim with post_update followed by [Open it in Connected apps](<link>)" in description
     assert "Give the person the link" not in description
 
 
@@ -443,7 +445,7 @@ async def test_connected_app_reach_hides_mcp_index_and_refuses_before_session_or
 
     allowed_context = state._current_thread_id.set("project-a-thread")
     try:
-        assert f"- wiki: 1 tool; Search the team wiki." in registry.get("tools_load").description
+        assert "- wiki: 1 tool; Search the team wiki." in registry.get("tools_load").description
         loaded = await registry.execute("tools_load", {"names": [wrapper.name]})
         called = await registry.execute("tool_call", {"name": wrapper.name, "arguments": {}})
     finally:

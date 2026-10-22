@@ -9,10 +9,7 @@ Core context defines the alignment, groundwork, and verification gates and their
 
 ## Alignment
 
-- Read before asking: the request, thread and plan history, named artifacts, prior decisions. Use bounded read-only discovery within existing access and privacy authority.
-- Put the aligned outcome, authority and effects, constraints, and acceptance evidence in the plan node in a few lines. Mark inferred items `ASSUMED:` with the source.
-- Ask only about an unknown that would change behavior, scope, cost, risk, audience, external effect, or reversibility. When the request already grants the authority, do not ask for a second confirmation.
-- Groundwork or new evidence may expose a material ambiguity. Return here, then resume.
+Core context's Alignment gate is the procedure. Mark an inferred part of `intent` `ASSUMED:` with its source.
 
 ## Groundwork by work type
 
@@ -37,13 +34,7 @@ Before claiming domain expertise is ready, compare representative outcomes with 
 
 ## No established workflow
 
-First look for an existing workflow or skill that fits the work, and use it if one does. If none does, build one first when the work will recur, is consequential (it goes outside, is hard to undo, or spends a person's time), or is sizeable (size M or more). Do small, low-risk one-offs directly; if one comes up a second time, build its workflow then. Runs that follow recorded steps can be measured against each other; improvised runs can't.
-
-1. Find how the top 1% of practitioners do this work, with evidence of their outcomes. Record credible alternatives, or label the process experimental if none exist. Prestige alone is not evidence of fit. Ask the person only what this research and their own sources can't answer, and only after doing both.
-2. Write their steps in order, adapted to the objective, scale, tools and budget, and explain important departures. For each step, write: what top-1% quality looks like; what usually fails, and where and why an AI agent fails; a check against each failure; and one open question that looks past the check (for example, "What would a top practitioner notice here that this check misses?"). Anything a question turns up becomes a check.
-3. Define inputs and outputs, owners, handoffs and recovery paths. Keep the process no larger than the activity needs.
-4. Test the weakest assumption with the smallest representative pilot inside authority and cost limits, compare the result with the success evidence, and revise.
-5. Record it as a skill with declared workflow steps (skill `skill-creator`; see Declared workflows), with a review trigger.
+Look first for a workflow or skill that fits the work, and use it. If none does and you will do this kind of work again, beyond a step or two, make one with skill `workflow-design`. A one-off is a plan: do it directly.
 
 ## Plan
 

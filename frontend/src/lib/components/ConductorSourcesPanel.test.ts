@@ -130,7 +130,7 @@ describe('first-run line', () => {
 	});
 
 	it('flips the line on models_updated, such as a download finishing', async () => {
-		listed = [{ source: 'omlx', name: 'Local model', state: 'needs_setup', eligible: true, setup_stage: 'Downloading', download_percent: 40 }];
+		listed = [{ source: 'omlx', name: 'Local model', state: 'needs_setup', eligible: true, local_state: 'downloading', download_percent: 40 }];
 		await render();
 		await vi.waitFor(() => expect(host.querySelector('section')).toBeNull());
 		listed = [{ source: 'omlx', name: 'Local model', state: 'ready' }];

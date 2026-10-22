@@ -67,6 +67,11 @@ beforeEach(() => {
 	drawing = [];
 	vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
 		setTransform() {},
+		save() {},
+		restore() {},
+		beginPath() {},
+		rect() {},
+		clip() {},
 		clearRect(...area: number[]) { drawing.push(`clear ${area.join(',')}`); },
 		drawImage(_image: unknown, ...area: number[]) { drawing.push(`draw ${area.slice(4).join(',')}`); },
 	} as unknown as CanvasRenderingContext2D);
@@ -91,7 +96,7 @@ describe('BrowserLeaf drawing', () => {
 		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
 		drawing = [];
 		socket.receive({ type: 'frame', metadata: { deviceWidth: 100, deviceHeight: 50 }, data: '' });
-		await vi.waitFor(() => expect(drawing).toEqual(['draw 0,25,100,50']));
+		await vi.waitFor(() => expect(drawing).toEqual(['clear 0,0,100,100', 'draw 0,25,100,50']));
 		drawing = [];
 		socket.receive({ type: 'frame', metadata: { deviceWidth: 50, deviceHeight: 50 }, data: '' });
 		await vi.waitFor(() => expect(drawing).toEqual(['clear 0,0,100,100', 'draw 0,0,100,100']));
@@ -308,6 +313,7 @@ describe('BrowserLeaf agent presence', () => {
 		flushSync();
 		expect(marker()!.classList.contains('above')).toBe(true);
 		expect([marker()!.style.left, marker()!.style.top]).toEqual(['70px', '41px']);
+		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
 		canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 50, clientY: 50, deltaY: 40 }));
 		flushSync();
 		expect(marker()!.classList.contains('shown')).toBe(false);
@@ -387,8 +393,9 @@ describe('BrowserLeaf letterbox input', () => {
 		expect(socket.sent.slice(before)).toEqual([]);
 	});
 
-	it('releases an inside press at the clamped page edge', () => {
+	it('releases an inside press at the clamped page edge', async () => {
 		const { canvas, socket } = render();
+		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
 		canvas.dispatchEvent(pointer('pointerdown', 50, 50));
 		canvas.dispatchEvent(pointer('pointerup', 50, 110));
 		expect(socket.sent.filter(message => message.type === 'input_mouse')).toEqual([
@@ -398,15 +405,17 @@ describe('BrowserLeaf letterbox input', () => {
 		]);
 	});
 
-	it('forwards wheel axes in pixels without turning vertical input horizontal', () => {
+	it('forwards wheel axes in pixels without turning vertical input horizontal', async () => {
 		const { canvas, socket } = render();
+		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
 		canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 50, clientY: 50, deltaX: 3, deltaY: 90, deltaMode: 0 }));
-		expect(socket.sent.at(-1)).toEqual({ type: 'input_mouse', eventType: 'mouseWheel', x: 50, y: 25, deltaX: 3, deltaY: 90 });
+		await vi.waitFor(() => expect(socket.sent.at(-1)).toEqual({ type: 'input_mouse', eventType: 'mouseWheel', x: 50, y: 25, deltaX: 3, deltaY: 90 }));
 	});
 
-	it('converts a line wheel to pixels, as CDP expects', () => {
+	it('converts a line wheel to pixels, as CDP expects', async () => {
 		const { canvas, socket } = render();
+		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
 		canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 50, clientY: 50, deltaX: 0, deltaY: 3, deltaMode: 1 }));
-		expect(socket.sent.at(-1)).toEqual({ type: 'input_mouse', eventType: 'mouseWheel', x: 50, y: 25, deltaX: 0, deltaY: 120 });
+		await vi.waitFor(() => expect(socket.sent.at(-1)).toEqual({ type: 'input_mouse', eventType: 'mouseWheel', x: 50, y: 25, deltaX: 0, deltaY: 120 }));
 	});
 });

@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN, watchSessionSubscriptions } from '../support/corsia';
 
 test('@flow:document-comment-save preserves the visible editor viewport', async ({ page, request }, testInfo) => {
@@ -331,7 +332,12 @@ test('@flow:document-comment-save preserves the visible editor viewport', async 
 		await trigger.dismiss();
 		await nextFrame();
 		await nextFrame();
-		await trigger.assertCaret(caretBeforeDrawer);
+		// Escape leaves the drawer rather than returning to the editor. When the reader returns by keyboard focus, CodeMirror
+		// must restore its full saved selection, including the DOM caret rebuilt with the resolved highlight.
+		if (trigger.name === 'Escape') {
+			await page.locator('.cm-content').focus();
+			await expect.poll(caret, { message: 'Returning to the editor after Escape must restore the full caret' }).toEqual(caretBeforeDrawer);
+		} else await trigger.assertCaret(caretBeforeDrawer);
 		const reopenAfterDismiss = await lifecyclePosition();
 		await nextFrame();
 		const reopenDismissFrameOne = await lifecyclePosition();

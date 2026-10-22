@@ -1,9 +1,4 @@
-"""Related past work at node start: what clears the floor, and what stays quiet.
-
-The lookup is advisory and agent-visible, so the contract is as much about
-silence as about hits: nothing below the floor, nothing the caller already
-carries live, nothing another user owns, and never an error in its caller.
-"""
+"""Prior-word source and exclusion behavior."""
 
 from __future__ import annotations
 
@@ -12,55 +7,21 @@ import json
 import pytest
 from loguru import logger
 
-from checkpoint_retrieval_fixtures import (  # noqa: F401
-    OWNER_USER,
-    _install_checkpoint,
-    fresh_db,
-)
-from tests.plan_writer_authorizer import raw_plan_seed
-
-#: Where a node of t1's plan points a caller in t2: plan_read cannot open it,
-#: and no read returns the node, so the pointer promises only that thread's
-#: messages (#2520).
-ELSEWHERE = '→ get_thread_history(thread_id="t1") — that thread\'s messages, not this node'
-
-IDLE_ROOT_CAUSE = (
-    "Root cause of missed idle checkpoints: accepting a passive input destroyed "
-    "the idle marker and cancelled its timer."
-)
+from infra.database import get_db
+from tests.event_routing_helpers import mk_session
 
 
 @pytest.fixture
-def db(fresh_db):
-    """Add a second owned thread and the plan rows the node half reads."""
-    fresh_db.executescript(
-        "ALTER TABLE threads ADD COLUMN purged_at TEXT;"
-        "INSERT INTO threads (id,user_id,title,history_epoch) VALUES ('t2','u','T2',0);"
-        "CREATE TABLE plans (id TEXT PRIMARY KEY, owner_kind TEXT, owner_id TEXT);"
-        "CREATE TABLE plan_nodes (id TEXT PRIMARY KEY, plan_id TEXT, title TEXT,"
-        " acceptance_criteria TEXT, description TEXT, state TEXT, updated_at TEXT,"
-        " requirements_revision INTEGER);"
-        "CREATE TABLE plan_node_events (node_id TEXT, event TEXT, payload_json TEXT,"
-        " created_at TEXT);"
-        "INSERT INTO plans VALUES ('p1','thread','t1'),('pf','thread','t-foreign');"
-    )
-    return fresh_db
+def db(isolated_db):
+    from infra.db_fts import _init_fts
 
-
-def _node(db, node_id, title, *, state="accepted", plan="p1", evidence=None):
-    with raw_plan_seed(db):
-        db.execute(
-            "INSERT INTO plan_nodes VALUES (?,?,?,?,NULL,?,?,1)",
-            (node_id, plan, title, "Done when it is shipped.", state, "2026-09-21T12:00:00"),
-        )
-    if evidence is not None:
-        db.execute(
-            "INSERT INTO plan_node_events VALUES (?, 'review_evidence_submitted', ?, ?)",
-            (node_id, json.dumps({
-                "evidence": evidence, "requirements_revision": 1, "artifact_ids": [],
-            }), "2026-09-21T12:00:00"),
-        )
-    db.commit()
+    connection = get_db()
+    _init_fts(connection)
+    mk_session("caller")
+    mk_session("past")
+    connection.commit()
+    yield connection
+    connection.close()
 
 
 @pytest.fixture
@@ -71,211 +32,591 @@ def logged():
     logger.remove(sink)
 
 
-def _related(db, title, *, caller="t2", criteria="", trigger="start"):
+def _message(db, message_id: str, thread: str, body: str, *, role="user", metadata="{}", seq=1, created_at="2026-01-01T12:00:00+00:00"):
+    db.execute(
+        "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq,delivery_state) "
+        "VALUES (?,?,?,?,?,?,?,'delivered')",
+        (message_id, thread, role, body, metadata, created_at, seq),
+    )
+    db.commit()
+
+
+def _related(db, title="Export account ledger in CSV format"):
     from memory.node_start_recall import NodeText, related
 
-    return related(
-        db, NodeText(title, criteria), caller_thread_id=caller, trigger=trigger,
+    return related(db, NodeText(title, criteria="Use stable export columns."), caller_thread_id="caller", trigger="start")
+
+
+def test_owner_message_is_quoted_with_header_and_newest_first(db, logged):
+    _message(db, "old", "past", "Export account ledger as CSV format with stable columns.")
+    _message(db, "new", "past", "Export account format is preferred.", seq=2, created_at="2026-02-01T12:00:00+00:00")
+
+    lines = _related(db)
+
+    assert lines[0].startswith("Earlier words from the person")
+    assert len(lines) == 3
+    assert "preferred" in lines[1] and "as CSV" in lines[2]
+    assert any("prior_words reason=delivered trigger=start hits=2 kinds=message:2" in line for line in logged)
+
+
+def test_agent_send_and_routed_event_are_never_quoted(db):
+    _message(db, "agent", "past", "Export account ledger as CSV format.", role="assistant")
+    _message(db, "event", "past", "Export account ledger as CSV format.", metadata='{"sender_kind":"agent"}', seq=2)
+
+    assert _related(db) == []
+
+
+def test_user_comment_targets_its_owner_without_an_author_thread_and_excludes_agent_comment(db):
+    from doc_feedback_helpers import add_comment, seed_document
+
+    db.execute("UPDATE threads SET user_id='owner-token'")
+    artifact = seed_document(db, "past", name="ledger-guide.md")
+    person, _ = add_comment(db, artifact, author_kind="user", author_id=None)
+    agent, _ = add_comment(db, artifact, author_kind="agent", author_id="past")
+    db.execute("UPDATE doc_comments SET body='Export account ledger with CSV format.' WHERE id IN (?, ?)", (person["id"], agent["id"]))
+    db.commit()
+
+    lines = _related(db)
+
+    assert person["author_thread_id"] is None
+    assert len(lines) == 2 and "comment on “ledger-guide.md”" in lines[1]
+
+
+def test_decision_without_free_text_is_not_quoted(db):
+    from plans.public import DECISION_TYPE
+
+    metadata = {"plan_decision": {"state": "answered", "thread_id": "past", "answered_at": "2026-01-01", "title": "Export ledger", "answer": {"option_id": "csv"}}}
+    db.execute(
+        "INSERT INTO artifact_identities (id,integration,type,external_id,state,retention,metadata,created_at,updated_at) "
+        "VALUES ('decision','local',?,'decision','active','durable',?,'2026-01-01','2026-01-01')",
+        (DECISION_TYPE, json.dumps(metadata)),
     )
+    db.commit()
+
+    assert _related(db) == []
 
 
-def test_terms_put_the_title_first_and_drop_boilerplate():
-    from memory.node_start_recall import MAX_TERMS, NodeText, terms
+def test_many_newer_one_term_comments_do_not_hide_an_older_match(db):
+    from doc_feedback_helpers import add_comment, seed_document
+    from memory.node_start_recall import SOURCE_CANDIDATES
 
-    chosen, title = terms(NodeText(
-        "Fix the missed idle checkpoints",
-        "Tests pass and the idle timer survives passive input; see #2283.",
-    ))
+    db.execute("UPDATE threads SET user_id='owner-token'")
+    artifact = seed_document(db, "past", name="ledger-guide.md")
+    match, _ = add_comment(db, artifact, author_kind="user", author_id=None)
+    noise = [add_comment(db, artifact, author_kind="user", author_id=None)[0]["id"] for _ in range(SOURCE_CANDIDATES + 1)]
+    db.execute("UPDATE doc_comments SET body='Export account ledger with CSV format.', created_at='2026-01-01' WHERE id=?", (match["id"],))
+    db.executemany("UPDATE doc_comments SET body='Export later.', created_at='2026-02-01' WHERE id=?", [(comment_id,) for comment_id in noise])
+    db.commit()
 
-    assert chosen[:3] == ["missed", "idle", "checkpoints"]
-    assert title == {"missed", "idle", "checkpoints"}
-    assert "fix" not in chosen and "tests" not in chosen and "the" not in chosen
-    assert "2283" in chosen and len(chosen) <= MAX_TERMS
+    lines = _related(db)
+
+    assert len(lines) == 2 and "Export account ledger with CSV" in lines[1]
 
 
-def test_an_owned_entry_from_another_thread_is_one_line_with_its_pointer(db, logged):
-    cid = _install_checkpoint(
-        db, thread_id="t1", narrative="Routine.", continuity=[{"statement": IDLE_ROOT_CAUSE}],
+@pytest.mark.parametrize("noise_body", [
+    "Reformat the subaccount, nonexport and subledger tabs; unstable.",  # terms only inside words
+    "Stable account columns, any format.",  # floor met without a title term
+])
+def test_many_comments_match_rejects_do_not_hide_a_match(db, noise_body):
+    from doc_feedback_helpers import add_comment, seed_document
+    from memory.node_start_recall import SOURCE_CANDIDATES, NodeText, related
+
+    db.execute("UPDATE threads SET user_id='owner-token'")
+    artifact = seed_document(db, "past", name="ledger-guide.md")
+    match, _ = add_comment(db, artifact, author_kind="user", author_id=None)
+    noise = [add_comment(db, artifact, author_kind="user", author_id=None)[0]["id"] for _ in range(SOURCE_CANDIDATES + 1)]
+    db.execute("UPDATE doc_comments SET body='Export the ledger.', created_at='2026-01-01' WHERE id=?", (match["id"],))
+    db.executemany("UPDATE doc_comments SET body=?, created_at='2026-02-01' WHERE id=?", [(noise_body, comment_id) for comment_id in noise])
+    db.commit()
+
+    lines = related(db, NodeText("Export ledger", criteria="Use stable account columns and format."), caller_thread_id="caller", trigger="start")
+
+    assert len(lines) == 2 and "Export the ledger" in lines[1]
+
+
+def test_purged_thread_answered_decision_is_not_quoted(db):
+    from plans.public import DECISION_TYPE
+
+    metadata = {"plan_decision": {"state": "answered", "thread_id": "past", "answered_at": "2026-01-01", "title": "Export ledger", "answer": {"option_id": "other", "text": "Export account ledger with CSV format."}}}
+    db.execute(
+        "INSERT INTO artifact_identities (id,integration,type,external_id,state,retention,metadata,created_at,updated_at) "
+        "VALUES ('purged-decision','local',?,'purged-decision','active','durable',?,'2026-01-01','2026-01-01')",
+        (DECISION_TYPE, json.dumps(metadata)),
     )
+    db.execute("UPDATE threads SET purged_at='2026-01-02' WHERE id='past'")
+    db.commit()
 
-    lines = _related(db, "Identify and fix missed idle checkpoints")
-
-    assert len(lines) == 1
-    assert "\n" not in lines[0]
-    assert "Root cause of missed idle checkpoints" in lines[0]
-    assert f'get_checkpoints(checkpoint_id="{cid}") entry 1' in lines[0]
-    assert any("reason=delivered trigger=start hits=1" in line for line in logged)
+    assert _related(db) == []
 
 
-def test_older_epochs_are_reached_and_labelled(db):
-    db.execute("UPDATE threads SET history_epoch=2 WHERE id='t1'")
-    _install_checkpoint(
-        db, thread_id="t1", narrative="Routine.", continuity=[{"statement": IDLE_ROOT_CAUSE}],
-        history_epoch=1,
+def test_many_one_term_decision_answers_do_not_hide_a_match(db):
+    from memory.node_start_recall import SOURCE_CANDIDATES
+    from plans.public import DECISION_TYPE
+
+    def decision(decision_id: str, text: str, answered_at: str) -> tuple:
+        body = {"state": "answered", "thread_id": "past", "answered_at": answered_at, "title": "Ledger", "answer": {"option_id": "other", "text": text}}
+        return (decision_id, DECISION_TYPE, decision_id, json.dumps({"plan_decision": body}))
+
+    noise = [decision(f"noise-{index}", "Export later.", "2026-02-01") for index in range(SOURCE_CANDIDATES + 1)]
+    rows = [*noise, decision("z-match", "Export account ledger with CSV format.", "2026-01-01")]
+    db.executemany(
+        "INSERT INTO artifact_identities (id,integration,type,external_id,state,retention,metadata,created_at,updated_at) "
+        "VALUES (?,'local',?,?,'active','durable',?,'2026-01-01','2026-01-01')", rows,
     )
+    db.commit()
 
-    lines = _related(db, "missed idle checkpoints")
+    lines = _related(db)
 
-    assert len(lines) == 1 and "epoch 1" in lines[0]
+    assert len(lines) == 2 and "answer to decision" in lines[1]
 
 
-def test_one_shared_term_is_below_the_floor(db, logged):
-    _install_checkpoint(
-        db, thread_id="t1", narrative="Routine.",
-        continuity=[{"statement": "Checkpoints fold at 262k tokens on Claude Code seats."}],
+def test_many_closer_matching_facts_do_not_hide_a_rule(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+    from memory.node_start_recall import SOURCE_CANDIDATES
+
+    facts = [{
+        "entry_id": index, "field": "facts", "revision": 1,
+        "body": {"statement": "Export account ledger CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+    } for index in range(1, SOURCE_CANDIDATES + 2)]
+    rule = {
+        "entry_id": SOURCE_CANDIDATES + 2, "field": "active_constraints", "revision": 1,
+        "body": {"statement": "When a release is near, export the account ledger in CSV format, never spreadsheets.",
+                 "source_refs": [{"kind": "user", "reference": "message"}]},
+    }
+    _install_checkpoint(db, thread_id="past", narrative="Rules", continuity=[*facts, rule])
+
+    assert any("rule an agent recorded" in line for line in _related(db))
+
+
+def test_locality_is_read_once_per_lookup(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+    from memory.node_start_recall import SOURCE_CANDIDATES
+
+    for index in range(SOURCE_CANDIDATES):
+        project = f"project-{index}"
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,'2026-01-01','2026-01-01')", (project, project))
+        mk_session(f"past-{index}")
+        db.execute("UPDATE threads SET project_id=? WHERE id=?", (project, f"past-{index}"))
+        _install_checkpoint(db, thread_id=f"past-{index}", narrative="Rule", continuity=[{
+            "entry_id": 1, "field": "active_constraints", "revision": 1,
+            "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+        }])
+        _message(db, f"message-{index}", f"past-{index}", "Export account ledger with CSV format.")
+    reads: list[str] = []
+    db.set_trace_callback(lambda sql: reads.append(sql) if "project_inference_policies" in sql or "FROM threads WHERE id=" in sql else None)
+
+    lines = _related(db)
+
+    db.set_trace_callback(None)
+    assert len(lines) == 4
+    assert len(reads) == 2  # the cloud-off projects, and the caller's own row
+
+
+def test_local_only_chat_words_reach_only_a_local_only_caller(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    db.execute("UPDATE threads SET local_only=1 WHERE id='past'")
+    db.commit()
+    _install_checkpoint(db, thread_id="past", narrative="Rule", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "revision": 1,
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+    }])
+    _message(db, "private", "past", "Export account ledger with CSV format.")
+
+    assert _related(db) == []
+    db.execute("UPDATE threads SET local_only=1 WHERE id='caller'")
+    db.commit()
+    assert sorted(line.split(" · ")[1].split(" ")[0] for line in _related(db)[1:]) == ["message", "rule"]
+
+
+def test_cloud_off_rule_stays_in_its_project(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+    from llm.locality import set_project_cloud_models_off
+
+    db.executemany(
+        "INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,?,?)",
+        [("one", "one", "2026-01-01", "2026-01-01"), ("two", "two", "2026-01-01", "2026-01-01")],
     )
+    db.execute("UPDATE threads SET project_id='one' WHERE id='past'")
+    db.execute("UPDATE threads SET project_id='two' WHERE id='caller'")
+    set_project_cloud_models_off("one", cloud_models_off=True, db=db)
+    _install_checkpoint(db, thread_id="past", narrative="Rule", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "revision": 1,
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+    }])
 
-    assert _related(db, "Missed idle timers on quiet threads checkpoints") == []
-    assert any("reason=below_floor" in line for line in logged)
+    assert _related(db) == []
+    db.execute("UPDATE threads SET project_id='one' WHERE id='caller'")
+    db.commit()
+    assert any("rule an agent recorded" in line for line in _related(db))
 
 
-def test_a_title_with_no_distinctive_terms_searches_nothing(db, logged):
-    assert _related(db, "Fix the tests") == []
-    assert any("reason=no_terms" in line for line in logged)
+def test_replaced_wording_of_an_active_rule_is_not_quoted(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    user = [{"kind": "user", "reference": "message"}]
+    _install_checkpoint(db, thread_id="past", narrative="First", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "revision": 1,
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": user},
+    }])
+    _install_checkpoint(db, thread_id="past", narrative="Second", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "revision": 2,
+        "body": {"statement": "Ledger downloads stay JSON only.", "source_refs": user},
+    }])
+
+    assert _related(db) == []
 
 
-def test_another_users_entry_is_never_shown(db):
-    _install_checkpoint(
-        db, thread_id="t-foreign", narrative="Routine.", continuity=[{"statement": IDLE_ROOT_CAUSE}],
+
+def test_each_lookup_emits_a_counts_only_product_event(db, monkeypatch):
+    from memory import node_start_recall
+
+    events: list[tuple] = []
+    monkeypatch.setattr(node_start_recall, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    _message(db, "words", "past", "Export account ledger with CSV format.")
+
+    _related(db)
+
+    (args, kwargs), = events
+    assert args == ("prior_words", "delivered")
+    assert kwargs["thread_id"] == "caller"
+    assert kwargs["properties"]["hits"] == 1 and kwargs["properties"]["kinds"].startswith("message:1")
+    assert "Export" not in json.dumps(kwargs)
+
+
+def test_only_user_sourced_active_rule_is_quoted(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    _install_checkpoint(db, thread_id="past", narrative="Rule", continuity=[{
+        "entry_id": 1,
+        "field": "active_constraints",
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+        "revision": 1,
+    }])
+
+    lines = _related(db)
+
+    assert len(lines) == 2 and "rule an agent recorded" in lines[1]
+
+
+def test_rule_without_revision_is_quoted(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    _install_checkpoint(db, thread_id="past", narrative="Rule", continuity=[{
+        "entry_id": 1,
+        "field": "active_constraints",
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+    }])
+
+    assert any("rule an agent recorded" in line for line in _related(db))
+
+
+def test_retired_rule_is_not_quoted(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    _install_checkpoint(db, thread_id="past", narrative="Rule", continuity=[{
+        "entry_id": 1,
+        "field": "active_constraints",
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+        "revision": 1,
+    }])
+    db.execute(
+        "UPDATE continuity_entries SET state='retired', retired_reason='replaced' "
+        "WHERE thread_id='past' AND entry_id=1",
     )
+    db.commit()
 
-    assert _related(db, "missed idle checkpoints") == []
+    assert _related(db) == []
 
 
-def test_the_callers_own_live_entry_is_not_repeated_back(db):
-    _install_checkpoint(
-        db, thread_id="t2", narrative="Routine.", continuity=[{"statement": IDLE_ROOT_CAUSE}],
+def test_callers_own_live_rule_is_not_quoted(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    _install_checkpoint(db, thread_id="caller", narrative="Rule", continuity=[{
+        "entry_id": 1,
+        "field": "active_constraints",
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+        "revision": 1,
+    }])
+
+    assert _related(db) == []
+
+
+def test_more_than_source_candidates_ineligible_rules_do_not_hide_a_user_rule(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+    from memory.node_start_recall import SOURCE_CANDIDATES
+    from tests.event_routing_helpers import mk_session
+
+    agent = {"kind": "message", "reference": "agent"}
+    user = {"kind": "user", "reference": "message"}
+    close = "Export account ledger in CSV format with stable export columns."
+    _install_checkpoint(db, thread_id="past", narrative="Rules", continuity=[
+        *[
+            {"entry_id": index, "field": "active_constraints", "body": {"statement": close, "source_refs": [agent]}, "revision": 1}
+            for index in range(1, SOURCE_CANDIDATES + 2)
+        ],
+        {"entry_id": SOURCE_CANDIDATES + 2, "field": "active_constraints", "body": {"statement": close, "source_refs": [user]}, "revision": 1},
+        {"entry_id": SOURCE_CANDIDATES + 3, "field": "active_constraints", "body": {"statement": "Export the ledger as CSV format.", "source_refs": [user]}, "revision": 1},
+    ])
+    mk_session("purged")
+    _install_checkpoint(db, thread_id="purged", narrative="Rule", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "body": {"statement": close, "source_refs": [user]}, "revision": 1,
+    }])
+    _install_checkpoint(db, thread_id="caller", narrative="Rule", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "body": {"statement": close, "source_refs": [user]}, "revision": 1,
+    }])
+    db.execute("UPDATE continuity_entries SET state='retired', retired_reason='replaced' WHERE thread_id='past' AND entry_id=?", (SOURCE_CANDIDATES + 2,))
+    db.execute("UPDATE threads SET purged_at='2026-01-02' WHERE id='purged'")
+    db.commit()
+
+    assert any("Export the ledger as CSV format" in line for line in _related(db))
+
+
+def test_current_rule_wording_is_used_when_an_older_revision_matches_better(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    user = [{"kind": "user", "reference": "message"}]
+    _install_checkpoint(db, thread_id="past", narrative="First", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "revision": 1,
+        "body": {"statement": "Export account ledger in CSV format with stable columns.", "source_refs": user},
+    }])
+    _install_checkpoint(db, thread_id="past", narrative="Current", continuity=[{
+        "entry_id": 1, "field": "active_constraints", "revision": 2,
+        "body": {"statement": "Export ledger CSV format stays current.", "source_refs": user},
+    }])
+
+    lines = _related(db)
+
+    assert any("Export ledger CSV format stays current" in line for line in lines)
+    assert not any("stable columns" in line for line in lines)
+
+
+def test_purged_thread_rule_is_not_quoted(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    _install_checkpoint(db, thread_id="past", narrative="Rule", continuity=[{
+        "entry_id": 1,
+        "field": "active_constraints",
+        "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "message"}]},
+        "revision": 1,
+    }])
+    db.execute("UPDATE threads SET purged_at='2026-01-02' WHERE id='past'")
+    db.commit()
+
+    assert _related(db) == []
+
+
+def test_live_transcript_messages_are_excluded_but_folded_messages_are_eligible(db):
+    db.execute(
+        "INSERT INTO checkpoints (id,thread_id,history_epoch,through_seq,through_message_id,trigger,mode,status,source_harness,source_model,writer_harness,writer_model,continuity_base_revision,continuity_base_snapshot_json,started_at,installed_at) "
+        "VALUES ('checkpoint','caller',0,1,'folded','manual','cold','installed','native','m','native','m',0,'[]','2026-01-01','2026-01-01')"
     )
+    _message(db, "folded", "caller", "Export account ledger with CSV format.", seq=1)
+    _message(db, "live", "caller", "Export account ledger with CSV format.", seq=2)
 
-    assert _related(db, "missed idle checkpoints") == []
+    lines = _related(db)
+
+    assert len(lines) == 2
+    assert 'get_thread_history(thread_id="caller")' in lines[1]
 
 
-def test_at_most_three_hits(db):
-    for index in range(5):
-        _install_checkpoint(
-            db, thread_id="t1", narrative=f"Routine {index}.",
-            continuity=[{"entry_id": index + 1, "field": "decisions",
-                         "body": {"statement": f"{IDLE_ROOT_CAUSE} ({index})"},
-                         "revision": 1}],
-            checkpoint_id=f"cp-{index}",
+def test_cloud_off_message_stays_in_its_project(db):
+    from llm.locality import set_project_cloud_models_off
+
+    db.executemany(
+        "INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,?,?)",
+        [("one", "one", "2026-01-01", "2026-01-01"), ("two", "two", "2026-01-01", "2026-01-01")],
+    )
+    db.execute("UPDATE threads SET project_id='one' WHERE id='past'")
+    db.execute("UPDATE threads SET project_id='two' WHERE id='caller'")
+    set_project_cloud_models_off("one", cloud_models_off=True, db=db)
+    _message(db, "project-message", "past", "Export account ledger with CSV format.")
+
+    assert _related(db) == []
+    db.execute("UPDATE threads SET project_id='one' WHERE id='caller'")
+    db.commit()
+    assert len(_related(db)) == 2
+
+
+def test_cloud_off_messages_cannot_fill_the_candidate_window(db):
+    from llm.locality import set_project_cloud_models_off
+    from memory.node_start_recall import SOURCE_CANDIDATES
+    from tests.event_routing_helpers import mk_session
+
+    db.executemany(
+        "INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,?,?)",
+        [("one", "one", "2026-01-01", "2026-01-01"), ("two", "two", "2026-01-01", "2026-01-01")],
+    )
+    db.execute("UPDATE threads SET project_id='one' WHERE id='past'")
+    db.execute("UPDATE threads SET project_id='two' WHERE id='caller'")
+    set_project_cloud_models_off("one", cloud_models_off=True, db=db)
+    mk_session("deliverable", project_id="two")
+    for index in range(SOURCE_CANDIDATES + 1):
+        _message(db, f"cloud-{index}", "past", "Export account ledger with CSV format and stable columns.", seq=index + 1)
+    _message(db, "deliverable-message", "deliverable", "Export ledger as CSV format.")
+
+    assert any("deliverable-message" not in line and "Export ledger as CSV format" in line for line in _related(db))
+
+
+def test_newer_messages_the_matcher_rejects_do_not_hide_an_older_match(db):
+    from memory.node_start_recall import SOURCE_CANDIDATES
+
+    # Each newer message holds title terms but stays below the floor, so none takes a window slot.
+    common = [(f"common-{index}", "Export account notes.") for index in range(10 * SOURCE_CANDIDATES)]
+    rare = [(f"rare-{index}", "Ledger ledger ledger.") for index in range(SOURCE_CANDIDATES + 1)]
+    db.executemany(
+        "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq,delivery_state) "
+        "VALUES (?,'past','user',?,'{}','2026-02-01T12:00:00+00:00',?,'delivered')",
+        [(message_id, body, seq) for seq, (message_id, body) in enumerate([*common, *rare], start=2)],
+    )
+    _message(db, "match", "past", "Export the account ledger.")
+
+    lines = _related(db)
+
+    assert len(lines) == 2 and "Export the account ledger" in lines[1]
+
+
+def test_a_task_term_naming_the_role_column_does_not_count_for_a_message(db):
+    from memory.node_start_recall import SOURCE_CANDIDATES, NodeText, related
+
+    noise = [(f"noise-{index}", "Export export export.") for index in range(SOURCE_CANDIDATES + 1)]
+    db.executemany(
+        "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq,delivery_state) "
+        "VALUES (?,'past','user',?,'{}','2026-02-01T12:00:00+00:00',?,'delivered')",
+        [(message_id, body, seq) for seq, (message_id, body) in enumerate(noise, start=2)],
+    )
+    _message(db, "match", "past", "Export the ledger for each user.")
+
+    lines = related(db, NodeText("Export user ledger"), caller_thread_id="caller", trigger="start")
+
+    assert len(lines) == 2 and "Export the ledger for each user" in lines[1]
+
+
+def test_long_quote_is_cut_around_the_matched_word_not_a_longer_one(db):
+    from memory.node_start_recall import NodeText, related
+
+    filler = "Earlier notes about the catalog and its many sections. " * 5
+    _message(db, "long", "past", filler + "Log rotation must keep a week of files.")
+
+    lines = related(db, NodeText("Log rotation"), caller_thread_id="caller", trigger="start")
+
+    assert len(lines) == 2 and "Log rotation must keep" in lines[1]
+
+
+def test_limits_to_three_lines_and_one_rule(db):
+    from checkpoint_retrieval_fixtures import _install_checkpoint
+
+    _install_checkpoint(db, thread_id="past", narrative="Rules", continuity=[
+        {"entry_id": 1, "field": "active_constraints", "body": {"statement": "Export account ledger as CSV format.", "source_refs": [{"kind": "user", "reference": "first"}]}, "revision": 1},
+        {"entry_id": 2, "field": "approvals_and_preferences", "body": {"statement": "Export account ledger CSV format stays stable.", "source_refs": [{"kind": "user", "reference": "second"}]}, "revision": 1},
+    ])
+    for index in range(3):
+        _message(db, f"message-{index}", "past", "Export account ledger with CSV format.", seq=index + 1, created_at=f"2026-02-0{index + 1}T00:00:00+00:00")
+
+    lines = _related(db)
+
+    assert len(lines) == 4
+    assert sum("rule an agent recorded" in line for line in lines) == 1
+
+
+def test_words_after_task_start_are_excluded(db):
+    from memory.node_start_recall import NodeText, related
+    from plans import service
+    from tests.plan_execution_helpers import add_task
+
+    plan = service.ensure_plan("thread", "caller", db=db)
+    task = add_task(db, plan.id, "Export account ledger in CSV format")
+    db.commit()
+    _message(db, "future", "past", "Export account ledger with CSV format.", created_at="2099-01-01T00:00:00+00:00")
+
+    assert related(db, NodeText(task.title, criteria=task.acceptance_criteria, node_id=task.id), caller_thread_id="caller", trigger="start") == []
+
+
+def _intent_task(db, *, intent=None, quote=None):
+    from plans import service
+    from tests.plan_execution_helpers import add_task
+
+    plan = service.ensure_plan("thread", "caller", db=db)
+    task = add_task(db, plan.id, "Prepare ledger export")
+    if intent:
+        db.execute("UPDATE plan_nodes SET intent=? WHERE id=?", (intent, task.id))
+    if quote:
+        db.execute(
+            "INSERT INTO plan_node_intent_words (node_id,author,source_kind,source_id,quote,role,requirements_revision,added_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (task.id, "person", "message", "m1", quote, "origin", 1, "2026-01-01T00:00:00+00:00"),
         )
-
-    assert len(_related(db, "missed idle checkpoints")) == 3
-
-
-def test_a_settled_node_is_found_with_its_evidence(db):
-    _node(db, "n-old", "Identify and fix missed idle checkpoints",
-          evidence="Merged #2290; timer survives passive input.")
-    _node(db, "n-open", "Missed idle checkpoints follow-up", state="active")
-    _node(db, "n-foreign", "Missed idle checkpoints elsewhere", plan="pf")
-
-    lines = _related(db, "Missed idle checkpoints on quiet threads")
-
-    assert len(lines) == 1
-    assert lines[0].startswith("node accepted · thread t1 · 2026-09-21")
-    assert "Merged #2290" in lines[0] and lines[0].endswith(ELSEWHERE)
+    db.commit()
+    _message(db, "old", "past", "Currency conversion rounding matters for the ledger.")
+    return task
 
 
-def test_another_threads_pointer_names_the_read_not_the_node(db):
-    """Another thread's node is not readable: the line says so (#2520)."""
-    _node(db, "n-old", "Identify and fix missed idle checkpoints")
+@pytest.mark.parametrize("field", ["intent", "quote"])
+def test_terms_only_in_task_intent_or_its_quoted_words_find_prior_words_on_start(db, field):
+    from memory.node_start_recall import attach_to_result
 
-    line = _related(db, "Missed idle checkpoints on quiet threads")[0]
+    task = _intent_task(db, **{field: "Include currency conversion rounding"})
+    result = {"node": {"id": task.id, "title": task.title, "acceptance_criteria": task.acceptance_criteria}}
 
-    assert line.endswith(ELSEWHERE)
-    assert "get_thread_history" in line and "not this node" in line
-    assert "n-old" not in line
+    attach_to_result(db, "start", result, caller_thread_id="caller")
 
-
-def test_a_node_in_the_callers_own_plan_points_at_plan_read(db):
-    _node(db, "n-old", "Identify and fix missed idle checkpoints")
-
-    lines = _related(db, "Missed idle checkpoints on quiet threads", caller="t1")
-
-    assert lines[0].endswith('→ plan_read(node_id="n-old")')
+    assert "rounding matters" in "\n".join(result["prior_words"])
 
 
-def test_a_purged_threads_nodes_are_not_offered(db):
-    _node(db, "n-old", "Identify and fix missed idle checkpoints")
-    db.execute("UPDATE threads SET purged_at='2026-09-22T00:00:00' WHERE id='t1'")
+@pytest.mark.parametrize("field", ["intent", "quote"])
+def test_a_task_inheriting_its_intent_reads_the_canonical_intent_and_words_on_start(db, field):
+    from memory.node_start_recall import attach_to_result
+    from tests.plan_execution_helpers import add_task
 
-    assert _related(db, "Missed idle checkpoints on quiet threads") == []
+    canonical = _intent_task(db, **{field: "Include currency conversion rounding"})
+    follow_up = add_task(db, canonical.plan_id, "Prepare ledger export", intent_node_id=canonical.id)
+    db.commit()
+    result = {"node": {"id": follow_up.id}}
+
+    attach_to_result(db, "start", result, caller_thread_id="caller")
+
+    assert "rounding matters" in "\n".join(result["prior_words"])
 
 
-def test_the_node_being_started_is_not_its_own_hit(db):
+def test_a_task_without_intent_terms_finds_nothing_on_start(db):
+    from memory.node_start_recall import attach_to_result
+
+    task = _intent_task(db)
+    result = {"node": {"id": task.id, "title": task.title, "acceptance_criteria": task.acceptance_criteria}}
+
+    attach_to_result(db, "start", result, caller_thread_id="caller")
+
+    assert "prior_words" not in result
+
+
+def test_the_next_task_a_close_starts_reads_its_intent(db):
+    from memory.node_start_recall import attach_to_result
+
+    task = _intent_task(db, intent="Include currency conversion rounding")
+    result = {"next": {"selected": {"id": task.id, "how": "auto_selected"}}}
+
+    attach_to_result(db, "close_node", result, caller_thread_id="caller")
+
+    assert "rounding matters" in "\n".join(result["prior_words"])
+
+
+def test_each_silent_lookup_logs_its_own_reason(db, logged):
     from memory.node_start_recall import NodeText, related
 
-    _node(db, "n-self", "Missed idle checkpoints")
+    assert _related(db, "Fix tests") == []
+    _message(db, "partial", "past", "Export only.")
+    assert _related(db) == []
+    assert related(db, NodeText("Export account ledger in CSV format"), caller_thread_id="missing", trigger="start") == []
+    db.execute("UPDATE threads SET local_only=1 WHERE id='past'")
+    _message(db, "local", "past", "Export account ledger with CSV format.", seq=2)
+    assert _related(db) == []
 
-    text = NodeText("Missed idle checkpoints", node_id="n-self")
-    assert related(db, text, caller_thread_id="t2", trigger="start") == []
-
-
-def test_a_lookup_error_is_logged_and_never_raised(db, logged):
-    with raw_plan_seed(db):  # dropping the table deletes its rows
-        db.execute("DROP TABLE plan_nodes")
-
-    assert _related(db, "missed idle checkpoints") == []
-    assert any(
-        "reason=error" in line and "OperationalError: no such table" in line
-        for line in logged
-    )
+    reasons = [line.split("reason=")[1].split()[0] for line in logged if line.startswith("prior_words ")]
+    assert reasons == ["no_terms", "below_floor", "unresolved_caller", "below_floor"]
 
 
-def test_attach_adds_the_key_only_for_starting_operations_with_hits(db):
-    from memory.node_start_recall import RESULT_KEY, attach_to_result
+def test_error_isolated_and_key_stays_absent(db, logged):
+    db.execute("DROP TABLE messages")
 
-    _node(db, "n-old", "Identify and fix missed idle checkpoints")
-    node = {"id": "n-new", "title": "Missed idle checkpoints again",
-            "acceptance_criteria": "Timer survives.", "description": None}
-
-    started = {"node": dict(node)}
-    attach_to_result(db, "start", started, caller_thread_id="t2")
-    edited = {"node": dict(node)}
-    attach_to_result(db, "edit", edited, caller_thread_id="t2")
-    quiet = {"node": {**node, "title": "Rename the release notes heading"}}
-    attach_to_result(db, "add", quiet, caller_thread_id="t2")
-
-    assert started[RESULT_KEY][0].endswith(ELSEWHERE)
-    assert RESULT_KEY not in edited and RESULT_KEY not in quiet
-
-
-def test_a_close_that_started_the_next_task_carries_it(db):
-    from memory.node_start_recall import RESULT_KEY, attach_to_result
-
-    _node(db, "n-old", "Identify and fix missed idle checkpoints")
-    _node(db, "n-next", "Missed idle checkpoints again", state="active")
-    result = {"next": {"selected": {"id": "n-next", "how": "started"}}}
-    running = {"next": {"selected": {"id": "n-next", "how": "running"}}}
-
-    attach_to_result(db, "request_review", result, caller_thread_id="t2")
-    attach_to_result(db, "request_review", running, caller_thread_id="t2")
-
-    assert result[RESULT_KEY][0].endswith(ELSEWHERE)
-    assert RESULT_KEY not in running
-
-
-def test_a_raised_decision_is_looked_up_by_its_title_and_context(db):
-    from memory.node_start_recall import RESULT_KEY, attach_to_result
-
-    _node(db, "n-old", "Identify and fix missed idle checkpoints")
-    result = {"decision": {"title": "Missed idle checkpoints: fix now?",
-                           "context": "Quiet threads never fold."}}
-
-    attach_to_result(db, "raise", result, caller_thread_id="t2")
-
-    assert result[RESULT_KEY][0].endswith(ELSEWHERE)
-
-
-def test_opening_a_delivered_pointer_is_logged_once(db, logged):
-    from memory.node_start_opened import note_opened
-
-    _node(db, "n-old", "Identify and fix missed idle checkpoints")
-    _related(db, "Missed idle checkpoints again")
-
-    note_opened("t2", "t-unrelated")
-    note_opened("t3", "t1")
-    note_opened("t2", "t1")
-    note_opened("t2", "t1")
-
-    assert sum("reason=opened" in line for line in logged) == 1
+    assert _related(db) == []
+    assert any("prior_words reason=error" in line for line in logged)

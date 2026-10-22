@@ -41,6 +41,15 @@ class TestReviewerPrompt:
         assert "approved PRD" in prompt
         assert "recent decisions" not in prompt
 
+    def test_prompt_routes_copy_findings_to_their_own_category(self):
+        """The injected copy contract has an instruction and a category to file under."""
+        from prompts.reviewer import build_reviewer_prompt
+
+        prompt = build_reviewer_prompt(diff="", context_text="")
+
+        assert "``standards/copy`` for C#" in prompt
+        assert "**Copy (always):**" in prompt
+
     def test_prompt_contains_all_categories(self):
         """Prompt includes every category from the taxonomy."""
         from reviewer.reviewer_categories import VALID_CATEGORIES
@@ -176,14 +185,14 @@ class TestSummaryBody:
     def test_empty_findings_no_resolved(self):
         """No findings + no resolves = clean pass message."""
         from reviewer.reviewer_comment import format_summary_body
-        body = format_summary_body([], "Claude Fable 5", 0, 0, 0, 0)
+        body = format_summary_body([], "Claude Fable 5", 0, [], 0, 0)
         assert "No issues found" in body
         assert "0 block, 0 flag, 0 nit" in body
 
     def test_not_raised_findings_do_not_claim_resolution(self):
         """An omitted finding is reported honestly, not as a verified fix."""
         from reviewer.reviewer_comment import format_summary_body
-        body = format_summary_body([], "Claude Fable 5", 0, 0, 3, 0)
+        body = format_summary_body([], "Claude Fable 5", 0, [], 3, 0)
         assert "not raised this run" in body
         assert "resolved" not in body.lower()
         assert "3" in body
@@ -196,24 +205,56 @@ class TestSummaryBody:
             {"severity": "block", "file": "b.py", "line": 2, "category": "x", "description": "d", "cited_section": None},
             {"severity": "flag", "file": "c.py", "line": 3, "category": "x", "description": "d", "cited_section": None},
         ]
-        body = format_summary_body(findings, "Claude Fable 5", 3, 0, 0, 0)
+        body = format_summary_body(findings, "Claude Fable 5", 3, [], 0, 0)
         assert body.splitlines()[0] == (
             "## :mag: LLM Code Review — 2 block, 1 flag, 0 nit"
         )
 
     def test_delta_counts_in_summary(self):
         """Body distinguishes this run from findings carried across runs."""
+        from reviewer.review_thread_lifecycle import StillRaisedFinding
         from reviewer.reviewer_comment import format_summary_body
-        body = format_summary_body([], "Claude Fable 5", 2, 5, 1, 0)
+
+        finding = {"severity": "flag", "file": "a.py", "line": 1}
+        still_raised = [
+            StillRaisedFinding(finding, {"html_url": "https://example.test/comment"})
+            for _ in range(5)
+        ]
+        body = format_summary_body([], "Claude Fable 5", 2, still_raised, 1, 0)
+
         assert (
             "2 new this run · 5 still raised this run · 1 not raised this run"
             in body
         )
 
+    def test_still_raised_lines_use_current_severity_and_carrier_links(self):
+        from reviewer.review_thread_lifecycle import StillRaisedFinding
+        from reviewer.reviewer_comment import format_summary_body
+
+        new = {"severity": "flag", "file": "new.py", "line": 5}
+        block = {"severity": "block", "file": "backend/x.py", "line": 18}
+        flag = {"severity": "flag", "file": "backend/y.py", "line": 19}
+        nit = {"severity": "nit", "file": "backend/z.py", "line": 20}
+        still_raised = [
+            StillRaisedFinding(block, {"html_url": "https://example.test/block"}),
+            StillRaisedFinding(flag, {"html_url": "https://example.test/flag"}),
+            StillRaisedFinding(nit, {}),
+        ]
+
+        body = format_summary_body(
+            [new, block, flag, nit], "Reviewer", 1, still_raised, 0, 0,
+        )
+
+        assert "**1 new finding**" in body
+        assert "- still blocking: [backend/x.py:18](https://example.test/block)" in body
+        assert "- still flagged: [backend/y.py:19](https://example.test/flag)" in body
+        assert "- still a nit: backend/z.py:20" in body
+        assert "still apply — see existing threads" not in body
+
     def test_model_label_in_body(self):
         """Model label appears in the body."""
         from reviewer.reviewer_comment import format_summary_body
-        body = format_summary_body([], "qwen3.6-27B Dense", 0, 0, 0, 0)
+        body = format_summary_body([], "qwen3.6-27B Dense", 0, [], 0, 0)
         assert "qwen3.6-27B Dense" in body
 
     def test_new_findings_mention_threads(self):
@@ -222,7 +263,7 @@ class TestSummaryBody:
         findings = [
             {"severity": "flag", "file": "a.py", "line": 1, "category": "x", "description": "d", "cited_section": None},
         ]
-        body = format_summary_body(findings, "Claude Fable 5", 1, 0, 0, 0)
+        body = format_summary_body(findings, "Claude Fable 5", 1, [], 0, 0)
         assert "line-level comment" in body
 
     def test_pr_level_fallback_is_declared_in_the_summary(self):
@@ -231,7 +272,7 @@ class TestSummaryBody:
         findings = [
             {"severity": "flag", "file": "", "line": 0, "category": "x", "description": "d", "cited_section": None},
         ]
-        body = format_summary_body(findings, "Claude Fable 5", 1, 0, 0, 1)
+        body = format_summary_body(findings, "Claude Fable 5", 1, [], 0, 1)
         assert "could not be anchored" in body
         assert "PR-level comment" in body
 
@@ -244,7 +285,7 @@ class TestSummaryBody:
              "cited_section": "EAS3"},
         ]
 
-        body = format_summary_body(findings, "Reviewer", 1, 0, 0, 0)
+        body = format_summary_body(findings, "Reviewer", 1, [], 0, 0)
 
         assert "Flags and nits are diagnostic evidence, not patch requests" in body
         assert "A finding may be wrong" in body
@@ -264,7 +305,7 @@ class TestSummaryBody:
                 [{"severity": severity, "file": "a.py", "line": 1,
                   "category": "correctness/logic", "description": "d",
                   "cited_section": None}],
-                "Reviewer", 1, 0, 0, 0,
+                "Reviewer", 1, [], 0, 0,
             )
             for severity in ("block", "flag")
         ]
@@ -305,7 +346,7 @@ class TestSummaryBody:
              "cited_section": None},
         ]
 
-        body = format_summary_body(findings, "Reviewer", 1, 0, 0, 1)
+        body = format_summary_body(findings, "Reviewer", 1, [], 0, 1)
 
         assert "Do not patch the findings one-by-one" in body
         assert body.splitlines()[0] == (

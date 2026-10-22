@@ -9,9 +9,11 @@
 #
 #   checkout root  Contents/Resources, the script's parent as for a checkout
 #   python         the bundled interpreter, with Resources/bin/corsia's PYTHONPATH
-#   config source  service.json in the app folder (workspace, port); never a
-#                  .env or the machine bootstrap a source install reads
-#   state root     the backend's default_state_root() for this bundle
+#   config source  service.json in the app folder (workspace, port, and a
+#                  state_dir when it names one); never a .env or the machine
+#                  bootstrap a source install reads
+#   state root     service.json's state_dir when present, else the backend's
+#                  default_state_root() for this bundle
 #   version        CFBundleShortVersionString+CFBundleVersion, the generation
 #                  the launcher gives the service
 #   service verbs  the bundle's launchd job; Update stages and swaps the app
@@ -36,7 +38,7 @@ APP_SERVICE_LABEL=ai.corsia.service
 # Resources here). An explicit CORSIA_WORKSPACE or BACKEND_PORT still wins
 # over service.json, as it does for the launcher.
 app_mode_checkout() {
-    local resolved line
+    local resolved line config_error=""
     PYTHON="$CORSIA_DIR/python/bin/python3"
     ENV_FILE=""
     BOOTSTRAP_CONFIG=""
@@ -46,9 +48,8 @@ app_mode_checkout() {
 import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
-from infra.platform_paths import (
-    SERVICE_FILE, app_metadata_dir, default_state_root, service_file_lines,
-)
+from infra.platform_paths import app_metadata_dir, default_state_root
+from infra.service_file import SERVICE_FILE, service_file_lines
 app_dir = app_metadata_dir()
 print(f"app={app_dir}")
 print(f"state={default_state_root(app_bundle=Path(sys.argv[2]))}")
@@ -62,6 +63,11 @@ if (app_dir / SERVICE_FILE).is_file():
         case "$line" in
             app=*) _corsia_app_dir="${line#app=}" ;;
             state=*) _corsia_app_state_root="${line#state=}" ;;
+            state_dir=*)
+                [ -n "${CORSIA_STATE_DIR:-}" ] \
+                    || _corsia_app_state_root="${line#state_dir=}"
+                ;;
+            error=*) config_error="${line#error=}" ;;
             workspace=*)
                 [ -n "${CORSIA_WORKSPACE:-}" ] \
                     || export CORSIA_WORKSPACE="${line#workspace=}"
@@ -69,6 +75,12 @@ if (app_dir / SERVICE_FILE).is_file():
             port=*) [ -n "${BACKEND_PORT:-}" ] || BACKEND_PORT="${line#port=}" ;;
         esac
     done <<< "$resolved"
+    # The launcher and the app refuse the same way: falling back to the default state root
+    # would open a different, empty folder beside the data service.json names.
+    if [ -z "${CORSIA_STATE_DIR:-}" ] && [ -n "$config_error" ]; then
+        echo "CORSIA refused to run: $config_error, so no other state folder was opened" >&2
+        return 1
+    fi
 }
 
 app_mode_runtime_identity() {
@@ -76,7 +88,7 @@ app_mode_runtime_identity() {
         echo "This CORSIA app has no workspace recorded in $_corsia_app_dir/service.json; open CORSIA to finish setting it up." >&2
         return 1
     fi
-    CORSIA_STATE_DIR="$_corsia_app_state_root"
+    CORSIA_STATE_DIR="${CORSIA_STATE_DIR:-$_corsia_app_state_root}"
     export CORSIA_WORKSPACE CORSIA_STATE_DIR
     # The launcher sends the service's output here.
     BACKEND_LOG="${BACKEND_LOG:-$CORSIA_STATE_DIR/logs/service.log}"
@@ -383,6 +395,9 @@ app_mode_start_swapped_update() {
 # their generic definitions.
 app_mode_install_overrides() {
     resolve_bind_host() { echo 127.0.0.1; }
+    resolve_remote_address() {
+        (cd "$BACKEND_DIR" && "$PYTHON" -m cli remote-address --state-root "${CORSIA_STATE_DIR:-$_corsia_app_state_root}")
+    }
     resolve_runtime_identity() { app_mode_runtime_identity; }
     installed_release_label() {
         echo "CORSIA $(app_mode_generation "$_corsia_app_bundle" || echo unknown)"

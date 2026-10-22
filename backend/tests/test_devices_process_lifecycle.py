@@ -130,7 +130,8 @@ async def stable_counts(client, *, quiet_seconds=0.15):
         response = await client.get("/__i9/counts")
         response.raise_for_status()
         counts = response.json()
-        if counts != previous:
+        # Only CORSIA's own resources decide quiet; native idle threads come and go.
+        if previous is None or owned_resource_counts(counts) != owned_resource_counts(previous):
             unchanged_since = time.monotonic()
         elif time.monotonic() - unchanged_since >= quiet_seconds:
             return counts
@@ -139,12 +140,27 @@ async def stable_counts(client, *, quiet_seconds=0.15):
     raise AssertionError(f"backend resources never settled: {previous}")
 
 
+async def wait_for_cloud_discovery(client):
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        response = await client.get("/__i9/counts")
+        response.raise_for_status()
+        if not response.json()["startup_cloud_discovery_pending"]:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError("startup cloud discovery did not finish")
+
+
+# psutil includes idle-timed native threads outside CORSIA's ownership.
+def owned_resource_counts(counts):
+    return {key: counts[key] for key in ("fds", "tasks", "thread_names")}
+
+
 @pytest.mark.integration
 async def test_devices_open_streams_stop_under_grace_and_50_cycles_release_resources():
     with backend_process() as backend:
         async with httpx.AsyncClient(base_url=backend.url, timeout=5, trust_env=False) as client:
-            # Native startup workers retire asynchronously. Select the exact
-            # baseline only after a continuous quiet window, before cycle 1.
+            await wait_for_cloud_discovery(client)
             baseline = await stable_counts(client, quiet_seconds=5)
             durations = []
             for cycle in range(50):
@@ -154,9 +170,14 @@ async def test_devices_open_streams_stop_under_grace_and_50_cycles_release_resou
                     durations.append(time.monotonic() - started)
                     response.raise_for_status()
                     assert durations[-1] < 2, (cycle, durations[-1])
-                assert await stable_counts(client) == baseline, f"resource leak at cycle {cycle + 1}"
+                counts = await stable_counts(client)
+                assert owned_resource_counts(counts) == owned_resource_counts(baseline), (
+                    f"resource leak at cycle {cycle + 1}: {counts}; baseline={baseline}"
+                )
             final = await stable_counts(client)
-            assert final == baseline
+            assert owned_resource_counts(final) == owned_resource_counts(baseline), (
+                f"resource leak at final: {final}; baseline={baseline}"
+            )
             print(f"I9 cycles=50 baseline={baseline} final={final} stop_max={max(durations):.4f}s")
         code, elapsed = backend.terminate()
         assert code in (0, -signal.SIGTERM)
@@ -167,10 +188,12 @@ async def test_devices_open_streams_stop_under_grace_and_50_cycles_release_resou
 async def test_devices_sigterm_with_open_streams_matches_no_devices_baseline():
     with backend_process() as baseline:
         async with httpx.AsyncClient(base_url=baseline.url, timeout=5, trust_env=False) as client:
+            await wait_for_cloud_discovery(client)
             await stable_counts(client, quiet_seconds=5)
         baseline_code, baseline_time = baseline.terminate()
     with backend_process() as backend:
         async with httpx.AsyncClient(base_url=backend.url, timeout=5, trust_env=False) as client:
+            await wait_for_cloud_discovery(client)
             await stable_counts(client, quiet_seconds=5)
             async with open_streams(client):
                 # Keep the peer idle while the real backend handles SIGTERM.

@@ -12,12 +12,15 @@ leave A eligible never touch its attempt.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import sqlite3
 from typing import Any
 import uuid
 
 import pytest
 
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from infra.schema import SCHEMA_SQL
 from plans import admission, service
 from plans.boundary import PlanActor, mutate
@@ -56,6 +59,24 @@ def db():
 
 def plan_update(db, plan_id: str, operation: str, params: dict, *, actor=ACTOR) -> dict:
     """Commit one mutation through `plans.boundary.mutate`, as the plan owner by default."""
+    if operation in {"add", "insert"} and params.get("kind", "task") == "task" and "intent" not in params:
+        owner = service._plan_row(db, plan_id)["owner_id"]
+        intent = f"Deliver {params['title']}."
+        turn_id = f"authority-turn-{uuid.uuid4().hex}"
+        message_id = f"authority-message-{uuid.uuid4().hex}"
+        if db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages_fts'"
+        ).fetchone() is None:
+            _init_messages_fts(db)
+        accept_thread_input(
+            owner, role="user", content=intent, intent="apply_now", message_id=message_id, db=db,
+        )
+        db.execute("UPDATE messages SET active_turn_id=? WHERE id=?", (turn_id, message_id))
+        params = {
+            **params, "intent": intent,
+            "intent_words": [{"quote": intent, "role": "authority"}],
+        }
+        actor = replace(actor, turn_id=turn_id)
     params = with_actionable_user_ask(db, plan_id, operation, params, actor)
     return mutate(
         plan_id, operation, params, actor=actor,
@@ -196,7 +217,7 @@ def test_inserting_an_earlier_node_keeps_the_selected_attempt(db):
         {
             "kind": "task",
             "title": "Inserted earlier work",
-            "acceptance_criteria": "The inserted work is verified",
+            "acceptance_criteria": "The inserted work is verified", "size": "unknown",
             "before_node_id": task_a,
         },
     )["node"]

@@ -7,13 +7,12 @@
 	} from '$lib/stores/providers';
 	import { removeNetworkServer, testNetworkServer } from '$lib/stores/networkServers';
 	import { hostGroups, loadHostGroups, type HostProvider } from '$lib/stores/providersV7';
-	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { Button, Field, Message, Modal } from '$lib/components/ui';
 	import ConfirmDialog from '../ConfirmDialog.svelte';
 	import CostPanel from './CostPanel.svelte';
 	import ExternalProviderSettings from './ExternalProviderSettings.svelte';
 	import OmlxServerInfoPanel from './OmlxServerInfoPanel.svelte';
-	import OwnOmlxManagement from './OwnOmlxManagement.svelte';
+
 	import ProviderEndpointsTab from './ProviderEndpointsTab.svelte';
 	import ProviderSettingsHeader from './ProviderSettingsHeader.svelte';
 	import ProviderStatusCard from './ProviderStatusCard.svelte';
@@ -22,10 +21,11 @@
 
 	interface Props {
 		provider: HostProvider;
+		initialTab?: ProviderSettingsTab;
 		onClose: () => void;
 	}
 
-	const { provider: providerProp, onClose }: Props = $props();
+	const { provider: providerProp, initialTab, onClose }: Props = $props();
 
 	const providerIndex = $derived.by((): Map<string, HostProvider> => {
 		const m = new Map<string, HostProvider>();
@@ -41,7 +41,7 @@
 		providerIndex.get(`${providerProp.name}|${providerProp.server?.id ?? ''}`) ?? providerProp,
 	);
 
-	let activeTab = $state<ProviderSettingsTab>('overview');
+	let activeTab = $state<ProviderSettingsTab>(initialTab ?? 'overview');
 	onMount(() => { if (providerProp.type === 'harness') activeTab = 'accounts'; });
 	let actionError = $state('');
 	let actionMessage = $state('');
@@ -79,11 +79,6 @@
 	});
 
 	function clearMessages() { actionError = ''; actionMessage = ''; }
-
-	function openAccountOrder() {
-		onClose();
-		requestSettingsSection('providers', 'workspace-provider-policy');
-	}
 
 	async function handleTest() {
 		clearMessages(); busy = true;
@@ -236,7 +231,6 @@
 
 	{#if activeTab === 'accounts' && provider.type === 'harness'}
 		<AccountsBlock {provider} />
-		<p class="policy-pointer">Rollover and account order are set in <button class="policy-link" onclick={openAccountOrder}>Accounts and rollover</button>.</p>
 	{:else if activeTab === 'overview'}
 		<ProviderStatusCard {provider} />
 
@@ -246,15 +240,13 @@
 			{:else if hasServer}
 				{#if isLocalhostDaemon}
 					{#if daemonRunning}
-						<Button disabled={busy} onclick={() => handleDaemonAction('stop')}>Stop daemon</Button>
+						<Button disabled={busy} onclick={() => handleDaemonAction('stop')}>Stop</Button>
 						<Button disabled={busy} onclick={() => handleDaemonAction('reload')}>Reload models</Button>
 					{:else}
-						<Button variant="primary" disabled={busy} onclick={() => handleDaemonAction('start')}>Start daemon</Button>
+						<Button variant="primary" disabled={busy} onclick={() => handleDaemonAction('start')}>Start</Button>
 					{/if}
 					<Button disabled={busy} onclick={handleTestLocal}>{busy ? 'Testing…' : 'Test connection'}</Button>
-					{#if provider.name === 'omlx'}
-						<OwnOmlxManagement onResult={(message, error) => { clearMessages(); if (error) actionError = message; else actionMessage = message; }} />
-					{/if}
+
 				{:else}
 					<Button disabled={busy} onclick={handleTestLocal}>{busy ? 'Testing…' : 'Test connection'}</Button>
 				{/if}
@@ -287,7 +279,7 @@
 		{:else if hasServer && provider.name === 'omlx' && provider.server}
 			<OmlxServerInfoPanel serverId={provider.server.id} />
 		{:else if hasServer}
-			<p class="hint">{provider.label} is added manually by host:port. Server-level settings are owned by the daemon itself.</p>
+			<p class="hint">{provider.label} is added manually by host:port. Its settings are changed on that server, not here.</p>
 		{/if}
 	{/if}
 </Modal>
@@ -308,20 +300,6 @@
 		align-items: center;
 	}
 
-	.policy-pointer {
-		margin: 12px 0 0;
-		font-size: var(--text-footnote);
-		color: var(--text-secondary);
-	}
-	.policy-link {
-		padding: 0;
-		border: 0;
-		background: none;
-		color: inherit;
-		font: inherit;
-		text-decoration: underline;
-		cursor: pointer;
-	}
 	.hint {
 		font-size: var(--text-subhead); color: var(--text-tertiary);
 		line-height: 1.6;

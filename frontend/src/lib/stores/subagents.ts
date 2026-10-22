@@ -15,6 +15,8 @@
  */
 
 import { get, writable } from 'svelte/store';
+import type { Thread } from './threads';
+import { seedThreadModelTruth } from './threadModelTruth';
 
 /**
  * `unknown` is the absence of information, never a claim about the worker.
@@ -26,17 +28,32 @@ export type SubStatus = 'running' | 'ready' | 'closed' | 'error' | 'idle' | 'unk
 /** Live frames own these; hydration may never overwrite one. */
 const TERMINAL_STATUSES: ReadonlySet<SubStatus> = new Set<SubStatus>(['closed', 'error']);
 
+/**
+ * The thread-row fields, beyond the model, that the composer's effort and switch
+ * controls read. The thread list never holds a worker, so its row lives in
+ * `subagentThreadRows`, beside this registry and not in it, and the composer reads
+ * it the way it reads any thread's. The worker's selected model is not here:
+ * threadModelFor holds every thread's, a worker's too.
+ */
+export type SubagentThreadFields = Partial<Pick<
+	Thread,
+	| 'reasoning_effort' | 'project_id'
+	| 'pending_model' | 'switch_status' | 'switch_error' | 'switch_operation_id'
+>>;
+
 export interface SubagentRef {
 	childThreadId: string;
 	parentThreadId: string;
 	name: string;
 	provider: string;
 	status: SubStatus;
-	model?: string;
 	cwd?: string;
 }
 
 export const subagentMeta = writable<Map<string, SubagentRef>>(new Map());
+
+/** A worker's thread row, by worker id: the fields the thread list would hold if it held workers. */
+export const subagentThreadRows = writable<Map<string, SubagentThreadFields>>(new Map());
 
 export const openSubagentRequest = writable<string | null>(null);
 
@@ -56,11 +73,16 @@ export function registerSubagent(
 			name,
 			provider,
 			status,
-			model: prev?.model,
 			cwd: prev?.cwd,
 		});
 		return n;
 	});
+}
+
+/** Fold effort, project and switch fields into a worker's row; a thread that is no worker is ignored. */
+export function patchSubagentThread(childId: string, fields: SubagentThreadFields): void {
+	if (!get(subagentMeta).has(childId)) return;
+	subagentThreadRows.update((m) => new Map(m).set(childId, { ...m.get(childId), ...fields }));
 }
 
 export function setSubagentStatus(childId: string, status: SubStatus): void {
@@ -73,7 +95,7 @@ export function setSubagentStatus(childId: string, status: SubStatus): void {
 	});
 }
 
-export function setSubagentInit(childId: string, init: { model?: string; cwd?: string }): void {
+export function setSubagentInit(childId: string, init: { cwd?: string }): void {
 	subagentMeta.update((m) => {
 		const prev = m.get(childId);
 		if (!prev) return m;
@@ -96,6 +118,12 @@ export function setSubagentParent(childId: string, parentThreadId: string): void
 /** Drop a thread the server does not consider a subagent. */
 export function forgetSubagent(childId: string): void {
 	subagentMeta.update((m) => {
+		if (!m.has(childId)) return m;
+		const n = new Map(m);
+		n.delete(childId);
+		return n;
+	});
+	subagentThreadRows.update((m) => {
 		if (!m.has(childId)) return m;
 		const n = new Map(m);
 		n.delete(childId);
@@ -152,10 +180,24 @@ export async function hydrateSubagentThread(
 		const serverParent = typeof truth?.parent_thread_id === 'string' ? truth.parent_thread_id : '';
 		if (serverParent) setSubagentParent(threadId, serverParent);
 		const current = get(subagentMeta).get(threadId);
+		// The composer reads these on a worker in any status, so they fold in before
+		// either early return. Only a field nobody has set yet is filled: a live
+		// frame or the user's own change is newer than this response.
+		const foldThreadFields = () => {
+			const known = get(subagentThreadRows).get(threadId);
+			const fields: SubagentThreadFields = {};
+			if (known?.reasoning_effort === undefined) {
+				fields.reasoning_effort = typeof truth?.reasoning_effort === 'string' ? truth.reasoning_effort : null;
+			}
+			if (known?.project_id === undefined) {
+				fields.project_id = typeof truth?.project_id === 'string' ? truth.project_id : null;
+			}
+			patchSubagentThread(threadId, fields);
+		};
 		// A live frame that landed while this request was in flight is newer than
 		// the response, and a terminal outcome is the last word either way.
-		if (current && current.status !== statusBefore) return current.status;
-		if (current && TERMINAL_STATUSES.has(current.status)) return current.status;
+		if (current && current.status !== statusBefore) { foldThreadFields(); return current.status; }
+		if (current && TERMINAL_STATUSES.has(current.status)) { foldThreadFields(); return current.status; }
 
 		const status = statusFromRuntimeTruth(truth ?? {});
 		registerSubagent(
@@ -166,7 +208,8 @@ export async function hydrateSubagentThread(
 			(typeof truth?.driver === 'string' && truth.driver) || current?.provider || 'cc',
 			status,
 		);
-		if (typeof truth?.model === 'string') setSubagentInit(threadId, { model: truth.model });
+		if (typeof truth?.model === 'string') seedThreadModelTruth(threadId, truth.model);
+		foldThreadFields();
 		return status;
 	} catch (error) {
 		// Declared, not silent: the chip stays `unknown` and a later mount retries.

@@ -10,6 +10,8 @@ import subprocess
 import pytest
 
 from core.skills_registry import SkillResolution, SkillRow
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from infra.schema import SCHEMA_SQL
 from infra.system_package import system_package_dir
 from plans import service
@@ -24,6 +26,10 @@ from tools.workflow_task_fields import (
 
 
 _MUTATION_IDS = itertools.count()
+_WORKFLOW_TASK_INTENT = {
+    "intent": "Build the requested workflow task.",
+    "intent_words": [{"quote": "Build the requested workflow task.", "role": "authority"}],
+}
 
 
 @pytest.fixture
@@ -35,6 +41,11 @@ def db():
     connection.execute(
         "INSERT INTO threads (id,user_id,created_at,updated_at) VALUES ('owner','user','t','t')"
     )
+    _init_messages_fts(connection)
+    accept_thread_input(
+        "owner", role="user", content="Build the requested workflow task.", intent="apply_now",
+        message_id="workflow-authority", db=connection,
+    )
     connection.commit()
     yield connection
     connection.close()
@@ -45,6 +56,15 @@ def _actor() -> PlanActor:
 
 
 def _mutate(db, plan_id, operation, params, workflow_version=None):
+    if operation in {"add", "insert"} and params.get("kind", "task") == "task":
+        params = {
+            **params,
+            "intent": params.get("intent", "Build the requested workflow task."),
+            "intent_words": params.get(
+                "intent_words",
+                [{"quote": "Build the requested workflow task.", "role": "authority"}],
+            ),
+        }
     return mutate(
         plan_id,
         operation,
@@ -109,7 +129,7 @@ def test_add_insert_immutable_fields_and_read_detail(db):
 def test_workflow_step_requires_difficulty_and_only_allows_the_three_levels(db):
     plan = service.ensure_plan("thread", "owner", db=db)
     base = {
-        "kind": "task", "title": "Build", "acceptance_criteria": "Build passes",
+        "kind": "task", "title": "Build", "acceptance_criteria": "Build passes", "size": "S",
         "workflow_ref": "sample", "workflow_step": "build",
     }
     with pytest.raises(service.PlanInputError, match="is the wanted result clear"):
@@ -125,7 +145,7 @@ def test_rerating_keeps_original_difficulty_and_current_attempt(db):
         plan.id,
         "add",
         {
-            "kind": "task", "title": "Build", "acceptance_criteria": "Build passes",
+            "kind": "task", "title": "Build", "acceptance_criteria": "Build passes", "size": "S",
             "workflow_ref": "sample", "workflow_step": "build", "difficulty": "standard",
         },
     )["node"]
@@ -206,7 +226,7 @@ def test_split_copies_workflow_fields_but_follow_up_does_not(db):
         "split",
         {
             "node_id": source["id"], "expected_revision": source["revision"],
-            "title": "Build remainder", "acceptance_criteria": "Remainder passes",
+            "title": "Build remainder", "acceptance_criteria": "Remainder passes", "size": "S",
         },
     )["node"]
     follow_up = _mutate(
@@ -215,7 +235,7 @@ def test_split_copies_workflow_fields_but_follow_up_does_not(db):
         "add_follow_up",
         {
             "node_id": source["id"], "expected_revision": source["revision"] + 1,
-            "title": "Later", "acceptance_criteria": "Later passes",
+            "title": "Later", "acceptance_criteria": "Later passes", "size": "S",
         },
     )["follow_up"]
 
@@ -223,7 +243,7 @@ def test_split_copies_workflow_fields_but_follow_up_does_not(db):
         assert split[key] == source[key]
         assert follow_up[key] is None
     assert source["size"] == "L"
-    assert split["size"] is None and follow_up["size"] is None
+    assert split["size"] == "S" and follow_up["size"] == "S"
 
 
 def test_required_step_prompts_are_report_only(db):
@@ -365,6 +385,11 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
     db = get_db()
     try:
         plan = service.ensure_plan("thread", thread_id, db=db)
+        _init_messages_fts(db)
+        accept_thread_input(
+            thread_id, role="user", content="Build the requested workflow task.", intent="apply_now",
+            message_id="workflow-tool-authority", db=db,
+        )
         identity = open_turn(db, thread_id)
     finally:
         db.close()
@@ -385,8 +410,9 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
         {
             "plan_id": plan.id, "mutation_id": "missing-difficulty", "operation": "add",
             "params": {
-                "kind": "task", "title": "Missing rating", "acceptance_criteria": "Never",
+                "kind": "task", "title": "Missing rating", "acceptance_criteria": "Never", "size": "S",
                 "parent_id": phase["id"], "workflow_ref": "sample", "workflow_step": "build",
+                **_WORKFLOW_TASK_INTENT,
             },
         },
     )
@@ -395,9 +421,10 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
         {
             "plan_id": plan.id, "mutation_id": "build", "operation": "add",
             "params": {
-                "kind": "task", "title": "Build", "acceptance_criteria": "Build passes",
+                "kind": "task", "title": "Build", "acceptance_criteria": "Build passes", "size": "S",
                 "parent_id": phase["id"], "workflow_ref": "sample",
                 "workflow_step": "build", "difficulty": "standard",
+                **_WORKFLOW_TASK_INTENT,
             },
         },
     ))
@@ -410,8 +437,9 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
         {
             "plan_id": plan.id, "mutation_id": "caller-version", "operation": "add",
             "params": {
-                "kind": "task", "title": "Caller version", "acceptance_criteria": "Never",
+                "kind": "task", "title": "Caller version", "acceptance_criteria": "Never", "size": "S",
                 "workflow_ref": "sample", "workflow_version": "invented",
+                **_WORKFLOW_TASK_INTENT,
             },
         },
     )

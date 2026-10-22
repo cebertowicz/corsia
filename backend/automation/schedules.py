@@ -26,7 +26,7 @@ class Schedule:
     scope_id: str
     kind: str
     spec: str
-    next_run_at: str
+    next_run_at: str | None  # None only for a script only event rules start
     last_run_at: str | None
     runs: int
     max_runs: int
@@ -42,6 +42,7 @@ class Schedule:
     last_status: str | None = None
     last_error: str | None = None
     noted_at: str | None = None
+    last_measures: str | None = None
 
 
 def _parse(value: str) -> datetime:
@@ -191,7 +192,7 @@ def settle_run(schedule_id: str, fired_at: str, *, db) -> bool:
     """Advance one settled scheduled occurrence exactly once."""
 
     schedule = get(schedule_id, db=db)
-    if schedule.state != "active" or schedule.next_run_at > fired_at:
+    if schedule.state != "active" or schedule.next_run_at is None or schedule.next_run_at > fired_at:
         return False
     runs = schedule.runs + 1
     exhausted = runs >= schedule.max_runs or schedule.kind == "clock"

@@ -1,5 +1,18 @@
 import type { ThreadPlanStateEntry } from '$lib/api/plans';
 import { attentionKindWord, chatStateWord } from '$lib/components/plans/planDisplay';
+import { waitChecksBack } from '$lib/components/plans/planWaits';
+import { formatMoment } from '$lib/time';
+
+/** Hover text of a row's hourglass (EW6): what it waits for and when it checks back; empty for any other state. */
+export function waitMarkTitle(entry: ThreadPlanStateEntry | undefined, now: Date = new Date()): string {
+	if (entry?.state !== 'waiting' || !entry.wait) return '';
+	return [`Waiting for ${entry.wait.label}`, waitChecksBack(entry.wait.until, now)].filter(Boolean).join(' · ');
+}
+
+/** Whether the row's trailing slot draws the hourglass: waiting, and neither spinner showing (EW6). */
+export function showsWaitingGlyph(entry: ThreadPlanStateEntry | undefined, spinnerShowing: boolean): boolean {
+	return entry?.state === 'waiting' && !spinnerShowing;
+}
 
 /** Whether the row's plan state is something the user owes. */
 export function isYourMove(entry: ThreadPlanStateEntry | undefined): boolean {

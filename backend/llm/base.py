@@ -242,15 +242,14 @@ async def _omlx_loaded_only_preflight(
         OmlxLoadedStateError,
         require_loaded_model,
     )
-    from llm.router import LLMResponse
+    from llm.router import provider_error_response
 
     try:
         await require_loaded_model(api_base, model, server_id=server_id)
     except OmlxLoadedStateError as error:
         logger.error("oMLX loaded-only preflight failed for {}: {}", model, error)
-        return LLMResponse(
-            content=f"Error calling LLM: {_humanize_error(error, model)}",
-            finish_reason="error",
+        return provider_error_response(
+            error, f"Error calling LLM: {_humanize_error(error, model)}",
         )
     return None
 

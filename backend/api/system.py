@@ -9,14 +9,13 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from api.setup import _trusted_request
+from api.setup import _trusted_json_post, _trusted_request
 from api.system_admin import router as system_admin_router
 from api.system_reviewer import (
     host_access_reviewer_status as _host_access_reviewer_status,
     reviewer_save_error,
 )
 from infra import bulletins, config
-from infra import state
 from infra.auth import authenticate, require_human_user, require_user
 from infra.cpu_sampler import apply_cpu_profiler, cpu_sampler_running
 from infra.db_async import run_in_db
@@ -52,8 +51,6 @@ def _debug_version_overlay_default() -> bool:
 
 @router.get("/health")
 async def health():
-    if state._thread_driver_failure is not None:
-        raise HTTPException(503, f"thread driver failed: {state._thread_driver_failure}")
     return {"status": "ok"}
 
 
@@ -65,6 +62,22 @@ async def system_operation_active(request: Request):
     from automation import self_restart
 
     return {"active": await run_in_db(self_restart.in_flight_request) is not None}
+
+
+@router.post("/system/stop-local-model")
+async def system_stop_local_model(request: Request):
+    """Stop the oMLX CORSIA spawned; the desktop shell calls it on Quit only, never on restart or update."""
+    if not _trusted_json_post(request):
+        raise HTTPException(403)
+    from loguru import logger as log
+
+    from llm.providers.omlx_supervisor import stop_all_servers
+
+    results = await stop_all_servers()
+    if failed := "; ".join(str(r.get("message")) for r in results if not r.get("ok")):
+        log.warning("stop-local-model: {}", failed)
+        raise HTTPException(500, failed)
+    return {"stopped": [r["pid"] for r in results if r.get("pid")]}
 
 
 def _security_alert_path() -> Path:
@@ -301,11 +314,11 @@ def _live_platform_status() -> dict:
     """The non-cached poller state included in each system status response."""
     from events.connectors.github_notifications import poller_status
     from events.connectors.github_pr_quiet_watch import quiet_watch_status
-    from events.connectors.gmail_poller import poller_status as gmail_poller_status
+    from events.connectors.mail_poller import poller_status as mail_poller_status
 
     return {
         "github_notifications": poller_status(),
-        "gmail_poller": gmail_poller_status(),
+        "mail_poller": mail_poller_status(),
         "pr_quiet_watch": quiet_watch_status(),
     }
 

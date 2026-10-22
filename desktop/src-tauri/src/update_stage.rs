@@ -34,8 +34,8 @@ const STAGING_HEADROOM_BYTES: u64 = 1024 * 1024 * 1024;
 pub fn run(mut context: tauri::Context<tauri::Wry>, operation_id: String) -> i32 {
     // The lock comes before anything else, so a second update never touches
     // the first one's staged copy.
-    let state_dir = match app_paths::app_dir() {
-        Ok(app_dir) => app_paths::state_dir_for(&app_dir),
+    let state_dir = match app_paths::state_dir() {
+        Ok(state_dir) => state_dir,
         Err(reason) => {
             eprintln!("update staging failed: {reason}");
             return BUILD_FAILED;
@@ -329,7 +329,7 @@ fn ensure_staged_bundle_version(
         .map_err(|error| format!("invalid installed version: {error}"))?;
     let manifest = Version::parse(manifest_version)
         .map_err(|error| format!("invalid candidate version: {error}"))?;
-    let bundle = bundle_short_version(extracted_bundle)?;
+    let bundle = bundle_full_version(extracted_bundle)?;
     if bundle != manifest {
         return Err(format!(
             "refusing update: signed bundle version {bundle} does not match manifest {manifest}"
@@ -343,14 +343,20 @@ fn ensure_staged_bundle_version(
     Ok(())
 }
 
-fn bundle_short_version(bundle: &Path) -> Result<Version, String> {
+/// The full release version the build stamped into the signed bundle
+/// (`CORSIAVersion`). CFBundleShortVersionString cannot hold it: macOS requires
+/// that key to be numeric, so a dev build's `0.4.1-dev.N` never appears there.
+fn bundle_full_version(bundle: &Path) -> Result<Version, String> {
     let plist_path = bundle.join("Contents/Info.plist");
     let plist = plist::Value::from_file(&plist_path).map_err(|error| error.to_string())?;
     let version = plist
         .as_dictionary()
-        .and_then(|dictionary| dictionary.get("CFBundleShortVersionString"))
+        .and_then(|dictionary| dictionary.get("CORSIAVersion"))
         .and_then(plist::Value::as_string)
-        .ok_or_else(|| "bundle Info.plist omitted CFBundleShortVersionString".to_string())?;
+        .ok_or_else(|| {
+            "bundle Info.plist omitted CORSIAVersion; this build cannot be verified as an update"
+                .to_string()
+        })?;
     Version::parse(version).map_err(|error| format!("invalid bundle version: {error}"))
 }
 
@@ -479,8 +485,11 @@ struct SigningIdentity {
 }
 
 pub(crate) fn verify_bundle_identity(current: &Path, staged: &Path) -> Result<(), String> {
-    let current_identity = code_identity(current)?;
-    let staged_identity = code_identity(staged)?;
+    // The installed app's seal is not re-verified: a file written into it after install (a
+    // __pycache__) breaks the seal, and refusing to update is then the one thing that keeps
+    // the broken copy. Its identity still has to match; the staged app is verified in full.
+    let current_identity = code_identity(current, false)?;
+    let staged_identity = code_identity(staged, true)?;
     ensure_matching_identity(&current_identity, &staged_identity)
 }
 
@@ -500,14 +509,16 @@ fn ensure_matching_identity(
     Ok(())
 }
 
-fn code_identity(bundle: &Path) -> Result<SigningIdentity, String> {
-    let verify = Command::new("/usr/bin/codesign")
-        .args(["--verify", "--strict"])
-        .arg(bundle)
-        .output()
-        .map_err(|error| error.to_string())?;
-    if !verify.status.success() {
-        return Err(String::from_utf8_lossy(&verify.stderr).into_owned());
+fn code_identity(bundle: &Path, verify_seal: bool) -> Result<SigningIdentity, String> {
+    if verify_seal {
+        let verify = Command::new("/usr/bin/codesign")
+            .args(["--verify", "--strict"])
+            .arg(bundle)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !verify.status.success() {
+            return Err(String::from_utf8_lossy(&verify.stderr).into_owned());
+        }
     }
     let output = Command::new("/usr/bin/codesign")
         .args(["--display", "--verbose=4", "--requirements", "-"])
@@ -606,16 +617,87 @@ mod tests {
         assert!(decode_updater_signature(&encoded).is_ok());
     }
 
-    fn write_bundle_version(bundle: &Path, version: &str) {
+    const PLIST_HEAD: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>CFBundleVersion</key><string>1.0.412</string>";
+
+    /// Writes an Info.plist in the shape the release pipeline produces: a
+    /// numeric short version, an integer-only CFBundleVersion, and the full
+    /// release version in CORSIAVersion, stamped by the script the build uses.
+    fn write_bundle_version(bundle: &Path, full_version: &str) {
+        let contents = bundle.join("Contents");
+        fs::create_dir_all(&contents).unwrap();
+        let plist = contents.join("Info.plist");
+        let short_version = full_version.split("-dev.").next().unwrap();
+        fs::write(&plist, format!("{PLIST_HEAD}</dict></plist>")).unwrap();
+        let status = Command::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../scripts/stamp-bundle-version.sh"
+        ))
+        .arg(&plist)
+        .arg(short_version)
+        .arg(full_version)
+        .status()
+        .unwrap();
+        assert!(status.success());
+    }
+
+    fn write_bundle_without_full_version(bundle: &Path, short_version: &str) {
         let contents = bundle.join("Contents");
         fs::create_dir_all(&contents).unwrap();
         fs::write(
             contents.join("Info.plist"),
-            format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>CFBundleShortVersionString</key><string>{version}</string></dict></plist>"
-            ),
+            format!("{PLIST_HEAD}<key>CFBundleShortVersionString</key><string>{short_version}</string></dict></plist>"),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn dev_bundle_is_accepted_only_when_newer_and_matching_the_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        let bundle = temp.path().join("CORSIA.app");
+        // Short 0.4.1, CFBundleVersion 1.0.412, CORSIAVersion 0.4.1-dev.407.
+        write_bundle_version(&bundle, "0.4.1-dev.407");
+
+        assert!(ensure_staged_bundle_version("0.4.1-dev.385", "0.4.1-dev.407", &bundle).is_ok());
+        assert!(ensure_staged_bundle_version("0.4.0", "0.4.1-dev.407", &bundle).is_ok());
+        for (installed, manifest) in [
+            ("0.4.1-dev.407", "0.4.1-dev.407"),
+            ("0.4.1-dev.408", "0.4.1-dev.407"),
+            ("0.4.1", "0.4.1-dev.407"),
+            ("0.4.1-dev.385", "0.4.1-dev.406"),
+            ("0.4.1-dev.385", "0.4.1"),
+        ] {
+            assert!(
+                ensure_staged_bundle_version(installed, manifest, &bundle).is_err(),
+                "{installed} -> {manifest}"
+            );
+        }
+    }
+
+    #[test]
+    fn stable_bundle_installs_over_a_dev_build() {
+        let temp = tempfile::tempdir().unwrap();
+        let bundle = temp.path().join("CORSIA.app");
+        // Short 0.4.1 and CORSIAVersion 0.4.1, against a 0.4.1 manifest.
+        write_bundle_version(&bundle, "0.4.1");
+
+        assert!(ensure_staged_bundle_version("0.4.1-dev.407", "0.4.1", &bundle).is_ok());
+        assert!(ensure_staged_bundle_version("0.4.0", "0.4.1", &bundle).is_ok());
+        assert!(ensure_staged_bundle_version("0.4.1", "0.4.1", &bundle).is_err());
+    }
+
+    #[test]
+    fn bundle_without_the_full_version_key_is_refused() {
+        let temp = tempfile::tempdir().unwrap();
+        let bundle = temp.path().join("CORSIA.app");
+        // The short version alone (what the old check read) is never enough.
+        write_bundle_without_full_version(&bundle, "0.4.1");
+
+        for (installed, manifest) in [("0.4.1-dev.385", "0.4.1-dev.407"), ("0.4.1-dev.385", "0.4.1")] {
+            assert!(matches!(
+                ensure_staged_bundle_version(installed, manifest, &bundle),
+                Err(reason) if reason.contains("omitted CORSIAVersion")
+            ));
+        }
     }
 
     #[test]

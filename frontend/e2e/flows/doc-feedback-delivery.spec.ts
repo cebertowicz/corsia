@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { showAllThreads } from '../support/commentDrawer';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
-import { openUnsentFooter } from '../support/docFeedbackFooter';
+import { leaveUnsent, openUnsentFooter } from '../support/docFeedbackFooter';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -95,6 +96,7 @@ test('@surface:doc-feedback-delivery closes a due user batch in the open canvas'
 		data: { body: 'This pending comment is delivered by the due-batch seam.', anchor_text: 'comment', from_off: 2, to_off: 9 },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
+	await leaveUnsent(request, (await created.json()).comment.id);
 
 	await page.addInitScript(({ threadId, docPath, fileName }) => {
 		localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({

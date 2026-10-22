@@ -90,7 +90,7 @@ fn is_corsia_label(label: &str) -> bool {
     label.starts_with("com.corsia.") || label.starts_with("ai.corsia.")
 }
 
-fn service_label() -> &'static str {
+pub(crate) fn service_label() -> &'static str {
     PLIST_NAME
         .strip_suffix(".plist")
         .expect("service plist name has its required suffix")
@@ -283,6 +283,30 @@ fn current_service(
     Ok(current)
 }
 
+/// A copy running from a disk image or a translocated path disappears once the image is ejected, so it never
+/// registers a service. An Applications folder on an external drive is a real install: only a read-only volume
+/// (how a downloaded disk image mounts) counts as a disk image.
+pub fn is_transient_bundle_path(executable: &Path) -> bool {
+    transient_bundle_path(executable, mount_is_read_only)
+}
+
+fn transient_bundle_path(executable: &Path, read_only: impl Fn(&Path) -> bool) -> bool {
+    let parts = executable.components().map(|part| part.as_os_str().to_string_lossy()).collect::<Vec<_>>();
+    parts.iter().any(|part| part == "AppTranslocation")
+        || (parts.get(1).is_some_and(|part| part == "Volumes") && read_only(executable))
+}
+
+fn mount_is_read_only(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else { return false };
+    let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // An unreadable mount is not proof of a disk image; refusing a real install would leave it unable to start.
+    if unsafe { libc::statvfs(path.as_ptr(), stats.as_mut_ptr()) } != 0 {
+        return false;
+    }
+    unsafe { stats.assume_init() }.f_flag & libc::ST_RDONLY != 0
+}
+
 fn bundle_root(executable: &Path) -> Result<PathBuf, String> {
     executable
         .parent()
@@ -322,6 +346,9 @@ fn unregister_if_registered(manager: &impl ServiceManager) -> Result<(), String>
     })
 }
 
+/// What the person sees when registering the service failed and macOS then would not say its state; the cause is logged.
+const REGISTRATION_FAILED: &str = "CORSIA could not register its service";
+
 pub fn ensure_service_registered(
     manager: &impl ServiceManager,
     reader: &impl LaunchctlReader,
@@ -351,7 +378,22 @@ pub fn ensure_service_registered(
             manager.register()?;
             manager.status()
         }
-        ServiceStatus::NotFound => Ok(status),
+        // SMAppService reports NotFound for an agent that was never registered for this
+        // user, so only register() can tell whether the bundle really lacks it. After a
+        // failure, macOS's text goes to the log and the status macOS then reports picks
+        // the sentence the person sees (still not found: the missing agent; not
+        // registered: the registration that did not persist).
+        ServiceStatus::NotFound => {
+            refuse_foreign_corsia_job(reader, executable)?;
+            if let Err(error) = manager.register() {
+                log::error!("registering the CORSIA service it reported as not found failed: {error}");
+                return manager.status().map_err(|status_error| {
+                    log::error!("could not read the CORSIA service status after its registration failed: {status_error}");
+                    REGISTRATION_FAILED.to_owned()
+                });
+            }
+            manager.status()
+        }
     }
 }
 
@@ -504,6 +546,16 @@ pub fn command_from_environment() -> Option<i32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn transient_bundle_paths_are_never_registered() {
+        let path = std::path::Path::new;
+        assert!(super::transient_bundle_path(path("/Volumes/CORSIA/CORSIA.app/Contents/MacOS/CORSIA"), |_| true));
+        assert!(!super::transient_bundle_path(path("/Volumes/External/Applications/CORSIA.app/Contents/MacOS/CORSIA"), |_| false));
+        assert!(super::transient_bundle_path(path("/private/var/folders/x/AppTranslocation/CORSIA.app/Contents/MacOS/CORSIA"), |_| false));
+        assert!(!super::transient_bundle_path(path("/Applications/CORSIA.app/Contents/MacOS/CORSIA"), |_| true));
+        assert!(!super::mount_is_read_only(path("/tmp")));
+    }
+
     use super::*;
     use std::{cell::Cell, fs};
 
@@ -514,6 +566,8 @@ mod tests {
         registrations: Cell<u8>,
         unregistrations: Cell<u8>,
         unregister_error: Cell<Option<&'static str>>,
+        register_error: Cell<Option<&'static str>>,
+        status_lost_on_register: Cell<bool>,
     }
 
     impl ServiceManager for FakeManager {
@@ -524,6 +578,12 @@ mod tests {
             self.registrations.set(self.registrations.get() + 1);
             if let Some(status) = self.registered_status.get() {
                 self.status.set(Some(status));
+            }
+            if self.status_lost_on_register.get() {
+                self.status.set(None);
+            }
+            if let Some(error) = self.register_error.get() {
+                return Err(error.into());
             }
             Ok(())
         }
@@ -776,6 +836,51 @@ mod tests {
             Ok(ServiceStatus::Enabled)
         );
         assert_eq!(absent.registrations.get(), 1);
+    }
+
+    #[test]
+    fn a_service_never_registered_for_this_user_is_registered_even_when_reported_not_found() {
+        let (executable, _root) = bundle_executable();
+        let reader = FakeLaunchctl { jobs: String::new(), details: String::new() };
+        let fresh = FakeManager::default();
+        fresh.status.set(Some(ServiceStatus::NotFound));
+        fresh.registered_status.set(Some(ServiceStatus::Enabled));
+        assert_eq!(
+            ensure_unlocked_service_registered(&fresh, &reader, &executable),
+            Ok(ServiceStatus::Enabled)
+        );
+        assert_eq!(fresh.registrations.get(), 1);
+
+        let lacking = FakeManager::default();
+        lacking.status.set(Some(ServiceStatus::NotFound));
+        lacking.register_error.set(Some("The operation couldn’t be completed. (SMAppServiceErrorDomain error 3.)"));
+        assert_eq!(
+            ensure_unlocked_service_registered(&lacking, &reader, &executable),
+            Ok(ServiceStatus::NotFound),
+            "a bundle that lacks the agent must keep its named cause, not macOS's text"
+        );
+        assert_eq!(lacking.registrations.get(), 1);
+
+        // macOS found the agent but would not register it: not the missing-agent cause, and
+        // never macOS's own text.
+        let refused = FakeManager::default();
+        refused.status.set(Some(ServiceStatus::NotFound));
+        refused.registered_status.set(Some(ServiceStatus::NotRegistered));
+        refused.register_error.set(Some("Operation not permitted"));
+        assert_eq!(
+            ensure_unlocked_service_registered(&refused, &reader, &executable),
+            Ok(ServiceStatus::NotRegistered)
+        );
+
+        // The status cannot be read after the failure: a named sentence, not macOS's text.
+        let unreadable = FakeManager::default();
+        unreadable.status.set(Some(ServiceStatus::NotFound));
+        unreadable.status_lost_on_register.set(true);
+        unreadable.register_error.set(Some("Operation not permitted"));
+        assert_eq!(
+            ensure_unlocked_service_registered(&unreadable, &reader, &executable),
+            Err(REGISTRATION_FAILED.into())
+        );
     }
 
     #[test]

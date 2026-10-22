@@ -67,8 +67,8 @@ def _next_reply(harness: str) -> dict[str, Any]:
     return dict(_get_json(f"harness-responses/{urllib.parse.quote(harness)}/next")["reply"])
 
 
-def _claude_bridge() -> tuple[str, str] | None:
-    """Read the invocation-local MCP loopback endpoint and token."""
+def _claude_bridge() -> tuple[str, dict[str, str]] | None:
+    """Read the invocation-local MCP loopback endpoint and authenticated headers."""
     try:
         raw = sys.argv[sys.argv.index("--mcp-config") + 1]
     except (ValueError, IndexError):
@@ -77,7 +77,11 @@ def _claude_bridge() -> tuple[str, str] | None:
         config = json.loads(Path(raw).read_text())
         server = config["mcpServers"]["corsia"]
         env = server["env"]
-        return str(env["CORSIA_CC_TOOL_URL"]), str(env["CORSIA_CC_TOOL_TOKEN"])
+        headers = {"X-CORSIA-Tool-Token": str(env["CORSIA_CC_TOOL_TOKEN"])}
+        if fork_id := env.get("CORSIA_FORK_ID"):
+            headers["X-CORSIA-Fork-Id"] = str(fork_id)
+            headers["X-CORSIA-Tool-Token"] = str(env.get("CORSIA_FORK_TOOL_TOKEN", headers["X-CORSIA-Tool-Token"]))
+        return str(env["CORSIA_CC_TOOL_URL"]), headers
     except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError("Claude fixture received an invalid CORSIA MCP config") from exc
 
@@ -97,7 +101,7 @@ def _call_claude_bridge(call: dict[str, Any], call_id: str) -> str:
     bridge = _claude_bridge()
     if bridge is None:
         raise RuntimeError("Claude fixture has no CORSIA tool bridge")
-    endpoint, token = bridge
+    endpoint, headers = bridge
     raw_arguments = call.get("arguments_json", call.get("arguments", "{}"))
     arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
     body = json.dumps({
@@ -109,10 +113,7 @@ def _call_claude_bridge(call: dict[str, Any], call_id: str) -> str:
     request = urllib.request.Request(
         endpoint,
         data=body,
-        headers={
-            "Content-Type": "application/json",
-            "X-CORSIA-Tool-Token": token,
-        },
+        headers={"Content-Type": "application/json", **headers},
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=180) as response:

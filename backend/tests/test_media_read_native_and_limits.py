@@ -107,10 +107,8 @@ async def test_checkpoint_media_is_projected_before_harness_translation(
 
     reference = media_read_reference(_write(tmp_path, "shot.png", _png_bytes()))
     raw = MediaToolResult(reference.placeholder_text(), reference)
-    monkeypatch.setattr(
-        harness_tool_bridge,
-        "_execute_registry_tool",
-        AsyncMock(return_value=raw),
+    registry = SimpleNamespace(
+        get=lambda _name: None, execute=AsyncMock(return_value=raw),
     )
     monkeypatch.setattr(
         "infra.database.get_db",
@@ -122,9 +120,9 @@ async def test_checkpoint_media_is_projected_before_harness_translation(
     )
 
     result = await harness_tool_bridge.execute_tool(
-        SimpleNamespace(get=lambda _name: None),
+        registry,
         thread_id="thread-1",
-        checkpoint_id="checkpoint-1",
+        fork_id="checkpoint-1",
         model="anthropic/claude-sonnet-5",
         name="read_file",
         arguments={"path": "shot.png"},
@@ -150,10 +148,8 @@ async def test_checkpoint_media_materialization_runs_off_event_loop(
     event_loop_thread = threading.get_ident()
     observed_threads = []
 
-    monkeypatch.setattr(
-        harness_tool_bridge,
-        "_execute_registry_tool",
-        AsyncMock(return_value=raw),
+    registry = SimpleNamespace(
+        get=lambda _name: None, execute=AsyncMock(return_value=raw),
     )
 
     def capture(text, _reference, _model):
@@ -166,9 +162,9 @@ async def test_checkpoint_media_materialization_runs_off_event_loop(
     )
 
     await harness_tool_bridge.execute_tool(
-        SimpleNamespace(get=lambda _name: None),
+        registry,
         thread_id="thread-1",
-        checkpoint_id="checkpoint-1",
+        fork_id="checkpoint-1",
         model="anthropic/claude-sonnet-5",
         name="read_file",
         arguments={"path": "shot.png"},

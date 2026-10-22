@@ -413,7 +413,7 @@ def test_wrong_durable_identity_never_satisfies_a_call(tmp_path, field):
 
 @pytest.mark.parametrize("late_stdout", [False, True])
 def test_frozen_prefix_uses_durable_receipt_and_keeps_later_tool_growth(tmp_path, late_stdout):
-    from core.checkpoint_codex_context import frozen_context_tokens
+    from core.fork_codex_context import frozen_context_tokens
     from test_checkpoint_codex_capacity import target
 
     records = group()

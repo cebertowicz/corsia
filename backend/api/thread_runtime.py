@@ -21,12 +21,14 @@ from core.turn_core import TurnIdentity
 from core.turn_core import active_turns_for_owner
 from api.thread_cache_warm import router as cache_warm_router
 from api.checkpoints import router as checkpoints_router
+from api.open_time import router as open_time_router
 from api.thread_seen import router as thread_seen_router
 from api.thread_update_cards import router as thread_update_cards_router
 
 router = APIRouter(prefix="/api", tags=["threads"])
 router.include_router(cache_warm_router)
 router.include_router(checkpoints_router)
+router.include_router(open_time_router)
 router.include_router(thread_seen_router)
 router.include_router(thread_update_cards_router)
 

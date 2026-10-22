@@ -24,6 +24,7 @@ log = "0.4"
 tauri = { version = "2.10.3", features = ["macos-private-api"] }
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-window-state = "2"
 tauri-plugin-updater = "2"
 libc = "0.2"
 signal-hook = "0.3"
@@ -47,6 +48,7 @@ hyper-util = { version = "0.1", features = ["tokio", "client", "server", "http1"
 sha2 = "0.10"
 hkdf = "0.12"
 hmac = "0.12"
+ring = "0.17"
 
 [dev-dependencies]
 tauri = { version = "2.10.3", features = ["macos-private-api", "test"] }

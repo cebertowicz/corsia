@@ -1,6 +1,7 @@
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 
-import { TEST_SESSION_TOKEN, chatComposer, openSettings, saveEvidenceScreenshot } from '../support/corsia';
+import { chatComposer, createSession, openAppPastLanding, openSettings, saveEvidenceScreenshot, sidebarThread } from '../support/corsia';
 
 test.use({ video: 'on' });
 
@@ -19,8 +20,7 @@ function updateStatus(schedule: Schedule) {
 
 async function openSystem(page: Page, theme: 'dark' | 'light', width: number) {
 	await page.setViewportSize({ width, height: width === 393 ? 852 : 1000 });
-	await page.goto(`/?token=${encodeURIComponent(TEST_SESSION_TOKEN)}`);
-	await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible();
+	await openAppPastLanding(page);
 	await page.evaluate((nextTheme) => document.documentElement.setAttribute('data-theme', nextTheme), theme);
 	await openSettings(page);
 	await page.getByRole('button', { name: 'System' }).click();
@@ -95,12 +95,18 @@ test.describe('@surface:settings scheduled updates parity', () => {
 		{ width: 1440 as const, label: '1440 desktop' },
 		{ width: 393 as const, label: '393 mobile' },
 	]) {
-		test(`${viewport.label}: the update notice opens Settings at the Updates card and Back returns to the chat`, async ({ page }) => {
+		test(`${viewport.label}: the update notice opens Settings at the Updates card and Back returns to the chat`, async ({ page, request }) => {
 			test.skip(test.info().project.name.includes('mobile') !== (viewport.width === 393), 'each run uses the project matching its asserted viewport');
 			const schedule: Schedule = { automatic: false, time: '03:00', tonight_at: null };
 			await page.route('**/api/system/update-status*', (route) => route.fulfill({ json: updateStatus(schedule) }));
 			await page.setViewportSize({ width: viewport.width, height: viewport.width === 393 ? 852 : 1000 });
-			await page.goto(`/?token=${encodeURIComponent(TEST_SESSION_TOKEN)}`);
+			// A saved chat gives Back something to return to: "New chat" opens an unsaved draft that Back does not return to.
+			const title = `e2e scheduled updates back ${Date.now()}`;
+			await createSession(request, title);
+			await openAppPastLanding(page);
+			if (viewport.width === 393) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+			await sidebarThread(page, title).click();
+			await expect(chatComposer(page)).toBeVisible();
 
 			const notice = page.getByRole('button', { name: 'Update ready. Open Updates' });
 			await expect(notice).toBeVisible();

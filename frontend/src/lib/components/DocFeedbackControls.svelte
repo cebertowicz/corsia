@@ -12,24 +12,20 @@
 		/** False where Send lives elsewhere (the document's comments drawer): only what was not delivered, and Retry, show here. */
 		withSend?: boolean;
 	} = $props();
-	const shortLabel = $derived(feedback.sendingGrace ? 'Send now' : `Send ${feedback.pendingCount}`);
+	const shortLabel = $derived(`Send ${feedback.pendingCount}`);
 </script>
 
 <!-- Send arrives and leaves in one slot, never popping in the row (motion.md); after a send that went it says Sent
      for a moment first. Leaving, the slot keeps what it last showed; a send not delivered swaps it for Retry at once. -->
 {#if withSend && (feedback.pendingCount > 0 || feedback.sent > 0)}
-	<span class="sending-now" class:compact class:grace={!compact && feedback.sendingGrace} in:inlineSlot out:inlineSlot={{ instant: feedback.handedToRetry }}>
+	<span class="sending-now" class:compact in:inlineSlot out:inlineSlot={{ instant: feedback.handedToRetry }}>
 		{#if feedback.pendingCount === 0}
 			<span class="sent">
 				<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
 				Sent
 			</span>
 		{:else if compact}
-			<span class="sr-only" role="status">{feedback.sendingGrace ? feedback.graceText : ''}</span>
-			<Button size="sm" onclick={feedback.send} loading={feedback.sending} ariaLabel={feedback.sendingGrace ? `${feedback.graceText}. Send now` : feedback.sendLabel}>{shortLabel}</Button>
-		{:else if feedback.sendingGrace}
-			<span class="sending-grace" role="status" title={feedback.graceText}>Sending to <span class="grace-owner">{feedback.ownerName ?? 'the owner'}</span> in {feedback.graceMinutes} min</span>
-			<Button size="sm" onclick={feedback.send} loading={feedback.sending}>Send now</Button>
+			<Button size="sm" onclick={feedback.send} loading={feedback.sending} ariaLabel={feedback.sendLabel}>{shortLabel}</Button>
 		{:else}
 			<Button size="sm" onclick={feedback.send} loading={feedback.sending}>{feedback.sendLabel}</Button>
 		{/if}
@@ -48,17 +44,6 @@
 </span>
 
 <style>
-	.sending-grace {
-		display: inline-flex;
-		gap: 0.25em;
-		min-width: 0;
-		overflow: hidden;
-		white-space: nowrap;
-		font-size: var(--text-footnote);
-		color: var(--text-secondary);
-	}
-	/* Only the owner name gives way; "Sending to" and the countdown stay whole. */
-	.grace-owner { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 	.undelivered {
 		display: inline-flex;
 		flex-wrap: wrap;

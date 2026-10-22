@@ -2,7 +2,6 @@
 	import { onMount } from 'svelte';
 	import CommentThread from './comments/CommentThread.svelte';
 	import Button from './ui/Button.svelte';
-	import { returnDocFeedback } from '$lib/api/docFeedback';
 	import { docComments, loadComments } from '$lib/stores/docComments';
 
 	let { artifactId, title }: { artifactId: string; title: string } = $props();
@@ -15,7 +14,6 @@
 		try {
 			await loadComments(artifactId);
 			status = 'ready';
-			void returnDocFeedback(artifactId).catch((error) => console.error('feedback return failed', error));
 		} catch {
 			status = 'error';
 		}

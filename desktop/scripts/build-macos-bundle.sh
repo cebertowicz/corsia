@@ -21,6 +21,20 @@ readonly GIT_ARCHIVE="git-${GIT_VERSION}.tar.xz"
 readonly GIT_URL="https://mirrors.edge.kernel.org/pub/software/scm/git/${GIT_ARCHIVE}"
 readonly GIT_SHA256="5818bd7d80b061bbbdfec8a433d609dc8818a05991f731ffc4a561e2ca18c653"
 readonly GIT_SOURCE="$BUILD_ROOT/git-${GIT_VERSION}"
+# The browser tool's CLI: the upstream native arm64 build. The version must stay inside
+# _VERIFIED_FAMILIES in backend/host_access/browser_cli.py.
+readonly AGENT_BROWSER_VERSION="0.31.2"
+readonly AGENT_BROWSER_URL="https://github.com/vercel-labs/agent-browser/releases/download/v${AGENT_BROWSER_VERSION}/agent-browser-darwin-arm64"
+readonly AGENT_BROWSER_SHA256="98042bcfee9afdf6119d6817a04ef5897f519f290491664911779b084ae1b82a"
+readonly AGENT_BROWSER_LICENSE_URL="https://raw.githubusercontent.com/vercel-labs/agent-browser/v${AGENT_BROWSER_VERSION}/LICENSE"
+readonly AGENT_BROWSER_LICENSE_SHA256="014bb31e83d5c2e76aea1cc6e82217346ab41362f32cb355ad0f5c10aa0aeaff"
+# The sandbox every agent shell runs inside: one self-contained bash script. Its floor is
+# _MIN_SAFEHOUSE_VERSION in backend/tools/shell_guard.py; without it every shell command is refused.
+readonly SAFEHOUSE_VERSION="0.11.1"
+readonly SAFEHOUSE_URL="https://github.com/eugene1g/agent-safehouse/releases/download/v${SAFEHOUSE_VERSION}/safehouse.sh"
+readonly SAFEHOUSE_SHA256="dd96f92d77aebf142e0ee33f38754b6dc6c6f7a1245129b715f7deea488e3d78"
+readonly SAFEHOUSE_LICENSE_URL="https://raw.githubusercontent.com/eugene1g/agent-safehouse/v${SAFEHOUSE_VERSION}/LICENSE"
+readonly SAFEHOUSE_LICENSE_SHA256="cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
 
 skip_dmg=false
 for argument in "$@"; do
@@ -35,6 +49,28 @@ fetch_verified() {
   local url="$1" file="$2" digest="$3"
   curl --fail --location --retry 3 --silent --show-error "$url" --output "$file"
   echo "${digest}  ${file}" | shasum --algorithm 256 --check --status || fail "SHA-256 mismatch for $(basename "$file")"
+}
+fetch_agent_browser() {
+  local download="$BUILD_ROOT/downloads/agent-browser-darwin-arm64"
+  fetch_verified "$AGENT_BROWSER_URL" "$download" "$AGENT_BROWSER_SHA256"
+  install -m 0755 "$download" "$BUNDLE_ROOT/bin/agent-browser"
+  fetch_verified "$AGENT_BROWSER_LICENSE_URL" "$BUILD_ROOT/downloads/agent-browser-LICENSE" "$AGENT_BROWSER_LICENSE_SHA256"
+  mkdir -p "$BUNDLE_ROOT/licenses/agent-browser"
+  install -m 0644 "$BUILD_ROOT/downloads/agent-browser-LICENSE" "$BUNDLE_ROOT/licenses/agent-browser/LICENSE"
+  printf 'agent-browser %s\n%s\nsha256 %s\n' "$AGENT_BROWSER_VERSION" "$AGENT_BROWSER_URL" "$AGENT_BROWSER_SHA256" > "$BUNDLE_ROOT/licenses/agent-browser/SOURCE"
+  [ "$("$BUNDLE_ROOT/bin/agent-browser" --version)" = "agent-browser $AGENT_BROWSER_VERSION" ] \
+    || fail "bundled agent-browser does not report version $AGENT_BROWSER_VERSION"
+}
+fetch_safehouse() {
+  local download="$BUILD_ROOT/downloads/safehouse.sh" license="$BUILD_ROOT/downloads/safehouse-LICENSE"
+  fetch_verified "$SAFEHOUSE_URL" "$download" "$SAFEHOUSE_SHA256"
+  fetch_verified "$SAFEHOUSE_LICENSE_URL" "$license" "$SAFEHOUSE_LICENSE_SHA256"
+  install -m 0755 "$download" "$BUNDLE_ROOT/bin/safehouse"
+  mkdir -p "$BUNDLE_ROOT/licenses/safehouse"
+  install -m 0644 "$license" "$BUNDLE_ROOT/licenses/safehouse/LICENSE"
+  printf 'agent-safehouse %s\n%s\nsha256 %s\n' "$SAFEHOUSE_VERSION" "$SAFEHOUSE_URL" "$SAFEHOUSE_SHA256" > "$BUNDLE_ROOT/licenses/safehouse/SOURCE"
+  [ "$("$BUNDLE_ROOT/bin/safehouse" --version | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" = "$SAFEHOUSE_VERSION" ] \
+    || fail "bundled safehouse does not report version $SAFEHOUSE_VERSION"
 }
 build_git_runtime() {
   local archive="$BUILD_ROOT/downloads/$GIT_ARCHIVE"
@@ -122,6 +158,8 @@ command -v cargo >/dev/null || fail "scoped Rust cargo is required"
 
 rm -rf "$BUILD_ROOT" "$BUNDLE_ROOT"
 mkdir -p "$BUILD_ROOT/downloads" "$BUNDLE_ROOT/bin"
+bash "$ROOT/desktop/scripts/write-updater-endpoint-resource.sh" \
+  "$ROOT/desktop/src-tauri/tauri.conf.json" "$BUNDLE_ROOT/updater-endpoint.json"
 fetch_verified "$PYTHON_URL" "$BUILD_ROOT/downloads/$PYTHON_ARCHIVE" "$PYTHON_SHA256"
 tar -xzf "$BUILD_ROOT/downloads/$PYTHON_ARCHIVE" -C "$BUNDLE_ROOT"
 readonly PYTHON="$BUNDLE_ROOT/python/bin/python3"
@@ -134,7 +172,14 @@ fetch_verified "$OMLX_URL" "$BUILD_ROOT/downloads/$OMLX_WHEEL" "$OMLX_SHA256"
 PYTHONPATH="$BUNDLE_ROOT/python/backend-packages" "$PYTHON" -m pip check
 PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 
+# Nothing may write bytecode into the signed bundle: an added __pycache__ breaks
+# its seal, and Update refuses to stage from an app whose seal is broken.
+printf 'import sys\nsys.dont_write_bytecode = True\n' \
+  >"$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/sitecustomize.py"
+
 build_git_runtime
+fetch_agent_browser
+fetch_safehouse
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
 (
   cd "$ROOT/frontend"
@@ -159,7 +204,9 @@ readonly APP="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle
 readonly DMG_DIR="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
 readonly DMG="$DMG_DIR/CORSIA-unsigned-aarch64.dmg"
 [ -d "$APP" ] || fail "Tauri did not produce $APP"
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $macos_short_version" "$APP/Contents/Info.plist"
+# scripts/corsia.d/app_mode.sh runs Contents/MacOS/CORSIA to stage, swap and roll back an update.
+[ -x "$APP/Contents/MacOS/CORSIA" ] || fail "$APP has no Contents/MacOS/CORSIA, so Update could never run"
+"$ROOT/desktop/scripts/stamp-bundle-version.sh" "$APP/Contents/Info.plist" "$macos_short_version" "$app_version"
 # SMAppService discovers this static, signed definition inside the app bundle.
 # It intentionally contains no per-user environment; the launcher reads the
 # service record and constructs its identity itself at every launch.

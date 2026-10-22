@@ -1,7 +1,6 @@
 """Execution, cleanup and capability adapters for the browser tool family."""
 from __future__ import annotations
 
-import shutil
 from typing import Any
 
 from host_access import browser_cli, browser_control
@@ -94,10 +93,13 @@ def browser_available() -> dict:
 
     The version is checked on first use; this reports what resolve_native admits.
     """
-    problem = _native_problem()
+    try:
+        binary, problem = browser_cli.resolve_native(_AGENT_BROWSER_BIN)[0], None
+    except BrowserIdentityError as exc:
+        binary, problem = None, str(exc)
     return {
         "available": problem is None,
-        "binary": shutil.which(_AGENT_BROWSER_BIN) if problem is None else None,
+        "binary": binary,
         "tool": _AGENT_BROWSER_BIN,
         "install_hint": problem,
     }

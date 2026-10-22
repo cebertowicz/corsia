@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from core.checkpoint_fit import soft_pressure_remaining
-from core.checkpoint_types import CHECKPOINT_TOOL_ROUND_TRIP_TOKENS
+from core.fork_fit import soft_pressure_remaining
+from core.fork_types import FORK_TOOL_ROUND_TRIP_TOKENS
 
 
 def fork_instruction_room(context_window: int, output_tokens: int) -> int:
@@ -16,6 +16,6 @@ def fork_instruction_room(context_window: int, output_tokens: int) -> int:
     """
     room = (
         soft_pressure_remaining(context_window)
-        - output_tokens - CHECKPOINT_TOOL_ROUND_TRIP_TOKENS
+        - output_tokens - FORK_TOOL_ROUND_TRIP_TOKENS
     )
     return max(room, 0)

@@ -8,46 +8,47 @@ const settle = () => vi.advanceTimersByTimeAsync(0);
 
 const api = (patch: Partial<DevicesApi> = {}): DevicesApi => ({
 	enabled: true, listening: { port: 47901 }, announced_name: 'Studio', local_hostname: 'studio.local', computer_name: 'Studio Mac',
-	lan_addresses: ['192.168.1.20'], code: { state: 'none' }, ...patch,
+	lan_addresses: ['192.168.1.20'], code: { state: 'none' }, read_only: false, ...patch,
 });
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 describe('viewFromApi', () => {
 	it('reads the off state', () => {
-		const view = viewFromApi(api({ enabled: false, announced_name: null, listening: { error: null } }), false);
+		const view = viewFromApi(api({ enabled: false, announced_name: null, listening: { error: null } }));
 		expect(view).toMatchObject({ enabled: false, announced: false, pairing: 'idle', listener: 'ok', readOnly: false });
 	});
 	it('reads on and visible, with the announced name', () => {
-		expect(viewFromApi(api(), false)).toMatchObject({ enabled: true, announced: true, hostName: 'Studio', pairing: 'idle' });
+		expect(viewFromApi(api())).toMatchObject({ enabled: true, announced: true, hostName: 'Studio', pairing: 'idle' });
 	});
 	it('reads on but not announced, and lists what to type with the port when it is not the default', () => {
-		const view = viewFromApi(api({ announced_name: null, listening: { port: 47902 }, lan_addresses: ['192.168.1.20', 'fd5c::1'] }), false);
+		const view = viewFromApi(api({ announced_name: null, listening: { port: 47902 }, lan_addresses: ['192.168.1.20', 'fd5c::1'] }));
 		expect(view).toMatchObject({ announced: false, hostName: 'Studio Mac' });
 		expect(view.addresses).toEqual(['studio.local:47902', '192.168.1.20:47902', '[fd5c::1]:47902']);
 	});
 	it('reads an active code with its seconds left', () => {
-		expect(viewFromApi(api({ code: { state: 'active', value: 'K7QX', expires_in_seconds: 540 } }), false)).toMatchObject({ pairing: 'code', code: 'K7QX', endsInSeconds: 540 });
+		expect(viewFromApi(api({ code: { state: 'active', value: 'K7QX', expires_in_seconds: 540 } }))).toMatchObject({ pairing: 'code', code: 'K7QX', endsInSeconds: 540 });
 	});
 	it('reads paused', () => {
-		expect(viewFromApi(api({ code: { state: 'paused' } }), false)).toMatchObject({ pairing: 'paused', code: null });
+		expect(viewFromApi(api({ code: { state: 'paused' } }))).toMatchObject({ pairing: 'paused', code: null });
 	});
 	it('reads all ports taken: off, with a listener error', () => {
-		expect(viewFromApi(api({ enabled: false, listening: { error: 'No approved Devices port is available', reason: 'ports_taken' }, announced_name: null }), false).listener).toBe('all-ports-taken');
+		expect(viewFromApi(api({ enabled: false, listening: { error: 'No approved Devices port is available', reason: 'ports_taken' }, announced_name: null })).listener).toBe('all-ports-taken');
 	});
 	it('reads any other listening failure as unavailable, not as taken ports', () => {
 		for (const reason of ['credentials', 'bind', 'disabled', undefined]) {
-			expect(viewFromApi(api({ enabled: false, listening: { error: 'Permission denied', reason }, announced_name: null }), false).listener).toBe('unavailable');
+			expect(viewFromApi(api({ enabled: false, listening: { error: 'Permission denied', reason }, announced_name: null })).listener).toBe('unavailable');
 		}
 	});
-	it('is read-only when told so, and when an active code arrives without its characters (G11)', () => {
-		expect(viewFromApi(api(), true).readOnly).toBe(true);
-		const seen = viewFromApi(api({ code: { state: 'active', expires_in_seconds: 300 } }), false);
+	it('uses the server’s read_only response as the sole management authority', () => {
+		expect(viewFromApi(api({ read_only: true })).readOnly).toBe(true);
+		const seen = viewFromApi(api({ read_only: true, code: { state: 'active', expires_in_seconds: 300 } }));
 		expect(seen).toMatchObject({ readOnly: true, pairing: 'idle', code: null });
 	});
 	it('uses the connected computer’s name over the one the server reports', () => {
-		expect(viewFromApi(api(), true, 'Alex’s Mac mini').hostName).toBe('Alex’s Mac mini');
+		expect(viewFromApi(api(), 'Alex’s Mac mini').hostName).toBe('Alex’s Mac mini');
 	});
 });
+
 
 describe('createDevices', () => {
 	let calls: { url: string; method: string; body?: string; auth?: string }[];
@@ -104,10 +105,37 @@ describe('createDevices', () => {
 		expect(devices.view).toMatchObject({ enabled: false, listener: 'all-ports-taken' });
 	});
 
+	it('submits the typed outside address and shows the backend refusal', async () => {
+		const devices = createDevices();
+		await devices.read();
+		const refusal = 'Type a name, like home.example.com, or a name and port, like home.example.com:8443.';
+		responses.push(json({ detail: refusal }, 400), json(api()));
+		expect(await devices.setOutside('home.example.com:99999')).toBe(refusal);
+		expect(calls[1]).toMatchObject({ url: '/api/devices', method: 'PUT', body: JSON.stringify({ outside_address: 'home.example.com:99999' }) });
+	});
+
+	it('uses the outside-address fallback for a server failure instead of its detail', async () => {
+		const devices = createDevices();
+		await devices.read();
+		responses.push(json({ detail: 'internal detail' }, 500), json(api()));
+		expect(await devices.setOutside('home.example.com')).toBe('Couldn’t save the outside address. Try again.');
+	});
+
+	it('displays the server-normalized outside address and clears it', async () => {
+		const devices = createDevices();
+		await devices.read();
+		responses.push(json(api({ outside_address: 'home.example.com:8443' })));
+		expect(await devices.setOutside(' https://home.example.com:8443/ ')).toBeNull();
+		expect(devices.view.outside).toBe('home.example.com:8443');
+		responses.push(json(api({ outside_address: null })));
+		expect(await devices.setOutside('')).toBeNull();
+		expect(devices.view.outside).toBeNull();
+	});
+
 	it('asks for a new code with POST', async () => {
 		const devices = createDevices({ now: () => clock });
 		await devices.read();
-		responses.push(json({ code: 'W4BC', ...api({ code: { state: 'active', value: 'W4BC', expires_in_seconds: 600 } }) }));
+		responses.push(json(api({ code: { state: 'active', value: 'W4BC', expires_in_seconds: 600 } })));
 		await devices.newCode();
 		expect(calls.at(-1)).toMatchObject({ url: '/api/devices/code', method: 'POST' });
 		expect(devices.view).toMatchObject({ pairing: 'code', code: 'W4BC' });
@@ -117,7 +145,7 @@ describe('createDevices', () => {
 		const devices = createDevices({ now: () => clock });
 		await devices.read();
 		responses.push(json({ detail: 'Manage connections on Studio itself' }, 403));
-		responses.push(json(api()));
+		responses.push(json(api({ read_only: true })));
 		await devices.setEnabled(false);
 		expect(devices.view.readOnly).toBe(true);
 	});
@@ -166,6 +194,7 @@ describe('createDevices', () => {
 
 	it('takes the connected computer’s name from the shell', async () => {
 		const devices = createDevices({ now: () => clock, remoteName: () => 'Alex’s Mac mini' });
+		responses.push(json(api({ read_only: true })));
 		await devices.read();
 		expect(devices.view).toMatchObject({ readOnly: true, hostName: 'Alex’s Mac mini' });
 	});

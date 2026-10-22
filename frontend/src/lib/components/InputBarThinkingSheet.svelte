@@ -1,18 +1,26 @@
 <script lang="ts">
 	import { token } from '$lib/stores/auth';
-	import { activeThreadId, reasoningEffort, saveReasoningEffort } from '$lib/stores/threads';
+	import { reasoningEffort } from '$lib/stores/threads';
+	import { saveReasoningEffort } from '$lib/stores/threadEffort';
+	import { composerSelectionFor } from '$lib/stores/composerSelection';
+	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
 	import type { ReasoningConfig } from '$lib/stores/models';
 	import { reasoningSegments, resolveReasoningEffort } from './inputBarReasoning';
 
 	let {
+		threadId = undefined,
 		reasoningConfig,
 	}: {
+		threadId?: string | null;
 		reasoningConfig: ReasoningConfig | null;
 	} = $props();
 
+	// The effort of the thread this composer is bound to, which is a worker's own in a worker's pane.
+	const sel = $derived($composerSelectionFor(threadId));
+
 	const segments = $derived(reasoningSegments(reasoningConfig));
-	const resolvedEffort = $derived(resolveReasoningEffort($reasoningEffort, reasoningConfig));
+	const resolvedEffort = $derived(resolveReasoningEffort(sel.effort, reasoningConfig));
 	const activeSegIndex = $derived.by(() => {
 		if (segments.length === 0) return 0;
 		const index = segments.findIndex(segment => segment.value === resolvedEffort);
@@ -25,15 +33,18 @@
 	let segTrackRect: DOMRect | null = null;
 
 	function setEffort(level: string | null) {
-		const sid = $activeThreadId;
+		const sid = sel.threadId;
 		const t = $token;
-		reasoningEffort.set(level);
 		emitProductEvent('ui', 'thinking_toggled', {
 			thread_id: sid,
 			effort: level,
 			reasoning_shape: reasoningConfig?.type ?? null,
 		});
-		if (sid && t) saveReasoningEffort(sid, level, t);
+		if (sid && t) {
+			void saveReasoningEffort(sid, level, t).then((failure) => {
+				if (failure) toasts.show(failure, 'error');
+			});
+		} else if (sel.isOpen) reasoningEffort.set(level);
 	}
 
 	function isSegActive(value: string | null) {

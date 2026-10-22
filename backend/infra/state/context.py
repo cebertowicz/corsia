@@ -39,22 +39,22 @@ _current_provider_call_id: contextvars.ContextVar[str | None] = contextvars.Cont
 
 @contextmanager
 def tool_invocation_context(
-    invocation_id: str | None, *, checkpoint_id: str | None = None,
+    invocation_id: str | None, *, fork_id: str | None = None,
     provider_call_id: str | None = None,
 ) -> Iterator[None]:
     """Bind the caller's exact invocation during execution, never a fallback.
 
-    This shared scope is for bridge, native and checkpoint-private callers.
-    A checkpoint must clear an inherited foreground id. The shell receives
+    This shared scope is for bridge, native and fork-private callers.
+    A fork must clear an inherited foreground id. The shell receives
     the value through registry injection, not by reading task context in an
     executor thread. This helper alone does not wire those callers or export
     an environment value.
     """
     current = invocation_id if isinstance(invocation_id, str) and invocation_id.strip() else None
-    if checkpoint_id is not None:
+    if fork_id is not None:
         current = None
     reset_handle = _current_tool_invocation_id.set(current)
-    call_handle = _current_provider_call_id.set(provider_call_id if checkpoint_id is None else None)
+    call_handle = _current_provider_call_id.set(provider_call_id if fork_id is None else None)
     try:
         yield
     finally:

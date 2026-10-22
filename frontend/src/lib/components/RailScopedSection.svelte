@@ -10,6 +10,9 @@
 	import { COLLAPSED_AGENT_LIMIT, selectAgentRows } from './agentVisibility';
 	import ThreadPlanStateMark from './ThreadPlanStateMark.svelte';
 	import ThreadPausedMark from './ThreadPausedMark.svelte';
+	import ThreadWaitingMark from './ThreadWaitingMark.svelte';
+	import { showsWaitingGlyph, waitMarkTitle } from './threadRowMark';
+	import { minuteClock } from '$lib/time';
 	import type { View } from '$lib/homePaneConfig';
 
 	type MenuKind = 'agent' | 'conductor';
@@ -202,6 +205,8 @@
 			<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--status-in-progress)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 		{:else if conductorThreadId && $descendantRunning.has(conductorThreadId)}
 			<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="3" role="img" aria-label="Subagent working"><title>Subagent working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+		{:else if conductorThreadId && showsWaitingGlyph($threadPlanStates[conductorThreadId], false)}
+			<span class="waiting-slot"><ThreadWaitingMark size={12} title={waitMarkTitle($threadPlanStates[conductorThreadId], $minuteClock)} /></span>
 		{/if}
 	</div>
 
@@ -268,6 +273,8 @@
 				<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--status-in-progress)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 			{:else if $descendantRunning.has(agent.id)}
 				<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="3" role="img" aria-label="Subagent working"><title>Subagent working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+			{:else if showsWaitingGlyph($threadPlanStates[agent.id], false)}
+				<span class="waiting-slot"><ThreadWaitingMark size={12} title={waitMarkTitle($threadPlanStates[agent.id], $minuteClock)} /></span>
 			{/if}
 		</div>
 	{/each}
@@ -325,6 +332,7 @@
 		border-radius: var(--radius-2xs); outline: none;
 	}
 	.spinner { flex-shrink: 0; animation: spin 0.9s linear infinite; }
+	.waiting-slot { display: inline-flex; flex-shrink: 0; color: var(--text-tertiary); }
 	@media (prefers-reduced-motion: reduce) {
 		/* The arc stays, still titled, so reduced motion reads the same truth. */
 		.spinner { animation: none; }

@@ -14,7 +14,7 @@ from infra.database import get_db
 from tests.test_action_gate import _admit, _bind, _draft, workspace  # noqa: F401 (fixture)
 from tests.test_google_email import mail  # noqa: F401 (fixture)
 from tests.test_google_sign_in import client_file, conductor, google  # noqa: F401 (mail dependencies)
-from connections.google.calendar_document import attendee_emails, compose_document
+from connections.calendar_document import attendee_emails, compose_document
 from tools import action_gate, google_calendar
 from tools.action_drafts import record_draft
 from tools.action_gate import Approved, Refusal
@@ -22,12 +22,12 @@ from tools.google_calendar import CalendarDraftInviteTool, CalendarListTool, Cal
 
 
 async def _allowed(_kwargs):
-    return None
+    return {"id": "acct-1", "address": "person@example.com", "state": "connected"}
 
 
 @pytest.mark.asyncio
 async def test_list_requires_offset_and_refuses_ranges_over_31_days(monkeypatch):
-    monkeypatch.setattr(google_calendar, "_designated", _allowed)
+    monkeypatch.setattr(google_calendar, "_account", _allowed)
     tool = CalendarListTool()
     assert await tool.execute(
         time_min="2026-10-15T09:00:00", time_max="2026-10-16T09:00:00-07:00",
@@ -39,11 +39,11 @@ async def test_list_requires_offset_and_refuses_ranges_over_31_days(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_list_defaults_to_primary_expands_recurring_and_preserves_google_times(monkeypatch):
-    monkeypatch.setattr(google_calendar, "_designated", _allowed)
+    monkeypatch.setattr(google_calendar, "_account", _allowed)
     calls = []
 
-    async def get_json(url, *, params):
-        calls.append((url, params))
+    async def get_json(account_id, url, *, params):
+        calls.append((account_id, url, params))
         return {"items": [
             {"id": "timed", "start": {"dateTime": "2026-10-15T09:00:00-07:00"},
              "end": {"dateTime": "2026-10-15T10:00:00-07:00"}, "summary": "Standup",
@@ -56,7 +56,7 @@ async def test_list_defaults_to_primary_expands_recurring_and_preserves_google_t
     result = json.loads(await CalendarListTool().execute(
         time_min="2026-10-15T00:00:00-07:00", time_max="2026-10-16T00:00:00-07:00",
     ))
-    assert calls == [(google_calendar._event_url("primary"), {
+    assert calls == [("acct-1", google_calendar._event_url("primary"), {
         "timeMin": "2026-10-15T00:00:00-07:00", "timeMax": "2026-10-16T00:00:00-07:00",
         "maxResults": 250, "singleEvents": "true", "orderBy": "startTime",
     })]
@@ -70,13 +70,15 @@ async def test_list_defaults_to_primary_expands_recurring_and_preserves_google_t
 
 def test_first_description_lines_and_email_refusal_bytes_are_pinned():
     assert CalendarListTool().description.splitlines()[0] == (
-        "List the person's Google Calendar events in a time range of up to 31 days"
+        "List the Google Calendar events of the account named by account_id, in a range of up to 31 days"
     )
     assert CalendarDraftInviteTool().description.splitlines()[0] == (
-        "Save a calendar invite as a draft document for the person to review; nothing is sent"
+        "Save a calendar invite from the account named by account_id as a draft document for the "
+        "person to review; nothing is sent, and it is later sent from the same account"
     )
     assert CalendarSendInviteTool().description.splitlines()[0] == (
-        "Send a saved invite draft after the person says to send it; attendees get emails"
+        "Send a saved invite draft, from the account it was drafted from, after the person says to "
+        "send it; attendees get emails"
     )
     assert action_gate.CHANGED_OUTSIDE == (
         "Not sent: the draft was changed outside the draft tools. Save it with email_draft, "
@@ -94,14 +96,14 @@ async def test_send_recovery_is_invite_specific_for_lost_stale_and_sending_draft
         return fn(*args)
 
     monkeypatch.setattr(google_calendar, "run_in_db", run_direct)
-    monkeypatch.setattr(google_calendar, "_open_draft", lambda *_args: None)
+    monkeypatch.setattr(google_calendar, "open_draft", lambda *_args: None)
     tool = CalendarSendInviteTool()
     assert await tool._prepare("thread", "lost", "revision") == f"Error: {google_calendar.NO_OPEN_DRAFT}"
 
-    monkeypatch.setattr(google_calendar, "_open_draft", lambda *_args: {"state": "sending"})
+    monkeypatch.setattr(google_calendar, "open_draft", lambda *_args: {"state": "sending"})
     assert await tool._prepare("thread", "sending", "revision") == f"Error: {google_calendar.STILL_SENDING}"
 
-    monkeypatch.setattr(google_calendar, "_open_draft", lambda *_args: {"state": "open"})
+    monkeypatch.setattr(google_calendar, "open_draft", lambda *_args: {"state": "open"})
 
     async def stale(*_args):
         return Refusal(action_gate.STALE_REVISION)
@@ -124,10 +126,14 @@ async def test_draft_and_send_follow_the_email_lifecycle_with_attendee_notificat
 
     mail.fake.handler = calendar_handler
     saved = json.loads(await CalendarDraftInviteTool().execute(
-        _thread_id=mail.thread, title="Planning", start="2026-10-15T09:00:00-07:00",
+        _thread_id=mail.thread, account_id=mail.account, title="Planning", start="2026-10-15T09:00:00-07:00",
         end="2026-10-15T10:00:00-07:00", attendees=["sam@example.com"], description="Agenda",
     ))
-    assert saved["from"] == "person@example.com"
+    assert saved["from"] == "person@example.com" and saved["account_id"] == mail.account
+    target = json.loads(get_db().execute(
+        "SELECT target_json FROM action_drafts WHERE id=?", (saved["draft_id"],),
+    ).fetchone()[0])
+    assert target["account_id"] == mail.account and target["account"] == "person@example.com"
     document = (mail.workspace / saved["path"]).read_text()
     assert document == (
         "From: person@example.com\nTitle: Planning\nWhen: 2026-10-15T09:00:00-07:00 to "
@@ -154,14 +160,10 @@ async def test_draft_and_send_follow_the_email_lifecycle_with_attendee_notificat
     assert tuple(row) == ("sent", "event-1")
 
 
-async def _no_designation(_kwargs):
-    return None
-
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", ["not_seen", "stale", "changed"])
 async def test_send_uses_the_real_gate_for_invite_refusals(deleg_db, workspace, monkeypatch, case):
-    monkeypatch.setattr(google_calendar, "_designated", _no_designation)
     data = b"From: person@example.com\nTitle: Planning\nWhen: 2026-10-15T09:00:00-07:00 to 2026-10-15T10:00:00-07:00\nAttendees: sam@example.com\n\nAgenda\n"
     draft = _draft(deleg_db, workspace, data=data, kind="invite")
     _admit(deleg_db, case)
@@ -195,7 +197,7 @@ async def _approved_calendar_draft(draft_id: str) -> Approved:
 
 async def _calendar_draft(mail) -> dict:
     return json.loads(await CalendarDraftInviteTool().execute(
-        _thread_id=mail.thread, title="Planning", start="2026-10-15T09:00:00-07:00",
+        _thread_id=mail.thread, account_id=mail.account, title="Planning", start="2026-10-15T09:00:00-07:00",
         end="2026-10-15T10:00:00-07:00", attendees=["sam@example.com"], description="Agenda",
     ))
 
@@ -277,21 +279,20 @@ def test_attendee_emails_rejects_non_plain_addresses(value):
 
 @pytest.mark.asyncio
 async def test_draft_refuses_to_record_changed_readback(mail, monkeypatch):
-    monkeypatch.setattr(google_calendar, "_read_document", lambda _relative: b"changed")
+    from tools import reviewed_drafts
+
+    monkeypatch.setattr(reviewed_drafts, "_read_bytes", lambda _relative: b"changed")
     before = get_db().execute("SELECT COUNT(*) FROM action_drafts").fetchone()[0]
     output = await CalendarDraftInviteTool().execute(
-        _thread_id=mail.thread, title="Planning", start="2026-10-15T09:00:00-07:00",
+        _thread_id=mail.thread, account_id=mail.account, title="Planning", start="2026-10-15T09:00:00-07:00",
         end="2026-10-15T10:00:00-07:00", attendees=["sam@example.com"], description="Agenda",
     )
-    assert output == (
-        "Error: The invite draft changed while it was being saved, so it is not recorded. "
-        "Save it again with calendar_draft_invite."
-    )
+    assert output == "Error: The draft changed while it was being saved, so it is not recorded. Save it again."
     assert get_db().execute("SELECT COUNT(*) FROM action_drafts").fetchone()[0] == before
 
 
 @pytest.mark.asyncio
-async def test_send_refuses_when_the_google_account_changed(mail, monkeypatch):
+async def test_send_refuses_when_the_drafts_account_is_signed_out(mail, monkeypatch):
     saved = await _calendar_draft(mail)
 
     async def approved(_kind, draft_id, _revision):
@@ -304,14 +305,17 @@ async def test_send_refuses_when_the_google_account_changed(mail, monkeypatch):
         return {"id": "unexpected"}
 
     monkeypatch.setattr(google_calendar, "check_action", approved)
-    monkeypatch.setattr(google_calendar.oauth, "account_status", lambda: {"email": "other@example.com"})
+    db = get_db()
+    db.execute("UPDATE connected_accounts SET state='signed_out' WHERE id=?", (mail.account,))
+    db.commit()
     monkeypatch.setattr(google_calendar.google_client, "request_json", request_json)
     output = await CalendarSendInviteTool().execute(
         _thread_id=mail.thread, draft_id=saved["draft_id"], revision=saved["revision"],
     )
     assert output == (
-        "Error: Not sent: Google is now signed in as other@example.com, but this invite was "
-        "drafted from person@example.com. Save it again with calendar_draft_invite and show the person."
+        "Error: Not sent: person@example.com is signed out. Ask the person to use Sign in on its row "
+        "in Connected apps, or call google_connect with this account_id and post its reply verbatim followed "
+        "by its link as [Open it in Connected apps](<link>)."
     )
     assert calls == []
     row = get_db().execute("SELECT state FROM action_drafts WHERE id=?", (saved["draft_id"],)).fetchone()

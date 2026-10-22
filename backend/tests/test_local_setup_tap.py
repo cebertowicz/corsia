@@ -1,25 +1,59 @@
-"""Local setup installs oMLX from its tap, which must be given the repository URL."""
+"""Source setup installs missing oMLX and never modifies an existing installation."""
 
 import subprocess
 
 import pytest
 
-from llm import local_setup_ownership
+from llm import managed_omlx_binary, local_setup_executable
 
 
-def test_the_tap_is_added_with_the_repository_url_before_the_install(monkeypatch, tmp_path):
+@pytest.fixture(autouse=True)
+def working_entrypoint(monkeypatch):
+    monkeypatch.setattr(local_setup_executable, "_is_broken_leftover", lambda _path: False)
+
+
+def test_the_tap_is_added_with_the_repository_url_before_the_install(monkeypatch):
     commands: list[list[str]] = []
-    monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: tmp_path / "marker")
-    monkeypatch.setattr(local_setup_ownership, "run_command", commands.append)
-    monkeypatch.setattr(local_setup_ownership.shutil, "which",
-                        lambda name: "/opt/bin/brew" if name == "brew" else None)
-
-    local_setup_ownership.ensure_omlx(lambda stage: None)
-
+    monkeypatch.setattr(local_setup_executable, "run_command", commands.append)
+    monkeypatch.setattr(local_setup_executable.shutil, "which", lambda name: "/opt/bin/brew" if name == "brew" else None)
+    local_setup_executable.ensure_omlx(lambda _stage: None)
     assert commands == [
         ["/opt/bin/brew", "tap", "jundot/omlx", "https://github.com/jundot/omlx"],
         ["/opt/bin/brew", "install", "jundot/omlx/omlx"],
     ]
+
+
+def test_packaged_setup_uses_the_bundled_omlx_without_brew(monkeypatch):
+    commands: list[list[str]] = []
+    monkeypatch.setattr(managed_omlx_binary, "managed_omlx_executable", lambda: "/Applications/CORSIA.app/Contents/Resources/bin/omlx")
+    monkeypatch.setattr(local_setup_executable, "run_command", commands.append)
+    monkeypatch.setattr(local_setup_executable.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
+    local_setup_executable.ensure_omlx(lambda _stage: None, needs_repair=True)
+    assert commands == []
+
+
+def test_packaged_setup_reports_a_damaged_app_without_brew(monkeypatch):
+    commands: list[list[str]] = []
+    monkeypatch.setattr(managed_omlx_binary, "managed_omlx_executable", lambda: (_ for _ in ()).throw(
+        RuntimeError("The CORSIA app is damaged: its bundled oMLX executable is missing.")))
+    monkeypatch.setattr(local_setup_executable, "run_command", commands.append)
+    with pytest.raises(RuntimeError, match="CORSIA app is damaged"):
+        local_setup_executable.ensure_omlx(lambda _stage: None)
+    assert commands == []
+
+
+def test_bundled_omlx_on_path_is_not_the_persons_omlx(monkeypatch):
+    bundled = "/Applications/CORSIA.app/Contents/Resources/bin/omlx"
+    monkeypatch.setattr(local_setup_executable.shutil, "which", lambda _name: bundled)
+    monkeypatch.setattr(managed_omlx_binary, "is_managed_omlx_executable", lambda path: path == bundled)
+    assert local_setup_executable.omlx_on_path() is None
+
+
+def test_persons_brew_omlx_stays_visible_when_the_bundle_exists(monkeypatch):
+    binary = "/opt/homebrew/bin/omlx"
+    monkeypatch.setattr(local_setup_executable.shutil, "which", lambda _name: binary)
+    monkeypatch.setattr(managed_omlx_binary, "is_managed_omlx_executable", lambda _path: False)
+    assert local_setup_executable.omlx_on_path() == binary
 
 
 def test_homebrew_inspection_has_a_bounded_timeout(monkeypatch):
@@ -29,141 +63,34 @@ def test_homebrew_inspection_has_a_bounded_timeout(monkeypatch):
         seen.update(kwargs)
         return type("Result", (), {"stdout": "omlx 0.7.0\n"})()
 
-    monkeypatch.setattr(local_setup_ownership.subprocess, "run", completed)
-
-    assert local_setup_ownership.command_output(["brew", "list", "--versions", "omlx"]) == "omlx 0.7.0"
+    monkeypatch.setattr(local_setup_executable.subprocess, "run", completed)
+    assert managed_omlx_binary.command_output(["brew", "list", "--versions", "omlx"]) == "omlx 0.7.0"
     assert seen["timeout"] == 30
 
 
-def test_an_outdated_omlx_owned_by_setup_refreshes_the_tap_then_upgrades(monkeypatch, tmp_path):
-    commands: list[list[str]] = []
-    marker = tmp_path / "marker"
-    marker.write_text("installed by corsia local setup\n", encoding="utf-8")
-    monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: marker)
-    monkeypatch.setattr(local_setup_ownership, "run_command", commands.append)
-    monkeypatch.setattr(local_setup_ownership.shutil, "which",
-                        lambda name: "/opt/bin/brew" if name == "brew" else "/opt/bin/omlx")
-    monkeypatch.setattr(local_setup_ownership, "setup_owns_current_omlx", lambda *_args: True,
-                        raising=False)
-
-    local_setup_ownership.ensure_omlx(lambda stage: None, needs_repair=True, broken=False)
-
-    assert commands == [
-        ["/opt/bin/brew", "tap", "jundot/omlx", "https://github.com/jundot/omlx"],
-        ["/opt/bin/brew", "update"],
-        ["/opt/bin/brew", "upgrade", "jundot/omlx/omlx"],
-    ]
+def test_existing_binary_repair_is_actionable_and_never_runs_brew(monkeypatch):
+    monkeypatch.setattr(local_setup_executable.shutil, "which", lambda name: "/opt/bin/brew" if name == "brew" else "/opt/bin/omlx")
+    monkeypatch.setattr(local_setup_executable, "run_command", lambda _cmd: pytest.fail("existing oMLX must stay untouched"))
+    monkeypatch.setattr(managed_omlx_binary, "command_output", lambda _cmd: pytest.fail("never infer ownership from a brew keg"))
+    with pytest.raises(local_setup_executable.OwnOmlxUpgradeRequired) as failure:
+        local_setup_executable.ensure_omlx(lambda _stage: None, needs_repair=True)
+    assert "brew upgrade jundot/omlx/omlx" in str(failure.value)
+    assert "brew reinstall jundot/omlx/omlx" in str(failure.value)
+    assert "install the CORSIA app to use its bundled oMLX" in str(failure.value)
 
 
-def test_a_broken_omlx_owned_by_setup_refreshes_the_tap_then_reinstalls(monkeypatch, tmp_path):
-    commands: list[list[str]] = []
-    marker = tmp_path / "marker"
-    marker.write_text("installed by corsia local setup\n", encoding="utf-8")
-    monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: marker)
-    monkeypatch.setattr(local_setup_ownership, "run_command", commands.append)
-    monkeypatch.setattr(local_setup_ownership.shutil, "which",
-                        lambda name: "/opt/bin/brew" if name == "brew" else "/opt/bin/omlx")
-    monkeypatch.setattr(local_setup_ownership, "setup_owns_current_omlx", lambda *_args: True,
-                        raising=False)
-
-    local_setup_ownership.ensure_omlx(lambda stage: None, needs_repair=True, broken=True)
-
-    assert commands == [
-        ["/opt/bin/brew", "tap", "jundot/omlx", "https://github.com/jundot/omlx"],
-        ["/opt/bin/brew", "update"],
-        ["/opt/bin/brew", "reinstall", "jundot/omlx/omlx"],
-    ]
-
-
-def test_a_stale_marker_does_not_authorize_repairing_a_different_omlx(monkeypatch, tmp_path):
-    marker = tmp_path / "marker"
-    marker.write_text("installed by corsia local setup\n", encoding="utf-8")
-    monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: marker)
-    monkeypatch.setattr(local_setup_ownership.shutil, "which",
-                        lambda name: "/opt/bin/brew" if name == "brew" else "/usr/local/bin/omlx")
-    monkeypatch.setattr(
-        local_setup_ownership, "command_output",
-        lambda command: "jundot/omlx 0.7.0" if command[1:3] == ["list", "--versions"] else "/opt/homebrew/opt/omlx",
-        raising=False,
-    )
-
-    assert local_setup_ownership.existing_install_is_foreign() is True
-
-
-@pytest.mark.parametrize(("broken", "action"), [(False, "update"), (True, "reinstall")])
-def test_a_failed_owned_omlx_repair_names_only_the_last_homebrew_stderr_line(
-        monkeypatch, tmp_path, broken, action):
-    marker = tmp_path / "marker"
-    marker.write_text("installed by corsia local setup\n", encoding="utf-8")
-    monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: marker)
-    monkeypatch.setattr(local_setup_ownership.shutil, "which",
-                        lambda name: "/opt/bin/brew" if name == "brew" else "/opt/bin/omlx")
+@pytest.mark.parametrize("stderr,expected", [
+    ("first failure\nlast failure", "Homebrew couldn't install oMLX: last failure. Try again."),
+    ("old detail\ntap remote differs", "Homebrew couldn't install oMLX: tap remote differs. Try again."),
+    ("", "Homebrew couldn't install oMLX. Try again."),
+])
+def test_fresh_install_failure_has_bounded_homebrew_feedback(monkeypatch, stderr, expected):
+    monkeypatch.setattr(local_setup_executable.shutil, "which", lambda name: "/opt/bin/brew" if name == "brew" else None)
 
     def failed(command):
-        if command[1] == "tap" or (command[1] == "update" and action == "reinstall"):
-            return None
-        raise subprocess.CalledProcessError(1, command, stderr="first failure\nlast failure")
+        raise subprocess.CalledProcessError(1, command, stderr=stderr)
 
-    monkeypatch.setattr(local_setup_ownership, "run_command", failed)
-    monkeypatch.setattr(local_setup_ownership, "setup_owns_current_omlx", lambda *_args: True,
-                        raising=False)
-
-    with pytest.raises(RuntimeError, match=rf"Homebrew couldn't {action} oMLX: last failure\. Try again\."):
-        local_setup_ownership.ensure_omlx(lambda stage: None, needs_repair=True, broken=broken)
-
-
-def test_a_failed_ownership_read_on_repair_names_homebrew_not_a_manual_update(monkeypatch, tmp_path):
-    marker = tmp_path / "marker"
-    marker.write_text("installed by corsia local setup\n", encoding="utf-8")
-    commands = []
-    monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: marker)
-    monkeypatch.setattr(local_setup_ownership, "run_command", commands.append)
-    monkeypatch.setattr(local_setup_ownership.shutil, "which",
-                        lambda name: "/opt/bin/brew" if name == "brew" else "/opt/bin/omlx")
-
-    def locked(command):
-        raise subprocess.CalledProcessError(1, command, stderr="Error: another brew process is running")
-
-    monkeypatch.setattr(local_setup_ownership, "command_output", locked)
-
-    with pytest.raises(RuntimeError,
-                       match=r"Homebrew couldn't check oMLX: Error: another brew process is running\. Try again\."):
-        local_setup_ownership.ensure_omlx(lambda stage: None, needs_repair=True)
-    assert commands == []
-
-
-def test_a_conflicting_tap_remote_reports_only_homebrews_last_line(monkeypatch, tmp_path):
-    marker = tmp_path / "marker"
-    marker.write_text("installed by corsia local setup\n", encoding="utf-8")
-    monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: marker)
-    monkeypatch.setattr(local_setup_ownership.shutil, "which",
-                        lambda name: "/opt/bin/brew" if name == "brew" else "/opt/bin/omlx")
-    monkeypatch.setattr(local_setup_ownership, "setup_owns_current_omlx", lambda *_args: True)
-
-    def conflicting_remote(command):
-        raise subprocess.CalledProcessError(1, command, stderr="old detail\ntap remote differs")
-
-    monkeypatch.setattr(local_setup_ownership, "run_command", conflicting_remote)
-
-    with pytest.raises(RuntimeError, match=r"Homebrew couldn't update oMLX: tap remote differs\. Try again\."):
-        local_setup_ownership.ensure_omlx(lambda stage: None, needs_repair=True)
-
-
-def test_an_empty_homebrew_stderr_has_no_raw_command_in_the_card_message(monkeypatch, tmp_path):
-    marker = tmp_path / "marker"
-    marker.write_text("installed by corsia local setup\n", encoding="utf-8")
-    monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: marker)
-    monkeypatch.setattr(local_setup_ownership.shutil, "which",
-                        lambda name: "/opt/bin/brew" if name == "brew" else "/opt/bin/omlx")
-    monkeypatch.setattr(local_setup_ownership, "setup_owns_current_omlx", lambda *_args: True,
-                        raising=False)
-
-    def failed(command):
-        if command[1] == "tap":
-            return None
-        raise subprocess.CalledProcessError(1, command, stderr="")
-
-    monkeypatch.setattr(local_setup_ownership, "run_command", failed)
-
-    with pytest.raises(RuntimeError, match=r"Homebrew couldn't update oMLX\. Try again\."):
-        local_setup_ownership.ensure_omlx(lambda stage: None, needs_repair=True, broken=False)
+    monkeypatch.setattr(local_setup_executable, "run_command", failed)
+    with pytest.raises(RuntimeError) as failure:
+        local_setup_executable.ensure_omlx(lambda _stage: None)
+    assert str(failure.value) == expected

@@ -1,8 +1,10 @@
 """The local model CORSIA sets up: the one oMLX's own recommender picks for this Mac.
 
 There is no hand-kept model list. CORSIA's managed oMLX answers
-``GET /admin/api/hf/recommendations`` (first shipped in oMLX 0.7.1rc1), and the
-pick is the first row of its "best" section with at least CORSIA's agent minimum
+``GET /admin/api/hf/recommendations`` (first shipped in oMLX 0.7.1rc1), and
+CORSIA orders its rows itself: what fits the memory free now first, by quality
+then speed, then what needs more. Setup's pick and the Add model sheet's
+Recommended row are that list's first row, with at least CORSIA's agent minimum
 of context. Under 24 GiB of memory there is no local model at all. This module
 is the one owner of that rule; every other reader goes through it.
 """
@@ -47,6 +49,15 @@ class LocalModel:
     context_window: int
     #: A name the profile gives the model; without one the name comes from the repository id.
     name: str | None = field(default=None, compare=False)
+    #: oMLX recommender facts, retained for Settings display without changing model identity.
+    level: float | None = field(default=None, compare=False)
+    fp16: bool | None = field(default=None, compare=False)
+    relative_speed: float | None = field(default=None, compare=False)
+    #: Memory oMLX says the model needs once loaded; absent when oMLX gives none.
+    resident_bytes: int | None = field(default=None, compare=False)
+    #: oMLX's quality estimate (0.5-5 dots) and estimated decode speed; the sort's keys.
+    smarts_level: float | None = field(default=None, compare=False)
+    tokens_per_second: float | None = field(default=None, compare=False)
 
     @property
     def model(self) -> str:
@@ -66,14 +77,30 @@ class LocalModel:
         """Whether this is an ``-mtp`` build, which oMLX runs with its MTP head on."""
         return self.model.lower().endswith("-mtp")
 
+    @property
+    def quantization_bits(self) -> float | None:
+        """The recommender's structured quantization precision for display."""
+        return 16.0 if self.fp16 else self.level
+
     def view(self) -> dict:
         """The model as setup surfaces show it."""
-        return {
-            "name": self.display_name, "repository": self.repository,
+        result = {
+            "name": self.display_name, "repository": self.repository, "model": self.model,
             "download_size_bytes": self.download_size_bytes,
             "download_size_gb": round(self.download_size_bytes / 1000**3, 1),
             "context_window": self.context_window,
         }
+        if self.quantization_bits is not None:
+            result["quantization_bits"] = self.quantization_bits
+        if self.relative_speed is not None:
+            result["relative_speed"] = self.relative_speed
+        if self.resident_bytes is not None:
+            result["resident_bytes"] = self.resident_bytes
+        if self.smarts_level is not None:
+            result["smarts_level"] = self.smarts_level
+        if self.tokens_per_second is not None:
+            result["tokens_per_second"] = self.tokens_per_second
+        return result
 
 
 def memory_allows_local(ram_bytes: int) -> bool:
@@ -107,7 +134,21 @@ def from_recommendation(raw: object) -> LocalModel | None:
             or not isinstance(context, int) or context < MIN_CONTEXT):
         return None
     name = raw.get("display_name")
-    return LocalModel(repository, size, min(context, MAX_CONTEXT), name if isinstance(name, str) and name.strip() else None)
+    level = raw.get("level")
+    fp16 = raw.get("fp16")
+    relative_speed = raw.get("relative_speed")
+    resident = raw.get("resident_bytes")
+    smarts = raw.get("smarts_level")
+    speed = raw.get("tokens_per_second")
+    return LocalModel(
+        repository, size, min(context, MAX_CONTEXT), name if isinstance(name, str) and name.strip() else None,
+        float(level) if isinstance(level, (int, float)) and not isinstance(level, bool) else None,
+        fp16 if isinstance(fp16, bool) else None,
+        float(relative_speed) if isinstance(relative_speed, (int, float)) and not isinstance(relative_speed, bool) else None,
+        resident if isinstance(resident, int) and not isinstance(resident, bool) and resident > 0 else None,
+        float(smarts) if isinstance(smarts, (int, float)) and not isinstance(smarts, bool) else None,
+        float(speed) if isinstance(speed, (int, float)) and not isinstance(speed, bool) else None,
+    )
 
 
 def to_record(model: LocalModel) -> dict:
@@ -116,24 +157,27 @@ def to_record(model: LocalModel) -> dict:
               "max_context": model.context_window}
     if model.name:
         record["display_name"] = model.name
+    if model.level is not None:
+        record["level"] = model.level
+    if model.fp16 is not None:
+        record["fp16"] = model.fp16
+    if model.relative_speed is not None:
+        record["relative_speed"] = model.relative_speed
+    if model.resident_bytes is not None:
+        record["resident_bytes"] = model.resident_bytes
+    if model.smarts_level is not None:
+        record["smarts_level"] = model.smarts_level
+    if model.tokens_per_second is not None:
+        record["tokens_per_second"] = model.tokens_per_second
     return record
-
-
-def pick(payload: object) -> LocalModel | None:
-    """The first row of the recommender's ``best`` section that reaches 32K, else None."""
-    sections = payload.get("sections") if isinstance(payload, dict) else None
-    rows = sections.get("best") if isinstance(sections, dict) else None
-    if not isinstance(rows, list):
-        return None
-    return next((model for row in rows if (model := from_recommendation(row)) is not None), None)
 
 
 class PickUnavailable(RuntimeError):
     """The recommender could not answer: oMLX not up yet, Hugging Face unreachable, or no recommender."""
 
 
-async def ask_recommender(server_id: str) -> LocalModel | None:
-    """Ask the managed oMLX once; None when nothing fits, ``PickUnavailable`` when it can't answer.
+async def ask_recommendations(server_id: str) -> dict[str, list[LocalModel]]:
+    """Return every usable named recommender section from one oMLX request.
 
     oMLX answers 503 before its downloader is up, 504 on a Hub timeout and 502 on
     any other failure; its own Hub reads wait up to 30 seconds, so this waits a
@@ -146,16 +190,80 @@ async def ask_recommender(server_id: str) -> LocalModel | None:
     try:
         response = await admin_request({"server_id": server_id}, "GET", "/hf/recommendations", timeout=45.0)
     except (OmlxAdminError, httpx.HTTPError) as exc:
-        raise PickUnavailable(f"oMLX could not be reached ({type(exc).__name__}).") from exc
+        log.exception("oMLX recommender request failed")
+        raise PickUnavailable("Couldn't get model recommendations from oMLX. Check that oMLX is running, then try again.") from exc
     if response.status_code != 200:
-        raise PickUnavailable(f"oMLX could not check model recommendations (HTTP {response.status_code}).")
+        log.warning("oMLX recommender returned status %s", response.status_code)
+        raise PickUnavailable("Couldn't get model recommendations from oMLX. Check that oMLX is running, then try again.")
     try:
         payload = response.json()
     except ValueError as exc:
-        raise PickUnavailable("oMLX returned unreadable model recommendations.") from exc
-    if not isinstance(payload, dict) or not isinstance(payload.get("sections"), dict):
-        raise PickUnavailable("oMLX returned unreadable model recommendations.")
-    return pick(payload)
+        log.warning("oMLX recommender returned unreadable data")
+        raise PickUnavailable("Couldn't get model recommendations from oMLX. Try again.") from exc
+    sections = payload.get("sections") if isinstance(payload, dict) else None
+    if not isinstance(sections, dict):
+        log.warning("oMLX recommender returned an invalid payload")
+        raise PickUnavailable("Couldn't get model recommendations from oMLX. Try again.")
+    return {
+        name: [model for row in rows if (model := from_recommendation(row)) is not None]
+        for name, rows in sections.items() if isinstance(name, str) and isinstance(rows, list)
+    }
+
+
+async def ask_recommender(server_id: str) -> LocalModel | None:
+    """Pick setup's model from the shared Settings recommender reader."""
+    from infra.host_resources import model_room_bytes
+
+    sections = await ask_recommendations(server_id)
+    # The preload check's rule: available memory less the load reserve.
+    return pick_for_setup(sections, model_room_bytes())
+
+
+def fits_now(model: LocalModel, room_bytes: int) -> bool:
+    """host_resources' "fits now" rule for one row; a row without oMLX's loaded size counts as fitting."""
+    from infra.host_resources import GIB, fits_now as fits
+
+    return model.resident_bytes is None or fits(model.resident_bytes / GIB, room_bytes / GIB)
+
+
+def _by_quality_then_speed(model: LocalModel) -> tuple[float, float]:
+    return (-(model.smarts_level or 0.0), -(model.tokens_per_second or 0.0))
+
+
+def _in_omlx_order(sections: dict[str, list[LocalModel]]) -> list[LocalModel]:
+    """oMLX's rows, "best" first, each model once; ``unlock`` rows need more memory than this Mac has."""
+    seen: set[str] = set()
+    rows = []
+    for models in (sections.get("best", []),
+                   *(models for name, models in sections.items() if name not in ("best", "unlock"))):
+        for model in models:
+            if model.repository not in seen:
+                seen.add(model.repository)
+                rows.append(model)
+    return rows
+
+
+def order_models(sections: dict[str, list[LocalModel]], room_bytes: int) -> list[LocalModel]:
+    """The one list CORSIA offers: setup's pick on top, the rest that fit ``room_bytes``, then what needs more.
+
+    After the pick, each group runs by oMLX's quality level, then its estimated
+    speed. oMLX's section names are dropped. Setup's pick and the Add model
+    sheet's Recommended row are both this list's first fitting row.
+    """
+    pick = pick_for_setup(sections, room_bytes)
+    rows = sorted(_in_omlx_order(sections), key=_by_quality_then_speed)
+    if pick is not None and fits_now(pick, room_bytes):
+        rows = [pick, *(m for m in rows if m is not pick)]
+    return [*(m for m in rows if fits_now(m, room_bytes)), *(m for m in rows if not fits_now(m, room_bytes))]
+
+
+def pick_for_setup(sections: dict[str, list[LocalModel]], room_bytes: int) -> LocalModel | None:
+    """oMLX's own ranking: its first row that fits ``room_bytes``, "best" first; when none fits, the smallest."""
+    rows = _in_omlx_order(sections)
+    fitting = next((model for model in rows if fits_now(model, room_bytes)), None)
+    if fitting is not None or not rows:
+        return fitting
+    return min(rows, key=lambda model: model.resident_bytes or 0)
 
 
 def _record_path() -> Path:
@@ -177,37 +285,35 @@ def record_set_up(model: LocalModel) -> None:
 
 
 def _starter_installed(starter: LocalModel) -> bool:
-    """Whether CORSIA's own oMLX has the whole pre-record starter in its configured model directory."""
-    from llm.local_setup_ownership import download_complete, own_omlx_settings_file
+    """Whether the published setup's oMLX directory holds its completed starter."""
+    from llm.local_setup_disk import download_complete
+    from llm.local_setup_executable import legacy_omlx_settings_file
 
     try:
-        raw = json.loads(own_omlx_settings_file().read_text(encoding="utf-8"))
+        raw = json.loads(legacy_omlx_settings_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
     model = raw.get("model") if isinstance(raw, dict) else None
     model_dir = model.get("model_dir") if isinstance(model, dict) else None
-    if not isinstance(model_dir, str) or not model_dir:
-        return False
-    return download_complete(Path(model_dir) / starter.repository, starter.download_size_bytes)
+    return isinstance(model_dir, str) and bool(model_dir) and download_complete(
+        Path(model_dir) / starter.repository, starter.download_size_bytes,
+    )
 
 
 def backfill_legacy_record() -> LocalModel | None:
     """Once at startup, record the starter a finished pre-record setup installed.
 
-    Writes only when there is no record and no recovery record of any version (a
-    setup may be mid-download), setup's own marker is present, the current oMLX
-    runs and is setup's own, and that oMLX's model directory holds the whole starter
-    (the marker is written before the download starts, so it proves no download).
+    Writes only when there is no record or recovery record (a setup may be mid-
+    download), the published setup marker still owns oMLX, and that oMLX holds the starter.
     Blocking: run it off the event loop.
     """
     from llm import local_setup_operation
     from llm.local_profiles import STARTER_MODEL
-    from llm.local_setup_ownership import existing_install_is_foreign, installed_omlx, marker_path
+    from llm.local_setup_executable import legacy_setup_is_foreign, legacy_setup_marker_path, omlx_on_path
 
-    if _record_path().exists() or local_setup_operation.record_path().exists() or not marker_path().exists():
-        return None
-    if installed_omlx() is None or existing_install_is_foreign() or not _starter_installed(STARTER_MODEL):
-        return None
+    if (_record_path().exists() or local_setup_operation.record_path().exists()
+            or not legacy_setup_marker_path().exists() or omlx_on_path() is None
+            or legacy_setup_is_foreign() or not _starter_installed(STARTER_MODEL)):        return None
     try:
         record_set_up(STARTER_MODEL)
     except OSError as error:

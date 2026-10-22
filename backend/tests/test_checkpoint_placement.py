@@ -94,7 +94,7 @@ def test_migration_40_staging_copy_matches_the_live_schema_while_current() -> No
     from infra.migration_39_to_40_placement_marks import STAGING_40_DDL
     from infra.schema import SCHEMA_VERSION
 
-    if SCHEMA_VERSION == 126:
+    if SCHEMA_VERSION == 141:
         assert STAGING_40_DDL == STAGING_SCHEMA_SQL
 
 
@@ -593,7 +593,8 @@ def _log(repo: Path) -> list[str]:
 
 
 def _placement_save(workspace: Path, target: Path, text: str, expected: str | None):
-    from infra.guidance_git import GuidanceTarget, digest, save_guidance
+    from infra.guidance_git import digest, save_guidance
+    from infra.guidance_targets import GuidanceTarget
 
     return save_guidance(
         {target: text.encode()}, workspace=workspace, target=GuidanceTarget("placement"),

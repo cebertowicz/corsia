@@ -63,7 +63,7 @@ async def _maintain_initial_boundary(
     _identity: TurnIdentity,
 ):
     from subagents.cc_replay_authority import require_cc_provider_fit
-    from core.checkpoint_cc_context import CCCheckpointContext
+    from core.fork_cc_context import CCForkContext
     from subagents.cc_resume_transition import (
         replace_same_turn_after_checkpoint_locked,
     )
@@ -78,7 +78,7 @@ async def _maintain_initial_boundary(
         return replacement, replacement_frame
     if transition.refresh_callback is None:
         require_cc_provider_fit(prepared_context, transition.target)
-        current.session.tool_context = CCCheckpointContext(
+        current.session.tool_context = CCForkContext(
             transition.target, prepared_context.fit_ledger.rendered_input_tokens,
         )
         return current, frame
@@ -91,7 +91,7 @@ async def _maintain_initial_boundary(
     )
     if adopted is None:
         require_cc_provider_fit(prepared_context, transition.target)
-        current.session.tool_context = CCCheckpointContext(
+        current.session.tool_context = CCForkContext(
             transition.target, prepared_context.fit_ledger.rendered_input_tokens,
         )
         return current, frame

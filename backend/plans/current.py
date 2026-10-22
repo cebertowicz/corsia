@@ -38,7 +38,7 @@ PAGE_BYTES = 16 * 1024
 #: were 81.8% of the projection's bytes (acceptance_criteria 41.0%, description
 #: 40.8%) while carrying no identity a mutation needs.
 _BODY_FIELDS = (
-    "description", "acceptance_criteria", "workflow_ref", "workflow_version",
+    "description", "intent", "intent_node_id", "acceptance_criteria", "workflow_ref", "workflow_version",
     "workflow_step", "difficulty",
 )
 

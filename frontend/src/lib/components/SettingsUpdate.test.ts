@@ -58,11 +58,11 @@ describe('SettingsUpdate', () => {
 
 		expect(host.textContent).toContain('1.0.0');
 		expect(host.textContent).toContain('1.1.0 available');
-		expect(host.querySelector('.pill.active')?.textContent).toBe('1.1.0 available');
+		expect(host.querySelector('.offer-state')?.textContent).toBe('· 1.1.0 available');
 		expect(host.textContent).toContain('Update');
 	});
 
-	it('uses StatePill and hides the available version while updating', () => {
+	it('puts the update in progress on the version line and hides the available version', () => {
 		updateStatus.set(status({
 			available: true, target_version: '1.1.0',
 			operation: { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase: 'draining' },
@@ -70,11 +70,11 @@ describe('SettingsUpdate', () => {
 		component = mount(SettingsUpdate, { target: host });
 		flushSync();
 
-		expect(host.querySelector('.pill.active')).toBeNull();
+		expect(host.querySelector('.offer-state')).toBeNull();
 		expect(host.textContent).not.toContain('1.1.0 available');
 		// The Version row carries the toast's words and a spinner, not a second phrasing.
 		expect(host.textContent).toContain('Pausing agents');
-		expect(host.querySelector('.updating .spinner')).toBeTruthy();
+		expect(host.querySelector('.version-line .updating .spinner')).toBeTruthy();
 		expect(host.textContent).not.toContain('Updating to');
 		expect(host.querySelector('.offer')).toBeNull();
 	});

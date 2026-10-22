@@ -3,19 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import secrets
 import time
 from types import SimpleNamespace
+from typing import Any, Callable
 
 import httpx
 
 from llm.local_model import LocalModel
 from llm.local_profiles import MODEL_SETTINGS, OMLX_GLOBAL_SETTINGS, thinking_recommendation
-from llm.local_setup_auth import SKIP_AUTH_SETTING
-from llm.local_setup_ownership import omlx_log_detail
+from llm.local_setup_auth import SKIP_AUTH_SETTING, UPDATE_OMLX_MESSAGE, _omlx_supports_loopback_auth, omlx_version, secure_local_omlx
+from llm.local_setup_executable import ensure_omlx, omlx_log_detail
+from llm.managed_omlx_binary import MANAGED_INSTANCE_ID, reserve_managed_omlx_port
+
+log = logging.getLogger(__name__)
 
 LOCAL_HOST = "127.0.0.1"
 HEALTH_WAIT_SECONDS = 120.0
-LOCAL_SERVER_NAME = "This Mac"
+LOCAL_SERVER_NAME = "Local"
 
 
 async def omlx_answers(port: int) -> bool:
@@ -48,14 +54,79 @@ async def wait_for_health(port: int) -> None:
     )
 
 
-async def register_loopback_server(*, port: int, api_key: str | None = None) -> str:
-    """Register a healthy loopback oMLX through the existing manual path."""
-    from api.network_server_helpers import _add_omlx_server
+async def start_managed_omlx(report: Callable[[str], None]) -> tuple[str, int]:
+    """Install and supervise the private server without touching other services."""
+    from llm.local_model import omlx_has_recommender
+    from llm.providers.omlx_supervisor import start_server
 
-    result = await _add_omlx_server(SimpleNamespace(
-        hostname=LOCAL_HOST, port=port, name=LOCAL_SERVER_NAME, api_key=api_key,
-    ))
-    return str(result["server_id"])
+    report("Installing")
+    version = await asyncio.to_thread(omlx_version)
+    needs_repair = (not await asyncio.to_thread(_omlx_supports_loopback_auth)
+                    or not omlx_has_recommender(version))
+    await asyncio.to_thread(ensure_omlx, report, needs_repair=needs_repair)
+    if not await asyncio.to_thread(_omlx_supports_loopback_auth):
+        raise RuntimeError(UPDATE_OMLX_MESSAGE)
+    paths, port = await asyncio.to_thread(reserve_managed_omlx_port)
+    server_id, key = await register_managed_server(
+        port=port, base_path=str(paths.base_path), model_dir=str(paths.model_dir),
+    )
+    report("Starting")
+    started = await start_server({"server_id": server_id})
+    if not started.get("ok"):
+        raise RuntimeError(str(started.get("message") or "CORSIA couldn’t start its local model server."))
+    report("Configuring")
+    await secure_local_omlx(server_id, key)
+    await configure_global(server_id)
+    return server_id, port
+
+
+async def register_managed_server(*, port: int, base_path: str, model_dir: str) -> tuple[str, str]:
+    """Create CORSIA's managed row without modifying any other server row.
+
+    The generated credential stays in the server key store and is passed only to
+    CORSIA's owned subprocess through its supervisor configuration.
+    """
+    from infra.db_async import run_in_db
+    from infra.key_store_servers import resolve_server, set_server_key
+    from llm import network_discovery as discovery
+
+    def persist() -> tuple[str, str]:
+        server_id = discovery.upsert_server(
+            provider="omlx", instance_id=MANAGED_INSTANCE_ID, instance_name=LOCAL_SERVER_NAME,
+            host=LOCAL_HOST, port=port, status="offline", kind="managed", source="corsia",
+        )
+        credential = resolve_server(server_id) or secrets.token_urlsafe(32)
+        set_server_key(server_id, credential)
+        discovery.set_server_metadata(
+            server_id, base_path=base_path, model_dir=model_dir, corsia_managed=True,
+        )
+        return server_id, credential
+
+    return await run_in_db(persist)
+
+
+def rename_managed_server() -> bool:
+    """Give an existing install's managed row, and the model rows that carry its name, the current name.
+
+    Matches only the row ``is_corsia_managed_server`` recognizes, so a person's server keeps its own name.
+    """
+    from infra.database import write_transaction
+    from llm.managed_omlx_binary import is_corsia_managed_server
+    from llm.network_discovery import get_servers
+
+    stale = [row for row in get_servers(provider="omlx")
+             if is_corsia_managed_server(row) and row["instance_name"] != LOCAL_SERVER_NAME]
+    if not stale:
+        return False
+    with write_transaction(None, scope="rename_managed_server") as db:
+        for row in stale:
+            db.execute("UPDATE network_servers SET instance_name = ? WHERE id = ?", (LOCAL_SERVER_NAME, row["id"]))
+            db.execute(
+                "UPDATE models SET metadata_json = json_set(metadata_json, '$.server_name', ?) "
+                "WHERE json_valid(metadata_json) AND json_extract(metadata_json, '$.server_id') = ?",
+                (LOCAL_SERVER_NAME, row["id"]),
+            )
+    return True
 
 
 async def configure_global(server_id: str) -> None:
@@ -84,6 +155,140 @@ async def thinking_settings(server_id: str, model: LocalModel) -> dict:
     return thinking_recommendation(row.get("thinking_default"))
 
 
+class OptimalResult:
+    """Best-effort outcome from the benchmark settings pass."""
+
+    def __init__(self, status: str, speed: float | None = None, *, writer_attempted: bool = False) -> None:
+        self.status = status
+        self.speed = speed
+        self.writer_attempted = writer_attempted
+
+
+def _model_specific_fields(payload: object) -> set[str]:
+    """Read the current oMLX model-specific allowlist without copying it locally."""
+    if not isinstance(payload, dict):
+        return set()
+    values = payload.get("model_specific")
+    if not isinstance(values, list):
+        values = payload.get("model_specific_fields")
+    return {value for value in values if isinstance(value, str)} if isinstance(values, list) else set()
+
+
+async def _without_uninstalled_drafts(server_id: str, settings: dict[str, Any]) -> dict[str, Any] | None:
+    """Drop draft-model settings whose referenced model is absent from this oMLX."""
+    drafts = {key: value for key, value in settings.items()
+              if key.endswith("_draft_model") and isinstance(value, str)}
+    if not drafts:
+        return settings
+    from llm.providers.omlx_endpoints import OmlxAdminError, admin_request
+
+    try:
+        response = await admin_request({"server_id": server_id}, "GET", "/models", timeout=15.0)
+        payload = response.json() if response.status_code == 200 else None
+    except (OmlxAdminError, ValueError):
+        return None
+    rows = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return None
+    installed = {row.get("id") for row in rows if isinstance(row, dict) and isinstance(row.get("id"), str)}
+    return {key: value for key, value in settings.items() if key not in drafts or value in installed}
+
+
+async def model_settings_payload(server_id: str, model: LocalModel) -> dict[str, Any]:
+    """The one CORSIA-owned per-model settings payload; it never includes sampling."""
+    return {
+        **MODEL_SETTINGS,
+        "max_context_window": model.context_window,
+        **({"mtp_enabled": True} if model.mtp else {}),
+        **await thinking_settings(server_id, model),
+    }
+
+
+async def _read_optimal_inputs(server_id: str, model: LocalModel) -> tuple[dict[str, Any], object, object, object] | OptimalResult:
+    """Read the candidate, benchmark and current oMLX state without writing."""
+    from llm.providers.omlx_endpoints import OmlxAdminError, admin_request
+
+    try:
+        candidate = await admin_request(
+            {"server_id": server_id}, "GET", f"/models/{model.model}/settings/optimal", timeout=15.0,
+        )
+        if candidate.status_code == 404:
+            return OptimalResult("not_found")
+        if candidate.status_code != 200:
+            return OptimalResult("offline")
+        payload = candidate.json()
+        rows = payload.get("by_tg") if isinstance(payload, dict) else None
+        row = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None
+        benchmark_id = row.get("benchmark_id") if row is not None else None
+        if not isinstance(benchmark_id, str) or not benchmark_id:
+            return OptimalResult("not_found")
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            benchmark = await client.get(f"https://omlx.ai/api/benchmarks/{benchmark_id}")
+        if benchmark.status_code != 200:
+            return OptimalResult("offline")
+        fields = await admin_request({"server_id": server_id}, "GET", "/profile-fields", timeout=15.0)
+        current = await admin_request({"server_id": server_id}, "GET", f"/models/{model.model}/settings", timeout=15.0)
+        if fields.status_code != 200 or current.status_code != 200:
+            return OptimalResult("offline")
+        return row, benchmark.json(), fields.json(), current.json()
+    except OmlxAdminError:
+        return OptimalResult("no_omlx")
+    except (httpx.HTTPError, ValueError):
+        return OptimalResult("offline")
+
+
+async def apply_optimal_settings(server_id: str, model: LocalModel) -> OptimalResult:
+    """Apply only compatible benchmark performance fields in one model-settings write."""
+    writer_attempted = False
+    try:
+        from llm.local_model import omlx_has_recommender
+        from llm.local_setup_auth import omlx_version
+        from llm.providers.omlx_endpoints import OmlxAdminError, admin_request
+
+        if not omlx_has_recommender(await asyncio.to_thread(omlx_version)):
+            return OptimalResult("unsupported")
+        inputs = await _read_optimal_inputs(server_id, model)
+        if isinstance(inputs, OptimalResult):
+            return inputs
+        row, snapshot, fields, current = inputs
+        settings = snapshot.get("model_settings") if isinstance(snapshot, dict) else None
+        allowed = _model_specific_fields(fields)
+        if not isinstance(settings, dict) or not isinstance(current, dict):
+            return OptimalResult("offline")
+        filtered = {key: value for key, value in settings.items() if key in allowed}
+        # TurboQuant is an all-or-nothing feature; a disabled snapshot must not carry
+        # its stale bit/skip fields into this model.
+        if filtered.get("turboquant_kv_enabled") is not True:
+            filtered = {key: value for key, value in filtered.items() if not key.startswith("turboquant_")}
+        compatible = await _without_uninstalled_drafts(server_id, filtered)
+        if compatible is None:
+            return OptimalResult("offline")
+        if not compatible:
+            return OptimalResult("not_found")
+
+        try:
+            # The benchmark decides TurboQuant here, so CORSIA's default must not switch it on.
+            corsia = {key: value for key, value in (await model_settings_payload(server_id, model)).items()
+                      if not key.startswith("turboquant_")}
+        except RuntimeError:
+            return OptimalResult("offline")
+        writer_attempted = True
+        try:
+            response = await admin_request(
+                {"server_id": server_id}, "PUT", f"/models/{model.model}/settings",
+                json={**corsia, **compatible}, timeout=15.0,
+            )
+        except (httpx.HTTPError, OmlxAdminError):
+            return OptimalResult("offline", writer_attempted=True)
+        if response.status_code != 200:
+            return OptimalResult("offline", writer_attempted=True)
+        speed = row.get("tg_tps") if isinstance(row, dict) else None
+        return OptimalResult("applied", float(speed) if isinstance(speed, (int, float)) else None)
+    except Exception:
+        log.exception("Couldn't apply optimal local-model settings")
+        return OptimalResult("offline", writer_attempted=writer_attempted)
+
+
 async def configure_model_settings(server_id: str, model: LocalModel) -> None:
     """Set the picked model's oMLX settings.
 
@@ -93,11 +298,7 @@ async def configure_model_settings(server_id: str, model: LocalModel) -> None:
     """
     from llm.providers.omlx_endpoints import admin_request
 
-    payload = {
-        **MODEL_SETTINGS, "max_context_window": model.context_window,
-        **({"mtp_enabled": True} if model.mtp else {}),
-        **await thinking_settings(server_id, model),
-    }
+    payload = await model_settings_payload(server_id, model)
     response = await admin_request(
         {"server_id": server_id}, "PUT", f"/models/{model.model}/settings", json=payload, timeout=15.0,
     )

@@ -251,6 +251,7 @@
 
 		<SidebarThreadList
 			bind:this={threadListRef}
+			contextMenuThreadId={contextMenuKind === 'conversation' ? contextMenuThreadId : null}
 			{onSelectThread}
 			{onDeleteThread}
 			{onArchiveThread}

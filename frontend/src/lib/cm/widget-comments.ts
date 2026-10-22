@@ -4,7 +4,7 @@ import { commentRanges } from './comment-marks';
 import { pendingCommentMark } from './pending-comment-mark';
 import { blockRange, cellElement, DIAGRAM, TABLE, widgetOf } from './widget-blocks';
 import { occurrences, snappedTableRows, tableCells, widgetCommentLabel, type CellSpan } from './widget-cells';
-import { addCommentId, commentIdsAt, paintTable, unpaint, type Mark } from './widget-paint';
+import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type Mark } from './widget-paint';
 
 /**
  * Comments on text inside a rendered table, and on a rendered diagram as a whole. The widgets replace their source,
@@ -49,17 +49,20 @@ export function selectionIn(view: EditorView, el: HTMLElement, range: Range): Wi
 		return { ...block, text: view.state.sliceDoc(block.from, block.to), ...place, label: () => widgetCommentLabel(state, block.from, block.to, '') ?? undefined, anchor: () => el.isConnected ? el.getBoundingClientRect() : null };
 	}
 	const src = view.state.sliceDoc(block.from, block.to);
+	const origin = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
+	const collapsedCell = range.collapsed ? origin?.closest<HTMLTableCellElement>('td, th') ?? null : null;
 	const covered = tableCells(src).map((span) => ({ span, cell: cellElement(el, span) }))
-		.filter((hit): hit is { span: CellSpan; cell: HTMLTableCellElement } => !!hit.cell && range.intersectsNode(hit.cell))
+		.filter((hit): hit is { span: CellSpan; cell: HTMLTableCellElement } => !!hit.cell && (range.intersectsNode(hit.cell) || hit.cell === collapsedCell))
 		.map(({ span, cell }) => {
-			// The selection's share of this cell: it starts and ends inside the cell, or at the cell's own edges.
+			// The selection's share of this cell: it starts and ends inside the cell, or at the cell's own edges. A collapsed
+		// range at an empty cell's edge does not intersect that element in Chromium, so `collapsedCell` above includes it.
 			const part = range.cloneRange(), inCell = document.createRange();
 			inCell.selectNodeContents(cell);
 			if (range.compareBoundaryPoints(Range.START_TO_START, inCell) < 0) part.setStart(cell, 0);
 			if (range.compareBoundaryPoints(Range.END_TO_END, inCell) > 0) part.setEnd(cell, cell.childNodes.length);
 			return { span, cell, part, picked: part.toString() };
 		})
-		.filter(({ picked }) => picked.trim() !== '');
+		.filter(({ span, picked }) => picked.trim() !== '' || (range.collapsed && span.from === span.to));
 	if (covered.length === 0) return null;
 	const rows = (items: Array<{ cell: HTMLTableCellElement }> = covered) => {
 		const trs = items.map(({ cell }) => cell.parentElement).filter((tr): tr is HTMLElement => !!tr?.isConnected);
@@ -84,6 +87,10 @@ export function selectionIn(view: EditorView, el: HTMLElement, range: Range): Wi
 	if (covered.length > 1) return whole();
 	// One cell: the occurrence the person selected, by its place among the same text in the rendered cell.
 	const { span, cell, part, picked } = first;
+	if (range.collapsed && span.from === span.to) {
+		const from = block.from + span.anchorFrom, to = block.from + span.anchorTo, text = src.slice(span.anchorFrom, span.anchorTo);
+		return { from, to, text, ...place, label: () => widgetCommentLabel(state, from, to, text) ?? undefined, anchor: rows as () => DOMRect | null };
+	}
 	const rendered = cell.textContent ?? '';
 	const before = document.createRange();
 	before.selectNodeContents(cell);
@@ -128,8 +135,9 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 		private readonly click = (event: MouseEvent) => {
 			const origin = event.target instanceof Element ? event.target : null;
 			const widget = origin && widgetOf(this.view, origin);
+			const selection = document.getSelection();
 			const ids = widget && origin ? commentIdsAt(widget, origin) : [];
-			if (widget && origin && ids.length > 0 && document.getSelection()?.isCollapsed !== false) { hooks.onFocus(ids, origin.closest<HTMLElement>('[data-comment-ids]') ?? widget); return; }
+			if (widget && origin && ids.length > 0 && selection?.isCollapsed !== false) { hooks.onFocus(ids, origin.closest<HTMLElement>('[data-comment-ids]') ?? widget); return; }
 			if ((this.pointer === 'touch' || this.recentTouch()) && (!origin || !widgetOf(this.view, origin))) { hooks.onSelect(null); return; }
 			this.tap(event);
 		};
@@ -167,6 +175,19 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 					window.removeEventListener('mouseup', release);
 					if (Math.hypot(e.clientX - clientX, e.clientY - clientY) > 4) { document.getSelection()?.selectAllChildren(widget); this.listen(); }
 				};
+				window.addEventListener('mouseup', release);
+				return;
+			}
+			const emptyCell = target.closest<HTMLTableCellElement>('td, th');
+			// Chromium gives an empty cell a collapsed DOM range but does not announce it through selectionchange.
+			// This is the existing press path for table selection, so read the range synchronously here.
+			if (emptyCell && !emptyCell.textContent?.trim()) {
+				event.preventDefault();
+				const selection = document.getSelection(), range = document.createRange();
+				range.selectNodeContents(emptyCell);
+				selection?.removeAllRanges();
+				selection?.addRange(range);
+				const release = () => { window.removeEventListener('mouseup', release); this.listen(); };
 				window.addEventListener('mouseup', release);
 				return;
 			}
@@ -212,9 +233,18 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 
 		private read() {
 			const selection = document.getSelection();
-			const range = selection && selection.rangeCount > 0 && !selection.isCollapsed ? selection.getRangeAt(0) : null;
+			const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
 			const el = range && widgetOf(this.view, range.commonAncestorContainer);
-			const raised = el && range ? selectionIn(this.view, el, range) : null;
+			const raised = el && range && (!range.collapsed || el.matches(TABLE)) ? selectionIn(this.view, el, range) : null;
+			// While the editor holds focus, every editor update (this selection's own pending mark, a collaborator's edit)
+			// writes the editor's caret over the browser's selection, which then reads as nothing. A selection inside a widget
+			// is not the editor's, so the editor gives up focus and the same range is put back.
+			if (raised && this.view.hasFocus) {
+				const kept = range!.cloneRange();
+				this.view.contentDOM.blur();
+				selection!.removeAllRanges();
+				selection!.addRange(kept);
+			}
 			if (raised) { this.raised = true; hooks.onSelect({ ...raised, top: raised.anchor()?.top ?? raised.top }); }
 			else if (this.raised) { this.raised = false; hooks.onSelect(null); }
 		}
@@ -239,16 +269,18 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 						const signature = JSON.stringify([block.from, src.length, mine]);
 						if (el.dataset.paintSignature === signature) continue;
 						el.dataset.paintSignature = signature;
-						unpaint(el);
-						if (el.matches(DIAGRAM)) {
-							for (const mark of mine) {
-								el.classList.add(mark.kind === 'pending' ? 'cm-comment-block-pending' : 'cm-comment-block', ...(mark.kind === 'focused' ? ['cm-comment-block-focused'] : []));
-								addCommentId(el, mark);
-								el.dataset.commentAria = 'true';
-								el.setAttribute('role', 'img');
-								el.setAttribute('aria-label', 'Commented diagram');
-							}
-						} else paintTable(el, block.from, src, mine);
+						keepingSelection(el, () => {
+							unpaint(el);
+							if (el.matches(DIAGRAM)) {
+								for (const mark of mine) {
+									el.classList.add(mark.kind === 'pending' ? 'cm-comment-block-pending' : 'cm-comment-block', ...(mark.kind === 'focused' ? ['cm-comment-block-focused'] : []));
+									addCommentId(el, mark);
+									el.dataset.commentAria = 'true';
+									el.setAttribute('role', 'img');
+									el.setAttribute('aria-label', 'Commented diagram');
+								}
+							} else paintTable(el, block.from, src, mine);
+						});
 					}
 				},
 			});

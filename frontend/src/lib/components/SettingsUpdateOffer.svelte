@@ -35,16 +35,17 @@
 	<div class="actions">
 		<Button variant="primary" size="sm" loading={$updateStarting} onclick={() => void startUpdate()}>Update now</Button>
 		{#if scheduledTonight}
-			<Button size="sm" disabled={saving} onclick={() => void saveSchedule({ tonight: false })}>Cancel tonight's update</Button>
+			<Button variant="ghost" size="sm" disabled={saving} onclick={() => void saveSchedule({ tonight: false })}>Cancel tonight's update</Button>
 		{:else if schedule && !schedule.automatic}
-			<Button size="sm" disabled={saving} onclick={() => void tonight()}>Tonight at {formatScheduleTime(schedule.time)}</Button>
+			<Button variant="ghost" size="sm" disabled={saving} onclick={() => void tonight()}>Tonight at {formatScheduleTime(schedule.time)}</Button>
 		{/if}
 	</div>
 </div>
 
 <style>
-	.offer { display: grid; gap: var(--space-3); padding: var(--space-3); background: var(--bg-tertiary); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: var(--text-footnote); line-height: 1.5; }
+	/* Read content under the Version row, flat on the pane at the row inset (§0.1). */
+	.offer { display: grid; gap: var(--space-3); padding: var(--space-1) var(--space-2) var(--space-2); color: var(--text-secondary); font-size: var(--text-footnote); line-height: 1.5; }
 	.cost { margin: 0; }
-	.actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-	@media (max-width: 768px) { .actions :global(button) { flex: 1 1 100%; } }
+	/* Natural width at every size: a full-width ghost reads as a line of text, not a button. */
+	.actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 </style>

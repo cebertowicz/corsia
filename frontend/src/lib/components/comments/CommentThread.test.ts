@@ -100,6 +100,16 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct-at.compact')?.textContent).toBe('now');
 	});
 
+	it('shows agent comment and reply bylines as author then time only', () => {
+		render(thread({
+			author: 'conductor', authorKind: 'agent',
+			replies: [{ author: 'conductor', authorKind: 'agent', text: 'Reply', at: '1m ago' }],
+		}));
+		expect(host.querySelector('.ct-author')?.textContent).toBe('Conductor');
+		expect(host.querySelector('.ct-msg-author')?.textContent).toBe('Conductor');
+		expect(host.textContent).not.toMatch(/via Claude Code|opus-4\.8|project coordination/);
+	});
+
 	it('posts a reply on Cmd+Enter', () => {
 		const { onReply } = render(thread());
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;

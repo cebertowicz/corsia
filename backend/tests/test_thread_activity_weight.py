@@ -33,7 +33,7 @@ def _db() -> sqlite3.Connection:
         "id TEXT PRIMARY KEY, thread_id TEXT, role TEXT, content TEXT, "
         "metadata TEXT, created_at TEXT, seq INTEGER, active_turn_id TEXT, "
         "write_started_at TEXT, delivery_state TEXT NOT NULL DEFAULT 'delivered', "
-        "delivery_intent TEXT)"
+        "delivery_intent TEXT, input_order INTEGER)"
     )
     conn.execute(
         "CREATE INDEX idx_messages_turn_calls ON messages(thread_id, role, "

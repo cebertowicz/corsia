@@ -255,7 +255,7 @@ async def test_codex_turn_is_owned_until_its_terminal_commits(
         "_retire_registered_thread_artifacts",
         lambda *_a, **_k: False,
     )
-    monkeypatch.setattr(codex_runtime, "insert_message", lambda *_a, **_k: None)
+    monkeypatch.setattr("subagents.codex_shutdown_error.insert_message", lambda *_a, **_k: None)
     if route in _ROUTES_WITH_TOOL_DEBT:
         live, _step_id = _active_live_with_persisted_tool(thread_id, session)
     else:
@@ -282,7 +282,7 @@ async def test_tool_debt_settlement_happens_inside_the_ownership_window(
     _reset_runtime()
     thread_id = f"codex-debt-{route}"
     session = _FenceSession(thread_id, request_idle=True)
-    monkeypatch.setattr(codex_runtime, "insert_message", lambda *_a, **_k: None)
+    monkeypatch.setattr("subagents.codex_shutdown_error.insert_message", lambda *_a, **_k: None)
     live, step_id = _active_live_with_persisted_tool(thread_id, session)
     settled_while_owned: list[bool] = []
     original_settle = codex_runtime._settle_live_tool_debt

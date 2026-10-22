@@ -1,13 +1,10 @@
 
-import { expect, type Locator, test } from '@playwright/test';
-import {
-    captureConsoleErrors,
-    createSession,
-    TEST_TOKEN,
-    waitForWsConnected,
-} from '../support/corsia';
+import { test } from '../support/test';
+import { expect, type Locator } from '@playwright/test';
+import { captureConsoleErrors, createSession, openAppPastLanding, TEST_TOKEN, waitForWsConnected, sidebarThread } from '../support/corsia';
 import { injectMessage } from '../support/mock';
 import { setFocusMode } from '../support/focusMode';
+import { settled } from '../support/reviewFixtures';
 
 const LONG_TEXT = Array.from(
     { length: 26 },
@@ -20,6 +17,9 @@ async function expectCollapsedThenExpand(row: Locator) {
 
     await expect(body).toHaveClass(/collapsed/, { timeout: 10_000 });
     await expect(toggle).toBeVisible();
+    // The rows fade in and the opened thread's panel slides in under the toggle; a press that lands mid-slide
+    // goes down on the button and comes up on the text it moved over, so it is no click on the button.
+    await settled(row.page());
 
     await toggle.click();
     await expect(row.getByRole('button', { name: 'Show less' })).toBeVisible();
@@ -78,16 +78,13 @@ test.describe('@flow:long-message-collapse @surface:chat long message readabilit
                 TEST_TOKEN,
             );
 
-            await page.goto(`/?token=${encodeURIComponent(TEST_TOKEN)}`);
-            await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible({
-                timeout: 20_000,
-            });
+            await openAppPastLanding(page);
 
             if ((page.viewportSize()?.width ?? 0) <= 768) {
                 await page.getByRole('button', { name: 'Toggle sidebar' }).click();
             }
 
-            await page.getByText(sessionTitle).click({ timeout: 10_000 });
+            await sidebarThread(page, sessionTitle).click({ timeout: 10_000 });
             await waitForWsConnected(page);
 
             const assistantRow = page.locator('.message.assistant').first();

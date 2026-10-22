@@ -18,6 +18,7 @@ import logging
 import os
 import pwd
 import stat
+import string
 import uuid
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -28,6 +29,8 @@ PROFILE_RELATIVE_PATH = Path("context") / "50-USER-PROFILE.md"
 _LOCALTIME = Path("/etc/localtime")
 _EMAIL_LABEL = "- **Email:**"
 _NAME_LABEL = "- **Preferred name:**"
+_FULL_NAME_LABEL = "- **Full name:**"
+USE_COMMUNITY_LABEL = "- **Use community improvements:**"
 
 
 def mac_full_name() -> str:
@@ -60,9 +63,11 @@ def one_line(value: str) -> str:
     return " ".join(value.split())
 
 
-def profile_text(name: str, timezone: str, email: str = "") -> str:
-    """The profile body: the name, the email when known, and the timezone when the Mac reports one."""
-    lines = ["# User profile", "", f"- **Preferred name:** {one_line(name)}"]
+def profile_text(full_name: str, timezone: str, email: str = "") -> str:
+    """The profile body: the preferred name (the full name's first word), the full name, the email when
+    known, and the timezone when the Mac reports one."""
+    full_name = one_line(full_name)
+    lines = ["# User profile", "", f"{_NAME_LABEL} {full_name.split(' ', 1)[0]}", f"{_FULL_NAME_LABEL} {full_name}"]
     if one_line(email):
         lines.append(f"{_EMAIL_LABEL} {one_line(email)}")
     if timezone:
@@ -70,32 +75,50 @@ def profile_text(name: str, timezone: str, email: str = "") -> str:
     return "\n".join(lines) + "\n"
 
 
-def _email_in(text: str) -> str:
+def _labeled_value(text: str, label: str) -> str:
+    """The rest of the first line that starts with ``label``, or empty."""
     for line in text.splitlines():
-        if line.startswith(_EMAIL_LABEL):
-            return line[len(_EMAIL_LABEL):].strip()
+        if line.startswith(label):
+            return line.removeprefix(label)
     return ""
+
+
+def _read_profile(workspace: Path) -> str:
+    try:
+        return (Path(workspace) / PROFILE_RELATIVE_PATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return ""
+
+
+def _email_in(text: str) -> str:
+    return _labeled_value(text, _EMAIL_LABEL).strip()
 
 
 def profile_email(workspace: Path) -> str:
     """The email an existing profile already names, or empty."""
-    try:
-        return _email_in((Path(workspace) / PROFILE_RELATIVE_PATH).read_text(encoding="utf-8"))
-    except OSError:
-        return ""
+    return _email_in(_read_profile(workspace))
+
+
+def _printable_value(workspace: Path, label: str) -> str:
+    """The existing profile's value after ``label``, without control characters, or empty."""
+    value = "".join(char for char in _labeled_value(_read_profile(workspace), label) if char.isprintable())
+    return one_line(value)[:120]
 
 
 def profile_name(workspace: Path) -> str:
     """The existing profile's preferred name, without control characters, or empty."""
-    try:
-        text = (Path(workspace) / PROFILE_RELATIVE_PATH).read_text(encoding="utf-8")
-    except OSError:
-        return ""
-    for line in text.splitlines():
-        if line.startswith(_NAME_LABEL):
-            name = "".join(char for char in line.removeprefix(_NAME_LABEL) if char.isprintable())
-            return one_line(name)[:120]
-    return ""
+    return _printable_value(workspace, _NAME_LABEL)
+
+
+def profile_full_name(workspace: Path) -> str:
+    """The existing profile's full name, without control characters, or empty."""
+    return _printable_value(workspace, _FULL_NAME_LABEL)
+
+
+def uses_community_improvements(workspace: Path) -> bool:
+    """Whether the person explicitly answered yes to using community improvements."""
+    words = _labeled_value(_read_profile(workspace), USE_COMMUNITY_LABEL).split(maxsplit=1)
+    return bool(words) and words[0].rstrip(string.punctuation).casefold() == "yes"
 
 
 class StagedProfile:
@@ -131,15 +154,15 @@ class StagedProfile:
             logger.exception("Could not restore the user profile")
 
 
-def stage_user_profile(workspace: Path, name: str, timezone: str, email: str = "") -> StagedProfile | None:
+def stage_user_profile(workspace: Path, full_name: str, timezone: str, email: str = "") -> StagedProfile | None:
     """Prepare the profile write for a new install, or ``None`` when there is nothing to write.
 
-    A missing profile is created from the name, timezone and email. An existing
+    A missing profile is created from the full name, timezone and email. An existing
     one is never rewritten; it only gains the email it names none of. Raises
     ``ValueError`` when the name is empty and ``OSError`` when the folder cannot
     be written.
     """
-    if not one_line(name):
+    if not one_line(full_name):
         raise ValueError("a name is required")
     path = Path(workspace) / PROFILE_RELATIVE_PATH
     email = one_line(email)
@@ -154,7 +177,7 @@ def stage_user_profile(workspace: Path, name: str, timezone: str, email: str = "
         mode = stat.S_IMODE(path.stat().st_mode)
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        text = profile_text(name, timezone, email)
+        text = profile_text(full_name, timezone, email)
     temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     descriptor = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
     try:

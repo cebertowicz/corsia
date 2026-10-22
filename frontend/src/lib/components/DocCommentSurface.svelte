@@ -29,7 +29,7 @@
 	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
 	/** A document's image comments (DCOL-FR13.6): grouped under each thumbnail, with cards carrying tag number and colour; `src` is null when the image has no file. */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, widgetLabel, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, placementRecovery = { orphanedCount: 0 }, covered = false, onDrawerShown, onSheetModalChange, onRevealDraft }: {
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, widgetLabel, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, placementRecovery = { unplacedCount: 0, replaceableCount: 0 }, covered = false, onDrawerShown, onSheetModalChange, onRevealDraft }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
@@ -140,7 +140,7 @@
 		return image ? [...shown].sort(byNumber) : shown;
 	});
 	const followed = $derived(surfaceState?.kind === 'thread' ? comments.find((item) => item.id === surfaceState.id) : undefined);
-	// Leaving the document sends the batch (DocFeedback.leave); in its grace period it says when it goes instead.
+	// Comments not yet sent say they are on their way; Send delivers them at once.
 	const unsentText = $derived(feedback?.unsent ?? null);
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
@@ -385,7 +385,7 @@
 	.drawer-unsent p { flex: 1; min-width: 0; margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
 	/* A long owner name is cut only where the footer is too narrow to hold it on one line of the sentence. */
 	@container drawer-footer (max-width: 30rem) { .drawer-footer-owner { display: inline-block; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; white-space: nowrap; } }
-	.drawer-unsent :global(.btn) { flex: none; }
+	.drawer-unsent :global(.btn) { flex: none; min-width: 6.5rem; }
 	@media (max-width: 420px) { .drawer-unsent { gap: var(--space-1); padding-inline: var(--space-2); } }
 	@media (pointer: coarse) { .drawer-unsent :global(.btn) { min-height: 44px; } }
 	.suggestion-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }

@@ -6,8 +6,6 @@ const mocks = vi.hoisted(() => ({
 	fetchComments: vi.fn(),
 	fetchRevision: vi.fn(),
 	send: vi.fn(),
-	leave: vi.fn(),
-	ret: vi.fn(),
 	retry: vi.fn(),
 }));
 vi.mock('$lib/ws', () => ({ on: vi.fn(() => () => {}) }));
@@ -20,8 +18,6 @@ vi.mock('$lib/api/docs', () => ({
 }));
 vi.mock('$lib/api/docFeedback', () => ({
 	sendDocFeedback: mocks.send,
-	leaveDocFeedback: mocks.leave,
-	returnDocFeedback: mocks.ret,
 	retryDocFeedback: mocks.retry,
 }));
 vi.mock('$lib/stores/viewport', async () => {
@@ -36,7 +32,7 @@ import { docComments } from '$lib/stores/docComments';
 import { isMobile } from '$lib/stores/viewport';
 
 const SRC = '/api/files/content?path=%2Fws%2Fshot.png&raw=true';
-const pending = (open_count: number) => ({ owner_label: 'Design', grace_closes_at: null, undelivered_batches: [], open_count });
+const pending = (open_count: number) => ({ owner_label: 'Design', undelivered_batches: [], open_count });
 const onImage = (id: string, number: number) => ({
 	id, author: 'you', author_kind: 'user', body: id, created_at: '2026-10-10T00:00:00Z',
 	region_x: 0.1, region_y: 0.2, region_w: 0.2, region_h: 0.1, region_number: number, region_stale: false,
@@ -113,7 +109,7 @@ beforeEach(() => {
 	});
 	Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
 	docComments.set({});
-	for (const mock of [mocks.send, mocks.leave, mocks.ret, mocks.retry]) mock.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
+	for (const mock of [mocks.send, mocks.retry]) mock.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
 	mocks.fetchComments.mockReset().mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(0) });
 	mocks.fetchRevision.mockReset().mockResolvedValue({ exists: true, path: '/ws/shot.png', revision: 'r-1', media_type: 'image/png', artifact_id: 'art-img' });
 });
@@ -151,11 +147,11 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		unmount(shown.component);
 		mounted = mounted.filter((component) => component !== shown.component);
 		await settle();
-		expect(mocks.leave).not.toHaveBeenCalled();
+		expect(mocks.send).not.toHaveBeenCalled();
 		expect(sendIn(doc.target)!.textContent!.trim()).toBe('Send 1 comment to Design');
 	});
 
-	it('counts a comment made in the viewer into the document’s batch', async () => {
+	it('leaves nothing waiting to send after a comment made in the viewer, which goes at once', async () => {
 		const doc = documentStatus();
 		const shown = await viewer({
 			src: SRC, alt: 'Mock', artifactId: 'art-doc',
@@ -165,15 +161,15 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		await settle();
 		shown.target.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
 		await settle();
-		const textarea = shown.target.querySelector<HTMLTextAreaElement>('textarea')!;
+		const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea')!;
 		textarea.value = 'Too dark';
 		textarea.dispatchEvent(new Event('input', { bubbles: true }));
 		await settle();
-		shown.target.querySelector<HTMLButtonElement>('button.submit')!.click();
+		document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
 		await settle();
-		// The document’s review surface owns the pending batch; the in-document lightbox has no duplicate control.
+		// A person's comment is delivered as it is made: no Send in the lightbox or the document's review surface.
 		expect(sendIn(shown.target.querySelector('.bar')!)).toBeNull();
-		expect(sendIn(doc.target)!.textContent!.trim()).toBe('Send 1 comment to Design');
+		expect(sendIn(doc.target)).toBeNull();
 	});
 
 	it('keeps an image artifact’s own batch, sent to its owner from the drawer footer, never the bar', async () => {
@@ -182,7 +178,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(sendIn(shown.target.querySelector('.bar')!), 'the bar has no Send (RSR-5)').toBeNull();
 		await openDrawer(shown.target);
 		const footer = footerIn(shown.target)!;
-		expect(footer.querySelector('[role="status"]')!.textContent).toBe('1 message not sent yet · it goes to Design when you leave.');
+		expect(footer.querySelector('[role="status"]')!.textContent).toBe('1 message not sent yet · it goes to Design in a few seconds.');
 		const send = [...footer.querySelectorAll('button')].find((button) => button.textContent!.trim() === 'Send now')!;
 		send.click();
 		await settle();
@@ -227,7 +223,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(footerIn(shown.target)).toBeNull();
 	});
 
-	it('reloading an image artifact is not leaving it: its batch stays pending', async () => {
+	it('reloading an image artifact keeps its batch pending, and closing the tab sends nothing', async () => {
 		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(1) });
 		const shown = await imageTab();
 		await openDrawer(shown.target);
@@ -237,15 +233,15 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		shown.component.reload();
 		await drawn(shown.target);
 
-		expect(mocks.leave).not.toHaveBeenCalled();
+		expect(mocks.send).not.toHaveBeenCalled();
 		// The reload redraws the viewer with its drawer closed; reopened, it still names the pending batch.
 		await openDrawer(shown.target);
 		expect(footerIn(shown.target)!.textContent).toContain('1 message not sent yet');
-		// Closing the tab is leaving it.
+		// Closing the tab sends nothing: the server delivers on its own clock.
 		unmount(shown.component as unknown as Record<string, unknown>);
 		mounted = mounted.filter((component) => component !== (shown.component as unknown));
 		await settle();
-		expect(mocks.leave).toHaveBeenCalledWith('art-img');
+		expect(mocks.send).not.toHaveBeenCalled();
 	});
 
 	it('on a phone, keeps the in-document lightbox bar free of review controls', async () => {

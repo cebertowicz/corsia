@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { isTabChanged, type ArtifactTab } from '$lib/stores/artifactWorkspace';
 
 	let { tabs, activeKey, imageTabIds = new Set<string>(), onSelect, onClose, onCollapse }: {
@@ -12,6 +13,56 @@
 	} = $props();
 
 	let stripEl = $state<HTMLElement | undefined>(undefined);
+	let startHidden = $state(false);
+	let endHidden = $state(false);
+
+	function refreshScrollEdges() {
+		const el = stripEl;
+		if (!el) return;
+		startHidden = el.scrollLeft > 1;
+		endHidden = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+	}
+
+	function reducedMotion(): boolean {
+		return typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+	}
+
+	function revealTab(instanceId: string) {
+		const tab = Array.from(stripEl?.querySelectorAll<HTMLElement>('.tab') ?? [])
+			.find((element) => element.dataset.tabId === instanceId);
+		tab?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' });
+		requestAnimationFrame(refreshScrollEdges);
+	}
+
+	function onWheel(event: WheelEvent) {
+		const el = stripEl;
+		if (!el || event.deltaY === 0) return;
+		event.preventDefault();
+		el.scrollBy?.({ left: event.deltaY, behavior: 'auto' });
+	}
+
+	$effect(() => {
+		const el = stripEl;
+		if (!el) return;
+		refreshScrollEdges();
+		if (typeof ResizeObserver === 'undefined') return;
+		const observer = new ResizeObserver(refreshScrollEdges);
+		observer.observe(el);
+		return () => observer.disconnect();
+	});
+
+	// Saves and load signals replace `tabs` in place; only an opened or closed tab
+	// changes this, so a person scrolling the strip is not pulled back mid-save.
+	const tabIds = $derived(tabs.map((tab) => tab.instanceId).join('\n'));
+
+	$effect(() => {
+		void tabIds;
+		const active = activeKey;
+		void tick().then(() => {
+			if (active) revealTab(active);
+			else refreshScrollEdges();
+		});
+	});
 
 	function onKeydown(e: KeyboardEvent, idx: number) {
 		if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
@@ -26,7 +77,16 @@
 </script>
 
 <div class="strip">
-	<div class="tabs" role="tablist" aria-label="Open side panel items" bind:this={stripEl}>
+	<div
+		class="tabs"
+		class:start-hidden={startHidden}
+		class:end-hidden={endHidden}
+		role="tablist"
+		aria-label="Open side panel items"
+		bind:this={stripEl}
+		onscroll={refreshScrollEdges}
+		onwheel={onWheel}
+	>
 		{#each tabs as t, i (t.instanceId)}
 			{@const key = t.instanceId}
 			{@const active = key === activeKey}
@@ -38,7 +98,9 @@
 					role="tab"
 					aria-selected={active}
 					tabindex={active ? 0 : -1}
+					data-tab-id={key}
 					onclick={() => onSelect(key)}
+					onfocus={() => revealTab(key)}
 					onkeydown={(e) => onKeydown(e, i)}
 				>
 					{#if t.kind === 'browser'}
@@ -88,6 +150,13 @@
 		gap: 2px;
 	}
 	.tabs::-webkit-scrollbar { display: none; }
+	/* Hidden tabs leave a soft edge instead of an extra overflow control. */
+	.tabs.start-hidden { -webkit-mask-image: linear-gradient(to right, transparent, currentColor var(--space-4)); mask-image: linear-gradient(to right, transparent, currentColor var(--space-4)); }
+	.tabs.end-hidden { -webkit-mask-image: linear-gradient(to left, transparent, currentColor var(--space-4)); mask-image: linear-gradient(to left, transparent, currentColor var(--space-4)); }
+	.tabs.start-hidden.end-hidden {
+		-webkit-mask-image: linear-gradient(to right, transparent, currentColor var(--space-4), currentColor calc(100% - var(--space-4)), transparent);
+		mask-image: linear-gradient(to right, transparent, currentColor var(--space-4), currentColor calc(100% - var(--space-4)), transparent);
+	}
 	/* A tab is a pill in the transcript's pill geometry (32 px, fully round); wide enough for a typical file name. */
 	.tab-wrap {
 		display: flex; align-items: center; flex-shrink: 0;

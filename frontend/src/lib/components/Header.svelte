@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { activeThread, activeThreadId, isNavAgent } from '$lib/stores/threads';
+	import { threadLocalOnly } from '$lib/stores/threadLocalOnly';
+	import { requestModelSheet } from '$lib/stores/modelSheetRequest';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { openProjectSettings as showProjectSettings, openWorkspaceSettings as showWorkspaceSettings } from '$lib/stores/settingsNavigation';
 	import { sidebarCollapsed } from '$lib/stores/ui';
@@ -11,7 +13,7 @@
 	import { openMeasurementFromThread } from '$lib/stores/measurementNavigation';
 	import type { View } from '$lib/homePaneConfig';
 
-	let { onToggleSidebar, onTogglePane, onMeasurement, activeView, conductorThreadId, hasPane = true }: {
+	let { onToggleSidebar, onTogglePane, onMeasurement, activeView, conductorThreadId, hasPane = true, artifactHeaderInset = null }: {
 		onToggleSidebar: () => void;
 		onTogglePane: () => void;
 		/** Opens the Measurement surface; the doorway writes its own scope first (PL-2). */
@@ -20,6 +22,8 @@
 		conductorThreadId: string | null;
 		/** False where the view has no right pane; the panel toggle would open nothing. */
 		hasPane?: boolean;
+		/** Width reserved by an expanded artifact canvas and its divider. */
+		artifactHeaderInset?: number | null;
 	} = $props();
 
 	const h = $derived($canvasHeader);
@@ -41,6 +45,9 @@
 	const showMeasures = $derived(activeView === 'chat' && !isTakeover && (isConductorThread || isLaneThread));
 	const hasOverflow = $derived(overflowActions.length > 0);
 	const measuresLabel = $derived(`Measurement for ${isConductorThread ? scopeTitle : ($activeThread?.title ?? 'this agent')}`);
+	// LO1: the badge shows exactly when Local only is in force: the thread's own, inherited, or the project's.
+	const showLocalOnly = $derived(activeView === 'chat' && !isTakeover && $activeThread != null
+		&& threadLocalOnly($activeThread).effective);
 
 	function openMeasures() {
 		haptic();
@@ -62,6 +69,10 @@
 	function openThreadSettings() {
 		haptic();
 		threadSettingsOpen.update((open) => !open);
+	}
+	function openLocalOnlySettings() {
+		haptic();
+		requestModelSheet({ focusLocalOnly: true });
 	}
 	function openProjectSettings() {
 		haptic();
@@ -97,13 +108,27 @@
 			<svg class="h-cond-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Agent"><path d="M12 3l1.8 5 5 1.8-5 1.8L12 17l-1.8-5-5-1.8 5-1.8z"/></svg>
 		{/if}
 		<span class="h-scope">{$activeThread.title}</span>
+		<!-- The badge's slot is reserved so its appearance never moves the title. -->
+		<span class="h-local-slot">
+			{#if showLocalOnly}
+				<button class="h-local-only" onclick={openLocalOnlySettings} aria-label="Local only. Change in model settings." title="Local only. Change in model settings.">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 12h6M12 9v6"/></svg>
+					<span>Local only</span>
+				</button>
+			{/if}
+		</span>
 	{:else}
 		<span class="h-scope">{scopeTitle}</span>
 	{/if}
 {/snippet}
 
 <header class="shell-header" class:shell-inset={$sidebarCollapsed} data-tauri-drag-region use:toastTopSurface>
-	<div class="h-leading">
+	<div
+		class="chat-header"
+		class:with-canvas={artifactHeaderInset !== null}
+		style:--artifact-header-inset={artifactHeaderInset === null ? undefined : `${artifactHeaderInset}px`}
+	>
+		<div class="h-leading">
 		<div class="h-zone h-left">
 			<button class="h-icon" onclick={toggleSidebar} title="Toggle sidebar" aria-label="Toggle sidebar">
 				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
@@ -153,6 +178,7 @@
 				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="15" y1="4" x2="15" y2="20"/></svg>
 			</button>
 		{/if}
+		</div>
 	</div>
 </header>
 
@@ -195,6 +221,13 @@
 	:global(html[data-shell="tauri"]) .shell-header.shell-inset { padding-left: 99px; }
 	.shell-header :global(button) { -webkit-app-region: no-drag; app-region: no-drag; }
 
+	.chat-header { display: flex; align-items: center; flex: 1; min-width: 0; }
+	/* The canvas keeps its own segment in the shared header. All chat controls, including
+	   the title, stay in the remaining segment instead of layering over its tabs. */
+	.chat-header.with-canvas {
+		flex: 0 1 calc(100% - var(--artifact-header-inset));
+		max-width: calc(100% - var(--artifact-header-inset));
+	}
 	.h-zone { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 	.h-leading { display: flex; align-items: center; min-width: 0; flex: 1; gap: 8px; }
 	.h-right { margin-left: auto; }
@@ -230,13 +263,16 @@
 		letter-spacing: var(--ls-title); color: var(--text-primary);
 		white-space: nowrap; overflow: hidden;
 	}
-	.h-scope { overflow: hidden; text-overflow: ellipsis; }
-	/* An expanded document occupies the right canvas column, and ChatArtifactSplit publishes its width on main as
-	   --artifact-header-inset (unset without one). The title stays inside the chat's column, with a visible gap
-	   before the document tab strip. The header's right padding is outside this flex box, so the reservation adds
-	   it back. With the inset unset, neither rule binds: the cap exceeds the box and the gap is zero. */
-	.h-leading { max-width: calc(100% - var(--artifact-header-inset, 0px) + var(--header-inline-end)); }
-	.h-title { margin-right: min(var(--space-2), var(--artifact-header-inset, 0px)); }
+	/* A long scoped title yields to the fixed header controls instead of pushing them away. */
+	.h-scope { min-width: 0; max-width: 24rem; overflow: hidden; text-overflow: ellipsis; }
+	/* The Local only badge: a status mark, not a pill (DESIGN-SYSTEM §0.1, §0.2): no fill or border at rest, teal icon, secondary label. */
+	.h-local-slot { display: inline-flex; flex: 0 0 auto; min-width: var(--header-badge-slot); }
+	.h-local-only { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; padding: var(--space-1) var(--chip-inline-padding); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; animation: hLocalOnlyIn var(--dur-tight) var(--ease-snap); transition: background var(--dur-tight), color var(--dur-tight), opacity var(--dur-tight), transform var(--dur-tight); }
+	.h-local-only:hover { background: var(--bg-hover); color: var(--text-primary); }
+	.h-local-only:active { transform: scale(.96); }
+	.h-local-only svg { flex: 0 0 auto; color: var(--teal); }
+	@keyframes hLocalOnlyIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+	@media (prefers-reduced-motion: reduce) { .h-local-only { animation: none; } }
 	.h-cond-glyph { color: var(--accent-text); flex-shrink: 0; }
 	.h-cond-tag { color: var(--text-tertiary); font-weight: var(--fw-medium); flex-shrink: 0; }
 	.h-cond-tag::before { content: '· '; }
@@ -283,6 +319,13 @@
 			box-shadow: none;
 			display: grid; grid-template-columns: auto 1fr auto; gap: 4px;
 		}
+		/* The desktop split wrapper collapses back to the existing three mobile header cells. */
+		.chat-header, .chat-header.with-canvas {
+			grid-column: 1 / -1;
+			width: 100%; max-width: none; flex: 1;
+			display: grid; grid-template-columns: auto 1fr auto; gap: var(--space-1);
+		}
+		.h-leading { display: contents; }
 		/* The blur stays on this masked layer so it fades out with no hard edge.
 		   Wherever the mask is below 1 the transcript shows through, so the mask stays opaque
 		   down to the bottom of the row's glyphs and then fades out linearly to the header
@@ -309,6 +352,11 @@
 		/* inline-flex is content-sized; override so the 1fr cell bounds the title and
 		   the existing overflow:hidden + text-overflow:ellipsis on .h-scope fires. */
 		.h-title { justify-self: center; text-align: center; width: 100%; min-width: 0; }
+		/* At 393 the badge is its icon alone in a 44px hit area; the label stays for screen readers. */
+		.h-local-slot { min-width: var(--touch-target); }
+		.h-local-only { width: var(--touch-target); height: var(--touch-target); padding: 0; justify-content: center; }
+		.h-local-only:hover { background: transparent; color: var(--text-secondary); }
+		.h-local-only span { position: absolute; width: 0; height: 0; padding: 0; overflow: hidden; white-space: nowrap; }
 		.h-icon { width: 44px; height: 44px; }
 		.h-back-label { display: none; }
 		.h-act.overflowable { display: none; }

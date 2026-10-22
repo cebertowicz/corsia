@@ -14,12 +14,15 @@ the assertion with it.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import re
 import sys
 import uuid
 from typing import Any
 
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from plans import service
 from plans.boundary import PlanActor, mutate
 from tests.plan_ask_helpers import with_actionable_user_ask
@@ -102,6 +105,24 @@ def revision(db, node_id: str) -> int:
 
 def plan_update(db, plan_id, operation, params, *, actor=OWNER, mutation_id=None) -> dict:
     """Commit one mutation through the real boundary and return its result."""
+    if operation in {"add", "insert"} and params.get("kind", "task") == "task" and "intent" not in params:
+        owner = service._plan_row(db, plan_id)["owner_id"]
+        intent = f"Deliver {params['title']}."
+        turn_id = f"authority-turn-{uuid.uuid4().hex}"
+        message_id = f"authority-message-{uuid.uuid4().hex}"
+        if db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages_fts'"
+        ).fetchone() is None:
+            _init_messages_fts(db)
+        accept_thread_input(
+            owner, role="user", content=intent, intent="apply_now", message_id=message_id, db=db,
+        )
+        db.execute("UPDATE messages SET active_turn_id=? WHERE id=?", (turn_id, message_id))
+        params = {
+            **params, "intent": intent,
+            "intent_words": [{"quote": intent, "role": "authority"}],
+        }
+        actor = replace(actor, turn_id=turn_id)
     params = with_actionable_user_ask(db, plan_id, operation, params, actor)
     return mutate(
         plan_id, operation, params, actor=actor, provenance="test.plan_close_next",
@@ -164,7 +185,9 @@ def close_params(db, operation: str, node_id: str, *, next_node_id: Any = _MISSI
     if operation in {"accept", "accept_with_follow_up"}:
         params["verification_result"] = "passed"
     if operation == "accept_with_follow_up":
-        params.update(title="Fix the follow-up", acceptance_criteria="Follow-up is verified")
+        params.update(
+            title="Fix the follow-up", acceptance_criteria="Follow-up is verified", size="unknown",
+        )
     if next_node_id is not _MISSING:
         params["next_node_id"] = next_node_id
     return params

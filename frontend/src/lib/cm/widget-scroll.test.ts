@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { forceParsing } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
 import { GFM } from '@lezer/markdown';
 import { scrollToRange } from './comment-marks';
@@ -20,6 +21,9 @@ const rect = (top: number, height: number) => ({ top, height, bottom: top + heig
  */
 function editorWithTable(rowTops: number[] | null) {
 	const view = new EditorView({ state: EditorState.create({ doc: DOC, extensions: [markdown({ extensions: GFM })] }), parent: document.body });
+	// The first parse stops after 20ms of wall time and finishes on a timer these tests never run: under load the table would
+	// not be parsed yet, and the comment would read as plain text.
+	if (!forceParsing(view, view.state.doc.length, 1_000)) throw new Error('markdown parser did not finish');
 	view.scrollDOM.style.overflowY = 'auto';
 	view.scrollDOM.getBoundingClientRect = () => rect(BAND.top, BAND.bottom - BAND.top);
 	const writes: boolean[] = [];

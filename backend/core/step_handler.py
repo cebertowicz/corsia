@@ -15,7 +15,9 @@ from infra.context_receipts import (
     context_usage_receipt,
     context_usage_summary, live_context_usage_payload,
 )
+from core.turn_error_surface import persist_llm_error
 from infra.queries import insert_message
+from llm.error_cause import error_fields
 from core.plan_turn_end import record_turn_end_logged
 from core.turn_core import TurnIdentity
 from tools.tool_display import tool_start_frame
@@ -384,21 +386,13 @@ class StepHandler:
 
     async def _handle_error(self, payload: dict):
         terminal_context = await self._persist_terminal_context(payload)
-        err_id = str(uuid.uuid4())
-        err_now = utc_now_iso()
+        err_id, err_now = str(uuid.uuid4()), utc_now_iso()
         err_content = payload.get("message", "An error occurred")
-        err_meta = {
-            "type": "llm_error",
-            "model": self.model_info.get("model"),
-            "turn_id": self.turn_id,
-        }
-
-        def _persist():
-            with write_transaction(None, scope="persist_error") as db:
-                insert_message(self.thread_id, "system", err_content, err_meta,
-                               msg_id=err_id, db=db, created_at=err_now)
-
-        await run_in_db(_persist)
+        err_fields = await run_in_db(
+            persist_llm_error, write_transaction, insert_message, self.thread_id,
+            self.model_info.get("model"), self.turn_id, err_id, err_now, err_content,
+            error_fields(payload),
+        )
 
         await record_turn_end_logged(
             self.thread_id, "plan-liveness error wake failed; parent may wait",
@@ -406,13 +400,13 @@ class StepHandler:
             level="ERROR", outcome="error", error=err_content, turn_id=self.turn_id,
         )
 
-        ws_payload = {
+        await self._emit({
             "type": "error",
             "thread_id": self.thread_id,
             "message": err_content,
+            **err_fields,
             **terminal_context,
-        }
-        await self._emit(ws_payload)
+        })
 
     async def _handle_turn_cancelled(self, payload: dict):
         effect_type = (

@@ -12,30 +12,25 @@
 	const { group, isThisMac = false, isCloud = false, children }: Props = $props();
 
 	const usedGb = $derived(group.resources ? group.resources.total_gb - group.resources.free_gb : null);
+	const KIND_LABEL = { lan: 'LAN', tailscale: 'Tailscale', cloud: 'Cloud' } as const;
+	// How the host is reached reads as part of its description, not as a badge.
+	const kind = $derived(
+		group.netKind === 'lan' || group.netKind === 'tailscale' || (group.netKind === 'cloud' && !isCloud)
+			? KIND_LABEL[group.netKind]
+			: '',
+	);
+	// The subname already carries total and free; used completes it on the same line rather than repeating free beside it.
+	const used = $derived(usedGb === null ? '' : `${usedGb.toFixed(0)} GB used`);
+	const subline = $derived([group.subname, used, kind].filter(Boolean).join(' · '));
 </script>
 
 <section class="host-section">
 	<div class="host-head" class:this={isThisMac} class:cloud={isCloud}>
 		<div class="host-title">
-			<div class="host-name">
-				<span>{group.name}</span>
-				{#if group.netKind === 'lan' || group.netKind === 'tailscale' || (group.netKind === 'cloud' && !isCloud)}
-					<span class="net-tag {group.netKind}">{group.netKind}</span>
-				{/if}
-			</div>
-			<div class="host-subname">{group.subname}</div>
+			<h3 class="host-name">{group.name}</h3>
+			{#if subline}<div class="host-subname">{subline}</div>{/if}
 		</div>
-
-		{#if group.resources}
-			<div class="host-meta">
-				<span><strong>{usedGb?.toFixed(0)} GB</strong> used</span>
-				<span class="sep">·</span>
-				<span class="free">{group.resources.free_gb.toFixed(0)} GB free</span>
-			</div>
-		{/if}
 	</div>
-
-	<div class="host-rule"></div>
 
 	<div class="providers">
 		{@render children()}
@@ -43,58 +38,15 @@
 </section>
 
 <style>
-	.host-section { margin-bottom: 28px; }
-	.host-section:last-child { margin-bottom: 0; }
+	/* One host is one Settings group: a section label with its description, then its rows.
+	   Space alone separates hosts, as it separates groups on the other Settings pages. */
+	.host-section { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-6); }
+	.host-section:first-of-type { margin-top: 0; }
 
-	.host-head {
-		display: flex; align-items: center; gap: 14px;
-		padding: 6px 0 14px;
-	}
+	.host-head { padding: 0 var(--space-2); }
+	.host-title { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+	.host-name { margin: 0; font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-tertiary); }
+	.host-subname { margin-bottom: var(--space-1); font-size: var(--text-caption); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 
-	.host-title { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-	.host-name {
-		font-size: var(--text-callout); font-weight: 600; letter-spacing: -0.015em;
-		color: var(--text-primary);
-		display: flex; align-items: center; gap: 10px;
-	}
-	.host-head.this .host-name { color: var(--accent-text); }
-	.host-subname {
-		font-size: var(--text-footnote); color: var(--text-tertiary); font-weight: 400;
-	}
-
-	.net-tag {
-		font-size: var(--text-caption); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
-		padding: 2px 7px; border-radius: var(--radius-xs);
-	}
-	.net-tag.localhost { color: var(--teal); border: 1px solid var(--teal-line); background: var(--teal-bg); }
-	.net-tag.lan       { color: var(--sky); border: 1px solid var(--sky-line); background: var(--sky-bg); }
-	.net-tag.tailscale { color: var(--purple-text); border: 1px solid var(--purple-line); background: var(--purple-bg); }
-	.net-tag.cloud     { color: var(--accent-text); border: 1px solid var(--accent-line); background: var(--accent-wash); }
-
-	.host-meta {
-		display: flex; align-items: center; gap: 12px;
-		font-size: var(--text-footnote); color: var(--text-tertiary);
-		font-variant-numeric: tabular-nums;
-		flex-shrink: 0;
-	}
-	.host-meta .sep { color: var(--text-tertiary); opacity: 0.5; }
-	.host-meta strong { color: var(--text-secondary); font-weight: 600; }
-	.host-meta .free { color: var(--green); font-weight: 600; }
-
-	.host-rule { height: 1px; background: var(--border-subtle); margin: 0 0 10px; }
-
-	.providers { display: flex; flex-direction: column; gap: 4px; }
-
-	@media (max-width: 720px) {
-		.host-head { flex-wrap: wrap; gap: 10px; }
-		.host-meta { width: 100%; }
-	}
-
-	@media (max-width: 480px) {
-		.host-head { padding: 4px 0 12px; gap: 10px; }
-		.host-name { font-size: var(--text-body); gap: 8px; }
-		.host-subname { font-size: var(--text-footnote); }
-		.host-meta { font-size: var(--text-footnote); gap: 8px; }
-		.host-section { margin-bottom: 20px; }
-	}
+	.providers { display: flex; flex-direction: column; gap: var(--space-1); }
 </style>

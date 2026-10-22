@@ -369,13 +369,14 @@ async def test_stdio_http_client_preserves_tool_result_text(result):
 
 
 @pytest.mark.asyncio
-async def test_stdio_http_client_ignores_environment_proxies():
+async def test_stdio_http_client_ignores_environment_proxies(monkeypatch):
     from subagents import corsia_mcp_server
 
-    client = corsia_mcp_server._http_client("live-secret", "cp-1")
+    monkeypatch.setenv("CORSIA_FORK_ID", "cp-1")
+    client = corsia_mcp_server._http_client("live-secret")
     try:
         assert client._trust_env is False
-        assert client.headers["X-CORSIA-Checkpoint-Id"] == "cp-1"
+        assert client.headers["X-CORSIA-Fork-Id"] == "cp-1"
     finally:
         await client.aclose()
 
@@ -1036,7 +1037,7 @@ async def test_rejected_resume_does_not_replace_an_unsettled_process(monkeypatch
     )
     monkeypatch.setattr(cc_feed_transition, "require_cc_provider_fit", lambda *_: None)
     monkeypatch.setattr(
-        "llm.resolution.resolve_execution_target", lambda _catalog_id: target,
+        "llm.resolution.resolve_execution_target", lambda _catalog_id, **_k: target,
     )
 
     try:

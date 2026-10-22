@@ -40,7 +40,7 @@ async def test_boundaryless_external_cold_admission_runs_off_the_loop(monkeypatc
 
 @pytest.mark.asyncio
 async def test_native_cold_tool_count_and_fit_run_off_the_loop(monkeypatch):
-    from core import checkpoint_native_fork as fork
+    from core import fork_native as fork
 
     loop_thread = threading.get_ident()
     counted: list[int] = []
@@ -56,8 +56,8 @@ async def test_native_cold_tool_count_and_fit_run_off_the_loop(monkeypatch):
         assert round_trip_tokens == 16_384
         return SimpleNamespace(messages=(), first_included_seq=3)
 
-    monkeypatch.setattr("core.checkpoint_cold_count.cold_input_tokens", count)
-    monkeypatch.setattr("core.checkpoint_render.fit_cold_checkpoint_input", fit)
+    monkeypatch.setattr("core.fork_cold_count.cold_input_tokens", count)
+    monkeypatch.setattr("core.fork_render.fit_cold_fork_input", fit)
     # A cold fork only ever advertises its one executable tool (#2116); use it
     # here too so this off-loop-threading contract stays meaningful.
     tools = [{"type": "function", "function": {"name": "continuity_edit"}}]
@@ -66,7 +66,9 @@ async def test_native_cold_tool_count_and_fit_run_off_the_loop(monkeypatch):
         warm_source=None, instruction="fold", target="writer", max_output_tokens=16_384,
     )
 
-    messages, sent_tools, first_seq = await fork._messages_and_tools(request, agent)
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
+
+    messages, sent_tools, first_seq = await fork._messages_and_tools(request, agent, CHECKPOINT_KIND)
 
     assert counted and counted[0] != loop_thread
     assert fitted and fitted[0] != loop_thread

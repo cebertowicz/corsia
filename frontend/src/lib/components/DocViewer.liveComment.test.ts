@@ -36,7 +36,7 @@ beforeEach(() => {
 	connectionState.set('connected'); stop = startLiveDocuments();
 	api.fetchContent.mockResolvedValue({ text: 'disk copy', writable: true, artifact: { id: 'artifact' }, freshness: null });
 	api.fetchRevision.mockResolvedValue({ exists: true, writable: true, artifact_id: 'artifact', freshness: null });
-	api.fetchComments.mockResolvedValue({ comments: [], feedback: { open_count: 0, owner_label: null, grace_closes_at: null, undelivered_batches: [] } });
+	api.fetchComments.mockResolvedValue({ comments: [], feedback: { open_count: 0, owner_label: null, undelivered_batches: [] } });
 	api.postComment.mockImplementation(async (_artifact, fields) => ({ id: fields.client_id, artifact_id: 'artifact',
 		body: fields.body, anchor_text: fields.anchor_text, from_off: fields.from_off, to_off: fields.to_off,
 		author: 'you', author_kind: 'user', created_at: '2026-10-07T00:00:00Z', parent_id: null, review: false, resolved: false, acked: false, replies: [] }));
@@ -104,7 +104,9 @@ it('retains body across outside-close/reselection, rejects deleted identity and 
 	await vi.waitFor(() => expect(submit.disabled).toBe(true));
 	const reason = submit.getAttribute('aria-describedby');
 	expect(document.getElementById(reason!)?.textContent).toContain('your draft will carry over');
-	document.querySelector<HTMLElement>('.drawer-backdrop')!.click(); flushSync();
+	const scrim = document.querySelector<HTMLElement>('.drawer-backdrop')!;
+	scrim.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+	scrim.click(); flushSync();
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
 	expect(get(commentDraft)?.body).toBe('Keep my body');
 	await select(0, 5); host.querySelector<HTMLButtonElement>('.sel-comment')!.click(); flushSync();
@@ -120,7 +122,9 @@ it('highlights the selected text only while its composer is open: a close keeps 
 	const marked = () => [...host.querySelectorAll('.cm-comment-pending')].map(node => node.textContent).join('');
 	await open(); await select(); await compose();
 	expect(marked()).toBe('beta');
-	document.querySelector<HTMLElement>('.drawer-backdrop')!.click(); flushSync();
+	const scrim = document.querySelector<HTMLElement>('.drawer-backdrop')!;
+	scrim.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+	scrim.click(); flushSync();
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
 	expect(get(commentDraft)?.body).toBe('Keep my body');
 	expect(marked()).toBe('');
@@ -155,7 +159,9 @@ it('cancels the positions wait on outside close and ignores its late reply', asy
 	document.querySelector<HTMLButtonElement>('.composer .submit')!.click();
 	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
 	const ask = wire.frames.findLast(frame => frame.type === 'doc_positions')!;
-	document.querySelector<HTMLElement>('.drawer-backdrop')!.click(); flushSync();
+	const scrim = document.querySelector<HTMLElement>('.drawer-backdrop')!;
+	scrim.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+	scrim.click(); flushSync();
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
 	await answer(ask);
 	await Promise.resolve(); await Promise.resolve();
@@ -189,7 +195,9 @@ it('after a store mismatch, reopening the composer and submitting sends one rese
 	emit('doc_error', { type: 'doc_error', artifact_id: 'artifact', store_id: 'other', request_id: refused.request_id, kind: 'store_mismatch' });
 	await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('.composer .submit')!.disabled).toBe(false));
 	expect(api.postComment).not.toHaveBeenCalled();
-	document.querySelector<HTMLElement>('.drawer-backdrop')!.click(); flushSync();
+	const scrim = document.querySelector<HTMLElement>('.drawer-backdrop')!;
+	scrim.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+	scrim.click(); flushSync();
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
 	await select(); host.querySelector<HTMLButtonElement>('.sel-comment')!.click(); flushSync();
 	await vi.waitFor(() => expect(document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value).toBe('Keep my body'));

@@ -3,13 +3,14 @@ import {
 	SETTINGS_PATH, codeRefusalLine, disconnectRemote, parseAddress, refusesOnCodeScreen, remoteDiscovered, remotePair, shellInfo,
 	unreachableLine, type PairReason,
 } from './remoteShell';
+import pairRequests from '../../../testdata/remote-pair-requests.json';
 
 afterEach(() => {
 	delete (window as unknown as Record<string, unknown>).__CORSIA_SHELL__;
 	vi.unstubAllGlobals();
 });
 
-const REASONS: PairReason[] = ['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy', 'network', 'server', 'incompatible', 'too_old', 'local'];
+const REASONS: PairReason[] = ['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy', 'network', 'server', 'incompatible', 'too_old', 'local', 'not_local'];
 
 describe('shellInfo', () => {
 	it('is null in a browser or the phone app, where nothing injects it', () => {
@@ -36,6 +37,13 @@ describe('the shell commands', () => {
 		await disconnectRemote();
 		expect(invoke).toHaveBeenCalledWith('remote_pair', { target: { kind: 'dns_sd', instance: 'Studio' }, code: 'K7QX' });
 		expect(invoke).toHaveBeenCalledWith('disconnect_remote');
+	});
+	// The shell's `remote_pair_accepts_the_arguments_the_page_sends` invokes the real command with these same arguments.
+	it.each(pairRequests)('sends remote_pair the arguments the shell accepts: %j', async (request) => {
+		const invoke = vi.fn(async () => ({ ok: true, name: 'Studio' }));
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
+		await remotePair(request.target as Parameters<typeof remotePair>[0], request.code);
+		expect(invoke).toHaveBeenCalledWith('remote_pair', request);
 	});
 	it.each(REASONS)('passes the %s refusal through unchanged, with versions', async (reason) => {
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => ({ ok: false, reason, app_version: '1.4', host_version: '1.2' })) });
@@ -85,9 +93,10 @@ describe('the approved lines', () => {
 		expect(codeRefusalLine('too_many_tries', 'Studio')).toMatch(/^Too many wrong codes\./);
 		expect(codeRefusalLine('paused', 'Studio')).toMatch(/^Pairing is paused on Studio\./);
 		expect(codeRefusalLine('busy', 'Studio')).toContain('Studio is busy');
+		expect(codeRefusalLine('not_local', 'Studio')).toBe('If this computer isn’t on the same network as the main computer, connect it to that network, then try again.');
 	});
 	it('splits refusals between the code screen and the choose screen', () => {
-		expect(REASONS.filter(refusesOnCodeScreen)).toEqual(['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy']);
+		expect(REASONS.filter(refusesOnCodeScreen)).toEqual(['wrong_code', 'expired', 'too_many_tries', 'paused', 'busy', 'not_local']);
 	});
 	it('says what is wrong with the computer, for the choose screen', () => {
 		expect(unreachableLine('server', 'studio.local', {})).toBe('studio.local answered, but CORSIA isn’t running there.');

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, type FullConfig } from '@playwright/test';
+import { captureSeed, SEED_ENABLED } from './support/backendSeed';
 import { openAppByUrl } from './support/corsia';
 
 const e2eRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -26,7 +27,12 @@ async function warmDevServer(baseURL: string | undefined) {
 		// it leaves no state for the tests to see.
 		const context = await browser.newContext({ baseURL });
 		context.setDefaultNavigationTimeout(COLD_SHELL_BUDGET_MS);
-		await openAppByUrl(await context.newPage(), { timeout: COLD_SHELL_BUDGET_MS });
+		const page = await context.newPage();
+		await openAppByUrl(page, { timeout: COLD_SHELL_BUDGET_MS });
+		// The design route and its framed variant pull modules the shell never loads, so the first test to open them
+		// would pay that transform inside its own 30 s budget.
+		await page.goto('/_design#attention-dock', { waitUntil: 'networkidle', timeout: COLD_SHELL_BUDGET_MS });
+		await page.goto('/_design?frame=attention-dock&scenario=one', { waitUntil: 'networkidle', timeout: COLD_SHELL_BUDGET_MS });
 	} catch (error) {
 		throw new Error(
 			`global-setup: the signed-in shell at ${baseURL} did not load and mount within ${COLD_SHELL_BUDGET_MS / 1000}s. ` +
@@ -46,6 +52,8 @@ async function globalSetup(config: FullConfig) {
 	fs.mkdirSync(stateRoot, { recursive: true });
 
 	await warmDevServer(config.projects[0]?.use.baseURL);
+	// Warm-up only read, so this is the state a person's first load finds. Each spec file starts from it again.
+	if (SEED_ENABLED) await captureSeed();
 }
 
 export default globalSetup;

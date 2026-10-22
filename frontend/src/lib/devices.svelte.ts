@@ -17,6 +17,10 @@ export type DevicesApi = {
 	computer_name: string;
 	lan_addresses: string[];
 	code: { state: 'none' | 'active' | 'paused'; expires_in_seconds?: number | null; value?: string };
+	/** Whether the server says this caller is not the host's direct loopback page. */
+	read_only: boolean;
+	/** The saved outside address, `host` or `host:port` (always reached over https). */
+	outside_address?: string | null;
 };
 
 export type DevicesView = {
@@ -32,11 +36,16 @@ export type DevicesView = {
 	code: string | null;
 	endsInSeconds: number | null;
 	addresses: string[];
+	/** The saved outside address and the Devices listener port (filled from the running config). */
+	outside: string | null;
+	devicesPort: number | null;
 };
+
 
 export const EMPTY_VIEW: DevicesView = {
 	load: 'loading', enabled: false, readOnly: false, hostName: '', announced: false, busy: null,
 	listener: 'ok', pairing: 'idle', code: null, endsInSeconds: null, addresses: [],
+	outside: null, devicesPort: null,
 };
 
 /** The host's name as a person knows it: the announced one, else the computer's own name (never the typed `.local` host). */
@@ -50,9 +59,9 @@ function listenerOf(api: DevicesApi): DevicesView['listener'] {
 	return api.listening.reason === 'ports_taken' ? 'all-ports-taken' : 'unavailable';
 }
 
-export function viewFromApi(api: DevicesApi, forcedReadOnly: boolean, hostNameOverride?: string): DevicesView {
-	// The code's characters come only over direct loopback (G11): an active code without them is a connected computer's view.
-	const readOnly = forcedReadOnly || (api.code.state === 'active' && !api.code.value);
+export function viewFromApi(api: DevicesApi, hostNameOverride?: string): DevicesView {
+	// `read_only` is the host's authority for management access; a redacted active code follows from it.
+	const readOnly = api.read_only;
 	const code = api.code.state === 'active' ? api.code.value ?? null : null;
 	return {
 		load: 'ready',
@@ -66,6 +75,9 @@ export function viewFromApi(api: DevicesApi, forcedReadOnly: boolean, hostNameOv
 		code,
 		endsInSeconds: api.code.state === 'active' ? api.code.expires_in_seconds ?? null : null,
 		addresses: typedAddresses(api),
+		outside: api.outside_address ?? null,
+		devicesPort: api.listening?.port ?? null,
+
 	};
 }
 
@@ -89,7 +101,6 @@ export function createDevices(options: Options = {}) {
 	let view = $state<DevicesView>({ ...EMPTY_VIEW });
 	let endsAt: number | null = null;
 	let remaining = $state<number | null>(null);
-	let forcedReadOnly = false;
 
 	const headers = (json = false): Record<string, string> => {
 		const current = get(token);
@@ -97,7 +108,7 @@ export function createDevices(options: Options = {}) {
 	};
 
 	function accept(api: DevicesApi) {
-		const next = viewFromApi(api, forcedReadOnly || Boolean(options.remoteName?.()), options.remoteName?.());
+		const next = viewFromApi(api, options.remoteName?.());
 		endsAt = next.endsInSeconds === null ? null : now() + next.endsInSeconds * 1000;
 		remaining = next.endsInSeconds;
 		view = { ...next, endsInSeconds: remaining };
@@ -122,10 +133,14 @@ export function createDevices(options: Options = {}) {
 		view = { ...view, endsInSeconds: remaining };
 	}
 
-	async function write(path: string, init: RequestInit): Promise<DevicesApi | null> {
+	async function write(path: string, init: RequestInit, fallback: string): Promise<DevicesApi | null> {
 		const response = await fetch(path, { ...init, headers: headers(init.body !== undefined) });
-		if (response.status === 403) { forcedReadOnly = true; await read(); return null; }
-		if (!response.ok) throw new Error(String(response.status));
+		if (response.status === 403) { await read(); return null; }
+		if (!response.ok) {
+			const body: unknown = await response.json().catch(() => null);
+			const detail = body && typeof body === 'object' && 'detail' in body ? (body as { detail?: unknown }).detail : null;
+			throw new Error(response.status >= 400 && response.status < 500 && typeof detail === 'string' ? detail : fallback);
+		}
 		return await response.json() as DevicesApi;
 	}
 
@@ -133,7 +148,7 @@ export function createDevices(options: Options = {}) {
 		const before = view;
 		view = { ...view, enabled: next, busy: next ? 'starting' : null, listener: 'ok', pairing: 'idle', code: null, endsInSeconds: null };
 		try {
-			const api = await write('/api/devices', { method: 'PUT', body: JSON.stringify({ enabled: next }) });
+			const api = await write('/api/devices', { method: 'PUT', body: JSON.stringify({ enabled: next }) }, 'Couldn’t update device connections. Try again.');
 			if (api) accept(api);
 		} catch {
 			view = { ...before, load: before.load };
@@ -143,10 +158,22 @@ export function createDevices(options: Options = {}) {
 
 	async function newCode() {
 		try {
-			const api = await write('/api/devices/code', { method: 'POST' });
+			const api = await write('/api/devices/code', { method: 'POST' }, 'Couldn’t make a new code. Try again.');
 			if (api) accept(api);
 		} catch {
 			await read();
+		}
+	}
+
+	/** Saves the outside address (empty clears it). Returns the refusal line, or null once saved. */
+	async function setOutside(text: string): Promise<string | null> {
+		try {
+			const api = await write('/api/devices', { method: 'PUT', body: JSON.stringify({ outside_address: text }) }, 'Couldn’t save the outside address. Try again.');
+			if (api) accept(api);
+			return null;
+		} catch (error) {
+			await read();
+			return error instanceof Error ? error.message : 'Couldn’t save the outside address. Try again.';
 		}
 	}
 
@@ -180,6 +207,6 @@ export function createDevices(options: Options = {}) {
 
 	return {
 		get view() { return view; },
-		read, setEnabled, newCode, retry, start, tick,
+		read, setEnabled, setOutside, newCode, retry, start, tick,
 	};
 }

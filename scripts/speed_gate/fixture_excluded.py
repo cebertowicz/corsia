@@ -45,12 +45,15 @@ EXCLUDED: dict[str, str] = {
     "outcome_event_counters": _small(1),
     "users": _small(1),
     **{table: NOT_IN_CENSUS for table in (
-        "action_drafts", "artifact_relocation_intents", "connected_app_audit", "connected_app_reach",
-        "connected_apps", "connection_rules", "doc_feedback_edit_items", "durable_write_intents",
+        "action_drafts", "artifact_relocation_intents", "connected_account_audit",
+        "connected_account_reach", "connected_accounts",
+        "connected_app_audit", "connected_app_reach", "connected_apps", "connection_rules",
+        "doc_feedback_edit_items", "durable_write_intents", "event_intake_records", "event_route_decisions",
+        "event_rules",
         "email_screens", "key_store_entries", "key_write_attempts", "lesson_placement_checks",
-        "limit_observations", "managed_process_retirements", "plan_ask_deferrals",
-        "plan_markdown_import_issues", "plan_markdown_imports",
-        "plan_status_dirty", "provider_availability", "reviewer_gate_approval",
+        "limit_observations", "managed_process_retirements", "measure_definitions", "plan_ask_deferrals",
+        "plan_markdown_import_issues", "plan_markdown_imports", "plan_node_intent_words",
+        "plan_status_dirty", "project_inference_policies", "provider_availability", "reviewer_gate_approval",
         "vendor_account_billing_facts", "vendor_account_billing_revisions")},
 }
 
@@ -58,6 +61,6 @@ EXCLUDED: dict[str, str] = {
 #: table's stored rows with ``fixture_spec.target_rows``: a table below target fails the build unless it is
 #: listed here with its exact actual count, so a shortfall is never an accident and a stale entry fails too.
 SHORT: dict[str, tuple[int, str]] = {
-    "plan_liveness_wakes": (553, "one row per thread (thread_id is UNIQUE) and the fixture has 553 threads, "
-                                 "so it cannot hold the census's 966 at this scale"),
+    "plan_liveness_wakes": (830, "one row per thread (thread_id is UNIQUE); the fixture deliberately has 830 "
+                                 "threads to match the visible sidebar list, below the census's 966 wakes"),
 }

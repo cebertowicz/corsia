@@ -113,7 +113,7 @@ def _recording(captured: dict):
 
 
 async def _run(rows: list[dict]) -> list[dict]:
-    from connections.google import email_screen
+    from connections.mail import email_screen
     from infra.database import get_db
     from infra.time import utc_now_iso
 

@@ -30,9 +30,10 @@ from infra.app_loop import AppLoopUnavailable
 from doceditor.comment_feedback_transitions import apply_user_transition
 from doceditor.comment_state_updates import update_comment
 from doceditor.comment_actions import (
-    CommentActionError, SUGGESTION_REASON_MAX_CHARS, check_user_text_edit, decide_all_from_author,
+    CommentActionError, SUGGESTION_REASON_MAX_CHARS, check_user_text_edit,
     decide_suggestion, reopen_fields, validate_create,
 )
+from doceditor.comment_batch_actions import accept_all_open, decide_all_from_author
 from doceditor.comments import CrossArtifactIdError
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context
@@ -143,6 +144,10 @@ async def create_comment(artifact_id: str, token: str, body: CommentCreate):
             409,
             "client_id collides with another artifact's comment — re-mint and retry",
         ) from exc
+    if feedback["woken"]:
+        from plans import public
+
+        await public.drive_threads(feedback["woken"])
     return {"comment": row, **feedback}
 
 
@@ -164,11 +169,7 @@ def _user_feedback_write(user_id: str, artifact_id: str, action: str) -> dict:
                     artifact_id=artifact_id,
                     reason="send",
                 )
-            elif action == "leave":
-                feedback_batches.mark_user_left(connection, artifact_id)
-            elif action == "return":
-                feedback_batches.mark_user_returned(connection, artifact_id)
-            else:
+            elif action == "retry":
                 woken = feedback_batches.retry_for_document(
                     connection,
                     author_kind="user",
@@ -201,25 +202,6 @@ async def send_user_feedback(
 ):
     """Close and deliver the user's open batches for one document."""
     return await _user_feedback_action(user["id"], body, "send")
-
-
-@router.post("/doc-feedback/leave")
-async def leave_user_feedback(
-    body: FeedbackDocumentAction, user: dict = Depends(require_user_header_only),
-):
-    """Start the user's leave grace period for one document."""
-    return await _user_feedback_action(user["id"], body, "leave")
-
-
-@router.post("/doc-feedback/return")
-async def return_user_feedback(
-    body: FeedbackDocumentAction, user: dict = Depends(require_user_header_only),
-):
-    """Record that the user is looking at the document again: cancel leave grace.
-
-    Reply markers are not touched here; each clears only when its thread's reply is shown (the /viewed stamp).
-    """
-    return await _user_feedback_action(user["id"], body, "return")
 
 
 @router.post("/doc-feedback/retry")
@@ -285,14 +267,8 @@ class CommentDecision(BaseModel):
 
 
 
-@router.post("/comments/{comment_id}/decision")
-async def decide_comment(comment_id: str, token: str, body: CommentDecision):
-    user = authenticate(token)
-    if not user:
-        raise HTTPException(401)
-
-    saved: dict = {}
-
+def _person_writer(user: dict, saved: dict):
+    """The document writer a person's accept uses; it notes the text and revision it saved."""
     async def write(
         path: str, text: str, project_id: str | None, reason: str, expected_sha256: str | None,
     ) -> dict:
@@ -305,6 +281,35 @@ async def decide_comment(comment_id: str, token: str, body: CommentDecision):
             raise document_save_http_exception(exc) from exc
         saved.update(text=text, revision=receipt["revision"])
         return receipt
+    return write
+
+
+@router.post("/artifacts/{artifact_id}/suggestions/accept-all")
+async def accept_all_suggestions(artifact_id: str, token: str):
+    """Accept every open suggestion on the document, from every author, in one write."""
+    user = authenticate(token)
+    if not user:
+        raise HTTPException(401)
+    saved: dict = {}
+    try:
+        result = await accept_all_open(
+            artifact_id, user_id=user["id"], decided_by=user["name"], actor_thread_id=None,
+            write=_person_writer(user, saved))
+    except CommentActionError as exc:
+        return decision_refusal(exc)
+    except DocumentSaveError as exc:
+        raise document_save_http_exception(exc) from exc
+    return {**result, **saved}
+
+
+@router.post("/comments/{comment_id}/decision")
+async def decide_comment(comment_id: str, token: str, body: CommentDecision):
+    user = authenticate(token)
+    if not user:
+        raise HTTPException(401)
+
+    saved: dict = {}
+    write = _person_writer(user, saved)
 
     try:
         decide = decide_all_from_author if body.all_from_author else decide_suggestion

@@ -15,6 +15,8 @@ function run(node: HTMLElement, from: Keyframe, to: Keyframe, { direction }: Dir
 	if (direction === 'both') throw new Error('menuPop and peerFade run one way: use in: and out:, not transition:');
 	const entering = direction === 'in';
 	const duration = ms('--dur-tight') * (entering ? 1 : 0.7);
+	// Svelte resumes a keyed block that is still leaving; its finished exit holds opacity 0 (fill forwards) until cancelled.
+	if (entering) node.getAnimations?.().forEach((animation) => animation.cancel());
 	node.animate(entering ? [from, to] : [to, from], { duration, easing: cssVar('--ease-snap') || 'ease-out', fill: entering ? 'none' : 'forwards' });
 	return { duration };
 }

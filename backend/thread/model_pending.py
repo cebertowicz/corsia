@@ -131,7 +131,7 @@ async def _fail_switch(
 
 async def _fail_preparation(request: SwitchRequest, error: Exception, *, stage: str):
     """Fail one preparation stage, retaining an unexpected error's traceback."""
-    from core.checkpoint_fit import ColdFoldInputTooLarge
+    from core.fork_fit import ColdFoldInputTooLarge
     from core.checkpoint_runtime import CheckpointTargetLimited
 
     if not isinstance(error, (ColdFoldInputTooLarge, CheckpointTargetLimited)):

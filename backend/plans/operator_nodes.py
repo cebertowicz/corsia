@@ -15,6 +15,7 @@ import plans.operator_scheduled as scheduled_work
 import plans.rollup as rollup
 import plans.service as service
 import plans.user_steering as user_steering
+import plans.wait_summary as wait_summary
 from plans import open_tree
 from plans.node_states import folded_ids, is_container, parent_ids, work_ids
 
@@ -378,11 +379,20 @@ def present_plan(
     users = frozenset(node["id"] for node in projected.nodes if node["assignee"] == "user")
     next_ids = node_state.next_node_ids([node for node in nodes if node["id"] not in users])
     progress = {**projected.progress, "distribution": counts}
+    display = plan_header.plan_display(projected.plan, counts, nodes, users)
+    # Each outside-wait row reads the same value as the sidebar and chip (EW11).
+    for node in nodes:
+        if node_wait := wait_summary.from_nodes([node]):
+            node["wait"] = node_wait
+    if wait := wait_summary.from_nodes(nodes):
+        display["wait"] = wait
+    elif until := wait_summary.set_aside_until(nodes):
+        display["set_aside_until"] = until
     return {
         "plan": dict(projected.plan),
         "owner": owner,
         "progress": progress,
-        "display": plan_header.plan_display(projected.plan, counts, nodes, users),
+        "display": display,
         "oversize": oversize(nodes),
         "current_node_ids": current,
         "next_node_ids": next_ids,

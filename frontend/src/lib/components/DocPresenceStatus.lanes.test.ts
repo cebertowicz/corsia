@@ -15,7 +15,7 @@ vi.mock('$lib/api/docs', async (original) => ({
 	...await original<typeof import('$lib/api/docs')>(),
 	fetchComments: async () => {
 		if (wire.failNext) { wire.failNext = false; throw new Error('offline'); }
-		return { comments: wire.rows, feedback: { open_count: 0, owner_label: null, grace_closes_at: null, undelivered_batches: [] } };
+		return { comments: wire.rows, feedback: { open_count: 0, owner_label: null, undelivered_batches: [] } };
 	},
 }));
 
@@ -257,11 +257,13 @@ describe('the hold on a pending comment', () => {
 		expect(shown()).toEqual([]);
 	});
 
-	it('suggestions and the user own comments are never held', async () => {
+	it('an agent suggestion is held until its turn, and the user own comments never are', async () => {
 		wire.rows = [serverComment('s1', 50, 0, 5), serverComment('u1', 20, 6, 9, 'you')];
 		post('agent-a', 's1', Date.now(), 'suggestion');
 		await settle();
 		await changeFrame();
+		expect(shown()).toEqual(['u1']);
+		await vi.advanceTimersByTimeAsync(commentArrivalDelay(5, 50));
 		expect(shown().sort()).toEqual(['s1', 'u1']);
 	});
 });

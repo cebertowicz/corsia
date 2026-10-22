@@ -24,6 +24,12 @@ export interface Thread extends ThreadModelSwitchState {
 	created_at: string;
 	updated_at: string;
 	last_message?: string;
+	/** Local only payload fields; `threadLocalOnly` is their one reader. */
+	local_only?: number | boolean | null;
+	local_only_effective?: boolean | null;
+	local_only_cause?: 'inherited' | 'own' | 'project' | null;
+	local_only_inherited_from_thread_id?: string | null;
+	local_only_inherited_from_title?: string | null;
 }
 
 /**
@@ -251,19 +257,6 @@ export async function saveThreadTitle(threadId: string, title: string, token: st
 			thread.id === threadId ? { ...thread, title: previousTitle } : thread
 		)));
 		throw error;
-	}
-}
-
-export async function saveReasoningEffort(threadId: string, effort: string | null, token: string) {
-	threads.update(ss => ss.map(s => s.id === threadId ? { ...s, reasoning_effort: effort } : s));
-	reasoningEffort.set(effort);
-	try {
-		await fetch(`/api/threads/${threadId}?token=${token}`, {
-			method: 'PATCH',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ reasoning_effort: effort }),
-		});
-	} catch {
 	}
 }
 

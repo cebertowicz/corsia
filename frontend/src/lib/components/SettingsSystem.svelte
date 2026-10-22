@@ -10,10 +10,11 @@
 	import SettingsUpdate from './SettingsUpdate.svelte';
 	import { updateInFlight } from '$lib/update/store';
 	import HostAccessReviewSetting from './HostAccessReviewSetting.svelte';
+	import SettingsGroup from './SettingsGroup.svelte';
+	import SettingsRow from './SettingsRow.svelte';
 	import SettingsDevices from './SettingsDevices.svelte';
 	import { disconnectRemote, shellInfo } from '$lib/remoteShell';
 	import { connectOpen } from '$lib/stores/remoteConnect';
-	import { settingsAnchor } from '$lib/stores/settingsNavigation';
 
 	const themeOpts: { v: ThemeSetting; l: string }[] = [
 		{ v: 'light', l: 'Light' },
@@ -84,6 +85,7 @@
 
 	let accountConfirm = $state<'logout' | 'disconnect' | null>(null);
 	let accountInProgress = $state(false);
+	let deviceConnectionsEnabled = $state<boolean | null>(null);
 	// Only the desktop app can connect to, or leave, another computer; a browser and the phone app have no shell.
 	const shell = shellInfo();
 	const remoteName = shell?.mode === 'remote' ? shell.name : null;
@@ -105,181 +107,131 @@
 		}
 	}
 
-	function memoryColor(pressure: string): string {
-		if (pressure === 'critical') return 'var(--red)';
-		if (pressure === 'warning') return 'var(--yellow)';
-		return 'var(--green)';
+	async function signOut() {
+		accountInProgress = true;
+		try { await logout(); } finally { accountConfirm = null; accountInProgress = false; }
 	}
+
+	const serverLine = $derived(
+		lifecycleProgress ? `${lifecycleProgress} · ${lifecycleElapsedSeconds}s elapsed`
+		: $updateInFlight ? 'Running · Can’t restart while an update runs'
+		: 'Running',
+	);
+
+	function memoryFree(memory: { free_mb: number; total_gb: number }): string {
+		const free = memory.free_mb < 1024 ? `${memory.free_mb}MB` : `${(memory.free_mb / 1024).toFixed(1)}GB`;
+		return `${free} free / ${memory.total_gb}GB`;
+	}
+
+	// Pressure is coloured text on the row, in the status colours (§0.1); normal pressure says nothing.
+	const memoryPressure = $derived(systemStatus?.memory?.pressure as string | undefined);
 
 </script>
 
-<div class="section-header">
-	<h2>System</h2>
-	<p>Backend controls and system health.</p>
-</div>
-
 {#if settingsError}
-	<div class="settings-error">{settingsError}</div>
+	<p class="error" role="alert">{settingsError}</p>
 {/if}
 
-<div class="settings-card theme-card">
-	<span class="theme-label">Theme</span>
-	<div class="theme-opts" role="radiogroup" aria-label="Theme">
-		{#each themeOpts as o}
-			<button class="theme-opt" class:active={$themeSetting === o.v} role="radio" aria-checked={$themeSetting === o.v} onclick={() => themeSetting.set(o.v)}>{o.l}</button>
-		{/each}
-	</div>
-</div>
-
-<FocusModeSetting onError={(message) => settingsError = message} />
+<SettingsGroup label="Display">
+	<SettingsRow name="Theme">
+		{#snippet actions()}
+			<div class="theme-opts" role="radiogroup" aria-label="Theme">
+				{#each themeOpts as o}
+					<button class="theme-opt" class:active={$themeSetting === o.v} role="radio" aria-checked={$themeSetting === o.v} onclick={() => themeSetting.set(o.v)}>{o.l}</button>
+				{/each}
+			</div>
+		{/snippet}
+	</SettingsRow>
+	<FocusModeSetting onError={(message) => settingsError = message} />
+</SettingsGroup>
 
 <HostAccessReviewSetting onError={(message) => settingsError = message} />
 
-<div class="settings-card" data-settings-anchor="update" use:settingsAnchor={'update'}>
-	<h3>Updates</h3>
-	<p class="card-desc">Keep CORSIA current.</p>
-	<div class="service-grid"><SettingsUpdate /></div>
-</div>
+<SettingsGroup label="Updates" anchor="update">
+	<SettingsUpdate />
+</SettingsGroup>
 
-<div class="settings-card" data-settings-anchor="restart" use:settingsAnchor={'restart'}>
-	<h3>Services</h3>
-	<p class="card-desc">Restart drains and bounces the current build.</p>
+<SettingsGroup label="Services" anchor="restart" hint="Restart drains and bounces the current build.">
+	<SettingsRow name="Server" sub={serverLine}>
+		{#snippet actions()}
+			{#if restartMode === 'restart'}
+				<span class="confirm-text">Drain + restart?</span>
+				<Button variant="ghost" size="sm" disabled={restartInProgress} onclick={() => restartServer()}>{restartInProgress ? 'Draining…' : 'Confirm'}</Button>
+				<Button variant="ghost" size="sm" onclick={() => restartMode = null}>Cancel</Button>
+			{:else}
+				<Button variant="ghost" size="sm" disabled={$updateInFlight} title={$updateInFlight ? 'Restart is unavailable while CORSIA updates.' : undefined} onclick={() => restartMode = 'restart'}>Restart</Button>
+			{/if}
+		{/snippet}
+	</SettingsRow>
+	<span class="live" role="status" aria-live="polite">{lifecycleProgress}</span>
+</SettingsGroup>
 
-	<div class="service-grid">
-		<div class="service-row">
-			<span class="service-name">Server</span>
-			<span class="service-status up">Running{#if $updateInFlight}<span class="restart-unavailable">Unavailable while an update runs</span>{/if}</span>
-			<div class="service-actions">
-				{#if restartMode === 'restart'}
-					<span class="confirm-text">Drain + restart?</span>
-					<Button variant="danger" size="sm" disabled={restartInProgress} onclick={() => restartServer()}>{restartInProgress ? 'Draining…' : 'Confirm'}</Button>
-					<Button variant="ghost" size="sm" onclick={() => restartMode = null}>Cancel</Button>
+<SettingsGroup label="Account">
+	<SettingsRow name="Sign out" sub="Clears your token and returns to the login screen on this server." wrap>
+		{#snippet actions()}
+			{#if accountConfirm !== 'logout'}
+				<Button variant="ghost" size="sm" onclick={() => accountConfirm = 'logout'}>Log out</Button>
+			{:else}
+				<span class="confirm-text">Sign out?</span>
+				<Button variant="ghost" size="sm" disabled={accountInProgress} onclick={signOut}>Confirm</Button>
+				<Button variant="ghost" size="sm" onclick={() => accountConfirm = null}>Cancel</Button>
+			{/if}
+		{/snippet}
+	</SettingsRow>
+	{#if remoteName}
+		<SettingsRow name="Computer" sub={`Connected to ${remoteName}`} wrap>
+			{#snippet actions()}
+				{#if accountConfirm !== 'disconnect'}
+					<Button variant="ghost" size="sm" onclick={() => accountConfirm = 'disconnect'}>Disconnect</Button>
 				{:else}
-					<Button size="sm" disabled={$updateInFlight} title={$updateInFlight ? 'Restart is unavailable while CORSIA updates.' : undefined} onclick={() => restartMode = 'restart'}>Restart</Button>
-				{/if}
-			</div>
-		</div>
-		{#if lifecycleProgress}
-			<div class="service-row" role="status" aria-live="polite">
-				<span class="service-name">Restart progress</span>
-				<span class="service-status">{lifecycleProgress} · {lifecycleElapsedSeconds}s elapsed</span>
-				<div class="service-actions"></div>
-			</div>
-		{/if}
-
-	</div>
-</div>
-
-<div class="settings-card">
-	<h3>Account</h3>
-	<p class="card-desc">Sign out of this CORSIA instance and return to its login screen.</p>
-
-	<div class="service-grid">
-		<div class="service-row">
-			<span class="service-name">Sign out</span>
-			<span class="service-status">Clears your token and returns to the login screen on this server.</span>
-			<div class="service-actions">
-				{#if accountConfirm !== 'logout'}
-					<Button size="sm" onclick={() => accountConfirm = 'logout'}>Log out</Button>
-				{:else}
-					<span class="confirm-text">Sign out?</span>
-					<Button variant="danger" size="sm" disabled={accountInProgress} onclick={async () => { accountInProgress = true; try { await logout(); } finally { accountConfirm = null; accountInProgress = false; } }}>Confirm</Button>
+					<Button variant="ghost" size="sm" disabled={accountInProgress} onclick={disconnect}>Disconnect</Button>
 					<Button variant="ghost" size="sm" onclick={() => accountConfirm = null}>Cancel</Button>
 				{/if}
-			</div>
-		</div>
-
-		{#if remoteName}
-			<div class="service-row" data-testid="account-computer">
-				<span class="service-name">Computer</span>
-				<span class="service-status">Connected to {remoteName}</span>
-				<div class="service-actions">
-					{#if accountConfirm !== 'disconnect'}
-						<Button size="sm" onclick={() => accountConfirm = 'disconnect'}>Disconnect</Button>
-					{:else}
-						<Button variant="danger" size="sm" disabled={accountInProgress} onclick={disconnect}>Disconnect</Button>
-						<Button variant="ghost" size="sm" onclick={() => accountConfirm = null}>Cancel</Button>
-					{/if}
-				</div>
-				{#if accountConfirm === 'disconnect'}
-					<div class="confirm-block" role="group" aria-label="Disconnect from {remoteName}?">
-						<span class="confirm-text">Disconnect from {remoteName}?</span>
-						<span class="service-status">Your work stays on {remoteName}. This app signs out and returns to setup.</span>
-					</div>
-				{/if}
-			</div>
-		{:else if shell}
-			<div class="service-row" data-testid="account-computer">
-				<span class="service-name">Computer</span>
-				<span class="service-status">This computer</span>
-				<div class="service-actions"><Button size="sm" onclick={() => connectOpen.set(true)}>Connect to another computer</Button></div>
+			{/snippet}
+		</SettingsRow>
+		<!-- Three sentences get their own wrapping block under the row, never the row's non-wrapping actions. -->
+		{#if accountConfirm === 'disconnect'}
+			<div class="confirm-block" role="group" aria-label="Disconnect from {remoteName}?">
+				<span class="confirm-text">Disconnect from {remoteName}?</span>
+				<span class="confirm-detail">Your work stays on {remoteName}. This app signs out and returns to setup.</span>
 			</div>
 		{/if}
+	{:else if shell && deviceConnectionsEnabled === false}
+		<SettingsRow name="Computer" sub="This computer">
+			{#snippet actions()}<Button variant="ghost" size="sm" onclick={() => connectOpen.set(true)}>Connect to another computer</Button>{/snippet}
+		</SettingsRow>
+	{/if}
+</SettingsGroup>
 
-	</div>
-</div>
-
-<SettingsDevices />
+<SettingsDevices onConnectionState={(enabled) => deviceConnectionsEnabled = enabled} />
 
 {#if systemStatus?.memory}
-	<div class="settings-card">
-		<h3>Resources</h3>
-		<div class="status-grid">
-			<div class="status-row">
-				<span class="status-label">Memory</span>
-				<span class="status-value">
-					<span class="dot" style="background: {memoryColor(systemStatus.memory.pressure)}"></span>
-					{systemStatus.memory.free_mb < 1024
-						? systemStatus.memory.free_mb + 'MB'
-						: (systemStatus.memory.free_mb / 1024).toFixed(1) + 'GB'} free / {systemStatus.memory.total_gb}GB
-				</span>
-			</div>
-			{#if systemStatus.cpu}
-				<div class="status-row">
-					<span class="status-label">CPU</span>
-					<span class="status-value">{systemStatus.cpu.usage_pct}%</span>
-				</div>
-			{/if}
-		</div>
-	</div>
+	<SettingsGroup label="Resources">
+		<SettingsRow
+			name="Memory"
+			trailing={memoryFree(systemStatus.memory)}
+			sub={memoryPressure === 'critical' ? 'Memory is almost full' : memoryPressure === 'warning' ? 'Memory is running low' : ''}
+			subTone={memoryPressure === 'critical' ? 'failed' : memoryPressure === 'warning' ? 'attention' : 'quiet'}
+		/>
+		{#if systemStatus.cpu}
+			<!-- The backend reports {error} instead of a figure when it cannot read CPU use. -->
+			<SettingsRow name="CPU" trailing={typeof systemStatus.cpu.usage_pct === 'number' ? `${systemStatus.cpu.usage_pct}%` : 'Unavailable'} />
+		{/if}
+	</SettingsGroup>
 {/if}
 
 <style>
-	.section-header { margin-bottom: 24px; }
-	.section-header h2 { font-size: var(--text-title2); font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
-	.section-header p { font-size: var(--text-subhead); color: var(--text-muted); margin: 0; }
-
-	.settings-card { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 20px 24px; margin-bottom: 16px; }
-	.theme-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-	.theme-label { font-size: var(--text-subhead); font-weight: var(--fw-medium); color: var(--text-primary); }
+	.error { margin: 0 0 var(--space-4); padding: 0 var(--space-2); font-size: var(--text-footnote); color: var(--red-text); }
+	/* Restart progress is announced on its own; the row's second line shows it. */
+	.live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+	.confirm-text { font-size: var(--text-caption); color: var(--text-secondary); }
+	.confirm-block { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-1) var(--space-2); overflow-wrap: anywhere; }
+	.confirm-detail { font-size: var(--text-caption); color: var(--text-tertiary); }
+	/* Theme stays the inline three-way control until the SegmentedControl primitive lands (DESIGN-SYSTEM §4.1);
+	   the chosen option takes the selected-row wash (§0.1), not a solid accent fill. */
 	.theme-opts { display: inline-flex; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 2px; gap: 2px; }
-	.theme-opt { padding: 6px 16px; border-radius: var(--radius-xs); background: none; border: none; cursor: pointer; font-family: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
+	.theme-opt { padding: var(--space-1) var(--space-4); border-radius: var(--radius-xs); background: none; border: none; cursor: pointer; font-family: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
 	.theme-opt:hover { color: var(--text-primary); }
-	.theme-opt.active { background: var(--accent-fill); color: var(--accent-on-fill); }
-	.settings-card h3 { font-size: var(--text-callout); font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
-	.card-desc { font-size: var(--text-subhead); color: var(--text-muted); margin: 0 0 16px; line-height: 1.5; }
-	.settings-error { background: color-mix(in srgb, var(--red) 10%, transparent); border: 1px solid color-mix(in srgb, var(--red) 30%, transparent); color: var(--red); border-radius: var(--radius-xs); padding: 10px 14px; font-size: var(--text-subhead); margin-bottom: 16px; }
-	.service-grid { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
-	.service-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); }
-	.service-name { font-size: var(--text-subhead); font-weight: 500; min-width: 70px; }
-	.service-status { font-size: var(--text-footnote); color: var(--text-tertiary); }
-	.service-status.up { color: var(--green); }
-	.restart-unavailable { display: block; color: var(--text-tertiary); }
-	.service-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-
-	.confirm-text { font-size: var(--text-subhead); color: var(--text-secondary); }
-	.confirm-block { flex-basis: 100%; display: flex; flex-direction: column; gap: calc(var(--space-1) / 2); order: -1; }
-	.service-row:has(.confirm-block) { flex-wrap: wrap; }
-	.status-grid { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding: 12px; background: var(--bg-primary); border-radius: var(--radius-xs); border: 1px solid var(--border-subtle); }
-	.status-row { display: flex; align-items: center; gap: 12px; font-size: var(--text-subhead); }
-	.status-label { color: var(--text-muted); width: 120px; flex-shrink: 0; }
-	.status-value { color: var(--text-primary); display: flex; align-items: center; gap: 6px; }
-	.dot { width: 7px; height: 7px; border-radius: var(--radius-circle); flex-shrink: 0; }
-
-	@media (max-width: 768px) {
-		.status-label { width: auto; min-width: 80px; }
-		.service-row { flex-wrap: wrap; gap: 6px; }
-		.service-actions { width: 100%; margin-left: 0; }
-
-		}
+	.theme-opt.active { background: var(--accent-wash); color: var(--accent-text); }
+	.theme-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 </style>

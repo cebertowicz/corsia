@@ -34,6 +34,7 @@ from typing import Any
 
 from events.connectors.github_ownership import declared_owner_thread_ids
 from events.connectors import github_outcome_input as shape
+from events.connectors import github_outcome_measurements as measurements
 from infra.outcome_event_attributes import ISSUE_KIND_VALUES, PRIORITY_VALUES
 
 _INTRODUCED_BY = re.compile(r"^[ \t>*_-]*introduced[ \t]+by[ \t]+#(\d+)\b", re.I | re.M)
@@ -154,11 +155,21 @@ def _pr_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
         return [_pr_draft(key, subject, common, f"closed:{closed}", "github.pr.closed", closed)]
     merged_at = shape.timestamp(shape.required(pr, "merged_at"))
     body = shape.body(pr.get("body"))
+    minutes_since_opened = measurements.minutes_between(pr.get("created_at"), merged_at)
+    revert = measurements.reverted_sha(pr.get("title"), body)
+    revert_pr = measurements.reverted_pr_number(pr.get("title"), body, repo)
+    measurement_attrs: dict[str, Any] = {}
+    if minutes_since_opened is not None:
+        measurement_attrs["minutes_since_opened"] = minutes_since_opened
+    if revert is not None:
+        measurement_attrs["reverts_sha"] = revert
+    if revert_pr is not None:
+        measurement_attrs["reverts_pr"] = revert_pr
     drafts = [_pr_draft(
         key, subject, common, "merged", "github.pr.merged", merged_at,
         head_ref=shape.text(shape.required(shape.mapping(pr["head"]), "ref")),
         merge_sha=shape.text(shape.required(pr, "merge_commit_sha")),
-        **declaration_attributes(pr),
+        **declaration_attributes(pr), **measurement_attrs,
     )]
     for introducing in introduced_by_numbers(body):
         drafts.append(OutcomeDraft(

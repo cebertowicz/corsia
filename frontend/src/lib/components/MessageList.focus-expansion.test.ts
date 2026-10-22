@@ -1,6 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withOpenTime } from '$lib/__tests__/fixtures/openTimeServer';
 import { flushSync, mount, unmount } from 'svelte';
 import { coreSettings } from '$lib/stores/settings';
+import { token } from '$lib/stores/auth';
 import {
 	activeThreadId, activeToolsByThread, messages, streamContentByThread, type Message,
 } from '$lib/stores/threads';
@@ -62,6 +64,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	vi.unstubAllGlobals();
+	token.set(null);
 	if (component) unmount(component);
 	component = null;
 	host.remove();
@@ -122,10 +126,13 @@ describe('Focus runs when the first page failed', () => {
 	const rows = () => inThread(A, [work('step', 1, '10:01:00'), said('reply', 2, '10:02:00')]);
 	const turnSummaries = { t1: turn('10:00:00', '10:02:00', 1) };
 
-	it('counts a first run whose start is known', () => {
+	it('counts a first run whose start is known', async () => {
+		// The server answers the run's range: the lead Turn's whole span.
+		token.set('test-token');
+		vi.stubGlobal('fetch', withOpenTime(vi.fn() as unknown as typeof fetch, () => turnSummaries));
 		messages.set(rows());
 		renderList({ turnSummaries });
-
+		await vi.waitFor(() => expect(faces()).toEqual(['Worked · 1 step · 2 min']));
 		expect(faces()).toEqual(['Worked · 1 step · 2 min']);
 	});
 

@@ -105,7 +105,7 @@ def require_same_operation_home(request, source_home):
 
 
 def _refuse_warm_source(reason):
-    from core.checkpoint_types import WarmForkUnusable
+    from core.fork_types import WarmForkUnusable
 
     raise WarmForkUnusable(reason, reason=reason)
 

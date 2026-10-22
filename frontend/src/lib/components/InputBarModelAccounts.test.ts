@@ -3,7 +3,7 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn() }));
-vi.mock('$lib/stores/modelsLoad', () => ({ loadModels: vi.fn(async () => {}) }));
+vi.mock('$lib/stores/modelsLoad', () => ({ loadModels: vi.fn(async () => {}), loadComposerModels: vi.fn(async () => {}), loadThreadCatalog: vi.fn(async () => {}) }));
 vi.mock('$lib/stores/threadVendorAccounts', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/stores/threadVendorAccounts')>()),
 	loadThreadVendorAccounts: vi.fn(async () => {}),
@@ -185,7 +185,7 @@ describe('model picker account rows', () => {
 		expect(get(settingsNavigation).openRequest).toBe(1);
 		expect(get(settingsNavigation).section).toBe('providers');
 		expect(get(settingsNavigation).project).toBeNull();
-		expect(get(settingsNavigation).anchor).toBe('workspace-provider-policy');
+		expect(get(settingsNavigation).anchor).toBeNull();
 		expect(onclose).toHaveBeenCalledOnce();
 	});
 

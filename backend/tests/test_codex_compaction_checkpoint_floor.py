@@ -131,7 +131,7 @@ async def test_codex_compaction_after_same_turn_checkpoint_has_no_new_legal_boun
 @pytest.mark.asyncio
 async def test_pressure_launch_does_not_start_a_second_fold_while_one_is_active():
     """`evaluate_boundary` suppresses a duplicate optional fold while active."""
-    from core.checkpoint_fit import BoundaryDecision, soft_pressure_remaining
+    from core.fork_fit import BoundaryDecision, soft_pressure_remaining
     from core.checkpoint_resume import (
         CheckpointWaitScope,
         ProviderBoundary,

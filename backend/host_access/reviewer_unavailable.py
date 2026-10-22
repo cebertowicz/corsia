@@ -12,6 +12,8 @@ from __future__ import annotations
 from datetime import datetime
 
 from host_access.errors import ReviewerOutage, ReviewerUnavailableError
+from llm.locality import LOCALITY_REFUSALS
+from prompts.cloud_off import LOCALITY_PHRASES
 
 SETTINGS_PLACE = "Settings > System > Host Access Review"
 
@@ -56,6 +58,8 @@ def _moment_text(moment: datetime) -> str:
 
 def outage_cause(outage: ReviewerOutage) -> str:
     """Plain words for why one reviewer cannot run, with its reset time when known."""
+    if outage.reason in LOCALITY_REFUSALS:
+        return f"it's a cloud model and {LOCALITY_PHRASES[outage.reason]}"
     if outage.reason == "usage_limited":
         moment = _local(outage.resets_at)
         return f"usage limit until {_moment_text(moment)}" if moment else "usage limit"
@@ -89,10 +93,24 @@ def _unavailable_head(exc: ReviewerUnavailableError | None) -> str:
     )
 
 
+def _locality_fix(exc: ReviewerUnavailableError) -> str | None:
+    """The one fix a locality refusal has: the person's setting, and no waiting for it.
+
+    Only the person can lift a locality refusal, so every cause the locality
+    owner names gets this fix, never the wait-for-the-reviewer guidance.
+    """
+    if exc.outage.reason not in LOCALITY_REFUSALS:
+        return None
+    fix = f"Tell the person once to choose a local reviewer model in {SETTINGS_PLACE}"
+    return f"{fix} or turn on reviewer fallback." if not exc.fallback_enabled else f"{fix}."
+
+
 def application_guidance(
     exc: ReviewerUnavailableError | None, *, subject: str = "application",
 ) -> str:
     """Tell an agent its review did not happen, why, and what to do instead."""
+    if exc is not None and (fix := _locality_fix(exc)):
+        return f"{_unavailable_head(exc)} Your {subject} was not reviewed. {fix}"
     moment = _resume_moment(exc)
     wait = (
         f"until {moment}, or until the reviewer is back"
@@ -105,9 +123,20 @@ def application_guidance(
 
 
 def action_guidance(exc: ReviewerUnavailableError) -> str:
-    """Guidance for an action whose lease reviewer cannot run (pinned review)."""
+    """Guidance for an action whose lease reviewer cannot run (pinned review).
+
+    A pinned review never re-resolves, so neither waiting nor a Settings change
+    lifts a locality refusal of its model: only a new application can reach a
+    reviewer the chat may use, and that application's own refusal names any fix.
+    """
     if exc.pinned and exc.fallback_enabled:
         return _PINNED_APPLY_AGAIN
+    if exc.pinned and exc.outage.reason in LOCALITY_REFUSALS:
+        return (
+            f"This lease's reviewer can't run ({outage_cause(exc.outage)}). Your "
+            "action was not reviewed. Apply again; if the new application is "
+            "refused too, its refusal names the fix."
+        )
     return application_guidance(exc, subject="action")
 
 

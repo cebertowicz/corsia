@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
 from automation import plan_liveness
 from automation.continuation.progress import (
     ADVANCED,
@@ -11,11 +9,12 @@ from automation.continuation.progress import (
     wake_snapshot,
 )
 from automation.continuation.triggers import Trigger, TriggerRequest
+from infra.thread_input_rows import (
+    liveness_wake_queued,
+    turn_running_before,
+    turn_starting_work_pending,
+)
 from plans.public import liveness_signal
-
-PLAN_WAKE_MAX_PER_WINDOW = 20
-PLAN_WAKE_WINDOW_SECONDS = 3600
-
 
 
 def _scope(thread_id: str, db) -> str:
@@ -53,6 +52,11 @@ class LivenessSource:
 
         requests = []
         for wake in plan_liveness.due_plan_wakes(now, db=db):
+            # One unread wake per thread: a Turn that outlasts several due
+            # times reads one reminder, not a stack of them. The row's deadline
+            # alone decides when; this only holds a second unread reminder.
+            if liveness_wake_queued(db, wake.thread_id):
+                continue
             requests.append(self._request(wake, db, now))
         return requests
 
@@ -64,12 +68,7 @@ class LivenessSource:
             outcome, reason = "cancelled", "no_actionable_work"
         else:
             progress = classify_progress(signal, wake_snapshot(wake))
-            next_cycle = 0 if progress == ADVANCED else wake.cycle + 1
             reason = f"progress_{progress}"
-            if self._window_exhausted(wake, now):
-                outcome, reason = "stalled", "wake_budget_exhausted"
-            elif next_cycle >= plan_liveness.PLAN_WAKE_MAX_CYCLES:
-                outcome, reason = "stalled", "cycle_cap_reached"
         return TriggerRequest(
             kind=self.kind,
             thread_id=wake.thread_id,
@@ -110,8 +109,6 @@ class LivenessSource:
         if transition != _transition(wake):
             return False
         if details.get("provider_reset_at"):
-            from infra.thread_input_rows import turn_starting_work_pending
-
             if turn_starting_work_pending(db, thread_id):
                 return False
         return self.still_actionable(thread_id, details, db=db)
@@ -120,10 +117,9 @@ class LivenessSource:
         """Return whether the work this wake was collected for can still move.
 
         This is the only question a claim may ask. Delivering a wake settles its
-        source and re-arms the row at the next cycle, so asking again whether
-        the row still matches the transition it was collected at would call a
-        wake stale for having been delivered, and the Turn it waited for would
-        never start.
+        source and re-arms the row, so asking again whether the row still
+        matches the transition it was collected at would call a wake stale for
+        having been delivered, and the Turn it waited for would never start.
         """
         signal = self._signal(thread_id, db)
         return (
@@ -157,9 +153,6 @@ class LivenessSource:
             return
         if outcome == "delivered":
             self._settle_delivery(wake, trigger.created_at, db)
-        elif outcome == "deferred" and reason == "thread_unavailable":
-            signal = self._signal(wake.thread_id, db)
-            plan_liveness._rearm_due_wake(wake, signal, wake.cycle, db)
         elif outcome in {"cancelled", "stalled"}:
             plan_liveness._claim_fire(wake.id, outcome, db)
         elif outcome == "failed":
@@ -167,40 +160,17 @@ class LivenessSource:
             # too, so no failed delivery can re-arm it or replay indefinitely.
             plan_liveness._claim_fire(wake.id, plan_liveness.STALLED, db)
 
-    def _settle_delivery(self, wake, now: str, db) -> None:
+    def _settle_delivery(self, wake, collected_at: str, db) -> None:
         signal = self._signal(wake.thread_id, db)
         progress = classify_progress(signal, wake_snapshot(wake))
+        if turn_running_before(db, wake.thread_id, collected_at):
+            # The wake steered a Turn that was already running: the flat
+            # in-Turn interval, and the idle cycle does not advance. A wake that
+            # started its own Turn is idle spacing, so the backoff still doubles.
+            plan_liveness._rearm_due_wake(
+                wake, signal, 0 if progress == ADVANCED else wake.cycle, db,
+                seconds=plan_liveness.PLAN_WAKE_IN_TURN_SECONDS,
+            )
+            return
         next_cycle = 0 if progress == ADVANCED else wake.cycle + 1
-        self._record_delivery_window(wake, now, db)
         plan_liveness._rearm_due_wake(wake, signal, next_cycle, db)
-
-    def _window_exhausted(self, wake, now: str) -> bool:
-        if not wake.window_started_at:
-            return False
-        started = datetime.fromisoformat(wake.window_started_at)
-        if datetime.fromisoformat(now) - started >= timedelta(
-            seconds=PLAN_WAKE_WINDOW_SECONDS
-        ):
-            return False
-        return wake.wakes_in_window >= PLAN_WAKE_MAX_PER_WINDOW
-
-    def _record_delivery_window(self, wake, now_iso: str, db) -> None:
-        now = datetime.fromisoformat(now_iso)
-        started = (
-            datetime.fromisoformat(wake.window_started_at)
-            if wake.window_started_at
-            else None
-        )
-        reset = started is None or now - started >= timedelta(
-            seconds=PLAN_WAKE_WINDOW_SECONDS
-        )
-        db.execute(
-            """UPDATE plan_liveness_wakes
-               SET wakes_in_window=?, window_started_at=?
-               WHERE id=? AND status='armed'""",
-            (
-                1 if reset else wake.wakes_in_window + 1,
-                now.isoformat() if reset else wake.window_started_at,
-                wake.id,
-            ),
-        )

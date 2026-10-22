@@ -59,6 +59,11 @@ def thread_is_available(session: Any | None) -> bool:
     return thread_unavailable_reason(session) is None
 
 
+def thread_is_temporary(session: Any) -> bool:
+    """Whether a spawned thread remains a temporary worker rather than an agent."""
+    return _row_value(session, "spawned_by") is not None and not _row_value(session, "agent_enabled")
+
+
 def thread_is_explicitly_archived(session: Any | None) -> bool:
     return (
         session is not None

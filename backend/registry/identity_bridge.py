@@ -120,6 +120,19 @@ def normalized_row_by_id(
     return public_row_from_normalized(projected)
 
 
+def written_row(db, artifact_id: str, writer_thread_id: str) -> dict | None:
+    """The row a confirmed write reports: the current owner's registration.
+
+    A write to a released file leaves it unowned and the writer a subscriber,
+    so the write reports the writer's own registration, never the former
+    owner's archived projection that ``normalized_row_by_id`` gives readers.
+    """
+    row = _joined_registration(db, artifact_id, OWNER_REGISTRATION_STATES) or _joined_registration(
+        db, artifact_id, RELEASED_OWNER_REGISTRATION_STATES, parent_thread_id=writer_thread_id
+    )
+    return public_row_from_normalized(row) if row else None
+
+
 def _latest_released_owner_thread_id(db, artifact_id: str) -> str | None:
     latest = db.execute(
         """SELECT event_type, old_owner_thread_id

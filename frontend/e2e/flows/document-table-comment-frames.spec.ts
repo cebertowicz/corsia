@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 
 /**
@@ -8,7 +9,10 @@ import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
  * sheet leaves a commented table cell above where it rests.
  */
 
-const TABLE_ROWS = Array.from({ length: 14 }, (_, index) => `| row-${String(index).padStart(2, '0')} | owner-${String(index).padStart(2, '0')} |`);
+const TABLE_ROWS = [
+	...Array.from({ length: 14 }, (_, index) => `| row-${String(index).padStart(2, '0')} | owner-${String(index).padStart(2, '0')} |`),
+	'| cut line ||',
+];
 const filler = (from: number, to: number) => Array.from({ length: to - from }, (_, index) => `## Section ${from + index}\n\nA public-safe paragraph that makes this document long enough to scroll in the editor, repeated so that each section takes real room.\n`);
 const DOC = [
 	'# Table comment frames', '',
@@ -20,7 +24,7 @@ const DOC = [
 	...filler(30, 48),
 ].join('\n');
 
-type Opened = { artifactId: string; ids: { table: string; prose: string } };
+type Opened = { title: string; artifactId: string; ids: { table: string; prose: string } };
 
 async function openDocument(page: Page, size: { width: number; height: number }): Promise<Opened> {
 	await page.setViewportSize(size);
@@ -54,7 +58,7 @@ async function openDocument(page: Page, size: { width: number; height: number })
 	await expect(page.locator('.cm-content')).toBeVisible();
 	await expect(page.getByRole('button', { name: /^2 open threads\b/ })).toBeEnabled();
 	await settle(page);
-	return { artifactId, ids };
+	return { title, artifactId, ids };
 }
 
 /** Waits until nothing animates and the editor's geometry is steady across frames. */
@@ -102,6 +106,30 @@ const evidence = async (page: Page, testInfo: TestInfo, name: string) => {
 
 test.describe('@flow:document-table-comment-frames @surface:documents desktop with the comment list open', () => {
 	test.beforeEach(({}, testInfo) => { test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop width'); });
+
+	test('an empty table cell can start and keep a comment after reload', async ({ page }, testInfo) => {
+		test.setTimeout(90_000);
+		const { title, ids } = await openDocument(page, { width: 1440, height: 900 });
+		await page.getByRole('button', { name: /^2 open threads\b/ }).click();
+		const comments = page.locator('[data-doc-comments-drawer]');
+		await comments.locator(`[data-comment-id="${ids.table}"]`).locator('[data-comment-jump]').click();
+		await comments.getByRole('button', { name: 'Close comments' }).click();
+		await expect(comments).toHaveCount(0);
+		const cell = page.locator('.cm-md-table tr', { hasText: 'cut line' }).locator('td').nth(1);
+		await cell.scrollIntoViewIfNeeded();
+		await cell.click();
+		await page.locator('.sel-comment').click();
+		await page.getByPlaceholder('Comment…').fill('Empty-cell comment.');
+		await page.getByRole('button', { name: 'Comment', exact: true }).last().click();
+		await expect(cell).toHaveClass(/cm-comment-anchor/);
+		await loginByUrl(page, { waitForComposer: false });
+		await page.getByText(title, { exact: true }).first().click();
+		await expect(page.locator('.cm-content')).toBeVisible();
+		await page.getByRole('button', { name: /^3 open threads\b/ }).click();
+		await expect(page.getByText('Empty-cell comment.', { exact: true })).toBeVisible();
+		await expect(page.getByText('Couldn’t find its place', { exact: true })).toHaveCount(0);
+		await evidence(page, testInfo, 'empty-cell-after-reload');
+	});
 
 	test('navigating to a table row and a prose comment lands inside the editor, and saving on visible text does not scroll', async ({ page }, testInfo) => {
 		test.setTimeout(90_000);

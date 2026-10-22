@@ -82,7 +82,7 @@ def _read_native_checkpoint_context(
     from history.scoped_source import assistant_step_through
     from infra.checkpoint_queries import current_installed
     from infra.database import get_db
-    from llm.resolution import resolve_execution_target
+    from llm.resolution import resolve_thread_target
     from subagents.codex_runtime_support import resolve_working_dir
 
     db = get_db()
@@ -91,7 +91,7 @@ def _read_native_checkpoint_context(
         thread_row = db.execute("SELECT * FROM threads WHERE id=?", (thread_id,)).fetchone()
         if thread_row is None:
             return None
-        target = resolve_execution_target(str(thread_row["model"] or ""), db=db)
+        target = resolve_thread_target(str(thread_row["model"] or ""), thread_id=thread_id, db=db)
         if target.catalog_id != target_catalog_id:
             return None
         if target.harness != "native" or not target.available:
@@ -111,11 +111,7 @@ def _read_native_checkpoint_context(
         if boundary is None:
             return None
         return _NativeCheckpointContext(
-            target,
-            boundary,
-            previous,
-            projection,
-            previous.id if previous is not None else None,
+            target, boundary, previous, projection, previous.id if previous is not None else None,
             resolve_working_dir(thread_row["project_id"], db),
         )
     finally:
@@ -140,12 +136,16 @@ def remaining_native_input(state) -> int:
     return max(0, state.fit_ledger.effective_window_tokens - occupied)
 
 
-async def _refresh_native_window(state) -> None:
-    """Rebind the same payload to a freshly resolved cap at its next call boundary."""
-    from llm.resolution import resolve_execution_target
+async def _refresh_native_window(state, thread_id: str) -> None:
+    """Rebind the same payload to a freshly resolved cap at its next call boundary.
+
+    The resolution is the thread's, so a model its locality policy now forbids stops the
+    whole Turn here, before the call: later input then holds at admission on that cause.
+    """
+    from llm.resolution import resolve_locality_permitted
 
     ledger = state.fit_ledger
-    target = await run_in_db(resolve_execution_target, ledger.target_catalog_id)
+    target = await run_in_db(partial(resolve_locality_permitted, ledger.target_catalog_id, thread_id=thread_id))
     if target.context_window is None:
         raise ValueError("Native provider call has no resolved context window")
     if target.context_window != ledger.effective_window_tokens:
@@ -250,7 +250,7 @@ async def maintain_native_checkpoint(
     """Apply the shared checkpoint boundary before one Native provider call."""
     if turn_identity is None or state.fit_ledger is None:
         return None
-    await _refresh_native_window(state)
+    await _refresh_native_window(state, thread_id)
     from core.checkpoint_resume import (
         CheckpointWaitScope,
         ProviderBoundary,

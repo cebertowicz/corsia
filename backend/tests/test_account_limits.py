@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, Mock
 from fastapi import FastAPI
 import pytest
 
-from automation.continuation.admission import DEFERRAL_BASE_SECONDS, MAX_DEFERRALS
 from connections import harness_models, harness_usage
 from connections.account_policy import select_account
 from connections.account_receipts import capture_receipt, limit_subject
@@ -27,6 +26,10 @@ from connections.usage_windows import merged_window, window_length, window_stale
 from core.checkpoint_types import CheckpointUnavailable
 from core.stop_causes import PLAN_LIMIT_REASON, PlanLimitStop
 from infra.database import get_db, write_transaction
+from infra.connection_limit_release import (
+    LIMIT_RELEASE_BACKOFF_SECONDS,
+    LIMIT_RELEASE_MAX_ATTEMPTS,
+)
 from infra.input_admission import accept_thread_input
 from infra.plan_limit_continue import CONTINUE_CHIP, continue_message_id, queue_plan_limit_continue
 from infra import thread_execution  # noqa: F401  # imported before any patch of the driver, so it binds the real one
@@ -352,7 +355,7 @@ def _due_after_reset(db) -> list[LimitSubject]:
     after_reset = datetime.fromisoformat(_RESET) + timedelta(minutes=1)
     return [due.subject for due in release_due(
         harness_usage.stored_usage(provider="claude-code", db=db, account_id=default_id("claude-code", db=db)), after_reset,
-        account=default_subject("claude-code", "null", db=db), max_attempts=MAX_DEFERRALS, backoff_seconds=DEFERRAL_BASE_SECONDS,
+        account=default_subject("claude-code", "null", db=db), max_attempts=LIMIT_RELEASE_MAX_ATTEMPTS, backoff_seconds=LIMIT_RELEASE_BACKOFF_SECONDS,
     )]
 
 

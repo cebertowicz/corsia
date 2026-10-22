@@ -8,7 +8,7 @@ import SettingsKeys from './SettingsKeys.svelte';
 import { token, user } from '$lib/stores/auth';
 import { connectionError } from '$lib/stores/connection';
 import { KEYS_SIGNED_OUT } from '$lib/stores/keys';
-import { providerCardRequest, settingsNavigation } from '$lib/stores/settingsNavigation';
+import { providerCardRequest, requestConnectedAppKey, resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 import { disconnect } from '$lib/ws/connection';
 
 const VALUE = 'BSAmarkup-test-value-0123';
@@ -31,6 +31,7 @@ let serverKeys: Record<string, unknown>[];
 let writeAnswer: { status: number; body: unknown };
 let checkAnswer: unknown;
 let fetchMock: ReturnType<typeof vi.fn>;
+let connectedAppsAnswers: ({ servers: unknown[] } | Error)[];
 
 function json(status: number, body: unknown) {
 	return { ok: status < 400, status, json: async () => body } as Response;
@@ -44,10 +45,17 @@ beforeEach(() => {
 	providerKeys = [];
 	serverKeys = [];
 	providerCardRequest.set(null);
+	resetSettingsNavigation();
 	writeAnswer = { status: 200, body: { key: webSearch } };
 	checkAnswer = { outcome: 'works', reason: null };
+	connectedAppsAnswers = [];
 	fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
 		if (url === '/api/keys') return json(200, { keys: entries, provider_keys: providerKeys, server_keys: serverKeys });
+		if (String(url).startsWith('/api/mcp/servers')) {
+			const answer = connectedAppsAnswers.shift() ?? { servers: [] };
+			if (answer instanceof Error) throw answer;
+			return json(200, answer);
+		}
 		if (url.endsWith('/check')) return json(200, checkAnswer);
 		return json(writeAnswer.status, writeAnswer.body);
 	});
@@ -67,9 +75,9 @@ afterEach(() => {
 	connectionError.set(null);
 });
 
-async function mountKeys() {
+async function mountKeys(firstEntry = 'web-search') {
 	component = mount(SettingsKeys, { target: host });
-	await vi.waitFor(() => expect(host.querySelector('[data-key-entry="web-search"]')).not.toBeNull());
+	await vi.waitFor(() => expect(host.querySelector(`[data-key-entry="${firstEntry}"]`)).not.toBeNull());
 }
 
 function button(card: string, label: string): HTMLButtonElement {
@@ -116,13 +124,34 @@ describe('Settings › Keys', () => {
 		expect(added).toContain('Remove');
 	});
 
+	it('labels every referenced card with its app and key name when Connected apps opens a multi-key app', async () => {
+		const originalScroll = HTMLElement.prototype.scrollIntoView;
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+		try {
+			entries = [
+				{ ...maps, name: 'linear-primary', label: 'Linear primary key' },
+				{ ...maps, name: 'linear-secondary', label: 'Linear secondary key' },
+			];
+			requestConnectedAppKey('Linear', 'linear-primary', [
+				{ entry: 'linear-primary', name: 'LINEAR_PRIMARY_KEY' },
+				{ entry: 'linear-secondary', name: 'LINEAR_SECONDARY_KEY' },
+			]);
+			await mountKeys('linear-primary');
+			expect(host.querySelector('[data-key-entry="linear-primary"] .name')?.textContent).toBe('Linear key: LINEAR_PRIMARY_KEY');
+			expect(host.querySelector('[data-key-entry="linear-secondary"] .name')?.textContent).toBe('Linear key: LINEAR_SECONDARY_KEY');
+		} finally {
+			if (originalScroll) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: originalScroll });
+			else delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+		}
+	});
+
 	it('says on the entry card that an environment variable is ignored, and not when none is', async () => {
 		const withEnv = { ...webSearch, ignored_env_var: 'BRAVE_API_KEY' };
 		entries = [withEnv, maps];
 		await mountKeys();
-		expect(host.querySelector('[data-key-entry="web-search"] [data-ignored-env]')!.textContent)
+		expect(host.querySelector('[data-key-entry="web-search"] [data-row-note]')!.textContent)
 			.toBe('BRAVE_API_KEY in the environment is ignored. Change the key here.');
-		expect(host.querySelector('[data-key-entry="maps"] [data-ignored-env]')).toBeNull();
+		expect(host.querySelector('[data-key-entry="maps"] [data-row-note]')).toBeNull();
 	});
 
 	it('names when a set key was saved', async () => {
@@ -215,6 +244,37 @@ describe('Settings › Keys', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain(text));
 	});
 
+	describe('saved connected-app keys', () => {
+		async function saveLinkedKey() {
+			Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+			entries = [{ ...maps, name: 'linear-key', label: 'Linear key' }];
+			requestConnectedAppKey('Linear', 'linear-key', [{ entry: 'linear-key', name: 'API key' }]);
+			await mountKeys('linear-key');
+			button('linear-key', 'Set').click();
+			await vi.waitFor(() => expect(host.querySelector('form')).not.toBeNull());
+			const form = host.querySelector('form')!;
+			const fields = form.querySelectorAll<HTMLInputElement>('input');
+			type(fields[0], VALUE);
+			type(fields[1], PASSWORD);
+			form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		}
+
+		const connecting = { servers: [{ name: 'Linear', state: 'connecting' }] };
+		it.each([
+			[[new Error('offline')], 'Saved.'],
+			[[connecting, { servers: [{ name: 'Linear', state: 'working' }] }], 'Linear is connected.'],
+			[[...Array.from({ length: 31 }, () => connecting)], 'Saved.'],
+			[[{ servers: [{ name: 'Linear', state: 'failed', failure_class: 'timed_out' }] }], "Couldn't connect: no response"],
+		])('keeps key-save status accurate after reconnect lookup: %s', async (answers, expected) => {
+			vi.useFakeTimers();
+			connectedAppsAnswers = [...answers];
+			await saveLinkedKey();
+			await vi.runAllTimersAsync();
+			await vi.waitFor(() => expect(host.textContent).toContain(expected));
+			vi.useRealTimers();
+		});
+	});
+
 	describe('provider keys', () => {
 		const anthropic = {
 			name: 'provider-anthropic', provider: 'anthropic', label: 'Anthropic',
@@ -248,19 +308,19 @@ describe('Settings › Keys', () => {
 			expect(get(settingsNavigation).section).toBe('providers');
 		});
 
-		it('lists built-in keys first, then every provider as a row in one card with no heading per provider', async () => {
+		it('lists built-in keys first, then every provider as a row in one group with no heading per provider', async () => {
 			providerKeys = [anthropic, openai, groq];
 			await mountKeys();
 			expect(host.textContent).not.toContain('Other keys');
-			const subhead = [...host.querySelectorAll('h3')].find((h) => h.textContent === 'Provider keys')!;
+			const subhead = [...host.querySelectorAll('h3')].find((h) => h.textContent?.trim() === 'Provider keys')!;
 			const webCard = host.querySelector('[data-key-entry="web-search"]')!;
 			expect(webCard.compareDocumentPosition(subhead) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-			const card = row('anthropic').closest('.settings-card')!;
-			expect(card.querySelectorAll('[data-provider-key]')).toHaveLength(3);
-			expect(card.querySelector('h3')).toBeNull();
+			const group = row('anthropic').closest('.settings-group')!;
+			expect(group.querySelectorAll('[data-provider-key]')).toHaveLength(3);
+			expect(group.querySelectorAll('h3')).toHaveLength(1);
 		});
 
-		it('lists each server as a row in the same card as the providers, by name, with no heading of its own', async () => {
+		it('lists each server as a row in the same group as the providers, by name, with no heading of its own', async () => {
 			providerKeys = [anthropic, openai];
 			serverKeys = [
 				{ name: 'server-ns-1', server_id: 'ns-1', label: 'Studio', is_set: true },
@@ -269,10 +329,10 @@ describe('Settings › Keys', () => {
 			await mountKeys();
 			const studio = host.querySelector<HTMLElement>('[data-server-key="ns-1"]')!;
 			const plan = host.querySelector<HTMLElement>('[data-server-key="ns-2"]')!;
-			const card = row('anthropic').closest('.settings-card')!;
-			expect(studio.closest('.settings-card')).toBe(card);
-			expect(plan.closest('.settings-card')).toBe(card);
-			expect(card.querySelector('h3')).toBeNull();
+			const group = row('anthropic').closest('.settings-group')!;
+			expect(studio.closest('.settings-group')).toBe(group);
+			expect(plan.closest('.settings-group')).toBe(group);
+			expect(group.querySelectorAll('h3')).toHaveLength(1);
 			expect(row('openai').compareDocumentPosition(studio) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 			expect(studio.textContent).toContain('Studio');
 			expect(studio.textContent).toContain('Set');
@@ -289,13 +349,13 @@ describe('Settings › Keys', () => {
 		it('shows the Provider keys heading for servers alone', async () => {
 			serverKeys = [{ name: 'server-ns-1', server_id: 'ns-1', label: 'Studio', is_set: true }];
 			await mountKeys();
-			expect([...host.querySelectorAll('h3')].some((h) => h.textContent === 'Provider keys')).toBe(true);
+			expect([...host.querySelectorAll('h3')].some((h) => h.textContent?.trim() === 'Provider keys')).toBe(true);
 		});
 
 		it('says only that an environment key is ignored, since the key is changed in Providers', async () => {
 			providerKeys = [{ ...anthropic, is_set: false, ignored_env_var: 'ANTHROPIC_API_KEY' }, openai];
 			await mountKeys();
-			expect(row('anthropic').querySelector('[data-ignored-env]')!.textContent).toBe('ANTHROPIC_API_KEY in the environment is ignored.');
+			expect(row('anthropic').querySelector('[data-row-note]')!.textContent).toBe('ANTHROPIC_API_KEY in the environment is ignored.');
 			expect(row('openai').textContent).not.toContain('ignored');
 		});
 

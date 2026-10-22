@@ -279,7 +279,7 @@ def test_external_initial_context_does_not_fold_nonterminal_predecessor() -> Non
 def test_new_turn_cold_admission_fits_tool_run_after_installed_floor(
     isolated_db, monkeypatch, specimen: str, trigger: str,
 ) -> None:
-    from core.checkpoint_render import fit_cold_checkpoint_input
+    from core.fork_render import fit_cold_fork_input
     from infra.database import get_db
     from subagents.harness_checkpoint_cold_admission import build_external_cold_admission
     from subagents.harness_checkpoint_context import read_external_checkpoint_context
@@ -390,7 +390,7 @@ def test_new_turn_cold_admission_fits_tool_run_after_installed_floor(
     assert admission.request.through_seq == last_result_seq
     assert admission.request.trigger == trigger
     assert admission.provider_request.cold_source is not None
-    fitted = fit_cold_checkpoint_input(
+    fitted = fit_cold_fork_input(
         admission.provider_request,
         # Fixed pressure budgets exercise the fit floor; these are synthetic
         # surface allowances, not measurements of production provider prompts.
@@ -680,7 +680,7 @@ async def test_claude_initial_resume_captures_exact_boundary_warm_source(monkeyp
     """Claude provider-resume must not silently fall through to cold capture."""
     from history.types import HistoryBoundary
     from subagents import harness_checkpoint_resume as bridge
-    from core import checkpoint_cc_boundary
+    from core import fork_cc_boundary
 
     target = _target("claude-code")
     boundary = HistoryBoundary("thread-cc", 0, 7, "through-row")
@@ -703,7 +703,7 @@ async def test_claude_initial_resume_captures_exact_boundary_warm_source(monkeyp
         return SimpleNamespace(request=SimpleNamespace(mode="warm"))
 
     monkeypatch.setattr(
-        checkpoint_cc_boundary,
+        fork_cc_boundary,
         "capture_boundary_warm_source",
         capture,
         raising=False,
@@ -725,8 +725,8 @@ async def test_claude_initial_resume_captures_exact_boundary_warm_source(monkeyp
 
 @pytest.mark.asyncio
 async def test_provider_resume_refusal_keeps_its_own_reason(monkeypatch) -> None:
-    from core import checkpoint_cc_boundary
-    from core.checkpoint_warm_request import warm_capture_refused
+    from core import fork_cc_boundary
+    from core.fork_capture import warm_capture_refused
     from history.types import HistoryBoundary
     from loguru import logger
     from subagents import harness_checkpoint_resume as bridge
@@ -744,7 +744,7 @@ async def test_provider_resume_refusal_keeps_its_own_reason(monkeypatch) -> None
     async def prepare(_checkpoint_id, **kwargs):
         return SimpleNamespace(request=SimpleNamespace(mode="cold"), **kwargs)
 
-    monkeypatch.setattr(checkpoint_cc_boundary, "capture_boundary_warm_source", capture)
+    monkeypatch.setattr(fork_cc_boundary, "capture_boundary_warm_source", capture)
     monkeypatch.setattr(bridge, "_prepare_external_checkpoint", prepare)
     lines: list[str] = []
     sink = logger.add(lines.append, format="{level}|{message}", level="DEBUG")
@@ -757,15 +757,15 @@ async def test_provider_resume_refusal_keeps_its_own_reason(monkeypatch) -> None
         logger.remove(sink)
 
     assert admission.warm_source is None
-    refused = "checkpoint warm capture refused for thread-cc (claude-code): live_changed"
+    refused = "fork warm capture refused for thread-cc (claude-code): live_changed"
     assert lines.count(f"INFO|{refused}\n") == 1
     assert not any("no_live_handle" in line for line in lines)
 
 
 @pytest.mark.asyncio
 async def test_codex_rollout_refusal_keeps_its_own_reason(monkeypatch) -> None:
-    from core import checkpoint_render
-    from core.checkpoint_warm_request import warm_capture_refused
+    from core import fork_render
+    from core.fork_capture import warm_capture_refused
     from history.types import HistoryBoundary
     from loguru import logger
     from subagents import harness_checkpoint_resume as bridge
@@ -783,7 +783,7 @@ async def test_codex_rollout_refusal_keeps_its_own_reason(monkeypatch) -> None:
     async def prepare(_checkpoint_id, **kwargs):
         return SimpleNamespace(request=SimpleNamespace(mode="cold"), **kwargs)
 
-    monkeypatch.setattr(checkpoint_render, "capture_warm_checkpoint_source", capture)
+    monkeypatch.setattr(fork_render, "capture_warm_fork_source", capture)
     monkeypatch.setattr(bridge, "_prepare_external_checkpoint", prepare)
     lines: list[str] = []
     sink = logger.add(lines.append, format="{level}|{message}", level="DEBUG")
@@ -796,7 +796,7 @@ async def test_codex_rollout_refusal_keeps_its_own_reason(monkeypatch) -> None:
         logger.remove(sink)
 
     assert admission.warm_source is None
-    refused = "checkpoint warm capture refused for thread-codex (codex): no_warm_boundary"
+    refused = "fork warm capture refused for thread-codex (codex): no_warm_boundary"
     assert lines.count(f"INFO|{refused}\n") == 1
     assert not any("no_live_handle" in line for line in lines)
 
@@ -825,7 +825,7 @@ async def test_codex_fresh_process_captures_registered_rollout(monkeypatch) -> N
         captured["warm_source"] = kwargs["warm_source"]
         return SimpleNamespace(request=SimpleNamespace(mode="warm"))
 
-    monkeypatch.setattr("core.checkpoint_render.capture_warm_checkpoint_source", capture)
+    monkeypatch.setattr("core.fork_render.capture_warm_fork_source", capture)
     monkeypatch.setattr(bridge, "_prepare_external_checkpoint", prepare)
 
     admission = await bridge._prepare_initial_external_checkpoint(
@@ -920,7 +920,7 @@ async def test_fresh_process_initial_fold_follows_harness_no_warm_policy(
         assert cold_calls == []
         assert sum(line.startswith("INFO|Optional checkpoint skipped") for line in lines) == 1
         refused = (
-            "INFO|checkpoint warm capture refused for thread-fresh "
+            "INFO|fork warm capture refused for thread-fresh "
             f"(claude-code): no_live_handle mode={mode} has_session=no "
             "session_registered=no eager=none\n"
         )
@@ -977,7 +977,7 @@ def test_no_live_handle_names_why_the_launch_was_not_provider_resume(fields, exp
 async def test_codex_tool_boundary_prepares_warm_checkpoint_at_previous_group(
     monkeypatch,
 ) -> None:
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import CheckpointWaitScope, ProviderContinuation
     from history.types import HistoryBoundary
     from subagents import harness_checkpoint_resume as bridge
@@ -1032,7 +1032,7 @@ async def test_codex_tool_boundary_prepares_warm_checkpoint_at_previous_group(
         )
 
     monkeypatch.setattr(
-        "core.checkpoint_codex_fork.warm_tool_boundary_prefix_bytes",
+        "core.fork_codex.warm_tool_boundary_prefix_bytes",
         boundary_prefix,
     )
 
@@ -1062,7 +1062,7 @@ async def test_codex_tool_boundary_prepares_warm_checkpoint_at_previous_group(
         resumed.append(args)
 
     monkeypatch.setattr(
-        "core.checkpoint_render.capture_warm_checkpoint_source",
+        "core.fork_render.capture_warm_fork_source",
         capture,
     )
     monkeypatch.setattr(
@@ -1098,7 +1098,7 @@ async def test_external_tool_boundary_uses_fresh_checkpoint_state(
     harness,
     fresh_state,
 ) -> None:
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import CheckpointWaitScope, ProviderContinuation
     from history.types import HistoryBoundary
     from subagents import harness_checkpoint_resume as bridge
@@ -1279,7 +1279,7 @@ async def test_cc_checkpoint_replaces_handle_beneath_same_turn(
     from subagents import cc_runtime
     from subagents import cc_resume_transition as resume_module
     from subagents.cc_runtime_state import _LIVE, _Live
-    from core.checkpoint_cc_context import CCCheckpointContext
+    from core.fork_cc_context import CCForkContext
 
     identity = TurnIdentity("turn-cc", 4)
     terminated = []
@@ -1294,7 +1294,7 @@ async def test_cc_checkpoint_replaces_handle_beneath_same_turn(
             claude_dir="/tmp/claude",
             working_dir="/tmp/project",
             terminate=terminate,
-            tool_context=CCCheckpointContext(None, None),
+            tool_context=CCForkContext(None, None),
         )
 
     old_session = session("old")
@@ -1796,7 +1796,7 @@ async def test_external_tool_boundary_carries_provider_checkpoint_identity(
     monkeypatch,
     harness,
 ) -> None:
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import (
         CheckpointWaitScope,
         ProviderContinuation,
@@ -1888,7 +1888,7 @@ async def test_external_tool_boundary_renders_exact_when_usage_is_missing(
     monkeypatch,
     harness,
 ) -> None:
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import CheckpointWaitScope, ProviderContinuation
     from history.types import HistoryBoundary
     from subagents import harness_checkpoint_resume as bridge
@@ -1977,7 +1977,7 @@ async def test_external_tool_boundary_uses_the_context_that_seeded_its_handle(
     replaces_handle,
 ) -> None:
     """Pending usage uses checkpoint+tail; real pressure still replaces the handle."""
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import CheckpointWaitScope, ProviderContinuation
     from history.types import HistoryBoundary
     from subagents import harness_checkpoint_resume as bridge

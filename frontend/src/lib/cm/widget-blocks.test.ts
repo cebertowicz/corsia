@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { forceParsing } from '@codemirror/language';
 import { markdown } from '@codemirror/lang-markdown';
 import { GFM } from '@lezer/markdown';
 import { tableAt, tableRowAt, widgetSourceAt } from './widget-blocks';
@@ -27,8 +28,15 @@ function drawnTable(view: EditorView) {
 	return el;
 }
 
+/** An editor with its document parsed: the first parse stops after 20ms of wall time and finishes on a timer these tests never run. */
+const editor = (doc: string) => {
+	const created = new EditorView({ state: EditorState.create({ doc, extensions }), parent: document.body });
+	if (!forceParsing(created, created.state.doc.length, 1_000)) throw new Error('markdown parser did not finish');
+	return created;
+};
+
 let view: EditorView;
-const open = () => view = new EditorView({ state: EditorState.create({ doc: DOC, extensions }), parent: document.body });
+const open = () => view = editor(DOC);
 afterEach(() => { view?.destroy(); document.body.replaceChildren(); vi.restoreAllMocks(); });
 
 describe('tableRowAt', () => {
@@ -93,15 +101,15 @@ describe('widgetSourceAt', () => {
 		const fence = DOC.indexOf('```mermaid');
 		expect(widgetSourceAt(view, DOC.indexOf('A-->B'))).toEqual({ from: fence, to: DOC.length - 1 });
 		expect(widgetSourceAt(view, DOC.indexOf('Title'))).toBeNull();
-		const code = new EditorView({ state: EditorState.create({ doc: '```js\nlet a\n```', extensions }), parent: document.body });
+		const code = editor('```js\nlet a\n```');
 		expect(widgetSourceAt(code, 8)).toBeNull();
 		code.destroy();
 	});
 
 	// The renderer draws a diagram only when the fence's info string, trimmed and lowercased, is exactly mermaid.
 	const sourceIn = (doc: string, needle: string) => {
-		const editor = new EditorView({ state: EditorState.create({ doc, extensions }), parent: document.body });
-		try { return widgetSourceAt(editor, doc.indexOf(needle)); } finally { editor.destroy(); }
+		const opened = editor(doc);
+		try { return widgetSourceAt(opened, doc.indexOf(needle)); } finally { opened.destroy(); }
 	};
 
 	it('takes a tilde or an indented mermaid fence as a diagram, as the renderer does', () => {

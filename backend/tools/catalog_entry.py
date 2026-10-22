@@ -25,6 +25,10 @@ ToolCategory = Literal[
     "host_access",
     "discovery",
     "google",
+    "microsoft",
+    "microsoft_mail",
+    "microsoft_calendar",
+    "microsoft_files",
 ]
 
 

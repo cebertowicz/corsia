@@ -351,3 +351,29 @@ describe('markdown images in the live preview', () => {
 		expect(view.dom.querySelector('.cm-md-image')).toBeNull();
 	});
 });
+
+describe('images in a rendered table', () => {
+	const TABLE_DOC = ['# Shots', '', '| Phone | Desktop |', '| - | - |', '| ![A phone](img/a.png) | ![A desktop](/ws/other/b.png) |', ''].join('\n');
+	const cells = (view: EditorView) => [...view.dom.querySelectorAll<HTMLImageElement>('.cm-md-table td img')];
+
+	it('loads each cell image from the content route, a relative one from the document folder', () => {
+		const imgs = cells(mount(TABLE_DOC, 0));
+		expect(imgs.map((img) => img.alt)).toEqual(['A phone', 'A desktop']);
+		expect(imgs.map(imagePath)).toEqual(['/ws/notes/img/a.png', '/ws/other/b.png']);
+		expect(imgs.every((img) => img.src.includes('/api/files/content'))).toBe(true);
+	});
+
+	it('says why a cell image did not load', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => ({ status: 404, body: null })));
+		const view = mount(TABLE_DOC, 0);
+		cells(view)[0].dispatchEvent(new Event('error'));
+		await vi.waitFor(() => expect(view.dom.querySelector('.cm-md-table .cm-md-image-note')?.textContent).toBe(`A phone · ${MISSING_IMAGE}`));
+	});
+
+	it('never fetches a web image in a cell, or any image when the document has no path', () => {
+		const web = ['| a |', '| - |', '| ![remote](https://example.com/x.png) |', ''].join('\n');
+		expect(mount(web, 0).dom.querySelector('.cm-md-table img')).toBeNull();
+		expect(mount(web, 0).dom.querySelector('.cm-md-table .cm-md-link')?.textContent).toBe('remote');
+		expect(cells(mount(TABLE_DOC, 0, null))).toEqual([]);
+	});
+});

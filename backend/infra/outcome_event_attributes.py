@@ -47,6 +47,12 @@ class AttributeSpec:
         """Whether ``value`` is a legal value for this attribute."""
         if self.kind == "count":
             return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        if self.kind == "num":
+            return (
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                and value >= 0 and value == value and value not in (float("inf"), float("-inf"))
+                and round(value, 6) == value
+            )
         if self.kind == "login":
             return (
                 isinstance(value, str)
@@ -149,7 +155,8 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     "github.pr.retargeted": {**_PR_ATTRS, "base_from": id_attr()},
     "github.pr.merged": {
         **_PR_ATTRS, **_PR_DECLARATION_ATTRS,
-        "head_ref": id_attr(), "merge_sha": id_attr(),
+        "head_ref": id_attr(), "merge_sha": id_attr(), "minutes_since_opened": count_attr(),
+        "reverts_sha": id_attr(), "reverts_pr": id_attr(),
     },
     "github.pr.introduced_by": {
         "repo": id_attr(), "pr": id_attr(), "introduced_by_pr": id_attr(),
@@ -193,13 +200,24 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     "github.issue.closed": {
         **_ISSUE_ATTRS, "state_reason": enum_attr("completed", "not_planned", "reopened", "duplicate"),
     },
+    # Immutable verdict records use bounded serialized details rather than a
+    # second table.  The engine writes these only while its switch is enabled.
+    "measurement.verdict.planned": {"plan": text_attr(2_000)},
+    "measurement.verdict.reached": {
+        "verdict": enum_attr("keep", "revert"),
+        "reason": text_attr(200), "detail": text_attr(2_000),
+    },
 }
 
 
 def filter_attributes(
     event_name: str, attributes: dict[str, Any] | None,
+    declared: dict[str, AttributeSpec] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Return (kept, dropped keys): allowlisted valid values only, sanitized.
+
+    ``declared`` is a declared measure event's own specs, passed in by admission; without it the
+    event's built-in allowlist applies, so what is kept never depends on what has been loaded.
 
     Raises ``OutcomeInputRefusal`` (a ``ValueError``) at the kept-attribute 4 KiB guard.
 
@@ -210,7 +228,7 @@ def filter_attributes(
     a row a dropped enum value is simply absent — only the moving counter says that
     anything was dropped at all.
     """
-    allowed = ATTRIBUTE_ALLOWLISTS.get(event_name, {})
+    allowed = declared if declared is not None else ATTRIBUTE_ALLOWLISTS.get(event_name, {})
     kept: dict[str, Any] = {}
     dropped: list[str] = []
     for key, value in (attributes or {}).items():

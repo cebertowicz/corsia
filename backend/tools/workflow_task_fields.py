@@ -13,6 +13,7 @@ from infra import config
 from infra.database import get_db
 from infra.db_async import run_in_db, run_off_db
 from infra.guidance_git import GitFault, file_version, workspace_repository
+from infra.guidance_history_paths import LOCAL_EDIT_MARK
 from infra.system_package import system_package_dir
 from plans.public import PlanInputError
 
@@ -232,6 +233,14 @@ def _workflow_version(skill) -> str | None:
         if skill.scope == "system"
         else _editable_workflow_version(skill.path)
     )
+
+
+def judged_version(version: object) -> bool:
+    """Whether a recorded ``workflow_version`` names one exact content: not Unversioned, not a local edit.
+
+    A local edit carries the mark :func:`_editable_workflow_version` writes, and two drafts can share it.
+    """
+    return isinstance(version, str) and bool(version.strip()) and LOCAL_EDIT_MARK not in version
 
 
 def _editable_workflow_version(path) -> str | None:

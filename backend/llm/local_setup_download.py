@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 from llm import local_setup_operation
 from llm.local_model import LocalModel
@@ -28,7 +28,7 @@ async def wait_for_download(
     model: LocalModel,
     *,
     record_task: Callable[[LocalModel, str], None],
-    flight: Any,
+    on_progress: Callable[[int | None, bool, int | None], None],
     wait_seconds: float = DOWNLOAD_WAIT_SECONDS,
     poll_seconds: float = DOWNLOAD_POLL_SECONDS,
     background_poll_seconds: float = DOWNLOAD_BACKGROUND_POLL_SECONDS,
@@ -57,6 +57,7 @@ async def wait_for_download(
 
     started = time.monotonic()
     tracker = DownloadProgress(started)
+    following = False
     while True:
         tasks_response = await admin_request(cfg, "GET", "/hf/tasks", timeout=15.0)
         if tasks_response.status_code != 200:
@@ -67,9 +68,9 @@ async def wait_for_download(
         status = str(task.get("status") or "").lower()
         observed_at = time.monotonic()
         tracker.observe(task.get("downloaded_size"), task.get("total_size"), observed_at)
-        flight.download_eta_seconds = tracker.eta_seconds
-        flight.download_stalled = tracker.stalled
-        shown = tracker.due(task.get("downloaded_size"), task.get("total_size"), observed_at)
+        downloaded, total = task.get("downloaded_size"), task.get("total_size")
+        on_progress(tracker.eta_seconds, tracker.stalled, DownloadProgress.percent(downloaded, total))
+        shown = tracker.due(downloaded, total, observed_at)
         if shown is not None:
             progress(f"Downloading {model.model} ({format_size(model.download_size_bytes)}, {shown}%)")
         if status in {"completed", "complete", "success", "succeeded"}:
@@ -79,11 +80,11 @@ async def wait_for_download(
         elapsed = time.monotonic() - started
         if elapsed >= follow_seconds:
             raise StillDownloading()
-        if elapsed >= wait_seconds and not flight.following:
-            flight.following = True
+        if elapsed >= wait_seconds and not following:
+            following = True
             progress(f"Still downloading {model.model}; it will finish in the background")
         await asyncio.sleep(
-            background_poll_seconds if flight.following else poll_seconds,
+            background_poll_seconds if following else poll_seconds,
         )
 
 

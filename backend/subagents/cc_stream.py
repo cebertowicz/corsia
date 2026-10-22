@@ -13,12 +13,10 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from core._tool_result_delivery_support import ToolResultBindingError
-from core.checkpoint_cc_context import CCCheckpointContext
+from core.fork_cc_context import CCForkContext
 from infra.write_admission import sqlite_errorname_tag
-from subagents.cc_invocation import (
-    ClaudeInvocation,
-    build_claude_cmd,
-)
+from subagents.cc_confinement import drop_review_credentials
+from subagents.cc_invocation import CONFINEMENT_NONE, ClaudeInvocation, build_claude_cmd
 from subagents.cc_env import apply_claude_config_dir, clean_claude_env
 from subagents.cc_events import normalize_event
 from subagents.cc_stream_frames import build_user_frame, read_raw_event
@@ -64,6 +62,8 @@ class CCStreamSession:
         resume_session_id: str | None = None,
         corsia_thread_id: str | None = None,
         reconstructed_transcript_path: str | None = None,
+        confinement: str = CONFINEMENT_NONE,
+        add_dirs: tuple[str, ...] = (),
     ) -> None:
         self.transport_generation_id = str(uuid.uuid4())
         self.binary = binary
@@ -78,6 +78,8 @@ class CCStreamSession:
         self.permission_mode = permission_mode
         self.working_dir = working_dir
         self.claude_dir = claude_dir
+        self.confinement = confinement
+        self.add_dirs = add_dirs
         self._on_event = on_event
         self._on_exit = on_exit
         self._extra_args = extra_args or []
@@ -91,7 +93,7 @@ class CCStreamSession:
         self._interrupt_seq = 0
         self._control_seq = 0
         self._control_responses: dict[str, asyncio.Future[dict]] = {}
-        self.tool_context = CCCheckpointContext(None, None)
+        self.tool_context = CCForkContext(None, None)
         self._context_changed = asyncio.Event()
 
     def invocation(self) -> ClaudeInvocation:
@@ -106,6 +108,8 @@ class CCStreamSession:
             working_dir=self.working_dir,
             model=self.model,
             effort=self.effort,
+            confinement=self.confinement,
+            add_dirs=self.add_dirs,
         )
 
     def build_cmd(self) -> list[str]:
@@ -124,6 +128,8 @@ class CCStreamSession:
             env["CORSIA_THREAD_ID"] = self.corsia_thread_id
         apply_claude_config_dir(env, self.claude_dir)
         env["CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"] = "1"
+        if self.confinement != CONFINEMENT_NONE:
+            drop_review_credentials(env)
         return env
 
     async def start(self) -> None:

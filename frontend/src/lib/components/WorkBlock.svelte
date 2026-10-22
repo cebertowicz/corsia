@@ -2,6 +2,8 @@
 	import { tick, type Snippet } from 'svelte';
 	import VisitDivider from './VisitDivider.svelte';
 	import BlockLine from './BlockLine.svelte';
+	import WaitCapsule from './WaitCapsule.svelte';
+	import type { WaitFace } from './waitFace';
 	import { createPhraseSwap } from './plans/phraseSwap.svelte';
 	import { FADE_MS, UNKNOWN_STEP } from './plans/planLiveStep';
 	import { blockEntries } from './transcriptBlockEntries';
@@ -18,6 +20,9 @@
 		liveTime = null,
 		livePhrase = UNKNOWN_STEP,
 		liveDimmed = false,
+		liveOwnThread = true,
+		liveActorName = null,
+		livePreviewFromDescendant = false,
 		load,
 		onToggle,
 		onLoadRun,
@@ -26,6 +31,8 @@
 		warning,
 		liveActivity,
 		notes,
+		wait = null,
+		waitThreadId = null,
 	}: {
 		entry: TranscriptFoldEntry;
 		label: string;
@@ -37,6 +44,12 @@
 		livePhrase?: string;
 		/** Between tools: the phrase is the last tool's. */
 		liveDimmed?: boolean;
+		/** Only the visible thread's own running turn uses the accent spinner. */
+		liveOwnThread?: boolean;
+		/** Named when the live phrase belongs to an active descendant worker. */
+		liveActorName?: string | null;
+		/** The phrase is a descendant's; wait for its subscribed title before showing it. */
+		livePreviewFromDescendant?: boolean;
 		load?: RunLoad;
 		onToggle: () => void;
 		onLoadRun?: (stub: RunStub) => void;
@@ -48,22 +61,35 @@
 		liveActivity?: Snippet;
 		/** Plan-limit pause notes for a stub run, shown open or closed. */
 		notes?: Snippet;
+		/** The plan waits on something outside and nothing runs: the chip says so in place of its settled face (EW8). */
+		wait?: WaitFace | null;
+		waitThreadId?: string | null;
 	} = $props();
 
 	let section: HTMLElement | undefined = $state();
-	let toggleButton: HTMLButtonElement | undefined = $state();
+	let toggleButton: HTMLElement | undefined = $state();
 
 	// A stub-backed block reads newest rows first: its rows only start at its start once the read is whole.
 	const complete = $derived(!entry.stub || (load !== undefined && !load.loading && !load.error && !runHasMore(entry.stub, load)));
 	const entries = $derived(expanded ? blockEntries(entry, { complete }) : []);
 	const indexById = $derived(new Map(entry.items.map((item, index) => [item.id, index])));
 	const plainLabel = $derived(label.endsWith(NEW_SUFFIX) ? label.slice(0, -NEW_SUFFIX.length) : label);
+	const hideUnidentifiedDescendant = $derived(livePreviewFromDescendant && !liveActorName);
 	// A new phrase waits out the current one's minimum hold, then crossfades in, as the plan row does.
-	const swap = createPhraseSwap(() => livePhrase);
-	const liveText = $derived(liveLabel(liveTime, swap.shown));
-	const ariaLabel = $derived(entry.live
-		? `${expanded ? 'Collapse' : 'Expand'} current work: ${livePhrase}${liveTime ? ` · ${liveTime}` : ''}`
-		: runToggleName(entry, label, expanded));
+	// The actor swaps with its phrase, so a held phrase is never credited to the next actor.
+	const swap = createPhraseSwap(() => JSON.stringify(hideUnidentifiedDescendant ? [null, UNKNOWN_STEP] : [liveActorName, livePhrase]));
+	const shown = $derived(JSON.parse(swap.shown) as [string | null, string]);
+	const shownActor = $derived(shown[0]);
+	// The lead stays `Working · 3 min`; an unknown or unattributed step adds nothing after it.
+	const shownPhrase = $derived(shown[1] === UNKNOWN_STEP ? null : shown[1]);
+	const liveLead = $derived(liveLabel(liveTime, null));
+	const liveText = $derived(liveLabel(liveTime, shownPhrase && shownActor ? `${shownActor}: ${shownPhrase}` : shownPhrase));
+	const ariaLabel = $derived.by(() => {
+		if (wait) return `${expanded ? 'Collapse' : 'Expand'} run. ${wait.title}`;
+		if (!entry.live) return runToggleName(entry, label, expanded);
+		const phrase = hideUnidentifiedDescendant ? UNKNOWN_STEP : `${liveActorName ? `${liveActorName}: ` : ''}${livePhrase}`;
+		return `${expanded ? 'Collapse' : 'Expand'} current work: ${phrase}${liveTime ? ` · ${liveTime}` : ''}`;
+	});
 
 	/** The pinned header sits at its `top` offset; a collapse from there must leave the capsule there. */
 	function isPinned(): boolean {
@@ -82,25 +108,34 @@
 	}
 </script>
 
-<section class="transcript-fold" class:live-work={entry.live} class:expanded bind:this={section} data-work-block data-new={entry.new ? '' : undefined}>
-	<button
-		type="button"
-		class="fold-toggle"
-		bind:this={toggleButton}
-		aria-expanded={expanded}
-		aria-controls={expanded ? bodyId : undefined}
-		aria-label={ariaLabel}
-		onclick={() => { void toggle(); }}
-	>
-		{#if entry.live}
-			<svg class="live-spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-			<span class="live-step" class:dimmed={liveDimmed} class:fading={swap.fading} style="--fade-ms: {FADE_MS}ms" title={liveText}>{liveText}</span>
-		{:else}
-			<span class="fold-label">{plainLabel}</span>
-			{#if entry.new}<span class="fold-new" data-new-capsule>· <i aria-hidden="true"></i>new</span>{/if}
-		{/if}
-		<svg class="fold-chevron" class:expanded width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
-	</button>
+<section class="transcript-fold" class:live-work={entry.live || wait !== null} class:expanded bind:this={section} data-work-block data-new={entry.new ? '' : undefined}>
+	{#if wait}
+		<WaitCapsule
+			face={wait}
+			threadId={waitThreadId}
+			toggle={{ expanded, controls: expanded ? bodyId : undefined, name: ariaLabel, onToggle: () => { void toggle(); } }}
+			bind:element={toggleButton}
+		/>
+	{:else}
+		<button
+			type="button"
+			class="fold-toggle"
+			bind:this={toggleButton}
+			aria-expanded={expanded}
+			aria-controls={expanded ? bodyId : undefined}
+			aria-label={ariaLabel}
+			onclick={() => { void toggle(); }}
+		>
+			{#if entry.live}
+				<svg class="live-spinner" class:subagent-only={!liveOwnThread} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+				<span class="live-step" class:dimmed={liveDimmed} class:fading={swap.fading} style="--fade-ms: {FADE_MS}ms" title={liveText}>{liveLead}{#if shownPhrase}{' · '}{#if shownActor}<span class="live-actor">{shownActor}:</span>{' '}{/if}{shownPhrase}{/if}</span>
+			{:else}
+				<span class="fold-label">{plainLabel}</span>
+				{#if entry.new}<span class="fold-new" data-new-capsule><span class="fold-new-sep">·</span> <i aria-hidden="true"></i><span class="fold-new-word">new</span></span>{/if}
+			{/if}
+			<svg class="fold-chevron" class:expanded width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
+		</button>
+	{/if}
 	{#if expanded}
 		<div class="fold-details" id={bodyId}>
 			{#if entry.stub}
@@ -144,7 +179,9 @@
 </section>
 
 <style>
-	.transcript-fold { max-width: 760px; margin: 0 auto 14px; scroll-margin-top: var(--sticky-top, 0px); }
+	.transcript-fold { display: flex; flex-wrap: wrap; max-width: 760px; margin: 0 auto 14px; min-width: 0; align-items: center; scroll-margin-top: var(--sticky-top, 0px); }
+	/* Notes (plan-limit pauses) are rows under the block, never items beside the chip. */
+	.transcript-fold > :global(.plan-limit-paused) { flex: 0 0 100%; }
 	/* Collapsed: a glass capsule sized to its label. Expanded: the same capsule pins as the header. */
 	.fold-toggle {
 		position: sticky; top: var(--sticky-top, 0px); z-index: 4;
@@ -154,11 +191,14 @@
 		box-shadow: var(--glass-rim), 0 0 0 1px var(--border-subtle);
 		color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); text-align: left; cursor: pointer;
 	}
-	.expanded > .fold-toggle { background: var(--glass-regular); box-shadow: var(--glass-elevation-1); }
+	.expanded .fold-toggle { background: var(--glass-regular); box-shadow: var(--glass-elevation-1); }
 	.fold-toggle:hover { color: var(--text-primary); }
 	.fold-label, .live-step { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.fold-new { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; white-space: nowrap; }
-	.fold-new i { width: 6px; height: 6px; border-radius: var(--radius-circle); background: var(--accent); }
+	.live-actor { color: var(--text-secondary); }
+	.fold-new { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--space-1); margin-left: calc(-1 * var(--space-1)); white-space: nowrap; }
+	.fold-new i { width: calc(var(--space-1) * 1.5); height: calc(var(--space-1) * 1.5); border-radius: var(--radius-circle); background: var(--accent); }
+	.fold-new-word { color: var(--accent-text); }
+	.fold-details, .fold-history { flex: 0 0 100%; box-sizing: border-box; }
 	.fold-chevron { flex: 0 0 auto; color: var(--text-tertiary); transition: transform var(--dur-tight); }
 	.fold-chevron.expanded { transform: rotate(90deg); }
 	.live-step { transition: opacity var(--fade-ms, 150ms) ease; }
@@ -166,6 +206,7 @@
 	.live-step.fading { opacity: 0; }
 	@media (prefers-reduced-motion: reduce) { .live-step { transition: none; } }
 	.live-spinner { flex-shrink: 0; color: var(--status-in-progress); animation: live-spin 1s linear infinite; }
+	.live-spinner.subagent-only { color: var(--text-tertiary); }
 	@keyframes live-spin { to { transform: rotate(360deg); } }
 	/* No box: a 2 px rule down the left edge shows where the block starts and ends. */
 	.fold-details { margin: 8px 0 0 5px; padding: 2px 0 0 16px; border-left: 2px solid var(--border-subtle); }

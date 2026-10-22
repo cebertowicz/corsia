@@ -67,7 +67,8 @@ def admit_input(
             intent=intent,
             message_id=message_id,
             metadata=stamped_human_metadata(
-                connection, role, message_id, metadata, viewing_document=viewing_document,
+                connection, role, message_id, metadata,
+                viewing_document=viewing_document, thread_id=thread_id,
             ),
             delivery_options=delivery_options,
             continuation=continuation,
@@ -104,6 +105,10 @@ def _parent_completion(
     ).fetchone()[0]
     if not parent or is_fenced(str(parent)):
         return None
+    from events.worker_starts import started_by
+
+    if started_by(db, child_id) is not None:
+        return None  # a rule-started worker answers its owner only as a worker.* event
     from plans.public import has_open_structured_attachment
 
     if has_open_structured_attachment(child_id, db=db):

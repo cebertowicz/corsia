@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from host_access.credential_sanitizer import contains_credential
-from infra.outcome_event_attributes import filter_attributes
+from infra.outcome_event_attributes import AttributeSpec, filter_attributes
 from infra.outcome_event_input import OutcomeInputRefusal
 
 TOMBSTONE = '{"retracted":true}'
@@ -51,6 +51,7 @@ def _utc(ts: str) -> str:
 
 def count_outcome_event(
     db: sqlite3.Connection, counter: str, event_name: str, n: int = 1,
+    agent_thread_id: str = "", day: str | None = None,
 ) -> None:
     """Add ``n`` to a durable intake counter; an unknown ``counter`` is refused by the schema.
 
@@ -61,9 +62,9 @@ def count_outcome_event(
     if n < 1:
         raise ValueError("outcome event counters only grow; n must be positive")
     db.execute(
-        "INSERT INTO outcome_event_counters (counter,event_name,n) VALUES (?,?,?) "
-        "ON CONFLICT(counter,event_name) DO UPDATE SET n=n+excluded.n",
-        (counter, event_name, n),
+        "INSERT INTO outcome_event_counters (counter,event_name,agent_thread_id,day,n) VALUES (?,?,?,?,?) "
+        "ON CONFLICT(agent_thread_id,day,event_name,counter) DO UPDATE SET n=n+excluded.n",
+        (counter, event_name, agent_thread_id, day or _now()[:10], n),
     )
 
 
@@ -81,12 +82,14 @@ def record_outcome_event(
     attribution: str | None = None,
     corroborated_by: str | None = None,
     attributes: dict[str, Any] | None = None,
+    declared_specs: dict[str, AttributeSpec] | None = None,
 ) -> RecordResult:
     """Insert one event keyed on ``dedupe_key``; the first write wins.
 
     A later write with the same key is ignored and counted
     (``duplicate_ignored``). Attributes are filtered through the event's
-    allowlist; dropped keys are counted (``attribute_dropped``) and returned.
+    allowlist (or ``declared_specs``, a declared measure event's own); dropped keys are
+    counted (``attribute_dropped``) and returned.
     ``ts`` is stored as UTC ISO text (a naive value is taken as UTC). Raises
     ``OutcomeInputRefusal`` (a ``ValueError``) only at the credential-identity and
     kept-attribute budget guards; an unparseable ``ts`` raises ordinary ``ValueError``.
@@ -96,7 +99,7 @@ def record_outcome_event(
     for field in (dedupe_key, subject_key, project_id, agent_thread_id, corroborated_by):
         if field and contains_credential(field):
             raise OutcomeInputRefusal("outcome event identity fields must not carry credentials")
-    kept, dropped = filter_attributes(event_name, attributes)
+    kept, dropped = filter_attributes(event_name, attributes, declared_specs)
     event_id = str(uuid.uuid4())
     cursor = db.execute(
         f"INSERT INTO outcome_events ({_COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NULL) "
@@ -106,10 +109,10 @@ def record_outcome_event(
          json.dumps(kept, separators=(",", ":"))),
     )
     if cursor.rowcount != 1:
-        count_outcome_event(db, "duplicate_ignored", event_name)
+        count_outcome_event(db, "duplicate_ignored", event_name, agent_thread_id=agent_thread_id or "")
         return RecordResult(False, None, ())
     if dropped:
-        count_outcome_event(db, "attribute_dropped", event_name, len(dropped))
+        count_outcome_event(db, "attribute_dropped", event_name, len(dropped), agent_thread_id=agent_thread_id or "")
     return RecordResult(True, event_id, tuple(dropped))
 
 

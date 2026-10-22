@@ -44,7 +44,7 @@
 		<span class="hint">{hint}</span>
 	{/if}
 	{#if error}
-		<span class="err">{error}</span>
+		<span class="err error-text">{error}</span>
 	{/if}
 </div>
 
@@ -112,7 +112,7 @@
 	.c :global(textarea:focus) {
 		outline: none;
 		border-color: var(--accent);
-		box-shadow: 0 0 0 3px var(--accent-wash);
+		box-shadow: var(--shadow-focus);
 	}
 
 	.c :global(select) {
@@ -142,10 +142,7 @@
 		grid-area: msg;
 		font-size: var(--text-footnote); color: var(--text-tertiary);
 	}
-	.err {
-		grid-area: msg;
-		font-size: var(--text-footnote); color: var(--red-text);
-	}
+	.err { grid-area: msg; }
 
 	/* chip and nested: label above, no divider; the control's own look is in text-field.css. */
 	.field.chip, .field.nested { border-bottom: 0; padding: 0; grid-template-columns: 1fr; grid-template-areas: 'label' 'control' 'msg'; gap: var(--space-1); }
@@ -157,6 +154,12 @@
 		clip-path: inset(50%); white-space: nowrap;
 	}
 	.field.chip .c :global(select) { width: auto; flex: none; padding-right: calc(var(--space-6) + var(--space-3)); background-position: right var(--space-4) center; }
+	.field.chip .c :global(input::placeholder) { color: var(--text-tertiary); }
+	.field.chip .c :global(input:focus),
+	.field.chip .c :global(select:focus) {
+		border-color: var(--accent); box-shadow: var(--glass-rim), var(--shadow-chip), var(--shadow-focus);
+	}
+	.field.chip.has-error .c :global(input) { border-color: var(--red-text); }
 	.field.chip .hint, .field.chip .err, .field.nested .hint, .field.nested .err { padding-left: var(--space-1); }
 
 	@media (max-width: 720px) {

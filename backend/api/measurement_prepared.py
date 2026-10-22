@@ -46,8 +46,27 @@ DDL = {
         )
     """,
 }
+#: The accepted tasks' walked chains, filled by ``api.measurement_model_cost.materialize_chain``; not shared.
+CHAIN_TABLE = "temp.measurement_task_chain"
+CHAIN_DDL = ("CREATE TEMP TABLE IF NOT EXISTS measurement_task_chain "
+             "(task_id TEXT, period TEXT, settled_at TEXT, node_id TEXT)")
 _SCOPE_TABLES = (PREPARED_SCOPE, PREPARED_OUTCOMES, PREPARED_OUTCOME_NODES)
 _ROOT_TABLES = (*_SCOPE_TABLES, PREPARED_ROOTS, PREPARED_ROOT_OUTCOMES, PREPARED_ROOT_DIFFICULTIES)
+
+
+def create_tables(db, roots: bool) -> None:
+    """Create the prepared tables a preparation fills, before its first write.
+
+    sqlite3 opens a transaction at a job's first write, and the pooled connection's close rolls it back.
+    DDL inside that transaction is rolled back with it, so the table would be created again on every
+    request, and rolling back DDL makes SQLite discard the connection's whole parsed schema: the next
+    statement on that connection, whichever job sends it, re-reads every table, index and trigger.
+    Created first, the tables persist on the pooled connection and ``IF NOT EXISTS`` is a no-op after.
+    The chain table is created here too, as a job that reads chains may write these tables first.
+    """
+    for table in _ROOT_TABLES if roots else _SCOPE_TABLES:
+        db.execute(DDL[table])
+    db.execute(CHAIN_DDL)
 
 
 # --- Single-flight preparation ---------------------------------------------------
@@ -90,8 +109,8 @@ def _snapshot(db, roots: bool) -> dict[str, list[tuple]]:
 
 
 def _restore(db, snapshot: dict[str, list[tuple]]) -> None:
+    create_tables(db, roots=PREPARED_ROOTS in snapshot)
     for table, rows in snapshot.items():
-        db.execute(DDL[table])
         db.execute(f"DELETE FROM {table}")
         if rows:
             db.executemany(f"INSERT INTO {table} VALUES ({','.join('?' * len(rows[0]))})", rows)

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.checkpoint_types import CheckpointNotAdmitted
+from core.fork_types import ForkNotAdmitted
 from test_cold_install_floor_debt import _append_candidate, _capture_and_install, _request
 from test_external_cold_install_race import _codex_events, _event
 from test_external_cold_tool_debt import _context, debt_db  # noqa: F401
@@ -34,7 +34,7 @@ async def test_codex_refused_sibling_blocks_cold_install_until_missing_result_se
         "AND json_extract(metadata, '$.tool_call_id')='refused'"
     ).fetchone()[0] == 0
 
-    with pytest.raises(CheckpointNotAdmitted, match="tool calls are outstanding"):
+    with pytest.raises(ForkNotAdmitted, match="tool calls are outstanding"):
         build_external_cold_admission(
             "blocked", context=context, live=live, identity=live.corsia_turn,
         )

@@ -1,6 +1,7 @@
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { loginByUrl, openSettings, openSettingsSection, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 test('@flow:settings @surface:settings network registration shows its endpoint and removes the provider', async ({ page, request }, testInfo) => {
@@ -28,12 +29,13 @@ test('@flow:settings @surface:settings network registration shows its endpoint a
 		await loginByUrl(page, { waitForComposer: false });
 		await openSettings(page);
 		await openSettingsSection(page, 'Providers'); // the phone opens Settings on its section list
-		await page.getByRole('button', { name: 'Add your first provider', exact: true }).click();
-		await page.getByRole('button', { name: /Add remote provider by IP/ }).click();
+		// The header button exists whether or not an earlier spec left a provider; the empty state's own button does not.
+		await page.getByRole('button', { name: 'Add provider', exact: true }).click();
+		await page.getByRole('button', { name: /^oMLX on another Mac/ }).click();
 		const dialog = page.getByRole('dialog').last();
 		await dialog.getByPlaceholder('100.64.1.5  ·  macbook-m4.local').fill('127.0.0.1');
 		await dialog.getByPlaceholder('8000', { exact: true }).fill(String(bound.port));
-		await dialog.getByPlaceholder('(optional — auto-detected)').fill('G3 disposable provider');
+		await dialog.getByPlaceholder('(optional — uses the address)').fill('G3 disposable provider');
 		const [added] = await Promise.all([
 			page.waitForResponse(response => response.request().method() === 'POST'
 				&& new URL(response.url()).pathname === '/api/settings/network-servers'),

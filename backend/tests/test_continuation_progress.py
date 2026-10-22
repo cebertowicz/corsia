@@ -60,7 +60,7 @@ def test_progress_classification(current, snapshot, expected):
 
 
 @pytest.mark.asyncio
-async def test_twelve_churn_rounds_reach_the_bounded_stall(isolated_db):
+async def test_twelve_churn_rounds_keep_waking_at_a_widening_gap(isolated_db):
     thread_id = mk_session("bounded-churn")
     db = get_db()
     plan = service.ensure_plan("thread", thread_id, db=db)
@@ -94,57 +94,15 @@ async def test_twelve_churn_rounds_reach_the_bounded_stall(isolated_db):
         await pl.sweep_plan_wakes(
             "2099-01-01T00:00:00+00:00",
             db=db,
-            is_idle=lambda _thread_id: True,
             deliver=deliver,
         )
-        row = db.execute(
-            "SELECT status FROM plan_liveness_wakes WHERE thread_id=?",
-            (thread_id,),
-        ).fetchone()
-        if row["status"] == pl.STALLED:
-            break
 
-    assert row["status"] == pl.STALLED
-    assert deliver.await_count <= pl.PLAN_WAKE_MAX_CYCLES
-    db.close()
-
-
-def test_settled_event_inflation_cannot_bypass_thread_window(isolated_db):
-    thread_id = mk_session("inflation-window")
-    db = get_db()
-    plan = service.ensure_plan("thread", thread_id, db=db)
-    node = service.add_node(
-        plan.id,
-        kind="task",
-        title="Still actionable",
-        acceptance_criteria="The window remains authoritative",
-        db=db,
-    )
-    service.transition_node(node.id, "active", db=db)
-    admission.select(
-        node.id, actor_id=thread_id, provenance="test", db=db, touch=False,
-    )
-    pl.on_turn_complete(thread_id, db=db)
-    db.execute(
-        """UPDATE plan_liveness_wakes
-           SET deadline=?,last_open_count=2,last_settled_events=0,
-               wakes_in_window=20,window_started_at=?
-           WHERE thread_id=?""",
-        (
-            "2099-01-01T00:00:00+00:00",
-            "2099-01-01T00:30:00+00:00",
-            thread_id,
-        ),
-    )
-    db.commit()
-
-    request = LivenessSource().due(
-        "2099-01-01T01:00:00+00:00",
-        db=db,
-    )[0]
-
-    assert request.outcome == "stalled"
-    assert request.reason == "wake_budget_exhausted"
+    row = db.execute(
+        "SELECT status,cycle FROM plan_liveness_wakes WHERE thread_id=?",
+        (thread_id,),
+    ).fetchone()
+    assert (row["status"], row["cycle"]) == ("armed", 12)
+    assert deliver.await_count == 12
     db.close()
 
 
@@ -184,7 +142,6 @@ async def test_liveness_wake_blocked_after_collection_never_enters_fifo(isolated
             "2099-01-01T00:00:00+00:00",
             db=db,
             sources=[_BlockAfterCollection(active.id, blocker.id)],
-            is_idle=lambda _thread_id: True,
         )
 
     assert result["cancelled"] == [thread_id]
@@ -227,12 +184,12 @@ async def test_failed_t0_delivery_stalls_the_wake_without_replaying_forever(isol
     deliver = AsyncMock(return_value=False)
     await runner.sweep(
         "2099-01-01T00:00:00+00:00",
-        db=db, sources=[LivenessSource()], is_idle=lambda _thread_id: True,
+        db=db, sources=[LivenessSource()],
         deliver=deliver,
     )
     await runner.sweep(
         "2099-01-01T01:00:00+00:00",
-        db=db, sources=[LivenessSource()], is_idle=lambda _thread_id: True,
+        db=db, sources=[LivenessSource()],
         deliver=deliver,
     )
 

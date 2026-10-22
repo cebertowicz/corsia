@@ -18,7 +18,7 @@ import pytest
 
 from core.checkpoint_render import render_installed_checkpoint
 from core.checkpoint_snapshot_render import DATES_HEADER, render_checkpoint_dates
-from core.checkpoint_types import CHECKPOINT_CONTEXT_TRUNCATED
+from core.fork_types import FORK_CONTEXT_TRUNCATED
 
 THREAD = "dates-thread"
 MODEL = "native/Fortissimo"
@@ -148,7 +148,7 @@ def test_missing_captured_at_reads_as_an_unknown_time(dates):
 def test_dates_line_follows_the_truncation_warning(dates):
     _install()
     rendered = render_installed_checkpoint(
-        replace(_record(), error=CHECKPOINT_CONTEXT_TRUNCATED),
+        replace(_record(), error=FORK_CONTEXT_TRUNCATED),
     )
 
     assert rendered.index("[CORSIA warning") < rendered.index(

@@ -8,6 +8,7 @@ from typing import Any
 
 from core.message_row import call_id, parse_meta
 from core.reasoning_provenance import reasoning_content_for_typed_replay
+from core.reply_context import REPLY_CONTEXT_KEY, reply_context_lines
 from core.tool_lineage import resolve_tool_lineage
 from core.viewing_context import VIEWING_DOCUMENT_KEY, viewing_context_line
 from infra.delivery_states import TOOL_RESULT_QUARANTINED_UNBOUND
@@ -65,6 +66,7 @@ def render_agent_envelope(
         (metadata or {}).get(key) for key in NON_HUMAN_MARKERS
     ):
         lead += viewing_context_line((metadata or {}).get(VIEWING_DOCUMENT_KEY))
+        lead += reply_context_lines((metadata or {}).get(REPLY_CONTEXT_KEY))
     if not metadata or metadata.get("sender_kind") != "agent":
         footer = (
             f"\n{HUMAN_REPLY_FOOTER}"

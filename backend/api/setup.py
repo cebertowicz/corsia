@@ -9,28 +9,25 @@ the first account); it exists only while no account does.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import platform
 import shutil
-import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator
+from pydantic import ValidationError
 
+from api.setup_requests import FirstAccountRequest, LocalDownloadRequest, SetupProgressUpdate, SetupReportRequest
 from core.corrections_asset_download import FLIGHT as CLASSIFIER_DOWNLOAD
 from core.corrections_asset_download import public_state as classifier_state
-from infra import accounts, config, setup_progress, user_profile
+from infra import account_validation, accounts, config, setup_progress
 from infra.auth import authenticate, require_user, token_from_request
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
 from infra.time import utc_storage_iso_to_api
-from llm.local_setup_ownership import (
-    existing_omlx_requires_consent,
-    record_existing_omlx_consent,
-)
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 logger = logging.getLogger(__name__)
@@ -38,46 +35,6 @@ logger = logging.getLogger(__name__)
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]"})
 _TAURI_ORIGINS = frozenset({"tauri:" + "//localhost", "http:" + "//tauri.localhost"})
 _MINIMUM_MACOS_MAJOR = 15
-
-
-class LocalDownloadRequest(BaseModel):
-    """Consent for setup to inspect a pre-existing oMLX, and whether CORSIA may manage it."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    consent_existing: bool = False
-    #: Welcome's choice for it: Let CORSIA manage it, Use mine, or None where it wasn't shown.
-    manage_existing: bool | None = None
-
-
-class SetupProgressUpdate(BaseModel):
-    """One change to the setup record: a step, the local-AI choice, what was checked on Welcome, or completion."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    step: str | None = None
-    local_ai: bool | None = None
-    picks: dict[str, StrictBool] | None = None
-    completed: bool = False
-
-
-class FirstAccountRequest(BaseModel):
-    """The account screen's fields; password confirmation remains client-side."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=120)
-    username: str = Field(min_length=1, max_length=64)
-    password: str = Field(min_length=1, max_length=1024)
-    email: str | None = Field(default=None, max_length=320)
-
-    @field_validator("name")
-    @classmethod
-    def _name_is_not_blank(cls, value: str) -> str:
-        """A name of only whitespace is a validation error, never a profile-file one."""
-        if not user_profile.one_line(value):
-            raise ValueError("name is required")
-        return value
 
 
 def _own_backend_port(request: Request) -> int | None:
@@ -138,19 +95,6 @@ def _macos_supported() -> bool:
     except (TypeError, ValueError):
         return False
 
-
-def _app_location_class(executable: Path | None = None) -> str:
-    """Expose a coarse package class, never the executable's path."""
-    parts = (executable or Path(sys.executable)).parts
-    if "AppTranslocation" in parts:
-        return "disk_image"
-    if len(parts) > 1 and parts[1] == "Volumes":
-        return "disk_image"
-    try:
-        app_index = parts.index("CORSIA.app")
-    except ValueError:
-        return "other"
-    return "applications" if app_index > 0 and parts[app_index - 1] == "Applications" else "other"
 
 
 def _work_folder_display(workspace: Path) -> str:
@@ -213,11 +157,9 @@ def _setup_status() -> dict:
         "macos_supported": macos_supported,
         "ram_tier": "eligible" if memory_ok else "below_minimum",
         "free_disk_gb": free_disk_gb,
-        "app_location": _app_location_class(),
         "local_eligible": apple_silicon and macos_supported and memory_ok,
         "work_folder": _work_folder_display(config.WORKSPACE),
         "required_username": _required_username(),
-        "existing_omlx": existing_omlx_requires_consent(),
         "classifier": classifier_state(CLASSIFIER_DOWNLOAD.status()),
         "ready_ai": _ready_ai(),
         "ai_check_pending": _ai_check_pending(),
@@ -239,17 +181,22 @@ async def setup_progress_view(_user: dict = Depends(require_user)) -> dict:
     """Where setup stands for a signed-in person; while unfinished, the eligibility facts are read fresh."""
 
     def _read() -> dict:
+        from llm.local_setup import ever_started
+
         progress = setup_progress.view()
-        return progress if progress["setup_completed"] else {**progress, "status": _setup_status()}
+        if progress["setup_completed"]:
+            return progress
+        # Only a resumed setup asks whether local setup ever began; the pre-auth status never does.
+        return {**progress, "status": {**_setup_status(), "local_started": ever_started()}}
 
     return await run_in_db(_read)
 
 
 @router.put("/progress", response_model=None)
 async def setup_progress_update(request: Request, authorization: str | None = Header(None)) -> dict | Response:
-    """Record a setup step, the local-AI choice, Welcome's picks or completion.
+    """Record a setup step, the local-AI choice, the subscriptions they pay for or completion.
 
-    Before the first account only the local-AI choice and Welcome's picks are taken, on the same loopback boundary as the
+    Before the first account only the local-AI choice and the subscriptions they pay for are taken, on the same loopback boundary as the
     other pre-account routes; after it, any signed-in session may record all of them.
     """
     signed_in = await run_in_db(accounts.has_users)
@@ -262,14 +209,39 @@ async def setup_progress_update(request: Request, authorization: str | None = He
         body = SetupProgressUpdate.model_validate(await request.json())
     except (ValidationError, ValueError):
         return Response(status_code=422)
-    if not signed_in and (body.step is not None or body.completed):
+    if not signed_in and (body.step is not None or body.handoff is not None or body.completed):
         return Response(status_code=422)
     try:
         await run_in_db(lambda: setup_progress.update(
-            step=body.step, local_ai=body.local_ai, picks=body.picks, completed=body.completed))
+            step=body.step, local_ai=body.local_ai, picks=body.picks,
+            handoff=body.handoff.model_dump(exclude_none=True) if body.handoff is not None else None,
+            completed=body.completed))
     except setup_progress.SetupProgressError:
         return Response(status_code=422)
     return {"ok": True}
+
+
+@router.post("/report", response_model=None)
+async def setup_report(request: Request, authorization: str | None = Header(None)) -> dict | Response:
+    """The body of a saved setup report: the failed rows' causes and the service-log lines about them.
+
+    Before the first account, on the loopback boundary of the other pre-account routes; after it, any signed-in
+    session.
+    """
+    if await run_in_db(accounts.has_users):
+        if not authenticate(token_from_request(None, authorization)):
+            return Response(status_code=401)
+    elif not _trusted_json_post(request):
+        return Response(status_code=403)
+    try:
+        body = SetupReportRequest.model_validate(await request.json())
+    except (ValidationError, ValueError):
+        return Response(status_code=422)
+    from onboarding.setup_report import report_details
+
+    rows = [row.model_dump() for row in body.rows]
+    text = await asyncio.to_thread(report_details, rows, config.LOGS_DIR / "service.log")
+    return {"text": text}
 
 
 async def _before_first_account(request: Request, *, post: bool) -> Response | None:
@@ -315,6 +287,16 @@ async def local_model_stop(request: Request) -> dict | Response:
     return await stop_prepare()
 
 
+@router.get("/local-download", response_model=None)
+async def local_download_status(request: Request) -> dict | Response:
+    """The safe, live setup-flight state for Welcome's pre-account progress rail."""
+    if refused := await _before_first_account(request, post=False):
+        return refused
+    from onboarding.local_download_state import current
+
+    return current()
+
+
 @router.post("/local-download", response_model=None)
 async def local_download(request: Request) -> dict | Response:
     """Join the one local setup flight before first login; it downloads only the pick."""
@@ -323,16 +305,24 @@ async def local_download(request: Request) -> dict | Response:
     if await run_in_db(accounts.has_users):
         return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
     try:
-        body = LocalDownloadRequest.model_validate(await request.json())
+        LocalDownloadRequest.model_validate(await request.json())
     except (ValidationError, ValueError):
         return Response(status_code=422)
-    if existing_omlx_requires_consent():
-        if not body.consent_existing:
-            return JSONResponse(status_code=409, content={"code": "consent_required"})
-        record_existing_omlx_consent(manage=body.manage_existing)
-    from llm.local_setup import begin_local_setup
+    from llm.local_setup_flow import begin_local_setup
 
-    return await begin_local_setup()
+    return await begin_local_setup(onboarding=True)
+
+
+@router.post("/local-download/stop", response_model=None)
+async def stop_local_download(request: Request) -> dict | Response:
+    """Stop the pre-account setup flight under the same local JSON boundary that starts it."""
+    if not _trusted_json_post(request):
+        return Response(status_code=403)
+    if await run_in_db(accounts.has_users):
+        return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
+    from llm.local_setup import cancel_local_setup
+
+    return await cancel_local_setup()
 
 
 @router.get("/classifier", response_model=None)
@@ -348,7 +338,9 @@ async def classifier_download(request: Request) -> dict | Response:
     """Start, join or retry the one classifier flight. Takes no path or URL from the caller."""
     if not _trusted_json_post(request):
         return Response(status_code=403)
-    return classifier_state(CLASSIFIER_DOWNLOAD.start())
+    from app_startup_runtime import report_classifier_download_failure
+
+    return classifier_state(CLASSIFIER_DOWNLOAD.start(on_failure=report_classifier_download_failure))
 
 
 @router.post("/classifier/recheck", response_model=None)
@@ -371,11 +363,11 @@ async def first_account(request: Request) -> dict | Response:
     try:
         user_id = await run_in_db(
             accounts.create_first_account, body.username, body.password,
-            call_name=body.name, email=body.email or "", first_run_path="app",
+            full_name=body.name, email=body.email or "", first_run_path="app",
         )
-    except accounts.FirstAccountExists:
+    except account_validation.FirstAccountExists:
         return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
-    except accounts.AccountError as error:
+    except account_validation.AccountError as error:
         return JSONResponse(status_code=422, content={"detail": str(error)})
     except Exception:
         # No user field is in this message; the traceback names only the failing step.

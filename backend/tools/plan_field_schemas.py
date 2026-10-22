@@ -57,6 +57,17 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         **NULLABLE_TEXT,
         "description": "Optional supporting detail.",
     },
+    "instructions_artifact_id": {
+        **TEXT,
+        "description": "Owned document with a person step's how-to.",
+    },
+    # Runtime validation owns byte limits; publish the reusable quote item shape
+    # once so agents can construct an authority citation for an earlier source.
+    "intent": {"type": "string"},
+    "intent_words": {"type": "array", "items": {"type": "object", "properties": {
+        "quote": {"type": "string"}, "author": {"enum": ["person", "agent"]},
+        "role": {"enum": ["origin", "bears_on", "authority"]},
+    }, "required": ["quote"]}},
     # Runtime validation owns the 200-character bound; repeating it in each
     # operation schema spends the published contract budget without teaching.
     "workflow_ref": {"type": "string"},
@@ -70,7 +81,7 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": ["string", "null"],
         "enum": [*SIZE_CLASSES, None],
         "description": (
-            f"{SIZE_TOOL_PREFIX}{SIZE_SCALE_DESCRIPTION}. Set it on every task you add."
+            f"{SIZE_TOOL_PREFIX}{SIZE_SCALE_DESCRIPTION}. Required on every task."
         ),
     },
     "difficulty_rerated": {

@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -209,6 +210,16 @@ class TestRegisterIfAvailable:
         did = register_if_available(reg, "claude-code", lambda: _FakeTool(), db=connections_db)
         assert did is False
 
+
+
+def test_binary_resolver_reports_both_setup_clis_absent_in_empty_search_roots(tmp_path):
+    from connections import binary_from_config
+
+    empty_root = tmp_path / "empty-bin"
+    empty_root.mkdir()
+
+    assert binary_from_config("claude-code", {}, candidate_roots=(Path(empty_root),)) is None
+    assert binary_from_config("codex", {}, candidate_roots=(Path(empty_root),)) is None
 
 
 class TestSeedBuiltinConnections:

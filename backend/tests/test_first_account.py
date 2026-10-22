@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import cli_accounts  # noqa: E402
 from api import setup as setup_api  # noqa: E402
 from connections import signed_in_emails  # noqa: E402
-from infra import accounts, config, user_profile  # noqa: E402
+from infra import account_validation, accounts, config, user_profile  # noqa: E402
 from infra.default_port import DEFAULT_BACKEND_PORT  # noqa: E402
 from infra.time import utc_now_iso  # noqa: E402
 
@@ -152,6 +152,24 @@ def test_a_failed_commit_restores_an_extended_profile_exactly(client, workspace,
     assert [entry.name for entry in path.parent.iterdir()] == [path.name]
 
 
+@pytest.mark.parametrize(
+    ("full_name", "preferred"), [("Ada Lovelace", "Ada"), ("Cher", "Cher")],
+)
+def test_a_new_profile_keeps_the_full_name_and_its_first_word(client, workspace, full_name, preferred):
+    assert _post(client, {**REQUEST, "name": full_name, "email": None}).status_code == 200
+    text = _profile(workspace).read_text(encoding="utf-8")
+    assert f"- **Preferred name:** {preferred}\n- **Full name:** {full_name}\n" in text
+
+
+def test_an_existing_profile_is_byte_identical_after_the_account_is_made(client, workspace):
+    path = _profile(workspace)
+    path.parent.mkdir()
+    original = b"# mine\n- **Preferred name:** Old Name\n- **Email:** old@example.test\n"
+    path.write_bytes(original)
+    assert _post(client, {**REQUEST, "name": "Ada Lovelace"}).status_code == 200
+    assert path.read_bytes() == original
+
+
 def test_an_existing_profile_only_gains_the_email_it_names_none_of(client, workspace):
     path = _profile(workspace)
     path.parent.mkdir()
@@ -181,8 +199,8 @@ def test_a_whitespace_only_name_is_a_validation_error_before_anything_is_touched
 
 def test_the_account_function_refuses_a_blank_name_before_anything_is_touched(workspace):
     before = _state()
-    with pytest.raises(accounts.AccountError, match="name is required"):
-        accounts.create_first_account("pat", PASSWORD, call_name="  ")
+    with pytest.raises(account_validation.AccountError, match="name is required"):
+        accounts.create_first_account("pat", PASSWORD, full_name="  ")
     assert _state() == before
     assert not (workspace / "context").exists()
 
@@ -235,7 +253,9 @@ def test_the_cli_and_the_setup_route_write_the_same_profile(client, workspace, m
     _profile(workspace).unlink()
     assert _cli_first_account(monkeypatch, name="pat", answers=["Pat Example", "pat@example.test"]) == 0
     assert _profile(workspace).read_text(encoding="utf-8") == from_route
-    assert from_route.startswith("# User profile\n\n- **Preferred name:** Pat Example\n- **Email:** pat@example.test\n")
+    assert from_route.startswith(
+        "# User profile\n\n- **Preferred name:** Pat\n- **Full name:** Pat Example\n- **Email:** pat@example.test\n"
+    )
 
 
 def test_cli_first_account_queues_the_script_path(workspace, monkeypatch):

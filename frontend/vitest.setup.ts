@@ -1,3 +1,5 @@
+import { afterEach } from 'vitest';
+
 // jsdom implements neither the Web Animations API nor matchMedia, which Svelte
 // transitions and the viewport stores rely on. Without these, mounting any
 // component that transitions throws instead of rendering.
@@ -58,3 +60,10 @@ if (
 		get length() { return store.size; },
 	} as Storage;
 }
+
+// Open-time memory and its retry timers outlive a mount, so no test inherits another's.
+// Imported lazily: the module reads localStorage, which is shimmed above.
+afterEach(async () => {
+	const { _resetOpenTimeForTests } = await import('$lib/openTime');
+	_resetOpenTimeForTests();
+});

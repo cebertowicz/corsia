@@ -8,7 +8,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from doceditor import comment_notifications, feedback_comments, feedback_delivery, feedback_edits, review_requests
+from doceditor import comment_notifications, feedback_comments, feedback_delivery, feedback_edits
+from doceditor.review_lifecycle import settle_for_batch
 from doceditor.feedback_state import (
     USER_AUTHOR_ID,
     annotate_pane,
@@ -17,13 +18,14 @@ from doceditor.feedback_state import (
     undelivered_for_document,
     user_feedback_for_document,
 )
+import infra.sweep_wake as sweep_wake
 from infra.database import write_transaction
+from infra.write_effects import after_commit
 
 log = logging.getLogger(__name__)
 
 AGENT_QUIET = 120
-USER_LEAVE_GRACE = 120
-USER_IDLE = 30 * 60
+USER_IDLE = 5
 
 
 def _now() -> str:
@@ -67,6 +69,8 @@ def _open_batch(
             now, now, _new_deadline(author_kind, now), now, now,
         ),
     )
+    # A new deadline can be earlier than the one the continuation loop is sleeping toward.
+    after_commit(db, sweep_wake.sweep_soon)
     return batch_id
 
 
@@ -242,6 +246,23 @@ def record_comment(
     return {"batch_ids": batch_ids, "undelivered_batches": notices, "woken": woken}
 
 
+def deliver_person_comment(db, batch_ids: list[str], artifact_id: str) -> list[str]:
+    """Deliver a person's just-saved comment now, each batch in its own write.
+
+    The comment is already committed. A batch that fails here stays open with its
+    deadline a few seconds out, so the continuation loop retries it. The comment's
+    one change frame goes out here, after delivery, whatever its outcome.
+    """
+    woken: list[str] = []
+    for batch_id in batch_ids:
+        try:
+            woken.extend(close_batch(db, batch_id, "send")[1])
+        except Exception:
+            log.exception("immediate delivery of document feedback batch %s failed; it stays open to retry", batch_id)
+    comment_notifications.publish_due_user_feedback([artifact_id])
+    return woken
+
+
 def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None) -> tuple[bool, tuple[str, ...]]:
     now = _now()
     closed_sql = "closed_reason=?" if reason is not None else "closed_reason=closed_reason"
@@ -276,7 +297,7 @@ def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None
             (delivered.node_id, delivered.outcome, now, batch_id),
         )
         db.execute("DELETE FROM doc_feedback_edit_items WHERE batch_id=?", (batch_id,))
-        review_woken = review_requests.settle_for_batch(db, batch)
+        review_woken = settle_for_batch(db, batch)
     return True, delivered.woken_threads + review_woken
 
 
@@ -351,34 +372,6 @@ def close_due(now: str, *, db=None) -> list[str]:
     return woken
 
 
-def mark_user_left(db, artifact_id: str) -> int:
-    """Start the user's leave grace period for open batches on a document."""
-    now = _now()
-    changed = db.execute(
-        """UPDATE doc_feedback_batches SET closes_at=?,closed_reason='leave',updated_at=?
-           WHERE state='open' AND author_kind='user' AND author_id=? AND artifact_id=?""",
-        (_after(now, USER_LEAVE_GRACE), now, USER_AUTHOR_ID, artifact_id),
-    )
-    return changed.rowcount
-
-
-def mark_user_returned(db, artifact_id: str) -> int:
-    """Cancel leave grace by restoring each open batch's idle deadline."""
-    rows = db.execute(
-        """SELECT id,last_item_at FROM doc_feedback_batches WHERE state='open'
-           AND author_kind='user' AND author_id=? AND artifact_id=?""",
-        (USER_AUTHOR_ID, artifact_id),
-    ).fetchall()
-    now = _now()
-    for row in rows:
-        db.execute(
-            """UPDATE doc_feedback_batches SET closes_at=?,closed_reason=NULL,updated_at=?
-               WHERE id=? AND state='open'""",
-            (_after(row["last_item_at"], USER_IDLE), now, row["id"]),
-        )
-    return len(rows)
-
-
 def retry_for_document(db, *, author_kind: str, author_id: str, artifact_id: str) -> list[str]:
     """Retry every undelivered recipient batch for one author's document."""
     rows = db.execute(
@@ -391,6 +384,3 @@ def retry_for_document(db, *, author_kind: str, author_id: str, artifact_id: str
         _retried, selected = retry_batch(db, row["id"])
         woken.extend(selected)
     return woken
-
-
-# Read-only feedback projections are imported above to preserve existing callers.

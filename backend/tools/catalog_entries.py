@@ -1,13 +1,14 @@
-"""The tool catalog's data: one declaration per registry tool.
-
-``tools.catalog`` is the public import path; it re-exports these names with
-the packs and lookups that read them.
-"""
+"""Tool-catalog declarations, re-exported through ``tools.catalog``."""
 
 from __future__ import annotations
 
+from tools.catalog_automation_entries import AUTOMATION_CATALOG_ENTRIES
+from tools.catalog_consent_entries import CONSENT_CATALOG_ENTRIES
 from tools.catalog_entry import ToolCatalogEntry
 from tools.catalog_host_entries import HOST_ACCESS_CATALOG_ENTRIES
+from tools.catalog_library_entries import LIBRARY_CATALOG_ENTRIES
+from tools.catalog_measurement_entries import MEASUREMENT_CATALOG_ENTRIES
+from tools.catalog_microsoft_entries import MICROSOFT_CATALOG_ENTRIES
 
 _Entry = ToolCatalogEntry
 
@@ -153,11 +154,6 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Create a new project workspace",
         activity="Creating project",
     ),
-    "project_discovery_list": _Entry(
-        "projects", authority="consented-history-read",
-        summary="List the folders the user works in, after their consent decision",
-        activity="Finding projects",
-    ),
     "worktree_create": _Entry(
         "projects", status="substrate", authority="repository-worktree-write",
         summary="Create a Git worktree and branch for a project repository",
@@ -260,6 +256,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Read the Google sign-in's email, scopes and status",
         activity="Checking Google sign-in",
     ),
+
     "email_draft": _Entry(
         "google", status="active", authority="conductor-api",
         summary="Save an email as a draft document for the person to review; nothing is sent",
@@ -302,21 +299,8 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Draft, review and raise a plan decision for the user",
         activity="Drafting decision",
     ),
-    "automation_schedule": _Entry(
-        "automations", status="substrate", authority="automation-write",
-        summary="Schedule a clock or cadence wake for this thread",
-        activity="Scheduling",
-    ),
-    "automation_cancel": _Entry(
-        "automations", status="substrate", authority="automation-write",
-        summary="Cancel one of this thread's schedules",
-        activity="Cancelling automation",
-    ),
-    "automation_list": _Entry(
-        "automations", status="substrate", authority="automation-read",
-        summary="List this thread's schedules",
-        activity="Listing automations",
-    ),
+    **AUTOMATION_CATALOG_ENTRIES,
+    **MEASUREMENT_CATALOG_ENTRIES,
     "restart_resume": _Entry(
         "delegation", status="substrate", authority="restart-continuity",
         summary="Resume this turn after the pending system restart",
@@ -397,4 +381,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Releasing artifact",
     ),
     **HOST_ACCESS_CATALOG_ENTRIES,
+    **MICROSOFT_CATALOG_ENTRIES,
+    **LIBRARY_CATALOG_ENTRIES,
+    **CONSENT_CATALOG_ENTRIES,
 }

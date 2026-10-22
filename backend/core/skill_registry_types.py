@@ -54,6 +54,7 @@ class SkillResolution:
     omitted: list[SkillRow]
     errors: list[SkillRow]
     system_unavailable: str | None = None
+    precedence: tuple[tuple[str, str], ...] = ()
 
     def all_rows(self) -> list[SkillRow]:
         """Return every resolved row, preserving included/omitted/error buckets."""

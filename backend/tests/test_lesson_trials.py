@@ -219,11 +219,13 @@ def test_a_capture_file_records_its_identity_and_is_never_a_skill():
         capture_id=LESSON, capture_hash="c" * 64, owner="owner", reason="missing-derivation",
         name="cite-the-head", description="Use when reporting a check result.",
         text="Name the exact commit the check ran on.", trial=held, source_refs=[*REFS, *REFS],
+        originating_subjects=("message:corrected",),
     )
     capture = lesson_files.read_capture(text)
 
     assert capture == lesson_files.CaptureFile(
         id=LESSON, hash="c" * 64, source_refs=({"kind": "turn", "reference": "turn-1"},),
+        originating_subjects=("message:corrected",),
     )
     assert "Not offered as guidance: it cites what a person said and gives no derivation" in text
     assert not validate_skill_text(text).ok

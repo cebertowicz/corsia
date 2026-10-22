@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from infra.database import write_transaction
+from llm.local_downloads import settle_listed
 from llm.model_metadata import extract_context_length
 from llm.omlx_capabilities import apply_metadata, capture_configured, capture_reported
 
@@ -45,6 +46,7 @@ def _parse_omlx_status(response) -> dict[str, dict]:
             "engine_type": (model.get("engine_type") or "").lower(),
             "context_length": extract_context_length(model),
             "size_bytes": int(model.get("estimated_size") or 0) or None,
+            "pinned": bool(model.get("pinned")),
         }
         status_alias = (model.get("model_alias") or "").strip()
         if status_alias:
@@ -347,6 +349,7 @@ def _reconcile_network_models(
             db, server_id, provider, seen_pmids, now,
         )
 
+    settle_listed(server_id, seen_pmids)
     result["ok"] = True
     return result
 
@@ -380,9 +383,6 @@ async def discover_network_models(server_id: str) -> dict:
         result["error"] = f"Connection failed: {exc}"
         return result
 
-    from llm.omlx_global_settings import record_observation
-
-    await record_observation(server)
 
     try:
         return await run_in_db(

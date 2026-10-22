@@ -220,6 +220,7 @@ class TestWorkflowFailureOutcomes:
 
     # -- Gate policy: errored reviewer = RED, emit reviewer.errored (CHANGE 2)
 
+    @patch("infra.transient_read.time.sleep")
     @patch("reviewer.on_pr_review._review_diff")
     @patch("reviewer.reviewer_runner.invoke_cc_subagent")
     @patch("reviewer.on_pr_review.set_pending")
@@ -229,7 +230,7 @@ class TestWorkflowFailureOutcomes:
     @patch("reviewer.on_pr_review.emit_product_event")
     def test_reviewer_exception_emits_errored_event(
         self, mock_emit, mock_error, mock_fail, mock_success, mock_pending,
-        mock_cc, mock_diff,
+        mock_cc, mock_diff, mock_comment_read_sleep,
     ):
         """max_turns / exception / timeout → RED state + reviewer.errored event.
 

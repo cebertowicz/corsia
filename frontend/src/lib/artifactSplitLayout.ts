@@ -2,9 +2,9 @@
 // C0-ARTIFACT-LEAF-SHELL-DESIGN.md "Desktop UX".
 export const CHAT_MIN = 420;
 export const ARTIFACT_MIN = 360;
-export const ARTIFACT_DEFAULT_FRACTION = 0.45;
-export const ARTIFACT_DEFAULT_MIN_CAP = 600;
-export const ARTIFACT_DEFAULT_MAX_CAP = 640;
+// A new desktop canvas begins with chat at 40% and the artifact at 60%.
+// The split layout still protects both minimum readable widths below this size.
+export const ARTIFACT_DEFAULT_FRACTION = 0.6;
 export const DIVIDER_WIDTH = 8;
 export const KEYBOARD_STEP = 24;
 export const PANE_DRAWER_WIDTH = 312;
@@ -16,8 +16,7 @@ export function clamp(value: number, min: number, max: number): number {
 }
 
 export function computeDefaultArtifactWidth(canvasWidth: number): number {
-	const raw = canvasWidth * ARTIFACT_DEFAULT_FRACTION;
-	return clamp(raw, ARTIFACT_DEFAULT_MIN_CAP, ARTIFACT_DEFAULT_MAX_CAP);
+	return canvasWidth * ARTIFACT_DEFAULT_FRACTION;
 }
 
 export const COMBINED_MIN = CHAT_MIN + ARTIFACT_MIN + DIVIDER_WIDTH;

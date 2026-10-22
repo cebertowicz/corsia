@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
 import { createComment, openLiveDocument, renderedCount, seedLiveDocument, serverText, typeAtDocumentEnd, type LiveDocument } from '../support/liveDocument';
 import { liveFaultEvidence, liveFaultsEnabled, refuseLiveFaultOnce } from '../support/liveFault';

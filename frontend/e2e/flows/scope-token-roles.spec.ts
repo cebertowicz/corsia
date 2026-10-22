@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { apcaLc, parseColor } from '../../src/lib/utils/contrast';
 import { ACCENT_ROLE_TOKENS, accentRoles, FILL_INK_MIN_LC } from '../../src/lib/utils/projectColors';
 import { loginByUrl, TEST_TOKEN } from '../support/corsia';

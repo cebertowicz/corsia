@@ -16,7 +16,17 @@ from typing import Any, Mapping
 from loguru import logger
 
 CORRECTION_EVENT = "measurement.correction"
+SOURCE_KIND_MESSAGE = "message"
+SOURCE_KIND_DOC_COMMENT = "doc_comment"
+SOURCE_KIND_DECISION_ANSWER = "plan_decision_answer"
 MESSAGE_SUBJECT_PREFIX = "message:"
+COMMENT_SUBJECT_PREFIX = "doc-comment:"
+DECISION_SUBJECT_PREFIX = "plan-decision-answer:"
+SUBJECT_PREFIXES = {
+    SOURCE_KIND_MESSAGE: MESSAGE_SUBJECT_PREFIX,
+    SOURCE_KIND_DOC_COMMENT: COMMENT_SUBJECT_PREFIX,
+    SOURCE_KIND_DECISION_ANSWER: DECISION_SUBJECT_PREFIX,
+}
 LABEL_CORRECTION = "correction"
 LABEL_NOT_CORRECTION = "not_correction"
 # A healthy, self-tested classifier failed twice on this one input; Measurement never counts it.
@@ -32,7 +42,8 @@ SYSTEM_WRAPPER_PREFIXES = (
 )
 OWNER_MESSAGE_METADATA_KEYS = ("sender_kind", "routed_event", "send_idempotency_key")
 FACT_KEYS = (
-    "message_id",
+    "source_kind",
+    "source_id",
     "thread_id",
     "label",
     "asset_id",
@@ -104,18 +115,24 @@ def version_match_sql(alias: str, version: ClassifierVersion) -> tuple[str, dict
 
 @dataclass(frozen=True)
 class CorrectionCandidate:
-    """One persisted user message eligible to be checked.
+    """One persisted owner source (message, comment or decision answer) eligible to be checked.
 
-    ``arrived`` marks a message classified as it arrives, not by a later scan.
+    ``arrived`` marks a source classified as it arrives, not by a later scan.
+    For a comment or a decision answer, ``quote`` is the person's words as
+    written (``content`` is their masked classifier input) and ``about`` is the
+    artifact or decision its triage note names.
     """
 
-    message_id: str
+    source_kind: str
+    source_id: str
     thread_id: str
     project_id: str | None
     content: str
     created_at: str
     context: tuple[tuple[str, str], ...] = ()
     arrived: bool = False
+    quote: str | None = None
+    about: str | None = None
 
 
 ACTIVATIONS_SETTING = "corrections_classifier_activations"
@@ -156,15 +173,37 @@ def active_corrections_version() -> ClassifierVersion | CorruptActivation | None
         db.close()
 
 
-def subject_key(message_id: str) -> str:
-    """The ``outcome_events`` subject for one durable message."""
-    return MESSAGE_SUBJECT_PREFIX + message_id
+def subject_key(source_kind: str, source_id: str) -> str:
+    """The non-colliding ``outcome_events`` subject for one correction source."""
+    if source_kind not in SUBJECT_PREFIXES:
+        raise ValueError(f"unknown correction source kind: {source_kind}")
+    return SUBJECT_PREFIXES[source_kind] + source_id
 
 
-def dedupe_key(message_id: str, version: ClassifierVersion) -> str:
-    """Stable idempotency key for one message under one classifier version."""
+def decision_answer_source_id(decision_id: str, revision: object) -> str:
+    """The stable source id for one answered revision of a plan decision."""
+    return f"{decision_id}:{revision}"
+
+
+def decision_answer_source_id_sql(alias: str) -> str:
+    """SQL for an ``artifact_identities`` alias's answered-decision source id."""
+    return f"{alias}.external_id || ':' || json_extract({alias}.metadata,'$.plan_decision.revision')"
+
+
+def decision_answer_arrived_at_sql(alias: str) -> str:
+    """SQL for an ``artifact_identities`` alias's recorded decision-answer arrival time."""
+    return f"json_extract({alias}.metadata,'$.plan_decision.answered_at')"
+
+
+def decision_answer_subject_key_sql(alias: str) -> str:
+    """SQL for an ``artifact_identities`` alias's correction-event subject key."""
+    return f"'{DECISION_SUBJECT_PREFIX}' || {decision_answer_source_id_sql(alias)}"
+
+
+def dedupe_key(candidate: CorrectionCandidate, version: ClassifierVersion) -> str:
+    """Stable idempotency key for one source under one classifier version."""
     payload = json.dumps(
-        {"message_id": message_id, **version_attributes(version)},
+        {"subject_key": subject_key(candidate.source_kind, candidate.source_id), **version_attributes(version)},
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -246,7 +285,8 @@ def fact_attributes(
     if label not in LABELS or reason not in FAILURE_REASONS or (label == LABEL_UNREADABLE) == (reason == "none"):
         raise ValueError(f"inconsistent correction fact: label {label}, failure {reason}")
     return {
-        "message_id": candidate.message_id,
+        "source_kind": candidate.source_kind,
+        "source_id": candidate.source_id,
         "thread_id": candidate.thread_id,
         "label": label,
         **version_attributes(version),

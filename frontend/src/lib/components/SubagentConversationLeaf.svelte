@@ -4,6 +4,7 @@
 	import { on, subscribeThread, unsubscribeThread } from '$lib/ws';
 	import { hydrateFetchedMessages } from '$lib/messageHistory';
 	import { messages } from '$lib/stores/threads';
+	import { hydrateSubagentThread } from '$lib/stores/subagents';
 	import { adoptThreadSnapshot, claimDisplayedThread } from '$lib/stores/displayedThreads';
 	import MessageList from './MessageList.svelte';
 	import InputBar from './InputBar.svelte';
@@ -80,6 +81,8 @@
 		const subscribed = threadId;
 		const release = claimDisplayedThread(subscribed);
 		void load();
+		// The composer shows this worker's own model and effort, which the server's status carries.
+		if ($token) void hydrateSubagentThread(subscribed, $token);
 		subscribeThread(subscribed);
 		const offConnected = on('connected', () => {
 			subscribeThread(subscribed);

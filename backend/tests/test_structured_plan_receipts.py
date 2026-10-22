@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from infra.schema import SCHEMA_SQL
 from plans import boundary, service
 from plans.boundary import PlanActor
@@ -30,6 +32,11 @@ def db():
             "INSERT INTO threads (id,user_id,spawned_by,created_at,updated_at) VALUES (?,?,?,?,?)",
             (thread_id, user_id, spawned_by, "t", "t"),
         )
+    _init_messages_fts(connection)
+    accept_thread_input(
+        "parent", role="user", content="Create the receipt-tested task.", intent="apply_now",
+        message_id="receipt-authority", db=connection,
+    )
     yield connection
     connection.close()
 
@@ -57,6 +64,9 @@ def _add_params(title="Task"):
         "kind": "task",
         "title": title,
         "acceptance_criteria": f"{title} DOD",
+        "size": "S",
+        "intent": "Create the receipt-tested task.",
+        "intent_words": [{"quote": "Create the receipt-tested task.", "role": "authority"}],
     }
 
 
@@ -121,7 +131,7 @@ def test_public_project_scope_add_is_denied_before_dispatch_or_receipt(db, monke
     with pytest.raises(PermissionError, match="public scope plan mutation"):
         _call(
             db, project_plan.id, "add",
-            {"kind": "task", "title": "Project task", "acceptance_criteria": "Project DOD"},
+            {"kind": "task", "title": "Project task", "acceptance_criteria": "Project DOD", "size": "S"},
             "project-denied", actor=PlanActor(None, "user-1", "project-1", kind="user"),
         )
 
@@ -138,7 +148,7 @@ def test_split_replay_returns_same_sibling_and_stale_new_key_conflicts(db, plan)
     source = _call(db, plan.id, "add", _add_params(), "add-source")["node"]
     params = {
         "node_id": source["id"], "title": "Remainder", "acceptance_criteria": "Remainder DOD",
-        "expected_revision": source["revision"],
+        "size": "S", "expected_revision": source["revision"],
     }
     split = _call(db, plan.id, "split", params, "split-1")
     replay = _call(db, plan.id, "split", params, "split-1")
@@ -161,7 +171,7 @@ def test_accept_and_follow_up_replay_from_durable_receipts(db, plan):
     original = _reviewed_node(db, plan, "Follow")
     follow_params = {
         "node_id": original.id, "title": "Fix follow-up", "acceptance_criteria": "Fix DOD",
-        "verification_result": "passed", "expected_revision": original.revision,
+        "size": "S", "verification_result": "passed", "expected_revision": original.revision,
     }
     first_follow = _call(db, plan.id, "accept_with_follow_up", follow_params, "follow-1")
     assert first_follow == _call(db, plan.id, "accept_with_follow_up", follow_params, "follow-1")

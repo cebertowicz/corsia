@@ -22,7 +22,7 @@ def _add(plan_id: str, *, db, assignee: str | None = "user") -> dict:
         {
             "kind": "task",
             "title": "Run the command",
-            "acceptance_criteria": "The command reports success.",
+            "acceptance_criteria": "The command reports success.", "size": "unknown",
             "assignee": assignee,
             "description": _DESCRIPTION,
         },
@@ -33,8 +33,8 @@ def test_add_and_insert_require_a_nonempty_tried_marker_for_new_user_steps(db):
     plan = owner_plan(db)
     anchor = task(db, plan.id, "Anchor")
     for operation, params in (
-        ("add", {"kind": "task", "title": "Do it", "acceptance_criteria": "Done", "assignee": "user"}),
-        ("insert", {"kind": "task", "title": "Do it", "acceptance_criteria": "Done", "assignee": "user", "before_node_id": anchor.id, "description": "How to do it."}),
+        ("add", {"kind": "task", "title": "Do it", "acceptance_criteria": "Done", "size": "unknown", "assignee": "user"}),
+        ("insert", {"kind": "task", "title": "Do it", "acceptance_criteria": "Done", "size": "unknown", "assignee": "user", "before_node_id": anchor.id, "description": "How to do it."}),
     ):
         with pytest.raises(service.PlanInputError, match="Already tried"):
             plan_update(db, plan.id, operation, params)
@@ -80,12 +80,12 @@ def test_edit_and_split_cannot_strip_a_user_step_tried_marker(db):
     with pytest.raises(service.PlanInputError, match="Already tried"):
         plan_update(
             db, plan.id, "split",
-            {"node_id": user["id"], "expected_revision": user["revision"], "title": "Second command", "acceptance_criteria": "Done", "description": "New instructions."},
+            {"node_id": user["id"], "expected_revision": user["revision"], "title": "Second command", "acceptance_criteria": "Done", "size": "unknown", "description": "New instructions."},
         )
 
     split = plan_update(
         db, plan.id, "split",
-        {"node_id": user["id"], "expected_revision": user["revision"], "title": "Second command", "acceptance_criteria": "Done", "description": _DESCRIPTION},
+        {"node_id": user["id"], "expected_revision": user["revision"], "title": "Second command", "acceptance_criteria": "Done", "size": "unknown", "description": _DESCRIPTION},
     )
     assert split["node"]["assignee"] == "user"
 

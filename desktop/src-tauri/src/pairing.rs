@@ -1,8 +1,4 @@
-use std::{
-    error::Error,
-    net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6},
-    time::Duration,
-};
+use std::{error::Error, net::SocketAddr, time::Duration};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use hmac::{Hmac, Mac};
@@ -14,6 +10,7 @@ use spake2::{Ed25519Group, Identity, Password, Spake2};
 
 use crate::{
     classify::{classify_connect_error, classify_tls_against_plain_http, ConnectFailure},
+    remote_host::RemoteHost,
     trust::{self, Trust},
 };
 
@@ -26,6 +23,10 @@ pub struct Paired {
     pub trust: Trust,
     pub host: String,
     pub port: u16,
+    /// Stable host identity, confirmed by every successful new pairing.
+    pub identity: [u8; 32],
+    /// Optional bare host[:port] learned while this local pinned connection was established.
+    pub outside_address: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,6 +36,7 @@ pub enum PairError {
     TooManyTries,
     Paused,
     Busy,
+    NotLocal,
     Unreachable(ConnectFailure),
     TooOld,
     /// The host presented a key other than the pinned one: not a network failure.
@@ -51,7 +53,7 @@ impl PairError {
             Self::TooOld => Some(ConnectFailure::TooOld),
             Self::KeyChanged => Some(ConnectFailure::KeyChanged),
             Self::Protocol(_) => Some(ConnectFailure::Server),
-            Self::WrongCode | Self::Expired | Self::TooManyTries | Self::Paused | Self::Busy => None,
+            Self::WrongCode | Self::Expired | Self::TooManyTries | Self::Paused | Self::Busy | Self::NotLocal => None,
         }
     }
 }
@@ -118,6 +120,17 @@ struct FinishRequest<'a> {
 struct FinishResponse {
     confirm_s: String,
     name: String,
+    #[serde(default)]
+    spki_sha256: Option<String>,
+    #[serde(default)]
+    confirm_identity: Option<String>,
+    #[serde(default)]
+    outside_address: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OutsideAddressResponse {
+    outside_address: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -136,85 +149,6 @@ struct Exchange {
     spake: Spake2<Ed25519Group>,
 }
 
-/// A remote host as typed by a person or resolved by discovery: a DNS name, an
-/// IP literal, or an IPv6 literal carrying a zone (`fe80::1%en0`), with or
-/// without URL brackets.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum RemoteHost {
-    Name(String),
-    Ip(IpAddr),
-    /// A link-local IPv6 address, which is only reachable through its interface.
-    Scoped { address: Ipv6Addr, scope_id: u32 },
-}
-
-impl RemoteHost {
-    pub(crate) fn parse(host: &str) -> Result<Self, String> {
-        let host = host.trim();
-        let (inner, bracketed) = match host.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) {
-            Some(inner) => (inner, true),
-            None => (host, false),
-        };
-        if let Some((address, zone)) = inner.split_once('%') {
-            let address: Ipv6Addr = address.parse().map_err(|_| "remote host is not a valid IPv6 address".to_owned())?;
-            // A URL writes the zone separator as %25.
-            let zone = match zone.strip_prefix("25") {
-                Some(rest) if bracketed && !rest.is_empty() => rest,
-                _ => zone,
-            };
-            let scope_id = parse_scope(zone)?;
-            return Ok(if scope_id == 0 { Self::Ip(IpAddr::V6(address)) } else { Self::Scoped { address, scope_id } });
-        }
-        if let Ok(address) = inner.parse::<IpAddr>() {
-            return Ok(Self::Ip(address));
-        }
-        if inner.is_empty() || bracketed || inner.contains(':') {
-            return Err("remote host must be a hostname or IP address without a port".into());
-        }
-        Ok(Self::Name(inner.to_owned()))
-    }
-
-    /// `host:port` as it belongs in a URL or Host header: IPv6 is bracketed and
-    /// never carries its zone on the wire.
-    pub(crate) fn authority(&self, port: u16) -> String {
-        match self {
-            Self::Name(name) => format!("{name}:{port}"),
-            Self::Ip(IpAddr::V4(address)) => format!("{address}:{port}"),
-            Self::Ip(IpAddr::V6(address)) | Self::Scoped { address, .. } => format!("[{address}]:{port}"),
-        }
-    }
-
-    /// The socket address to dial, or `None` when a name must be looked up.
-    pub(crate) fn socket_addr(&self, port: u16) -> Option<SocketAddr> {
-        match self {
-            Self::Name(_) => None,
-            Self::Ip(address) => Some(SocketAddr::new(*address, port)),
-            Self::Scoped { address, scope_id } => Some(SocketAddr::V6(SocketAddrV6::new(*address, port, 0, *scope_id))),
-        }
-    }
-
-    /// The TLS server name: a name, or the address without its zone.
-    pub(crate) fn server_name(&self) -> Result<rustls::pki_types::ServerName<'static>, String> {
-        match self {
-            Self::Name(name) => rustls::pki_types::ServerName::try_from(name.clone()).map_err(|error| error.to_string()),
-            Self::Ip(address) => Ok(rustls::pki_types::ServerName::IpAddress((*address).into())),
-            Self::Scoped { address, .. } => Ok(rustls::pki_types::ServerName::IpAddress(IpAddr::V6(*address).into())),
-        }
-    }
-}
-
-fn parse_scope(zone: &str) -> Result<u32, String> {
-    if let Ok(index) = zone.parse::<u32>() {
-        return Ok(index);
-    }
-    #[cfg(unix)]
-    if let Ok(name) = std::ffi::CString::new(zone) {
-        let index = unsafe { libc::if_nametoindex(name.as_ptr()) };
-        if index != 0 {
-            return Ok(index);
-        }
-    }
-    Err(format!("unknown network interface {zone:?}"))
-}
 
 /// Where a pairing or version request goes. reqwest's URL type cannot carry an
 /// IPv6 zone, so a link-local address is addressed by a placeholder name that
@@ -430,12 +364,62 @@ async fn finish_exchange(
     transcript.extend_from_slice(b"name:");
     transcript.extend_from_slice(finish.name.as_bytes());
     verify_confirmation(&server_key, &transcript, &confirm_s)?;
+    let identity = finish_identity(&server_key, transcript, finish.spki_sha256, finish.confirm_identity)?;
     Ok(Paired {
         name: finish.name,
         trust,
         host: endpoint.host.clone(),
         port: endpoint.port,
+        identity,
+        outside_address: finish.outside_address,
     })
+}
+
+/// The identity fields were added after the first pairing protocol. Their absence means the main computer needs an
+/// update, rather than that it returned a malformed response.
+fn finish_identity(
+    server_key: &[u8; 32],
+    transcript: Vec<u8>,
+    fingerprint: Option<String>,
+    confirmation: Option<String>,
+) -> Result<[u8; 32], PairError> {
+    match (fingerprint, confirmation) {
+        (Some(fingerprint), Some(confirmation)) => confirmed_identity(server_key, transcript, &fingerprint, &confirmation),
+        _ => Err(PairError::TooOld),
+    }
+}
+
+/// Read the endpoint only over the paired local route, whose TLS key is pinned.
+pub async fn outside_address(host: &str, port: u16, trust: Trust) -> Result<Option<String>, PairError> {
+    let endpoint = Endpoint::new(host, port)?;
+    let response = client_for(trust, &endpoint)?
+        .get(endpoint.url("/api/devices/outside-address"))
+        .send()
+        .await?;
+    if !response.status().is_success() {
+        return Err(pair_status(response).await);
+    }
+    response
+        .json::<OutsideAddressResponse>()
+        .await
+        .map(|response| response.outside_address)
+        .map_err(|error| PairError::Protocol(format!("invalid outside-address response: {error}")))
+}
+
+/// The host's identity fingerprint, accepted only under its own confirmation over the name-bound transcript.
+fn confirmed_identity(server_key: &[u8; 32], mut transcript: Vec<u8>, fingerprint: &str, confirmation: &str) -> Result<[u8; 32], PairError> {
+    let fingerprint: [u8; 32] = BASE64
+        .decode(fingerprint)
+        .map_err(|_| PairError::Protocol("pair/finish returned a non-base64 identity".into()))?
+        .try_into()
+        .map_err(|_| PairError::Protocol("pair/finish identity must contain exactly 32 bytes".into()))?;
+    let confirmation = BASE64
+        .decode(confirmation)
+        .map_err(|_| PairError::Protocol("pair/finish returned a non-base64 identity confirmation".into()))?;
+    transcript.extend_from_slice(b"spki:");
+    transcript.extend_from_slice(&fingerprint);
+    verify_confirmation(server_key, &transcript, &confirmation)?;
+    Ok(fingerprint)
 }
 
 fn start_spake(code: &str) -> Result<(Vec<u8>, Spake2<Ed25519Group>), PairError> {
@@ -494,6 +478,7 @@ async fn pair_status(response: reqwest::Response) -> PairError {
         Some("expired") => PairError::Expired,
         Some("too_many_tries") => PairError::TooManyTries,
         Some("paused") => PairError::Paused,
+        Some("not_on_this_network") => PairError::NotLocal,
         _ => PairError::Protocol(format!("pairing request failed with HTTP {status}")),
     }
 }
@@ -609,6 +594,8 @@ mod tests {
                         serde_json::json!({
                             "confirm_s": BASE64.encode(confirmation(&server_key, &transcript)),
                             "name": "Studio",
+                            "spki_sha256": BASE64.encode(pin),
+                            "confirm_identity": BASE64.encode(confirmation(&server_key, &[transcript.as_slice(), b"spki:", &pin].concat())),
                         })
                     };
                     Ok::<_, Infallible>(json_response(response))
@@ -625,6 +612,14 @@ mod tests {
             }
         });
         (port, task)
+    }
+
+    #[tokio::test]
+    async fn same_network_refusal_reaches_the_frontend_reason() {
+        let response = hyper::Response::builder().status(403)
+            .body(include_str!("../../../testdata/pairing-not-local.json")).unwrap();
+        assert_eq!(pair_status(reqwest::Response::from(response)).await, PairError::NotLocal);
+        assert!(matches!(crate::remote_pair_error(PairError::NotLocal), crate::RemotePairResponse::Failure { reason, .. } if reason == "not_local"));
     }
 
     #[test]
@@ -660,20 +655,22 @@ mod tests {
     }
 
     #[test]
-    fn ipv6_authorities_are_bracketed_and_never_carry_the_zone() {
-        let scoped = RemoteHost::parse("fe80::1%4").unwrap();
-        assert_eq!(scoped, RemoteHost::Scoped { address: "fe80::1".parse().unwrap(), scope_id: 4 });
-        assert_eq!(scoped.authority(47901), "[fe80::1]:47901");
-        assert_eq!(
-            scoped.socket_addr(47901).unwrap().to_string(),
-            "[fe80::1%4]:47901"
-        );
-        assert_eq!(RemoteHost::parse("[fe80::1%254]").unwrap(), scoped, "URL form writes the zone as %25");
-        assert_eq!(RemoteHost::parse("::1").unwrap().authority(1), "[::1]:1");
-        assert_eq!(RemoteHost::parse("[::1]").unwrap().authority(1), "[::1]:1");
-        assert_eq!(RemoteHost::parse("studio.local").unwrap().authority(1), "studio.local:1");
-        assert_eq!(RemoteHost::parse("10.0.0.2").unwrap().authority(1), "10.0.0.2:1");
-        assert!(RemoteHost::parse("fe80::1%no-such-interface0").is_err());
+    fn identity_is_accepted_only_under_its_confirmation() {
+        let (key, transcript, fingerprint) = ([3_u8; 32], b"transcript".to_vec(), [9_u8; 32]);
+        let signed = confirmation(&key, &[transcript.as_slice(), b"spki:", &fingerprint].concat());
+        let accept = |fingerprint: &[u8], signed: &[u8]| confirmed_identity(&key, transcript.clone(), &BASE64.encode(fingerprint), &BASE64.encode(signed));
+        assert_eq!(accept(&fingerprint, &signed).unwrap(), fingerprint);
+        assert!(accept(&[8_u8; 32], &signed).is_err(), "a swapped fingerprint");
+        assert!(accept(&fingerprint, &confirmation(&key, &transcript)).is_err(), "the name confirmation reflected");
+        assert!(accept(&fingerprint[..31], &signed).is_err(), "a short fingerprint");
+    }
+
+    #[test]
+    fn pair_finish_without_either_identity_field_requires_a_main_computer_update() {
+        let key = [3_u8; 32];
+        for fields in [(None, None), (Some("identity".into()), None), (None, Some("confirmation".into()))] {
+            assert_eq!(finish_identity(&key, b"transcript".to_vec(), fields.0, fields.1), Err(PairError::TooOld));
+        }
     }
 
     #[test]
@@ -819,6 +816,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(paired.name, "Studio");
+        assert_eq!(paired.identity, identity.pin, "a fresh pairing always confirms the host identity");
         server.await.unwrap();
 
         let requests = requests.lock().unwrap();
@@ -854,9 +852,16 @@ mod tests {
             crate::version_check::check("127.0.0.1", port, &paired.trust, "0.4.1-dev.230").await.unwrap(),
             crate::version_check::Compat::Ok
         );
-        let proxy = crate::proxy::start(
-            crate::remote_config::Locator::Address { host: "127.0.0.1".into(), port },
-            paired.trust.clone(),
+        let proxy_record = crate::remote_config::RemoteRecord {
+            locator: crate::remote_config::Locator::Address { host: "127.0.0.1".into(), port },
+            trust: crate::remote_config::RemoteTrust::from(&paired.trust),
+            name: "disposable".into(),
+            proxy_port: 0,
+            identity: Some(BASE64.encode(paired.identity)),
+            outside: None,
+        };
+        let proxy = crate::proxy::start_record(
+            &proxy_record,
             0,
             || panic!("a matching disposable host key must not trigger key_changed"),
         )
@@ -875,9 +880,16 @@ mod tests {
         spki_sha256[0] ^= 1;
         let key_changed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let observed_key_change = std::sync::Arc::clone(&key_changed);
-        let wrong_proxy = crate::proxy::start(
-            crate::remote_config::Locator::Address { host: "127.0.0.1".into(), port },
-            wrong_trust,
+        let wrong_record = crate::remote_config::RemoteRecord {
+            locator: crate::remote_config::Locator::Address { host: "127.0.0.1".into(), port },
+            trust: crate::remote_config::RemoteTrust::from(&wrong_trust),
+            name: "disposable".into(),
+            proxy_port: 0,
+            identity: Some(BASE64.encode(paired.identity)),
+            outside: None,
+        };
+        let wrong_proxy = crate::proxy::start_record(
+            &wrong_record,
             0,
             move || observed_key_change.store(true, std::sync::atomic::Ordering::SeqCst),
         )

@@ -42,7 +42,6 @@ export type ImageRegion = { x: number; y: number; w: number; h: number };
 export interface CommentFeedback {
 	open_count: number;
 	owner_label: string | null;
-	grace_closes_at: string | null;
 	undelivered_batches: UndeliveredBatch[];
 }
 

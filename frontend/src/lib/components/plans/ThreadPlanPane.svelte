@@ -7,6 +7,7 @@
 	import { createChildExpansion } from './childExpansion.svelte';
 	import { createPaneView } from './paneView.svelte';
 	import { foldedOf, hasFolded } from './planFoldLevels';
+	import { personStepInstructionsDocument } from './nodeDetailsText';
 	import { planQuery } from '$lib/stores/planQuery.svelte';
 	import { connectionState } from '$lib/stores/connection';
 	import { token } from '$lib/stores/auth';
@@ -125,6 +126,11 @@
 			}
 			drillRootId = drilled;
 			focusNotice = 'That item is no longer in this plan';
+			return;
+		}
+		const instructions = personStepInstructionsDocument(node);
+		if (instructions) {
+			openAsk(instructions, node.title);
 			return;
 		}
 		const forThread = threadId;

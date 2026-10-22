@@ -19,6 +19,7 @@
 	import PlanRowActions from './PlanRowActions.svelte';
 	import type { ScheduledView } from './planDisplay';
 	import { carriedByParent, rolledLive } from './planLiveStep';
+	import { personStepInstructionsDocument } from './nodeDetailsText';
 	import PlanRowDetails from './PlanRowDetails.svelte';
 	import PlanTaskMenuHost from './PlanTaskMenuHost.svelte';
 	import { createTaskMenu } from './taskMenu.svelte';
@@ -95,7 +96,7 @@
 	// A row the history route fetched carries no details; opening it reads the node (`PlanHistoryDetails`).
 	const historyIds = $derived(new Set(foldView.extra.map((row) => row.id)));
 	const treeNodes = $derived(foldView.extra.length > 0 ? [...shownNodes, ...foldView.extra] : shownNodes);
-	const index = $derived(indexPlanNodes(treeNodes, { maxDepth, currentNodeIds, deepFolded: foldView.deep }));
+	const index = $derived(indexPlanNodes(treeNodes, { maxDepth, currentNodeIds, deepFolded: foldView.deep, now: now.getTime() }));
 
 	const { isBranchExpanded, toggleBranch, openBranches, detailsExpanded, toggleDetails } = createRowDisclosure(
 		(nodeId) => expandBranchesByDefault || index.defaultExpandedBranches.has(nodeId),
@@ -177,8 +178,10 @@
 
 </script>
 
+<!-- A row's ask opens while it is open: raised, or deferred by a pause or a put-off. -->
 {#snippet row(node: OperatorNode, nest: number, view?: ScheduledView)}
-		{@const ask = node.artifacts.find((artifact) => artifact.role === 'attention' && artifact.attention_state === 'raised')}
+		{@const ask = node.artifacts.find((artifact) => artifact.role === 'attention' && (artifact.attention_state === 'raised' || artifact.attention_state === 'deferred'))}
+		{@const instructions = personStepInstructionsDocument(node)}
 		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<div
 			class="tree-row" role="listitem"
@@ -193,21 +196,21 @@
 			aria-level={depthOffset + node.depth + nest + 1}
 			aria-current={currentNodeIds.includes(node.id) ? 'step' : undefined}
 		>
-			<!-- The row body is the details disclosure: status, title and subline
-			     are one control. A branch's done/total count and chevron are its
-			     separate expand control, a sibling, so neither nests in the other. -->
+			<!-- The row body is the details disclosure (a person step with an instructions
+			     document opens it instead): status, title and subline are one control. A branch's
+			     done/total count and chevron are its separate expand control, a sibling. -->
 			<button
 				class="row-body"
 				type="button"
-				aria-expanded={detailsExpanded(node.id)}
-				aria-controls={rowControls.detailsId(node.id)}
+				aria-expanded={instructions ? undefined : detailsExpanded(node.id)}
+				aria-controls={instructions ? undefined : rowControls.detailsId(node.id)}
 				aria-haspopup={onUserAction && node.user_actions.length > 0 ? 'menu' : undefined}
-				title="{detailsExpanded(node.id) ? 'Hide' : 'Show'} details"
-				onclick={() => reveal.byRequest(() => toggleDetails(node.id))}
+				title={instructions ? 'Open instructions' : `${detailsExpanded(node.id) ? 'Hide' : 'Show'} details`}
+				onclick={() => instructions ? onOpenArtifact(instructions, node.title) : reveal.byRequest(() => toggleDetails(node.id))}
 			>
 				<PlanRowFace
 					{node} isNext={nextNodeIds.includes(node.id)} showProgress={!branchParents.has(node.id)} detailsOpen={detailsExpanded(node.id)}
-					scheduledView={view} threads={live.threads.get(node.id)} moves={live.moving.has(node.id)} carriedBelow={carriedUnder(node.id)}
+					scheduledView={view} threads={live.threads.get(node.id)} moves={live.moving.has(node.id)} owners={live.owners} carriedBelow={carriedUnder(node.id)}
 				/>
 			</button>
 			<PlanRowActions
@@ -278,12 +281,13 @@
 {/snippet}
 
 <div class="plan-tree" role="list" aria-label="Plan steps" bind:this={treeElement}>
+	<!-- Every item carries an out transition: Svelte 5 destroys a keyed batch only when all its removed items have one, so a bare Scheduled or fold row would keep a closed group's rows on screen. -->
 	{#each items as item (item.key)}
 		{#if item.kind === 'fold'}
 			<!-- A level's finished work, gathered at its bottom: still counted as
 			     done, opened in pages newest first, never a second plan view. -->
 			<div
-				class="tree-row fold-row" role="listitem"
+				class="tree-row fold-row" role="listitem" in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }}
 				data-flip-key={`${scope}${item.key}`} data-fold-level={`${scope}${item.level}`}
 				style={depthStyle(depthOffset + item.depth)} data-depth={depthOffset + item.depth}
 				aria-level={depthOffset + item.depth + 1}
@@ -304,7 +308,7 @@
 		{:else if item.kind === 'scheduled'}
 			<!-- A level's quietly scheduled tasks, gathered after its open rows: opened all at once. -->
 			<div
-				class="tree-row scheduled-row" role="listitem" data-flip-key={`${scope}${item.key}`}
+				class="tree-row scheduled-row" role="listitem" in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }} data-flip-key={`${scope}${item.key}`}
 				style={depthStyle(depthOffset + item.depth)} data-depth={depthOffset + item.depth}
 				aria-level={depthOffset + item.depth + 1}
 			>
@@ -346,10 +350,6 @@
 		padding: 6px 8px 6px calc(8px + var(--indent)); border-radius: var(--radius-xs);
 		width: 100%;
 	}
-	/* The fold face keeps its whole width, so the actions sit beside the
-	   outcome counts when they fit and wrap below them only when they don't. */
-	.fold-row { flex-wrap: wrap; }
-	.fold-row .row-body { flex: 0 1 auto; }
 	/* A long-press opens the task menu, so it must not also select text or raise the iOS callout. */
 	@media (pointer: coarse) {
 		.tree-row.has-menu { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }

@@ -200,7 +200,7 @@ async def test_native_stop_signals_exact_waiter_without_cancelling_checkpoint(
 
     async def _cancel_checkpoint(exact_checkpoint_id):
         checkpoint_stops.append(exact_checkpoint_id)
-        raise RuntimeError("minimum meaningful cold checkpoint input does not fit")
+        raise RuntimeError("minimum meaningful cold fork input does not fit")
 
     provider_task = asyncio.create_task(_provider())
     owner_task = asyncio.create_task(_owner(provider_task))
@@ -305,7 +305,7 @@ async def test_cc_stop_signals_its_exact_hard_wait_before_handle_stop(
 
     async def cancel(exact_checkpoint_id):
         calls.append(("checkpoint", exact_checkpoint_id))
-        raise RuntimeError("minimum meaningful cold checkpoint input does not fit")
+        raise RuntimeError("minimum meaningful cold fork input does not fit")
 
     async def halt(*_args):
         calls.append(("halt", "turn-cc"))
@@ -1838,7 +1838,7 @@ async def test_codex_stop_signals_its_exact_hard_wait_before_handle_stop(
 
     async def cancel(exact_checkpoint_id):
         calls.append(("checkpoint", exact_checkpoint_id))
-        raise RuntimeError("minimum meaningful cold checkpoint input does not fit")
+        raise RuntimeError("minimum meaningful cold fork input does not fit")
 
     async def terminate(*_args):
         calls.append(("terminate", "turn-codex"))
@@ -2025,7 +2025,7 @@ async def test_codex_stop_owns_same_turn_checkpoint_replacement_before_write(
         driven.append(settlement)
 
     monkeypatch.setattr(
-        "llm.resolution.resolve_execution_target", lambda _model: target,
+        "llm.resolution.resolve_execution_target", lambda _model, **_k: target,
     )
     monkeypatch.setattr(
         codex_turn_transitions, "_require_provider_fit", lambda *_args: None,
@@ -2512,7 +2512,7 @@ async def test_codex_mid_turn_stop_keeps_terminal_ownership_after_replacement(
         rejected.append(True)
 
     monkeypatch.setattr(
-        "llm.resolution.resolve_execution_target", lambda _model: target,
+        "llm.resolution.resolve_execution_target", lambda _model, **_k: target,
     )
     monkeypatch.setattr(
         codex_runtime, "_fence_exact_live", lambda *_args: asyncio.sleep(0, result=True),

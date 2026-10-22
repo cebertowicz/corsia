@@ -92,7 +92,8 @@ def _save(
     """Commit one step's files; on failure settle or defer the entry and say no."""
     from core.placement_proposal import marker
     from infra.config import WORKSPACE
-    from infra.guidance_git import GuidanceTarget, save_guidance
+    from infra.guidance_git import save_guidance
+    from infra.guidance_targets import GuidanceTarget
     from infra.skill_save_validation import REFUSED
 
     trailer = marker(entry["thread_id"], entry["entry_id"], entry["revision"])
@@ -199,6 +200,8 @@ def _capture(
     from infra.guidance_git import digest
     from plans import public as plans
 
+    from core.lesson_corrections import merge_subjects
+
     trial, reason = decision.trial, admission.hold
     assert trial is not None and reason is not None and place.tray is not None
     path = lesson_files.capture_path(place.tray, admission.capture_id)
@@ -208,11 +211,13 @@ def _capture(
     earlier = lesson_files.read_capture(current) if current else None
     # Evidence accumulates only while the hypothesis itself is unchanged.
     kept = earlier.source_refs if earlier is not None and earlier.hash == version else ()
+    subjects = earlier.originating_subjects if earlier is not None and earlier.hash == version else ()
     text = lesson_files.render_capture(
         capture_id=admission.capture_id, capture_hash=version, owner=entry["thread_id"],
         reason=reason, name=decision.skill_name, description=decision.skill_description,
         text=decision.text, trial=trial,
         source_refs=lesson_files.merged_refs(kept, entry["body"].get("source_refs") or []),
+        originating_subjects=merge_subjects(subjects, decision.originating_subjects),
     )
     if current != text and not _save(
         entry, place, decision, relative, {path: text}, {path: digest(current)},

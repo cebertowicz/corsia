@@ -8,7 +8,7 @@ from functools import wraps
 from typing import Any, Callable
 
 from infra.db_async import run_in_db
-from infra.send_broadcast import broadcast_input_row
+from infra.send_broadcast import broadcast_input_row, broadcast_newest_error
 from infra.send_post_admission import (
     broadcast_passive,
     publish_projection,
@@ -118,7 +118,7 @@ def _require_thread_identity(thread_id: str, thread_row: Any) -> None:
         raise SendRejected(404, "thread does not exist")
 
 
-def broadcast_accepted_input(
+async def broadcast_accepted_input(
     admission: InputAdmission,
     content: str,
     metadata: dict | None,
@@ -126,7 +126,7 @@ def broadcast_accepted_input(
     role: str,
     exclude_ws: Any | None,
 ) -> None:
-    """Project the exact durable pending row, and any hold it took, to subscribed clients."""
+    """Project the exact durable pending row, any hold it took, and the error it now waits behind."""
     accepted = admission.accepted
     broadcast_input_row(
         accepted.thread_id, accepted.message_id, content, metadata, accepted.created_at,
@@ -137,6 +137,7 @@ def broadcast_accepted_input(
         role=role,
         exclude_ws=exclude_ws,
     )
+    await broadcast_newest_error(accepted.thread_id)
 
 
 async def request_safe_boundary(thread_id: str, target_harness: str) -> None:
@@ -358,7 +359,7 @@ async def send_thread_input(
         delivery_options=options,
         continuation=continuation,
     )
-    from jobs.corrections_realtime import notify_if_owner  # best effort; never fails the send
+    from jobs.corrections_recording import notify_if_owner  # best effort; never fails the send
     notify_if_owner(admission.accepted, role=role, content=text, metadata=metadata)
     return await _deliver_admission(
         admission, thread_row,

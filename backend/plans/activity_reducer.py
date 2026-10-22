@@ -94,6 +94,7 @@ def reduce_node(
         row, plan, decision_wait=decision_wait, child_cause=child_cause,
     )
     paused = operator_display_state.plan_defers_asks(plan["state"])
+    node_paused = bool(row["has_user_pause"])
     needs_user = operator_node_state.needs_user_from_facts(
         str(row["state"]),
         condition,
@@ -101,6 +102,7 @@ def reduce_node(
         review_kind,
         has_attention=bool(row["has_attention"]),
         plan_paused=paused,
+        node_paused=node_paused,
     )
     stopped_reason = operator_stopped.reason_from_facts(
         executor_stop_fact,
@@ -117,6 +119,7 @@ def reduce_node(
         child_working=child_working,
         executor_stopped=stopped_reason is not None,
         plan_paused=paused,
+        node_paused=node_paused,
     )
     shown = operator_node_state.shown_condition_from_facts(
         condition, label=display["label_key"], child_working=child_working,
@@ -131,6 +134,7 @@ def reduce_node(
         quiet_block=quiet_block,
         unactionable_user_block=bool(row["has_user_block"]) and not needs_user,
         plan_paused=paused,
+        node_paused=node_paused,
     )
     return ReducedNode(
         condition=condition,

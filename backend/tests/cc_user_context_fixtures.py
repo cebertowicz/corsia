@@ -28,34 +28,60 @@ SENTINELS = {
 _MEMORY_PROMPT_MARKERS = ("auto memory", "persistent, file-based memory", "memory.md")
 
 
-def _completed_turn(model: str) -> bytes:
-    """Render the smallest streamed assistant turn the CLI will accept."""
+def _turn(model: str, block: dict, delta: dict, stop_reason: str) -> bytes:
+    """Render one streamed assistant turn with a single content block."""
     return (
         sse("message_start", message={
             "id": "m", "type": "message", "role": "assistant", "content": [],
             "model": model, "stop_reason": None, "stop_sequence": None,
             "usage": {"input_tokens": 1, "output_tokens": 1}})
-        + sse("content_block_start", index=0, content_block={"type": "text", "text": ""})
-        + sse("content_block_delta", index=0, delta={"type": "text_delta", "text": "ok"})
+        + sse("content_block_start", index=0, content_block=block)
+        + sse("content_block_delta", index=0, delta=delta)
         + sse("content_block_stop", index=0)
-        + sse("message_delta", delta={"stop_reason": "end_turn", "stop_sequence": None},
+        + sse("message_delta", delta={"stop_reason": stop_reason, "stop_sequence": None},
                usage={"output_tokens": 1})
         + sse("message_stop")
     )
 
 
-class InferencePeer:
-    """Answer the CLI with a synthetic turn and keep every request body."""
+def _completed_turn(model: str) -> bytes:
+    """Render the smallest streamed assistant turn the CLI will accept."""
+    return _turn(model, {"type": "text", "text": ""},
+                 {"type": "text_delta", "text": "ok"}, "end_turn")
 
-    def __init__(self) -> None:
+
+def _tool_use_turn(model: str, name: str, tool_input: dict) -> bytes:
+    """Render an assistant turn that calls one tool."""
+    block = {"type": "tool_use", "id": "toolu_peer_1", "name": name, "input": {}}
+    delta = {"type": "input_json_delta", "partial_json": json.dumps(tool_input)}
+    return _turn(model, block, delta, "tool_use")
+
+
+class InferencePeer:
+    """Answer the CLI with a synthetic turn and keep every request body.
+
+    Given ``tool_use`` (a tool name and its input), the peer first calls that
+    tool on the request that offers it, then answers once its result is back.
+    """
+
+    def __init__(self, tool_use: tuple[str, dict] | None = None) -> None:
         self.bodies: list[str] = []
+        self._tool_use = tool_use
+
+    def _answer(self, body: dict) -> bytes:
+        model = body.get("model", "x")
+        offered = {tool.get("name") for tool in body.get("tools") or [] if isinstance(tool, dict)}
+        answered = '"tool_result"' in json.dumps(body.get("messages"))
+        if self._tool_use and self._tool_use[0] in offered and not answered:
+            return _tool_use_turn(model, *self._tool_use)
+        return _completed_turn(model)
 
     async def respond(self, reader, writer) -> None:
         try:
             _, route, raw = await read_request(reader)
             if "/v1/messages" in route and "count_tokens" not in route:
                 self.bodies.append(raw.decode())
-                data = _completed_turn(json.loads(raw).get("model", "x"))
+                data = self._answer(json.loads(raw))
                 content_type = "text/event-stream"
             else:
                 data, content_type = b'{"input_tokens":1}', "application/json"

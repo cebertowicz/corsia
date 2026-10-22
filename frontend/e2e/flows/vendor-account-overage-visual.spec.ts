@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Page } from '@playwright/test';
 import { loginByUrl, openSettings } from '../support/corsia';
 
 // Synthetic accounts only: the disposable backend has no vendor CLI, so the
@@ -31,6 +32,8 @@ const MODELS = [
 async function serveAccounts(page: Page, writes: { url: string; body: unknown }[]) {
 	const accounts = ACCOUNTS.map((account) => ({ ...account }));
 	await page.route('**/api/settings/models?**', (route) => route.fulfill({ json: { models: MODELS } }));
+	await page.route('**/api/settings/providers?**', (route) => route.fulfill({ json: { providers: [] } }));
+	await page.route('**/api/settings/network-servers?**', (route) => route.fulfill({ json: { servers: [] } }));
 	await page.route('**/api/models**', (route) => new URL(route.request().url()).pathname === '/api/models' && route.request().method() === 'GET'
 		? route.fulfill({ json: { models: MODELS.map(catalogRow), active_local_threads: 0 } }) : route.continue());
 	await page.route('**/api/vendor-accounts?**', (route) => route.fulfill({ json: { accounts } }));
@@ -55,6 +58,8 @@ async function openHarnessAccounts(page: Page, provider: string, account: string
 
 test.describe('@surface:providers accounts live in settings modal', () => {
 	test('the harness gear opens canonical account rows and a flip writes only that account', async ({ page }, testInfo) => {
+		// Four viewport/theme evidence passes plus the final write exceed mock mode's suite-wide 30s ceiling.
+		test.setTimeout(60_000);
 		const writes: { url: string; body: unknown }[] = [];
 		await serveAccounts(page, writes);
 		for (const [name, width, colorScheme] of [

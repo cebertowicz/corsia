@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from api import provider_sources as provider_sources_api  # noqa: E402
 from api import setup as setup_api  # noqa: E402
 from infra import accounts, setup_progress  # noqa: E402
 from infra.default_port import DEFAULT_BACKEND_PORT  # noqa: E402
@@ -19,6 +20,14 @@ BASE = "http:" + f"//127.0.0.1:{DEFAULT_BACKEND_PORT}"
 HOST = {"Host": f"127.0.0.1:{DEFAULT_BACKEND_PORT}"}
 JSON_HEADERS = {**HOST, "Content-Type": "application/json"}
 ACCOUNT = {"name": "First", "username": "first", "password": "a-long-enough-password"}
+
+
+HANDOFF = {
+    "tools": {
+        "claude-code": {"attempt": "install_failed", "cause": "download_unavailable", "ref": "setup-42"},
+        "codex": {"attempt": "none"},
+    },
+}
 
 
 @pytest.fixture
@@ -39,6 +48,7 @@ def client(isolated_db, tmp_path, monkeypatch, facts):
     database.commit()
     app = FastAPI()
     app.include_router(setup_api.router)
+    app.include_router(provider_sources_api.router)
     with TestClient(app, base_url=BASE, client=("127.0.0.1", 50100)) as test_client:
         yield test_client
 
@@ -96,7 +106,9 @@ def test_eligibility_facts_are_read_fresh_each_time_never_replayed(client, facts
     facts["free_disk_gb"] = 4.0
     facts["existing_omlx"] = True
 
-    assert _progress(client, token)["status"] == {"local_eligible": True, "free_disk_gb": 4.0, "existing_omlx": True}
+    status = _progress(client, token)["status"]
+    assert isinstance(status.pop("local_started"), bool)  # its values are pinned in test_setup_local_started
+    assert status == {"local_eligible": True, "free_disk_gb": 4.0, "existing_omlx": True}
     assert "free_disk_gb" not in (setup_progress.read() or {})
 
 
@@ -129,10 +141,105 @@ def test_an_account_made_by_the_cli_has_no_setup_to_resume(client):
     assert _progress(client, token)["setup_completed"] is True
 
 
+def test_pre_account_local_download_status_exposes_only_the_safe_projection(client, monkeypatch):
+    monkeypatch.setattr("onboarding.local_download_state.current", lambda: {
+        "state": "failed", "cause": "disk_full", "bytes_to_free": 1024,
+    })
+
+    response = client.get("/api/setup/local-download", headers=HOST)
+
+    assert response.status_code == 200
+    assert response.json() == {"state": "failed", "cause": "disk_full", "bytes_to_free": 1024}
+
+
+@pytest.mark.parametrize(("result", "downloaded"), [
+    ({"ok": False, "cause": "connection", "message": "connection lost"}, False),
+    ({"ok": False, "cause": "disk_full", "bytes_to_free": 4_000_000_000, "message": "disk full"}, False),
+    ({"ok": False, "cause": "memory", "message": "memory"}, False),
+    ({"ok": False, "cause": "other", "ref": "setup-42", "message": "other"}, False),
+    ({"ok": False, "cause": "other", "pre_download": True, "message": "setup"}, False),
+    ({"ok": False, "cause": "connection", "message": "start"}, True),
+], ids=["connection", "disk-full", "memory", "other", "setup-failed", "start-failed"])
+def test_signed_in_omlx_source_projects_the_same_terminal_flight_as_local_download(client, monkeypatch, result, downloaded):
+    """The authenticated source row uses Welcome's one safe local-flight projection."""
+    from llm import local_setup, local_sources
+
+    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight(result=result, downloaded=downloaded))
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
+    monkeypatch.setattr(local_sources, "omlx_on_path", lambda: None)
+
+    rail = client.get("/api/setup/local-download", headers=HOST)
+    assert rail.status_code == 200
+    token = _create_account(client)
+    sources = client.get("/api/providers/sources", headers={"Authorization": f"Bearer {token}"})
+    assert sources.status_code == 200
+    source = next(row for row in sources.json()["sources"] if row["source"] == "omlx")
+
+    assert {key: source.get(key) for key in ("local_state", "setup_error_code", "setup_error_reference", "bytes_to_free")} == {
+        "local_state": rail.json()["state"],
+        "setup_error_code": rail.json().get("cause"),
+        "setup_error_reference": rail.json().get("ref"),
+        "bytes_to_free": rail.json().get("bytes_to_free"),
+    }
+
+
+def test_settings_flight_never_projects_local_download_fields(monkeypatch):
+    from llm import local_setup, local_sources
+
+    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight(
+        kind="settings", result={"ok": False, "cause": "other", "ref": "settings-42"},
+    ))
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
+    monkeypatch.setattr(local_sources, "omlx_on_path", lambda: None)
+
+    source = local_sources.omlx_source((set(), set()))
+
+    assert not {"local_state", "setup_error_code", "setup_error_reference", "bytes_to_free"} & source.keys()
+
+
+def test_local_download_starts_the_onboarding_flight_with_no_question(client, monkeypatch):
+    from unittest.mock import AsyncMock, call
+
+    started = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", started)
+
+    response = client.post("/api/setup/local-download", json={}, headers=JSON_HEADERS)
+
+    assert response.status_code == 200 and response.json() == {"ok": True}
+    assert started.await_args_list == [call(onboarding=True)]
+
+
 def test_before_an_account_only_the_local_choice_is_taken(client):
     assert _put(client, {"step": "models"}).status_code == 422
+    assert _put(client, {"handoff": HANDOFF}).status_code == 422
     assert _put(client, {"completed": True}).status_code == 422
     assert setup_progress.read() is None
+
+
+def test_handoff_can_be_written_before_binding_and_never_copies_it(client):
+    token = _create_account(client)
+
+    assert _put(client, {"handoff": HANDOFF}, token).status_code == 200
+    assert setup_progress.read()["handoff"] == HANDOFF
+    assert _put(client, {"completed": True, "handoff": HANDOFF}, token).status_code == 200
+
+    assert setup_progress.read()["handoff"] == HANDOFF
+    # A stale tab cannot change either completion or the durable handoff after binding.
+    assert _put(client, {"handoff": HANDOFF}, token).status_code == 200
+    assert setup_progress.read()["handoff"] == HANDOFF
+
+
+@pytest.mark.parametrize("handoff", [
+    {**HANDOFF, "tools": {"claude-code": {"attempt": "none"}}},
+    {**HANDOFF, "tools": {"claude-code": {"attempt": "install_failed"}, "codex": {"attempt": "none"}}},
+    {**HANDOFF, "tools": {"claude-code": {"attempt": "none", "cause": "other"}, "codex": {"attempt": "none"}}},
+    {**HANDOFF, "other_omlx": "kept_both"},
+])
+def test_handoff_refuses_missing_tool_or_unsafe_failure_shape(client, handoff):
+    token = _create_account(client)
+
+    assert _put(client, {"handoff": handoff}, token).status_code == 422
+    assert "handoff" not in (setup_progress.read() or {})
 
 
 def test_after_an_account_a_write_needs_a_session(client):
@@ -178,7 +285,13 @@ def test_update_reads_and_writes_inside_one_write_transaction(isolated_db, monke
     assert in_transaction == [True]
 
 
-ALL_PICKS = {"claude": True, "chatgpt": False, "key": True}
+ALL_PICKS = {"claude": True, "chatgpt": False}
+HANDOFF = {
+    "tools": {
+        "claude-code": {"attempt": "install_failed", "cause": "download_unavailable", "ref": "setup-42"},
+        "codex": {"attempt": "none"},
+    },
+}
 
 
 def test_welcome_picks_survive_the_account_and_a_reload(client):
@@ -195,12 +308,20 @@ def test_welcome_picks_survive_the_account_and_a_reload(client):
 def test_picks_change_after_the_account_and_a_later_write_keeps_the_rest(client):
     token = _create_account(client)
     assert _put(client, {"picks": ALL_PICKS}, token).status_code == 200
-    assert _put(client, {"picks": {"claude": False, "chatgpt": True, "key": False}}, token).status_code == 200
+    assert _put(client, {"picks": {"claude": False, "chatgpt": True}}, token).status_code == 200
     assert _put(client, {"local_ai": False}, token).status_code == 200
 
     progress = _progress(client, token)
-    assert progress["picks"] == {"claude": False, "chatgpt": True, "key": False}
+    assert progress["picks"] == {"claude": False, "chatgpt": True}
     assert progress["local_ai"] is False
+
+
+def test_a_subscriptions_answer_is_stored_as_given(client):
+    token = _create_account(client)
+
+    assert _put(client, {"picks": {"claude": True, "chatgpt": False}}, token).status_code == 200
+
+    assert _progress(client, token)["picks"] == {"claude": True, "chatgpt": False}
 
 
 def test_no_picks_reads_as_none_not_as_all_unchecked(client):
@@ -209,10 +330,11 @@ def test_no_picks_reads_as_none_not_as_all_unchecked(client):
 
 @pytest.mark.parametrize("picks", [
     {"claude": True},
-    {"claude": True, "chatgpt": True, "key": True, "other": True},
-    {"claude": "yes", "chatgpt": False, "key": False},
+    {"claude": True, "chatgpt": True, "other": True},
+    {"claude": True, "chatgpt": True, "key": False},
+    {"claude": "yes", "chatgpt": False},
 ])
-def test_picks_must_say_yes_or_no_for_exactly_the_three_choices(client, picks):
+def test_picks_must_say_yes_or_no_for_exactly_the_two_subscriptions(client, picks):
     token = _create_account(client)
 
     assert _put(client, {"picks": picks}, token).status_code == 422
@@ -223,6 +345,41 @@ def test_a_completed_setup_ignores_a_late_picks_write(client):
     token = _create_account(client)
     assert _put(client, {"picks": ALL_PICKS}, token).status_code == 200
     assert _put(client, {"completed": True}, token).status_code == 200
-    assert _put(client, {"picks": {"claude": False, "chatgpt": False, "key": False}}, token).status_code == 200
+    assert _put(client, {"picks": {"claude": False, "chatgpt": False}}, token).status_code == 200
 
     assert _progress(client, token)["picks"] == ALL_PICKS
+
+
+def test_finishing_setup_picks_no_model_and_the_held_first_message_starts_on_the_persons_pick(client, monkeypatch):
+    """Setup never chooses the CORSIA agent's model: its first-run message waits for the person's own pick."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    import infra.thread_execution as thread_execution
+    from infra.corsia_agent import get_corsia_agent
+    from infra.database import get_db
+    from thread.model import switch_model
+
+    def first_run_state(agent: str) -> tuple:
+        db = get_db()
+        try:
+            thread = db.execute("SELECT model FROM threads WHERE id=?", (agent,)).fetchone()
+            wake = db.execute(
+                "SELECT delivery_state, delivery_error, target_model FROM messages WHERE id LIKE 'first-run:%'"
+            ).fetchone()
+            return thread["model"], tuple(wake)
+        finally:
+            db.close()
+
+    token = _create_account(client)
+    assert _put(client, {"completed": True}, token).status_code == 200
+    agent = get_corsia_agent()
+    assert first_run_state(agent) == (None, ("queued", "no_model_selected", None))
+
+    drive = AsyncMock()
+    monkeypatch.setattr(thread_execution, "drive_thread", drive)
+    asyncio.run(switch_model(agent, "claude-code/sonnet", user_id=None, actor_kind="user", actor_id=None,
+                             reason="harness_model_switch"))
+
+    assert first_run_state(agent) == ("claude-code/sonnet", ("queued", None, "claude-code/sonnet"))
+    drive.assert_awaited_once_with(agent)

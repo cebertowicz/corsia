@@ -1,5 +1,5 @@
 import { cellElement } from './widget-blocks';
-import { clean, occurrences, tableCells } from './widget-cells';
+import { clean, intersectsCell, occurrences, tableCells } from './widget-cells';
 
 export interface Mark { from: number; to: number; id: string; kind: 'placed' | 'focused' | 'pending' }
 
@@ -34,6 +34,41 @@ export function unpaint(el: HTMLElement) {
 	el.normalize();
 }
 
+/** A point as the count of text characters before it in `el`. */
+function textOffset(el: HTMLElement, node: Node, offset: number): number {
+	const before = document.createRange();
+	before.setStart(el, 0);
+	before.setEnd(node, offset);
+	return before.toString().length;
+}
+
+/** The point `at` characters into `el`; between two text nodes, a start belongs to the later one and an end to the earlier. */
+function textPoint(el: HTMLElement, at: number, start: boolean): { node: Node; offset: number } {
+	const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+	let seen = 0, last: Text | null = null;
+	for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+		if (start ? at < seen + node.data.length : at <= seen + node.data.length) return { node, offset: at - seen };
+		seen += node.data.length;
+		last = node;
+	}
+	return last ? { node: last, offset: last.data.length } : { node: el, offset: el.childNodes.length };
+}
+
+/**
+ * Runs `repaint` on a widget without losing the browser's selection inside it. Wrapping and unwrapping text removes the
+ * nodes a selection sits on, which collapses it; painting never changes the text, so the same characters are selected again.
+ */
+export function keepingSelection(el: HTMLElement, repaint: () => void) {
+	const selection = document.getSelection();
+	const { anchorNode, anchorOffset, focusNode, focusOffset } = selection ?? {};
+	const inside = !!selection && !selection.isCollapsed && !!anchorNode && !!focusNode && el.contains(anchorNode) && el.contains(focusNode);
+	const kept = inside ? { text: selection.toString(), anchor: textOffset(el, anchorNode!, anchorOffset!), focus: textOffset(el, focusNode!, focusOffset!) } : null;
+	repaint();
+	if (!kept || selection!.toString() === kept.text) return;
+	const anchor = textPoint(el, kept.anchor, kept.anchor <= kept.focus), focus = textPoint(el, kept.focus, kept.focus < kept.anchor);
+	selection!.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
+}
+
 const markClasses = (kind: Mark['kind']) => kind === 'pending' ? ['cm-comment-pending'] : kind === 'focused' ? ['cm-comment-anchor', 'cm-comment-focused'] : ['cm-comment-anchor'];
 
 /** Wraps the text nodes a range holds, so a mark follows the text inside formatting. */
@@ -66,7 +101,7 @@ export function paintTable(el: HTMLElement, base: number, src: string, marks: Ma
 			addCommentId(el, mark);
 			continue;
 		}
-		const hit = cells.filter((span) => span.from < to && span.to > from);
+		const hit = cells.filter((span) => intersectsCell(span, from, to));
 		for (const span of hit) {
 			const cell = cellElement(el, span);
 			if (!cell) continue;

@@ -1,6 +1,8 @@
 import fs from 'node:fs';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
+import { leaveUserCommentsUnsent } from '../support/docFeedbackFooter';
 import {
 	at, commentButton, composer, drag, drawer, frame, isolatedDb, newRevision, openThread, overlap, pill, postComment, rest, seedImage,
 	sendFromDrawerByKeyboard, sheet, shoot, showImage, tag, tagNumbers, touchDrag, viewer,
@@ -147,11 +149,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await page.keyboard.press('Escape');
 			await expect(tag(page, 2)).toBeFocused();
 
-			// The person's comments are delivered as one batch carrying each region and one marked-up copy.
-			isolatedDb([
-				'changed = connection.execute("UPDATE doc_feedback_batches SET closes_at=? WHERE state=\'open\' AND author_kind=\'user\' AND artifact_id=?", ("2000-01-01T00:00:00+00:00", sys.argv[2])).rowcount',
-				'assert changed == 1, changed',
-			], seeded.artifactId);
+			// The person's comments were delivered as they were made, into one task carrying each region and one marked-up copy.
 			let delivered: { title: string; description: string } | null = null;
 			await expect.poll(() => {
 				delivered = JSON.parse(isolatedDb([
@@ -242,6 +240,8 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 
 			// R2: Send now in the drawer's footer, from the keyboard, leaves focus in the drawer; Escape then closes only it.
 			await page.keyboard.press('Escape');
+			// The comment went as it was made; re-opening it is what leaves a message to send.
+			await leaveUserCommentsUnsent(request, seeded.artifactId);
 			await pill(page).click();
 			await expect(drawer(page)).toBeVisible();
 			await sendFromDrawerByKeyboard(page, testInfo, viewer(page), '1440-15-drawer-sent-focus');
@@ -304,6 +304,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			if (process.env.CORSIA_E2E_MOCK === '1') {
 				await page.keyboard.press('Escape');
 				await expect(sheet(page)).toHaveCount(0);
+				await leaveUserCommentsUnsent(request, seeded.artifactId);
 				await pill(page).tap();
 				await expect(sheet(page)).toBeVisible();
 				await sendFromDrawerByKeyboard(page, testInfo, viewer(page), '393-06-drawer-sent-focus');

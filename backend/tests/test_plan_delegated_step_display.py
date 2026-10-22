@@ -185,7 +185,30 @@ def test_a_delegated_step_its_own_agent_holds_reads_as_a_neutral_wait():
         # Only the user's blocker reads red (#2213): the agent's own is a wait.
         assert node["display"] == {"label_key": "waiting", "tone_key": "waiting"}
         assert entry["progress"]["liveness"] == "waiting"
-        assert entry["display"] == {"label_key": "waiting", "tone_key": "waiting"}
+        assert entry["display"]["label_key"] == "waiting"
+        assert entry["display"]["tone_key"] == "waiting"
+        # EW3: the plan says what it waits for, in the reason's own words.
+        assert entry["display"]["wait"]["label"] == "the launch brief"
+    finally:
+        db.close()
+
+
+def test_a_waiting_child_tells_its_parent_what_it_waits_for():
+    """EW4: the parent's child summary carries the child's wait; its state stays liveness."""
+    db = _db()
+    try:
+        step, child_step = _delegated_step(db, child_running=False)
+        wait_on(
+            db, child_step.id, reason="Waiting for the vendor reply", owner_kind="external",
+            reason_key="vendor_reply", actor=PlanActor("child", "user", "project"),
+        )
+        db.commit()
+
+        child = _node(db, "owner", step.id)["child"]
+
+        assert child["progress"]["liveness"] == "waiting"
+        assert child["wait"]["label"] == "the vendor reply"
+        assert child["wait"]["more"] == 0
     finally:
         db.close()
 

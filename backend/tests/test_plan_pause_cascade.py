@@ -9,12 +9,15 @@ safe point, and that telling can never start a Turn.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import sqlite3
 
 import pytest
 
 from automation import plan_liveness
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from infra.passive_changes import append_change
 from infra.schema import SCHEMA_SQL
 from infra.thread_inputs import claim_safe_boundary, start_idle_turn
@@ -200,10 +203,22 @@ MID = PlanActor("mid", "user", None)
 def _own_task(db, thread_id: str = "mid") -> None:
     """The worker adds and starts its own task, as a worker does; nobody is told."""
     plan = _plan(db, thread_id)
+    intent = "Complete the worker task."
+    turn_id = f"worker-task-{thread_id}"
+    _init_messages_fts(db)
+    accept_thread_input(
+        thread_id, role="user", content=intent, intent="apply_now",
+        message_id=f"worker-authority-{thread_id}", db=db,
+    )
+    db.execute(
+        "UPDATE messages SET active_turn_id=? WHERE id=?",
+        (turn_id, f"worker-authority-{thread_id}"),
+    )
     added = boundary.mutate(
         plan["id"], "add",
-        {"kind": "task", "title": "Worker task", "acceptance_criteria": "Done"},
-        actor=MID, provenance="test.pause_cascade", mutation_id=f"add-{thread_id}", db=db,
+        {"kind": "task", "title": "Worker task", "acceptance_criteria": "Done", "size": "unknown",
+         "intent": intent, "intent_words": [{"quote": intent, "role": "authority"}]},
+        actor=replace(MID, turn_id=turn_id), provenance="test.pause_cascade", mutation_id=f"add-{thread_id}", db=db,
     ).result
     node = added.get("node", added)
     boundary.mutate(

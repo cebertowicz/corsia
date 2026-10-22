@@ -12,7 +12,7 @@ vi.mock('$lib/api/docs', async (original) => ({
 	...await original<typeof import('$lib/api/docs')>(),
 	fetchComments: async () => ({
 		comments: wire.rows,
-		feedback: { open_count: 0, owner_label: null, grace_closes_at: null, undelivered_batches: [] },
+		feedback: { open_count: 0, owner_label: null, undelivered_batches: [] },
 	}),
 }));
 
@@ -35,8 +35,8 @@ const settle = () => vi.advanceTimersByTimeAsync(0);
 const changeFrame = (id: string) => emit('doc_comment_changed', {
 	type: 'doc_comment_changed', artifact_id: ART, comment_id: id, author_thread_id: 'agent-a',
 });
-const activityFrame = (id: string): DocActivityFrame => ({
-	type: 'doc_activity', artifact_id: ART, thread_id: 'agent-a', agent: 'agent-a', kind: 'comment',
+const activityFrame = (id: string, kind: DocActivityFrame['kind'] = 'comment'): DocActivityFrame => ({
+	type: 'doc_activity', artifact_id: ART, thread_id: 'agent-a', agent: 'agent-a', kind,
 	span: { from: 1, to: 4 }, comment_id: id, revision: null, at: new Date().toISOString(),
 });
 
@@ -173,6 +173,19 @@ describe('the hold started by a comment change frame', () => {
 		attach();
 		emit('doc_comment_changed', { type: 'doc_comment_changed', artifact_id: ART });
 		await settle();
+		expect(shown()).toEqual(['c1']);
+	});
+
+	it('a suggestion is held like a comment: the lane takes over the hold, so the wait for its frame does not release it', async () => {
+		reloadOnChange();
+		cleanups.push(startDocPresence());
+		attach();
+		changeFrame('c1');
+		await vi.advanceTimersByTimeAsync(1_000);
+		emit('doc_activity', activityFrame('c1', 'suggestion'));
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(everShown('c1')).toBe(false);
+		await vi.advanceTimersByTimeAsync(REVEAL_MS);
 		expect(shown()).toEqual(['c1']);
 	});
 });

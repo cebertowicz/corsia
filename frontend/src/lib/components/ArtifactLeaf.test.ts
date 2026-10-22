@@ -24,8 +24,6 @@ const mocks = vi.hoisted(() => {
 			},
 		},
 		sendDocFeedback: vi.fn(),
-		leaveDocFeedback: vi.fn(),
-		returnDocFeedback: vi.fn(),
 		retryDocFeedback: vi.fn(),
 		restoreDocumentPlace: vi.fn(),
 		setComments(value: Record<string, unknown[]>) {
@@ -46,8 +44,6 @@ vi.mock('$lib/api/docFeedback', () => ({
 			constructor(readonly status: number) { super(`HTTP ${status}`); }
 		},
 		sendDocFeedback: mocks.sendDocFeedback,
-		leaveDocFeedback: mocks.leaveDocFeedback,
-		returnDocFeedback: mocks.returnDocFeedback,
 		retryDocFeedback: mocks.retryDocFeedback,
 	}));
 
@@ -71,7 +67,8 @@ vi.mock('$lib/stores/docComments', async () => ({
 	flushPositions: vi.fn(),
 }));
 
-vi.mock('$lib/documentImagePlace', () => ({
+vi.mock('$lib/documentImagePlace', async (importOriginal) => ({
+	...await importOriginal<typeof import('$lib/documentImagePlace')>(),
 	restoreDocumentPlace: mocks.restoreDocumentPlace,
 }));
 
@@ -178,7 +175,6 @@ beforeEach(() => {
 	mocks.loadComments.mockReset().mockResolvedValue({
 		open_count: 0,
 		owner_label: null,
-		grace_closes_at: null,
 		undelivered_batches: [],
 	});
 	mocks.prepareCommentArrival.mockReset();
@@ -188,8 +184,6 @@ beforeEach(() => {
 	mocks.ackComment.mockReset();
 	mocks.rangeFor.mockReset().mockReturnValue(null);
 	mocks.sendDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
-	mocks.leaveDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
-	mocks.returnDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
 	mocks.retryDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
 	mocks.restoreDocumentPlace.mockReset().mockResolvedValue(undefined);
 	mocks.setComments({});
@@ -310,7 +304,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			host.querySelector<HTMLButtonElement>('.comment-status')!.click();
 			flushSync();
 			expect(host.querySelector('.doc [data-doc-comments-drawer]')).not.toBeNull();
-			expect(host.querySelector('.popover')).toBeNull();
+			expect(document.body.querySelector('.popover')).toBeNull();
 			expect(host.querySelector('[data-adaptive-drawer]')).toBeNull();
 			expect(get(paneOpen)).toBe(true);
 		} finally {
@@ -340,7 +334,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		host.querySelector<HTMLButtonElement>('.comment-status')!.click();
 		flushSync();
 		expect(document.querySelector('[data-adaptive-drawer].within [data-doc-comments-drawer]')).not.toBeNull();
-		expect(host.querySelector('.popover')).toBeNull();
+		expect(document.body.querySelector('.popover')).toBeNull();
 		expect(get(paneOpen)).toBe(false);
 	});
 
@@ -829,12 +823,12 @@ describe('ArtifactLeaf load-status ownership', () => {
 		show.mockRestore();
 	});
 
-	it('uses leave, not send, when switching away from or navigating off a document', async () => {
+	it('does not send feedback when switching away from or navigating off a document', async () => {
 		mocks.fetchContent.mockResolvedValue({
 			text: '# doc', revision: 'r1', writable: true, artifact: { id: 'art-leave' },
 		});
 		mocks.loadComments.mockResolvedValue({
-			open_count: 1, owner_label: 'Documents & Artifacts', grace_closes_at: null, undelivered_batches: [],
+			open_count: 1, owner_label: 'Documents & Artifacts', undelivered_batches: [],
 		});
 		openArtifactTab(THREAD, { artifactId: 'art-leave', path: '/leave.md', title: 'leave.md' });
 		openArtifactTab(THREAD, { artifactId: 'art-other', path: '/other.md', title: 'other.md' });
@@ -842,15 +836,8 @@ describe('ArtifactLeaf load-status ownership', () => {
 		setActiveTab(THREAD, leaveTab.instanceId);
 		render();
 		await vi.waitFor(() => expect(tabsOf().find((tab) => tab.instanceId === leaveTab.instanceId)?.status).toBe('ready'));
-		mocks.leaveDocFeedback.mockClear();
 		setActiveTab(THREAD, tabsOf()[1].instanceId);
-		await vi.waitFor(() => expect(mocks.leaveDocFeedback).toHaveBeenCalledWith('art-leave'));
-		expect(mocks.sendDocFeedback).not.toHaveBeenCalled();
-
-		mocks.leaveDocFeedback.mockClear();
-		unmount(component as never);
-		component = null;
-		await vi.waitFor(() => expect(mocks.leaveDocFeedback).toHaveBeenCalled());
+		await Promise.resolve();
 		expect(mocks.sendDocFeedback).not.toHaveBeenCalled();
 	});
 
@@ -905,7 +892,7 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		flushSync();
 		// The editor's anchor-focus callback reached the viewer and opened this thread.
 		expect(get(focusedDocComment)).toBe('comment');
-		expect(host.querySelector('.popover')).not.toBeNull();
+		expect(document.body.querySelector('.popover')).not.toBeNull();
 		expect(view.state.selection.main).toMatchObject({ anchor: QUOTE.from + 2, head: QUOTE.from + 2 });
 	});
 
@@ -920,7 +907,7 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		marker.click();
 		flushSync();
 		expect(get(focusedDocComment)).toBe('comment');
-		expect(host.querySelector('.popover')).not.toBeNull();
+		expect(document.body.querySelector('.popover')).not.toBeNull();
 		expect(view.state.selection.main).toMatchObject({ anchor: 0, head: 0 });
 		expect(view.contentDOM.contains(document.activeElement)).toBe(false);
 	});
@@ -952,6 +939,6 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		const tab = get(threadWorkspaces)[THREAD].activeTabId!;
 		await vi.waitFor(() => expect(tabDocumentImage(THREAD, tab)).toMatchObject({ ...IMG, focus: { id: 'pin' } }));
 		await vi.waitFor(() => expect(host.querySelector('.image-overlay [data-image-comment]')).not.toBeNull());
-		expect(host.querySelector('.popover')).toBeNull();
+		expect(document.body.querySelector('.popover')).toBeNull();
 	});
 });

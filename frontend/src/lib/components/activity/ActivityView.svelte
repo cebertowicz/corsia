@@ -220,7 +220,7 @@
 						aria-expanded={waitingOpen}
 					>
 						<span aria-hidden="true">{waitingOpen ? '⌄' : '›'}</span>
-						Waiting ({waitingCount})
+						Waiting{waitingOpen ? '' : ` (${waitingCount})`}
 					</button>
 				</h2>
 				{#if waitingOpen}

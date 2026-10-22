@@ -63,7 +63,6 @@ async def test_product_event_never_exposes_plan_free_text(monkeypatch):
         "2026-01-01T00:00:00+00:00",
         db=db,
         sources=[OneRequestSource()],
-        is_idle=lambda _thread_id: True,
         deliver=lambda *_args: _land(),
     )
 

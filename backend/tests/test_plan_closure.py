@@ -23,11 +23,14 @@ plan permanently 3 of 4.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 
 import sqlite3
 
 import pytest
 
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from infra.schema import SCHEMA_SQL
 from plans import closure, projections, service, status_context
 from plans.boundary import PlanActor, mutate
@@ -406,10 +409,17 @@ def test_passing_the_budget_never_refuses_a_write(db):
     for index in range(status_context.OPEN_NODE_BUDGET + 1):
         _task(db, plan.id, title=f"Task {index}")
 
+    intent = "Keep the open-work budget non-blocking"
+    _init_messages_fts(db)
+    accept_thread_input(
+        "root", role="user", content=intent, intent="apply_now", message_id="budget-authority", db=db,
+    )
+    db.execute("UPDATE messages SET active_turn_id='budget-turn' WHERE id='budget-authority'")
     added = mutate(
         plan.id, "add",
-        {"kind": "task", "title": "One more", "acceptance_criteria": "DOD"},
-        actor=OWNER, provenance="test", mutation_id=_mid(), db=db,
+        {"kind": "task", "title": "One more", "acceptance_criteria": "DOD", "size": "unknown",
+         "intent": intent, "intent_words": [{"quote": intent, "role": "authority"}]},
+        actor=replace(OWNER, turn_id="budget-turn"), provenance="test", mutation_id=_mid(), db=db,
     ).result
 
     assert added["node"]["title"] == "One more"

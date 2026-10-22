@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { resolveParticipant, userParticipant, agentTag } from '$lib/stores/participants';
+	import { resolveParticipant, userParticipant } from '$lib/stores/participants';
 	import CommentMarkdownBody from './CommentMarkdownBody.svelte';
 
 	export type CommentReplyData = {
@@ -58,7 +58,6 @@
 			<div class="ct-msg-meta">
 				<!-- The reply rail supplies grouping; an author dot would repeat it. -->
 				<span class="ct-msg-author">{author.name}</span>
-				{#if author.kind === 'agent' && agentTag(author)}<span class="ct-tag">{agentTag(author)}</span>{/if}
 				<span class="ct-at">{reply.at}</span>
 				{#if isNew}<span class="ct-new"><span aria-hidden="true" class="ct-new-dot"></span>New</span>{/if}
 			</div>

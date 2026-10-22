@@ -158,7 +158,7 @@ def test_steered_long_turn_shape_is_seq_interleaved_across_steps() -> None:
 
 def test_seq_interleaved_long_turn_drops_whole_oldest_steps_to_fit() -> None:
     """The wedged shape: one Turn far over budget whose every cut is seq-interleaved."""
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
     from history.folds import checkpoint_fold_units
 
     db = _db()
@@ -205,7 +205,7 @@ def _exactly_once_source():
 def test_every_step_cut_renders_each_source_message_once_or_omits_it(
     stub_old_tool_results,
 ) -> None:
-    from core import checkpoint_fit
+    from core import fork_fit
     from core.checkpoint_fold_blocks import COLD_FOLD_OLD_TOOL_BUDGET_TOKENS
     from history.folds import checkpoint_fold_units
 
@@ -216,11 +216,11 @@ def test_every_step_cut_renders_each_source_message_once_or_omits_it(
     assert sorted(m.message_id for u in units for m in u.messages) == sorted(every_id)
     kinds = set()
     for skipped in range(len(units)):
-        fitted = checkpoint_fit._candidate(
+        fitted = fork_fit._candidate(
             source, units, skipped=skipped, project_tools=True,
             newest_tool_budget_tokens=COLD_FOLD_OLD_TOOL_BUDGET_TOKENS,
             stub_old_tool_results=stub_old_tool_results,
-            protected_blocks=(), count_tokens=checkpoint_fit._estimate_messages_tokens,
+            protected_blocks=(), count_tokens=fork_fit._estimate_messages_tokens,
         )
         assert fitted is not None and fitted.omitted_units == skipped
         omitted, included = units[:skipped], units[skipped:]
@@ -248,7 +248,7 @@ def test_every_step_cut_renders_each_source_message_once_or_omits_it(
 
 
 def test_identical_input_fits_to_the_identical_cut_identity() -> None:
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
 
     first = render_cold_fold_input(_exactly_once_source(), max_input_tokens=1_200)
     second = render_cold_fold_input(_exactly_once_source(), max_input_tokens=1_200)

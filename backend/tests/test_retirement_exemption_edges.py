@@ -15,6 +15,7 @@ import pytest
 
 from infra import config
 from infra.database import get_db, write_transaction
+from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
 from infra.platform_paths import WorkspaceSelection
 from registry import (
     exemption_restore,
@@ -276,3 +277,28 @@ def test_a_user_comment_shows_a_shared_document_its_ownership_change_settled(db)
         (shared["id"],),
     ).fetchone()
     assert last["event_type"] == "exempt_row_restored"
+
+
+@pytest.mark.parametrize(
+    ("integration", "type_", "metadata"),
+    [
+        (GITHUB_INTEGRATION, PR_TYPE, '{"pr_state": "merged"}'),
+        (GITHUB_INTEGRATION, PR_TYPE, '{"pr_state": "closed"}'),
+        (GITHUB_INTEGRATION, PR_TYPE, '{"pr_state": "open"}'),
+        (GITHUB_INTEGRATION, PR_TYPE, "{}"),
+        (GITHUB_INTEGRATION, PR_TYPE, None),
+        (GITHUB_INTEGRATION, "issue", '{"pr_state": "closed"}'),
+        ("gmail", PR_TYPE, '{"pr_state": "merged"}'),
+    ],
+)
+def test_identity_ended_agrees_with_the_ended_pull_request_clause(integration, type_, metadata):
+    """Routing reads an identity row in Python; storage seams read it in SQL."""
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.execute("CREATE TABLE artifact_identities (integration TEXT, type TEXT, metadata TEXT)")
+    connection.execute("INSERT INTO artifact_identities VALUES (?, ?, ?)",
+                       (integration, type_, metadata))
+    [row] = connection.execute(
+        f"SELECT i.*, {retirement_predicate.ENDED_PULL_REQUEST} AS ended "
+        "FROM artifact_identities AS i").fetchall()
+    assert retirement_predicate.identity_ended(dict(row)) is bool(row["ended"])

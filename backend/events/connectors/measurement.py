@@ -27,7 +27,7 @@ def _classify(raw: dict[str, Any]) -> str:
     return MOVEMENT_DIGEST_EVENT
 
 
-def _extract_facts(raw: dict[str, Any]) -> dict[str, Any]:
+def _extract_facts(raw: dict[str, Any], _resolved: Any = None) -> dict[str, Any]:
     keys = ("scope", "report_date", "report_key", "breach", "moves")
     return {k: raw[k] for k in keys if raw.get(k) is not None}
 
@@ -51,7 +51,8 @@ MANIFEST = register(ConnectorManifest(
             artifact_integration=MEASUREMENT_INTEGRATION,
             event_class="informational",
             actionable_when={"breach": True},
-            collapse_fact="report_key"),
+            collapse_fact="report_key",
+            digest_line_facts=("scope", "report_date", "report_key", "breach", "moves")),
     },
     classify=_classify,
     extract_facts=_extract_facts,

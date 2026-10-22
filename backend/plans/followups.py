@@ -6,6 +6,12 @@ import plans.errors as errors
 import plans.service as service
 
 
+def _canonical_intent(connection, node_id: str) -> str:
+    from plans.intent_words import canonical
+
+    return canonical(connection, node_id)["id"]
+
+
 def _unsettled_parent(connection, parent_id: str | None) -> str | None:
     """Where a follow-up lands: the source's parent, else its nearest unsettled ancestor.
 
@@ -25,12 +31,15 @@ def add_follow_up(
     *,
     title: str,
     acceptance_criteria: str,
+    size: str | None = None,
     actor_id: str | None = None,
     provenance: str = "plan_service",
     expected_revision: int | None = None,
     inherit_commitment: bool = False,
     description: str | None = None,
     spawn_kind: str | None = None,
+    intent: str | None = None,
+    intent_words: list[dict[str, str]] | None = None,
     db=None,
 ):
     """Create one DOD-bearing task linked to a follow-up chain.
@@ -49,13 +58,15 @@ def add_follow_up(
         if expected_revision is not None:
             errors.require_node_revision(source, expected_revision)
         follow_up_id = service._id()
-        return service._create_node(
+        follow_up = service._create_node(
             connection, source["plan_id"], kind="task", title=title,
             acceptance_criteria=acceptance_criteria,
             parent_id=_unsettled_parent(connection, source["parent_id"]),
             order_key=None, description=description,
             workflow_ref=None, workflow_version=None, workflow_step=None,
-            difficulty=None, size=None, checkpoint_exception=False, assignee=source["assignee"],
+            difficulty=None, size=size, intent=intent,
+            intent_node_id=(None if intent is not None else _canonical_intent(connection, source["id"])),
+            checkpoint_exception=False, assignee=source["assignee"],
             spawn_kind=spawn_kind,
             watchdog_budget_seconds=source["watchdog_budget_seconds"],
             follow_up_of=node_id,
@@ -64,6 +75,10 @@ def add_follow_up(
             ),
             actor_id=actor_id, provenance=provenance, node_id=follow_up_id,
         )
+        if intent_words:
+            from plans import intent_words as words
+            words.append(connection, follow_up.id, intent_words, revision=follow_up.requirements_revision)
+        return follow_up
 
 
 def accept_with_follow_up(
@@ -71,6 +86,9 @@ def accept_with_follow_up(
     *,
     title: str,
     acceptance_criteria: str,
+    size: str | None = None,
+    intent: str | None = None,
+    intent_words: list[dict[str, str]] | None = None,
     actor_id: str | None = None,
     provenance: str = "plan_service",
     verification_result: str | None = None,
@@ -93,8 +111,8 @@ def accept_with_follow_up(
             verified_by=verified_by,
         )
         follow_up = add_follow_up(
-            node_id, title=title, acceptance_criteria=acceptance_criteria,
-            actor_id=actor_id, provenance=provenance,
+            node_id, title=title, acceptance_criteria=acceptance_criteria, size=size,
+            intent=intent, intent_words=intent_words, actor_id=actor_id, provenance=provenance,
             inherit_commitment=True, db=connection,
         )
         return service._node_from_row(

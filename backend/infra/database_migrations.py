@@ -182,6 +182,21 @@ from infra.migration_122_to_123_connected_apps import migrate_122_to_123
 from infra.migration_123_to_124_drop_title_source import migrate_123_to_124
 from infra.migration_124_to_125_reviewer_gate_approval import migrate_124_to_125
 from infra.migration_125_to_126_presence_focus import migrate_125_to_126
+from infra.migration_126_to_127_user_comments_index import migrate_126_to_127
+from infra.migration_127_to_128_measure_registry import migrate_127_to_128
+from infra.migration_128_to_129_connected_accounts import migrate_128_to_129
+from infra.migration_129_to_130_project_inference_policy import migrate_129_to_130
+from infra.migration_130_to_131_local_only_threads import migrate_130_to_131
+from infra.migration_131_to_132_microsoft_accounts import migrate_131_to_132
+from infra.migration_132_to_133_review_forks import migrate_132_to_133
+from infra.migration_133_to_134_doc_stranded_suggestions import migrate_133_to_134
+from infra.migration_134_to_135_doc_decision_bulk import migrate_134_to_135
+from infra.migration_135_to_136_event_rules import migrate_135_to_136
+from infra.migration_136_to_137_event_intake import migrate_136_to_137
+from infra.migration_137_to_138_plan_intent import migrate_137_to_138
+from infra.migration_138_to_139_rule_runs import migrate_138_to_139
+from infra.migration_139_to_140_review_requesting_node import migrate_139_to_140
+from infra.migration_140_to_141_worker_starts import migrate_140_to_141
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -792,6 +807,21 @@ MIGRATIONS[122] = migrate_122_to_123
 MIGRATIONS[123] = migrate_123_to_124
 MIGRATIONS[124] = migrate_124_to_125
 MIGRATIONS[125] = migrate_125_to_126
+MIGRATIONS[126] = migrate_126_to_127
+MIGRATIONS[127] = migrate_127_to_128
+MIGRATIONS[128] = migrate_128_to_129
+MIGRATIONS[129] = migrate_129_to_130
+MIGRATIONS[130] = migrate_130_to_131
+MIGRATIONS[131] = migrate_131_to_132
+MIGRATIONS[132] = migrate_132_to_133
+MIGRATIONS[133] = migrate_133_to_134
+MIGRATIONS[134] = migrate_134_to_135
+MIGRATIONS[135] = migrate_135_to_136
+MIGRATIONS[136] = migrate_136_to_137
+MIGRATIONS[137] = migrate_137_to_138
+MIGRATIONS[138] = migrate_138_to_139
+MIGRATIONS[139] = migrate_139_to_140
+MIGRATIONS[140] = migrate_140_to_141
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:
@@ -820,7 +850,7 @@ def _backup_room_state(source: Path) -> tuple[int, int, list[Path]]:
     """Share the preflight and migration room calculation so their decisions agree."""
     needed = _database_bytes(source)
     required = int(needed * _BACKUP_MIN_FREE_RATIO) + _BACKUP_FREE_FLOOR_BYTES
-    return required, shutil.disk_usage(source.parent).free, _pre_migration_backups(source)[:-1]
+    return required, shutil.disk_usage(source.parent).free, pre_migration_backups(source)[:-1]
 
 
 def backup_room(source: Path) -> tuple[int, int]:
@@ -860,7 +890,7 @@ def require_backup_room(source: Path, from_version: int) -> tuple[int, int]:
     return required, available
 
 
-def _pre_migration_backups(source: Path) -> list[Path]:
+def pre_migration_backups(source: Path) -> list[Path]:
     """This database's pre-migration backups, oldest first.
 
     Matches only ``<db name>.pre-migration-v<digits>-<UTC stamp>.bak`` beside
@@ -902,7 +932,7 @@ def _delete_backups(victims: list[Path], reason: str) -> None:
 
 def _prune_backups(source: Path, keep_path: Path | None) -> None:
     """After a verified migration, keep the newest N backups and drop the rest."""
-    backups = _pre_migration_backups(source)
+    backups = pre_migration_backups(source)
     survivors = backups[-_PRE_MIGRATION_BACKUPS_KEEP:]
     victims = [path for path in backups if path not in survivors and path != keep_path]
     _delete_backups(victims, "retention after migration")
