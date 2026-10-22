@@ -298,16 +298,16 @@
       "sha256": "39d0a439a185d99fea0382d63737b64fdc849ba726a80ac643dbcd01053b7371"
     },
     {
-      "bytes": 6767,
+      "bytes": 6887,
       "kind": "skill",
       "path": "skills/github/references/agent-account.md",
-      "sha256": "b164d6d99f375a630a270017daf06ceb6648b7cb58a81c2b9f8cbb0b4fd6ace3"
+      "sha256": "b0f1f09184551b4d60e2406078b47c5f62263e8095ff54c5a6c24eb43658ec00"
     },
     {
-      "bytes": 5243,
+      "bytes": 5347,
       "kind": "skill",
       "path": "skills/google-setup/SKILL.md",
-      "sha256": "540781f9ef46ad9ecf75b676c02d7b6db848a75ba413d97d7c5f63fdab3a091b"
+      "sha256": "8c90f92817d7b4a8ebdbd81c2ba2997720dda133fcf0ebc064a60887cfd7d252"
     },
     {
       "bytes": 9080,
@@ -316,10 +316,10 @@
       "sha256": "b6e513e6b01040266b7eaa974c751e819f5fb5da7e9c966951e2c35c61d0df9a"
     },
     {
-      "bytes": 5770,
+      "bytes": 5874,
       "kind": "skill",
       "path": "skills/microsoft-setup/SKILL.md",
-      "sha256": "eed03176927f29683b1ad4b4d26c104becb5ae15228b6bc23c06e1e5ed005919"
+      "sha256": "d88b7c0d051b1b75a197a2fb22ef47afc56304f5e37fc1df495228822a50fcdd"
     },
     {
       "bytes": 2063,

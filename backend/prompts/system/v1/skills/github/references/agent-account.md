@@ -32,7 +32,7 @@ Only when the person chose to post as themselves and no agents' account exists (
 - **Signed in:** post `Your agents will post as [login].` Done.
 - **`gh` missing:** call `github_agent_account` with `action: "install"`, which puts CORSIA's pinned `gh` in every agent shell, then check `gh auth status` again. If it returns `failed`, tell the person in plain words what failed. A failed download is tried once more; any other reason is a gap in CORSIA, so report it the way you report any problem with CORSIA, then stop. Never install it with Homebrew.
 - **Signed out:** post `I'll sign the GitHub CLI in to your account. You'll see one request to approve, then a GitHub page where you approve the sign-in.` Then `request_host_access` for exactly `gh auth login --hostname github.com --web --git-protocol https </dev/null` and, once approved, run it in the background: it prints `First copy your one-time code: XXXX-XXXX` and the link `https://github.com/login/device`, then waits until the person approves. Post `Open [github.com/login/device](https://github.com/login/device), enter [code], and approve. I'll continue when it's done.` Then check `gh auth status` every few seconds until it succeeds (stop after about 5 minutes and ask them to tell you when it's done). Never type the code into the page yourself.
-- **A request refused:** give the person that one command to run in their own Terminal and wait for their word.
+- **A request refused:** give the person that one command to run in their own Terminal, with `gh` written as the full path `command -v gh` prints in your shell (CORSIA's copy is on agent shells' PATH only), and wait for their word.
 
 Done when `gh auth status` succeeds.
 
