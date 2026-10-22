@@ -236,7 +236,7 @@ class TestAppPath:
         assert first_run_wake.app_reference_served() is True
 
     @pytest.mark.asyncio
-    async def test_served_app_path_uses_only_app_facts_and_both_references(self, monkeypatch):
+    async def test_served_app_path_uses_compact_instructions_and_only_first_step(self, monkeypatch):
         from onboarding import first_run_wake
 
         app_facts = {
@@ -249,13 +249,17 @@ class TestAppPath:
             "user_profile": {"name": "Pat"},
         }
         monkeypatch.setattr(first_run_wake, "app_reference_served", lambda: True)
-        monkeypatch.setattr(first_run_wake, "setup_facts", AsyncMock(return_value=app_facts))
+        monkeypatch.setattr("onboarding.app_first_run.read_app_facts", AsyncMock(return_value=app_facts))
         monkeypatch.setattr(first_run_wake, "instructions", lambda path="script": f"{path} instructions")
 
         wake = await first_run_wake.render_for("codex/gpt-5.6-terra", "app")
 
         assert first_run_wake.APP_INLINE_SUMMARY in wake
         assert "app instructions" in wake
+        assert "## Your first step" in wake
+        assert "3. **Where your work lives" in wake
+        assert "4. **Web search" not in wake
+        assert "## The opening" not in wake
         assert set(app_facts) == first_run_wake.APP_FACT_KEYS
         assert not any(key in wake for key in ("mcp_sources", "your_model", "model_sources", "host_access_reviewer"))
 
@@ -525,7 +529,7 @@ class TestAppPath:
         from infra import system_package
         from onboarding import first_run_wake
 
-        reference = first_run_wake.instructions("app")
+        reference = system_package.system_resource_source(first_run_wake.APP_REFERENCE).read_text()
         local_offer = system_package.system_resource_source(
             "skills/conductor-bootstrap/references/local-model-offer.md",
         ).read_text(encoding="utf-8")
@@ -535,14 +539,16 @@ class TestAppPath:
         assert "a tool `pays_for` doesn't list is never offered or mentioned" in reference
         assert "You said you pay for [Claude | ChatGPT]." in reference
         assert "Setup couldn't install [Claude Code | Codex]: [what went wrong, in plain words]." in reference
-        assert "Sign in to [Claude Code | Codex] in Settings › Providers, then tell me when it's done." in reference
-        assert "If it shows the source is ready, carry on." in reference
-        assert "If it is still unsigned, once post" in reference
+        assert "Setup's sign-in to [Claude Code | Codex] didn't finish." in reference
+        assert "[Settings › Providers](/settings/providers), press Sign in on its card" in reference
+        assert "Never initiate or cancel the vendor sign-in yourself" in reference
+        assert "POST /api/vendor-accounts/{id}/signin" not in reference
         assert "Never read the local download yourself." in reference
         assert "Post the news first, as its own message, word for word as below; it never asks anything." in reference
         assert "when your question is still unanswered, end your turn: that question stays open" in reference
-        assert "never track a step itself in the plan (no `start`, no `mark_done`" in reference
-        assert "the tasks steps 3 and 6 make are follow-up work, so do make them" in reference
+        assert "Never write the opening or create the setup plan" in reference
+        assert "mark each done when complete" in reference
+        assert "The tasks steps 3 and 6 make are follow-up work, so do add those" in reference
         assert "already shows that same outcome, say nothing" in reference
         assert "Done for now. Anything I skipped, ask me any time and I'll set it up." in reference
 
@@ -553,8 +559,11 @@ class TestAppPath:
 
         from onboarding import first_run_wake
 
-        paragraph = first_run_wake.instructions("app").split("**Facts to read from `## Setup facts`**", 1)[1].split("Never restate", 1)[0]
+        from infra.system_package import system_resource_source
+
+        reference = system_resource_source(first_run_wake.APP_REFERENCE).read_text()
+        paragraph = reference.split("**Facts to read from `## Setup facts`**", 1)[1].split("Never restate", 1)[0]
         top_level = re.sub(r"\([^)]*\)", "", paragraph)
         keys = set(re.findall(r"`([a-z_]+)`", top_level))
-        assert keys == first_run_wake.APP_FACT_KEYS - {"first_run_path", "setup"}
+        assert keys == first_run_wake.APP_PLAN_FACT_KEYS - {"first_run_path", "setup"}
         assert "`setup.setup_decisions`" in paragraph  # setup is named through its nested decisions

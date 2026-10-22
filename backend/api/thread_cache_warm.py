@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
-from loguru import logger
-
 from infra.auth import authenticate
 from infra.database import get_db
 from infra.db_async import run_in_db
@@ -66,8 +64,7 @@ def _load_warm_target(thread_id: str, user_id: str, model: str | None = None):
         except (ModelUnavailableError, ValueError) as exc:
             return {"ok": False, "message": str(exc)}
         effort = effective_reasoning_effort(
-            sess["reasoning_effort"]
-            if bound and "reasoning_effort" in sess.keys() else None,
+            sess["reasoning_effort"] if "reasoning_effort" in sess.keys() else None,
             target.catalog_id,
         )
         return target, sess["project_id"], effort
@@ -77,10 +74,7 @@ def _load_warm_target(thread_id: str, user_id: str, model: str | None = None):
 
 async def _prove_warm_target(target: ExecutionTarget, thread_id: str):
     if not _is_warmable_omlx_target(target):
-        return {
-            "ok": False,
-            "message": "Not a warmable available Native oMLX network model",
-        }
+        return {"ok": False, "message": "Not a warmable available Native oMLX network model"}
     if _has_positive_context_evidence(target):
         return target
     await ensure_context_window(target.catalog_id)
@@ -93,15 +87,9 @@ async def _prove_warm_target(target: ExecutionTarget, thread_id: str):
     finally:
         db.close()
     if not _has_positive_context_evidence(target):
-        return {
-            "ok": False,
-            "message": f"Exact context-window evidence is unknown for {target.catalog_id}",
-        }
+        return {"ok": False, "message": f"Exact context-window evidence is unknown for {target.catalog_id}"}
     if not _is_warmable_omlx_target(target):
-        return {
-            "ok": False,
-            "message": "Not a warmable available Native oMLX network model",
-        }
+        return {"ok": False, "message": "Not a warmable available Native oMLX network model"}
     return target
 
 
@@ -125,7 +113,7 @@ async def _build_warm_prefix(
     candidates, eager_checkpoint_id = await run_in_db(
         _warm_replay_candidates, thread_id, target.catalog_id,
     )
-    messages, prefix_info = await _render_warm_replay(
+    messages, _prefix_info = await _render_warm_replay(
         agent=agent,
         thread_id=thread_id,
         project_id=project_id,
@@ -133,12 +121,6 @@ async def _build_warm_prefix(
         candidates=candidates,
         eager_checkpoint_id=eager_checkpoint_id,
         tool_defs=tool_defs,
-    )
-    logger.info(
-        f"warm_session_cache: built {len(messages)} prefix messages "
-        f"(history={prefix_info['history_messages']}, "
-        f"history_tokens={prefix_info['history_tokens']}, "
-        f"trimmed={prefix_info['was_trimmed']})"
     )
     messages = sanitize_messages(sanitize_empty_content(messages))
     prompt_shape = make_prompt_extra_body(
@@ -235,10 +217,11 @@ def _warm_transport_identity(target: ExecutionTarget) -> tuple[str, str] | None:
 
 def _probe_progress(probe: dict) -> dict:
     return {
-        "total_blocks": probe.get("total_blocks", 0),
+        "total_blocks": probe.get("total_blocks"),
         "cold_blocks_at_start": probe.get("blocks_cold", 0),
         "block_size": probe.get("block_size", 0),
         "total_tokens": probe.get("total_tokens", 0),
+        "ready_blocks": probe.get("blocks_ssd_hot"),
     }
 
 
@@ -264,6 +247,8 @@ async def _submit_warm(
     wire_tool_defs: list[dict],
     prompt_shape: dict,
     wait: bool = False,
+    user_id: str | None = None,
+    requested_model: str | None = None,
 ):
     from llm.providers import for_provider
 
@@ -286,6 +271,8 @@ async def _submit_warm(
     if probe.get("ok") and probe.get("model_loaded") is False:
         return {"ok": False, "message": f"model not loaded: {model_id}"}
     progress = _probe_progress(probe) if probe.get("ok") else None
+    # Progress is emitted only while a submitted warm is running; the setup UI
+    # never polls this endpoint, so there is no separate probe-only contract.
     if _probe_is_memory_hot(probe):
         return {
             "ok": True,
@@ -304,6 +291,8 @@ async def _submit_warm(
         prompt_shape,
         progress,
         wait,
+        user_id=user_id,
+        event_model=requested_model or target.catalog_id,
     )
 
 
@@ -318,9 +307,14 @@ async def _start_warm_owner(
     prompt_shape: dict,
     progress: dict | None,
     wait: bool = False,
+    *,
+    user_id: str | None,
+    event_model: str,
 ):
     from core.thread_warm import (
         await_warm_outcome,
+        make_provider_warm_operations,
+        make_user_warm_progress_callback,
         start_thread_warm,
         warm_prefix_key,
         warm_suppression_reason,
@@ -338,17 +332,21 @@ async def _start_warm_owner(
         return _warm_suppressed(suppression)
     key = warm_prefix_key(thread_id, model_id, messages, tools, prompt_shape)
 
-    async def _warm():
-        return await provider.warm_cache(
-            cfg,
-            model_id=model_id,
-            messages=messages,
-            tools=tools,
-            **prompt_shape,
-        )
-
+    warm, progress_probe = make_provider_warm_operations(
+        provider, cfg, model_id, messages, tools, prompt_shape, _probe_progress,
+    )
+    progress_callback = make_user_warm_progress_callback(
+        user_id, thread_id, event_model,
+    )
     task, started, suppression = await start_thread_warm(
-        thread_id, key, _warm, model=catalog_id, admission_check=_admission_check,
+        thread_id,
+        key,
+        warm,
+        model=catalog_id,
+        admission_check=_admission_check,
+        progress_probe=progress_probe,
+        progress_callback=progress_callback,
+        initial_progress=progress,
     )
     if suppression is not None:
         return _warm_suppressed(suppression)
@@ -396,4 +394,6 @@ async def warm_session_cache(
         tools,
         prompt_shape,
         wait,
+        user_id=user["id"],
+        requested_model=model,
     )

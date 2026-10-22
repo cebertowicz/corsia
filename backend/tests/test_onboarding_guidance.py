@@ -265,12 +265,16 @@ def test_first_run_routes_the_app_path_to_its_own_reference():
     assert "references/first-run-app.md" in FIRST_RUN.read_text(encoding="utf-8")
 
 
-def test_app_path_sends_the_message_then_eight_steps_and_ends_on_the_handoff():
+def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
     steps = app.split("## The steps, in this order", 1)[1].split("## The hand-off", 1)[0]
     titles = re.findall(r"^\d\. \*\*([^*]+)\*\*", steps, flags=re.MULTILINE)
 
-    assert app.index("I'm CORSIA, your assistant.") < app.index("## The steps")
+    assert app.index("first-run-opening.md") < app.index("## The steps")
+    opening = (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
+    assert "My job is to give you back your time, and I measure it" in opening
+    assert "Here's mine for finishing your setup" in opening
+    assert "Never post or repeat it" in app
     # The doc's order: the other subscription, the one import, Where your work lives, search, About you.
     assert [title.rstrip(".,") for title in titles] == [
         "The other subscription", "Bring over from your other tools", "Where your work lives",
@@ -283,7 +287,8 @@ def test_app_path_sends_the_message_then_eight_steps_and_ends_on_the_handoff():
     assert app.split("## The hand-off", 1)[1].strip().startswith("After the last step that applies, post one line")
     assert "post exactly `" + HANDOFF + "`" in app
     assert "follow skill `google-setup`" in steps
-    assert "no setup task list" in app
+    assert "Never write the opening or create the setup plan" in app
+    assert "mark each done when complete" in app
     assert "agent-import.md" in steps
 
 
@@ -305,7 +310,10 @@ def test_where_your_work_lives_never_ends_at_i_cant_and_hands_the_rest_to_helper
 
     assert "I'll connect the quick ones now, and [a helper looks into the rest in the background" in work
     assert "Connect up to two quick apps now" in work
-    assert "`delegate_task`" in work and "`Connect [app]` follow-up task" in work and "as `plan_node_id`" in work
+    assert "`delegate_task`" in work and "`Connect [app]` child task" in work and "as `plan_node_id`" in work
+    assert "`parent_id` set to the existing **Where your work lives** step" in work
+    assert "Keep the connect step open until every child is settled" in work
+    assert "continue to the next onboarding step while background children remain open" in work
     assert "If `delegate_task` refuses the model, post `It's on my list.`" in work
     assert "never a persistent agent" in work
     assert "**On the local model** (`bound_model` `source` is `omlx`) start no helper" in work
@@ -350,7 +358,8 @@ def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_li
     assert step.startswith("Learning from the community.** Always.")
     assert "Here's how CORSIA gets better: it learns from you." in step
     assert "sharing it means everyone using CORSIA gets better, and you get what others prove." in step
-    assert "After about a week of work, the chart button at the top of this chat shows what's changing: how much work gets done per hour of your attention, and how many of your minutes each outcome takes." in step
+    assert "chart button" not in step
+    assert "You can see it any time in Measurement." in (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
     assert "Use and share community improvements?" in step
     assert "**Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No" in step
     assert "would only share, write No and Yes" in step
@@ -609,7 +618,7 @@ def test_app_path_email_step_records_the_email_app_where_the_microsoft_fact_read
 def test_app_path_local_news_covers_exactly_the_outcomes_the_wake_sends():
     from onboarding.local_download_wake import OUTCOMES
 
-    news = FIRST_RUN_APP.read_text(encoding="utf-8").split("**The local model's news.**", 1)[1].split("## The message", 1)[0]
+    news = FIRST_RUN_APP.read_text(encoding="utf-8").split("**The local model's news.**", 1)[1].split("## The opening", 1)[0]
     named = set(re.findall(r"`([a-z_]+)`", "".join(line.split(":", 1)[0] for line in news.splitlines() if line.startswith("- `"))))
     assert named == OUTCOMES
 

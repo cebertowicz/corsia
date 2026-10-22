@@ -17,6 +17,66 @@ from infra.send_target import NO_MODEL_SELECTED
 
 WarmFactory = Callable[[], Awaitable[dict[str, Any]]]
 WarmAdmissionCheck = Callable[[], str | None]
+WarmProgressProbe = Callable[[], Awaitable[dict[str, Any] | None]]
+WarmProgressCallback = Callable[[dict[str, Any]], None]
+WARM_PROGRESS_PROBE_SECONDS = 2.0
+
+
+def _publish_warm_progress(
+    callback: WarmProgressCallback,
+    progress: dict[str, Any],
+) -> None:
+    """Publish best-effort progress without changing the warm's outcome."""
+    try:
+        callback(progress)
+    except Exception as error:
+        logger.debug("Native cache warm progress callback failed: {}", error)
+
+
+def make_provider_warm_operations(
+    provider: Any,
+    cfg: dict[str, Any],
+    model_id: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    prompt_shape: dict[str, Any],
+    progress_from_probe: Callable[[dict[str, Any]], dict[str, Any]],
+) -> tuple[WarmFactory, WarmProgressProbe]:
+    """Build the matching provider warm and progress operations for one owner."""
+    async def warm() -> dict[str, Any]:
+        return await provider.warm_cache(
+            cfg, model_id=model_id, messages=messages, tools=tools, **prompt_shape,
+        )
+
+    async def progress_probe() -> dict[str, Any] | None:
+        probe = await provider.probe_cache(
+            cfg, model_id=model_id, messages=messages, tools=tools, **prompt_shape,
+        )
+        return progress_from_probe(probe) if probe.get("ok") else None
+
+    return warm, progress_probe
+
+
+def make_user_warm_progress_callback(
+    user_id: str | None,
+    thread_id: str,
+    event_model: str,
+) -> WarmProgressCallback | None:
+    """Create the user-scoped websocket publisher for one registered warm."""
+    if user_id is None:
+        return None
+
+    def publish(progress: dict[str, Any]) -> None:
+        from infra.state.ws import broadcast_to_user
+
+        broadcast_to_user(user_id, {
+            "type": "thread_warm_progress",
+            "thread_id": thread_id,
+            "model": event_model,
+            "progress": progress,
+        })
+
+    return publish
 
 
 def warm_suppression_reason(
@@ -144,6 +204,49 @@ async def await_warm_outcome(task: asyncio.Task) -> dict[str, Any]:
     return {"ok": True, "message": "Warm finished"}
 
 
+async def _run_warm_with_progress(
+    factory: WarmFactory,
+    progress_probe: WarmProgressProbe | None,
+    progress_callback: WarmProgressCallback | None,
+) -> dict[str, Any]:
+    """Run one provider warm without letting progress work delay or fail it."""
+    warm = asyncio.create_task(factory())
+    probe: asyncio.Task[dict[str, Any] | None] | None = None
+    try:
+        while not warm.done():
+            if progress_probe is None or progress_callback is None:
+                await warm
+                break
+            if probe is None:
+                done, _ = await asyncio.wait({warm}, timeout=WARM_PROGRESS_PROBE_SECONDS)
+                if warm in done:
+                    break
+                probe = asyncio.create_task(progress_probe())
+            done, _ = await asyncio.wait({warm, probe}, return_when=asyncio.FIRST_COMPLETED)
+            if warm in done:
+                break
+            assert probe in done
+            if probe.cancelled():
+                probe = None
+                continue
+            try:
+                progress = probe.result()
+            except Exception as error:
+                logger.debug("Native cache warm progress probe failed: {}", error)
+            else:
+                if progress is not None:
+                    _publish_warm_progress(progress_callback, progress)
+            probe = None
+        return await warm
+    finally:
+        if probe is not None and not probe.done():
+            probe.cancel()
+            await asyncio.gather(probe, return_exceptions=True)
+        if not warm.done():
+            warm.cancel()
+            await asyncio.gather(warm, return_exceptions=True)
+
+
 async def join_requested_warm_for_delivery(thread_id: str, catalog_id: str) -> bool:
     """Join an explicit Native warm of this model without blocking on its failure.
 
@@ -173,6 +276,9 @@ async def start_thread_warm(
     *,
     model: str,
     admission_check: WarmAdmissionCheck,
+    progress_probe: WarmProgressProbe | None = None,
+    progress_callback: WarmProgressCallback | None = None,
+    initial_progress: dict[str, Any] | None = None,
 ) -> tuple[asyncio.Task | None, bool, str | None]:
     """Deduplicate or replace one thread warm through the existing owner.
 
@@ -201,7 +307,9 @@ async def start_thread_warm(
     if suppression is not None:
         return None, False, suppression
 
-    task = asyncio.create_task(factory())
+    task = asyncio.create_task(
+        _run_warm_with_progress(factory, progress_probe, progress_callback),
+    )
     setattr(task, "_corsia_warm_key", warm_key)
     setattr(task, "_corsia_warm_model", model)
     state._active_warm_tasks[thread_id] = task
@@ -211,4 +319,6 @@ async def start_thread_warm(
             state._active_warm_tasks.pop(thread_id, None)
 
     task.add_done_callback(_release)
+    if initial_progress is not None and progress_callback is not None:
+        _publish_warm_progress(progress_callback, initial_progress)
     return task, True, None

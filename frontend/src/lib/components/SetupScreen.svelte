@@ -30,6 +30,7 @@
 	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
 	import { measuredDownloadTime } from '$lib/setupLocalPresentation';
 	import { WELCOME_ACCOUNT_LINE, WELCOME_TITLE } from '$lib/setupWelcome';
+	import { createSetupWarm } from '$lib/setupWarm.svelte';
 	import { isSetupWide } from '$lib/stores/viewport';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
 	type LocalStartResult = 'started' | 'failed';
@@ -57,6 +58,8 @@
 	const CLI_VENDORS = ['claude-code', 'codex'] as const;
 	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; local_started?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
 	const classifier = createSetupClassifier(), localPick = createSetupLocalPick(), remote = createSetupRemote();
+	const warm = createSetupWarm();
+	$effect(() => { warm.start(catalog, $token); });
 	let page = $state<Page>(untrack(() => startConnect) ? 'connect' : 'checking');
 	// Below 1280 wide, Welcome is its own screen before the account form; from 1280 it sits beside the form instead.
 	let welcomeSeen = $state(false);
@@ -142,6 +145,7 @@
 		if (page === 'account' && $token) return { title: 'Your account', primary: { label: 'Continue' }, onPrimary: afterAccount };
 		if (page === 'account') return { title: $isSetupWide ? WELCOME_TITLE : 'Create your account', lede: $isSetupWide ? WELCOME_ACCOUNT_LINE : undefined, primary: { label: 'Continue', loading: accountBusy, disabled: !accountValid || accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'picker_failed' }, onPrimary: createFromForm };
 		if (page === 'subscriptions') return { title: 'Your subscriptions', lede: 'CORSIA’s agents can work through a Claude or ChatGPT plan you already pay for.' };
+		if (page === 'models' && finishing && warm.running) return { title: 'Finishing setup', lede: warm.percent === null ? undefined : `${warm.percent}%` };
 		return { title: 'Providers & models', lede: 'CORSIA needs one working model to continue setup.', primary: { label: 'Start using CORSIA', disabled: !canFinish || finishing, loading: finishing, note: finishNote, noteAlways: true }, onPrimary: finishSetup };
 	});
 	function validateConfirmation() { confirmationError = confirmation && password !== confirmation ? 'Passwords don’t match.' : ''; }
@@ -266,6 +270,8 @@
 				sourceError = 'CORSIA couldn’t save setup progress. Try again.';
 				return;
 			}
+			warm.start(catalog, current);
+			await warm.finish();
 			onFinished();
 		} finally { finishing = false; }
 	}
@@ -301,7 +307,7 @@
 		const offClassifier = on('classifier_updated', () => { void classifier.read(); });
 		const focus = () => { if (page === 'models') void refreshSources(true); void classifier.retryIfFailed(); };
 		window.addEventListener('focus', focus);
-		return () => { offModels(); offClassifier(); window.removeEventListener('focus', focus); };
+		return () => { warm.destroy(); offModels(); offClassifier(); window.removeEventListener('focus', focus); };
 	});
 </script>
 

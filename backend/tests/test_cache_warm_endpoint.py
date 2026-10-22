@@ -570,7 +570,8 @@ def test_warm_endpoint_does_not_fall_back_to_volatile_thread_model(
     get_agent.assert_not_awaited()
 
 
-def test_warm_endpoint_passes_explicit_model_id_to_provider(monkeypatch):
+@pytest.mark.asyncio
+async def test_warm_endpoint_passes_explicit_model_id_to_provider(monkeypatch):
     from api import thread_cache_warm as api_runtime
 
     install_resolved_omlx_session(
@@ -602,11 +603,11 @@ def test_warm_endpoint_passes_explicit_model_id_to_provider(monkeypatch):
 
     monkeypatch.setattr("llm.providers.for_provider", lambda _name: fake_provider)
 
-    resp = asyncio.run(api_runtime.warm_session_cache("sess-1", token="t"))
+    resp = await api_runtime.warm_session_cache("sess-1", token="t")
     from infra import state
     pending = state._active_warm_tasks.get("sess-1")
     if pending is not None:
-        asyncio.run(asyncio.wait_for(asyncio.shield(pending), timeout=2))
+        await asyncio.wait_for(asyncio.shield(pending), timeout=2)
 
     assert resp["ok"] is True
     assert captured["model_id"] == "Local-Model-A3B-8bit"
@@ -719,6 +720,46 @@ def test_warm_endpoint_returns_loud_fail_for_unloaded_target(monkeypatch):
     assert "model not loaded" in resp["message"]
     assert "unloaded-model" in resp["message"]
     assert not warm_called
+
+
+@pytest.mark.asyncio
+async def test_cold_probe_falls_back_to_warm_and_reports_starting_progress(monkeypatch):
+    from api import thread_cache_warm as api_runtime
+    from infra import state
+
+    install_resolved_omlx_session(monkeypatch, api_runtime, "omlx@srv-1/model-1")
+    monkeypatch.setattr(
+        "core.agent.get_agent", AsyncMock(return_value=_make_mock_agent(system_prompt="SYSTEM")),
+    )
+    provider = MagicMock()
+    provider.probe_cache = AsyncMock(return_value={
+        "ok": True,
+        "model_loaded": True,
+        "total_blocks": 8,
+        "block_size": 2_048,
+        "total_tokens": 16_384,
+        "blocks_ssd_hot": 0,
+        "blocks_ssd_disk": 0,
+        "blocks_cold": 8,
+    })
+    provider.warm_cache = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr("llm.providers.for_provider", lambda _name: provider)
+
+    response = await api_runtime.warm_session_cache("sess-1", token="[REDACTED]")
+    await state._active_warm_tasks["sess-1"]
+
+    assert response == {
+        "ok": True,
+        "message": "Warm request submitted",
+        "progress": {
+            "total_blocks": 8,
+            "cold_blocks_at_start": 8,
+            "block_size": 2_048,
+            "total_tokens": 16_384,
+            "ready_blocks": 0,
+        },
+    }
+    provider.warm_cache.assert_awaited_once()
 
 
 def test_probe_memory_hot_allows_only_the_uncacheable_partial_tail():

@@ -218,12 +218,58 @@ describe('landOnFirstRun', () => {
 
 	afterEach(() => { _resetFirstRunLandingForTests(); });
 
-	it('opens the conductor once per page load', () => {
+	it('opens the conductor once per page load', async () => {
 		const open = vi.fn();
-		landOnFirstRun(pending, null, open);
-		landOnFirstRun(pending, null, open);
+		await landOnFirstRun(pending, null, open);
+		await landOnFirstRun(pending, null, open);
 		expect(open).toHaveBeenCalledTimes(1);
 		expect(open).toHaveBeenCalledWith('cond-w');
+	});
+
+	it('does not mark first run landed until the async opener completes', async () => {
+		let resolveOpen!: () => void;
+		const opening = new Promise<void>((resolve) => { resolveOpen = resolve; });
+		const open = vi.fn(() => opening);
+
+		const first = landOnFirstRun(pending, null, open);
+		await Promise.resolve();
+		const duplicate = landOnFirstRun(pending, null, open);
+		expect(open).toHaveBeenCalledTimes(1);
+
+		resolveOpen();
+		await Promise.all([first, duplicate]);
+		await landOnFirstRun(pending, null, open);
+		expect(open).toHaveBeenCalledTimes(1);
+	});
+
+	it('retries first-run entry after the opener fails', async () => {
+		const open = vi.fn()
+			.mockRejectedValueOnce(new Error('first open canceled'))
+			.mockResolvedValueOnce(undefined);
+
+		await landOnFirstRun(pending, null, open);
+		await landOnFirstRun(pending, null, open);
+		expect(open).toHaveBeenCalledTimes(2);
+	});
+
+	it('retries when the opener reports no mounted chat surface', async () => {
+		const open = vi.fn()
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(true);
+
+		await landOnFirstRun(pending, null, open);
+		await landOnFirstRun(pending, null, open);
+		expect(open).toHaveBeenCalledTimes(2);
+	});
+
+	it('retries first-run entry after a synchronous opener failure', async () => {
+		const open = vi.fn()
+			.mockImplementationOnce(() => { throw new Error('first open canceled'); })
+			.mockResolvedValueOnce(undefined);
+
+		await landOnFirstRun(pending, null, open);
+		await landOnFirstRun(pending, null, open);
+		expect(open).toHaveBeenCalledTimes(2);
 	});
 
 	it('leaves an already open thread alone', () => {

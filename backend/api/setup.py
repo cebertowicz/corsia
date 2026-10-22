@@ -200,8 +200,10 @@ async def setup_progress_update(request: Request, authorization: str | None = He
     other pre-account routes; after it, any signed-in session may record all of them.
     """
     signed_in = await run_in_db(accounts.has_users)
+    user = None
     if signed_in:
-        if not authenticate(token_from_request(None, authorization)):
+        user = authenticate(token_from_request(None, authorization))
+        if not user:
             return Response(status_code=401)
     elif not _trusted_json_post(request):
         return Response(status_code=403)
@@ -212,12 +214,23 @@ async def setup_progress_update(request: Request, authorization: str | None = He
     if not signed_in and (body.step is not None or body.handoff is not None or body.completed):
         return Response(status_code=422)
     try:
+        if signed_in and body.completed:
+            from onboarding.app_first_run import complete_app_setup
+
+            handled = await complete_app_setup(
+                user["id"], step=body.step, local_ai=body.local_ai, picks=body.picks,
+                handoff=body.handoff.model_dump(exclude_none=True) if body.handoff is not None else None,
+            )
+            if handled:
+                return {"ok": True}
         await run_in_db(lambda: setup_progress.update(
             step=body.step, local_ai=body.local_ai, picks=body.picks,
             handoff=body.handoff.model_dump(exclude_none=True) if body.handoff is not None else None,
             completed=body.completed))
     except setup_progress.SetupProgressError:
         return Response(status_code=422)
+    except PermissionError:
+        return Response(status_code=403)
     return {"ok": True}
 
 

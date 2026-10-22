@@ -1,0 +1,302 @@
+"""App-path first-run opening and setup-plan seed coverage."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+
+PASSWORD = "long-enough-passphrase"
+
+
+@pytest.fixture
+def fresh_install(isolated_db):
+    from infra.database import write_transaction
+
+    with write_transaction(None, scope="fresh_app_install") as db:
+        db.execute("DELETE FROM auth_tokens")
+        db.execute("DELETE FROM users")
+    return isolated_db
+
+
+@pytest.fixture
+def app_seed_facts(monkeypatch):
+    from onboarding import app_first_run
+
+    facts = {
+        "agents_found": ["openclaw"],
+        "connected_app_count": 0,
+        "email_calendar_ready": False,
+    }
+    monkeypatch.setattr(app_first_run, "_pre_pick_facts", lambda *, db: facts)
+    return facts
+
+
+def _conductor_id() -> str:
+    from infra.corsia_agent import get_corsia_agent
+
+    conductor_id = get_corsia_agent()
+    assert conductor_id
+    return conductor_id
+
+
+def _rows(sql: str, *args):
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return [dict(row) for row in db.execute(sql, args).fetchall()]
+    finally:
+        db.close()
+
+
+def test_app_account_persists_one_opening_and_keeps_held_wake(
+    fresh_install, app_seed_facts,
+):
+    from infra import accounts
+    from infra.onboarding_events import first_run_message_id
+
+    accounts.create_first_account(
+        "newcomer", PASSWORD, full_name="New Comer", first_run_path="app",
+    )
+
+    conductor_id = _conductor_id()
+    [opening] = _rows("SELECT * FROM messages WHERE id=?", f"first-run-opening:{conductor_id}")
+    assert (opening["thread_id"], opening["role"], opening["delivery_state"]) == (
+        conductor_id, "assistant", "delivered",
+    )
+    assert opening["content"].startswith("Hi New.\n\nI'm CORSIA.")
+    metadata = json.loads(opening["metadata"])
+    assert metadata["for_user"] is True
+    assert metadata["turn_unbound_reason"] == "server_scripted"
+    assert "turn_id" not in metadata
+    from history.projection import render_portable_history
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        render_portable_history(conductor_id, db=db)
+    finally:
+        db.close()
+    [wake] = _rows("SELECT * FROM messages WHERE id=?", first_run_message_id(conductor_id))
+    assert (wake["role"], wake["delivery_state"], wake["delivery_error"]) == (
+        "system", "queued", "no_model_selected",
+    )
+    [thread] = _rows("SELECT model FROM threads WHERE id=?", conductor_id)
+    assert thread["model"] is None
+
+    # A retry writes neither a second greeting nor a second plan task.
+    from infra.database import write_transaction
+    from onboarding.app_first_run import seed_initial
+
+    with write_transaction(None, scope="repeat_app_seed") as db:
+        seed_initial(conductor_id, "newcomer", db=db, opening_name="New")
+    assert len(_rows("SELECT * FROM messages WHERE id=?", opening["id"])) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("first_run_path", "consume_wake", "handled"),
+    [("script", False, False), ("app", True, False), ("app", False, True)],
+)
+async def test_complete_app_setup_only_reads_facts_for_a_held_app_wake(
+    fresh_install, app_seed_facts, monkeypatch, first_run_path, consume_wake, handled,
+):
+    from unittest.mock import AsyncMock
+
+    from infra import accounts, setup_progress
+    from infra.database import write_transaction
+    from infra.onboarding_events import first_run_message_id
+    from onboarding import app_first_run
+
+    facts = {"agents_found": [], "connected_app_count": 0, "email_calendar_ready": False}
+    read_facts = AsyncMock(return_value=facts)
+    monkeypatch.setattr(app_first_run, "read_app_facts", read_facts)
+    user_id = accounts.create_first_account(
+        "newcomer", PASSWORD, full_name="New Comer", first_run_path=first_run_path,
+    )
+    conductor_id = _conductor_id()
+    if consume_wake:
+        with write_transaction(None, scope="consume_app_wake") as db:
+            db.execute(
+                "UPDATE messages SET delivery_state='delivered', delivery_error=NULL WHERE id=?",
+                (first_run_message_id(conductor_id),),
+            )
+
+    assert await app_first_run.complete_app_setup(
+        user_id, step=None, local_ai=None, picks=None, handoff=None,
+    ) is handled
+
+    if not handled:
+        read_facts.assert_not_awaited()
+        assert setup_progress.view()["setup_completed"] is (first_run_path == "script")
+        return
+
+    assert read_facts.await_count == 1
+    assert app_first_run.read_cached_app_facts(conductor_id) == facts
+    assert setup_progress.view()["setup_completed"] is True
+    # A repeated completion cannot reopen setup or duplicate final seed work.
+    assert await app_first_run.complete_app_setup(
+        user_id, step=None, local_ai=None, picks=None, handoff=None,
+    ) is True
+    assert read_facts.await_count == 2
+    assert app_first_run.read_cached_app_facts(conductor_id) == facts
+    assert setup_progress.view()["setup_completed"] is True
+
+
+def test_connected_app_facts_counts_only_connected_projections(isolated_db, monkeypatch):
+    from connections import app_reach
+    from onboarding.app_first_run import _connected_app_facts
+
+    monkeypatch.setattr(app_reach, "list_apps", lambda *, db: [
+        {"state": app_reach.PENDING_STATE},
+        {"state": "disconnected"},
+        {"state": "connected"},
+    ])
+
+    assert _connected_app_facts()["connected_app_count"] == 1
+
+
+def test_portable_history_refuses_a_fabricated_turn_for_the_opening(fresh_install, app_seed_facts):
+    from history.projection import render_portable_history
+    from history.types import PortableHistoryError
+    from infra import accounts
+    from infra.database import get_db, write_transaction
+
+    accounts.create_first_account("newcomer", PASSWORD, full_name="New Comer", first_run_path="app")
+    conductor_id = _conductor_id()
+    with write_transaction(None, scope="fabricated_opening_turn") as db:
+        db.execute(
+            "UPDATE messages SET metadata=? WHERE id=?",
+            (json.dumps({"turn_id": "invented-turn"}), f"first-run-opening:{conductor_id}"),
+        )
+
+    db = get_db()
+    try:
+        with pytest.raises(PortableHistoryError, match="message names missing Turn 'invented-turn'"):
+            render_portable_history(conductor_id, db=db)
+    finally:
+        db.close()
+
+
+def test_seed_initial_preserves_restored_conductor_history(fresh_install, app_seed_facts):
+    from infra import accounts
+    from infra.database import write_transaction
+    from onboarding.app_first_run import seed_initial
+    from infra.queries import insert_message
+
+    accounts.create_first_account("newcomer", PASSWORD, full_name="New Comer", first_run_path="app")
+    with write_transaction(None, scope="restored_history") as db:
+        db.execute(
+            "INSERT INTO threads (id, user_id, created_at, updated_at) VALUES ('restored', 'newcomer', 't', 't')"
+        )
+        insert_message("restored", "user", "Restored conversation", db=db)
+        seed_initial("restored", "newcomer", db=db, opening_name="New")
+
+    assert [row["role"] for row in _rows("SELECT role FROM messages WHERE thread_id='restored'")] == ["user"]
+    assert _rows("SELECT id FROM plans WHERE owner_id='restored'") == []
+
+
+def test_real_history_still_refuses_another_first_run_wake(fresh_install, app_seed_facts):
+    from infra import accounts, onboarding_events
+    from infra.database import write_transaction
+    from infra.onboarding_events import first_run_message_id
+    from infra.queries import insert_message
+
+    accounts.create_first_account("newcomer", PASSWORD, full_name="New Comer", first_run_path="app")
+    conductor_id = _conductor_id()
+    with write_transaction(None, scope="prior_real_history") as db:
+        db.execute("DELETE FROM messages WHERE id=?", (first_run_message_id(conductor_id),))
+        insert_message(conductor_id, "user", "Earlier real history", db=db)
+        accepted = onboarding_events.enqueue_first_run_wake(conductor_id, first_run_path="app", db=db)
+    assert accepted is False
+
+
+def test_applicable_steps_and_completion_cache_reconcile_conditionals(
+    fresh_install, app_seed_facts,
+):
+    from infra import accounts
+    from infra.database import write_transaction
+    from onboarding.app_first_run import applicable_steps, cache_completed_facts, read_cached_app_facts
+
+    facts = {
+        "sources_missing": {"claude_code": "needs_auth", "codex": "not_installed"},
+        "pays_for": ["claude_code"],
+        "agents_found": ["openclaw"],
+        "web_search_ready": False,
+        "connected_app_count": 2,
+        "email_calendar_ready": True,
+        "setup": {"setup_decisions": []},
+    }
+    steps = applicable_steps(facts)
+    assert [(step["step_number"], step["title"], step.get("vendor")) for step in steps] == [
+        (1, "The other subscription", "claude_code"),
+        (2, "Bring over from your other tools", None),
+        (4, "Web search", None),
+        (5, "About you", None),
+        (7, "How CORSIA gets better", None),
+        (8, "Your files, and when agents ask first", None),
+        (9, "The hand-off", None),
+    ]
+
+    accounts.create_first_account("newcomer", PASSWORD, full_name="New Comer", first_run_path="app")
+    conductor_id = _conductor_id()
+    with write_transaction(None, scope="complete_app_seed") as db:
+        cache_completed_facts(conductor_id, "newcomer", facts, db=db)
+        assert read_cached_app_facts(conductor_id, db=db) == facts
+
+    live = _rows(
+        "SELECT n.title FROM plan_nodes n JOIN plans p ON p.id=n.plan_id "
+        "WHERE p.owner_id=? AND n.description LIKE 'first-run-app:%' "
+        "AND n.archived_at IS NULL ORDER BY n.order_key", conductor_id,
+    )
+    assert [node["title"] for node in live] == [step["title"] for step in steps]
+
+
+def test_completion_retry_reconciles_facts_that_changed_during_setup(fresh_install, app_seed_facts):
+    from infra import accounts
+    from infra.database import write_transaction
+    from onboarding.app_first_run import applicable_steps, cache_completed_facts
+    from plans import public
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    initial = {"agents_found": [], "connected_app_count": 0, "web_search_ready": False}
+    updated = {**initial, "connected_app_count": 2, "web_search_ready": True}
+    with write_transaction(None, scope="retry_changed_setup") as db:
+        cache_completed_facts(conductor_id, "newcomer", initial, db=db)
+        cache_completed_facts(conductor_id, "newcomer", updated, db=db)
+        listing = public.read_current_plan(
+            actor=public.PlanActor(conductor_id, "newcomer", None), include_folded=True, db=db,
+        )
+    remaining = [node["title"] for node in listing["nodes"] if node.get("archived_at") is None]
+    assert remaining == [step["title"] for step in applicable_steps(updated)]
+
+
+def test_named_apps_are_children_and_preserve_visible_onboarding_steps(fresh_install, app_seed_facts):
+    from infra import accounts
+    from infra.database import write_transaction
+    from onboarding.app_first_run import applicable_steps, cache_completed_facts
+    from plans import public
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    facts = {"agents_found": [], "connected_app_count": 0, "web_search_ready": False}
+    actor = public.PlanActor(conductor_id, "newcomer", None)
+    with write_transaction(None, scope="named_app_children") as db:
+        cache_completed_facts(conductor_id, "newcomer", facts, db=db)
+        listing = public.read_current_plan(actor=actor, include_folded=True, db=db)
+        connect = next(node for node in listing["nodes"] if node["title"] == "Where your work lives")
+        for app in ("Slack", "Notes"):
+            public.add_node(
+                listing["plan"]["id"], kind="task", title=f"Connect {app}",
+                parent_id=connect["id"], acceptance_criteria="Connected, or the user chose not now",
+                provenance="test.app_first_run", db=db,
+            )
+        final = public.read_current_plan(actor=actor, include_folded=True, db=db)
+    children = [node for node in final["nodes"] if node["parent_id"] == connect["id"]]
+    assert {node["title"] for node in children} == {"Connect Slack", "Connect Notes"}
+    top_level = {node["title"] for node in final["nodes"] if node["parent_id"] is None}
+    assert top_level == {step["title"] for step in applicable_steps(facts)}
+    assert "The hand-off" in top_level

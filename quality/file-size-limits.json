@@ -52,7 +52,7 @@
     "frontend/src/lib/components/InputBar.svelte": 406,
     "frontend/src/lib/ws/handlers.ts": 317,
     "frontend/src/lib/ws/handlersTurns.ts": 478,
-    "frontend/src/routes/+page.svelte": 484,
+    "frontend/src/routes/+page.svelte": 478,
     "frontend/src/routes/_design/+page.svelte": 608
   },
   "function_limits": {

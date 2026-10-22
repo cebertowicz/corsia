@@ -270,7 +270,7 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			handleSessionUpdated(data);
 			break;
 
-		case 'models_updated': case 'classifier_updated': {
+		case 'models_updated': case 'classifier_updated': case 'thread_warm_progress': {
 			if (data.type === 'models_updated') import('../stores/models').then(m => m.loadModels());
 			emit(data.type, data);
 			break;

@@ -1,6 +1,6 @@
 # Getting the person a web search key
 
-Use this for first-run task `Connect web search` and any time later the person asks to turn on web search. On the app path of `references/first-run.md` there are no setup tasks: skip every task this file adds, depends on, marks done or closes, and let the person's next message wake you. Brave's pages were checked read-only in the agent browser on 2026-10-09. Follow it exactly; never improvise a step, a link or a price.
+Use this for first-run task `Connect web search` and any time later the person asks to turn on web search. On the app path, use the server-seeded `Web search` task instead of creating `Connect web search`; keep the person-step tasks and dependencies this file needs, and mark the seeded task done or skipped. Brave's pages were checked read-only in the agent browser on 2026-10-09. Follow it exactly; never improvise a step, a link or a price.
 
 **Rules.** You never see, ask for, read or repeat the key or a password. The person types their password themselves and pastes the key into Settings › Keys; never accept either in chat. If they paste a key in chat anyway, post `Please don't paste keys here. Delete that message, then put the key in Settings › Keys.` and carry on. Browser steps follow `references/browser-person-steps.md`. There is no fallback search: without a key, web search stays off.
 

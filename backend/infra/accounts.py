@@ -124,7 +124,7 @@ def _credentials(username: str, password: str) -> tuple[str, str]:
 def _create_account(
     name: str, encoded: str, *, db: sqlite3.Connection | None, first_run_wake: bool,
     require_first: bool = False, first_run_path: str = "script", claim_data_owner: bool = False,
-    before_commit=None,
+    opening_name: str | None = None, before_commit=None,
 ):
     """Insert the account (and the first one's CORSIA agent) in one transaction.
 
@@ -175,6 +175,10 @@ def _create_account(
                 if start_setup_task:
                     first_run_path = "script"  # seeded tasks mean the wake follows the script path
                     seed_first_run_setup_plan(conductor_id, name, db=conn)
+                else:
+                    from onboarding.app_first_run import seed_initial
+
+                    seed_initial(conductor_id, name, db=conn, opening_name=opening_name)
                 woke = enqueue_first_run_wake(conductor_id, first_run_path=first_run_path, db=conn)
         if before_commit is not None:
             before_commit()
@@ -237,6 +241,7 @@ def create_first_account(
         announce = _create_account(
             name, encoded, db=None, first_run_wake=first_run_wake, require_first=True,
             first_run_path=first_run_path, claim_data_owner=True,
+            opening_name=(full_name.split(" ", 1)[0] if full_name else None),
             before_commit=staged.publish if staged else None,
         )
     except BaseException:

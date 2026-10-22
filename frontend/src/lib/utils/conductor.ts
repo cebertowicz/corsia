@@ -43,23 +43,34 @@ export function firstRunLanding(
 }
 
 let firstRunLanded = false;
+let firstRunOpening: Promise<void> | null = null;
 
-/** Open the CORSIA agent once per page load when `firstRunLanding` says so. */
+/** Open the CORSIA agent once per page load when `firstRunLanding` says so.
+ *
+ * The landing is complete only after its opener settles. Until then the shared
+ * promise suppresses duplicate lookups, while a rejected opener remains
+ * retryable instead of stranding first run on the empty regular composer. */
 export function landOnFirstRun(
 	lookup: CoordinationLookup,
 	scope: UiScope | null,
 	open: (threadId: string) => unknown,
-): void {
+): Promise<void> {
+	if (firstRunOpening) return firstRunOpening;
 	const landing = firstRunLanding(lookup, {
 		scope, activeThreadId: get(activeThreadId), landed: firstRunLanded,
 	});
-	if (!landing) return;
-	firstRunLanded = true;
-	void open(landing);
+	if (!landing) return Promise.resolve();
+	firstRunOpening = Promise.resolve()
+		.then(() => open(landing))
+		.then((opened) => { if (opened !== false) firstRunLanded = true; })
+		.catch(() => {})
+		.finally(() => { firstRunOpening = null; });
+	return firstRunOpening;
 }
 
 export function _resetFirstRunLandingForTests(): void {
 	firstRunLanded = false;
+	firstRunOpening = null;
 }
 
 export function conductorScopeParam(scope: UiScope | null): string {

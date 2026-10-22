@@ -191,6 +191,8 @@ async def _inline_first_run_wake(thread_id: str, model: str) -> str | None:
     path = await run_in_db(_held_path)
     if path is None:
         return None
+    if path == "app":
+        return await first_run_wake.render_for(model, path, thread_id=thread_id)
     return await first_run_wake.render_for(model, path)
 
 
