@@ -44,7 +44,7 @@ def _state(db) -> dict[str, tuple]:
 
 
 def test_v94_is_registered():
-    assert SCHEMA_VERSION == 139
+    assert SCHEMA_VERSION == 141
     assert MIGRATIONS[93] is migrate_93_to_94
 
 

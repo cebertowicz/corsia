@@ -196,27 +196,6 @@ class TestSweep:
         assert len(calls) == 1
 
     @pytest.mark.asyncio
-    async def test_busy_thread_is_woken_without_waiting_for_its_turn(self, isolated_db):
-        thread_id = mk_session("structured-busy")
-        db, _plan_row, _nodes, _wake = _arm(thread_id)
-        db.execute(
-            "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch) "
-            "VALUES ('turn-busy',?,0,'native/model','running','2000-01-01T00:00:00','boot-1')",
-            (thread_id,),
-        )
-        db.commit()
-        calls = []
-
-        async def deliver(*args):
-            calls.append(args)
-            return True
-
-        result = await pl.sweep_plan_wakes(_FUTURE, db=db, deliver=deliver)
-
-        assert result["woken"] == [thread_id]
-        assert len(calls) == 1
-
-    @pytest.mark.asyncio
     async def test_no_progress_never_stops_the_wake_and_each_gap_doubles(
         self, isolated_db, monkeypatch,
     ):

@@ -10,7 +10,8 @@ from typing import Any
 from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
 from core.fork_runtime import ForkHandle, cancel_fork, forget, handles
 from core.artifact_review_capture import ReviewForkFailure, fork_ended
-from prompts.artifact_review import instruction
+from plans import public
+from prompts.artifact_review import instruction, requesting_task_block
 
 logger = logging.getLogger(__name__)
 _starting: set[str] = set()
@@ -18,6 +19,17 @@ _starting: set[str] = set()
 # A backstop for a fork that stops making progress without exiting. The step
 # budget ends an ordinary review well before it; past it the reviewer finishes.
 REVIEW_WALL_SECONDS = 30 * 60
+
+
+def _requesting_task(db, row) -> str | None:
+    """The requesting task, read once through Plans at fork start.
+
+    The fork cannot call plan_read, so it is given the task itself, named with the revision read.
+    A failed read fails the fork start, which hands the review to the reviewer's plan task.
+    """
+    if not row["requesting_node_id"]:
+        return None
+    return requesting_task_block(public.intent_of(row["requesting_node_id"], db=db))
 
 
 def _cold_request(request_id: str):
@@ -57,7 +69,7 @@ def _cold_request(request_id: str):
         protected = ({"role": "user", "content": render_prior_checkpoint(previous)},) if previous else ()
         request = build_cold_fork_admission(
             fork_id=row["fork_id"], thread_id=thread["id"], target=target, kind=ARTIFACT_REVIEW_KIND,
-            instruction=instruction(row, artifact),
+            instruction=instruction(row, artifact, _requesting_task(db, row)),
             source=ColdForkSource(projection, protected),
             working_dir=resolve_working_dir(thread["project_id"], db),
             reasoning_effort=thread["reasoning_effort"], binary=fork_binary(target, db),
@@ -79,12 +91,7 @@ async def start(request_id: str) -> None:
         try:
             _row, request = await asyncio.to_thread(_cold_request, request_id)
         except Exception as error:
-            from core.artifact_review_capture import failure_reason
-
-            reason = failure_reason(error)
-            if reason.startswith("provider_error:"):
-                reason = f"cold_request_build:{type(error).__name__}"
-            await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id, error, reason=reason)
+            await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id, error, reason=_build_reason(error))
             return
         if await asyncio.to_thread(fork_ended, request_id):
             return
@@ -97,6 +104,16 @@ async def start(request_id: str) -> None:
         task.add_done_callback(lambda done: forget(fork_id, done))
     finally:
         _starting.discard(request_id)
+
+
+def _build_reason(error: Exception) -> str:
+    """A failure building the request is internal, never a provider failure."""
+    from core.artifact_review_capture import failure_reason
+
+    reason = failure_reason(error)
+    if reason.startswith("provider_error:"):
+        return f"cold_request_build:{type(error).__name__}"
+    return reason
 
 
 def _already_started(request_id: str) -> bool:
@@ -170,6 +187,7 @@ async def _run(request_id: str, request: Any, cancel_event: asyncio.Event) -> No
 
 
 async def _review(request_id: str, request: Any, cancel_event: asyncio.Event) -> None:
+    building = False
     try:
         # start() registers the handle before this first yield/state read, so a
         # withdrawal either appears here or signals the registered handle.
@@ -183,8 +201,9 @@ async def _review(request_id: str, request: Any, cancel_event: asyncio.Event) ->
             from core.fork_native_tools import await_or_cancel
 
             await await_or_cancel(await_checkpoint(active.id), cancel_event)
-            prepared = await asyncio.to_thread(_cold_request, request_id)
-            _row, request = prepared
+            building = True
+            _row, request = await asyncio.to_thread(_cold_request, request_id)
+            building = False
         request = await ARTIFACT_REVIEW_KIND.usage_binder(await _source(request))
         from core.fork_runtime import invoke_fork
 
@@ -195,6 +214,7 @@ async def _review(request_id: str, request: Any, cancel_event: asyncio.Event) ->
         raise
     except Exception as error:
         if not cancel_event.is_set():
-            await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id, error)
+            reason = _build_reason(error) if building else None
+            await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(request_id, error, reason=reason)
         else:
             logger.warning("artifact review raised after cancel request_id=%s", request_id, exc_info=error)

@@ -43,7 +43,7 @@ def _v103_database(path):
 
 
 def test_migration_is_registered():
-    assert SCHEMA_VERSION == 139 and MIGRATIONS[103] is migrate_103_to_104
+    assert SCHEMA_VERSION == 141 and MIGRATIONS[103] is migrate_103_to_104
 
 
 def test_legacy_image_rows_are_retyped_and_only_their_type_changes(tmp_path):
@@ -53,7 +53,7 @@ def test_legacy_image_rows_are_retyped_and_only_their_type_changes(tmp_path):
         before = _rows(db)
         migrate_to_current(db, SCHEMA_VERSION)
         after = _rows(db)
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 139
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 141
 
     retyped = {"png", "upper", "logical", "svg"}
     for identity_id in retyped:

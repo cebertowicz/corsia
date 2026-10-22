@@ -9,7 +9,7 @@ RESTART_JITTER_SECONDS = int(os.getenv("CORSIA_RESTART_JITTER_SECONDS", "30"))
 
 
 def restart_jitter_seconds(thread_id: str, *, maximum: int) -> int:
-    """Spread restart admission deterministically over a bounded window."""
+    """Spread restart wakes deterministically over a bounded window."""
 
     if maximum <= 0:
         return 0

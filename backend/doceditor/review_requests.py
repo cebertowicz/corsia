@@ -42,6 +42,10 @@ REVIEWER_NOT_IN_ROSTER = "reviewer_not_in_roster"
 DEFAULT_REQUEST_ERROR_CODE = "review_request_refused"
 CANCEL_REASON = "Review request cancelled by its requester or document owner."
 IN_REVIEW_REFUSAL = "A review is already in progress. Wait for it to finish, or cancel it and request a new review with your note."
+DIFFERENT_TASK_REFUSAL = (
+    "This reviewer already has an open review of this document, started from another task or "
+    "none, so your task would not reach the reviewer. Wait for that review to finish, then request again."
+)
 
 
 class ReviewRequestError(ValueError):
@@ -156,17 +160,24 @@ def get_request(db, request_id: str) -> dict:
     return _view(db, db.execute("SELECT * FROM doc_review_requests WHERE id=?", (request_id,)).fetchone())
 
 
-def _repeat(db, row, actor: ReviewActor, note: str | None, key: str) -> dict:
+def _requesting_node(requester: ReviewActor, live: str | None) -> str | None:
+    """Return only the server-resolved live Turn node for an agent request."""
+    return (live or None) if requester.kind == "agent" else None
+
+
+def _repeat(db, row, actor: ReviewActor, note: str | None, key: str, requesting: str | None = None) -> dict:
     keys = json.loads(row["client_ids"])
     if key in keys:
         return _view(db, row)
+    if requesting and requesting != row["requesting_node_id"]:
+        raise ReviewRequestError(DIFFERENT_TASK_REFUSAL)
+    if note and row["state"] == "forked":
+        # A fork has already frozen its instruction; silently accepting a
+        # later note would claim the reviewer saw it when it could not.
+        raise ReviewRequestError(IN_REVIEW_REFUSAL)
     keys.append(key)
     db.execute("UPDATE doc_review_requests SET client_ids=? WHERE id=?", (json.dumps(keys), row["id"]))
     if note:
-        if row["state"] == "forked":
-            # A fork has already frozen its instruction; silently accepting a
-            # later note would claim the reviewer saw it when it could not.
-            raise ReviewRequestError(IN_REVIEW_REFUSAL)
         public.append_review_note(db, row["node_id"], {
             **dict(row), "note": note, "requester_display": actor.display,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -175,7 +186,7 @@ def _repeat(db, row, actor: ReviewActor, note: str | None, key: str) -> dict:
 
 
 def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: ReviewActor,
-                   note: str | None, client_id: str) -> dict:
+                   note: str | None, client_id: str, *, live_node_id: str | None = None) -> dict:
     """Queue one reviewer task, with retry-safe notes and no preemption."""
     key = validate_client_id(client_id)
     if key is None:
@@ -194,23 +205,24 @@ def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: Rev
         if prior is not None:
             return _view(connection, prior)
         # The write lock serializes the pending request check and insert.
+        requesting = _requesting_node(requester, live_node_id)
         latest = _latest(connection, artifact_id, reviewer_thread_id)
         if latest is not None and is_open(connection, latest):
-            return _repeat(connection, latest, requester, note, key)
+            return _repeat(connection, latest, requester, note, key, requesting)
         request_id = str(uuid.uuid4())
         request = {
             "id": request_id, "artifact_id": artifact_id,
             "requester_kind": requester.kind, "requester_id": requester.id,
             "reviewer_thread_id": reviewer_thread_id, "note": note,
-            "fork_id": str(uuid.uuid4()),
+            "fork_id": str(uuid.uuid4()), "requesting_node_id": requesting,
             "created_at": datetime.now(timezone.utc).isoformat(), "requester_display": requester.display,
         }
         connection.execute(
             """INSERT INTO doc_review_requests(id,artifact_id,requester_kind,requester_id,
-               reviewer_thread_id,note,client_ids,fork_id,state,state_changed_at,created_at)
-               VALUES (?,?,?,?,?,?,?,?,'forked',?,?)""",
+               reviewer_thread_id,note,client_ids,fork_id,requesting_node_id,state,state_changed_at,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,'forked',?,?)""",
             (request["id"], artifact_id, requester.kind, requester.id, reviewer_thread_id,
-             note, json.dumps([key]), request["fork_id"], request["created_at"], request["created_at"]),
+             note, json.dumps([key]), request["fork_id"], requesting, request["created_at"], request["created_at"]),
         )
         # Recheck admission under the same write lock. A request is fork-first:
         # Plans is reserved for terminal fallback only.
@@ -263,7 +275,7 @@ def escalate_fork(db, request_id: str, *, reason: str = "limit",
         request = {
             **dict(row),
             "requester_display": requester_name(connection, row) or "the requester",
-            "note": f"{row['note'] or ''}\n\n{continuation(comment_count, reason)}".strip(),
+            "note": "\n\n".join(part for part in (row["note"], continuation(comment_count, reason)) if part),
         }
         node = public.create_review_node(connection, row["reviewer_thread_id"], request)
         connection.execute(

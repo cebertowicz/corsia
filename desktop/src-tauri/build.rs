@@ -19,6 +19,8 @@ fn main() {
                 "retry_saved_remote",
                 "save_setup_report",
                 "start_existing_again",
+                "start_fresh",
+                "start_fresh_preview",
                 "start_local_service",
                 "start_source_install",
                 "start_window_drag",

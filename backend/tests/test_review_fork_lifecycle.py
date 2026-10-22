@@ -53,6 +53,30 @@ async def test_start_build_failure_records_reason_and_hands_back(review_env, mon
 
 
 @pytest.mark.asyncio
+async def test_rebuild_after_checkpoint_failure_is_not_a_provider_failure(review_env, monkeypatch):
+    from types import SimpleNamespace
+
+    from core import checkpoint_runtime
+    from infra import checkpoint_queries
+    from plans.errors import PlanError
+
+    db, aid = review_env
+    row = request(db, aid)
+
+    async def settled(_checkpoint_id):
+        return None
+
+    def broken(_request_id):
+        raise PlanError("requesting task unreadable")
+
+    monkeypatch.setattr(checkpoint_queries, "active_for_thread", lambda _thread: SimpleNamespace(id="cp"))
+    monkeypatch.setattr(checkpoint_runtime, "await_checkpoint", settled)
+    monkeypatch.setattr(runtime, "_cold_request", broken)
+    await runtime._review(row["id"], SimpleNamespace(thread_id=row["reviewer_thread_id"]), asyncio.Event())
+    assert stored(db, row["id"])["reason"] == "cold_request_build:PlanError"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("error,expected_state,reason", [
     (ForkStepLimitReached("job exhausted"), "handed_back", "limit"),
     (ProviderForkRejected("provider unavailable"), "failed", "provider_error:ProviderForkRejected"),

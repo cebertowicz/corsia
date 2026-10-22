@@ -472,6 +472,9 @@ def test_active_code_is_redacted_outside_direct_main_loopback(monkeypatch):
 
     assert direct.status_code == forwarded.status_code == devices_listener.status_code == 200
     assert direct.json()["code"]["value"] == code
+    assert direct.json()["read_only"] is False
+    assert forwarded.json()["read_only"] is True
+    assert devices_listener.json()["read_only"] is True
     assert forwarded.json()["code"] == {
         "state": "active",
         "expires_in_seconds": forwarded.json()["code"]["expires_in_seconds"],
@@ -482,7 +485,7 @@ def test_active_code_is_redacted_outside_direct_main_loopback(monkeypatch):
     }
 
 
-_DOCUMENTED_DEVICES_KEYS = {"enabled", "listening", "announced_name", "local_hostname", "computer_name", "lan_addresses", "code", "outside_address"}
+_DOCUMENTED_DEVICES_KEYS = {"enabled", "listening", "announced_name", "local_hostname", "computer_name", "lan_addresses", "code", "outside_address", "read_only"}
 _NAME_CONFLICT = -65548
 
 
@@ -664,6 +667,9 @@ def test_devices_management_routes_require_direct_main_loopback(monkeypatch):
         "/api/devices", json={"enabled": True}, headers={"x-forwarded-for": "192.168.1.20"}
     )
     forwarded_code = main_client.post("/api/devices/code", headers={"x-forwarded-for": "192.168.1.20"})
+    forwarded_outside = main_client.put(
+        "/api/devices", json={"outside_address": "home.example.com"}, headers={"x-forwarded-for": "192.168.1.20"}
+    )
     devices_enable = devices_client.put("/api/devices", json={"enabled": True})
     devices_code = devices_client.post("/api/devices/code")
 
@@ -673,6 +679,6 @@ def test_devices_management_routes_require_direct_main_loopback(monkeypatch):
     assert len(direct_code.json()["code"]) == 4
     assert updates == [{"type": "devices_updated"}, {"type": "devices_updated"}]
     assert writes == [(set_devices_enabled, (True,))]
-    for refused in (forwarded_enable, forwarded_code, devices_enable, devices_code):
+    for refused in (forwarded_enable, forwarded_code, forwarded_outside, devices_enable, devices_code):
         assert refused.status_code == 403
         assert refused.json()["detail"] == "Manage connections on Studio itself"

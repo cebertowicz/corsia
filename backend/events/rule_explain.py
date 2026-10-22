@@ -16,18 +16,37 @@ _TEXT = {
     outcomes.DEAD_LETTERED: "rule {rule} could not deliver it",
     outcomes.ENDED: "rule {rule} did not fire: the file had already ended",
     outcomes.DUPLICATE: "rule {rule}: {thread} already had it",
-    outcomes.QUEUED: "rule {rule} will run {thread}'s script with it",
-    outcomes.RUNNING: "rule {rule} is running {thread}'s script with it",
-    outcomes.RAN: "rule {rule} ran {thread}'s script with it",
-    outcomes.FAILED: "rule {rule}'s run of {thread}'s script with it failed",
-    outcomes.SKIPPED: "rule {rule} did not run {thread}'s script",
+}
+# A script or worker rule delivers nothing, so what it did is told in its own words. A
+# script that never started (refused at its claim, or its owner gone at evaluation) reads
+# "did not run"; "failed" is only a run that started.
+_ACTION_TEXT = {
+    outcomes.RUN_SCRIPT: {
+        outcomes.QUEUED: "rule {rule} will run {thread}'s script with it",
+        outcomes.RUNNING: "rule {rule} is running {thread}'s script with it",
+        outcomes.RAN: "rule {rule} ran {thread}'s script with it",
+        outcomes.FAILED: "rule {rule}'s run of {thread}'s script with it failed",
+        outcomes.SKIPPED: "rule {rule} did not run {thread}'s script",
+        outcomes.DEAD_LETTERED: "rule {rule} did not run {thread}'s script",
+    },
+    outcomes.START_WORKER: {
+        outcomes.QUEUED: "rule {rule} will start a worker for {thread} with it",
+        outcomes.STARTED: "rule {rule} started a worker for {thread}",
+        outcomes.RETURNED: "rule {rule}'s worker for {thread} returned a result",
+        outcomes.INVALID: "rule {rule}'s worker for {thread} returned a result its workflow refuses",
+        outcomes.NO_RESULT: "rule {rule}'s worker for {thread} returned nothing",
+        outcomes.REFUSED: "rule {rule} did not start a worker for {thread}",
+        outcomes.SKIPPED: "rule {rule} did not start a worker for {thread}",
+        outcomes.DEAD_LETTERED: "rule {rule} did not start a worker for {thread}",
+    },
 }
 
 
 def decision(db: sqlite3.Connection, row: Mapping[str, Any]) -> dict[str, Any]:
     """The shaped row; a drop also names any armed watch it left waiting."""
     outcome, reason, thread = row["outcome"], row["reason"], row["thread_id"]
-    text = _TEXT[outcome].format(rule=row["rule_id"], thread=thread)
+    texts = _ACTION_TEXT.get(row["action"], {})
+    text = (texts.get(outcome) or _TEXT[outcome]).format(rule=row["rule_id"], thread=thread)
     if row["via"] == "routed" and outcome in (outcomes.WOKE, outcomes.DIGESTED):
         text += " (with the delivery routing already made)"
     if reason:

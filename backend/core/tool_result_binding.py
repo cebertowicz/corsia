@@ -117,10 +117,10 @@ def _bind_undispatched_echo(
         "Assistant Step Turn identity",
     )
     from core.tool_result_delivery import (
-        UNDISPATCHED_TOOL_REASON,
         persist_tool_execution_result,
         synthetic_result_identity,
     )
+    from infra.delivery_states import UNDISPATCHED_TOOL_REASON
 
     invocation_id, extra_metadata = synthetic_result_identity(
         tool_use_id=provider_tool_call_id,

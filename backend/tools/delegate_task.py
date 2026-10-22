@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 from functools import partial
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.thread_identity import thread_agent_identity
 from infra.db_async import run_in_db
@@ -21,6 +21,9 @@ from llm.delegation_model import dispatch_scope, eligible_delegation_model
 from subagents.cc_invocation import CONFINEMENT_NONE, CONFINEMENT_REVIEW, CONFINEMENTS
 from tools import delegation
 from tools.base import Tool
+
+if TYPE_CHECKING:
+    from subagents.cc_spawn import RuleStart
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +121,9 @@ class DelegateTaskTool(Tool):
             ))
         except public.PlanInputError as exc:
             return f"Error: invalid request, fix and resend - {exc}"
-        started = await _spawn(parent_thread_id, parent, task.strip(), kwargs)
+        started = await _spawn(
+            parent_thread_id, parent, with_task_line(task.strip(), step, parent_thread_id), kwargs,
+        )
         if isinstance(started, str):
             return started
         started["plan_task"] = await _hand_over(step, started["thread_id"], parent, requested)
@@ -129,10 +134,34 @@ class DelegateTaskTool(Tool):
         return delegation._json(started)
 
 
+def with_task_line(message: str, step, parent_thread_id: str) -> str:
+    """Append the line naming the handed plan task, or return ``message`` unchanged.
+
+    The task is named by reference, never copied: its intent can be revised
+    after dispatch, so a copy goes stale and a read stays current. The task is
+    in the parent's plan, so the worker reads it with the parent's ``thread_id``
+    (same user and project is the whole access rule), and that read does not
+    depend on the attach, so a failed attach leaves the line true.
+    """
+    if step is None:
+        return message
+    return (
+        f'{message}\n\nYour plan task: "{step.title}" ({step.node_id}). Read its intent and '
+        f"acceptance criteria with plan_read(thread_id='{parent_thread_id}', "
+        f"node_id='{step.node_id}') before you start, and again if you're told it changed."
+    )
+
+
 async def _spawn(
     parent_thread_id: str, parent: dict[str, Any], task: str, kwargs: dict[str, Any],
+    *, rule_start: RuleStart | None = None,
 ) -> dict[str, Any] | str:
-    """Start the worker; its receipt, or an error string with nothing started."""
+    """Start the worker; its receipt, or an error string with nothing started.
+
+    ``rule_start`` is a rule-started worker's (R23), never a caller's: it records the
+    worker before its first turn, and a full Claude Code cap raises
+    ``LiveSpawnCapExceeded`` so the rule's runner can queue the start again.
+    """
     from infra.delegation import DelegationModelRequired, require_explicit_thread_model
 
     try:
@@ -161,7 +190,7 @@ async def _spawn(
             task=task,
             title=kwargs.get("title"),
             model_id=model, account_id=kwargs.get("account_id"),
-            confinement=confinement, read_paths=read_paths,
+            confinement=confinement, read_paths=read_paths, rule_start=rule_start,
         )
     if confinement != CONFINEMENT_NONE:
         return f"Error: refused: no confined launch for {model}; use a claude-code/* model."
@@ -261,6 +290,7 @@ async def _spawn_claude_code_child(
     account_id: str | None = None,
     confinement: str = CONFINEMENT_NONE,
     read_paths: list[str] | None = None,
+    rule_start: RuleStart | None = None,
 ) -> dict[str, Any] | str:
     from connections.models import get_connection
     from subagents.cc_confinement import ConfinementRefused, require_readable_dirs
@@ -302,9 +332,11 @@ async def _spawn_claude_code_child(
             working_dir=working_dir,
             title=title,
             project_id=project_id, account_id=account_id,
-            confinement=confinement, add_dirs=add_dirs,
+            confinement=confinement, add_dirs=add_dirs, rule_start=rule_start,
         )
     except LiveSpawnCapExceeded as e:
+        if rule_start is not None:
+            raise
         return str(e)
     except CCWorkingDirMissing as e:
         return f"Cannot delegate to Claude Code: {e}"

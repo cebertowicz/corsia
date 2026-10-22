@@ -24,10 +24,10 @@ def declared_event(db: sqlite3.Connection, connector: str, event_type: str) -> t
     """The declaration of ``connector.event_type`` when an agent declared it, else ``None``.
 
     The one place a declared type becomes an ``EventTypeDecl``: rules match on its fields and
-    intake delivers by it (``intake.resolve_event_type``). A connector's namespace, and ``worker``,
-    is never an agent's, so a row synced under one can't shadow its manifest.
+    intake delivers by it (``intake.resolve_event_type``). A connector's namespace (``worker``
+    included) is never an agent's, so a row synced under one can't shadow its manifest.
     """
-    if connector == "worker" or connector in registered_connectors():
+    if connector in registered_connectors():
         return None
     entry = REGISTRY.ensure_loaded(db).events.get(f"{connector}.{event_type}")
     if entry is None:

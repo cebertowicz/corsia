@@ -136,7 +136,7 @@ pub fn source_from_plist(home: &Path, plist_path: &Path) -> Result<SourceInstall
 /// The roots the source install's bootstrap config records: a v2 file names
 /// both, an older one names only the workspace and keeps its state in
 /// `<workspace>/.corsia`.
-fn bootstrap_roots(config: &Path) -> Option<(PathBuf, PathBuf)> {
+pub(crate) fn bootstrap_roots(config: &Path) -> Option<(PathBuf, PathBuf)> {
     let value: serde_json::Value = serde_json::from_str(&fs::read_to_string(config).ok()?).ok()?;
     match value.get("workspace")? {
         serde_json::Value::String(workspace) => {
@@ -189,6 +189,8 @@ pub enum Phase {
     BackingUp,
     /// The app's own service is starting.
     Starting,
+    /// Start fresh is moving the earlier install into its backup folder.
+    MovingToBackup,
     /// A rollback is putting the existing install back.
     StartingExisting,
 }
@@ -336,7 +338,7 @@ fn write_failure_trail(plan: &Plan, failure: &Failure) {
 /// partial file: a temp file beside it is synced, renamed over it, and the
 /// folder is synced. A temp file left by an earlier crash is discarded first,
 /// so it can never block a retry.
-fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
+pub(crate) fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
     let directory = path.parent().ok_or("path has no folder")?;
     fs::create_dir_all(directory).map_err(io)?;
     let mut temporary = path.as_os_str().to_owned();
@@ -1975,6 +1977,7 @@ mod tests {
             (Phase::BackingUp, "backing_up"),
             (Phase::Starting, "starting"),
             (Phase::StartingExisting, "starting_existing"),
+            (Phase::MovingToBackup, "moving_to_backup"),
         ] {
             assert_eq!(
                 serde_json::to_value(phase).unwrap(),

@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 
 PLAN_WAKE_IDLE_SECONDS = 180
 PLAN_WAKE_BACKOFF = 2.0
+#: Production (2026-10-08..22) long Turns: p50 464s, p75 902s, p90 1,690s;
+#: 600s gives a median long Turn about one reminder and a p90 about three.
+PLAN_WAKE_IN_TURN_SECONDS = 600
 
 ARMED = "armed"
 CANCELLED = "cancelled"
@@ -257,18 +260,20 @@ def _rearm_due_wake(
     signal: PlanLivenessSignal,
     cycle: int,
     db,
+    *,
+    seconds: float | None = None,
 ) -> bool:
-    """Move the exact due wake to its next deadline without a claim gap."""
+    """Move the exact due wake to its next deadline without a claim gap.
+
+    ``seconds`` overrides the idle backoff spacing (the flat in-Turn interval).
+    """
 
     if signal.count <= 0:
         return False
     now = _now()
-    deadline = _iso(
-        now
-        + timedelta(
-            seconds=PLAN_WAKE_IDLE_SECONDS * (PLAN_WAKE_BACKOFF**cycle)
-        )
-    )
+    if seconds is None:
+        seconds = PLAN_WAKE_IDLE_SECONDS * (PLAN_WAKE_BACKOFF**cycle)
+    deadline = _iso(now + timedelta(seconds=seconds))
     cursor = db.execute(
         """UPDATE plan_liveness_wakes
            SET status='armed',deadline=?,cycle=?,last_open_count=?,

@@ -1,17 +1,23 @@
-"""What agent-written rules decided for one event: each rule's outcome, and the deliveries they make.
+"""What agent-written rules are, and what they decided for one event: each rule's outcome and deliveries.
 
 ``events.rules`` decides, ``events.platform`` delivers, and ``rules.record``
 writes the outcome rows. A ``run_script`` rule's row is also its run's queue
-(``events.rule_runs``). Names no connector.
+(``events.rule_runs``), and a ``start_worker`` rule's row its start's
+(``events.worker_starts``). The shapes live here so those modules and
+``events.rules`` read them without importing each other. Names no connector.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import Any
 
-if TYPE_CHECKING:
-    from events.rules import Rule
+# Actions a rule takes.
+DELIVER = "deliver"
+DROP = "drop"
+RUN_SCRIPT = "run_script"
+START_WORKER = "start_worker"
 
 # Outcomes, as event_route_decisions stores them.
 WOKE = "woke"
@@ -27,8 +33,53 @@ RUNNING = "running"
 RAN = "ran"
 FAILED = "failed"
 SKIPPED = "skipped"
+# A start_worker rule's start: queued by evaluation (and while the worker limit is full),
+# then started, and settled once by its worker's result (returned, invalid or no_result);
+# or skipped, or refused before any worker was made.
+STARTED = "started"
+RETURNED = "returned"
+INVALID = "invalid"
+NO_RESULT = "no_result"
+REFUSED = "refused"
 
 WAKE_CAP = "wake cap"  # the reason R9's hourly cap turned a rule's wake into a digest
+
+
+@dataclass(frozen=True)
+class Rule:
+    id: str
+    scope: str
+    connector: str
+    event_type: str
+    match: tuple[Mapping[str, Any], ...]
+    action: str
+    to: str
+    mode: str | None
+    note: str | None
+    created_by: str
+    enabled: bool = True
+    script_id: str | None = None  # run_script: the writer's script schedule it runs
+    workflow_id: str | None = None  # start_worker: the workflow its worker runs
+    request_identity_fact: str | None = None  # start_worker: the fact naming one request (R24)
+
+
+@dataclass(frozen=True)
+class RuleEvent:
+    """One event as rules see it: its declared type and facts, never its raw body."""
+
+    event_id: str
+    connector: str
+    event_type: str
+    watch_event: str  # the name a watch on this event uses
+    facts: Mapping[str, Any]
+    artifact_ref: Mapping[str, str] | None
+    ends_artifact: bool = False
+    # Read only when routing gave the event no thread: the projects tracking its repository.
+    repository_projects: frozenset[str] = frozenset()
+    trace: tuple[str, ...] = ()  # the rules whose script runs led to this event, oldest first
+    # The agent whose rule started the worker this event reports on, set by the server only:
+    # with no owner to scope by, the event still reaches that agent's own rules.
+    requester: str | None = None
 
 
 @dataclass(frozen=True)
@@ -49,6 +100,7 @@ class Outcome:
     via: str = "rule"  # "routed": the rule rode a delivery something else made
     reason: str | None = None
     run_input: str | None = None  # a queued run's input, until the runner claims it
+    request_identity: str | None = None  # a worker start's request (R24)
 
 
 @dataclass
@@ -92,3 +144,19 @@ class Delivery:
             results.append(Outcome(entry.rule_id, thread, delivered,
                                    via="rule" if caused else "routed", reason=entry.reason))
         return results
+
+
+@dataclass
+class RulePlan:
+    """Everything rules decided for one event, before delivery."""
+
+    event: RuleEvent
+    lifecycle: str = "active"  # the artifact's, as routing resolved it
+    drops: dict[str, str] = field(default_factory=dict)       # routed thread -> drop rule id
+    rides: dict[str, Delivery] = field(default_factory=dict)  # routed thread -> what rides it
+    adds: dict[str, Delivery] = field(default_factory=dict)   # new thread -> its delivery
+    settled: list[Outcome] = field(default_factory=list)      # outcomes with no delivery
+
+    def handled_by(self) -> str | None:
+        """A rule that queued a run of its writer's script, or a worker start, with this event."""
+        return next((item.rule_id for item in self.settled if item.outcome == QUEUED), None)

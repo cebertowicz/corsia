@@ -1,4 +1,4 @@
-"""Single durable admission, delivery, and settlement loop."""
+"""Single durable delivery and settlement loop for continuation triggers."""
 
 from __future__ import annotations
 
@@ -171,10 +171,14 @@ async def _run_batch(batch, by_id, *, db, now_dt, deliver, results) -> None:
 
 async def _drive_scripts(now_iso: str, db) -> None:
     """System phase: start due model-free script runs, never failing the sweep."""
-    from automation import script_runner
+    from automation import script_runner, worker_runner
+    from events.worker_starts import any_open
 
     try:
         await script_runner.drive(now_iso, db=db)
+        # Rule-started workers: new starts, and a restart's or a missed turn end's leftovers.
+        if await run_in_db_unless_owned(db, any_open, db):
+            worker_runner.poke()
     except Exception:  # noqa: BLE001 - liveness must outlive a script fault
         logger.exception("continuation script phase failed")
 

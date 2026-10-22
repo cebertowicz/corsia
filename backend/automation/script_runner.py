@@ -333,7 +333,8 @@ def settle(
     REGISTRY.ensure_loaded(db if db is not None else get_db())  # the first load reads outside the transaction
     with write_transaction(db, scope="script_runner_settle") as connection:
         if rule_run is not None:
-            failed = None if report.status == "ok" else (report.error or report.status)
+            # A breach is a reading the script ran and reported, not a failed run.
+            failed = None if report.status in ("ok", "breach") else (report.error or report.status)
             rule_runs.finish(connection, rule_run.decision_id, failed=failed)
         try:
             current = get(schedule.id, db=connection)

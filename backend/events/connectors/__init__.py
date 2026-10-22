@@ -92,6 +92,9 @@ class ConnectorManifest:
     repository_fact: str | None = None
     project_repositories: Callable[[str], frozenset[str] | None] | None = None
     repository_projects: Callable[[str], frozenset[str] | None] | None = None
+    # A CORSIA-produced (platform) event's fact naming the agent that asked for it: with no
+    # artifact owner, the event still reaches that agent's own rules (``events.rules``).
+    requester_fact: str | None = None
 
     def routed_type(self, routed_event: str) -> str | None:
         """The declared type the router's ``routed_event`` is, if one declares it."""
@@ -164,6 +167,7 @@ def _load_builtin_manifests() -> None:
         measurement,
         microsoft,
         plan,
+        worker,
     )
 
 

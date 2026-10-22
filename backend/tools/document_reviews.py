@@ -10,6 +10,7 @@ from infra.db_async import run_in_db
 from infra.write_effects import after_commit
 from infra.queries import get_thread_for_user
 from plans import public
+from registry.registration_origin import RegistrationOrigin, origin_from_tool_context, resolve_rebind
 from tools.artifact_tool_helpers import default_workspace, tool_path
 from tools.base import Tool
 from tools.delegation import _require_context, _tool_schema
@@ -21,7 +22,9 @@ TOOL_DESCRIPTION = (
     "If the review cannot finish, it becomes a reviewer plan task. The reviewer comments; it does not do the work. Ask only about a "
     "section that changes the reviewer's area: name that section and your question in `note`. "
     "The reviewer reads only that section and leaves its changes as suggestions. `reviewer` "
-    "is a thread ID from `agent_roster`; the document's owner cannot be the reviewer."
+    "is a thread ID from `agent_roster`; the document's owner cannot be the reviewer. "
+    "The private review is given the intent of the task you are on when you request (the task's "
+    "own, or the one it inherits from the task it was handed for); request from that task."
 )
 TARGET_REFUSAL = "exactly one of doc_path / artifact_id is required"
 UNREGISTERED_REFUSAL = "doc_path is not registered; register it first or retry with its artifact_id"
@@ -46,7 +49,8 @@ def _cancel_after_commit(fork_id: str) -> None:
 
 def create_request(actor: reviews.ReviewActor, *, reviewer: str, note: str | None,
                    client_id: str, doc_path: str | None = None,
-                   artifact_id: str | None = None) -> tuple[dict, list[str]]:
+                   artifact_id: str | None = None,
+                   origin: RegistrationOrigin | None = None) -> tuple[dict, list[str]]:
     if bool(doc_path) == bool(artifact_id):
         raise ValueError(TARGET_REFUSAL)
     db = get_db()
@@ -58,9 +62,13 @@ def create_request(actor: reviews.ReviewActor, *, reviewer: str, note: str | Non
                 actor_thread_id=actor.thread_id, user_id=actor.user_id, db=connection, allow_register=False)
             if aid is None:
                 raise ValueError(UNREGISTERED_REFUSAL)
+            # The requester's current task is the server Turn's live node, as artifact registration binds it.
+            live = resolve_rebind(connection, actor.thread_id, origin)[0].plan_node_id
             woken: list[str] = []
             with public.collect_wake_recipients(connection, woken):
-                result = reviews.request_review(connection, aid, reviewer, actor, note, client_id)
+                result = reviews.request_review(
+                    connection, aid, reviewer, actor, note, client_id, live_node_id=live,
+                )
                 if result["state"] == "forked":
                     after_commit(
                         connection,
@@ -131,7 +139,8 @@ class DocReviewRequestTool(Tool):
             result, woken = await run_in_db(create_request, actor,
                 reviewer=kwargs.get("reviewer", ""), note=kwargs.get("note"),
                 client_id=kwargs.get("client_id"), doc_path=doc_path,
-                artifact_id=kwargs.get("artifact_id"))
+                artifact_id=kwargs.get("artifact_id"),
+                origin=origin_from_tool_context(thread_id, kwargs, "doc_review_request"))
         except reviews.ReviewRosterError:
             return f"Error: {reviews.ROSTER_ERROR}"
         except (ValueError, PermissionError) as exc:

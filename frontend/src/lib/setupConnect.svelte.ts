@@ -57,6 +57,7 @@ export function signinFailureCopy(vendor: string, cause?: string | null, ref?: s
 	if (cause === 'agent_unavailable') return { meta: `CORSIA couldn’t reach its agent to start signing in. ${again}`, reportable: true };
 	if (cause?.endsWith('_executable_missing')) return { meta: `CORSIA couldn’t find ${cli} on this computer. Sign in again to install it.`, reportable: true };
 	if (cause?.endsWith('_signin_in_progress')) return { meta: `Another ${cli} sign-in is already open. Finish it in your browser, or sign in again.`, reportable: false };
+	if (cause === 'signin_timed_out') return { meta: `Your browser never came back to CORSIA to finish signing in to ${cli}. Sign in again.`, reportable: false };
 	if (cause === 'vendor_login_failed') return { meta: `Signing in to ${cli} didn’t finish in the browser. Sign in again.`, reportable: false };
 	if (cause === 'vendor_not_signed_in') return { meta: `${cli} didn’t report a signed-in ${account} account. Sign in again.`, reportable: false };
 	if (cause === 'same_account') return { meta: `That ${account} account is already signed in here. To add another, sign in again with a different ${account} account.`, reportable: false };

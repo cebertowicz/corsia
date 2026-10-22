@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.workflow_result import schema_errors
+
 _WORKFLOW_STEP_KEYS = frozenset(
     {
         "id",
@@ -57,13 +59,16 @@ def validate_workflow(corsia: dict[str, Any]) -> list[str]:
         return []
     if not isinstance(workflow, dict):
         return ["corsia.workflow must be a mapping"]
+    # A worker's workflow may declare a result and no steps, so the result is checked first.
+    errors: list[str] = (
+        schema_errors(workflow["result"]) if "result" in workflow else []
+    )
     steps = workflow.get("steps")
     if steps is None:
-        return []
+        return errors
     if not isinstance(steps, list):
-        return ["corsia.workflow.steps must be a list"]
+        return [*errors, "corsia.workflow.steps must be a list"]
 
-    errors: list[str] = []
     known: set[str] = set()
     after_by_id: dict[str, list[str]] = {}
     for index, step in enumerate(steps):

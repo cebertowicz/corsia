@@ -102,7 +102,7 @@ async def test_naming_a_task_hands_it_to_a_worker_whose_step_settled(deleg_db, s
 
     receipt = json.loads(await _send_to(plan_node_id=later))
 
-    assert sent == [(_WORKER, "one more thing")]
+    assert sent == [(_WORKER, "one more thing\n\n" + _line("Second job", later))]
     assert _worker_of(deleg_db, later) == _WORKER
     assert receipt["plan_task"]["attached"] is True
     assert receipt["plan_task"]["node_id"] == later
@@ -269,3 +269,36 @@ async def test_a_task_that_cannot_be_handed_over_is_refused_before_sending(
 
     assert result.startswith("Error: invalid request"), result
     assert sent == []
+
+
+def _line(title: str, node_id: str) -> str:
+    return (
+        f'Your plan task: "{title}" ({node_id}). Read its intent and acceptance criteria with '
+        f"plan_read(thread_id='{_PARENT}', node_id='{node_id}') before you start, and again "
+        "if you're told it changed."
+    )
+
+
+async def test_a_handed_task_is_named_by_reference_and_the_child_can_read_it(deleg_db, sent):
+    from tools.plans import PlanReadTool
+
+    plan_id = _seed(deleg_db)
+    node_id = _task(deleg_db, plan_id, "Second job")
+
+    await _send_to(plan_node_id=node_id)
+
+    text = sent[0][1]
+    assert _line("Second job", node_id) in text
+    assert "Second job done" not in text  # criteria are read, never copied
+    read = json.loads(await PlanReadTool().execute(
+        node_id=node_id, thread_id=_PARENT, _thread_id=_WORKER,
+    ))
+    assert read["acceptance_criteria"] == "Second job done"
+
+
+async def test_a_send_with_no_task_is_unchanged(deleg_db, sent):
+    _seed(deleg_db)
+
+    await _send_to()
+
+    assert sent == [(_WORKER, "one more thing")]

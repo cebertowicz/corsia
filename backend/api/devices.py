@@ -32,6 +32,11 @@ def _require_local_management(request: Request) -> None:
         raise HTTPException(403, f"Manage connections on {_management_name()} itself")
 
 
+def _direct_snapshot() -> dict:
+    """The direct-only management routes always return an editable host snapshot."""
+    return {**runtime.snapshot(include_code=True), "read_only": False}
+
+
 def _decode(value: object, name: str) -> bytes:
     if not isinstance(value, str):
         raise HTTPException(400, f"{name} must be base64")
@@ -85,7 +90,8 @@ def _pairing_error(error: PairingError) -> HTTPException:
 
 @router.get("")
 async def get_devices(request: Request, _user: dict = Depends(require_human_user)):
-    return runtime.snapshot(include_code=is_direct_loopback(request))
+    direct_loopback = is_direct_loopback(request)
+    return {**runtime.snapshot(include_code=direct_loopback), "read_only": not direct_loopback}
 
 
 @router.put("")
@@ -96,7 +102,7 @@ async def put_devices(body: dict, request: Request, _user: dict = Depends(requir
         await run_in_db(set_devices_outside_address, address)
         runtime.outside_address = address
         emit_devices_event("outside_address_saved" if address else "outside_address_cleared")
-        return runtime.snapshot(include_code=True)
+        return _direct_snapshot()
     enabled = body.get("enabled")
     if not isinstance(enabled, bool):
         raise HTTPException(400, "enabled must be a boolean")
@@ -104,7 +110,7 @@ async def put_devices(body: dict, request: Request, _user: dict = Depends(requir
         was_enabled = runtime.enabled
         started = await runtime.enable(request.app)
         if not started:
-            return runtime.snapshot()
+            return _direct_snapshot()
         if not was_enabled:
             runtime.pairing.issue_code()
             emit_devices_event("devices_enabled")
@@ -113,7 +119,7 @@ async def put_devices(body: dict, request: Request, _user: dict = Depends(requir
         await runtime.disable()
         emit_devices_event("devices_disabled")
     await run_in_db(set_devices_enabled, enabled)
-    return runtime.snapshot(include_code=True)
+    return _direct_snapshot()
 
 
 @router.post("/code")
@@ -124,7 +130,7 @@ async def issue_code(request: Request, _user: dict = Depends(require_human_user)
     except PairingError as error:
         raise _pairing_error(error) from error
     emit_devices_event("pairing_code_issued")
-    return {**runtime.snapshot(include_code=True), "code": code}
+    return {**_direct_snapshot(), "code": code}
 
 
 @router.post("/pair/start")

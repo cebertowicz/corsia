@@ -449,3 +449,32 @@ def test_failed_boot_signals_only_a_child_that_has_not_exited(isolated_runtime, 
     assert signals == []
     sup._failed_boot_result("server", "127.0.0.1", 9999, 1234, reason="timed_out")
     assert signals == [(1234, sup.signal.SIGTERM)]
+
+
+def test_stop_all_servers_stops_recorded_servers_and_never_a_foreign_process(isolated_runtime):
+    from llm.providers.omlx_supervisor import _read_pid, _write_pid, stop_all_servers
+
+    def sleeper():
+        return subprocess.Popen(
+            ["sleep", "60"], stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+
+    ours, foreign = sleeper(), sleeper()
+    _write_pid("ns-ours", ours.pid)
+    try:
+        results = asyncio.run(stop_all_servers())
+        assert [r["ok"] for r in results] == [True]
+        assert _read_pid("ns-ours") is None
+        ours.wait(timeout=2)
+        assert foreign.poll() is None  # no pid record, so never touched
+    finally:
+        for proc in (ours, foreign):
+            if proc.poll() is None:
+                proc.kill()
+
+
+def test_stop_all_servers_with_nothing_recorded_is_a_no_op(isolated_runtime):
+    from llm.providers.omlx_supervisor import stop_all_servers
+
+    assert asyncio.run(stop_all_servers()) == []

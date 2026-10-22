@@ -25,44 +25,26 @@ import sqlite3
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from events import rules
-from events.rule_outcomes import DROPPED, FAILED, QUEUED, RAN, RUNNING, SKIPPED, Outcome
+from events.rule_outcomes import (
+    DROPPED, FAILED, QUEUED, RAN, RUN_SCRIPT, RUNNING, SKIPPED, Outcome, Rule, RuleEvent,
+)
 
 OWNER_PAUSED = "owner paused"
+#: A script's or worker's owner gone, whether evaluation or the claim finds it.
+OWNER_GONE = "its owner is no longer available"
 LOOP = "loop"
 QUEUE_FULL = "queue full"
-#: Runs one rule may have waiting; a match past it is skipped, so a looping script stays bounded.
+#: Runs or worker starts one rule may have waiting; a match past it is skipped, so a
+#: looping script or a burst of requests stays bounded.
 QUEUE_CAP = 50
 INTERRUPTED = "the run stopped before it settled; it is not replayed"
 TURNED_OFF = "the rule was turned off before its run started"
 _REASON_LIMIT = 500
 
 
-def check_script(db: sqlite3.Connection, writer: str, script_id: Any, extra: Mapping[str, Any]) -> str:
-    """The script a ``run_script`` rule may run: one of its writer's own active script
-    schedules. ``extra`` are the fields that belong to other actions, all refused."""
-    from events.rule_authoring import RuleRefused
-
-    given = sorted(name for name, value in extra.items() if value is not None)
-    if given:
-        raise RuleRefused(f"A run_script rule takes no {' or '.join(given)}: it runs your script, "
-                          "and the event still reaches whoever it reaches today.")
-    if not isinstance(script_id, str) or not script_id:
-        raise RuleRefused("run_script needs script_id, the id automation_list shows for one of your "
-                          "script schedules.")
-    row = db.execute("SELECT thread_id, state FROM automation_schedules WHERE id=? AND kind='script'",
-                     (script_id,)).fetchone()
-    if row is None or row["thread_id"] != writer:
-        raise RuleRefused(f"{script_id} isn't one of your script schedules; automation_list shows "
-                          "yours, and automation_schedule registers one.")
-    if row["state"] != "active":
-        raise RuleRefused(f"Your script schedule {script_id} is {row['state']}; register the script "
-                          "again with automation_schedule and use the new id.")
-    return script_id
-
-
-def _waiting(db: sqlite3.Connection, rule_id: str, writer: str) -> int:
-    """The rule's queued runs, at most ``QUEUE_CAP`` read (``idx_event_route_decisions_rule``)."""
+def waiting(db: sqlite3.Connection, rule_id: str, writer: str) -> int:
+    """The rule's queued runs or starts, at most ``QUEUE_CAP`` read
+    (``idx_event_route_decisions_rule``)."""
     return db.execute(
         "SELECT COUNT(*) FROM (SELECT 1 FROM event_route_decisions "
         "WHERE rule_id=? AND thread_id=? AND outcome=? LIMIT ?)",
@@ -71,21 +53,21 @@ def _waiting(db: sqlite3.Connection, rule_id: str, writer: str) -> int:
 
 
 def queue(
-    db: sqlite3.Connection, event: rules.RuleEvent, matched: Iterable[rules.Rule],
+    db: sqlite3.Connection, event: RuleEvent, matched: Iterable[Rule],
     dropped_by: Mapping[str, str],
 ) -> list[Outcome]:
     """Each matching ``run_script`` rule's outcome: queued with its input, dropped by
     its writer's own drop, or skipped because it is already in the event's chain or
     its queue is full."""
     outcomes = []
-    for rule in (rule for rule in matched if rule.action == rules.RUN_SCRIPT):
+    for rule in (rule for rule in matched if rule.action == RUN_SCRIPT):
         writer = rule.created_by
         if writer in dropped_by:
             outcomes.append(Outcome(rule.id, writer, DROPPED,
                                     reason=f"dropped by rule {dropped_by[writer]}"))
         elif rule.id in event.trace:
             outcomes.append(Outcome(rule.id, writer, SKIPPED, reason=LOOP))
-        elif _waiting(db, rule.id, writer) >= QUEUE_CAP:
+        elif waiting(db, rule.id, writer) >= QUEUE_CAP:
             outcomes.append(Outcome(rule.id, writer, SKIPPED, reason=QUEUE_FULL))
         else:
             outcomes.append(Outcome(rule.id, writer, QUEUED, run_input=json.dumps({
@@ -105,7 +87,9 @@ def queued(db: sqlite3.Connection, limit: int) -> list[Mapping[str, Any]]:
         "SELECT d.id, d.rule_id, d.thread_id, r.script_id, r.enabled "
         "FROM event_route_decisions d LEFT JOIN event_rules r ON r.id=d.rule_id "
         "LEFT JOIN automation_schedules s ON s.id=r.script_id "
-        "WHERE d.outcome=? AND s.running_since IS NULL ORDER BY d.id LIMIT ?", (QUEUED, limit),
+        # A worker start's queued row carries its request identity; a script run's never does.
+        "WHERE d.outcome=? AND d.request_identity IS NULL AND s.running_since IS NULL "
+        "ORDER BY d.id LIMIT ?", (QUEUED, limit),
     ).fetchall()
 
 

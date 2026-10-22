@@ -211,7 +211,7 @@ class Background:
     """
 
     def __init__(self, backend: Path) -> None:
-        self._root = str(backend)
+        self._root = backend
         self._live: list[tuple[str, asyncio.Task]] = []
         self._untraced: list[str] = []
         self.portal = None
@@ -221,9 +221,10 @@ class Background:
         def create_task(loop, coro, **kwargs):
             task = real_create_task(loop, coro, **kwargs)
             code = getattr(coro, "cr_code", None)
-            if code is not None and code.co_filename.startswith(background._root):
+            filename = Path(code.co_filename) if code is not None else None
+            if filename is not None and filename.is_relative_to(background._root) and not filename.is_relative_to(background._root / ".venv"):
                 qualified = getattr(code, "co_qualname", code.co_name)
-                name = f"{Path(code.co_filename).relative_to(background._root).as_posix()}:{qualified}"
+                name = f"{filename.relative_to(background._root).as_posix()}:{qualified}"
                 if asyncio.current_task(loop) is None:
                     background._untraced.append(name)
                 background._live.append((name, task))

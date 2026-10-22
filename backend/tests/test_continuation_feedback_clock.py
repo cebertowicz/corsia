@@ -35,7 +35,7 @@ async def test_loop_sweeps_again_when_an_open_batch_comes_due_and_when_one_is_wr
         sweeps.append(now)
 
     monkeypatch.setattr(loop, "sweep", fake_sweep)
-    monkeypatch.setattr(loop.admission, "RESTART_JITTER_SECONDS", 0)
+    monkeypatch.setattr(loop.restart_jitter, "RESTART_JITTER_SECONDS", 0)
     db = get_db()
     try:
         seed_thread(db, "owner")
@@ -65,7 +65,7 @@ async def test_sweep_soon_wakes_a_sleeping_loop(isolated_db, monkeypatch):
         sweeps.append(now)
 
     monkeypatch.setattr(loop, "sweep", fake_sweep)
-    monkeypatch.setattr(loop.admission, "RESTART_JITTER_SECONDS", 0)
+    monkeypatch.setattr(loop.restart_jitter, "RESTART_JITTER_SECONDS", 0)
     task = asyncio.create_task(loop.continuation_sweep_loop())
     try:
         async with asyncio.timeout(3):
@@ -91,7 +91,7 @@ async def test_a_failing_deadline_read_does_not_end_the_loop(isolated_db, monkey
 
     monkeypatch.setattr(loop, "sweep", fake_sweep)
     monkeypatch.setattr(loop, "_seconds_to_next_feedback_deadline", broken)
-    monkeypatch.setattr(loop.admission, "RESTART_JITTER_SECONDS", 0)
+    monkeypatch.setattr(loop.restart_jitter, "RESTART_JITTER_SECONDS", 0)
     task = asyncio.create_task(loop.continuation_sweep_loop())
     try:
         async with asyncio.timeout(3):
