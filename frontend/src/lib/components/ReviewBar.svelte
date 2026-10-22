@@ -14,14 +14,20 @@
 	 * The in-view review bar (DCOL-FR12.4): when an agent has asked for a review of this artifact, the
 	 * answer is one click from the reading. `draftOpen` is the comment composer's unsaved text.
 	 */
-	let { artifactId, draftOpen = false, suppressed = false, capsuleClearance = $bindable(0), onAnswered }: {
+	let { artifactId, draftOpen = false, suppressed = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll }: {
 		artifactId: string | null; draftOpen?: boolean; suppressed?: boolean;
+		/** Open suggestions the bar's own accept applies before it approves; with `onAcceptAll`, the approve button says so. */
+		pendingSuggestions?: number;
+		/** Accepts them all and puts the accepted text on screen; throws when it could not, so no verdict is sent. */
+		onAcceptAll?: () => Promise<void>;
 		/** Out: px the bar's container leaves at its bottom so the floating capsule never covers it; 0 while it does not float. */
 		capsuleClearance?: number;
 		onAnswered?: () => void;
 	} = $props();
 
 	const bar = createReviewBarState();
+	const ACCEPT_FAILED = "Couldn't accept the suggestions. Try again.";
+	let accepting = $state(false);
 	let expanded = $state(false);
 	let noteInput = $state<HTMLTextAreaElement>();
 	let requestButton = $state<HTMLButtonElement>();
@@ -38,7 +44,7 @@
 	const others = $derived(read?.other_askers ?? []);
 	const round = $derived(read?.round_feedback_count ?? 0);
 	const pending = $derived(`${round} comment${round === 1 ? '' : 's'}`);
-	const busy = $derived(bar.phase === 'sending');
+	const busy = $derived(bar.phase === 'sending' || accepting);
 	/** A send keeps the layout it came from: the note stays mounted while its own send is in flight. */
 	const noting = $derived(bar.phase === 'noting' || (busy && bar.sendingFrom === 'noting'));
 	const placeholder = $derived(bar.noteRequired ? `What should ${asker} change?` : `Add a note for ${asker} (optional)`);
@@ -110,8 +116,14 @@
 		if (bar.phase === 'noting') noteInput?.focus();
 		else if (bar.phase === 'ask') approveButton?.focus();
 	}
-	function approve() {
+	const acceptFirst = $derived(pendingSuggestions > 0 && onAcceptAll !== undefined);
+	const approveText = $derived(acceptFirst ? `Accept ${pendingSuggestions} suggestion${pendingSuggestions === 1 ? '' : 's'} and approve` : bar.approveLabel);
+	async function approve() {
 		if (round > 0 && blocked()) return;
+		if (acceptFirst) {
+			accepting = true; bar.failure = '';
+			try { await onAcceptAll?.(); } catch { bar.failure = ACCEPT_FAILED; return; } finally { accepting = false; }
+		}
 		void settle(round > 0 ? 'approved_with_changes' : 'approved');
 	}
 	async function requestChanges() {
@@ -235,7 +247,7 @@
 					{:else}
 						<div class="rb-actions">
 							<Button size="sm" variant="ghost" disabled={busy} bind:el={requestButton} onclick={requestChanges}>Request changes</Button>
-							<Button size="sm" variant="primary" loading={busy} bind:el={approveButton} description={alsoSends} title={alsoSends} onclick={approve}>{bar.approveLabel}</Button>
+							<Button size="sm" variant="primary" loading={busy} bind:el={approveButton} description={alsoSends} title={alsoSends} onclick={approve}>{approveText}</Button>
 						</div>
 					{/if}
 				</div>

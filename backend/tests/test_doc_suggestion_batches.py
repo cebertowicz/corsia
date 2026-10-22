@@ -98,11 +98,15 @@ async def test_overlap_skips_later_suggestion_through_every_adapter(
         quote="A unique tail sentence",
         replacement="A concise sentence",
     )
-    later = await _suggest(
-        author,
-        doc,
-        quote="unique tail sentence anchors",
-        replacement="replacement that overlaps",
+    # An agent can no longer create this overlap (it is refused at creation), but one made before that rule,
+    # or by a person, still reaches the batch, so the row is written at the store.
+    quote = "unique tail sentence anchors"
+    start = doc.read_text().index(quote)
+    from doceditor import comments
+
+    later, _ = comments.create_with_status(
+        earlier["artifact_id"], body="", author="Batch author", author_kind="agent", author_thread_id=author,
+        anchor_text=quote, from_off=start, to_off=start + len(quote), replacement="replacement that overlaps",
     )
     writes = []
     original_write = document_save._write_document
@@ -143,7 +147,7 @@ async def test_stale_revision_refuses_entire_batch_through_every_adapter(
     _registrable_roots,
     monkeypatch,
 ):
-    from doceditor import comment_actions
+    from doceditor import comment_batch_actions
 
     owner, doc = await _owned_doc(adapter, integration_client, doc)
     author = _mk_thread(integration_client, _OWNER, title="Batch author")
@@ -154,7 +158,7 @@ async def test_stale_revision_refuses_entire_batch_through_every_adapter(
         quote="A unique tail sentence",
         replacement="A new tail sentence",
     )
-    original_read = comment_actions.read_doc_text
+    original_read = comment_batch_actions.read_doc_text
     concurrent_text = doc.read_text() + "\nConcurrent edit.\n"
     read_threads: list[int] = []
 
@@ -164,7 +168,7 @@ async def test_stale_revision_refuses_entire_batch_through_every_adapter(
         doc.write_text(concurrent_text)
         return snapshot
 
-    monkeypatch.setattr(comment_actions, "read_doc_text", read_then_change)
+    monkeypatch.setattr(comment_batch_actions, "read_doc_text", read_then_change)
     status, result = await _decide(
         adapter,
         integration_client,
@@ -357,7 +361,7 @@ async def test_accept_all_passes_one_snapshot_hash_to_its_writer(
     doc,
     _registrable_roots,
 ):
-    from doceditor.comment_actions import decide_all_from_author
+    from doceditor.comment_batch_actions import decide_all_from_author
 
     owner, _ = await _own(integration_client, doc)
     first = await _suggest(owner, doc, quote="# Design", replacement="# New design")
