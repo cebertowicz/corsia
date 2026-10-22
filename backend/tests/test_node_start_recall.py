@@ -532,6 +532,74 @@ def test_words_after_task_start_are_excluded(db):
     assert related(db, NodeText(task.title, criteria=task.acceptance_criteria, node_id=task.id), caller_thread_id="caller", trigger="start") == []
 
 
+def _intent_task(db, *, intent=None, quote=None):
+    from plans import service
+    from tests.plan_execution_helpers import add_task
+
+    plan = service.ensure_plan("thread", "caller", db=db)
+    task = add_task(db, plan.id, "Prepare ledger export")
+    if intent:
+        db.execute("UPDATE plan_nodes SET intent=? WHERE id=?", (intent, task.id))
+    if quote:
+        db.execute(
+            "INSERT INTO plan_node_intent_words (node_id,author,source_kind,source_id,quote,role,requirements_revision,added_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (task.id, "person", "message", "m1", quote, "origin", 1, "2026-01-01T00:00:00+00:00"),
+        )
+    db.commit()
+    _message(db, "old", "past", "Currency conversion rounding matters for the ledger.")
+    return task
+
+
+@pytest.mark.parametrize("field", ["intent", "quote"])
+def test_terms_only_in_task_intent_or_its_quoted_words_find_prior_words_on_start(db, field):
+    from memory.node_start_recall import attach_to_result
+
+    task = _intent_task(db, **{field: "Include currency conversion rounding"})
+    result = {"node": {"id": task.id, "title": task.title, "acceptance_criteria": task.acceptance_criteria}}
+
+    attach_to_result(db, "start", result, caller_thread_id="caller")
+
+    assert "rounding matters" in "\n".join(result["prior_words"])
+
+
+@pytest.mark.parametrize("field", ["intent", "quote"])
+def test_a_task_inheriting_its_intent_reads_the_canonical_intent_and_words_on_start(db, field):
+    from memory.node_start_recall import attach_to_result
+    from tests.plan_execution_helpers import add_task
+
+    canonical = _intent_task(db, **{field: "Include currency conversion rounding"})
+    follow_up = add_task(db, canonical.plan_id, "Prepare ledger export", intent_node_id=canonical.id)
+    db.commit()
+    result = {"node": {"id": follow_up.id}}
+
+    attach_to_result(db, "start", result, caller_thread_id="caller")
+
+    assert "rounding matters" in "\n".join(result["prior_words"])
+
+
+def test_a_task_without_intent_terms_finds_nothing_on_start(db):
+    from memory.node_start_recall import attach_to_result
+
+    task = _intent_task(db)
+    result = {"node": {"id": task.id, "title": task.title, "acceptance_criteria": task.acceptance_criteria}}
+
+    attach_to_result(db, "start", result, caller_thread_id="caller")
+
+    assert "prior_words" not in result
+
+
+def test_the_next_task_a_close_starts_reads_its_intent(db):
+    from memory.node_start_recall import attach_to_result
+
+    task = _intent_task(db, intent="Include currency conversion rounding")
+    result = {"next": {"selected": {"id": task.id, "how": "auto_selected"}}}
+
+    attach_to_result(db, "close_node", result, caller_thread_id="caller")
+
+    assert "rounding matters" in "\n".join(result["prior_words"])
+
+
 def test_each_silent_lookup_logs_its_own_reason(db, logged):
     from memory.node_start_recall import NodeText, related
 

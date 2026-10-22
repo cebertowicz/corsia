@@ -2,14 +2,13 @@
 
 from collections import defaultdict
 from contextlib import closing
-from datetime import datetime, timedelta
 import asyncio
 import sqlite3
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from automation.continuation import admission, execution, runner, triggers
+from automation.continuation import execution, runner, triggers
 from automation.continuation.sources.harvest import HarvestSource
 from infra import database
 
@@ -107,14 +106,9 @@ def writer_available(path):
         db.rollback()
 
 
-def seeded_trigger(*, exhausted=False, dispatched=False):
+def seeded_trigger(*, dispatched=False):
     with database.write_transaction(None, scope="continuation_test_trigger") as db:
         trigger, _ = triggers.enqueue(request(), db=db, now=NOW)
-        if exhausted:
-            db.execute(
-                "UPDATE continuation_triggers SET deferrals=? WHERE id=?",
-                (admission.MAX_DEFERRALS, trigger.id),
-            )
         if dispatched:
             triggers.claim(trigger.id, idempotency_key="recorded-input", db=db, now=NOW)
         return triggers.get(trigger.id, db=db)
@@ -138,7 +132,6 @@ async def test_sweep_cannot_finish_a_foreign_transaction(
             await runner.sweep(
                 NOW, db=db if named else None,
                 sources=[HarvestSource()] if prepare else [Source()],
-                is_idle=lambda _thread: False,
             )
         assert db.in_transaction
         assert stored(continuation_db) == ([], [])
@@ -168,8 +161,7 @@ async def test_delivery_cannot_settle_inside_a_later_foreign_write(
     try:
         with pytest.raises(refusal):
             await runner.sweep(
-                NOW, db=db if named else None, sources=[Source()],
-                is_idle=lambda _thread: True, deliver=deliver,
+                NOW, db=db if named else None, sources=[Source()], deliver=deliver,
             )
         assert db.in_transaction
         assert stored(continuation_db) == ([], [("dispatched", 1)])
@@ -189,8 +181,7 @@ async def test_sweep_commits_claim_before_delivery_and_source_with_outcome(conti
 
     db = database.get_db()
     result = await runner.sweep(
-        NOW, db=db if named else None, sources=[Source()],
-        is_idle=lambda _thread: True, deliver=deliver,
+        NOW, db=db if named else None, sources=[Source()], deliver=deliver,
     )
     assert result["woken"] == ["owner"]
     assert stored(continuation_db) == ([("settled",)], [("delivered", 1)])
@@ -210,7 +201,6 @@ async def test_sweep_skips_raising_prepare_source_and_runs_later_source(
         NOW,
         db=db,
         sources=[RaisingPrepareSource(), Source()],
-        is_idle=lambda _thread: True,
         deliver=AsyncMock(return_value=True),
     )
 
@@ -234,7 +224,6 @@ async def test_sweep_skips_raising_due_source_and_runs_later_source(
         NOW,
         db=db,
         sources=[RaisingDueSource(), Source()],
-        is_idle=lambda _thread: True,
         deliver=AsyncMock(return_value=True),
     )
 
@@ -270,9 +259,7 @@ def test_prepare_failure_preserves_a_foreign_transaction(
 async def test_collection_discovers_requests_before_acquiring_writer(continuation_db):
     source = TransactionProbeSource()
 
-    await runner.sweep(
-        NOW, sources=[source], is_idle=lambda _thread: False,
-    )
+    await runner.sweep(NOW, sources=[source])
 
     assert source.transaction_states == [False]
 
@@ -311,22 +298,15 @@ async def test_failed_commit_releases_only_the_owned_unit(continuation_db, stage
     writer_available(continuation_db)
 
 
-@pytest.mark.parametrize("exhausted", [False, True])
-def test_synchronous_terminalization_preserves_named_outer_rollback(continuation_db, exhausted):
-    trigger = seeded_trigger(exhausted=exhausted)
+def test_synchronous_terminalization_preserves_named_outer_rollback(continuation_db):
+    trigger = seeded_trigger()
     with pytest.raises(RuntimeError, match="caller abort"):
         with database.write_transaction(None, scope="continuation_test_caller") as db:
             db.execute("INSERT INTO continuation_markers VALUES ('caller')")
-            if exhausted:
-                execution.defer_trigger(
-                    trigger, "global_in_flight", datetime.fromisoformat(NOW),
-                    Source(), db=db, results=defaultdict(list),
-                )
-            else:
-                execution.settle_without_delivery(
-                    trigger, request(outcome="suppressed"), Source(),
-                    db=db, now=NOW, results=defaultdict(list),
-                )
+            execution.settle_without_delivery(
+                trigger, request(outcome="suppressed"), Source(),
+                db=db, now=NOW, results=defaultdict(list),
+            )
             assert db.in_transaction
             assert stored(continuation_db) == ([], [("pending", 0)])
             raise RuntimeError("caller abort")
@@ -334,98 +314,35 @@ def test_synchronous_terminalization_preserves_named_outer_rollback(continuation
     writer_available(continuation_db)
 
 
-@pytest.mark.parametrize("outcome", ["suppressed", "stalled", "deferred"])
-def test_standalone_terminal_and_deferred_units_are_durable(continuation_db, outcome):
-    trigger = seeded_trigger(exhausted=outcome == "stalled")
-    results = defaultdict(list)
-    if outcome == "suppressed":
-        execution.settle_without_delivery(
-            trigger, request(outcome=outcome), Source(), db=None, now=NOW, results=results,
-        )
-    else:
-        execution.defer_trigger(
-            trigger, "global_in_flight", datetime.fromisoformat(NOW),
-            Source(), db=None, results=results,
-        )
-    assert stored(continuation_db) == (
-        [("settled",)], [(outcome, 0 if outcome == "deferred" else 1)],
+def test_standalone_terminal_unit_is_durable(continuation_db):
+    trigger = seeded_trigger()
+    execution.settle_without_delivery(
+        trigger, request(outcome="suppressed"), Source(), db=None, now=NOW,
+        results=defaultdict(list),
     )
+    assert stored(continuation_db) == ([("settled",)], [("suppressed", 1)])
     writer_available(continuation_db)
 
 
-def test_a_busy_owner_retries_at_the_base_interval_without_spending_the_budget(continuation_db):
-    """#505: a running Turn is not a capacity limit, so it never stalls the wake."""
-    trigger = seeded_trigger(exhausted=True)
-    results = defaultdict(list)
-    now = datetime.fromisoformat(NOW)
-
-    execution.defer_trigger(
-        trigger, "thread_unavailable", now, Source(), db=None, results=results,
-    )
-
-    after = current(trigger.id)
-    assert (after.state, after.reason, after.deferrals) == (
-        "deferred", "thread_unavailable", admission.MAX_DEFERRALS,
-    )
-    delay = (datetime.fromisoformat(after.next_attempt_at) - now).total_seconds()
-    base = admission.DEFERRAL_BASE_SECONDS
-    assert base * (1 - admission.JITTER_RATIO) <= delay <= base * (1 + admission.JITTER_RATIO)
-    assert results["stalled"] == [] and results["skipped"] == ["owner"]
-
-
-@pytest.mark.parametrize("reason", ["global_in_flight", "scope_cost_ceiling", "scope_fairness"])
-def test_a_capacity_deferral_at_the_budget_still_stalls(continuation_db, reason):
-    trigger = seeded_trigger(exhausted=True)
-    results = defaultdict(list)
-
-    execution.defer_trigger(
-        trigger, reason, datetime.fromisoformat(NOW), Source(), db=None, results=results,
-    )
-
-    assert current(trigger.id).state == "stalled"
-    assert results["stalled"] == ["owner"]
-
-
-def test_a_capacity_deferral_keeps_its_exponential_backoff_and_count(continuation_db):
-    trigger = seeded_trigger()
-    now = datetime.fromisoformat(NOW)
-
-    execution.defer_trigger(
-        trigger, "global_in_flight", now, Source(), db=None, results=defaultdict(list),
-    )
-
-    after = current(trigger.id)
-    assert (after.state, after.deferrals) == ("deferred", 1)
-    assert after.next_attempt_at == admission.deferred_until(trigger.id, 1, now).isoformat()
-
-
 @pytest.mark.asyncio
-async def test_a_trigger_outlasts_a_busy_owner_and_is_delivered_once_it_is_idle(continuation_db):
-    """#505: an owner busy for more sweeps than the budget still gets its wake."""
+async def test_a_trigger_reaches_a_busy_owner_in_the_sweep_it_falls_due(continuation_db):
+    # A running Turn never holds a wake back: delivery queues it for the Turn's boundary.
+    with database.write_transaction(None, scope="continuation_test_busy") as db:
+        db.execute(
+            "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch) "
+            "VALUES ('turn-1','owner',0,'native/model','running','2000-01-01T00:00:00','boot-1')",
+        )
     delivered = []
 
     async def deliver(thread, event, summary, details):
         delivered.append(thread)
         return True
 
-    start = datetime.fromisoformat(NOW)
-    busy_sweeps = admission.MAX_DEFERRALS * 3
-    for index in range(busy_sweeps):
-        result = await runner.sweep(
-            (start + timedelta(minutes=5 * index)).isoformat(), sources=[Source()],
-            is_idle=lambda _thread: False, deliver=deliver,
-        )
-        assert result["stalled"] == []
-    [row] = [current(trigger_id) for trigger_id in _trigger_ids(continuation_db)]
-    assert (row.state, row.deferrals, delivered) == ("deferred", 0, [])
-
-    result = await runner.sweep(
-        (start + timedelta(minutes=5 * busy_sweeps)).isoformat(), sources=[Source()],
-        is_idle=lambda _thread: True, deliver=deliver,
-    )
+    result = await runner.sweep(NOW, sources=[Source()], deliver=deliver)
 
     assert result["woken"] == ["owner"] and delivered == ["owner"]
-    assert current(row.id).state == "delivered"
+    [row] = [current(trigger_id) for trigger_id in _trigger_ids(continuation_db)]
+    assert (row.state, row.deferrals) == ("delivered", 0)
 
 
 def current(trigger_id):

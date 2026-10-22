@@ -1,14 +1,12 @@
 """Entry-level FTS reads over the checkpoint entry index.
 
 Ranking runs on the lean index rows; the large frozen snapshots are joined and
-decoded only for the bounded result. ``checkpoint_search`` and the node-start
-lookup both read through here.
+decoded only for the bounded result. ``checkpoint_search`` reads through here.
 """
 
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable
 
 from loguru import logger as log
 
@@ -52,9 +50,9 @@ def entry_rank_rows_matching(
 ) -> list[dict]:
     """Return the ranked, bounded entry rows with no checkpoint columns.
 
-    Everything ranking and ``select`` need lives on the lean index and
-    continuity rows; :func:`hydrate_entry_rows` adds the checkpoint pointers and
-    the large frozen snapshots for whichever rows survive.
+    Everything ranking needs lives on the lean index and continuity rows;
+    :func:`hydrate_entry_rows` adds the checkpoint pointers and the large
+    frozen snapshots for the bounded result.
     """
     params: list[object] = [match]
     scope = scope_clause(thread_id, params)
@@ -216,29 +214,3 @@ def entry_hits(rows: list[dict]) -> list[tuple[float, int, dict]]:
             build_entry_hit(row, entry, canonical, pointers),
         ))
     return hits
-
-
-def entry_hits_matching(
-    db: sqlite3.Connection,
-    match: str,
-    *,
-    user_id: str,
-    candidate_limit: int,
-    per_thread: int,
-    select: Callable[[list[dict]], list[dict]] = lambda rows: rows,
-) -> list[tuple[float, int, dict]]:
-    """Return owned entry hits for a caller-built FTS5 expression, best first.
-
-    The node-start lookup builds an any-term expression rather than this
-    module's every-term one, and reads entries only: narrative relevance comes
-    from a different index and does not rank against entry relevance.
-    ``select`` narrows the rows (each carries ``search_text``) before any
-    frozen snapshot is decoded, which is where the time goes.
-    """
-    # Signal that proves this: re-running
-    # shared/context-memory/metrics/node_recall_scan_cost.py on production
-    # (owner runs it), target whole-lookup p95 under 100 ms (#2908). Only the
-    # rows ``select`` keeps are hydrated with checkpoint snapshots.
-    return entry_hits(hydrate_entry_rows(db, select(entry_rank_rows_matching(
-        db, match, user_id, None, candidate_limit, per_thread
-    ))))

@@ -134,30 +134,6 @@ def test_rows_match_the_reference_query(corpus, match, per_thread, limit):
         ) == _reference_rows(corpus, match, OWNER_USER, thread_id, limit, per_thread)
 
 
-def test_node_start_selection_returns_the_reference_hits_in_order(corpus):
-    from memory.checkpoint_entry_rows import entry_hits, entry_hits_matching
-
-    def select(rows):
-        return sorted(rows, key=lambda row: row["entry_id"], reverse=True)[:4]
-
-    match = '"cache"* OR "index"*'
-    new = entry_hits_matching(
-        corpus, match, user_id=OWNER_USER, candidate_limit=100, per_thread=3,
-        select=select,
-    )
-    old = entry_hits(select(_reference_rows(corpus, match, OWNER_USER, None, 100, 3)))
-
-    assert new == old and len(new) == 4
-    revised = entry_hits_matching(
-        corpus, '"eviction"*', user_id=OWNER_USER, candidate_limit=100,
-        per_thread=3,
-    )
-    assert any(
-        hit["first_checkpoint"]["checkpoint_id"] != hit["latest_checkpoint"]["checkpoint_id"]
-        for _relevance, _order, hit in revised
-    )
-
-
 def test_search_tool_returns_the_reference_hits(corpus, monkeypatch):
     import memory.checkpoint_search as search
 

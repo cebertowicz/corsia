@@ -7,7 +7,7 @@ import sqlite3
 import pytest
 
 from automation import schedules
-from automation.continuation import admission, runner, triggers
+from automation.continuation import runner, triggers
 from automation.continuation.sources.schedules import ScheduleSource
 from infra.database import write_transaction
 from infra.schema import SCHEMA_SQL
@@ -48,7 +48,6 @@ async def test_cadence_enters_shared_runner_and_exhausts_at_max_runs():
     result = await runner.sweep(
         "2026-01-01T00:01:00+00:00",
         db=db,
-        is_idle=lambda _thread_id: True,
         deliver=_delivered,
     )
 
@@ -149,7 +148,7 @@ async def test_failed_schedule_delivery_advances_occurrence_once(
 
     result = await runner.sweep(
         "2026-01-01T00:01:00+00:00",
-        db=db, is_idle=lambda _thread_id: True, deliver=lambda *_args: False,
+        db=db, deliver=lambda *_args: False,
     )
 
     row = db.execute(
@@ -161,68 +160,13 @@ async def test_failed_schedule_delivery_advances_occurrence_once(
 
     repeated = await runner.sweep(
         "2026-01-01T00:01:00+00:00",
-        db=db, is_idle=lambda _thread_id: True, deliver=lambda *_args: False,
+        db=db, deliver=lambda *_args: False,
     )
     assert repeated["errored"] == []
     assert db.execute(
         "SELECT COUNT(*) FROM continuation_triggers WHERE subject_id=?",
         (schedule.id,),
     ).fetchone()[0] == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("kind", "spec", "max_runs", "expected"),
-    [
-        (
-            "clock",
-            "2026-01-01T00:01:00+00:00",
-            1,
-            {
-                "state": "exhausted",
-                "runs": 1,
-                "next_run_at": "2026-01-01T00:01:00+00:00",
-            },
-        ),
-        (
-            "cadence",
-            "60",
-            2,
-            {
-                "state": "active",
-                "runs": 1,
-                "next_run_at": "2026-01-01T00:02:00+00:00",
-            },
-        ),
-    ],
-)
-async def test_stalled_schedule_occurrence_advances_like_a_failed_one(
-    kind, spec, max_runs, expected, monkeypatch,
-):
-    # Stall through a capacity limit: a busy owner never stalls an occurrence.
-    monkeypatch.setattr(admission, "MAX_GLOBAL_INFLIGHT", 0)
-    db = _db()
-    schedule = schedules.create(
-        "thread", "__workspace__", "thread", kind=kind, spec=spec,
-        max_runs=max_runs, now="2026-01-01T00:00:00+00:00", db=db,
-    )
-
-    # A capacity limit defers the occurrence until its deferral budget runs out;
-    # sweeps a day apart outlast every deferral backoff.
-    stalled = []
-    for day in range(1, admission.MAX_DEFERRALS + 2):
-        result = await runner.sweep(
-            f"2026-01-{day:02d}T00:01:00+00:00",
-            db=db, is_idle=lambda _thread_id: True, deliver=_delivered,
-        )
-        stalled += result["stalled"]
-
-    row = db.execute(
-        "SELECT state,runs,next_run_at FROM automation_schedules WHERE id=?",
-        (schedule.id,),
-    ).fetchone()
-    assert stalled == ["thread"]
-    assert dict(row) == expected
 
 
 @pytest.mark.parametrize("outcome", ["stalled", "cancelled", "suppressed"])

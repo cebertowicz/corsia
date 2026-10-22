@@ -300,6 +300,9 @@ def test_cc_projects_arguments_only_for_checkpoint_tail(monkeypatch, mode) -> No
     from subagents import cc_destination
 
     captured = {}
+    from subagents.cc_invocation import UNCONFINED
+
+    monkeypatch.setattr(cc_destination, "launch_confinement", lambda *_a: UNCONFINED)
     monkeypatch.setattr(cc_destination, "registered_cwd_or_default", lambda *_a: "/tmp")
     monkeypatch.setattr(cc_destination, "_main_working_dir", lambda *_a: "/tmp")
     monkeypatch.setattr(cc_destination, "_artifact_cc_session_id", lambda *_a: "cc-1")

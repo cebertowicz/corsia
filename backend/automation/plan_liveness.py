@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 
 PLAN_WAKE_IDLE_SECONDS = 180
 PLAN_WAKE_BACKOFF = 2.0
-PLAN_WAKE_MAX_CYCLES = 3
 
 ARMED = "armed"
 CANCELLED = "cancelled"
@@ -40,8 +39,6 @@ class PlanWake:
     last_open_count: int
     last_signal_hash: str
     last_settled_events: int
-    wakes_in_window: int
-    window_started_at: str | None
     provider_reset_at: str | None
     provider_reset_turn_id: str | None
 
@@ -65,8 +62,6 @@ def row_to_wake(row: dict) -> PlanWake:
         last_open_count=row["last_open_count"],
         last_signal_hash=row["last_signal_hash"],
         last_settled_events=row["last_settled_events"],
-        wakes_in_window=row["wakes_in_window"],
-        window_started_at=row["window_started_at"],
         provider_reset_at=row["provider_reset_at"],
         provider_reset_turn_id=row["provider_reset_turn_id"],
     )
@@ -305,7 +300,6 @@ async def sweep_plan_wakes(
     now_iso: str,
     *,
     db=None,
-    is_idle=None,
     signal_resolver=None,
     deliver=None,
 ) -> dict:
@@ -318,7 +312,6 @@ async def sweep_plan_wakes(
         now_iso,
         db=db,
         sources=[LivenessSource(signal_resolver)],
-        is_idle=is_idle,
         deliver=deliver,
     )
 

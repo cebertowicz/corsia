@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
+
 from automation import plan_liveness_terminal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from loguru import logger
 
 from core.turn_core import BOOT_EPOCH, TurnIdentity
+from infra.failure_reference import REFERENCE
 from infra.database import get_db
 from plans import admission as plan_admission, service
 from tests.event_routing_helpers import mk_session
@@ -56,7 +60,7 @@ async def _deliver_codex_terminal(handler, event: dict, live) -> None:
     ],
 )
 def test_codex_terminal_calls_the_shared_hook_unless_interrupted(
-    isolated_db, event, expected_calls
+    isolated_db, event, expected_calls, caplog,
 ):
     """Success, an errored result and ``turn_failed`` all reach plan liveness,
     the errors with ``outcome='error'`` so a stuck child wakes its delegating
@@ -75,21 +79,36 @@ def test_codex_terminal_calls_the_shared_hook_unless_interrupted(
     _bind_active_turn(live, thread_id)
     completion = MagicMock()
 
-    with patch(
-        "automation.plan_liveness_terminal.on_thread_turn_complete",
-        completion,
-    ):
-        _run(
-            _deliver_codex_terminal(
-                codex_runtime._make_on_event(live, thread_id, MagicMock()),
-                event,
-                live,
+    sink = logger.add(caplog.handler, level="INFO", format="{message}")
+    try:
+        with patch(
+            "automation.plan_liveness_terminal.on_thread_turn_complete",
+            completion,
+        ):
+            _run(
+                _deliver_codex_terminal(
+                    codex_runtime._make_on_event(live, thread_id, MagicMock()),
+                    event,
+                    live,
+                )
             )
-        )
+    finally:
+        logger.remove(sink)
 
     assert completion.call_count == expected_calls
     if expected_calls:
         assert completion.call_args.args == (thread_id,)
+    else:
+        db = get_db()
+        try:
+            assert db.execute(
+                "SELECT COUNT(*) FROM messages WHERE thread_id=? AND "
+                "json_extract(metadata, '$.type') IN (?,?,?,?)",
+                (thread_id, "llm_error", "cc_error", "tool_boundary_violation", "tool_bridge_unavailable"),
+            ).fetchone()[0] == 0
+        finally:
+            db.close()
+        assert not [record for record in caplog.records if "turn_error " in record.getMessage()]
 
 
 def test_codex_turn_failed_carries_the_error_text_to_plan_liveness(isolated_db):
@@ -140,7 +159,7 @@ def test_codex_turn_failed_carries_the_error_text_to_plan_liveness(isolated_db):
         {"kind": "result", "is_error": True, "result": "boom"},
     ],
 )
-def test_codex_error_marker_is_recorded_before_plan_liveness(isolated_db, event):
+def test_codex_error_marker_is_recorded_before_plan_liveness(isolated_db, event, caplog):
     """A plan-side failure must never hide the user-visible failure marker."""
     from codex_runtime_fixtures import _reset_runtime, _run
     from subagents import codex_runtime, codex_runtime_events
@@ -161,19 +180,42 @@ def test_codex_error_marker_is_recorded_before_plan_liveness(isolated_db, event)
         order.append("marker")
         return await real_marker(*args, **kwargs)
 
-    with patch.object(codex_runtime_events, "record_terminal_marker", marker), patch(
-        "automation.plan_liveness_terminal.on_thread_turn_complete",
-        MagicMock(side_effect=lambda *a, **k: order.append("plan")),
-    ):
-        _run(
-            _deliver_codex_terminal(
-                codex_runtime._make_on_event(live, thread_id, MagicMock()),
-                event,
-                live,
+    sink = logger.add(caplog.handler, level="INFO", format="{message}")
+    try:
+        with patch.object(codex_runtime_events, "record_terminal_marker", marker), patch(
+            "automation.plan_liveness_terminal.on_thread_turn_complete",
+            MagicMock(side_effect=lambda *a, **k: order.append("plan")),
+        ):
+            _run(
+                _deliver_codex_terminal(
+                    codex_runtime._make_on_event(live, thread_id, MagicMock()),
+                    event,
+                    live,
+                )
             )
-        )
+    finally:
+        logger.remove(sink)
 
     assert order == ["marker", "plan"]
+    if event["kind"] != "turn_failed":
+        return
+    db = get_db()
+    try:
+        metadata = json.loads(db.execute(
+            "SELECT metadata FROM messages WHERE thread_id=? AND role='system' "
+            "ORDER BY seq DESC LIMIT 1",
+            (thread_id,),
+        ).fetchone()["metadata"])
+    finally:
+        db.close()
+    assert metadata["type"] == "cc_error"
+    assert metadata["turn_id"] == live.corsia_turn.turn_id
+    assert len(metadata["reference"]) == 6 and REFERENCE.fullmatch(metadata["reference"])
+    lines = [record.getMessage() for record in caplog.records if "turn_error " in record.getMessage()]
+    assert lines == [
+        f"turn_error reference={metadata['reference']} turn_id={live.corsia_turn.turn_id} "
+        f"thread={thread_id} kind=cc_error",
+    ]
 
 
 def test_codex_terminal_surfaces_plan_completion_failure(isolated_db):
@@ -311,7 +353,7 @@ async def test_cc_terminal_surfaces_plan_completion_failure(isolated_db):
 )
 @pytest.mark.asyncio
 async def test_native_terminal_calls_the_shared_hook_unless_cancelled(
-    isolated_db, monkeypatch, step_type, payload, expected_calls
+    isolated_db, monkeypatch, step_type, payload, expected_calls, caplog,
 ):
     """F1: a native/local Turn that errors still reaches plan liveness, via
     ``_handle_error``'s own call rather than the turn-complete handler's --
@@ -332,12 +374,66 @@ async def test_native_terminal_calls_the_shared_hook_unless_cancelled(
 
     monkeypatch.setattr(step_module, "run_in_db", immediate)
     completion = MagicMock()
-    with patch("automation.plan_liveness.on_turn_complete", completion):
-        await handler.handle(step_type, payload)
+    sink = logger.add(caplog.handler, level="INFO", format="{message}")
+    try:
+        with patch("automation.plan_liveness.on_turn_complete", completion):
+            await handler.handle(step_type, payload)
+    finally:
+        logger.remove(sink)
 
     assert completion.call_count == expected_calls
     if expected_calls:
         assert completion.call_args.args == (thread_id,)
+    else:
+        db = get_db()
+        try:
+            assert db.execute(
+                "SELECT COUNT(*) FROM messages WHERE thread_id=? AND "
+                "json_extract(metadata, '$.type') IN (?,?,?,?)",
+                (thread_id, "llm_error", "cc_error", "tool_boundary_violation", "tool_bridge_unavailable"),
+            ).fetchone()[0] == 0
+        finally:
+            db.close()
+        assert not [record for record in caplog.records if "turn_error " in record.getMessage()]
+
+
+@pytest.mark.asyncio
+async def test_native_llm_error_frame_matches_history_projection(isolated_db, monkeypatch):
+    from api.thread_paging import finish_display
+    from core import step_handler as step_module
+
+    thread_id = mk_session("native-error-reference-parity")
+    emit = AsyncMock()
+    handler = step_module.StepHandler(
+        thread_id,
+        {"model": "test/model", "model_name": "Test"},
+        emit,
+        f"turn-{thread_id}",
+    )
+    handler.bind_turn_identity(TurnIdentity(f"turn-{thread_id}", 1))
+
+    async def immediate(callable_, *args, **kwargs):
+        return callable_(*args, **kwargs)
+
+    monkeypatch.setattr(step_module, "run_in_db", immediate)
+    await handler.handle("error", {"message": "provider failed"})
+
+    frame = next(call.args[0] for call in emit.await_args_list if call.args[0]["type"] == "error")
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT id, metadata FROM messages WHERE thread_id=? AND role='system' "
+            "ORDER BY seq DESC LIMIT 1",
+            (thread_id,),
+        ).fetchone()
+        history = [{"id": row["id"], "metadata": row["metadata"]}]
+        finish_display(db, thread_id, history, include_tool_results=True)
+    finally:
+        db.close()
+
+    assert frame["turn_id"] == history[0]["metadata"]["turn_id"]
+    assert frame["reference"] == history[0]["metadata"]["reference"]
+    assert frame["next_step"] == history[0]["metadata"]["next_step"]
 
 
 @pytest.mark.asyncio

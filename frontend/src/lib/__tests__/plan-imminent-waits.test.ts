@@ -132,13 +132,21 @@ describe('a wait ending within the hour counts down', () => {
 		expect(waitCountdown(wait('a', 60), NOW)).toBe('ends in 60 min');
 		expect(waitCountdown(wait('a', 0.2), NOW)).toBe('ends in under a minute');
 		expect(waitCountdown(wait('a', 61), NOW)).toBeNull();
-		expect(waitCountdown(wait('a', -5), NOW)).toBeNull();
+		expect(waitCountdown(wait('a', -5), NOW)).toBe('due now');
 		expect(waitCountdown(wait('a', null), NOW)).toBeNull();
 	});
 
 	it('leads the row line, ahead of why the task waits', () => {
 		expect(nodeSubline(wait('a', 12, true), NOW)).toBe('ends in 12 min · Revisit after the review');
 		expect(nodeSubline(wait('a', 300, true), NOW)).toMatch(/^today at .* · Revisit after the review$/);
+	});
+
+	it('says due now once the time has passed, never the past clock time', () => {
+		expect(nodeSubline(wait('a', -1, true), NOW)).toBe('due now · Revisit after the review');
+		const plain = wait('b', -1);
+		plain.execution.causes[0].reason = 'Waiting until 2026-09-25T16:59:00+00:00';
+		plain.status_reason = plain.execution.causes[0].reason;
+		expect(nodeSubline(plain, NOW)).toBe('due now');
 	});
 
 	it('says a plain deadline once: the countdown replaces its own "Waiting until" line', () => {

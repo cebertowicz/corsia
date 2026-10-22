@@ -95,7 +95,7 @@ async def _send(service, row, input_id, **kwargs):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("step", ["broadcast_accepted_input", "on_admitted"])
+@pytest.mark.parametrize("step", ["broadcast_accepted_input", "broadcast_newest_error", "on_admitted"])
 @pytest.mark.parametrize("failure", [_locked, _unavailable])
 async def test_idle_send_still_dispatches_when_projection_step_fails(
     isolated_db, monkeypatch, caplog, step, failure,

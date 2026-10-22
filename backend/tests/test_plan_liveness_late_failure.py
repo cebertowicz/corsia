@@ -93,13 +93,13 @@ def test_late_admission_failure_leaves_the_next_cycle_armed():
         db.close()
 
 
-def test_repeated_late_failures_stop_at_the_cycle_cap():
+def test_repeated_late_failures_never_stop_the_wake():
     db = _db()
     try:
         _actionable(db)
         plan_liveness.on_turn_complete("owner", db=db)
         db.commit()
-        for hours in range(1, plan_liveness.PLAN_WAKE_MAX_CYCLES):
+        for hours in range(1, 7):
             _deliver(db, _later(hours))
             execution.record_failed_accepted_delivery(KEY, db=db, now=_later(hours))
             db.execute(
@@ -110,8 +110,6 @@ def test_repeated_late_failures_stop_at_the_cycle_cap():
 
         last = LivenessSource().due(_later(24), db=db)
 
-        assert [(r.outcome, r.reason) for r in last] == [
-            ("stalled", "cycle_cap_reached"),
-        ]
+        assert [(r.outcome, r.reason) for r in last] == [(None, "progress_unchanged")]
     finally:
         db.close()

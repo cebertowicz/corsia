@@ -13,7 +13,7 @@ from infra.input_render import PreparedBatch
 from infra.input_writes import ProviderWriteEvidence, dispatch_fenced_batch, settle_batch_write
 from infra.plan_dispatch_events import report_terminal_unknown
 from infra.queries import message_transcript_seq
-from infra.send_broadcast import broadcast_claimed_batch
+from infra.send_broadcast import broadcast_claimed_batch, broadcast_newest_error
 from infra.send_types import InboxQueuedInput, InputReceipt, SendResult
 from infra.thread_input_types import ClaimedBatch, batch_option
 from infra.time import utc_now_iso
@@ -390,6 +390,10 @@ async def drive_terminal_settlement(settlement) -> None:
         await drive_pending_model_switch(settlement.thread_id)
     if settlement.successor is not None:
         await drive_turn_admission(settlement.successor)
+    elif settlement.probe_outcome in ("error", "limited") and settlement.thread_id:
+        # The live error frame was sent while the Turn still ran ('failed');
+        # an input left queued behind it now makes it 'held'.
+        await broadcast_newest_error(settlement.thread_id)
     for thread_id in settlement.wake_thread_ids:
         await drive_thread(thread_id)
     await drive_failed_wake_owners(settlement.failed_message_ids)

@@ -244,6 +244,7 @@ def integration_client(integration_workspace):
     import app_lifecycle
     import app_startup_runtime
     import automation.plan_liveness as plan_liveness
+    import connections
     import llm.network_discovery as network_discovery
     import ws.presence_control as presence_control
     import infra.bulletin_live as bulletin_live
@@ -282,6 +283,12 @@ def integration_client(integration_workspace):
             app_lifecycle,
             "_startup_harness_discovery",
             _skip_external_harness_discovery,
+        ))
+        # Startup's init_db would re-seed the session database's CLI rows from
+        # whatever this host has installed, undoing the deterministic rows
+        # ``_init_isolated_db_schema`` seeded (#2975).
+        suspended.enter_context(patch.object(
+            connections, "seed_builtin_connections", lambda **_kwargs: 0,
         ))
         for module, loop_name in _BACKGROUND_LOOPS:
             suspended.enter_context(

@@ -65,12 +65,12 @@ describe('Activity waiting rows', () => {
 		expect(host.querySelector('.state-word')).toBeNull();
 	});
 
-	it('a set-aside row whose time has passed reads back now', () => {
+	it('a set-aside row whose time has passed reads due now', () => {
 		threadPlanStates.set({ t3: entry({ state: 'idle', set_aside_until: at(-5) }) });
 		render('t3');
 
-		expect(host.querySelector('.owner-copy')?.textContent).toContain('Back now');
-		expect(host.textContent).not.toMatch(/overdue|stalled|due back/i);
+		expect(host.querySelector('.owner-copy')?.textContent).toContain('Due now');
+		expect(host.textContent).not.toMatch(/overdue|stalled|back now/i);
 	});
 
 	it('the wait link is a sibling of the row toggle; the toggle keeps its name and comes first in focus order', () => {

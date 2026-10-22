@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from infra.failure_reference import REFERENCE
+from loguru import logger
 from subagents import codex_runtime_state, codex_runtime_terminal
 
 from codex_runtime_fixtures import (
@@ -1639,7 +1641,7 @@ class TestFailedTurnContextUsage:
                 from core.turn_core import TurnTerminalResult
 
                 return TurnTerminalResult.APPLIED
-            if fn.__name__ == "insert_message":
+            if fn.__name__ == "insert_terminal_marker":
                 return fn(*_args, **_kwargs)
             return "failure-message"
 
@@ -1696,7 +1698,7 @@ class TestFailedTurnContextUsage:
             return TerminalSettlement(result, None)
 
         async def fake_run_in_db(fn, *_args, **_kwargs):
-            if fn.__name__ == "insert_message":
+            if fn.__name__ == "insert_terminal_marker":
                 raise RuntimeError("marker failed")
             return "unused"
 
@@ -1736,7 +1738,7 @@ class TestFailedTurnContextUsage:
         from subagents import codex_runtime
 
         async def fake_run_in_db(fn, *_args, **_kwargs):
-            assert fn.__name__ == "insert_message"
+            assert fn.__name__ == "insert_terminal_marker"
             return fn(*_args, **_kwargs)
 
         def failed_announcement(_thread_id, _payload):
@@ -1762,7 +1764,7 @@ class TestFailedTurnContextUsage:
         announced: dict = {}
 
         async def fake_run_in_db(fn, *_args, **kwargs):
-            assert fn.__name__ == "insert_message"
+            assert fn.__name__ == "insert_terminal_marker"
             persisted.update(kwargs)
             return fn(*_args, **kwargs)
 
@@ -1811,7 +1813,7 @@ class TestFailedTurnContextUsage:
             return TerminalSettlement(TurnTerminalResult.APPLIED, None)
 
         async def fake_run_in_db(fn, *args, **kwargs):
-            if fn.__name__ == "insert_message":
+            if fn.__name__ == "insert_terminal_marker":
                 persisted_markers.append((args, kwargs))
                 return fn(*args, **kwargs)
             return "unused"
@@ -2417,3 +2419,63 @@ class TestSurfaceExitError:
         payload = bcast.call_args.args[1]
         assert payload["turn_id"] == "turn-fail"
         assert payload["turn_order"] == 3
+
+
+def test_provider_tool_violation_stores_reference_and_logs_once(main_db, caplog):
+    from subagents import codex_runtime_events
+
+    main_db.execute(
+        "INSERT INTO threads (id,user_id,created_at,updated_at) VALUES ('thread-1','u','t','t')",
+    )
+    main_db.commit()
+    live = SimpleNamespace(
+        corsia_turn=SimpleNamespace(turn_id="turn-1"),
+        provider_context_untrusted=False,
+        tool_boundary_violation_recorded=False,
+        tool_boundary_marker_id=None,
+    )
+    context = SimpleNamespace(thread_id="thread-1", live=live, bcast=MagicMock())
+    sink = logger.add(caplog.handler, level="INFO", format="{message}")
+    try:
+        with (
+            patch.object(codex_runtime_events, "_is_current_provider_event", return_value=True),
+            pytest.raises(RuntimeError, match="capability boundary violated"),
+        ):
+            _run(codex_runtime_events._on_provider_tool_violation(context, {"id": "tool-1"}))
+    finally:
+        logger.remove(sink)
+
+    stored = json.loads(main_db.execute(
+        "SELECT metadata FROM messages WHERE thread_id='thread-1'",
+    ).fetchone()["metadata"])
+    assert stored["type"] == "tool_boundary_violation"
+    assert stored["turn_id"] == "turn-1"
+    assert len(stored["reference"]) == 6 and REFERENCE.fullmatch(stored["reference"])
+    lines = [record.getMessage() for record in caplog.records if "turn_error " in record.getMessage()]
+    assert lines == [
+        f"turn_error reference={stored['reference']} turn_id=turn-1 thread=thread-1 kind=tool_boundary_violation",
+    ]
+
+
+def test_provider_tool_violation_propagates_marker_write_failure():
+    from subagents import codex_runtime_events
+
+    live = SimpleNamespace(
+        corsia_turn=SimpleNamespace(turn_id="turn-1"),
+        provider_context_untrusted=False,
+        tool_boundary_violation_recorded=False,
+        tool_boundary_marker_id=None,
+    )
+    context = SimpleNamespace(thread_id="thread-1", live=live, bcast=MagicMock())
+
+    async def failed_write(*_args, **_kwargs):
+        raise RuntimeError("marker write failed")
+
+    with (
+        patch.object(codex_runtime_events, "_is_current_provider_event", return_value=True),
+        patch("subagents.terminal_marker_writer.run_in_db", failed_write),
+        pytest.raises(RuntimeError, match="marker write failed"),
+    ):
+        _run(codex_runtime_events._on_provider_tool_violation(context, {"id": "tool-1"}))
+
+    context.bcast.assert_not_called()

@@ -206,7 +206,7 @@ readonly DMG="$DMG_DIR/CORSIA-unsigned-aarch64.dmg"
 [ -d "$APP" ] || fail "Tauri did not produce $APP"
 # scripts/corsia.d/app_mode.sh runs Contents/MacOS/CORSIA to stage, swap and roll back an update.
 [ -x "$APP/Contents/MacOS/CORSIA" ] || fail "$APP has no Contents/MacOS/CORSIA, so Update could never run"
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $macos_short_version" "$APP/Contents/Info.plist"
+"$ROOT/desktop/scripts/stamp-bundle-version.sh" "$APP/Contents/Info.plist" "$macos_short_version" "$app_version"
 # SMAppService discovers this static, signed definition inside the app bundle.
 # It intentionally contains no per-user environment; the launcher reads the
 # service record and constructs its identity itself at every launch.

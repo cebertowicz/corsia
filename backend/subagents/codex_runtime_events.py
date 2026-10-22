@@ -37,6 +37,7 @@ from subagents.codex_runtime_terminal import (
     settle_failed_turn_usage as _settle_failed_turn_usage,
 )
 from subagents.codex_usage_calls import on_call_usage as _on_call_usage
+from subagents import terminal_marker_writer
 
 log = logging.getLogger(__name__)
 
@@ -486,21 +487,13 @@ async def record_terminal_marker(
     try:
         if db is None:
             marker_id = await run_in_db(
-                insert_message,
-                thread_id,
-                "system",
-                content,
-                metadata,
+                terminal_marker_writer.insert_terminal_marker,
+                insert_message, thread_id, content, metadata,
                 **insert_kwargs,
             )
         else:
-            marker_id = insert_message(
-                thread_id,
-                "system",
-                content,
-                metadata,
-                db=db,
-                **insert_kwargs,
+            marker_id = terminal_marker_writer.insert_terminal_marker(
+                insert_message, thread_id, content, metadata, db=db, **insert_kwargs,
             )
     except Exception as exc:
         log.error("codex_runtime: %s marker failed for %s: %s", label, thread_id, exc)
@@ -604,7 +597,10 @@ async def _on_turn_failed(ctx, ev: dict) -> None:
 
             mark_provider_context_untrusted(ctx.thread_id)
             ctx.thread_registry.pop(ctx.thread_id, None)
-        meta_f = codex_failure_meta(cause, msg, reset_at, ctx.live.model, unrecorded)
+        meta_f = {
+            **codex_failure_meta(cause, msg, reset_at, ctx.live.model, unrecorded),
+            "turn_id": identity.turn_id,
+        }
         marker_id = await record_terminal_marker(
             ctx.thread_id,
             content=f"⚠️ {msg}",
@@ -637,40 +633,9 @@ async def _on_turn_failed(ctx, ev: dict) -> None:
 
 
 async def _on_provider_tool_violation(ctx, ev: dict) -> None:
-    tool_type = ev.get("tool_type") or "provider-native-tool"
-    phase = ev.get("phase") or "observed"
-    if not _is_current_provider_event(ctx, 
-        ev,
-        label=f"provider-native action ({phase})",
-    ):
-        return
-    ctx.live.provider_context_untrusted = True
-    meta_f = {
-        "codex": True,
-        "type": "tool_boundary_violation",
-        "event_type": "harness.tool_boundary_violation",
-        "harness": "codex",
-        "provider": ev.get("provider") or "codex",
-        "tool_type": tool_type,
-        "phase": phase,
-        "provider_tool_id": ev.get("id"),
-        "repair_owner": "execution-dispatch",
-    }
-    text = (
-        f"Codex attempted provider-native {tool_type} ({phase}). "
-        "CORSIA tools must run through the CORSIA tool bridge. Host "
-        "access cannot authorize provider-native tools; retry through "
-        "the corresponding CORSIA tool."
+    await terminal_marker_writer.record_provider_tool_violation(
+        ctx, ev, _is_current_provider_event,
     )
-    if not ctx.live.tool_boundary_violation_recorded:
-        ctx.live.tool_boundary_violation_recorded = True
-        mid = await run_in_db(
-            insert_message, ctx.thread_id, "system", text, meta_f,
-            msg_id=str(uuid.uuid4()),
-        )
-        ctx.live.tool_boundary_marker_id = mid
-        await broadcast_message_rows(ctx.thread_id, (mid,), broadcast=ctx.bcast)
-    raise RuntimeError("Codex capability boundary violated")
 
 
 async def _on_model_reported(ctx, ev: dict) -> None:
