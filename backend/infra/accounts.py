@@ -157,9 +157,12 @@ def _create_account(
             from infra.corsia_agent import ensure_corsia_agent
 
             conductor_id = ensure_corsia_agent(name, model=None, db=conn)
-            from infra.setup_progress import start_after_account
+            from infra.setup_progress import release_marker_if_finished, start_after_account
 
             start_after_account(first_run_path, db=conn)
+            # An account made outside the app (`corsia user add`) leaves no setup to finish, so the shell's wipe
+            # marker goes now; a marker that will not go refuses the account, since the next launch would wipe it.
+            release_marker_if_finished(db=conn)
             if not data_owners_without_accounts(conn):
                 from infra import config
                 from registry.shared_ownership_assignment import enforce_scaffold_ownership

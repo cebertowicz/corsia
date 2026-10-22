@@ -74,9 +74,91 @@ def test_a_profile_the_person_already_had_is_not_recorded(app):
     assert _marker(app)["files"] == {}
 
 
-def test_a_script_made_account_records_nothing(app):
+def test_a_script_made_first_account_leaves_no_marker_so_a_relaunch_keeps_everything(app):
     _first_account("script")
-    assert _marker(app)["files"] == {}
+    assert not (app / setup_marker.MARKER_FILE).exists(), "setup is finished the moment the CLI makes the account"
+    assert setup_progress.view()["setup_completed"]
+
+
+def test_the_command_line_first_account_removes_the_marker_too(app):
+    accounts.create_first_account("pat", PASSWORD)  # what `corsia user add` calls: no profile, the script path
+    assert not (app / setup_marker.MARKER_FILE).exists()
+
+
+def test_an_account_made_outside_the_app_is_refused_when_its_marker_will_not_go(app):
+    app.chmod(0o500)
+    try:
+        with pytest.raises(OSError):
+            accounts.create_first_account("pat", PASSWORD)
+    finally:
+        app.chmod(0o700)
+    assert not get_db().execute("SELECT 1 FROM users").fetchone()
+    assert (app / setup_marker.MARKER_FILE).exists(), "the install is still unfinished, and still marked"
+
+
+def test_startup_removes_the_marker_of_an_install_that_already_reads_finished(app):
+    _first_account("script")
+    marker = {"state_dir": str(config.STATE_ROOT), "workspace": str(app.parent / "default"), "files": {}}
+    (app / setup_marker.MARKER_FILE).write_text(json.dumps(marker), encoding="utf-8")
+    setup_progress.release_marker_if_finished()
+    assert not (app / setup_marker.MARKER_FILE).exists()
+
+
+def test_startup_leaves_the_marker_while_setup_is_unfinished_or_has_no_account_yet(app):
+    setup_progress.release_marker_if_finished()
+    assert (app / setup_marker.MARKER_FILE).exists(), "no account yet: the first run is still being set up"
+    _first_account("app")
+    setup_progress.release_marker_if_finished()
+    assert (app / setup_marker.MARKER_FILE).exists(), "an account at a step: setup is unfinished"
+    assert not setup_progress.view()["setup_completed"]
+
+
+def test_the_backend_startup_releases_a_finished_installs_marker():
+    import inspect
+
+    import app_lifecycle
+
+    assert "release_marker_at_startup" in inspect.getsource(app_lifecycle._initialize_startup)
+
+
+def test_a_marker_that_will_not_go_at_startup_is_logged_and_never_stops_the_backend(app):
+    _first_account("script")
+    marker = {"state_dir": str(config.STATE_ROOT), "workspace": str(app.parent / "default"), "files": {}}
+    (app / setup_marker.MARKER_FILE).write_text(json.dumps(marker), encoding="utf-8")
+    logged = []
+
+    class Logger:
+        def exception(self, message):
+            logged.append(message)
+
+    app.chmod(0o500)
+    try:
+        setup_progress.release_marker_at_startup(Logger())
+    finally:
+        app.chmod(0o700)
+    assert len(logged) == 1
+    assert (app / setup_marker.MARKER_FILE).exists()
+
+
+def test_a_wiped_install_has_no_step_to_resume(app):
+    """After a wipe the database is new: no account and no record, so setup opens at screen 1, not as a resume."""
+    assert setup_progress.read() is None
+    assert setup_progress.view()["step"] is None
+    assert not get_db().execute("SELECT 1 FROM users").fetchone()
+
+
+def test_the_shells_kept_downloads_are_the_backends_model_store_assets_and_logs(app):
+    from core.corrections_asset_files import asset_root
+    from llm.managed_omlx_binary import managed_omlx_paths
+
+    kept = [
+        str(managed_omlx_paths().model_dir.relative_to(config.STATE_ROOT)),
+        asset_root().relative_to(config.STATE_ROOT).parts[0],
+        config.LOGS_DIR.name,
+    ]
+    shell = (REPO / "desktop" / "src-tauri" / "src" / "unfinished_setup.rs").read_text(encoding="utf-8")
+    declared = shell.split("pub const KEPT: [&str; 3] = [", 1)[1].split("];", 1)[0]
+    assert [part.strip().strip('"') for part in declared.split(",")] == kept
 
 
 def test_an_install_without_a_marker_is_left_alone(app):

@@ -354,14 +354,18 @@ fn unregister_service() -> Result<(), String> {
 /// An unfinished first-run setup leaves nothing: before anything is planned or started, a marker the first run
 /// left (and the backend deletes when setup finishes) makes this launch wipe the state folder and what setup
 /// created, so first run begins again at step 1. Without a marker, or with one that cannot be trusted, nothing
-/// is touched. Starting over never stops a launch: whatever fails, the marker is dropped and the install
-/// resumes where it stopped, so the worst case is the old behavior, never a dead end.
+/// is touched. Starting over never stops a launch, and it is all or nothing for the old install: a wipe that
+/// fails deletes nothing, so the marker is dropped and the install resumes where it stopped (the old behavior);
+/// one that gets past its first step has removed the old install, so the launch plans a clean first run.
 ///
 /// Returns the work folder that setup made, so planning the new first run reuses it.
 fn start_over_if_unfinished(app_dir: &Path, may_wipe: bool) -> Option<PathBuf> {
     match unfinished_setup::at_launch(app_dir) {
         unfinished_setup::Launch::Nothing => None,
-        unfinished_setup::Launch::Replan(workspace) => Some(workspace),
+        unfinished_setup::Launch::Replan(workspace) => {
+            unfinished_setup::finish_leftovers(app_dir);
+            Some(workspace)
+        }
         unfinished_setup::Launch::Damaged(reason) => {
             // Nothing can trust it, so it only gets in the way: this install is simply not marked.
             log::error!("a damaged unfinished-setup marker was removed: {reason}");

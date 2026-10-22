@@ -10,7 +10,8 @@ An install with no record, or one made by ``corsia user add``, has no setup to
 resume: with an account present it counts as completed. Only a record that
 reached a step and was never completed reopens setup. An install the shell marked
 at its first run (``infra.setup_marker``) never gets that far: its unfinished setup is wiped
-on the next launch, and finishing removes the marker first.
+on the next launch. That marker exists only while this record reads unfinished, so every path that makes it
+read finished removes the marker first (``release_marker_if_finished``).
 """
 
 from __future__ import annotations
@@ -52,6 +53,28 @@ def view(*, db: sqlite3.Connection | None = None) -> dict:
         "local_ai": local_ai if isinstance(local_ai, bool) else None,
         "picks": {key: picks.get(key) is True for key in PICKS} if isinstance(picks, dict) else None,
     }
+
+
+def release_marker_if_finished(*, db: sqlite3.Connection | None = None) -> None:
+    """Delete the shell's wipe marker once this install has an account and ``view()`` reads it as finished.
+
+    The marker exists only while setup is unfinished, and ``view()`` is the one answer to that. Every way an install
+    can come to read finished calls this: the first account made outside the app (``corsia user add``), backend
+    startup, and ``update(completed=True)``. Before an account exists the marker stays: the first run is still
+    being set up. Raises ``OSError`` if the marker cannot be deleted.
+    """
+    from infra import accounts
+
+    if setup_marker.marker_path().exists() and accounts.has_users(db) and view(db=db)["setup_completed"]:
+        setup_marker.remove()
+
+
+def release_marker_at_startup(startup_logger) -> None:
+    """``release_marker_if_finished`` for backend startup, which a marker that will not go never stops."""
+    try:
+        release_marker_if_finished()
+    except OSError:
+        startup_logger.exception("The unfinished-setup marker of a finished install could not be removed")
 
 
 def start_after_account(first_run_path: str | None, *, db: sqlite3.Connection) -> None:

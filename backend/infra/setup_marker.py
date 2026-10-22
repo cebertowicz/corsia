@@ -2,15 +2,18 @@
 
 The desktop shell writes ``setup-unfinished`` in the app folder (the state root's parent) only when its first
 run makes a brand-new state root (``desktop/src-tauri/src/unfinished_setup.rs``). While the file exists, the
-next launch removes that state root and everything the marker lists, so an unfinished setup starts again at
-step 1 as a fresh install.
+next launch moves that state root aside and deletes it, keeping the downloads in it (the model store, classifier
+assets and logs), and removes everything the marker lists, so an unfinished setup starts again at step 1 as a
+fresh install.
 
 The backend has two jobs, both on that one file:
 
 * when the app's setup creates a file in the work folder, it records the path and digest there, so the shell
   removes it only while its bytes still match;
-* when the person finishes setup it removes the file *before* the completion is committed, so a finished
-  install can never be wiped. If the file cannot be removed, finishing fails and setup stays unfinished.
+* it removes the file whenever the install comes to read as finished (``setup_progress.view()``, the one
+  answer to that), and *before* the change is committed: when the person finishes setup, when the first
+  account is made outside the app (``corsia user add``), and at backend startup. So a finished install can
+  never be wiped. If the file cannot be removed, finishing fails and setup stays unfinished.
 
 Only a marker naming this backend's own state root is touched. Any other install, or one the shell never marked,
 has no marker and every function here does nothing.

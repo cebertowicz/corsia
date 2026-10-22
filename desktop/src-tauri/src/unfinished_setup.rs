@@ -5,13 +5,16 @@
 // each work-folder file its setup creates (path and SHA-256) and deletes the marker before it commits the
 // finished setup (`backend/infra/setup_marker.py`), so a finished install has no marker.
 //
-// While the marker exists, the next launch, before it starts the service, removes the recorded files whose
-// bytes still match, the state folder and `service.json`, then plans a first run again in the folder the first
-// run made. When the wipe finishes the marker is rewritten as `wiped`, which keeps that folder trusted on disk
-// until the new first run is applied and `mark` replaces it, so a launch that fails in between still plans the
-// first run there. An install the shell did not mark (adopted, existing, scripted, or already finished) is never
-// touched. A wipe that fails never stops the launch: the caller drops the marker and the install resumes where it
-// stopped. A marker the shell cannot trust is left alone.
+// While the marker exists, the next launch, before it starts the service, moves the state folder aside in one
+// rename, keeps the downloads in it (`KEPT`), deletes the rest, removes `service.json` and the recorded files
+// whose bytes still match, then plans a first run again in the folder the first run made. When the wipe
+// finishes the marker is rewritten as `wiped`, which keeps that folder trusted on disk until the new first run
+// is applied and `mark` replaces it, so a launch that fails in between still plans the first run there. An
+// install the shell did not mark (adopted, existing, scripted, or already finished) is never touched. If the
+// rename fails nothing was deleted: the caller drops the marker and the old install resumes whole. Once it
+// succeeds the old install is gone and the launch goes on as a clean first run; a recorded file that will not
+// go stays in the marker and is retried at the next launch (`finish_leftovers`). A marker the shell cannot
+// trust is left alone.
 //
 // Two writers share the file: the shell owns `state_dir` and `workspace`, the backend owns `files_root` and
 // `files` (see `backend/infra/setup_marker.py`).
@@ -101,11 +104,7 @@ pub fn mark(app_dir: &Path, workspace: &Path) -> Result<bool, String> {
     if exists(&state_dir)? {
         let metadata = fs::symlink_metadata(&state_dir)
             .map_err(|error| format!("could not check {}: {error}", state_dir.display()))?;
-        let empty = metadata.is_dir()
-            && fs::read_dir(&state_dir)
-                .map_err(|error| format!("could not read {}: {error}", state_dir.display()))?
-                .next()
-                .is_none();
+        let empty = metadata.is_dir() && holds_only_downloads(&state_dir, &state_dir);
         if !empty {
             return Ok(false);
         }
@@ -197,7 +196,7 @@ pub fn at_launch(app_dir: &Path) -> Launch {
 fn nothing_to_wipe(app_dir: &Path, marker: &Marker) -> bool {
     let state_dir = state_dir_in(app_dir);
     let state_is_empty = match fs::read_dir(&state_dir) {
-        Ok(mut entries) => entries.next().is_none(),
+        Ok(_) => holds_only_downloads(&state_dir, &state_dir),
         Err(error) => error.kind() == ErrorKind::NotFound,
     };
     marker.files.is_empty() && state_is_empty && !matches!(exists(&app_dir.join(SERVICE_FILE)), Ok(true) | Err(_))
@@ -248,60 +247,134 @@ fn remove_empty_parents(file: &Path, workspace: &Path) {
 
 /// Wipe the unfinished setup `marker` names. The service must not be running.
 ///
-/// The work-folder files go first (a failure stops here with the state folder untouched), then the state folder
-/// in one rename, so it is never left half deleted, then `service.json`, and last the marker is rewritten as
-/// wiped (`Launch::Replan`). A failure at any step is the caller's to turn into a resume: nothing here may leave a
-/// launch that cannot proceed. A file the person changed, or one that is no longer a plain file, stays. Errors
-/// are details for the log, not text for the person.
+/// All or nothing for the old install. The state folder is moved aside in one rename before anything else is
+/// touched, so an `Err` means nothing was deleted and the caller resumes the old install whole. Once the rename
+/// has happened the old install is gone and nothing below fails the wipe: the downloads in [`KEPT`] are moved
+/// back into a new state folder and the rest of the old one is deleted, `service.json` goes, and then the
+/// recorded work-folder files whose bytes still match. A file that will not go is written back into the marker
+/// (`wiped`), and the next launch that plans a first run tries again. Errors are details for the log, not text
+/// for the person.
 pub fn wipe(app_dir: &Path, marker: &Marker) -> Result<(), String> {
-    let workspace = marker.files_folder();
-    let mut failures = Vec::new();
-    for (relative, digest) in &marker.files {
-        let Some(path) = removable(workspace, relative) else { continue };
-        match digest_of(&path) {
-            Ok(found) if &found == digest => match remove_if_present(&path) {
-                Ok(()) => remove_empty_parents(&path, workspace),
-                Err(reason) => failures.push(reason),
-            },
-            Ok(_) => {}
-            Err(reason) => failures.push(reason),
-        }
-    }
-    if !failures.is_empty() {
-        return Err(failures.join("; "));
-    }
     let state_dir = state_dir_in(app_dir);
+    // A leftover from an earlier wipe that was cut short: its downloads come back before it is cleared.
+    if exists(&app_dir.join(DISCARDED_STATE))? {
+        settle_discarded(app_dir)?;
+    }
     if exists(&state_dir)? {
         let metadata = fs::symlink_metadata(&state_dir)
             .map_err(|error| format!("could not check {}: {error}", state_dir.display()))?;
         if !metadata.is_dir() {
             return Err(format!("{} is not a plain folder", state_dir.display()));
         }
-        let discarded = app_dir.join(DISCARDED_STATE);
-        // A leftover from an earlier wipe whose delete was cut short.
-        let _ = fs::remove_dir_all(&discarded);
-        fs::rename(&state_dir, &discarded)
+        fs::rename(&state_dir, app_dir.join(DISCARDED_STATE))
             .map_err(|error| format!("could not move {} aside: {error}", state_dir.display()))?;
-        if let Err(error) = fs::remove_dir_all(&discarded) {
-            log::warn!("could not finish deleting {}: {error}", discarded.display());
-        }
     }
-    remove_if_present(&app_dir.join(SERVICE_FILE))?;
+    // The old install is gone. Nothing from here may stop the launch.
+    if let Err(error) = settle_discarded(app_dir) {
+        log::warn!("could not finish clearing the old state folder: {error}");
+    }
+    if let Err(error) = remove_if_present(&app_dir.join(SERVICE_FILE)) {
+        log::warn!("{error}");
+    }
+    let stuck = remove_recorded_files(marker.files_folder(), &marker.files);
     // The wipe is done. If this note can't be written, the old marker still describes an install with nothing
     // left, which `at_launch` also plans as a fresh first run.
-    if let Err(error) = write_marker(
-        app_dir,
-        &Marker {
-            state_dir: marker.state_dir.clone(),
-            workspace: marker.workspace.clone(),
-            files_root: None,
-            files: BTreeMap::new(),
-            wiped: true,
-        },
-    ) {
+    if let Err(error) = write_marker(app_dir, &wiped_marker(marker, stuck)) {
         log::warn!("could not note that the wipe finished: {error}");
     }
     Ok(())
+}
+
+/// The marker a finished wipe leaves: the first run is planned in `workspace`, and only files that would not go
+/// are still recorded.
+fn wiped_marker(marker: &Marker, stuck: BTreeMap<String, String>) -> Marker {
+    Marker {
+        state_dir: marker.state_dir.clone(),
+        workspace: marker.workspace.clone(),
+        files_root: (!stuck.is_empty()).then(|| marker.files_folder().to_string_lossy().into_owned()),
+        files: stuck,
+        wiped: true,
+    }
+}
+
+/// Remove the recorded files whose bytes still match. Returns the ones that would not go, to try again. A file
+/// the person changed, or one that is no longer a plain file, stays and is not retried.
+fn remove_recorded_files(workspace: &Path, files: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let mut stuck = BTreeMap::new();
+    for (relative, digest) in files {
+        let Some(path) = removable(workspace, relative) else { continue };
+        let gone = match digest_of(&path) {
+            Ok(found) if &found == digest => remove_if_present(&path).map(|()| remove_empty_parents(&path, workspace)),
+            Ok(_) => Ok(()),
+            Err(reason) => Err(reason),
+        };
+        if let Err(reason) = gone {
+            log::warn!("{reason}");
+            stuck.insert(relative.clone(), digest.clone());
+        }
+    }
+    stuck
+}
+
+/// Try again to remove the files an earlier wipe could not. A launch that plans a first run again calls it.
+pub fn finish_leftovers(app_dir: &Path) {
+    let Ok(bytes) = fs::read(app_dir.join(MARKER_FILE)) else { return };
+    let Ok(marker) = serde_json::from_slice::<Marker>(&bytes) else { return };
+    if !marker.wiped || marker.files.is_empty() {
+        return;
+    }
+    let stuck = remove_recorded_files(marker.files_folder(), &marker.files);
+    if stuck.len() != marker.files.len() {
+        if let Err(error) = write_marker(app_dir, &wiped_marker(&marker, stuck)) {
+            log::warn!("could not note the files that are gone: {error}");
+        }
+    }
+}
+
+/// Downloads are not setup state, so a wipe keeps them. Relative to the state folder; held equal to the
+/// backend's model store, classifier assets and logs folders by a test.
+pub const KEPT: [&str; 3] = ["managed-omlx/models", "assets", "logs"];
+
+/// Whether a state folder holds nothing but the folders in [`KEPT`] and the folders on the way to them.
+fn holds_only_downloads(dir: &Path, within: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else { return false };
+    entries.flatten().all(|entry| {
+        let path = entry.path();
+        let Ok(relative) = path.strip_prefix(within) else { return false };
+        let relative = relative.to_string_lossy();
+        KEPT.contains(&relative.as_ref())
+            || (KEPT.iter().any(|kept| kept.starts_with(&format!("{relative}/")))
+                && fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_dir())
+                && holds_only_downloads(&path, within))
+    })
+}
+
+/// Move the downloads out of the folder set aside back into the state folder, then delete what is left of it.
+///
+/// Nothing is deleted unless every download that was there has been moved back: one that cannot be restored, or
+/// whose place is already taken, leaves the whole folder aside for the next wipe to settle.
+fn settle_discarded(app_dir: &Path) -> Result<(), String> {
+    let discarded = app_dir.join(DISCARDED_STATE);
+    if !exists(&discarded)? {
+        return Ok(());
+    }
+    let state_dir = state_dir_in(app_dir);
+    for kept in KEPT {
+        let from = discarded.join(kept);
+        if !exists(&from)? {
+            continue;
+        }
+        let to = state_dir.join(kept);
+        if exists(&to)? {
+            return Err(format!("{} is already there, so {} stays aside", to.display(), from.display()));
+        }
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+        }
+        fs::rename(&from, &to).map_err(|error| format!("could not keep {}: {error}", from.display()))?;
+    }
+    fs::remove_dir_all(&discarded).map_err(|error| format!("could not delete {}: {error}", discarded.display()))
 }
 
 #[cfg(test)]
@@ -594,32 +667,109 @@ mod tests {
         assert!(matches!(at_launch(&app_dir), Launch::Untrusted(_)));
     }
 
-    #[test]
-    fn a_file_that_will_not_go_stops_the_wipe_before_the_state_folder_is_touched() {
-        use std::os::unix::fs::PermissionsExt;
-        let home = Home::new("stuck");
-        let (app_dir, workspace) = unfinished(&home);
-        let context = workspace.join("context");
-        fs::set_permissions(&context, fs::Permissions::from_mode(0o500)).unwrap();
-        let result = wipe_it(&app_dir);
-        fs::set_permissions(&context, fs::Permissions::from_mode(0o700)).unwrap();
-        let reason = result.expect_err("a file that cannot be removed is reported");
-        assert!(reason.contains("50-USER-PROFILE.md"), "{reason}");
-        assert!(app_dir.join("state").join("corsia.db").exists(), "nothing else was removed");
-        assert!(app_dir.join(MARKER_FILE).exists());
-        discard_marker(&app_dir).unwrap();
-        assert_eq!(at_launch(&app_dir), Launch::Nothing, "the caller drops the marker and the install resumes");
+    fn downloads(app_dir: &Path) {
+        let state = app_dir.join("state");
+        for (relative, body) in [
+            ("managed-omlx/models/starter/weights.bin", "model"),
+            ("managed-omlx/settings.json", "{}"),
+            ("assets/classifier/asset.bin", "asset"),
+            ("logs/service.log", "log"),
+        ] {
+            let path = state.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, body).unwrap();
+        }
     }
 
     #[test]
-    fn a_state_folder_that_cannot_be_moved_aside_is_left_whole() {
+    fn a_state_folder_that_cannot_be_moved_aside_deletes_nothing() {
         use std::os::unix::fs::PermissionsExt;
         let home = Home::new("stuck-state");
-        let (app_dir, _) = unfinished(&home);
+        let (app_dir, workspace) = unfinished(&home);
+        downloads(&app_dir);
         fs::set_permissions(&app_dir, fs::Permissions::from_mode(0o500)).unwrap();
         let result = wipe_it(&app_dir);
         fs::set_permissions(&app_dir, fs::Permissions::from_mode(0o700)).unwrap();
         result.expect_err("a state folder that cannot be renamed is reported");
         assert!(app_dir.join("state").join("corsia.db").exists(), "never half deleted");
+        assert!(workspace.join(PROFILE).exists(), "the profile is still there: the old install is whole");
+        assert!(app_dir.join(SERVICE_FILE).exists());
+        assert!(app_dir.join("state/managed-omlx/models/starter/weights.bin").exists());
+        assert!(app_dir.join(MARKER_FILE).exists());
+        discard_marker(&app_dir).unwrap();
+        assert_eq!(at_launch(&app_dir), Launch::Nothing, "the caller drops the marker and the old install resumes");
+    }
+
+    #[test]
+    fn a_file_that_will_not_go_never_stops_the_wipe_and_is_tried_again_at_the_next_launch() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = Home::new("stuck-file");
+        let (app_dir, workspace) = unfinished(&home);
+        let context = workspace.join("context");
+        fs::set_permissions(&context, fs::Permissions::from_mode(0o500)).unwrap();
+        let wiped = wipe_it(&app_dir);
+        wiped.expect("the old install is gone, so a stuck file cannot fail the wipe");
+        assert!(!app_dir.join("state").exists());
+        assert!(!app_dir.join(SERVICE_FILE).exists());
+        assert!(workspace.join(PROFILE).exists(), "the file that would not go is still there");
+        assert!(
+            matches!(at_launch(&app_dir), Launch::Replan(ref folder) if *folder == workspace),
+            "the launch plans a clean first run in the folder the wiped setup made"
+        );
+        let marker: Marker = serde_json::from_slice(&fs::read(app_dir.join(MARKER_FILE)).unwrap()).unwrap();
+        assert!(marker.wiped);
+        assert_eq!(marker.files.keys().collect::<Vec<_>>(), [PROFILE], "only the stuck file is still recorded");
+        fs::set_permissions(&context, fs::Permissions::from_mode(0o700)).unwrap();
+        finish_leftovers(&app_dir);
+        assert!(!workspace.join(PROFILE).exists(), "the next launch removes it");
+        let marker: Marker = serde_json::from_slice(&fs::read(app_dir.join(MARKER_FILE)).unwrap()).unwrap();
+        assert!(marker.files.is_empty());
+    }
+
+    #[test]
+    fn downloads_survive_the_wipe_and_the_next_first_run_is_still_marked() {
+        let home = Home::new("downloads");
+        let (app_dir, workspace) = unfinished(&home);
+        downloads(&app_dir);
+        wipe_it(&app_dir).unwrap();
+        let state = app_dir.join("state");
+        assert_eq!(fs::read(state.join("managed-omlx/models/starter/weights.bin")).unwrap(), b"model");
+        assert_eq!(fs::read(state.join("assets/classifier/asset.bin")).unwrap(), b"asset");
+        assert_eq!(fs::read(state.join("logs/service.log")).unwrap(), b"log");
+        assert!(!state.join("corsia.db").exists(), "setup state goes");
+        assert!(!state.join("managed-omlx/settings.json").exists(), "the managed oMLX settings are setup state too");
+        assert!(!app_dir.join("state.discarded").exists());
+        assert!(matches!(at_launch(&app_dir), Launch::Replan(_)));
+        assert!(
+            mark(&app_dir, &workspace).unwrap(),
+            "a state folder holding only downloads is still new, so quitting the next setup wipes it too"
+        );
+        fs::write(state.join("corsia.db"), b"db").unwrap();
+        assert!(!mark(&app_dir, &workspace).unwrap(), "any other file makes it an install this setup did not create");
+    }
+
+    #[test]
+    fn a_folder_set_aside_by_a_wipe_that_was_cut_short_gives_its_downloads_back() {
+        let home = Home::new("cut-short");
+        let (app_dir, _) = unfinished(&home);
+        downloads(&app_dir);
+        fs::rename(app_dir.join("state"), app_dir.join("state.discarded")).unwrap();
+        wipe_it(&app_dir).unwrap();
+        assert!(app_dir.join("state/managed-omlx/models/starter/weights.bin").exists());
+        assert!(!app_dir.join("state.discarded").exists());
+    }
+
+    #[test]
+    fn a_download_that_cannot_be_put_back_keeps_the_folder_aside_instead_of_deleting_it() {
+        let home = Home::new("conflict");
+        let (app_dir, _) = unfinished(&home);
+        downloads(&app_dir);
+        fs::rename(app_dir.join("state"), app_dir.join("state.discarded")).unwrap();
+        fs::create_dir_all(app_dir.join("state/logs")).unwrap();
+        fs::write(app_dir.join("state/logs/new.log"), b"new").unwrap();
+        assert!(settle_discarded(&app_dir).is_err());
+        assert!(app_dir.join("state/managed-omlx/models/starter/weights.bin").exists(), "the others came back");
+        assert!(app_dir.join("state.discarded/logs/service.log").exists(), "the one that could not stays aside");
+        assert_eq!(fs::read(app_dir.join("state/logs/new.log")).unwrap(), b"new");
     }
 }
