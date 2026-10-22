@@ -2,6 +2,10 @@
 
 For the CORSIA agent: step 5 of `references/first-run-app.md` sends you here. Do the steps in order. Post only the lines in backticks, word for word. Never show how sure you are.
 
+## Before anything: ask when search was already set up
+
+When `web_search_ready` was already true before step 4, so no key was saved in this chat, open with this line and wait for the answer: `I can look you up on the web, so you don't have to tell me everything yourself. Your name and anything I search for go to Brave. Want me to?` On a yes, go on from section A. On a no, or anything but a yes, go straight to section E. When the key was saved in step 4, ask nothing: step 4 already offered the opt-out.
+
 ## A. What you start from
 
 1. Name: `user_profile` `name`. When it is empty, post `What's your full name? I'll use it to look you up.` and wait for the answer.
@@ -9,7 +13,7 @@ For the CORSIA agent: step 5 of `references/first-run-app.md` sends you here. Do
 3. What the import kept: their work, their city, a GitHub handle or website.
 4. This Mac's time zone: the `Timezone` line of the workspace `USER.md` if it has one, else `date +%Z`.
 5. Too little to go on means: you have only a name, or a name and a domain no page answered for, and the import kept nothing. Then go to section E, post the parts of question 1 you still lack, in one message, and use the answer as your detail. Then continue at section B.
-6. When they did not save a search key a moment ago in step 4 (a key saved earlier never covers sending their name out) or they said not to look them up: go to section E. Say nothing about searching or about skipping it, anywhere in this step: not in what you post, not in what you write.
+6. When search does not work (`web_search_ready` is false and no key was just saved) or they said not to look them up: go to section E. Say nothing about searching or about skipping it, anywhere in this step: not in what you post, not in what you write.
 
 ## B. Search
 
