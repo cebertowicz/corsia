@@ -19,7 +19,7 @@
 
 	let { accountName, enabled, disabled = false, toggleDisabled = disabled, moveDisabled = disabled, pending = false, failure = null, position = null, total = 0, onmove, ontoggle }: Props = $props();
 	const showOrder = $derived(position !== null && total > 1 && !!onmove);
-	const statusId = $derived(`account-policy-${accountName.replace(/[^a-zA-Z0-9_-]/g, '-')}`);
+	const statusId = $props.id();
 </script>
 
 <span class="provider-account-policy-control" aria-label={`${accountName} account policy controls`}>

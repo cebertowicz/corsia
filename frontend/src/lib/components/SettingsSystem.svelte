@@ -85,9 +85,11 @@
 
 	let accountConfirm = $state<'logout' | 'disconnect' | null>(null);
 	let accountInProgress = $state(false);
+	// Only the desktop app can connect to, or leave, another computer; a browser and the phone app have no shell.
 	const shell = shellInfo();
 	const remoteName = shell?.mode === 'remote' ? shell.name : null;
 
+	/** Signs this app out, then forgets the computer; the shell opens Welcome. Nothing on the other computer changes. */
 	async function disconnect() {
 		accountInProgress = true;
 		try {
@@ -96,6 +98,7 @@
 		} catch {
 			const message = 'CORSIA couldn’t disconnect from this computer. Sign in and try again.';
 			settingsError = message;
+			// Signing out comes first, so this page may already be replaced by sign-in; a toast outlives it.
 			toasts.show(message, 'error', 8000);
 		} finally {
 			accountConfirm = null;

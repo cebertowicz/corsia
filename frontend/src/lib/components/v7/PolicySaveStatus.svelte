@@ -1,5 +1,5 @@
 <script lang="ts">
-		interface Props { id?: string; pending?: boolean; failure?: string | null; }
+	interface Props { id?: string; pending?: boolean; failure?: string | null; }
 	const { id, pending = false, failure = null }: Props = $props();
 </script>
 

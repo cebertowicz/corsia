@@ -74,18 +74,10 @@
 		state === 'error' ? 'error' :
 		'',
 	);
-	const rowClass = $derived(
-		downloading ? 'dl-row' :
-		state === 'loaded' ? 'loaded' :
-		state === 'loading' ? 'loading-row' :
-		state === 'cache_warming' ? 'warming-row' :
-		state === 'error' ? 'error-row' :
-		'',
-	);
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex: focused group exposes the row-menu keyboard handler for ContextMenu and Shift+F10. -->
-<div class="mr {rowClass}" class:has-warn={!!warning || !!note} style="--p: {progress}%" role={onDeleteDownload ? 'group' : undefined} aria-label={onDeleteDownload ? `Actions for ${name}` : undefined} tabindex={onDeleteDownload ? 0 : undefined} {...menu.rowHandlers(name)}>
+<div class="mr" class:dl-row={downloading} class:has-warn={!!warning || !!note} style="--p: {progress}%" role={onDeleteDownload ? 'group' : undefined} aria-label={onDeleteDownload ? `Actions for ${name}` : undefined} tabindex={onDeleteDownload ? 0 : undefined} {...menu.rowHandlers(name)}>
 	<span class="mr-toggle-wrap">
 		{#if downloading || loadingOn}
 			{@const on = downloading ? downloadingOn : loadingOn}

@@ -55,12 +55,13 @@ export function createProviderPolicyState(projectId?: string | (() => string | u
 		return null;
 	}
 
-	/** Name why a save failed from what the server shows now, never from the HTTP status: the policy is re-read, and the cause is the server being unreachable, a moved revision, or the server's own reason. */
-	async function failureAfter(result: { detail?: unknown; reached?: boolean }, sent: number, revisionOf: (latest: ProviderPolicy) => number | undefined): Promise<string> {
+	/** Name why a save failed from what the server shows now, never from the HTTP status. The re-read also gives the retry its revision. These routes' own reasons are validation text written for developers, so none is shown. */
+	async function failureAfter(result: { reached?: boolean }, sent: number, revisionOf: (latest: ProviderPolicy) => number | undefined): Promise<string> {
 		const latest = await refresh();
-		if (!latest) return saveFailureText(undefined, false);
+		// Unreached first: a write that committed but lost its response moved the revision itself.
+		if (!latest || result.reached === false) return saveFailureText(undefined, false);
 		if (revisionOf(latest) !== sent) return saveFailureText('It changed elsewhere and now shows the latest setting.', true);
-		return saveFailureText(result.detail, result.reached !== false);
+		return saveFailureText(undefined, true);
 	}
 
 	/** Every save is built from the server's `units`: the accounts that exist now, in effective order. A removed account's id may linger in the raw arrays and is rejected on save, so it is never sent back. */

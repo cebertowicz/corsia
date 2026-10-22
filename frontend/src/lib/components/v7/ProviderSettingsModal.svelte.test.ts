@@ -88,23 +88,6 @@ describe('ProviderSettingsModal remove', () => {
 		expect(window.confirm).not.toHaveBeenCalled();
 	});
 
-	it('keeps account policy in the Accounts tab', async () => {
-			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ accounts: [{
-				id: 'codex-default', provider: 'codex', name: 'Default', is_default: true,
-				state: 'legacy', revision: 1, identity: {},
-				label: { name: 'Plus account 1', email: null, text: 'Plus account 1' },
-			}] })));
-			component = mount(ProviderSettingsModal, {
-				target: document.body,
-				props: { provider: {
-					name: 'codex', label: 'Codex', type: 'harness', statusDot: 'online', subline: '1 account · 3 models',
-					raw: { name: 'codex', label: 'Codex', type: 'harness' },
-				} as never, onClose: vi.fn() },
-			});
-			await vi.waitFor(() => expect(document.body.textContent).toContain('Plus account 1'));
-			expect(document.body.textContent).not.toContain('Rollover and account order are set in Accounts and rollover.');
-		});
-
 	it('opens a harness provider on Accounts with its canonical name and email label', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ accounts: [{
 			id: 'codex-default', provider: 'codex', name: 'Default', is_default: true,

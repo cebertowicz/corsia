@@ -52,27 +52,29 @@ describe('providerPolicyState failures', () => {
 		expect(state.failureText('rollover:codex')).toBe('Couldn’t save this change. Check your connection and try again.');
 	});
 
-	it('shows the server’s reason and keeps other targets clear', async () => {
-		vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => init?.method === 'PUT'
-			? json({ detail: 'Rollover is not available for this provider.' }, 400)
-			: json({ scope: 'workspace', providers: [entry(1)] })));
-		const state = createProviderPolicyState();
-		await state.load();
-		await state.save(state.policy!.providers[0], { rollover: false }, 'rollover:codex');
-		expect(state.failureText('rollover:codex')).toBe('Couldn’t save this change. Rollover is not available for this provider.');
-		expect(state.failureText('unit:codex:a')).toBeNull();
-	});
-
-	it('shows the server’s reason, never "changed elsewhere", when a 409 leaves the revision unchanged', async () => {
+	it('never shows the server’s validation text or "changed elsewhere" when a 409 leaves the revision unchanged, and keeps other targets clear', async () => {
 		vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => init?.method === 'PUT'
 			? json({ detail: 'policy account must belong to this provider and not be removed' }, 409)
 			: json({ scope: 'workspace', providers: [entry(1)] })));
 		const state = createProviderPolicyState();
 		await state.load();
 		await state.save(state.policy!.providers[0], { rollover: false }, 'rollover:codex');
-		expect(state.failureText('rollover:codex')).toBe('Couldn’t save this change. policy account must belong to this provider and not be removed.');
-		expect(state.failureText('rollover:codex')).not.toContain('elsewhere');
+		expect(state.failureText('rollover:codex')).toBe('Couldn’t save this change. Try again.');
+		expect(state.failureText('unit:codex:a')).toBeNull();
 		expect(state.error).toBe('');
+	});
+
+	it('says to check the connection, not "changed elsewhere", when a write committed but its response was lost', async () => {
+		let revision = 1;
+		vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === 'PUT') { revision = 2; throw new TypeError('Failed to fetch'); }
+			return json({ scope: 'workspace', providers: [entry(revision)] });
+		}));
+		const state = createProviderPolicyState();
+		await state.load();
+		await state.save(state.policy!.providers[0], { rollover: false }, 'rollover:codex');
+		expect(state.failureText('rollover:codex')).toBe('Couldn’t save this change. Check your connection and try again.');
+		expect(state.policy!.providers[0].revision).toBe(2);
 	});
 
 	it('says to check the connection, and keeps the error for a reload, when the re-read after a failed save also fails', async () => {
@@ -106,7 +108,7 @@ describe('providerPolicyState failures', () => {
 		expect(state.failureText('scope')).toBe('Couldn’t save this change. It changed elsewhere and now shows the latest setting.');
 		moveRevision = false;
 		await state.toggleScope(true);
-		expect(state.failureText('scope')).toBe('Couldn’t save this change. project does not exist.');
+		expect(state.failureText('scope')).toBe('Couldn’t save this change. Try again.');
 	});
 });
 
