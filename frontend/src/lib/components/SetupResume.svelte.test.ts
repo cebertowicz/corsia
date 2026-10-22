@@ -45,8 +45,9 @@ describe('SetupScreen resume', () => {
 		click('Back'); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
 		expect(host.textContent).toContain('Do you pay for Claude or ChatGPT?');
-		// Answering installs software, so the question says so first.
-		expect(host.textContent).toContain('CORSIA installs Claude Code from Anthropic or Codex from OpenAI for each one you pay for.');
+		// The question carries no install note: a yes starts the install, and the next thing shown is Sign in.
+		expect(host.textContent).not.toContain('CORSIA installs');
+		expect(host.querySelector('.question .note')).toBeNull();
 		click('Back'); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Your work folder');
 		// The account exists, so the folder reads back: no picker that the service would refuse.
