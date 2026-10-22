@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
-from plans import admission, artifact_links, service
+from plans import admission, artifact_links, intent_words, service
 from registry.identity_metadata import last_written_sha256, sha256_file
 from registry.shared_edit_classification import combine_capped_diffs, capped_unified_diff
 
@@ -323,20 +323,29 @@ def create_feedback_node(
     if not loaded:
         raise EmptyFeedbackBatchError(f"feedback batch {batch_id} has no renderable items")
     author, document = feedback_display(db, batch, loaded)
+    words = (
+        intent_words.document_comment_words(loaded)
+        if _batch_value(batch, "author_kind") == "user"
+        else ()
+    )
     return _create_linked_node(
         db, recipient_thread_id, artifact_id, batch_id, PROVENANCE,
         title=_title(author, document, loaded), acceptance=_acceptance(loaded),
         description=_description(batch, loaded),
+        intent=intent_words.document_comment_intent(loaded) if words else None, words=words,
     )
 
 
 def _create_linked_node(db, recipient_thread_id, artifact_id, source_id, provenance,
-                        *, title, acceptance, description) -> FeedbackNodeResult:
+                        *, title, acceptance, description, intent=None, intent_node_id=None,
+                        words=()) -> FeedbackNodeResult:
     plan = service.ensure_plan("thread", recipient_thread_id, db=db)
     node = service.add_node(
         plan.id, kind="task", title=title, acceptance_criteria=acceptance,
-        description=description, actor_id=None, provenance=provenance, db=db,
+        description=description, intent=intent, intent_node_id=intent_node_id,
+        actor_id=None, provenance=provenance, db=db,
     )
+    intent_words.append(db, node.id, words, revision=node.requirements_revision)
     service.transition_node(
         node.id, "active", actor_id=None, provenance=provenance, db=db,
     )
@@ -365,5 +374,25 @@ def create_review_node(db, reviewer_thread_id: str, request: Any) -> FeedbackNod
     return _create_linked_node(
         db, reviewer_thread_id, artifact_id, request_id, REVIEW_PROVENANCE,
         title=_trim_title(full, ""), acceptance=REVIEW_ACCEPTANCE,
-        description=description(path, request),
+        description=description(path, request), intent_node_id=_requesting_intent(db, request),
     )
+
+
+def _requesting_intent(db, request) -> str | None:
+    """Resolve an optional review-request task to its canonical intent node.
+
+    The reference is another lane's column, so an unknown node leaves the
+    review without intent rather than losing the review.
+    """
+    try:
+        requesting_node_id = request["requesting_node_id"]
+    except (IndexError, KeyError):
+        return None
+    if not requesting_node_id:
+        return None
+    from plans import intent_words
+
+    try:
+        return str(intent_words.canonical(db, str(requesting_node_id))["id"])
+    except service.PlanError:
+        return None

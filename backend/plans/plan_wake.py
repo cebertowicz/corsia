@@ -38,6 +38,8 @@ ASK_RELEASED = "ask_released"
 CHILD_RETURNED = "child_returned"
 #: A submission this thread made or returned was rejected; it now holds the revision.
 REVISION_REQUESTED = "revision_requested"
+#: A canonical task's requirements changed while this thread has live work under it.
+INTENT_REVISED = "intent_revised"
 #: A task one of this thread's tasks depends on settled: in another plan, or
 #: failed or closed by someone else in its own (``plans.cross_plan``).
 PREREQUISITE_SETTLED = "prerequisite_settled"
@@ -282,6 +284,13 @@ def notify_revision(
                 },
             ),
         )
+
+
+def notify_intent_revised(db, node_id: str, *, causing_executor: str | None) -> None:
+    """Tell live workers that their canonical task's intent changed."""
+    from plans import plan_wake_intent
+
+    plan_wake_intent.notify(db, node_id, causing_executor=causing_executor)
 
 
 def notify_selected(

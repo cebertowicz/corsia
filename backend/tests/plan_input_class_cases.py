@@ -16,7 +16,7 @@ from __future__ import annotations
 from functools import partial
 
 from plans import (
-    boundary_dispatch, delegate_attach, holds, service, status_cursor, system_user_steps,
+    boundary_dispatch, delegate_attach, holds, intent_words, service, status_cursor, system_user_steps,
 )
 from plans.boundary import PlanActor, mutate
 from plans.current import read_current_plan, read_current_status
@@ -471,6 +471,66 @@ def _user_block_on_non_document(db, scene):
     return _user_block(db, scene, ask_artifact_id=ask)
 
 
+def _missing_intent_word(_db, _scene):
+    return partial(intent_words.validate_intent, "")
+
+
+def _oversized_intent_word(_db, _scene):
+    return partial(intent_words.validate_intent, "x" * (intent_words.MAX_INTENT_BYTES + 1))
+
+
+def _missing_task_intent(db, scene):
+    return partial(_mutate, db, scene.plan_id, "add", {
+        "title": "Intent", "acceptance_criteria": "Recorded", "size": "unknown",
+    }, _mid())
+
+
+def _missing_task_size_and_intent(db, scene):
+    return partial(_mutate, db, scene.plan_id, "add", {
+        "title": "Intent", "acceptance_criteria": "Recorded",
+    }, _mid())
+
+
+def _missing_authority_quote(db, scene):
+    return partial(_mutate, db, scene.plan_id, "add", {
+        "title": "Intent", "acceptance_criteria": "Recorded", "size": "unknown",
+        "intent": "Keep the request aligned",
+    }, _mid())
+
+
+def _person_step(extra: dict):
+    return _operation("add", {
+        "kind": "task", "title": "Do setup", "acceptance_criteria": "Ready",
+        "assignee": "user", "description": "Run setup. Already tried: the supported route.",
+        **extra,
+    })
+
+
+def _foreign_instructions_document(db, scene):
+    from registry import models
+
+    artifact = models.register_artifact(
+        integration="local", type="document", external_id="/shared/foreign-instructions.md",
+        parent_thread_id="child", title="Foreign instructions", path="/shared/foreign-instructions.md",
+        db=db,
+    )
+    db.commit()
+    return partial(_mutate, db, scene.plan_id, "add", {
+        "kind": "task", "title": "Do setup", "acceptance_criteria": "Ready", "size": "unknown",
+        "assignee": "user", "description": "Run setup. Already tried: the supported route.",
+        "instructions_artifact_id": artifact["id"],
+    }, _mid())
+
+
+def _wrong_type_instructions_document(db, scene):
+    artifact = _artifact(db, external_id="instructions-pr", owner="root")
+    return partial(_mutate, db, scene.plan_id, "add", {
+        "kind": "task", "title": "Do setup", "acceptance_criteria": "Ready", "size": "unknown",
+        "assignee": "user", "description": "Run setup. Already tried: the supported route.",
+        "instructions_artifact_id": artifact,
+    }, _mid())
+
+
 _CASES = {
     # --- plans/service.py ---
     ("service.py", 'f"{field} is required"'): _operation(
@@ -499,6 +559,32 @@ _CASES = {
             "acceptance_criteria": "DOD",
         },
     ),
+    # --- plans/intent_words.py ---
+    ("intent_words.py", 'f"{field} is required"'): _missing_intent_word,
+    ("intent_words.py", 'f"{field} exceeds the {limit}-byte limit"'): _oversized_intent_word,
+    ("intent_words.py", '"intent_words must be a nonempty array"'): _missing_intent_word,
+    ("intent_words.py", '"intent_words items require quote, author?, and role?"'): _missing_intent_word,
+    ("intent_words.py", '"intent word author must be person or agent"'): _missing_intent_word,
+    ("intent_words.py", '"intent word role must be origin, bears_on, or authority"'): _missing_intent_word,
+    ("intent_words.py", '"quote was not found; quote exactly, or pass it as your own words with author: agent"'): _missing_intent_word,
+    # --- plans/boundary_dispatch.py ---
+    ("intent_creation.py", '"task creation needs intent_words with an exact person quote and role: authority"'): _missing_authority_quote,
+    # --- plans/boundary_fields.py ---
+    ("boundary_fields.py", '"task creation requires size and intent"'): _missing_task_size_and_intent,
+    ("boundary_fields.py", '"task creation requires intent"'): _missing_task_intent,
+    ("boundary_fields.py", "PERSON_STEP_DESCRIPTION_LIMIT_REFUSAL"):
+        _person_step({"description": "x" * 380 + " Already tried: route"}),
+    # --- plans/user_step_instructions.py ---
+    ("user_step_instructions.py", '"instructions_artifact_id is only valid for an assignee: user task"'):
+        _operation("add", {"title": "T", "acceptance_criteria": "DOD", "instructions_artifact_id": "doc"}),
+    ("user_step_instructions.py", '"instructions_artifact_id must name a registered document"'):
+        _person_step({"instructions_artifact_id": ""}),
+    ("user_step_instructions.py", 'f"instructions_artifact_id {artifact_id!r} names no registered document"'):
+        _person_step({"instructions_artifact_id": "missing"}),
+    ("user_step_instructions.py", 'f"instructions_artifact_id must name a registered document, not {identity[\'type\']!r}"'):
+        _wrong_type_instructions_document,
+    ("user_step_instructions.py", '"instructions_artifact_id must name a document this thread owns"'):
+        _foreign_instructions_document,
     # --- plans/node_creation.py ---
     ("node_creation.py", '"size requires schema version 91"'): _size_before_migration,
     # --- plans/size_fields.py ---

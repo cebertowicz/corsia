@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from infra.schema import SCHEMA_SQL
 from plans import mutations, service
 from plans.boundary import PlanActor, mutate
@@ -48,6 +50,11 @@ def db() -> Iterator[sqlite3.Connection]:
             "INSERT INTO threads (id,user_id,spawned_by,created_at,updated_at) VALUES (?,?,?,?,?)",
             (thread_id, user_id, spawned_by, "t", "t"),
         )
+    _init_messages_fts(connection)
+    accept_thread_input(
+        "parent", role="user", content="Mutate the requested plan task.", intent="apply_now",
+        message_id="mutation-authority", db=connection,
+    )
     connection.commit()
     yield connection
     connection.close()
@@ -74,6 +81,15 @@ _MUTATION_IDS = itertools.count(1)
 
 
 def _mutate(db, plan_id, operation, params, actor=None, mutation_id=None):
+    if operation in {"add", "insert"} and params.get("kind", "task") == "task":
+        params = {
+            **params,
+            "intent": params.get("intent", "Mutate the requested plan task."),
+            "intent_words": params.get(
+                "intent_words",
+                [{"quote": "Mutate the requested plan task.", "role": "authority"}],
+            ),
+        }
     deferred = mutate(
         plan_id, operation, params, actor=actor or _actor(), provenance="test",
         mutation_id=mutation_id or f"test-{next(_MUTATION_IDS)}", db=db,

@@ -63,7 +63,7 @@ describe('PlanDrillView', () => {
 		component = mount(PlanDrillView, { target: host, props: { nodes, folded, rootId: 'root', onBack: () => {} } });
 		flushSync();
 		const labels = [...host.querySelectorAll('.fold-label')].map((label) => label.textContent?.trim());
-		expect(labels).toEqual(['4 completed, 1 failed']);
+		expect(labels).toEqual(['4 done']);
 	});
 
 	it('keeps a drilled root that is itself finished as the heading, not under a fold row', () => {

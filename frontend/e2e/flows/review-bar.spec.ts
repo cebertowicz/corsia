@@ -16,6 +16,34 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const backendDir = path.join(repoRoot, 'backend');
 const python = () => process.env.CORSIA_E2E_BACKEND_PYTHON ?? path.join(repoRoot, '.venv/bin/python');
 
+function addPersonStep(threadId: string, artifactId: string): void {
+	const state = process.env.CORSIA_E2E_STATE_DIR;
+	if (process.env.CORSIA_E2E_MOCK !== '1' || !state) throw new Error('The person-step fixture requires isolated E2E mock state');
+	execFileSync(python(), ['-c', [
+		'import sys, uuid',
+		'from infra.database import get_db',
+		'from plans import service',
+		'from plans.boundary import PlanActor, mutate',
+		'from infra.db_fts import _init_messages_fts',
+		'from infra.input_admission import accept_thread_input',
+		'thread, artifact = sys.argv[1:]',
+		'db = get_db()',
+		'user = db.execute("SELECT user_id FROM threads WHERE id=?", (thread,)).fetchone()["user_id"]',
+		'intent = "Set up the workspace from the instructions."',
+		'if db.execute("SELECT 1 FROM sqlite_master WHERE type=\'table\' AND name=\'messages_fts\'").fetchone() is None: _init_messages_fts(db)',
+		'message_id, turn_id = uuid.uuid4().hex, uuid.uuid4().hex',
+		'accept_thread_input(thread, role="user", content=intent, intent="apply_now", message_id=message_id, db=db)',
+		'db.execute("UPDATE messages SET active_turn_id=? WHERE id=?", (turn_id, message_id))',
+		'plan = service.ensure_plan("thread", thread, db=db)',
+		'params = {"kind": "task", "title": "Set up the workspace", "acceptance_criteria": "It is ready.", "size": "unknown", "assignee": "user", "description": "Follow the document. Already tried: I opened the instructions.", "instructions_artifact_id": artifact, "intent": intent, "intent_words": [{"quote": intent, "role": "authority"}]}',
+		'mutate(plan.id, "add", params, actor=PlanActor(thread, user, None, turn_id=turn_id), provenance="e2e.person_step", mutation_id=uuid.uuid4().hex, db=db)',
+		'db.commit()',
+	].join('\n'), threadId, artifactId], {
+		cwd: backendDir, encoding: 'utf8',
+		env: { ...process.env, CORSIA_TEST_MODE: '1', CORSIA_STATE_DIR: state, CORSIA_WORKSPACE: process.env.CORSIA_E2E_WORKSPACE ?? '' },
+	});
+}
+
 function raiseAsk(threadId: string, artifactId: string, reason: string): void {
 	const state = process.env.CORSIA_E2E_STATE_DIR;
 	if (process.env.CORSIA_E2E_MOCK !== '1' || !state) throw new Error('The ask fixture requires isolated E2E mock state');
@@ -110,6 +138,96 @@ async function expectLayout(page: Page, mode: Mode) {
 	}
 	expect(box.x + box.width - Math.max(...buttons.map((button) => button.right)), 'right-aligned').toBeLessThanOrEqual(24);
 }
+
+test('@surface:review-bar person-step and document-review bars render at 1280px', async ({ page, request }, info) => {
+	test.skip(info.project.name === 'chromium-mobile', 'the two required 1280px receipts are desktop evidence');
+	const person = await seed(request, 'Person instructions');
+	addPersonStep(person.threadId, person.artifactId);
+	await open(page, person, 'default', 'light');
+	await page.setViewportSize({ width: 1280, height: 900 });
+	await expect(bar(page).locator('.rb-ask-full')).toHaveText('Needs you to do this: Set up the workspace');
+	await expect(bar(page).getByRole('button', { name: 'Done', exact: true })).toBeVisible();
+	await page.screenshot({ path: info.outputPath('person-step-instructions.png'), animations: 'disabled' });
+
+	const review = await seed(request, 'Document review');
+	raiseAsk(review.threadId, review.artifactId, 'Is the rollout plan right?');
+	await open(page, review, 'default', 'light');
+	await page.setViewportSize({ width: 1280, height: 900 });
+	await expect(bar(page).getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
+	await page.screenshot({ path: info.outputPath('document-review.png'), animations: 'disabled' });
+});
+
+/** The person step through the review ask's shell: 1280 with the pane open (the narrow header), 1440 with it closed (the wide one) and a 393 phone. */
+const PERSON_STEP: readonly Case[] = [
+	['1280 light', 'default', 'light'], ['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light'],
+];
+/** Opens a fresh person step; each answer gets its own test, so each pays for one seed and one open. */
+async function personStep(page: Page, request: APIRequestContext, name: string, mode: Mode, theme: 'light' | 'dark') {
+	const doc = await seed(request, `${name} ${mode}`);
+	addPersonStep(doc.threadId, doc.artifactId);
+	await open(page, doc, mode, theme);
+	if (mode === 'default') await page.setViewportSize({ width: 1280, height: 900 });
+	const who = bar(page).locator('.rb-who');
+	await expect(who).toHaveText(`${doc.title}:`);
+	await expect(bar(page).locator('.rb-ask-full')).toHaveText('Needs you to do this: Set up the workspace');
+	// The pane and the bar animate in after the resize; measure the layout they land in.
+	await settled(page);
+	// MiddleName's head is the innermost element that ellipsizes, so it is the one to measure.
+	const head = who.locator('.name-head');
+	expect(await head.evaluate((el) => el.scrollWidth <= el.clientWidth), 'the owner’s name is never truncated').toBe(true);
+	return (label: 'Done' | 'Won’t do') => bar(page).getByRole('button', { name: label, exact: true });
+}
+
+journey('mark a person step done from its instructions', PERSON_STEP, async ({ page, request, info, mode, theme }) => {
+	const button = await personStep(page, request, 'Person done', mode, theme);
+	await settled(page);
+	await shot(page, 'person-step-ask', info);
+	await button('Done').click();
+	await expect(bar(page).locator('.rb-receipt')).toHaveText('Done');
+	await expect(bar(page).locator('.rb-receipt')).toBeFocused();
+	await settled(page);
+	await shot(page, 'person-step-done', info);
+});
+
+// A name too long for the narrow header (1280 with the pane open) wraps onto a second line rather than truncating.
+journey('a long agent name on a person step wraps', PERSON_STEP, async ({ page, request, info, mode, theme }) => {
+	await personStep(page, request, 'Person with a very long agent name', mode, theme);
+	const who = bar(page).locator('.rb-who');
+	if (mode === 'default') {
+		const wrapped = await who.evaluate((el) => el.getBoundingClientRect().height > 1.8 * parseFloat(getComputedStyle(el).fontSize));
+		expect(wrapped, 'the long name wraps in the narrow header').toBe(true);
+		// Wrapped as one text run: the name's last characters follow its head instead of sitting beside its first line.
+		const tailBelowFirstLine = await who.evaluate((el) => {
+			const tail = el.querySelector('.name-tail');
+			return !tail || tail.getBoundingClientRect().top > el.getBoundingClientRect().top + parseFloat(getComputedStyle(el).fontSize);
+		});
+		expect(tailBelowFirstLine, 'the name’s tail flows after its wrapped head').toBe(true);
+	}
+	await shot(page, 'person-step-long-name', info);
+});
+
+journey('decline a person step from its instructions', PERSON_STEP, async ({ page, request, info, mode, theme }) => {
+	const button = await personStep(page, request, 'Person wont', mode, theme);
+	await button('Won’t do').click();
+	await expect(bar(page).locator('.rb-receipt')).toHaveText('Won’t do');
+	await settled(page);
+	await shot(page, 'person-step-wont-do', info);
+});
+
+// A stale revision: the server refuses the answer and the bar says so, keeping the step to answer again.
+journey('a stale answer to a person step keeps it open', PERSON_STEP, async ({ page, request, info, mode, theme }) => {
+	const button = await personStep(page, request, 'Person stale', mode, theme);
+	await page.route('**/api/plans/*/mutations', (route) => {
+		const body = route.request().postDataJSON() as { params: { expected_revision: number } };
+		body.params.expected_revision -= 1;
+		return route.continue({ postData: JSON.stringify(body) });
+	}, { times: 1 });
+	await button('Done').click();
+	await expect(bar(page).locator('.rb-status')).toHaveText('This step changed. Refreshing the latest state.');
+	await expect(bar(page).locator('.rb-receipt')).toHaveCount(0);
+	await settled(page);
+	await shot(page, 'person-step-conflict', info);
+});
 
 const ALL: readonly Case[] = [
 	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],

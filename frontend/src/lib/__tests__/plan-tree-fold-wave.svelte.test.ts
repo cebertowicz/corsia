@@ -77,7 +77,7 @@ describe('PlanTree — the fold wave', () => {
 	it('animates every row that folds, each a fixed stagger after the last', async () => {
 		await foldAll(3);
 		expect(ghostDelays()).toEqual([0, STAGGER_MS, 2 * STAGGER_MS]);
-		expect(host.querySelector('.fold-row')?.textContent).toContain('3 completed');
+		expect(host.querySelector('.fold-row')?.textContent).toContain('3 done');
 	});
 
 	it('starts the rows in on-screen order, top to bottom, not plan order', async () => {
@@ -153,14 +153,14 @@ describe('PlanTree — the fold wave', () => {
 		await tick();
 		flushSync();
 		expect(ghostDelays()).toHaveLength(0);
-		expect(host.querySelector('.fold-row')?.textContent).toContain('8 completed');
+		expect(host.querySelector('.fold-row')?.textContent).toContain('8 done');
 	});
 
 	it('honours reduced motion: no motion, just the settled state', async () => {
 		reducedMotion = true;
 		await foldAll(4);
 		expect(animate).not.toHaveBeenCalled();
-		expect(host.querySelector('.fold-row')?.textContent).toContain('4 completed');
+		expect(host.querySelector('.fold-row')?.textContent).toContain('4 done');
 		expect(host.querySelectorAll('.fold-ghost')).toHaveLength(0);
 	});
 
@@ -237,24 +237,24 @@ describe('PlanTree — only what is new since the last look', () => {
 		const server = { planId: 'plan-1', levels: [{ parent_id: null, done: 15, failed: 0, closed: 0, more: 3 }] };
 		await open(finished(12, true), seen(), server);
 		expect(rowIds()).toEqual(['open', ...Array.from({ length: 12 }, (_, i) => `done-${i}`)]);
-		expect(foldText()).toContain('3 completed');
+		expect(foldText()).toContain('3 done');
 		expect(ghostDelays()).toHaveLength(0);
 	});
 
 	it('holds only rows not yet released, and folds them in one wave when the pane releases them', async () => {
 		const props = await open(finished(4, true), seen('done-2', 'done-3'));
 		expect(rowIds()).toEqual(['open', 'done-0', 'done-1']);
-		expect(foldText()).toContain('2 completed');
+		expect(foldText()).toContain('2 done');
 		await release(props, 'done-0', 'done-1', 'done-2', 'done-3');
 		expect(ghostDelays()).toEqual([0, STAGGER_MS]);
 		expect(rowIds()).toEqual(['open']);
-		expect(foldText()).toContain('4 completed');
+		expect(foldText()).toContain('4 done');
 	});
 
 	it('replays nothing when the view has shown every folded row', async () => {
 		await open(finished(4, true), seen('done-0', 'done-1', 'done-2', 'done-3'));
 		expect(rowIds()).toEqual(['open']);
-		expect(foldText()).toContain('4 completed');
+		expect(foldText()).toContain('4 done');
 		expect(ghostDelays()).toHaveLength(0);
 	});
 
@@ -279,7 +279,7 @@ describe('PlanTree — only what is new since the last look', () => {
 	it('shows the server folds without a pane view', async () => {
 		await open(finished(4, true), null);
 		expect(rowIds()).toEqual(['open']);
-		expect(foldText()).toContain('4 completed');
+		expect(foldText()).toContain('4 done');
 	});
 
 	it('honours reduced motion: the same rows fold, with no animation', async () => {

@@ -130,6 +130,22 @@ from plans.status_context import render as render_status
 # The status a plan write left owed: drained before a digest (infra/passive_changes)
 # and swept at startup (app_lifecycle).
 from plans.status_drain import drain_for_digest as drain_status_for_digest, sweep as sweep_owed_status
+
+
+def intent_of(node_id: str, *, db) -> dict:
+    """Read a node's canonical intent for an authorized Agent Substrate fork."""
+    from plans import intent_words, service
+
+    with service._connection(db) as connection:
+        source = intent_words.canonical(connection, node_id)
+        return {
+            "node_id": source["id"], "title": source["title"],
+            "requirements_revision": source["requirements_revision"],
+            "intent": source["intent"], "acceptance_criteria": source["acceptance_criteria"],
+            "intent_words": intent_words.newest(connection, source["id"]),
+        }
+
+
 # Notifications raised by a plan write, driven after its commit.
 from plans.notifications import (
     collect_touched, collect_wake_recipients, deliver as deliver_notifications, deliver_deferred, drive_after,
@@ -159,6 +175,7 @@ from plans.watch_resolution import resolve_delivered_event
 
 # Document feedback and shared-document ownership tasks (doceditor/, registry/).
 from plans.artifact_links import link as link_node_artifact
+from plans.user_step_instructions import read_for_artifact as person_step_instructions
 from plans.feedback_nodes import (
     create_feedback_node, create_review_node, feedback_display, feedback_item_counts, load_feedback_items,
 )

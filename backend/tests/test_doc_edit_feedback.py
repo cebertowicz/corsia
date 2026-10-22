@@ -395,6 +395,10 @@ def test_edit_only_user_batch_uses_actor_display_and_applied_edit_framing(isolat
         assert "The user changed this directly and it is already applied." in node.description
         assert "once the change lands" not in node.description
         assert "Comment " not in node.description
+        assert node.intent is None
+        assert db.execute(
+            "SELECT COUNT(*) FROM plan_node_intent_words WHERE node_id=?", (node.id,)
+        ).fetchone()[0] == 0
     finally:
         db.close()
 
