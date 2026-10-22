@@ -90,6 +90,58 @@ async def test_register_managed_server_renames_only_its_existing_row(isolated_db
     db.close()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("old_name", ["CORSIA's own oMLX", "This Mac"])
+async def test_startup_renames_an_existing_managed_row_and_its_models_only(isolated_db, monkeypatch, tmp_path, old_name) -> None:
+    import json
+
+    import app_startup_runtime
+    from infra.db_async import run_in_db
+    from infra.database import get_db
+    from llm import local_model, network_discovery as discovery
+    from llm.local_setup_runtime import LOCAL_SERVER_NAME
+
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    managed = await run_in_db(
+        discovery.upsert_server,
+        provider="omlx", instance_id="corsia-managed", instance_name=old_name,
+        host="127.0.0.1", port=8200, status="online", kind="managed", source="corsia",
+    )
+    mine = await run_in_db(
+        discovery.upsert_server,
+        provider="omlx", instance_id="127.0.0.1:9000", instance_name="My oMLX",
+        host="127.0.0.1", port=9000, status="online", kind="external", source="manual",
+    )
+    for model_id, server_id in (("managed-model", managed), ("my-model", mine)):
+        _model_row(model_id, f"omlx@{server_id}/{model_id}", model_id)
+        db = get_db()
+        db.execute("UPDATE models SET metadata_json = ? WHERE id = ?",
+                   (json.dumps({"server_id": server_id, "server_name": old_name if server_id == managed else "My oMLX"}), model_id))
+        db.commit()
+        db.close()
+
+    async def resumed() -> bool:
+        return False
+
+    async def notified() -> None:
+        return None
+
+    monkeypatch.setattr(local_model, "backfill_legacy_record", lambda: None)
+    monkeypatch.setattr("llm.local_setup_flow.resume_pending_setup", resumed)
+    monkeypatch.setattr("onboarding.local_download_wake.resume_pending_local_download", notified)
+
+    await app_startup_runtime.resume_local_setup()
+
+    assert LOCAL_SERVER_NAME == "Local"
+    assert (await run_in_db(discovery.get_server, managed))["instance_name"] == "Local"
+    assert (await run_in_db(discovery.get_server, mine))["instance_name"] == "My oMLX"
+    db = get_db()
+    names = {row["id"]: json.loads(row["metadata_json"])["server_name"]
+             for row in db.execute("SELECT id, metadata_json FROM models WHERE id IN ('managed-model', 'my-model')")}
+    db.close()
+    assert names == {"managed-model": "Local", "my-model": "My oMLX"}
+
+
 def test_managed_paths_are_a_pure_lookup(monkeypatch, tmp_path) -> None:
     """Reading the paths binds no port and creates or writes nothing (startup reads them)."""
     from llm.managed_omlx_binary import managed_omlx_paths
