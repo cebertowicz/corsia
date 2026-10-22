@@ -58,8 +58,9 @@ test.describe('@surface:first-run setup landing', () => {
 			await page.locator('input[autocomplete="new-password"]').nth(0).fill('correct-password');
 			await page.locator('input[autocomplete="new-password"]').nth(1).fill('correct-password');
 			await page.getByRole('button', { name: 'Continue' }).click();
-			await expect(page.getByRole('heading', { name: 'Choose your work folder' })).toBeVisible();
-			await page.getByRole('button', { name: 'Continue' }).click();
+			// With a tool not signed in the subscriptions question comes first: answer it without picking a plan.
+			await expect(page.getByRole('heading', { name: 'Your subscriptions' })).toBeVisible();
+			await page.getByRole('button', { name: /^(No|Neither)$/ }).click();
 			await expect(page.getByRole('heading', { name: 'Providers & models' })).toBeVisible();
 			const start = page.getByRole('button', { name: 'Start using CORSIA' });
 			await expect(start).toBeEnabled();

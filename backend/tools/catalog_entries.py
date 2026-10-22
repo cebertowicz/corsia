@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tools.catalog_automation_entries import AUTOMATION_CATALOG_ENTRIES
 from tools.catalog_consent_entries import CONSENT_CATALOG_ENTRIES
 from tools.catalog_entry import ToolCatalogEntry
 from tools.catalog_host_entries import HOST_ACCESS_CATALOG_ENTRIES
@@ -298,21 +299,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Draft, review and raise a plan decision for the user",
         activity="Drafting decision",
     ),
-    "automation_schedule": _Entry(
-        "automations", status="substrate", authority="automation-write",
-        summary="Schedule a clock or cadence wake for this thread",
-        activity="Scheduling",
-    ),
-    "automation_cancel": _Entry(
-        "automations", status="substrate", authority="automation-write",
-        summary="Cancel one of this thread's schedules",
-        activity="Cancelling automation",
-    ),
-    "automation_list": _Entry(
-        "automations", status="substrate", authority="automation-read",
-        summary="List this thread's schedules",
-        activity="Listing automations",
-    ),
+    **AUTOMATION_CATALOG_ENTRIES,
     **MEASUREMENT_CATALOG_ENTRIES,
     "restart_resume": _Entry(
         "delegation", status="substrate", authority="restart-continuity",

@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from collections.abc import Iterator
 from pathlib import Path
 
+from claude_controls import confined_claude_controls
+
 _SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 _READER = Path(__file__).with_name("reviewer_read.py")
 _SANDBOX_EXEC = "/usr/bin/sandbox-exec"
@@ -36,11 +38,7 @@ def claude_exact_source_controls(
     """
     reader = reader_command(git_dir, base_sha, head_sha)
     args = [
-        "--restricted",
-        "--safe-mode",
-        "--setting-sources", "",
-        "--strict-mcp-config",
-        "--permission-mode", "dontAsk",
+        *confined_claude_controls(),
         "--tools", "Bash",
         "--allowedTools",
         f"Bash({reader} stat)",

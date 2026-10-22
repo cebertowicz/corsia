@@ -53,7 +53,7 @@ async function openModels({ localEligible = false, localReplies = [], progressFa
 	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
 	flushSync(); await settle(); click('Continue'); await settle(); // past the Welcome screen of a narrow window
 	fill('#setup-name', 'Ada'); fill('#setup-username', 'ada'); fill('#setup-password', 'password1'); fill('#setup-confirm-password', 'password1');
-	await settle(); click('Continue'); await settle(); click('Continue'); await settle();
+	await settle(); click('Continue'); await settle();
 	await vi.waitFor(() => expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions'));
 	click('Neither'); await settle();
 	expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
@@ -75,7 +75,6 @@ describe('SetupScreen account recovery', () => {
 		flushSync(); await settle(); click('Continue'); await settle();
 		fill('#setup-name', 'Ada'); fill('#setup-username', 'ada'); fill('#setup-password', 'password1'); fill('#setup-confirm-password', 'password1');
 		await settle(); click('Continue'); await settle();
-		click('Continue'); await settle();
 		expect(host.textContent).toContain('Couldn’t create your account. Try again.');
 		click('Save a report'); await settle();
 		// No provider row failed, so the report adds no row details that would claim nothing went wrong.
