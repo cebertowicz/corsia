@@ -26,6 +26,7 @@ from infra.checkpoint_queries import current_installed_through_seq
 from infra.product_events import emit_product_event
 from llm.locality import cloud_off_project_ids
 from memory.checkpoint_search import caller_user_id
+from memory.node_text import node_text as _node_text
 from memory.task_match import Match, NodeText, TaskTerms, first_term_at, match, task_terms
 
 MAX_HITS = 3
@@ -103,7 +104,11 @@ def related_for_next(
 def _subject(db, operation: str, result: dict) -> tuple[NodeText, str] | None:
     if operation in _NODE_OPERATIONS and isinstance(result.get("node"), dict):
         node = result["node"]
-        return NodeText(str(node.get("title") or ""), criteria=str(node.get("acceptance_criteria") or ""), node_id=node.get("id")), operation
+        stored = _node_text(db, str(node["id"])) if node.get("id") else None
+        return stored or NodeText(
+            str(node.get("title") or ""), str(node.get("intent") or ""),
+            str(node.get("acceptance_criteria") or ""), node_id=node.get("id"),
+        ), operation
     if operation == "raise" and isinstance(result.get("decision"), dict):
         decision = result["decision"]
         return NodeText(str(decision.get("title") or ""), intent=str(decision.get("context") or "")), "decision_raise"
@@ -117,15 +122,6 @@ def _started_node_id(block: object) -> str | None:
     if not isinstance(selected, dict) or selected.get("how") not in _STARTED_HOWS:
         return None
     return str(selected["id"])
-
-
-def _node_text(db, node_id: str) -> NodeText | None:
-    row = db.execute(
-        "SELECT id,title,acceptance_criteria FROM plan_nodes WHERE id=?", (node_id,),
-    ).fetchone()
-    if row is None:
-        return None
-    return NodeText(str(row["title"]), criteria=str(row["acceptance_criteria"] or ""), node_id=str(row["id"]))
 
 
 def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]]:
