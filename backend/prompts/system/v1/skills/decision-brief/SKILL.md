@@ -29,7 +29,7 @@ Keep routine updates brief and consolidated. A requested report, explanation or 
 - Do not ask the user to choose what does not change behavior, external effect, cost, risk, or reversibility. Run skill `decide-or-raise` before drafting a raise.
 - Long form goes to the plan node or a registered document; the brief links it.
 - A genuine decision is a structured plan decision (draft, parent review, raise). Describing it in chat is not surfacing it.
-- An artifact ask, for something they must judge itself (a draft to send, a design): write it in the scope's `shared/`, register it (`artifact_register`), then `plan_update` `block_node` with `owner_kind: user` and `ask_artifact_id`. `request_review` hands work to an agent reviewer, never to the person.
+- An artifact ask, for something they must judge itself (a draft to send, a design): register the document as yours (`artifact_register`), then `plan_update` `block_node` with `owner_kind: user` and `ask_artifact_id`. `request_review` hands work to an agent reviewer, never to the person.
 - Keep unanswered decisions pending. Chase an overdue decision through its existing supported route without creating duplicates or treating silence as consent.
 
 ## Before sending
