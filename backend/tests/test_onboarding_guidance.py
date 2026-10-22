@@ -184,10 +184,14 @@ def test_every_settings_link_in_first_run_opens_a_real_section_and_anchor():
     web_search = WEB_SEARCH.read_text(encoding="utf-8")
     navigation = (ROOT / "frontend/src/lib/stores/settingsNavigation.ts").read_text(encoding="utf-8")
     sections = set(re.findall(r"'([a-z]+)'", navigation.split("SETTINGS_SECTIONS = [", 1)[1].split("]", 1)[0]))
+    # An anchor is a literal `data-settings-anchor` or the `anchor` prop SettingsGroup renders as one.
     anchors = {
         anchor
         for path in (ROOT / "frontend/src/lib/components").glob("*.svelte")
-        for anchor in re.findall(r'data-settings-anchor="([\w-]+)"', path.read_text(encoding="utf-8"))
+        for anchor in re.findall(
+            r'(?:data-settings-anchor|<SettingsGroup\b[^>]*?\sanchor)="([\w-]+)"',
+            path.read_text(encoding="utf-8"),
+        )
     }
     links = re.findall(r"\]\(/settings/([a-z]+)(?:#([\w-]+))?\)", first_run + web_search)
 

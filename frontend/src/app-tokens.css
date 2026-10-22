@@ -176,6 +176,7 @@
   --lg-row-hover: color-mix(in srgb, var(--text-primary) 6%, transparent);
   --header-gradient-top: var(--glass-thin);
   --shadow-chip: 0 8px 32px rgba(0, 0, 0, 0.40);
+  --shadow-focus: 0 0 0 3px var(--accent-wash);
 }
 
 [data-theme="light"] {

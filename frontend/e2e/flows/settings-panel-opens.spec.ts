@@ -35,7 +35,8 @@ test.describe('@flow:settings @surface:settings settings panel opens', () => {
 		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible();
 		await openSettings(page);
 		await openSettingsSection(page, 'Providers');
-		await expect(page.getByRole('heading', { name: 'Accounts and rollover', exact: true })).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Providers', exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Add provider', exact: true })).toBeVisible();
 
 		await openSettingsSection(page, 'System');
 		await expect(page.locator('.settings-content')).toBeVisible();

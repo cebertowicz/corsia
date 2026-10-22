@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { Spinner, Toggle } from '$lib/components/ui';
-	import StatePill from '$lib/components/ui/StatePill.svelte';
 	import { saveUpdateSchedule, updateFailureVerdict, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStatus, updateUnreachable } from '$lib/update/store';
 	import { failureCopy, failureFromOperation, failureFromVerdict } from '$lib/update/failureCopy';
 	import { changeList, currentOperation, elapsedSeconds, formatElapsed, formatInstalledAt, formatScheduleTime, isFailedOperation, releaseNotesFor, stepMessage } from '$lib/update/model';
@@ -55,12 +54,12 @@
 		<span class="service-name">Version</span>
 		<div class="version-state">
 			<span class="version-line">
-				{#if scheduledTonight}<StatePill state="active" size="sm" label={`${currentVersion} · ${formatScheduleTime(schedule?.time ?? '')} tonight`} />
-				{:else}<span class="service-version">{currentVersion}</span>{#if copy}<StatePill state="warning" size="sm" label={copy.title} />{:else if offered && targetVersion}<StatePill state="active" size="sm" label={`${targetVersion} available`} />{/if}{/if}
+				<span class="service-version">{currentVersion}</span>
+				{#if scheduledTonight}<span class="state offer-state">· {formatScheduleTime(schedule?.time ?? '')} tonight</span>
+				{:else if copy}<span class="state failed-state">· {copy.title}</span>
+				{:else if offered && targetVersion}<span class="state offer-state">· {targetVersion} available</span>{/if}
+				{#if running}<span class="updating">· <Spinner size={12} />{stepMessage(operation, $updateUnreachable)}<span class="time">{elapsed}</span></span>{/if}
 			</span>
-			{#if running}
-				<span class="updating"><Spinner size={12} />{stepMessage(operation, $updateUnreachable)}<span class="time">{elapsed}</span></span>
-			{/if}
 			{#if installedLine}<span class="installed">{installedLine}</span>{/if}
 		</div>
 	</div>
@@ -83,20 +82,25 @@
 </div>
 
 <style>
-	.update-card { display: flex; flex-direction: column; gap: var(--space-2); }
-	.service-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); background: var(--bg-tertiary); border-radius: var(--radius-sm); }
-	.service-name { font-size: var(--text-subhead); font-weight: var(--fw-medium); min-width: 70px; }
-	.version-state { display: grid; gap: var(--space-1); min-width: 0; }
-	.version-line { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; flex-wrap: wrap; }
+	/* Rows take the §0.1 list-row and second-line treatment (as SettingsRow draws them). The Version row
+	   carries a spinner and a status in its own colour, which SettingsRow's plain-text line cannot. */
+	.update-card { display: flex; flex-direction: column; gap: var(--space-1); }
+	.service-row { display: flex; align-items: center; gap: var(--space-3); min-height: var(--list-row-min-height); padding: var(--space-1) var(--space-2); }
+	.service-name { font-size: var(--text-subhead); color: var(--text-primary); min-width: 70px; }
+	/* The version and its state, an update in progress included, are the row's one-line trailing detail. */
+	.version-state { display: grid; justify-items: end; gap: var(--space-1); min-width: 0; margin-left: auto; text-align: right; }
+	.version-line { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--space-1); min-width: 0; flex-wrap: wrap; font-size: var(--text-caption); }
 	.installed { color: var(--text-tertiary); font-size: var(--text-caption); }
-	.service-version { color: var(--text-primary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
-	.service-status { color: var(--text-tertiary); font-size: var(--text-footnote); }
-	.updating { color: var(--text-primary); font-size: var(--text-footnote); display: inline-flex; align-items: center; gap: var(--space-2); }
+	.service-version { color: var(--text-tertiary); overflow-wrap: anywhere; }
+	.offer-state { color: var(--accent-text); }
+	.failed-state { color: var(--amber-text); }
+	.service-status { color: var(--text-tertiary); font-size: var(--text-caption); }
+	.updating { color: var(--text-secondary); font-size: var(--text-caption); display: inline-flex; align-items: center; gap: var(--space-1); }
 	.time { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 	.time::before { content: '\00b7\00a0'; }
-	.notes { padding: var(--space-3); background: var(--bg-tertiary); border-radius: var(--radius-sm); color: var(--text-secondary); font-size: var(--text-footnote); line-height: 1.5; }
+	.notes { padding: 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-footnote); line-height: 1.5; }
 	.service-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
-	.automatic-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); }
+	.automatic-row { display: flex; align-items: center; gap: var(--space-3); min-height: var(--list-row-min-height); padding: var(--space-1) var(--space-2); }
 	.automatic-copy { display: grid; gap: var(--space-1); color: var(--text-primary); font-size: var(--text-subhead); }
 	.time-field { border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); background: var(--bg-primary); color: var(--text-primary); font: inherit; padding: var(--space-1); }
 	@media (max-width: 768px) { .service-row, .automatic-row { flex-wrap: wrap; gap: var(--space-2); } .automatic-row .service-actions { width: auto; margin-left: auto; } .automatic-copy { flex: 1; min-width: min(250px, 100%); } }

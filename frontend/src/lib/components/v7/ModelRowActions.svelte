@@ -29,6 +29,10 @@
 
 <style>
 	.action { grid-area: action; display: flex; align-items: center; justify-content: flex-end; min-width: calc(var(--space-6) * 2 + var(--space-1)); }
+	/* The trailing glyph or word ends on the content edge, with every other Settings row's control;
+	   the button keeps its hit area, which runs out past the edge instead. */
+	.action > .ico-btn.sm { margin-right: calc(-1 * var(--space-2) + var(--space-1) / 8); }
+	.action > .row-btn { margin-right: calc(-1 * (var(--space-2) + var(--space-1) / 2)); }
 	.ico-btn {
 		display: inline-flex; align-items: center; justify-content: center;
 		border-radius: var(--radius-xs); color: var(--text-tertiary);
@@ -45,4 +49,5 @@
 	}
 	.row-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 	.row-btn.danger:hover { color: var(--red); }
+	@media (max-width: 30rem) { .action { align-self: center; } }
 </style>
