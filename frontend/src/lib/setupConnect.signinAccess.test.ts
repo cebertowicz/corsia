@@ -30,12 +30,12 @@ function flowFor(source: typeof claude) {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('a sign-in the browser never returns to', () => {
-	it('names the usual cause, keeps the failure reference and offers a new sign-in or turning the tool off', async () => {
+	it('says what happened, keeps the failure reference and offers a new sign-in or turning the tool off', async () => {
 		serve({ status: 'failed', cause: 'signin_timed_out', ref: 'ref-7' });
 		const flow = flowFor(claude);
 		await flow.signIn(claude);
 		const row = flow.row(claude);
-		expect(row.meta).toBe('Couldn’t finish signing in to Claude Code: your browser may have stopped on a page saying this account doesn’t include it. Sign in with another account, or turn it off.');
+		expect(row.meta).toBe('Couldn’t finish signing in to Claude Code: your browser didn’t come back to CORSIA in time. Sign in again, or turn Claude Code off.');
 		expect(row.error).toBe(true);
 		expect(row.reference).toBe('ref-7');
 		expect(row.action?.label).toBe('Sign in');
@@ -46,7 +46,7 @@ describe('a sign-in the browser never returns to', () => {
 		const calls = serve({ status: 'failed', cause: 'signin_timed_out', ref: 'ref-8' });
 		const flow = flowFor(codex);
 		await flow.signIn(codex);
-		expect(flow.row(codex).meta).toBe('Couldn’t finish signing in to Codex: your browser may have stopped on a page saying this account doesn’t include it. Sign in with another account, or turn it off.');
+		expect(flow.row(codex).meta).toBe('Couldn’t finish signing in to Codex: your browser didn’t come back to CORSIA in time. Sign in again, or turn Codex off.');
 		const starts = () => calls.filter((call) => call === 'POST /api/vendor-accounts/account-1/signin').length;
 		expect(starts()).toBe(1);
 		flow.row(codex).action?.run();
@@ -61,7 +61,7 @@ describe('an account the service records as signed in with no usable model', () 
 	it('says the account does not include the tool, from the record alone, and offers a new sign-in or turning it off', () => {
 		const flow = flowFor(claude);
 		const row = flow.row(signedIn(claude, 'no_usable_model'));
-		expect(row.meta).toBe('This Claude account doesn’t include Claude Code. Sign in with another account, or turn it off.');
+		expect(row.meta).toBe('This Claude account has no models for Claude Code. Sign in with another account, or turn Claude Code off.');
 		expect(row.error).toBe(true);
 		expect(row.action?.label).toBe('Sign in');
 		expect(row.canTurnOff).toBe(true);
@@ -69,13 +69,13 @@ describe('an account the service records as signed in with no usable model', () 
 
 	it('names Codex and the ChatGPT account for Codex', () => {
 		const flow = flowFor(codex);
-		expect(flow.row(signedIn(codex, 'no_usable_model', 'signed_out')).meta).toBe('This ChatGPT account doesn’t include Codex. Sign in with another account, or turn it off.');
+		expect(flow.row(signedIn(codex, 'no_usable_model', 'signed_out')).meta).toBe('This ChatGPT account has no models for Codex. Sign in with another account, or turn Codex off.');
 	});
 
 	it('leaves a working, limited or still-unchecked account to its own row', () => {
 		const flow = flowFor(claude);
 		expect(flow.row(signedIn(claude, 'no_usable_model', 'ready')).meta).toBe('Ready · me@example.com');
-		expect(flow.row(signedIn(claude, 'no_usable_model', 'limited')).meta).not.toContain('doesn’t include');
-		expect(flow.row(signedIn(claude, 'no_usable_model', 'unchecked')).meta).not.toContain('doesn’t include');
+		expect(flow.row(signedIn(claude, 'no_usable_model', 'limited')).meta).not.toContain('has no models for');
+		expect(flow.row(signedIn(claude, 'no_usable_model', 'unchecked')).meta).not.toContain('has no models for');
 	});
 });

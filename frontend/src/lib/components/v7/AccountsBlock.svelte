@@ -91,7 +91,7 @@
 	});
 
 	// The first read of a new login's models ends with models_updated: the list then shows whether the account has any.
-	onMount(() => on('models_updated', () => { void loadVendorAccounts(); }));
+	onMount(() => on('models_updated', async () => { const result = await loadVendorAccounts(); if (!result.ok && !result.superseded) actionError = result.error ?? 'Could not load accounts.'; }));
 
 	onMount(async () => {
 		void policyState.load();
@@ -129,7 +129,7 @@
 		if (account.state === 'legacy') return 'Managed by provider';
 		if (account.state === 'removed') return 'Removed';
 		const vendor = VENDORS[account.provider];
-		if (account.no_usable_model && vendor) return `This ${vendor.name} account doesn’t include ${vendor.cli}. Sign in with another account, or turn this one off.`;
+		if (account.no_usable_model && vendor) return `This ${vendor.name} account has no models for ${vendor.cli}. Sign in with another account, or turn this account off.`;
 		return null;
 	}
 
@@ -339,7 +339,7 @@
 				{/if}
 				{#if account.state !== 'removed' && signIn && !(signIn.status === 'completed' && account.state === 'signed_in')}
 					<div class="signin-state" role="status">
-						<span>{signinMessage(signIn, accountName, signin, VENDORS[account.provider]?.cli)}</span>
+						<span>{signinMessage(signIn, accountName, signin)}</span>
 						{#if signIn.status === 'waiting'}
 							<div class="signin-actions">
 								<Button size="sm" disabled={!!pending[account.id]} onclick={() => checkSignin(account.id)}>Check</Button>

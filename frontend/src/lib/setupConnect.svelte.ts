@@ -59,7 +59,7 @@ export function signinFailureCopy(vendor: string, cause?: string | null, ref?: s
 	if (cause === 'agent_unavailable') return { meta: `CORSIA couldn’t reach its agent to start signing in. ${again}`, reportable: true };
 	if (cause?.endsWith('_executable_missing')) return { meta: `CORSIA couldn’t find ${cli} on this computer. Sign in again to install it.`, reportable: true };
 	if (cause?.endsWith('_signin_in_progress')) return { meta: `Another ${cli} sign-in is already open. Finish it in your browser, or sign in again.`, reportable: false };
-	if (cause === 'signin_timed_out') return { meta: `Couldn’t finish signing in to ${cli}: your browser may have stopped on a page saying this account doesn’t include it. Sign in with another account, or turn it off.`, reportable: false };
+	if (cause === 'signin_timed_out') return { meta: `Couldn’t finish signing in to ${cli}: your browser didn’t come back to CORSIA in time. Sign in again, or turn ${cli} off.`, reportable: false };
 	if (cause === 'vendor_login_failed') return { meta: `Signing in to ${cli} didn’t finish in the browser. Sign in again.`, reportable: false };
 	if (cause === 'vendor_not_signed_in') return { meta: `${cli} didn’t report a signed-in ${account} account. Sign in again.`, reportable: false };
 	if (cause === 'same_account') return { meta: `That ${account} account is already signed in here. To add another, sign in again with a different ${account} account.`, reportable: false };
@@ -227,7 +227,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 			return { meta: account ? `Ready · ${account}` : 'Ready', ready: true };
 		}
 		if (hasNoUsableModel(source)) {
-			return { meta: `This ${copy.account} account doesn’t include ${copy.cli}. Sign in with another account, or turn it off.`, error: true, action: signInAction, canTurnOff: true };
+			return { meta: `This ${copy.account} account has no models for ${copy.cli}. Sign in with another account, or turn ${copy.cli} off.`, error: true, action: signInAction, canTurnOff: true };
 		}
 		if (source.state === 'unverified' && source.cli_package_manager) {
 			const command = source.cli_package_manager === 'homebrew' ? `brew reinstall ${source.source === 'claude-code' ? 'claude-code' : 'codex'}` : `npm install -g ${source.source === 'claude-code' ? '@anthropic-ai/claude-code' : '@openai/codex'}`;

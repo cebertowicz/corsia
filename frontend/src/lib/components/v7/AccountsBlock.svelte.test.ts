@@ -4,6 +4,7 @@ import AccountsBlock from './AccountsBlock.svelte';
 import { checkVendorSignin, loadVendorAccounts, removeVendorAccount, renameVendorAccount, signOutVendorAccount, type VendorAccount, vendorAccounts } from '$lib/stores/vendorAccounts';
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
+import { emit } from '$lib/ws/events';
 
 describe('rendering and actions', () => {
 	const provider = {
@@ -222,9 +223,9 @@ describe('rendering and actions', () => {
 			}
 		});
 
-		it('says an account the service records as having no usable model does not include the tool, and only then', async () => {
+		it('says an account the service records as having no usable model has no models for the tool, and only then', async () => {
 			const signedIn = { ...workAccount, state: 'signed_in' as const };
-			const noModel = 'This ChatGPT account doesn’t include Codex. Sign in with another account, or turn this one off.';
+			const noModel = 'This ChatGPT account has no models for Codex. Sign in with another account, or turn this account off.';
 			for (const [record, shown] of [[{ no_usable_model: true }, true], [{ no_usable_model: false }, false], [{}, false]] as const) {
 				vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [defaultAccount, { ...signedIn, ...record }] })));
 				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
@@ -235,7 +236,30 @@ describe('rendering and actions', () => {
 			}
 		});
 
-		it('names the usual cause of a sign-in that timed out and says what to do next', async () => {
+		it('reads the list again when a login finishes reading its models, and says so when that read fails', async () => {
+			const signedIn = { ...workAccount, state: 'signed_in' as const };
+			const noModel = 'This ChatGPT account has no models for Codex.';
+			let reads = 0;
+			vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+				if (!String(input).startsWith('/api/vendor-accounts')) return response({});
+				reads += 1;
+				if (reads === 1) return response({ accounts: [defaultAccount, signedIn] });
+				if (reads === 2) return response({ accounts: [defaultAccount, { ...signedIn, no_usable_model: true }] });
+				return response({}, 500);
+			}));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await settle();
+			expect(document.body.textContent).not.toContain(noModel);
+			emit('models_updated', {});
+			await settle();
+			expect(document.body.textContent).toContain(noModel);
+			emit('models_updated', {});
+			await settle();
+			expect(document.body.textContent).toContain('Could not load accounts.');
+			unmount(component);
+		});
+
+		it('says what happened to a sign-in that timed out and what to do next', async () => {
 			vi.stubGlobal('fetch', vi.fn()
 				.mockResolvedValueOnce(response({ accounts: [defaultAccount, workAccount] }))
 				.mockResolvedValueOnce(response({ detail: 'no sign-in is in progress for this account' }, 409))
@@ -244,7 +268,7 @@ describe('rendering and actions', () => {
 			await settle();
 			button('Sign in').click();
 			await settle();
-			expect(document.body.textContent).toContain('Couldn’t finish signing in: your browser may have stopped on a page saying this account doesn’t include Codex. Sign in with another account, or turn this one off.');
+			expect(document.body.textContent).toContain('Couldn’t finish signing in: your browser didn’t come back to CORSIA in time. Sign in again, or turn this account off.');
 			unmount(component);
 		});
 

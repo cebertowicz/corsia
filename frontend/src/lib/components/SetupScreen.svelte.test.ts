@@ -237,7 +237,7 @@ describe('SetupScreen', () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready', accounts: [account] } as never, { source: 'codex', name: 'Codex', state: 'not_installed' }];
 		await passFolder();
 		button('Claude')?.click(); await settle();
-		expect(host.textContent).toContain('This Claude account doesn’t include Claude Code. Sign in with another account, or turn it off.');
+		expect(host.textContent).toContain('This Claude account has no models for Claude Code. Sign in with another account, or turn Claude Code off.');
 		progressBodies.length = 0;
 		host.querySelector<HTMLButtonElement>('button[aria-label="Claude Code"]')!.click(); await settle();
 		expect(progressBodies.map((body) => JSON.parse(body).picks)).toContainEqual({ claude: false, chatgpt: false });
