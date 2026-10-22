@@ -9,6 +9,11 @@ from automation.continuation.progress import (
     wake_snapshot,
 )
 from automation.continuation.triggers import Trigger, TriggerRequest
+from infra.thread_input_rows import (
+    liveness_wake_queued,
+    turn_running,
+    turn_starting_work_pending,
+)
 from plans.public import liveness_signal
 
 
@@ -47,6 +52,10 @@ class LivenessSource:
 
         requests = []
         for wake in plan_liveness.due_plan_wakes(now, db=db):
+            # One unread wake per thread: a Turn that outlasts several due
+            # times reads one reminder, not a stack of them.
+            if liveness_wake_queued(db, wake.thread_id):
+                continue
             requests.append(self._request(wake, db, now))
         return requests
 
@@ -99,8 +108,6 @@ class LivenessSource:
         if transition != _transition(wake):
             return False
         if details.get("provider_reset_at"):
-            from infra.thread_input_rows import turn_starting_work_pending
-
             if turn_starting_work_pending(db, thread_id):
                 return False
         return self.still_actionable(thread_id, details, db=db)
@@ -156,5 +163,14 @@ class LivenessSource:
     def _settle_delivery(self, wake, db) -> None:
         signal = self._signal(wake.thread_id, db)
         progress = classify_progress(signal, wake_snapshot(wake))
-        next_cycle = 0 if progress == ADVANCED else wake.cycle + 1
+        if progress == ADVANCED:
+            next_cycle = 0
+        elif turn_running(db, wake.thread_id) and liveness_wake_queued(
+            db, wake.thread_id,
+        ):
+            # The wake waits behind a running Turn. The agent has not read it,
+            # so it has not gone unanswered.
+            next_cycle = wake.cycle
+        else:
+            next_cycle = wake.cycle + 1
         plan_liveness._rearm_due_wake(wake, signal, next_cycle, db)

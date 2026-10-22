@@ -18,12 +18,27 @@ def starts_turn(row: sqlite3.Row) -> bool:
     )
 
 
-def turn_starting_work_pending(db: sqlite3.Connection, thread_id: str) -> bool:
-    """Whether a running Turn or current-model queued input already starts work."""
-    if db.execute(
+def turn_running(db: sqlite3.Connection, thread_id: str) -> bool:
+    """Whether the thread has a running Turn."""
+    return db.execute(
         "SELECT 1 FROM active_turns WHERE thread_id=? AND status='running'",
         (thread_id,),
-    ).fetchone() is not None:
+    ).fetchone() is not None
+
+
+def liveness_wake_queued(db: sqlite3.Connection, thread_id: str) -> bool:
+    """Whether a plan liveness wake still waits, unclaimed, in the thread's FIFO."""
+    return db.execute(
+        "SELECT 1 FROM messages WHERE thread_id=? AND delivery_state='queued' "
+        "AND active_turn_id IS NULL AND input_order IS NOT NULL "
+        "AND json_extract(metadata,'$.event_type')='plan.liveness_wake' LIMIT 1",
+        (thread_id,),
+    ).fetchone() is not None
+
+
+def turn_starting_work_pending(db: sqlite3.Connection, thread_id: str) -> bool:
+    """Whether a running Turn or current-model queued input already starts work."""
+    if turn_running(db, thread_id):
         return True
     thread = db.execute(
         "SELECT execution_epoch,model FROM threads WHERE id=?", (thread_id,),

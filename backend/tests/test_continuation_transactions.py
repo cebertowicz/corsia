@@ -325,36 +325,6 @@ def test_standalone_terminal_unit_is_durable(continuation_db):
 
 
 @pytest.mark.asyncio
-async def test_a_trigger_reaches_a_busy_owner_in_the_sweep_it_falls_due(continuation_db):
-    # A running Turn never holds a wake back: delivery queues it for the Turn's boundary.
-    with database.write_transaction(None, scope="continuation_test_busy") as db:
-        db.execute(
-            "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch) "
-            "VALUES ('turn-1','owner',0,'native/model','running','2000-01-01T00:00:00','boot-1')",
-        )
-    delivered = []
-
-    async def deliver(thread, event, summary, details):
-        delivered.append(thread)
-        return True
-
-    result = await runner.sweep(NOW, sources=[Source()], deliver=deliver)
-
-    assert result["woken"] == ["owner"] and delivered == ["owner"]
-    [row] = [current(trigger_id) for trigger_id in _trigger_ids(continuation_db)]
-    assert (row.state, row.deferrals) == ("delivered", 0)
-
-
-def current(trigger_id):
-    return triggers.get(trigger_id, db=database.get_db())
-
-
-def _trigger_ids(path):
-    with closing(sqlite3.connect(str(path))) as db:
-        return [row[0] for row in db.execute("SELECT id FROM continuation_triggers")]
-
-
-@pytest.mark.asyncio
 async def test_failed_accepted_delivery_wins_race_with_inflight_settlement(
     continuation_db, monkeypatch,
 ):

@@ -1,4 +1,4 @@
-"""Single durable admission, delivery, and settlement loop."""
+"""Single durable delivery and settlement loop for continuation triggers."""
 
 from __future__ import annotations
 
