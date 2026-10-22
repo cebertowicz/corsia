@@ -22,7 +22,8 @@ APP_REFERENCE = "skills/conductor-bootstrap/references/first-run-app.md"
 FACTS_TIMEOUT_SECONDS = 5.0
 APP_FACT_KEYS = frozenset({
     "first_run_path", "harness_ready", "sources_missing", "agents_found", "local_download",
-    "tool_attempts", "bound_model", "web_search_ready", "github_ready", "setup", "user_profile",
+    "tool_attempts", "pays_for", "bound_model", "web_search_ready", "github_ready", "setup",
+    "user_profile",
 })
 UNAVAILABLE_READS = {
     "your_model": "none; omit task 1's bracket",
@@ -34,10 +35,11 @@ UNAVAILABLE_READS = {
     "web_search_key": "one web_search call",
     "harness_ready": "tool model_sources, once, without recheck",
     "sources_missing": "tool model_sources, once, without recheck",
-    "agents_found": "none; leave OpenClaw and Hermes Agent out of step 4",
+    "agents_found": "none; leave OpenClaw and Hermes Agent out of step 2",
     "local_download": "corsia_api GET /api/providers/local/setup",
     "setup_handoff": "setup progress handoff saved before model binding",
     "tool_attempts": "setup progress handoff saved before model binding",
+    "pays_for": "setup progress handoff saved before model binding; offer no subscription",
     "web_search_ready": "one web_search call",
     "github_ready": "tool model_sources, once, without recheck",
     "user_profile": "preferred-name read from the workspace profile",
@@ -157,6 +159,14 @@ def _app_setup_handoff() -> dict[str, Any] | None:
     return handoff if isinstance(handoff, dict) else None
 
 
+def _pays_for(subscriptions: object) -> list[str]:
+    """The tools the person said they pay for; nothing when they were not asked."""
+    if not isinstance(subscriptions, dict):
+        return []
+    return [name for name, vendor in (("claude_code", "claude-code"), ("codex", "codex"))
+            if subscriptions.get(vendor) is True]
+
+
 def _app_user_profile() -> dict[str, str | None]:
     from infra import config
     from infra.user_profile import profile_name
@@ -243,7 +253,9 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         sources_missing = _unavailable("sources_missing")
         github_ready = _unavailable("github_ready")
     handoff = reads["setup_handoff"]
+    pays_for: list[str] | dict[str, str] = []
     if isinstance(handoff, dict) and "unavailable" not in handoff:
+        pays_for = _pays_for(handoff.get("subscriptions"))
         tool_attempts = handoff.get("tools")
         if isinstance(tool_attempts, dict):
             tool_attempts = {
@@ -252,6 +264,7 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
             }
     elif isinstance(handoff, dict):
         tool_attempts = _unavailable("tool_attempts")
+        pays_for = _unavailable("pays_for")
     else:
         tool_attempts = None
     return {
@@ -261,6 +274,7 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "agents_found": reads["agents_found"],
         "local_download": reads["local_download"],
         "tool_attempts": tool_attempts,
+        "pays_for": pays_for,
         "bound_model": reads["bound_model"],
         "web_search_ready": reads["web_search_ready"],
         "github_ready": github_ready,
