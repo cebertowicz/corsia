@@ -14,8 +14,6 @@
 .account-manager .rollover-row > span:first-child { min-width: 0; }
 .account-manager .policy-control { display: contents; }
 .account-manager .rollover-row .policy-status { grid-column: 1 / -1; justify-self: end; text-align: right; }
-.account-manager .policy-status { color: var(--text-secondary); font-size: var(--text-footnote); }
-.account-manager .policy-status.error { color: var(--red-text); }
 .account-manager .override-summary { margin: 0; font-size: var(--text-caption); color: var(--text-tertiary); }
 .account-manager .project-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
 .account-manager .account { position: relative; padding: var(--space-1) 0; outline: none; }

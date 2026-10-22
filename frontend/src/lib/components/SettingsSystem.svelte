@@ -110,7 +110,7 @@
 
 	const serverLine = $derived(
 		lifecycleProgress ? `${lifecycleProgress} · ${lifecycleElapsedSeconds}s elapsed`
-		: $updateInFlight ? 'Running · Unavailable while an update runs'
+		: $updateInFlight ? 'Running · Can’t restart while an update runs'
 		: 'Running',
 	);
 
@@ -200,7 +200,7 @@
 		<SettingsRow
 			name="Memory"
 			trailing={memoryFree(systemStatus.memory)}
-			sub={memoryPressure === 'critical' || memoryPressure === 'warning' ? `Memory pressure: ${memoryPressure}` : ''}
+			sub={memoryPressure === 'critical' ? 'Memory is almost full' : memoryPressure === 'warning' ? 'Memory is running low' : ''}
 			subTone={memoryPressure === 'critical' ? 'failed' : memoryPressure === 'warning' ? 'attention' : 'quiet'}
 		/>
 		{#if systemStatus.cpu}

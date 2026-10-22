@@ -10,6 +10,8 @@
 	import AccountUsageRow from './AccountUsageRow.svelte';
 	import AccountBillingRow from './AccountBillingRow.svelte';
 	import ProviderAccountPolicyControls from './ProviderAccountPolicyControls.svelte';
+	import PolicySaveStatus from './PolicySaveStatus.svelte';
+	import { signinMessage } from './accountSigninMessage';
 	import type { HostProvider } from '$lib/stores/providersV7';
 	import { createProviderPolicyState } from '$lib/stores/providerPolicyState.svelte';
 	import { openProjectSettings } from '$lib/stores/settingsNavigation';
@@ -67,10 +69,29 @@
 	const removedAccounts = $derived((historicalAccounts ?? []).filter((account) => account.provider === provider.name));
 	const accounts = $derived([...$vendorAccounts.filter((account) => account.provider === provider.name && account.state !== 'removed' && !removedAccounts.some((removed) => removed.id === account.id)), ...removedAccounts]);
 	const showRows = $derived(accounts.length > 0 || Object.keys(signin).length > 0);
+	const rolloverActive = $derived(!!policyProvider?.rollover && policyProvider.units.length >= 2);
+	// The saved rollover order is the order of `units`: numbered rows follow it, and accounts with no unit (removed ones) follow, unnumbered.
+	const rows = $derived.by(() => {
+		const byId = new Map(accounts.filter((account) => account.state !== 'removed').map((account) => [account.id, account]));
+		const ordered = (policyProvider?.units ?? []).flatMap((unit, position) => byId.has(unit.id) ? [{ account: byId.get(unit.id)!, unit, position }] : []);
+		const numbered = new Set(ordered.map((row) => row.account.id));
+		return [...ordered, ...accounts.filter((account) => !numbered.has(account.id)).map((account) => ({ account, unit: undefined, position: -1 }))];
+	});
+
+	// The policy lists exactly this vendor's accounts, so it reloads whenever that set changes.
+	const accountIdsKey = $derived($vendorAccounts.filter((account) => account.provider === provider.name && account.state !== 'removed').map((account) => account.id).sort().join('\n'));
+	let policyAccountIds: string | null = null;
+	$effect(() => {
+		const key = accountIdsKey;
+		if (policyAccountIds === null || key === policyAccountIds) return;
+		policyAccountIds = key;
+		void policyState.load();
+	});
 
 	onMount(async () => {
 		void policyState.load();
 		const result = await loadVendorAccounts();
+		policyAccountIds = accountIdsKey;
 		if (!result.ok) {
 			if (!result.superseded) actionError = result.error ?? 'Could not load accounts.';
 			return;
@@ -103,34 +124,6 @@
 		if (account.state === 'legacy') return 'Managed by provider';
 		if (account.state === 'removed') return 'Removed';
 		return null;
-	}
-
-	function readableCause(cause: string | null): string {
-		if (!cause) return 'Sign-in didn’t complete.';
-		if (cause === 'vendor_login_failed') return 'Sign-in didn’t complete.';
-		if (cause === 'vendor_not_signed_in') return 'The vendor did not report this account as signed in.';
-		if (cause === 'signin_check_failed') return 'CORSIA could not check the vendor sign-in.';
-		if (cause === 'vendor_login_unavailable') return 'Sign-in is unavailable.';
-		return cause.replaceAll('_', ' ');
-	}
-
-	function signinMessage(result: SigninResult): string {
-		if (result.status === 'waiting') return 'Waiting for sign-in in your browser';
-		if (result.status === 'completed') return 'Signed in';
-		if (result.status === 'cancelled') return 'Sign-in cancelled';
-		if (result.status === 'superseded') return 'Account changed before sign-in finished';
-		if (result.status === 'unavailable') return 'Sign-in is unavailable';
-		if (result.cause === 'same_account') {
-			const name = accountName(result.duplicate_of);
-			return name ? `Already signed in as ${name}` : 'This account is already signed in';
-		}
-		if (result.status === 'refused') {
-			const name = accountName(result.held_by);
-			const holder = result.held_by ? signin[result.held_by] : null;
-			if (holder && holder.status !== 'waiting') return name ? `Sign-in was already in progress for ${name}` : 'Another sign-in was already in progress';
-			return name ? `${name} is already signing in` : 'Another account is already signing in';
-		}
-		return readableCause(result.cause);
 	}
 
 	async function focusHolder(result: SigninResult) {
@@ -281,14 +274,13 @@
 		</div>
 	{:else}
 		{#if policyProvider && policyProvider.units.length >= 2 && policyProvider.capabilities.rollover}
-			<div class="rollover-row"><span>Roll over when an account hits its limit</span><span class="policy-control"><Toggle checked={policyProvider.rollover} disabled={policyState.isPending(rolloverTarget)} ariaLabel="Roll over when an account hits its limit" describedBy={policyState.isPending(rolloverTarget) || policyState.hasFailure(rolloverTarget) ? 'rollover-policy-status' : undefined} onchange={(value) => policyState.save(policyProvider, { rollover: value }, rolloverTarget)} />{#if policyState.isPending(rolloverTarget)}<span class="policy-status" id="rollover-policy-status" role="status">Saving…</span>{/if}{#if policyState.hasFailure(rolloverTarget)}<span class="policy-status error" id="rollover-policy-status" role="status">Couldn't save this change. Try again.</span>{/if}</span></div>
+			<div class="rollover-row"><span>Roll over when an account hits its limit</span><span class="policy-control"><Toggle checked={policyProvider.rollover} disabled={policyState.isPending(rolloverTarget)} ariaLabel="Roll over when an account hits its limit" describedBy={policyState.isPending(rolloverTarget) || policyState.hasFailure(rolloverTarget) ? 'rollover-policy-status' : undefined} onchange={(value) => policyState.save(policyProvider, { rollover: value }, rolloverTarget)} /><PolicySaveStatus id="rollover-policy-status" pending={policyState.isPending(rolloverTarget)} failed={policyState.hasFailure(rolloverTarget)} /></span></div>
 		{/if}
-		{#each accounts as account, index (account.id)}
-			{@const unit = policyProvider?.units.find((candidate) => candidate.id === account.id)}
+		{#each rows as { account, unit, position } (account.id)}
 			{@const unitTarget = `unit:${provider.name}:${account.id}`}
 			{@const signIn = signin[account.id]}
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-			<section class="account" class:ordered={policyProvider?.rollover && policyProvider.units.length >= 2} id={`vendor-account-${account.id}`} tabindex="0" {...accountMenu.rowHandlers(account)}>
+			<section class="account" class:ordered={rolloverActive} id={`vendor-account-${account.id}`} tabindex="0" {...accountMenu.rowHandlers(account)}>
 				{#if editingId === account.id && account.state !== 'removed'}
 					<Field label="Name" error={editError}>
 						{#snippet trailing()}
@@ -307,7 +299,7 @@
 				{:else}
 					<div class="account-main">
 						<div class="account-copy">
-							<AccountUsageRow {account} compact marker={account.is_default ? 'Workspace account' : null} order={policyProvider?.rollover && policyProvider.units.length >= 2 ? index + 1 : null}>
+							<AccountUsageRow {account} compact marker={account.is_default ? 'Workspace account' : null} order={rolloverActive && unit ? position + 1 : null}>
 								{#if unit}
 									<ProviderAccountPolicyControls
 										accountName={displayName(account)}
@@ -316,7 +308,7 @@
 										moveDisabled={policyState.isPending(`order:${provider.name}:${account.id}`)}
 										pending={policyState.isPending(unitTarget) || policyState.isPending(`order:${provider.name}:${account.id}`)}
 										failed={policyState.hasFailure(unitTarget) || policyState.hasFailure(`order:${provider.name}:${account.id}`)}
-										position={policyProvider?.rollover && policyProvider.units.length >= 2 ? index : null}
+										position={rolloverActive ? position : null}
 										total={policyProvider?.units.length ?? 0}
 										onmove={(direction) => policyState.move(policyProvider!, account.id, direction)}
 										ontoggle={(value) => policyState.setEnabled(policyProvider!, account.id, value)}
@@ -339,7 +331,7 @@
 				{/if}
 				{#if account.state !== 'removed' && signIn && !(signIn.status === 'completed' && account.state === 'signed_in')}
 					<div class="signin-state" role="status">
-						<span>{signinMessage(signIn)}</span>
+						<span>{signinMessage(signIn, accountName, signin)}</span>
 						{#if signIn.status === 'waiting'}
 							<div class="signin-actions">
 								<Button size="sm" disabled={!!pending[account.id]} onclick={() => checkSignin(account.id)}>Check</Button>

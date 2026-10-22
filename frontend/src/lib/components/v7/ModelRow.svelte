@@ -163,8 +163,8 @@
 <style>
 	/* A nested Settings list row under its provider: it starts on the provider's name column and ends
 	   on the content edge, flat on the pane, with space alone between rows. State is the switch, the
-	   status text and the progress puck, never a fill or a bar; the one exception is a download's
-	   hairline, the only place its progress shows. */
+	   status text (which carries load and warm progress) and the puck, never a fill or a bar; the one
+	   exception is a download's hairline. */
 	.mr {
 		display: grid;
 		/* The name keeps a floor, so a long status line wraps instead of squeezing it to nothing. */

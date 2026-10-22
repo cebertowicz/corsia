@@ -95,12 +95,93 @@ describe('rendering and actions', () => {
 			await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')).not.toBeNull());
 			const toggle = document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')!;
 			toggle.click();
-			await vi.waitFor(() => expect(document.body.textContent).toContain("Couldn't save this change. Try again."));
+			await vi.waitFor(() => expect(document.body.textContent).toContain("Couldn’t save this change. Try again."));
 			expect(toggle.getAttribute('aria-pressed')).toBe('true');
 			expect(document.getElementById('account-policy-Plus-account-1')?.closest('.account-usage-row')).not.toBeNull();
-			expect(document.querySelector('.account-usage-row .policy-status')?.textContent).toBe("Couldn't save this change. Try again.");
+			expect(document.querySelector('.account-usage-row .policy-status')?.textContent).toBe("Couldn’t save this change. Try again.");
 			expect(document.body.textContent).not.toContain('Could not save subscriptions.');
 			unmount(component);
+		});
+
+		describe('workspace account policy', () => {
+			const signedIn = (id: string, name: string) => ({ ...workAccount, id, name, state: 'signed_in' as const, label: { name, email: null, text: name, custom: name } });
+			const entry = (ids: string[], order: string[] | null = null) => ({
+				provider_key: 'codex', capabilities: { units: 'accounts', rollover: true }, rollover: true, order, disabled: [], revision: 1,
+				units: ids.map((id) => ({ id, label: id, enabled: true })),
+			});
+			const rowIds = () => [...document.querySelectorAll('[id^="vendor-account-"]')].map((row) => row.id.replace('vendor-account-', ''));
+			const numbers = () => [...document.querySelectorAll('.account-usage-row .order')].map((node) => node.textContent);
+			const moveButton = (name: string, direction: 'up' | 'down') => document.querySelector<HTMLButtonElement>(`[aria-label="Move ${name} ${direction}"]`)!;
+
+			it('shows the saved rollover order, and a move visibly swaps the rows it acts on', async () => {
+				token.set('test-token');
+				// The accounts list order differs from the saved order: c, a, b.
+				let units = ['c', 'a', 'b'];
+				let puts: unknown[] = [];
+				vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+					const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+					if (init?.method === 'PUT') {
+						const body = JSON.parse(String(init.body));
+						puts.push(body);
+						units = body.order;
+						return Promise.resolve(response(entry(units, units)));
+					}
+					return path.startsWith('/api/provider-policy')
+						? Promise.resolve(response({ providers: [entry(units, units)] }))
+						: Promise.resolve(response({ accounts: [signedIn('a', 'Alpha'), signedIn('b', 'Bravo'), signedIn('c', 'Charlie')] }));
+				}));
+				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+				await vi.waitFor(() => expect(rowIds()).toEqual(['c', 'a', 'b']));
+				await vi.waitFor(() => expect(numbers()).toEqual(['1', '2', '3']));
+				expect(moveButton('Charlie', 'up').disabled).toBe(true);
+				expect(moveButton('Charlie', 'down').disabled).toBe(false);
+				expect(moveButton('Bravo', 'up').disabled).toBe(false);
+				expect(moveButton('Bravo', 'down').disabled).toBe(true);
+
+				moveButton('Charlie', 'down').click();
+				await vi.waitFor(() => expect(rowIds()).toEqual(['a', 'c', 'b']));
+				expect(puts).toEqual([expect.objectContaining({ order: ['a', 'c', 'b'] })]);
+				expect(moveButton('Alpha', 'up').disabled).toBe(true);
+				expect(moveButton('Charlie', 'up').disabled).toBe(false);
+				unmount(component);
+			});
+
+			it('numbers only the units and puts an account with no unit after them', async () => {
+				token.set('test-token');
+				const removed = { ...signedIn('gone', 'Removed one'), state: 'removed' as const };
+				vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+					const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+					if (path.startsWith('/api/provider-policy')) return Promise.resolve(response({ providers: [entry(['b', 'a'], ['b', 'a'])] }));
+					return Promise.resolve(response({ accounts: [removed, signedIn('a', 'Alpha'), signedIn('b', 'Bravo')] }));
+				}));
+				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+				await vi.waitFor(() => expect(numbers()).toEqual(['1', '2']));
+				expect(rowIds()).toEqual(['b', 'a']);
+				unmount(component);
+			});
+
+			it('reloads the policy when the vendor accounts change, so a new account gets its switch and rollover appears', async () => {
+				token.set('test-token');
+				let accounts = [signedIn('a', 'Alpha')];
+				let units = ['a'];
+				vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+					const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+					return path.startsWith('/api/provider-policy')
+						? Promise.resolve(response({ providers: [entry(units)] }))
+						: Promise.resolve(response({ accounts }));
+				}));
+				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+				await vi.waitFor(() => expect(document.querySelector('[aria-label="Use Alpha"]')).not.toBeNull());
+				expect(document.body.textContent).not.toContain('Roll over when an account hits its limit');
+
+				accounts = [signedIn('a', 'Alpha'), signedIn('b', 'Bravo')];
+				units = ['a', 'b'];
+				await loadVendorAccounts();
+				await vi.waitFor(() => expect(document.querySelector('[aria-label="Use Bravo"]')).not.toBeNull());
+				expect(document.body.textContent).toContain('Roll over when an account hits its limit');
+				expect(numbers()).toEqual(['1', '2']);
+				unmount(component);
+			});
 		});
 
 		it('renders limit, checking, and verification messages independently for every usage state', async () => {

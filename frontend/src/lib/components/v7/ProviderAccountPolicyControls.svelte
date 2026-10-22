@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Toggle from '../ui/Toggle.svelte';
 	import IconButton from '../ui/IconButton.svelte';
+	import PolicySaveStatus from './PolicySaveStatus.svelte';
 
 	interface Props {
 		accountName: string;
@@ -29,14 +30,11 @@
 		{/if}
 		<Toggle checked={enabled} disabled={toggleDisabled} ariaLabel={`Use ${accountName}`} describedBy={pending || failed ? statusId : undefined} onchange={ontoggle} />
 	</span>
-	{#if pending}<span class="policy-status" id={statusId} role="status">Saving…</span>{/if}
-	{#if failed}<span class="policy-status error" id={statusId} role="status">Couldn't save this change. Try again.</span>{/if}
+	<PolicySaveStatus id={statusId} {pending} {failed} />
 </span>
 
 <style>
 	/* The account row owns placement; this component always emits a control plus its status line. */
 	.provider-account-policy-control { display: contents; }
 	.provider-account-policy-controls { display: flex; align-items: center; gap: var(--space-1); }
-	.policy-status { color: var(--text-secondary); font-size: var(--text-footnote); }
-	.policy-status.error { color: var(--red-text); }
 </style>

@@ -80,8 +80,6 @@
 
 	function clearMessages() { actionError = ''; actionMessage = ''; }
 
-	// Account policy is managed beside the accounts in AccountsBlock.
-
 	async function handleTest() {
 		clearMessages(); busy = true;
 		const r = await testProvider(provider.name);
@@ -302,7 +300,6 @@
 		align-items: center;
 	}
 
-	/* Account policy is rendered by the Accounts tab. */
 	.hint {
 		font-size: var(--text-subhead); color: var(--text-tertiary);
 		line-height: 1.6;

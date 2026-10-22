@@ -132,7 +132,6 @@
 		<div class="section-host">
 			{#if section === 'providers'}
 				<ProviderManager />
-				<!-- Harness account policy lives in each provider window's Accounts tab. -->
 			{:else if section === 'connected-apps'}
 				<h2 class="page-title">Connected apps</h2>
 				<ConnectedAppsSettings />

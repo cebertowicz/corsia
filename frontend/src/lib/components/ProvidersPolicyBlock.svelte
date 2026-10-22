@@ -2,6 +2,7 @@
 	import Toggle from './ui/Toggle.svelte';
 	import Button from './ui/Button.svelte';
 	import ProviderAccountPolicyControls from './v7/ProviderAccountPolicyControls.svelte';
+	import PolicySaveStatus from './v7/PolicySaveStatus.svelte';
 	import AccountUsageRow from './v7/AccountUsageRow.svelte';
 	import type { ProviderEntry } from '$lib/api/providerPolicy';
 	import { createProviderPolicyState } from '$lib/stores/providerPolicyState.svelte';
@@ -50,13 +51,11 @@
 </script>
 
 <section class="providers-policy" aria-label="Project providers" data-settings-anchor="project-provider-policy" use:settingsAnchor={'project-provider-policy'}>
-	{#if projectId}
-		<h2>Models</h2>
-		<CloudModelsOffSetting {projectId} onCloudModelsOffState={(value) => { cloudModelsOff = value; }} onCloudModelsOffSaved={() => { void loadThreads(); }} />
-	{/if}
+	<h2>Models</h2>
+	<CloudModelsOffSetting {projectId} onCloudModelsOffState={(value) => { cloudModelsOff = value; }} onCloudModelsOffSaved={() => { void loadThreads(); }} />
 	<h2>Accounts and rollover</h2>
-	{#if loading || (projectId && cloudModelsOff === null)}<p role="status">Loading providers…</p>
-	{:else if projectId && cloudModelsOff === true && policy}
+	{#if loading || cloudModelsOff === null}<p role="status">Loading providers…</p>
+	{:else if cloudModelsOff === true && policy}
 		{#if cloudOffLine}<p>{cloudOffLine}</p>{/if}
 	{:else if error && !hasControlFailure}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
 	{:else if policy}
@@ -67,7 +66,7 @@
 					<p>Use the workspace's account order and rollover.</p>
 					<span class="workspace-link"><Button variant="ghost" size="sm" onclick={openWorkspaceProviders}>Open workspace providers</Button></span>
 				</div>
-				<span class="policy-control"><Toggle checked={policy.use_workspace ?? true} disabled={policyState.isPending(scopeTarget)} ariaLabel="Use workspace settings" describedBy={policyState.isPending(scopeTarget) || policyState.hasFailure(scopeTarget) ? 'scope-policy-status' : undefined} onchange={toggleScope} />{#if policyState.isPending(scopeTarget)}<span class="policy-status" id="scope-policy-status" role="status">Saving…</span>{/if}{#if policyState.hasFailure(scopeTarget)}<span class="policy-status error" id="scope-policy-status" role="status">Couldn't save this change. Try again.</span>{/if}</span>
+				<span class="policy-control"><Toggle checked={policy.use_workspace ?? true} disabled={policyState.isPending(scopeTarget)} ariaLabel="Use workspace settings" describedBy={policyState.isPending(scopeTarget) || policyState.hasFailure(scopeTarget) ? 'scope-policy-status' : undefined} onchange={toggleScope} /><PolicySaveStatus id="scope-policy-status" pending={policyState.isPending(scopeTarget)} failed={policyState.hasFailure(scopeTarget)} /></span>
 			</div>
 		{#if !policy.use_workspace}
 			{#each accountProviders as provider (provider.provider_key)}
@@ -87,7 +86,7 @@
 						{/if}
 					{:else}
 						{#if provider.capabilities.rollover}
-							<div class="line"><span>Roll over when an account hits its limit</span><span class="policy-control"><Toggle checked={provider.rollover} disabled={policyState.isPending(`rollover:${provider.provider_key}`)} ariaLabel="Roll over when an account hits its limit" describedBy={policyState.isPending(`rollover:${provider.provider_key}`) || policyState.hasFailure(`rollover:${provider.provider_key}`) ? `rollover-${provider.provider_key}-policy-status` : undefined} onchange={(value) => save(provider, { rollover: value }, `rollover:${provider.provider_key}`)} />{#if policyState.isPending(`rollover:${provider.provider_key}`)}<span class="policy-status" id={`rollover-${provider.provider_key}-policy-status`} role="status">Saving…</span>{/if}{#if policyState.hasFailure(`rollover:${provider.provider_key}`)}<span class="policy-status error" id={`rollover-${provider.provider_key}-policy-status`} role="status">Couldn't save this change. Try again.</span>{/if}</span></div>
+							<div class="line"><span>Roll over when an account hits its limit</span><span class="policy-control"><Toggle checked={provider.rollover} disabled={policyState.isPending(`rollover:${provider.provider_key}`)} ariaLabel="Roll over when an account hits its limit" describedBy={policyState.isPending(`rollover:${provider.provider_key}`) || policyState.hasFailure(`rollover:${provider.provider_key}`) ? `rollover-${provider.provider_key}-policy-status` : undefined} onchange={(value) => save(provider, { rollover: value }, `rollover:${provider.provider_key}`)} /><PolicySaveStatus id={`rollover-${provider.provider_key}-policy-status`} pending={policyState.isPending(`rollover:${provider.provider_key}`)} failed={policyState.hasFailure(`rollover:${provider.provider_key}`)} /></span></div>
 						{/if}
 						{#each provider.units as unit, index (unit.id)}
 							{#if accountFor(unit.id)}
@@ -139,6 +138,4 @@
 	p { margin: 0; color: var(--text-tertiary); font-size: var(--text-caption); }
 	.error { color: var(--red-text); }
 	.policy-control { display: contents; }
-	.policy-status { color: var(--text-secondary); font-size: var(--text-footnote); }
-	.policy-status.error { color: var(--red-text); }
 </style>
