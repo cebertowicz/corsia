@@ -258,7 +258,7 @@
 		color: var(--red); font-size: var(--text-subhead); margin-bottom: 12px;
 	}
 	.return-confirm {
-		display: grid; gap: var(--space-2); margin: var(--space-3) auto 0; max-width: 280px;
+		display: grid; gap: var(--space-2); margin: var(--space-3) auto 0; max-width: 100%;
 		font-size: var(--text-subhead); color: var(--text-secondary);
 	}
 	.return-confirm > span:first-child { color: var(--text-primary); }
