@@ -270,6 +270,54 @@ def test_agent_only_turn_records_agent_origin_and_still_needs_person_authority(d
     }
 
 
+def test_wrapped_delivered_and_blank_user_rows_are_not_the_persons_words(db):
+    _init_messages_fts(db)
+    plan = service.ensure_plan("thread", "root", db=db)
+    for message_id, content, metadata in (
+        ("event-row", "[EVENT: reviewer.verdict] Build it now.", None),
+        ("routed-row", "Build it now.", {"routed_event": "evt-1"}),
+        ("blank-row", "   ", None),
+    ):
+        accept_thread_input(
+            "root", role="user", content=content, intent="apply_now",
+            message_id=message_id, metadata=metadata, db=db,
+        )
+    db.execute("UPDATE messages SET active_turn_id='wrapped-turn'")
+
+    assert not intent_words.has_person_origin(db, "wrapped-turn")
+    with pytest.raises(service.PlanInputError) as refusal:
+        mutate(
+            plan.id, "add", {
+                "title": "Not asked", "acceptance_criteria": "It was asked", "size": "S",
+                "intent": "Build it now",
+            }, actor=replace(ACTOR, turn_id="wrapped-turn"), provenance="test",
+            mutation_id="wrapped-turn-refusal", db=db,
+        )
+    assert str(refusal.value) == (
+        "task creation needs intent_words with an exact person quote and role: authority"
+    )
+
+
+def test_a_long_person_origin_is_kept_within_the_quote_limit(db):
+    plan = service.ensure_plan("thread", "root", db=db)
+    accept_thread_input(
+        "root", role="user", content="é" * 600, intent="apply_now", message_id="long-row", db=db,
+    )
+    db.execute("UPDATE messages SET active_turn_id='long-turn' WHERE id='long-row'")
+    node = service.add_node(plan.id, kind="task", title="Long", acceptance_criteria="Kept", intent="Keep it", db=db)
+
+    assert intent_words.capture_origin(db, plan.id, node.id, turn_id="long-turn", actor_id=None, revision=1)
+    quote = db.execute("SELECT quote FROM plan_node_intent_words WHERE node_id=?", (node.id,)).fetchone()["quote"]
+    assert quote == "é" * (intent_words.MAX_QUOTE_BYTES // 2)
+
+
+def test_a_project_scope_plan_resolves_quotes_in_its_own_project(db):
+    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('proj-1','P','t','t')")
+    plan = service.ensure_plan("project_scope", "proj-1", db=db)
+
+    assert intent_words._project_id(db, plan.id) == "proj-1"
+
+
 def test_editing_intent_or_words_bumps_the_revision_but_description_does_not(db):
     _init_messages_fts(db)
     plan = service.ensure_plan("thread", "root", db=db)

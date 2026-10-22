@@ -1,7 +1,7 @@
 """Validate and project a person step's linked instructions document."""
 from __future__ import annotations
 
-from plans import service
+from plans import node_states, service
 
 
 def artifact_id(params: dict, actor, *, db) -> str | None:
@@ -53,14 +53,14 @@ def link_requested(node_id: str, params: dict, actor, *, db) -> None:
 def read_for_artifact(artifact_id: str, *, db) -> dict | None:
     """Return the one open person step whose input is this instructions document."""
     row = db.execute(
-        """SELECT n.id,n.title,n.revision,n.plan_id,p.owner_id,t.title AS owner_title
+        f"""SELECT n.id,n.title,n.revision,n.plan_id,p.owner_id,t.title AS owner_title
              FROM plan_node_artifact_links l
              CROSS JOIN plan_nodes n ON n.id=l.node_id
              CROSS JOIN plans p ON p.id=n.plan_id
              LEFT JOIN threads t ON t.id=p.owner_id
             WHERE l.artifact_id=? AND l.role='input'
               AND n.kind='task' AND n.assignee='user'
-              AND n.state NOT IN ('accepted','closed','failed')
+              AND {node_states.open_sql('n')}
             ORDER BY l.created_at DESC LIMIT 1""",
         (artifact_id,),
     ).fetchone()

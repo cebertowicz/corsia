@@ -5,6 +5,7 @@ from __future__ import annotations
 from urllib.parse import urlparse
 
 from plans import node_waits, operator_scheduled
+from plans.not_moving import parse_deadline
 
 
 def from_nodes(nodes: list[dict]) -> dict | None:
@@ -20,13 +21,14 @@ def from_nodes(nodes: list[dict]) -> dict | None:
 def set_aside_until(nodes: list[dict]) -> str | None:
     """When the earliest work the agent set aside itself comes back (EW7's set-aside row)."""
     ends = [
-        str(cause["ends_at"])
+        parsed
         for node in nodes
         if not node.get("container") and node["execution"]["condition"] == "waiting"
         for cause in node["execution"]["causes"]
         if operator_scheduled.is_set_aside(cause) and cause.get("ends_at")
+        if (parsed := parse_deadline(str(cause["ends_at"]))) is not None
     ]
-    return min(ends, default=None)
+    return min(ends, default=(None, None))[1]
 
 
 def for_plans(db, plan_ids) -> dict[str, dict]:
@@ -40,10 +42,11 @@ def for_plans(db, plan_ids) -> dict[str, dict]:
 
 def _earliest(pairs) -> dict | None:
     waits = [
-        (str(cause["ends_at"]), cause, node)
+        (parsed[0], cause, node)
         for cause, node in pairs
         if cause.get("kind") == "waiting" and cause.get("ends_at")
         and not operator_scheduled.is_set_aside(cause)
+        if (parsed := parse_deadline(str(cause["ends_at"]))) is not None
     ]
     if not waits:
         return None
