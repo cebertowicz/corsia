@@ -37,7 +37,6 @@ _DESCRIPTION = (
 )
 
 
-
 def _workspace() -> Path:
     from infra.config import WORKSPACE
 
@@ -109,33 +108,39 @@ def _execute(
 ) -> dict[str, Any]:
     """Run the complete operation off the event loop; writes use canonical owners."""
     from infra.database import get_db
+    from infra.user_profile import uses_community_improvements
 
     db = get_db()
     try:
-        owner_id = _persistent_owner(thread_id, db)
-        project_id = thread.get("project_id")
         try:
-            if action == "search":
-                result = (_error("query_required", "search requires query; pass a few words describing the job")
-                          if not isinstance(query, str) or not query.strip()
-                          else _search(query, owner_id, project_id, db))
-            elif not isinstance(name, str) or not name.strip():
-                result = _error("name_required", f"{action} requires name from a search result or your skills index")
-            elif action == "install":
-                result = _install(name, owner_id, project_id, db)
-            elif action == "update":
-                result = _update(name, owner_id, project_id, db, discard_local_edits, local_edits_token)
-            elif action == "remove":
-                result = _remove(name, owner_id, project_id, db, discard_local_edits, local_edits_token)
-            else:
+            if action not in {"search", "install", "update", "remove"}:
                 result = _error("invalid_action", "action must be search, install, update, or remove")
+            elif action in {"search", "install", "update"} and not uses_community_improvements(_workspace()):
+                result = _error(
+                    "community_off",
+                    "The person hasn't agreed to use the community's improvements (the 'Use community improvements' line in their profile), so the library is off and nothing was searched, installed or updated. Continue without it, and write your own skill with skill skill-creator if you need one. Only the person changes this answer; don't ask them for it just for this task. remove still works on a copy you already hold.",
+                )
+            else:
+                owner_id = _persistent_owner(thread_id, db)
+                project_id = thread.get("project_id")
+                if action == "search":
+                    result = (_error("query_required", "search requires query; pass a few words describing the job")
+                              if not isinstance(query, str) or not query.strip()
+                              else _search(query, owner_id, project_id, db))
+                elif not isinstance(name, str) or not name.strip():
+                    result = _error("name_required", f"{action} requires name from a search result or your skills index")
+                elif action == "install":
+                    result = _install(name, owner_id, project_id, db)
+                elif action == "update":
+                    result = _update(name, owner_id, project_id, db, discard_local_edits, local_edits_token)
+                else:
+                    result = _remove(name, owner_id, project_id, db, discard_local_edits, local_edits_token)
         except _LibraryIndexError as error:
             result = _error(error.code, error.message)
         _emit_action(action, thread_id, result)
         return result
     finally:
         db.close()
-
 
 
 def _installed_library_origins(owner_id: str, db) -> dict[str, dict[str, Any]]:
@@ -389,7 +394,6 @@ def _path(owner_id: str, project_id: str | None, db, name: str) -> str:
     root = skill_scope_root(scope="thread", thread_id=owner_id, project_id=project_id, workspace=_workspace(), db=db)
     assert root is not None
     return str(root / "skills" / name / "SKILL.md")
-
 
 
 def _error(code: str, message: str) -> dict[str, str]:
