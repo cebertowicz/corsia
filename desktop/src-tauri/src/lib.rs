@@ -1778,8 +1778,9 @@ pub fn run() {
             app.manage(AppServiceState::default());
             app.manage(RemoteRuntime::default());
             watch_for_swapped_app(app.handle().clone());
-            if let Ok(config_dir) = app.path().app_config_dir() {
-                window_placement::place_main_window(app, &config_dir);
+            match app.path().app_config_dir() {
+                Ok(config_dir) => window_placement::place_main_window(app, &config_dir),
+                Err(error) => log::warn!("the window's saved place could not be read: {error}"),
             }
             #[cfg(target_os = "macos")]
             app.set_menu(lifecycle::menu(app.handle())?)?;
