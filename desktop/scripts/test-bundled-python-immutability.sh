@@ -51,13 +51,12 @@ printf 'bundled-python-pyc=%s\n' "$python_bytecode"
 env -i PATH="/usr/bin:/bin:/usr/sbin:/sbin" "$PYTHON" -I -c '
 import sys
 sys.path[:0] = sys.argv[1:]
-import sitecustomize
 import json
 import ssl
 import fastapi
 import mlx
 import core
-print("bundled-python-imports=sitecustomize,json,ssl,fastapi,mlx,core")
+print("bundled-python-imports=json,ssl,fastapi,mlx,core")
 ' "$BACKEND_PACKAGES" "$OMLX_PACKAGES" "$BACKEND_ROOT"
 
 snapshot > "$AFTER"

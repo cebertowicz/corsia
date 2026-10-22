@@ -172,17 +172,14 @@ fetch_verified "$OMLX_URL" "$BUILD_ROOT/downloads/$OMLX_WHEEL" "$OMLX_SHA256"
 PYTHONPATH="$BUNDLE_ROOT/python/backend-packages" "$PYTHON" -m pip check
 PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 
-# sitecustomize guards imports that occur after Python starts; precompilation
-# covers packaged source imports that can happen before the guard loads.
-printf 'import sys\nsys.dont_write_bytecode = True\n' \
-  >"$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/sitecustomize.py"
+# All packaged bytecode is produced after every source is staged below.
 
 build_git_runtime
 fetch_agent_browser
 fetch_safehouse
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
 # Nothing may write bytecode into the signed bundle: an added __pycache__ breaks
-# its seal. Compile every packaged source, including sitecustomize and the backend,
+# its seal. Compile every packaged source, including the backend,
 # with unchecked hashes so a later mtime change cannot make a cache stale.
 "$PYTHON" -m compileall -q -f --invalidation-mode unchecked-hash "$BUNDLE_ROOT"
 "$PYTHON" - "$BUNDLE_ROOT" <<'PY'

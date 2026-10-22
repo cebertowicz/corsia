@@ -88,7 +88,7 @@ def test_package_caches_are_writable_and_never_the_runtime_folder_or_home(home):
     for cache in caches:
         assert not cache.is_relative_to(home) and not cache.is_relative_to(runtimes)
         assert cache.is_relative_to(tempfile.gettempdir())  # a temp root, which the sandbox lets shells write
-    assert set(agent_shell_tools.ENV_NAMES) <= set(shell_env_pass_names().split(","))
+    assert set(agent_shell_tools.CACHE_ENV_NAMES) <= set(shell_env_pass_names().split(","))
     other = safehouse_subprocess_env("thread-2")
     assert not {env[name] for name in agent_shell_tools.CACHE_ENV_NAMES} & {
         other[name] for name in agent_shell_tools.CACHE_ENV_NAMES
@@ -246,7 +246,7 @@ def test_the_build_precompiles_and_immutability_checks_bundled_python():
     assert "cache_from_source" in build
     assert '"$ROOT/desktop/scripts/test-bundled-python-immutability.sh" "$APP"' in build
     assert "env -i PATH=" in test
-    for module in ("sitecustomize", "json", "ssl", "fastapi", "mlx", "core"):
+    for module in ("json", "ssl", "fastapi", "mlx", "core"):
         assert f"import {module}" in test
     assert 'find "$RESOURCES" -type f -name \'*.py\' -exec touch {} +' in test
     assert "stat -f '%m\\t%p\\t%N'" in test

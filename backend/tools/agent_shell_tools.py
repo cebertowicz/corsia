@@ -22,9 +22,8 @@ from tools.managed_runtime import (
 )
 
 logger = logging.getLogger(__name__)
-# Environment names a shell child needs from CORSIA, passed through the sandbox by name.
+# Writable package-cache environment names passed through the sandbox by name.
 CACHE_ENV_NAMES = ("npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR")
-ENV_NAMES = CACHE_ENV_NAMES
 _prefetch: asyncio.Task | None = None
 
 
