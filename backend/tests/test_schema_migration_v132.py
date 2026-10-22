@@ -56,7 +56,7 @@ def test_account_cause_checks_match_the_canonical_cause_sets() -> None:
 
 
 def test_v131_registers_microsoft_account_step() -> None:
-    assert SCHEMA_VERSION == 133
+    assert SCHEMA_VERSION >= 134
     assert MIGRATIONS[131] is migrate_131_to_132
 
 

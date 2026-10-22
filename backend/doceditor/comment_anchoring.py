@@ -12,28 +12,45 @@ from doceditor.quote_anchor import anchor_context, reanchor
 log = logging.getLogger(__name__)
 
 
+def _anchored_quote(comment: dict) -> str:
+    """The text a comment's place is found by.
+
+    An accepted suggestion's replacement is what the document holds where its
+    quote used to be, so that is what its place is found by.
+    """
+    if comment.get("decision") == "accepted" and comment.get("replacement"):
+        return comment["replacement"]
+    return comment["anchor_text"]
+
+
 def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict]:
-    """Resolve one text snapshot; callers choose when its offsets are persisted."""
+    """Resolve one text snapshot; callers choose when its offsets are persisted.
+
+    A decided suggestion is never orphaned: its decision closed it, so losing
+    its place keeps the offsets it has.
+    """
     updates: list[dict] = []
     for comment in threads:
         if comment["parent_id"] or comment["review"] or not comment["anchor_text"]:
             continue
+        quote = _anchored_quote(comment)
+        lost = not comment.get("decision")
         resolved = (ranges or {}).get(comment["id"])
         if resolved is None:
             resolved = reanchor(
-                text, comment["anchor_text"], from16=comment["from_off"], to16=comment["to_off"],
+                text, quote, from16=comment["from_off"], to16=comment["to_off"],
                 prefix=comment.get("anchor_prefix"), suffix=comment.get("anchor_suffix"),
             )
         if resolved is None:
-            comment["orphaned"] = True
+            comment["orphaned"] = lost
             continue
         from_off, to_off = resolved
-        context = anchor_context(text, from_off, to_off, comment["anchor_text"])
+        context = anchor_context(text, from_off, to_off, quote)
         if context is None:
-            comment["orphaned"] = True
+            comment["orphaned"] = lost
             # Preserve mapped collapsed ranges in the live response. Reload can
             # deliberately omit the range hint and resolve restored text anew.
-            if comment["id"] in (ranges or {}):
+            if lost and comment["id"] in (ranges or {}):
                 comment["from_off"], comment["to_off"] = resolved
             continue
         prefix, suffix = context

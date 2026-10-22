@@ -49,6 +49,24 @@ def _decision_note(
     )
 
 
+def stranded_note(db, suggestion: dict[str, Any], *, editor: str) -> None:
+    """Tell a suggestion's agent author that an edit it did not make left the suggestion nothing to apply to."""
+    artifact_id = str(suggestion["artifact_id"])
+    document = document_name(registry_models.get_artifact(artifact_id, db=db))
+    append_thread_context_note(
+        db,
+        thread_id=str(suggestion["author_thread_id"]),
+        summary=(
+            f"{editor} changed the text your suggestion replaces on {document}, so it can no longer "
+            f"be applied: {_named(suggestion)}. If it still applies, suggest again on the current text."
+        ),
+        details={
+            "kind": "suggestion_stranded", "artifact_id": artifact_id, "comment_id": suggestion["id"],
+            "chip": f"{editor}'s edit stranded a suggestion on {document}.",
+        },
+    )
+
+
 def record_suggestion_decisions(
     db,
     comments: list[dict[str, Any]],
