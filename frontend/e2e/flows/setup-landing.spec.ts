@@ -58,8 +58,6 @@ test.describe('@surface:first-run setup landing', () => {
 			await page.locator('input[autocomplete="new-password"]').nth(0).fill('correct-password');
 			await page.locator('input[autocomplete="new-password"]').nth(1).fill('correct-password');
 			await page.getByRole('button', { name: 'Continue' }).click();
-			await expect(page.getByRole('heading', { name: 'Choose your work folder' })).toBeVisible();
-			await page.getByRole('button', { name: 'Continue' }).click();
 			await expect(page.getByRole('heading', { name: 'Providers & models' })).toBeVisible();
 			const start = page.getByRole('button', { name: 'Start using CORSIA' });
 			await expect(start).toBeEnabled();
