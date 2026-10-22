@@ -22,24 +22,13 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from events import rule_declarations, rule_explain, rule_reads, rules
+from events.rule_actions import RuleRefused, check_script, check_worker
 from events.connectors import EventTypeDecl, get_manifest
 from events.rule_match import matches
 from infra.queries import thread_available_sql, thread_is_temporary
 
 _EXPLAIN_LIMIT = 50
-
-
-def _prune_disabled(db: sqlite3.Connection, scope: str, now: str) -> None:
-    """Keep disabled rules briefly for inspection, then discard them, and what
-    they did, in their own scope."""
-    cutoff = (datetime.fromisoformat(now) - rules.RETENTION).isoformat()
-    stale = "SELECT id FROM event_rules WHERE scope=? AND enabled=0 AND updated_at<?"
-    db.execute(f"DELETE FROM event_route_decisions WHERE rule_id IN ({stale})", (scope, cutoff))
-    db.execute(f"DELETE FROM event_rules WHERE id IN ({stale})", (scope, cutoff))
-
-
-class RuleRefused(ValueError):
-    """A request the writer limits or the rule shape refuse; the text says why."""
+_STARTS = "'queued','running','ran','failed','started','returned','invalid','no_result'"
 
 
 def _thread(db: sqlite3.Connection, thread_id: str) -> Mapping[str, Any] | None:
@@ -179,11 +168,13 @@ def create(
     db: sqlite3.Connection, *, writer: str, project_id: str | None, connector: Any,
     event_type: Any, match: Any = None, action: Any = rules.DELIVER, to: Any = None,
     mode: Any = None, note: Any = None, scope: Any = None, now: str,
-    tracked: frozenset[str] | None = None, script_id: Any = None,
+    tracked: frozenset[str] | None = None, script_id: Any = None, workflow_id: Any = None,
+    request_identity_fact: Any = None, workflows: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write one rule within the writer limits, or raise :class:`RuleRefused`.
 
-    ``tracked`` is :func:`tracked_repositories`, read before the transaction.
+    ``tracked`` is :func:`tracked_repositories` and ``workflows`` is
+    :func:`events.rule_actions.reachable_workflows`, both read before the transaction.
     """
     row = _thread(db, writer)
     if row is None:
@@ -205,13 +196,18 @@ def create(
     if problem:
         raise RuleRefused(problem)
     _repositories(connector, tests, tracked)
-    if action not in (rules.DELIVER, rules.DROP, rules.RUN_SCRIPT):
-        raise RuleRefused("action is deliver, drop or run_script")
-    if script_id is not None and action != rules.RUN_SCRIPT:
+    if action not in (rules.DELIVER, rules.DROP, rules.RUN_SCRIPT, rules.START_WORKER):
+        raise RuleRefused("action is deliver, drop, run_script or start_worker")
+    if action != rules.START_WORKER and (workflow_id, request_identity_fact) != (None, None):
+        raise RuleRefused("workflow_id and request_identity_fact go only with action start_worker.")
+    if action == rules.START_WORKER:
+        # Refuses to, mode, note and script_id; the worker is its writer's own, so it stores to: self.
+        workflow_id, request_identity_fact = check_worker(
+            workflows or {}, workflow_id, request_identity_fact, decl,
+            {"to": to, "mode": mode, "note": note, "script_id": script_id})
+    elif script_id is not None and action != rules.RUN_SCRIPT:
         raise RuleRefused("script_id goes only with action run_script.")
-    if action == rules.RUN_SCRIPT:
-        from events.rule_runs import check_script
-
+    elif action == rules.RUN_SCRIPT:
         # Refuses to, mode and note; the run is its writer's own, so it stores to: self.
         script_id = check_script(db, writer, script_id, {"to": to, "mode": mode, "note": note})
     elif action == rules.DROP:
@@ -227,12 +223,13 @@ def create(
     rule_id = "rule_" + uuid.uuid4().hex[:12]
     db.execute(
         'INSERT INTO event_rules (id, created_at, updated_at, enabled, scope, connector, event_type, '
-        '"match", action, "to", mode, note, origin, created_by, authority_ref, script_id) '
-        "VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?)",
+        '"match", action, "to", mode, note, origin, created_by, authority_ref, script_id, '
+        "workflow_id, request_identity_fact) VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (rule_id, now, now, own_scope, connector, event_type, json.dumps(tests), action,
-         stored_to, mode, note, f"agent:{writer}", writer, authority, script_id),
+         stored_to, mode, note, f"agent:{writer}", writer, authority, script_id,
+         workflow_id, request_identity_fact),
     )
-    _prune_disabled(db, own_scope, now)
+    rules.prune_disabled(db, own_scope, now)
     return _shape(rules.from_row(db.execute("SELECT * FROM event_rules WHERE id=?", (rule_id,)).fetchone()))
 
 
@@ -254,15 +251,8 @@ def disable(
         raise RuleRefused(
             "Only the rule's writer, its named recipient, a recipient it has delivered to or "
             "the project's conductor can turn it off.")
-    turn_off(db, rule.id, row["scope"], now)
+    rules.turn_off(db, rule.id, row["scope"], now)
     return {**_shape(rule), "enabled": False}
-
-
-def turn_off(db: sqlite3.Connection, rule_id: str, scope: str, now: str) -> None:
-    """Disable one rule and prune its scope's stale disabled rules: ``disable``'s
-    write, and evaluation's for a rule whose writer left its project."""
-    db.execute("UPDATE event_rules SET enabled=0, updated_at=? WHERE id=?", (now, rule_id))
-    _prune_disabled(db, scope, now)
 
 
 def _shape(rule: rules.Rule) -> dict[str, Any]:
@@ -270,7 +260,8 @@ def _shape(rule: rules.Rule) -> dict[str, Any]:
         "id": rule.id, "enabled": rule.enabled, "connector": rule.connector,
         "event_type": rule.event_type, "match": list(rule.match), "action": rule.action,
         "to": rule.to, "mode": rule.mode, "note": rule.note, "written_by": rule.created_by,
-        "script_id": rule.script_id,
+        "script_id": rule.script_id, "workflow_id": rule.workflow_id,
+        "request_identity_fact": rule.request_identity_fact,
     }
 
 
@@ -289,11 +280,14 @@ def list_rules(db: sqlite3.Connection, *, project_id: str | None, now: str) -> l
         return []
     since = (datetime.fromisoformat(now) - timedelta(hours=24)).isoformat()
     marks = ",".join("?" * len(found))
+    # A start is a script run queued or begun, or a worker started or held for a slot (a held
+    # start has its worker; a held delivery has none).
+    started = f"(outcome IN ({_STARTS}) OR (outcome='held' AND worker_thread_id IS NOT NULL))"
     stats = {
         row["rule_id"]: row for row in db.execute(
-            "SELECT rule_id, MAX(CASE WHEN outcome IN ('woke','digested','dropped','queued','running',"
-            "'ran','failed') THEN at END) AS last_fired, SUM(outcome='woke' AND via='rule' AND at>=?) "
-            "AS wakes, SUM(outcome IN ('queued','running','ran','failed') AND at>=?) AS starts, "
+            "SELECT rule_id, MAX(CASE WHEN outcome IN ('woke','digested','dropped') OR "
+            f"{started} THEN at END) AS last_fired, SUM(outcome='woke' AND via='rule' AND at>=?) "
+            f"AS wakes, SUM({started} AND at>=?) AS starts, "
             "SUM(outcome='skipped' AND at>=?) AS skips "
             f"FROM event_route_decisions WHERE rule_id IN ({marks}) GROUP BY rule_id",
             (since, since, since, *(rule.id for rule in found)),
@@ -335,6 +329,9 @@ def _would(rule: rules.Rule) -> str:
         return f"drop deliveries to {rules.thread_target(rule.to)}"
     if rule.action == rules.RUN_SCRIPT:
         return f"run {rules.thread_target(rule.to)}'s script {rule.script_id} with the event"
+    if rule.action == rules.START_WORKER:
+        return (f"start one {rule.workflow_id} worker for {rules.thread_target(rule.to)} per "
+                f"{rule.request_identity_fact}")
     who = "the registered owner" if rule.to == rules.REGISTERED_OWNER else rules.thread_target(rule.to)
     return f"{rule.mode} {who}"
 
@@ -369,7 +366,7 @@ def explain(
         where.append("d.thread_id=?")
         args.append(thread)
     rows = db.execute(
-        "SELECT d.* FROM event_route_decisions d JOIN event_rules r ON r.id=d.rule_id "
+        "SELECT d.*, r.action FROM event_route_decisions d JOIN event_rules r ON r.id=d.rule_id "
         f"WHERE {' AND '.join(where)} ORDER BY d.id DESC LIMIT ?",
         (*args, _EXPLAIN_LIMIT),
     ).fetchall()

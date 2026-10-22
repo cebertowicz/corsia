@@ -145,7 +145,9 @@ def lifted_hold_ids(rows, model: str, *, db, thread_id: str | None = None) -> fr
     account_held = frozenset(str(row['id']) for row in rows
                             if row['write_outcome'] == 'proved_no_write'
                             and row['delivery_error'] in ACCOUNT_HOLD_REASONS)
-    return account_held | (
+    from infra.worker_capacity import lift
+
+    return account_held | lift(db, thread_id, rows) | (
         held if held and model_admission(model, db=db, thread_id=thread_id) != 'wait' else frozenset()
     )
 

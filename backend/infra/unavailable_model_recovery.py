@@ -73,12 +73,14 @@ def _held_thread_ids() -> list[str]:
 
 
 async def hold_unavailable_model_input(
-    batch: ClaimedBatch, target: ExecutionTarget,
+    batch: ClaimedBatch, target: ExecutionTarget, *, cause: str | None = None,
 ) -> InboxQueuedInput:
     """Preserve a batch whose selected model cannot run at its FIFO boundary.
 
     When policy forbids the model, the hold's durable cause is the locality refusal
     itself, so every reader (release, stalled kind, parent wake) tells it from an outage.
+    ``cause`` names another hold: ``worker_capacity``, a rule-started worker waiting for a
+    working slot, which only the idle claim lifts (``infra.worker_capacity``).
     """
     from core.plan_turn_end import record_turn_end_logged
     from core.turn_core import settle_turn_terminal
@@ -86,7 +88,7 @@ async def hold_unavailable_model_input(
     from infra.send_broadcast import broadcast_claimed_batch
     from infra.send_types import InboxQueuedInput, InputReceipt
 
-    cause = hold_cause(target)
+    cause = cause or hold_cause(target)
     await run_in_db(release_batch_before_write, batch, hold_error=cause)
     await settle_turn_terminal(batch.turn_id, "error", cause)
     try:
@@ -99,7 +101,7 @@ async def hold_unavailable_model_input(
     await record_turn_end_logged(
         batch.thread_id, "plan-liveness after a held input failed",
         "parent drive after a held input failed", level="ERROR",
-        outcome="error", error=_held_error(batch.thread_id, target),
+        outcome="error", error=_held_error(batch.thread_id, target, cause),
         turn_id=batch.turn_id,
     )
     latest = batch.items[-1]
@@ -141,10 +143,14 @@ def hold_cause(target: ExecutionTarget) -> str:
     return reason if reason in LOCALITY_REFUSALS else SELECTED_MODEL_UNAVAILABLE
 
 
-def _held_error(thread_id: str, target: ExecutionTarget) -> str:
+def _held_error(thread_id: str, target: ExecutionTarget, cause: str) -> str:
     """Name the held model, why, and its known reset, for whoever reads the Turn end."""
     from infra.held_admission import limited_admission
+    from infra.worker_capacity import WORKER_CAPACITY
 
+    if cause == WORKER_CAPACITY:
+        return (f"Held: worker capacity. {target.catalog_id} starts when a Claude Code slot "
+                "frees, oldest held worker first.")
     reason = target.availability_reason or "model_unavailable"
     if reason in LOCALITY_REFUSALS:
         # The person's own setting, not an outage: name it so nobody reads it as one.

@@ -79,19 +79,28 @@ def _is_working(
 
 
 def working_thread_ids(*, db=None) -> tuple[str, ...]:
-    """Return the ids of held Claude Code handles that are working now.
+    """Return the ids of held Claude Code handles that are working now, and of Claude
+    Code threads with a running turn and no handle yet (a cold start under way).
 
     Reads borrow the caller's pooled connection and never close it: closing
     rolls back whatever write the calling frame still has pending.
     """
     from core.turn_core import active_turn_thread_ids
 
-    running = set(active_turn_thread_ids(db=db if db is not None else get_db()))
+    connection = db if db is not None else get_db()
+    running = set(active_turn_thread_ids(db=connection))
+    held = list(_LIVE.ids())
     working = []
-    for thread_id in _LIVE.ids():
+    for thread_id in held:
         live = _LIVE.get(thread_id)
         if _is_working(thread_id, live, running):
             working.append(thread_id)
+    cold = sorted(running - set(held))
+    if cold:
+        marks = ",".join("?" * len(cold))
+        working += [str(row["id"]) for row in connection.execute(
+            f"SELECT id FROM threads WHERE id IN ({marks}) AND model GLOB 'claude-code/*'", cold,
+        ).fetchall()]
     return tuple(working)
 
 

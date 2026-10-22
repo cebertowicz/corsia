@@ -158,7 +158,8 @@ def _script_owner(conn, producer: str) -> str | None:
     return str(row[0]) if row else None
 
 
-def _connector_event(conn, event_type: str, facts: dict[str, Any], producer: str) -> _ResolvedEvent:
+def _connector_event(conn, event_type: str, facts: dict[str, Any], producer: str,
+                     origin: str) -> _ResolvedEvent:
     from events.connectors import get_manifest
 
     split = _split_type(event_type)
@@ -180,7 +181,7 @@ def _connector_event(conn, event_type: str, facts: dict[str, Any], producer: str
             event_id="", type=suffix, connector=namespace, facts=facts, relationships=(),
             artifact_ref=manifest.build_artifact_ref(suffix, facts, facts),
             provenance={"source": namespace, "ingested_at": _now(), "rule_trace": []},
-            event_class=declaration.event_class, ownerless_ok=declaration.ownerless_ok, origin="connector",
+            event_class=declaration.event_class, ownerless_ok=declaration.ownerless_ok, origin=origin,
         ),
         None,
         None,
@@ -322,9 +323,10 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
             return IntakeResult(True, True, None, int(row["rules_matched"]))
         if event_type.startswith("worker.") and origin != "platform":
             return _refusal("reserved_type", "worker events are produced by CORSIA only")
+        # CORSIA's own events (``worker.*``) are declared in a manifest, as a connector's are.
         resolved = (
-            _connector_event(conn, event_type, facts, producer)
-            if origin == "connector"
+            _connector_event(conn, event_type, facts, producer, origin)
+            if origin in ("connector", "platform")
             else _declared_event(conn, event_type, facts, producer, origin)
         )
         if resolved.refusal is not None:

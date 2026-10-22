@@ -72,7 +72,7 @@ def _listed(thread_id: str, project_id: str | None, items: list) -> list[dict]:
 
     listed = [asdict(item) for item in items]
     for entry in listed:
-        if entry["kind"] == script_schedules.SCRIPT_KIND and entry["spec"] == script_schedules.RULES_ONLY:
+        if entry["kind"] == script_schedules.SCRIPT_KIND and entry["next_run_at"] is None:
             entry["runs_from"] = "event rules only: it has no cadence and runs when a run_script rule matches"
     named = [entry for entry in listed if (entry.get("payload") or {}).get("workflow") and entry["kind"] == script_schedules.SCRIPT_KIND]
     if named:

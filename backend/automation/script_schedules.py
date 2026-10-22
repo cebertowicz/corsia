@@ -27,8 +27,6 @@ from host_access.credential_sanitizer import sanitize_credential_text
 from infra.database import write_transaction
 
 SCRIPT_KIND = "script"
-#: The spec of a script with no cadence: only ``run_script`` event rules start it.
-RULES_ONLY = "rules"
 MIN_CADENCE_SECONDS = 300
 DEFAULT_TIMEOUT_SECONDS = 60
 MAX_TIMEOUT_SECONDS = 300
@@ -185,7 +183,8 @@ def create_script(
                VALUES (?,?,?,'script',?,?,?,'active',?,?,?,?,?,?,?)""",
             (
                 schedule_id, thread_id, scope_id,
-                RULES_ONLY if cadence_seconds is None else str(cadence_seconds),
+                # No cadence: no next run, which alone says only run_script rules start it.
+                "" if cadence_seconds is None else str(cadence_seconds),
                 None if cadence_seconds is None else now, UNBOUNDED_RUNS, payload, thread_id, now, now,
                 str(script_path), script_sha256, timeout_seconds,
             ),

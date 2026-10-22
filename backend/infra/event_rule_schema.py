@@ -1,11 +1,12 @@
 """Agent-written event rules and the record of what each one did.
 
-Shared by fresh installs and migrations 136 and 138. ``event_rules`` holds only
+Shared by fresh installs and migrations 136, 138 and 141. ``event_rules`` holds only
 rules an agent wrote through the ``event_rules`` tool: no row is seeded, and
 today's routing stays in code. ``event_route_decisions`` is the one outcome
 record for those rules; the tool's list, explain and the hourly wake budget read
-it, and a ``run_script`` rule's row is also its run's queue until the script
-runner settles it.
+it, a ``run_script`` rule's row is also its run's queue until the script
+runner settles it, and a ``start_worker`` rule's row is its start's queue, its
+request identity and its worker until the worker's result settles it.
 """
 from __future__ import annotations
 
@@ -41,7 +42,7 @@ EVENT_RULE_SCHEMA_SQL = f"""
             CHECK (json_valid("match") AND json_type("match") = 'array'
                    AND json_array_length("match") <= 4)
             CHECK ({_MATCH_CHECKS}),
-        action TEXT NOT NULL CHECK (action IN ('deliver', 'drop', 'run_script')),
+        action TEXT NOT NULL CHECK (action IN ('deliver', 'drop', 'run_script', 'start_worker')),
         "to" TEXT NOT NULL CHECK ("to" = 'registered_owner' OR "to" LIKE 'thread:_%'),
         mode TEXT CHECK (COALESCE((action = 'deliver' AND mode IN ('wake', 'digest'))
                                   OR (action != 'deliver' AND mode IS NULL), 0)),
@@ -51,7 +52,11 @@ EVENT_RULE_SCHEMA_SQL = f"""
         authority_ref TEXT NOT NULL,
         -- run_script: the writer's own script schedule, which it runs with the event's facts.
         script_id TEXT CHECK ((action = 'run_script') = (script_id IS NOT NULL)),
-        -- A drop removes only its writer's own deliveries, and a script run is the writer's own.
+        -- start_worker: the workflow its worker runs, and the event fact naming one request.
+        workflow_id TEXT CHECK ((action = 'start_worker') = (workflow_id IS NOT NULL)),
+        request_identity_fact TEXT
+            CHECK ((action = 'start_worker') = (request_identity_fact IS NOT NULL)),
+        -- A drop removes only its writer's own deliveries, and a script run or worker is the writer's own.
         -- (No semicolon in these comments: migration 139 runs this text statement by statement.)
         CHECK (action = 'deliver' OR "to" = 'thread:' || created_by)
     );
@@ -74,12 +79,18 @@ EVENT_RULE_SCHEMA_SQL = f"""
         thread_id TEXT,
         outcome TEXT NOT NULL CHECK (outcome IN (
             'woke', 'digested', 'dropped', 'held', 'dead_lettered', 'ended', 'duplicate',
-            'queued', 'running', 'ran', 'failed', 'skipped')),
+            'queued', 'running', 'ran', 'failed', 'skipped',
+            'started', 'returned', 'invalid', 'no_result', 'refused')),
         -- 'routed': the rule rode a delivery today's routing already made.
         via TEXT NOT NULL CHECK (via IN ('rule', 'routed')),
         reason TEXT,
-        -- A queued run's input (the event and its rule chain), cleared when the run is claimed.
-        run_input TEXT CHECK (run_input IS NULL OR (outcome = 'queued' AND json_valid(run_input)))
+        -- A queued run's or start's input (the event and its rule chain), cleared when it is
+        -- claimed, or a made worker's result check, cleared when it settles.
+        run_input TEXT CHECK (run_input IS NULL OR (outcome IN ('queued', 'held', 'started')
+                                                    AND json_valid(run_input))),
+        -- A worker start's request identity (R24) and, once started, its worker thread.
+        request_identity TEXT,
+        worker_thread_id TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_event_route_decisions_rule
         ON event_route_decisions(rule_id, thread_id, outcome, at);
@@ -93,4 +104,8 @@ EVENT_RULE_SCHEMA_SQL = f"""
     -- SQLite uses a partial index only when the query repeats its WHERE term, and these bind the outcome.
     CREATE INDEX IF NOT EXISTS idx_event_route_decisions_runs
         ON event_route_decisions(outcome, id);
+    CREATE INDEX IF NOT EXISTS idx_event_route_decisions_request
+        ON event_route_decisions(rule_id, request_identity);
+    CREATE INDEX IF NOT EXISTS idx_event_route_decisions_worker
+        ON event_route_decisions(worker_thread_id);
 """

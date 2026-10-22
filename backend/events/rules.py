@@ -9,7 +9,9 @@ resolved) and never re-derive it. A rule an agent wrote only adds to it:
   to that thread (its note joins it, and a wake beats a digest);
 - a ``drop`` rule removes its writer's own delivery, nothing else;
 - a ``run_script`` rule queues one run of its writer's script and changes no
-  delivery (``events.rule_runs``).
+  delivery (``events.rule_runs``);
+- a ``start_worker`` rule queues one worker start per request and changes no
+  delivery (``events.worker_starts``).
 
 Every outcome of a rule goes through :func:`record`, the one writer of
 ``event_route_decisions`` rows; ``events.rule_runs`` only advances a queued
@@ -23,25 +25,23 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from loguru import logger
 
-from events import rule_reads
+from events import rule_reads, worker_starts
 from events.rule_match import matches, repository_fact
 from events.disposition import WAKE as TABLE_WAKE, disposition
 from events.resolve import Target, lifecycle
 from events.rule_outcomes import (  # noqa: F401 - re-exported: callers read them as rules.*
-    DEAD_LETTERED, DIGESTED, DROPPED, DUPLICATE, ENDED, HELD, WAKE_CAP, WOKE, Delivery, Entry, Outcome,
+    DEAD_LETTERED, DELIVER, DIGESTED, DROP, DROPPED, DUPLICATE, ENDED, HELD, RUN_SCRIPT, START_WORKER,
+    WAKE_CAP, WOKE, Delivery, Entry, Outcome, Rule, RuleEvent, RulePlan,
 )
+from events.rule_runs import OWNER_GONE, queue
 from infra.queries import thread_is_temporary
 from registry.retirement_predicate import identity_ended
 
-DELIVER = "deliver"
-DROP = "drop"
-RUN_SCRIPT = "run_script"
 WAKE = "wake"
 DIGEST = "digest"
 REGISTERED_OWNER = "registered_owner"
@@ -65,50 +65,6 @@ WAKES_PER_HOUR = 1
 RETENTION = timedelta(days=30)
 
 
-@dataclass(frozen=True)
-class Rule:
-    id: str
-    scope: str
-    connector: str
-    event_type: str
-    match: tuple[Mapping[str, Any], ...]
-    action: str
-    to: str
-    mode: str | None
-    note: str | None
-    created_by: str
-    enabled: bool = True
-    script_id: str | None = None  # run_script: the writer's script schedule it runs
-
-
-@dataclass(frozen=True)
-class RuleEvent:
-    """One event as rules see it: its declared type and facts, never its raw body."""
-
-    event_id: str
-    connector: str
-    event_type: str
-    watch_event: str  # the name a watch on this event uses
-    facts: Mapping[str, Any]
-    artifact_ref: Mapping[str, str] | None
-    ends_artifact: bool = False
-    # Read only when routing gave the event no thread: the projects tracking its repository.
-    repository_projects: frozenset[str] = frozenset()
-    trace: tuple[str, ...] = ()  # the rules whose script runs led to this event, oldest first
-
-
-@dataclass
-class RulePlan:
-    """Everything rules decided for one event, before delivery."""
-
-    event: RuleEvent
-    lifecycle: str = "active"  # the artifact's, as routing resolved it
-    drops: dict[str, str] = field(default_factory=dict)       # routed thread -> drop rule id
-    rides: dict[str, Delivery] = field(default_factory=dict)  # routed thread -> what rides it
-    adds: dict[str, Delivery] = field(default_factory=dict)   # new thread -> its delivery
-    settled: list[Outcome] = field(default_factory=list)      # outcomes with no delivery
-
-
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -123,6 +79,7 @@ def from_row(row: Mapping[str, Any]) -> Rule:
         event_type=row["event_type"], match=tuple(json.loads(row["match"])),
         action=row["action"], to=row["to"], mode=row["mode"], note=row["note"],
         created_by=row["created_by"], enabled=bool(row["enabled"]), script_id=row["script_id"],
+        workflow_id=row["workflow_id"], request_identity_fact=row["request_identity_fact"],
     )
 
 
@@ -136,6 +93,16 @@ def lookup(
     rows = rule_reads.enabled_rules(db, connector, event_type, PROJECT_PREFIX, thread,
                                     [project_scope(project) for project in projects])
     return [from_row(row) for row in rows]
+
+
+def reaches_unowned(rule: Rule, event: RuleEvent) -> bool:
+    """Whether ``rule`` fires on an event routing gave no thread: one CORSIA produced for a
+    requester (a worker's result) reaches only that requester's rules to itself; any other
+    reaches only :func:`self_on_repository`'s."""
+    if event.requester is None:
+        return self_on_repository(rule)
+    return (rule.created_by == event.requester and rule.action != DROP
+            and thread_target(rule.to) == rule.created_by)
 
 
 def self_on_repository(rule: Rule) -> bool:
@@ -216,19 +183,34 @@ def _settle_unreachable(
         row = threads.get(thread) if thread else None
         writer = threads.get(rule.created_by)
         if writer is not None and writer["project_id"] != rule.scope.removeprefix(PROJECT_PREFIX):
-            from events.rule_authoring import turn_off
-
             turn_off(db, rule.id, rule.scope, _iso(_now()))
             plan.settled.append(Outcome(rule.id, rule.created_by, DEAD_LETTERED,
                                         reason=WRITER_LEFT))
         elif rule.action != DROP and (row is None or not row["available"]):
-            reason = "no registered owner" if thread is None else UNAVAILABLE
+            reason = ("no registered owner" if thread is None
+                      else UNAVAILABLE if rule.action == DELIVER else OWNER_GONE)
             plan.settled.append(Outcome(rule.id, thread, DEAD_LETTERED, reason=reason))
         elif row is not None and row["project_id"] != rule.scope.removeprefix(PROJECT_PREFIX):
             plan.settled.append(Outcome(rule.id, thread, HELD, reason=OUT_OF_PROJECT))
         else:
             current.append(rule)
     return current
+
+
+def turn_off(db: sqlite3.Connection, rule_id: str, scope: str, now: str) -> None:
+    """Disable one rule and prune its scope's stale disabled rules: ``disable``'s
+    write, and evaluation's for a rule whose writer left its project."""
+    db.execute("UPDATE event_rules SET enabled=0, updated_at=? WHERE id=?", (now, rule_id))
+    prune_disabled(db, scope, now)
+
+
+def prune_disabled(db: sqlite3.Connection, scope: str, now: str) -> None:
+    """Keep disabled rules briefly for inspection, then discard them, and what
+    they did, in their own scope."""
+    cutoff = (datetime.fromisoformat(now) - RETENTION).isoformat()
+    stale = "SELECT id FROM event_rules WHERE scope=? AND enabled=0 AND updated_at<?"
+    db.execute(f"DELETE FROM event_route_decisions WHERE rule_id IN ({stale})", (scope, cutoff))
+    db.execute(f"DELETE FROM event_rules WHERE id IN ({stale})", (scope, cutoff))
 
 
 def _wake_guard(
@@ -287,9 +269,10 @@ def evaluate(
     matches its facts; the caller then delivers exactly as it would without rules.
     """
     by_thread, state, anchor = routed(targets, skipped)
-    rules = [rule for rule in lookup(db, event.connector, event.event_type, anchor,
-                                     () if anchor else event.repository_projects)
-             if matches(rule, event.facts) and (anchor or self_on_repository(rule))]
+    scope = anchor or event.requester
+    rules = [rule for rule in lookup(db, event.connector, event.event_type, scope,
+                                     () if scope else event.repository_projects)
+             if matches(rule, event.facts) and (anchor or reaches_unowned(rule, event))]
     if not rules:
         return None
     owner = (state.get("owner") or {}).get("parent_thread_id")
@@ -306,9 +289,8 @@ def evaluate(
         db, [*recipients.values(), *(rule.created_by for rule in rules)])
     rules = _settle_unreachable(db, plan, rules, recipients, threads)
     dropped_by = _apply_drops(plan, rules, by_thread, recipients)
-    from events.rule_runs import queue  # it imports this module
-
     plan.settled += queue(db, event, rules, dropped_by)
+    plan.settled += worker_starts.queue(db, event, rules, dropped_by)
     delivering: list[tuple[Rule, str, Target | None]] = []
     answers: dict[str, tuple[bool, str | None, int]] = {}
     asking: dict[str, list[str]] = {}
@@ -345,11 +327,12 @@ def record(db: sqlite3.Connection, event: RuleEvent, outcomes: Iterable[Outcome]
     db.executemany(
         "INSERT INTO event_route_decisions (at, event_id, connector, event_type, watch_event, "
         "artifact_integration, artifact_type, artifact_external_id, rule_id, thread_id, "
-        "outcome, via, reason, run_input) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "outcome, via, reason, run_input, request_identity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
             (_iso(now), event.event_id, event.connector, event.event_type, event.watch_event,
              ref.get("integration"), ref.get("type"), ref.get("external_id"),
-             item.rule_id, item.thread, item.outcome, item.via, item.reason, item.run_input)
+             item.rule_id, item.thread, item.outcome, item.via, item.reason, item.run_input,
+             item.request_identity)
             for item in outcomes
         ],
     )

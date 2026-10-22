@@ -7,7 +7,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from events import rule_authoring, rule_runs, rules
+from events import rule_actions, rule_authoring, rule_runs, rules
+from infra import config
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.product_events import emit_product_event
@@ -29,6 +30,8 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
         # Resolving the project's repositories runs git: never under the write lock.
         tracked = (rule_authoring.tracked_repositories(
             kwargs.get("connector"), kwargs.get("match"), project_id) if operation == "create" else None)
+        workflows = (_workflows(thread_id, project_id)
+                     if operation == "create" and kwargs.get("action") == rules.START_WORKER else None)
         with write_transaction(None, scope="event_rules_tool") as db:
             if operation == "create":
                 result = rule_authoring.create(
@@ -37,7 +40,8 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
                     match=kwargs.get("match"), action=kwargs.get("action", "deliver"),
                     to=kwargs.get("to"), mode=kwargs.get("mode"), note=kwargs.get("note"),
                     scope=kwargs.get("scope"), now=now, tracked=tracked,
-                    script_id=kwargs.get("script_id"),
+                    script_id=kwargs.get("script_id"), workflow_id=kwargs.get("workflow_id"),
+                    request_identity_fact=kwargs.get("request_identity_fact"), workflows=workflows,
                 )
             else:
                 result = rule_authoring.disable(
@@ -59,6 +63,15 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
             db, project_id=project_id, event_id=kwargs.get("event_id"),
             artifact=kwargs.get("artifact"), thread=kwargs.get("thread"),
             event_type=kwargs.get("event_type"))
+    finally:
+        db.close()
+
+
+def _workflows(thread_id: str, project_id: str | None) -> dict[str, Any]:
+    # Reads skill folders: never under the write lock.
+    db = get_db()
+    try:
+        return rule_actions.reachable_workflows(db, thread_id, project_id, config.WORKSPACE)
     finally:
         db.close()
 
@@ -109,13 +122,19 @@ class EventRulesTool(Tool):
             "a run while you are paused is skipped and not replayed. A script runs once at a time, "
             f"so runs wait their turn; a match while {rule_runs.QUEUE_CAP} of its rule's runs wait "
             "is skipped. "
+            "`start_worker` starts one read-only worker on your model running `workflow_id` (a skill "
+            "you can read whose corsia.yaml workflow declares a `result`) once per value of the "
+            "event's `request_identity_fact`; the worker reads only the event's `staging_path` (in your "
+            "staging folder) and the `head_repo`/`head_sha` tree, "
+            "and its checked answer comes back as a worker.result event on the item (worker.no_result "
+            "when it returns nothing usable). "
             "Your rules cover your own project and deliver only to you (`to: self`, the default) or "
             "to the event's file's registered owner (`to: registered_owner`); that owner is woken "
             "only when it is you or one of your temporary workers, otherwise the event goes to "
             "its digest. A rule wakes a chat "
             "at most once an hour; more go to its digest. A paused chat gets a digest instead. "
             "disable: turn off a rule you wrote or receive. list: the project's rules, with when "
-            "each last acted and its wakes, script starts and skipped runs in the last 24 hours. test: which rules a set of `facts` "
+            "each last acted and its wakes, script and worker starts and skipped runs in the last 24 hours. test: which rules a set of `facts` "
             "would match. explain: why an event (`event_id`, or `artifact`, the file's external id "
             "such as owner/repo#7) did or didn't reach a chat through a rule, or, given `event_type`, "
             "the recent refusals of that declared type. emit: send one event of a declared "
@@ -140,7 +159,13 @@ class EventRulesTool(Tool):
                     }, "required": ["field"]},
                     "description": "create: tests that must all pass",
                 },
-                "action": {"type": "string", "enum": [rules.DELIVER, rules.DROP, rules.RUN_SCRIPT]},
+                "action": {"type": "string",
+                           "enum": [rules.DELIVER, rules.DROP, rules.RUN_SCRIPT, rules.START_WORKER]},
+                "workflow_id": {"type": "string",
+                                "description": "create with start_worker: the workflow skill's name"},
+                "request_identity_fact": {
+                    "type": "string",
+                    "description": "create with start_worker: the event fact naming one request"},
                 "script_id": {"type": "string",
                               "description": "create with run_script: your script schedule's id"},
                 "to": {"type": "string",
@@ -175,6 +200,6 @@ class EventRulesTool(Tool):
             return await _emit(thread_id, kwargs)
         try:
             result = await run_in_db(_run, operation, thread_id, actor_row.get("project_id"), kwargs)
-        except rule_authoring.RuleRefused as exc:
+        except rule_actions.RuleRefused as exc:
             return f"Refused: {exc}"
         return json.dumps(result, sort_keys=True)

@@ -54,7 +54,7 @@ def _refusal(connection, row) -> tuple[Schedule | None, str | None]:
     if schedule.state != "active":
         return None, f"its script schedule is {schedule.state}"
     if not thread_is_available(get_thread(row["thread_id"], db=connection)):
-        return None, "its owner is no longer available"
+        return None, rule_runs.OWNER_GONE
     return schedule, None
 
 

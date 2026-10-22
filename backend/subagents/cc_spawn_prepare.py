@@ -209,9 +209,13 @@ def _confined_record(
     )
 
 
-async def prepare_spawn(request: CCSpawnRequest, db) -> PreparedCCSpawn:
-    """Create the durable child and its pre-start runtime context."""
-    _check_live_cap()
+async def prepare_spawn(request: CCSpawnRequest, db, *, check_cap: bool = True) -> PreparedCCSpawn:
+    """Create the durable child and its pre-start runtime context.
+
+    ``check_cap`` False is a rule-started worker's: at a full cap it is held, not refused.
+    """
+    if check_cap:
+        _check_live_cap()
     from connections.models import connection_available
     from registry.cc_session import notify_cc_session, persist_cc_session
 

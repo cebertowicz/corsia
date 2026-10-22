@@ -180,8 +180,19 @@ def rule_event(
     return rules.RuleEvent(
         envelope.event_id, envelope.connector or "", envelope.type,
         watch_event or envelope.type, envelope.facts, envelope.artifact_ref, ends_artifact,
-        trace=tuple(envelope.provenance.get("rule_trace") or ()),
+        trace=tuple(envelope.provenance.get("rule_trace") or ()), requester=_requester(envelope),
     )
+
+
+def _requester(envelope: EventEnvelope) -> str | None:
+    """The agent a CORSIA-produced event answers, from its manifest's declared fact; intake
+    admits that namespace from CORSIA alone, so no producer can name one."""
+    try:
+        fact = get_manifest(envelope.connector or "").requester_fact
+    except KeyError:
+        return None
+    value = envelope.facts.get(fact) if fact else None
+    return str(value) if value else None
 
 
 _RULE_OUTCOMES = {WOKE: rules.WOKE, DIGESTED: rules.DIGESTED, DUPLICATE: rules.DUPLICATE}
