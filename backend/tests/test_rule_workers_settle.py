@@ -144,6 +144,49 @@ async def test_each_settled_start_emits_one_product_event(world, monkeypatch):
         "rule_id", "workflow", "outcome", "waited_for_capacity"}
 
 
+# A worker answers its owner only as a worker.* event while its start is open; once it has
+# settled, a later turn (the owner messaged it) is an ordinary child's completion.
+@pytest.mark.asyncio
+async def test_a_settled_workers_later_turn_wakes_its_owner_as_an_ordinary_child(world, monkeypatch):
+    from automation import worker_runner
+    from infra.database import get_db, write_transaction
+    from infra.queries import insert_message
+    from infra.thread_driver import PARENT_COMPLETION_HEADING, _parent_completion
+
+    def completions() -> list[str]:
+        return [row[0] for row in get_db().execute(
+            "SELECT content FROM messages WHERE thread_id=? AND json_valid(metadata) "
+            "AND json_extract(metadata,'$.completion')=1", (OWNER,))]
+
+    def completion(turn_id: str) -> str | None:
+        with write_transaction(None, scope="rule_worker_parent_completion") as db:
+            return _parent_completion(db, turn_id, worker)
+
+    poke = worker_runner.poke
+    monkeypatch.setattr(worker_runner, "poke", lambda **_: None)  # hold the settle back
+    rule = await make_rule()
+    await request()
+    assert await worker_runner.drive() == 1
+    worker = starts(rule)[0][3]
+    for _ in range(300):
+        turn = get_db().execute(
+            "SELECT id FROM active_turns WHERE thread_id=? AND status='completed'", (worker,)).fetchone()
+        if turn is not None:
+            break
+        await asyncio.sleep(0.02)
+    assert turn is not None, "the worker's turn never completed"
+    assert starts(rule)[0][0] == "started"
+    assert completion(turn[0]) is None and completions() == []
+
+    monkeypatch.setattr(worker_runner, "poke", poke)
+    await settle_all()
+    assert starts(rule)[0][0] == "returned" and completions() == []
+
+    insert_message(worker, "assistant", "Answered the owner.", metadata={"turn_id": "owner-asked"})
+    assert completion("owner-asked") == OWNER
+    assert completions() == [f"{PARENT_COMPLETION_HEADING}\n\nAnswered the owner."]
+
+
 # 4 -- schema-invalid output: no_result {reason: invalid}; the same request starts nothing, a bumped attempt starts one.
 @pytest.mark.asyncio
 async def test_an_invalid_result_keeps_its_request_and_a_new_attempt_starts(world, monkeypatch):
