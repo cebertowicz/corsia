@@ -4,6 +4,7 @@ import uuid
 from typing import Callable
 
 from infra.send_broadcast import broadcast_stored_message
+from llm.error_cause import cause_fields
 
 
 class CodexLiveTurnBusy(RuntimeError):
@@ -51,7 +52,7 @@ def surface_exit_error(
             "type": "cc_error",
             "event_type": "harness.error",
             "harness": "codex",
-            "cause": "process_exited",
+            **cause_fields("codex", "process_exited", stderr),
         }
         mid = insert_message_fn(
             thread_id, "system", text, meta,

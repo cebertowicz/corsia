@@ -7,6 +7,8 @@ from typing import Any, Awaitable
 
 import litellm
 
+from llm.error_cause import mark_own_server
+
 litellm.suppress_debug_info = True
 
 litellm.drop_params = False
@@ -86,6 +88,10 @@ class LLMResponse:
     # wire, None when it sent none (unlisted level, "auto", "none"): the usage
     # ledger records this, not the level that was requested.
     effort_sent: str | None = None
+    # When a usage-limit failure's reset time is known (ISO), else None.
+    resets_at: str | None = None
+    # True when the failing oMLX server is CORSIA's own (set by chat_completion).
+    own_server: bool = False
 
     @property
     def has_tool_calls(self) -> bool:
@@ -94,12 +100,15 @@ class LLMResponse:
 
 def provider_error_response(error: Exception, content: str) -> LLMResponse:
     """The terminal response for a provider call that failed with ``error``."""
+    from llm.error_cause import USAGE_LIMIT, native_error_kind, reset_iso
     from llm.server_observation import endpoint_failure_of
     from llm.stream_idle import error_kind_of
 
+    error_kind = error_kind_of(error) or native_error_kind(error)
     return LLMResponse(
-        content=content, finish_reason="error",
-        error_kind=error_kind_of(error), endpoint_failure=endpoint_failure_of(error),
+        content=content, finish_reason="error", error_kind=error_kind,
+        endpoint_failure=endpoint_failure_of(error),
+        resets_at=reset_iso(error) if error_kind == USAGE_LIMIT else None,
     )
 
 
@@ -321,4 +330,4 @@ async def chat_completion(
         retry_transient_errors=retry_transient_errors,
     ))
     response.effort_sent = (extra_body or {}).get("reasoning_effort")
-    return response
+    return await mark_own_server(response, omlx_server_id)

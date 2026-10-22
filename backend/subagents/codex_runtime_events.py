@@ -23,6 +23,7 @@ from core.turn_core import (
 from infra.db_async import run_in_db
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_message_rows, broadcast_stored_message
+from llm.error_cause import codex_failure_meta
 from registry.observer import observe_settled_tool_result
 from registry.registration_writer import RegistrationOrigin
 from registry.service import notify_changed, register_codex_thread
@@ -603,12 +604,7 @@ async def _on_turn_failed(ctx, ev: dict) -> None:
 
             mark_provider_context_untrusted(ctx.thread_id)
             ctx.thread_registry.pop(ctx.thread_id, None)
-        meta_f: dict = {
-            "codex": True, "type": "cc_error", "event_type": "harness.error",
-            "harness": "codex", "cause": cause, **unrecorded,
-        }
-        if reset_at:
-            meta_f["reset_at"] = reset_at
+        meta_f = codex_failure_meta(cause, msg, reset_at, ctx.live.model, unrecorded)
         marker_id = await record_terminal_marker(
             ctx.thread_id,
             content=f"⚠️ {msg}",

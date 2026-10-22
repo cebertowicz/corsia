@@ -5,6 +5,7 @@ import uuid
 from typing import Callable
 
 from infra.send_broadcast import broadcast_stored_message
+from llm.error_cause import cause_fields
 
 
 _EXPIRED_LOGIN_RECONCILIATION_TASKS: set[asyncio.Task] = set()
@@ -89,7 +90,7 @@ def surface_exit_error(
             "type": "cc_error",
             "event_type": "harness.error",
             "harness": "claude-code",
-            "cause": "process_exited",
+            **cause_fields("claude-code", "process_exited", stderr),
         }
         mid = insert_message_fn(
             thread_id, "system", text, meta,
