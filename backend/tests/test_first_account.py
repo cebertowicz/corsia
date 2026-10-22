@@ -200,7 +200,7 @@ def test_a_whitespace_only_name_is_a_validation_error_before_anything_is_touched
 def test_the_account_function_refuses_a_blank_name_before_anything_is_touched(workspace):
     before = _state()
     with pytest.raises(account_validation.AccountError, match="name is required"):
-        accounts.create_first_account("pat", PASSWORD, call_name="  ")
+        accounts.create_first_account("pat", PASSWORD, full_name="  ")
     assert _state() == before
     assert not (workspace / "context").exists()
 

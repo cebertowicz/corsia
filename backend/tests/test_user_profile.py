@@ -192,6 +192,17 @@ def test_profile_full_name_is_sanitized_bounded_and_empty_when_absent(first_acco
     assert user_profile.profile_name(first_account) == ""
 
 
+def test_the_cli_asks_for_the_full_name(first_account, monkeypatch):
+    prompts: list[str] = []
+    stdin = io.StringIO()
+    stdin.isatty = lambda: True  # type: ignore[method-assign]
+    monkeypatch.setattr(sys, "stdin", stdin)
+    monkeypatch.setattr(signed_in_emails, "signed_in_emails", lambda: [])
+    monkeypatch.setattr("builtins.input", lambda prompt="": prompts.append(prompt) or "")
+    cli_accounts.cmd_user_add(argparse.Namespace(name="pat", password_stdin=False))
+    assert any(p.startswith("What's your full name?") for p in prompts)
+
+
 def _add_with_answers(monkeypatch, *answers: str) -> int:
     """Run `user add` on a terminal whose answers arrive in order: name, then email."""
     queue = list(answers)

@@ -452,7 +452,7 @@ def test_the_look_up_reference_carries_the_rules_outcomes_questions_and_examples
     examples = ref.split("## Worked examples", 1)[1]
     assert re.findall(r"^\*\*(\d)\. ([^.]+)\.\*\*", examples, flags=re.MULTILINE) == [
         ("1", "One clear match"), ("2", "Two people with the same name"), ("3", "A famous namesake"), ("4", "Nothing found")]
-    assert len(ref.split()) < 2100
+    assert len(ref.split()) < 2140
     assert not re.search(r"\bAI\b", ref)
 
 
@@ -483,12 +483,12 @@ def test_the_look_up_reads_and_writes_the_zone_and_name_in_the_workspace_profile
     start = ref.index("4. This computer's time zone")
     start_line = ref[start:ref.index("\n", start)]
     assert "- **Timezone:**" in start_line and "context/50-USER-PROFILE.md" in start_line
-    assert "date +%Z" not in ref and "This Mac" not in ref
+    assert "else `date +%Z`" in start_line and "This Mac" not in ref
     write = ref[ref.index("## F. Write it down"):ref.index("## G.")]
     # The zone is written in the exact line the profile seeds, and the name replaces the preferred-name line.
     seeded = user_profile.profile_text("Ada", "ZONE").splitlines()[-1].replace("ZONE", "<IANA zone>")
     assert seeded in write
-    assert "replacing it, or adding it when there is none, with" in write
+    assert "replacing the profile's `- **Timezone:**` line, or adding it when there is none, with" in write
     assert "over the profile's `- **Preferred name:**` line" in write
     assert "`USER.md`" in write and "(work, place, background)" in write
     doc = (FIRST_RUN_APP.parent / "about-you-doc.md").read_text(encoding="utf-8")
