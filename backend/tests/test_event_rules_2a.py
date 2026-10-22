@@ -488,6 +488,7 @@ async def test_writer_limits(isolated_db, sent, resolved, monkeypatch):
     _agent("cond")
     _agent("a")
     _agent("b")
+    _agent("other")
     _agent("worker", temporary_of="a")
     base = {"operation": "create", "connector": "github", "event_type": "pr.merged"}
 
@@ -530,6 +531,12 @@ async def test_writer_limits(isolated_db, sent, resolved, monkeypatch):
     assert "Only the rule's writer" in await _tool("a", operation="disable", rule_id=digest["id"])
     assert (await _tool("b", operation="disable", rule_id=digest["id"]))["enabled"] is False
 
+    registered = await _tool("a", **base, to="registered_owner")
+    register_pr(REPO, 4, "b")
+    await route(MERGED, _merged(4))
+    assert "Only the rule's writer" in await _tool("other", operation="disable", rule_id=registered["id"])
+    assert (await _tool("b", operation="disable", rule_id=registered["id"]))["enabled"] is False
+
     # Every declared field can match: a PR's author comes from the webhook.
     by_author = await _tool("a", **base, match=[{"field": "author", "op": "eq", "value": "carol"}])
     register_pr(REPO, 5, "a")
@@ -539,7 +546,7 @@ async def test_writer_limits(isolated_db, sent, resolved, monkeypatch):
     [hit] = _decisions(rule_id=by_author["id"])
     assert (hit["thread_id"], hit["outcome"]) == ("a", "woke")
     assert hit["artifact_external_id"] == pr_external_id(REPO, 5)
-    assert len(_rows("SELECT id FROM event_rules")) == 3
+    assert len(_rows("SELECT id FROM event_rules")) == 4
 
 
 @pytest.mark.asyncio
@@ -1171,6 +1178,32 @@ def test_an_agents_owner_rule_wakes_only_its_own_or_its_workers(isolated_db, own
     assert (made.outcome == "woke", len(_wakes(owner)) == 1) == (woke, woke)
     [decision] = _decisions(rule_id=rule["id"])
     assert decision["outcome"] == ("woke" if woke else "digested")
+
+
+def test_an_agents_owner_rule_does_not_wake_a_promoted_worker(isolated_db):
+    import asyncio
+
+    _project(P)
+    _agent("writer")
+    _agent("temporary", temporary_of="writer")
+    _agent("promoted", temporary_of="writer")
+    _write("UPDATE threads SET agent_enabled=1 WHERE id=?", "promoted")
+    rule = asyncio.run(_tool("writer", operation="create", connector=library.LIBRARY_CONNECTOR,
+                             event_type=library.ITEM_CHANGED_EVENT, to="registered_owner"))
+
+    _library_owner("temporary")
+    models.register_artifact(integration=library.LIBRARY_INTEGRATION,
+                             type=library.INSTALLED_SKILL_TYPE, external_id="owner/promoted",
+                             parent_thread_id="promoted")
+    [temporary_delivery] = deliver_platform_event_sync(
+        library.LIBRARY_CONNECTOR, _library_changed("temporary"))
+    promoted_event = _library_changed("promoted") | {"external_id": "owner/promoted"}
+    [promoted_delivery] = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, promoted_event)
+
+    assert (temporary_delivery.outcome, promoted_delivery.outcome) == ("woke", "digested")
+    decisions = _decisions(rule_id=rule["id"])
+    assert [(row["thread_id"], row["outcome"], row["reason"]) for row in decisions] == [
+        ("temporary", "woke", None), ("promoted", "digested", "the registered owner is another agent")]
 
 
 def test_a_drop_with_nothing_routed_records_nothing(isolated_db):

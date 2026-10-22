@@ -40,10 +40,21 @@ PR_MERGED_KEY = "merged"
 """The one GitHub field that decides a PR's end. Named here so no consumer
 spells it out again; a rename moves the rule, the classifier and the tests."""
 
+# The connector owns the names its manifest declares for routed GitHub events.
+# The webhook mapper (events/github_mapper.py) imports these values when it maps
+# payloads, so a declaration cannot silently name an event the mapper never emits.
+GITHUB_ROUTED_EVENTS = {
+    "pr.opened": "webhook.github.pr_opened",
+    "pr.synchronize": "webhook.github.pr_synchronize",
+    "pr.ready_for_review": "webhook.github.pr_ready_for_review",
+    "pr.labeled": "webhook.github.pr_labeled",
+    "pr.merged": "webhook.github.pr_merged",
+    "pr.closed": "webhook.github.pr_closed",
+    "check.completed": "webhook.github.check_suite_completed",
+}
+
 # Each consumer maps PrEnd into its own vocabulary; the rule itself is never
-# re-written. The connector names the manifest event types, each declaring the
-# ``webhook.github.*`` name the router gives it (``routed_event``); the webhook
-# mapper (events/github_mapper.py) maps payloads to those names.
+# re-written.
 _PR_END_TYPES: dict[PrEnd, str] = {"merged": "pr.merged", "closed": "pr.closed"}
 
 #: The ``resolved`` key for the pull request routing selected for a check suite.
@@ -226,36 +237,36 @@ MANIFEST = register(ConnectorManifest(
         "pr.opened": EventTypeDecl(
             "pr.opened", ("repo", "pr_number", "action"), _PR_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
-            event_class="actionable", routed_event="webhook.github.pr_opened"),
+            event_class="actionable", routed_event=GITHUB_ROUTED_EVENTS["pr.opened"]),
         "pr.synchronize": EventTypeDecl(
             "pr.synchronize", ("repo", "pr_number", "action", "sha"), _PR_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
-            event_class="actionable", routed_event="webhook.github.pr_synchronize"),
+            event_class="actionable", routed_event=GITHUB_ROUTED_EVENTS["pr.synchronize"]),
         "pr.ready_for_review": EventTypeDecl(
             "pr.ready_for_review", ("repo", "pr_number", "action", "sha"),
             _PR_FILTERABLE, artifact_type=PR_TYPE,
             artifact_integration=GITHUB_INTEGRATION, event_class="informational",
-            routed_event="webhook.github.pr_ready_for_review"),
+            routed_event=GITHUB_ROUTED_EVENTS["pr.ready_for_review"]),
         "pr.labeled": EventTypeDecl(
             "pr.labeled", ("repo", "pr_number", "action", "sha"),
             _PR_FILTERABLE, artifact_type=PR_TYPE,
             artifact_integration=GITHUB_INTEGRATION, event_class="informational",
-            routed_event="webhook.github.pr_labeled"),
+            routed_event=GITHUB_ROUTED_EVENTS["pr.labeled"]),
         "pr.merged": EventTypeDecl(
             "pr.merged", ("repo", "pr_number", "action"), _PR_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
-            event_class="informational", routed_event="webhook.github.pr_merged"),
+            event_class="informational", routed_event=GITHUB_ROUTED_EVENTS["pr.merged"]),
         "pr.closed": EventTypeDecl(
             "pr.closed", ("repo", "pr_number", "action"), _PR_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
-            event_class="informational", routed_event="webhook.github.pr_closed"),
+            event_class="informational", routed_event=GITHUB_ROUTED_EVENTS["pr.closed"]),
         "check.completed": EventTypeDecl(
             "check.completed",
             ("repo", "check_suite_id", "conclusion", "head_sha"),
             _CHECK_FILTERABLE, artifact_type=PR_TYPE,
             artifact_integration=GITHUB_INTEGRATION,
             relationships=(_CHECK_TO_PR,), event_class="actionable",
-            routed_event="webhook.github.check_suite_completed"),
+            routed_event=GITHUB_ROUTED_EVENTS["check.completed"]),
     },
     classify=_classify,
     extract_facts=_extract_facts,

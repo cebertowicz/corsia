@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from events.connectors.github import PrEnd, pr_end_state
+from events.connectors.github import GITHUB_ROUTED_EVENTS, PrEnd, pr_end_state
 from events.markers import (
     REVIEW_FP_MARKER_PREFIX as _REVIEW_FP_MARKER,
     REVIEW_RESOLVED_MARKER as _REVIEW_RESOLVED_MARKER,
@@ -14,12 +14,12 @@ from reviewer.reviewer_categories import LABEL_REVIEW
 
 log = logging.getLogger(__name__)
 
-# This module owns the webhook vocabulary: the name each terminal state maps to,
-# and its inverse. The rule that reads the state off a payload is the connector's
-# ``events.connectors.github.pr_end_state`` — never re-written here.
+# The connector owns the webhook vocabulary that declarations name. This mapper
+# only maps payloads to those names. The rule that reads terminal state off a
+# payload is the connector's ``events.connectors.github.pr_end_state``.
 _PR_END_EVENTS: dict[PrEnd, str] = {
-    "merged": "webhook.github.pr_merged",
-    "closed": "webhook.github.pr_closed",
+    "merged": GITHUB_ROUTED_EVENTS["pr.merged"],
+    "closed": GITHUB_ROUTED_EVENTS["pr.closed"],
 }
 _PR_STATE_BY_EVENT: dict[str, PrEnd] = {
     event: state for state, event in _PR_END_EVENTS.items()
@@ -84,15 +84,15 @@ def map_github_event(event_type: str, payload: dict[str, Any]) -> str | None:
 
     if event_type == "pull_request":
         if action == "opened":
-            return "webhook.github.pr_opened"
+            return GITHUB_ROUTED_EVENTS["pr.opened"]
         if action == "synchronize":
-            return "webhook.github.pr_synchronize"
+            return GITHUB_ROUTED_EVENTS["pr.synchronize"]
         if action == "ready_for_review":
-            return "webhook.github.pr_ready_for_review"
+            return GITHUB_ROUTED_EVENTS["pr.ready_for_review"]
         if action == "labeled":
             # Only the review label is an event; every other label stays unmapped.
             label = payload.get("label") or {}
-            return "webhook.github.pr_labeled" if label.get("name") == LABEL_REVIEW else None
+            return GITHUB_ROUTED_EVENTS["pr.labeled"] if label.get("name") == LABEL_REVIEW else None
         if action == "closed":
             end = pr_end_state(payload)
             if end is None:
@@ -124,7 +124,7 @@ def map_github_event(event_type: str, payload: dict[str, Any]) -> str | None:
 
     if event_type == "check_suite":
         if action == "completed":
-            return "webhook.github.check_suite_completed"
+            return GITHUB_ROUTED_EVENTS["check.completed"]
         return None
 
     return None

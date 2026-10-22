@@ -24,7 +24,7 @@ from typing import Any
 from events import rules
 from events.connectors import EventTypeDecl, get_manifest
 from events.rule_match import matches
-from infra.queries import thread_available_sql
+from infra.queries import thread_available_sql, thread_is_temporary
 
 _EXPLAIN_LIMIT = 50
 
@@ -49,9 +49,6 @@ def _thread(db: sqlite3.Connection, thread_id: str) -> Mapping[str, Any] | None:
         (thread_id,),
     ).fetchone()
 
-
-def _temporary(row: Mapping[str, Any]) -> bool:
-    return row["spawned_by"] is not None and not row["agent_enabled"]
 
 
 def _conductor(db: sqlite3.Connection, project_id: str) -> str | None:
@@ -165,7 +162,7 @@ def _recipient(
     row = _thread(db, target)
     if row is None or row["project_id"] != project_id or not row["available"]:
         raise RuleRefused(f"{target} is not an agent in this project")
-    if _temporary(row):
+    if thread_is_temporary(row):
         raise RuleRefused("A temporary agent can't receive rules; it ends with its task.")
     if mode != rules.DIGEST:
         raise RuleRefused("A conductor's rule for another agent delivers as a digest only.")
@@ -185,7 +182,7 @@ def create(
     row = _thread(db, writer)
     if row is None:
         raise RuleRefused("this chat was not found")
-    if _temporary(row):
+    if thread_is_temporary(row):
         raise RuleRefused("A temporary agent can't write rules; they would outlive its task. "
                           "Ask the agent that started you.")
     if not project_id:
@@ -230,8 +227,16 @@ def disable(
     if row is None or not project_id or row["scope"] != rules.project_scope(project_id):
         raise RuleRefused(f"no rule {rule_id!r} in this project")
     rule = rules.from_row(row)
-    if caller not in (rule.created_by, rules.thread_target(rule.to)) and _conductor(db, project_id) != caller:
-        raise RuleRefused("Only the rule's writer, its recipient or the project's conductor can turn it off.")
+    delivered_to_caller = db.execute(
+        "SELECT 1 FROM event_route_decisions WHERE rule_id=? AND thread_id=? "
+        "AND outcome IN ('woke', 'digested') LIMIT 1",
+        (rule.id, caller),
+    ).fetchone() is not None
+    if (caller not in (rule.created_by, rules.thread_target(rule.to))
+            and not delivered_to_caller and _conductor(db, project_id) != caller):
+        raise RuleRefused(
+            "Only the rule's writer, its named recipient, a recipient it has delivered to or "
+            "the project's conductor can turn it off.")
     turn_off(db, rule.id, row["scope"], now)
     return {**_shape(rule), "enabled": False}
 

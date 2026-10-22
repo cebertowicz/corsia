@@ -28,6 +28,7 @@ from events import rule_reads
 from events.rule_match import matches, repository_fact
 from events.disposition import WAKE as TABLE_WAKE, disposition
 from events.resolve import Target, lifecycle
+from infra.queries import thread_is_temporary
 from registry.retirement_predicate import identity_ended
 
 DELIVER = "deliver"
@@ -297,7 +298,7 @@ def _wake_guard(
                    rule_wake=True) != TABLE_WAKE:
         return False, NEVER_WAKES, 0
     if (rule.to == REGISTERED_OWNER and thread != rule.created_by
-            and row["spawned_by"] != rule.created_by):
+            and (row["spawned_by"] != rule.created_by or not thread_is_temporary(row))):
         return False, OTHER_OWNER, 0  # 4.4
     return None
 
