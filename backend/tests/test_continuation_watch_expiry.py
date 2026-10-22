@@ -12,8 +12,10 @@ from automation.continuation.triggers import Trigger
 from infra.schema import SCHEMA_SQL
 import plans.admission as admission
 import plans.boundary as boundary
+import plans.public as public
 import plans.receipts as receipts
 import plans.service as service
+import plans.status as status
 from plans.boundary import PlanActor
 
 
@@ -183,6 +185,37 @@ def _open_attempt(db, node_id: str):
         "SELECT * FROM plan_node_attempts WHERE node_id=? AND released_at IS NULL",
         (node_id,),
     ).fetchone()
+
+
+def test_late_watch_refires_once_and_plan_stays_waiting_until_settle():
+    db = _db()
+    plan, node, other = _plan(db)
+    service.transition_node(other.id, "active", db=db)
+    service.transition_node(other.id, "closed", db=db)
+    watch = _arm(db, plan, node)["watch"]
+    source = WatchExpirySource()
+
+    requests = source.due("2099-01-01T00:00:00+00:00", db=db)
+
+    assert [(request.kind, request.thread_id) for request in requests] == [("t2_watch_expiry", "owner")]
+    assert "2000-01-01T00:00:00+00:00" in requests[0].details["summary"]
+    assert "arm_watch again" in requests[0].details["summary"]
+    assert status.read(db, service._plan_row(db, plan.id), actor=_actor())["severity"] == "waiting"
+    source.settle(_expiry_trigger(db)[1], "delivered", "watch_expired", db=db)
+    assert source.due("2099-01-01T00:00:00+00:00", db=db) == []
+    assert db.execute(
+        "SELECT status FROM expected_event_watches WHERE id=?", (watch["id"],)
+    ).fetchone()["status"] == "expired"
+
+
+def test_only_a_wake_past_the_grace_names_the_missed_time():
+    due = "2000-01-01T00:00:00+00:00"
+
+    assert public.late_wake(due, "2000-01-01T00:05:00+00:00") is None
+    assert public.late_wake(due, "2000-01-01T00:11:00+00:00") is None
+    late = public.late_wake(due, "2000-01-01T00:11:01+00:00")
+    assert due in late and "arm_watch it again" in late
+    assert public.late_wake(None, "2000-01-01T01:00:00+00:00") is None
 
 
 def test_t2_expiry_routes_once_and_rearms_t0():

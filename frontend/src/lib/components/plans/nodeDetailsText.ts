@@ -1,5 +1,12 @@
-import type { OperatorCostAmount, OperatorExecutionCause, OperatorNode } from '$lib/api/plans';
+import type { OperatorArtifactLink, OperatorCostAmount, OperatorExecutionCause, OperatorNode } from '$lib/api/plans';
 import { formatCost } from '$lib/stores/costs';
+
+/** The linked how-to that replaces a user step's inline details. */
+export function personStepInstructionsDocument(node: OperatorNode): OperatorArtifactLink | undefined {
+	return node.assignee === 'user'
+		? node.artifacts.find((artifact) => artifact.role === 'input' && artifact.type === 'document')
+		: undefined;
+}
 
 /**
  * Who moves a waiting node next, in the reader's words. An agent moving its own
@@ -34,7 +41,8 @@ const TRY_ENDINGS: Record<string, string> = {
 	turn_terminal: 'run ended',
 };
 
-const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+/** Compact count formatting shared by plan details and finished-work summaries. */
+export const compactNumber = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 
 export function nextMove(causes: OperatorExecutionCause[]): string | null {
 	const owners = [...new Set(
@@ -63,7 +71,7 @@ export function duration(totalSeconds: number): string {
 }
 
 export function tokens(value: number): string {
-	return `${compact.format(value)} tokens`;
+	return `${compactNumber.format(value)} tokens`;
 }
 
 /** A measured fact stays visibly partial when any matching usage was not recorded. */
@@ -75,7 +83,7 @@ function lowerBound(value: string, incomplete: boolean): string {
 export function tokenLine(amount: OperatorCostAmount): string | null {
 	if (amount.tokens.known !== null) {
 		return lowerBound(
-			compact.format(amount.tokens.known),
+			compactNumber.format(amount.tokens.known),
 			amount.tokens.unknown_rows > 0 || amount.usage_recording_failures > 0,
 		);
 	}

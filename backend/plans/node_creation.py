@@ -160,6 +160,8 @@ def _insert_node_row(
     workflow_step,
     difficulty,
     size,
+    intent,
+    intent_node_id,
 ) -> None:
     """Insert against the current node shape or its pre-v51 migration predecessor.
 
@@ -168,19 +170,35 @@ def _insert_node_row(
     """
     workflow_columns = {"workflow_ref", "workflow_version", "workflow_step", "difficulty"}
     present_columns = {row[1] for row in connection.execute("PRAGMA table_info(plan_nodes)")}
+    if not {"intent", "intent_node_id"} <= present_columns and (intent, intent_node_id) != (None, None):
+        raise service.PlanInputError("task intent requires schema version 138")
     if workflow_columns <= present_columns:
-        writer_context.execute(
-            connection, "INSERT INTO plan_nodes "
-            "(id,plan_id,parent_id,order_key,kind,title,description,workflow_ref,"
-            "workflow_version,workflow_step,difficulty,size,acceptance_criteria,"
-            "checkpoint_exception,assignee,spawn_kind,watchdog_budget_seconds,"
-            "follow_up_of,requirements_revision,commitment_id,created_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                *base_values[:7], workflow_ref, workflow_version, workflow_step, difficulty, size,
-                *base_values[7:],
-            ),
-        )
+        if {"intent", "intent_node_id"} <= present_columns:
+            writer_context.execute(
+                connection, "INSERT INTO plan_nodes "
+                "(id,plan_id,parent_id,order_key,kind,title,description,intent,intent_node_id,workflow_ref,"
+                "workflow_version,workflow_step,difficulty,size,acceptance_criteria,"
+                "checkpoint_exception,assignee,spawn_kind,watchdog_budget_seconds,"
+                "follow_up_of,requirements_revision,commitment_id,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    *base_values[:7], intent, intent_node_id, workflow_ref, workflow_version, workflow_step,
+                    difficulty, size, *base_values[7:],
+                ),
+            )
+        else:
+            writer_context.execute(
+                connection, "INSERT INTO plan_nodes "
+                "(id,plan_id,parent_id,order_key,kind,title,description,workflow_ref,"
+                "workflow_version,workflow_step,difficulty,size,acceptance_criteria,"
+                "checkpoint_exception,assignee,spawn_kind,watchdog_budget_seconds,"
+                "follow_up_of,requirements_revision,commitment_id,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    *base_values[:7], workflow_ref, workflow_version, workflow_step, difficulty, size,
+                    *base_values[7:],
+                ),
+            )
     else:
         if any(value is not None for value in (workflow_ref, workflow_version, workflow_step, difficulty)):
             raise service.PlanInputError("workflow fields require schema version 51")
@@ -201,8 +219,8 @@ def _insert_node_row(
 def _creation_values(
     connection, plan_id, node_id, commitment_id, *, kind, title, acceptance_criteria,
     parent_id, order_key, description, workflow_ref, workflow_version, workflow_step,
-    difficulty, size, checkpoint_exception, assignee, spawn_kind, watchdog_budget_seconds,
-    follow_up_of,
+    difficulty, size, intent, intent_node_id, checkpoint_exception, assignee, spawn_kind,
+    watchdog_budget_seconds, follow_up_of,
 ):
     """Validate one node and prepare its durable values before insertion."""
     _validate_node_input(
@@ -220,6 +238,12 @@ def _creation_values(
     size = validate_size(size)
     if kind == "task" and size is None:
         size = UNKNOWN
+    from plans import intent_words
+
+    if intent is not None:
+        intent = intent_words.validate_intent(intent)
+    elif intent_node_id is None:
+        intent_node_id = intent_words.inherited_node_id(connection, plan_id)
     order_key = _open_order_slot(connection, plan_id, parent_id, order_key)
     resolved_commitment = _commitment(connection, plan_id, node_id, parent_id, commitment_id)
     now = service._now()
@@ -228,7 +252,10 @@ def _creation_values(
         service._validate_dod(acceptance_criteria, checkpoint_exception), int(checkpoint_exception),
         assignee, spawn_kind, watchdog_budget_seconds, follow_up_of, 1, resolved_commitment, now, now,
     )
-    return base_values, workflow_ref, workflow_version, workflow_step, difficulty, size, resolved_commitment
+    return (
+        base_values, workflow_ref, workflow_version, workflow_step, difficulty, size,
+        intent, intent_node_id, resolved_commitment,
+    )
 
 
 def create_node(
@@ -254,18 +281,25 @@ def create_node(
     actor_id: str | None,
     provenance: str,
     node_id: str,
+    intent: str | None = None,
+    intent_node_id: str | None = None,
     commitment_id: str | None = None,
 ) -> PlanNode:
     """Validate and insert a node without opening another transaction."""
-    base_values, workflow_ref, workflow_version, workflow_step, difficulty, size, commitment_id = _creation_values(
+    (
+        base_values, workflow_ref, workflow_version, workflow_step, difficulty, size,
+        intent, intent_node_id, commitment_id,
+    ) = _creation_values(
         connection, plan_id, node_id, commitment_id, kind=kind, title=title,
         acceptance_criteria=acceptance_criteria, parent_id=parent_id, order_key=order_key,
         description=description, workflow_ref=workflow_ref, workflow_version=workflow_version,
-        workflow_step=workflow_step, difficulty=difficulty, size=size,
-        checkpoint_exception=checkpoint_exception, assignee=assignee, spawn_kind=spawn_kind,
+        workflow_step=workflow_step, difficulty=difficulty, size=size, intent=intent,
+        intent_node_id=intent_node_id, checkpoint_exception=checkpoint_exception, assignee=assignee,
+        spawn_kind=spawn_kind,
         watchdog_budget_seconds=watchdog_budget_seconds, follow_up_of=follow_up_of,
     )
-    _insert_node_row(connection, base_values, workflow_ref, workflow_version, workflow_step, difficulty, size)
+    _insert_node_row(connection, base_values, workflow_ref, workflow_version, workflow_step, difficulty, size,
+                     intent, intent_node_id)
     service._event(
         connection, node_id, "node_created", actor_id=actor_id, provenance=provenance,
         payload={

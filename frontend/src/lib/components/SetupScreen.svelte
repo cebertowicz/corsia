@@ -20,7 +20,7 @@
 	import { loadProviders, testedProviders, type ProviderEntry } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
-	import { bestSetupModel, setupModelWorks, setupCatalog, bindSetupFirstModel, SetupFirstModelError, type SetupModel } from '$lib/setupFirstModel';
+	import { hasReadySetupModel, setupModelWorks, setupCatalog, type SetupModel } from '$lib/setupModels';
 	import { fetchSetupProgress, recordSetupProgress } from '$lib/setupProgress';
 	import { saveSetupReport, type SetupReportRow } from '$lib/setupReport';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
@@ -47,16 +47,6 @@
 		if (response.ok && body?.ok !== false) return { result: 'started', reference };
 		if (!fix) throw new Error('local start response omitted recovery');
 		return { result: 'failed', reference, fix };
-	}
-	function setupFinishRecovery(error: unknown): string {
-		const code = error instanceof SetupFirstModelError ? error.code : undefined;
-		if (code === 'no_model') return 'CORSIA couldn’t find a working model. Connect a provider or choose one that is ready, then try again.';
-		if (code === 'binding_incomplete') return 'CORSIA couldn’t save the selected model. Try again.';
-		if (code === 'catalog_refused') return 'CORSIA couldn’t save the selected model. Check the provider setup, then try again.';
-		if (code === 'catalog_unavailable') return 'CORSIA couldn’t check your available models. Try again.';
-		if (code === 'agent_unavailable') return 'CORSIA couldn’t reach its agent. Try again.';
-		if (code === 'progress_save') return 'CORSIA couldn’t save setup progress. Try again.';
-		return 'CORSIA couldn’t finish model setup. Try again.';
 	}
 	/** The backend's own account refusal names the cause; a validation 422 has no string detail. */
 	function accountRefusal(detail: unknown): string | null {
@@ -90,8 +80,7 @@
 	const downloading = $derived(['downloading', 'paused', 'starting'].includes(local?.local_state ?? ''));
 	const localFailed = $derived(['failed', 'setup_failed', 'start_failed'].includes(local?.local_state ?? '') || Boolean(localStartError));
 	const tested = $derived($testedProviders.map((source) => ({ source })));
-	const best = $derived(bestSetupModel(catalog, tested));
-	const canFinish = $derived(Boolean(best));
+	const canFinish = $derived(hasReadySetupModel(catalog, tested));
 	const cliSignedIn = (vendor: string) => { const source = sources.find((row) => row.source === vendor); return Boolean(source && (sourceIsReady(source) || source.limited)); };
 	const cliPicked = (vendor: string) => picks === null || (vendor === 'codex' ? picks.chatgpt : picks.claude);
 	const subscriptionsSkipped = $derived(subscriptionQuestion(cliSignedIn('claude-code'), cliSignedIn('codex')) === null);
@@ -137,7 +126,7 @@
 			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed,
 			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
 			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() })));
-		const provider = tested.find((test) => bestSetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
+		const provider = tested.find((test) => hasReadySetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
 		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${provider.source} · passed a test call` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.',
 			pill: provider ? { state: 'success', label: 'Ready' } : undefined, action: provider ? undefined : { label: 'Add provider', run: () => { showAdd = true; } } });
 		return rows;
@@ -265,25 +254,21 @@
 		const current = get(token); if (!current) return;
 		try {
 			sources = await (strict ? recheckSources(current) : fetchSources(current));
-			catalog = (await setupCatalog(current)).models;
+			catalog = await setupCatalog(current);
 			sourceError = '';
 		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
 	}
+	/** Setup never chooses a model: the person picks the CORSIA agent's on its first chat. */
 	async function finishSetup() {
 		const current = get(token); if (!current || finishing) return;
 		finishing = true; sourceError = '';
 		try {
-			await bindSetupFirstModel(current, tested, async () => {
-				if (!await recordSetupProgress({ handoff: { tools: connectFlow.attempts } }, current)) throw new SetupFirstModelError('progress_save');
-			});
-			// The answer rides the completion write too, so a failed earlier save is repaired before the first chat reads it.
-			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts }, ...(picks ? { picks } : {}) }, current)) throw new SetupFirstModelError('progress_save');
+			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts }, ...(picks ? { picks } : {}) }, current)) {
+				sourceError = 'CORSIA couldn’t save setup progress. Try again.';
+				return;
+			}
 			onFinished();
-		} catch (error) {
-			await refreshSources(true);
-			sourceError = setupFinishRecovery(error);
-		}
-		finally { finishing = false; }
+		} finally { finishing = false; }
 	}
 	async function resumeSetup() {
 		const progress = await fetchSetupProgress(get(token));

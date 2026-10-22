@@ -5,7 +5,7 @@ import { seedMockResponses } from '../support/mock';
 
 // What is mocked: the setup routes only (/api/auth/status, /api/setup/status,
 // /api/setup/local-model, /api/setup/local-download, /api/setup/first-account,
-// /api/providers/sources*),
+// /api/providers/sources*) and the model catalog the picker reads,
 // so the screen is reachable on a workspace that already has an account and each
 // model source can be shown ready. What is real: the signed-in app shell, conductor
 // landing, thread, composer, websocket and the mocked-provider turn all run against
@@ -25,8 +25,6 @@ async function serveReadySetup(page: Page, sources: readonly Record<string, unkn
 	await page.route('**/api/setup/progress', (route) => route.fulfill({ json: { setup_completed: false, step: 'models', local_ai: false } }));
 	const isClaude = sources[0]?.source === 'claude-code';
 	const selectedModel = 'mock/test-model';
-	await page.route((url) => /^\/api\/threads\/[^/]+$/.test(url.pathname), (route) => route.request().method() === 'PATCH'
-		? route.fulfill({ json: { model: selectedModel, model_updated_at: '2026-10-21T08:00:00Z' } }) : route.continue());
 	await page.route((url) => url.pathname === '/api/models', (route) => route.request().method() === 'GET' ? route.fulfill({ json: { models: [isClaude
 		? { id: selectedModel, litellm_model: selectedModel, name: 'Vendor default', connection: 'claude-code', provider: 'claude-code', backend: 'api', status: 'ready', is_default: true, runs_on: [{ account_id: 'disposable-account', selected: true, status: 'ready' }] }
 		: { id: selectedModel, litellm_model: selectedModel, name: 'Vendor default', connection: 'omlx', provider: 'omlx', backend: 'network', status: 'ready', is_default: true }], active_local_threads: 0 } }) : route.continue());
@@ -75,20 +73,31 @@ test.describe('@surface:first-run setup landing', () => {
 			await expect(composer).toBeVisible({ timeout: 20_000 });
 			await expect(composer).toBeEnabled();
 			await expect(page.locator('.auth-gate')).toHaveCount(0);
-			// The CORSIA agent opens with a model chosen (not the 'Select Model' placeholder) and a live socket.
 			await waitForWsConnected(page);
+			// Setup chose no model: the CORSIA agent waits on the person's pick, and the first-run message is held until then.
+			const chip = page.locator('button.model-chip');
+			await expect(chip).toContainText('Select Model');
 			await shot(page, `landing-${slug}-${project}`);
 
-			// One send through the mocked provider renders a reply with its model badge.
-			await seedMockResponses(request, [{ content: 'SETUP_LANDING_REPLY', finish_reason: 'stop' }]);
-			await sendChatMessage(page, 'Say hello.');
-			// Focus is on by default and tucks finished work behind a summary; open it to read the reply itself.
+			// The first-run message and the person's first send reach the mocked provider in that order.
+			await seedMockResponses(request, [
+				{ content: 'SETUP_LANDING_FIRST_RUN_REPLY', finish_reason: 'stop' },
+				{ content: 'SETUP_LANDING_REPLY', finish_reason: 'stop' },
+			]);
+			await chip.click();
+			await page.locator('button.model-list-item', { hasText: 'Vendor default' }).click();
+			await expect(chip).toContainText('Vendor default');
+			// Focus is on by default and tucks finished work behind a summary; open it to read a reply itself.
 			const reply = lastAssistantMessage(page);
-			await expect(async () => {
+			const readReply = async (text: string) => expect(async () => {
 				const worked = page.getByRole('button', { name: /^Expand Worked/ });
 				if (await worked.isVisible()) await worked.click();
-				await expect(reply).toContainText('SETUP_LANDING_REPLY', { timeout: 2_000 });
+				await expect(reply).toContainText(text, { timeout: 2_000 });
 			}).toPass({ timeout: 25_000 });
+			// Picking the model starts the held first-run message.
+			await readReply('SETUP_LANDING_FIRST_RUN_REPLY');
+			await sendChatMessage(page, 'Say hello.');
+			await readReply('SETUP_LANDING_REPLY');
 			const badge = reply.locator('.msg-model-badge');
 			await expect(badge).toBeVisible();
 			await expect(badge).not.toHaveText('');

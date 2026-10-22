@@ -17,6 +17,12 @@ import type { PlansChangedMessage } from './planKeys';
 
 export const threadPlanStates = writable<Record<string, ThreadPlanStateEntry>>({});
 
+/** Whether a thread's plan waits on something outside: an empty thread then shows its waiting chip, not the greeting (EW8). */
+export function waitsOutside(states: Record<string, ThreadPlanStateEntry>, threadId: string | null): boolean {
+	const entry = threadId ? states[threadId] : undefined;
+	return entry?.state === 'waiting' && !!entry.wait;
+}
+
 let listed = new Set<string>();
 let seq = 0;
 /** The newest read that has written each thread, so a slow older read never overwrites it. */

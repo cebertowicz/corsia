@@ -67,7 +67,7 @@ describe('PlanTree — a level\'s folded history', () => {
 	it('says the server\'s count, though the read listed none of those rows', () => {
 		vi.stubGlobal('fetch', vi.fn());
 		mountTree(root(12, 12));
-		expect(titles()).toEqual(['Open task', '[12 completed]']);
+		expect(titles()).toEqual(['Open task', '[12 done]']);
 		expect(fetch).not.toHaveBeenCalled();
 	});
 
@@ -85,14 +85,14 @@ describe('PlanTree — a level\'s folded history', () => {
 		mountTree(root(7, 7));
 
 		await press('Show 5');
-		expect(titles()).toEqual(['Open task', 'Old 0', 'Old 1', 'Old 2', 'Old 3', 'Old 4', '[7 completed]']);
+		expect(titles()).toEqual(['Open task', 'Old 0', 'Old 1', 'Old 2', 'Old 3', 'Old 4', '[7 done]']);
 		await press('Show 2 more');
 		expect(titles()).toHaveLength(9);
 		expect([...host.querySelectorAll('button')].some((button) => button.textContent?.includes('more'))).toBe(false);
 		expect(fetch).toHaveBeenCalledTimes(1);
 
 		await press('Collapse');
-		expect(titles()).toEqual(['Open task', '[7 completed]']);
+		expect(titles()).toEqual(['Open task', '[7 done]']);
 	});
 
 	it('fetches the next page by its cursor when the opened rows run out', async () => {
@@ -135,11 +135,11 @@ describe('PlanTree — a level\'s folded history', () => {
 		mountTree(root(1, 1));
 		await press('Show 1');
 		expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t load earlier finished steps.');
-		expect(titles()).toEqual(['Open task', '[1 completed]']);
+		expect(titles()).toEqual(['Open task', '[1 done]']);
 
 		await press('Retry');
 		expect(host.querySelector('[role="alert"]')).toBeNull();
-		expect(titles()).toEqual(['Open task', 'Old 0', '[1 completed]']);
+		expect(titles()).toEqual(['Open task', 'Old 0', '[1 done]']);
 		expect(fetcher).toHaveBeenCalledTimes(2);
 	});
 

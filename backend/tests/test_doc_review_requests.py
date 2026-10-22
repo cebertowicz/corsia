@@ -66,7 +66,7 @@ def test_request_is_node_less_and_persists_a_running_fork(review_env):
 
     assert result["fork_id"] and result["node_id"] is None
     assert result["state"] == "forked"
-    assert "requesting_node_id" not in result and "requirements_revision" not in result
+    assert "requirements_revision" not in result
     assert result["outcome"] == "open"
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 0
 
@@ -202,7 +202,7 @@ def test_escalation_preserves_comments_and_passes_requesting_intent(review_env, 
     escalated = review_requests.escalate_fork(db, result["id"])
     comment = db.execute("SELECT id FROM doc_comments WHERE body='The claim needs evidence.'").fetchone()
     assert comment is not None
-    assert "intent_node_id" not in seen[0] and "requesting_node_id" not in seen[0]
+    assert "intent_node_id" not in seen[0]
     node = public.get_node(escalated["node_id"], db=db)
     assert seen[0]["requester_display"] == "Requester"
     assert node.description.endswith("Check claims\n\n" + continuation(1, "limit"))

@@ -34,13 +34,14 @@ function setCheckpoint(
 	}]]));
 }
 
-function render(renaming = false, onOpenAttention?: (threadId: string, title: string) => void): void {
+function render(renaming = false, onOpenAttention?: (threadId: string, title: string) => void, activity?: string): void {
 	component = mount(SidebarThreadRow, {
 		target: host,
 		props: {
 			thread,
 			isPinned: false,
 			isActive: false,
+			activity,
 			renaming,
 			renameValue: '',
 			swiping: false,
@@ -323,5 +324,43 @@ describe('SidebarThreadRow Done check (AS16)', () => {
 		renderRow();
 		expect(host.querySelector('.done-mark')).toBeNull();
 		expect(host.querySelector('.paused-mark')).not.toBeNull();
+	});
+});
+
+describe('SidebarThreadRow waiting mark', () => {
+	const wait = { label: 'CI on PR #1193', until: new Date(Date.now() + 40 * 60_000).toISOString(), more: 0 };
+	const waiting: ThreadPlanStateEntry = { state: 'waiting', label_key: null, paused: false, attention_items: [], wait };
+
+	it('draws the hourglass in the trailing slot with its hover title, and leaves the leading slot alone', () => {
+		threadPlanStates.set({ [thread.id]: waiting });
+		render();
+		const mark = host.querySelector('.thread-item > .waiting-slot .waiting-mark');
+		expect(mark).not.toBeNull();
+		expect(mark!.querySelector('title')!.textContent).toMatch(/^Waiting for CI on PR #1193 · checks back /);
+		expect(host.querySelector('.thread-title-row .waiting-mark')).toBeNull();
+		expect(host.querySelector('.thread-title-row .plan-state')).toBeNull();
+		expect(host.querySelector('.plan-state')).toBeNull();
+	});
+
+	it('draws it for no state but Waiting', () => {
+		threadPlanStates.set({ [thread.id]: { ...waiting, state: 'idle', wait: null } });
+		render();
+		expect(host.querySelector('.waiting-mark')).toBeNull();
+	});
+
+	it('shows the live spinner alone while its own turn runs', () => {
+		threadPlanStates.set({ [thread.id]: waiting });
+		applyLifecycle(thread.id, { turnId: 'turn-1', turnOrder: 1 }, thread.id);
+		render(false, undefined, 'active');
+		expect(host.querySelector('.thread-item > .spinner')).not.toBeNull();
+		expect(host.querySelector('.waiting-mark')).toBeNull();
+	});
+
+	it('shows the subagent spinner alone while only a descendant runs', () => {
+		threadPlanStates.set({ [thread.id]: waiting });
+		applyLifecycle('subagent-of-thread-ctx', { turnId: 'turn-sub', turnOrder: 3 }, 'thread-ctx');
+		render();
+		expect(host.querySelector('.thread-item > .spinner')?.getAttribute('aria-label')).toBe('Subagent working');
+		expect(host.querySelector('.waiting-mark')).toBeNull();
 	});
 });

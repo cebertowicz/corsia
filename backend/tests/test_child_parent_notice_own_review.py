@@ -16,6 +16,8 @@ import pytest
 
 from automation.turn_end_effects import PendingTurnEndEffects
 from automation import plan_liveness_terminal
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from plans import boundary, decisions, delegation, dependencies, service
 from plans.boundary import PlanActor
 from plans.projections import actionable_leaves, liveness_signal
@@ -224,10 +226,17 @@ def test_g11_a_worker_cannot_assign_its_step_to_the_user(db):
 
 def test_g11_an_agent_with_no_parent_still_assigns_the_user(db):
     plan = service.ensure_plan("thread", "grandparent", db=db)
+    _init_messages_fts(db)
+    accept_thread_input(
+        "grandparent", role="user", content="Ask the user to sign off.", intent="apply_now",
+        message_id="root-user-authority", db=db,
+    )
 
     boundary.mutate(
         plan.id, "add",
         {"kind": "task", "title": "Sign off", "acceptance_criteria": "signed", "size": "S",
+         "intent": "Ask the user to sign off.",
+         "intent_words": [{"quote": "Ask the user to sign off.", "role": "authority"}],
          "assignee": "user",
          "description": "Sign the release off.\n\nAlready tried: only the user can sign."},
         actor=PlanActor("grandparent", "user-1", "project-1"),

@@ -382,9 +382,10 @@ describe('ActivityView', () => {
 
 		const summary = host.querySelector('.row-summary[aria-label="Open Plan for thread-empty"]') as HTMLButtonElement;
 		expect(summary).toBeTruthy();
-		// One affordance inside the row-wide tap target: a forward chevron for a row that opens.
-		expect(summary.querySelectorAll('.chevron')).toHaveLength(1);
-		expect(summary.querySelector('.chevron.opens')).toBeTruthy();
+		// One affordance beside the row-wide tap target: a forward chevron for a row that opens.
+		const content = summary.parentElement!.querySelector('.row-content')!;
+		expect(content.querySelectorAll('.chevron')).toHaveLength(1);
+		expect(content.querySelector('.chevron.opens')).toBeTruthy();
 		summary.click();
 		await settle();
 		expect(onSelectThread).toHaveBeenCalledWith('thread-empty');

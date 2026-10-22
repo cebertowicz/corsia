@@ -1,3 +1,4 @@
+import { parseWsTimestamp } from '$lib/time';
 import type { TranscriptMessage } from './messageListModel';
 import { runKinds, type RowKind, type TranscriptEntry, type TranscriptFoldEntry } from './transcriptFocusModel';
 import { beside, boundOf, clampTo, turnOf, type Bounds, type Turn } from './transcriptRunTimes';
@@ -203,6 +204,18 @@ export function liveRunTimes(
 			const elapsed = span.startKnown ? activeTime(span.run, turnSummaries, span.lower, now) : Number.NaN;
 			return [span.run.id, Number.isFinite(elapsed) ? formatDuration(elapsed) : null];
 		}));
+}
+
+/**
+ * How long the thread has waited, in the run chip's own duration form: the time since its last Turn ended,
+ * or null when no ended Turn is known (EW8 drops the number rather than guess).
+ */
+export function waitElapsed(turnSummaries: TurnSummaries, now: number): string | null {
+	const ends = Object.values(turnSummaries)
+		.filter((summary) => summary.status !== 'running' && summary.status !== 'waiting_retry')
+		.map((summary) => parseWsTimestamp(summary.ended_at))
+		.filter(Number.isFinite);
+	return ends.length ? formatDuration(Math.max(0, now - Math.max(...ends))) : null;
 }
 
 /** `Working · 3 min · Reading files`; whatever is unknown drops off the end (A9-A11). */

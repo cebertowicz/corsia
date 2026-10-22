@@ -8,6 +8,7 @@ import uuid
 
 from infra.db_async import run_in_db
 from infra.queries import insert_message
+from llm.error_cause import cause_fields
 from subagents.cc_handle_close import (
     close_handle,
     finalize,
@@ -98,7 +99,7 @@ def _record_shutdown_marker(child_id: str) -> None:
             {
                 "cc": True, "type": "cc_error",
                 "event_type": "harness.error", "harness": "claude-code",
-                "cause": "backend_shutdown", "shutdown": True,
+                **cause_fields("claude-code", "backend_shutdown"), "shutdown": True,
             },
             msg_id=str(uuid.uuid4()),
         )

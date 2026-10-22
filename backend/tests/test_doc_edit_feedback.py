@@ -18,8 +18,8 @@ from plans.feedback_nodes import (
     EDIT_ACCEPTANCE,
     EmptyFeedbackBatchError,
     create_feedback_node,
-    load_feedback_items,
 )
+from plans.feedback_items import load_feedback_items
 from registry import models as registry_models
 from registry.identity_metadata import merge_identity_metadata
 from registry.shared_document_events import record_post_write_events
@@ -399,6 +399,10 @@ def test_edit_only_user_batch_uses_actor_display_and_applied_edit_framing(isolat
         assert "The user changed this directly and it is already applied." in node.description
         assert "once the change lands" not in node.description
         assert "Comment " not in node.description
+        assert node.intent is None
+        assert db.execute(
+            "SELECT COUNT(*) FROM plan_node_intent_words WHERE node_id=?", (node.id,)
+        ).fetchone()[0] == 0
     finally:
         db.close()
 

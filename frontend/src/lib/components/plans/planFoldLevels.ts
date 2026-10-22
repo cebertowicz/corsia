@@ -2,6 +2,7 @@ import type { OperatorCostAmount, OperatorFoldLevel, OperatorNode } from '$lib/a
 import type { FoldedItem } from '$lib/api/plansFolded';
 import type { LevelHistory } from './foldHistory.svelte';
 import { levelOf, ROOT_LEVEL } from './planTreeFold';
+import { compactNumber } from './nodeDetailsText';
 
 /**
  * What each level's fold row says and which of its finished rows can be opened.
@@ -181,20 +182,19 @@ export function buildFoldLevels(
 	return { levels: views, extra: [...extra.values()], deep };
 }
 
-/** What a fold row says: its finished work by outcome, completed first. */
+/** The compact, seen finished-work count a fold row shows; closures are done, failures are opened as rows. */
 export function foldLabel(counts: FoldCounts): string {
-	const total = foldTotal(counts);
-	const parts = [
-		counts.done > 0 || total === 0 ? `${counts.done} completed` : null,
-		counts.failed > 0 ? `${counts.failed} failed` : null,
-		counts.closed > 0 ? `${counts.closed} closed` : null,
-	];
-	return parts.filter((part) => part !== null).join(', ');
+	return `${compactNumber.format(counts.done + counts.closed).toLowerCase()} done`;
 }
 
-/** Whether a fold row may wear the done mark: only when all of it completed. */
-export function foldAllCompleted(counts: FoldCounts): boolean {
-	return counts.failed === 0 && counts.closed === 0;
+/** The exact finished-work count for assistive technology. */
+export function foldAccessibleLabel(counts: FoldCounts): string {
+	return `${(counts.done + counts.closed).toLocaleString()} done`;
+}
+
+/** Whether a fold row may wear the green done mark: only when its seen rows contain no failure. */
+export function foldHasNoFailures(counts: FoldCounts): boolean {
+	return counts.failed === 0;
 }
 
 /** Rows a level still has to open: none past the end of its history, whatever the count says. */
