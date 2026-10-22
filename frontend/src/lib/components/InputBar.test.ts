@@ -1039,6 +1039,42 @@ describe('InputBar model readiness at the action seam', () => {
 		expect(send.classList.contains('queue-armed')).toBe(false);
 		expect(send.classList.contains('queue-holding')).toBe(false);
 		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+
+		// The finger that was holding lifts over the other thread's draft: no tap.
+		await component.setText('other draft');
+		document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 10 }));
+		send.dispatchEvent(new PointerEvent('lostpointercapture', { bubbles: true, pointerId: 10 }));
+		send.click();
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+	});
+
+	it('does not stop the turn when a hold whose input was emptied is released', async () => {
+		activeThreadId.set('thread-1');
+		applyLifecycle('thread-1', { turnId: 'turn-1', turnOrder: 1 });
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		await component.setText('hold this');
+		const send = host.querySelector<HTMLButtonElement>('.send-btn')!;
+
+		vi.useFakeTimers();
+		send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 13 }));
+		vi.advanceTimersByTime(ARM_MS);
+		await component.setText('');
+		flushSync();
+		vi.useRealTimers();
+		expect(send.classList.contains('queue-armed')).toBe(false);
+
+		document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 13 }));
+		send.dispatchEvent(new PointerEvent('lostpointercapture', { bubbles: true, pointerId: 13 }));
+		send.click();
+		expect(wsMocks.stopTurn).not.toHaveBeenCalled();
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+
+		// The next deliberate tap still works.
+		send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 14 }));
+		document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 14 }));
+		send.click();
+		expect(wsMocks.stopTurn).toHaveBeenCalledWith('thread-1');
 	});
 
 	it('sends an ordinary tap once after document-level release handling', async () => {

@@ -149,6 +149,18 @@
 
 	onDestroy(cancelQueueHold);
 
+	/**
+	 * The context the hold began in is gone. Drop the hold but keep its pointer,
+	 * so the release that is still coming is swallowed rather than landing as a
+	 * tap on whatever the button now means (Stop, or another thread's send).
+	 */
+	function voidQueueHold() {
+		if (queueHoldTimer) clearTimeout(queueHoldTimer);
+		queueHoldTimer = null;
+		queueArmed = false;
+		queueHolding = false;
+	}
+
 	/** Leaving the page mid-hold ends it with nothing sent; the glyph must not stay up. */
 	function cancelHoldIfHidden() {
 		if (document.visibilityState === 'hidden') cancelQueueHold();
@@ -176,6 +188,11 @@
 	/** The one end path for up and cancel: capture on the document sees them even when the button misses the release. */
 	function finishQueueHoldFromDocument(event: PointerEvent) {
 		if (event.pointerId !== heldPointerId) return;
+		if (!queueHolding) {
+			cancelQueueHold();
+			if (event.type === 'pointerup') suppressClickUntil = Date.now() + CLICK_SUPPRESSION_MS;
+			return;
+		}
 		if (event.type === 'pointerup') completeQueueHold();
 		else abandonQueueHold();
 	}
@@ -188,8 +205,9 @@
 	 * steer. Below the delay it is an ordinary abort.
 	 */
 	function abandonQueueHold() {
-		const held = queueArmed
-			|| (queueHolding && Date.now() - holdStartedAt >= QUEUE_ARM_MS);
+		// A voided hold keeps its pointer until the document sees the release.
+		if (!queueHolding) return;
+		const held = queueArmed || Date.now() - holdStartedAt >= QUEUE_ARM_MS;
 		if (!held) { cancelQueueHold(); return; }
 		queueAfterTurn();
 	}
@@ -204,7 +222,7 @@
 
 	$effect(() => {
 		if (queueHolding && (sendDisabled || !hasMessageToSend || heldThreadId !== threadId)) {
-			cancelQueueHold();
+			voidQueueHold();
 		}
 	});
 </script>
