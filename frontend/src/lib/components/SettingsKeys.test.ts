@@ -137,8 +137,8 @@ describe('Settings › Keys', () => {
 				{ entry: 'linear-secondary', name: 'LINEAR_SECONDARY_KEY' },
 			]);
 			await mountKeys('linear-primary');
-			expect(host.querySelector('[data-key-entry="linear-primary"] h3')?.textContent).toBe('Linear key: LINEAR_PRIMARY_KEY');
-			expect(host.querySelector('[data-key-entry="linear-secondary"] h3')?.textContent).toBe('Linear key: LINEAR_SECONDARY_KEY');
+			expect(host.querySelector('[data-key-entry="linear-primary"] .name')?.textContent).toBe('Linear key: LINEAR_PRIMARY_KEY');
+			expect(host.querySelector('[data-key-entry="linear-secondary"] .name')?.textContent).toBe('Linear key: LINEAR_SECONDARY_KEY');
 		} finally {
 			if (originalScroll) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: originalScroll });
 			else delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;

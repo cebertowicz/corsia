@@ -284,7 +284,7 @@
 	{/if}
 
 	{#if grouped.loaded.length > 0}
-		<div class="section">{loadedLabel}</div>
+		<div class="section loaded">{loadedLabel}</div>
 		{#each grouped.loaded as m (m.id)}
 			<ModelRow
 				name={m.name}
@@ -301,7 +301,7 @@
 	{/if}
 
 	{#if grouped.loading.length > 0}
-		<div class="section">Loading</div>
+		<div class="section loading">Loading</div>
 		{#each grouped.loading as m (m.id)}
 			<ModelRow
 				name={m.name}

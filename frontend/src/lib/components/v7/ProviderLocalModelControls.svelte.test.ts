@@ -26,7 +26,7 @@ describe('ProviderLocalModelControls', () => {
 
 		expect(host.textContent).toContain('Local models need at least 24 GB of memory, and this computer has less. Smaller models and future updates may bring them to 16 GB computers. Connect a subscription or an API provider.');
 		expect([...host.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(['Add provider']);
-		expect(host.querySelector('button')?.classList.contains('secondary')).toBe(true);
+		expect(host.querySelector('button')?.classList.contains('ghost')).toBe(true);
 		expect(host.textContent).not.toContain('Add model');
 		host.querySelector<HTMLButtonElement>('button')!.click();
 		expect(onAddProvider).toHaveBeenCalledOnce();

@@ -38,6 +38,7 @@ describe('ProvidersPolicyBlock', () => {
 		let resolve!: (value: unknown) => void;
 		vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
 			if (input.toString().startsWith('/api/vendor-accounts')) return Promise.resolve({ ok: true, json: async () => ({ accounts: [] }) });
+			if (input.toString().startsWith('/api/projects/project/cloud-models-off')) return Promise.resolve({ ok: true, json: async () => ({ cloud_models_off: false }) });
 			return new Promise((done) => { resolve = done; });
 		}));
 		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
@@ -181,7 +182,7 @@ describe('ProvidersPolicyBlock', () => {
 
 		await vi.waitFor(() => expect(host.textContent).toContain("Claude Code and Codex aren't used while Local models only is on."));
 		expect(host.textContent).not.toContain('Use workspace settings');
-		expect(host.querySelector('[aria-label="Personal"]')).toBeNull();
+		expect(host.querySelector('[aria-label="Use Personal"]')).toBeNull();
 	});
 
 	it('shows project accounts as today when saved Local models only is off', async () => {
@@ -189,7 +190,7 @@ describe('ProvidersPolicyBlock', () => {
 		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
 
-		await vi.waitFor(() => expect(host.querySelector('[aria-label="Personal"]')).not.toBeNull());
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Use Personal"]')).not.toBeNull());
 		expect(host.textContent).toContain('Use workspace settings');
 	});
 
@@ -197,7 +198,7 @@ describe('ProvidersPolicyBlock', () => {
 		stubProjectCloudOff(false);
 		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
-		await vi.waitFor(() => expect(host.querySelector('[aria-label="Personal"]')).not.toBeNull());
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Use Personal"]')).not.toBeNull());
 
 		(host.querySelector('[aria-label="Local models only"]') as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(host.textContent).toContain("Claude Code and Codex aren't used while Local models only is on."));
@@ -208,11 +209,11 @@ describe('ProvidersPolicyBlock', () => {
 		stubProjectCloudOff(false, 'fail');
 		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
-		await vi.waitFor(() => expect(host.querySelector('[aria-label="Personal"]')).not.toBeNull());
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Use Personal"]')).not.toBeNull());
 
 		(host.querySelector('[aria-label="Local models only"]') as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t save this change.'));
-		expect(host.querySelector('[aria-label="Personal"]')).not.toBeNull();
+		expect(host.querySelector('[aria-label="Use Personal"]')).not.toBeNull();
 	});
 
 	it('keeps account controls visible when loading Local models only fails', async () => {
@@ -225,7 +226,7 @@ describe('ProvidersPolicyBlock', () => {
 		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
 
-		await vi.waitFor(() => expect(host.querySelector('[aria-label="Personal"]')).not.toBeNull());
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Use Personal"]')).not.toBeNull());
 		// The setting's value is unknown, so its switch is hidden rather than shown as off.
 		expect(host.querySelector('[aria-label="Local models only"]')).toBeNull();
 		expect(host.querySelector('[role="alert"]')?.textContent).toContain('Couldn’t load this setting. Try again');
@@ -243,9 +244,9 @@ describe('ProvidersPolicyBlock', () => {
 		flushSync();
 
 		await vi.waitFor(() => expect(host.textContent).toContain('Loading providers…'));
-		expect(host.querySelector('[aria-label="Personal"]')).toBeNull();
+		expect(host.querySelector('[aria-label="Use Personal"]')).toBeNull();
 		resolveCloud({ ok: true, json: async () => ({ cloud_models_off: false }) });
-		await vi.waitFor(() => expect(host.querySelector('[aria-label="Personal"]')).not.toBeNull());
+		await vi.waitFor(() => expect(host.querySelector('[aria-label="Use Personal"]')).not.toBeNull());
 	});
 
 	function account(id: string, windows: object[] = []) {
