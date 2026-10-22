@@ -172,11 +172,14 @@ async def _reconnect_connected_app_for_key(name: str) -> None:
 async def set_key_value(
     name: str, request: Request, session: tuple[dict, str] = Depends(_human_session),
 ) -> dict:
-    """Set or replace an entry's value, then refresh its approved MCP app."""
+    """Set or replace an entry's value, then refresh its approved MCP app or check its mail-host account."""
+    from connections.mailhost.check import start_after_key_write
+
     result = await _guarded(
         request, session, name, lambda body: key_store.set_value(name, body.get("value")), "write",
     )
     await _reconnect_connected_app_for_key(name)
+    await start_after_key_write(name)
     return result
 
 
@@ -185,7 +188,11 @@ async def clear_key_value(
     name: str, request: Request, session: tuple[dict, str] = Depends(_human_session),
 ) -> dict:
     """Remove an entry's value from Settings › Keys, keeping the entry."""
-    return await _guarded(request, session, name, lambda body: key_store.clear_value(name), "clear")
+    from connections.mailhost.check import reset_after_key_clear
+
+    result = await _guarded(request, session, name, lambda body: key_store.clear_value(name), "clear")
+    await reset_after_key_clear(name)
+    return result
 
 
 @router.post("/{name}/remove")

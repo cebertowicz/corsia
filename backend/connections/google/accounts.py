@@ -52,11 +52,11 @@ def thread_key(account_id: str, gmail_thread_id: object) -> str | None:
     return f"google:{account_id}:thread:{gmail_thread_id}"
 
 
-def _choices(accounts: list[dict]) -> str:
+def choices(accounts: list[dict]) -> str:
     return ", ".join(f"{account['address']} (account_id {account['id']})" for account in accounts)
 
 
-def _usable(account: dict) -> dict:
+def usable(account: dict) -> dict:
     state = account["state"]
     if state == STATUS_CONNECTED:
         return account
@@ -83,10 +83,10 @@ def resolve_for_thread(selector: object, thread_id: object, *, db: sqlite3.Conne
     reachable = visible_accounts(caller, db=db, provider=GOOGLE_PROVIDER) if caller is not None else []
     if not reachable:
         raise GoogleError(NONE_AVAILABLE)
-    listed = _choices(reachable)
+    listed = choices(reachable)
     if selector is None or (isinstance(selector, str) and not selector.strip()):
         if len(reachable) == 1:
-            return _usable(reachable[0])
+            return usable(reachable[0])
         raise GoogleError(CHOOSE.format(choices=listed))
     wanted = selector.strip() if isinstance(selector, str) else ""
     named = [account for account in reachable if account["id"] == wanted] or [
@@ -94,4 +94,4 @@ def resolve_for_thread(selector: object, thread_id: object, *, db: sqlite3.Conne
     ]
     if len(named) != 1:
         raise GoogleError(CHOOSE.format(choices=listed) if named else UNKNOWN.format(choices=listed))
-    return _usable(named[0])
+    return usable(named[0])

@@ -32,7 +32,7 @@ def _wound_back_to_v124() -> sqlite3.Connection:
 
 
 def test_the_step_is_registered_at_124() -> None:
-    assert SCHEMA_VERSION == 139
+    assert SCHEMA_VERSION == 140
     assert MIGRATIONS[124] is migrate_124_to_125
 
 
