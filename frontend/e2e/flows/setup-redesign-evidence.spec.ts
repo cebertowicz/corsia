@@ -11,13 +11,14 @@ import { localSetupFix } from '../support/localSetupFix';
 import { WELCOME_ACCOUNT_LINE, WELCOME_LINES, WELCOME_ROWS, WELCOME_TITLE } from '../../src/lib/setupWelcome';
 
 type LocalFixture = 'downloading' | 'paused' | 'starting' | 'ready' | 'stopped' | 'disk-space' | 'pick-failed' | 'connection' | 'disk-full' | 'memory' | 'other-ref' | 'other-no-ref' | 'setup-failed' | 'start-failed';
-type Fixture = { name: string; element: string; screen?: 'checking' | 'error' | 'old-macos' | 'account' | 'invalid' | 'mismatch' | 'short-password' | 'protected' | 'unwritable' | 'creating' | 'create-failed' | 'account-exists' | 'welcome' | 'account-form'; only?: 'narrow' | 'short'; cli?: string; local?: LocalFixture; finish?: 'progress-save'; api?: 'ready' | 'failed' | 'menu' | 'address'; classifier?: 'downloading' | 'failed'; requiredUsername?: string };
+type Fixture = { name: string; element: string; screen?: 'checking' | 'error' | 'old-macos' | 'account' | 'invalid' | 'mismatch' | 'short-password' | 'protected' | 'unwritable' | 'creating' | 'create-failed' | 'account-exists' | 'welcome' | 'account-form' | 'subscriptions'; only?: 'narrow' | 'short'; cli?: string; local?: LocalFixture; finish?: 'progress-save'; api?: 'ready' | 'failed' | 'menu' | 'address'; classifier?: 'downloading' | 'failed'; requiredUsername?: string };
 const fixtures: Fixture[] = [
 	{ name: 'checking', screen: 'checking', element: 'Checking this computer' },
 	{ name: 'status-error', screen: 'error', element: 'CORSIA couldn’t start; Retry and Save a report' },
 	{ name: 'old-macos', screen: 'old-macos', element: 'Update macOS to open CORSIA' },
 	{ name: 'account-empty', screen: 'account', element: 'Create your account: the five account fields and the work folder row, with the living mark beside them' },
 	{ name: 'account-short', screen: 'account', only: 'short', element: 'The account form and the work folder row in a 1280×600 window with no scrolling, the living mark beside them' },
+	{ name: 'subscriptions', screen: 'subscriptions', cli: 'ready', element: 'Your subscriptions: Claude Code signed in, the ChatGPT question, Back and Continue' },
 	{ name: 'welcome', screen: 'welcome', element: 'Getting started: the Welcome copy and Continue, with the living mark beside it from 1280 wide' },
 	{ name: 'account-early-download-failed', screen: 'account', local: 'connection', element: 'Local model rail job: Couldn’t download' },
 	{ name: 'account-invalid', screen: 'invalid', element: 'Use up to 32 lowercase letters, numbers, dashes or underscores.' },
@@ -208,6 +209,10 @@ async function navigate(page: Page, fixture: Fixture) {
 		await expect(page.getByLabel('Full name', { exact: true })).toBeVisible();
 		return;
 	}
+	// With a tool signed in or not, the subscriptions question can come first: answer it without picking a plan.
+	await expect(page.getByRole('heading', { name: /^(Your subscriptions|Providers & models)$/ })).toBeVisible();
+	if (fixture.screen === 'subscriptions') return;
+	if (await page.getByRole('heading', { name: 'Your subscriptions', exact: true }).isVisible()) await page.getByRole('button', { name: /^(No|Neither)$/ }).click();
 	await expect(page.getByRole('heading', { name: 'Providers & models', exact: true })).toBeVisible();
 	if (['installing', 'install-connection', 'install-failed', 'shadow'].includes(fixture.cli ?? '')) await page.getByRole('region', { name: 'Claude Code' }).getByRole('button', { name: 'Set up' }).click();
 	if (['signing-in', 'signin-failed'].includes(fixture.cli ?? '')) await page.getByRole('region', { name: 'Claude Code' }).getByRole('button', { name: 'Sign in', exact: true }).click();
@@ -246,6 +251,7 @@ async function assertState(page: Page, fixture: Fixture) {
 			await expect(page.getByLabel('Email (optional)', { exact: true })).toBeInViewport({ ratio: 1 });
 		}
 	}
+	if (fixture.screen === 'subscriptions') { await expect(page.getByRole('heading', { name: 'Your subscriptions', exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible(); return; }
 	if (fixture.screen === 'checking') { await expect(page.getByRole('heading', { name: 'Checking this computer' })).toBeVisible(); return; }
 	if (fixture.screen === 'error') { await expect(page.getByRole('heading', { name: 'CORSIA couldn’t start' })).toBeVisible(); await expect(page.getByRole('button', { name: 'Save a report' })).toBeVisible(); return; }
 	if (fixture.screen === 'old-macos') { await expect(page.getByRole('heading', { name: 'Update macOS to open CORSIA' })).toBeVisible(); return; }
