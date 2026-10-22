@@ -118,6 +118,7 @@ def _add_comment_item(
 
 
 
+
 def record_reopen(
     db,
     comment: dict[str, Any],
