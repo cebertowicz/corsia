@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from doceditor import comments, doc_images, feedback_batches, image_regions, review_feedback, review_lifecycle
+from doceditor import comment_notifications, comments, doc_images, feedback_batches, image_regions, review_feedback, review_lifecycle
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
@@ -135,6 +135,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 )
         if created and request.author_kind == "user":
             feedback["woken"].extend(feedback_batches.deliver_person_comment(db, feedback["batch_ids"]))
+            comment_notifications.broadcast_doc_comment_changed(artifact_id)
         return row, registered, feedback
     except BaseException:
         receipt.failed(identifier, db, artifact_id=request.artifact_id, author=request.author)
