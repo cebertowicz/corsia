@@ -3,11 +3,24 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
+import pytest
 import yaml
 
 from core.skill_sidecar import installed_digest
 from registry import models
 from tests.event_routing_helpers import mk_session
+
+
+@pytest.fixture(autouse=True)
+def community_workspace(tmp_path, monkeypatch):
+    from infra import config
+    from infra.user_profile import PROFILE_RELATIVE_PATH, USE_COMMUNITY_LABEL
+
+    profile = tmp_path / PROFILE_RELATIVE_PATH
+    profile.parent.mkdir()
+    profile.write_text(f"{USE_COMMUNITY_LABEL} Yes\n", encoding="utf-8")
+    monkeypatch.setattr(config, "WORKSPACE", tmp_path)
+    return tmp_path
 
 
 def _item(*, withdrawn: bool = False) -> dict:
@@ -110,6 +123,38 @@ def test_producer_reads_installed_artifacts_and_delivers_each_change_once(isolat
 
     assert (first, repeat) == (1, 0)
     assert _count("SELECT COUNT(*) FROM context_change_journal WHERE object_id=?", owner) == 1
+
+
+def test_producer_skips_change_notices_without_consent_but_sends_withdrawals(
+    isolated_db, tmp_path, monkeypatch, community_workspace,
+):
+    from infra.user_profile import PROFILE_RELATIVE_PATH, USE_COMMUNITY_LABEL
+    from library import producer
+
+    owner = mk_session("library-owner")
+    skill = tmp_path / "skills" / "pdf"
+    _copy(skill)
+    models.register_artifact(
+        integration="library", type="installed-skill", external_id=f"{owner}/pdf",
+        parent_thread_id=owner, path=str(skill / "SKILL.md"),
+    )
+    profile = community_workspace / PROFILE_RELATIVE_PATH
+    profile.write_text(f"{USE_COMMUNITY_LABEL} No\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "library.load_index", lambda: SimpleNamespace(skills=(_item(),), index_age="just now", generations={}),
+    )
+
+    assert producer.produce_once() == 0
+    assert _count("SELECT COUNT(*) FROM messages WHERE thread_id=? AND id LIKE 'platform-event:%'", owner) == 0
+
+    monkeypatch.setattr(
+        "library.load_index", lambda: SimpleNamespace(
+            skills=(_item(withdrawn=True),), index_age="just now", generations={},
+        ),
+    )
+
+    assert producer.produce_once() == 1
+    assert _count("SELECT COUNT(*) FROM messages WHERE thread_id=? AND id LIKE 'platform-event:%'", owner) == 1
 
 
 def test_producer_notices_a_version_change_at_the_same_source(isolated_db, tmp_path):

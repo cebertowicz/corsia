@@ -18,6 +18,7 @@ import logging
 import os
 import pwd
 import stat
+import string
 import uuid
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -28,6 +29,8 @@ PROFILE_RELATIVE_PATH = Path("context") / "50-USER-PROFILE.md"
 _LOCALTIME = Path("/etc/localtime")
 _EMAIL_LABEL = "- **Email:**"
 _NAME_LABEL = "- **Preferred name:**"
+USE_COMMUNITY_LABEL = "- **Use community improvements:**"
+SHARE_COMMUNITY_LABEL = "- **Share improvements with the community:**"
 
 
 def mac_full_name() -> str:
@@ -96,6 +99,29 @@ def profile_name(workspace: Path) -> str:
             name = "".join(char for char in line.removeprefix(_NAME_LABEL) if char.isprintable())
             return one_line(name)[:120]
     return ""
+
+
+def _has_consent(workspace: Path, label: str) -> bool:
+    try:
+        text = (Path(workspace) / PROFILE_RELATIVE_PATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    for line in text.splitlines():
+        if line.startswith(label):
+            value = line.removeprefix(label).lstrip()
+            first_word = value.split(maxsplit=1)[0] if value else ""
+            return first_word.rstrip(string.punctuation).casefold() == "yes"
+    return False
+
+
+def uses_community_improvements(workspace: Path) -> bool:
+    """Whether the person explicitly agreed to use community improvements."""
+    return _has_consent(workspace, USE_COMMUNITY_LABEL)
+
+
+def shares_improvements(workspace: Path) -> bool:
+    """Whether the person explicitly agreed to share improvements with the community."""
+    return _has_consent(workspace, SHARE_COMMUNITY_LABEL)
 
 
 class StagedProfile:
