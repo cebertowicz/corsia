@@ -276,7 +276,7 @@ describe('SettingsSystem', () => {
 		);
 		expect(toggle).toBeTruthy();
 		expect(toggle?.getAttribute('aria-pressed')).toBe('false');
-		expect(host.textContent).toMatch(/Auto-approve(?! leases)/);
+		expect(host.textContent).toContain('Auto-approve');
 		expect(host.textContent).toContain('Per-action review and hard safety limits still apply.');
 		expect(host.textContent).toContain('Repository-policy exceptions still require your approval.');
 

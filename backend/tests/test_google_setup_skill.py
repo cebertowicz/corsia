@@ -113,7 +113,7 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     steps = skill.split("# Connect Google", 1)[1]
 
     assert "CORSIA creates a private Google project you own, in a browser you can watch" in steps
-    assert "`Open your Drive, Docs and Sheets, so you won't have to sign in again later.`" in steps
+    assert "`See, edit and delete your Drive, Docs and Sheets files, so you won't have to sign in again later.`" in steps
     enable_link = "https://console.cloud.google.com/flows/enableapi?apiid="
     assert enable_link in steps
     enabled = steps.split(enable_link, 1)[1].split("`", 1)[0].split(",")
