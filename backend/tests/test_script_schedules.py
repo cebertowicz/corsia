@@ -88,7 +88,7 @@ async def _no_drive(_thread_id: str) -> None:
 def _use_run(monkeypatch, run: ScriptRun):
     calls: list[str] = []
 
-    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds):
+    async def fake(thread_id, project_id, path, *, schedule_id, run_id, timeout_seconds):
         calls.append(thread_id)
         return run
 

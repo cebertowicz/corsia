@@ -87,6 +87,36 @@ def test_cli_accepted_event_skips_its_session_and_retries(emit_world, capsys):
     assert delivered == []
 
 
+def test_cli_emit_inside_a_script_run_reaches_the_schedule_owner(emit_world, capsys, monkeypatch, tmp_path):
+    from automation import script_schedules
+
+    path = tmp_path / "emits.sh"
+    path.write_text("corsia event emit qa.route --facts '{}'")
+    db = get_db()
+    schedule = script_schedules.create_script(
+        OWNER, "project-a", script_path=path, script_sha256=script_schedules.file_sha256(path),
+        cadence_seconds=600, series=[], timeout_seconds=30,
+        now="2026-01-01T00:00:00+00:00", db=db,
+    )
+    db.commit()
+    db.close()
+    # What the script runner sets: the owner's session plus the run's schedule (events.trace_env).
+    monkeypatch.setenv("CORSIA_THREAD_ID", OWNER)
+    monkeypatch.setenv("CORSIA_EVENT_SCRIPT", schedule.id)
+    rc, out, err = _run(["event", "emit", "qa.route", "--facts", '{"code":"from-script"}'], capsys)
+
+    assert rc == 0 and not err
+    event_id = json.loads(out)["event_id"]
+    db = get_db()
+    producer = db.execute(
+        "SELECT producer FROM event_intake_records WHERE event_id=?", (event_id,),
+    ).fetchone()[0]
+    delivered = _digested(db, event_id)
+    db.close()
+    assert producer == f"script:{schedule.id}"
+    assert delivered == [OWNER]
+
+
 def test_cli_stdin_and_error_exit_contracts(emit_world, capsys, monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO('{"code":"stdin"}'))
     ok, out, err = _run(_cli("qa.route", "--facts", "-"), capsys)

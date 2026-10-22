@@ -64,7 +64,7 @@ def world(isolated_db, tmp_path: Path, monkeypatch):
 def runs(world, monkeypatch):
     """The sandboxed process: each script's stdout by file name, and every call's stdin."""
 
-    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, stdin=None, trace=()):
+    async def fake(thread_id, project_id, path, *, schedule_id, run_id, timeout_seconds, stdin=None, trace=()):
         world["calls"].append((path.name, json.loads(stdin) if stdin is not None else None))
         world["traces"].append(trace)
         return world["outputs"].get(path.name, ScriptRun(0, b"", b"", False))
@@ -346,6 +346,7 @@ def test_the_sandbox_sets_the_chain_only_for_a_rule_run_and_never_inherits_one(m
         return ForegroundProcessResult(None, b"", b"", 0)
 
     monkeypatch.setenv("CORSIA_EVENT_TRACE", '["inherited"]')
+    monkeypatch.setenv("CORSIA_EVENT_SCRIPT", "inherited")
     monkeypatch.setattr(script_sandbox, "_checked_environment", nothing)
     monkeypatch.setattr(script_sandbox, "load_shell_repo_policies", lambda *_a: ([], []))
     monkeypatch.setattr(script_sandbox, "_resolve_execution_cwd", cwd)
@@ -355,8 +356,10 @@ def test_the_sandbox_sets_the_chain_only_for_a_rule_run_and_never_inherits_one(m
     monkeypatch.setattr(script_sandbox.PROCESS_OWNER, "spawn", spawn)
     script = tmp_path / "s.sh"
     for kwargs in ({}, {"stdin": b"{}", "trace": ("rule_a", "rule_b")}):
-        asyncio.run(script_sandbox.run_script(OWNER, None, script, run_id="r", timeout_seconds=5, **kwargs))
+        asyncio.run(script_sandbox.run_script(OWNER, None, script, schedule_id="sched", run_id="r",
+                                               timeout_seconds=5, **kwargs))
     assert [env.get("CORSIA_EVENT_TRACE") for env in envs] == [None, '["rule_a", "rule_b"]']
+    assert [env.get("CORSIA_EVENT_SCRIPT") for env in envs] == ["sched", "sched"]
 
 
 def test_a_rules_queue_is_capped_and_a_skip_shows_in_explain_and_list(runs, monkeypatch):

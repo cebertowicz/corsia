@@ -4,8 +4,12 @@ The script runner sets ``CORSIA_EVENT_TRACE`` (a JSON list of rule ids) only for
 a run an event rule started, so an event the script emits through the CLI
 carries the same chain as one it prints, and the loop guard
 (``events.rule_runs``) sees it. A script that clears the variable can still
-loop; the per-rule queue cap bounds that. Imports nothing, so the shell
-environment can name it.
+loop; the per-rule queue cap bounds that.
+
+The runner also sets ``CORSIA_EVENT_SCRIPT`` (the schedule id) on every run, so
+an event the script emits through the CLI has the producer ``script:<id>``, the
+same one its printed event lines get, and is never mistaken for its owner's own
+emit. Imports nothing, so the shell environment can name it.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from __future__ import annotations
 import json
 
 TRACE_ENV = "CORSIA_EVENT_TRACE"
+SCRIPT_ENV = "CORSIA_EVENT_SCRIPT"
 MAX_TRACE_RULES = 100
 MAX_RULE_ID_CHARS = 64
 MAX_TRACE_CHARS = 8192

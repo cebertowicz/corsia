@@ -96,7 +96,7 @@ def _script(directory: Path, name: str, body: str) -> Path:
 
 async def _run(path: Path, *, timeout: int = 20):
     return await run_script(
-        THREAD_ID, None, path, run_id=uuid.uuid4().hex, timeout_seconds=timeout,
+        THREAD_ID, None, path, schedule_id="sched", run_id=uuid.uuid4().hex, timeout_seconds=timeout,
     )
 
 
@@ -118,7 +118,7 @@ async def test_real_script_reads_a_rule_runs_event_on_stdin_and_the_input_is_rem
 
     path = _script(sandbox, "event.sh", "cat\n")
     run = await run_script(
-        THREAD_ID, None, path, run_id=uuid.uuid4().hex, timeout_seconds=20,
+        THREAD_ID, None, path, schedule_id="sched", run_id=uuid.uuid4().hex, timeout_seconds=20,
         stdin=b'{"type": "qa.route", "facts": {}}',
     )
     assert run.returncode == 0, run.stderr

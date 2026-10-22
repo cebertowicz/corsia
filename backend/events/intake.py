@@ -345,7 +345,7 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
         target_filter = None
         if origin in ("agent", "emitter") and not producer.startswith("script:"):
             target_filter = lambda target, _db: (
-                "emitted by this thread" if target.thread == producer else None)
+                rules.OWN_EMIT if target.thread == producer else None)
         deliveries, plan = deliver_envelope_sync(
             envelope, resolved.declaration,
             (lambda db: _registered_owner_targets(owner, envelope, db)) if owner

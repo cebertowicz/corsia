@@ -255,8 +255,8 @@ def test_a_declared_events_owner_is_the_registered_owner_rules_read(intake_world
 
     # The owner remains the rule anchor, but an event it emitted does not return to it.
     assert result.accepted and result.rules_matched == 1
-    assert _decisions(intake_world, "owned") == {("to-owner", OWNER, "held", "emitted by this thread")}
-    assert explained["decisions"][0]["reason"] == "emitted by this thread"
+    assert _decisions(intake_world, "owned") == {("to-owner", OWNER, "held", "sent by this chat")}
+    assert explained["decisions"][0]["reason"] == "sent by this chat"
 
 
 def test_a_rule_fires_when_intake_dead_letters_for_an_inactive_owner(intake_world, monkeypatch):
