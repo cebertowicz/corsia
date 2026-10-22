@@ -124,7 +124,7 @@ def _credentials(username: str, password: str) -> tuple[str, str]:
 def _create_account(
     name: str, encoded: str, *, db: sqlite3.Connection | None, first_run_wake: bool,
     require_first: bool = False, first_run_path: str = "script", claim_data_owner: bool = False,
-    before_commit=None, created_files: dict[str, str] | None = None,
+    before_commit=None, created_files: dict[str, str] | None = None, pending_profile: dict[str, str] | None = None,
 ):
     """Insert the account (and the first one's CORSIA agent) in one transaction.
 
@@ -159,7 +159,9 @@ def _create_account(
             conductor_id = ensure_corsia_agent(name, model=None, db=conn)
             from infra.setup_progress import start_after_account
 
-            start_after_account(first_run_path, db=conn, user_id=name, created_files=created_files)
+            start_after_account(
+                first_run_path, db=conn, user_id=name, created_files=created_files, pending_profile=pending_profile,
+            )
             if not data_owners_without_accounts(conn):
                 from infra import config
                 from registry.shared_ownership_assignment import enforce_scaffold_ownership
@@ -230,14 +232,18 @@ def create_first_account(
         raise AccountError("A name is required.")
     name, encoded = _credentials(username, password)
     staged = None
+    pending_profile = None
     if full_name is not None:
-        staged = user_profile.stage_user_profile(
-            config.WORKSPACE, full_name, user_profile.mac_timezone(), email,
-        )
+        timezone = user_profile.mac_timezone()
+        if first_run_path == "app" and user_profile.profile_exists(config.WORKSPACE):
+            # A profile the person already had is not touched until they finish setup.
+            pending_profile = {"full_name": full_name, "timezone": timezone, "email": email} if email else None
+        else:
+            staged = user_profile.stage_user_profile(config.WORKSPACE, full_name, timezone, email)
     try:
         announce = _create_account(
             name, encoded, db=None, first_run_wake=first_run_wake, require_first=True,
-            first_run_path=first_run_path, claim_data_owner=True,
+            first_run_path=first_run_path, claim_data_owner=True, pending_profile=pending_profile,
             before_commit=staged.publish if staged else None,
             created_files=(
                 {user_profile.PROFILE_RELATIVE_PATH.as_posix(): staged.created_sha256}

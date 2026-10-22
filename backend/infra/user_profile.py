@@ -95,6 +95,11 @@ def _email_in(text: str) -> str:
     return _labeled_value(text, _EMAIL_LABEL).strip()
 
 
+def profile_exists(workspace: Path) -> bool:
+    """Whether the work folder already has a profile file."""
+    return (Path(workspace) / PROFILE_RELATIVE_PATH).exists()
+
+
 def profile_email(workspace: Path) -> str:
     """The email an existing profile already names, or empty."""
     return _email_in(_read_profile(workspace))

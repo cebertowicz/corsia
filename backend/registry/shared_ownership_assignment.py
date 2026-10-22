@@ -71,13 +71,13 @@ def _directory_owners(shared_root: Path, project_id: str | None, db) -> dict[str
     return result
 
 
-def _registry_rule(registered: str | None, db) -> tuple[str | None, str]:
+def _registry_rule(registered: str | None, db, *, lift_ui: bool = False) -> tuple[str | None, str]:
     """Keep a persistent registry owner, or lift a temporary one to its acting owner.
 
     A temporary owner with no persistent ancestor matches neither rule, so the
-    caller falls through to the directory and conductor rules.
+    caller falls through to the directory and conductor rules. ``lift_ui``: the user is no owner.
     """
-    if registered is None:
+    if registered is None or (lift_ui and registered == "ui"):
         return None, ""
     thread = db.execute(
         "SELECT agent_enabled FROM threads WHERE id=?", (registered,),
@@ -87,7 +87,7 @@ def _registry_rule(registered: str | None, db) -> tuple[str | None, str]:
     return acting_owner(registered, False, db=db), "acting_owner"
 
 
-def inventory_shared_ownership(workspace: Path, project_id: str | None, *, db) -> tuple[Assignment, ...]:
+def inventory_shared_ownership(workspace: Path, project_id: str | None, *, db, untouched_scaffold=False) -> tuple[Assignment, ...]:
     """Return the deterministic, side-effect-free assignment table for one scope."""
     root = _scope_root(workspace, project_id, db)
     if root is None:
@@ -105,7 +105,7 @@ def inventory_shared_ownership(workspace: Path, project_id: str | None, *, db) -
         header = resolve_header_owner(header_value, project_id, db) if header_value else None
         conflict = bool(header and registered and header != registered)
         trigger = fields.get("review")
-        owner, rule = (header, "header") if header else _registry_rule(registered, db)
+        owner, rule = (header, "header") if header else _registry_rule(registered, db, lift_ui=untouched_scaffold)
         if owner is None:
             category = path.relative_to(shared_root).parts[0]
             if category in directory_owners:
@@ -239,20 +239,23 @@ def enforce_scaffold_ownership(
     if not _scaffold_shared_tree(workspace, project_id, db=db):
         return ()
     return apply_shared_ownership(
-        workspace, project_id, apply=True, create_claim_tasks=False, db=db,
+        workspace, project_id, apply=True, create_claim_tasks=False, db=db, untouched_scaffold=True,
     )
 
 
 def apply_shared_ownership(
     workspace: Path, project_id: str | None, *, apply: bool, db,
-    create_claim_tasks: bool = True,
+    create_claim_tasks: bool = True, untouched_scaffold: bool = False,
 ) -> tuple[Assignment, ...]:
-    """Dry-run or atomically apply one scope's assignment table."""
-    rows = inventory_shared_ownership(workspace, project_id, db=db)
+    """Dry-run or atomically apply one scope's assignment table.
+
+    ``untouched_scaffold``: every file is still the scaffold's; reassign even after an earlier assignment.
+    """
+    rows = inventory_shared_ownership(workspace, project_id, db=db, untouched_scaffold=untouched_scaffold)
     if not apply:
         return rows
     scope_id = project_id or WORKSPACE_SCOPE
-    if conductor_adopts_unowned(scope_id, db=db):
+    if conductor_adopts_unowned(scope_id, db=db) and not untouched_scaffold:
         return rows
     unassigned = [row for row in rows if row.owner is None]
     if unassigned:

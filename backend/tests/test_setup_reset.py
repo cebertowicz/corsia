@@ -90,18 +90,92 @@ def test_a_reset_install_takes_a_new_first_account_that_starts_setup_again(works
     assert setup_progress.read()[setup_progress.CREATED_BY_APP]["user_id"] == second
 
 
-def test_the_scaffold_ownership_assignment_is_undone_with_the_account(workspace):
-    """Account creation records that the scaffold's documents were assigned; a reset clears it so the next account assigns them again."""
-    from infra.conductor import WORKSPACE_SCOPE
-    from infra.settings import get_setting, set_setting
-    from registry.document_ownership import ADOPTION_SETTING_PREFIX
+def _write_scaffold(root: Path) -> None:
+    """The shared files a fresh work folder starts with, so account creation assigns their owners."""
+    from core.scaffold_layouts import _workspace_layout
 
-    key = f"{ADOPTION_SETTING_PREFIX}{WORKSPACE_SCOPE}"
-    first = _app_account()
-    with write_transaction(None, scope="test_assignment") as db:
-        set_setting(key, {"shared_ownership_enforced_at": "2026-10-22T00:00:00+00:00"}, db=db)
-    assert reset_unfinished_setup(first).reset is True
-    assert get_setting(key, db=get_db()) is None
+    for relative, content in _workspace_layout().files:
+        if relative.startswith("shared/"):
+            (root / relative).parent.mkdir(parents=True, exist_ok=True)
+            (root / relative).write_text(content, encoding="utf-8")
+
+
+def _install_state(root: Path) -> dict:
+    """What an install holds after an account is made: agent, document owners, setup record, profile."""
+    from registry import service
+    from registry.shared_principals import artifact_owner
+
+    db = get_db()
+    agent = get_corsia_agent()
+    owners = {}
+    for path in sorted((root / "shared").rglob("*")):
+        if path.is_file():
+            artifact = service.find_file_identity(str(path), db=db)
+            owner = artifact_owner(str(artifact["id"]), db=db) if artifact else None
+            owners[path.relative_to(root).as_posix()] = "agent" if owner == agent else owner
+    record = setup_progress.read() or {}
+    return {
+        "agent_exists": agent is not None,
+        "threads": len(_threads()),
+        "users": len(_users()),
+        "owners": owners,
+        "step": record.get("step"),
+        "completed": record.get("setup_completed"),
+        "profile": (root / PROFILE).read_bytes() if (root / PROFILE).exists() else None,
+    }
+
+
+def test_a_reset_install_matches_a_fresh_one_after_the_next_account(workspace, monkeypatch):
+    """The scaffold's documents belong to the new agent, not the user the old agent's end left them with."""
+    from infra.platform_paths import WorkspaceSelection
+    from registry import service
+
+    monkeypatch.setattr(config, "WORKSPACE_SELECTION", WorkspaceSelection(
+        workspace_id="workspace-stable-id", root=workspace.resolve(), name="Test workspace",
+    ))
+    monkeypatch.setattr(service, "get_allowed_dirs_rw", lambda **_kwargs: [workspace.resolve()])
+    _write_scaffold(workspace)
+    _app_account("pat")
+    fresh = _install_state(workspace)
+    assert fresh["owners"] and set(fresh["owners"].values()) == {"agent"}
+    assert reset_unfinished_setup("pat").reset is True
+    assert (workspace / PROFILE).exists() is False
+    _app_account("pat")
+    assert _install_state(workspace) == fresh
+
+
+# Guard 3, the held profile change.
+
+
+def _own_profile(workspace: Path) -> bytes:
+    path = workspace / PROFILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# Pat\n\nName: Pat\n", encoding="utf-8")
+    return path.read_bytes()
+
+
+def test_an_unfinished_setup_leaves_a_profile_the_person_had_byte_identical(workspace):
+    before = _own_profile(workspace)
+    user_id = _app_account()
+    assert (workspace / PROFILE).read_bytes() == before
+    assert reset_unfinished_setup(user_id).reset is True
+    assert (workspace / PROFILE).read_bytes() == before
+
+
+def test_finishing_setup_adds_the_held_email_to_the_profile_the_person_had(workspace):
+    before = _own_profile(workspace)
+    _app_account()
+    setup_progress.update(completed=True)
+    after = (workspace / PROFILE).read_text(encoding="utf-8")
+    assert after.startswith(before.decode()) and "pat@example.test" in after
+    assert setup_progress.PENDING_PROFILE not in setup_progress.read()
+
+
+def test_a_setup_that_made_the_profile_has_it_at_once_and_removes_it_on_reset(workspace):
+    user_id = _app_account()
+    assert "pat@example.test" in (workspace / PROFILE).read_text(encoding="utf-8")
+    reset_unfinished_setup(user_id)
+    assert not (workspace / PROFILE).exists()
 
 
 def test_a_refusal_from_the_stored_record_opens_no_write_transaction(workspace, monkeypatch):

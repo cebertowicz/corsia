@@ -170,11 +170,15 @@ def test_an_existing_profile_is_byte_identical_after_the_account_is_made(client,
     assert path.read_bytes() == original
 
 
-def test_an_existing_profile_only_gains_the_email_it_names_none_of(client, workspace):
+def test_an_existing_profile_only_gains_the_email_it_names_none_of_once_setup_is_finished(client, workspace):
+    from infra import setup_progress
+
     path = _profile(workspace)
     path.parent.mkdir()
     path.write_text("# mine\n- **Preferred name:** Old Name\n", encoding="utf-8")
     assert _post(client, REQUEST).status_code == 200
+    assert path.read_text(encoding="utf-8") == "# mine\n- **Preferred name:** Old Name\n"
+    setup_progress.update(completed=True)
     assert path.read_text(encoding="utf-8") == (
         "# mine\n- **Preferred name:** Old Name\n- **Email:** pat@example.test\n"
     )

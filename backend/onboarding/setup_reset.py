@@ -20,10 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from infra import config, setup_progress
-from infra.conductor import WORKSPACE_SCOPE
-from registry.document_ownership import ADOPTION_SETTING_PREFIX
-from infra.corsia_agent import SETTINGS_KEY as CORSIA_AGENT_KEY
-from infra.corsia_agent import get_corsia_agent
+from infra.corsia_agent import get_corsia_agent, set_corsia_agent
 from infra.database import write_transaction
 from infra.send_target import NO_MODEL_SELECTED
 
@@ -116,10 +113,7 @@ def reset_unfinished_setup(user_id: str) -> ResetResult:
             delete_thread_family(db, thread_family_ids(db, agent))
         db.execute("DELETE FROM auth_tokens WHERE user_id = ?", (user_id,))
         db.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        # The scaffold's ownership assignment (written with the account) goes too, so the next first account assigns it again.
-        db.execute(
-            "DELETE FROM settings WHERE key IN (?, ?, ?)",
-            (CORSIA_AGENT_KEY, setup_progress.KEY, f"{ADOPTION_SETTING_PREFIX}{WORKSPACE_SCOPE}"),
-        )
+        set_corsia_agent(None, db=db)
+        setup_progress.clear(db=db)
     _remove_unchanged_files(config.WORKSPACE, files)
     return ResetResult(reset=True)
