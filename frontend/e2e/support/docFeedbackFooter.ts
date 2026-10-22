@@ -1,4 +1,47 @@
-import type { Locator, Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { TEST_TOKEN } from './corsia';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+
+/** The server delivers an open person batch five seconds after its last item; push that out so a spec can read the unsent state. */
+function holdOpenBatches(): void {
+	const stateRoot = process.env.CORSIA_E2E_STATE_DIR;
+	if (process.env.CORSIA_E2E_MOCK !== '1' || !stateRoot) throw new Error('Holding a batch open requires isolated E2E mock state');
+	execFileSync(process.env.CORSIA_E2E_BACKEND_PYTHON ?? path.join(repoRoot, '.venv/bin/python'), [
+		'-c', [
+			'import sqlite3, sys',
+			'from datetime import datetime, timedelta, timezone',
+			'connection = sqlite3.connect(sys.argv[1])',
+			'later = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()',
+			'connection.execute("UPDATE doc_feedback_batches SET closes_at=? WHERE state=\'open\' AND author_kind=\'user\'", (later,))',
+			'connection.commit()',
+			'connection.close()',
+		].join('\n'), path.join(stateRoot, 'corsia.db'),
+	], { cwd: repoRoot, encoding: 'utf8' });
+}
+
+/**
+ * A person's comment is delivered as it is made, so no unsent state follows it. Re-opening a resolved comment is the
+ * person action that still waits for the person to stop: resolve then re-open a comment to leave one unsent message.
+ */
+export async function leaveUnsent(request: APIRequestContext, commentId: string): Promise<void> {
+	for (const resolved of [true, false]) {
+		const patched = await request.patch(`/api/comments/${commentId}`, { params: { token: TEST_TOKEN }, data: { resolved } });
+		expect(patched.ok(), await patched.text()).toBeTruthy();
+	}
+	holdOpenBatches();
+}
+
+/** Leave every top-level comment a person made on a document unsent, as `leaveUnsent` does for one. */
+export async function leaveUserCommentsUnsent(request: APIRequestContext, artifactId: string): Promise<void> {
+	const listed = await request.get(`/api/artifacts/${artifactId}/comments`, { params: { token: TEST_TOKEN } });
+	expect(listed.ok(), await listed.text()).toBeTruthy();
+	const comments = (await listed.json()).comments as Array<{ id: string; author_kind: string; parent_id: string | null }>;
+	for (const comment of comments) if (comment.author_kind === 'user' && !comment.parent_id) await leaveUnsent(request, comment.id);
+}
 
 /** Open the comments drawer from the header pill ("N open threads, …") and return its unsent-messages footer. */
 export async function openUnsentFooter(page: Page): Promise<Locator> {

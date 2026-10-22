@@ -140,7 +140,7 @@
 		return image ? [...shown].sort(byNumber) : shown;
 	});
 	const followed = $derived(surfaceState?.kind === 'thread' ? comments.find((item) => item.id === surfaceState.id) : undefined);
-	// Leaving the document sends the batch (DocFeedback.leave); in its grace period it says when it goes instead.
+	// Comments not yet sent say when they go; Send now delivers them at once.
 	const unsentText = $derived(feedback?.unsent ?? null);
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
@@ -385,7 +385,7 @@
 	.drawer-unsent p { flex: 1; min-width: 0; margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
 	/* A long owner name is cut only where the footer is too narrow to hold it on one line of the sentence. */
 	@container drawer-footer (max-width: 30rem) { .drawer-footer-owner { display: inline-block; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; white-space: nowrap; } }
-	.drawer-unsent :global(.btn) { flex: none; }
+	.drawer-unsent :global(.btn) { flex: none; min-width: 6.5rem; }
 	@media (max-width: 420px) { .drawer-unsent { gap: var(--space-1); padding-inline: var(--space-2); } }
 	@media (pointer: coarse) { .drawer-unsent :global(.btn) { min-height: 44px; } }
 	.suggestion-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }

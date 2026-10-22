@@ -94,10 +94,11 @@ async def test_a_user_comment_resolved_by_an_agent_sends_no_note(integration_cli
     )
     assert created.status_code == 200, created.text
     user_cid = created.json()["comment"]["id"]
+    owner_notes = _notes(owner)
 
     await _tool_update(owner, user_cid, resolved=True)
 
-    assert _notes(author) == [] and _notes(owner) == []
+    assert _notes(author) == [] and _notes(owner) == owner_notes
 
 
 def _artifact_id(doc):

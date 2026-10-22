@@ -69,7 +69,7 @@ describe('DocViewerStatus freshness metadata', () => {
 
 	it('names unsent feedback in the comment pill while Send stays in the drawer', () => {
 		render(value(), undefined, { commentCount: 2 });
-		component!.sync('artifact-1', { open_count: 3, owner_label: 'Style', grace_closes_at: '2026-10-11T22:32:00Z', undelivered_batches: [] });
+		component!.sync('artifact-1', { open_count: 3, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
 		const pill = host.querySelector('.comment-status');
 		expect(pill?.getAttribute('aria-label')).toBe('2 open threads, 3 messages not sent yet');
@@ -88,11 +88,11 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(pill.querySelector('.count-unit')!.textContent).toBe('thread');
 		expect(pill.getAttribute('aria-label')).toBe('1 open thread');
 		expect(pill.querySelector('.unsent-dot')).toBeNull();
-		component!.sync('artifact-1', { open_count: 1, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] });
+		component!.sync('artifact-1', { open_count: 1, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
 		expect(pill.getAttribute('aria-label')).toBe('1 open thread, 1 message not sent yet');
 		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
-		component!.sync('artifact-1', { open_count: 0, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] });
+		component!.sync('artifact-1', { open_count: 0, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
 		expect(pill.getAttribute('aria-label')).toBe('1 open thread');
 		expect(pill.querySelector('.unsent-dot')).toBeNull();
@@ -144,9 +144,9 @@ describe('DocViewerStatus freshness metadata', () => {
 	});
 
 	it.each([
-		['unplaced and unsent', { commentCount: 2, orphanedCount: 2 }, { open_count: 3, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] }, "2 open threads, 2 comments couldn't be placed, 3 messages not sent yet"],
+		['unplaced and unsent', { commentCount: 2, orphanedCount: 2 }, { open_count: 3, owner_label: 'Style', undelivered_batches: [] }, "2 open threads, 2 comments couldn't be placed, 3 messages not sent yet"],
 		['unplaced only', { commentCount: 2, orphanedCount: 2 }, null, "2 open threads, 2 comments couldn't be placed"],
-		['unsent only', { commentCount: 2 }, { open_count: 3, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] }, '2 open threads, 3 messages not sent yet'],
+		['unsent only', { commentCount: 2 }, { open_count: 3, owner_label: 'Style', undelivered_batches: [] }, '2 open threads, 3 messages not sent yet'],
 		['neither', { commentCount: 2 }, null, '2 open threads'],
 	])('names %s comment status once', (_state, props, feedback, expected) => {
 		render(value(), undefined, props);

@@ -104,12 +104,12 @@ async def test_frames_open_merge_ack_and_flush_without_whole_text_save(ownership
 
 @pytest.mark.asyncio
 async def test_user_feedback_debounce_resets_and_can_be_cancelled(monkeypatch):
+    from doceditor import feedback_batches
     from ws import user_feedback_delivery
 
     deliveries = []
-    monkeypatch.setattr(user_feedback_delivery, "_generations", {})
     monkeypatch.setattr(user_feedback_delivery, "_tasks", {})
-    monkeypatch.setattr(user_feedback_delivery, "USER_FEEDBACK_IDLE_SECONDS", 0.01)
+    monkeypatch.setattr(feedback_batches, "USER_IDLE", 0.01)
 
     async def deliver(artifact_id):
         deliveries.append(artifact_id)
@@ -125,6 +125,22 @@ async def test_user_feedback_debounce_resets_and_can_be_cancelled(monkeypatch):
     user_feedback_delivery.cancel("artifact")
     await asyncio.sleep(0.02)
     assert deliveries == ["artifact"]
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_deliver(artifact_id):
+        deliveries.append(artifact_id)
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(user_feedback_delivery, "deliver", slow_deliver)
+    user_feedback_delivery.schedule("artifact")
+    await started.wait()
+    user_feedback_delivery.schedule("artifact")
+    release.set()
+    await asyncio.sleep(0.02)
+    assert deliveries == ["artifact", "artifact", "artifact"]
 
 
 @pytest.mark.asyncio

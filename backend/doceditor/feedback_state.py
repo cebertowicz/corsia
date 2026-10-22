@@ -62,12 +62,6 @@ def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
              AND batch.author_id=? AND batch.artifact_id=?""",
         (USER_AUTHOR_ID, artifact_id),
     ).fetchone()[0]
-    grace_deadline = db.execute(
-        """SELECT MIN(closes_at) FROM doc_feedback_batches
-           WHERE state='open' AND author_kind='user' AND author_id=?
-             AND artifact_id=? AND closed_reason='leave'""",
-        (USER_AUTHOR_ID, artifact_id),
-    ).fetchone()[0]
     artifact = registry_models.get_artifact(artifact_id, db=db)
     owner = db.execute(
         "SELECT title FROM threads WHERE id=?",
@@ -76,7 +70,6 @@ def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
     return {
         "open_count": count,
         "owner_label": owner["title"] if owner else None,
-        "grace_closes_at": grace_deadline,
         "undelivered_batches": undelivered_for_document(
             db,
             author_kind="user",

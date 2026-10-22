@@ -1,6 +1,6 @@
 <script lang="ts">
-	// The open document's feedback batch, owned here for as long as the document is open: leaving it (another
-	// document, a hidden browser tab, closing) lets its comments go to the owner after the grace period.
+	// The open document's feedback batch, owned here for as long as the document is open; the server delivers
+	// its comments to the owner as the person types.
 	import { onMount } from 'svelte';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import { holdDocFeedback, type DocFeedback } from '$lib/docFeedback.svelte';

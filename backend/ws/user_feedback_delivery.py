@@ -1,36 +1,35 @@
-"""Debounced delivery of a person's live-document feedback."""
+"""Schedule durable user-feedback delivery from the live editor's idle boundary."""
 
 from __future__ import annotations
 
 import asyncio
+import logging
+from datetime import datetime, timezone
 
 from infra.db_async import run_in_db
 
-USER_FEEDBACK_IDLE_SECONDS = 5
-_generations: dict[str, int] = {}
-_tasks: dict[str, asyncio.Task] = {}
+log = logging.getLogger(__name__)
+_tasks: dict[str, asyncio.Task[None]] = {}
 
 
 def _close(artifact_id: str) -> list[str]:
-    """Close one person's persisted feedback after typing goes quiet."""
+    """Sweep one document through its persisted feedback deadline."""
     from doceditor import feedback_batches
     from infra.database import get_db
 
     db = get_db()
     try:
-        return feedback_batches.close_for_document(
-            db,
-            author_kind="user",
-            author_id=feedback_batches.USER_AUTHOR_ID,
+        return feedback_batches.close_due(
+            datetime.now(timezone.utc).isoformat(),
+            db=db,
             artifact_id=artifact_id,
-            reason="idle",
         )
     finally:
         db.close()
 
 
 async def deliver(artifact_id: str) -> None:
-    """Drive recipients after the feedback close has committed."""
+    """Drive recipients after the persisted due batches have committed."""
     woken = await run_in_db(_close, artifact_id)
     if woken:
         from plans import public
@@ -39,25 +38,37 @@ async def deliver(artifact_id: str) -> None:
 
 
 def cancel(artifact_id: str) -> None:
+    """Cancel only a pending idle wait for one document."""
     task = _tasks.pop(artifact_id, None)
     if task is not None:
         task.cancel()
 
 
+def _report_delivery_failure(task: asyncio.Task[None]) -> None:
+    """Consume and report a detached delivery failure without hiding it."""
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        log.exception("live document feedback delivery failed", exc_info=True)
+
+
 def schedule(artifact_id: str) -> None:
-    """Deliver persisted user edits five seconds after the last accepted update."""
-    generation = _generations.get(artifact_id, 0) + 1
-    _generations[artifact_id] = generation
+    """Sweep the document five seconds after its last accepted live-editor update."""
+    from doceditor.feedback_batches import USER_IDLE
+
     cancel(artifact_id)
 
     async def send() -> None:
         try:
-            await asyncio.sleep(USER_FEEDBACK_IDLE_SECONDS)
-            if _generations.get(artifact_id) == generation:
-                await deliver(artifact_id)
-        finally:
-            if _tasks.get(artifact_id) is task:
-                _tasks.pop(artifact_id, None)
+            await asyncio.sleep(USER_IDLE)
+        except asyncio.CancelledError:
+            return
+        if _tasks.get(artifact_id) is task:
+            _tasks.pop(artifact_id, None)
+        await deliver(artifact_id)
 
     task = asyncio.create_task(send())
+    task.add_done_callback(_report_delivery_failure)
     _tasks[artifact_id] = task

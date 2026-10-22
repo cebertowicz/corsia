@@ -12,7 +12,7 @@ import { injectMessage, readMockCallCount, releaseMockGate, seedMockResponses } 
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const auth = () => ({ Authorization: `Bearer ${TEST_TOKEN}` });
-type SendState = 'pending' | 'grace' | 'undelivered';
+type SendState = 'pending' | 'undelivered';
 
 /** Every reviewer a case promoted; the agent rail lists a few before "Show more", so each case demotes its own and later specs still find their agents. */
 const promoted: string[] = [];
@@ -120,7 +120,7 @@ function setFeedbackFixture(artifactId: string, state: SendState) {
 		'connection = sqlite3.connect(sys.argv[1])',
 		'artifact, state = sys.argv[2:]',
 		'future = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()',
-		'changed = connection.execute("UPDATE doc_feedback_batches SET state=?, closed_reason=?, closes_at=?, undelivered_reason=? WHERE artifact_id=? AND author_kind=\'user\'", ("undelivered" if state == "undelivered" else "open", "leave" if state == "grace" else None, future, "owner_admission_refused" if state == "undelivered" else None, artifact)).rowcount',
+		'changed = connection.execute("UPDATE doc_feedback_batches SET state=?, closed_reason=?, closes_at=?, undelivered_reason=? WHERE artifact_id=? AND author_kind=\'user\'", ("undelivered" if state == "undelivered" else "open", None, future, "owner_admission_refused" if state == "undelivered" else None, artifact)).rowcount',
 		'assert changed == 1, changed',
 		'changed = connection.execute("UPDATE doc_comments SET anchor_text=?, from_off=NULL, to_off=NULL, anchor_prefix=NULL, anchor_suffix=NULL WHERE artifact_id=?", ("A quote removed from this document.", artifact)).rowcount',
 		'assert changed == 1, changed',
@@ -417,7 +417,7 @@ test('@flow:document-review-requests closed continuation refreshes on Plans chan
 	expect(reads).toBe(0); expect(navigations).toBe(0);
 });
 
-for (const count of [0, 1, 10]) for (const state of ['pending', 'grace', 'undelivered'] as const) {
+for (const count of [0, 1, 10]) for (const state of ['pending', 'undelivered'] as const) {
 	test(`@flow:document-review-requests ${count} reviews with ${state} send and changed text`, async ({ page, request }, info) => {
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable synthetic state');
 		test.setTimeout(100_000);
@@ -437,10 +437,10 @@ for (const count of [0, 1, 10]) for (const state of ['pending', 'grace', 'undeli
 		await captureLayout(page, info, `reviews-${count}-${state}-${mobile ? 'phone' : 'desktop-narrow'}`);
 		await expect(page.locator('.comment-status:has(.unplaced-dot)')).toBeVisible();
 		if (state !== 'undelivered') {
-			// Send now and the countdown are in the comments drawer's footer; the header shows neither.
+			// Send now is in the comments drawer's footer; the header shows none.
 			expect(await visibleHeaderSends(page), 'no Send shows in the header').toEqual([]);
 			const footer = await openUnsentFooter(page);
-			await expect(footer.getByRole('status')).toContainText(state === 'grace' ? '1 message not sent yet · sending to ' : '1 message not sent yet · it goes to ');
+			await expect(footer.getByRole('status')).toContainText('1 message not sent yet · it goes to ');
 			await expect(footer.getByRole('button', { name: 'Send now', exact: true })).toBeVisible();
 			await page.getByRole('region', { name: 'Document comments' }).getByRole('button', { name: 'Close comments', exact: true }).click();
 			// The closing drawer stays mounted (inert) through its outro; the review panel below must be the only drawer.

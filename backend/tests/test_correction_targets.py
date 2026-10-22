@@ -28,8 +28,7 @@ def _candidate_thread(source_id: str) -> str | None:
 
 def _deliver_batch(db):
     batch = batches(db)[0]
-    assert feedback_batches.close_batch(db, batch["id"], "send")[0]
-    db.commit()
+    assert batch["state"] == "delivered"  # a person's comment is delivered as it is made
     return batch
 
 
@@ -55,8 +54,8 @@ def test_a_reply_to_an_agent_comment_targets_the_owner_not_the_comment_author(db
     agent_row, _ = add_comment(db, artifact, author_kind="agent", author_id="reviewer")
     db.commit()
     _deliver_all(db)
-    earlier = _user_comment(db, artifact)  # opens the owner's batch first, so the reviewer's is newer
-    db.execute("UPDATE doc_feedback_batches SET created_at='2000-01-01T00:00:00' WHERE state='open'")
+    earlier = _user_comment(db, artifact)  # delivers the owner's batch first, so the reviewer's is newer
+    db.execute("UPDATE doc_feedback_batches SET created_at='2000-01-01T00:00:00' WHERE author_kind='user'")
     db.commit()
 
     reply, _ = add_comment(
@@ -64,7 +63,7 @@ def test_a_reply_to_an_agent_comment_targets_the_owner_not_the_comment_author(db
     )
     db.commit()
     newest_first = db.execute(
-        "SELECT recipient_id FROM doc_feedback_batches WHERE state='open' ORDER BY created_at DESC, id DESC"
+        "SELECT recipient_id FROM doc_feedback_batches WHERE author_kind='user' ORDER BY created_at DESC, id DESC"
     ).fetchall()
     assert [row[0] for row in newest_first] == ["reviewer", "owner"]  # the reply joined both batches
 

@@ -7,7 +7,7 @@ import { SENT_HOLD_MS } from '$lib/docFeedback.svelte';
 import DocFeedbackStatus from './DocFeedbackStatus.svelte';
 
 let host: HTMLElement;
-let component: { commentCreated: () => void; sync: (id: string, feedback: { open_count: number; owner_label: string | null; grace_closes_at: string | null; undelivered_batches: any[] }) => void } | null = null;
+let component: { commentCreated: () => void; sync: (id: string, feedback: { open_count: number; owner_label: string | null; undelivered_batches: any[] }) => void } | null = null;
 const fetchMock = vi.fn();
 const onFeedbackChanged = vi.fn();
 
@@ -23,6 +23,11 @@ function render() {
 		props: { artifactId: 'artifact-1', targetInstanceId: 'tab-1', onFeedbackChanged },
 	});
 	flushSync();
+}
+
+/** The server reports a message waiting to be sent: a re-opened comment or an edit, since a new comment goes at once. */
+function waitToSend(count = 1) {
+	component!.sync('artifact-1', { open_count: count, owner_label: null, undelivered_batches: [] });
 }
 
 function clearToasts() {
@@ -56,7 +61,7 @@ afterEach(() => {
 describe('DocFeedbackStatus', () => {
 	it('sends pending comments with the bearer header, then hides the control', async () => {
 		fetchMock.mockImplementation(() => Promise.resolve(result()));
-		component!.commentCreated();
+		waitToSend();
 		flushSync();
 
 		expect(host.textContent).toContain('Send 1 comment');
@@ -74,7 +79,7 @@ describe('DocFeedbackStatus', () => {
 	it('confirms a delivered send with Sent and a check for a moment, then lets the control go', async () => {
 		vi.useFakeTimers({ toFake: ['setTimeout'] });
 		try {
-			component!.commentCreated();
+			waitToSend();
 			flushSync();
 			host.querySelector<HTMLButtonElement>('button')!.click();
 			await vi.waitFor(() => expect(host.querySelector('.sent')).not.toBeNull());
@@ -97,7 +102,7 @@ describe('DocFeedbackStatus', () => {
 
 	it('says nothing was sent when the batch could not be delivered', async () => {
 		fetchMock.mockResolvedValueOnce(result([{ id: 'batch-1', item_count: 1, undelivered_reason: 'no_owner', attempts: 1 }]));
-		component!.commentCreated();
+		waitToSend();
 		flushSync();
 		host.querySelector<HTMLButtonElement>('button')!.click();
 
@@ -111,7 +116,7 @@ describe('DocFeedbackStatus', () => {
 		// The slot's own motion, told from Svelte's timing animations by the space it opens and closes.
 		const slotMotion = () => animate.mock.calls.map(([frames]) => frames as Keyframe[]).filter((frames) => Array.isArray(frames) && frames.some((frame) => 'maxWidth' in frame));
 		try {
-			component!.commentCreated();
+			waitToSend();
 			flushSync();
 			expect(slotMotion()).toHaveLength(1);
 			expect(slotMotion()[0][0]).toMatchObject({ maxWidth: '0px', opacity: 0 });
@@ -134,7 +139,7 @@ describe('DocFeedbackStatus', () => {
 		const animate = vi.spyOn(Element.prototype, 'animate');
 		const slotMotion = () => animate.mock.calls.map(([frames]) => frames as Keyframe[]).filter((frames) => Array.isArray(frames) && frames.some((frame) => 'maxWidth' in frame));
 		try {
-			component!.commentCreated();
+			waitToSend();
 			flushSync();
 			expect(slotMotion()).toHaveLength(1);
 			fetchMock.mockResolvedValueOnce(result([{ id: 'batch-1', item_count: 1, undelivered_reason: 'no_owner', attempts: 1 }]));
@@ -156,7 +161,7 @@ describe('DocFeedbackStatus', () => {
 		component = mount(DocFeedbackStatus, { target: host, props: { artifactId: 'artifact-1', targetInstanceId: 'tab-1', onFeedbackChanged, compact: true } });
 		flushSync();
 		fetchMock.mockResolvedValueOnce(result([{ id: 'batch-1', item_count: 1, undelivered_reason: 'no_owner', attempts: 1 }]));
-		component!.commentCreated();
+		waitToSend();
 		flushSync();
 		host.querySelector<HTMLButtonElement>('button')!.click();
 		await vi.waitFor(() => expect(host.querySelector('[role="status"]')!.textContent).toContain('1 comment not delivered'));
@@ -174,12 +179,12 @@ describe('DocFeedbackStatus', () => {
 	});
 
 	it('puts Send back in place of Sent when another comment is made', async () => {
-		component!.commentCreated();
+		waitToSend();
 		flushSync();
 		host.querySelector<HTMLButtonElement>('button')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.sent')).not.toBeNull());
 
-		component!.commentCreated();
+		waitToSend();
 		flushSync();
 
 		expect(host.querySelector('.sent')).toBeNull();
@@ -190,7 +195,7 @@ describe('DocFeedbackStatus', () => {
 	it('shows an undelivered reason and clears it after Retry', async () => {
 		fetchMock.mockResolvedValueOnce(result([{ id: 'batch-1', item_count: 3, undelivered_reason: 'owner_unavailable', attempts: 1 }]));
 		fetchMock.mockResolvedValueOnce(result());
-		component!.commentCreated();
+		waitToSend();
 		flushSync();
 		host.querySelector<HTMLButtonElement>('button')!.click();
 		await vi.waitFor(() => expect(host.textContent).toContain('3 comments not delivered: its owner is unavailable'));
@@ -208,7 +213,7 @@ describe('DocFeedbackStatus', () => {
 		expect(region).not.toBeNull();
 		expect(region!.textContent).toBe('');
 		fetchMock.mockResolvedValueOnce(result([{ id: 'batch-1', item_count: 1, undelivered_reason: 'owner_unaddressable', attempts: 1 }]));
-		component!.commentCreated();
+		waitToSend();
 		flushSync();
 		host.querySelector<HTMLButtonElement>('button')!.click();
 
@@ -221,22 +226,19 @@ describe('DocFeedbackStatus', () => {
 		component!.sync('artifact-1', {
 			open_count: 4,
 			owner_label: 'Documents & Artifacts',
-			grace_closes_at: null,
 			undelivered_batches: [{ id: 'batch-1', item_count: 3, undelivered_reason: 'owner_unavailable', attempts: 1 }],
 		});
 		flushSync();
 
 		expect(host.textContent).toContain('Send 4 comments to Documents & Artifacts');
 		expect(host.textContent).toContain('3 comments not delivered: its owner is unavailable');
-		component!.sync('artifact-1', { open_count: 0, owner_label: null, grace_closes_at: null, undelivered_batches: [] });
+		component!.sync('artifact-1', { open_count: 0, owner_label: null, undelivered_batches: [] });
 	});
 
-	it('keeps Send available even when a fallback deadline is present', async () => {
-		const deadline = new Date(Date.now() + 61_000).toISOString();
+	it('offers Send with no countdown beside it', async () => {
 		component!.sync('artifact-1', {
 			open_count: 2,
 			owner_label: 'Documents & Artifacts',
-			grace_closes_at: deadline,
 			undelivered_batches: [],
 		});
 		flushSync();
@@ -249,39 +251,15 @@ describe('DocFeedbackStatus', () => {
 
 	it('keeps pending comments visible and shows a toast when Send fails', async () => {
 		fetchMock.mockRejectedValue(new Error('offline'));
-		component!.sync('artifact-1', { open_count: 1, owner_label: null, grace_closes_at: null, undelivered_batches: [] });
+		component!.sync('artifact-1', { open_count: 1, owner_label: null, undelivered_batches: [] });
 		flushSync();
 		host.querySelector<HTMLButtonElement>('button')!.click();
 
 		await vi.waitFor(() => expect(get(toasts).map((toast) => toast.message)).toContain("Couldn't send your comments — try again"));
 		expect(host.textContent).toContain('Send 1 comment');
-		component!.sync('artifact-1', { open_count: 0, owner_label: null, grace_closes_at: null, undelivered_batches: [] });
+		component!.sync('artifact-1', { open_count: 0, owner_label: null, undelivered_batches: [] });
 	});
 
-	it('sends pending feedback once when the page hides or unloads', async () => {
-		fetchMock.mockImplementation(() => Promise.resolve(result()));
-		component!.commentCreated();
-		Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
-		window.dispatchEvent(new Event('visibilitychange'));
-		window.dispatchEvent(new Event('beforeunload'));
-		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-
-		expect(fetchMock).toHaveBeenCalledWith('/api/doc-feedback/send', expect.objectContaining({
-			keepalive: false,
-			headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
-		}));
-	});
-
-	it('retries pending feedback after its send fails', async () => {
-		setVisibility('hidden');
-		fetchMock.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(result());
-		component!.commentCreated();
-		window.dispatchEvent(new Event('beforeunload'));
-		await vi.waitFor(() => expect(get(toasts).map((toast) => toast.message)).toContain("Couldn't send your comments — try again"));
-		component!.sync('artifact-1', { open_count: 1, owner_label: null, grace_closes_at: null, undelivered_batches: [] });
-		window.dispatchEvent(new Event('beforeunload'));
-		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-	});
 
 	it.each([
 		['no_owner', 'this document has no owner'],
@@ -294,7 +272,6 @@ describe('DocFeedbackStatus', () => {
 		component!.sync('artifact-1', {
 			open_count: 0,
 			owner_label: null,
-			grace_closes_at: null,
 			undelivered_batches: [{ id: 'batch-1', item_count: 1, undelivered_reason: code, attempts: 1 }],
 		});
 		flushSync();
@@ -308,7 +285,6 @@ describe('DocFeedbackStatus', () => {
 		component!.sync('artifact-1', {
 			open_count: 0,
 			owner_label: null,
-			grace_closes_at: null,
 			undelivered_batches: [
 				{ id: 'batch-1', item_count: 1, undelivered_reason: 'owner_unavailable', attempts: 1 },
 				{ id: 'batch-2', item_count: 2, undelivered_reason: 'no_owner', attempts: 1 },
@@ -321,7 +297,7 @@ describe('DocFeedbackStatus', () => {
 	});
 
 	it('does not report a return when fresh state reaches a visible document', async () => {
-		component!.sync('artifact-1', { open_count: 1, owner_label: null, grace_closes_at: null, undelivered_batches: [] });
+		component!.sync('artifact-1', { open_count: 1, owner_label: null, undelivered_batches: [] });
 		await Promise.resolve();
 
 		expect(fetchMock).not.toHaveBeenCalled();
@@ -329,7 +305,7 @@ describe('DocFeedbackStatus', () => {
 
 	it('does not report a return when a hidden tab refreshes its comments', async () => {
 		setVisibility('hidden');
-		component!.sync('artifact-1', { open_count: 1, owner_label: null, grace_closes_at: null, undelivered_batches: [] });
+		component!.sync('artifact-1', { open_count: 1, owner_label: null, undelivered_batches: [] });
 		await Promise.resolve();
 
 		expect(fetchMock).not.toHaveBeenCalled();

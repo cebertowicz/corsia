@@ -2,7 +2,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
-import { openUnsentFooter, visibleHeaderSends } from '../support/docFeedbackFooter';
+import { leaveUnsent, openUnsentFooter, visibleHeaderSends } from '../support/docFeedbackFooter';
 
 type SeededDocument = { artifactId: string; path: string; fileName: string };
 
@@ -21,11 +21,12 @@ async function seedDocument(request: Parameters<typeof createSession>[0], thread
 	return { artifactId: (await seeded.json()).artifact.id as string, path: docPath, fileName };
 }
 
-async function addUserComment(request: Parameters<typeof createSession>[0], artifactId: string): Promise<void> {
+async function addUserComment(request: Parameters<typeof createSession>[0], artifactId: string): Promise<string> {
 	const created = await request.post(`/api/artifacts/${artifactId}/comments?token=${TEST_TOKEN}`, {
 		data: { body: 'Deliver this as document feedback.', anchor_text: 'commentable', from_off: 2, to_off: 13 },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
+	return (await created.json()).comment.id as string;
 }
 
 // Narrow viewports keep tabs in the compact sheet; its close uses the same path.
@@ -62,12 +63,12 @@ function workspaceState(threadId: string, documents: SeededDocument[], activeTab
 	};
 }
 
-test('@surface:doc-send-on-close sends an open user batch exactly once before the explicit tab close', async ({ page, request }) => {
+test('@surface:doc-send-on-close sends an unsent user batch exactly once before the explicit tab close', async ({ page, request }) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 	const title = `send-on-close-${Date.now()}`;
 	const threadId = await createSession(request, title);
 	const document = await seedDocument(request, threadId, title, 'close');
-	await addUserComment(request, document.artifactId);
+	await leaveUnsent(request, await addUserComment(request, document.artifactId));
 	const sends: string[] = [];
 	page.on('request', (outgoing) => {
 		if (new URL(outgoing.url()).pathname === '/api/doc-feedback/send') sends.push(outgoing.url());
@@ -76,9 +77,9 @@ test('@surface:doc-send-on-close sends an open user batch exactly once before th
 	await loginByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
-	// Send now is in the comments drawer's footer, which says leaving sends the batch; the header has none.
+	// Send now is in the comments drawer's footer, which says when the batch goes; the header has none.
 	const footer = await openUnsentFooter(page);
-	await expect(footer).toContainText(`1 message not sent yet · it goes to ${title} when you leave.`);
+	await expect(footer).toContainText(`1 message not sent yet · it goes to ${title} once you stop typing.`);
 	await expect(footer.getByRole('button', { name: 'Send now', exact: true })).toBeVisible();
 	expect(await visibleHeaderSends(page), 'no Send shows in the header').toEqual([]);
 
@@ -88,39 +89,32 @@ test('@surface:doc-send-on-close sends an open user batch exactly once before th
 		await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 		expect(sends, 'closing the sheet alone sends nothing').toHaveLength(0);
 	}
-	// Leaving delivers: closing the tab sends the batch once, without Send now.
+	// Closing the tab sends what is still unsent, once, without Send now.
 	await (await tabControl(page, document.fileName, 'close')).click();
 	await expect.poll(() => sends).toHaveLength(1);
 	await expect(page.getByRole('tab', { name: document.fileName })).toHaveCount(0);
 	await expect(page.getByRole('button', { name: `Close ${document.fileName}` })).toHaveCount(0);
 });
 
-test('@surface:doc-send-on-close keeps a switch-away grace and shows its server deadline on return', async ({ page, request }) => {
+test('@surface:doc-send-on-close keeps its unsent footer whole beside a long owner name', async ({ page, request }) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 	const title = `switch-away-with-a-long-owner-name-${Date.now()}`;
 	const threadId = await createSession(request, title);
 	const first = await seedDocument(request, threadId, title, 'first');
-	const second = await seedDocument(request, threadId, title, 'second');
-	await addUserComment(request, first.artifactId);
-	const leaves: string[] = [];
+	await leaveUnsent(request, await addUserComment(request, first.artifactId));
 	const sends: string[] = [];
 	page.on('request', (outgoing) => {
 		const pathname = new URL(outgoing.url()).pathname;
-		if (pathname === '/api/doc-feedback/leave') leaves.push(outgoing.url());
 		if (pathname === '/api/doc-feedback/send') sends.push(outgoing.url());
 	});
-	await page.addInitScript((state) => localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify(state)), workspaceState(threadId, [first, second], 'doc-0'));
+	await page.addInitScript((state) => localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify(state)), workspaceState(threadId, [first], 'doc-0'));
 	await loginByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
 	await expect(page.getByRole('button', { name: /^1 open thread, 1 message not sent yet$/ })).toBeVisible();
 
-	// Leaving delivers: switching away starts the batch's grace.
-	await (await tabControl(page, second.fileName, 'select')).click();
-	await expect.poll(() => leaves).toHaveLength(1);
-	await (await tabControl(page, first.fileName, 'select')).click();
 	const footer = await openUnsentFooter(page);
-	await expect(footer.getByRole('status')).toContainText(`1 message not sent yet · sending to ${title} in`);
+	await expect(footer.getByRole('status')).toContainText(`1 message not sent yet · it goes to ${title} once you stop typing.`);
 	const sendNow = footer.getByRole('button', { name: 'Send now', exact: true });
 	await expect(sendNow).toBeVisible();
 	expect(await visibleHeaderSends(page), 'neither Send nor its countdown shows in the header').toEqual([]);
@@ -130,7 +124,7 @@ test('@surface:doc-send-on-close keeps a switch-away grace and shows its server 
 	}));
 	expect(Math.abs(tops.review - tops.count), 'Request review shares a row with the comment count').toBeLessThanOrEqual(4);
 
-	// The footer is pinned at the drawer's foot and opaque; its whole text (the long owner name and the countdown) wraps, never clips.
+	// The footer is pinned at the drawer's foot and opaque; its whole text (the long owner name) wraps, never clips.
 	const fit = await footer.evaluate((element) => {
 		const drawer = element.closest<HTMLElement>('[data-doc-comments-drawer]')!;
 		const list = drawer.querySelector<HTMLElement>('.drawer-comments')!;
@@ -154,7 +148,7 @@ test('@surface:doc-send-on-close keeps a switch-away grace and shows its server 
 		};
 	});
 	expect(fit.labelClipped, 'Send now label is not truncated').toBeLessThanOrEqual(0.5);
-	expect(fit.textClipped, 'the owner name and the "in N min" countdown are whole').toBeLessThanOrEqual(0);
+	expect(fit.textClipped, 'the owner name and the line are whole').toBeLessThanOrEqual(0);
 	expect(fit.bottomGap, 'the footer sits on the drawer\'s bottom border').toBeLessThanOrEqual(1.5);
 	expect(fit.insideX, 'the footer stays inside the drawer').toBe(true);
 	expect(fit.belowList, 'the comment list scrolls above the footer, not under it').toBe(true);
@@ -172,8 +166,8 @@ test('@surface:doc-send-on-close at 393 px the pinned header with a pending send
 	const title = `header-fits-a-long-owner-thread-title-${Date.now()}`;
 	const threadId = await createSession(request, title);
 	const narrow = await seedDocument(request, threadId, title, 'narrow');
-	await addUserComment(request, narrow.artifactId);
-	await addUserComment(request, narrow.artifactId);
+	const waiting = [await addUserComment(request, narrow.artifactId), await addUserComment(request, narrow.artifactId)];
+	for (const id of waiting) await leaveUnsent(request, id);
 	await page.setViewportSize({ width: 393, height: 852 });
 	await page.addInitScript((state) => localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify(state)), workspaceState(threadId, [narrow], 'doc-0'));
 	await loginByUrl(page);
@@ -202,7 +196,7 @@ test('@surface:doc-send-on-close at 393 px the pinned header with a pending send
 
 	// The phone drawer ends in the footer: inside the canvas, a 44 px Send now under a coarse pointer.
 	const footer = await openUnsentFooter(page);
-	await expect(footer).toContainText(`2 messages not sent yet · they go to ${title} when you leave.`);
+	await expect(footer).toContainText(`2 messages not sent yet · they go to ${title} once you stop typing.`);
 	const send = footer.getByRole('button', { name: 'Send now', exact: true });
 	const footerBox = (await footer.boundingBox())!, sendBox = (await send.boundingBox())!;
 	expect(footerBox.x).toBeGreaterThanOrEqual(0);

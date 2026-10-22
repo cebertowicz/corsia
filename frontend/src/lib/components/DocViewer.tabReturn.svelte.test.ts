@@ -21,7 +21,6 @@ vi.mock('$lib/stores/deviceDocument', () => ({ DeviceDocument: class {
 	subscribe(listener: (copy: unknown) => void) { listener(this); return () => {}; }
 } }));
 vi.mock('$lib/stores/deviceRecovery', () => ({ readDeviceRecovery: async () => [] }));
-vi.mock('$lib/api/docFeedback', async importOriginal => ({ ...await importOriginal<typeof import('$lib/api/docFeedback')>(), returnDocFeedback: vi.fn(async () => {}) }));
 
 const notes: DocViewerTarget = { instanceId: 'tab-notes', path: '/documents/notes.md', name: 'notes.md', projectId: 'project', threadId: 'thread', artifactId: 'notes' };
 const other: DocViewerTarget = { instanceId: 'tab-other', path: '/documents/other.md', name: 'other.md', projectId: 'project', threadId: 'thread', artifactId: 'other' };
@@ -43,7 +42,7 @@ beforeEach(() => {
 		return { text: texts[id], writable: true, artifact: { id }, freshness: null };
 	});
 	api.fetchRevision.mockResolvedValue({ exists: true, writable: true, artifact_id: 'notes', freshness: null });
-	api.fetchComments.mockResolvedValue({ comments: [], feedback: { open_count: 0, owner_label: null, grace_closes_at: null, undelivered_batches: [] } });
+	api.fetchComments.mockResolvedValue({ comments: [], feedback: { open_count: 0, owner_label: null, undelivered_batches: [] } });
 });
 afterEach(async () => {
 	if (component) await unmount(component);

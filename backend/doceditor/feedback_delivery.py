@@ -16,7 +16,6 @@ from plans.public import (
     feedback_item_counts,
     load_feedback_items,
     recipient_turn_is_active,
-    unstarted_feedback_batch_id,
 )
 from registry import models as registry_models
 
@@ -36,41 +35,6 @@ class DeliveryResult:
 def _value(batch: Any, key: str) -> Any:
     return batch[key] if hasattr(batch, "keys") else getattr(batch, key)
 
-
-def join_unstarted_batch(db, comment: dict[str, Any], recipient_id: str) -> tuple[str, bool]:
-    """Add feedback to an eligible delivered task or open the next batch."""
-    from doceditor import feedback_batches, feedback_comments
-
-    author_kind = str(comment["author_kind"])
-    author_id = feedback_comments.author_id(comment)
-    artifact_id = str(comment["artifact_id"])
-    now = str(comment["created_at"])
-    batch_id = unstarted_feedback_batch_id(
-        db,
-        recipient_thread_id=recipient_id,
-        author_kind=author_kind,
-        author_id=author_id,
-        artifact_id=artifact_id,
-    )
-    delivered = batch_id is not None
-    if batch_id is None:
-        batch_id = feedback_batches._open_batch(
-            db,
-            author_kind=author_kind,
-            author_id=author_id,
-            artifact_id=artifact_id,
-            recipient_id=recipient_id,
-            now=now,
-        )
-    feedback_batches._add_comment_item(
-        db,
-        batch_id=batch_id,
-        comment_id=str(comment["id"]),
-        author_kind=author_kind,
-        now=now,
-        touch=not delivered,
-    )
-    return batch_id, delivered
 
 
 def wake_after_unselected_person_delivery(db, batch_id: str, selected: tuple[str, ...]) -> tuple[str, ...]:
@@ -171,6 +135,22 @@ def undelivered_note(
     )
 
 
+def _annotate(db, batch: Any, items: list[dict[str, Any]], recipient: str) -> None:
+    artifact = registry_models.get_artifact(str(_value(batch, "artifact_id")), db=db)
+    image_regions.annotate_delivery(
+        db, items, path=artifact["path"] if artifact else None, reader_thread_id=recipient,
+        batch_id=str(_value(batch, "id")),
+    )
+
+
+def refresh_unstarted_node(db, batch: Any) -> None:
+    """Rewrite a delivered batch's unstarted task to carry every comment it now holds, region lines included."""
+    items = load_feedback_items(db, batch)
+    recipient = str(_value(batch, "recipient_id"))
+    _annotate(db, batch, items, recipient)
+    create_feedback_node(db, recipient, batch, items=items)
+
+
 def deliver_claimed(db, batch: Any) -> DeliveryResult:
     """Deliver a batch already conditionally claimed by its state owner."""
     items = load_feedback_items(db, batch)
@@ -183,11 +163,7 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
     if problem is not None:
         undelivered_note(db, batch, problem, items=items)
         return DeliveryResult(reason=problem)
-    artifact = registry_models.get_artifact(str(_value(batch, "artifact_id")), db=db)
-    image_regions.annotate_delivery(
-        db, items, path=artifact["path"] if artifact else None, reader_thread_id=recipient,
-        batch_id=str(_value(batch, "id")),
-    )
+    _annotate(db, batch, items, recipient)
     created = create_feedback_node(db, recipient, batch, items=items)
     queued_note(db, recipient, batch, items=items)
     return DeliveryResult(

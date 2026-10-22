@@ -30,8 +30,11 @@ def artifact_id(isolated_db):
 
 
 def test_user_comment_delivers_once_and_drives_only_after_create_commits(client, isolated_db, monkeypatch):
+    from doceditor import live_runtime
     from plans import public
 
+    # This client runs no lifespan, so a manager left by an integration test's app has no loop here.
+    monkeypatch.setattr(live_runtime, "_manager", None)
     db = get_db()
     try:
         seed_thread(db, "owner")
@@ -56,7 +59,7 @@ def test_user_comment_delivers_once_and_drives_only_after_create_commits(client,
     assert drives == [["owner"]]
 
 
-@pytest.mark.parametrize("path", ["send", "leave", "return", "retry"])
+@pytest.mark.parametrize("path", ["send", "retry"])
 def test_feedback_actions_accept_bearer_header_only(client, artifact_id, path):
     response = client.post(
         f"/api/doc-feedback/{path}",
@@ -67,14 +70,14 @@ def test_feedback_actions_accept_bearer_header_only(client, artifact_id, path):
     assert response.status_code == 200, response.text
 
 
-@pytest.mark.parametrize("path", ["send", "leave", "return", "retry"])
+@pytest.mark.parametrize("path", ["send", "retry"])
 def test_feedback_actions_require_bearer_header(client, artifact_id, path):
     response = client.post(f"/api/doc-feedback/{path}", json={"artifact_id": artifact_id})
 
     assert response.status_code == 401
 
 
-def test_listing_comments_is_a_read_and_return_does_not_clear_replies(client, isolated_db):
+def test_listing_comments_does_not_change_open_feedback(client, isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner")
@@ -94,24 +97,10 @@ def test_listing_comments_is_a_read_and_return_does_not_clear_replies(client, is
             )
     finally:
         db.close()
-    headers = {"Authorization": f"Bearer {OWNER_TOKEN}"}
-    assert client.post(
-        "/api/doc-feedback/leave", headers=headers, json={"artifact_id": artifact_id},
-    ).status_code == 200
 
     listed = client.get(f"/api/artifacts/{artifact_id}/comments?token={OWNER_TOKEN}")
 
     assert listed.status_code == 200, listed.text
-    db = get_db()
-    try:
-        assert batches(db, state="open")[0]["closed_reason"] == "leave"
-        assert db.execute("SELECT COUNT(*) FROM doc_comment_thread_views").fetchone()[0] == 0
-    finally:
-        db.close()
-
-    assert client.post(
-        "/api/doc-feedback/return", headers=headers, json={"artifact_id": artifact_id},
-    ).status_code == 200
     db = get_db()
     try:
         assert batches(db, state="open")[0]["closed_reason"] is None

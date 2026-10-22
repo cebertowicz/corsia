@@ -19,12 +19,12 @@ from doceditor.feedback_state import (
     user_feedback_for_document,
 )
 from infra.database import write_transaction
+from plans.public import unstarted_feedback_batch_id
 
 log = logging.getLogger(__name__)
 
 AGENT_QUIET = 120
 USER_IDLE = 5
-USER_LEAVE_GRACE = USER_IDLE
 
 
 def _now() -> str:
@@ -96,9 +96,9 @@ def _add_comment_item(
     now: str,
     event: str | None = None,
     event_by: str | None = None,
-    touch: bool = True,
+    rearm_deadline: bool = True,
 ) -> bool:
-    """Add one comment item once and keep the batch deadline/count in sync."""
+    """Add one comment item once and keep the batch count in sync; rearm_deadline also resets its close deadline."""
     inserted = db.execute(
         """INSERT OR IGNORE INTO doc_feedback_batch_items
            (batch_id,comment_id,event,event_at,event_by) VALUES (?,?,?,?,?)""",
@@ -106,7 +106,7 @@ def _add_comment_item(
     )
     if not inserted.rowcount:
         return False
-    if touch:
+    if rearm_deadline:
         _touch_batch(db, batch_id, author_kind=author_kind, now=now, item_delta=1)
     else:
         db.execute(
@@ -117,6 +117,47 @@ def _add_comment_item(
     return True
 
 
+def join_unstarted_batch(
+    db,
+    comment: dict[str, Any],
+    recipient_id: str,
+) -> tuple[str, bool]:
+    """Add a comment to a person-comment task its recipient has not started, or open a batch.
+
+    Another author kind keeps its own quiet-close batch.
+    """
+    author_kind = str(comment["author_kind"])
+    author_id = feedback_comments.author_id(comment)
+    artifact_id = str(comment["artifact_id"])
+    now = str(comment["created_at"])
+    batch_id = None
+    if author_kind == "user":
+        batch_id = unstarted_feedback_batch_id(
+            db,
+            recipient_thread_id=recipient_id,
+            author_kind=author_kind,
+            author_id=author_id,
+            artifact_id=artifact_id,
+        )
+    delivered = batch_id is not None
+    if batch_id is None:
+        batch_id = _open_batch(
+            db,
+            author_kind=author_kind,
+            author_id=author_id,
+            artifact_id=artifact_id,
+            recipient_id=recipient_id,
+            now=now,
+        )
+    _add_comment_item(
+        db,
+        batch_id=batch_id,
+        comment_id=str(comment["id"]),
+        author_kind=author_kind,
+        now=now,
+        rearm_deadline=not delivered,
+    )
+    return batch_id, delivered
 
 
 def record_reopen(
@@ -211,16 +252,14 @@ def record_comment(
     if created:
         feedback_comments.make_user_document_durable(db, comment)
         feedback_comments.emit_comment_created(db, comment)
-        joins = [feedback_delivery.join_unstarted_batch(db, comment, recipient)
+        joins = [join_unstarted_batch(db, comment, recipient)
                  for recipient in feedback_comments.recipients(db, comment)]
         batch_ids = [batch_id for batch_id, _delivered in joins]
         delivered_joins = [(batch_id, delivered) for batch_id, delivered in joins if delivered]
         if delivered_joins:
-            from plans.public import create_feedback_node
-
             for batch_id, _delivered in delivered_joins:
                 batch = db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
-                create_feedback_node(db, str(batch["recipient_id"]), batch)
+                feedback_delivery.refresh_unstarted_node(db, batch)
         if comment["author_kind"] == "user":
             for batch_id, delivered in joins:
                 if not delivered:
@@ -332,14 +371,16 @@ def close_for_turn_end(db, thread_id: str) -> list[str]:
     return woken
 
 
-def close_due(now: str, *, db=None) -> list[str]:
-    """Deliver every due batch; one that raises rolls back alone, is logged, and retries next pass."""
+def close_due(now: str, *, db=None, artifact_id: str | None = None) -> list[str]:
+    """Deliver due batches, optionally for one document, through their persisted deadline."""
     deliveries: list[tuple[str, str]] = []
+    artifact_clause = " AND artifact_id=?" if artifact_id is not None else ""
+    params: tuple[str, ...] = (now,) if artifact_id is None else (now, artifact_id)
     with write_transaction(db, scope="close_due_doc_feedback") as connection:
         rows = connection.execute(
             """SELECT id,artifact_id,author_kind,closed_reason FROM doc_feedback_batches
-               WHERE state='open' AND closes_at<=? ORDER BY closes_at,id""",
-            (now,),
+               WHERE state='open' AND closes_at<=?""" + artifact_clause + " ORDER BY closes_at,id",
+            params,
         ).fetchall()
         woken: list[str] = []
         for row in rows:
@@ -353,34 +394,6 @@ def close_due(now: str, *, db=None) -> list[str]:
             comment_notifications.collect_due_user_delivery(deliveries, connection, row, closed)
     comment_notifications.publish_due_user_feedback(deliveries)
     return woken
-
-
-def mark_user_left(db, artifact_id: str) -> int:
-    """Start the user's leave grace period for open batches on a document."""
-    now = _now()
-    changed = db.execute(
-        """UPDATE doc_feedback_batches SET closes_at=?,closed_reason='leave',updated_at=?
-           WHERE state='open' AND author_kind='user' AND author_id=? AND artifact_id=?""",
-        (_after(now, USER_LEAVE_GRACE), now, USER_AUTHOR_ID, artifact_id),
-    )
-    return changed.rowcount
-
-
-def mark_user_returned(db, artifact_id: str) -> int:
-    """Cancel leave grace by restoring each open batch's idle deadline."""
-    rows = db.execute(
-        """SELECT id,last_item_at FROM doc_feedback_batches WHERE state='open'
-           AND author_kind='user' AND author_id=? AND artifact_id=?""",
-        (USER_AUTHOR_ID, artifact_id),
-    ).fetchall()
-    now = _now()
-    for row in rows:
-        db.execute(
-            """UPDATE doc_feedback_batches SET closes_at=?,closed_reason=NULL,updated_at=?
-               WHERE id=? AND state='open'""",
-            (_after(row["last_item_at"], USER_IDLE), now, row["id"]),
-        )
-    return len(rows)
 
 
 def retry_for_document(db, *, author_kind: str, author_id: str, artifact_id: str) -> list[str]:
