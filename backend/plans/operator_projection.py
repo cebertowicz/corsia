@@ -19,6 +19,7 @@ import plans.operator_owners as operator_owners
 import plans.pane_views as pane_views
 import plans.rollup as rollup
 import plans.service as service
+import plans.wait_summary as wait_summary
 from plans.boundary import PlanActor, _authorize_plan_scope
 
 CONTRACT_VERSION = 2
@@ -156,6 +157,18 @@ def _child_plan_ids(projected: list[rollup.PlanRollup]) -> set[str]:
     return child_ids
 
 
+def _child_waits(projected: list[rollup.PlanRollup], *, db) -> dict[str, dict]:
+    """EW4: what each waiting child plan waits for. Its state stays the child's liveness."""
+    waiting = {
+        node["child_plan"].plan["id"]
+        for item in projected
+        for node in item.nodes
+        if node["child_plan"] is not None
+        and node["child_plan"].progress.get("liveness") == "waiting"
+    }
+    return wait_summary.for_plans(db, waiting)
+
+
 def presented_plans(
     projected: list[rollup.PlanRollup], actor: PlanActor, *, db, include_archived: bool = False,
     costs: bool = True, memo: dict | None = None, lean: bool = False,
@@ -181,6 +194,7 @@ def presented_plans(
         ) if opened else None,
         titles=open_tree.PlansTitles(db, [item.tree for item in projected]) if opened else None,
     )
+    child_waits = _child_waits(projected, db=db)
     plans = []
     for item in projected:
         if item.plan["id"] in child_ids:
@@ -193,6 +207,10 @@ def presented_plans(
             item.tree,
         )
         if presented is not None:
+            for node in presented["nodes"]:
+                child = node["child"]
+                if child is not None and (wait := child_waits.get(child["plan_id"])):
+                    child["wait"] = wait
             if item.tree is not None:
                 presented["folds"] = open_folds.levels(item.tree)
                 presented["root_count"] = item.tree.plan["top_roots"]

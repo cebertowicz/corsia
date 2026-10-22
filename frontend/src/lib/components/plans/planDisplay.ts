@@ -11,7 +11,7 @@ import type {
 	ThreadPlanStateEntry,
 } from '$lib/api/plans';
 import { formatMoment, parseWsTimestamp } from '$lib/time';
-import { timedWait, waitCountdown, waitEndsAtMs } from './planWaits';
+import { outsideWaitReason, scheduledLine, timedWait, waitCountdown } from './planWaits';
 
 /** An ISO 8601 instant inside plan prose ("Waiting until 2026-09-25T12:00:00+00:00"). */
 const INSTANT = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?/g;
@@ -116,26 +116,6 @@ export function settledMoment(node: OperatorNode, now: Date = new Date()): strin
 	return Number.isFinite(ms) ? formatMoment(new Date(ms), now) || null : null;
 }
 
-/** When a timed wait ends, as a person says it: "tomorrow at 9:00 AM", or "ends in 12 min" inside the hour. */
-function endMoment(node: OperatorNode, now: Date, clock = false): string | null {
-	const ends = waitEndsAtMs(node);
-	if (ends === null) return null;
-	return waitCountdown(node, now) ?? formatMoment(new Date(ends), now, { clock });
-}
-
-/**
- * A task its agent scheduled, said as a person reads it: "tomorrow at 9:00 AM ·
- * why", or "ends in 12 min · why" inside the hour, from the wait's own
- * deadline, never the instant in the prose. Work that is running says only why,
- * because a running task is not waiting for the time.
- */
-function scheduledLine(node: OperatorNode, now: Date, running: boolean, clock = false): string | null {
-	const why = timedWait(node)?.scheduled_reason;
-	const when = endMoment(node, now, clock);
-	if (!why || when === null) return null;
-	return running ? why : `${when} · ${why}`;
-}
-
 function finishedOutcome(node: OperatorNode): string {
 	const label = nodeDisplayLabel(node);
 	switch (node.state) {
@@ -153,6 +133,9 @@ function finishedOutcome(node: OperatorNode): string {
 }
 
 function openReason(node: OperatorNode, now: Date, view?: ScheduledView): string | null {
+	// A row waiting outside the plan says what and when; its child chip says it for a delegated step (EW11).
+	const outside = outsideWaitReason(node, now);
+	if (outside !== undefined) return outside;
 	const running = node.display.label_key === 'working';
 	const scheduled = scheduledLine(node, now, running || view === 'reason', view === 'clock');
 	if (scheduled) return scheduled;
@@ -262,6 +245,7 @@ const CHAT_WORDS: Record<ThreadPlanState, string> = {
 	needs_input: 'Needs input',
 	blocked_on_you: 'Blocked on you',
 	failed: 'Failed',
+	waiting: 'Waiting',
 	paused: 'Paused',
 	idle: 'Idle',
 };

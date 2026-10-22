@@ -12,7 +12,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from plans import decisions, not_moving, operator_chat_state, operator_node_state, pane_views, service, status
+from plans import (
+    decisions, not_moving, operator_chat_state, operator_node_state, operator_projection, pane_views,
+    service, status,
+)
 from plans.boundary import PlanActor
 from tests.plan_close_next_helpers import HUMAN, plan_update, revision, task
 from tests.test_plan_reconcile_release import db, seed_threads  # noqa: F401 - fixture
@@ -659,7 +662,7 @@ def _deadline_wait(db, plan_id: str, actor: PlanActor, title: str, ends_at: str)
     }, actor=actor)
 
 
-def test_overdue_waits_keep_the_normal_idle_word_without_attention_items(db):
+def test_overdue_waits_read_waiting_without_attention_items(db):
     actor = _thread(db, "three-overdue")
     plan = _plan(db, "three-overdue")
     overdue = (datetime.now(UTC) - not_moving.OVERDUE_GRACE - timedelta(seconds=1)).isoformat()
@@ -668,7 +671,8 @@ def test_overdue_waits_keep_the_normal_idle_word_without_attention_items(db):
 
     state = _states(db, ["three-overdue"])["three-overdue"]
 
-    assert state["state"] == "idle"
+    assert state["state"] == "waiting"
+    assert state["wait"] == {"label": "it", "until": overdue, "more": 2}
     assert state["attention_items"] == []
 
 
@@ -696,7 +700,7 @@ def test_failed_work_remains_visible_when_pause_defers_a_person_hold(db):
     assert [item["kind"] for item in paused["attention_items"]] == ["failed"]
 
 
-def test_a_future_wait_is_idle(db):
+def test_a_future_wait_is_waiting(db):
     actor = _thread(db, "future-waits")
     plan = _plan(db, "future-waits")
     ends = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
@@ -704,4 +708,61 @@ def test_a_future_wait_is_idle(db):
 
     state = _states(db, ["future-waits"])["future-waits"]
 
+    assert state["state"] == "waiting"
+
+
+def test_an_outside_wait_row_reads_the_sidebar_value(db):
+    """EW11: the pane row's wait is the same server value as the thread's."""
+    actor = _thread(db, "row-wait")
+    plan = _plan(db, "row-wait")
+    ends = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    _deadline_wait(db, plan.id, actor, "Wait later", ends)
+
+    nodes = operator_projection.read_thread("row-wait", actor=HUMAN, db=db)["plans"][0]["nodes"]
+
+    assert [node["wait"] for node in nodes if "wait" in node] == [
+        _states(db, ["row-wait"])["row-wait"]["wait"],
+    ]
+
+
+def test_only_set_aside_work_is_idle_with_its_return_time(db):
+    """EW7: a set-aside row says when it comes back; it never reads Waiting."""
+    actor = _thread(db, "aside-only")
+    plan = _plan(db, "aside-only")
+    node = task(db, plan.id, "Tidy later")
+    ends = (datetime.now(UTC) + timedelta(days=2)).replace(microsecond=0).isoformat()
+    plan_update(db, plan.id, "arm_watch", {
+        "node_id": node.id, "reason": "Comes back after the release",
+        "condition": {"type": "deadline", "value": ends},
+        "expected_revision": revision(db, node.id),
+    }, actor=actor)
+
+    state = _states(db, ["aside-only"])["aside-only"]
+    nodes = operator_projection.read_thread("aside-only", actor=HUMAN, db=db)["plans"][0]["nodes"]
+
     assert state["state"] == "idle"
+    assert "wait" not in state
+    assert datetime.fromisoformat(state["set_aside_until"]) == datetime.fromisoformat(ends)
+    assert all("wait" not in row for row in nodes)
+
+
+def test_a_wait_label_adds_no_query_to_the_watch_read(db):
+    """EW3: the watched artifact's title rides the armed-watch read itself."""
+    ends = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    thread_ids = [f"title-batch-{number}" for number in range(3)]
+    for thread_id in thread_ids:
+        actor = _thread(db, thread_id)
+        _deadline_wait(db, _plan(db, thread_id).id, actor, "Wait later", ends)
+
+    statements: list[str] = []
+    db.set_trace_callback(statements.append)
+    try:
+        states = _states(db, thread_ids)
+    finally:
+        db.set_trace_callback(None)
+
+    assert {states[thread_id]["state"] for thread_id in thread_ids} == {"waiting"}
+    assert {states[thread_id]["wait"]["label"] for thread_id in thread_ids} == {"it"}
+    title_reads = [s for s in statements if "artifact_title" in s]
+    assert title_reads
+    assert all("FROM expected_event_watches w" in s for s in title_reads)

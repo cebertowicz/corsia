@@ -97,7 +97,8 @@ def armed_watches(
             columns += """,w.armed_at,w.expected_event,w.artifact_integration,
                        json_extract(e.payload_json,'$.blocked.owner_id') AS blocked_owner_id,
                        json_extract(e.payload_json,'$.blocked.reason') AS blocked_reason,
-                       json_extract(e.payload_json,'$.scheduled.reason') AS scheduled_reason"""
+                       json_extract(e.payload_json,'$.scheduled.reason') AS scheduled_reason,
+                       i.id AS artifact_id,i.title AS artifact_title"""
         for row in fetch_all(
             connection,
             f"""SELECT {columns}
@@ -105,11 +106,39 @@ def armed_watches(
                 LEFT JOIN plan_node_events e
                   ON e.node_id=w.plan_node_id AND e.event='watch_armed'
                  AND json_extract(e.payload_json,'$.watch_id')=w.id
+                LEFT JOIN artifact_identities i
+                  ON i.integration=w.artifact_integration AND i.type=w.artifact_type
+                 AND i.external_id=w.artifact_external_id
                 WHERE w.plan_node_id IN (SELECT value FROM json_each(?)) AND w.status='armed'
                 ORDER BY w.plan_node_id,w.armed_at,w.id""",
             (encoded_ids(ids),),
         ):
             found[str(row["plan_node_id"])].append(row)
+    return dict(found)
+
+
+def armed_in_plans(connection: sqlite3.Connection, plan_ids) -> dict[str, list]:
+    """Each listed plan's armed watches (``armed_watches`` rows), in two reads.
+
+    For a parent's child summaries, whose rollups list no nodes. The read is
+    driven from the few armed watches, never from a plan's node history.
+    """
+    ids = list(dict.fromkeys(str(plan_id) for plan_id in plan_ids))
+    if not ids:
+        return {}
+    plan_of = {
+        str(row["plan_node_id"]): str(row["plan_id"])
+        for row in fetch_all(
+            connection,
+            """SELECT w.plan_node_id,n.plan_id
+                FROM expected_event_watches w CROSS JOIN plan_nodes n ON n.id=w.plan_node_id
+                WHERE w.status='armed' AND n.plan_id IN (SELECT value FROM json_each(?))""",
+            (encoded_ids(ids),),
+        )
+    }
+    found: dict[str, list] = defaultdict(list)
+    for node_id, rows in armed_watches(connection, plan_of).items():
+        found[plan_of[node_id]].extend(rows)
     return dict(found)
 
 
@@ -128,6 +157,21 @@ def watch_cause(row) -> dict:
         "kind": "waiting", "reason_key": row["condition_type"], "watch_id": row["id"],
         "blocked_wait": row["blocked_owner_kind"] is not None,
         "ends_at": row["condition_value"] if row["condition_type"] == "deadline" else None,
+    }
+
+
+def named_watch_cause(row) -> dict:
+    """A full-read watch's cause with what it waits on: why, and the watched artifact.
+
+    Only the full ``armed_watches`` read selects these columns; the compact read
+    keeps ``watch_cause`` alone, so the narrow and full lifecycle parts agree.
+    """
+    return {
+        **watch_cause(row),
+        "blocked_reason": row["blocked_reason"],
+        "scheduled_reason": row["scheduled_reason"],
+        "artifact_id": row["artifact_id"],
+        "artifact_title": row["artifact_title"],
     }
 
 

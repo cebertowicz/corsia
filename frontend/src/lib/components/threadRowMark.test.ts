@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ThreadPlanStateEntry } from '$lib/api/plans';
-import { canMarkSeen, slotThreeWord } from './threadRowMark';
+import { canMarkSeen, showsWaitingGlyph, slotThreeWord, waitMarkTitle } from './threadRowMark';
 
 const idle: ThreadPlanStateEntry = { state: 'idle', label_key: null, paused: false, attention_items: [] };
 const decision = { kind: 'decision', title: 'Choose', node_id: 'n1' } as const;
@@ -36,5 +36,26 @@ describe('slotThreeWord', () => {
 
 	it('counts several decisions as to decide', () => {
 		expect(slotThreeWord({ ...idle, state: 'needs_input', attention_items: [decision, decision] })).toBe('2 to decide');
+	});
+});
+
+describe('waiting', () => {
+	const wait = { label: 'CI on PR #1193', until: new Date(Date.now() + 40 * 60_000).toISOString(), more: 0 };
+
+	it('is a glyph, never a word in slot 3', () => {
+		expect(slotThreeWord({ ...idle, state: 'waiting', wait })).toBe('');
+	});
+
+	it('draws the hourglass only when no spinner shows', () => {
+		expect(showsWaitingGlyph({ ...idle, state: 'waiting', wait }, false)).toBe(true);
+		expect(showsWaitingGlyph({ ...idle, state: 'waiting', wait }, true)).toBe(false);
+		expect(showsWaitingGlyph({ ...idle, state: 'idle' }, false)).toBe(false);
+		expect(showsWaitingGlyph(undefined, false)).toBe(false);
+	});
+
+	it('titles the glyph with what it waits for and when it checks back', () => {
+		expect(waitMarkTitle({ ...idle, state: 'waiting', wait })).toMatch(/^Waiting for CI on PR #1193 · checks back today at /);
+		expect(waitMarkTitle({ ...idle, state: 'waiting', wait: null })).toBe('');
+		expect(waitMarkTitle({ ...idle, state: 'idle', wait })).toBe('');
 	});
 });

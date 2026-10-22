@@ -32,6 +32,7 @@ from plans.scheduled_wait import PAUSE_OPERATIONS, pause_refusal
 # Continuation sources (automation/continuation/sources/*).
 from plans.scheduled_wait import wake_summary as scheduled_wake
 from plans.event_wait import wake_summary as event_wake
+from plans.not_moving import late_wake
 from plans.decision_fields import (
     PICK_ANY, PICK_ONE, answer_note, chosen_ids, pick_of, recommended_ids,
     MAX_CONTEXT as DECISION_MAX_CONTEXT,

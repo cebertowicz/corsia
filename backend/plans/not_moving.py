@@ -190,6 +190,22 @@ def _deadline(value: str) -> tuple[datetime, str] | None:
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc), value
 
 
+def late_wake(deadline: str | None, now: str) -> str | None:
+    """A late watch's wake text (EW2/EW5), or None when it fires on time.
+
+    A watch fires within ``OVERDUE_GRACE`` of its deadline in normal delivery;
+    one that fires later missed its time, so the agent is told to settle it.
+    """
+    due, fired = _deadline(str(deadline or "")), _deadline(now)
+    if due is None or fired is None or fired[0] - due[0] <= OVERDUE_GRACE:
+        return None
+    return (
+        f"This wait was due at {due[1]} and its wake came late. Resolve it if "
+        "what you waited for arrived; otherwise arm_watch it again with a new "
+        "deadline and reason."
+    )
+
+
 def deadline_range(causes: list[dict]) -> tuple[str, str] | None:
     """Earliest/latest raw deadline strings ordered by the canonical instant."""
     found = _deadlines(causes)
