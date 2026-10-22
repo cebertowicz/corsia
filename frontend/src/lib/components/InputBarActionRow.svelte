@@ -81,6 +81,8 @@
 	let queueHoldTimer: ReturnType<typeof setTimeout> | null = null;
 	let queueHolding = $state(false);
 	let queueArmed = $state(false);
+	let heldPointerId: number | null = null;
+	let heldThreadId: string | null = null;
 	let holdStartedAt = 0;
 	let holdOrigin: { x: number; y: number } | null = null;
 	let suppressClickUntil = 0;
@@ -100,6 +102,11 @@
 	const showStop = $derived(
 		isStreamingThisThread && !inputText.trim() && pendingAttachmentCount === 0,
 	);
+	const sendDisabled = $derived(
+		(!hasMessageToSend && !isStreamingThisThread)
+		|| $connectionState !== 'connected'
+		|| (!canSendToModel && hasMessageToSend),
+	);
 
 	function openControlSheet(event: MouseEvent, view: Exclude<SheetView, null>) {
 		event.preventDefault();
@@ -109,19 +116,23 @@
 
 	function beginQueueHold(event: PointerEvent) {
 		if (!hasMessageToSend || !canSendToModel || queueHoldTimer) return;
+		const pointerId = event.pointerId;
 		queueArmed = false;
 		queueHolding = true;
+		heldPointerId = pointerId;
+		heldThreadId = threadId;
 		holdStartedAt = Date.now();
 		holdOrigin = { x: event.clientX, y: event.clientY };
 		// Explicit capture keeps the gesture bound to this button for its whole
 		// life, so travel is judged by distance rather than by boundary events —
 		// which is what let a 40px target disarm itself under a steady thumb.
 		const target = event.currentTarget as HTMLElement | null;
-		if (target && typeof event.pointerId === 'number') {
-			try { target.setPointerCapture(event.pointerId); } catch { /* not captureable */ }
+		if (target) {
+			try { target.setPointerCapture(pointerId); } catch { /* document sees terminal events */ }
 		}
 		queueHoldTimer = setTimeout(() => {
 			queueHoldTimer = null;
+			if (!queueHolding || heldPointerId !== pointerId) return;
 			queueArmed = true;
 			haptics.threshold();
 		}, QUEUE_ARM_MS);
@@ -132,6 +143,8 @@
 		queueHoldTimer = null;
 		queueArmed = false;
 		queueHolding = false;
+		heldPointerId = null;
+		heldThreadId = null;
 		holdOrigin = null;
 	}
 
@@ -161,6 +174,12 @@
 		queueAfterTurn();
 	}
 
+	function finishQueueHoldFromDocument(event: PointerEvent) {
+		if (event.pointerId !== heldPointerId) return;
+		if (event.type === 'pointerup') completeQueueHold();
+		else abandonQueueHold();
+	}
+
 	/**
 	 * Finish a hold the platform took away from us.
 	 *
@@ -182,10 +201,20 @@
 		}
 		onSendClick();
 	}
+
+	$effect(() => {
+		if (queueHolding && (sendDisabled || !hasMessageToSend || heldThreadId !== threadId)) {
+			cancelQueueHold();
+		}
+	});
 </script>
 
 <svelte:window onblur={cancelQueueHold} />
-<svelte:document onvisibilitychange={cancelHoldIfHidden} />
+<svelte:document
+	onpointerupcapture={finishQueueHoldFromDocument}
+	onpointercancelcapture={finishQueueHoldFromDocument}
+	onvisibilitychange={cancelHoldIfHidden}
+/>
 
 <div class="action-row">
 	<button
@@ -298,7 +327,7 @@
 		onlostpointercapture={abandonQueueHold}
 		oncontextmenu={(event) => event.preventDefault()}
 		onclick={handleSendClick}
-		disabled={(!hasMessageToSend && !isStreamingThisThread) || $connectionState !== 'connected' || (!canSendToModel && hasMessageToSend)}
+		disabled={sendDisabled}
 		aria-label={queueArmed
 			? 'Release to queue after the current turn'
 			: isStreamingThisThread && !hasMessageToSend

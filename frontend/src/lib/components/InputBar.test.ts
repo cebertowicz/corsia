@@ -962,6 +962,102 @@ describe('InputBar model readiness at the action seam', () => {
 		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
 	});
 
+	it('finishes an armed hold from document pointerup when the button misses the release', async () => {
+		activeThreadId.set('thread-1');
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		await component.setText('hold this');
+		const send = host.querySelector<HTMLButtonElement>('.send-btn')!;
+
+		vi.useFakeTimers();
+		send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 7 }));
+		vi.advanceTimersByTime(ARM_MS);
+		flushSync();
+		expect(send.classList.contains('queue-armed')).toBe(true);
+
+		document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7 }));
+		flushSync();
+		vi.useRealTimers();
+		expect(send.classList.contains('queue-armed')).toBe(false);
+		expect(send.classList.contains('queue-holding')).toBe(false);
+		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
+		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
+			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn',
+		);
+	});
+
+	it('clears a hold when the send button becomes disabled', async () => {
+		activeThreadId.set('thread-1');
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		await component.setText('hold this');
+		const send = host.querySelector<HTMLButtonElement>('.send-btn')!;
+
+		vi.useFakeTimers();
+		send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 8 }));
+		vi.advanceTimersByTime(ARM_MS);
+		connectionState.set('disconnected');
+		flushSync();
+		vi.useRealTimers();
+		expect(send.disabled).toBe(true);
+		expect(send.classList.contains('queue-armed')).toBe(false);
+		expect(send.classList.contains('queue-holding')).toBe(false);
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+	});
+
+	it('clears a hold when its input is emptied', async () => {
+		activeThreadId.set('thread-1');
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		await component.setText('hold this');
+		const send = host.querySelector<HTMLButtonElement>('.send-btn')!;
+
+		vi.useFakeTimers();
+		send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9 }));
+		vi.advanceTimersByTime(ARM_MS);
+		await component.setText('');
+		flushSync();
+		vi.useRealTimers();
+		expect(send.classList.contains('queue-armed')).toBe(false);
+		expect(send.classList.contains('queue-holding')).toBe(false);
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+	});
+
+	it('clears a hold when its thread changes', async () => {
+		activeThreadId.set('thread-1');
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		await component.setText('hold this');
+		const send = host.querySelector<HTMLButtonElement>('.send-btn')!;
+
+		vi.useFakeTimers();
+		send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 10 }));
+		vi.advanceTimersByTime(ARM_MS);
+		activeThreadId.set('thread-2');
+		flushSync();
+		vi.useRealTimers();
+		expect(send.classList.contains('queue-armed')).toBe(false);
+		expect(send.classList.contains('queue-holding')).toBe(false);
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+	});
+
+	it('sends an ordinary tap once after document-level release handling', async () => {
+		activeThreadId.set('thread-1');
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		await component.setText('ordinary send');
+		const send = host.querySelector<HTMLButtonElement>('.send-btn')!;
+
+		send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 11 }));
+		document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 11 }));
+		send.click();
+
+		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
+		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
+			'thread-1', 'ordinary send', 'network/model', [], undefined,
+		);
+	});
+
 	it('treats lost pointer capture like pointercancel and queues once', async () => {
 		// Capture lost is the platform taking the touch: past the arm delay the
 		// gesture is made, as for pointercancel; before it, nothing is sent. The
