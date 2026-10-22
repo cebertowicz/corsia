@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 import tempfile
 from unittest.mock import AsyncMock
 
@@ -18,6 +19,9 @@ from tools.shell_environment import safehouse_subprocess_env, shell_env_pass_nam
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    # A fresh Mac has none of these; a runner or developer machine may, which must not change what is fetched.
+    real_which = shutil.which
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: None if name in managed_runtime.COMMAND_RUNTIME else real_which(name, *a, **k))
     return tmp_path
 
 
