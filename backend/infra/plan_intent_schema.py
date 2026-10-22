@@ -11,10 +11,7 @@ PLAN_INTENT_SCHEMA_SQL = """
         quote TEXT NOT NULL CHECK (length(trim(quote)) > 0),
         role TEXT NOT NULL CHECK (role IN ('origin', 'bears_on', 'authority')),
         requirements_revision INTEGER NOT NULL CHECK (requirements_revision > 0),
-        added_at TEXT NOT NULL,
-        removed_at TEXT,
-        removed_in_revision INTEGER,
-        CHECK ((removed_at IS NULL) = (removed_in_revision IS NULL))
+        added_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_plan_node_intent_words_node
         ON plan_node_intent_words(node_id);

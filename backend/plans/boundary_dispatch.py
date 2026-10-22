@@ -120,7 +120,7 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow_version
         )
         node = service.add_node(plan_id, **created, **common) if operation == "add" else mutations.insert_node(plan_id, **created, **common)
         user_step_instructions.link_requested(node.id, params, actor, db=db)
-        intent_creation.capture(db, plan_id, node, resolved_words, actor=actor)
+        intent_creation.capture(db, node, resolved_words, actor=actor)
         if "depends_on_node_id" in params:
             from plans import dependencies
 

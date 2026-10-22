@@ -27,10 +27,10 @@ def db(isolated_db, monkeypatch):
         connection.close()
 
 
-def _thread(db, thread_id: str, project: str | None = PROJECT) -> str:
+def _thread(db, thread_id: str, project: str | None = PROJECT, user: str = "u-test") -> str:
     db.execute(
         "INSERT INTO threads (id,user_id,project_id,model,title,created_at,updated_at) "
-        "VALUES (?,'u-test',?,'claude-code/opus',?,'t','t')", (thread_id, project, thread_id),
+        "VALUES (?,?,?,'claude-code/opus',?,'t','t')", (thread_id, user, project, thread_id),
     )
     db.commit()
     return thread_id
@@ -236,36 +236,34 @@ def test_the_words_are_bounded_in_the_wake(db):
     assert words.startswith(SAID) and len(words.encode()) <= person_input.WORDS_MAX_BYTES
 
 
-def _quote(db, node: str, text: str, *, removed: bool = False) -> None:
+def _quote(db, node: str, text: str) -> None:
     db.execute(
         """INSERT INTO plan_node_intent_words
-           (node_id,author,source_kind,source_id,quote,role,requirements_revision,added_at,removed_at,removed_in_revision)
-           VALUES (?,'person','message','src',?,'bears_on',1,'t',?,?)""",
-        (node, text, "t2" if removed else None, 1 if removed else None),
+           (node_id,author,source_kind,source_id,quote,role,requirements_revision,added_at)
+           VALUES (?,'person','message','src',?,'bears_on',1,'t')""",
+        (node, text),
     )
     db.commit()
 
 
-def test_a_quoted_word_counts_until_it_is_removed(db):
+def test_a_quoted_word_counts_toward_the_match(db):
     node = _task(db, _thread(db, "owner"), EXPORT, criteria="done")
-    _quote(db, node, "ledger reconciliation nightly")
     _say(db, _thread(db, "speaker"), "Rebuild invoice ledger reconciliation please")
+    assert _hear(db, "message", "m1") == []
+
+    _quote(db, node, "ledger reconciliation nightly")
 
     assert len(_hear(db, "message", "m1")) == 1
 
-    db.execute("DELETE FROM messages WHERE id LIKE 'plan-wake:%'")
-    db.execute("UPDATE plan_node_intent_words SET removed_at='t2',removed_in_revision=1")
-    db.commit()
 
-    assert _hear(db, "message", "m1") == []
+def test_project_less_words_reach_only_the_same_persons_project_less_tasks(db):
+    mine = _task(db, _thread(db, "mine", project=None), EXPORT)
+    _task(db, _thread(db, "theirs", project=None, user="u-other"), EXPORT)
+    _say(db, _thread(db, "speaker", project=None), SAID)
 
+    source = person_input.load(db, "message", "m1")
 
-def test_a_removed_quote_is_not_used_even_when_it_was_there_from_the_start(db):
-    node = _task(db, _thread(db, "owner"), EXPORT, criteria="done")
-    _quote(db, node, "ledger reconciliation nightly", removed=True)
-    _say(db, _thread(db, "speaker"), "Rebuild invoice ledger reconciliation please")
-
-    assert _hear(db, "message", "m1") == []
+    assert [str(node["id"]) for node in person_input.text_candidates(db, source)] == [mine]
 
 
 def test_the_hook_schedules_matching_and_returns_before_it_runs(db, monkeypatch):

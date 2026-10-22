@@ -216,8 +216,7 @@ def has_person_origin(connection: sqlite3.Connection, turn_id: str | None) -> bo
     ))
 
 
-def capture_origin(connection: sqlite3.Connection, plan_id: str, node_id: str, *, turn_id: str | None,
-                   actor_id: str | None, revision: int) -> bool:
+def capture_origin(connection: sqlite3.Connection, node_id: str, *, turn_id: str | None, revision: int) -> bool:
     """Append every input consumed by this turn and report whether one is human-authored."""
     if turn_id is None:
         return False
@@ -283,12 +282,12 @@ def newest(connection: sqlite3.Connection, node_id: str, *, limit: int = MAX_WOR
     """Return recent words while retaining the task's origin or authority."""
     anchor = connection.execute(
         """SELECT rowid,author,role,quote,added_at FROM plan_node_intent_words
-           WHERE node_id=? AND removed_at IS NULL AND role IN ('authority','origin')
+           WHERE node_id=? AND role IN ('authority','origin')
            ORDER BY added_at DESC,rowid DESC LIMIT 1""", (node_id,),
     ).fetchone()
     recent = connection.execute(
         """SELECT rowid,author,role,quote,added_at FROM plan_node_intent_words
-           WHERE node_id=? AND removed_at IS NULL AND rowid IS NOT ?
+           WHERE node_id=? AND rowid IS NOT ?
            ORDER BY added_at DESC,rowid DESC LIMIT ?""",
         (node_id, None if anchor is None else anchor["rowid"], limit - (1 if anchor is not None else 0)),
     ).fetchall()

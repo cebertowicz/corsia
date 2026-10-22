@@ -306,7 +306,7 @@ def test_a_long_person_origin_is_kept_within_the_quote_limit(db):
     db.execute("UPDATE messages SET active_turn_id='long-turn' WHERE id='long-row'")
     node = service.add_node(plan.id, kind="task", title="Long", acceptance_criteria="Kept", intent="Keep it", db=db)
 
-    assert intent_words.capture_origin(db, plan.id, node.id, turn_id="long-turn", actor_id=None, revision=1)
+    assert intent_words.capture_origin(db, node.id, turn_id="long-turn", revision=1)
     quote = db.execute("SELECT quote FROM plan_node_intent_words WHERE node_id=?", (node.id,)).fetchone()["quote"]
     assert quote == "é" * (intent_words.MAX_QUOTE_BYTES // 2)
 

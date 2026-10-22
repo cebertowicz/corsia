@@ -4,7 +4,8 @@
 schedules ``hear`` on the DB pool and returns, so it can never raise into or
 slow the send, comment or answer. ``hear`` finds the running canonical tasks the
 words may bear on (explicit links first, then a text match above ``TEXT_BAR``)
-and appends one ``INTENT_INPUT`` wake per task owner through ``plan_wake``.
+and appends one ``INTENT_INPUT`` wake per matched task (at most ``MAX_WAKES``)
+through ``plan_wake``.
 """
 
 from __future__ import annotations
@@ -169,7 +170,7 @@ def _picked(db, source: Source) -> list[tuple]:
             continue
         ordered.setdefault(str(node["id"]), node)
     explicit = list(ordered.values())
-    candidates = [node for node in text_candidates(db, source.project_id) if str(node["id"]) not in ordered]
+    candidates = [node for node in text_candidates(db, source) if str(node["id"]) not in ordered]
     cleared = [
         (hit, node) for node, hit in scored(db, candidates, source.words) if clears(hit, TEXT_BAR)
     ]
@@ -177,13 +178,14 @@ def _picked(db, source: Source) -> list[tuple]:
     return running(db, explicit + [node for _hit, node in cleared])
 
 
-def text_candidates(db, project_id: str | None) -> list:
-    """Every started canonical task in the project's plans (running is decided after).
+def text_candidates(db, source: Source) -> list:
+    """Every started canonical task in the source's project, of the same person (running is decided after).
 
-    Bound: the in-work canonical tasks of one project, no more. There is no
-    LIMIT, since one could drop the task the words match; ``hear`` scores them
-    on a read connection, never inside the write transaction. Who may hear
-    the words is decided per owner in ``_wake``.
+    Bound: the in-work canonical tasks of one project, or of the person's
+    project-less plans, no more. There is no LIMIT, since one could drop the
+    task the words match; ``hear`` scores them on a read connection, never
+    inside the write transaction. Who may hear the words is still decided per
+    owner in ``_wake``.
     """
     return db.execute(
         f"""SELECT n.* FROM plan_nodes n JOIN plans p ON p.id=n.plan_id
@@ -193,7 +195,8 @@ def text_candidates(db, project_id: str | None) -> list:
               AND p.state='active'
               AND (CASE p.owner_kind WHEN 'thread' THEN t.project_id
                                      WHEN 'project_scope' THEN p.owner_id END) IS ?
-            ORDER BY n.id""", (project_id,),
+              AND (p.owner_kind<>'thread' OR t.user_id=(SELECT user_id FROM threads WHERE id=?))
+            ORDER BY n.id""", (source.project_id, source.thread_id),
     ).fetchall()
 
 
@@ -228,7 +231,7 @@ def _quotes(db, node_ids: list[str]) -> dict[str, str]:
 
     rows = db.execute(
         """SELECT node_id,quote FROM plan_node_intent_words
-           WHERE removed_at IS NULL AND node_id IN (SELECT value FROM json_each(?))
+           WHERE node_id IN (SELECT value FROM json_each(?))
            ORDER BY node_id,added_at,rowid""", (json.dumps(node_ids),),
     ).fetchall()
     quotes: dict[str, list[str]] = {}
