@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from infra import setup_marker
+import infra.setup_marker as setup_marker  # mypy resolves a new submodule only this way
 from infra.database import write_transaction
 from infra.settings import get_setting, set_setting
 

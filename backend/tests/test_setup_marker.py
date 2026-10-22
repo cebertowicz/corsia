@@ -12,7 +12,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from infra import accounts, config, setup_marker, setup_progress  # noqa: E402
+import infra.setup_marker as setup_marker  # noqa: E402  # mypy resolves a new submodule only this way
+from infra import accounts, config, setup_progress  # noqa: E402
 from infra.database import get_db, write_transaction  # noqa: E402
 from infra.user_profile import PROFILE_RELATIVE_PATH  # noqa: E402
 

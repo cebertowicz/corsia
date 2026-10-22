@@ -59,7 +59,8 @@ def record_created_file(relative: str, sha256: str) -> None:
     data = _own_marker()
     if data is None:
         return
-    files = data.get("files") if isinstance(data.get("files"), dict) else {}
+    recorded = data.get("files")
+    files = recorded if isinstance(recorded, dict) else {}
     data = {**data, "workspace": str(config.WORKSPACE), "files": {**files, relative: sha256}}
     path = marker_path()
     staged = path.with_name(f"{MARKER_FILE}.tmp")

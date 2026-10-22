@@ -31,7 +31,8 @@ import secrets
 import sqlite3
 from datetime import timedelta
 
-from infra import setup_marker, user_profile
+import infra.setup_marker as setup_marker  # mypy resolves a new submodule only this way
+from infra import user_profile
 from infra.account_validation import AccountError, FirstAccountExists, normalize_username, require_password
 from infra.database import get_db, write_transaction
 from infra.passwords import hash_password, verify_password
