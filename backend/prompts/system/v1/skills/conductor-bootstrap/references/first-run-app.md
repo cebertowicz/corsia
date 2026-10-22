@@ -65,7 +65,7 @@ This message asks nothing, so don't end your turn on it: post the first step tha
    - **Neither:** post `Got it. Your agents keep their improvements here and don't take the community's. Ask me any time to change that.` and skip the rest of this step: no GitHub.
    - **Only use:** no GitHub question. Skip the rest of this step.
    - **Use and share, or only share, and not `github_ready`:** post `Sharing goes through GitHub, a free website where people share code. CORSIA's community keeps what it shares there. Do you have a GitHub account?` Then wait for **Yes**, **No** or **Not now**. When `github_ready`, skip the rest of this step: the account is already set up.
-     - **Yes:** post `Should your agents use your account, or have their own? Their own is allowed. GitHub's terms let each person run one free machine account besides their own. You accept GitHub's terms for it, and you're responsible for what it does. It keeps their posts apart from yours.` Then raise the decision titled `How should your agents post on GitHub?`, unchanged.
+     - **Yes:** post `Should your agents use your account, or have their own? Their own is allowed. You accept GitHub's terms for it, and you're responsible for what it does. It keeps their posts apart from yours.` Then raise the decision titled `How should your agents post on GitHub?`, unchanged.
      - **No:** post `Your agents can have their own account. You'd accept GitHub's terms, type its password and enter a code from your email. I never see them.` Then raise the decision titled `Make an account for your agents on GitHub?`, unchanged.
      - **Not now:** `Ask me any time.`
 

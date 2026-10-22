@@ -365,7 +365,7 @@ def test_github_comes_only_on_a_yes_to_sharing_and_answers_the_bot_account_quest
 
     assert "When `github_ready`, skip the rest of this step" in github
     assert github.index("Do you have a GitHub account?") < github.index("Should your agents use your account, or have their own?")
-    assert "Their own is allowed. GitHub's terms let each person run one free machine account besides their own." in github
+    assert "Their own is allowed. You accept GitHub's terms for it" in github and "machine account besides" not in github
     assert "Your agents can have their own account. You'd accept GitHub's terms, type its password and enter a code from your email. I never see them." in github
 
 
