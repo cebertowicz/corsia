@@ -77,6 +77,8 @@
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
 	let localStartError = $state<'other' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
+	// The pre-start (pick, then start) is under way, so the local row shows progress instead of a Download button.
+	let localPreparing = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	// The subscriptions answer; null until answered (or skipped, or a resumed setup), when every CLI row shows.
 	let picks = $state<SetupPicks | null>(null), confirmLocalStop = $state(false), localOffFailed = $state<{ reference?: string } | undefined>();
@@ -131,7 +133,7 @@
 			const works = catalog.some((row) => row.connection === vendor && setupModelWorks(row));
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, pill: works ? { state: 'success', label: 'Ready' } : undefined });
 		});
-		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
+		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localPick.pick?.state === 'checking', ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
 			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed,
 			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
 			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() })));
@@ -140,7 +142,7 @@
 			pill: provider ? { state: 'success', label: 'Ready' } : undefined, action: provider ? undefined : { label: 'Add provider', run: () => { showAdd = true; } } });
 		return rows;
 	});
-	const finishNote = $derived(setupStartNote(canFinish, eligible, downloading, local?.download_eta_seconds));
+	const finishNote = $derived(setupStartNote(canFinish, eligible, downloading || localPreparing, local?.download_eta_seconds));
 	type View = { title: string; lede?: string; primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean }; onPrimary?: () => void };
 	const view = $derived.by((): View => {
 		if (page === 'connect') return remote.view;
@@ -184,7 +186,10 @@
 			if (status.classifier) classifier.accept(status.classifier);
 			if (status.macos_supported === false) { page = 'hard-stop'; return; }
 			page = 'account'; void classifier.start();
-			if (eligible) { await localPick.start(); await startLocal(); await readLocalProgress(); }
+			if (eligible) {
+				localPreparing = true;
+				try { await localPick.start(); await startLocal(); await readLocalProgress(); } finally { localPreparing = false; }
+			}
 		} catch { statusError = 'Something went wrong while starting. Try again, or save a report to send.'; page = 'error'; }
 	}
 	async function checkLocal() {
