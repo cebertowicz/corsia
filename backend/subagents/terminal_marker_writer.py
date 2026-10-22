@@ -1,9 +1,10 @@
-"""Durable writers for the rows that end a Codex Turn.
+"""Durable writers for the rows that end a harness Turn.
 
-`insert_terminal_marker` persists a terminal marker, stamping the error kinds with
-their reference. `record_provider_tool_violation` handles a provider-native tool
-event: it marks the live provider context untrusted, writes one
-`tool_boundary_violation` row and raises to end the Turn.
+`insert_terminal_marker` persists a Codex or Claude Code terminal marker,
+stamping the error kinds and a failed `result` with their reference.
+`record_provider_tool_violation` handles a Codex provider-native tool event: it
+marks the live provider context untrusted, writes one `tool_boundary_violation`
+row and raises to end the Turn.
 """
 
 from __future__ import annotations
@@ -12,8 +13,7 @@ import uuid
 from typing import Callable
 
 from infra.db_async import run_in_db
-from infra.turn_errors import insert_turn_error
-from infra.focus_rows import ERROR_SYSTEM_TYPES
+from infra.turn_errors import insert_turn_error, needs_reference
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_message_rows
 
@@ -72,8 +72,8 @@ def insert_terminal_marker(
     created_at: str,
     db=None,
 ) -> str:
-    """Persist an ordinary marker or one of the terminal error kinds."""
-    if metadata.get("type") in ERROR_SYSTEM_TYPES:
+    """Persist an ordinary marker or a Turn-ending failure."""
+    if needs_reference(metadata):
         return insert_turn_error(
             insert_message_fn, thread_id, content, metadata,
             turn_id=metadata.get("turn_id"), msg_id=msg_id, created_at=created_at, db=db,

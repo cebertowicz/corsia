@@ -26,6 +26,7 @@ from subagents.cc_runtime_errors import (
     is_empty_text_block_rejection,
     reconcile_expired_login,
 )
+from subagents.terminal_marker_writer import insert_terminal_marker
 
 log = logging.getLogger("subagents.cc_runtime_events")
 
@@ -171,8 +172,8 @@ async def _insert_result_marker(
     try:
         await run_in_db_unless_owned(
             ctx.db,
-            insert_message,
-            ctx.child_id, "system", content, metadata,
+            insert_terminal_marker,
+            insert_message, ctx.child_id, content, metadata,
             msg_id=candidate, created_at=created_at, db=ctx.db,
         )
     except Exception as exc:

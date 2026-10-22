@@ -19,6 +19,7 @@ from infra.turn_errors import (
     apply_error_next_steps,
     insert_turn_error,
     last_turn_error_id,
+    needs_reference,
 )
 from infra.failure_reference import REFERENCE
 from infra.queries import insert_message
@@ -53,11 +54,13 @@ def _error(
     return {"id": message_id, "metadata": metadata}
 
 
-def _turn(db, turn_id: str, status: str = "error") -> None:
+def _turn(
+    db, turn_id: str, status: str = "error", started_at: str = "2000-01-01T00:00:00.000001",
+) -> None:
     db.execute(
         "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,"
-        "ended_at,boot_epoch) VALUES (?,'t',0,'m',?,'x',?,'b')",
-        (turn_id, status, None if status == "running" else "y"),
+        "ended_at,boot_epoch) VALUES (?,'t',0,'m',?,?,?,'b')",
+        (turn_id, status, started_at, None if status == "running" else "y"),
     )
 
 
@@ -412,10 +415,100 @@ def test_last_turn_error_queries_seek_their_indexes_without_sorting():
         placeholders = ",".join("?" for _ in ERROR_TYPES)
         for sql, params, index in (
             (_LATEST_TURN_SQL, ("t",), "idx_active_turns_session"),
-            (_LAST_TURN_ERROR_SQL.format(placeholders=placeholders), ("t", *ERROR_TYPES),
-             "idx_messages_session_seq"),
+            (_LAST_TURN_ERROR_SQL.format(placeholders=placeholders),
+             ("t", "2000-01-01T00:00:00", *ERROR_TYPES), "idx_messages_session (thread_id=? AND created_at>?)"),
         ):
             plan = db.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()
             detail = " ".join(str(row[3]) for row in plan)
             assert index in detail
             assert "TEMP B-TREE" not in detail
+
+
+def test_a_failed_turn_without_an_error_row_reads_only_its_own_rows():
+    with closing(_db()) as db:
+        _turn(db, "turn-1")
+        db.execute(
+            "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq) "
+            "VALUES ('old','t','system','boom','{\"type\":\"llm_error\",\"turn_id\":\"turn-1\"}',"
+            "'2000-01-01T00:00:01',1)",
+        )
+        _turn(db, "turn-2", started_at="2000-01-02T00:00:00.5")
+        db.execute(
+            "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq) "
+            "VALUES ('same-second','t','assistant','hi','{}','2000-01-02T00:00:00+00:00',2)",
+        )
+
+        assert last_turn_error_id(db, "t") is None
+        rows = db.execute(
+            _LAST_TURN_ERROR_SQL.format(placeholders=",".join("?" for _ in ERROR_TYPES)),
+            ("t", "2000-01-02T00:00:00.5", *ERROR_TYPES),
+        ).fetchall()
+        assert rows == []
+
+        db.execute(
+            "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq) "
+            "VALUES ('new','t','system','boom','{\"type\":\"cc_error\",\"turn_id\":\"turn-2\"}',"
+            "'2000-01-02T00:00:00+00:00',3)",
+        )
+        assert last_turn_error_id(db, "t") == "new"
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ({"type": "result", "is_error": True, "stop_reason": "error"}, True),
+        ({"type": "result", "is_error": True}, True),
+        ({"type": "result", "is_error": True, "stop_reason": "interrupted"}, False),
+        ({"type": "result", "is_error": False, "interrupted": True}, False),
+        ({"type": "result", "is_error": False}, False),
+        ({"type": "turn_cancelled"}, False),
+        *(({"type": kind}, True) for kind in ERROR_TYPES),
+    ],
+)
+def test_a_failed_provider_result_needs_a_reference_and_a_stop_does_not(metadata, expected):
+    assert needs_reference(metadata) is expected
+
+
+@pytest.mark.asyncio
+async def test_harness_result_failures_store_a_reference_and_one_log_line():
+    from subagents.cc_event_result import _insert_result_marker
+    from subagents.terminal_marker_writer import insert_terminal_marker
+
+    with closing(_db()) as db:
+        lines: list[str] = []
+        sink = logger.add(lines.append, format="{message}")
+        try:
+            cc_failed, _ = await _insert_result_marker(
+                SimpleNamespace(db=db, child_id="t"), "usage limit",
+                {"type": "result", "is_error": True, "turn_id": "turn-cc"},
+            )
+            cc_stopped, _ = await _insert_result_marker(
+                SimpleNamespace(db=db, child_id="t"), "",
+                {"type": "result", "is_error": True, "stop_reason": "interrupted", "turn_id": "turn-cc"},
+            )
+            codex_failed = insert_terminal_marker(
+                insert_message, "t", "codex failed",
+                {"codex": True, "type": "result", "is_error": True, "turn_id": "turn-codex"},
+                msg_id="codex-failed", created_at="2000-01-01T00:00:00", db=db,
+            )
+            codex_done = insert_terminal_marker(
+                insert_message, "t", "",
+                {"codex": True, "type": "result", "is_error": False, "turn_id": "turn-codex"},
+                msg_id="codex-done", created_at="2000-01-01T00:00:00", db=db,
+            )
+        finally:
+            logger.remove(sink)
+
+        stored = {
+            row["id"]: json.loads(row["metadata"])
+            for row in db.execute("SELECT id, metadata FROM messages WHERE thread_id='t'")
+        }
+
+    assert _is_turn_reference(stored[cc_failed]["reference"])
+    assert _is_turn_reference(stored[codex_failed]["reference"])
+    assert (stored[cc_failed]["turn_id"], stored[codex_failed]["turn_id"]) == ("turn-cc", "turn-codex")
+    assert "reference" not in stored[cc_stopped]
+    assert "reference" not in stored[codex_done]
+    logged = [line for line in lines if line.startswith("turn_error ")]
+    assert len(logged) == 2
+    assert all("kind=result" in line for line in logged)

@@ -23,15 +23,35 @@ from infra.focus_rows import ERROR_SYSTEM_TYPES
 # The thread's latest Turn: one index seek, so a thread whose latest Turn did
 # not fail never reads its messages.
 _LATEST_TURN_SQL = (
-    "SELECT id, status FROM active_turns WHERE thread_id=? ORDER BY rowid DESC LIMIT 1"
+    "SELECT id, status, started_at FROM active_turns WHERE thread_id=? "
+    "ORDER BY rowid DESC LIMIT 1"
 )
-# The newest error row, read only once that Turn failed; it ended the Turn, so
-# it sits at the tail of the sequence walk.
+# The newest error row, read only once that Turn failed, and only among rows
+# written since the second it started: a failed Turn with no error row (a
+# provider `result` failure) reads that Turn's rows, never the whole thread.
+# Comparing to the second keeps naive and '+00:00' UTC stamps comparable.
 _LAST_TURN_ERROR_SQL = (
     "SELECT id, json_extract(metadata, '$.turn_id') AS turn_id FROM messages "
-    "WHERE thread_id=? AND role='system' AND seq IS NOT NULL AND json_valid(metadata) "
-    "AND json_extract(metadata, '$.type') IN ({placeholders}) ORDER BY seq DESC LIMIT 1"
+    "WHERE thread_id=? AND created_at >= substr(?, 1, 19) AND role='system' "
+    "AND seq IS NOT NULL AND json_valid(metadata) "
+    "AND json_extract(metadata, '$.type') IN ({placeholders}) "
+    "ORDER BY created_at DESC LIMIT 1"
 )
+
+
+def needs_reference(metadata: dict) -> bool:
+    """Whether a row ends its Turn as a system failure a person may quote.
+
+    The error kinds, and a provider `result` that failed for a reason other
+    than the person's Stop.
+    """
+    kind = metadata.get("type")
+    if kind in ERROR_SYSTEM_TYPES:
+        return True
+    return (
+        kind == "result" and metadata.get("is_error") is True
+        and metadata.get("stop_reason") != "interrupted"
+    )
 
 
 def insert_turn_error(
@@ -94,6 +114,6 @@ def last_turn_error_id(db, thread_id: str) -> str | None:
     placeholders = ",".join("?" for _ in ERROR_SYSTEM_TYPES)
     row = db.execute(
         _LAST_TURN_ERROR_SQL.format(placeholders=placeholders),
-        (thread_id, *ERROR_SYSTEM_TYPES),
+        (thread_id, turn[2], *ERROR_SYSTEM_TYPES),
     ).fetchone()
     return None if row is None or row[1] != turn[0] else str(row[0])
