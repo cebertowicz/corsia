@@ -127,8 +127,8 @@ impl StartFreshError {
 }
 
 /// Said after the files are back when the earlier install did not start again.
-const NOT_STARTED: &str = "CORSIA couldn’t start your earlier install again, so it’s stopped now. \
-                           Choose Retry to move it into a backup again.";
+const NOT_STARTED: &str = "CORSIA couldn’t start your earlier install again, so it isn’t running. \
+                           Choose Retry to try Start fresh again.";
 
 /// The earlier install's service. Production asks launchd and the checkout's own
 /// script; unit tests use a fake, so no test reaches launchd.
@@ -521,7 +521,7 @@ pub fn start_fresh(
     });
     if let Err(error) = stopped {
         progress(Phase::StartingExisting);
-        let back = "CORSIA couldn’t stop your earlier install, so it left everything where it was.";
+        let back = "CORSIA couldn’t finish stopping your earlier install, so it left everything where it was.";
         return Err(undo(app_dir, &journal, old, back, error));
     }
 
@@ -1027,7 +1027,7 @@ mod tests {
         let error = result.unwrap_err();
         assert!(error.restored, "{error:?}");
         assert!(error.message.contains("put it all back"));
-        assert!(!error.message.contains("stopped now"), "{}", error.message);
+        assert!(!error.message.contains("isn’t running"), "{}", error.message);
         assert!(error.details.contains("com.cebertowicz.corsia"), "{}", error.details);
         assert_eq!(home.files(), before, "the earlier install is whole again");
         assert!(home.backups().is_empty(), "the empty backup folder is removed");
@@ -1060,7 +1060,7 @@ mod tests {
         let error = run(&home, &mut service).unwrap_err();
 
         assert!(error.restored);
-        assert!(error.message.contains("couldn’t stop"));
+        assert!(error.message.contains("couldn’t finish stopping"));
         assert_eq!(home.files(), before);
         assert!(home.backups().is_empty());
         assert!(!journal_path(&home.app_dir()).exists());
@@ -1091,8 +1091,8 @@ mod tests {
         let error = run(&home, &mut service).unwrap_err();
 
         assert!(error.restored, "the files are where they were");
-        assert!(error.message.contains("couldn’t stop"), "{}", error.message);
-        assert!(error.message.contains("stopped now"), "{}", error.message);
+        assert!(error.message.contains("couldn’t finish stopping"), "{}", error.message);
+        assert!(error.message.contains("isn’t running"), "{}", error.message);
         assert!(error.details.contains("it would not start"), "{}", error.details);
         assert_eq!(home.files(), before);
         assert!(!journal_path(&home.app_dir()).exists(), "Retry starts over instead of undoing again");
@@ -1148,7 +1148,7 @@ mod tests {
         let error = recover_on_launch(&home.app_dir(), |_| Err("it would not start".into())).unwrap_err();
 
         assert!(error.restored);
-        assert!(error.message.contains("stopped now"), "{}", error.message);
+        assert!(error.message.contains("isn’t running"), "{}", error.message);
         assert_eq!(error.details, "it would not start");
         assert_eq!(home.files(), before);
         assert!(!journal_path(&home.app_dir()).exists(), "the next launch goes on as usual");

@@ -240,7 +240,7 @@ for (const theme of ['dark', 'light']) {
 	// An unfinished Start fresh put back at launch: the earlier install didn't start, so the card says it's stopped.
 	{
 		const failure = {
-			message: 'CORSIA put back everything Start fresh had moved. CORSIA couldn’t start your earlier install again, so it’s stopped now. Choose Retry to move it into a backup again.',
+			message: 'CORSIA put back everything Start fresh had moved. CORSIA couldn’t start your earlier install again, so it isn’t running. Choose Retry to try Start fresh again.',
 			details: '`corsia start` exited 1',
 			restored: true,
 		};
