@@ -9,7 +9,7 @@ import pytest
 
 from automation.plan_liveness_terminal import on_thread_turn_complete
 from automation.turn_end_effects import record_turn_end
-from doc_feedback_helpers import add_comment, batches, linked_comment_ids, occupy_owner, seed_document, seed_thread
+from doc_feedback_helpers import add_comment, add_person_comment, batches, linked_comment_ids, seed_document, seed_thread
 from doceditor import comment_notifications, feedback_batches
 from infra.database import get_db, write_transaction
 
@@ -29,25 +29,17 @@ def add_user_edit(db, artifact_id: str, recipient_id: str = "owner") -> None:
         )
 
 
-def test_person_comments_join_an_unstarted_delivered_task_without_a_second_batch(isolated_db):
+def test_each_person_comment_is_delivered_as_its_own_task(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner", title="Documents")
-        occupy_owner(db, "owner")
         artifact_id = seed_document(db, "owner", name="DRAFT-PRD.md")
-        added = [
-            add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve") for _ in range(3)
-        ]
+        added = [add_person_comment(db, artifact_id) for _ in range(3)]
 
-        [batch] = batches(db)
-        assert (batch["state"], batch["closed_reason"], batch["item_count"]) == ("delivered", "send", 3)
-        assert linked_comment_ids(db, batch["id"]) == sorted(row["id"] for row, _feedback in added)
-        node = db.execute(
-            "SELECT title,description FROM plan_nodes WHERE id=?", (batch["delivered_node_id"],),
-        ).fetchone()
-        assert "3 comments" in node["title"]
-        assert f"Comment {added[-1][0]['id']}" in node["description"]
-        assert [feedback["woken"] for _row, feedback in added] == [[], [], []]
+        rows = batches(db)
+        assert [(row["state"], row["closed_reason"], row["item_count"]) for row in rows] == [("delivered", "send", 1)] * 3
+        assert [linked_comment_ids(db, row["id"]) for row in rows] == [[row["id"]] for row, _feedback in added]
+        assert len({row["delivered_node_id"] for row in rows}) == 3
     finally:
         db.close()
 
@@ -83,12 +75,8 @@ def test_user_comment_delivers_immediately_and_client_replay_is_a_noop(isolated_
         seed_thread(db, "owner")
         artifact_id = seed_document(db, "owner")
 
-        comment, feedback = add_comment(
-            db, artifact_id, author_kind="user", author_id=None, author="Steve", client_id="first",
-        )
-        replay, replay_feedback = add_comment(
-            db, artifact_id, author_kind="user", author_id=None, author="Steve", client_id="first",
-        )
+        comment, feedback = add_person_comment(db, artifact_id, client_id="first")
+        replay, replay_feedback = add_person_comment(db, artifact_id, client_id="first")
 
         [batch] = batches(db)
         assert replay["id"] == comment["id"]
@@ -100,15 +88,15 @@ def test_user_comment_delivers_immediately_and_client_replay_is_a_noop(isolated_
         db.close()
 
 
-def test_comment_after_the_task_started_opens_a_new_batch_that_queues_behind_it(isolated_db):
+def test_comment_while_an_earlier_task_is_selected_queues_behind_it_without_a_second_wake(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner")
         artifact_id = seed_document(db, "owner")
-        first, opened = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
+        first, opened = add_person_comment(db, artifact_id)
         assert opened["woken"] == ["owner"]
 
-        second, queued = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
+        second, queued = add_person_comment(db, artifact_id)
 
         rows = batches(db)
         assert len(rows) == 2
@@ -128,14 +116,14 @@ def test_comment_after_the_earlier_task_settled_selects_a_new_task_and_wakes_the
     try:
         seed_thread(db, "owner")
         artifact_id = seed_document(db, "owner")
-        add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
+        add_person_comment(db, artifact_id)
         [delivered] = batches(db)
         node_id = delivered["delivered_node_id"]
         admission.release(node_id, "test", db=db)
         service.transition_node(node_id, "closed", db=db)
         db.commit()
 
-        _second, feedback = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
+        _second, feedback = add_person_comment(db, artifact_id)
 
         rows = batches(db)
         assert len(rows) == 2 and rows[0]["delivered_node_id"] != rows[1]["delivered_node_id"]
@@ -304,17 +292,15 @@ def test_user_feedback_projection_has_no_open_comment_after_immediate_delivery(i
     db = get_db()
     try:
         seed_thread(db, "owner", title="Documents & Artifacts")
-        occupy_owner(db, "owner")
         artifact_id = seed_document(db, "owner")
-        add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
-        add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
+        add_person_comment(db, artifact_id)
+        add_person_comment(db, artifact_id)
 
         assert feedback_batches.user_feedback_for_document(db, artifact_id) == {
             "open_count": 0,
             "owner_label": "Documents & Artifacts",
             "undelivered_batches": [],
         }
-        [batch] = batches(db)
-        assert batch["state"] == "delivered" and batch["item_count"] == 2
+        assert [row["state"] for row in batches(db)] == ["delivered", "delivered"]
     finally:
         db.close()

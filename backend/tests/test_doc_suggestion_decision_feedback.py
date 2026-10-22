@@ -33,7 +33,7 @@ def _decide(db, suggestion: dict, decision: str, reason: str | None = None) -> d
 def _user_batch_for(db, recipient_id: str) -> dict:
     return next(
         batch
-        for batch in batches(db)
+        for batch in batches(db, state="open")
         if batch["author_kind"] == "user" and batch["recipient_id"] == recipient_id
     )
 
@@ -105,12 +105,11 @@ def test_rejection_is_a_passive_note_and_never_joins_the_deciders_reply_batch(is
             db, artifact_id, author_kind="user", author_id=None, author="Robin",
             parent_id=suggestion["id"],
         )
-        replied_nodes = _plan_nodes(db, "author")
 
         _decide(db, suggestion, "reject")
 
-        assert [note for note in _notes(db, "author") if "rejected" in note] == ["Robin rejected your suggestion on Design."]
-        assert _plan_nodes(db, "author") == replied_nodes
+        assert _notes(db, "author") == ["Robin rejected your suggestion on Design."]
+        assert _plan_nodes(db, "author") == 0
         # The user's reply remains ordinary document feedback, but the decision never joins its batch.
         batch = _user_batch_for(db, "author")
         assert db.execute(
@@ -157,15 +156,16 @@ def test_mixed_batch_keeps_the_comment_framing_and_a_rejection_adds_no_node(isol
             db, artifact_id, author_kind="user", author_id=None, author="Robin",
             parent_id=remark["id"],
         )
-        assert _plan_nodes(db, "author") == 1
 
         _decide(db, suggestion, "reject")
 
-        assert _plan_nodes(db, "author") == 1
+        assert _plan_nodes(db, "author") == 0
         batch = _user_batch_for(db, "author")
-        assert batch["state"] == "delivered"
-        node = service.get_node(batch["delivered_node_id"], db=db)
+        assert feedback_batches.close_batch(db, batch["id"], "send") == (True, ("author",))
+        delivered = next(row for row in batches(db) if row["id"] == batch["id"])
+        node = service.get_node(delivered["delivered_node_id"], db=db)
         assert node.description.startswith(USER_FRAMING)
+        assert _plan_nodes(db, "author") == 1
     finally:
         db.close()
 

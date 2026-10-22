@@ -101,14 +101,11 @@ def linked_comment_ids(db, batch_id: str) -> list[str]:
     ]
 
 
-def occupy_owner(db, thread_id: str) -> str:
-    """Give the thread an active, selected task so a feedback task delivered to it stays queued, unstarted."""
-    from plans import admission, service
-
-    plan = service.ensure_plan("thread", thread_id, db=db)
-    node = service.add_node(
-        plan.id, kind="task", title="Current work", acceptance_criteria="Current work is complete.", db=db,
+def add_person_comment(db, artifact_id: str, *, client_id: str | None = None) -> tuple[dict, dict]:
+    """Create a person's comment and deliver it as the create route does, once it is committed."""
+    row, feedback = add_comment(
+        db, artifact_id, author_kind="user", author_id=None, author="Steve", client_id=client_id,
     )
-    service.transition_node(node.id, "active", db=db)
-    admission.reconcile_plan(plan.id, actor_id=None, provenance="test", db=db)
-    return node.id
+    if feedback["batch_ids"]:
+        feedback["woken"].extend(feedback_batches.deliver_person_comment(db, feedback["batch_ids"]))
+    return row, feedback

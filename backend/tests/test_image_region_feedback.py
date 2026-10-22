@@ -12,7 +12,7 @@ import pytest
 from PIL import Image
 
 import infra.database as db_mod
-from doc_feedback_helpers import batches, occupy_owner, seed_thread
+from doc_feedback_helpers import batches, seed_thread
 from doceditor import comments, feedback_batches, image_regions
 from infra.database import get_db, write_transaction
 from plans.feedback_nodes import PROVENANCE
@@ -94,6 +94,7 @@ def test_a_persons_regions_are_delivered_in_the_image_owners_project_colour(isol
             )
             feedback_batches.record_comment(connection, row, created=created)
 
+        feedback_batches.close_batch(db, batches(db, state="open")[0]["id"], "quiet")
         description = _node_description(db)
     finally:
         db.close()
@@ -290,25 +291,3 @@ def test_a_reader_tray_that_cannot_be_resolved_still_delivers_the_text(isolated_
     )
     assert items[0]["region_line"].startswith("Region 1: box at x 10%")
     assert renders == []
-
-
-def test_a_second_person_region_comment_joins_the_unstarted_task_with_both_region_lines(isolated_db, tmp_path):
-    db = get_db()
-    try:
-        seed_thread(db, "owner")
-        occupy_owner(db, "owner")
-        artifact_id, _path = _image_artifact(db, "owner", tmp_path)
-        for x, body in ((0.1, "The header wraps."), (0.6, "The icon reads as disabled.")):
-            with write_transaction(db, scope="test_person_region_comment") as connection:
-                row, created = comments.create_with_status(
-                    artifact_id, body=body, author="Steve", author_kind="user", author_thread_id=None,
-                    region=(x, 0.2, 0.0, 0.0), image_rev="rev-1", client_id=uuid.uuid4().hex[:12], db=connection,
-                )
-                feedback_batches.record_comment(connection, row, created=created)
-        assert [row["state"] for row in batches(db)] == ["delivered"]
-
-        description = _node_description(db)
-        assert "Region 1: point at x 10%" in description and "Region 2: point at x 60%" in description
-        assert len(re.findall(r"Marked-up image \(numbered boxes\): \S+-2\.png", description)) == 1
-    finally:
-        db.close()

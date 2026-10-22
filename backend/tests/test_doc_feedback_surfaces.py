@@ -63,7 +63,6 @@ def test_reply_waiting_marker_is_passive_and_clears_one_seen_thread(isolated_db)
             db, artifact_id, author_kind="user", author_id=None, author="Steve",
         )
         add_comment(db, artifact_id, author_id="owner", author="Owner", parent_id=second["id"])
-        delivered = db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]  # the person's comments, sent as made
 
         assert feedback_batches.reply_waiting_ids(db, "owner-token") == {artifact_id}
         with write_transaction(db, scope="test_mark_one_thread_viewed") as connection:
@@ -77,7 +76,7 @@ def test_reply_waiting_marker_is_passive_and_clears_one_seen_thread(isolated_db)
         assert {thread["id"] for thread in threads if thread["new_reply_ids"]} == {second["id"]}
         assert by_root[first["id"]]["new_reply_ids"] == []
         assert len(by_root[second["id"]]["new_reply_ids"]) == 1
-        assert db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == delivered  # viewing sends nothing
+        assert db.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
     finally:
         db.close()
 
@@ -104,8 +103,9 @@ def test_first_user_comment_makes_workspace_document_retirement_exempt(isolated_
         ).fetchone()
         assert not_exempt is None
 
+        batch = batches(db, state="open")[0]
+        feedback_batches.close_batch(db, batch["id"], "send")
         delivered = batches(db)[0]
-        assert delivered["state"] == "delivered"
         node_id = delivered["delivered_node_id"]
         service.transition_node(node_id, "review_requested", db=db)
         submit_review_evidence(node_id, db=db)

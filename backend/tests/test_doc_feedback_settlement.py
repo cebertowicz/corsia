@@ -22,11 +22,11 @@ def _delivered(db, *, suggestions: int = 1, comments_: int = 0, edit: bool = Fal
     suggested = [add_comment(db, artifact_id, replacement=f"New {n}")[0] for n in range(suggestions)]
     plain = [add_comment(db, artifact_id)[0] for _ in range(comments_)]
     if edit:
-        with write_transaction(db, scope="test_record_edit") as connection:
-            feedback_batches.record_edit(
-                connection, artifact_id=artifact_id, recipient_id="owner", author_kind="agent", author_id="author",
-                actor_display="Reviewer", path=Path("/workspace/shared/Design.md"), before=b"old\n", after=b"new\n",
-            )
+        feedback_batches.record_edit(
+            db, artifact_id=artifact_id, recipient_id="owner", author_kind="agent", author_id="author",
+            actor_display="Reviewer", path=Path("/workspace/shared/Design.md"), before=b"old\n", after=b"new\n",
+        )
+        db.commit()
     batch = batches(db, state="open")[0]
     feedback_batches.close_batch(db, batch["id"], "quiet")
     delivered = batches(db)[0]
@@ -216,7 +216,8 @@ def test_a_batch_a_person_left_is_not_an_agents_to_settle(isolated_db):
         seed_thread(db, "owner")
         artifact_id = seed_document(db, "owner", name="Person.md")
         comment, _ = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Robin")
-        delivered = batches(db, state="delivered")[0]
+        feedback_batches.close_batch(db, batches(db, state="open")[0]["id"], "send")
+        delivered = batches(db)[0]
         assert delivered["delivered_node_id"]
 
         comments.update(comment["id"], {"resolved": True}, db=db)
