@@ -76,6 +76,13 @@ def _delete_one_thread_rows(
     # claiming runs for a thread that no longer exists, and its row would
     # block the thread's own deletion.
     db.execute("DELETE FROM automation_schedules WHERE thread_id = ?", (thread_id,))
+    # Its event rules go too, with every outcome naming them or the thread.
+    thread_rules = 'SELECT id FROM event_rules WHERE created_by = ? OR "to" = \'thread:\' || ?'
+    db.execute(
+        f"DELETE FROM event_route_decisions WHERE thread_id = ? OR rule_id IN ({thread_rules})",
+        (thread_id, thread_id, thread_id),
+    )
+    db.execute(f"DELETE FROM event_rules WHERE id IN ({thread_rules})", (thread_id, thread_id))
     delete_thread_checkpoints(db, thread_id)
     delete_thread_continuity(db, thread_id)
     delete_thread_turns(db, thread_id)

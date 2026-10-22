@@ -63,7 +63,7 @@
 		return typeof detail === 'string' && detail.trim() ? detail.trim() : null;
 	}
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
-	type Page = 'checking' | 'account' | 'folder' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
+	type Page = 'checking' | 'account' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
 	const CLI_VENDORS = ['claude-code', 'codex'] as const;
 	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
 	const classifier = createSetupClassifier(), localPick = createSetupLocalPick(), remote = createSetupRemote();
@@ -100,7 +100,6 @@
 	const accountValid = $derived(Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password));
 	const steps = $derived<SetupStep[]>(page === 'connect' ? remote.steps : [
 		{ label: 'Your account', icon: 'person', state: ['checking', 'account', 'hard-stop'].includes(page) || (page === 'error' && !$token) ? 'current' : 'done' },
-		{ label: 'Work folder', icon: 'computer', state: page === 'folder' ? 'current' : ['subscriptions', 'models'].includes(page) ? 'done' : 'todo' },
 		{ label: 'Your subscriptions', icon: 'sparkle', state: page === 'subscriptions' ? 'current' : page === 'models' ? 'done' : 'todo' },
 		{ label: 'Providers & models', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
 	]);
@@ -142,27 +141,24 @@
 		return rows;
 	});
 	const finishNote = $derived(setupStartNote(canFinish, eligible, downloading, local?.download_eta_seconds));
-	type View = { title: string; lede?: string; mark?: boolean; primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean }; onPrimary?: () => void };
+	type View = { title: string; lede?: string; primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean }; onPrimary?: () => void };
 	const view = $derived.by((): View => {
 		if (page === 'connect') return remote.view;
 		if (page === 'checking') return { title: 'Checking this computer' };
 		if (page === 'error') return { title: 'CORSIA couldn’t start', lede: reportError || statusError || 'Something went wrong while starting. Try again, or save a report to send.', primary: { label: 'Retry' }, onPrimary: resume ? resumeSetup : readStatus };
 		if (page === 'hard-stop') return { title: 'Update macOS to open CORSIA', lede: 'CORSIA needs macOS 15 or later. Update in System Settings › General › Software Update, then open CORSIA again.' };
-		if (screen === 'welcome') return { title: WELCOME_TITLE, mark: true, primary: { label: 'Continue' }, onPrimary: () => { welcomeSeen = true; } };
-		// Once the account exists, its two screens read back what was set: neither can change after it.
-		if (page === 'account' && $token) return { title: 'Your account', primary: { label: 'Continue' }, onPrimary: () => { page = 'folder'; } };
-		if (page === 'folder' && $token) return { title: 'Your work folder', primary: { label: 'Continue', loading: accountBusy, disabled: accountBusy }, onPrimary: afterFolder };
-		if (page === 'account') return { title: $isSetupWide ? WELCOME_TITLE : 'Create your account', lede: $isSetupWide ? WELCOME_ACCOUNT_LINE : undefined, mark: $isSetupWide, primary: { label: 'Continue', disabled: !accountValid }, onPrimary: toFolder };
-		if (page === 'folder') return { title: 'Choose your work folder', lede: 'Your projects and files live here.', primary: { label: 'Continue', loading: accountBusy, disabled: accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'picker_failed' }, onPrimary: folderContinue };
-		if (page === 'subscriptions') return { title: 'Your subscriptions' };
+		if (screen === 'welcome') return { title: WELCOME_TITLE, primary: { label: 'Continue' }, onPrimary: () => { welcomeSeen = true; } };
+		// Once the account exists, the screen reads back what was set: neither the account nor its folder can change after it.
+		if (page === 'account' && $token) return { title: 'Your account', primary: { label: 'Continue' }, onPrimary: afterAccount };
+		if (page === 'account') return { title: $isSetupWide ? WELCOME_TITLE : 'Create your account', lede: $isSetupWide ? WELCOME_ACCOUNT_LINE : undefined, primary: { label: 'Continue', loading: accountBusy, disabled: !accountValid || accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'picker_failed' }, onPrimary: createFromForm };
+		if (page === 'subscriptions') return { title: 'Your subscriptions', lede: 'CORSIA’s agents can work through a Claude or ChatGPT plan you already pay for.' };
 		return { title: 'Providers & models', lede: 'CORSIA needs one working model to continue setup.', primary: { label: 'Start using CORSIA', disabled: !canFinish || finishing, loading: finishing, note: finishNote, noteAlways: true }, onPrimary: finishSetup };
 	});
 	function validateConfirmation() { confirmationError = confirmation && password !== confirmation ? 'Passwords don’t match.' : ''; }
-	function toFolder() { validateConfirmation(); if (accountValid) page = 'folder'; }
-	/** Screen 3 is asked only while a CLI is still not signed in. */
-	function afterFolder() { page = subscriptionsSkipped ? 'models' : 'subscriptions'; }
-	/** Before the account exists, Continue on the folder screen creates it with the chosen folder. */
-	async function folderContinue() { if (!get(token)) await createAccount(); }
+	/** Continue on the account screen creates the account, applying the chosen folder first. */
+	async function createFromForm() { validateConfirmation(); if (accountValid && !get(token)) await createAccount(); }
+	/** The subscriptions screen is asked only while a CLI is still not signed in. */
+	function afterAccount() { page = subscriptionsSkipped ? 'models' : 'subscriptions'; }
 	/** One answer: picked tools start installing now, an unpicked one stops what it started. */
 	function answerSubscriptions(next: SetupPicks) {
 		picks = next;
@@ -256,7 +252,7 @@
 			onAccountCreated(); token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() }); connect();
 			password = ''; confirmation = '';
 			await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
-			afterFolder();
+			afterAccount();
 		} catch { accountError = 'Couldn’t create your account. Try again.'; }
 		finally { accountBusy = false; }
 	}
@@ -315,13 +311,13 @@
 </script>
 
 {#snippet welcomeAside()}<SetupWelcome accountLine={false} />{/snippet}
-<SetupShell {steps} section={page === 'connect' ? 'Connect' : 'Setup'} {jobs} page={page === 'connect' ? `connect-${remote.stage}` : screen} title={view.title} lede={view.lede} primary={view.primary} mark={view.mark} aside={page === 'account' && $isSetupWide && !$token ? welcomeAside : undefined} onPrimary={view.onPrimary}>
+<SetupShell {steps} section={page === 'connect' ? 'Connect' : 'Setup'} {jobs} page={page === 'connect' ? `connect-${remote.stage}` : screen} title={view.title} lede={view.lede} primary={view.primary} aside={page === 'account' && $isSetupWide && !$token ? welcomeAside : undefined} onPrimary={view.onPrimary}>
 	{#snippet secondary()}
 		{#if page === 'connect'}<SetupConnectBack onclick={() => remote.stage === 'code' ? remote.toChoose() : leaveConnect()} />
-		{:else if (screen === 'welcome' || page === 'account') && canConnect && !$token}<Button variant="chip" onclick={() => void connectToAnotherComputer()}>Connect to CORSIA on another computer</Button>
-		{:else if page === 'folder'}<Button variant="chip" disabled={accountBusy} onclick={() => { page = 'account'; }}>Back</Button>{#if accountError}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>{/if}
-		{:else if page === 'subscriptions'}<Button variant="chip" onclick={() => { page = 'folder'; }}>Back</Button>
-		{:else if page === 'models'}<Button variant="chip" disabled={finishing} onclick={() => { page = subscriptionsSkipped ? 'folder' : 'subscriptions'; }}>Back</Button>
+		{:else if (screen === 'welcome' || page === 'account') && canConnect && !$token}<Button variant="chip" onclick={() => void connectToAnotherComputer()}>Connect to CORSIA on another computer</Button>{#if accountError && page === 'account'}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>{/if}
+		{:else if page === 'account' && accountError}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>
+		{:else if page === 'subscriptions'}<Button variant="chip" onclick={() => { page = 'account'; }}>Back</Button>
+		{:else if page === 'models'}<Button variant="chip" disabled={finishing} onclick={() => { page = subscriptionsSkipped ? 'account' : 'subscriptions'; }}>Back</Button>
 		{:else if page === 'hard-stop'}<Button variant="chip" onclick={readStatus}>Check again</Button>
 		{:else if page === 'error'}<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>{/if}
 	{/snippet}
@@ -329,12 +325,12 @@
 	{:else if screen === 'welcome'}<SetupWelcome />
 	{:else if page === 'account' && $token}
 		<p class="settled" data-testid="setup-account-made">{accountName ? `Your account is set up as ${accountName}.` : 'Your account is set up.'}</p>
+		<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
 	{:else if page === 'account'}
-		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} onSubmit={toFolder} onValidateConfirmation={validateConfirmation} />
+		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} onSubmit={createFromForm} onValidateConfirmation={validateConfirmation} />
+		<SetupWorkFolder bind:folder bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} />
 		{#if accountExists}<Button variant="chip" onclick={onExistingAccount}>Sign in</Button>{/if}
-	{:else if page === 'folder' && $token}<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
-	{:else if page === 'folder'}<SetupWorkFolder bind:folder bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} error={accountError} />
-	{:else if page === 'subscriptions'}<SetupSubscriptions claudeReady={cliSignedIn('claude-code')} codexReady={cliSignedIn('codex')} answer={picks} onAnswer={answerSubscriptions} />
+	{:else if page === 'subscriptions'}<SetupSubscriptions claudeReady={cliSignedIn('claude-code')} codexReady={cliSignedIn('codex')} {eligible} answer={picks} onAnswer={answerSubscriptions} />
 	{:else if page === 'models'}
 		<SetupAiRows rows={aiRows} />
 		{#if sourceError}<p class="error-text" role="alert">{sourceError}</p><Button variant="chip" onclick={() => void refreshSources(true)}>Retry</Button>{/if}

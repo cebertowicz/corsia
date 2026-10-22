@@ -19,9 +19,11 @@
 		codexReady: boolean;
 		/** The answer kept from an earlier visit, shown as the selected button. */
 		answer?: SetupPicks | null;
+		/** Whether this Mac can run the free local model, which decides the no-plan line. */
+		eligible?: boolean;
 		onAnswer: (picks: SetupPicks) => void;
 	}
-	const { claudeReady, codexReady, answer = null, onAnswer }: Props = $props();
+	const { claudeReady, codexReady, answer = null, eligible = true, onAnswer }: Props = $props();
 	const question = $derived(subscriptionQuestion(claudeReady, codexReady));
 	const choices = $derived<{ label: string; picks: SetupPicks }[]>(question === 'both' ? [
 		{ label: 'Claude', picks: { claude: true, chatgpt: false } },
@@ -35,6 +37,11 @@
 		{ label: 'Yes', picks: { claude: true, chatgpt: true } },
 		{ label: 'No', picks: { claude: false, chatgpt: true } },
 	]);
+	const explainer = $derived(question === 'both'
+		? 'Claude plans use Claude Code; ChatGPT plans use Codex. Pick one you pay for and CORSIA installs it now. You sign in on the next screen.'
+		: question === 'chatgpt'
+			? 'ChatGPT plans use Codex (Claude plans use Claude Code). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Claude Code is enough to continue.'
+			: 'Claude plans use Claude Code (ChatGPT plans use Codex). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Codex is enough to continue.');
 	const chosen = (picks: SetupPicks) => answer !== null && answer.claude === picks.claude && answer.chatgpt === picks.chatgpt;
 </script>
 
@@ -52,12 +59,15 @@
 				<Button variant={chosen(choice.picks) ? 'primary' : 'secondary'} description={chosen(choice.picks) ? 'Your earlier answer' : undefined} onclick={() => onAnswer(choice.picks)}>{choice.label}</Button>
 			{/each}
 		</div>
+		<p class="explain">{explainer}</p>
+		{#if question === 'both'}<p class="explain">{eligible ? 'No plan? The free model downloading to this Mac works too, or add an API key.' : 'No plan? Add an API key on the next screen.'}</p>{/if}
 	</div>
 {/if}
 
 <style>
 	.question { display: flex; flex-direction: column; gap: var(--space-3); }
 	.ask { color: var(--text-primary); font-size: var(--text-body); font-weight: var(--fw-medium); }
+	.explain { margin: 0; color: var(--text-secondary); font-size: var(--text-body); line-height: var(--lh-normal); }
 	.choices { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 	.ready { margin: 0 0 var(--space-4); display: flex; align-items: center; gap: var(--space-2); color: var(--text-primary); font-size: var(--text-body); }
 	.ready svg { flex: none; color: var(--accent-text); }
