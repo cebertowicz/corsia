@@ -18,11 +18,12 @@ def starts_turn(row: sqlite3.Row) -> bool:
     )
 
 
-def turn_running(db: sqlite3.Connection, thread_id: str) -> bool:
-    """Whether the thread has a running Turn."""
+def turn_running_before(db: sqlite3.Connection, thread_id: str, moment: str) -> bool:
+    """Whether a Turn that started before ``moment`` is still running."""
     return db.execute(
-        "SELECT 1 FROM active_turns WHERE thread_id=? AND status='running'",
-        (thread_id,),
+        "SELECT 1 FROM active_turns WHERE thread_id=? AND status='running' "
+        "AND julianday(started_at) < julianday(?)",
+        (thread_id, moment),
     ).fetchone() is not None
 
 
@@ -43,34 +44,12 @@ def liveness_wake_queued(db: sqlite3.Connection, thread_id: str) -> bool:
     ).fetchone() is not None
 
 
-def liveness_wake_read_in_turn_since(
-    db: sqlite3.Connection, thread_id: str, since: str,
-) -> bool:
-    """Whether the thread's running Turn began writing a liveness wake since ``since``.
-
-    Only the running Turn's own claimed inputs are read (the
-    ``messages(active_turn_id, input_order)`` index), so the cost is bounded by
-    one Turn's inputs, not the thread's history. A begun write stays a read
-    reminder while it is queued, delivered or ambiguous: the in-flight, accepted
-    and uncertain sequence-attempt states. A proved-no-write release clears
-    ``write_started_at`` and the claim, so it is not a read; the requeued wake
-    is still unread and ``liveness_wake_queued`` holds the next one behind it.
-    """
-    return db.execute(
-        "SELECT 1 FROM active_turns t CROSS JOIN messages m "
-        "ON m.active_turn_id=t.id "
-        "WHERE t.thread_id=? AND t.status='running' "
-        "AND m.delivery_state IN ('queued','delivered','ambiguous') "
-        "AND m.write_started_at IS NOT NULL "
-        "AND julianday(m.write_started_at) > julianday(?) "
-        "AND json_extract(m.metadata,'$.event_type')='plan.liveness_wake' LIMIT 1",
-        (thread_id, since),
-    ).fetchone() is not None
-
-
 def turn_starting_work_pending(db: sqlite3.Connection, thread_id: str) -> bool:
     """Whether a running Turn or current-model queued input already starts work."""
-    if turn_running(db, thread_id):
+    if db.execute(
+        "SELECT 1 FROM active_turns WHERE thread_id=? AND status='running'",
+        (thread_id,),
+    ).fetchone() is not None:
         return True
     thread = db.execute(
         "SELECT execution_epoch,model FROM threads WHERE id=?", (thread_id,),

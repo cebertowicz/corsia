@@ -1,8 +1,9 @@
 """A busy owner reads one liveness wake per Turn, and the wait it missed isn't counted.
 
 The in-Turn cases use the real runner, event delivery, FIFO queue and boundary
-claim path. The post-Turn idle-backoff assertion stubs delivery: without a live
-Turn, real event delivery starts a provider dispatch outside this unit boundary.
+claim path. The idle cases stub delivery with one that starts the wake's own
+Turn, as production delivery to an idle thread does, without the provider
+dispatch real delivery would start outside this unit boundary.
 """
 
 from __future__ import annotations
@@ -51,6 +52,22 @@ def _owner(thread_id: str):
     )
     db.commit()
     return db, task
+
+
+def _deliver_starting_own_turn(db, delivered: list):
+    """Delivery to an idle thread: the wake claims its own Turn before settlement."""
+
+    async def deliver(thread_id, *args):
+        delivered.append((thread_id, *args))
+        db.execute(
+            "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch) "
+            "SELECT ?,id,execution_epoch,model,'running',?,'boot-1' FROM threads WHERE id=?",
+            (f"own-{len(delivered)}", pl._now().isoformat(), thread_id),
+        )
+        db.commit()
+        return True
+
+    return deliver
 
 
 def _make_due(db, thread_id: str) -> None:
@@ -146,44 +163,20 @@ async def test_a_long_turn_uses_a_flat_interval_from_the_claim(isolated_db, monk
     db.execute("UPDATE active_turns SET status='completed' WHERE id=?", (_TURN,))
     db.commit()
 
-    # With the Turn over and nothing queued, idle no-progress backoff doubles again.
-    delivered = []
-
-    async def deliver(*args):
-        delivered.append(args)
-        return True
-
-    clock[0] += timedelta(seconds=1)
-    _make_due(db, "owner")
-    assert (await _sweep(db, clock[0].isoformat(), deliver=deliver))["woken"] == ["owner"]
-    assert len(delivered) == 1
-    assert _cycle(db, "owner") == 1
-    assert _deadline(db, "owner") - clock[0] == timedelta(
-        seconds=pl.PLAN_WAKE_IDLE_SECONDS * pl.PLAN_WAKE_BACKOFF,
-    )
-
-
-@pytest.mark.asyncio
-async def test_a_late_claim_does_not_rearm_inside_the_flat_interval(isolated_db, monkeypatch):
-    clock = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
-    monkeypatch.setattr(pl, "_now", lambda: clock[0])
-    db, _task = _owner("owner")
-    _make_due(db, "owner")
-    start = clock[0]
-    await _sweep(db, start.isoformat())
-
-    # The boundary claims the reminder halfway to its next deadline.
-    claimed_at = start + timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS / 2)
-    _claim_and_settle_write(db, "owner", now=claimed_at)
-
-    clock[0] = start + timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS)
-    assert (await _sweep(db, clock[0].isoformat()))["woken"] == []
-    assert len(_wakes(db, "owner")) == 1
-    assert _cycle(db, "owner") == 0
-
-    clock[0] = claimed_at + timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS + 1)
-    assert (await _sweep(db, clock[0].isoformat()))["woken"] == ["owner"]
-    assert len(_wakes(db, "owner")) == 2
+    # With the Turn over, a wake that starts its own Turn is idle spacing: the
+    # no-progress backoff doubles again, each time.
+    delivered: list = []
+    deliver = _deliver_starting_own_turn(db, delivered)
+    for cycle in (1, 2):
+        clock[0] += timedelta(seconds=1)
+        db.execute("UPDATE active_turns SET status='completed' WHERE thread_id=?", ("owner",))
+        _make_due(db, "owner")
+        assert (await _sweep(db, clock[0].isoformat(), deliver=deliver))["woken"] == ["owner"]
+        assert len(delivered) == cycle
+        assert _cycle(db, "owner") == cycle
+        assert _deadline(db, "owner") - clock[0] == timedelta(
+            seconds=pl.PLAN_WAKE_IDLE_SECONDS * pl.PLAN_WAKE_BACKOFF**cycle,
+        )
 
 
 @pytest.mark.asyncio
@@ -225,14 +218,10 @@ async def test_an_unwritten_wake_holds_the_next_one_until_it_is_read(
     assert (await _sweep(db, clock[0].isoformat()))["woken"] == []
     assert len(_wakes(db, "owner")) == 1
 
-    # Once written, the next one comes a flat interval after that read.
+    # Once written, the row's deadline (long past) alone decides: the next sweep wakes.
     attempt_id = f"owner:{clock[0].isoformat()}"
     begin_batch_write(claimed, attempt_id=attempt_id, started_at=clock[0].isoformat(), db=db)
     settle_batch_write(attempt_id, outcome="accepted", db=db)
-    read_at = clock[0]
-    clock[0] = read_at + timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS - 1)
-    assert (await _sweep(db, clock[0].isoformat()))["woken"] == []
-    clock[0] = read_at + timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS + 1)
     assert (await _sweep(db, clock[0].isoformat()))["woken"] == ["owner"]
     assert len(_wakes(db, "owner")) == 2
 
@@ -248,12 +237,8 @@ async def test_a_claim_left_by_a_finished_turn_does_not_hold_wakes(isolated_db, 
     db.execute("UPDATE active_turns SET status='completed' WHERE id=?", (_TURN,))
     db.commit()
 
-    delivered = []
-
-    async def deliver(*args):
-        delivered.append(args)
-        return True
-
+    delivered: list = []
+    deliver = _deliver_starting_own_turn(db, delivered)
     clock[0] += timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS + 1)
     _make_due(db, "owner")
     assert (await _sweep(db, clock[0].isoformat(), deliver=deliver))["woken"] == ["owner"]
