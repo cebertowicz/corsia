@@ -8,16 +8,25 @@
 	// technology; the label link stays its own control.
 	let { face, threadId = null, decorative = false }: { face: WaitFace; threadId?: string | null; decorative?: boolean } = $props();
 
-	function open(): void {
-		if (face.artifactId) void openWaitArtifact(face.artifactId, face.label, threadId);
+	// The label links only when there is a thread to open the document from. A document that fails to open stops
+	// being a link, and its title says so.
+	let unopenable = $state<string | null>(null);
+	const linked = $derived(face.artifactId && threadId && unopenable !== face.artifactId ? face.artifactId : null);
+
+	async function open(): Promise<void> {
+		if (!linked || !threadId) return;
+		const artifactId = linked;
+		if (!(await openWaitArtifact(artifactId, face.label, threadId))) unopenable = artifactId;
 	}
 </script>
 
 <span class="wait-face" title={face.title}>
 	<span class="wait-fixed" aria-hidden={decorative || undefined}>Waiting ·</span>
 	{#if face.elapsed}<span class="wait-fixed wait-elapsed" aria-hidden={decorative || undefined}>{face.elapsed} ·</span>{/if}
-	{#if face.artifactId}
+	{#if linked}
 		<button type="button" class="wait-label wait-link" onclick={open}>{face.label}</button>
+	{:else if face.artifactId && unopenable === face.artifactId}
+		<span class="wait-label" title="Couldn't open this document">{face.label}</span>
 	{:else}
 		<span class="wait-label" aria-hidden={decorative || undefined}>{face.label}</span>
 	{/if}

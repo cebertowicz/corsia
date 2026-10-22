@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from typing import Any
 
 import plans.service as service
+from core.corrections_recording import is_owner_authored_message
 
 MAX_INTENT_BYTES = 600
 MAX_QUOTE_BYTES = 400
@@ -33,7 +34,10 @@ def validate_intent(value: object) -> str:
 
 def _project_id(connection: sqlite3.Connection, plan_id: str) -> str | None:
     row = connection.execute(
-        "SELECT t.project_id FROM plans p JOIN threads t ON t.id=p.owner_id WHERE p.id=?",
+        """SELECT CASE p.owner_kind WHEN 'thread' THEN t.project_id
+                                    WHEN 'project_scope' THEN p.owner_id END AS project_id
+             FROM plans p LEFT JOIN threads t ON p.owner_kind='thread' AND t.id=p.owner_id
+            WHERE p.id=?""",
         (plan_id,),
     ).fetchone()
     return None if row is None else row["project_id"]
@@ -44,12 +48,14 @@ def _phrase(quote: str) -> str:
 
 
 def _is_person_message(row: sqlite3.Row) -> bool:
-    # User-role rows can carry an agent relay; that is not the person's words.
-    return row["role"] == "user" and '"sender_kind":"agent"' not in (row["metadata"] or "").replace(" ", "")
+    # The one row-level rule for the person's own words: relays, events and blanks are not.
+    return is_owner_authored_message(role=row["role"], content=row["content"], metadata=row["metadata"])
 
 
 def _is_agent_message(row: sqlite3.Row) -> bool:
     """Whether a consumed message is an agent's words, not a person's."""
+    if not (row["content"] or "").strip():
+        return False
     return row["role"] == "assistant" or '"sender_kind":"agent"' in (row["metadata"] or "").replace(" ", "")
 
 
@@ -187,7 +193,7 @@ def has_person_origin(connection: sqlite3.Connection, turn_id: str | None) -> bo
     if turn_id is None:
         return False
     return any(_is_person_message(row) for row in connection.execute(
-        "SELECT role,metadata FROM messages WHERE active_turn_id=?", (turn_id,)
+        "SELECT role,content,metadata FROM messages WHERE active_turn_id=?", (turn_id,)
     ))
 
 
@@ -203,14 +209,15 @@ def capture_origin(connection: sqlite3.Connection, plan_id: str, node_id: str, *
     person = [row for row in rows if _is_person_message(row)]
     if person:
         append(connection, node_id, (
-            {"quote": row["content"], "author": "person", "role": "origin",
+            {"quote": bounded_text(row["content"].strip(), MAX_QUOTE_BYTES), "author": "person", "role": "origin",
              "source_kind": "message", "source_id": row["id"]}
             for row in person
         ), revision=revision)
         return True
     agent = next((row for row in rows if _is_agent_message(row)), None)
     if agent is not None:
-        append(connection, node_id, [{"quote": agent["content"], "author": "agent", "role": "origin",
+        append(connection, node_id, [{"quote": bounded_text(agent["content"].strip(), MAX_QUOTE_BYTES),
+                                      "author": "agent", "role": "origin",
                                       "source_kind": "message", "source_id": agent["id"]}], revision=revision)
     return False
 

@@ -87,8 +87,14 @@
 	const waitBackText = $derived(wait ? waitBack(wait.until, $minuteClock) : '');
 	const waitTitle = $derived(wait ? `Waiting for ${wait.label}${waitMore} · ${waitChecksBack(wait.until, $minuteClock)}` : '');
 
-	function openWait(): void {
-		if (wait?.artifact_id) void openWaitArtifact(wait.artifact_id, wait.label, threadId);
+	// A document that fails to open stops being a link, and its title says so.
+	let unopenable = $state<string | null>(null);
+	const waitLinked = $derived(wait?.artifact_id && unopenable !== wait.artifact_id ? wait.artifact_id : null);
+
+	async function openWait(): Promise<void> {
+		if (!waitLinked || !wait) return;
+		const artifactId = waitLinked;
+		if (!(await openWaitArtifact(artifactId, wait.label, threadId))) unopenable = artifactId;
 	}
 
 	const STATE_SYMBOL: Record<string, string> = {
@@ -161,7 +167,7 @@
 					<strong aria-hidden="true">{row.entry.owner.label}</strong>
 					{#if wait}
 						<!-- One line at every width: only the label truncates, and the time always shows. -->
-						<span class="wait" title={waitTitle}>{#if wait.artifact_id}<button type="button" class="wait-label wait-link" onclick={openWait}>{waitLabel}{waitMore}</button>{:else}<span class="wait-label">{waitLabel}{waitMore}</span>{/if}<span class="wait-when">{' · '}{waitBackText}</span></span>
+						<span class="wait" title={waitTitle}>{#if waitLinked}<button type="button" class="wait-label wait-link" onclick={openWait}>{waitLabel}{waitMore}</button>{:else}<span class="wait-label" title={wait.artifact_id ? "Couldn't open this document" : undefined}>{waitLabel}{waitMore}</span>{/if}<span class="wait-when">{' · '}{waitBackText}</span></span>
 					{:else if setAside}
 						<span class="set-aside">{setAside}</span>
 					{:else}

@@ -4,6 +4,8 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 
+import pytest
+
 from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, migrate_to_current
 from infra.migration_133_to_134_plan_intent import migrate_133_to_134
@@ -46,3 +48,14 @@ def test_existing_plan_nodes_survive_the_intent_migration() -> None:
         assert (result.from_version, result.to_version) == (133, 134)
         row = db.execute("SELECT intent,intent_node_id FROM plan_nodes WHERE id=?", (node.id,)).fetchone()
         assert tuple(row) == (None, None)
+
+
+def test_pre_v134_node_creation_refuses_intent_rather_than_dropping_it() -> None:
+    """A migration running the plan service before v134 has no intent columns to store it in."""
+    with closing(_dev_133()) as db:
+        plan = service.ensure_plan("thread", "root", db=db)
+        with pytest.raises(service.PlanInputError, match="task intent requires schema version 134"):
+            service.add_node(
+                plan.id, kind="task", title="Reject intent",
+                acceptance_criteria="Must require schema 134", intent="Keep the request", db=db,
+            )

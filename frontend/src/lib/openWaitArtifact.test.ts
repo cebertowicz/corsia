@@ -22,11 +22,15 @@ describe('openWaitArtifact', () => {
 		expect(openArtifactAndShowThread).toHaveBeenCalledWith({ artifactId: 'a2', path: '/w/b.md', title: 'Title a2' }, 'thread-1');
 	});
 
-	it('opens nothing when the thread pane does not hold it, or the read fails', async () => {
+	it('reports the open, so the caller can say when it fails', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		fetchArtifactPane.mockResolvedValue({ nodes: [node('a1', '/w/a.md')] });
-		await openWaitArtifact('missing', 'x', 'thread-1');
+		expect(await openWaitArtifact('a1', 'x', 'thread-1')).toBe(true);
+		expect(await openWaitArtifact('missing', 'x', 'thread-1')).toBe(false);
 		fetchArtifactPane.mockRejectedValue(new Error('500'));
-		await openWaitArtifact('a1', 'x', 'thread-1');
-		expect(openArtifactAndShowThread).not.toHaveBeenCalled();
+		expect(await openWaitArtifact('a1', 'x', 'thread-1')).toBe(false);
+		expect(openArtifactAndShowThread).toHaveBeenCalledTimes(1);
+		expect(warn).toHaveBeenCalledTimes(2);
+		warn.mockRestore();
 	});
 });
