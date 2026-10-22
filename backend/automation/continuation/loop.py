@@ -16,12 +16,12 @@ DUE_RETRY_SECONDS = 5
 
 
 def _seconds_to_next_feedback_deadline(now: datetime) -> float | None:
-    from doceditor import feedback_batches
+    from doceditor import feedback_state
     from infra.database import get_db
 
     db = get_db()
     try:
-        return feedback_batches.seconds_until_next_due(now, db=db)
+        return feedback_state.seconds_until_next_due(now, db=db)
     finally:
         db.close()
 

@@ -17,11 +17,11 @@ from doceditor.feedback_state import (
     reply_waiting_ids,
     take_unreported_undelivered,
     undelivered_for_document,
+    unstarted_batch_id,
     user_feedback_for_document,
 )
 from infra.database import write_transaction
 from infra.write_effects import after_commit
-from plans.public import feedback_node_takes_more
 
 log = logging.getLogger(__name__)
 
@@ -39,12 +39,6 @@ def _after(value: str, seconds: int) -> str:
 
 def _new_deadline(author_kind: str, now: str) -> str:
     return _after(now, AGENT_QUIET if author_kind == "agent" else USER_IDLE)
-
-
-def seconds_until_next_due(now: datetime, *, db) -> float | None:
-    """Seconds until the earliest open batch is due (negative when overdue), or None when none is open."""
-    row = db.execute("SELECT MIN(closes_at) FROM doc_feedback_batches WHERE state='open'").fetchone()
-    return None if row[0] is None else (datetime.fromisoformat(row[0]) - now).total_seconds()
 
 
 def _open_batch(
@@ -123,19 +117,6 @@ def _add_comment_item(
     return True
 
 
-def _unstarted_batch_id(db, recipient_id: str, author_kind: str, author_id: str, artifact_id: str) -> str | None:
-    """The author's newest delivered batch for this document and owner, if its task has not been started."""
-    row = db.execute(
-        """SELECT id,delivered_node_id FROM doc_feedback_batches
-           WHERE author_kind=? AND author_id=? AND artifact_id=? AND recipient_id=?
-             AND state='delivered' AND delivery_outcome='node'
-           ORDER BY updated_at DESC,id DESC LIMIT 1""",
-        (author_kind, author_id, artifact_id, recipient_id),
-    ).fetchone()
-    node_id = row["delivered_node_id"] if row is not None else None
-    return str(row["id"]) if node_id and feedback_node_takes_more(db, node_id, recipient_id) else None
-
-
 def join_unstarted_batch(
     db,
     comment: dict[str, Any],
@@ -149,7 +130,7 @@ def join_unstarted_batch(
     author_id = feedback_comments.author_id(comment)
     artifact_id = str(comment["artifact_id"])
     now = str(comment["created_at"])
-    batch_id = _unstarted_batch_id(db, recipient_id, author_kind, author_id, artifact_id) if author_kind == "user" else None
+    batch_id = unstarted_batch_id(db, recipient_id, author_kind, author_id, artifact_id) if author_kind == "user" else None
     delivered = batch_id is not None
     if batch_id is None:
         batch_id = _open_batch(
