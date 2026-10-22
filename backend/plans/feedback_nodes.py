@@ -33,8 +33,8 @@ STOPPED_NOTE = (
 USER_FRAMING = (
     "The user's comments. They state the user's intent; still check factual claims against "
     "the current source. A comment with a suggested replacement is already their change: "
-    "accept it if you agree, otherwise reply with your reason and leave it for them. Send each "
-    "other change you agree with to them as a suggested change "
+    "accept it if you agree, otherwise reply with your reason and leave it for them. Answer with "
+    "suggested changes for each other change you agree with "
     "(doc_comment_create with quote and replacement); make it directly only when it cannot be one "
     "(it moves text across sections, or other changes depend on it), with a comment on the changed "
     "text saying what changed and why. Acknowledge each comment you agree with or that needs no answer. "
@@ -324,6 +324,51 @@ def settle_feedback_node(db, recipient_thread_id: str, batch_id: str, *, evidenc
         )
 
 
+def unstarted_feedback_batch_id(
+    db,
+    *,
+    recipient_thread_id: str,
+    author_kind: str,
+    author_id: str,
+    artifact_id: str,
+) -> str | None:
+    """Return the most recent delivered batch whose recipient has not started its task.
+
+    The task and its active turn are plan-owned state, so this is deliberately
+    the sole feedback-batch query that decides whether new feedback may update
+    an already-delivered task.
+    """
+    row = db.execute(
+        """SELECT batch.id FROM doc_feedback_batches batch
+           JOIN plan_nodes node ON node.id=batch.delivered_node_id AND node.state='active'
+           JOIN plans plan ON plan.id=node.plan_id
+           WHERE batch.author_kind=? AND batch.author_id=? AND batch.artifact_id=?
+             AND batch.recipient_id=? AND batch.state='delivered'
+             AND batch.delivery_outcome='node'
+             AND plan.owner_kind='thread' AND plan.owner_id=?
+             AND NOT EXISTS (
+                 SELECT 1 FROM active_turns turn
+                 WHERE turn.thread_id=? AND turn.plan_node_id=node.id
+                   AND turn.status IN ('running','waiting_retry')
+             )
+           ORDER BY batch.updated_at DESC,batch.id DESC LIMIT 1""",
+        (
+            author_kind, author_id, artifact_id, recipient_thread_id,
+            recipient_thread_id, recipient_thread_id,
+        ),
+    ).fetchone()
+    return str(row["id"]) if row is not None else None
+
+
+def _node_has_started(db, recipient_thread_id: str, node_id: str) -> bool:
+    return db.execute(
+        """SELECT 1 FROM active_turns
+           WHERE thread_id=? AND plan_node_id=?
+             AND status IN ('running','waiting_retry')""",
+        (recipient_thread_id, node_id),
+    ).fetchone() is not None
+
+
 def create_feedback_node(
     db,
     recipient_thread_id: str,
@@ -331,11 +376,21 @@ def create_feedback_node(
     *,
     items: list[dict[str, Any]] | None = None,
 ) -> FeedbackNodeResult:
-    """Create one queued recipient-plan task, idempotently keyed by batch id."""
+    """Create one queued recipient-plan task, refreshing it only before admission starts it."""
     batch_id = str(_batch_value(batch, "id"))
     artifact_id = str(_batch_value(batch, "artifact_id"))
     existing = _existing(db, recipient_thread_id, batch_id)
     if existing is not None:
+        if not _node_has_started(db, recipient_thread_id, existing):
+            loaded = items if items is not None else load_feedback_items(db, batch)
+            if loaded:
+                author, document = feedback_display(db, batch, loaded)
+                service.touch_node(
+                    db, existing,
+                    title=_title(author, document, loaded),
+                    acceptance_criteria=_acceptance(loaded),
+                    description=_description(batch, loaded),
+                )
         return FeedbackNodeResult(existing, (), False)
     loaded = items if items is not None else load_feedback_items(db, batch)
     if not loaded:
