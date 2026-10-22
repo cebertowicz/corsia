@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from connections.calendar_document import attendee_emails, compose_document, one_line_text, parse_time
+from connections.calendar_document import compose_document, read_draft, read_invite
 from connections.connected_accounts import ConnectedAccountError
 from connections.microsoft import calendar, client
 from connections.microsoft.errors import MicrosoftError
@@ -63,21 +63,14 @@ class MicrosoftCalendarDraftTool(Tool):
             raise ValueError("event_id is only valid for update.")
         if operation == "update" and (not isinstance(event_id, str) or not event_id.strip()):
             raise ValueError("event_id is required for update.")
-        title = one_line_text(kwargs.get("title"), "title")
-        start, parsed_start = parse_time(kwargs.get("start"))
-        end, parsed_end = parse_time(kwargs.get("end"))
-        if parsed_end <= parsed_start:
-            raise ValueError("The invite end must be after its start.")
-        attendees = attendee_emails(kwargs.get("attendees"))
-        description = kwargs.get("description", "")
-        if not isinstance(description, str):
-            raise ValueError("The invite description must be text.")
+        invite = read_invite(kwargs)
         row = await run_in_db(_visible_account, account, thread_id)
         address = str(row["address"])
-        text = compose_document(address, title, start, end, attendees, description)
+        text = compose_document(address, invite.title, invite.start, invite.end, invite.attendees, invite.description)
         target = {
             "account": address, "account_id": account, "operation": operation, "event_id": event_id,
-            "title": title, "start": start, "end": end, "attendees": attendees, "description": description,
+            "title": invite.title, "start": invite.start, "end": invite.end,
+            "attendees": invite.attendees, "description": invite.description,
         }
         saved = await save_draft(
             thread_id=thread_id, kind="invite", extension=".md", prefix="calendar-invites",
@@ -162,34 +155,22 @@ class _GatedCalendarTool(Tool):
 
     def _prepare(self, verdict: Approved) -> tuple[str, str | None, dict[str, object]] | str:
         try:
-            if not verdict.data.decode("utf-8").startswith("From: "):
-                return BAD_CALENDAR_DRAFT
-            target = json.loads(verdict.draft.get("target_json") or "{}")
-            if not isinstance(target, dict):
-                return BAD_CALENDAR_DRAFT
-            operation = target.get("operation")
+            draft = read_draft(verdict.data, verdict.draft.get("target_json"))
+            operation = draft.target.get("operation")
             if operation not in {"create", "update"}:
                 return BAD_CALENDAR_DRAFT
-            title = one_line_text(target.get("title"), "title")
-            start, parsed_start = parse_time(target.get("start"))
-            end, parsed_end = parse_time(target.get("end"))
-            if parsed_end <= parsed_start:
-                return BAD_CALENDAR_DRAFT
-            attendees = attendee_emails(target.get("attendees"))
-            description = target.get("description", "")
-            if not isinstance(description, str) or not isinstance(target.get("account"), str):
-                return BAD_CALENDAR_DRAFT
-            event_id = target.get("event_id")
+            event_id = draft.target.get("event_id")
             if operation == "update" and (not isinstance(event_id, str) or not event_id.strip()):
                 return BAD_CALENDAR_DRAFT
         except (UnicodeDecodeError, ValueError, TypeError):
             return BAD_CALENDAR_DRAFT
+        invite = draft.invite
         body: dict[str, object] = {
-            "subject": title,
-            "start": {"dateTime": _graph_utc(parsed_start), "timeZone": "UTC"},
-            "end": {"dateTime": _graph_utc(parsed_end), "timeZone": "UTC"},
-            "attendees": [{"emailAddress": {"address": email}, "type": "required"} for email in attendees],
-            "body": {"contentType": "text", "content": description},
+            "subject": invite.title,
+            "start": {"dateTime": _graph_utc(invite.start_at), "timeZone": "UTC"},
+            "end": {"dateTime": _graph_utc(invite.end_at), "timeZone": "UTC"},
+            "attendees": [{"emailAddress": {"address": email}, "type": "required"} for email in invite.attendees],
+            "body": {"contentType": "text", "content": invite.description},
         }
         return operation, event_id if isinstance(event_id, str) else None, body
 

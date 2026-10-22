@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,36 @@ def _container_type(schema: Any) -> str | None:
         kinds = [branch.get("type") if isinstance(branch, dict) else None for branch in branches]
         declared = kinds[0] if all(kind == kinds[0] for kind in kinds) else None
     return declared if isinstance(declared, str) and declared in ("object", "array") else None
+
+
+_JSON_TYPES: dict[str, Any] = {
+    "string": str,
+    "integer": int,
+    "number": (int, float),
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+}
+_SCALAR_TYPES = ("integer", "number", "boolean")
+
+
+def _scalar_text(value: str, declared: str) -> Any:
+    """The integer, number or boolean that text spells exactly, else the text unchanged.
+
+    A boolean is only ``true`` or ``false``; ``1`` or ``yes`` stays text, as
+    do ``5.0`` for an integer and a non-finite number.
+    """
+    if value != value.strip():
+        return value
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        return value
+    if declared == "boolean":
+        return parsed if isinstance(parsed, bool) else value
+    if isinstance(parsed, bool) or not isinstance(parsed, _JSON_TYPES[declared]):
+        return value
+    return parsed if math.isfinite(parsed) else value
 
 
 class Tool(ABC):
@@ -42,14 +73,7 @@ class Tool(ABC):
     #: Operator opt-in to advertise a configured tool's schema without discovery.
     always_advertised: bool = False
 
-    _TYPE_MAP: dict[str, Any] = {
-        "string": str,
-        "integer": int,
-        "number": (int, float),
-        "boolean": bool,
-        "array": list,
-        "object": dict,
-    }
+    _TYPE_MAP: dict[str, Any] = _JSON_TYPES
 
     @property
     def workspace(self) -> Path | None:
@@ -101,18 +125,27 @@ class Tool(ABC):
         return self._validate(params, {**schema, "type": "object"}, "")
 
     def decode_string_arguments(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Decode a top-level object or array argument a model sent as JSON text.
+        """Decode a top-level argument a model sent as text instead of its declared type.
 
-        Some models serialize a nested argument as a string (#1653, #2453).
-        Text that parses to the declared type is that argument; anything else
-        is left for validation to refuse. This is the one place that decodes
-        it, for every tool.
+        Some models serialize a nested argument as a string (#1653, #2453), and
+        a local model calling a deferred tool by name, with no schema at its
+        parser, sends every argument as text. Text that parses exactly to the
+        declared object, array, integer, number or boolean is that argument;
+        anything else is left for validation to refuse. This is the one place
+        that decodes it, for every tool.
         """
         properties = (self.parameters or {}).get("properties", {})
         decoded = dict(params)
         for key, value in params.items():
-            expected = _container_type(properties.get(key, {}))
-            if not isinstance(value, str) or expected is None:
+            schema = properties.get(key, {})
+            if not isinstance(value, str):
+                continue
+            declared = schema.get("type") if isinstance(schema, dict) else None
+            if isinstance(declared, str) and declared in _SCALAR_TYPES:
+                decoded[key] = _scalar_text(value, declared)
+                continue
+            expected = _container_type(schema)
+            if expected is None:
                 continue
             try:
                 parsed = json.loads(value)

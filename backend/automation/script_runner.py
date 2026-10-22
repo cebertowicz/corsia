@@ -44,6 +44,9 @@ WORKSPACE_SCOPE = "__workspace__"
 
 _in_flight: dict[str, asyncio.Task] = {}
 
+#: The runner builds a line's event id from the run, so the owner can't resend it: a new run sends every line again.
+_RERUN_FIX = "Run the script again to send it; its other event lines are sent again too."
+
 
 def _forget(schedule_id: str, _task: asyncio.Task) -> None:
     _in_flight.pop(schedule_id, None)
@@ -156,6 +159,7 @@ async def run_claimed(schedule: Schedule, started_at: str, *, db=None) -> None:
         logger.exception("script schedule {} failed unexpectedly", schedule.id)
         report = _error_report(schedule, f"the runner failed: {exc}")
     report = await _stamped(schedule, report)
+    report = await _admit_events(schedule, report)
     try:
         woken = await run_in_db_unless_owned(
             db, settle, schedule, report, finished_at(), db,
@@ -170,13 +174,57 @@ async def run_claimed(schedule: Schedule, started_at: str, *, db=None) -> None:
         await _drive_owner(schedule.thread_id)
 
 
+async def _admit_events(schedule: Schedule, report: RunReport) -> RunReport:
+    """Route parsed event lines before synchronous settlement; one refusal wakes the owner once."""
+    if not report.events:
+        return report
+    from automation.script_measures import run_stamps
+    from events.intake import admit_event, failure_code, format_event_error
+
+    stamps = run_stamps(schedule, report)
+    producer = f"script:{schedule.id}"
+    refusals: dict[str, str] = {}  # each distinct code, with the first text it came with
+    for index, event in enumerate(report.events):
+        try:
+            result = await admit_event(
+                event_type=event["type"], facts=event["facts"], origin="emitter",
+                producer=producer, event_id=f"{producer}:{report.run_id}:{index}", stamps=stamps,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - run_claimed never raises; the run settles as an error
+            logger.exception("script schedule {} event line {} failed inside the intake", schedule.id, index)
+            code = failure_code(exc)
+            refusals.setdefault(code, (
+                "the event intake failed unexpectedly" if code == "internal_error"
+                else "event intake is unavailable"))
+            continue
+        if result.refusal is not None:
+            refusals.setdefault(result.refusal.code, result.refusal.text)
+    if not refusals:
+        return report
+    shown = [
+        format_event_error(code, refusals[code], _RERUN_FIX if code == "intake_unreachable" else None)
+        for code in sorted(refusals)[:2]
+    ]
+    more = f" and {len(refusals) - 2} more" if len(refusals) > 2 else ""
+    message = f"event line refused: {' '.join(shown)}{more}"
+    return dataclasses.replace(
+        report, status="error", error=message,
+        signals=[*report.signals, Signal(
+            "error", None, f'Script "{(schedule.script_path or "script").rsplit("/", 1)[-1]}": {message}',
+            {"message": message},
+        )],
+    )
+
+
 async def _stamped(schedule: Schedule, report: RunReport) -> RunReport:
     """Resolve the workflow stamp before settling, off the database pool (it reads Git).
 
     The owner rule is read live; a failure to resolve records the rows unversioned.
     """
     workflow = (schedule.payload or {}).get("workflow")
-    if not workflow or not report.measures:
+    if not workflow or not (report.measures or report.events):
         return report
 
     def resolve():

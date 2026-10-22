@@ -1,9 +1,11 @@
 """The one pass over a script's stdout: readings, measure lines and what was wrong.
 
 Each line is JSON and is dispatched on its single top-level key: ``{"series", "value"}``
-is a reading, ``{"measure": {...}}`` is a measure line. A reading problem is a run
-error. A measure line that is malformed, or past the per-run cap, is refused and
+is a reading, ``{"measure": {...}}`` is a measure line, ``{"event": {...}}`` an event line.
+A reading problem is a run error. A measure line that is malformed is refused and
 counted instead: it never fails the run or wakes the owner (design section 4.4.5).
+Measure and event lines share one per-run cap, since a ``both`` event line also writes
+a measurement row; lines past it are counted as over the cap and dropped.
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ class LineRefusal:
 @dataclass
 class ParsedOutput:
     readings: list[Reading] = field(default_factory=list)
+    events: list[dict[str, Any]] = field(default_factory=list)
     measures: list[dict[str, Any]] = field(default_factory=list)
     refused: list[LineRefusal] = field(default_factory=list)
     over_cap: int = 0
@@ -62,6 +65,11 @@ def parse_output(stdout: bytes, registered: dict[str, store.Series]) -> ParsedOu
         if isinstance(item, dict) and set(item) == {"measure"}:
             _take_measure(parsed, number, item["measure"])
             continue
+        if isinstance(item, dict) and set(item) == {"event"}:
+            problem = _take_event(parsed, item["event"])
+            if problem:
+                parsed.problems.append(f"line {number}: {problem}")
+            continue
         problem = _read_line(item, registered, readings)
         if problem:
             parsed.problems.append(f"line {number}: {problem}")
@@ -69,9 +77,15 @@ def parse_output(stdout: bytes, registered: dict[str, store.Series]) -> ParsedOu
     return parsed
 
 
+def _over_cap(parsed: ParsedOutput) -> bool:
+    if len(parsed.measures) + len(parsed.refused) + len(parsed.events) < MAX_MEASURE_LINES:
+        return False
+    parsed.over_cap += 1
+    return True
+
+
 def _take_measure(parsed: ParsedOutput, number: int, measure: Any) -> None:
-    if len(parsed.measures) + len(parsed.refused) >= MAX_MEASURE_LINES:
-        parsed.over_cap += 1
+    if _over_cap(parsed):
         return
     problem = _measure_problem(measure)
     if problem is None:
@@ -96,11 +110,24 @@ def _measure_problem(measure: Any) -> str | None:
     return None
 
 
+def _take_event(parsed: ParsedOutput, event: Any) -> str | None:
+    if not isinstance(event, dict) or set(event) != {"type", "facts"}:
+        return '"event" must be an object with exactly "type" and "facts"'
+    if not isinstance(event["type"], str) or not event["type"]:
+        return 'event type must be a non-empty declared event name'
+    if not isinstance(event["facts"], dict):
+        return 'event facts must be an object'
+    if _over_cap(parsed):
+        return None
+    parsed.events.append(event)
+    return None
+
+
 def _read_line(
     item: Any, registered: dict[str, store.Series], readings: dict[str, Reading],
 ) -> str | None:
     if not isinstance(item, dict) or set(item) != {"series", "value"}:
-        return 'expected exactly {"series": ..., "value": ...} or {"measure": ...}'
+        return 'expected exactly {"series": ..., "value": ...}, {"event": ...}, or {"measure": ...}'
     key, value = item["series"], item["value"]
     if not isinstance(key, str) or key not in registered:
         return "series is not registered on this schedule"

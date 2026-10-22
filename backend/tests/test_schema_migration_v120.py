@@ -64,7 +64,7 @@ def _raise_ask(db: sqlite3.Connection, artifact_id: str, owner: str = "owner"):
 
 
 def test_registers_the_hold_only_migration():
-    assert SCHEMA_VERSION == 137
+    assert SCHEMA_VERSION == 138
     assert MIGRATIONS[119] is migrate_119_to_120
     assert 137 not in MIGRATIONS
 

@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Coroutine, IO
 
-from llm import local_setup_download, local_setup_operation
+from llm import local_model, local_setup_download, local_setup_operation
 from llm.local_model import LocalModel
 from llm.local_profiles import format_size
 from llm.local_setup_disk import require_free_disk
@@ -220,6 +220,17 @@ def setup_finishing() -> bool:
 def setup_kind() -> str | None:
     """The wire kind: setup or settings."""
     return _flight.kind
+
+
+def ever_started() -> bool:
+    """Whether this Mac already began local setup, so a resumed setup must not start a download of its own.
+
+    The operation record is written by every claimed flight and keeps its cancelled, failed or finished
+    result. The recorded set-up model covers a setup that finished before that record existed. A model on a
+    server needs no clause: the start itself ends without a download when CORSIA's own oMLX already serves
+    one, and a person's own oMLX is never this install's server, so screen 1 would start here as well.
+    """
+    return local_setup_operation.read() is not None or local_model.set_up_model() is not None
 
 
 def setup_failure() -> dict | None:

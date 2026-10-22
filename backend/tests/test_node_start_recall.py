@@ -113,6 +113,27 @@ def test_many_newer_one_term_comments_do_not_hide_an_older_match(db):
     assert len(lines) == 2 and "Export account ledger with CSV" in lines[1]
 
 
+@pytest.mark.parametrize("noise_body", [
+    "Reformat the subaccount, nonexport and subledger tabs; unstable.",  # terms only inside words
+    "Stable account columns, any format.",  # floor met without a title term
+])
+def test_many_comments_match_rejects_do_not_hide_a_match(db, noise_body):
+    from doc_feedback_helpers import add_comment, seed_document
+    from memory.node_start_recall import SOURCE_CANDIDATES, NodeText, related
+
+    db.execute("UPDATE threads SET user_id='owner-token'")
+    artifact = seed_document(db, "past", name="ledger-guide.md")
+    match, _ = add_comment(db, artifact, author_kind="user", author_id=None)
+    noise = [add_comment(db, artifact, author_kind="user", author_id=None)[0]["id"] for _ in range(SOURCE_CANDIDATES + 1)]
+    db.execute("UPDATE doc_comments SET body='Export the ledger.', created_at='2026-01-01' WHERE id=?", (match["id"],))
+    db.executemany("UPDATE doc_comments SET body=?, created_at='2026-02-01' WHERE id=?", [(noise_body, comment_id) for comment_id in noise])
+    db.commit()
+
+    lines = related(db, NodeText("Export ledger", criteria="Use stable account columns and format."), caller_thread_id="caller", trigger="start")
+
+    assert len(lines) == 2 and "Export the ledger" in lines[1]
+
+
 def test_purged_thread_answered_decision_is_not_quoted(db):
     from plans.public import DECISION_TYPE
 
@@ -435,6 +456,51 @@ def test_cloud_off_messages_cannot_fill_the_candidate_window(db):
     _message(db, "deliverable-message", "deliverable", "Export ledger as CSV format.")
 
     assert any("deliverable-message" not in line and "Export ledger as CSV format" in line for line in _related(db))
+
+
+def test_newer_messages_the_matcher_rejects_do_not_hide_an_older_match(db):
+    from memory.node_start_recall import SOURCE_CANDIDATES
+
+    # Each newer message holds title terms but stays below the floor, so none takes a window slot.
+    common = [(f"common-{index}", "Export account notes.") for index in range(10 * SOURCE_CANDIDATES)]
+    rare = [(f"rare-{index}", "Ledger ledger ledger.") for index in range(SOURCE_CANDIDATES + 1)]
+    db.executemany(
+        "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq,delivery_state) "
+        "VALUES (?,'past','user',?,'{}','2026-02-01T12:00:00+00:00',?,'delivered')",
+        [(message_id, body, seq) for seq, (message_id, body) in enumerate([*common, *rare], start=2)],
+    )
+    _message(db, "match", "past", "Export the account ledger.")
+
+    lines = _related(db)
+
+    assert len(lines) == 2 and "Export the account ledger" in lines[1]
+
+
+def test_a_task_term_naming_the_role_column_does_not_count_for_a_message(db):
+    from memory.node_start_recall import SOURCE_CANDIDATES, NodeText, related
+
+    noise = [(f"noise-{index}", "Export export export.") for index in range(SOURCE_CANDIDATES + 1)]
+    db.executemany(
+        "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq,delivery_state) "
+        "VALUES (?,'past','user',?,'{}','2026-02-01T12:00:00+00:00',?,'delivered')",
+        [(message_id, body, seq) for seq, (message_id, body) in enumerate(noise, start=2)],
+    )
+    _message(db, "match", "past", "Export the ledger for each user.")
+
+    lines = related(db, NodeText("Export user ledger"), caller_thread_id="caller", trigger="start")
+
+    assert len(lines) == 2 and "Export the ledger for each user" in lines[1]
+
+
+def test_long_quote_is_cut_around_the_matched_word_not_a_longer_one(db):
+    from memory.node_start_recall import NodeText, related
+
+    filler = "Earlier notes about the catalog and its many sections. " * 5
+    _message(db, "long", "past", filler + "Log rotation must keep a week of files.")
+
+    lines = related(db, NodeText("Log rotation"), caller_thread_id="caller", trigger="start")
+
+    assert len(lines) == 2 and "Log rotation must keep" in lines[1]
 
 
 def test_limits_to_three_lines_and_one_rule(db):

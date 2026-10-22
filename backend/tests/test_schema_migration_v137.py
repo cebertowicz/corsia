@@ -1,61 +1,65 @@
-"""Schema 136 -> 137: durable task intent and supporting words."""
+"""Schema 136 -> 137 creates declared-event intake receipts safely."""
 from __future__ import annotations
 
 import sqlite3
-from contextlib import closing
 
-import pytest
-
-from infra.database import initialize_schema
-from infra.database_migrations import MIGRATIONS, migrate_to_current
-from infra.migration_136_to_137_plan_intent import migrate_136_to_137
-from infra.schema import SCHEMA_VERSION
-from plans import service
+from infra.migration_136_to_137_event_intake import migrate_136_to_137
 
 
-def _dev_136() -> sqlite3.Connection:
+def _intake_columns() -> set[str]:
+    return {
+        "id", "event_id", "outcome", "rules_matched", "refusal_code", "producer",
+        "origin", "event_type", "at",
+    }
+
+
+def test_intake_receipt_migration_is_idempotent_and_stays_in_the_open_transaction():
     db = sqlite3.connect(":memory:")
-    db.row_factory = sqlite3.Row
-    initialize_schema(db)
-    db.execute("DROP INDEX idx_plan_nodes_intent_node")
-    db.execute("ALTER TABLE plan_nodes DROP COLUMN intent_node_id")
-    db.execute("ALTER TABLE plan_nodes DROP COLUMN intent")
-    db.execute("DROP TABLE plan_node_intent_words")
-    db.execute("PRAGMA user_version=136")
-    db.commit()
-    return db
+    db.execute("BEGIN")
+    migrate_136_to_137(db)
+    migrate_136_to_137(db)
+    assert db.in_transaction
+    columns = {row[1] for row in db.execute("PRAGMA table_info(event_intake_records)")}
+    assert columns == _intake_columns()
+    fresh = sqlite3.connect(":memory:")
+    from infra.connection_schema import CONNECTION_SCHEMA_SQL
+    fresh.executescript(CONNECTION_SCHEMA_SQL)
+    assert {row[1] for row in fresh.execute("PRAGMA table_info(event_intake_records)")} == _intake_columns()
+    fresh.close()
+    db.rollback()
+    assert db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='event_intake_records'").fetchone() is None
 
 
-def test_v136_registers_the_task_intent_step() -> None:
-    assert SCHEMA_VERSION == 137
-    assert MIGRATIONS[136] is migrate_136_to_137
+def test_intake_schema_allows_refusal_then_acceptance_but_only_one_acceptance():
+    migrated = sqlite3.connect(":memory:")
+    fresh = sqlite3.connect(":memory:")
+    migrate_136_to_137(migrated)
+    from infra.connection_schema import CONNECTION_SCHEMA_SQL
+    fresh.executescript(CONNECTION_SCHEMA_SQL)
 
-
-def test_existing_plan_nodes_survive_the_intent_migration() -> None:
-    with closing(_dev_136()) as db:
-        plan = service.ensure_plan("thread", "root", db=db)
-        node = service.add_node(
-            plan.id,
-            title="Existing task",
-            kind="task",
-            acceptance_criteria="Existing task remains unchanged",
-            db=db,
+    for db in (migrated, fresh):
+        db.execute(
+            "INSERT INTO event_intake_records "
+            "(event_id,outcome,rules_matched,at) VALUES ('accepted-id','accepted',0,'now')"
         )
-        db.commit()
-
-        result = migrate_to_current(db, SCHEMA_VERSION)
-
-        assert (result.from_version, result.to_version) == (136, 137)
-        row = db.execute("SELECT intent,intent_node_id FROM plan_nodes WHERE id=?", (node.id,)).fetchone()
-        assert tuple(row) == (None, None)
-
-
-def test_pre_v137_node_creation_refuses_intent_rather_than_dropping_it() -> None:
-    """A migration running the plan service before v137 has no intent columns to store it in."""
-    with closing(_dev_136()) as db:
-        plan = service.ensure_plan("thread", "root", db=db)
-        with pytest.raises(service.PlanInputError, match="task intent requires schema version 137"):
-            service.add_node(
-                plan.id, kind="task", title="Reject intent",
-                acceptance_criteria="Must require schema 137", intent="Keep the request", db=db,
+        try:
+            db.execute(
+                "INSERT INTO event_intake_records "
+                "(event_id,outcome,rules_matched,at) VALUES ('accepted-id','accepted',0,'later')"
             )
+        except sqlite3.IntegrityError:
+            pass
+        else:
+            raise AssertionError("accepted event IDs must be unique")
+        db.execute(
+            "INSERT INTO event_intake_records "
+            "(event_id,outcome,rules_matched,at) VALUES ('retry-id','refused',0,'now')"
+        )
+        db.execute(
+            "INSERT INTO event_intake_records "
+            "(event_id,outcome,rules_matched,at) VALUES ('retry-id','accepted',0,'later')"
+        )
+        assert db.execute(
+            "SELECT outcome FROM event_intake_records WHERE event_id='retry-id' ORDER BY id"
+        ).fetchall() == [("refused",), ("accepted",)]
+        db.close()

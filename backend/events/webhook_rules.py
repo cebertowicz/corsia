@@ -9,16 +9,15 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from loguru import logger
-
-from events import rule_reads, rules
+from events import rules
 from events.connectors import get_manifest
 from events.envelope import EventEnvelope
 from events.platform import (
-    DEAD_LETTERED, WOKE, deliver_rule_adds, emit_route_events, rule_event, settle_rule_delivery,
+    DEAD_LETTERED, WOKE, deliver_rule_adds, emit_route_events, lookup_failed, rule_event,
+    settle_rule_delivery,
 )
 from events.resolve import Target
-from events.rule_match import matches, repository_fact
+from events.rule_match import matches
 from infra.database import get_db, write_transaction
 
 
@@ -40,7 +39,8 @@ def apply_webhook_rules_sync(
     anchor = rules.routed(targets)[2]
     if anchor is None:
         if repository_projects is None:
-            _lookup_failed(event)
+            with write_transaction(None, scope="apply_webhook_rules") as conn:
+                rules.record(conn, event, lookup_failed(conn, event))
             return None
         if not repository_projects:
             return None
@@ -61,21 +61,6 @@ def apply_webhook_rules_sync(
         rules.record(conn, event, [*plan.settled, *outcomes])
         emit_route_events(envelope, added)
         return plan
-
-
-def _lookup_failed(event: rules.RuleEvent) -> None:
-    """Fail closed, as ``create`` does: no self-rule fires when the projects tracking
-    the event's repository can't be read, and each one that matched says why."""
-    repository = event.facts.get(repository_fact(event.connector) or "")
-    logger.warning("event rules: repository lookup failed for {} {} on {}; no self-rule fired",
-                   event.connector, event.event_type, repository)
-    with write_transaction(None, scope="apply_webhook_rules") as conn:
-        rules.record(conn, event, [
-            rules.Outcome(rule.id, rule.created_by, rules.DEAD_LETTERED, reason=rules.LOOKUP_FAILED)
-            for rule in map(rules.from_row, rule_reads.self_rules(
-                conn, event.connector, event.event_type))
-            if matches(rule, event.facts) and rules.self_on_repository(rule)
-        ])
 
 
 def record_rule_ride_sync(plan: rules.RulePlan, thread: str, delivered: bool) -> None:

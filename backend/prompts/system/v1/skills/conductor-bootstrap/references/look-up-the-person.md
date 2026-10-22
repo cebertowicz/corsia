@@ -8,10 +8,10 @@ When `web_search_ready` was already true before step 4, so no key was saved in t
 
 ## A. What you start from
 
-1. Name: `user_profile` `name`. When it is empty, post `What's your full name? I'll use it to look you up.` and wait for the answer.
+1. Name: `user_profile` `full_name`, else `name`. When both are empty, post `What's your full name? I'll use it to look you up.` and wait for the answer.
 2. Domain: the part of the person's email after the `@` (the `- **Email:**` line of the workspace's `context/50-USER-PROFILE.md`). Leave it out when it belongs to a personal email service: gmail.com, googlemail.com, outlook.com, hotmail.com, live.com, yahoo.com, icloud.com, me.com, aol.com, proton.me, protonmail.com, or any domain whose own page offers free personal email sign-up. For any other domain, use it only when a `web_search` of the domain alone returns a page on that domain (the company's own site); that search counts toward the limit of 6. Otherwise leave it out. Never put the full address in a query.
 3. What the import kept: their work, their city, a GitHub handle or website.
-4. This Mac's time zone: the `Timezone` line of the workspace `USER.md` if it has one, else `date +%Z`.
+4. This computer's time zone: the `- **Timezone:**` line of `context/50-USER-PROFILE.md` if it has one, else `date +%Z`.
 5. Too little to go on means: you have only a name, or a name and a domain no page answered for, and the import kept nothing. Then go to section E, post the parts of question 1 you still lack, in one message, and use the answer as your detail. Then continue at section B.
 6. When search does not work (`web_search_ready` is false and no key was just saved) or they said not to look them up: go to section E. Say nothing about searching or about skipping it, anywhere in this step: not in what you post, not in what you write.
 
@@ -66,8 +66,8 @@ Follow up once on anything vague. On "not now", carry on and learn as you go.
 
 ## F. Write it down
 
-1. Set their time zone from the place they name (Tucson is America/Phoenix) and write it at once, with no question. This Mac's zone from section A is only for when they name no place.
-2. Write the rest into the workspace `USER.md`, only what they said or didn't correct, the way `references/project-import.md` does for role and working style, when `references/about-you-doc.md` says to write the profile.
+1. Set their time zone from the place they name (Tucson is America/Phoenix) and write it at once, with no question, replacing the profile's `- **Timezone:**` line, or adding it when there is none, with `- **Timezone:** <IANA zone>. Give every time and timestamp in this zone, never UTC.` Section A's zone is for when they name no place.
+2. Write the name they go by over the profile's `- **Preferred name:**` line, and the rest (work, place, background) into the workspace `USER.md`, only what they said or didn't correct, the way `references/project-import.md` does for role and working style, when `references/about-you-doc.md` says to write the profile.
 3. If the name they go by is not the one you searched, run one more search with it (within the limit of 6), show what it finds the same way, and ask nothing more about it.
 
 ## G. Check question 2 against what is connected

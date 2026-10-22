@@ -65,7 +65,7 @@
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'account' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
 	const CLI_VENDORS = ['claude-code', 'codex'] as const;
-	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
+	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; local_started?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
 	const classifier = createSetupClassifier(), localPick = createSetupLocalPick(), remote = createSetupRemote();
 	let page = $state<Page>(untrack(() => startConnect) ? 'connect' : 'checking');
 	// Below 1280 wide, Welcome is its own screen before the account form; from 1280 it sits beside the form instead.
@@ -77,6 +77,8 @@
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
 	let localStartError = $state<'other' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
+	// The pre-start (pick, then start) is under way, so the local row shows progress instead of a Download button.
+	let localPreparing = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	// The subscriptions answer; null until answered (or skipped, or a resumed setup), when every CLI row shows.
 	let picks = $state<SetupPicks | null>(null), confirmLocalStop = $state(false), localOffFailed = $state<{ reference?: string } | undefined>();
@@ -131,7 +133,7 @@
 			const works = catalog.some((row) => row.connection === vendor && setupModelWorks(row));
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, pill: works ? { state: 'success', label: 'Ready' } : undefined });
 		});
-		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
+		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localPick.pick?.state === 'checking', ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
 			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed,
 			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
 			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() })));
@@ -140,7 +142,7 @@
 			pill: provider ? { state: 'success', label: 'Ready' } : undefined, action: provider ? undefined : { label: 'Add provider', run: () => { showAdd = true; } } });
 		return rows;
 	});
-	const finishNote = $derived(setupStartNote(canFinish, eligible, downloading, local?.download_eta_seconds));
+	const finishNote = $derived(setupStartNote(canFinish, eligible, downloading || localPreparing, local?.download_eta_seconds));
 	type View = { title: string; lede?: string; primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean }; onPrimary?: () => void };
 	const view = $derived.by((): View => {
 		if (page === 'connect') return remote.view;
@@ -184,7 +186,10 @@
 			if (status.classifier) classifier.accept(status.classifier);
 			if (status.macos_supported === false) { page = 'hard-stop'; return; }
 			page = 'account'; void classifier.start();
-			if (eligible) { await localPick.start(); await startLocal(); await readLocalProgress(); }
+			if (eligible) {
+				localPreparing = true;
+				try { await localPick.start(); await startLocal(); await readLocalProgress(); } finally { localPreparing = false; }
+			}
 		} catch { statusError = 'Something went wrong while starting. Try again, or save a report to send.'; page = 'error'; }
 	}
 	async function checkLocal() {
@@ -286,7 +291,13 @@
 		if (progress.setup_completed) { onFinished(); return; }
 		status = (progress.status ?? {}) as Status; folder = status.work_folder || folder; page = 'models';
 		if (status.classifier) classifier.accept(status.classifier);
-		await Promise.all([refreshSources(true), classifier.read(), loadProviders()]);
+		// A relaunch after the account step has no screen-1 start to rerun, so a local download that was never claimed starts here.
+		const unstarted = eligible && status.local_started === false;
+		if (unstarted) localPreparing = true;
+		try {
+			await Promise.all([refreshSources(true), classifier.read(), loadProviders()]);
+			if (unstarted) await startLocal();
+		} finally { localPreparing = false; }
 	}
 	function selectProvider(provider: ProviderEntry) { showAdd = false; openProvider = { name: provider.name, label: provider.label, type: provider.type, statusDot: 'disabled', subline: '', raw: provider }; }
 	$effect(() => {
@@ -340,7 +351,7 @@
 {#if openProvider}<ProviderSettingsModal provider={openProvider} initialTab="advanced" onClose={() => { openProvider = null; void refreshSources(); }} />{/if}
 
 <style>
-	p { font-size: var(--text-footnote); line-height: var(--lh-normal); }
-	.error-text { margin: var(--space-2) var(--space-4); }
-	.settled { margin: 0; font-size: var(--text-body); color: var(--text-primary); }
+	p { font-size: var(--text-subhead); line-height: var(--lh-normal); }
+	.error-text { margin: var(--space-2) var(--space-4); font-size: var(--text-subhead); }
+	.settled { margin: 0; font-size: var(--text-title3); color: var(--text-primary); }
 </style>
