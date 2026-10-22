@@ -338,3 +338,9 @@ def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
         return lines, lost
     finally:
         db.close()
+
+
+def accounts_without_usable_model(provider: str) -> set[str]:
+    """The ids of this vendor's accounts whose first-run line reads ``no_usable_model``."""
+    lines, _ = source_account_view(provider)
+    return {line["account_id"] for line in lines if line["state"] == NO_USABLE_MODEL}

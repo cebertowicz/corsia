@@ -222,6 +222,32 @@ describe('rendering and actions', () => {
 			}
 		});
 
+		it('says an account the service records as having no usable model does not include the tool, and only then', async () => {
+			const signedIn = { ...workAccount, state: 'signed_in' as const };
+			const noModel = 'This ChatGPT account doesn’t include Codex. Sign in with another account, or turn this one off.';
+			for (const [record, shown] of [[{ no_usable_model: true }, true], [{ no_usable_model: false }, false], [{}, false]] as const) {
+				vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [defaultAccount, { ...signedIn, ...record }] })));
+				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+				await settle();
+				expect(document.body.textContent?.includes(noModel)).toBe(shown);
+				unmount(component);
+				document.body.innerHTML = '';
+			}
+		});
+
+		it('names the usual cause of a sign-in that timed out and says what to do next', async () => {
+			vi.stubGlobal('fetch', vi.fn()
+				.mockResolvedValueOnce(response({ accounts: [defaultAccount, workAccount] }))
+				.mockResolvedValueOnce(response({ detail: 'no sign-in is in progress for this account' }, 409))
+				.mockResolvedValueOnce(response({ account_id: 'work', route: 'browser', status: 'failed', cause: 'signin_timed_out', ref: 'signin-1' })));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await settle();
+			button('Sign in').click();
+			await settle();
+			expect(document.body.textContent).toContain('Couldn’t finish signing in: your browser may have stopped on a page saying this account doesn’t include Codex. Sign in with another account, or turn this one off.');
+			unmount(component);
+		});
+
 		it('prefills rename with a named account custom value only', async () => {
 			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [defaultAccount, workAccount] })));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });

@@ -12,6 +12,8 @@
 	import ProviderAccountPolicyControls from './ProviderAccountPolicyControls.svelte';
 	import PolicySaveStatus from './PolicySaveStatus.svelte';
 	import { signinMessage } from './accountSigninMessage';
+	import { VENDORS } from '$lib/conductorSources';
+	import { on } from '$lib/ws/events';
 	import type { HostProvider } from '$lib/stores/providersV7';
 	import { createProviderPolicyState } from '$lib/stores/providerPolicyState.svelte';
 	import { openProjectSettings } from '$lib/stores/settingsNavigation';
@@ -88,6 +90,9 @@
 		void policyState.load();
 	});
 
+	// The first read of a new login's models ends with models_updated: the list then shows whether the account has any.
+	onMount(() => on('models_updated', () => { void loadVendorAccounts(); }));
+
 	onMount(async () => {
 		void policyState.load();
 		const result = await loadVendorAccounts();
@@ -123,6 +128,8 @@
 		if (account.state === 'signed_out') return 'Signed out';
 		if (account.state === 'legacy') return 'Managed by provider';
 		if (account.state === 'removed') return 'Removed';
+		const vendor = VENDORS[account.provider];
+		if (account.no_usable_model && vendor) return `This ${vendor.name} account doesn’t include ${vendor.cli}. Sign in with another account, or turn this one off.`;
 		return null;
 	}
 
@@ -332,7 +339,7 @@
 				{/if}
 				{#if account.state !== 'removed' && signIn && !(signIn.status === 'completed' && account.state === 'signed_in')}
 					<div class="signin-state" role="status">
-						<span>{signinMessage(signIn, accountName, signin)}</span>
+						<span>{signinMessage(signIn, accountName, signin, VENDORS[account.provider]?.cli)}</span>
 						{#if signIn.status === 'waiting'}
 							<div class="signin-actions">
 								<Button size="sm" disabled={!!pending[account.id]} onclick={() => checkSignin(account.id)}>Check</Button>

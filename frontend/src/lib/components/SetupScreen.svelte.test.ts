@@ -232,6 +232,18 @@ describe('SetupScreen', () => {
 		expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
 	});
 
+	it('says a signed-in account without the tool does not include it, and its switch unpicks the tool', async () => {
+		const account = { account_id: 'a1', label: 'me@example.com', label_verified: true, identified: true, state: 'no_usable_model', resets_at: null, corsia_agent_binding: false };
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready', accounts: [account] } as never, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		await passFolder();
+		button('Claude')?.click(); await settle();
+		expect(host.textContent).toContain('This Claude account doesn’t include Claude Code. Sign in with another account, or turn it off.');
+		progressBodies.length = 0;
+		host.querySelector<HTMLButtonElement>('button[aria-label="Claude Code"]')!.click(); await settle();
+		expect(progressBodies.map((body) => JSON.parse(body).picks)).toContainEqual({ claude: false, chatgpt: false });
+		expect(rowNames()).not.toContain('Claude Code');
+	});
+
 	it('skips the subscriptions screen when both tools are signed in, and Back returns to the account', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'ready' }];
 		await passFolder();
