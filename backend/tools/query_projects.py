@@ -169,9 +169,6 @@ class GetThreadHistoryTool(Tool):
             return f"Error: Thread '{thread_id}' not found"
         if not rows:
             return f"No messages found in thread '{thread_id}'"
-        from memory.node_start_opened import note_opened
-
-        note_opened(kwargs.get("_thread_id"), thread_id)
         if not oldest_first:
             rows = list(reversed(rows))
 

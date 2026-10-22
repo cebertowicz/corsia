@@ -10,7 +10,7 @@ from typing import Any
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.state.context import running_call_ids
-from memory import node_start_opened, node_start_recall
+from memory import node_start_recall
 from plans import public
 from plans.public import (
     read_current_status, PlanActor, ensure_current_plan, mutate, read_current_plan,
@@ -112,8 +112,6 @@ def _current_operation(thread_id, actor_row, ensure, read: dict):
             )
         if other is not None:
             return public.addressed_to(page, other, db=db)
-        if page is not None and read.get("mode") != "full":
-            node_start_opened.note_opened(thread_id, read.get("node_id"))
         return page
     finally:
         db.close()
