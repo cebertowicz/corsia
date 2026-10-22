@@ -1058,6 +1058,48 @@ describe('InputBar model readiness at the action seam', () => {
 		);
 	});
 
+	it('queues once when the platform cancels an armed hold on the document', async () => {
+		activeThreadId.set('thread-1');
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		await component.setText('hold this');
+		const send = host.querySelector<HTMLButtonElement>('.send-btn')!;
+
+		vi.useFakeTimers();
+		send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 12 }));
+		vi.advanceTimersByTime(ARM_MS);
+		flushSync();
+		document.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 12 }));
+		send.dispatchEvent(new PointerEvent('lostpointercapture', { bubbles: true, pointerId: 12 }));
+		flushSync();
+		vi.useRealTimers();
+		expect(send.classList.contains('queue-armed')).toBe(false);
+		expect(send.classList.contains('queue-holding')).toBe(false);
+		expect(wsMocks.sendMessage).toHaveBeenCalledTimes(1);
+		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
+			'thread-1', 'hold this', 'network/model', [], undefined, 'queue_after_turn',
+		);
+	});
+
+	it('sends nothing when the platform cancels a hold before it arms', async () => {
+		activeThreadId.set('thread-1');
+		component = mount(InputBar, { target: host, props: { onSend: vi.fn() } });
+		flushSync();
+		await component.setText('hold this');
+		const send = host.querySelector<HTMLButtonElement>('.send-btn')!;
+
+		vi.useFakeTimers();
+		send.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 13 }));
+		vi.advanceTimersByTime(ARM_MS - 100);
+		document.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 13 }));
+		vi.advanceTimersByTime(200);
+		flushSync();
+		vi.useRealTimers();
+		expect(send.classList.contains('queue-armed')).toBe(false);
+		expect(send.classList.contains('queue-holding')).toBe(false);
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+	});
+
 	it('treats lost pointer capture like pointercancel and queues once', async () => {
 		// Capture lost is the platform taking the touch: past the arm delay the
 		// gesture is made, as for pointercancel; before it, nothing is sent. The

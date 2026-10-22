@@ -132,7 +132,6 @@
 		}
 		queueHoldTimer = setTimeout(() => {
 			queueHoldTimer = null;
-			if (!queueHolding || heldPointerId !== pointerId) return;
 			queueArmed = true;
 			haptics.threshold();
 		}, QUEUE_ARM_MS);
@@ -174,6 +173,7 @@
 		queueAfterTurn();
 	}
 
+	/** The one end path for up and cancel: capture on the document sees them even when the button misses the release. */
 	function finishQueueHoldFromDocument(event: PointerEvent) {
 		if (event.pointerId !== heldPointerId) return;
 		if (event.type === 'pointerup') completeQueueHold();
@@ -322,8 +322,6 @@
 		style="--queue-arm-ms: {QUEUE_ARM_MS}ms"
 		onpointerdown={beginQueueHold}
 		onpointermove={trackQueueHold}
-		onpointerup={completeQueueHold}
-		onpointercancel={abandonQueueHold}
 		onlostpointercapture={abandonQueueHold}
 		oncontextmenu={(event) => event.preventDefault()}
 		onclick={handleSendClick}
