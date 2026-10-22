@@ -40,6 +40,7 @@ export type OperatorNotMoving = {
 	next_wait_ends_at: string | null;
 	next_overdue_at: string | null;
 	overdue_waits: number;
+	overdue_wait_entries?: { title: string; node_id: string }[];
 	paused_by_you: number;
 	set_aside?: number;
 };

@@ -109,7 +109,7 @@ def _reduce_plan(
         for row in leaves
     )
     deadlines = [
-        (item.wait_deadline, item.wait_deadline_latest)
+        (item.wait_deadline, item.wait_deadline_latest, None)
         for row in leaves
         if (item := reduced[str(row["id"])]).bucket == "waiting"
         and item.wait_deadline is not None
