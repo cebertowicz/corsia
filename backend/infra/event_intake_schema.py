@@ -15,4 +15,6 @@ EVENT_INTAKE_SCHEMA_SQL = """
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_event_intake_accepted
         ON event_intake_records(event_id) WHERE outcome='accepted';
+    CREATE INDEX IF NOT EXISTS idx_event_intake_type
+        ON event_intake_records(outcome, event_type, at);
 """

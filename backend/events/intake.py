@@ -4,12 +4,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
-from events import rule_reads, rules
+from events import rule_declarations, rule_reads, rules
 from events.connectors import EventTypeDecl
 from events.disposition import delivery_disposition
 from events.envelope import EventEnvelope
@@ -17,20 +18,22 @@ from events.platform import deliver_envelope_sync
 from events.resolve import Target, resolve_targets
 from infra.database import get_db, write_transaction
 from infra.measure_admission import admit as admit_measure
-from infra.measure_registry import REGISTRY
 from infra.outcome_events import count_outcome_event
 
 _MAX_FACT_BYTES = 64 * 1024
+_UNAVAILABLE = ("database is locked", "database is busy", "unable to open database", "disk i/o error")
+_DECLARE_IT = "declare it with use: route or both in your measures.yaml and run measure_sync"
+# Shared by the CLI, the agent tool and scripts, so no fix names one surface's flags.
 _ERROR_FIXES = {
-    "facts_not_object": "Pass a JSON object to --facts.",
-    "bad_json": "Pass valid JSON to --facts.",
+    "facts_not_object": "Pass the facts as a JSON object.",
+    "bad_json": "Pass the facts as valid JSON.",
     "too_large": "Send fewer or shorter facts.",
-    "undeclared_type": "Use a declared route or both event type.",
+    "undeclared_type": f"Check the type name, or {_DECLARE_IT}.",
     "undeclared_fact": "Use only facts declared for this event type.",
     "bad_fact_kind": "Match each declared fact kind.",
-    "not_your_namespace": "Use a type declared by this session's rule set.",
+    "not_your_namespace": f"Emit only a type you declared; to add one, {_DECLARE_IT}.",
     "reserved_type": "worker.* events are produced by CORSIA only.",
-    "intake_unreachable": "Retry with the same --id.",
+    "intake_unreachable": "Retry with the same event id.",
     "internal_error": "This is a CORSIA defect and was logged; report it instead of retrying.",
     "record_refused": "Fix the record as the text says; the event was not routed.",
 }
@@ -83,6 +86,15 @@ def emitted_event_id(event_type: str, identity: str | None) -> str:
     return hashlib.sha256(f"{event_type}\0{identity}".encode()).hexdigest()
 
 
+def failure_code(exc: Exception) -> str:
+    """``intake_unreachable`` for a database or OS that can't be reached (retry); else ``internal_error`` (a defect)."""
+    if isinstance(exc, sqlite3.OperationalError):
+        unreachable = any(text in str(exc).lower() for text in _UNAVAILABLE)
+    else:
+        unreachable = isinstance(exc, OSError)
+    return "intake_unreachable" if unreachable else "internal_error"
+
+
 def format_event_error(code: str, text: str, fix: str | None = None) -> str:
     """Render the common caller-facing error copy without exposing event facts."""
     return f"{code}: {text.rstrip('.')}. {fix or _ERROR_FIXES.get(code, 'Correct the event and try again.')}"
@@ -102,14 +114,17 @@ def _split_type(event_type: str) -> tuple[str, str] | None:
 
 
 def resolve_event_type(conn, event_type: str) -> tuple[EventTypeDecl, Any | None] | None:
-    """Resolve declared types before connector manifests for every event-facing surface."""
+    """The declaration intake delivers by: an agent-declared type, else a connector's manifest entry.
+
+    The declared branch is ``rule_declarations.declared_event``, the one construction rules also match on.
+    """
     split = _split_type(event_type)
     if split is None:
         return None
     namespace, suffix = split
-    entry = REGISTRY.ensure_loaded(conn).events.get(event_type)
-    if entry is not None:
-        return EventTypeDecl(suffix, (), tuple(entry.declared)), entry
+    declared = rule_declarations.declared_event(conn, namespace, suffix)
+    if declared is not None:
+        return declared
     from events.connectors import get_manifest
 
     try:
@@ -242,6 +257,15 @@ def _rules_matched(plan: rules.RulePlan | None) -> int:
     return len(ids)
 
 
+def _prune_expired(conn) -> None:
+    """Age out both outcomes past ``rules.RETENTION``: ids rise with time, so the oldest rows are the expired ones."""
+    conn.execute(
+        "DELETE FROM event_intake_records WHERE at < ? AND id IN "
+        "(SELECT id FROM event_intake_records ORDER BY id LIMIT 1000)",
+        ((datetime.now(timezone.utc) - rules.RETENTION).isoformat(),),
+    )
+
+
 def _record_acceptance(conn, *, event_id: str, event_type: str, origin: str,
                        producer: str, rules_matched: int) -> None:
     conn.execute(
@@ -249,6 +273,7 @@ def _record_acceptance(conn, *, event_id: str, event_type: str, origin: str,
         "(event_id,outcome,rules_matched,producer,origin,event_type,at) VALUES (?,?,?,?,?,?,?)",
         (event_id, "accepted", rules_matched, producer, origin, event_type, _now()),
     )
+    _prune_expired(conn)
 
 
 def record_refusal(*, event_id: str, event_type: str, origin: Literal["emitter", "agent"],
@@ -261,11 +286,7 @@ def record_refusal(*, event_id: str, event_type: str, origin: Literal["emitter",
             "VALUES (?,?,?,?,?,?,?,?)",
             (event_id, "refused", 0, refusal.code, producer, origin, event_type, _now()),
         )
-        conn.execute(
-            "DELETE FROM event_intake_records WHERE id IN "
-            "(SELECT id FROM event_intake_records WHERE outcome='refused' AND at < ? ORDER BY id LIMIT 1000)",
-            ((datetime.now(timezone.utc) - timedelta(days=30)).isoformat(),)
-        )
+        _prune_expired(conn)
 
 
 def _store(conn, event_type: str, facts: dict[str, Any], owner: str, event_id: str,
@@ -325,7 +346,8 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
             conn, event_id=event_id, event_type=event_type, origin=origin,
             producer=producer, rules_matched=matched,
         )
-        return IntakeResult(True, all(delivery.outcome == "duplicate" for delivery in deliveries), None, matched)
+        duplicate = bool(deliveries) and all(delivery.outcome == "duplicate" for delivery in deliveries)
+        return IntakeResult(True, duplicate, None, matched)
 
 
 async def admit_event(*, event_type: str, facts: dict, origin: Literal["connector", "emitter", "agent", "platform"],

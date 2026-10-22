@@ -119,7 +119,7 @@ def test_cli_bad_json_and_transient_exit_contracts(emit_world, capsys, monkeypat
     # Without --id the event id is random, so a retry could duplicate a committed event.
     assert fresh == 3 and not fresh_out and fresh_err.startswith("error: intake_unreachable:")
     assert "Pass --id so a retry cannot duplicate the event." in fresh_err
-    assert keyed == 3 and "Retry with the same --id." in keyed_err
+    assert keyed == 3 and "Retry with the same event id." in keyed_err
 
 
 @pytest.mark.parametrize("defect", [TypeError("bad call"), sqlite3.OperationalError("no such table: event_rules")])

@@ -10,7 +10,6 @@ import asyncio
 import json
 import logging
 import os
-import sqlite3
 import sys
 from typing import Any, NoReturn
 
@@ -23,9 +22,6 @@ class _EmitParser(argparse.ArgumentParser):
 
     def error(self, message: str) -> NoReturn:
         self.exit(2, f"error: usage: {message}. Run corsia event emit --help.\n")
-
-
-_UNAVAILABLE = ("database is locked", "database is busy", "unable to open database", "disk i/o error")
 
 
 def _read_facts(raw: str) -> dict[str, Any] | Any:
@@ -43,15 +39,8 @@ def _print_error(code: str, text: str, fix: str | None = None) -> None:
     print(f"error: {format_event_error(code, text, fix)}", file=sys.stderr)
 
 
-def _unavailable(exc: Exception) -> bool:
-    """Only a database or OS that can't be reached is worth a retry; anything else is a defect."""
-    if isinstance(exc, sqlite3.OperationalError):
-        return any(text in str(exc).lower() for text in _UNAVAILABLE)
-    return isinstance(exc, OSError)
-
-
 def _cmd_emit(args: argparse.Namespace) -> int:
-    from events.intake import admit_event, emitted_event_id, record_refusal
+    from events.intake import admit_event, emitted_event_id, failure_code, record_refusal
 
     session = args.as_thread or os.environ.get("CORSIA_THREAD_ID")
     if not session:
@@ -65,7 +54,7 @@ def _cmd_emit(args: argparse.Namespace) -> int:
             producer=session, event_id=event_id,
         ))
     except Exception as exc:  # noqa: BLE001 - split into retryable and defect below
-        if not _unavailable(exc):
+        if failure_code(exc) == "internal_error":
             logger.exception("corsia event emit failed inside the intake")
             _print_error("internal_error", "the event intake failed unexpectedly")
             return 1

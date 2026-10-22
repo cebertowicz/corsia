@@ -64,7 +64,7 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
 
 async def _emit(thread_id: str, kwargs: dict[str, Any]) -> str:
     """Send one declared event as this chat; the receipt, or the refusal with its fix."""
-    from events.intake import admit_event, emitted_event_id, format_event_error, record_refusal
+    from events.intake import admit_event, emitted_event_id, failure_code, format_event_error, record_refusal
 
     event_type = kwargs.get("event_type")
     if not isinstance(event_type, str) or not event_type:
@@ -75,8 +75,10 @@ async def _emit(thread_id: str, kwargs: dict[str, Any]) -> str:
             event_type=event_type, facts=kwargs.get("facts"), origin="agent",
             producer=thread_id, event_id=event_id,
         )
-    except Exception:  # noqa: BLE001 - the intake or database is unreachable; a retry is safe with event_id
+    except Exception as exc:  # noqa: BLE001 - unreachable (retry with event_id) or a defect (report it)
         logger.exception("event_rules emit failed inside the intake")
+        if failure_code(exc) == "internal_error":
+            return f"Error: {format_event_error('internal_error', 'the event intake failed unexpectedly')}"
         return f"Error: {format_event_error('intake_unreachable', 'event intake is unavailable')}"
     if result.refusal is None:
         return json.dumps({"event_id": event_id, "duplicate": result.duplicate,

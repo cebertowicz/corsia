@@ -176,7 +176,7 @@ async def _admit_events(schedule: Schedule, report: RunReport) -> RunReport:
     if not report.events:
         return report
     from automation.script_measures import WORKSPACE_SCOPE
-    from events.intake import MeasureStamps, admit_event
+    from events.intake import MeasureStamps, admit_event, failure_code
 
     ref, version = report.workflow_stamp or (None, None)
     stamps = MeasureStamps(
@@ -186,11 +186,18 @@ async def _admit_events(schedule: Schedule, report: RunReport) -> RunReport:
     )
     refusals: list[str] = []
     for index, event in enumerate(report.events):
-        result = await admit_event(
-            event_type=event["type"], facts=event["facts"], origin="emitter",
-            producer=f"script:{schedule.id}", event_id=f"script:{schedule.id}:{report.run_id}:{index}",
-            stamps=stamps,
-        )
+        try:
+            result = await admit_event(
+                event_type=event["type"], facts=event["facts"], origin="emitter",
+                producer=f"script:{schedule.id}", event_id=f"script:{schedule.id}:{report.run_id}:{index}",
+                stamps=stamps,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - run_claimed never raises; the run settles as an error
+            logger.exception("script schedule {} event line {} failed inside the intake", schedule.id, index)
+            refusals.append(failure_code(exc))
+            continue
         if result.refusal is not None:
             refusals.append(result.refusal.code)
     if not refusals:
