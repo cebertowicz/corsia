@@ -8,7 +8,7 @@ import { openAppByUrl, TEST_TOKEN } from '../support/corsia';
 import { injectMessage } from '../support/mock';
 import { setFocusMode } from '../support/focusMode';
 import { localSetupFix } from '../support/localSetupFix';
-import { WELCOME_ACCOUNT_LINE, WELCOME_LINES, WELCOME_ROWS, WELCOME_TITLE } from '../../src/lib/setupWelcome';
+import { WELCOME_LINES, WELCOME_ROWS, WELCOME_TITLE } from '../../src/lib/setupWelcome';
 
 type LocalFixture = 'downloading' | 'paused' | 'starting' | 'ready' | 'stopped' | 'disk-space' | 'pick-failed' | 'connection' | 'disk-full' | 'memory' | 'other-ref' | 'other-no-ref' | 'setup-failed' | 'start-failed';
 type Fixture = { name: string; element: string; screen?: 'checking' | 'error' | 'old-macos' | 'account' | 'invalid' | 'mismatch' | 'short-password' | 'protected' | 'unwritable' | 'creating' | 'create-failed' | 'account-exists' | 'welcome' | 'account-form' | 'subscriptions'; only?: 'narrow' | 'short'; cli?: string; local?: LocalFixture; finish?: 'progress-save'; api?: 'ready' | 'failed' | 'menu' | 'address'; classifier?: 'downloading' | 'failed'; requiredUsername?: string };
@@ -180,8 +180,8 @@ async function fillAccount(page: Page) {
 async function expectWelcomeCopy(page: Page) {
 	await expect(page.locator('.welcome .line')).toHaveText([...WELCOME_LINES]);
 	await expect(page.locator('.welcome li')).toHaveText(WELCOME_ROWS.map((row) => `${row.label} ${row.text}`));
-	// Getting started ends on the account sentence.
-	await expect(page.locator('.welcome .account')).toHaveText(WELCOME_ACCOUNT_LINE);
+	// Getting started ends at its button; the account sentence lives on the account screen as its lede.
+	await expect(page.locator('.welcome .account')).toHaveCount(0);
 }
 const accountScreens = ['account', 'invalid', 'mismatch', 'short-password', 'account-exists'];
 async function navigate(page: Page, fixture: Fixture) {

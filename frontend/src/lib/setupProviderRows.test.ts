@@ -144,7 +144,7 @@ describe('setup local row switch', () => {
 		const row = downloadingRow();
 		expect(row.action).toBeUndefined();
 		expect(row.toggle).toMatchObject({ on: true, held: true });
-		expect(row.detail).toBe('CORSIA is downloading the local model so setup can continue. To turn it off, set up a subscription or add an API provider first.');
+		expect(row.detail).toBe('CORSIA is downloading the local model so setup can continue. To turn it off, sign in to a subscription (Back to Your subscriptions) or add an API provider first.');
 	});
 
 	it('asks before deleting a download once a cloud provider is ready', () => {
