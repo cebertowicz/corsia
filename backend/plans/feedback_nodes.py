@@ -261,6 +261,16 @@ def create_review_node(db, reviewer_thread_id: str, request: Any) -> FeedbackNod
     return _create_linked_node(
         db, reviewer_thread_id, artifact_id, request_id, REVIEW_PROVENANCE,
         title=_trim_title(full, ""), acceptance=REVIEW_ACCEPTANCE,
-        description=description(path, request),
+        description=description(path, request), intent_node_id=_requesting_intent(db, request),
     )
 
+
+def _requesting_intent(db, request) -> str | None:
+    """Resolve an optional review-request task to its canonical intent node.
+
+    A failed read fails the escalation, as it fails the fork start.
+    """
+    requesting_node_id = request["requesting_node_id"]
+    if not requesting_node_id:
+        return None
+    return str(intent_words.canonical(db, str(requesting_node_id))["id"])
