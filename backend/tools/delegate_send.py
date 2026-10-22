@@ -15,6 +15,7 @@ from infra.send_service import SendRejected
 from infra.send_types import InboxQueuedInput
 import tools.delegation as delegation
 from tools.base import Tool
+from tools.delegate_task import with_task_line
 from tools.delegation_send_context import fetch_send_target, native_send_scope_error
 
 
@@ -145,7 +146,8 @@ class DelegateSendTool(Tool):
         )
         if isinstance(plan_task, str):
             return plan_task
-        sent = await _send(thread_id, target, message.strip(), from_thread_id, current, kwargs)
+        text = with_task_line(message.strip(), step, from_thread_id)
+        sent = await _send(thread_id, target, text, from_thread_id, current, kwargs)
         if isinstance(sent, str):
             return sent
         if step is not None and step.already_attached:

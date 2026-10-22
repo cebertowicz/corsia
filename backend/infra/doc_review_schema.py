@@ -20,6 +20,7 @@ DOC_REVIEW_SCHEMA_SQL = """
         state_changed_at TEXT,
         reason TEXT,
         node_id TEXT REFERENCES plan_nodes(id),
+        requesting_node_id TEXT REFERENCES plan_nodes(id),
         created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_doc_review_reviewer

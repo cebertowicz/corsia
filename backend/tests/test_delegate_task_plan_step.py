@@ -318,3 +318,39 @@ async def test_a_persistent_agent_with_a_spawner_never_sees_the_worker_note(dele
     result = (await _receipt())
 
     assert "worker_note" not in result
+
+
+def _first_input(db, worker: str) -> str:
+    return db.execute(
+        "SELECT content FROM messages WHERE thread_id=? ORDER BY seq LIMIT 1", (worker,),
+    ).fetchone()["content"]
+
+
+async def test_the_workers_first_input_names_its_task_and_the_read_that_works(deleg_db, spawned):
+    from tools.plans import PlanReadTool
+
+    plan_id = _seed_parent(deleg_db)
+    node_id = _task(deleg_db, plan_id, "Build the thing", current=True)
+
+    worker = (await _receipt())["thread_id"]
+
+    assert _first_input(deleg_db, worker) == (
+        "do the work\n\n"
+        f'Your plan task: "Build the thing" ({node_id}). Read its intent and acceptance '
+        f"criteria with plan_read(thread_id='{_PARENT}', node_id='{node_id}') before you "
+        "start, and again if you're told it changed."
+    )
+    assert "Build the thing done" not in _first_input(deleg_db, worker)
+    read = json.loads(await PlanReadTool().execute(
+        node_id=node_id, thread_id=_PARENT, _thread_id=worker,
+    ))
+    assert read["acceptance_criteria"] == "Build the thing done"
+
+
+async def test_the_workers_first_input_is_unchanged_without_a_task(deleg_db, spawned):
+    plan_id = _seed_parent(deleg_db)
+    _task(deleg_db, plan_id, "Build the thing", current=True)
+
+    worker = (await _receipt(plan_node_id="none"))["thread_id"]
+
+    assert _first_input(deleg_db, worker) == "do the work"
