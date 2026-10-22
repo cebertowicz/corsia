@@ -561,6 +561,38 @@ class TestClaudeSignIn:
         assert sessions == ["list_models"]
         assert _sources(client)["claude-code"]["state"] == "ready"
 
+    def test_a_slow_catalog_refresh_does_not_ask_a_freshly_signed_in_row_again(
+        self, isolated_db, client, claude_session, monkeypatch,
+    ):
+        """The sign-in check cannot finish first and leave the refresh an available row."""
+        import app_lifecycle
+        import connections.harness_refresh as harness_refresh
+        import connections.startup as startup
+
+        real_check, real_refresh = startup.check_harness_source, harness_refresh.refresh_harness_catalogs
+        claude_checked = asyncio.Event()
+
+        async def check(provider, *, rediscover=False):
+            await real_check(provider, rediscover=rediscover)
+            if provider == "claude-code":
+                claude_checked.set()
+
+        async def slow_refresh(*, reason):
+            # Run beside the check, the refresh would start after it; run first, it never waits.
+            try:
+                await asyncio.wait_for(claude_checked.wait(), timeout=0.5)
+            except TimeoutError:
+                pass
+            return await real_refresh(reason=reason)
+
+        monkeypatch.setattr(startup, "check_harness_source", check)
+        monkeypatch.setattr(harness_refresh, "refresh_harness_catalogs", slow_refresh)
+        _put("claude-code", "needs_auth")
+        sessions = claude_session(_listed())
+        asyncio.run(app_lifecycle._startup_harness_discovery())
+        assert sessions == ["list_models"]
+        assert _sources(client)["claude-code"]["state"] == "ready"
+
     def test_a_catalog_refresh_alone_notices_a_sign_out(
         self, isolated_db, client, claude_session,
     ):

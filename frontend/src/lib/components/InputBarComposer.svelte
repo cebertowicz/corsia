@@ -4,6 +4,7 @@
 	import type { Attachment, SheetView } from './inputBarHelpers';
 	import { updateOperation, updateRestarting } from '$lib/update/store';
 	import { holdsNewWork } from '$lib/update/model';
+	import { noteComposerText } from '$lib/stores/replyContextCapture';
 
 	let {
 		inputEl = $bindable<HTMLDivElement | undefined>(),
@@ -60,6 +61,8 @@
 	let failedPreviewIds = $state<string[]>([]);
 	const updateDraining = $derived(holdsNewWork($updateOperation));
 	$effect(() => { if ($updateRestarting && document.activeElement === inputEl) inputEl?.blur(); });
+	// The first typed character opens the window the reply context's in-view ranges accumulate in.
+	$effect(() => { if (threadId) noteComposerText(threadId, inputText); });
 	const composerPlaceholder = $derived(
 		$updateRestarting ? 'You can send again when CORSIA is back' : updateDraining ? 'Sends after the update' : 'Message CORSIA...',
 	);

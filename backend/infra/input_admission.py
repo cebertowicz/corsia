@@ -7,9 +7,11 @@ import sqlite3
 from dataclasses import dataclass
 
 from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
+from core.reply_context import REPLY_CONTEXT_KEY
 from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY
 from infra.database import get_db, write_transaction
 from infra.document_viewing import PreparedViewingDocument
+from infra.reply_context import validate_reply_context
 from infra.thread_inputs import thread_admission_state
 from infra.time import utc_now_iso
 from infra.vendor_login import LOGIN_KEY, public_metadata
@@ -24,22 +26,26 @@ def stamped_human_metadata(
     metadata: dict | None,
     *,
     viewing_document: PreparedViewingDocument | None = None,
+    thread_id: str | None = None,
 ) -> dict | None:
     """Return the metadata a newly admitted human message is stored with.
 
     A human message (role ``user`` with none of the agent, completion or event
     markers) gains the stamp that makes its model frame end with the
-    ``post_update`` reply footer, and a server-resolved canvas note if supplied.
-    Both are written once, at admission, so a row
+    ``post_update`` reply footer, a server-resolved canvas note if supplied and
+    its validated reply context (what the person was answering, checked against
+    ``thread_id``). All are written once, at admission, so a row
     admitted before the stamp existed keeps rendering as it was cached and
     every replay of a stamped row renders the same footer. A retry of an id
     admitted earlier keeps the payload it was stored with, stamped or not, so
     the retry stays a duplicate.
     """
-    viewing_keys = (VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY)
+    server_keys = (
+        VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY, REPLY_CONTEXT_KEY,
+    )
     clean = (
-        {key: value for key, value in metadata.items() if key not in viewing_keys}
-        if metadata is not None and any(key in metadata for key in viewing_keys)
+        {key: value for key, value in metadata.items() if key not in server_keys}
+        if metadata is not None and any(key in metadata for key in server_keys)
         else metadata
     )
     if role != "user" or any((clean or {}).get(key) for key in NON_HUMAN_MARKERS):
@@ -51,6 +57,16 @@ def stamped_human_metadata(
     if prior is not None and REPLY_VIA_POST_UPDATE_KEY not in prior:
         return clean
     stamped = {**(clean or {}), REPLY_VIA_POST_UPDATE_KEY: True}
+    if prior is not None:
+        reply_context = prior.get(REPLY_CONTEXT_KEY)
+    elif thread_id is not None:
+        reply_context = validate_reply_context(
+            connection, thread_id, (metadata or {}).get(REPLY_CONTEXT_KEY),
+        )
+    else:
+        reply_context = None
+    if reply_context:
+        stamped[REPLY_CONTEXT_KEY] = reply_context
     if viewing_document is not None:
         target = viewing_document.target
         stamped[VIEWING_DOCUMENT_TARGET_KEY] = target
