@@ -41,6 +41,7 @@ mod remote_lifecycle;
 mod service_management;
 mod shell_state;
 mod source_lifecycle;
+mod start_fresh;
 mod startup_failure;
 #[cfg(test)]
 mod test_tls;
@@ -129,6 +130,10 @@ enum ServiceStartup {
     AdoptionOffered { workspace: String },
     /// An earlier adoption's undo could not finish; the window offers the recovery the backend chose.
     AdoptionFailed { failure: adoption::AdoptionError },
+    /// An earlier install this app can't open: the window offers to set it aside and start fresh.
+    ExistingInstall { reason: String, details: String },
+    /// Putting back a Start fresh the app did not finish went wrong; the window says what and offers the next step.
+    StartFreshFailed { failure: start_fresh::StartFreshError },
 }
 
 /// Drag-region handler injected into every page (including external URLs
@@ -552,19 +557,34 @@ fn start_service<R: tauri::Runtime>(
         log::error!("interrupted adoption could not be undone: {}", failure.message);
         return Ok(ServiceStartup::AdoptionFailed { failure });
     }
+    let home = app
+        .path()
+        .home_dir()
+        .map_err(|error| format!("could not resolve the home folder: {error}"))?;
+    // A Start fresh the app did not finish is put back first, so the earlier install is found whole.
+    let recovered = start_fresh::recover_on_launch(&app_dir, |stop| {
+        use start_fresh::OldService;
+        // A stop the last run left draining is waited for; the window shows the wait.
+        if stop.is_some() {
+            set_adoption_phase(service, Some(adoption::Phase::Waiting { running: None }));
+        }
+        let started = earlier_install_service(&home, &app_dir, &resources).start(stop);
+        set_adoption_phase(service, None);
+        started
+    });
+    if let Err(failure) = recovered {
+        log::error!("an unfinished Start fresh could not be put back: {}", failure.details);
+        return Ok(ServiceStartup::StartFreshFailed { failure });
+    }
     // Decide about the workspace before anything is written: a refusal leaves
     // the computer exactly as it was.
     let first_run = if first_run::environment_names_the_roots() {
         first_run::FirstRun::Configured
     } else {
-        let home = app
-            .path()
-            .home_dir()
-            .map_err(|error| format!("could not resolve the home folder: {error}"))?;
         first_run::plan(&home, &app_dir)?
     };
-    if let first_run::FirstRun::ExistingInstall { reason } = first_run {
-        return Err(reason);
+    if let first_run::FirstRun::ExistingInstall { reason, details } = first_run {
+        return Ok(ServiceStartup::ExistingInstall { reason, details });
     }
     if let first_run::FirstRun::Adoptable { source } = &first_run {
         return Ok(ServiceStartup::AdoptionOffered {
@@ -1307,6 +1327,7 @@ impl AdoptionProgress {
                     phase,
                     adoption::Phase::Waiting { .. }
                         | adoption::Phase::BackingUp
+                        | adoption::Phase::MovingToBackup
                         | adoption::Phase::StartingExisting
                 ),
         }
@@ -1399,6 +1420,62 @@ fn adopt_existing_install_blocking(app: &tauri::AppHandle) -> Result<ServiceStar
     *service.app_dir.lock().map_err(|_| switched("service state is unavailable"))? = Some(app_dir.clone());
     wait_for_service(port, &app_dir).map_err(|error| switched(&error))?;
     Ok(ServiceStartup::Ready { url: service_url(port) })
+}
+
+/// The earlier install's service, stopped through its own checkout when this app could adopt it.
+fn earlier_install_service(home: &Path, app_dir: &Path, resources: &Path) -> start_fresh::LaunchdService {
+    let source = match first_run::plan(home, app_dir) {
+        Ok(first_run::FirstRun::Adoptable { source }) => {
+            Some(SourceLifecycle::new(source, Bundled::in_resources(resources)))
+        }
+        _ => None,
+    };
+    start_fresh::LaunchdService::new(home, source, Bundled::in_resources(resources).python)
+}
+
+/// What Start fresh would move and which folders stay, for the confirmation, or why it can't run.
+#[tauri::command]
+fn start_fresh_preview(app: tauri::AppHandle) -> Result<start_fresh::Preview, start_fresh::StartFreshError> {
+    let untouched = start_fresh::StartFreshError::untouched;
+    let home = app.path().home_dir().map_err(|error| untouched(format!("could not resolve the home folder: {error}")))?;
+    start_fresh::preview(&home, &default_app_dir(&app).map_err(untouched)?)
+}
+
+/// Set the earlier install aside in a backup folder. Answers that folder, as the window shows it.
+#[tauri::command]
+async fn start_fresh(app: tauri::AppHandle) -> Result<String, start_fresh::StartFreshError> {
+    local_start_began(&app);
+    let working = app.clone();
+    tauri::async_runtime::spawn_blocking(move || start_fresh_blocking(&working))
+        .await
+        .map_err(|error| start_fresh::StartFreshError::unfinished(format!("the step did not finish: {error}")))?
+}
+
+fn start_fresh_blocking(app: &tauri::AppHandle) -> Result<String, start_fresh::StartFreshError> {
+    let untouched = start_fresh::StartFreshError::untouched;
+    let service = app.state::<AppServiceState>();
+    let home = app.path().home_dir().map_err(|error| untouched(format!("could not resolve the home folder: {error}")))?;
+    let app_dir = default_app_dir(app).map_err(untouched)?;
+    let resources = bundled_resource_dir(app).map_err(untouched)?;
+    let mut old = earlier_install_service(&home, &app_dir, &resources);
+    service.adoption_cancel_requested.store(false, Ordering::Release);
+    service.adoption_in_progress.store(true, Ordering::Release);
+    let result = start_fresh::start_fresh(
+        &home,
+        &app_dir,
+        &mut old,
+        &mut |phase| set_adoption_phase(&service, Some(phase)),
+        std::time::SystemTime::now(),
+    );
+    service.adoption_in_progress.store(false, Ordering::Release);
+    set_adoption_phase(&service, None);
+    if let Err(error) = &result {
+        log::warn!("Start fresh did not finish: {} ({})", error.message, error.details);
+    }
+    if start_fresh::quit_after(service.adoption_cancel_requested.load(Ordering::Acquire), &result) {
+        lifecycle::request_quit(app);
+    }
+    result.map(|backup| start_fresh::shown(&home, &backup))
 }
 
 /// "Start it again": with every file where it was, start the existing install
@@ -1750,6 +1827,8 @@ pub fn run() {
             start_local_service,
             adopt_existing_install,
             start_existing_again,
+            start_fresh,
+            start_fresh_preview,
             start_source_install,
             restart_source_install,
             reopen_app,
@@ -1908,6 +1987,8 @@ mod tests {
         "reopen_app",
         "restart_source_install",
         "start_existing_again",
+        "start_fresh",
+        "start_fresh_preview",
         "start_source_install",
         "remote_discovered",
         "remote_pair",

@@ -69,6 +69,23 @@ describe('WorkBlock structure', () => {
 		expect(toggle().textContent).toContain('Worked');
 	});
 
+	it('shows the browser chip of its open beside the closed capsule, and on the opening row once expanded', () => {
+		const open = { ...work('open', 2, '10:02:00'), metadata: { turn_id: 't1', tool_hints: ['Open a page'], browser_chip: { host: 'github.com' } } };
+		render(present([work('a', 1, '10:01:00'), open, said('reply', 5, '10:10:00')]));
+
+		const chips = () => [...host.querySelectorAll<HTMLElement>('button.tile.chip')];
+		expect(chips()).toHaveLength(1);
+		expect(chips()[0].closest('.fold-browser')).not.toBeNull();
+		expect(chips()[0].textContent).toContain('github.com');
+
+		toggle().click();
+		flushSync();
+
+		expect(chips()).toHaveLength(1);
+		expect(chips()[0].closest('.fold-browser')).toBeNull();
+		expect(chips()[0].closest('[data-message-id="open"]')).not.toBeNull();
+	});
+
 	it('opens a body the header controls, and closes it again', () => {
 		render(present([work('a', 1, '10:01:00'), said('reply', 5, '10:10:00')]));
 

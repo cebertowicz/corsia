@@ -259,6 +259,7 @@
 			warning={deliveryWarning}
 			wait={focusMode && entry.id === waitRunId ? wait : null}
 			waitThreadId={boundThreadId}
+			threadId={boundThreadId}
 		>
 			{#snippet liveActivity()}
 				<LiveToolActivity {threadId} {expandedTools} onToggleToolBlock={onToggleToolBlock} />

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Any
 
@@ -9,12 +10,8 @@ import core._tool_result_delivery_support as delivery_support
 from core.tool_result_projection import tool_result_integrity_metadata
 from infra.delivery_states import TOOL_RESULT_BOUND, TOOL_RESULT_PROVISIONAL
 from infra.queries import insert_message
+from tools.tool_display import SettledResult, project_tool_display
 from tools.tool_surface import dispatch_metadata
-
-UNDISPATCHED_TOOL_REASON = "undispatched_tool"
-USER_INTERRUPTION_REASON = "user_interruption"
-PROVIDER_MISSING_RESULT_REASON = "provider_missing_result"
-TURN_ENDED_WITHOUT_RESULT_REASON = "turn_ended_without_result"
 
 
 def synthetic_result_identity(
@@ -96,6 +93,26 @@ def _result_metadata(
     return metadata
 
 
+def _stamp_browser_chip(
+    db, *, thread_id: str, assistant_step_id: str, name: str, arguments: dict[str, Any],
+    content: str, metadata: dict[str, Any],
+) -> None:
+    """Store a visible open's chip on its Assistant Step, once, as the result settles.
+
+    The display projection decides; its answer is kept on the Step so every reader
+    (a Focus run stub in SQL, a reloaded row, a finalized live Step) reads one fact.
+    A later open in the same Step replaces it.
+    """
+    chip = project_tool_display(name, arguments, SettledResult.from_row(content, metadata)).browser_chip
+    if chip is None:
+        return
+    db.execute(
+        "UPDATE messages SET metadata=json_set(metadata, '$.browser_chip', json(?)) "
+        "WHERE id=? AND thread_id=? AND role='assistant' AND json_valid(metadata)",
+        (json.dumps(chip), assistant_step_id, thread_id),
+    )
+
+
 def _insert_exact_result(
     *,
     db,
@@ -137,6 +154,10 @@ def _insert_exact_result(
             is_error=is_error,
             db=db,
         )
+    _stamp_browser_chip(
+        db, thread_id=thread_id, assistant_step_id=assistant_step_id, name=name,
+        arguments=arguments, content=content, metadata=metadata,
+    )
     persisted = delivery_support.existing_result(db, exact_message_id)
     if persisted is None:
         raise delivery_support.ToolResultBindingError(

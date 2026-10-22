@@ -24,6 +24,8 @@
     "allow-retry-saved-remote",
     "allow-save-setup-report",
     "allow-start-existing-again",
+    "allow-start-fresh",
+    "allow-start-fresh-preview",
     "allow-start-local-service",
     "allow-start-source-install",
     "allow-start-window-drag",

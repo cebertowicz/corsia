@@ -15,7 +15,7 @@ const flag = process.argv.indexOf('--shell');
 const shell = flag > -1 ? path.resolve(process.argv[flag + 1]) : path.join(repo, 'desktop/dist-shell');
 const shellUrl = pathToFileURL(path.join(shell, 'index.html')).href;
 
-const refusal = 'A file named ~/Corsia is in the way of CORSIA’s default workspace folder. Nothing was changed.';
+const refusal = 'A file named ~/Corsia is in the way of CORSIA’s default workspace folder.';
 let failed = 0;
 const fail = (message) => {
 	failed += 1;
@@ -49,7 +49,8 @@ const read = (page) => page.evaluate(() => ({
 
 // The scripts the app's page-load hook runs for each launch outcome (shell_state_script in lib.rs).
 const drawn = {
-	refused: `window.__corsiaShowServiceFailure?.(${JSON.stringify(refusal)});`,
+	// An earlier install this app can't open is offered Start fresh.
+	refused: `window.__corsiaShowStartup?.(${JSON.stringify({ state: 'existing_install', reason: refusal })});`,
 	offered: 'window.__corsiaShowStartup?.({"state":"adoption_offered","workspace":"~/corsia"});',
 	approval: 'window.__corsiaShowStartup?.({"state":"requires_approval"});',
 	ready: 'window.__corsiaShowStartup?.({"state":"ready","url":"http://127.0.0.1:47895/"});',
@@ -74,8 +75,9 @@ try {
 		await page.evaluate(drawn.refused);
 		await page.clock.runFor(50);
 		const seen = await read(page);
-		if (seen.status !== 'CORSIA couldn’t start' || seen.line !== refusal || seen.retry !== 'Try again') fail(`refused: ${JSON.stringify(seen)}`);
-		else console.log('ok   refused launch shows its reason and Try again');
+		const offer = 'A file named ~/Corsia is in the way of CORSIA’s default workspace folder. Start fresh moves it into a backup folder and sets up CORSIA as new. Nothing is deleted.';
+		if (seen.status !== 'Start CORSIA fresh?' || seen.line !== offer || seen.retry !== 'Start fresh') fail(`refused: ${JSON.stringify(seen)}`);
+		else console.log('ok   refused launch shows its reason and Start fresh');
 	}
 	{
 		const page = await open();
