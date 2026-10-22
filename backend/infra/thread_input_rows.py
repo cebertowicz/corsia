@@ -36,6 +36,19 @@ def liveness_wake_queued(db: sqlite3.Connection, thread_id: str) -> bool:
     ).fetchone() is not None
 
 
+def liveness_wake_read_since(
+    db: sqlite3.Connection, thread_id: str, since: str,
+) -> bool:
+    """Whether a liveness wake reached provider delivery since ``since``."""
+    return db.execute(
+        "SELECT 1 FROM messages WHERE thread_id=? AND delivery_state='queued' "
+        "AND json_extract(metadata,'$.event_type')='plan.liveness_wake' "
+        "AND write_started_at IS NOT NULL "
+        "AND julianday(write_started_at) > julianday(?) LIMIT 1",
+        (thread_id, since),
+    ).fetchone() is not None
+
+
 def turn_starting_work_pending(db: sqlite3.Connection, thread_id: str) -> bool:
     """Whether a running Turn or current-model queued input already starts work."""
     if turn_running(db, thread_id):

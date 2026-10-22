@@ -201,7 +201,8 @@ def test_a_blocker_nobody_asks_the_user_to_clear_reads_as_a_wait(owner_kind):
                 "next_overdue_at": (
                     datetime.fromisoformat(watch.condition["value"]) + not_moving.OVERDUE_GRACE
                 ).isoformat(),
-                "overdue_waits": 0, "paused_by_you": 0, "set_aside": 0,
+                "overdue_waits": 0, "overdue_wait_entries": [],
+                "paused_by_you": 0, "set_aside": 0,
             },
             # EW3: what it waits on and when its agent checks back.
             "wait": {

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from automation import plan_liveness
 from automation.continuation.progress import (
     ADVANCED,
@@ -11,6 +13,7 @@ from automation.continuation.progress import (
 from automation.continuation.triggers import Trigger, TriggerRequest
 from infra.thread_input_rows import (
     liveness_wake_queued,
+    liveness_wake_read_since,
     turn_running,
     turn_starting_work_pending,
 )
@@ -51,10 +54,18 @@ class LivenessSource:
         """Return all due T0 requests, including durable terminal outcomes."""
 
         requests = []
+        in_turn_since = (
+            datetime.fromisoformat(now.replace("Z", "+00:00"))
+            - timedelta(seconds=plan_liveness.PLAN_WAKE_IN_TURN_SECONDS)
+        ).isoformat()
         for wake in plan_liveness.due_plan_wakes(now, db=db):
             # One unread wake per thread: a Turn that outlasts several due
             # times reads one reminder, not a stack of them.
             if liveness_wake_queued(db, wake.thread_id):
+                continue
+            if turn_running(db, wake.thread_id) and liveness_wake_read_since(
+                db, wake.thread_id, in_turn_since,
+            ):
                 continue
             requests.append(self._request(wake, db, now))
         return requests
@@ -116,10 +127,11 @@ class LivenessSource:
         """Return whether the work this wake was collected for can still move.
 
         This is the only question a claim may ask. Delivering a wake settles its
-        source and re-arms the row at the next cycle, so asking again whether
-        the row still matches the transition it was collected at would call a
-        wake stale for having been delivered, and the Turn it waited for would
-        never start.
+        source and re-arms the row; while its Turn runs, the due source uses the
+        message's provider-write timestamp to wait the flat in-Turn interval.
+        Asking here whether the row still matches the transition it was collected
+        at would call a wake stale for having been delivered, and the Turn it
+        waited for would never start.
         """
         signal = self._signal(thread_id, db)
         return (
@@ -165,11 +177,9 @@ class LivenessSource:
         progress = classify_progress(signal, wake_snapshot(wake))
         if progress == ADVANCED:
             next_cycle = 0
-        elif turn_running(db, wake.thread_id) and liveness_wake_queued(
-            db, wake.thread_id,
-        ):
-            # The wake waits behind a running Turn. The agent has not read it,
-            # so it has not gone unanswered.
+        elif turn_running(db, wake.thread_id):
+            # A running Turn uses the flat read-to-read interval; neither a queued
+            # nor already-claimed reminder advances idle backoff.
             next_cycle = wake.cycle
         else:
             next_cycle = wake.cycle + 1

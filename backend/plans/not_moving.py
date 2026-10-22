@@ -45,6 +45,7 @@ def read_from_facts(
     user_blocked: int,
     paused_by_user: int,
     wait_deadlines: list[tuple[str, str]],
+    overdue_wait_entries: list[dict[str, str]] | None = None,
     child_running: bool = False,
     set_aside: int | None = None,
 ) -> dict[str, Any] | None:
@@ -76,6 +77,7 @@ def read_from_facts(
         "next_wait_ends_at": earliest[1] if earliest is not None else None,
         "next_overdue_at": min(turns_overdue).isoformat() if turns_overdue else None,
         "overdue_waits": overdue,
+        "overdue_wait_entries": overdue_wait_entries or [],
         "paused_by_you": paused_by_user,
     }
     return {**facts, "set_aside": set_aside} if set_aside is not None else facts
@@ -91,14 +93,17 @@ def read(
     the user (``users``, their ids); a raised decision's source task is not
     counted again. ``next_wait_ends_at`` is the earliest end of a waiting
     leaf's deadlines. ``overdue_waits`` counts waiting leaves whose every
-    deadline passed more than ``OVERDUE_GRACE`` ago. ``paused_by_you`` counts
-    leaves the user paused. The plan is still only when every ready leaf the
-    counts hold is shown to be the user's.
+    deadline passed more than ``OVERDUE_GRACE`` ago, and
+    ``overdue_wait_entries`` names those leaves in plan order. ``paused_by_you``
+    counts leaves the user paused. The plan is still only when every ready leaf
+    the counts hold is shown to be the user's.
     """
     from plans import node_states, operator_node_state, operator_scheduled
 
     user_ready = user_blocked = paused_by_user = set_aside = 0
     deadlines: list[tuple[str, str]] = []
+    overdue_wait_entries: list[dict[str, str]] = []
+    cutoff = _utcnow() - OVERDUE_GRACE
     has_child_running = False
     for node in node_states.leaves(nodes):
         bucket = operator_node_state.leaf_bucket(node)
@@ -115,12 +120,19 @@ def read(
             found = deadline_range(causes)
             if found is not None:
                 deadlines.append(found)
+                latest = parse_deadline(found[1])
+                if latest is not None and latest[0] < cutoff:
+                    overdue_wait_entries.append({
+                        "title": str(node["title"]),
+                        "node_id": str(node["id"])[:8],
+                    })
     return read_from_facts(
         counts,
         user_ready=user_ready,
         user_blocked=user_blocked,
         paused_by_user=paused_by_user,
         wait_deadlines=deadlines,
+        overdue_wait_entries=overdue_wait_entries,
         child_running=has_child_running,
         set_aside=set_aside,
     )
@@ -144,10 +156,14 @@ def note(facts: dict[str, Any]) -> str:
     head = "not moving: " + " · ".join(said) if said else "not moving"
     if overdue:
         plural = "waits are" if overdue > 1 else "wait is"
+        entries = ", ".join(
+            f"{entry['title']} ({entry['node_id']})"
+            for entry in facts.get("overdue_wait_entries", [])
+        )
         return (
-            f"{head} · {overdue} {plural} past the deadline. Check each: resolve it if it "
-            "cleared, wait again with a new deadline and a reason, raise a decision, or close "
-            "the task."
+            f"{head} · {overdue} {plural} past the deadline: {entries}. Check each: resolve it "
+            "if it cleared, wait again with a new deadline and a reason, raise a decision, or "
+            "close the task."
         )
     set_aside = facts.get("set_aside", 0)
     if set_aside:

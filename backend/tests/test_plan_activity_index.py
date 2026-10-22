@@ -285,6 +285,7 @@ def test_compact_wait_ranges_keep_earliest_display_and_latest_overdue_clock(
         "next_wait_ends_at": "2026-09-30T08:00:00+00:00",
         "next_overdue_at": "2026-09-30T10:06:00+00:00",
         "overdue_waits": 0,
+        "overdue_wait_entries": [],
         "paused_by_you": 0,
     }
     monkeypatch.setattr(
