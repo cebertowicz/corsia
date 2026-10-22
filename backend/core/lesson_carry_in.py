@@ -288,13 +288,14 @@ def _fresh_scope(db, workspace: Path, target_path: str):
     return FreshTurnScope(project_id=project_id, owner_thread_id=owner, carry_in=True)
 
 
-
 def _rebaseline_first(
     db, workspace: Path, fact: CarryInFact, actions: dict[str, Any], adapter: TraceAdapter, runs: list[CarryInRun],
 ) -> bool:
     """Re-run the prior blob on a changed local identity before judging this edit."""
     if fact.role == "rebaseline":
         return True
+    from infra.database import write_transaction
+
     current_identity = getattr(adapter, "current_model_identity", lambda: None)()
     baseline = baseline_result(db, fact)
     setter = getattr(adapter, "set_fenced_target", None)
@@ -303,30 +304,30 @@ def _rebaseline_first(
     prior, _identity = baseline
     blob, reason = _recorded_target_blob(workspace, prior)
     if blob is None:
-        record_pending(
-            db,
-            CarryInFact(prior.lesson_id, prior.owner_thread_id, prior.target_commit, prior.target_path, prior.case_ref, "rebaseline"),
-            reason=reason,
-        )
+        with write_transaction(db, scope="carry_in_pending") as transaction:
+            record_pending(
+                transaction,
+                CarryInFact(prior.lesson_id, prior.owner_thread_id, prior.target_commit, prior.target_path, prior.case_ref, "rebaseline"),
+                reason=reason,
+            )
         return False
     from eval.fresh_turn_context import FencedTarget
-
     rebaseline = CarryInFact(
         prior.lesson_id, prior.owner_thread_id, prior.target_commit, prior.target_path, prior.case_ref, "rebaseline",
     )
     setter(FencedTarget(prior.target_path, prior.target_commit, blob, rebaseline.role))
     import hashlib
-
     prior_case = _case_for_fact(workspace, prior)
     try:
         run = run_three(
             actions, adapter, scenario=scenario_for_case(prior_case or {}),
             before_sample=lambda: (hashlib.sha256(blob).hexdigest(), None),
         )
-        if run.state == "settled":
-            record_result(db, rebaseline, run, case_sha=_case_sha(prior_case))
-        elif run.reason is not None:
-            record_pending(db, rebaseline, reason=run.reason)
+        with write_transaction(db, scope="carry_in_rebaseline") as transaction:
+            if run.state == "settled":
+                record_result(transaction, rebaseline, run, case_sha=_case_sha(prior_case))
+            elif run.reason is not None:
+                record_pending(transaction, rebaseline, reason=run.reason)
         runs.append(run)
         return run.state == "settled"
     finally:
@@ -337,11 +338,13 @@ def _rebaseline_first(
 
 def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: TraceAdapter) -> list[CarryInRun]:
     """Use one caller-admitted local adapter to settle pending facts serially."""
+    from infra.database import write_transaction
+
     runs: list[CarryInRun] = []
     for fact in facts:
-        record_pending(db, fact)
         # Pending must survive a stalled or unavailable local-admission check.
-        db.commit()
+        with write_transaction(db, scope="carry_in_pending") as transaction:
+            record_pending(transaction, fact)
         if not is_pending(db, fact):
             continue
         case = _case_for_fact(workspace, fact)
@@ -354,7 +357,8 @@ def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: Trac
         if setter is not None:
             blob, reason = _recorded_target_blob(workspace, fact)
             if blob is None:
-                record_pending(db, fact, reason=reason)
+                with write_transaction(db, scope="carry_in_pending") as transaction:
+                    record_pending(transaction, fact, reason=reason)
                 continue
             from eval.fresh_turn_context import FencedTarget
 
@@ -363,20 +367,21 @@ def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: Trac
             actions, adapter, scenario=scenario_for_case(case),
             before_sample=lambda: _target_snapshot(workspace, fact),
         )
-        if run.state == "pending" and run.reason is not None:
-            record_pending(db, fact, reason=run.reason)
         try:
-            if run.state == "settled":
-                owner = target_scope_owner(db, workspace, fact.target_path)
-                record_result(
-                    db, fact, run, owner_unresolved=owner is None, case_sha=_case_sha(case),
-                )
-                if run.verdict == "fail" and (event := _result_event(db, fact)) is not None:
-                    from core.self_caught_corrections import record_carry_in_regression
-
-                    record_carry_in_regression(
-                        db, result_event_id=str(event[0]), thread_id=None, created_at=str(event[1]),
+            with write_transaction(db, scope="carry_in_result") as transaction:
+                if run.state == "pending" and run.reason is not None:
+                    record_pending(transaction, fact, reason=run.reason)
+                elif run.state == "settled":
+                    owner = target_scope_owner(transaction, workspace, fact.target_path)
+                    record_result(
+                        transaction, fact, run, owner_unresolved=owner is None, case_sha=_case_sha(case),
                     )
+                    if run.verdict == "fail" and (event := _result_event(transaction, fact)) is not None:
+                        from core.self_caught_corrections import record_carry_in_regression
+
+                        record_carry_in_regression(
+                            transaction, result_event_id=str(event[0]), thread_id=None, created_at=str(event[1]),
+                        )
             runs.append(run)
         finally:
             cleanup = getattr(adapter, "cleanup", None)

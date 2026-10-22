@@ -89,14 +89,18 @@ def _pending_facts(db) -> list[CarryInFact]:
 
 def _drainable_pending_facts(db, workspace: Path, facts: Sequence[CarryInFact]) -> list[CarryInFact]:
     """Retire facts that can no longer run so one bounded drain cannot starve later work."""
+    from infra.database import write_transaction
+
     drainable: list[CarryInFact] = []
     for fact in facts:
         if _case_for_fact(workspace, fact) is None:
-            record_retirement(db, fact, "carry-in case is unavailable")
+            with write_transaction(db, scope="carry_in_retirement") as transaction:
+                record_retirement(transaction, fact, "carry-in case is unavailable")
             continue
         _target_hash, reason = _target_snapshot(workspace, fact)
         if reason == "target_changed_after_commit":
-            record_retirement(db, fact, "target changed after recorded commit")
+            with write_transaction(db, scope="carry_in_retirement") as transaction:
+                record_retirement(transaction, fact, "target changed after recorded commit")
             continue
         drainable.append(fact)
     return drainable
@@ -113,7 +117,7 @@ def _pending_event_count(db) -> int:
 
 def _drain_pending(workspace: Path) -> None:
     """Use existing startup/catalog-ready triggers for the bounded pending drain."""
-    from infra.database import get_db
+    from infra.database import get_db, write_transaction
     from core import lesson_carry_in_contract as contract
 
     with _DRAIN_LOCK:
@@ -126,13 +130,13 @@ def _drain_pending(workspace: Path) -> None:
                 edit_number=0 if cap is None or cap <= 0 else _pending_event_count(db) // cap,
             )
             for fact in facts:
-                record_pending(
-                    db, fact, reason="pending drain attempted", attempt=_pending_event_count(db) + 1,
-                )
+                with write_transaction(db, scope="carry_in_pending") as transaction:
+                    record_pending(
+                        transaction, fact, reason="pending drain attempted", attempt=_pending_event_count(transaction) + 1,
+                    )
                 user_id = _owner_user_id(db, fact.owner_thread_id)
                 if user_id is not None:
                     drain_facts(db, workspace, [fact], LocalTraceAdapter(user_id, _fresh_scope(db, workspace, fact.target_path)))
-            db.commit()
         except Exception:
             logger.opt(exception=True).warning("pending carry-in drain failed")
         finally:
@@ -152,7 +156,6 @@ def _record_save_drain(workspace: Path, paths: Sequence[Path], commit: str) -> N
         try:
             db = get_db()
             _drain_committed_facts(db, workspace, paths, commit)
-            db.commit()
         except Exception:
             logger.opt(exception=True).warning("carry-in pending fact could not be recorded")
         finally:

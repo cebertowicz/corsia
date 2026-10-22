@@ -629,6 +629,113 @@ def test_ready_free_save_starts_the_admitted_drain_without_another_trigger(tmp_p
     assert db.execute("SELECT event_name FROM outcome_events WHERE event_name='learning_loop.carry_in_result'").fetchone()
 
 
+def test_cleanup_cannot_rollback_a_settled_carry_in_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from core.lesson_carry_in import CarryInFact
+    from core.lesson_carry_in_drain import _record_save_drain
+
+    db = _event_db()
+    db.commit()
+    fact = CarryInFact("lesson", "owner", "a" * 40, "context/rule.md", "case")
+    passed = [_call("read_file", {"path": "context/rule.md"}), _call("plan_update", {"operation": "mark_done"})]
+    warnings: list[str] = []
+
+    class Logger:
+        def opt(self, **_kwargs):
+            return self
+
+        def warning(self, message: str):
+            warnings.append(message)
+
+    class CleanupAdapter(Adapter):
+        def __init__(self, *_args):
+            super().__init__([passed, passed, passed])
+
+        def cleanup(self):
+            from infra.database import get_db
+
+            cleanup_db = get_db()
+            cleanup_db.execute("UPDATE threads SET updated_at='cleanup' WHERE id='owner'")
+            cleanup_db.rollback()
+            cleanup_db.close()
+
+    class NoCloseDb:
+        def __getattr__(self, name):
+            return getattr(db, name)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("infra.database.get_db", lambda: NoCloseDb())
+    monkeypatch.setattr("core.lesson_carry_in_drain._matching_facts", lambda *_args: [fact])
+    monkeypatch.setattr("core.lesson_carry_in_drain._fresh_scope", lambda *_args: None)
+    monkeypatch.setattr("core.lesson_carry_in_drain.LocalTraceAdapter", CleanupAdapter)
+    monkeypatch.setattr("core.lesson_carry_in_drain.logger", Logger())
+    monkeypatch.setattr(
+        "core.lesson_carry_in._case_for_fact",
+        lambda *_args: {"what_happened": "The rule was missed.", "actions": ACTIONS},
+    )
+    monkeypatch.setattr("core.lesson_carry_in._target_snapshot", lambda *_args: ("target-hash", None))
+    monkeypatch.setattr("core.lesson_carry_in.target_scope_owner", lambda *_args: "owner")
+
+    _record_save_drain(tmp_path, [tmp_path / "context" / "rule.md"], "a" * 40)
+
+    assert warnings == []
+    assert db.execute("SELECT event_name FROM outcome_events WHERE event_name='learning_loop.carry_in_result'").fetchone()
+
+
+def test_rebaseline_cleanup_cannot_rollback_its_settled_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from core.lesson_carry_in import CarryInFact, CarryInRun, TraceScore, _rebaseline_first, record_result
+
+    db = _event_db()
+    previous = CarryInFact("lesson", "owner", "a" * 40, "context/rule.md", "case")
+    fact = CarryInFact("lesson", "owner", "b" * 40, "context/rule.md", "case")
+    passed_score = TraceScore("pass", "ok", 1)
+    assert record_result(db, previous, CarryInRun("settled", (passed_score,) * 3, "selector", "old"))
+    db.commit()
+    passed = [_call("read_file", {"path": "context/rule.md"}), _call("plan_update", {"operation": "mark_done"})]
+
+    class RebaselineAdapter(Adapter):
+        def __init__(self):
+            super().__init__([passed, passed, passed])
+            self.target = None
+
+        def current_model_identity(self):
+            return "new"
+
+        def set_fenced_target(self, target):
+            self.target = target
+
+        def cleanup(self):
+            from infra.database import get_db
+
+            cleanup_db = get_db()
+            cleanup_db.execute("UPDATE threads SET updated_at='cleanup' WHERE id='owner'")
+            cleanup_db.rollback()
+            cleanup_db.close()
+
+    class NoCloseDb:
+        def __getattr__(self, name):
+            return getattr(db, name)
+
+        def close(self):
+            pass
+
+    adapter = RebaselineAdapter()
+    monkeypatch.setattr("infra.database.get_db", lambda: NoCloseDb())
+    monkeypatch.setattr("core.lesson_carry_in._recorded_target_blob", lambda *_args: (b"previous rule", None))
+    monkeypatch.setattr(
+        "core.lesson_carry_in._case_for_fact",
+        lambda *_args: {"what_happened": "The rule was missed.", "actions": ACTIONS},
+    )
+
+    runs = []
+    assert _rebaseline_first(db, tmp_path, fact, ACTIONS, adapter, runs)
+
+    assert adapter.target is not None
+    assert [run.verdict for run in runs] == ["pass"]
+    assert db.execute("SELECT event_name FROM outcome_events WHERE subject_key=?", (previous.subject_key + ":rebaseline",)).fetchone()
+
+
 def test_committed_save_returns_before_its_background_drain_runs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from core.lesson_carry_in import record_committed_save
 
