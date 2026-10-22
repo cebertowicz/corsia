@@ -204,3 +204,24 @@ async def test_held_delivery_rows_never_affect_the_claim(full):
     await request()
     assert await worker_runner.drive() == 1
     assert [row[0] for row in starts(rule)] == ["held"] * 5 + ["started"]
+
+
+# A rule's waiting starts are capped as its script runs are: a match past the cap is skipped,
+# and the skip shows in explain and list.
+@pytest.mark.asyncio
+async def test_a_rules_queued_starts_are_capped_and_a_skip_shows_in_explain_and_list(full, monkeypatch):
+    from automation import worker_runner
+    from events import rule_runs
+
+    monkeypatch.setattr(rule_runs, "QUEUE_CAP", 2)
+    rule = await make_rule()
+    await _fill(rule)
+    events = [await request(f"pr-{n}@a1") for n in (2, 3, 4)]
+    assert await worker_runner.drive() == 0
+    assert [row[:2] for row in starts(rule)][1:] == [
+        ("queued", None), ("queued", None), ("skipped", "queue full")]
+    explained = await atool(OWNER, operation="explain", event_id=events[2])
+    assert [d["explanation"] for d in explained["decisions"]] == [
+        f"rule {rule} did not start a worker for {OWNER}: queue full"]
+    [listed] = (await atool(OWNER, operation="list"))["rules"]
+    assert (listed["starts_24h"], listed["skips_24h"]) == (3, 1)

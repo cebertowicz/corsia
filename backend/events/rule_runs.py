@@ -34,15 +34,17 @@ OWNER_PAUSED = "owner paused"
 OWNER_GONE = "its owner is no longer available"
 LOOP = "loop"
 QUEUE_FULL = "queue full"
-#: Runs one rule may have waiting; a match past it is skipped, so a looping script stays bounded.
+#: Runs or worker starts one rule may have waiting; a match past it is skipped, so a
+#: looping script or a burst of requests stays bounded.
 QUEUE_CAP = 50
 INTERRUPTED = "the run stopped before it settled; it is not replayed"
 TURNED_OFF = "the rule was turned off before its run started"
 _REASON_LIMIT = 500
 
 
-def _waiting(db: sqlite3.Connection, rule_id: str, writer: str) -> int:
-    """The rule's queued runs, at most ``QUEUE_CAP`` read (``idx_event_route_decisions_rule``)."""
+def waiting(db: sqlite3.Connection, rule_id: str, writer: str) -> int:
+    """The rule's queued runs or starts, at most ``QUEUE_CAP`` read
+    (``idx_event_route_decisions_rule``)."""
     return db.execute(
         "SELECT COUNT(*) FROM (SELECT 1 FROM event_route_decisions "
         "WHERE rule_id=? AND thread_id=? AND outcome=? LIMIT ?)",
@@ -65,7 +67,7 @@ def queue(
                                     reason=f"dropped by rule {dropped_by[writer]}"))
         elif rule.id in event.trace:
             outcomes.append(Outcome(rule.id, writer, SKIPPED, reason=LOOP))
-        elif _waiting(db, rule.id, writer) >= QUEUE_CAP:
+        elif waiting(db, rule.id, writer) >= QUEUE_CAP:
             outcomes.append(Outcome(rule.id, writer, SKIPPED, reason=QUEUE_FULL))
         else:
             outcomes.append(Outcome(rule.id, writer, QUEUED, run_input=json.dumps({

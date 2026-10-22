@@ -18,6 +18,9 @@ spawn it makes runs inside, so no start is claimed twice:
    the owner through ``worker.no_result``;
 3. each started worker whose last turn ended settles once (``automation.worker_settle``).
 
+Every way a start ends (refused, cut short, settled) goes through :func:`_settle`, which
+reports it with what its row kept (its trace and workflow) and removes its inputs.
+
 A pass runs on the continuation sweep when any start is open, which also covers a
 restart, and on every turn end while the last pass left one open (a slot may have
 freed, a worker may be done); with none open a turn end costs nothing.
@@ -52,6 +55,7 @@ _LOCAL_ONLY = {
                          "Local only for this chat.",
 }
 _SPAWN_FAILED = "refused: the start failed (delegation error)"
+_FAILED = "refused: the start failed"
 # "waited": the newest decision id queued while no slot was free. Process memory: it only
 # feeds the settle's product event, and a restart forgets it.
 _state: dict[str, Any] = {"lock": None, "task": None, "again": False, "open": False, "waited": 0}
@@ -103,13 +107,12 @@ async def drive() -> int:
     async with _lock():
         for row in await run_in_db(_read, worker_starts.orphans):
             if row["worker_thread_id"] is None or _LIVE.get(row["worker_thread_id"]) is None:
-                await _end(row, {}, NO_RESULT, _RESTARTED)
+                await _end(row, json.loads(row["run_input"] or "{}"), NO_RESULT, _RESTARTED)
         made = 0
         for row, run_input in await run_in_db(_claim):
             made += await _start(row, run_input)
         for item in await run_in_db(_read, worker_settle.ready):
-            await worker_settle.settle(item)
-            await run_in_db(_remove_inputs, item.owner, item.decision_id)
+            await _settle(item)
         _state["open"] = await run_in_db(worker_starts.any_open)
         return made
 
@@ -232,21 +235,21 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
             "read_paths": read_paths, "title": found["skill"].name,
         }, rule_start=record)
     except inputs.StartRefused as exc:
-        return await _refuse(row, str(exc), waited)
+        return await _refuse(row, run_input, str(exc), waited)
     except LiveSpawnCapExceeded:
         # Another spawn took the slot after the claim: back to the queue at its place.
         _state["waited"] = max(_state["waited"], row["id"])
         await run_in_db(_requeue, row["thread_id"], row["id"])
         return 0
-    except Exception as exc:  # noqa: BLE001 - a start that fails is told to its owner, not lost
-        logger.exception("worker start {} failed", row["id"])
-        return await _refuse(row, f"refused: the start failed ({type(exc).__name__})", waited)
+    except Exception:  # noqa: BLE001 - a start that fails is told to its owner, not lost
+        logger.exception("worker start {} failed", row["id"])  # the exception stays in the log
+        return await _refuse(row, run_input, _FAILED, waited)
     if isinstance(started, str):
         cause = started.removeprefix("Error: ")
         if not cause.startswith(worker_settle.REFUSAL_PREFIX):
             logger.warning("worker start {} was refused: {}", row["id"], started)
             cause = _SPAWN_FAILED
-        return await _refuse(row, cause, waited)
+        return await _refuse(row, run_input, cause, waited)
     return 1
 
 
@@ -261,14 +264,23 @@ def _requeue(owner: str, decision_id: int) -> None:
     _remove_inputs(owner, decision_id)
 
 
-async def _refuse(row: Mapping[str, Any], reason: str, waited: bool) -> int:
-    await _end(row, {"workflow": row["workflow_id"], "waited": waited}, REFUSED, reason)
-    await run_in_db(_remove_inputs, row["thread_id"], row["id"])
+async def _refuse(row: Mapping[str, Any], run_input: Mapping[str, Any], reason: str,
+                  waited: bool) -> int:
+    await _end(row, {**run_input, "waited": waited}, REFUSED, reason)
     return 0
 
 
-async def _end(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str, reason: str) -> None:
-    await worker_settle.settle(worker_settle.settlement(row, check, outcome, {"reason": reason}))
+async def _end(row: Mapping[str, Any], kept: Mapping[str, Any], outcome: str, reason: str) -> None:
+    """End a start no worker result settles, reported with what its row ``kept``: the
+    claimed input (its trace) or, once its worker was made, its check."""
+    check = {"workflow": row["workflow_id"], "waited": row["id"] <= _state["waited"], **kept}
+    await _settle(worker_settle.settlement(row, check, outcome, {"reason": reason}))
+
+
+async def _settle(item: worker_settle.Settle) -> None:
+    """Settle one start and remove its inputs: the one way every start ends."""
+    await worker_settle.settle(item)
+    await run_in_db(_remove_inputs, item.owner, item.decision_id)
 
 
 def _remove_inputs(owner: str, decision_id: int) -> None:

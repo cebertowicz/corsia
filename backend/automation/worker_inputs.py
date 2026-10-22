@@ -105,8 +105,7 @@ def write_head(source: tuple[Path, str, str], dest: Path) -> None:
         except tarfile.TarError as exc:
             archive.kill()
             logger.warning("head tree of {} at {} could not be written: {}", repo, sha, exc)
-            raise StartRefused(f"refused: commit {sha[:12]} could not be written "
-                               f"({type(exc).__name__})") from None
+            raise StartRefused(f"refused: commit {sha[:12]} could not be written") from None
     if archive.returncode:
         raise StartRefused(f"refused: commit {sha[:12]} could not be read from {repo}")
 

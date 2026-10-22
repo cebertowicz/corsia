@@ -4,7 +4,8 @@ Evaluation runs inside the event's write transaction, and a start makes a thread
 so the rule's row in ``event_route_decisions`` is the start's durable queue, its
 request identity (R24) and, once started, its worker's record. Evaluation records it
 ``queued`` with the start's input and the identity, or ``skipped`` (a duplicate
-request, a loop, a missing identity). It stays ``queued`` while the Claude Code limit
+request, a loop, a missing identity, or ``queue full`` once its rule already has
+``rule_runs.QUEUE_CAP`` starts waiting, as a ``run_script`` rule's runs). It stays ``queued`` while the Claude Code limit
 is full (R23): no worker exists until the runner claims it with a free slot and makes
 it ``started``, or ends it ``skipped`` or ``refused``. The worker's result settles it
 once as ``returned``, ``invalid`` or ``no_result``.
@@ -22,6 +23,7 @@ import sqlite3
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from events import rule_runs
 from events.rule_outcomes import (
     DROPPED, INVALID, NO_RESULT, QUEUED, REFUSED, RETURNED, SKIPPED, START_WORKER, STARTED,
     Outcome, Rule, RuleEvent,
@@ -49,7 +51,7 @@ def queue(
 ) -> list[Outcome]:
     """Each matching ``start_worker`` rule's outcome: queued with its input and request
     identity, dropped by its writer's own drop, or skipped (in the event's chain, no
-    identity fact, or a request whose start is in use)."""
+    identity fact, a request whose start is in use, or a full queue)."""
     outcomes = []
     for rule in (rule for rule in matched if rule.action == START_WORKER):
         writer = rule.created_by
@@ -65,6 +67,8 @@ def queue(
                                     reason=f"the event has no {rule.request_identity_fact}"))
         elif _in_use(db, rule.id, identity):
             outcomes.append(Outcome(rule.id, writer, SKIPPED, reason=DUPLICATE_REQUEST))
+        elif rule_runs.waiting(db, rule.id, writer) >= rule_runs.QUEUE_CAP:
+            outcomes.append(Outcome(rule.id, writer, SKIPPED, reason=rule_runs.QUEUE_FULL))
         else:
             outcomes.append(Outcome(rule.id, writer, QUEUED, request_identity=identity,
                                     run_input=json.dumps({
@@ -154,15 +158,16 @@ def started_by(db: sqlite3.Connection, worker: str) -> Mapping[str, Any] | None:
     ).fetchone()
 
 
-_START = ("SELECT id, rule_id, thread_id, worker_thread_id, request_identity, event_id, connector, "
-          "event_type, artifact_integration, artifact_type, artifact_external_id, run_input "
-          "FROM event_route_decisions d ")
+_START = ("SELECT d.id, d.rule_id, d.thread_id, d.worker_thread_id, d.request_identity, d.event_id, "
+          "d.connector, d.event_type, d.artifact_integration, d.artifact_type, d.artifact_external_id, "
+          "d.run_input, r.workflow_id FROM event_route_decisions d "
+          "LEFT JOIN event_rules r ON r.id=d.rule_id ")
 
 
 def with_workers(db: sqlite3.Connection) -> list[Mapping[str, Any]]:
     """Every started start with its worker made, oldest first, with what its result is
     checked and reported with."""
-    return db.execute(_START + "WHERE outcome=? AND worker_thread_id IS NOT NULL ORDER BY id",
+    return db.execute(_START + "WHERE d.outcome=? AND d.worker_thread_id IS NOT NULL ORDER BY d.id",
                       (STARTED,)).fetchall()
 
 
@@ -171,7 +176,7 @@ def orphans(db: sqlite3.Connection) -> list[Mapping[str, Any]]:
     no queued input. The runner claims and spawns under one lock, so when it holds that
     lock, one of these whose worker has no live process was cut short."""
     return db.execute(
-        _START + "WHERE outcome=? AND request_identity IS NOT NULL AND (worker_thread_id IS NULL "
+        _START + "WHERE d.outcome=? AND d.request_identity IS NOT NULL AND (d.worker_thread_id IS NULL "
         "OR (NOT EXISTS (SELECT 1 FROM active_turns t WHERE t.thread_id=d.worker_thread_id) "
         "AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.thread_id=d.worker_thread_id "
         "AND m.input_order IS NOT NULL AND m.delivery_state='queued')))",

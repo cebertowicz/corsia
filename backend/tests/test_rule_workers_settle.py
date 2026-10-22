@@ -91,6 +91,42 @@ async def test_a_worker_cut_short_before_its_first_turn_returns_no_result_once(w
     assert [kind for kind, _ in worker_events()] == ["worker.no_result"] and len(owner_wakes()) == 1
 
 
+# 3 (restart) -- a start cut short, made or not, removes its inputs and reports what its row
+# kept: the rule in the event's trace (so loop detection sees it) and the workflow.
+@pytest.mark.asyncio
+async def test_an_orphaned_start_removes_its_inputs_and_carries_its_trace(world, monkeypatch):
+    from automation.worker_inputs import start_dir
+    from events import intake, worker_starts
+    from infra.database import write_transaction
+
+    real, admitted = intake.admit_event, []
+
+    async def recorded(**kwargs):
+        admitted.append(kwargs)
+        return await real(**kwargs)
+
+    monkeypatch.setattr(intake, "admit_event", recorded)
+    rule = await make_rule()
+    await request("pr-1@a1")
+    await request("pr-2@a1")
+    check = json.dumps({"workflow": "worker-flow@3", "trace": ["rule_up", rule]})
+    with write_transaction(None, scope="rule_worker_claim") as db:
+        unmade, made = (row[0] for row in db.execute(
+            "SELECT id FROM event_route_decisions WHERE rule_id=? ORDER BY id", (rule,)))
+        for decision in (unmade, made):
+            assert worker_starts.claim(db, decision) is not None
+        worker_starts.made(db, made, "rw-cut-short", check)
+    dirs = [start_dir(world["folder"], decision) for decision in (unmade, made)]
+    for path in dirs:
+        (path / "head").mkdir(parents=True)
+    await settle_all()
+    assert [row[:2] for row in starts(rule)] == [("no_result", "a restart cut the start short")] * 2
+    assert not any(path.exists() for path in dirs)
+    assert {(item["trace"], item["facts"]["workflow"]) for item in admitted
+            if item["event_type"] == "worker.no_result"} == {
+        ((rule,), "worker-flow"), (("rule_up", rule), "worker-flow@3")}
+
+
 # The owner reads a classified reason; the exception's own text stays in the log.
 @pytest.mark.asyncio
 async def test_the_owner_wake_and_event_carry_no_exception_text(world, monkeypatch):
@@ -116,8 +152,10 @@ async def test_the_owner_wake_and_event_carry_no_exception_text(world, monkeypat
     [(outcome, reason, *_)] = starts(rule)
     [wake] = owner_wakes()
     stored = [row[0] for row in get_db().execute("SELECT content FROM messages")]
-    assert outcome in {"refused", "no_result"} and "RuntimeError" in reason and "RuntimeError" in wake
-    assert all("secret" not in text for text in (reason, *stored, *map(json.dumps, admitted)))
+    assert (outcome, reason) == ("refused", "the start failed")
+    assert "A rule couldn’t start worker-flow: the start failed\n" in wake
+    assert all("secret" not in text and "RuntimeError" not in text
+               for text in (reason, *stored, *map(json.dumps, admitted)))
     turn = {"id": "t", "status": "error", "error": "Traceback (most recent call last): secret"}
     assert verdict(turn, None, {}) == ("no_result", {"reason": "the agent's turn failed"})
     assert verdict({**turn, "error": "process_exited"}, None, {})[1] == {
