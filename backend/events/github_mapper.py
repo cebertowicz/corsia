@@ -24,22 +24,6 @@ _PR_END_EVENTS: dict[PrEnd, str] = {
 _PR_STATE_BY_EVENT: dict[str, PrEnd] = {
     event: state for state, event in _PR_END_EVENTS.items()
 }
-# The manifest type each routed webhook is, for agent-written rules. Comments
-# have no declared type yet, so no rule matches them.
-_MANIFEST_TYPES: dict[str, str] = {
-    "webhook.github.pr_opened": "pr.opened",
-    "webhook.github.pr_synchronize": "pr.synchronize",
-    "webhook.github.pr_ready_for_review": "pr.ready_for_review",
-    "webhook.github.pr_labeled": "pr.labeled",
-    "webhook.github.pr_merged": "pr.merged",
-    "webhook.github.pr_closed": "pr.closed",
-    "webhook.github.check_suite_completed": "check.completed",
-}
-
-
-def manifest_type(internal_event: str) -> str | None:
-    """The connector manifest's type for one webhook event name, if it declares one."""
-    return _MANIFEST_TYPES.get(internal_event)
 
 
 def ends_artifact(internal_event: str) -> bool:

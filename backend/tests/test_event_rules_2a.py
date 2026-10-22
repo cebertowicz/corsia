@@ -279,26 +279,29 @@ async def test_without_a_matching_rule_the_router_delivers_exactly_as_before(iso
     assert _decisions() == []
 
 
+def _purge(thread_id: str) -> None:
+    _write("UPDATE threads SET lifecycle_state='purged' WHERE id=?", thread_id)
+
+
 @pytest.mark.asyncio
 async def test_a_self_rule_fires_on_a_pr_routing_gave_no_thread(isolated_db, sent):
-    _project(P, conductor="cond")
-    _agent("cond")
+    _project(P)
+    _agent("owner")
     _agent("a")
-    _agent("b")
+    for number in (41, 42):
+        register_pr(REPO, number, "owner")
     rule = await _tool("a", operation="create", connector="github", event_type="pr.merged",
-                       match=[{"field": "repo", "op": "eq", "value": REPO}], note="Unowned PR merged.")
-    # A rule for someone else can't see an event no project claims, nor can a
-    # self-rule that doesn't name the event's repository.
-    other = await _tool("cond", operation="create", connector="github", event_type="pr.merged",
-                        to="thread:b", mode="digest")
-    unnamed = await _tool("b", operation="create", connector="github", event_type="pr.merged",
-                          note="Any PR merged.")
+                       match=[{"field": "repo", "op": "eq", "value": REPO}], note="PR merged.")
+    to_owner = await _tool("owner", operation="create", connector="github",
+                           event_type="pr.merged", to="registered_owner")
+    _purge("owner")
 
     with patch("events.connectors.github_rules.apply_routed_rules", lambda *a, **k: None):
         today = await route(MERGED, _merged(41))
     result = await route(MERGED, _merged(42))
 
-    # Today's result and its dead-letter record are unchanged; the rule only adds a wake.
+    # Routing dead-letters for its inactive owner and keeps doing so; the rules,
+    # scoped by that owner's project, only add a wake.
     assert (result.outcome, result.thread_id, result.reason) == (
         today.outcome, today.thread_id, today.reason)
     assert result.outcome == RouteOutcome.DEAD_LETTERED
@@ -306,16 +309,16 @@ async def test_a_self_rule_fires_on_a_pr_routing_gave_no_thread(isolated_db, sen
     assert [row["reason"] for row in parked] == [today.reason, today.reason]
     assert sent == []
     [wake] = _wakes("a")
-    assert "Unowned PR merged." in wake
-    [decision] = _decisions()
-    assert (decision["rule_id"], decision["thread_id"], decision["outcome"], decision["via"]) == (
-        rule["id"], "a", "woke", "rule")
-    assert _decisions(rule_id=other["id"]) == [] and _notes("b") == []
-    assert _decisions(rule_id=unnamed["id"]) == [] and _wakes("b") == []
+    assert "PR merged." in wake
+    [decision] = _decisions(rule_id=rule["id"])
+    assert (decision["thread_id"], decision["outcome"], decision["via"]) == ("a", "woke", "rule")
+    [owner_rule] = _decisions(rule_id=to_owner["id"])
+    assert (owner_rule["outcome"], owner_rule["reason"]) == ("dead_lettered", "recipient unavailable")
 
 
 @pytest.mark.asyncio
-async def test_webhook_reads_when_routing_chose_no_thread(isolated_db, sent):
+async def test_an_event_with_no_owner_and_no_thread_reads_no_rule(isolated_db, sent):
+    """Rules resolve in the artifact owner's scope: a PR nobody registered has none."""
     _project(P)
     _agent("a")
 
@@ -327,15 +330,12 @@ async def test_webhook_reads_when_routing_chose_no_thread(isolated_db, sent):
     with patch("events.connectors.github_rules.apply_routed_rules", lambda *a, **k: None):
         await run(60)
         before = await run(61)
-    no_rule = await run(62)
     await _tool("a", operation="create", connector="github", event_type="pr.merged",
                 match=[{"field": "repo", "op": "eq", "value": REPO}])
-    matched = await run(63)
+    matched = await run(62)
 
-    assert len(no_rule) - len(before) == 1
-    assert _decisions(thread_id="a")[-1]["outcome"] == "woke"
-    print(f"unrouted webhook reads: dev={len(before)} no_rule=+{len(no_rule) - len(before)} "
-          f"matched=+{len(matched) - len(before)}")
+    assert len(matched) == len(before)
+    assert _decisions() == [] and _wakes("a") == []
 
 
 # -- Burst -----------------------------------------------------------------------------------
@@ -505,11 +505,10 @@ async def test_rules_hold_threads_that_left_their_project(isolated_db, sent, mon
     _write("UPDATE threads SET project_id=? WHERE id='owner'", Q)
     models.register_artifact(integration="gmail", type="email-thread",
                              external_id="google:acct-1:thread:t1", parent_thread_id="owner")
-    monkeypatch.setattr("events.rules._reaches", lambda *_args: True)
     [delivered] = deliver_platform_event_sync("gmail", _email("acct-1", "moved-writer"))
+    # The event is now the owner's new project's; the old project's drop never sees it.
     assert delivered.outcome == "digested"
-    assert [(item["outcome"], item["reason"]) for item in _decisions(rule_id=drop["id"])] == [
-        ("held", "recipient outside the rule's project")]
+    assert _decisions(rule_id=drop["id"]) == []
 
 
 @pytest.mark.asyncio
@@ -594,40 +593,35 @@ async def test_todays_drops_still_come_before_any_rule(isolated_db, sent):
     assert (_wakes("watcher"), _notes("watcher"), _decisions()) == ([], [], [])
 
 
-def test_r29_and_r30_hold_an_account_event_from_recipients_it_may_not_reach(isolated_db, monkeypatch):
+def test_r30_the_mail_pollers_reach_filter_holds_rule_recipients(isolated_db):
     import asyncio
 
-    _project(P, cloud_off=True)
-    _project(Q)
+    from connections.connected_accounts import account_reaches_thread
+
+    _project(P)
     _agent("owner")
-    _agent("cloud", Q)
-    _agent("local", Q, local_only=True)
+    _agent("watcher")
     models.register_artifact(integration="gmail", type="email-thread",
                              external_id="google:acct-1:thread:t1", parent_thread_id="owner")
-    for writer in ("cloud", "local"):
-        asyncio.run(_tool(writer, operation="create", connector="gmail",
-                          event_type="email.received"))
+    asyncio.run(_tool("watcher", operation="create", connector="gmail",
+                      event_type="email.received"))
 
-    # R30, read through the real reach check: an unknown account reaches no one.
-    deliver_platform_event_sync("gmail", _email("acct-1", "m1"))
-    assert {d["thread_id"]: (d["outcome"], d["reason"]) for d in _decisions()} == {
-        "cloud": ("held", "account reach"), "local": ("held", "account reach")}
+    def inside_account_reach(target, connection):  # the mail poller's own filter
+        if target.thread is None or account_reaches_thread("acct-1", target.thread, db=connection):
+            return None
+        return "account_out_of_reach"
 
-    # R29: with reach granted, a Local-models-only project's mail reaches only the local agent.
-    monkeypatch.setattr("events.rules._reaches", lambda *_args: True)
-    deliveries = deliver_platform_event_sync("gmail", _email("acct-1", "m2"))
-    later = [d for d in _decisions() if d["id"] > 2]
-    assert {d["thread_id"]: (d["outcome"], d["reason"]) for d in later} == {
-        "cloud": ("held", "local only"), "local": ("woke", None)}
-    assert "local" in {d.thread_id for d in deliveries}
-    assert _wakes("cloud") == [] and len(_wakes("local")) == 1
-
-    held = asyncio.run(_tool("cloud", operation="explain", event_id=later[0]["event_id"]))
-    [why] = [d for d in held["decisions"] if d["outcome"] == "held"]
-    assert why["explanation"].endswith("held it from cloud: local only")
-    # The owner's project can't see the other project's rules.
-    assert asyncio.run(_tool("owner", operation="explain",
-                             event_id=later[0]["event_id"]))["decisions"] == []
+    # An unknown account reaches no one: routing's owner and the rule's recipient alike.
+    deliveries = deliver_platform_event_sync("gmail", _email("acct-1", "m1"),
+                                             target_filter=inside_account_reach)
+    assert {(d.thread_id, d.outcome, d.reason) for d in deliveries} == {
+        ("owner", FILTERED, "account_out_of_reach"), ("watcher", FILTERED, "account_out_of_reach")}
+    [held] = _decisions()
+    assert (held["thread_id"], held["outcome"], held["reason"]) == (
+        "watcher", "held", "account_out_of_reach")
+    [why] = asyncio.run(_tool("watcher", operation="explain",
+                              event_id=held["event_id"]))["decisions"]
+    assert why["explanation"].endswith("held it from watcher: account_out_of_reach")
 
 
 @pytest.mark.asyncio
@@ -670,8 +664,10 @@ async def test_rule_authoring_and_both_delivery_paths_emit_product_events(isolat
 
 # -- Platform path and watches ----------------------------------------------------------------
 
-def test_a_watch_ends_when_an_authored_rule_delivers_its_event(isolated_db):
+def test_a_watch_ends_only_where_a_rule_added_the_delivery(isolated_db, monkeypatch):
     import asyncio
+
+    from events import resolve
 
     _project(P)
     _agent("owner")
@@ -686,10 +682,26 @@ def test_a_watch_ends_when_an_authored_rule_delivers_its_event(isolated_db):
                       event_type=library.ITEM_CHANGED_EVENT, note="Reread the skill."))
     [ridden] = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-2"))
 
-    # The rule's wake beats the routed digest, carries its note, and ends the wait.
+    # The rule rides routing's delivery: its wake beats the digest and carries its
+    # note, and the wait stays routing's to end.
     assert ridden.outcome == "woke"
     [wake] = _wakes("owner")
     assert "Reread the skill." in wake
+    assert _armed(node) == 1
+
+    real = resolve.resolve_targets
+
+    def _no_thread(envelope, **kwargs):
+        [target] = real(envelope, **kwargs)
+        return [resolve.Target(None, "dead_letter", "none", routing_state=target.routing_state,
+                               disposition="dead_letter")]
+
+    monkeypatch.setattr("events.platform.resolve_targets", _no_thread)
+    made = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-3"))
+
+    # Routing chose no thread, so the rule added the delivery (a digest: the table lets
+    # no rule wake this artifact's recipient), and that delivery ends the wait.
+    assert ("owner", DIGESTED) in {(d.thread_id, d.outcome) for d in made}
     assert _armed(node) == 0
 
 
@@ -788,7 +800,7 @@ def test_platform_reads_per_event(isolated_db, monkeypatch):
             deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed(manifest))
         return _reads(seen)
 
-    with patch("events.platform.rules.evaluate", lambda *_args: None):
+    with patch("events.platform.rules.evaluate", lambda *_args, **_kwargs: None):
         before = run("warm")  # warms one-time reads
         before = run("m-0")   # dev's reads: no rule evaluation at all
     no_rule = run("m-1")
@@ -834,3 +846,161 @@ async def test_webhook_reads_per_event(isolated_db, sent):
     assert len(unmatched) - len(before) == 1
     print(f"webhook reads: dev={len(before)} no_rule=+{len(no_rule) - len(before)} "
           f"unmatched=+{len(unmatched) - len(before)} matched=+{len(matched) - len(before)}")
+
+
+# -- Rules read routing's decision and its owners' facts ---------------------------------------
+
+@pytest.mark.asyncio
+async def test_rules_read_the_registrys_ended_state(isolated_db, sent):
+    """Ended is the registry's one definition: the identity's recorded PR state."""
+    _project(P)
+    _agent("owner")
+    _agent("watcher")
+    register_pr(REPO, 7, "owner")
+    rule = await _tool("watcher", operation="create", connector="github",
+                       event_type="pr.synchronize")
+    _write("UPDATE artifact_identities SET metadata=json_set(COALESCE(metadata, '{}'), "
+           "'$.pr_state', 'closed') WHERE external_id=?", pr_external_id(REPO, 7))
+
+    await route(SYNC, _sync(7, 1))
+
+    assert [d["outcome"] for d in _decisions(rule_id=rule["id"])] == ["ended"]
+    assert _wakes("watcher") == [] and _notes("watcher") == []
+
+
+@pytest.mark.parametrize("relationship, lifecycle", [("owner", "archived"), ("parent_chain", "active")])
+def test_a_rule_wake_rides_only_where_the_disposition_table_allows(
+        isolated_db, monkeypatch, relationship, lifecycle):
+    import asyncio
+
+    from events import resolve
+    from events.resolve import Target
+
+    _project(P)
+    _agent("owner")
+    _library_owner("owner")
+    asyncio.run(_tool("owner", operation="create", connector=library.LIBRARY_CONNECTOR,
+                      event_type=library.ITEM_CHANGED_EVENT, note="Reread the skill."))
+    real = resolve.resolve_targets
+
+    def _targets(envelope, **kwargs):
+        [target] = real(envelope, **kwargs)
+        state = dict(target.routing_state)
+        state["identity"] = {**state["identity"], "state": lifecycle}
+        return [Target(target.thread, target.resolution, relationship, routing_state=state,
+                       disposition="owner_digest")]
+
+    monkeypatch.setattr("events.platform.resolve_targets", _targets)
+    [made] = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-1"))
+
+    assert made.outcome == DIGESTED
+    assert _wakes("owner") == []
+
+
+def test_rule_adds_pass_the_callers_filter_and_project_scope(isolated_db):
+    _project(P)
+    _project(Q)
+    _agent("owner")
+    _agent("watcher")
+    _agent("outsider", Q)
+    models.register_artifact(integration="gmail", type="email-thread",
+                             external_id="google:acct-1:thread:t1", parent_thread_id="owner")
+    import asyncio
+
+    inside = asyncio.run(_tool("watcher", operation="create", connector="gmail",
+                               event_type="email.received"))
+    outside = asyncio.run(_tool("outsider", operation="create", connector="gmail",
+                                event_type="email.received"))
+
+    def _reach(target, _conn):
+        return "account_out_of_reach" if target.thread == "watcher" else None
+
+    deliveries = deliver_platform_event_sync("gmail", _email("acct-1", "m1"), target_filter=_reach)
+
+    assert ("watcher", FILTERED, "account_out_of_reach") in {
+        (d.thread_id, d.outcome, d.reason) for d in deliveries}
+    assert [(d["outcome"], d["reason"]) for d in _decisions(rule_id=inside["id"])] == [
+        ("held", "account_out_of_reach")]
+    # Another project's rule never sees this project's event.
+    assert _decisions(rule_id=outside["id"]) == []
+    assert _wakes("watcher") == [] and _wakes("outsider") == []
+
+
+def test_platform_routed_delivery_ends_the_same_watches_with_or_without_a_rule(isolated_db):
+    import asyncio
+
+    _project(P)
+    _agent("owner")
+    _library_owner("owner")
+    without_node, _ = _watch("owner", "owner/pdf", library.ITEM_CHANGED_EVENT)
+    deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-1"))
+    without = _armed(without_node)
+
+    with_node, _ = _watch("owner", "owner/pdf", library.ITEM_CHANGED_EVENT)
+    asyncio.run(_tool("owner", operation="create", connector=library.LIBRARY_CONNECTOR,
+                      event_type=library.ITEM_CHANGED_EVENT, mode="digest", note="Reread it."))
+    deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-2"))
+
+    assert (without, _armed(with_node)) == (1, 1)
+
+
+def test_lookup_reads_only_the_event_projects_rules(isolated_db, monkeypatch):
+    import asyncio
+
+    from events import rules
+
+    _project(P)
+    _project(Q)
+    _agent("owner")
+    _agent("other", Q)
+    _library_owner("owner")
+    for n in range(5):
+        made = asyncio.run(_tool("other", operation="create", connector=library.LIBRARY_CONNECTOR,
+                                 event_type=library.ITEM_CHANGED_EVENT,
+                                 mode="digest", note=f"note {n}"))
+        assert isinstance(made, dict), made
+    read: list[str] = []
+    real = rules.from_row
+    monkeypatch.setattr("events.rules.from_row", lambda row: read.append(row["scope"]) or real(row))
+
+    deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-1"))
+
+    assert read == []
+
+
+@pytest.mark.parametrize("owner, woke", [("worker", True), ("other", False)])
+def test_an_agents_owner_rule_wakes_only_its_own_or_its_workers(isolated_db, owner, woke):
+    import asyncio
+
+    _project(P)
+    _agent("writer")
+    _agent("other")
+    _agent("worker", temporary_of="writer")
+    _library_owner(owner)
+    rule = asyncio.run(_tool("writer", operation="create", connector=library.LIBRARY_CONNECTOR,
+                             event_type=library.ITEM_CHANGED_EVENT, to="registered_owner",
+                             note="Reread the skill."))
+
+    [made] = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-1"))
+
+    assert made.thread_id == owner
+    assert (made.outcome == "woke", len(_wakes(owner)) == 1) == (woke, woke)
+    [decision] = _decisions(rule_id=rule["id"])
+    assert decision["outcome"] == ("woke" if woke else "digested")
+
+
+def test_a_drop_with_nothing_routed_records_nothing(isolated_db):
+    import asyncio
+
+    _project(P)
+    _agent("owner")
+    _agent("watcher")
+    _library_owner("owner")
+    drop = asyncio.run(_tool("watcher", operation="create", connector=library.LIBRARY_CONNECTOR,
+                             event_type=library.ITEM_CHANGED_EVENT, action="drop"))
+
+    deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-1"))
+
+    assert _decisions(rule_id=drop["id"]) == []
+    [listed] = asyncio.run(_tool("watcher", operation="list"))["rules"]
+    assert listed["last_fired"] is None

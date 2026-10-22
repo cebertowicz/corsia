@@ -2,15 +2,17 @@
 
 Today's routing decides first and stays in code (the webhook router's legs,
 ``resolve_targets``, the binder, the self-authored and cancelled-check drops).
-A rule an agent wrote only adds to that decision:
+Rules read that decision (its ``Target`` list, the owner and lifecycle it
+resolved) and never re-derive it. A rule an agent wrote only adds to it:
 
 - a ``deliver`` rule adds a recipient, or rides a delivery routing already made
   to that thread (its note joins it, and a wake beats a digest);
 - a ``drop`` rule removes its writer's own delivery, nothing else.
 
 Every outcome of a rule goes through :func:`record`, the one writer of
-``event_route_decisions``. With no enabled rule for an event's type, evaluation
-costs one indexed read and nothing else. Names no connector.
+``event_route_decisions``. With no enabled rule for an event's type in the
+event's project, evaluation costs one indexed read and nothing else. Whether a
+rule's wake ask wakes is the disposition table's answer. Names no connector.
 """
 
 from __future__ import annotations
@@ -23,6 +25,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from events import rule_reads
+from events.disposition import WAKE as TABLE_WAKE, disposition
+from events.resolve import Target, lifecycle
+from registry.retirement_predicate import identity_ended
 
 DELIVER = "deliver"
 DROP = "drop"
@@ -48,8 +53,8 @@ DUPLICATE = "duplicate"
 # Reasons a guard gives.
 WAKE_CAP = "wake cap"
 PAUSED = "paused"
-LOCAL_ONLY = "local only"
-ACCOUNT_REACH = "account reach"
+NEVER_WAKES = "this recipient never wakes for this artifact"
+OTHER_OWNER = "the registered owner is another agent"
 OUT_OF_PROJECT = "recipient outside the rule's project"
 
 WAKES_PER_HOUR = 1
@@ -85,21 +90,12 @@ class RuleEvent:
 
 
 @dataclass(frozen=True)
-class Routed:
-    """One delivery today's routing chose: its thread and whether it wakes."""
-
-    thread: str
-    wake: bool
-    owner: bool = False
-
-
-@dataclass(frozen=True)
 class Entry:
     """One rule's part in a delivery: whether it asks to wake, and why not."""
 
     rule_id: str
     wake: bool
-    reason: str | None = None  # R7 or R9 turned its wake into a digest
+    reason: str | None = None  # why its wake ask became a digest (R7, R9, 4.4, the table)
     since_wake: int = 0  # R9: this rule's capped digests to the thread since it last woke it
 
 
@@ -160,6 +156,7 @@ class RulePlan:
     """Everything rules decided for one event, before delivery."""
 
     event: RuleEvent
+    lifecycle: str = "active"  # the artifact's, as routing resolved it
     drops: dict[str, str] = field(default_factory=dict)       # routed thread -> drop rule id
     rides: dict[str, Delivery] = field(default_factory=dict)  # routed thread -> what rides it
     adds: dict[str, Delivery] = field(default_factory=dict)   # new thread -> its delivery
@@ -183,12 +180,13 @@ def from_row(row: Mapping[str, Any]) -> Rule:
     )
 
 
-def lookup(db: sqlite3.Connection, connector: str, event_type: str) -> list[Rule]:
-    """The enabled rules for one declared type: the one read every event pays."""
+def lookup(db: sqlite3.Connection, connector: str, event_type: str, thread: str) -> list[Rule]:
+    """The enabled rules for one declared type in ``thread``'s project: the one
+    indexed read every event pays. Rules resolve in the artifact owner's scope."""
     rows = db.execute(
-        "SELECT * FROM event_rules WHERE connector=? AND event_type=? AND enabled=1 "
-        "ORDER BY created_at, id",
-        (connector, event_type),
+        "SELECT * FROM event_rules WHERE scope=? || (SELECT project_id FROM threads WHERE id=?) "
+        "AND connector=? AND event_type=? AND enabled=1 ORDER BY created_at, id",
+        (PROJECT_PREFIX, thread, connector, event_type),
     ).fetchall()
     return [from_row(row) for row in rows]
 
@@ -228,20 +226,18 @@ def project_scope(project_id: str) -> str:
     return PROJECT_PREFIX + project_id
 
 
-def _in_scope(rule: Rule, event_project: str | None) -> bool:
-    """An event with a project matches only that project's rules. One with no owner
-    and nothing routed has no project, so only a writer's rule to itself that names
-    the event's repository sees it: create checked that the writer's project tracks
-    that repository, and no one else is reached."""
-    if event_project is not None:
-        return rule.scope == project_scope(event_project)
-    if rule.action != DELIVER or thread_target(rule.to) != rule.created_by:
-        return False
-    from events.connectors import get_manifest
-
-    manifest = get_manifest(rule.connector)
-    fact = manifest.repository_fact if manifest.project_repositories else None
-    return any(test["field"] == fact and test["op"] in NAMING for test in rule.match)
+def routed(
+    targets: Iterable[Target], skipped: Iterable[str] = (),
+) -> tuple[dict[str, Target], dict[str, Any], str | None]:
+    """Routing's decision as rules read it: each thread it delivers to (less the
+    caller's ``skipped``), its routing state, and the thread whose project scopes
+    the rules (the registered owner, else the first routed thread)."""
+    targets, skipped = list(targets), set(skipped)
+    state = next((t.routing_state for t in targets if t.routing_state), None) or {}
+    by_thread = {t.thread: t for t in targets if t.thread is not None
+                 and t.disposition != "dead_letter" and t.thread not in skipped}
+    owner = (state.get("owner") or {}).get("parent_thread_id")
+    return by_thread, state, owner or next(iter(by_thread), None)
 
 
 def _paused(db: sqlite3.Connection, thread: str) -> bool:
@@ -250,23 +246,21 @@ def _paused(db: sqlite3.Connection, thread: str) -> bool:
     return thread_paused_since(db, thread) is not None
 
 
-def _reaches(db: sqlite3.Connection, account_id: Any, thread: str) -> bool:
-    from connections.connected_accounts import account_reaches_thread
-
-    return account_reaches_thread(str(account_id), thread, db=db)
-
-
-def _apply_drops(plan: RulePlan, rules: list[Rule], by_thread: Mapping[str, Routed]) -> dict[str, str]:
-    """Each drop rule removes its writer's own routed delivery; returns writer -> rule."""
+def _apply_drops(
+    plan: RulePlan, rules: list[Rule], by_thread: Mapping[str, Target],
+    recipients: Mapping[str, str | None],
+) -> dict[str, str]:
+    """Each drop rule removes its writer's own delivery, routed or rule-added, and
+    records an outcome only when it removed one; returns writer -> rule."""
+    added = {recipients[rule.id] for rule in rules if rule.action == DELIVER}
     dropped_by: dict[str, str] = {}
     for rule in (rule for rule in rules if rule.action == DROP):
         writer = rule.created_by
         dropped_by.setdefault(writer, rule.id)
         if writer in by_thread:
             plan.drops.setdefault(writer, rule.id)
-        plan.settled.append(Outcome(
-            rule.id, writer, DROPPED,
-            reason=None if writer in by_thread else "nothing routed to drop"))
+        if writer in by_thread or writer in added:
+            plan.settled.append(Outcome(rule.id, writer, DROPPED))
     return dropped_by
 
 
@@ -291,13 +285,28 @@ def _settle_unreachable(
 
 
 def _wake_for(
-    db: sqlite3.Connection, rule: Rule, thread: str, routed_wake: bool,
+    db: sqlite3.Connection, rule: Rule, thread: str, row: Mapping[str, Any],
+    routed_here: Target | None, artifact_lifecycle: str,
 ) -> tuple[bool, str | None, int]:
-    """Whether this rule wakes the thread, why not (R7, R9), and its capped count."""
+    """Whether this rule wakes the thread, why not, and its capped count.
+
+    The disposition table answers whether this recipient can wake at all; the
+    rule's own guards are 4.4 (an agent's ``registered_owner`` rule wakes only
+    itself or its temporary workers), R7 (pause) and R9 (hourly budget).
+    """
     if rule.mode != WAKE:
         return False, None, 0
-    if routed_wake:
+    if routed_here is not None and routed_here.disposition == "owner_wake":
         return False, None, 0  # routing already wakes it; the rule only rides
+    relationship = routed_here.relationship if routed_here is not None else "rule"
+    if routed_here is not None and routed_here.routing_state:
+        artifact_lifecycle = lifecycle(routed_here.routing_state)
+    if disposition(relationship, "informational", artifact_lifecycle,
+                   rule_wake=True) != TABLE_WAKE:
+        return False, NEVER_WAKES, 0
+    if (rule.to == REGISTERED_OWNER and thread != rule.created_by
+            and row["spawned_by"] != rule.created_by):
+        return False, OTHER_OWNER, 0  # 4.4
     if _paused(db, thread):
         return False, PAUSED, 0  # R7
     spent, capped = rule_reads.wake_budget(
@@ -308,72 +317,50 @@ def _wake_for(
 
 
 def evaluate(
-    db: sqlite3.Connection, event: RuleEvent, routed: Iterable[Routed],
+    db: sqlite3.Connection, event: RuleEvent, targets: Iterable[Target],
+    skipped: Iterable[str] = (),
 ) -> RulePlan | None:
-    """Decide what agent-written rules add to today's routing for one event.
+    """Decide what agent-written rules add to routing's ``targets`` for one event.
 
-    Returns ``None`` when no enabled rule for the event's type matches its facts;
-    the caller then delivers exactly as it would without rules.
+    ``skipped`` are routed threads the caller's own filter keeps this event from.
+    Returns ``None`` when no enabled rule for the event's type in its project
+    matches its facts; the caller then delivers exactly as it would without rules.
     """
-    rules = [rule for rule in lookup(db, event.connector, event.event_type)
+    by_thread, state, anchor = routed(targets, skipped)
+    if anchor is None:
+        return None  # no owner and nothing routed: no project, so no rule
+    rules = [rule for rule in lookup(db, event.connector, event.event_type, anchor)
              if matches(rule, event.facts)]
     if not rules:
         return None
-    routed = list(routed)
-    by_thread = {item.thread: item for item in routed}
-    owner, ended = rule_reads.artifact_context(db, event.artifact_ref)
-    owner = owner or next((item.thread for item in routed if item.owner), None)
+    owner = (state.get("owner") or {}).get("parent_thread_id")
+    plan = RulePlan(event, lifecycle=lifecycle(state))
     recipients = {
         rule.id: (owner if rule.to == REGISTERED_OWNER else thread_target(rule.to))
         for rule in rules
     }
-    writers = [rule.created_by for rule in rules]
-    threads = rule_reads.threads(db, [owner, *by_thread, *recipients.values(), *writers])
-    event_project = threads[owner]["project_id"] if owner in threads else None
-    if event_project is None:
-        event_project = next(
-            (threads[item.thread]["project_id"] for item in routed if item.thread in threads), None)
-    account_id = event.facts.get("account_id")
-    if account_id is None:
-        rules = [rule for rule in rules if _in_scope(rule, event_project)]
-    plan = RulePlan(event)
-    if not rules:
-        return plan
-    if ended and not event.ends_artifact:
+    if identity_ended(state.get("identity")) and not event.ends_artifact:
         # R27: an ended artifact's later activity fires no rule.
         plan.settled = [Outcome(rule.id, recipients[rule.id], ENDED) for rule in rules]
         return plan
+    threads = rule_reads.threads(
+        db, [*recipients.values(), *(rule.created_by for rule in rules)])
     rules = _settle_unreachable(plan, rules, recipients, threads)
-    if not rules:
-        return plan
-    dropped_by = _apply_drops(plan, rules, by_thread)
-    cloud_off: set[str] | None = None
+    dropped_by = _apply_drops(plan, rules, by_thread, recipients)
     for rule in (rule for rule in rules if rule.action == DELIVER):
         thread = recipients[rule.id]
-        if thread is None:  # dead-lettered above
-            continue
-        row = threads[thread]
+        if thread is None:
+            continue  # _settle_unreachable dead-lettered it
         if thread in dropped_by:
             plan.settled.append(Outcome(
                 rule.id, thread, DROPPED, reason=f"dropped by rule {dropped_by[thread]}"))
             continue
-        if account_id is not None and not _reaches(db, account_id, thread):
-            # R30: the account this event came from must reach the recipient.
-            plan.settled.append(Outcome(rule.id, thread, HELD, reason=ACCOUNT_REACH))
-            continue
-        if cloud_off is None:
-            cloud_off = rule_reads.cloud_off(
-                db, [event_project, *(r["project_id"] for r in threads.values())])
-        if (event_project in cloud_off and not row["local_only"]
-                and row["project_id"] not in cloud_off):
-            # R29: a Local-models-only project's event reaches no cloud recipient.
-            plan.settled.append(Outcome(rule.id, thread, HELD, reason=LOCAL_ONLY))
-            continue
         routed_here = by_thread.get(thread)
-        routed_wake = bool(routed_here and routed_here.wake)
-        wake, reason, since_wake = _wake_for(db, rule, thread, routed_wake)
+        wake, reason, since_wake = _wake_for(
+            db, rule, thread, threads[thread], routed_here, plan.lifecycle)
         target = plan.rides if routed_here else plan.adds
-        delivery = target.setdefault(thread, Delivery(routed_wake=routed_wake))
+        delivery = target.setdefault(thread, Delivery(
+            routed_wake=bool(routed_here and routed_here.disposition == "owner_wake")))
         delivery.add(rule, wake, reason, since_wake)
     return plan
 

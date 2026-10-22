@@ -63,8 +63,7 @@ def _prepare_route(
     internal_event: str,
     payload: dict[str, Any],
     identity: Any,
-    check_suite_base_ref: str | None,
-    check_suite_pr_selected: bool,
+    selected_pr: dict[str, Any] | None,
 ) -> None:
     """Perform each canonical write in the original noninterleaved stage order."""
     from events import router
@@ -88,16 +87,15 @@ def _prepare_route(
         return
     external_id = identity.external_id if identity else None
     tag_provenance = structured_tag(payload)
-    selected = router._select_route(
-        internal_event, payload, identity, external_id, tag_provenance,
-        check_suite_base_ref, check_suite_pr_selected,
+    selected, routing_state = router._select_route(
+        internal_event, payload, identity, external_id, tag_provenance, selected_pr,
     )
     if isinstance(selected, router.RouteResult):
         prepared.result = selected
         # Routing chose no thread; rules may still add recipients, never change this result.
-        apply_routed_rules(prepared, internal_event, payload, identity, check_suite_base_ref)
+        apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state)
         return
-    thread_id, wake_reason, routing_state = selected
+    thread_id, wake_reason = selected
     summary, details = router._summarize(internal_event, payload, external_id)
     if tag_provenance:
         details["tag_provenance"] = tag_provenance
@@ -112,7 +110,7 @@ def _prepare_route(
     prepared.summary, prepared.details, prepared.chip = summary, details, chip
     prepared.notice = router.github_pr_notice.notice_for_routed_event(thread_id, identity)
     # Routing has decided; agent-written rules add recipients or drop or annotate this one.
-    apply_routed_rules(prepared, internal_event, payload, identity, check_suite_base_ref)
+    apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state, wake_reason)
 
 
 async def release_notice_off_loop(thread_id: str, identity: Any) -> None:
@@ -143,8 +141,7 @@ async def prepare_route_ordered(
     internal_event: str,
     payload: dict[str, Any],
     identity: Any,
-    check_suite_base_ref: str | None,
-    check_suite_pr_selected: bool,
+    selected_pr: dict[str, Any] | None,
 ) -> PreparedRoute:
     """Join the exact DB unit and recover committed effects before leaving its gate."""
     from events import router
@@ -154,8 +151,7 @@ async def prepare_route_ordered(
     async with _preparation_gate():
         unit = _Preparation()
         preparation = asyncio.create_task(run_in_db(
-            _prepare_route, unit, internal_event, payload, identity,
-            check_suite_base_ref, check_suite_pr_selected,
+            _prepare_route, unit, internal_event, payload, identity, selected_pr,
         ))
         cancellation = None
         try:

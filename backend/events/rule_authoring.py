@@ -273,10 +273,10 @@ def list_rules(db: sqlite3.Connection, *, project_id: str | None, now: str) -> l
 
 
 def dry_run(
-    db: sqlite3.Connection, *, project_id: str | None, connector: Any, event_type: Any,
-    facts: Any,
+    db: sqlite3.Connection, *, caller: str, project_id: str | None, connector: Any,
+    event_type: Any, facts: Any,
 ) -> list[dict[str, Any]]:
-    """Which of the project's enabled rules these facts match, and what each would do.
+    """Which of the caller's project's enabled rules these facts match, and what each would do.
 
     Matching only: it reads no thread, owner or tag, so it reveals nothing the
     caller could not already see in ``list``.
@@ -286,11 +286,10 @@ def dry_run(
         raise RuleRefused("facts is an object of the event's fields")
     if not project_id:
         return []
-    scope = rules.project_scope(project_id)
     return [
         {**_shape(rule), "would": _would(rule)}
-        for rule in rules.lookup(db, connector, decl.event_type)
-        if rule.scope == scope and rules.matches(rule, facts)
+        for rule in rules.lookup(db, connector, decl.event_type, caller)
+        if rules.matches(rule, facts)
     ]
 
 

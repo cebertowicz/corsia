@@ -48,7 +48,7 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
             return {"rules": rule_authoring.list_rules(db, project_id=project_id, now=now)}
         if operation == "test":
             return {"matches": rule_authoring.dry_run(
-                db, project_id=project_id, connector=kwargs.get("connector"),
+                db, caller=thread_id, project_id=project_id, connector=kwargs.get("connector"),
                 event_type=kwargs.get("event_type"), facts=kwargs.get("facts"))}
         return rule_authoring.explain(
             db, project_id=project_id, event_id=kwargs.get("event_id"),
@@ -72,7 +72,9 @@ class EventRulesTool(Tool):
             f"{', '.join(rules.OPERATORS)}) on that type's declared fields; your `note` "
             f"({rules.NOTE_LIMIT} characters) comes with the wake, so write what to do then. `drop` stops deliveries of matching events to you. "
             "Your rules cover your own project and deliver only to you (`to: self`, the default) or "
-            "to the event's file's registered owner (`to: registered_owner`). A rule wakes a chat "
+            "to the event's file's registered owner (`to: registered_owner`); that owner is woken "
+            "only when it is you or one of your temporary workers, otherwise the event goes to "
+            "its digest. A rule wakes a chat "
             "at most once an hour; more go to its digest. A paused chat gets a digest instead. "
             "disable: turn off a rule you wrote or receive. list: the project's rules, with when "
             "each last acted and its wakes in the last 24 hours. test: which rules a set of `facts` "

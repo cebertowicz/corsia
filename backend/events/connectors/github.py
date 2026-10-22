@@ -41,9 +41,13 @@ PR_MERGED_KEY = "merged"
 spells it out again; a rename moves the rule, the classifier and the tests."""
 
 # Each consumer maps PrEnd into its own vocabulary; the rule itself is never
-# re-written. The connector names the manifest event types; the webhook mapper
-# (events/github_mapper.py) owns the ``webhook.github.*`` names and their inverse.
+# re-written. The connector names the manifest event types, each declaring the
+# ``webhook.github.*`` name the router gives it (``routed_event``); the webhook
+# mapper (events/github_mapper.py) maps payloads to those names.
 _PR_END_TYPES: dict[PrEnd, str] = {"merged": "pr.merged", "closed": "pr.closed"}
+
+#: The ``resolved`` key for the pull request routing selected for a check suite.
+CHECK_SUITE_PR = "check_suite_pr"
 
 
 def _json_object(payload: Mapping[str, Any], key: str) -> Mapping[str, Any]:
@@ -139,19 +143,24 @@ def _classify(raw: dict[str, Any]) -> str:
     return "pr.opened"
 
 
-def _extract_facts(raw: dict[str, Any]) -> dict[str, Any]:
+def _extract_facts(raw: dict[str, Any], resolved: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """A webhook's facts. A check suite's pull request is the one routing selected
+    (``resolved[CHECK_SUITE_PR]``), looked up here only when none was passed."""
     facts: dict[str, Any] = {"repo": (raw.get("repository") or {}).get("full_name")}
     pr = raw.get("pull_request") or {}
     if pr:
+        user = _json_object(pr, "user")
         facts.update({
             "pr_number": pr.get("number"), "action": raw.get("action"),
             "merged": pr.get("merged"), "title": pr.get("title"),
             "branch": (pr.get("base") or {}).get("ref"),
-            "sha": (pr.get("head") or {}).get("sha"),
+            "sha": (pr.get("head") or {}).get("sha"), "author": user.get("login"),
         })
     cs = raw.get("check_suite") or {}
     if cs:
-        facts.update(_check_suite_facts(cs, check_suite_pr_metadata_from_event(raw)))
+        selected = (resolved[CHECK_SUITE_PR] if resolved is not None and CHECK_SUITE_PR in resolved
+                    else check_suite_pr_metadata_from_event(raw))
+        facts.update(_check_suite_facts(cs, selected))
     return {k: v for k, v in facts.items() if v is not None}
 
 
@@ -204,33 +213,36 @@ MANIFEST = register(ConnectorManifest(
         "pr.opened": EventTypeDecl(
             "pr.opened", ("repo", "pr_number", "action"), _PR_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
-            event_class="actionable"),
+            event_class="actionable", routed_event="webhook.github.pr_opened"),
         "pr.synchronize": EventTypeDecl(
             "pr.synchronize", ("repo", "pr_number", "action", "sha"), _PR_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
-            event_class="actionable"),
+            event_class="actionable", routed_event="webhook.github.pr_synchronize"),
         "pr.ready_for_review": EventTypeDecl(
             "pr.ready_for_review", ("repo", "pr_number", "action", "sha"),
             _PR_FILTERABLE, artifact_type=PR_TYPE,
-            artifact_integration=GITHUB_INTEGRATION, event_class="informational"),
+            artifact_integration=GITHUB_INTEGRATION, event_class="informational",
+            routed_event="webhook.github.pr_ready_for_review"),
         "pr.labeled": EventTypeDecl(
             "pr.labeled", ("repo", "pr_number", "action", "sha"),
             _PR_FILTERABLE, artifact_type=PR_TYPE,
-            artifact_integration=GITHUB_INTEGRATION, event_class="informational"),
+            artifact_integration=GITHUB_INTEGRATION, event_class="informational",
+            routed_event="webhook.github.pr_labeled"),
         "pr.merged": EventTypeDecl(
             "pr.merged", ("repo", "pr_number", "action"), _PR_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
-            event_class="informational"),
+            event_class="informational", routed_event="webhook.github.pr_merged"),
         "pr.closed": EventTypeDecl(
             "pr.closed", ("repo", "pr_number", "action"), _PR_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
-            event_class="informational"),
+            event_class="informational", routed_event="webhook.github.pr_closed"),
         "check.completed": EventTypeDecl(
             "check.completed",
             ("repo", "check_suite_id", "conclusion", "head_sha"),
             _CHECK_FILTERABLE, artifact_type=PR_TYPE,
             artifact_integration=GITHUB_INTEGRATION,
-            relationships=(_CHECK_TO_PR,), event_class="actionable"),
+            relationships=(_CHECK_TO_PR,), event_class="actionable",
+            routed_event="webhook.github.check_suite_completed"),
     },
     classify=_classify,
     extract_facts=_extract_facts,
@@ -279,53 +291,6 @@ def github_routing_envelope(
         provenance={},
         event_class=github_event_class(payload),
         ownerless_ok=False,
-    )
-
-
-def webhook_rule_envelope(
-    event_type: str,
-    payload: dict[str, Any],
-    identity: RoutingIdentity | None,
-    base_ref: str | None,
-) -> EventEnvelope | None:
-    """A routed webhook as the manifest declares it, for agent-written rules.
-
-    ``event_type`` is the manifest type the webhook mapper named. Pure: a check
-    suite's PR comes from the identity routing already resolved, never a new
-    lookup. ``None`` when the identity facts are missing.
-    """
-    from events.envelope import EventEnvelope
-    from events.identity_formula import compute_event_id
-
-    decl = MANIFEST.decl(event_type)
-    check_suite = payload.get("check_suite")
-    if isinstance(check_suite, Mapping):
-        selected = None
-        number = identity.external_id.rpartition("#")[2] if identity is not None else ""
-        if number.isdigit():
-            selected = {"number": int(number), "base_ref": base_ref}
-        facts = {"repo": _json_object(payload, "repository").get("full_name"),
-                 **_check_suite_facts(check_suite, selected)}
-        facts = {key: value for key, value in facts.items() if value is not None}
-    else:
-        facts = _extract_facts(payload)
-        # Declared filterable for rules only; today's facts and event ids stay as they are.
-        user = _json_object(payload, "pull_request").get("user")
-        if isinstance(user, Mapping) and user.get("login") is not None:
-            facts["author"] = user["login"]
-    try:
-        event_id = compute_event_id(MANIFEST.connector, event_type, facts, decl.identity_facts)
-    except MalformedEventError:
-        return None
-    artifact_ref = None
-    if identity is not None:
-        artifact_ref = {"integration": identity.integration, "type": identity.type,
-                        "external_id": identity.external_id}
-    return EventEnvelope(
-        event_id=event_id, type=event_type, connector=MANIFEST.connector, facts=facts,
-        relationships=(), artifact_ref=artifact_ref,
-        provenance={"source": MANIFEST.namespace, "conn_version": MANIFEST.version},
-        event_class=decl.event_class, ownerless_ok=decl.ownerless_ok,
     )
 
 

@@ -134,22 +134,19 @@ def _cancelled_check_result(
 
 async def _resolve_event_identity(
     internal_event: str, payload: dict[str, Any],
-) -> tuple[Any, str | None, bool]:
+) -> tuple[Any, dict[str, Any] | None]:
+    """The event's identity, and for a check suite the pull request it selected."""
     try:
         if internal_event not in CHECK_SUITE_COMPLETED_EVENTS:
-            return resolve_identity(internal_event, payload), None, False
+            return resolve_identity(internal_event, payload), None
         selected_pr = await asyncio.to_thread(
             check_suite_pr_metadata_from_event, payload,
         )
-        return (
-            identity_from_check_pr_metadata(payload, selected_pr),
-            selected_pr.get("base_ref") if selected_pr else None,
-            selected_pr is not None,
-        )
+        return identity_from_check_pr_metadata(payload, selected_pr), selected_pr
     except PrResolutionError as exc:
         logger.warning("event-routing: PR resolution failed for {}: {}", internal_event, exc)
         # The ordered DB stage owns error parking as well as normal route writes.
-        return exc, None, False
+        return exc, None
 
 
 def _self_authored_result(
@@ -175,15 +172,15 @@ def _unowned_check_result(
     internal_event: str,
     payload: dict[str, Any],
     external_id: str | None,
-    base_ref: str | None,
-    pr_selected: bool,
+    selected_pr: dict[str, Any] | None,
 ) -> RouteResult:
+    base_ref = selected_pr.get("base_ref") if selected_pr else None
     check_suite = payload.get("check_suite") or {}
     conclusion = check_suite.get("conclusion") or ""
     suite_branch = check_suite.get("head_branch")
     main_failure = conclusion in _TERMINAL_FAILURE_CONCLUSIONS and (
         base_ref == "main"
-        or (not base_ref and not pr_selected and suite_branch == "main")
+        or (not base_ref and selected_pr is None and suite_branch == "main")
     )
     if main_failure:
         logger.info(
@@ -213,9 +210,10 @@ def _select_route(
     identity,
     external_id: str | None,
     tag: dict[str, str] | None,
-    check_suite_base_ref: str | None,
-    check_suite_pr_selected: bool,
-) -> tuple[str, str, dict[str, Any]] | RouteResult:
+    selected_pr: dict[str, Any] | None,
+) -> tuple[tuple[str, str] | RouteResult, dict[str, Any]]:
+    """The routed thread and why, or the result when there is none, with the
+    routing state resolved on the way (agent-written rules read it)."""
     routing_state: dict[str, Any] = {
         "identity": None, "owner": None, "subscribers": [], "triage": None,
     }
@@ -229,8 +227,8 @@ def _select_route(
             )
             return _dead_letter_result(
                 internal_event, payload, "invalid_tag_target", external_id,
-            )
-        return thread_id, "tag", routing_state
+            ), routing_state
+        return (thread_id, "tag"), routing_state
 
     target = resolve_targets(
         github_routing_envelope(internal_event, identity, payload),
@@ -238,20 +236,18 @@ def _select_route(
     routing_state = target.routing_state or routing_state
     if target.thread is not None:
         reason = "triage" if target.relationship == "triage" else "owner"
-        return str(target.thread), reason, routing_state
+        return (str(target.thread), reason), routing_state
     if target.reason == "owner_inactive":
         return _dead_letter_result(
             internal_event, payload, "owner_inactive", external_id,
-        )
+        ), routing_state
     if (internal_event in _CHECK_EVENTS
             and routing_state.get("owner") is None
             and routing_state.get("triage") is None):
         return _unowned_check_result(
-            internal_event, payload, external_id,
-            check_suite_base_ref, check_suite_pr_selected,
-        )
+            internal_event, payload, external_id, selected_pr), routing_state
     reason = "no_artifact" if identity is None else (target.reason or "no_owner")
-    return _dead_letter_result(internal_event, payload, reason, external_id)
+    return _dead_letter_result(internal_event, payload, reason, external_id), routing_state
 
 
 async def route_event(
@@ -266,13 +262,12 @@ async def route_event(
         return cancelled
     resolved = await _resolve_event_identity(internal_event, payload)
 
-    identity, check_suite_base_ref, check_suite_pr_selected = resolved
+    identity, selected_pr = resolved
     prepared = await prepare_route_ordered(
         internal_event,
         payload,
         identity,
-        check_suite_base_ref,
-        check_suite_pr_selected,
+        selected_pr,
     )
 
     if prepared.result is not None:
