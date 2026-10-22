@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 LOCAL_HOST = "127.0.0.1"
 HEALTH_WAIT_SECONDS = 120.0
-LOCAL_SERVER_NAME = "CORSIA's own oMLX"
+LOCAL_SERVER_NAME = "Local"
 
 
 async def omlx_answers(port: int) -> bool:
@@ -103,6 +103,30 @@ async def register_managed_server(*, port: int, base_path: str, model_dir: str) 
         return server_id, credential
 
     return await run_in_db(persist)
+
+
+def rename_managed_server() -> bool:
+    """Give an existing install's managed row, and the model rows that carry its name, the current name.
+
+    Matches only the row ``is_corsia_managed_server`` recognizes, so a person's server keeps its own name.
+    """
+    from infra.database import write_transaction
+    from llm.managed_omlx_binary import is_corsia_managed_server
+    from llm.network_discovery import get_servers
+
+    stale = [row for row in get_servers(provider="omlx")
+             if is_corsia_managed_server(row) and row["instance_name"] != LOCAL_SERVER_NAME]
+    if not stale:
+        return False
+    with write_transaction(None, scope="rename_managed_server") as db:
+        for row in stale:
+            db.execute("UPDATE network_servers SET instance_name = ? WHERE id = ?", (LOCAL_SERVER_NAME, row["id"]))
+            db.execute(
+                "UPDATE models SET metadata_json = json_set(metadata_json, '$.server_name', ?) "
+                "WHERE json_valid(metadata_json) AND json_extract(metadata_json, '$.server_id') = ?",
+                (LOCAL_SERVER_NAME, row["id"]),
+            )
+    return True
 
 
 async def configure_global(server_id: str) -> None:
