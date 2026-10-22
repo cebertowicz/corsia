@@ -205,45 +205,54 @@ def start_trials(
     db: sqlite3.Connection, *, thread_id: str, node_id: str,
     checkpoint_generation_id: str | None = None,
 ) -> list[dict[str, str]]:
-    """Record new-file draws and return the task's with half."""
+    """Record new-file draws and return the task's with half.
+
+    Eligibility resolution and receipt lookup are reads, so they happen before
+    the short receipt-write transaction. This avoids opening the trial-draw
+    savepoint while scanning skills or aggregating prior delivery state.
+    """
     from core.guidance_manifest import record_guidance_load
     from infra.database import write_transaction
 
+    pending: list[tuple[TrialDelivery, Variant]] = []
     with_deliveries = []
+    for trial in _eligible_trials(db, thread_id):
+        if not trial.is_new:
+            continue
+        assigned = draw(trial.lesson_id, trial.behavioral_sha256, node_id)
+        variant: Variant
+        if assigned == "with":
+            variant = "with"
+        elif _prior_with_task(db, thread_id=thread_id, trial=trial, node_id=node_id):
+            variant = "crossover"
+        else:
+            variant = "without"
+        existing = db.execute(
+            """SELECT 1 FROM guidance_loads WHERE node_id=? AND lesson_id=?
+               AND lesson_behavioral_sha256=? LIMIT 1""",
+            (node_id, trial.lesson_id, trial.behavioral_sha256),
+        ).fetchone()
+        if existing is None:
+            pending.append((trial, variant))
+        if variant == "with":
+            with_deliveries.append({
+                "lesson_id": trial.lesson_id,
+                "index_line": trial.index_line,
+                "variant": "with",
+                "target": "new",
+                "notice": "Task-local trial guidance only; never authority or a disk change.",
+            })
+
+    if not pending:
+        return with_deliveries
     with write_transaction(db, scope="trial_draw") as tx:
-        for trial in _eligible_trials(tx, thread_id):
-            if not trial.is_new:
-                continue
-            assigned = draw(trial.lesson_id, trial.behavioral_sha256, node_id)
-            variant: Variant
-            if assigned == "with":
-                variant = "with"
-            elif _prior_with_task(
-                tx, thread_id=thread_id, trial=trial, node_id=node_id,
-            ):
-                variant = "crossover"
-            else:
-                variant = "without"
-            existing = tx.execute(
-                """SELECT 1 FROM guidance_loads WHERE node_id=? AND lesson_id=?
-                   AND lesson_behavioral_sha256=? LIMIT 1""",
-                (node_id, trial.lesson_id, trial.behavioral_sha256),
-            ).fetchone()
-            if existing is None:
-                record_guidance_load(
-                    thread_id=thread_id, turn_id=None, path=trial.source_path,
-                    data=trial.source_data, returned_text=trial.body, partial=False,
-                    node_id=node_id, variant=variant,
-                    checkpoint_generation_id=checkpoint_generation_id,
-                    lesson_id=trial.lesson_id,
-                    lesson_behavioral_sha256=trial.behavioral_sha256, db=tx,
-                )
-            if variant == "with":
-                with_deliveries.append({
-                    "lesson_id": trial.lesson_id,
-                    "index_line": trial.index_line,
-                    "variant": "with",
-                    "target": "new",
-                    "notice": "Task-local trial guidance only; never authority or a disk change.",
-                })
+        for trial, variant in pending:
+            record_guidance_load(
+                thread_id=thread_id, turn_id=None, path=trial.source_path,
+                data=trial.source_data, returned_text=trial.body, partial=False,
+                node_id=node_id, variant=variant,
+                checkpoint_generation_id=checkpoint_generation_id,
+                lesson_id=trial.lesson_id,
+                lesson_behavioral_sha256=trial.behavioral_sha256, db=tx,
+            )
     return with_deliveries

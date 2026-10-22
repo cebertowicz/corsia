@@ -120,6 +120,62 @@ async def test_activating_a_task_adds_trial_lessons_as_a_sibling(recall_db, monk
 
 
 @pytest.mark.asyncio
+async def test_plan_activation_records_new_trial_before_returning_lessons(recall_db, monkeypatch, tmp_path):
+    """The real nested trial write remains inside the plan mutation transaction."""
+    from core.lesson_files import read_trial, render_trial, with_review_ref
+    from core.lesson_trials import Trial
+    from plans import lesson_reviews
+    from tests.project_ref_helpers import select_workspace
+
+    thread_id = mk_session("trial-real-start")
+    select_workspace(monkeypatch, tmp_path)
+    source = tmp_path / ".threads" / thread_id / "skills" / "carry-in" / "SKILL.md"
+    source.parent.mkdir(parents=True)
+    text = render_trial(
+        lesson_id="e6a148b9-30dd-4b5a-b498-486282096733", owner=thread_id, name="carry-in",
+        description="Use when starting the carry-in proof.", text="Use the trial procedure.",
+        trial=Trial(kind="hypothesis", review_after="2030-01-01T00:00:00+00:00", boundary="Never otherwise."),
+        source_refs=[{"kind": "turn", "reference": "test"}],
+        target_file="new", new_target_path="context/new.md",
+    )
+    trial = read_trial(text)
+    assert trial is not None
+    recall_db.execute(
+        """INSERT INTO artifact_identities
+           (id,integration,type,external_id,title,state,created_at,updated_at)
+           VALUES ('trial-artifact','workspace','skill','workspace://trial','trial','active','t','t')"""
+    )
+    review_id, _created = lesson_reviews.ensure_lesson_review(
+        recall_db, thread_id, lesson_id="e6a148b9-30dd-4b5a-b498-486282096733", behavioral_sha256=trial.behavioral_sha256, artifact_id="trial-artifact",
+        title="Review trial lesson", acceptance="Review it.", review_after="2030-01-01T00:00:00+00:00",
+    )
+    source.write_text(with_review_ref(text, review_id), encoding="utf-8")
+    monkeypatch.setattr("core.lesson_delivery.draw", lambda *_args: "with")
+    from core import lesson_delivery
+
+    real_eligible_trials = lesson_delivery._eligible_trials
+    eligibility_transaction_states: list[bool] = []
+
+    def observe_eligibility_state(db, thread_id):
+        eligibility_transaction_states.append(db.in_transaction)
+        return real_eligible_trials(db, thread_id)
+
+    monkeypatch.setattr(lesson_delivery, "_eligible_trials", observe_eligibility_state)
+    result = await _activate(recall_db, thread_id, "Start new target work")
+
+    assert eligibility_transaction_states == [False]
+    assert result["trial_lessons"] == [{
+        "lesson_id": "e6a148b9-30dd-4b5a-b498-486282096733", "index_line": "- carry-in (trial, unproven): Use when starting the carry-in proof. (context/new.md)",
+        "variant": "with", "target": "new",
+        "notice": "Task-local trial guidance only; never authority or a disk change.",
+    }]
+    row = recall_db.execute(
+        "SELECT thread_id, node_id, variant FROM guidance_loads WHERE lesson_id='e6a148b9-30dd-4b5a-b498-486282096733'"
+    ).fetchone()
+    assert tuple(row) == (thread_id, result["node"]["id"], "with")
+
+
+@pytest.mark.asyncio
 async def test_an_unrelated_task_has_no_trial_sibling(recall_db, monkeypatch):
     monkeypatch.setattr("core.lesson_delivery.start_trials", lambda *_args, **_kwargs: [])
 
