@@ -207,14 +207,15 @@ def build_plan(facts: Facts) -> dict[str, Any]:
 
 
 async def web_search_works() -> bool:
-    """One real search with the key web_search would use; no key means no."""
+    """Whether Brave search works, or managed oMLX is ready for keyless search."""
     from infra.db_async import run_in_db
     from infra.key_store import WEB_SEARCH, resolve_builtin
+    from tools.web_omlx_search import keyless_available
     from tools.web_search_outcome import CHECK_QUERY, WORKS, run_search
 
     resolved = await run_in_db(resolve_builtin, WEB_SEARCH)
     if resolved is None:
-        return False
+        return await keyless_available()
     return (await run_search(resolved[0], CHECK_QUERY, 1)).kind == WORKS
 
 

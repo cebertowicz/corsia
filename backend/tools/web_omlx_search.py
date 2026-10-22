@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -16,29 +17,10 @@ from tools.web_search_outcome import (
     classify_status,
 )
 
-# Three empty-result tries plus two one-second waits must finish within ~45 seconds.
+NO_SERVER = "no_server"
+SERVER_STOPPED = "server_stopped"
+# Three empty-result tries plus two one-second waits finish within about 45 seconds.
 ATTEMPT_TIMEOUT_SECONDS = 14.0
-
-
-async def omlx_search_target() -> tuple[str, dict[str, str]] | None:
-    """Return the public search endpoint for the already-live managed server.
-
-    This only reads CORSIA's managed-server registration and live endpoint. It
-    does not start oMLX or probe a stale endpoint.
-    """
-    from infra.db_async import run_in_db
-    from llm.local_sources import corsia_omlx_server
-    from llm.network_endpoints import build_api_base
-    from llm.providers.omlx_public_auth import public_headers
-
-    server = await run_in_db(corsia_omlx_server)
-    if server is None or server.get("status") != "online":
-        return None
-    api_base = await run_in_db(build_api_base, server["id"])
-    if api_base is None:
-        return None
-    headers = await public_headers({"server_id": server["id"]}, url=api_base)
-    return f"{api_base.rstrip('/')}/web/search", headers
 
 
 def _result_items(body: dict[str, Any]) -> list[dict[str, str]] | None:
@@ -64,15 +46,34 @@ def _result_items(body: dict[str, Any]) -> list[dict[str, str]] | None:
     return items
 
 
-async def run_omlx_search(query: str) -> SearchOutcome | None:
-    """Search the managed oMLX server once, returning no target when it is absent."""
+async def _search_target() -> tuple[str, dict[str, str]] | SearchOutcome | str:
+    """Resolve the already-live managed server without starting or probing it."""
+    from infra.db_async import run_in_db
+    from llm.local_sources import corsia_omlx_server
+    from llm.network_endpoints import build_api_base
+    from llm.providers.omlx_public_auth import OmlxPublicAuthError, public_headers
+
+    server = await run_in_db(corsia_omlx_server)
+    if server is None:
+        return NO_SERVER
+    if server.get("status") != "online":
+        return SERVER_STOPPED
+    api_base = await run_in_db(build_api_base, server["id"])
+    if api_base is None:
+        return SERVER_STOPPED
     try:
-        target = await omlx_search_target()
-    except Exception:
+        headers = await public_headers({"server_id": server["id"]}, url=api_base)
+    except OmlxPublicAuthError:
         return SearchOutcome(FAILED, REASON_PROVIDER)
-    if target is None:
-        return None
-    url, headers = target
+    return f"{api_base.rstrip('/')}/web/search", headers
+
+
+async def keyless_available() -> bool:
+    """Whether the managed server is ready for keyless search, without searching."""
+    return isinstance(await _search_target(), tuple)
+
+
+async def _search_once(url: str, headers: dict[str, str], query: str) -> SearchOutcome:
     try:
         async with httpx.AsyncClient(timeout=ATTEMPT_TIMEOUT_SECONDS) as client:
             response = await client.post(url, json={"query": query}, headers=headers)
@@ -80,12 +81,12 @@ async def run_omlx_search(query: str) -> SearchOutcome | None:
         return SearchOutcome(FAILED, REASON_TIMEOUT)
     except httpx.HTTPError:
         return SearchOutcome(FAILED, REASON_NETWORK)
-    except Exception:
-        return SearchOutcome(FAILED, REASON_PROVIDER)
     try:
         body = response.json()
     except ValueError:
         body = None
+    if response.status_code in (401, 403):
+        return SearchOutcome(FAILED, REASON_PROVIDER)
     failure = classify_status(response.status_code, body)
     if failure is not None:
         return failure
@@ -95,3 +96,17 @@ async def run_omlx_search(query: str) -> SearchOutcome | None:
     if items is None:
         return SearchOutcome(FAILED, REASON_PROVIDER)
     return SearchOutcome(WORKS, results=items)
+
+
+async def keyless_search(query: str) -> SearchOutcome | str:
+    """Search once-resolved managed oMLX, retrying only an empty successful answer."""
+    target = await _search_target()
+    if not isinstance(target, tuple):
+        return target
+    url, headers = target
+    for attempt in range(3):
+        outcome = await _search_once(url, headers, query)
+        if outcome.kind != WORKS or outcome.results or attempt == 2:
+            return outcome
+        await asyncio.sleep(1)
+    raise AssertionError("three-attempt search loop must return")

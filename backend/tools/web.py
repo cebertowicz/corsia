@@ -1,6 +1,5 @@
 """Web tools: web_search and web_fetch."""
 
-import asyncio
 import html
 import json
 import re
@@ -10,7 +9,7 @@ from urllib.parse import urlparse
 import httpx
 
 from tools.base import Tool
-from tools.web_omlx_search import run_omlx_search
+from tools.web_omlx_search import NO_SERVER, SERVER_STOPPED, keyless_search
 from tools.web_search_outcome import WORKS, outcome_line, run_search
 
 #: What an agent reads when no key and no managed local search are available.
@@ -18,6 +17,10 @@ NO_KEY_TEXT = "Web search needs a Brave key in Settings › Keys or a local mode
 EMPTY_OMLX_TEXT = (
     "Keyless web search came back empty. Try rewording the query; "
     "a Brave key in Settings › Keys makes search dependable."
+)
+SERVER_STOPPED_TEXT = (
+    "Keyless web search needs CORSIA's local model server, which isn't running. "
+    "A Brave key in Settings › Keys works without it."
 )
 
 # Shared constants
@@ -88,15 +91,11 @@ class WebSearchTool(Tool):
             if outcome.kind != WORKS:
                 return outcome_line(outcome)
         else:
-            # The keyless engine sometimes answers empty; two short retries usually recover it.
-            for attempt in range(3):
-                if attempt:
-                    await asyncio.sleep(1)
-                outcome = await run_omlx_search(query)
-                if outcome is None or outcome.kind != WORKS or outcome.results:
-                    break
-            if outcome is None:
+            outcome = await keyless_search(query)
+            if outcome == NO_SERVER:
                 return NO_KEY_TEXT
+            if outcome == SERVER_STOPPED:
+                return SERVER_STOPPED_TEXT
             if outcome.kind != WORKS:
                 return outcome_line(outcome)
             if not outcome.results:

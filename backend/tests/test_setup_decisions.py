@@ -244,7 +244,7 @@ def test_the_saved_email_is_read_from_the_workspace_profile(tmp_path, monkeypatc
     assert REAL_SAVED_EMAIL() == "pat@gmail.com"
 
 
-def test_web_search_works_needs_a_key_and_a_works_outcome(monkeypatch):
+def test_web_search_works_uses_keyless_readiness_and_settles_setup(monkeypatch):
     from tools.web_search_outcome import FAILED, KEY_REFUSED, WORKS, SearchOutcome
 
     seen: list[str] = []
@@ -254,9 +254,15 @@ def test_web_search_works_needs_a_key_and_a_works_outcome(monkeypatch):
         seen.append(key)
         return outcome
 
+    keyless = AsyncMock(return_value=True)
     monkeypatch.setattr("tools.web_search_outcome.run_search", search)
+    monkeypatch.setattr("tools.web_omlx_search.keyless_available", keyless)
     monkeypatch.setattr("infra.key_store.resolve_builtin", lambda builtin: None)
-    assert asyncio.run(setup.web_search_works()) is False
+    assert asyncio.run(setup.web_search_works()) is True
+    keyless.assert_awaited_once_with()
+    assert setup.build_settlements(setup.Facts(web_search_works=True)) == [{
+        "task_title": WEB, "outcome": "done", "text": "Web search already works.",
+    }]
     assert not seen
 
     monkeypatch.setattr("infra.key_store.resolve_builtin", lambda builtin: ("k", "store"))

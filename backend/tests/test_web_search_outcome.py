@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -158,93 +159,94 @@ async def test_a_newly_saved_key_is_used_on_the_next_call(store, monkeypatch):
 @pytest.mark.asyncio
 async def test_brave_key_precedes_managed_omlx(store, monkeypatch):
     key = "brave-key"
-    brave = pytest.importorskip("unittest.mock").AsyncMock(
-        return_value=outcome_mod.SearchOutcome(WORKS, results=[{"title": "Brave", "url": "https://brave.test"}]),
-    )
-    omlx = pytest.importorskip("unittest.mock").AsyncMock()
+    brave = AsyncMock(return_value=outcome_mod.SearchOutcome(
+        WORKS, results=[{"title": "Brave", "url": "https://brave.test"}],
+    ))
+    keyless = AsyncMock()
     key_store.set_value("web-search", key)
     monkeypatch.setattr(web_mod, "run_search", brave)
-    monkeypatch.setattr(web_mod, "run_omlx_search", omlx)
+    monkeypatch.setattr(web_mod, "keyless_search", keyless)
 
     text = await WebSearchTool().execute("q")
 
     assert "Brave" in text
     brave.assert_awaited_once_with(key, "q", 5)
-    omlx.assert_not_awaited()
+    keyless.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_web_search_uses_managed_omlx_without_brave_key(store, monkeypatch):
-    omlx = pytest.importorskip("unittest.mock").AsyncMock(
-        return_value=outcome_mod.SearchOutcome(WORKS, results=[{
-            "title": "oMLX", "url": "https://omlx.test/result", "description": "Snippet",
-        }]),
-    )
-    monkeypatch.setattr(web_mod, "run_omlx_search", omlx)
+    keyless = AsyncMock(return_value=outcome_mod.SearchOutcome(WORKS, results=[{
+        "title": "oMLX", "url": "https://omlx.test/result", "description": "Snippet",
+    }]))
+    monkeypatch.setattr(web_mod, "keyless_search", keyless)
 
     text = await WebSearchTool().execute("q")
 
     assert "1. oMLX" in text
     assert "https://omlx.test/result" in text
-    omlx.assert_awaited_once_with("q")
+    keyless.assert_awaited_once_with("q")
 
 
 @pytest.mark.asyncio
-async def test_web_search_retries_empty_managed_omlx_results(store, monkeypatch):
-    omlx = pytest.importorskip("unittest.mock").AsyncMock(side_effect=[
+async def test_keyless_search_retries_empty_results_after_one_discovery(monkeypatch):
+    target = ("http://omlx.test/v1/web/search", {"Authorization": "Bearer safe"})
+    search_once = AsyncMock(side_effect=[
         outcome_mod.SearchOutcome(WORKS),
         outcome_mod.SearchOutcome(WORKS, results=[{"title": "Recovered", "url": "https://recovered.test"}]),
     ])
-    sleep = pytest.importorskip("unittest.mock").AsyncMock()
-    monkeypatch.setattr(web_mod, "run_omlx_search", omlx)
-    monkeypatch.setattr(web_mod.asyncio, "sleep", sleep)
+    sleep = AsyncMock()
+    discovery = AsyncMock(return_value=target)
+    monkeypatch.setattr(omlx_mod, "_search_target", discovery)
+    monkeypatch.setattr(omlx_mod, "_search_once", search_once)
+    monkeypatch.setattr(omlx_mod.asyncio, "sleep", sleep)
 
-    text = await WebSearchTool().execute("q")
+    outcome = await omlx_mod.keyless_search("q")
 
-    assert "Recovered" in text
-    assert omlx.await_count == 2
+    assert outcome.results[0]["title"] == "Recovered"
+    discovery.assert_awaited_once_with()
+    assert search_once.await_count == 2
     sleep.assert_awaited_once_with(1)
 
 
 @pytest.mark.asyncio
 async def test_web_search_explains_three_empty_managed_omlx_results(store, monkeypatch):
-    omlx = pytest.importorskip("unittest.mock").AsyncMock(return_value=outcome_mod.SearchOutcome(WORKS))
-    monkeypatch.setattr(web_mod, "run_omlx_search", omlx)
-    monkeypatch.setattr(web_mod.asyncio, "sleep", pytest.importorskip("unittest.mock").AsyncMock())
+    keyless = AsyncMock(return_value=outcome_mod.SearchOutcome(WORKS))
+    monkeypatch.setattr(web_mod, "keyless_search", keyless)
 
     text = await WebSearchTool().execute("q")
 
-    assert text == (
-        "Keyless web search came back empty. Try rewording the query; "
-        "a Brave key in Settings › Keys makes search dependable."
-    )
-    assert omlx.await_count == 3
+    assert text == web_mod.EMPTY_OMLX_TEXT
+    keyless.assert_awaited_once_with("q")
 
 
 @pytest.mark.asyncio
-async def test_web_search_names_both_ways_to_enable_search_without_server(store, monkeypatch):
-    monkeypatch.setattr(web_mod, "run_omlx_search", pytest.importorskip("unittest.mock").AsyncMock(return_value=None))
+@pytest.mark.parametrize(
+    ("keyless_result", "expected"),
+    [
+        (omlx_mod.NO_SERVER, web_mod.NO_KEY_TEXT),
+        (omlx_mod.SERVER_STOPPED, web_mod.SERVER_STOPPED_TEXT),
+    ],
+)
+async def test_web_search_names_the_keyless_unavailable_state(store, monkeypatch, keyless_result, expected):
+    monkeypatch.setattr(web_mod, "keyless_search", AsyncMock(return_value=keyless_result))
 
-    text = await WebSearchTool().execute("q")
-
-    assert text == (
-        "Web search needs a Brave key in Settings › Keys or a local model set up."
-    )
+    assert await WebSearchTool().execute("q") == expected
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("response,expected", [
     ({"ok": False}, (FAILED, REASON_PROVIDER)),
     (httpx.ConnectError("refused"), (FAILED, REASON_NETWORK)),
+    (httpx.Response(401), (FAILED, REASON_PROVIDER)),
 ])
 async def test_managed_omlx_failures_use_search_outcome_classes(monkeypatch, response, expected):
-    async def target():
-        return "http://omlx.test/v1/web/search", {"Authorization": "Bearer safe"}
-
-    monkeypatch.setattr(omlx_mod, "omlx_search_target", target)
     if isinstance(response, Exception):
         def handler(_request):
             raise response
+    elif isinstance(response, httpx.Response):
+        def handler(request):
+            return httpx.Response(response.status_code, request=request)
     else:
         def handler(request):
             return httpx.Response(200, json=response, request=request)
@@ -256,6 +258,7 @@ async def test_managed_omlx_failures_use_search_outcome_classes(monkeypatch, res
             super().__init__(*args, **kwargs)
 
     monkeypatch.setattr(omlx_mod.httpx, "AsyncClient", Client)
-    result = await omlx_mod.run_omlx_search("q")
+    result = await omlx_mod._search_once("http://omlx.test/v1/web/search", {}, "q")
 
     assert (result.kind, result.reason) == expected
+    assert result.kind != KEY_REFUSED
