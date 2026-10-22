@@ -83,6 +83,7 @@ class DeclaredEvent:
     dedupe: tuple[str, ...]
     declared: dict[str, Any]
     keep_days: int
+    use: str = "record"
 
 
 @dataclass(frozen=True)
@@ -167,7 +168,10 @@ def _read_state(db: sqlite3.Connection) -> RegistryState:
 
 def _declared(owner: str, spec: dict[str, Any]) -> DeclaredEvent:
     attributes = spec["attributes"]
-    return DeclaredEvent(owner, {**_attribute_specs(attributes), **_STAMPED_SPECS}, tuple(spec["dedupe"]), attributes, keep_days(spec))
+    return DeclaredEvent(
+        owner, {**_attribute_specs(attributes), **_STAMPED_SPECS},
+        tuple(spec["dedupe"]), attributes, keep_days(spec), spec.get("use", "record"),
+    )
 
 
 def _attribute_specs(raw: dict[str, Any]) -> dict[str, AttributeSpec]:

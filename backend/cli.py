@@ -294,6 +294,10 @@ def _add_runtime_commands(sub: argparse._SubParsersAction) -> None:
 
     build_artifact_parser(sub)
 
+    from cli_events import build_parser as build_event_parser
+
+    build_event_parser(sub)
+
     from cli_mcp import build_parser as build_mcp_parser
 
     build_mcp_parser(sub)

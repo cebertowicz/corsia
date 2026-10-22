@@ -43,6 +43,16 @@ _TYPE_RULES = "FROM event_rules WHERE connector=? AND event_type=? AND enabled=1
 _SELF_RULES = f"{_TYPE_RULES} AND action='deliver' AND \"to\"='thread:' || created_by"
 
 
+def _manifest(connector: str) -> Any:
+    """The connector's manifest; ``None`` for a namespace an agent declared."""
+    from events.connectors import get_manifest
+
+    try:
+        return get_manifest(connector)
+    except KeyError:
+        return None
+
+
 def self_rules(db: sqlite3.Connection, connector: str, event_type: str) -> list[sqlite3.Row]:
     """Every enabled deliver rule to its own writer for one type, in any project."""
     return db.execute(f"SELECT * {_SELF_RULES} ORDER BY created_at, id",
@@ -73,11 +83,9 @@ def unrouted_projects(
     failed, which is not the same as an untracked repository. Runs git, so call
     it outside any write transaction and the preparation gate.
     """
-    from events.connectors import get_manifest
-
-    manifest = get_manifest(connector)
-    repository = facts.get(manifest.repository_fact or "")
-    if manifest.repository_projects is None or not repository:
+    manifest = _manifest(connector)
+    repository = facts.get(manifest.repository_fact or "") if manifest is not None else None
+    if not repository or manifest.repository_projects is None:
         return frozenset()
     if not (type_rules(connector, event_type)[1] if self_rule is None else self_rule):
         return frozenset()
@@ -126,3 +134,13 @@ def wake_budgets(
         params,
     ).fetchall()
     return {row["rule_id"]: (int(row["spent"]), int(row["capped"])) for row in rows}
+
+
+def explain_summary(event_id: Any, found: int) -> str:
+    """The one-line answer to "why did this event go where it did", rule outcomes counted."""
+    if found:
+        return f"{found} rule outcome(s), newest first."
+    if event_id:
+        return ("No rule acted on an event with this id. If you emitted it, pass the event_id "
+                "from emit's receipt.")
+    return "No rule acted on events for this file."

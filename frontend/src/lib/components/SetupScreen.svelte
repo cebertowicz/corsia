@@ -65,7 +65,7 @@
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'account' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
 	const CLI_VENDORS = ['claude-code', 'codex'] as const;
-	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
+	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; local_started?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
 	const classifier = createSetupClassifier(), localPick = createSetupLocalPick(), remote = createSetupRemote();
 	let page = $state<Page>(untrack(() => startConnect) ? 'connect' : 'checking');
 	// Below 1280 wide, Welcome is its own screen before the account form; from 1280 it sits beside the form instead.
@@ -291,7 +291,13 @@
 		if (progress.setup_completed) { onFinished(); return; }
 		status = (progress.status ?? {}) as Status; folder = status.work_folder || folder; page = 'models';
 		if (status.classifier) classifier.accept(status.classifier);
-		await Promise.all([refreshSources(true), classifier.read(), loadProviders()]);
+		// A relaunch after the account step has no screen-1 start to rerun, so a local download that was never claimed starts here.
+		const unstarted = eligible && status.local_started === false;
+		if (unstarted) localPreparing = true;
+		try {
+			await Promise.all([refreshSources(true), classifier.read(), loadProviders()]);
+			if (unstarted) await startLocal();
+		} finally { localPreparing = false; }
 	}
 	function selectProvider(provider: ProviderEntry) { showAdd = false; openProvider = { name: provider.name, label: provider.label, type: provider.type, statusDot: 'disabled', subline: '', raw: provider }; }
 	$effect(() => {

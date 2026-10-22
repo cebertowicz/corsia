@@ -109,8 +109,8 @@ def apply_routed_rules(
     ``prepared.thread_id`` is ``None`` when routing chose no thread; ``prepared.result``
     then already holds today's result, which rules never change, and the
     ``scope`` read before the gate (:func:`rule_scope`) scopes the rules. Rules
-    only add: when evaluating them fails, the routed delivery and its notice go
-    ahead as routing prepared them.
+    only add: when reading or evaluating them fails, the routed delivery and its
+    notice go ahead as routing prepared them, and the failure is logged.
     """
     scope = scope or RuleScope()
     if not scope.any_rule:
