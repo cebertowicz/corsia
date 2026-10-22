@@ -184,13 +184,11 @@ else
   OWNER_IDENTITY_ARGS=(--allow-missing-owner-identity)
   OWNER_IDENTITY_SOURCE=""
 fi
-CORSIA_WORKSPACE="$CHECKPR_TEMP_DIR/no-workspace" \
-  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
   GIT_CONFIG_COUNT=2 \
   GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0= \
   GIT_CONFIG_KEY_1=user.email GIT_CONFIG_VALUE_1= \
   "$VENV_PY" scripts/check-docs-drift \
-  --allow-missing-workspace \
   --json-out "$CHECKPR_TEMP_DIR/docs-drift.json" \
   "${OWNER_IDENTITY_ARGS[@]}" \
   | tee "$CHECKPR_TEMP_DIR/docs-drift.txt" \

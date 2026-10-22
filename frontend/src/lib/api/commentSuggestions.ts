@@ -28,8 +28,18 @@ export async function decideSuggestion(
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ decision, all_from_author: allFromAuthor }),
 	});
+	return decided(response, `Couldn't ${decision} this suggestion`);
+}
+
+/** Accept every open suggestion on a document, from every author, in one write; having none is not an error. */
+export async function acceptAllSuggestions(artifactId: string): Promise<SuggestionDecision> {
+	const response = await fetch(`/api/artifacts/${encodeURIComponent(artifactId)}/suggestions/accept-all?token=${encodeURIComponent(get(token) ?? '')}`, { method: 'POST' });
+	return decided(response, "Couldn't accept the suggestions");
+}
+
+async function decided(response: Response, fallback: string): Promise<SuggestionDecision> {
 	if (!response.ok) {
-		let detail = `Couldn't ${decision} this suggestion`, kind: string | null = null;
+		let detail = fallback, kind: string | null = null;
 		try {
 			const body = await response.json();
 			if (typeof body.detail === 'string') detail = body.detail;

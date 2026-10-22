@@ -6,9 +6,8 @@ import {
 	pollJobsFor,
 	markModelOptimistic,
 	modelsForProvider,
-	loadModel,
-	unloadModel,
 } from '../providerModels';
+import { loadModel, unloadModel } from '../providerModelCommands';
 import { token } from '../auth';
 import type { ProviderEntry } from '../providers';
 import type { NetworkServer } from '../networkServers';

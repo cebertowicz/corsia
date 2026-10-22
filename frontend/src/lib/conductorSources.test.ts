@@ -6,6 +6,7 @@ import {
 	deleteLocalModelDownload,
 	fetchLocalModelRecommendations,
 	fetchSources,
+	localPickerStatus,
 	recheckSources,
 	setupLocalSource,
 	startLocalModelDownload,
@@ -59,6 +60,7 @@ describe('source routes', () => {
 		expect(await fetchSources('tok')).toEqual([{ source: 'omlx' }]);
 		expect(await recheckSources('tok')).toEqual([{ source: 'omlx' }]);
 		expect(await setupLocalSource('tok')).toEqual({ ok: true });
+		expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ body: JSON.stringify({}) });
 		expect(await fetchLocalModelRecommendations('tok')).toEqual({ state: 'ready', sections: { best: [] } });
 		await startLocalModelDownload('tok', 'org/model');
 		await cancelLocalDownload('tok');
@@ -77,16 +79,24 @@ describe('source routes', () => {
 		}
 	});
 
-	it('returns a structured consent requirement so callers can recover', async () => {
-		vi.stubGlobal('fetch', vi.fn(async () => ({
-			ok: false, status: 409, json: async () => ({ detail: { code: 'consent_required' } }),
-		})));
-
-		expect(await setupLocalSource('tok')).toEqual({ ok: false, code: 'consent_required' });
-	});
-
 	it('throws on a failed read so the panel can say it could not read', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
 		await expect(fetchSources('tok')).rejects.toThrow('sources 500');
+	});
+});
+
+describe('localPickerStatus', () => {
+	it('says Loading, not Downloading 0%, once the bytes are on disk', () => {
+		const flight = { name: 'Qwen', repository: 'org/qwen', percent: null, failed: false };
+		expect(localPickerStatus(source('omlx', 'Local', 'ready', { settings_download: flight }))?.line).toBe('Downloading Qwen \u00b7 0%');
+		expect(localPickerStatus(source('omlx', 'Local', 'ready', { settings_download: { ...flight, finishing: true } }))?.line).toBe('Loading Qwen');
+	});
+
+	it('says downloaded-but-not-listed when only listing failed, and keeps the retry', () => {
+		const flight = { name: 'Qwen', repository: 'org/qwen', percent: null, failed: true };
+		expect(localPickerStatus(source('omlx', 'Local', 'ready', { settings_download: flight }))?.line).toBe('Couldn’t download Qwen.');
+		const listed = localPickerStatus(source('omlx', 'Local', 'ready', { settings_download: { ...flight, downloaded: true } }));
+		expect(listed?.line).toBe("Qwen is downloaded but couldn’t be added.");
+		expect(listed?.retry).toBe('settings');
 	});
 });

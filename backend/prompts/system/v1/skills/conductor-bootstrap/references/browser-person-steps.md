@@ -11,9 +11,11 @@ Use this whenever you open a page in the agent browser (`browser_open` with `sho
 3. Stop when the URL or title shows the page moved on, then carry on with the step that follows.
 4. After about 5 minutes without a change, stop looping. `post_update` one line: `Tell me when you're past it and I'll pick up from there.` End your turn.
 
-## B. Sign-in, password, 2-Step, passkey or verification-code page
+## B. Sign-in, password, 2-Step, passkey, card-entry, phone-verification or verification-code page
 
 The browser is the person's. `post_update` once that they sign in (or enter the code) in the open window and that you'll continue when it's done. Then watch exactly as in A, steps 2 to 4: `browser_wait` milliseconds, then read only the page URL and title with that one `browser_eval`. On this page run nothing else: no snapshot, screenshot, text or value read, any other eval, click, fill or reload. Stop when the URL or title shows they got past it, then take over. Never type, fill or read a password or a code yourself.
+
+CORSIA's own connect sign-ins (`google_connect`, `microsoft_connect`) return to localhost with an authorization code: send the person the link for their default browser, never open it in the agent browser, and don't watch it. Admin-portal sign-ins (Entra, Google Cloud console) are opened in the agent browser as written.
 
 A page that has both a captcha and a password field is a B page.
 

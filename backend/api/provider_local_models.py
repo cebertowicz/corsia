@@ -9,23 +9,27 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 
 from infra.auth import require_user_header_only
 from infra.db_async import run_in_db
+from infra.host_resources import model_room_bytes
 from llm import local_downloads, local_setup_operation
-from llm.local_model import OMLX_PIN, LocalModel, PickUnavailable, ask_recommendations, omlx_has_recommender
+from llm.local_model import (
+    OMLX_PIN, LocalModel, PickUnavailable, ask_recommendations, fits_now, omlx_has_recommender, order_models, pick_for_setup,
+)
 from llm.local_setup_auth import omlx_version
 from llm.local_setup_gates import host_ram_bytes, local_memory_ok
 from llm.local_setup_download import download_dir
-from llm.local_setup_ownership import download_disk_space
-from llm.network_discovery import get_servers
+from llm.local_setup_disk import download_disk_space
+from llm.local_sources import corsia_omlx_server
 
 router = APIRouter(prefix="/api/providers/local", tags=["providers"])
 
 
 async def _server() -> dict[str, Any]:
-    servers = [server for server in await run_in_db(get_servers, provider="omlx")
-               if server.get("kind") != "external" and server.get("status") == "online"]
-    if len(servers) != 1:
-        raise HTTPException(409, "Couldn't reach the local model server. Check that oMLX is running, then try again.")
-    return servers[0]
+    server = await run_in_db(corsia_omlx_server)
+    if server is None:
+        raise HTTPException(409, "Local models aren’t set up. Select Set up to continue.")
+    if server.get("status") != "online":
+        raise HTTPException(409, "CORSIA’s local model server isn’t running. Open its settings and select Start.")
+    return server
 
 
 async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]]]:
@@ -33,7 +37,7 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
         from llm.local_setup_prepare import NO_LOCAL_MODEL
 
         downloads = [item.view() for item in local_downloads.all()]
-        return {"state": "low_memory", "message": NO_LOCAL_MODEL, "sections": {}, "downloads": downloads}, {}
+        return {"state": "low_memory", "message": NO_LOCAL_MODEL, "models": [], "downloads": downloads}, {}
     server = await _server()
     from llm.providers.omlx_lifecycle import list_disk_models
 
@@ -49,29 +53,39 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
         return {
             "state": "update_required",
             "message": f"Update oMLX to {OMLX_PIN} or later to add a local model.",
-            "sections": {}, "downloads": downloads,
+            "models": [], "downloads": downloads,
         }, {}
     try:
         sections = await ask_recommendations(str(server["id"]))
     except PickUnavailable as exc:
-        raise HTTPException(503, str(exc)) from exc
+        raise HTTPException(503, "Couldn’t check which models fit this computer.") from exc
     model_dir = await download_dir(str(server["id"]))
+
+    # The room setup's pick and the preload check judge a model against, read once so the
+    # order, the recommended row and the memory lines agree.
+    room_bytes = model_room_bytes()
+    ordered = order_models(sections, room_bytes)
 
     def model_view(model: LocalModel) -> dict[str, Any]:
         space = download_disk_space(model.download_size_bytes, model_dir, model.repository)
-        return {**model.view(), "disk": space}
+        return {**model.view(), "disk": space, "fits_now": fits_now(model, room_bytes)}
 
-    views = {name: [model_view(model) for model in models] for name, models in sections.items()}
+    views = [model_view(model) for model in ordered]
     disk_free_bytes = next(
-        (item["disk"].get("free_bytes") for models in views.values() for item in models
-         if isinstance(item["disk"].get("free_bytes"), int)),
+        (item["disk"].get("free_bytes") for item in views if isinstance(item["disk"].get("free_bytes"), int)),
         None,
     )
+    # Recommended is only ever a model that fits now: with nothing that fits, no row is recommended.
+    recommended = pick_for_setup(sections, room_bytes)
+    if recommended is not None and not fits_now(recommended, room_bytes):
+        recommended = None
     return {
         "state": "ready",
-        "sections": views,
+        "models": views,
         "downloads": downloads,
+        "recommended_repository": recommended.repository if recommended is not None else None,
         "memory_gb": round(host_ram_bytes() / 1024**3),
+        "memory_room_gb": round(room_bytes / 1024**3, 2),
         "disk_free_gb": round(disk_free_bytes / 1000**3) if isinstance(disk_free_bytes, int) else None,
     }, sections
 
@@ -115,9 +129,9 @@ async def download_model(body: dict = Body(...), _user: dict = Depends(require_u
         _clear_failed_record(model_id)
         raise HTTPException(409, "This computer does not have enough free disk space. Pick another from the list.")
     operation = local_setup_operation.read()
-    if operation is not None and operation.model.model != model_id:
+    if operation is not None and operation.in_flight and operation.model is not None and operation.model.model != model_id:
         raise HTTPException(409, f"{operation.model.display_name} is already downloading.")
-    from llm.local_setup import begin_settings_download
+    from llm.local_setup_flow import begin_settings_download
 
     return await begin_settings_download(model)
 
@@ -129,7 +143,7 @@ async def delete_download(model_id: str, _user: dict = Depends(require_user_head
     # models that oMLX has downloaded.
     model_id = model_id.rsplit("/", 1)[-1]
     operation = local_setup_operation.read()
-    if operation is not None and operation.model.model == model_id:
+    if operation is not None and operation.in_flight and operation.model is not None and operation.model.model == model_id:
         raise HTTPException(409, "Couldn't delete this model while it is downloading. Cancel the download first, then try again.")
     from llm.local_model import set_up_model
     setup = set_up_model()
@@ -144,10 +158,8 @@ async def delete_download(model_id: str, _user: dict = Depends(require_user_head
     if not any(row.get("identifier") == model_id for row in disk_models):
         if local_downloads.get(model_id) is not None:
             local_downloads.forget(model_id)
-            from llm.own_omlx_management import forget_model_originals
             from infra.state.ws import notify_models_changed
 
-            forget_model_originals(model_id)
             notify_models_changed()
             return {"ok": True}
         raise HTTPException(404, "Couldn't find this local model download. Refresh the list and try again.")
@@ -169,11 +181,9 @@ async def delete_download(model_id: str, _user: dict = Depends(require_user_head
         raise HTTPException(502, "Couldn't delete this local model download. Try again.")
     if downloaded is not None:
         local_downloads.forget(model_id)
-    from llm.own_omlx_management import forget_model_originals
     from llm.local_setup import _emit
     from infra.state.ws import notify_models_changed
 
-    forget_model_originals(model_id)
     _emit("deleted", kind="settings", model=model_id)
     notify_models_changed()
     return {"ok": True}

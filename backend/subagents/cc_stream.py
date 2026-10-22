@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from core._tool_result_delivery_support import ToolResultBindingError
-from core.checkpoint_cc_context import CCCheckpointContext
+from core.fork_cc_context import CCForkContext
 from infra.write_admission import sqlite_errorname_tag
 from subagents.cc_invocation import (
     ClaudeInvocation,
@@ -91,7 +91,7 @@ class CCStreamSession:
         self._interrupt_seq = 0
         self._control_seq = 0
         self._control_responses: dict[str, asyncio.Future[dict]] = {}
-        self.tool_context = CCCheckpointContext(None, None)
+        self.tool_context = CCForkContext(None, None)
         self._context_changed = asyncio.Event()
 
     def invocation(self) -> ClaudeInvocation:

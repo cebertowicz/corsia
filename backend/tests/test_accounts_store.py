@@ -21,7 +21,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from infra import accounts, token_admin  # noqa: E402
+from infra import account_validation, accounts, token_admin  # noqa: E402
 from infra.accounts_schema import ACCOUNTS_SCHEMA_SQL  # noqa: E402
 from infra.passwords import (  # noqa: E402
     MIN_PASSWORD_LENGTH,
@@ -98,12 +98,12 @@ class TestUsernames:
         [("Steve", "steve"), ("  steve  ", "steve"), ("a_b-1", "a_b-1")],
     )
     def test_normalized(self, raw, expected):
-        assert accounts.normalize_username(raw) == expected
+        assert account_validation.normalize_username(raw) == expected
 
     @pytest.mark.parametrize("raw", ["", "   ", "has space", "hé", "x" * 33, "a/b"])
     def test_rejected(self, raw):
-        with pytest.raises(accounts.AccountError):
-            accounts.normalize_username(raw)
+        with pytest.raises(account_validation.AccountError):
+            account_validation.normalize_username(raw)
 
 
 class TestAccounts:
@@ -225,11 +225,11 @@ class TestAccounts:
 
     def test_duplicate_is_refused(self, isolated_db):
         accounts.create_user("newcomer", GOOD_PASSWORD)
-        with pytest.raises(accounts.AccountError, match="already exists"):
+        with pytest.raises(account_validation.AccountError, match="already exists"):
             accounts.create_user("newcomer", GOOD_PASSWORD)
 
     def test_short_password_is_refused(self, isolated_db):
-        with pytest.raises(accounts.AccountError, match="at least"):
+        with pytest.raises(account_validation.AccountError, match="at least"):
             accounts.create_user("newcomer", "x" * (MIN_PASSWORD_LENGTH - 1))
         assert accounts.get_user("newcomer") is None
 
@@ -345,11 +345,11 @@ class TestTokens:
 
     def test_unknown_kind_is_refused(self, isolated_db):
         accounts.create_user("newcomer", GOOD_PASSWORD)
-        with pytest.raises(accounts.AccountError, match="unknown token kind"):
+        with pytest.raises(account_validation.AccountError, match="unknown token kind"):
             accounts.issue_token("newcomer", kind="forever")
 
     def test_token_for_missing_account_is_refused(self, isolated_db):
-        with pytest.raises(accounts.AccountError, match="no account named"):
+        with pytest.raises(account_validation.AccountError, match="no account named"):
             accounts.issue_token("nobody")
 
     def test_expired_token_does_not_resolve(self, isolated_db):
@@ -412,7 +412,7 @@ class TestTokens:
         assert accounts.check_password("newcomer", GOOD_PASSWORD + "-new")
 
     def test_password_change_for_missing_account_is_refused(self, isolated_db):
-        with pytest.raises(accounts.AccountError, match="no account named"):
+        with pytest.raises(account_validation.AccountError, match="no account named"):
             accounts.set_password("nobody", GOOD_PASSWORD)
 
 
@@ -462,7 +462,7 @@ class TestAccountsMigration:
         from infra.migration_25_to_26_accounts import migrate_25_to_26
         from infra.schema import SCHEMA_VERSION
 
-        assert SCHEMA_VERSION == 132
+        assert SCHEMA_VERSION == 136
         assert MIGRATIONS[25] is migrate_25_to_26
 
     def test_migrated_shape_matches_a_freshly_created_one(self, tmp_path):

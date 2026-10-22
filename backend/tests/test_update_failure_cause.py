@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
-from infra.accounts import AccountError
+from infra.account_validation import AccountError
 
 
 @pytest.mark.asyncio

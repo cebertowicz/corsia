@@ -6,7 +6,8 @@
 	import InputBarThinkingSheet from './InputBarThinkingSheet.svelte';
 	import LimitHeldLine from './LimitHeldLine.svelte';
 	import { checkpointsByThread, latestCheckpoint, requestManualCheckpoint } from '$lib/stores/checkpoints';
-	import { activeThreadId, reasoningEffort, threads, type ContextUsage } from '$lib/stores/threads';
+	import { activeThreadId, threads, type ContextUsage } from '$lib/stores/threads';
+	import { composerSelectionFor } from '$lib/stores/composerSelection';
 	import {
 		contextPreviewByThread,
 		contextReading,
@@ -17,7 +18,8 @@
 		measuredHydratedThreads,
 		previewIdentity,
 	} from '$lib/stores/contextUsageByThread';
-	import { acceptsSend, activeModelId, findModelById, loadModels, models } from '$lib/stores/models';
+	import { acceptsSend, activeModelId, findModelById } from '$lib/stores/models';
+	import { loadComposerModels } from '$lib/stores/modelsLoad';
 	import { canonicalName } from '$lib/stores/modelGroups';
 	import { subagentMeta } from '$lib/stores/subagents';
 	import { reasoningEffortLabel, resolveReasoningEffort } from './inputBarReasoning';
@@ -74,7 +76,9 @@
 		onQueueAfterTurn: () => void;
 	} = $props();
 
-	const activeModel = $derived(findModelById($models, $activeModelId));
+	// The composer's own thread's selection: for a worker's composer, the worker's, not the open thread's.
+	const selection = $derived($composerSelectionFor(threadId));
+	const activeModel = $derived(findModelById(selection.models, selection.modelId));
 	// The chip reads as chosen under the composer's one send rule (`acceptsSend`): a usage-limit block
 	// is a normal chip, since the held line says why. Any other block (not offered, signed out,
 	// model gone) is still 'Unavailable'.
@@ -82,13 +86,22 @@
 	const modelName = $derived(
 		chipReady
 			? canonicalName(activeModel!)
-			: $activeModelId
-				? `Unavailable · ${activeModel ? canonicalName(activeModel) : $activeModelId}`
+			: selection.modelId
+				? `Unavailable · ${activeModel ? canonicalName(activeModel) : selection.modelId}`
 				: 'Select Model'
 	);
 	// Defaults to the active thread so a caller that predates the subagent
 	// leaf (#1949) keeps its existing behavior unchanged.
 	const boundThreadId = $derived(threadId ?? $activeThreadId);
+	const boundThread = $derived($threads.find((thread) => thread.id === boundThreadId));
+	// A failed model switch is durable server state until another choice; otherwise the thread
+	// and selected account provide the two existing in-progress facts for the composer chip.
+	const switchState = $derived.by((): 'model' | 'account' | 'failed' | null => {
+		if (boundThread?.switch_status === 'failed') return 'failed';
+		if (boundThread?.pending_model) return 'model';
+		return activeModel?.runs_on?.find((entry) => entry.selected)?.pending === true ? 'account' : null;
+	});
+	const switchError = $derived(switchState === 'failed' ? boundThread?.switch_error ?? null : null);
 	// Context usage and the next-turn preview are keyed by the bound thread
 	// (#2269), so every composer inspects its own thread: the active thread with
 	// the selected model, a subagent leaf (#1949) with the worker's own model.
@@ -106,8 +119,7 @@
 			?? $threads.find(thread => thread.id === boundThreadId)?.title
 			?? 'this thread',
 	);
-	const isSubagentThread = $derived(subagentRef !== undefined);
-	const isCCBacked = $derived(isSubagentThread || activeModel?.backend === 'cc');
+	const isCCBacked = $derived(activeModel?.backend === 'cc');
 	const showVisionWarning = $derived(
 		hasImageAttachments &&
 		!isCCBacked &&
@@ -118,7 +130,7 @@
 
 	const reasoningConfig = $derived(activeModel?.capabilities?.reasoning_config ?? null);
 	const supportsReasoning = $derived(reasoningConfig !== null);
-	const resolvedEffort = $derived(resolveReasoningEffort($reasoningEffort, reasoningConfig));
+	const resolvedEffort = $derived(resolveReasoningEffort(selection.effort, reasoningConfig));
 	const effortLabel = $derived.by(() => {
 		if (!supportsReasoning) return '';
 		return reasoningEffortLabel(reasoningConfig, resolvedEffort);
@@ -167,7 +179,7 @@
 			? previewIdentity(boundThreadId, previewModelId, boundUsage, latestCheckpoint(checkpointState))
 			: null,
 	);
-	const measuredReading = $derived(measuredFor(boundUsage, boundThreadId, previewModelId, $models));
+	const measuredReading = $derived(measuredFor(boundUsage, boundThreadId, previewModelId, selection.models));
 	// The preview read for this thread, model and measured turn, if any; a
 	// newer measured turn or another model leaves it unowned and unshown.
 	const ownedPreview = $derived(
@@ -210,7 +222,7 @@
 		});
 	});
 	function openSheet(view: Exclude<SheetView, null>) {
-		if (sheetView !== view && view === 'model') loadModels({ refreshUsage: true });
+		if (sheetView !== view && view === 'model') void loadComposerModels(boundThreadId, { refreshUsage: true });
 		toggleSheet(view);
 	}
 	function documentName(source: ContextSheetSourceRow): string {
@@ -273,7 +285,7 @@
 		<span>{activeModel?.name ?? 'Current model'} doesn't support images — switch to a vision-capable model to use image attachments.</span>
 	</div>
 {/if}
-<LimitHeldLine model={activeModel} onSwitchModel={() => openSheet('model')} />
+<LimitHeldLine threadId={boundThreadId} model={activeModel} onSwitchModel={() => openSheet('model')} />
 
 {#if sheetView === 'attachments'}
 	<div class="action-sheet">
@@ -302,7 +314,7 @@
 {/if}
 
 {#if sheetView === 'model'}
-	<InputBarModelSheet onclose={() => toggleSheet('model')} {focusLocalOnly} onfocusconsumed={onfocusconsumed} />
+	<InputBarModelSheet threadId={boundThreadId} onclose={() => toggleSheet('model')} {focusLocalOnly} onfocusconsumed={onfocusconsumed} />
 {/if}
 
 {#if sheetView === 'context'}
@@ -331,7 +343,7 @@
 {/if}
 
 {#if sheetView === 'thinking' && supportsReasoning && reasoningConfig}
-	<InputBarThinkingSheet {reasoningConfig} />
+	<InputBarThinkingSheet threadId={boundThreadId} {reasoningConfig} />
 {/if}
 </div>
 {/if}
@@ -341,11 +353,11 @@
 		threadId={boundThreadId}
 		{sheetView}
 		{openSheet}
-		{isSubagentThread}
-		{subagentRef}
 		isActiveModelReady={chipReady}
 		{canSendToModel}
 		{queueUntilSwitch}
+		{switchState}
+		{switchError}
 		modelLabel={modelName}
 		activeModelName={activeModel?.name}
 		{supportsReasoning}

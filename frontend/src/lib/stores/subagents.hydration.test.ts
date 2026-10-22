@@ -4,10 +4,14 @@ import {
 	_resetSubagentHydrationForTests,
 	hydrateSubagentThread,
 	hydrateSubagentThreadOnce,
+	patchSubagentThread,
 	registerSubagent,
+	setSubagentInit,
 	setSubagentStatus,
 	subagentMeta,
+	subagentThreadRows,
 } from './subagents';
+import { _resetThreadModelTruthForTests, acceptThreadModelTruth, threadModelFor } from './models';
 
 /**
  * A reload empties an in-memory map. What the SERVER knows about a worker
@@ -42,7 +46,9 @@ function respondWith(body: unknown, ok = true): void {
 
 beforeEach(() => {
 	subagentMeta.set(new Map());
+	subagentThreadRows.set(new Map());
 	_resetSubagentHydrationForTests();
+	_resetThreadModelTruthForTests();
 });
 
 afterEach(() => {
@@ -61,8 +67,18 @@ describe('subagent chip hydration reads server runtime truth', () => {
 			name: 'tmp inspector',
 			provider: 'cc',
 			status: 'running',
-			model: 'cc/opus',
 		});
+	});
+
+	it("holds the worker's saved model with every thread's, where its composer reads it", async () => {
+		respondWith(runtimeTruth({ model: 'claude-code/opus' }));
+		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		expect(threadModelFor('child-1')).toBe('claude-code/opus');
+		expect(acceptThreadModelTruth('child-1', 'claude-code/sonnet', '2026-10-20T10:00:00.000000')).toBe(true);
+
+		respondWith(runtimeTruth({ model: 'claude-code/opus' }));
+		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		expect(threadModelFor('child-1')).toBe('claude-code/sonnet');
 	});
 
 	it('a live process between turns is ready', async () => {
@@ -173,5 +189,38 @@ describe('subagent chip hydration reads server runtime truth', () => {
 		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
 		setSubagentStatus('child-1', 'closed');
 		expect(get(subagentMeta).get('child-1')?.status).toBe('closed');
+	});
+});
+
+describe('hydration folds the worker\'s effort and project', () => {
+	it('lands them on a terminal worker, which the composer still reads', async () => {
+		registerSubagent('parent-1', 'child-1', 'tmp inspector', 'cc', 'closed');
+		respondWith(runtimeTruth({ model: 'cc/opus', reasoning_effort: 'high', project_id: 'project-1' }));
+		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		const ref = get(subagentMeta).get('child-1');
+		expect(ref).toMatchObject({ status: 'closed' });
+		expect(get(subagentThreadRows).get('child-1')).toMatchObject({ reasoning_effort: 'high', project_id: 'project-1' });
+	});
+
+	it('lands them when a live frame moved the status mid-flight', async () => {
+		registerSubagent('parent-1', 'child-1', 'tmp inspector', 'cc', 'running');
+		vi.stubGlobal('fetch', vi.fn(async () => {
+			setSubagentStatus('child-1', 'ready');
+			return { ok: true, status: 200, json: async () => runtimeTruth({ reasoning_effort: 'low' }) };
+		}) as never);
+		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		expect(get(subagentThreadRows).get('child-1')?.reasoning_effort).toBe('low');
+	});
+
+	it('fills only a field nobody has set, so a later change or a live frame is never overwritten', async () => {
+		registerSubagent('parent-1', 'child-1', 'tmp inspector', 'cc', 'running');
+		vi.stubGlobal('fetch', vi.fn(async () => {
+			patchSubagentThread('child-1', { reasoning_effort: 'high' });
+			return { ok: true, status: 200, json: async () => runtimeTruth({ reasoning_effort: 'low', project_id: 'project-1' }) };
+		}) as never);
+		await hydrateSubagentThread('child-1', TOKEN, 'parent-1');
+		const row = get(subagentThreadRows).get('child-1');
+		expect(row?.reasoning_effort).toBe('high');
+		expect(row?.project_id).toBe('project-1');
 	});
 });

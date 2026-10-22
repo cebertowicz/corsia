@@ -251,7 +251,7 @@ def test_pairing_state_survives_worker_threads_racing_the_event_loop_calls():
         # Each unknown exchange is a counted failure; keep them rare enough that
         # the hourly pause does not turn the whole run into a no-op.
         if index % 50 == 0:
-            pairing.finish(exchange_id=f"missing-{index}", confirm_c=b"x", name="host")
+            pairing.finish(exchange_id=f"missing-{index}", confirm_c=b"x", name="host", identity=bytes(32))
 
     def rotate(index):
         if index % 25 == 0:
@@ -282,9 +282,9 @@ def test_malformed_client_message_in_finish_is_a_counted_failed_try():
     exchange_id, _ = pairing.start(msg_c=b"not-a-pake-message", transcript_prefix=b"test")
 
     with pytest.raises(PairingError) as failed:
-        pairing.finish(exchange_id=exchange_id, confirm_c=b"x", name="host")
+        pairing.finish(exchange_id=exchange_id, confirm_c=b"x", name="host", identity=bytes(32))
 
     assert failed.value.reason == "invalid_exchange"
     assert pairing._wrong_tries == 1
     with pytest.raises(PairingError, match="invalid_exchange"):
-        pairing.finish(exchange_id=exchange_id, confirm_c=b"x", name="host")
+        pairing.finish(exchange_id=exchange_id, confirm_c=b"x", name="host", identity=bytes(32))

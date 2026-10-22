@@ -1,0 +1,29 @@
+{
+  "accepted": [
+    {"input": "home.example.com", "normalized": "home.example.com"},
+    {"input": " https://Home.Example.com:8443/ ", "normalized": "Home.Example.com:8443"},
+    {"input": "HTTPS://home.example.com:443/", "normalized": "home.example.com:443"},
+    {"input": "home.example.com:1", "normalized": "home.example.com:1"},
+    {"input": "home.example.com:65535", "normalized": "home.example.com:65535"},
+    {"input": "home.example.com:00080", "normalized": "home.example.com:80"},
+    {"input": "192.168.1.20:8443", "normalized": "192.168.1.20:8443"},
+    {"input": "my-host.example.com.", "normalized": "my-host.example.com."}
+  ],
+  "rejected": [
+    "http://home.example.com",
+    "https://",
+    "/",
+    "home.example.com:0",
+    "home.example.com:99999",
+    "home.example.com/path",
+    "home.example.com:",
+    "user@home.example.com",
+    "home.example.com#fragment",
+    "home.example.com?query=1",
+    "home%zz.example.com",
+    "home.example.com:１２３",
+    "home.example.com\\path",
+    "home example.com",
+    "home.99999"
+  ]
+}

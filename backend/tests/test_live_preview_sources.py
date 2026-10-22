@@ -208,7 +208,7 @@ def test_the_provider_call_id_is_bound_only_inside_its_tool_run():
     with tool_invocation_context("inv-1", provider_call_id="toolu_1"):
         assert _current_provider_call_id.get() == "toolu_1"
     assert _current_provider_call_id.get() is None
-    with tool_invocation_context(None, checkpoint_id="cp", provider_call_id="toolu_1"):
+    with tool_invocation_context(None, fork_id="cp", provider_call_id="toolu_1"):
         assert _current_provider_call_id.get() is None
 
 

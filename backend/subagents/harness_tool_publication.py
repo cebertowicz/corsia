@@ -47,13 +47,13 @@ class ToolBridgeResult(ProjectedMediaResult):
         return instance
 
 
-async def _checkpoint_result(
+async def _fork_result(
     completion: CompletedToolCall,
     model: str | None,
     *,
     harness: str = "external",
 ) -> str:
-    """Project private checkpoint media while retaining post-effect failure."""
+    """Project private fork media while retaining post-effect failure."""
     reference = getattr(completion.result, "media", None)
     if reference is None:
         return completion.result
@@ -150,7 +150,7 @@ async def publish_completed_tool_result(
     *,
     thread_id: str | None,
     turn_identity: "TurnIdentity | None",
-    checkpoint_id: str | None,
+    fork_id: str | None,
     model: str | None,
     persist_delivery,
     media_delivery,
@@ -158,8 +158,8 @@ async def publish_completed_tool_result(
     harness: str = "external",
 ) -> str:
     """Publish a completed effect without creating another execution owner."""
-    if checkpoint_id is not None:
-        return await _checkpoint_result(completion, model, harness=harness)
+    if fork_id is not None:
+        return await _fork_result(completion, model, harness=harness)
     return await _foreground_result(
         completion,
         thread_id=thread_id,

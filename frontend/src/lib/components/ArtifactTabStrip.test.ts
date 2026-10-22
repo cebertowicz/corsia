@@ -1,4 +1,4 @@
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ArtifactTabStrip from './ArtifactTabStrip.svelte';
 import type { ArtifactTab } from '$lib/stores/artifactWorkspace';
@@ -104,6 +104,24 @@ describe('ArtifactTabStrip', () => {
 		onSelect.mockClear();
 		tabEls[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
 		expect(onSelect).toHaveBeenCalledWith('tab-3'); // wraps to the last tab
+	});
+
+	it('scrolls the active and keyboard-focused tab into view', async () => {
+		const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
+		const scrollIntoView = vi.fn();
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+		try {
+			renderStrip({ activeKey: 'tab-3' });
+			await tick();
+			expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+
+			scrollIntoView.mockClear();
+			host.querySelectorAll<HTMLElement>('[role="tab"]')[1].focus();
+			expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+		} finally {
+			if (original) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', original);
+			else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+		}
 	});
 
 	it('the collapse button calls onCollapse', () => {

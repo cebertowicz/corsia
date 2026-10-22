@@ -1260,7 +1260,9 @@ describe('HostAccessLeaseControl — AdaptiveDrawer routing (#1123)', () => {
 		trigger.click();
 		flushSync();
 		await tick();
-		(host.querySelector('[data-adaptive-drawer]') as HTMLElement).click();
+		const scrim = host.querySelector('[data-adaptive-drawer]') as HTMLElement;
+		scrim.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+		scrim.click();
 		flushSync();
 		await vi.waitFor(() => expect(host.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(0));
 

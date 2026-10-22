@@ -47,13 +47,15 @@ function openPicker(): void {
 }
 
 function search(term: string): void {
-	const input = host.querySelector('.picker-search') as HTMLInputElement;
+	const input = panel()?.querySelector('.picker-search') as HTMLInputElement;
 	input.value = term;
 	input.dispatchEvent(new Event('input', { bubbles: true }));
 	flushSync();
 }
 
-const optionText = () => [...host.querySelectorAll('.picker-option')].map((node) => node.textContent?.replace(/\s+/g, ' ').trim());
+// The shared popover is portaled to document.body to escape the page pane's clip boundary.
+const panel = () => document.querySelector('.popover');
+const optionText = () => [...document.querySelectorAll('.picker-option')].map((node) => node.textContent?.replace(/\s+/g, ' ').trim());
 
 describe('MeasurementScopePicker', () => {
 	it('names the current scope on the trigger and opens a searchable listbox', () => {
@@ -62,8 +64,8 @@ describe('MeasurementScopePicker', () => {
 		expect(trigger.getAttribute('aria-label')).toBe('Measurement scope: All work');
 		expect(trigger.getAttribute('aria-expanded')).toBe('false');
 		openPicker();
-		expect(host.querySelector('[role="listbox"]')).not.toBeNull();
-		expect((host.querySelector('.picker-search') as HTMLInputElement).getAttribute('aria-label')).toBe('Search projects and agents');
+		expect(panel()?.querySelector('[role="listbox"]')).not.toBeNull();
+		expect((panel()?.querySelector('.picker-search') as HTMLInputElement).getAttribute('aria-label')).toBe('Search projects and agents');
 	});
 
 	it('filters projects and agents by the search term', () => {
@@ -82,7 +84,7 @@ describe('MeasurementScopePicker', () => {
 		render();
 		openPicker();
 		search('bugs');
-		const rows = [...host.querySelectorAll('.picker-option.is-nested')];
+		const rows = [...document.querySelectorAll('.picker-option.is-nested')];
 		expect(rows.length).toBe(2);
 		expect(rows.map((row) => row.querySelector('.option-label')?.textContent)).toEqual(['Bugs', 'Bugs']);
 		expect(rows.map((row) => row.querySelector('.option-detail')?.textContent)).toEqual(['Atlas', 'Boreas']);
@@ -93,36 +95,36 @@ describe('MeasurementScopePicker', () => {
 		expect((host.querySelector('.picker-trigger') as HTMLButtonElement).getAttribute('aria-label')).toBe('Measurement scope: Boreas');
 		openPicker();
 		search('bugs');
-		const second = [...host.querySelectorAll('.picker-option')].find((row) => row.querySelector('.option-detail')?.textContent === 'Boreas') as HTMLButtonElement;
+		const second = [...document.querySelectorAll('.picker-option')].find((row) => row.querySelector('.option-detail')?.textContent === 'Boreas') as HTMLButtonElement;
 		second.click();
 		flushSync();
 		expect(chosen).toEqual(['agent:ag-b']);
-		expect(host.querySelector('[role="listbox"]')).toBeNull();
+		expect(panel()).toBeNull();
 	});
 
 	it('is keyboard-operable: arrows update the active descendant, options stay out of Tab order, and Enter chooses it', () => {
 		const { chosen } = render();
 		openPicker();
-		const input = host.querySelector('.picker-search') as HTMLInputElement;
+		const input = panel()?.querySelector('.picker-search') as HTMLInputElement;
 		expect(input.getAttribute('aria-activedescendant')).toBe('scope-all');
-		expect([...host.querySelectorAll('[role="option"]')].every((option) => option.getAttribute('tabindex') === '-1')).toBe(true);
+		expect([...document.querySelectorAll('[role="option"]')].every((option) => option.getAttribute('tabindex') === '-1')).toBe(true);
 		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
 		flushSync();
 		expect(input.getAttribute('aria-activedescendant')).toBe('scope-project-prj-atlas');
-		expect(host.querySelector('[data-active="true"] .option-label')?.textContent).toBe('Atlas');
+		expect(document.querySelector('[data-active="true"] .option-label')?.textContent).toBe('Atlas');
 		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 		flushSync();
 		expect(chosen).toEqual(['project:prj-atlas']);
-		expect(host.querySelector('[role="listbox"]')).toBeNull();
+		expect(panel()).toBeNull();
 	});
 
 	it('closes on Escape without choosing', () => {
 		const { chosen } = render();
 		openPicker();
-		const input = host.querySelector('.picker-search') as HTMLInputElement;
+		const input = panel()?.querySelector('.picker-search') as HTMLInputElement;
 		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 		flushSync();
-		expect(host.querySelector('[role="listbox"]')).toBeNull();
+		expect(panel()).toBeNull();
 		expect(chosen).toEqual([]);
 	});
 

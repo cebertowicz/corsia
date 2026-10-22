@@ -283,6 +283,30 @@ fn current_service(
     Ok(current)
 }
 
+/// A copy running from a disk image or a translocated path disappears once the image is ejected, so it never
+/// registers a service. An Applications folder on an external drive is a real install: only a read-only volume
+/// (how a downloaded disk image mounts) counts as a disk image.
+pub fn is_transient_bundle_path(executable: &Path) -> bool {
+    transient_bundle_path(executable, mount_is_read_only)
+}
+
+fn transient_bundle_path(executable: &Path, read_only: impl Fn(&Path) -> bool) -> bool {
+    let parts = executable.components().map(|part| part.as_os_str().to_string_lossy()).collect::<Vec<_>>();
+    parts.iter().any(|part| part == "AppTranslocation")
+        || (parts.get(1).is_some_and(|part| part == "Volumes") && read_only(executable))
+}
+
+fn mount_is_read_only(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else { return false };
+    let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // An unreadable mount is not proof of a disk image; refusing a real install would leave it unable to start.
+    if unsafe { libc::statvfs(path.as_ptr(), stats.as_mut_ptr()) } != 0 {
+        return false;
+    }
+    unsafe { stats.assume_init() }.f_flag & libc::ST_RDONLY != 0
+}
+
 fn bundle_root(executable: &Path) -> Result<PathBuf, String> {
     executable
         .parent()
@@ -522,6 +546,16 @@ pub fn command_from_environment() -> Option<i32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn transient_bundle_paths_are_never_registered() {
+        let path = std::path::Path::new;
+        assert!(super::transient_bundle_path(path("/Volumes/CORSIA/CORSIA.app/Contents/MacOS/CORSIA"), |_| true));
+        assert!(!super::transient_bundle_path(path("/Volumes/External/Applications/CORSIA.app/Contents/MacOS/CORSIA"), |_| false));
+        assert!(super::transient_bundle_path(path("/private/var/folders/x/AppTranslocation/CORSIA.app/Contents/MacOS/CORSIA"), |_| false));
+        assert!(!super::transient_bundle_path(path("/Applications/CORSIA.app/Contents/MacOS/CORSIA"), |_| true));
+        assert!(!super::mount_is_read_only(path("/tmp")));
+    }
+
     use super::*;
     use std::{cell::Cell, fs};
 

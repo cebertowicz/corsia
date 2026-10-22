@@ -72,8 +72,11 @@ def _client() -> TestClient:
 
 @pytest.mark.parametrize(("error", "reason"), [
     (urllib.error.URLError("offline"), "no internet connection"),
-    (urllib.error.HTTPError("https:" "//example.test", 403, "forbidden", Message(), None), "this computer couldn't download the installer"),
-    (urllib.error.HTTPError("https:" "//example.test", 503, "down", Message(), None), "the download service didn't answer"),
+    (urllib.error.HTTPError("https:" "//example.test", 403, "forbidden", Message(), None), "the download site refused the request"),
+    (urllib.error.HTTPError("https:" "//example.test", 404, "missing", Message(), None), "the download site refused the request"),
+    (urllib.error.HTTPError("https:" "//example.test", 408, "timeout", Message(), None), "the download service cannot answer"),
+    (urllib.error.HTTPError("https:" "//example.test", 429, "limited", Message(), None), "the download service cannot answer"),
+    (urllib.error.HTTPError("https:" "//example.test", 503, "down", Message(), None), "the download service cannot answer"),
 ])
 def test_download_connection_failures_have_safe_reasons(monkeypatch, error, reason):
     from api import cli_install
@@ -95,7 +98,7 @@ def test_download_request_identifies_corsia_with_its_app_version(monkeypatch):
         observed["user_agent"] = request.get_header("User-agent")
         return _Response(b"#!/bin/sh\n")
 
-    monkeypatch.setattr(cli_install.app_version, "_read_frontend_build_info", lambda: {"app": {"version": "0.4.1-dev.246"}})
+    monkeypatch.setattr(cli_install.build_info, "frontend_build_info", lambda: {"app": {"version": "0.4.1-dev.246"}})
     monkeypatch.setattr(cli_install.urllib.request, "urlopen", fetch)
     script = cli_install._download_script("codex")
     assert observed["user_agent"] == "CORSIA/0.4.1-dev.246"
@@ -136,7 +139,7 @@ def test_success_runs_bash_with_the_service_environment(monkeypatch, tmp_path):
     ("codex", {"timeout": True}, "it took too long"),
     ("codex", {"returncode": 1, "output": (b"installer output", b"failed")}, "the installer stopped"),
     ("claude-code", {"returncode": 1, "output": (b"Checksum verification failed", b"")}, "the download didn't verify"),
-    ("claude-code", {"returncode": 1, "output": (b"Failed to get a valid version", b"")}, "the download service didn't answer"),
+    ("claude-code", {"returncode": 1, "output": (b"Failed to get a valid version", b"")}, "the download service cannot answer"),
     ("codex", {"returncode": 1, "output": (b"Could not fetch installer", b"")}, "no internet connection"),
 ])
 def test_installer_failures_have_safe_reasons(monkeypatch, tmp_path, vendor, result, reason):
@@ -166,9 +169,9 @@ async def test_success_refreshes_sources_and_notifies_models(monkeypatch):
     monkeypatch.setattr(cli_install, "recheck_sources_once", refresh)
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: notified.append(True))
     monkeypatch.setattr(cli_install, "path_shadowed_binary", lambda _vendor: "/usr/local/bin/codex")
-    assert await cli_install.start_install("codex", {}) == {"state": "running", "reason": None, "path_shadowed_by": None}
+    assert await cli_install.start_install("codex", {}) == {"state": "running", "reason": None, "ref": None, "path_shadowed_by": None}
     await cli_install._jobs["codex"].task
-    assert await cli_install.get_install("codex", {}) == {"state": "done", "reason": None, "path_shadowed_by": "/usr/local/bin/codex"}
+    assert await cli_install.get_install("codex", {}) == {"state": "done", "reason": None, "ref": None, "path_shadowed_by": "/usr/local/bin/codex"}
     assert refreshed == [True] and notified == [True]
 
 
@@ -185,7 +188,7 @@ async def test_location_check_failure_does_not_break_a_successful_install(monkey
     with caplog.at_level("WARNING", logger=cli_install.log.name):
         await cli_install.start_install("codex", {})
         await cli_install._jobs["codex"].task
-    assert await cli_install.get_install("codex", {}) == {"state": "done", "reason": None, "path_shadowed_by": None}
+    assert await cli_install.get_install("codex", {}) == {"state": "done", "reason": None, "ref": None, "path_shadowed_by": None}
     assert "location check after installation did not complete" in caplog.text
 
 
@@ -204,7 +207,7 @@ async def test_second_post_returns_the_existing_running_job(monkeypatch):
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
     await cli_install.start_install("claude-code", {})
-    assert await cli_install.start_install("claude-code", {}) == {"state": "running", "reason": None, "path_shadowed_by": None}
+    assert await cli_install.start_install("claude-code", {}) == {"state": "running", "reason": None, "ref": None, "path_shadowed_by": None}
     release.set()
     await cli_install._jobs["claude-code"].task
 
@@ -221,7 +224,7 @@ async def test_update_reuses_the_installer_unless_a_package_manager_owns_the_cli
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: refreshed.append(True) or asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
 
-    assert await cli_install.start_update("codex", {}) == {"state": "running", "reason": None, "path_shadowed_by": None}
+    assert await cli_install.start_update("codex", {}) == {"state": "running", "reason": None, "ref": None, "path_shadowed_by": None}
     await cli_install._jobs["codex"].task
     assert refreshed == [True]
 
@@ -284,7 +287,7 @@ async def test_guard_treats_a_hung_login_shell_as_not_found(monkeypatch):
     monkeypatch.setattr(cli_install, "_run_installer", lambda _vendor, _job: None)
     monkeypatch.setattr(cli_install, "recheck_sources_once", lambda: asyncio.sleep(0))
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
-    assert await cli_install.start_install("codex", {}) == {"state": "running", "reason": None, "path_shadowed_by": None}
+    assert await cli_install.start_install("codex", {}) == {"state": "running", "reason": None, "ref": None, "path_shadowed_by": None}
     await cli_install._jobs["codex"].task
 
 
@@ -303,7 +306,9 @@ async def test_a_tempfile_error_settles_the_job_failed(monkeypatch):
     monkeypatch.setattr(cli_install, "schedule_models_changed", lambda: None)
     await cli_install.start_install("codex", {})
     await cli_install._jobs["codex"].task
-    assert await cli_install.get_install("codex", {}) == {"state": "failed", "reason": cli_install.INSTALLER_STOPPED, "path_shadowed_by": None}
+    result = await cli_install.get_install("codex", {})
+    assert result["state"] == "failed" and result["reason"] == cli_install.INSTALLER_STOPPED
+    assert result["ref"].startswith("cli-") and result["path_shadowed_by"] is None
 
 
 @pytest.mark.asyncio
@@ -320,8 +325,22 @@ async def test_any_unexpected_error_settles_the_job_failed_and_is_logged(monkeyp
     with caplog.at_level("ERROR", logger=cli_install.log.name):
         await cli_install.start_install("claude-code", {})
         await cli_install._jobs["claude-code"].task
-    assert await cli_install.get_install("claude-code", {}) == {"state": "failed", "reason": cli_install.INSTALLER_STOPPED, "path_shadowed_by": None}
+    result = await cli_install.get_install("claude-code", {})
+    assert result["state"] == "failed" and result["reason"] == cli_install.INSTALLER_STOPPED
+    assert result["ref"].startswith("cli-") and result["path_shadowed_by"] is None
     assert "stopped unexpectedly" in caplog.text
+
+
+@pytest.mark.parametrize(("reason", "cause"), [
+    ("no internet connection", "connection"),
+    ("the download site refused the request", "site_refused"),
+    ("the download didn't verify", "download_unverified"),
+    ("the installer stopped", "installer_failed"),
+])
+def test_install_failure_codes_are_independent_of_copy(reason, cause):
+    from api import cli_install
+
+    assert cli_install.install_cause(reason) == cause
 
 
 def test_installer_env_passes_only_the_minimal_variables(monkeypatch):
@@ -351,7 +370,7 @@ def test_get_is_exact_and_unknown_vendor_is_not_found():
 
     with _client() as client:
         response = client.get("/api/providers/cli/codex/install")
-        assert response.json() == {"state": "idle", "reason": None, "path_shadowed_by": None}
+        assert response.json() == {"state": "idle", "reason": None, "ref": None, "path_shadowed_by": None}
     with pytest.raises(HTTPException, match="CLI vendor not found"):
         asyncio.run(cli_install.get_install("unknown", {}))
 
@@ -410,12 +429,12 @@ async def test_cancel_while_running_stops_the_installer_tree_and_settles_cancell
     installer, child = int((pids / "installer").read_text()), int((pids / "child").read_text())
     assert _alive(installer) and _alive(child)
 
-    assert await cli_install.cancel_install("claude-code", {}) == {"state": "cancelled", "reason": None, "path_shadowed_by": None}
+    assert await cli_install.cancel_install("claude-code", {}) == {"state": "cancelled", "reason": None, "ref": None, "path_shadowed_by": None}
     await cli_install._jobs["claude-code"].task
 
     assert _gone_soon(installer) and _gone_soon(child)
     assert not script.exists()
-    assert await cli_install.get_install("claude-code", {}) == {"state": "cancelled", "reason": None, "path_shadowed_by": None}
+    assert await cli_install.get_install("claude-code", {}) == {"state": "cancelled", "reason": None, "ref": None, "path_shadowed_by": None}
 
 
 @pytest.mark.asyncio
@@ -443,7 +462,7 @@ async def test_a_new_install_can_start_after_a_cancel(monkeypatch, tmp_path):
     assert cli_install._jobs["claude-code"].state == "cancelled"
 
     (tmp_path / "child").unlink()
-    assert await cli_install.start_install("claude-code", {}) == {"state": "running", "reason": None, "path_shadowed_by": None}
+    assert await cli_install.start_install("claude-code", {}) == {"state": "running", "reason": None, "ref": None, "path_shadowed_by": None}
     await cli_install.cancel_install("claude-code", {})
     await cli_install._jobs["claude-code"].task
 
@@ -466,7 +485,7 @@ def test_cancel_when_nothing_ran_is_a_no_op_over_http_and_unknown_vendors_are_no
     with _client() as client:
         response = client.delete("/api/providers/cli/codex/install")
         assert response.status_code == 200
-        assert response.json() == {"state": "idle", "reason": None, "path_shadowed_by": None}
+        assert response.json() == {"state": "idle", "reason": None, "ref": None, "path_shadowed_by": None}
         assert client.delete("/api/providers/cli/unknown/install").status_code == 404
 
 
@@ -542,6 +561,6 @@ async def test_a_cancel_racing_completion_returns_the_single_state_the_job_settl
     cancelling = asyncio.create_task(cli_install.cancel_install("codex", {}))
     await asyncio.sleep(0.05)
     release.set()
-    assert await cancelling == {"state": "done", "reason": None, "path_shadowed_by": None}
+    assert await cancelling == {"state": "done", "reason": None, "ref": None, "path_shadowed_by": None}
     await cli_install._jobs["codex"].task
     assert cli_install._status("codex")["state"] == "done"

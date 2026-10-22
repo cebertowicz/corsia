@@ -1,64 +1,87 @@
-import { isHarness, sourceIsReady, type ModelSource } from '$lib/conductorSources';
-import {
-	getModelDispatchId,
-	modelAvailability,
-	saveThreadModel,
-	type Model,
-} from '$lib/stores/models';
+import { getModelDispatchId, saveThreadModel, type Model } from '$lib/stores/models';
 import { fetchCorsiaAgent } from '$lib/utils/conductor';
 
-async function readyModelForSetupSource(
-	token: string,
-	source: ModelSource,
-	threadId: string,
-): Promise<Model | null> {
-	try {
-		const response = await fetch(`/api/models?thread_id=${encodeURIComponent(threadId)}`, {
-			headers: { Authorization: `Bearer ${token}` },
-		});
-		if (!response.ok) return null;
-		const rows = (await response.json()).models;
-		if (!Array.isArray(rows)) return null;
-		return rows.find((model): model is Model => (
-			model?.connection === source.source && modelAvailability(model).status === 'ready'
-		)) ?? null;
-	} catch {
-		return null;
+export type SetupModel = Model & { is_default?: boolean };
+export type TestedProvider = { source: string; model?: string };
+export type SetupBinding = { model: string; source: string };
+export type SetupFirstModelErrorCode = 'no_model' | 'binding_incomplete' | 'catalog_refused' | 'catalog_unavailable' | 'agent_unavailable' | 'progress_save';
+
+/** Coded setup failures keep recovery copy independent of transport wording. */
+export class SetupFirstModelError extends Error {
+	constructor(readonly code: SetupFirstModelErrorCode) {
+		super(code);
+		this.name = 'SetupFirstModelError';
 	}
 }
 
-/** Claude Code or Codex first, any other cloud source or key next, the local model only when nothing else is ready. */
-function sourceRank(source: ModelSource): number {
-	return isHarness(source) ? 0 : source.source === 'omlx' ? 2 : 1;
+/** Setup and Start share the catalog's readiness, including the selected account. */
+export function setupModelWorks(model: SetupModel): boolean {
+	if (model.status !== 'ready') return false;
+	if (model.connection === 'claude-code' || model.connection === 'codex') {
+		return model.runs_on?.find((account) => account.selected)?.status === 'ready';
+	}
+	return true;
 }
 
-/** Select the best ready setup source, whatever order they became ready in, on the existing CORSIA-agent model path. */
-export async function selectSetupFirstModel(token: string | null, sources: ModelSource[]): Promise<boolean> {
-	if (!token) return false;
-	const source = sources.filter(sourceIsReady).sort((a, b) => sourceRank(a) - sourceRank(b))[0];
-	if (!source) return false;
-	const lookup = await fetchCorsiaAgent(token);
-	if (lookup.kind !== 'target') return false;
-	const model = await readyModelForSetupSource(token, source, lookup.target.thread_id);
-	if (!model) return false;
-	try {
-		await saveThreadModel(lookup.target.thread_id, getModelDispatchId(model), token, 'setup');
-		return true;
-	} catch {
-		return false;
+/** Prefer each subscription's advertised default, then a tested API provider’s default (or first ready row), then local. */
+export function bestSetupModel(models: SetupModel[], tested: TestedProvider[] = []): SetupModel | undefined {
+	const ready = models.filter(setupModelWorks);
+	for (const connection of ['claude-code', 'codex']) {
+		const rows = ready.filter((row) => row.connection === connection);
+		const model = rows.find((row) => row.is_default) ?? rows[0];
+		if (model) return model;
 	}
+	for (const test of tested) {
+		const rows = ready.filter((row) => row.connection === test.source || row.provider === test.source);
+		const model = rows.find((row) => row.is_default) ?? rows[0];
+		if (model) return model;
+	}
+	return ready.find((row) => row.connection === 'omlx');
 }
 
-/** Finishing setup must leave the model picker available when preselection cannot complete. */
-export async function finishSetupWithBestEffortSelection(
-	token: string | null,
-	sources: ModelSource[],
-	onFinished: () => void,
-): Promise<void> {
+/** Read the same scope the CORSIA agent will use, never the unscoped catalog. */
+export async function setupCatalog(session: string): Promise<{ models: SetupModel[]; thread: string }> {
+	let lookup: Awaited<ReturnType<typeof fetchCorsiaAgent>>;
 	try {
-		await selectSetupFirstModel(token, sources);
+		lookup = await fetchCorsiaAgent(session);
 	} catch {
-		// Preselection is optional; the finished app exposes the picker as recovery.
+		throw new SetupFirstModelError('agent_unavailable');
 	}
-	onFinished();
+	if (lookup.kind !== 'target') throw new SetupFirstModelError('agent_unavailable');
+	const thread = lookup.target.thread_id;
+	let response: Response;
+	try {
+		response = await fetch(`/api/models?thread_id=${encodeURIComponent(thread)}`, { headers: { Authorization: `Bearer ${session}` } });
+	} catch {
+		throw new SetupFirstModelError('catalog_unavailable');
+	}
+	if (!response.ok) {
+		throw new SetupFirstModelError(response.status >= 400 && response.status < 500 ? 'catalog_refused' : 'catalog_unavailable');
+	}
+	let body: unknown;
+	try {
+		body = await response.json();
+	} catch {
+		throw new SetupFirstModelError('catalog_unavailable');
+	}
+	if (!body || typeof body !== 'object' || !Array.isArray((body as { models?: unknown }).models)) throw new SetupFirstModelError('catalog_unavailable');
+	return { models: (body as { models: SetupModel[] }).models, thread };
+}
+
+/** Refresh and bind before completion; failures leave setup open. */
+export async function bindSetupFirstModel(session: string, tested: TestedProvider[] = [], beforeBind?: (binding: SetupBinding) => Promise<void>): Promise<SetupBinding> {
+	const { models, thread } = await setupCatalog(session);
+	const model = bestSetupModel(models, tested);
+	if (!model) throw new SetupFirstModelError('no_model');
+	const selector = getModelDispatchId(model);
+	const binding = { model: selector, source: model.connection ?? model.provider ?? '' };
+	try {
+		await beforeBind?.(binding);
+		const saved = await saveThreadModel(thread, selector, session, 'setup');
+		if (saved.kind !== 'committed' || saved.model !== selector) throw new SetupFirstModelError('binding_incomplete');
+		return binding;
+	} catch (error) {
+		if (error instanceof SetupFirstModelError) throw error;
+		throw new SetupFirstModelError('binding_incomplete');
+	}
 }

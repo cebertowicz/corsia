@@ -1,400 +1,346 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
 	import { get } from 'svelte/store';
-	import { Button, Message } from '$lib/components/ui';
+	import { Button } from '$lib/components/ui';
 	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
 	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
-	import SetupWelcomeChoice from './SetupWelcomeChoice.svelte';
-	import type { SetupPicks } from './SetupSubscriptionQuestion.svelte';
-	import SetupApiKeyRow from './SetupApiKeyRow.svelte';
-	import SetupExistingOmlxConsent from './SetupExistingOmlxConsent.svelte';
-	import { token, user } from '$lib/stores/auth';
-	import { fetchSources, isHarness, recheckSources, setupLocalSource, sourceIsReady, type ModelSource } from '$lib/conductorSources';
-	import { createSetupConnect, POLL_MS, VENDOR_COPY } from '$lib/setupConnect.svelte';
-	import { loadProviders, providers } from '$lib/stores/providers';
-	import { on } from '$lib/ws/events';
-	import { connect } from '$lib/ws';
-	import { finishSetupWithBestEffortSelection } from '$lib/setupFirstModel';
-	import { fetchSetupProgress, recordSetupProgress } from '$lib/setupProgress';
-	import { saveSetupReport, setupReportInvoke } from '$lib/setupReport';
-	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
-	import { createSetupLocalPick, noLocalModel } from '$lib/setupLocalPick.svelte';
-	import { createSetupPicks } from '$lib/setupPicks.svelte';
-	import { createSetupLocalActions } from '$lib/setupLocalActions.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
+	import SetupWelcome from './SetupWelcome.svelte';
+	import SetupWorkFolder, { type FolderNotice } from './SetupWorkFolder.svelte';
 	import SetupConnect from './SetupConnect.svelte';
 	import SetupConnectBack from './SetupConnectBack.svelte';
+	import SetupSubscriptions, { subscriptionQuestion, type SetupPicks } from './SetupSubscriptions.svelte';
+	import AddProviderModal from './v7/AddProviderModal.svelte';
+	import ProviderSettingsModal from './v7/ProviderSettingsModal.svelte';
+	import type { HostProvider } from '$lib/stores/providersV7';
+	import { token, user } from '$lib/stores/auth';
+	import { fetchSources, recheckSources, cancelLocalDownload, sourceIsReady, type ModelSource } from '$lib/conductorSources';
+	import { stopLocalServer } from '$lib/conductorSourcesApi';
+	import { createSetupConnect, POLL_MS } from '$lib/setupConnect.svelte';
+	import { loadProviders, testedProviders, type ProviderEntry } from '$lib/stores/providers';
+	import { on } from '$lib/ws/events';
+	import { connect } from '$lib/ws';
+	import { bestSetupModel, setupModelWorks, setupCatalog, bindSetupFirstModel, SetupFirstModelError, type SetupModel } from '$lib/setupFirstModel';
+	import { fetchSetupProgress, recordSetupProgress } from '$lib/setupProgress';
+	import { saveSetupReport, type SetupReportRow } from '$lib/setupReport';
+	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
+	import { createSetupLocalPick } from '$lib/setupLocalPick.svelte';
 	import { createSetupRemote } from '$lib/setupRemote.svelte';
 	import { applyWorkFolder, shellInfo } from '$lib/remoteShell';
-	import { localJob as buildLocalJob, setupFinishNote, setupSourceMeta, type PickedTools } from '$lib/setupLocalPresentation';
-	/** `startConnect` opens on Connect to another computer (from Settings › System), skipping the checks; Back then calls `onLeaveConnect`. `resume` picks up a setup whose account already exists, from the backend's record. */
+	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
+	import { measuredDownloadTime } from '$lib/setupLocalPresentation';
+	import { WELCOME_ACCOUNT_LINE, WELCOME_TITLE } from '$lib/setupWelcome';
+	import { isSetupWide } from '$lib/stores/viewport';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
+	type LocalStartResult = 'started' | 'failed';
+	type LocalStartResponse = { result: LocalStartResult; reference?: string; fix?: string };
+	const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';
+	async function requestLocalStart(session: string | null): Promise<LocalStartResponse> {
+		const response = await fetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session}` } : {}) },
+			body: JSON.stringify(session ? { onboarding: true } : {}),
+		});
+		const body = await response.json().catch(() => null);
+		const reference = typeof body?.detail?.ref === 'string' ? body.detail.ref : typeof body?.ref === 'string' ? body.ref : undefined;
+		const fix = typeof body?.detail?.fix === 'string' ? body.detail.fix : typeof body?.fix === 'string' ? body.fix : undefined;
+		if (response.ok && body?.ok !== false) return { result: 'started', reference };
+		if (!fix) throw new Error('local start response omitted recovery');
+		return { result: 'failed', reference, fix };
+	}
+	function setupFinishRecovery(error: unknown): string {
+		const code = error instanceof SetupFirstModelError ? error.code : undefined;
+		if (code === 'no_model') return 'CORSIA couldn’t find a working model. Connect a provider or choose one that is ready, then try again.';
+		if (code === 'binding_incomplete') return 'CORSIA couldn’t save the selected model. Try again.';
+		if (code === 'catalog_refused') return 'CORSIA couldn’t save the selected model. Check the provider setup, then try again.';
+		if (code === 'catalog_unavailable') return 'CORSIA couldn’t check your available models. Try again.';
+		if (code === 'agent_unavailable') return 'CORSIA couldn’t reach its agent. Try again.';
+		if (code === 'progress_save') return 'CORSIA couldn’t save setup progress. Try again.';
+		return 'CORSIA couldn’t finish model setup. Try again.';
+	}
+	/** The backend's own account refusal names the cause; a validation 422 has no string detail. */
+	function accountRefusal(detail: unknown): string | null {
+		return typeof detail === 'string' && detail.trim() ? detail.trim() : null;
+	}
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
-	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error' | 'connect';
-	type SetupStatus = { apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; required_username?: string | null; existing_omlx?: boolean; classifier?: ClassifierState; ready_ai?: string | null; ai_check_pending?: boolean; error?: string };
-	type FolderNotice = { kind: 'protected'; folder: string } | { kind: 'unwritable'; reason: string } | null;
-	const classifier = createSetupClassifier();
-	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources: (strict) => refreshSources(strict) });
-	const remote = createSetupRemote();
-	const canConnect = shellInfo() !== null; // only the desktop app can pair with another computer
+	type Page = 'checking' | 'account' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
+	const CLI_VENDORS = ['claude-code', 'codex'] as const;
+	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
+	const classifier = createSetupClassifier(), localPick = createSetupLocalPick(), remote = createSetupRemote();
 	let page = $state<Page>(untrack(() => startConnect) ? 'connect' : 'checking');
-	let status = $state<SetupStatus>({});
-	const cloud = createSetupPicks({ status: () => status, update: (next) => (status = { ...status, ...next }) });
-	const localPick = createSetupLocalPick();
-	let statusError = $state('');
-	let name = $state('');
-	let username = $state('');
-	let password = $state('');
-	let confirmation = $state('');
-	let email = $state('');
-	let folder = $state('~/CORSIA'), folderChanged = $state(false);
-	let folderNotice = $state<FolderNotice>(null);
-	let folderChanging = $state(false);
-	let accountBusy = $state(false);
-	let accountError = $state('');
-	let reportError = $state('');
-	let confirmationError = $state('');
-	let sources = $state<ModelSource[]>([]);
-	let sourceError = $state('');
-	let localStartError = $state('');
-	let localDownloadPending = $state(false);
-	const localActions = createSetupLocalActions({ token: () => get(token), downloading: () => localDownloading, existingOmlx: () => Boolean(status.existing_omlx), refresh: () => refreshSources(),
-		askConsent: () => (existingOmlxConsent = true), fail: (message) => (sourceError = message), clearStartError: () => (localStartError = '') });
-	let existingOmlxConsent = $state(false);
-	/** Welcome's Let CORSIA manage it (or Use mine) for the person's own oMLX. */
-	let manageOwnOmlx = $state(true);
-	let keySaved = $state(false);
-	let providerName = $state('anthropic');
-
-	/** Something besides the local model will run chat: a tool already ready, or one the person checked. */
-	const hasSource = $derived(Boolean(status.ready_ai) || cloud.any);
-	const noModel = $derived(noLocalModel(status.local_eligible, localPick.pick));
-
+	// Below 1280 wide, Welcome is its own screen before the account form; from 1280 it sits beside the form instead.
+	let welcomeSeen = $state(false);
+	const screen = $derived(page === 'account' && !$isSetupWide && !welcomeSeen && !$token ? 'welcome' : page);
+	let status = $state<Status>({}), statusError = $state(''), reportError = $state('');
+	let name = $state(''), username = $state(''), password = $state(''), confirmation = $state(''), email = $state('');
+	let folder = $state('~/CORSIA'), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
+	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
+	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
+	let localStartError = $state<'other' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
+	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
+	// The subscriptions answer; null until answered (or skipped, or a resumed setup), when every CLI row shows.
+	let picks = $state<SetupPicks | null>(null), confirmLocalStop = $state(false), localOffFailed = $state<{ reference?: string } | undefined>();
+	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources });
+	const canConnect = shellInfo() !== null;
+	let preauthLocal = $state<LocalRowState | undefined>();
+	const local = $derived(($token ? sources.find((source) => source.source === 'omlx') : preauthLocal) as LocalRowState | undefined);
+	const eligible = $derived(status.local_eligible !== false);
+	const downloading = $derived(['downloading', 'paused', 'starting'].includes(local?.local_state ?? ''));
+	const localFailed = $derived(['failed', 'setup_failed', 'start_failed'].includes(local?.local_state ?? '') || Boolean(localStartError));
+	const tested = $derived($testedProviders.map((source) => ({ source })));
+	const best = $derived(bestSetupModel(catalog, tested));
+	const canFinish = $derived(Boolean(best));
+	const cliSignedIn = (vendor: string) => { const source = sources.find((row) => row.source === vendor); return Boolean(source && (sourceIsReady(source) || source.limited)); };
+	const cliPicked = (vendor: string) => picks === null || (vendor === 'codex' ? picks.chatgpt : picks.claude);
+	const subscriptionsSkipped = $derived(subscriptionQuestion(cliSignedIn('claude-code'), cliSignedIn('codex')) === null);
+	// A working cloud model frees the local download to be turned off.
+	const cloudReady = $derived(catalog.some((row) => row.connection !== 'omlx' && setupModelWorks(row)));
+	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? 'Use up to 32 lowercase letters, numbers, dashes or underscores.' : '');
+	const accountName = $derived(username.trim() || $user?.name || '');
+	const accountValid = $derived(Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password));
 	const steps = $derived<SetupStep[]>(page === 'connect' ? remote.steps : [
-		{ label: 'Welcome', icon: 'sparkle', state: page === 'welcome' || page === 'hard-stop' || page === 'checking' ? 'current' : 'done' },
-		{ label: 'Your account', icon: 'person', state: page === 'account' ? 'current' : page === 'models' && !existingOmlxConsent ? 'done' : 'todo' },
-		{ label: status.ready_ai && page !== 'models' ? status.ready_ai : 'Your AI', icon: 'chip', state: page === 'models' ? 'current' : status.ready_ai ? 'done' : 'todo' },
+		{ label: 'Your account', icon: 'person', state: ['checking', 'account', 'hard-stop'].includes(page) || (page === 'error' && !$token) ? 'current' : 'done' },
+		{ label: 'Your subscriptions', icon: 'sparkle', state: page === 'subscriptions' ? 'current' : page === 'models' ? 'done' : 'todo' },
+		{ label: 'Providers & models', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
 	]);
-	/** Welcome's choice where it showed both (Let CORSIA manage it, Use mine); undefined where it didn't. */
-	const ownOmlxChoice = $derived(status.existing_omlx && localPick.wanted ? manageOwnOmlx : undefined);
-	const manageExisting = $derived(ownOmlxChoice === true);
-	const local = $derived(sources.find((source) => source.source === 'omlx'));
-	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage || (localDownloadPending && !local?.setup_error)));
-	const localJob = $derived(buildLocalJob(local, localDownloading, localPick.pick?.model?.name ?? local?.omlx_management?.starter_name ?? undefined, page, Boolean(get(token)), localStartError, () => void localActions.cancel()));
-	const canFinish = $derived(sources.some(sourceIsReady));
+	/** Every failed row's cause and reference, so the saved report says what went wrong where. */
+	function reportRows(): SetupReportRow[] {
+		return aiRows.filter((row) => row.error).map((row) => ({
+			key: row.key as SetupReportRow['key'], name: row.name, reference: row.reference,
+			cause: row.key === 'omlx' ? (localOffFailed ? 'turn_off_failed' : local?.setup_error_code ?? (localStartError || undefined)) : connectFlow.attempts[row.key]?.cause,
+		}));
+	}
+	/** Save a report only where a reference gives the report log lines to find; the row's own action covers the rest. */
+	function withReportAction(row: AiRow): AiRow {
+		return row.reportable && row.reference ? { ...row, more: [...(row.more ?? []), { label: 'Save a report', run: () => void saveSetupReport(reportRows()) }] } : row;
+	}
 	const jobs = $derived<SetupJob[]>([
-		...(localJob ? [localJob] : []),
+		...(page !== 'models' && (downloading || localFailed) ? [{ label: 'Local model', state: localFailed ? 'error' as const : 'busy' as const,
+			meta: localFailed ? (localStartError ? startFix : local?.fix) ?? '' : local?.local_state === 'starting' ? 'Starting the local model…' : ['Downloading', `${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), progress: (local?.download_percent ?? 0) / 100 }] : []),
 		...(classifier.job ? [classifier.job] : []),
-		...(page === 'account' && accountBusy ? [{ label: 'Starting CORSIA', state: 'busy' as const, meta: 'Preparing your account' }] : []),
-		...(page === 'error' ? [{ label: 'Starting CORSIA', state: 'error' as const, meta: 'Couldn’t start' }] : []),
-		...(page === 'models' && canFinish && !localDownloading ? [{ label: 'Starting CORSIA', state: 'done' as const, meta: 'Ready' }] : []),
+		...(accountBusy ? [{ label: 'Starting CORSIA', state: 'busy' as const }] : []),
 	]);
-	const modelSize = $derived(localPick.pick?.model ? `${localPick.pick.model.download_size_gb} GB` : local?.download_size || '');
-	/** Why this computer got the starter model, said by the server when oMLX recommended none: on the pick, or, for the person's own oMLX under management, on its source row. */
-	const starterNote = $derived((localPick.pick?.state === 'picked' && localPick.pick.model ? localPick.pick.message : null) ?? local?.omlx_management?.starter_note ?? undefined);
-	const downloadModelLabel = $derived(localPick.pick?.model?.name || 'The local model');
-	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? "Use 1–32 lowercase letters, numbers, '-' or '_'." : '');
-	function leaveConnect() { if (startConnect) onLeaveConnect?.(); else page = 'welcome'; }
-	type SetupPrimary = { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean };
-	type SetupView = { title: string; lede?: string; primary?: SetupPrimary; onPrimary?: () => void; mark?: boolean };
-	const shellView = $derived.by((): SetupView => {
-		switch (page) {
-			case 'checking':
-				return { title: 'Checking this computer', lede: 'This takes a moment.' };
-			case 'hard-stop':
-				if (status.apple_silicon === false) return { title: 'CORSIA needs Apple silicon', lede: 'This version of CORSIA runs on Macs with Apple silicon.' };
-				if (status.macos_supported === false) return { title: 'Update macOS to continue', lede: 'Update to macOS 15 or later, then open CORSIA again.' };
-				return { title: 'Move CORSIA to Applications', lede: 'Move CORSIA to Applications, then open it again so updates work.' };
-			case 'connect': return remote.view;
-			case 'welcome':
-				return { title: 'Welcome to CORSIA', lede: 'Your own AI team, on this computer. It remembers your projects, works with the tools and models you already use, and shows you results, not transcripts.', primary: { label: 'Get started', disabled: cloud.detecting || (noModel && !hasSource) }, onPrimary: beginSetup, mark: true };
-			case 'account':
-				return { title: 'Create your account', primary: { label: status.ready_ai ? 'Start using CORSIA' : 'Continue', disabled: accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || !name.trim() || !username.trim() || !!usernameError || password.length < 8 || !!confirmationError, loading: accountBusy }, onPrimary: createAccount };
-			case 'error':
-				return { title: 'CORSIA couldn’t start', lede: reportError || statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: resume ? resumeSetup : !get(token) ? readStatus : createAccount };
-			case 'models':
-				if (existingOmlxConsent) return { title: 'Use your oMLX?', lede: 'Your oMLX is already on this computer.' };
-				return { title: 'Connect an AI', lede: cloud.any ? 'Setting up what you chose. You can add the others with CORSIA later.' : 'CORSIA needs one to start. You can add the others with CORSIA later.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote, noteAlways: Boolean(pickedTools?.failed.length && pickedTools.localReady) }, onPrimary: () => void finishSetupWithBestEffortSelection(get(token), sources, finishSetup) };
-		}
+	const aiRows = $derived.by((): AiRow[] => {
+		const rows = CLI_VENDORS.filter((vendor) => cliSignedIn(vendor) || cliPicked(vendor)).map((vendor): AiRow => {
+			const source = sources.find((row) => row.source === vendor);
+			if (!source) {
+				const name = vendor === 'codex' ? 'Codex' : 'Claude Code';
+				return sourceError ? { key: vendor, name, meta: `Couldn’t check ${name}.`, error: true, action: { label: 'Retry', run: () => void refreshSources(true) } } : { key: vendor, name, meta: '', busy: true };
+			}
+			const view = connectFlow.row(source);
+			const works = catalog.some((row) => row.connection === vendor && setupModelWorks(row));
+			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, pill: works ? { state: 'success', label: 'Ready' } : undefined });
+		});
+		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
+			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed,
+			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
+			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() })));
+		const provider = tested.find((test) => bestSetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
+		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${provider.source} · passed a test call` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.',
+			pill: provider ? { state: 'success', label: 'Ready' } : undefined, action: provider ? undefined : { label: 'Add provider', run: () => { showAdd = true; } } });
+		return rows;
 	});
-
+	const finishNote = $derived(setupStartNote(canFinish, eligible, downloading, local?.download_eta_seconds));
+	type View = { title: string; lede?: string; primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean }; onPrimary?: () => void };
+	const view = $derived.by((): View => {
+		if (page === 'connect') return remote.view;
+		if (page === 'checking') return { title: 'Checking this computer' };
+		if (page === 'error') return { title: 'CORSIA couldn’t start', lede: reportError || statusError || 'Something went wrong while starting. Try again, or save a report to send.', primary: { label: 'Retry' }, onPrimary: resume ? resumeSetup : readStatus };
+		if (page === 'hard-stop') return { title: 'Update macOS to open CORSIA', lede: 'CORSIA needs macOS 15 or later. Update in System Settings › General › Software Update, then open CORSIA again.' };
+		if (screen === 'welcome') return { title: WELCOME_TITLE, primary: { label: 'Continue' }, onPrimary: () => { welcomeSeen = true; } };
+		// Once the account exists, the screen reads back what was set: neither the account nor its folder can change after it.
+		if (page === 'account' && $token) return { title: 'Your account', primary: { label: 'Continue' }, onPrimary: afterAccount };
+		if (page === 'account') return { title: $isSetupWide ? WELCOME_TITLE : 'Create your account', lede: $isSetupWide ? WELCOME_ACCOUNT_LINE : undefined, primary: { label: 'Continue', loading: accountBusy, disabled: !accountValid || accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'picker_failed' }, onPrimary: createFromForm };
+		if (page === 'subscriptions') return { title: 'Your subscriptions', lede: 'CORSIA’s agents can work through a Claude or ChatGPT plan you already pay for.' };
+		return { title: 'Providers & models', lede: 'CORSIA needs one working model to continue setup.', primary: { label: 'Start using CORSIA', disabled: !canFinish || finishing, loading: finishing, note: finishNote, noteAlways: true }, onPrimary: finishSetup };
+	});
+	function validateConfirmation() { confirmationError = confirmation && password !== confirmation ? 'Passwords don’t match.' : ''; }
+	/** Continue on the account screen creates the account, applying the chosen folder first. */
+	async function createFromForm() { validateConfirmation(); if (accountValid && !get(token)) await createAccount(); }
+	/** The subscriptions screen is asked only while a CLI is still not signed in. */
+	function afterAccount() { page = subscriptionsSkipped ? 'models' : 'subscriptions'; }
+	/** One answer: picked tools start installing now, an unpicked one stops what it started. */
+	function answerSubscriptions(next: SetupPicks) {
+		picks = next;
+		// Kept so the first chat knows which subscriptions the person said they pay for.
+		void recordSetupProgress({ picks: next }, get(token));
+		for (const vendor of CLI_VENDORS) {
+			if (cliSignedIn(vendor)) continue;
+			const source = sources.find((row) => row.source === vendor);
+			if (cliPicked(vendor)) { if (source) void connectFlow.install(source); }
+			else void connectFlow.stop(vendor);
+		}
+		page = 'models';
+	}
+	function leaveConnect() { if (startConnect) onLeaveConnect?.(); else page = 'account'; }
 	async function readStatus() {
-		statusError = '';
-		page = 'checking';
+		page = 'checking'; statusError = '';
 		try {
 			const response = await fetch('/api/setup/status');
 			if (response.status === 409) { onExistingAccount(); return; }
-			if (!response.ok) throw new Error(`setup status ${response.status}`);
-			status = await response.json();
-			folder = status.work_folder || folder;
+			if (!response.ok) throw new Error('status');
+			status = await response.json(); folder = status.work_folder || folder;
 			if (status.required_username) username = status.required_username;
 			if (status.classifier) classifier.accept(status.classifier);
-			if (status.apple_silicon === false || status.macos_supported === false || status.app_location === 'disk_image') page = 'hard-stop';
-			else {
-				page = 'welcome';
-				localPick.open(status.local_eligible !== false, Boolean(status.existing_omlx));
-				await cloud.settle();
-			}
-		} catch {
-			statusError = 'CORSIA couldn’t check this computer. Try again, or sign in if you already set it up.';
-			page = 'error';
-		}
+			if (status.macos_supported === false) { page = 'hard-stop'; return; }
+			page = 'account'; void classifier.start();
+			if (eligible) { await localPick.start(); await startLocal(); await readLocalProgress(); }
+		} catch { statusError = 'Something went wrong while starting. Try again, or save a report to send.'; page = 'error'; }
 	}
-
-	function togglePick(key: keyof SetupPicks) {
-		cloud.toggle(key);
-		void recordSetupProgress({ picks: { ...cloud.picks } }, get(token));
-		// The local switch is locked on while nothing else will run chat, so unchecking the last pick turns it back on.
-		if (!hasSource && !noModel && !localPick.wanted) { localPick.change(true, Boolean(status.existing_omlx)); void recordSetupProgress({ local_ai: true }, get(token)); }
-	}
-
-	/** Each checked tool installs, then opens its sign-in by itself. */
-	async function connectPickedTools() {
-		await Promise.all(cloud.vendors.map((vendor) => {
-			const source = sources.find((candidate) => candidate.source === vendor);
-			return source ? connectFlow.connectPicked(source) : undefined;
-		}));
-	}
-
-	type LocalDownloadStart = 'started' | 'consent_required' | 'failed';
-
-	async function startLocalDownload(consentExisting = false): Promise<LocalDownloadStart> {
-		if (!localPick.downloads(status.free_disk_gb) && !consentExisting) return 'started';
-		const response = await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent_existing: consentExisting, manage_existing: consentExisting ? ownOmlxChoice : undefined }) });
-		const result = await response.json().catch(() => null);
-		if (response.status === 409 && result?.code === 'consent_required') return 'consent_required';
-		return response.ok && result?.ok !== false ? 'started' : 'failed';
-	}
-
-	async function beginSetup() {
-		void classifier.start();
-		if (status.existing_omlx && localPick.wanted) {
-			existingOmlxConsent = true;
-			page = 'models';
+	async function checkLocal() {
+		const current = get(token);
+		if (current) {
+			const progress = await fetchSetupProgress(current);
+			if (progress?.status) status = progress.status as Status;
+			await startLocal();
 			return;
 		}
-		try {
-			const start = await startLocalDownload();
-			if (start === 'consent_required') {
-				existingOmlxConsent = true;
-				page = 'models';
-				return;
-			}
-			if (start === 'started') localDownloadPending = localPick.downloads(status.free_disk_gb);
-			else localStartError = 'The local model download couldn’t start.';
-		} catch {
-			localStartError = 'The local model download couldn’t start.';
-		}
-		page = 'account';
+		await localPick.start();
+		await readLocalProgress();
 	}
-
-	/** Finishing is the one thing that closes setup for good: it is recorded before the app opens. */
-	const finishSetup = async () => {
-		if (await recordSetupProgress({ completed: true }, get(token))) { onFinished(); return; }
-		sourceError = 'CORSIA couldn’t save that setup is finished. Try again.'; page = 'models';
-	};
-
-	async function decideExistingOmlx(useIt: boolean) {
-		void recordSetupProgress({ local_ai: useIt }, get(token));
-		if (!useIt) { existingOmlxConsent = false; localPick.wanted = false; page = get(token) ? 'models' : 'account'; return; }
-		localActions.busy = true;
-		localStartError = '';
-		let returnToModels = false;
+	async function readLocalProgress() {
+		try {
+			const response = await fetch('/api/setup/local-download');
+			if (!response.ok) return;
+			const live = await response.json();
+			preauthLocal = { source: 'omlx', name: live.model ?? 'Local model', state: live.state, local_state: live.state,
+				download_percent: live.percent, download_eta_seconds: live.eta_seconds, download_size: live.download_size, download_stalled: live.stalled,
+				setup_error_code: live.cause, setup_error_reference: live.ref, bytes_to_free: live.bytes_to_free, fix: live.fix };
+		} catch { /* Preserve the last job projection until the next successful read. */ }
+	}
+	async function startLocal() {
+		if (!eligible || localBusy) return;
+		localBusy = true; localStartError = ''; localStartReference = ''; startFix = undefined;
 		try {
 			const current = get(token);
-			returnToModels = Boolean(current);
-			const start = current
-				? await setupLocalSource(current, true, ownOmlxChoice)
-				: await startLocalDownload(true);
-			const started = typeof start === 'string' ? start === 'started' : start.ok;
-			if (started) localDownloadPending = true;
-			else localStartError = 'The local model couldn’t start.';
-		} catch {
-			localStartError = 'The local model couldn’t start.';
-		} finally {
-			localActions.busy = false;
-			existingOmlxConsent = false;
-			page = returnToModels ? 'models' : 'account';
-		}
+			const { result, reference, fix } = await requestLocalStart(current);
+			localStartReference = reference ?? '';
+			if (result === 'failed') { localStartError = 'other'; startFix = fix; }
+			if (current) await refreshSources();
+		} catch { localStartError = 'other'; startFix = LOCAL_START_NETWORK_FAILURE; }
+		finally { localBusy = false; }
 	}
-
-	function validateConfirmation() {
-		confirmationError = confirmation && password !== confirmation ? 'Passwords don’t match.' : '';
+	async function stopLocal() {
+		const current = get(token);
+		if (current) { await cancelLocalDownload(current); await refreshSources(); }
+		else await fetch('/api/setup/local-download/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
 	}
-
+	async function turnOffLocal() {
+		const current = get(token);
+		if (!current) return;
+		const stopped = await stopLocalServer(current).catch(() => ({ ok: false, ref: undefined }));
+		localOffFailed = stopped.ok ? undefined : { reference: stopped.ref };
+		await refreshSources();
+	}
+	async function connectToAnotherComputer() {
+		await stopLocal();
+		remote.reset(); page = 'connect';
+	}
 	async function createAccount() {
-		validateConfirmation();
-		if (!name.trim() || !username.trim() || usernameError || password.length < 8 || confirmationError || accountBusy) return;
+		if (!accountValid || accountBusy) return;
 		accountBusy = true; accountError = '';
 		try {
 			if (folderChanged) { await applyWorkFolder(folder); folderChanged = false; }
-		} catch {
-			accountError = 'CORSIA couldn’t prepare this work folder. Choose another folder or try again.';
-			accountBusy = false;
-			return;
-		}
-		try {
-			const response = await fetch('/api/setup/first-account', {
-				method: 'POST', headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null }),
-			});
-			if (response.status === 409) { onExistingAccount(); return; }
-			if (response.status === 422) {
-				const detail = (await response.json().catch(() => null))?.detail;
-				accountError = typeof detail === 'string' ? detail : 'Check the highlighted account details and try again.';
+			const response = await fetch('/api/setup/first-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null }) });
+			if (response.status === 409) { accountExists = true; accountError = 'This computer already has a CORSIA account. Sign in instead.'; page = 'account'; return; }
+			const result = await response.json().catch(() => null);
+			if (!response.ok) {
+				if (response.status === 422) { page = 'account'; accountError = accountRefusal(result?.detail) ?? 'Couldn’t create your account. Try again.'; }
+				else accountError = 'Couldn’t create your account. Try again.';
 				return;
 			}
-			if (!response.ok) throw new Error(`account ${response.status}`);
-			const result = await response.json();
-			onAccountCreated();
-			token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() });
-			// A session opened here has no socket until something connects it; the app shell only connects on mount.
-			connect();
-			await Promise.all([refreshSources(), classifier.read()]);
-			await loadCloudProviders();
+			onAccountCreated(); token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() }); connect();
 			password = ''; confirmation = '';
-			if (status.ready_ai && canFinish) return finishSetupWithBestEffortSelection(get(token), sources, finishSetup);
-			page = 'models';
-			void connectPickedTools();
-		} catch { accountError = 'CORSIA couldn’t create your account. Try again.'; }
+			await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
+			afterAccount();
+		} catch { accountError = 'Couldn’t create your account. Try again.'; }
 		finally { accountBusy = false; }
 	}
-
-	/** The API-key form needs the provider list; if it cannot be read, say so instead of showing an empty choice. */
-	async function loadCloudProviders() {
-		await loadProviders();
-		if (!get(providers).some((provider) => provider.type === 'cloud')) sourceError = 'CORSIA couldn’t load the list of providers. Try again.';
-	}
-
-	/** A strict refresh answers a check the person asked for, so a failed recheck is shown, never replaced by the stored rows. */
 	async function refreshSources(strict = false) {
-		const current = get(token);
-		if (!current) return;
+		const current = get(token); if (!current) return;
 		try {
-			sources = await (strict ? recheckSources(current) : recheckSources(current).catch(() => fetchSources(current)));
-			localDownloadPending = false;
+			sources = await (strict ? recheckSources(current) : fetchSources(current));
+			catalog = (await setupCatalog(current)).models;
 			sourceError = '';
-		} catch { sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
+		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
 	}
-
-	let rechecking = false;
-	/** Coming back to the window is how a copy fixed in Terminal, or a sign-in finished in the browser, is noticed. */
-	async function recheckOnFocus() {
-		if (page !== 'models' || rechecking) return;
-		rechecking = true;
+	async function finishSetup() {
+		const current = get(token); if (!current || finishing) return;
+		finishing = true; sourceError = '';
 		try {
-			await refreshSources();
-			await connectFlow.tick();
-		} finally { rechecking = false; }
+			await bindSetupFirstModel(current, tested, async () => {
+				if (!await recordSetupProgress({ handoff: { tools: connectFlow.attempts } }, current)) throw new SetupFirstModelError('progress_save');
+			});
+			// The answer rides the completion write too, so a failed earlier save is repaired before the first chat reads it.
+			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts }, ...(picks ? { picks } : {}) }, current)) throw new SetupFirstModelError('progress_save');
+			onFinished();
+		} catch (error) {
+			await refreshSources(true);
+			sourceError = setupFinishRecovery(error);
+		}
+		finally { finishing = false; }
 	}
-
+	async function resumeSetup() {
+		const progress = await fetchSetupProgress(get(token));
+		if (!progress) { page = 'error'; return; }
+		if (progress.setup_completed) { onFinished(); return; }
+		status = (progress.status ?? {}) as Status; folder = status.work_folder || folder; page = 'models';
+		if (status.classifier) classifier.accept(status.classifier);
+		await Promise.all([refreshSources(true), classifier.read(), loadProviders()]);
+	}
+	function selectProvider(provider: ProviderEntry) { showAdd = false; openProvider = { name: provider.name, label: provider.label, type: provider.type, statusDot: 'disabled', subline: '', raw: provider }; }
 	$effect(() => {
-		if (!connectFlow.active) return;
-		const timer = setInterval(() => void connectFlow.tick(), POLL_MS);
+		// Authenticated source/catalog state arrives through models_updated. Poll only the two setup-owned jobs
+		// that have no event while running: CLI install/sign-in, and the pre-account local downloader.
+		if (!connectFlow.active && (!downloading || get(token))) return;
+		const timer = setInterval(() => {
+			if (connectFlow.active) void connectFlow.tick();
+			if (!get(token) && downloading) void readLocalProgress();
+		}, POLL_MS);
 		return () => clearInterval(timer);
 	});
-
-	/** After a pick the step lists only what was checked, so no Set up appears for a tool the person did not choose. */
-	const harnessSources = $derived(sources.filter(isHarness).filter((source) => !cloud.any || cloud.vendors.includes(source.source)));
-	const showLocalRow = $derived(page === 'models' && Boolean(local));
-	const aiRows = $derived.by((): AiRow[] => {
-		const rows: AiRow[] = harnessSources.map((source) => {
-			const row = connectFlow.row(source);
-			return { key: source.source, name: VENDOR_COPY[source.source]?.cli ?? source.name, meta: row.meta, busy: row.busy, spinning: row.spinning, error: row.error, detail: row.detail, action: row.action, confirm: row.confirm, more: row.more,
-				pill: row.ready ? { state: 'success', label: 'Ready' } : undefined };
-		});
-		if (keySaved) rows.push({ key: 'api-key', name: 'API key', meta: `Uses your ${$providers.find((provider) => provider.name === providerName)?.label ?? 'provider'} key.`, pill: { state: 'success', label: 'Ready' } });
-		if (!showLocalRow || !local) return rows;
-		const ready = sourceIsReady(local);
-		rows.push({ key: 'omlx', name: 'This computer', meta: setupSourceMeta(local, localStartError, modelSize),
-			pill: ready ? { state: 'success', label: 'Ready' } : localDownloading ? { state: 'loading', label: 'Downloading' } : undefined,
-			action: ready ? undefined : localDownloading ? { label: 'Cancel', run: localActions.cancel, loading: localActions.busy } : { label: local?.setup_error || localStartError ? 'Try again' : 'Download', run: localActions.retry, loading: localActions.busy },
-			error: !localDownloading && !ready && Boolean(local?.setup_error || localStartError), detail: !localDownloading && !ready && (local?.setup_error || localStartError) ? `${downloadModelLabel} didn’t finish downloading. Choose Try again, or use another source.` : starterNote });
-		return rows;
-	});
-
-	/** The account exists, so the pre-account status gate is closed: the backend's record says where to pick up, and the facts are read fresh. */
-	async function resumeSetup() {
-		statusError = ''; page = 'checking';
-		const progress = await fetchSetupProgress(get(token));
-		if (!progress) { statusError = 'CORSIA couldn’t check your setup. Try again.'; page = 'error'; return; }
-		if (progress.setup_completed) { onFinished(); return; }
-		status = (progress.status ?? {}) as SetupStatus;
-		folder = status.work_folder || folder;
-		if (status.classifier) classifier.accept(status.classifier);
-		localPick.wanted = progress.local_ai ?? status.local_eligible !== false;
-		if (progress.picks) cloud.restore(progress.picks);
-		existingOmlxConsent = progress.step === 'local-consent'; page = 'models';
-		await Promise.all([refreshSources(), classifier.read()]);
-		await loadCloudProviders();
-	}
-
-	$effect(() => {
-		if (page === 'models' && get(token)) void recordSetupProgress({ step: existingOmlxConsent ? 'local-consent' : 'models' }, get(token));
-	});
-
-	/** The rows on the step that the wait line and the local-model note speak to: only rows the screen shows. */
-	const pickedTools = $derived.by((): PickedTools | undefined => {
-		const rows = cloud.vendors.map((vendor) => aiRows.find((row) => row.key === vendor)).filter((row): row is AiRow => Boolean(row) && !row?.pill);
-		const keyOpen = cloud.picks.key && !keySaved;
-		if (!rows.length && !keyOpen) return undefined;
-		const names = (keep: (row: AiRow) => boolean) => rows.filter(keep).map((row) => row.name);
-		return { waiting: names((row) => !row.error && Boolean(row.busy)), idle: names((row) => !row.error && !row.busy), failed: names((row) => Boolean(row.error)), localReady: Boolean(local && sourceIsReady(local)), keyOpen };
-	});
-
-	const finishNote = $derived(setupFinishNote(local, localDownloading, localStartError, pickedTools));
-
 	$effect(() => (page === 'connect' ? remote.start() : undefined));
 	onMount(() => {
-		if (startConnect) { /* Connect opened from Settings: no checks to run */ }
-		else if (resume) void resumeSetup();
-		else void readStatus();
+		if (!startConnect) void (resume ? resumeSetup() : readStatus());
 		const offModels = on('models_updated', () => { if (page === 'models') void refreshSources(); });
 		const offClassifier = on('classifier_updated', () => { void classifier.read(); });
-		const onVisible = () => { if (document.visibilityState === 'visible') void recheckOnFocus(); };
-		const onFocus = () => { void classifier.recheckSpace(); void recheckOnFocus(); };
-		window.addEventListener('focus', onFocus);
-		document.addEventListener('visibilitychange', onVisible);
-		return () => { offModels(); offClassifier(); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onVisible); };
+		const focus = () => { if (page === 'models') void refreshSources(true); };
+		window.addEventListener('focus', focus);
+		return () => { offModels(); offClassifier(); window.removeEventListener('focus', focus); };
 	});
 </script>
 
-<SetupShell {steps} section={page === 'connect' ? 'Connect' : 'Setup'} {jobs} page={page === 'connect' ? `connect-${remote.stage}` : page} title={shellView.title} lede={shellView.lede} primary={shellView.primary} mark={shellView.mark} onPrimary={shellView.onPrimary}>
+{#snippet welcomeAside()}<SetupWelcome accountLine={false} />{/snippet}
+<SetupShell {steps} section={page === 'connect' ? 'Connect' : 'Setup'} {jobs} page={page === 'connect' ? `connect-${remote.stage}` : screen} title={view.title} lede={view.lede} primary={view.primary} aside={page === 'account' && $isSetupWide && !$token ? welcomeAside : undefined} onPrimary={view.onPrimary}>
 	{#snippet secondary()}
-		{#if page === 'connect'}
-			<SetupConnectBack onclick={() => (remote.stage === 'code' ? remote.toChoose() : leaveConnect())} />
-		{:else if page === 'welcome' && canConnect}
-			<Button variant="chip" onclick={() => { remote.reset(); page = 'connect'; }}>Connect to CORSIA on another computer</Button>
-		{:else if page === 'hard-stop'}
-			<Button variant="chip" onclick={readStatus}>Check again</Button>
-		{:else if page === 'error' && setupReportInvoke()}
-			<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>
-		{/if}
+		{#if page === 'connect'}<SetupConnectBack onclick={() => remote.stage === 'code' ? remote.toChoose() : leaveConnect()} />
+		{:else if (screen === 'welcome' || page === 'account') && canConnect && !$token}<Button variant="chip" onclick={() => void connectToAnotherComputer()}>Connect to CORSIA on another computer</Button>{#if accountError && page === 'account'}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>{/if}
+		{:else if page === 'account' && accountError}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>
+		{:else if page === 'subscriptions'}<Button variant="chip" onclick={() => { page = 'account'; }}>Back</Button>
+		{:else if page === 'models'}<Button variant="chip" disabled={finishing} onclick={() => { page = subscriptionsSkipped ? 'account' : 'subscriptions'; }}>Back</Button>
+		{:else if page === 'hard-stop'}<Button variant="chip" onclick={readStatus}>Check again</Button>
+		{:else if page === 'error'}<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>{/if}
 	{/snippet}
-
-	{#if page === 'connect'}
-		<SetupConnect {remote} />
-	{:else if page === 'welcome'}
-		<SetupWelcomeChoice localEligible={status.local_eligible} freeDiskGb={status.free_disk_gb} pick={localPick.pick} downloadEtaSeconds={local?.download_eta_seconds} downloadStalled={local?.download_stalled} wanted={localPick.wanted}
-			onWantedChange={(next) => { localPick.change(next, Boolean(status.existing_omlx)); void recordSetupProgress({ local_ai: next }, get(token)); }} onRecheck={readStatus} onRetry={() => void localPick.start()}
-			ownOmlx={Boolean(status.existing_omlx)} manage={manageOwnOmlx} onManageChange={(next) => (manageOwnOmlx = next)}
-			picks={cloud.picks} onTogglePick={togglePick} ready={cloud.questionShown ? null : status.ready_ai ?? null} detecting={cloud.detecting} />
+	{#if page === 'connect'}<SetupConnect {remote} />
+	{:else if screen === 'welcome'}<SetupWelcome />
+	{:else if page === 'account' && $token}
+		<p class="settled" data-testid="setup-account-made">{accountName ? `Your account is set up as ${accountName}.` : 'Your account is set up.'}</p>
+		<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
 	{:else if page === 'account'}
-		<SetupAccountForm bind:folder bind:folderChanged bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} {accountBusy} bind:folderChanging bind:folderNotice onSubmit={createAccount} onValidateConfirmation={validateConfirmation} />
-	{:else if page === 'models' && existingOmlxConsent}
-		<SetupExistingOmlxConsent manage={manageExisting} busy={localActions.busy} onDecide={decideExistingOmlx} />
+		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} onSubmit={createFromForm} onValidateConfirmation={validateConfirmation} />
+		<SetupWorkFolder bind:folder bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} />
+		{#if accountExists}<Button variant="chip" onclick={onExistingAccount}>Sign in</Button>{/if}
+	{:else if page === 'subscriptions'}<SetupSubscriptions claudeReady={cliSignedIn('claude-code')} codexReady={cliSignedIn('codex')} {eligible} answer={picks} onAnswer={answerSubscriptions} />
 	{:else if page === 'models'}
-		<div class="sources">
-			{#if cloud.picks.key && !keySaved}
-				<SetupApiKeyRow bind:providerName onError={(message) => (sourceError = message)} onSaved={async () => { keySaved = true; await loadProviders(); await refreshSources(); }} />
-			{/if}
-			<SetupAiRows rows={aiRows} />
-			{#if sourceError}<Message variant="err">{sourceError}</Message>{/if}
-		</div>
+		<SetupAiRows rows={aiRows} />
+		{#if sourceError}<p class="error-text" role="alert">{sourceError}</p><Button variant="chip" onclick={() => void refreshSources(true)}>Retry</Button>{/if}
 	{/if}
 </SetupShell>
+{#if showAdd}<AddProviderModal onClose={() => { showAdd = false; void refreshSources(); }} onSelectCloud={selectProvider} />{/if}
+{#if openProvider}<ProviderSettingsModal provider={openProvider} initialTab="advanced" onClose={() => { openProvider = null; void refreshSources(); }} />{/if}
 
 <style>
-	/* Account form styles live with SetupAccountForm. */
-	.sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); }
+	p { font-size: var(--text-footnote); line-height: var(--lh-normal); }
+	.error-text { margin: var(--space-2) var(--space-4); }
+	.settled { margin: 0; font-size: var(--text-body); color: var(--text-primary); }
 </style>

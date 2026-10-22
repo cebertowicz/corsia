@@ -1,6 +1,6 @@
 ---
 name: time-to-agent
-description: Use as CORSIA or a project conductor for the weekly review of where the person's time goes, when they ask where it goes or ask you to take recurring work off them, when they answer a suggestion from it, and on a recurring-work finding from CORSIA.
+description: Use as CORSIA or a project conductor before setting up any agent or project when the person asks you to take work off them; for the weekly time review or when asked where their time goes; on replies to its suggestions; on CORSIA's recurring-work findings.
 ---
 
 # Time to agent
@@ -15,7 +15,7 @@ The person's time should go to what only they can do. Find recurring work that k
 
 ## Ledger
 
-Keep `time-to-agent.md` directly in your thread folder, not `working/`; create it silently if missing. If `working/time-to-agent.md` still exists, migrate only that file before using the ledger: move it to your thread folder as `time-to-agent.md` when absent; otherwise merge it in, keeping the later last-review date, every week's counts, and for a kind or agent on both, the line with the later date, then delete the working copy. Move no other working file. It holds the date of the last weekly review, each week's counts by kind (with the sources read), one line per kind you suggested: `<kind> | first suggested <date> | share then | answer yes/no/none, <date> | outcome`, and one line per agent flagged as not pulling its weight. Read it before every step. Show it whenever the person asks. Each kind in flight (interviewing, awaiting approval, following through) is also a task in your plan.
+Keep `time-to-agent.md` in your thread folder, the parent of your `working/` folder (`<scope>/.threads/<your thread id>/time-to-agent.md`, where the scope is the workspace for CORSIA and the project folder for a project conductor), by its full path: a bare file name lands in `working/`. Create it silently if missing. If `working/time-to-agent.md` still exists, migrate only that file before using the ledger: move it to your thread folder as `time-to-agent.md` when absent; otherwise merge it in, keeping the later last-review date, every week's counts, and for a kind or agent on both, the line with the later date, then delete the working copy. Move no other working file. It holds the date of the last weekly review, each week's counts by kind (with the sources read), one line per kind you suggested: `<kind> | first suggested <date> | share then | answer yes/no/none, <date> | outcome`, and one line per agent flagged as not pulling its weight. Read it before every step. Show it whenever the person asks. Each kind in flight (interviewing, awaiting approval, following through) is also a task in your plan.
 
 ## Weekly review
 

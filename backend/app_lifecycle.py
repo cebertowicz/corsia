@@ -13,7 +13,7 @@ from app_shutdown_owned_tasks import shutdown_owned_tasks as _shutdown_owned_tas
 from app_shutdown_refreshes import shutdown_refresh_owners
 from app_startup_runtime import (
     _start_runtime_services, _startup_harness_discovery as _startup_harness_discovery,
-    configure_sqlite_fetch_switch_interval, stop_runtime_logs,
+    configure_sqlite_fetch_switch_interval, resume_local_setup, stop_runtime_logs,
 )
 from app_shutdown_native import remaining_native_owners, shutdown_native_turns
 import infra.app_loop as app_loop
@@ -144,8 +144,10 @@ async def lifespan(app: FastAPI):
         from automation import restart_startup
         from doceditor.live_runtime import start_documents
         from llm.lifecycle import autostart_local_providers
+        from tools.agent_shell_tools import start_prefetch
         from tools.mcp_runtime import start_connected_app_runtime
 
+        start_prefetch()
         await start_connected_app_runtime()
 
         startup_tasks[0] = asyncio.create_task(autostart_local_providers())
@@ -155,13 +157,11 @@ async def lifespan(app: FastAPI):
         recovered, wakes = await restart_startup.run_startup_reconcile(logger)
         await _start_runtime_services()
         from core.devices_runtime import runtime as devices_runtime
-        from infra.settings import get_devices_enabled
-        await devices_runtime.restore(app, await run_in_db(get_devices_enabled))
+        from infra.settings import get_devices_enabled, get_devices_outside_address
+        enabled, outside_address = await asyncio.gather(run_in_db(get_devices_enabled), run_in_db(get_devices_outside_address))
+        await devices_runtime.restore(app, enabled, outside_address)
         await start_documents()
-        from llm.local_model import backfill_legacy_record
-        from llm.local_setup import resume_pending_setup
-        await asyncio.to_thread(backfill_legacy_record)
-        await resume_pending_setup()
+        await resume_local_setup()
         schedule_usage_rollup_refresh()
         startup_tasks[4] = asyncio.create_task(
             restart_startup.run_startup_drive(
@@ -194,16 +194,14 @@ async def _run_cleanup_owner(name: str, awaitable, logger):
     return failure, pending_cancel
 
 
-async def _shutdown_checkpoints(logger):
-    """Stop exact checkpoint calls before their provider transports."""
+async def _shutdown_forks(logger):
+    """Stop disposable forks before provider transports and checkpoint wakes."""
     try:
-        from core.checkpoint_runtime import shutdown_checkpoint_tasks
+        from app_shutdown_runtime import shutdown_fork_owners
 
-        return await _run_cleanup_owner(
-            "checkpoint cleanup", shutdown_checkpoint_tasks(), logger,
-        )
+        return await _run_cleanup_owner("fork cleanup", shutdown_fork_owners(), logger)
     except Exception as exc:
-        logger.warning(f"shutdown: checkpoint cleanup failed: {exc}")
+        logger.warning(f"shutdown: fork cleanup failed: {exc}")
         return exc, None
 
 
@@ -240,10 +238,10 @@ async def _shutdown_host_processes(logger):
         configure_host_access_terminal_callback(None)
 
 
-def _checkpoint_task_count() -> int:
-    from core.checkpoint_runtime import checkpoint_task_count
+def _fork_task_count() -> int:
+    from core.fork_runtime import fork_task_count
 
-    return checkpoint_task_count()
+    return fork_task_count()
 
 
 def _host_access_owner_count() -> int:
@@ -333,10 +331,10 @@ async def _shutdown_runtime_services(
         _log_shutdown,
     )
     pending_cancel = pending_cancel or host_access_cancel
-    checkpoint_failure, checkpoint_cancel = await _shutdown_checkpoints(
+    fork_failure, fork_cancel = await _shutdown_forks(
         _log_shutdown,
     )
-    pending_cancel = pending_cancel or checkpoint_cancel
+    pending_cancel = pending_cancel or fork_cancel
     (rollup_failure, refresh_failure), refresh_cancel = await shutdown_refresh_owners(
         _log_shutdown, _run_cleanup_owner,
     )
@@ -365,8 +363,8 @@ async def _shutdown_runtime_services(
     )
     pending_cancel = pending_cancel or handoff_cancel
 
-    remaining_checkpoints, checkpoint_count_failure = count_shutdown_owner(
-        "checkpoint", _checkpoint_task_count, _log_shutdown,
+    remaining_forks, fork_count_failure = count_shutdown_owner(
+        "fork", _fork_task_count, _log_shutdown,
     )
     remaining_host_access, host_access_count_failure = count_shutdown_owner(
         "host-access", _host_access_owner_count, _log_shutdown,
@@ -378,13 +376,13 @@ async def _shutdown_runtime_services(
         {
             "native": remaining_native_owners(),
             "awaited_handoffs": app_loop.awaited_count(),
-            "checkpoints": remaining_checkpoints,
+            "forks": remaining_forks,
             "host_access": remaining_host_access,
             "host_processes": remaining_processes,
             "idle_checkpoint_timers": remaining_idle_timers(),
         },
         (
-            checkpoint_failure, checkpoint_count_failure, host_access_count_failure,
+            fork_failure, fork_count_failure, host_access_count_failure,
             process_count_failure, rollup_failure, refresh_failure, harness_failure,
             process_failure, host_access_failure, devices_failure, mcp_failure, handoff_failure,
         ),

@@ -27,6 +27,7 @@ _RESERVED_EXECUTION_PREFIXES = (
     "_host_access_",
     "_lease_",
     "_checkpoint_",
+    "_review_",
 )
 
 # Tool names (resolved, post-dispatch) whose own execution enters
@@ -77,10 +78,14 @@ class ToolRegistry:
         allowed = set(names)
         self._tools = {name: tool for name, tool in self._tools.items() if name in allowed}
 
-    async def execute(self, name: str, params: dict[str, Any]) -> str:
-        """Execute a tool by name with given parameters."""
+    async def execute(
+        self, name: str, params: dict[str, Any], *, review_request_id: str | None = None,
+    ) -> str:
+        """Execute a tool with optional backend-owned review scope."""
         try:
-            result = self._sanitize_result(await self._execute_unredacted(name, params))
+            result = self._sanitize_result(await self._execute_unredacted(
+                name, params, review_request_id=review_request_id,
+            ))
             result = await remind_current_turn(result, name, params)
         except CompletedToolFailure as failure:
             # Retained output answers the provider's own call: a dispatched
@@ -209,10 +214,19 @@ class ToolRegistry:
             return unknown_tool_error([name], names)
         return tool
 
+    @staticmethod
+    def _execution_params(model_params, thread_context, name, review_request_id):
+        """Add trusted execution scope only after model arguments are validated."""
+        execution_params = inject_context(model_params, thread_context, tool_name=name)
+        if review_request_id is not None:
+            execution_params["_review_request_id"] = review_request_id
+        return execution_params
+
     async def _execute_unredacted(
         self,
         name: str,
         params: dict[str, Any],
+        *, review_request_id: str | None = None,
     ) -> str:
         """Execute once, a ``tool_call`` as the tool it names; the boundary sanitizes."""
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
@@ -262,10 +276,8 @@ class ToolRegistry:
                 reach_refusal = await mcp_reach_refusal(tool, thread_context)
                 if reach_refusal is not None:
                     return reach_refusal
-                execution_params = inject_context(
-                    model_params,
-                    thread_context,
-                    tool_name=name,
+                execution_params = self._execution_params(
+                    model_params, thread_context, name, review_request_id,
                 )
 
                 drain_refusal = await self._restart_drain_refusal(

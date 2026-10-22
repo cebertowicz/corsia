@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.checkpoint_types import CheckpointNotAdmitted, OptionalCheckpointSkipped
+from core.fork_types import ForkNotAdmitted
+from core.checkpoint_types import OptionalCheckpointSkipped
 from core.turn_core import TurnIdentity
 from llm.resolution import ExecutionTarget
 
@@ -96,7 +97,7 @@ async def test_cold_prepare_refuses_live_debt_before_publication(debt_db, monkey
     refusal = (
         pytest.raises(OptionalCheckpointSkipped)
         if harness == "claude-code" and not required
-        else pytest.raises(CheckpointNotAdmitted, match="tool calls are outstanding")
+        else pytest.raises(ForkNotAdmitted, match="tool calls are outstanding")
     )
     with refusal:
         await _prepare_external_checkpoint(
@@ -134,6 +135,6 @@ async def test_warm_correction_rechecks_live_debt(debt_db, monkeypatch, harness)
     )
     # Debt appearing after warm admission must still refuse the deferred cold correction.
     live.tool_step_ids["older"] = "older-step"
-    with pytest.raises(CheckpointNotAdmitted, match="tool calls are outstanding"):
+    with pytest.raises(ForkNotAdmitted, match="tool calls are outstanding"):
         await warm.provider_request.same_model_cold()
     assert debt_db.execute("SELECT count(*) FROM checkpoints").fetchone()[0] == 0

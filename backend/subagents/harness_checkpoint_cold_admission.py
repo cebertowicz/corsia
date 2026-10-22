@@ -20,15 +20,15 @@ def build_external_cold_admission(
     identity: Any,
 ):
     """Freeze the cold admission this boundary uses when no warm fork serves."""
-    from core.checkpoint_render import build_cold_checkpoint_admission
-    from core.checkpoint_types import CheckpointNotAdmitted
+    from core.checkpoint_cold_admission import build_checkpoint_admission
+    from core.fork_types import ForkNotAdmitted
     from history.projection import slice_portable_projection
     from infra.database import get_db
 
     # Late settlement of an older Step can invalidate an already installed cut.
     # Apply the warm capture prerequisite before freezing the cold fallback too.
     if getattr(live, "tool_step_ids", None):
-        raise CheckpointNotAdmitted("external checkpoint tool calls are outstanding")
+        raise ForkNotAdmitted("external checkpoint tool calls are outstanding")
     boundary = context.boundary
     db = get_db()
     try:
@@ -38,7 +38,7 @@ def build_external_cold_admission(
             if context.target.harness == "claude-code"
             else None
         )
-        return build_cold_checkpoint_admission(
+        return build_checkpoint_admission(
             checkpoint_id=checkpoint_id,
             thread_id=boundary.thread_id,
             trigger="pressure",

@@ -24,17 +24,11 @@ describe('retryLocalSetup', () => {
 		vi.clearAllMocks();
 	});
 
-	it('returns consent_required for the picker to show explicit remediation', async () => {
-		vi.mocked(setupLocalSource).mockResolvedValue({ ok: false, code: 'consent_required' });
-
-		expect(await retryLocalSetup('setup')).toEqual({ ok: false, code: 'consent_required' });
-	});
-
-	it('passes explicit consent when the picker action is affirmed', async () => {
+	it('retries setup without asking about other oMLX processes', async () => {
 		vi.mocked(setupLocalSource).mockResolvedValue({ ok: true });
 
-		expect(await retryLocalSetup('setup', true)).toEqual({ ok: true });
-		expect(setupLocalSource).toHaveBeenCalledWith('token', true);
+		expect(await retryLocalSetup('setup')).toEqual({ ok: true });
+		expect(setupLocalSource).toHaveBeenCalledWith('token');
 	});
 
 	it('retries a Settings download through conductorSources after the models_updated read', async () => {

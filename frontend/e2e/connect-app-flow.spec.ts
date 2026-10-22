@@ -54,7 +54,7 @@ for (const viewport of viewports) {
 				await route.fulfill({ json: {
 					servers: [], sign_in_here: true,
 					accounts: googleAccountReady ? [{
-						id: 'google-work', provider: 'google', address: 'sam.work@example.com', state: 'connected',
+						id: 'google-work', provider: 'google', provider_display_name: 'Google', address: 'sam.work@example.com', state: 'connected',
 						capabilities: ['mail', 'calendar', 'files'], reach: { mode: 'corsia', project_ids: [], outside_projects: false },
 					}] : [],
 				} });

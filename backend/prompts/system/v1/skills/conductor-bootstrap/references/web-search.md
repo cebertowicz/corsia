@@ -6,9 +6,9 @@ Use this for first-run task `Connect web search` and any time later the person a
 
 ## 1. Explain, then ask
 
-One `post_update`, word for word:
+One `post_update`, word for word. Keep the two bracketed parts only when step 5 of `references/first-run-app.md` will run the lookup (the app path); on any other path leave both out.
 
-> Web search lets me look things up on the web for you. It uses Brave Search. Brave's free plan still asks for a credit card; search costs $5 per 1,000 searches and includes $5 of free credit every month, so about 1,000 searches a month cost nothing. Do you already have a Brave Search API account (the developer one, separate from the Brave browser)?
+> Web search lets me look things up on the web for you[, starting with you, so you don't have to tell me everything yourself]. It uses Brave Search. Brave's free plan still asks for a credit card; search costs $5 per 1,000 searches, and every month includes $5 of free credit, about 1,000 searches. That's usually enough for most people, so search usually costs nothing. Your searches go to Brave. Do you already have a Brave Search API account? It's the account apps use to search, separate from the Brave browser. [If you'd rather I didn't look you up, just say so.]
 
 End your turn. Not now: `OK. Settings › Keys has it whenever you want it.` Close their task and task `Connect web search` with `You chose not now. Settings › Keys has it.`
 
@@ -25,7 +25,7 @@ Sign-up asks only for an email and a password; **Create account** stays disabled
 
 ## 3. Take them to the key
 
-Open [API Keys](https://api-dashboard.search.brave.com/app/keys). A page that sends them back to the login page is theirs (B). If they have no plan yet, they open [Plans](https://api-dashboard.search.brave.com/app/subscriptions/subscribe), choose **Search** and add their card; that is theirs too. When the API Keys page is showing, post once: `Press Add API Key, name it CORSIA and copy the key. Then open [Settings › Keys](/settings/keys), paste it under Web search, enter your CORSIA password and press Save. Check tells you right away whether it works. The key stays on this Mac; agents use it but can never see it. Tell me when it's in.` Read the URL and title only; never read the key off the page. Add their task `Add your web search key`; task `Connect web search` depends on it. End your turn.
+Open [API Keys](https://api-dashboard.search.brave.com/app/keys). A page that sends them back to the login page is theirs (B). If they have no plan yet, they open [Plans](https://api-dashboard.search.brave.com/app/subscriptions/subscribe), choose **Search** and add their card; that is theirs too. When the API Keys page is showing, post once: `The key goes only in Settings › Keys, never here in chat. Press Add API Key, name it CORSIA and copy the key. Then open [Settings › Keys](/settings/keys), paste it under Web search, enter your CORSIA password and press Save. Check tells you right away whether it works. The key stays on this Mac; agents use it but can never see it. Tell me when it's in.` Read the URL and title only; never read the key off the page. Add their task `Add your web search key`; task `Connect web search` depends on it. End your turn.
 
 ## 4. Help with a step
 

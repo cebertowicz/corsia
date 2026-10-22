@@ -15,7 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from llm import local_profiles, local_setup, local_setup_operation
+from llm import local_profiles, local_setup, local_setup_operation, local_setup_flow as flow, local_setup_runtime as runtime, local_setup_download as downloads
 from llm.local_model import LocalModel
 
 GIB = 1024**3
@@ -28,99 +28,11 @@ def fresh_flight(monkeypatch):
     local_setup_operation.clear()
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
     monkeypatch.setattr(local_setup, "_emit", lambda action, **properties: None)
-    monkeypatch.setattr(local_setup, "existing_install_is_foreign", lambda: False)
+    # Each test starts with an unclaimed local setup flight.
     yield
     local_setup_operation.clear()
 
 
-def test_the_settings_file_holds_the_unmanaged_starter_and_model_independent_settings():
-    raw = json.loads(local_profiles._PATH.read_text())
-    assert set(raw) == {"omlx_global_settings", "model_settings", "starter_model"}
-    assert local_profiles.OMLX_GLOBAL_SETTINGS == raw["omlx_global_settings"]
-    assert local_profiles.MODEL_SETTINGS == raw["model_settings"]
-    assert local_profiles.STARTER_MODEL == LocalModel(
-        raw["starter_model"]["repo_id"], raw["starter_model"]["download_bytes"], raw["starter_model"]["max_context"])
-
-
-def test_loader_rejects_malformed_settings_files(tmp_path):
-    good = json.loads(local_profiles._PATH.read_text())
-
-    def load(payload):
-        path = tmp_path / "settings.json"
-        path.write_text(json.dumps(payload))
-        return local_profiles.load_settings(path)
-
-    assert load(good) == (good["omlx_global_settings"], good["model_settings"], local_profiles.STARTER_MODEL)
-    for bad in ([], {**good, "profiles": []}, {"model_settings": {}}, {**good, "model_settings": []},
-                {**good, "starter_model": {}}):
-        with pytest.raises(RuntimeError):
-            load(bad)
-    with pytest.raises(RuntimeError, match="unreadable"):
-        local_profiles.load_settings(tmp_path / "absent.json")
-
-
-@pytest.fixture
-def legacy(monkeypatch, tmp_path):
-    """A finished pre-record setup: setup's marker, its working oMLX, and the starter on disk."""
-    from llm import local_model
-
-    state = tmp_path / "state"
-    settings = tmp_path / "omlx" / "settings.json"
-    model_dir = tmp_path / "models"
-    starter = model_dir / local_profiles.STARTER_MODEL.repository
-    starter.mkdir(parents=True)
-    with open(starter / "model.safetensors", "wb") as weights:  # sparse: full size, no disk
-        weights.truncate(local_profiles.STARTER_MODEL.download_size_bytes)
-    settings.parent.mkdir(parents=True)
-    settings.write_text(json.dumps({"model": {"model_dir": str(model_dir)}}))
-    state.mkdir()
-    (state / "marker").write_text("installed")
-    env = {"omlx": "/opt/homebrew/bin/omlx", "foreign": False}
-    monkeypatch.setattr(local_model, "_record_path", lambda: state / "local-model.json")
-    monkeypatch.setattr(local_setup_operation, "record_path", lambda: state / "operation.json")
-    monkeypatch.setattr("llm.local_setup_ownership.marker_path", lambda: state / "marker")
-    monkeypatch.setattr("llm.local_setup_ownership.own_omlx_settings_file", lambda: settings)
-    monkeypatch.setattr("llm.local_setup_ownership.installed_omlx", lambda: env["omlx"])
-    monkeypatch.setattr("llm.local_setup_ownership.existing_install_is_foreign", lambda: env["foreign"])
-    return local_model, state, model_dir, env
-
-
-def test_startup_backfills_the_starter_a_finished_legacy_setup_installed(legacy):
-    local_model, state, _model_dir, _env = legacy
-
-    assert local_model.set_up_model() is None
-    assert local_model.backfill_legacy_record() == local_profiles.STARTER_MODEL
-    assert local_model.set_up_model() == local_profiles.STARTER_MODEL
-    assert json.loads((state / "local-model.json").read_text()) == local_model.to_record(
-        local_profiles.STARTER_MODEL)
-    assert local_model.backfill_legacy_record() is None
-
-
-@pytest.mark.parametrize("case", [
-    "no_marker", "no_omlx", "foreign", "no_starter", "setup_in_flight", "download_short", "download_partial",
-])
-def test_startup_backfill_never_fires_without_proof_of_a_finished_setup(legacy, case):
-    local_model, state, model_dir, env = legacy
-    if case == "no_marker":
-        (state / "marker").unlink()
-    elif case == "no_omlx":
-        env["omlx"] = None
-    elif case == "foreign":
-        env["foreign"] = True
-    elif case == "no_starter":
-        shutil.rmtree(model_dir / local_profiles.STARTER_MODEL.repository)
-    elif case == "download_short":
-        # A cancelled or failed download: setup cleared its record, the folder stays.
-        weights = model_dir / local_profiles.STARTER_MODEL.repository / "model.safetensors"
-        with open(weights, "r+b") as handle:
-            handle.truncate(local_profiles.STARTER_MODEL.download_size_bytes - 1)
-    elif case == "download_partial":
-        (model_dir / local_profiles.STARTER_MODEL.repository / "tokenizer.json.incomplete").write_text("{")
-    else:
-        (state / "operation.json").write_text(json.dumps({"profile": "legacy-mid-download"}))
-
-    assert local_model.backfill_legacy_record() is None
-    assert not (state / "local-model.json").exists()
 
 
 def test_local_setup_view_reads_ram_once_per_process(monkeypatch):
@@ -129,7 +41,7 @@ def test_local_setup_view_reads_ram_once_per_process(monkeypatch):
     reads = []
     monkeypatch.setattr("infra.host_resources.host_total_ram_bytes", lambda: reads.append(True) or 128 * GIB)
     local_setup_gates.host_ram_bytes.cache_clear()
-    monkeypatch.setattr("llm.local_setup_ownership.existing_install_is_foreign", lambda: False)
+    # Each test starts with an unclaimed local setup flight.
     monkeypatch.setattr("llm.local_model.set_up_model", lambda: None)
     monkeypatch.setattr(local_setup_prepare, "_prepare", local_setup_prepare._Prepare())
 
@@ -157,7 +69,7 @@ def test_download_and_settings_use_the_picked_model(monkeypatch):
 
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
     asyncio.run(local_setup._wait_for_download("srv", lambda _m: None, BIG))
-    asyncio.run(local_setup._configure_model_settings("srv", BIG))
+    asyncio.run(runtime.configure_model_settings("srv", BIG))
 
     assert calls[0] == ("POST", "/hf/download", {"repo_id": BIG.repository, "hf_token": ""})
     method, path, payload = calls[-1]
@@ -170,7 +82,7 @@ usage = namedtuple("usage", "total used free")
 
 
 def test_disk_check_fails_with_the_space_needed_and_passes_with_room(monkeypatch, tmp_path):
-    from llm import local_setup_ownership as own
+    from llm import local_setup_disk as own
 
     model_dir = tmp_path / "missing" / "models"
     size = 106_318_234_757
@@ -185,7 +97,7 @@ def test_disk_check_fails_with_the_space_needed_and_passes_with_room(monkeypatch
 
 
 def test_disk_check_reads_the_volume_of_the_reported_directory(monkeypatch, tmp_path):
-    from llm import local_setup_ownership as own
+    from llm import local_setup_disk as own
 
     read = []
     monkeypatch.setattr(own.shutil, "disk_usage", lambda path: read.append(path) or usage(0, 0, 10**15))
@@ -194,7 +106,7 @@ def test_disk_check_reads_the_volume_of_the_reported_directory(monkeypatch, tmp_
 
 
 def test_disk_check_credits_bytes_already_downloaded(monkeypatch, tmp_path):
-    from llm import local_setup_ownership as own
+    from llm import local_setup_disk as own
 
     folder = tmp_path / REPO
     folder.mkdir(parents=True)
@@ -216,7 +128,7 @@ def test_disk_check_credits_bytes_already_downloaded(monkeypatch, tmp_path):
 
 
 def test_disk_check_logs_a_warning_and_proceeds_when_space_or_directory_is_unknown(monkeypatch, tmp_path, caplog):
-    from llm import local_setup_ownership as own
+    from llm import local_setup_disk as own
 
     def boom(_p):
         raise PermissionError("denied")
@@ -256,12 +168,16 @@ def test_an_unreported_model_directory_reaches_the_check_as_unknown(monkeypatch,
         return reply
 
     monkeypatch.setattr("llm.providers.omlx_settings.get_settings", settings)
-    assert asyncio.run(local_setup._download_dir("srv")) is None
+    assert asyncio.run(downloads.download_dir("srv")) is None
 
 
-def _fake_new_omlx(monkeypatch, download, disk=lambda *_args: None):
+def _fake_new_omlx(monkeypatch, download, disk=lambda *_args: None, optimal=None):
     """Stub every oMLX call a new-install flight makes; ``download`` is the one under test."""
     wrote = []
+
+    async def apply_optimal(server_id, model):
+        wrote.append("optimal")
+        return optimal or runtime.OptimalResult("unsupported")
 
     async def healthy(port):
         return None
@@ -292,20 +208,17 @@ def _fake_new_omlx(monkeypatch, download, disk=lambda *_args: None):
     from llm.local_model import OMLX_PIN
 
     monkeypatch.setattr(local_setup, "require_free_disk", disk)
-    monkeypatch.setattr(local_setup, "_download_dir", model_dir)
-    monkeypatch.setattr(local_setup, "_omlx_supports_loopback_auth", lambda: True)
-    monkeypatch.setattr(local_setup, "omlx_version", lambda: OMLX_PIN)
-    monkeypatch.setattr(local_setup, "_ensure_omlx", lambda *a, **k: None)
-    monkeypatch.setattr(local_setup, "_run", lambda command: None)
-    monkeypatch.setattr(local_setup, "own_omlx_port", lambda: 5200)
-    monkeypatch.setattr(local_setup, "own_omlx_admin_key", lambda: "k")
-    monkeypatch.setattr(local_setup, "registered_local_key", registered_key)
-    monkeypatch.setattr(local_setup, "_wait_for_health", healthy)
-    monkeypatch.setattr(local_setup, "_register_loopback_server", register)
-    monkeypatch.setattr(local_setup, "secure_local_omlx", secured)
-    monkeypatch.setattr(local_setup, "_configure_global", global_settings)
+    monkeypatch.setattr(downloads, "download_dir", model_dir)
+
+
+    async def start_managed(_report):
+        return "srv", 5200
+
+    monkeypatch.setattr("llm.local_setup_flow.start_managed_omlx", start_managed)
+
     monkeypatch.setattr(local_setup, "_wait_for_download", download)
-    monkeypatch.setattr(local_setup, "_configure_model_settings", model_settings)
+    monkeypatch.setattr(flow, "configure_model_settings", model_settings)
+    monkeypatch.setattr(flow, "apply_optimal_settings", apply_optimal)
     monkeypatch.setattr(llm.catalog_network_models, "discover_network_models", discover)
     monkeypatch.setattr(infra.state.ws, "notify_models_changed", lambda: None)
     return wrote
@@ -322,10 +235,10 @@ def test_a_full_disk_fails_the_flight_before_the_download_is_requested(monkeypat
 
     wrote = _fake_new_omlx(monkeypatch, download, disk=full)
 
-    result = asyncio.run(local_setup._run_flight(model=BIG))
+    result = asyncio.run(flow._run_flight(model=BIG))
 
     assert result["ok"] is False and "117 GB" in result["message"]
-    assert requested == [] and wrote == ["global"]
+    assert requested == [] and wrote == []
 
 
 def test_a_download_that_outlives_the_follow_names_the_model_and_resumes_it(monkeypatch):
@@ -334,22 +247,22 @@ def test_a_download_that_outlives_the_follow_names_the_model_and_resumes_it(monk
     async def download(server_id, progress, chosen):
         attempts.append(chosen.repository)
         if len(attempts) == 1:
-            raise local_setup.StillDownloading()
+            raise flow.StillDownloading()
 
     wrote = _fake_new_omlx(monkeypatch, download)
 
-    first = asyncio.run(local_setup._run_flight(model=MODEL))
+    first = asyncio.run(flow._run_flight(model=MODEL))
 
-    assert first["downloading"] is True and wrote == ["global"]
+    assert first["downloading"] is True and wrote == []
     assert first["message"] == "Qwen3.8 27B is still downloading in oMLX; CORSIA stopped following it."
-    assert first["next_action"] == f"Run `{local_setup.SETUP_COMMAND}` to follow it again."
+    assert first["next_action"] == f"Run `{flow.SETUP_COMMAND}` to follow it again."
 
     # The same command runs the same setup again: it resumes and writes the model's settings.
-    second = asyncio.run(local_setup._run_flight(model=MODEL))
+    second = asyncio.run(flow._run_flight(model=MODEL))
 
     assert second["ok"] is True and second["model"] == MODEL.model
     assert attempts == [MODEL.repository] * 2
-    assert wrote == ["global", "global", (MODEL.repository, MODEL.context_window)]
+    assert wrote == ["optimal", (MODEL.repository, MODEL.context_window)]
 
 
 def test_a_failed_flight_points_at_the_one_setup_command(monkeypatch):
@@ -357,11 +270,87 @@ def test_a_failed_flight_points_at_the_one_setup_command(monkeypatch):
         raise RuntimeError("oMLX could not start the model download (HTTP 500).")
 
     _fake_new_omlx(monkeypatch, download)
-    result = asyncio.run(local_setup._run_flight(model=MODEL))
+    result = asyncio.run(flow._run_flight(model=MODEL))
     assert result["ok"] is False
     assert result["next_action"] == (
-        f"Run `{local_setup.SETUP_COMMAND}` again after fixing this, or add a subscription/API key.")
-    assert local_setup.SETUP_COMMAND == "corsia local setup"
+        f"Run `{flow.SETUP_COMMAND}` again after fixing this, or add a subscription/API key.")
+    assert flow.SETUP_COMMAND == "corsia local setup"
+
+
+async def _downloaded(server_id, progress, chosen):
+    return None
+
+
+def test_a_new_install_applies_the_benchmark_settings_after_the_starter_download(monkeypatch):
+    wrote = _fake_new_omlx(monkeypatch, _downloaded, optimal=runtime.OptimalResult("applied", 41.0))
+
+    result = asyncio.run(flow._run_flight(model=MODEL))
+
+    assert result["ok"] is True
+    # The benchmark write carries CORSIA's required fields, so the plain writer is skipped.
+    assert wrote == ["optimal"]
+
+
+def test_a_new_install_without_a_benchmark_writes_corsias_own_model_settings(monkeypatch):
+    wrote = _fake_new_omlx(monkeypatch, _downloaded, optimal=runtime.OptimalResult("not_found"))
+
+    assert asyncio.run(flow._run_flight(model=MODEL))["ok"] is True
+    assert wrote == ["optimal", (MODEL.repository, MODEL.context_window)]
+
+
+def test_an_already_connected_local_model_keeps_its_settings(monkeypatch):
+    async def download(server_id, progress, chosen):
+        raise AssertionError("an existing local model is never downloaded again")
+
+    wrote = _fake_new_omlx(monkeypatch, download)
+    monkeypatch.setattr("llm.local_sources.connected_local_server", lambda: {"id": "mine"})
+
+    result = asyncio.run(flow._run_flight(model=MODEL))
+
+    assert result["existing"] is True and result["server_id"] == "mine"
+    assert wrote == []
+
+
+def test_a_persons_own_omlx_never_stands_in_for_corsias_server(monkeypatch):
+    from llm import local_sources
+
+    own = {"id": "mine", "provider": "omlx", "kind": "network", "status": "online", "port": 8000}
+    legacy = {"id": "old", "provider": "omlx", "kind": "managed", "status": "online", "port": 8200}
+    managed = {"id": "corsia-managed", "provider": "omlx", "kind": "managed", "source": "corsia",
+               "instance_id": "corsia-managed", "status": "online", "port": 8210}
+    servers = [own, legacy]
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: servers)
+    monkeypatch.setattr(local_sources, "catalog_membership",
+                        lambda: ({"omlx@mine", "omlx@old", "omlx@corsia-managed"}, set()))
+    started: list[str] = []
+
+    async def start_managed(_report):
+        started.append("corsia-managed")
+        servers.append(managed)
+        return "corsia-managed", 8210
+
+    assert local_sources.connected_local_server() is None
+    resolved = asyncio.run(local_sources.local_server_for_install(lambda _stage: None, start_managed=start_managed))
+    assert resolved == ("corsia-managed", 8210, False) and started == ["corsia-managed"]
+    assert local_sources.connected_local_server() == managed
+
+
+def test_settings_download_uses_only_corsias_managed_server(monkeypatch):
+    from llm import local_settings_download
+
+    downloaded: list[str] = []
+
+    async def download(server_id, _report, _model):
+        downloaded.append(server_id)
+
+    async def start_managed(_report):
+        return "corsia-managed", 8210
+
+    monkeypatch.setattr(local_setup, "_download", download)
+    monkeypatch.setattr(local_settings_download, "start_managed_omlx", start_managed)
+
+    assert asyncio.run(local_settings_download._managed_download(lambda _stage: None, MODEL)) == "corsia-managed"
+    assert downloaded == ["corsia-managed"]
 
 
 @pytest.fixture
@@ -383,35 +372,21 @@ def test_route_starts_the_flight_with_no_model_choice(client, monkeypatch):
         calls.append(kwargs)
         return {"ok": True, "in_progress": True}
 
-    monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
-    monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: False)
+    monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
 
     assert client.post("/api/providers/local/setup").json() == {"ok": True, "in_progress": True}
-    assert calls[-1] == {"no_subscription_only": False, "automatic": False}
+    assert calls[-1] == {"no_subscription_only": False, "automatic": False, "onboarding": False}
 
 
-def _ram(monkeypatch, gib):
-    monkeypatch.setattr("infra.host_resources.host_total_ram_bytes", lambda: gib * GIB)
-    from llm.local_setup_gates import host_ram_bytes
-    host_ram_bytes.cache_clear()
+def test_route_returns_backend_recovery_when_starting_fails(client, monkeypatch):
+    from llm.local_setup_results import local_setup_error
 
+    async def begin(**_kwargs):
+        return local_setup_error("could not start")
 
-def test_status_route_says_whose_omlx_it_is_and_shows_the_pick(client, monkeypatch):
-    from llm import local_model
+    monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", begin)
 
-    foreign = {"value": False}
-    monkeypatch.setattr("llm.local_setup_ownership.existing_install_is_foreign", lambda: foreign["value"])
-    monkeypatch.setattr(local_setup, "existing_install_is_foreign", lambda: foreign["value"])
-    _ram(monkeypatch, 128)
-    body = client.get("/api/providers/local/setup").json()
-    assert body["state"] == "idle" and body["omlx_is_persons_own"] is False
-    assert body["local_model"] == {"state": "not_checked", "model": None, "message": None}
-    # A finished setup's model is the one this Mac has.
-    local_model.record_set_up(BIG)
-    picked = client.get("/api/providers/local/setup").json()["local_model"]
-    assert picked["state"] == "picked" and picked["model"]["repository"] == BIG.repository
-    foreign["value"] = True
-    assert client.get("/api/providers/local/setup").json()["omlx_is_persons_own"] is True
-    foreign["value"] = False
-    _ram(monkeypatch, 16)
-    assert client.get("/api/providers/local/setup").json()["local_model"]["state"] == "low_memory"
+    response = client.post("/api/providers/local/setup")
+
+    assert response.status_code == 200
+    assert response.json()["fix"] == "CORSIA couldn’t set up the local model."

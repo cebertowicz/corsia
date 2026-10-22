@@ -67,6 +67,8 @@ export interface NetworkServer {
 	private?: boolean;
 	has_key?: boolean;
 	masked_key?: string;
+	/** True only for CORSIA's own oMLX, online or not: identity, never status (read ``status`` for that). */
+	corsia_omlx?: boolean;
 	/** How the endpoint is billed; null when unset. */
 	billing?: ServerBilling | null;
 	/** Fences billing writes; sent back unchanged. */
@@ -97,9 +99,9 @@ export async function addNetworkServer(
 	hostname: string,
 	port: number,
 	// A cloud endpoint is identified by a full URL rather than host+port, and
-	// carries its own auth and cache-warm declaration. Optional so the existing
-	// oMLX-by-IP call stays exactly as it was.
-	extra?: { base_url?: string; dialect?: string; api_key?: string; cache_warm_seconds?: number; model_ids?: string[] },
+	// carries its own auth. Optional so the existing oMLX-by-IP call stays exactly
+	// as it was.
+	extra?: { base_url?: string; dialect?: string; api_key?: string; model_ids?: string[] },
 ): Promise<{ ok: boolean; server_id?: string; status?: string; message?: string }> {
 	try {
 		const res = await fetch(`${BASE}/api/settings/network-servers?token=${t()}`, {
@@ -124,8 +126,7 @@ export async function addNetworkServer(
 export async function updateNetworkServer(
 	serverId: string,
 	extra: {
-		base_url: string; dialect: 'openai' | 'anthropic'; api_key?: string;
-		cache_warm_seconds?: number; model_ids?: string[];
+		base_url: string; dialect: 'openai' | 'anthropic'; api_key?: string; model_ids?: string[];
 	},
 ): Promise<{ ok: boolean; server_id?: string; status?: string; models?: number; message?: string }> {
 	try {

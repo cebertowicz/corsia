@@ -868,7 +868,7 @@ def test_only_this_databases_backups_match(tmp_path):
     )
     (tmp_path / "test.db.pre-migration-v8-20250101T000000Z.bak").mkdir()
 
-    assert [p.name for p in migrations._pre_migration_backups(tmp_path / "test.db")] == [
+    assert [p.name for p in migrations.pre_migration_backups(tmp_path / "test.db")] == [
         "test.db.pre-migration-v9-20260101T000000Z.bak",
         "test.db.pre-migration-v10-20260301T000000Z.bak",
     ]

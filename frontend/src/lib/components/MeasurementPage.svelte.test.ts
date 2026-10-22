@@ -333,15 +333,16 @@ function renderPage(): HTMLElement {
 
 async function openScopePicker(): Promise<void> {
 	(host.querySelector('.picker-trigger') as HTMLButtonElement).click();
-	await vi.waitFor(() => expect(host.querySelector('.picker-search')).not.toBeNull());
+	// Popover is portaled to document.body to clear the measurement pane's clip boundary.
+	await vi.waitFor(() => expect(document.querySelector('.picker-search')).not.toBeNull());
 	flushSync();
 }
 
 async function typeSearch(term: string): Promise<void> {
-	const input = host.querySelector('.picker-search') as HTMLInputElement;
+	const input = document.querySelector('.picker-search') as HTMLInputElement;
 	input.value = term;
 	input.dispatchEvent(new Event('input', { bubbles: true }));
-	await vi.waitFor(() => expect(host.querySelectorAll('.picker-option').length).toBeGreaterThan(0));
+	await vi.waitFor(() => expect(document.querySelectorAll('.picker-option').length).toBeGreaterThan(0));
 	flushSync();
 }
 
@@ -355,7 +356,7 @@ describe('MeasurementPage scope selection', () => {
 
 		await openScopePicker();
 		await typeSearch('bugs');
-		(host.querySelector('.picker-option.is-nested') as HTMLButtonElement).click();
+		(document.querySelector('.picker-option.is-nested') as HTMLButtonElement).click();
 		flushSync();
 
 		await vi.waitFor(() => expect(get(measurementScope)).toEqual({ project: 'prj-boreas', agent: 'ag-bugs' }));
@@ -381,12 +382,12 @@ describe('MeasurementPage scope selection', () => {
 
 		await openScopePicker();
 		await typeSearch('bugs');
-		(host.querySelector('.picker-option.is-nested') as HTMLButtonElement).click();
+		(document.querySelector('.picker-option.is-nested') as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(host.querySelector('.agent-chip')).not.toBeNull());
 
 		await openScopePicker();
 		await typeSearch('all work');
-		(host.querySelector('.picker-option') as HTMLButtonElement).click();
+		(document.querySelector('.picker-option') as HTMLButtonElement).click();
 		// Widening the project keeps the agent: every agent is inside All work, so the
 		// composite writer drops only an agent that cannot belong to the project named.
 		await vi.waitFor(() => expect(get(measurementScope)).toEqual({ project: 'all', agent: 'ag-bugs' }));

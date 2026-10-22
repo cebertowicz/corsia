@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -79,7 +80,7 @@ def _post(client, path: str, body: dict | None = None, *, headers: dict | None =
 
 # Every pre-auth route, as the app calls it.
 ROUTES = [
-    ("GET", "/api/setup/status"), ("POST", "/api/setup/local-download"), ("POST", "/api/setup/first-account"),
+    ("GET", "/api/setup/status"), ("POST", "/api/setup/local-download"), ("POST", "/api/setup/local-download/stop"), ("POST", "/api/setup/first-account"),
     ("GET", "/api/setup/local-model"), ("POST", "/api/setup/local-model"), ("POST", "/api/setup/local-model/stop"),
 ]
 POSTS = [path for method, path in ROUTES if method == "POST"]
@@ -140,7 +141,6 @@ def test_status_exposes_only_screen_facts(client, monkeypatch):
         "macos_supported": True,
         "ram_tier": "eligible",
         "free_disk_gb": 123.0,
-        "app_location": "applications",
         "local_eligible": True,
         "work_folder": "~/corsia",
         "required_username": None,
@@ -161,107 +161,43 @@ def test_post_setup_returns_complete_code(client, method, path):
     assert response.json() == {"code": "setup_complete"}
 
 
-def test_status_uses_the_same_existing_omlx_consent_predicate_as_setup(client, monkeypatch):
-    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: True)
-
-    response = client.get("/api/setup/status", headers=LOOPBACK_HEADERS)
-
-    assert response.status_code == 200
-    assert response.json()["existing_omlx"] is True
-
-
-def test_local_download_uses_existing_single_flight(client, monkeypatch):
+def test_polling_setup_status_and_local_download_spawn_no_processes(client, monkeypatch):
     from llm import local_setup
 
-    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: False)
+    monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("polling must not inspect processes")
+
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden)
+
+    status = client.get("/api/setup/status", headers=LOOPBACK_HEADERS)
+    local_download = client.get("/api/setup/local-download", headers=LOOPBACK_HEADERS)
+
+    assert status.status_code == local_download.status_code == 200
+    assert "existing_omlx" not in status.json()
+    assert local_download.json()["state"] == "stopped"
+
+
+def test_local_download_uses_the_single_managed_flight(client, monkeypatch):
+    from llm import local_setup_flow as flow
+
     calls = 0
 
-    async def begin_local_setup():
+    async def begin_local_setup(*, onboarding):
+        assert onboarding is True
         nonlocal calls
         calls += 1
         return {"ok": True, "in_progress": True, "stage": "Installing"}
 
-    monkeypatch.setattr(local_setup, "begin_local_setup", begin_local_setup)
+    monkeypatch.setattr(flow, "begin_local_setup", begin_local_setup)
     first = _post(client, "/api/setup/local-download")
     second = _post(client, "/api/setup/local-download")
     assert first.status_code == second.status_code == 200
     assert first.json() == second.json() == {"ok": True, "in_progress": True, "stage": "Installing"}
     assert calls == 2
-
-
-def test_local_download_requires_consent_before_starting_an_existing_omlx(client, monkeypatch):
-    from llm import local_setup
-
-    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: True)
-
-    async def should_not_start():
-        raise AssertionError("existing oMLX must not be inspected before consent")
-
-    monkeypatch.setattr(local_setup, "begin_local_setup", should_not_start)
-    response = _post(client, "/api/setup/local-download")
-
-    assert response.status_code == 409
-    assert response.json() == {"code": "consent_required"}
-
-
-def test_broken_leftover_requires_consent_then_starts_setup_after_consent(client, monkeypatch, tmp_path):
-    from llm import local_setup, local_setup_ownership
-
-    leftover = tmp_path / "omlx"
-    leftover.write_text("#!/nonexistent\n", encoding="utf-8")
-    consented = tmp_path / "consented"
-    monkeypatch.setattr(local_setup_ownership.shutil, "which", lambda name: str(leftover) if name == "omlx" else None)
-    monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: tmp_path / "owned")
-    monkeypatch.setattr(local_setup_ownership, "consent_marker_path", lambda: consented)
-    monkeypatch.setattr(local_setup_ownership, "_is_broken_leftover", lambda _path: pytest.fail("consent check must not execute oMLX"))
-    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", local_setup_ownership.existing_omlx_requires_consent)
-    calls = 0
-
-    async def begin_local_setup():
-        nonlocal calls
-        calls += 1
-        return {"ok": True, "in_progress": True, "stage": "Repairing oMLX"}
-
-    monkeypatch.setattr(local_setup, "begin_local_setup", begin_local_setup)
-    refused = _post(client, "/api/setup/local-download")
-    accepted = _post(client, "/api/setup/local-download", {"consent_existing": True})
-
-    assert refused.status_code == 409
-    assert refused.json() == {"code": "consent_required"}
-    assert accepted.status_code == 200
-    assert accepted.json()["stage"] == "Repairing oMLX"
-    assert consented.exists()
-    assert calls == 1
-
-
-@pytest.mark.parametrize("body,choice", [
-    ({"consent_existing": True}, None),
-    ({"consent_existing": True, "manage_existing": False}, False),
-    ({"consent_existing": True, "manage_existing": True}, True),
-])
-def test_welcome_s_own_omlx_choice_reaches_the_consent_and_its_absence_records_none(client, monkeypatch, body, choice):
-    from llm import local_setup
-
-    recorded = []
-    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: True)
-    monkeypatch.setattr(setup_api, "record_existing_omlx_consent", lambda *, manage: recorded.append(manage))
-
-    async def begin_local_setup():
-        return {"ok": True, "in_progress": True}
-
-    monkeypatch.setattr(local_setup, "begin_local_setup", begin_local_setup)
-
-    assert _post(client, "/api/setup/local-download", body).status_code == 200
-    assert recorded == [choice]
-
-
-def test_existing_omlx_consent_check_runs_no_command(monkeypatch):
-    from llm import local_setup_ownership
-
-    monkeypatch.setattr(local_setup_ownership.shutil, "which", lambda _: "/usr/local/bin/omlx")
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("presence must not execute oMLX"))
-
-    assert local_setup_ownership.existing_omlx_requires_consent() is True
 
 
 def test_operation_active_accepts_raw_loopback_shape_without_origin(system_client, monkeypatch):
@@ -383,7 +319,7 @@ def test_first_account_returns_safe_account_error_detail(client):
     })
 
     assert response.status_code == 422
-    assert response.json() == {"detail": "username must be 1-32 characters of a-z, 0-9, '-' or '_'"}
+    assert response.json() == {"detail": "Use up to 32 lowercase letters, numbers, dashes or underscores for the username."}
 
 
 def test_first_account_rejects_the_client_only_folder_field(client):
@@ -417,19 +353,6 @@ def test_macos_support_uses_the_approved_major_version_floor(monkeypatch, system
     monkeypatch.setattr(setup_api.platform, "mac_ver", lambda: (version, ("", "", ""), ""))
     assert setup_api._macos_supported() is expected
 
-
-@pytest.mark.parametrize(
-    ("executable", "expected"),
-    [
-        (Path("/Applications/CORSIA.app/Contents/MacOS/corsia"), "applications"),
-        (Path("/Volumes/CORSIA/CORSIA.app/Contents/MacOS/corsia"), "disk_image"),
-        (Path("/private/var/folders/x/AppTranslocation/id/d/CORSIA.app/Contents/MacOS/corsia"), "disk_image"),
-        (Path("/private/Applications/cache/corsia"), "other"),
-        (Path("/opt/corsia/bin/corsia"), "other"),
-    ],
-)
-def test_app_location_is_classified_without_returning_a_path(executable, expected):
-    assert setup_api._app_location_class(executable) == expected
 
 
 def test_work_folder_display_hides_the_home_name(monkeypatch, tmp_path):
@@ -508,7 +431,6 @@ def welcome(no_users, monkeypatch, fresh_local_setup):
     """The setup routes on a non-default bound port, as the app reaches them before any account."""
     from llm import local_setup
 
-    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: False)
     port = 43124
     headers = {"Host": f"127.0.0.1:{port}", "Content-Type": "application/json"}
     app = FastAPI()
@@ -542,6 +464,8 @@ def test_welcome_picks_then_get_started_downloads_that_model_through_the_setup_r
         "name": "Qwen3.8 27B", "repository": row["repo_id"], "model": "Qwen3.8-27B-oQ4e-mtp",
         "download_size_bytes": row["download_bytes"], "download_size_gb": round(row["download_bytes"] / 1000**3, 1),
         "context_window": 262_144, "quantization_bits": row["level"], "relative_speed": row["relative_speed"],
+        "resident_bytes": row["resident_bytes"],
+        "smarts_level": row["smarts_level"], "tokens_per_second": row["tokens_per_second"],
     }}
     # Welcome only picked; nothing downloaded and nothing was written to oMLX.
     assert mac.downloads == [] and mac.omlx.puts() == []
@@ -567,7 +491,7 @@ def test_turning_the_switch_off_on_welcome_stops_the_pick_through_the_setup_rout
     stopped = welcome.call("POST", "/api/setup/local-model/stop").json()
 
     assert stopped == {"state": "not_checked", "model": None, "message": None}
-    assert mac.commands == [["omlx", "stop"]] and mac.downloads == []
+    assert mac.stopped == ["srv"] and mac.downloads == []
 
 
 def test_a_mac_under_24_gb_gets_no_pick_and_starts_nothing_through_the_setup_routes(welcome, monkeypatch):

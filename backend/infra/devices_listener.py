@@ -6,29 +6,21 @@ import asyncio
 import errno
 import ipaddress
 import logging
-import os
-import secrets
 import socket
-import stat
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from urllib.parse import parse_qs
 
 import psutil
 import uvicorn
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.x509.oid import NameOID
 from starlette.responses import JSONResponse
 
 from infra.auth import authenticate, is_person_session, token_from_request
-from infra.config import STATE_ROOT
 from infra.db_async import run_in_db
-from infra.dns_sd import DNSServiceAnnouncement
+from infra.devices_events import emit_pairing_failure
+from infra.devices_identity import ensure_host_key
 from infra.devices_server import DevicesServer
+from infra.dns_sd import DNSServiceAnnouncement
 
 
 DEFAULT_PORT = 47901
@@ -76,14 +68,19 @@ _PUBLIC_API_ROUTES = frozenset({
     ("POST", "/api/auth/login"),
     ("POST", "/api/devices/pair/start"),
     ("POST", "/api/devices/pair/finish"),
+    ("GET", "/api/devices/outside-address"),
+    ("POST", "/api/devices/identity"),
 })
+_LOCAL_ONLY_POST_ROUTES = frozenset({("POST", "/api/devices/pair/start"), ("POST", "/api/devices/pair/finish")})
+_FORWARDING_HEADERS = frozenset({b"forwarded", b"x-forwarded-for", b"x-real-ip"})
 
 
 class DevicesApp:
     """Tag Devices scopes and limit their HTTP access to pairing-safe routes."""
 
-    def __init__(self, app):
+    def __init__(self, app, *, outside_enabled: Callable[[], bool] | None = None):
         self._app = app
+        self._outside_enabled = outside_enabled or (lambda: False)
         self.stopping = False
 
     @staticmethod
@@ -108,8 +105,8 @@ class DevicesApp:
         return user is not None and is_person_session(user)
 
     @staticmethod
-    def _peer_is_on_this_network(scope) -> bool:
-        """Only the addresses `lan_addresses` advertises (and loopback) may reach this listener, whatever it is bound to."""
+    def _may_peer_reach_devices(scope) -> bool:
+        """Return whether a peer may reach the devices listener."""
         try:
             peer = ipaddress.ip_address(str(scope["client"][0]).split("%", 1)[0])
         except (KeyError, TypeError, IndexError, ValueError):
@@ -118,17 +115,42 @@ class DevicesApp:
             peer = peer.ipv4_mapped
         return peer.is_loopback or peer.is_link_local or any(peer in network for network in _PEER_NETWORKS)
 
+    @staticmethod
+    def _peer_is_on_this_network(scope) -> bool:
+        """The pairing/sign-in network: private, ULA, or link-local, never loopback."""
+        try:
+            peer = ipaddress.ip_address(str(scope["client"][0]).split("%", 1)[0])
+        except (KeyError, TypeError, IndexError, ValueError):
+            return False
+        if peer.version == 6 and peer.ipv4_mapped is not None:
+            peer = peer.ipv4_mapped
+        return not peer.is_loopback and (peer.is_link_local or any(peer in network for network in _PEER_NETWORKS))
+
+    @classmethod
+    def _requires_same_network(cls, scope) -> bool:
+        if (scope.get("method"), scope.get("path")) not in _LOCAL_ONLY_POST_ROUTES:
+            return False
+        headers = {name.lower() for name, _ in scope.get("headers", ())}
+        return bool(headers & _FORWARDING_HEADERS) or not cls._peer_is_on_this_network(scope)
+
     async def __call__(self, scope, receive, send):
         tagged = dict(scope)
         tagged["corsia_listener"] = "devices"
         path = tagged.get("path", "")
         kind = tagged.get("type")
-        if kind in {"http", "websocket"} and not self._peer_is_on_this_network(tagged):
+        may_reach = self._may_peer_reach_devices(tagged) or self._outside_enabled()
+        if kind in {"http", "websocket"} and not may_reach:
             if kind == "http":
-                await JSONResponse({"reason": "not_on_this_network"}, status_code=403)(tagged, receive, send)
+                await JSONResponse({"detail": {"reason": "not_on_this_network"}}, status_code=403)(tagged, receive, send)
             else:
                 await receive()  # websocket.connect
                 await send({"type": "websocket.close", "code": 1008})
+            return
+        if kind == "http" and self._requires_same_network(tagged):
+            # This refusal happens before the route can emit its normal pairing
+            # failure event, so use the shared pairing-failure emitter here.
+            emit_pairing_failure(reason="not_on_this_network")
+            await JSONResponse({"detail": {"reason": "not_on_this_network"}}, status_code=403)(tagged, receive, send)
             return
         if (
             kind == "http"
@@ -174,6 +196,7 @@ class DevicesListener:
     announcement: DNSServiceAnnouncement | None = None
     # Told when the announced name or its error changes after start().
     on_announcement_change: Callable[[], None] | None = None
+    outside_enabled: Callable[[], bool] | None = None
 
     @property
     def listening(self) -> dict:
@@ -198,7 +221,7 @@ class DevicesListener:
             return False
         assert port is not None
         config = uvicorn.Config(
-            DevicesApp(self.app),
+            DevicesApp(self.app, outside_enabled=self.outside_enabled),
             host="::",
             port=port,
             log_config=None,
@@ -273,92 +296,3 @@ def _prebind() -> tuple[socket.socket | None, int | None, str | None]:
                 continue
             return None, None, exc.strerror or str(exc)
     return None, None, _NO_PORT_ERROR
-
-
-def _key_paths(state_root: Path = STATE_ROOT) -> tuple[Path, Path]:
-    folder = state_root / "devices"
-    return folder / "host-key.pem", folder / "host-cert.pem"
-
-
-def _secure_file(path: Path) -> None:
-    info = path.stat()
-    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) not in {0o400, 0o600}:
-        raise RuntimeError("Devices host key files have unsafe ownership or permissions")
-
-
-def _certificate_for_key(key) -> bytes:
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "CORSIA")])
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(name)
-        .issuer_name(name)
-        .public_key(key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.now(UTC) - timedelta(minutes=1))
-        .not_valid_after(datetime.now(UTC) + timedelta(days=3650))
-        .add_extension(
-            x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),
-            critical=False,
-        )
-        .sign(key, hashes.SHA256())
-    )
-    return cert.public_bytes(serialization.Encoding.PEM)
-
-
-def _private_key_bytes(key) -> bytes:
-    return key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.TraditionalOpenSSL,
-        serialization.NoEncryption(),
-    )
-
-
-def ensure_host_key(state_root: Path = STATE_ROOT) -> tuple[Path, Path]:
-    """Load, or securely repair, the host's stable ECDSA identity."""
-    key_path, cert_path = _key_paths(state_root)
-    folder = key_path.parent
-    key_exists = key_path.exists()
-    cert_exists = cert_path.exists()
-    if key_exists:
-        _secure_file(key_path)
-    if cert_exists:
-        _secure_file(cert_path)
-    if key_exists and cert_exists:
-        return key_path, cert_path
-
-    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(folder, 0o700)
-    if key_exists:
-        key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
-        _write_private_file(cert_path, _certificate_for_key(key))
-        return key_path, cert_path
-
-    key = ec.generate_private_key(ec.SECP256R1())
-    _write_private_file(key_path, _private_key_bytes(key))
-    _write_private_file(cert_path, _certificate_for_key(key))
-    return key_path, cert_path
-
-
-def host_spki_sha256(state_root: Path = STATE_ROOT) -> bytes:
-    """Return the SHA-256 binding for the listener's stable public key."""
-    _, cert_path = ensure_host_key(state_root)
-    cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
-    spki = cert.public_key().public_bytes(
-        serialization.Encoding.DER,
-        serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
-    digest = hashes.Hash(hashes.SHA256())
-    digest.update(spki)
-    return digest.finalize()
-
-
-def _write_private_file(path: Path, content: bytes) -> None:
-    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
-    descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    try:
-        with os.fdopen(descriptor, "wb") as output:
-            output.write(content)
-        os.replace(temporary, path)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise

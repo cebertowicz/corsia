@@ -177,7 +177,7 @@ def test_reviewer_events_include_version_and_standards(monkeypatch):
     monkeypatch.setattr(on_pr_review, "format_status_summary", lambda *_args: ("none", "clean", 0, 0, 0))
     monkeypatch.setattr(on_pr_review, "fetch_existing_review_comments", lambda *_args: [])
     monkeypatch.setattr(on_pr_review, "fetch_existing_issue_comments", lambda *_args: [])
-    monkeypatch.setattr(on_pr_review, "classify_review_findings", lambda *_args, **_kwargs: ([], [], 0))
+    monkeypatch.setattr(on_pr_review, "classify_review_findings", lambda *_args, **_kwargs: ([], [], []))
     monkeypatch.setattr(on_pr_review, "publish_review", lambda **_kwargs: None)
     monkeypatch.setattr(on_pr_review, "set_success", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(

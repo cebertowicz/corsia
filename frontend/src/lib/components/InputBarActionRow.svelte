@@ -15,19 +15,19 @@
 	import { stopRequestedTurns } from '$lib/ws/send';
 	import { turnStates } from '$lib/ws/turnState';
 	import { isThreadTurnActive } from '$lib/stores/threads';
-	import { subagentGlyph, subagentModelLabel, subagentTitle } from '$lib/utils/subagentLabel';
 	import type { SheetView } from './inputBarHelpers';
-	type SubagentRef = { model?: string | null; provider?: string } | undefined;
+	import { inlineSlot } from '$lib/slotMotion';
+	import SwitchingIcon from './ui/SwitchingIcon.svelte';
 
 	let {
 		threadId,
 		sheetView,
 		openSheet,
-		isSubagentThread,
-		subagentRef,
 		isActiveModelReady,
 		canSendToModel,
 		queueUntilSwitch,
+		switchState = null,
+		switchError = null,
 		modelLabel,
 		activeModelName,
 		supportsReasoning,
@@ -47,11 +47,11 @@
 		threadId: string | null;
 		sheetView: SheetView;
 		openSheet: (view: Exclude<SheetView, null>) => void;
-		isSubagentThread: boolean;
-		subagentRef: SubagentRef;
 		isActiveModelReady: boolean;
 		canSendToModel: boolean;
 		queueUntilSwitch: boolean;
+		switchState?: 'model' | 'account' | 'failed' | null;
+		switchError?: string | null;
 		modelLabel: string;
 		activeModelName: string | undefined;
 		supportsReasoning: boolean;
@@ -81,6 +81,8 @@
 	let queueHoldTimer: ReturnType<typeof setTimeout> | null = null;
 	let queueHolding = $state(false);
 	let queueArmed = $state(false);
+	let heldPointerId: number | null = null;
+	let heldThreadId: string | null = null;
 	let holdStartedAt = 0;
 	let holdOrigin: { x: number; y: number } | null = null;
 	let suppressClickUntil = 0;
@@ -100,6 +102,11 @@
 	const showStop = $derived(
 		isStreamingThisThread && !inputText.trim() && pendingAttachmentCount === 0,
 	);
+	const sendDisabled = $derived(
+		(!hasMessageToSend && !isStreamingThisThread)
+		|| $connectionState !== 'connected'
+		|| (!canSendToModel && hasMessageToSend),
+	);
 
 	function openControlSheet(event: MouseEvent, view: Exclude<SheetView, null>) {
 		event.preventDefault();
@@ -109,16 +116,19 @@
 
 	function beginQueueHold(event: PointerEvent) {
 		if (!hasMessageToSend || !canSendToModel || queueHoldTimer) return;
+		const pointerId = event.pointerId;
 		queueArmed = false;
 		queueHolding = true;
+		heldPointerId = pointerId;
+		heldThreadId = threadId;
 		holdStartedAt = Date.now();
 		holdOrigin = { x: event.clientX, y: event.clientY };
 		// Explicit capture keeps the gesture bound to this button for its whole
 		// life, so travel is judged by distance rather than by boundary events —
 		// which is what let a 40px target disarm itself under a steady thumb.
 		const target = event.currentTarget as HTMLElement | null;
-		if (target && typeof event.pointerId === 'number') {
-			try { target.setPointerCapture(event.pointerId); } catch { /* not captureable */ }
+		if (target) {
+			try { target.setPointerCapture(pointerId); } catch { /* document sees terminal events */ }
 		}
 		queueHoldTimer = setTimeout(() => {
 			queueHoldTimer = null;
@@ -132,10 +142,29 @@
 		queueHoldTimer = null;
 		queueArmed = false;
 		queueHolding = false;
+		heldPointerId = null;
+		heldThreadId = null;
 		holdOrigin = null;
 	}
 
 	onDestroy(cancelQueueHold);
+
+	/**
+	 * The context the hold began in is gone. Drop the hold but keep its pointer,
+	 * so the release that is still coming is swallowed rather than landing as a
+	 * tap on whatever the button now means (Stop, or another thread's send).
+	 */
+	function voidQueueHold() {
+		if (queueHoldTimer) clearTimeout(queueHoldTimer);
+		queueHoldTimer = null;
+		queueArmed = false;
+		queueHolding = false;
+	}
+
+	/** Leaving the page mid-hold ends it with nothing sent; the glyph must not stay up. */
+	function cancelHoldIfHidden() {
+		if (document.visibilityState === 'hidden') cancelQueueHold();
+	}
 
 	/** A hold that travelled is a drag or a scroll, not a deliberate hold. */
 	function trackQueueHold(event: PointerEvent) {
@@ -156,6 +185,18 @@
 		queueAfterTurn();
 	}
 
+	/** The one end path for up and cancel: capture on the document sees them even when the button misses the release. */
+	function finishQueueHoldFromDocument(event: PointerEvent) {
+		if (event.pointerId !== heldPointerId) return;
+		if (!queueHolding) {
+			cancelQueueHold();
+			if (event.type === 'pointerup') suppressClickUntil = Date.now() + CLICK_SUPPRESSION_MS;
+			return;
+		}
+		if (event.type === 'pointerup') completeQueueHold();
+		else abandonQueueHold();
+	}
+
 	/**
 	 * Finish a hold the platform took away from us.
 	 *
@@ -164,8 +205,9 @@
 	 * steer. Below the delay it is an ordinary abort.
 	 */
 	function abandonQueueHold() {
-		const held = queueArmed
-			|| (queueHolding && Date.now() - holdStartedAt >= QUEUE_ARM_MS);
+		// A voided hold keeps its pointer until the document sees the release.
+		if (!queueHolding) return;
+		const held = queueArmed || Date.now() - holdStartedAt >= QUEUE_ARM_MS;
 		if (!held) { cancelQueueHold(); return; }
 		queueAfterTurn();
 	}
@@ -177,7 +219,20 @@
 		}
 		onSendClick();
 	}
+
+	$effect(() => {
+		if (queueHolding && (sendDisabled || !hasMessageToSend || heldThreadId !== threadId)) {
+			voidQueueHold();
+		}
+	});
 </script>
+
+<svelte:window onblur={cancelQueueHold} />
+<svelte:document
+	onpointerupcapture={finishQueueHoldFromDocument}
+	onpointercancelcapture={finishQueueHoldFromDocument}
+	onvisibilitychange={cancelHoldIfHidden}
+/>
 
 <div class="action-row">
 	<button
@@ -190,30 +245,37 @@
 	>
 		<svg class="plus-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 	</button>
-	{#if isSubagentThread}
-		<span class="row-chip cc-model-chip" title={subagentTitle(subagentRef?.provider)}>
-			<span class="cc-glyph">{subagentGlyph(subagentRef?.provider)}</span>
-			<span class="model-chip-name">{subagentModelLabel(subagentRef?.model, subagentRef?.provider)}</span>
-		</span>
-	{:else}
-		<button
-			type="button"
-			class="row-chip model-chip"
-			class:open={sheetView === 'model'}
-			class:unloaded={!isActiveModelReady}
-			data-sheet-trigger
-			onclick={(event) => openControlSheet(event, 'model')}
-			title={isActiveModelReady
-				? activeModelName
-				: queueUntilSwitch
-					? 'Model switch in progress'
-					: 'Pick a loaded model to send'}
-		>
-			<span class="model-chip-name">{modelLabel}</span>
-			<svg class="chevron" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>
-		</button>
-	{/if}
-	{#if !isSubagentThread && supportsReasoning && effortLabel}
+	<button
+		type="button"
+		class="row-chip model-chip"
+		class:open={sheetView === 'model'}
+		class:unloaded={!isActiveModelReady}
+		data-sheet-trigger
+		onclick={(event) => openControlSheet(event, 'model')}
+		title={switchState === 'failed'
+			? switchError ?? 'Switch failed'
+			: switchState === 'model'
+				? 'Model switch in progress'
+				: switchState === 'account'
+					? 'Account switch in progress'
+					: isActiveModelReady
+						? activeModelName
+						: queueUntilSwitch
+							? 'Model switch in progress'
+							: 'Pick a loaded model to send'}
+	>
+		{#if switchState}
+			<span class="model-switch-slot" in:inlineSlot out:inlineSlot>
+				<span class="model-switch-status" class:failed={switchState === 'failed'}>
+					<span class="model-switch-icon" aria-hidden={switchState === 'failed'}><SwitchingIcon ariaLabel={switchState === 'model' ? 'Switching model' : 'Switching account'} /></span>
+					<span class="model-status-dot" style="background: var(--red)" role="img" aria-label="Switch failed" aria-hidden={switchState !== 'failed'}></span>
+				</span>
+			</span>
+		{/if}
+		<span class="model-chip-name">{modelLabel}</span>
+		<svg class="chevron" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>
+	</button>
+	{#if supportsReasoning && effortLabel}
 		<button
 			type="button"
 			class="row-chip effort-chip"
@@ -278,11 +340,10 @@
 		style="--queue-arm-ms: {QUEUE_ARM_MS}ms"
 		onpointerdown={beginQueueHold}
 		onpointermove={trackQueueHold}
-		onpointerup={completeQueueHold}
-		onpointercancel={abandonQueueHold}
+		onlostpointercapture={abandonQueueHold}
 		oncontextmenu={(event) => event.preventDefault()}
 		onclick={handleSendClick}
-		disabled={(!hasMessageToSend && !isStreamingThisThread) || $connectionState !== 'connected' || (!canSendToModel && hasMessageToSend && !isSubagentThread)}
+		disabled={sendDisabled}
 		aria-label={queueArmed
 			? 'Release to queue after the current turn'
 			: isStreamingThisThread && !hasMessageToSend
@@ -292,7 +353,7 @@
 			? 'Release to queue after the current turn'
 			: queueUntilSwitch && !isStreamingThisThread
 				? 'Queues until model switch finishes'
-				: !canSendToModel && !isStreamingThisThread && !isSubagentThread
+				: !canSendToModel && !isStreamingThisThread
 					? 'Pick a loaded model to send'
 					: hasMessageToSend
 						? 'Send — hold to queue, or press Ctrl/⌘+Enter'
@@ -317,6 +378,12 @@
 
 <style>
 	.model-chip-name { min-width: 0; }
+	.model-switch-slot { display: inline-flex; flex: 0 0 auto; align-items: center; }
+	/* Icon and failed dot share one cell, so the slot keeps the icon's size as one fades into the other. */
+	.model-switch-status { display: grid; place-items: center; }
+	.model-switch-status > * { grid-area: 1 / 1; transition: opacity var(--dur-tight) var(--ease-snap); }
+	.model-switch-icon { display: inline-flex; }
+	.model-switch-status.failed .model-switch-icon, .model-switch-status:not(.failed) .model-status-dot { opacity: 0; pointer-events: none; }
 	.ctx-estimate-marker {
 		visibility: hidden;
 		font: inherit;

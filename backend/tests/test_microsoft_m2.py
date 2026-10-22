@@ -304,9 +304,8 @@ async def test_microsoft_search_uses_persisted_screen_to_limit_headers(
         _thread_id="t", account_id=account, query="x",
     ))["messages"][0]
     assert result["screen"] == expected_screen
-    assert result["to"] == "person@example.test"
     assert ("subject" in result) is has_subject
-    assert set(result) == {"message_id", "thread_id", "from", "to", "date", "screen"} | (
+    assert set(result) == {"message_id", "thread_id", "from", "date", "screen"} | (
         {"subject"} if has_subject else set()
     )
 

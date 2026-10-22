@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import subprocess
 
 import httpx
@@ -9,12 +10,39 @@ from fastapi import HTTPException
 
 #: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
 SETUP_COMMAND = "corsia local setup"
+CAUSES = frozenset({"connection", "damaged_bundle", "disk_full", "memory", "other", "own_omlx_upgrade_required"})
+# Sentences say "try again"; "Retry" names only the button.
+RETRY_IN_APP = "try again."
+RETRY_IN_TERMINAL = f"run `{SETUP_COMMAND}` again."
+
+
+def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN_APP) -> str:
+    """Return the one cause-specific recovery line for setup, sources, wakes and the CLI."""
+    if cause == "damaged_bundle":
+        return f"The CORSIA app is damaged because its bundled oMLX executable is missing. Download CORSIA again, replace this app, then {retry}"
+    if cause == "disk_full":
+        need = (f"{math.ceil(bytes_to_free / 100_000_000) / 10:.1f} GB more"
+                if isinstance(bytes_to_free, int) and bytes_to_free > 0 else "more")
+        return f"The local model needs {need} free space. Free it up, then {retry}"
+    if cause == "connection":
+        return f"Check your internet connection, then {retry}"
+    if cause == "memory":
+        return "Choose a subscription or API provider instead."
+    if cause == "own_omlx_upgrade_required":
+        # Only a source run without the bundled oMLX reaches this (ensure_omlx).
+        if retry == RETRY_IN_APP:
+            return "The oMLX on this computer is out of date or broken. Update it, then try again."
+        return f"Run `brew upgrade jundot/omlx/omlx`, or install the CORSIA app to use its bundled oMLX, then {retry}"
+    if retry == RETRY_IN_APP:
+        return "CORSIA couldn’t set up the local model."
+    return f"CORSIA couldn’t set up the local model. {retry[0].upper() + retry[1:]}"
 
 
 def local_setup_error(message: str) -> dict:
     return {
         "ok": False,
         "message": message,
+        "fix": setup_fix("other"),
         "next_action": f"Run `{SETUP_COMMAND}` again after fixing this, or add a subscription/API key.",
     }
 
@@ -39,6 +67,22 @@ def failure_message(exc: Exception) -> str:
     if isinstance(exc, (OSError, subprocess.SubprocessError, httpx.HTTPError, RuntimeError)):
         return str(exc)
     return f"Local model setup failed unexpectedly ({type(exc).__name__}); see the backend log."
+
+
+def failure_cause(exc: Exception) -> str:
+    """Classify local-flight exceptions into stable setup-status cause codes."""
+    from llm.local_setup_disk import DiskSpaceError
+    from llm.local_setup_executable import OwnOmlxUpgradeRequired
+
+    if isinstance(exc, OwnOmlxUpgradeRequired):
+        return "own_omlx_upgrade_required"
+    if isinstance(exc, DiskSpaceError):
+        return "disk_full"
+    if isinstance(exc, MemoryError):
+        return "memory"
+    if isinstance(exc, (httpx.NetworkError, httpx.TimeoutException, ConnectionError, TimeoutError)):
+        return "connection"
+    return "other"
 
 
 class DownloadProgress:
@@ -83,10 +127,17 @@ class DownloadProgress:
         if self.bytes_per_second and not self.stalled:
             self.eta_seconds = max(0, round((float(total) - current) / self.bytes_per_second))
 
-    def due(self, downloaded: object, total: object, now: float) -> int | None:
+    @staticmethod
+    def percent(downloaded: object, total: object) -> int | None:
+        """Return structured bounded download progress, if oMLX reported both sizes."""
         if not (isinstance(downloaded, (int, float)) and isinstance(total, (int, float)) and total):
             return None
-        percent = min(100, max(0, int(downloaded / total * 100)))
+        return min(100, max(0, int(downloaded / total * 100)))
+
+    def due(self, downloaded: object, total: object, now: float) -> int | None:
+        percent = self.percent(downloaded, total)
+        if percent is None:
+            return None
         step = percent // self.step * self.step
         timed = self.seconds is not None and now - self.reported_at >= self.seconds
         if not ((step and step != self.reported_step) or timed):

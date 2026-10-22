@@ -5,11 +5,12 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 
 @pytest.mark.asyncio
 async def test_native_reports_paid_call_before_tool_failure(monkeypatch):
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from llm.router import LLMResponse, ToolCallRequest
     from test_checkpoint_provider_adapters import _request, _source
 
@@ -35,14 +36,14 @@ async def test_native_reports_paid_call_before_tool_failure(monkeypatch):
     monkeypatch.setattr(native, "_provider_params", lambda model: {"model": model})
     request = replace(_request(_source(native)), on_usage=usage)
     with pytest.raises(RuntimeError, match="tool failed"):
-        await native.invoke_checkpoint(request, asyncio.Event())
+        await native.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert observed[0][2]["total_tokens"] == 150
 
 
 @pytest.mark.asyncio
 async def test_cc_complete_usage_precedes_tool_and_excludes_aggregate():
-    from core.checkpoint_cc_io import _ToolBoundary
-    from core.checkpoint_cc_context import CCCheckpointContext
+    from core.fork_cc_io import _ToolBoundary
+    from core.fork_cc_context import CCForkContext
     from test_checkpoint_external_adapters import _target
 
     observed = []
@@ -51,7 +52,7 @@ async def test_cc_complete_usage_precedes_tool_and_excludes_aggregate():
         observed.append((key, measured))
 
     boundary = _ToolBoundary(SimpleNamespace(returncode=None),
-                             CCCheckpointContext(_target("claude-code"), 0), asyncio.Event(),
+                             CCForkContext(_target("claude-code"), 0), asyncio.Event(),
                              on_usage=usage)
     await boundary.observe({"type": "assistant", "message": {
         "id": "response-1", "stop_reason": "tool_use", "content": [
@@ -79,8 +80,8 @@ async def test_cc_complete_usage_precedes_tool_and_excludes_aggregate():
     ],
 )
 async def test_cc_terminal_usage_keeps_the_vendor_reported_model(terminal, terminal_usage, expected_key, expected_model):
-    from core.checkpoint_cc_io import _ToolBoundary
-    from core.checkpoint_cc_context import CCCheckpointContext
+    from core.fork_cc_io import _ToolBoundary
+    from core.fork_cc_context import CCForkContext
     from test_checkpoint_external_adapters import _target
 
     observed = []
@@ -89,7 +90,7 @@ async def test_cc_terminal_usage_keeps_the_vendor_reported_model(terminal, termi
         observed.append((key, model, measured))
 
     boundary = _ToolBoundary(SimpleNamespace(returncode=None),
-                             CCCheckpointContext(_target("claude-code"), 0), asyncio.Event(),
+                             CCForkContext(_target("claude-code"), 0), asyncio.Event(),
                              on_usage=usage)
     await boundary.observe({"type": "stream_event", "event": {"type": "message_start", "message": {
         "id": "response-1", "model": "claude-sonnet-5-5",
@@ -112,7 +113,7 @@ async def test_cc_terminal_usage_keeps_the_vendor_reported_model(terminal, termi
 
 @pytest.mark.asyncio
 async def test_codex_observed_calls_exclude_final_aggregate_and_old_duplicates():
-    from core.checkpoint_codex_result import CodexCheckpointCapture
+    from core.fork_codex_result import CodexForkCapture
     from infra.provider_usage import TokenUsage
 
     observed = []
@@ -120,7 +121,7 @@ async def test_codex_observed_calls_exclude_final_aggregate_and_old_duplicates()
     async def usage(key, model, measured):
         observed.append((key, measured))
 
-    capture = CodexCheckpointCapture(on_usage=usage)
+    capture = CodexForkCapture(on_usage=usage, kind=CHECKPOINT_KIND)
     event = {"kind": "call_usage", "turn_id": "fork", "ordinal": 1,
              "usage": TokenUsage(input_uncached=100, output=20).ledger_row()}
     await capture.on_event(event)

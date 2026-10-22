@@ -45,7 +45,7 @@ class CompletedToolCall:
     invocation_id: str | None = None
     provider_tool_call_id: str | None = None
     assistant_step_id: str | None = None
-    checkpoint_id: str | None = None
+    fork_id: str | None = None
     canonical: Any = field(default=None, repr=False)
 
 
@@ -120,7 +120,7 @@ def enrich_completed_failure(
     invocation_id: str | None = None,
     provider_tool_call_id: str | None = None,
     assistant_step_id: str | None = None,
-    checkpoint_id: str | None = None,
+    fork_id: str | None = None,
 ) -> CompletedToolFailure:
     """Add outer call identity without ever rebinding producer-known evidence.
 
@@ -149,7 +149,7 @@ def enrich_completed_failure(
                 assistant_step_id=_merge_known_value(
                     call.assistant_step_id, assistant_step_id,
                 ),
-                checkpoint_id=_merge_known_value(call.checkpoint_id, checkpoint_id),
+                fork_id=_merge_known_value(call.fork_id, fork_id),
                 canonical=call.canonical,
             ))
     except ValueError:
@@ -180,7 +180,7 @@ def _same_completed_call(left: CompletedToolCall, right: CompletedToolCall) -> b
         and left.invocation_id == right.invocation_id
         and left.provider_tool_call_id == right.provider_tool_call_id
         and left.assistant_step_id == right.assistant_step_id
-        and left.checkpoint_id == right.checkpoint_id
+        and left.fork_id == right.fork_id
         and getattr(left.canonical, "message_id", None)
         == getattr(right.canonical, "message_id", None)
     )

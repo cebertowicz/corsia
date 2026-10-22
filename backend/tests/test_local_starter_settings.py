@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from llm import local_setup
+from llm import local_setup_runtime as runtime
 from llm.local_model import LocalModel
 from llm.local_profiles import OMLX_GLOBAL_SETTINGS
 
@@ -27,8 +27,8 @@ def test_canonical_setup_settings_use_exact_upstream_payloads_and_no_environment
     monkeypatch.setattr("llm.providers.omlx_settings.admin_request", admin_request)
     monkeypatch.setattr("llm.providers.omlx_endpoints.admin_request", admin_request)
 
-    asyncio.run(local_setup._configure_global("server"))
-    asyncio.run(local_setup._configure_model_settings("server", model))
+    asyncio.run(runtime.configure_global("server"))
+    asyncio.run(runtime.configure_model_settings("server", model))
 
     assert calls == [
         ("POST", "/global-settings", {

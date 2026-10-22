@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from spake2 import SPAKE2_Symmetric
 
 import api.devices as devices_api
+import infra.devices_events as devices_events
 from core.device_pairing import PAIRING_IDENTITY, _split_key
 from core.devices_runtime import runtime
 from main import app
@@ -28,11 +29,10 @@ def _start(client: TestClient, message: bytes):
 
 def test_pairing_events_record_outcomes_without_secret_material(monkeypatch):
     events = []
-    monkeypatch.setattr(
-        devices_api,
-        "emit_product_event",
-        lambda category, action, *, properties=None: events.append((category, action, properties)),
-    )
+    def record(category, action, *, properties=None):
+        events.append((category, action, properties))
+
+    monkeypatch.setattr(devices_events, "emit_product_event", record)
     client = TestClient(app)
 
     runtime.pairing.disable()

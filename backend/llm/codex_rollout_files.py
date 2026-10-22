@@ -7,7 +7,7 @@ threads that home is the managed app-server home under the runtime dir, not
 the user's ``~/.codex``.
 
 Checkpoint work copies the exact rollout into a disposable Codex home and
-resumes it there through ``core.checkpoint_codex_fork``.
+resumes it there through ``core.fork_codex``.
 """
 
 from __future__ import annotations

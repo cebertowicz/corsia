@@ -9,7 +9,7 @@
 	 * Frames for corsia#638 PR 2. The real screens run on their own code path; only the outside is faked, the way a test
 	 * fakes it: the desktop shell (`window.__CORSIA_SHELL__` and its commands) and the server answers (`fetch`). The
 	 * frame script reaches each state by using the screens (click, type), never by editing the page.
-	 *   ?kind=setup&discover=found|empty|denied&pair=ok|wrong_code|expired|too_many_tries|paused|busy|server|network|incompatible|too_old
+	 *   ?kind=setup&discover=looking|found|empty|denied&pair=ok|wrong_code|expired|too_many_tries|paused|busy|server|network|incompatible|too_old
 	 *   ?kind=devices&state=off|on|code|ending|not-announced|paused|starting|ports-taken|load-failed|loading|read-only|consumed|long-name|long-name-read-only
 	 *   &theme=light|dark
 	 */
@@ -65,6 +65,7 @@
 		const names = discover === 'found' ? ['Alex’s Mac mini', 'Living room mini'] : [];
 		(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
 			invoke: async (command: string) => {
+				if (command === 'remote_discovered' && discover === 'looking') return new Promise(() => {});
 				if (command === 'remote_discovered') return { names, denied: discover === 'denied' };
 				if (command === 'remote_pair') {
 					return pair === 'ok' ? { ok: true, name: 'Alex’s Mac mini' }

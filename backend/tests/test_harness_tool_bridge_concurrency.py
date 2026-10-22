@@ -275,10 +275,10 @@ async def test_checkpoint_media_projection_failure_preserves_private_effect(
     with pytest.raises(CompletedToolFailure) as raised:
         await execute_tool(registry_of(tool), thread_id="thread-1", turn_identity=identity,
                            invocation_id="cp-call", provider_tool_call_id="cp-call",
-                           checkpoint_id="checkpoint", name=tool.name, arguments={})
+                           fork_id="checkpoint", name=tool.name, arguments={})
     [completed] = raised.value.completed
     assert completed.result == "private media result" and completed.result.media is reference
-    assert completed.checkpoint_id == "checkpoint" and completed.invocation_id == "cp-call"
+    assert completed.fork_id == "checkpoint" and completed.invocation_id == "cp-call"
     assert completed.canonical is None
     assert db.execute("SELECT COUNT(*) FROM messages WHERE role='tool'").fetchone()[0] == 0
     assert tool.calls == 1
@@ -301,7 +301,7 @@ async def test_completed_failure_refuses_outer_identity_contradiction(conflict):
         turn_id="producer-turn" if conflict == "turn" else "outer-turn",
         invocation_id="invocation",
         provider_tool_call_id="producer-call" if conflict == "provider" else "outer-call",
-        checkpoint_id="producer-checkpoint" if conflict == "checkpoint" else None,
+        fork_id="producer-checkpoint" if conflict == "checkpoint" else None,
     )
 
     class Registry:
@@ -315,7 +315,7 @@ async def test_completed_failure_refuses_outer_identity_contradiction(conflict):
         await execute_tool(
             Registry(), thread_id="thread-1", turn_identity=TurnIdentity("outer-turn", 1),
             invocation_id="invocation", provider_tool_call_id="outer-call",
-            checkpoint_id="outer-checkpoint" if conflict == "checkpoint" else None,
+            fork_id="outer-checkpoint" if conflict == "checkpoint" else None,
             name="capture", arguments={"source": "outer"},
         )
 

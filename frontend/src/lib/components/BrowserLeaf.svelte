@@ -3,9 +3,9 @@
 	import { openBrowserUrl } from '$lib/api/browser';
 	import { token } from '$lib/stores/auth';
 	import { theme } from '$lib/stores/theme';
-	import { clampPoint } from '$lib/browserPane';
+	import { clampPoint, drawShifted, FrameScrollShift } from '$lib/browserPane';
 	import { agentColor } from '$lib/docPresence';
-	import { BrowserPaneInput, wheelPixels } from '$lib/browserPaneInput';
+	import { BrowserPaneInput, keyModifiers, keyText, wheelPixels } from '$lib/browserPaneInput';
 	import { browserTabLabel } from '$lib/browserAddress';
 	import { BrowserAgentPresence, markerPlace, type MarkerPlace } from '$lib/browserAgentPresence.svelte';
 	import { setBrowserPaneLabel } from '$lib/stores/artifactWorkspace';
@@ -48,9 +48,12 @@
 	let activePointer: number | null = null;
 	let decodeGeneration = 0;
 	let decodeWarned = false;
-	let drawnArea = '';
+	const frameScroll = new FrameScrollShift(() => redraw());
 	const paneInput = new BrowserPaneInput(message => {
 		if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+	}, delta => {
+		frameScroll.shift(delta);
+		redraw();
 	});
 
 	function resetPointer() {
@@ -153,13 +156,16 @@
 		pageConfirmed();
 		const metadata = message.metadata as Record<string, unknown>;
 		if (typeof metadata.deviceWidth !== 'number' || typeof metadata.deviceHeight !== 'number') return;
-		width = metadata.deviceWidth;
-		height = metadata.deviceHeight;
+		const frameWidth = metadata.deviceWidth;
+		const frameHeight = metadata.deviceHeight;
 		const generation = ++decodeGeneration;
 		const next = new Image();
 		next.src = `data:image/jpeg;base64,${message.data}`;
 		void next.decode().then(() => {
 			if (generation !== decodeGeneration) return;
+			frameScroll.replace(metadata);
+			width = frameWidth;
+			height = frameHeight;
 			image = next;
 			redraw();
 		}, (error) => {
@@ -197,18 +203,15 @@
 		if (!context) return;
 		// A new page size moves the letterbox even when the pane keeps its size: clear the whole backing
 		// store so no strip of the earlier picture survives beside the new one.
-		const area = `${left},${top},${width * scale},${height * scale}`;
-		if (area !== drawnArea) {
-			context.setTransform(1, 0, 0, 1, 0, 0);
-			context.clearRect(0, 0, canvas.width, canvas.height);
-			drawnArea = area;
-		}
+		// Predicted scroll also moves the visible rectangle, so it needs the same clear.
+		context.setTransform(1, 0, 0, 1, 0, 0);
+		context.clearRect(0, 0, canvas.width, canvas.height);
 		context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
 		// Chrome can keep capturing at an older, smaller size: the frame then holds the page shrunk into its
 		// top-left corner with blank space beside it, so draw only the page's part of the frame.
 		// Frame pixels per page pixel; above 1 on a high-density pane.
 		const density = Math.min(image.naturalWidth / width, image.naturalHeight / height);
-		context.drawImage(image, 0, 0, width * density, height * density, left, top, width * scale, height * scale);
+		drawShifted(context, image, width * density, height * density, left, top, width * scale, height * scale, frameScroll.translation, scale);
 		placeMarker();
 	}
 
@@ -261,27 +264,17 @@
 		// The person's scroll moves the agent's field, and the marker cannot follow it there.
 		agent.clearMark();
 		// CDP takes wheel deltas in CSS pixels, so a line or page wheel is converted first.
-		socket.send(JSON.stringify({ type: 'input_mouse', eventType: 'mouseWheel', ...point, ...wheelPixels(event, height) }));
+		paneInput.wheel(point, wheelPixels(event, height));
 	}
 
 	function sendKey(event: KeyboardEvent) {
 		if (socket?.readyState !== WebSocket.OPEN) return;
 		event.preventDefault();
+		paneInput.flush();
 		socket.send(JSON.stringify({
 			type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp',
 			key: event.key, code: event.code, keyCode: event.keyCode, text: keyText(event), modifiers: keyModifiers(event)
 		}));
-	}
-
-	// Chrome's CDP modifier bits preserve shortcuts that the person performs in the shared page.
-	function keyModifiers(event: KeyboardEvent) {
-		return (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
-	}
-
-	// Chrome types only keys that carry text; Enter must carry a return to submit a form.
-	function keyText(event: KeyboardEvent) {
-		if (event.type !== 'keydown' || event.metaKey || event.ctrlKey) return '';
-		return event.key === 'Enter' ? '\r' : event.key.length === 1 ? event.key : '';
 	}
 
 	async function go(targetUrl = url) {
@@ -332,6 +325,7 @@
 			clearTimeout(fitTimer);
 			agent.reset();
 			paneInput.dispose();
+			frameScroll.dispose();
 		};
 	});
 

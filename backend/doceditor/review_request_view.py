@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 from doceditor import review_requests as reviews
-from infra.accounts import get_user
 
 
 def _thread_names(db, rows: list[dict]) -> dict[str, str]:
     ids = {row["reviewer_thread_id"] for row in rows}
-    ids.update(row["requester_id"] for row in rows if row["requester_kind"] == "agent")
     if not ids:
         return {}
     placeholders = ",".join("?" for _ in ids)
@@ -17,14 +15,10 @@ def _thread_names(db, rows: list[dict]) -> dict[str, str]:
     }
 
 
-def _requester_name(db, row, actor: reviews.ReviewActor, names: dict[str, str]) -> str:
-    requester_id = row["requester_id"]
-    if row["requester_kind"] == "agent":
-        return names.get(requester_id, requester_id)
-    if actor.kind == "user" and actor.id == requester_id:
+def _requester_name(db, row, actor: reviews.ReviewActor) -> str:
+    if row["requester_kind"] == "user" and actor.kind == "user" and actor.id == row["requester_id"]:
         return actor.display
-    user = get_user(requester_id, db=db)
-    return user["name"] if user else requester_id
+    return reviews.requester_name(db, row) or row["requester_id"]
 
 
 def document_reviews(db, artifact_id: str, actor: reviews.ReviewActor) -> dict:
@@ -40,7 +34,7 @@ def document_reviews(db, artifact_id: str, actor: reviews.ReviewActor) -> dict:
     result: dict[str, object] = {"reviews": [
         {
             **row, "reviewer_name": names.get(row["reviewer_thread_id"], row["reviewer_thread_id"]),
-            "requester_name": _requester_name(db, row, actor, names),
+            "requester_name": _requester_name(db, row, actor),
             "may_cancel": row["outcome"] == "open" and reviews.may_cancel(db, artifact, row, actor),
         }
         for row in rows

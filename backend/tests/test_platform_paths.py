@@ -128,6 +128,12 @@ def test_adoption_snapshot_restores_database_files_and_permissions(tmp_path):
         connection.execute("create table agents (id text)")
         connection.execute("insert into agents values ('before-adopt')")
     database.chmod(0o600)
+    pre_migration = state / "corsia.db.pre-migration-v126-20261020T000000Z.bak"
+    pre_migration.write_text("kept outside adoption snapshot")
+    expected_snapshot_size = snapshots._snapshot_size(state)
+    pre_migration.unlink()
+    assert snapshots._snapshot_size(state) == expected_snapshot_size
+    pre_migration.write_text("kept outside adoption snapshot")
     keys = state / "keys"
     keys.mkdir(mode=0o700)
     key = keys / "provider"
@@ -137,6 +143,8 @@ def test_adoption_snapshot_restores_database_files_and_permissions(tmp_path):
     (state / "devices" / "registered").write_text("device")
 
     snapshot = snapshots.create_adoption_snapshot(state)
+    assert not (snapshot / "files" / pre_migration.name).exists()
+    pre_migration.write_text("a later migration backup survives restore")
     with sqlite3.connect(database) as connection:
         connection.execute("insert into agents values ('new-build')")
     (state / "keys" / "new-key").write_text("new")
@@ -156,6 +164,7 @@ def test_adoption_snapshot_restores_database_files_and_permissions(tmp_path):
     assert stat.S_IMODE(keys.stat().st_mode) == 0o700
     assert stat.S_IMODE(key.stat().st_mode) == 0o600
     assert stat.S_IMODE(database.stat().st_mode) == 0o600
+    assert pre_migration.read_text() == "a later migration backup survives restore"
 
 
 def _adoptable_state(tmp_path, stored: dict[str, str]) -> Path:
@@ -591,7 +600,7 @@ def test_preview_layout_moves_every_state_entry_but_app_metadata(tmp_path):
         "worktree_reaper",
         "reviewer",
         "local_setup_installed_omlx",
-        "local_setup_existing_omlx_consented",
+        "managed-omlx",
         "local-setup-operation.json",
     }
     for name in state_entries:

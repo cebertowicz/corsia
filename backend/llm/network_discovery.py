@@ -19,13 +19,20 @@ from llm.network_endpoints import (
     is_cloud_external,
     upsert_endpoint,
 )
-from llm.server_observation import record_reachable, record_unreachable
+from llm.server_observation import record_discovery, record_reachable, record_unreachable
 
 log = logging.getLogger(__name__)
 
 HEALTH_SWEEP_INTERVAL = 10
 
 _LOADED_BY_SERVER: dict[str, set[str]] = {}
+
+def notify_cached_model_loaded(server_id: str, model_id: str) -> None:
+    """Optimistically mark the newly loaded model and notify clients."""
+    from infra.state.ws import notify_models_changed
+    _LOADED_BY_SERVER.setdefault(server_id, set()).add(model_id)
+    notify_models_changed()
+
 
 def get_loaded_model_ids(server_id: str) -> set[str]:
     """Return model ids currently loaded on a swept online server."""
@@ -342,9 +349,14 @@ async def _discover_and_notify(server_id: str) -> dict:
                 from llm.catalog import discover_network_models
                 result = await discover_network_models(server_id)
         except Exception as e:
-            log.warning("discover_and_notify(%s) failed: %s", server_id, e)
-            return {"ok": False, "error": str(e)}
-        _notify_models_changed_safe()
+            result = {"ok": False, "error": str(e)}
+            if is_external:
+                log.warning("discover_and_notify(%s) failed: %s", server_id, e)
+            else:
+                record_discovery(server_id, result)
+            return result
+        if is_external or record_discovery(server_id, result):
+            _notify_models_changed_safe()
         if not result.get("ok"):
             return result
         if is_external:
@@ -372,19 +384,6 @@ async def _discover_and_notify(server_id: str) -> dict:
 async def discover_and_notify(server_id: str) -> dict:
     """Public single-server discovery entry point, returning its core receipt."""
     return await _discover_and_notify(server_id)
-
-
-async def refresh_online_servers() -> list[str]:
-    """Re-run model discovery for every online server (managed + external).
-
-    Public entry point for the manual discovery trigger so API routes don't reach
-    into the internal ``_discover_and_notify``. Returns the server ids refreshed."""
-    refreshed: list[str] = []
-    for server in await run_in_db(get_servers):
-        if server.get("status") == "online":
-            await _discover_and_notify(server["id"])
-            refreshed.append(server["id"])
-    return refreshed
 
 
 def _notify_models_changed_safe() -> None:

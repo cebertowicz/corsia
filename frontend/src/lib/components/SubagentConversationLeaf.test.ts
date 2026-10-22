@@ -48,12 +48,18 @@ function response(messages: unknown[] = [], turn_summaries: Record<string, unkno
 }
 
 // The leaf's composer reads a next-turn estimate on entry when the child has no
-// stored reading; these tests count only the leaf's own history reads.
+// stored reading, and the leaf reads the worker's own model and effort from its
+// status and its own catalog; these tests count only the leaf's own history reads.
 const PREVIEW_PATH = '/context-snapshot/next-turn';
+const STATUS_PATH = '/api/delegation/threads/';
+const CATALOG_PATH = '/api/models';
+
+function isHistoryRead(url: unknown): boolean {
+	return ![PREVIEW_PATH, STATUS_PATH, CATALOG_PATH].some((path) => String(url).includes(path));
+}
 
 function historyCalls(mock: unknown): number {
-	return (mock as ReturnType<typeof vi.fn>).mock.calls
-		.filter(([url]) => !String(url).includes(PREVIEW_PATH)).length;
+	return (mock as ReturnType<typeof vi.fn>).mock.calls.filter(([url]) => isHistoryRead(url)).length;
 }
 
 beforeEach(() => {
@@ -180,7 +186,7 @@ describe('SubagentConversationLeaf', () => {
 			}]))
 			.mockRejectedValueOnce(new Error('offline'));
 		const fetchMock = vi.fn(async (url: string) => (
-			url.includes(PREVIEW_PATH) ? response() : history(url)
+			isHistoryRead(url) ? history(url) : response()
 		));
 		vi.stubGlobal('fetch', fetchMock);
 		component = mount(SubagentConversationLeaf, {
@@ -218,8 +224,9 @@ describe('SubagentConversationLeaf', () => {
 		sendBtn.click();
 
 		await vi.waitFor(() => expect(wsMocks.sendMessage).toHaveBeenCalledOnce());
+		// The send carries the worker's own model (none loaded here), never the open thread's.
 		expect(wsMocks.sendMessage).toHaveBeenCalledWith(
-			'child-3', 'hello from the leaf', 'network/model', [], undefined,
+			'child-3', 'hello from the leaf', undefined, [], undefined,
 		);
 	});
 

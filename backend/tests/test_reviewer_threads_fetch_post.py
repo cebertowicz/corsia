@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import json
 import sys
 from pathlib import Path
@@ -9,12 +10,20 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from infra.transient_read import TRANSIENT_READ_ATTEMPTS
 from reviewer.review_comment_fetch import (
     fetch_existing_issue_comments,
     fetch_existing_review_comments,
 )
 from reviewer.reviewer_threads import post_review_summary
 from reviewer_threads_fixtures import _mock_run
+
+
+@pytest.fixture(autouse=True)
+def _no_retry_sleep():
+    """The unreadable-read retry must never really sleep 4 s in these tests."""
+    with patch("infra.transient_read.time.sleep") as sleep:
+        yield sleep
 
 
 @patch("reviewer.gh_api.subprocess.run")
@@ -68,6 +77,32 @@ def test_fetch_falls_back_to_manual_pagination_on_unknown_flag(mock_run):
     assert any("per_page=100" in a for a in second_call_args)
 
 
+@patch("reviewer.gh_api.subprocess.run")
+def test_fetch_retries_unreadable_read_then_returns_comments(mock_run, _no_retry_sleep):
+    """One transient gh failure re-polls once and returns the readable result."""
+    mock_run.side_effect = [
+        _mock_run(returncode=2, stderr="API rate limit exceeded"),
+        _mock_run(stdout='[[{"id": 1, "body": "x"}]]'),
+    ]
+    out = fetch_existing_review_comments(42, "owner/repo")
+    assert out == [{"id": 1, "body": "x"}]
+    assert mock_run.call_count == 2
+    _no_retry_sleep.assert_called_once()
+
+
+@patch("reviewer.gh_api.subprocess.run")
+def test_fetch_returns_none_only_after_the_full_retry_budget(mock_run, _no_retry_sleep):
+    """Persistent unreadability uses the whole bounded budget, then returns
+    None so the caller's 'history is unreadable' path is unchanged."""
+    mock_run.side_effect = itertools.repeat(
+        _mock_run(returncode=2, stderr="API rate limit exceeded")
+    )
+    out = fetch_existing_issue_comments(42, "owner/repo")
+    assert out is None
+    assert mock_run.call_count == TRANSIENT_READ_ATTEMPTS
+    assert _no_retry_sleep.call_count == TRANSIENT_READ_ATTEMPTS - 1
+
+
 @pytest.mark.parametrize(
     "response",
     [
@@ -97,11 +132,11 @@ def test_fetch_handles_invalid_json_via_manual_fallback(mock_run):
 @patch("reviewer.gh_api.subprocess.run")
 def test_fetch_discards_partial_manual_pagination(mock_run):
     first_page = json.dumps([{"id": comment_id} for comment_id in range(100)])
-    mock_run.side_effect = [
+    mock_run.side_effect = itertools.cycle([
         _mock_run(returncode=1, stderr="unknown flag: --slurp"),
         _mock_run(stdout=first_page),
         _mock_run(returncode=2, stderr="API rate limit exceeded"),
-    ]
+    ])
 
     out = fetch_existing_review_comments(42, "owner/repo")
 
@@ -117,10 +152,10 @@ def test_fetch_discards_blank_manual_pagination_page(mock_run, blank_page):
     manual_pages = [_mock_run(stdout="")]
     if blank_page == 2:
         manual_pages.insert(0, first_page)
-    mock_run.side_effect = [
+    mock_run.side_effect = itertools.cycle([
         _mock_run(returncode=1, stderr="unknown flag: --slurp"),
         *manual_pages,
-    ]
+    ])
 
     assert fetch_existing_review_comments(42, "owner/repo") is None
 

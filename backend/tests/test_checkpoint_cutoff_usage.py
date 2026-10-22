@@ -3,11 +3,12 @@
 import json
 
 import pytest
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 
 @pytest.mark.parametrize("terminal", [False, True])
 def test_cc_completed_call_ids_count_once_and_terminal_does_not_double_them(terminal):
-    from core.checkpoint_cc_fork import _result
+    from core.fork_cc_result import result as _result
 
     def record(call_id, usage):
         return {"type": "assistant", "message": {
@@ -23,7 +24,7 @@ def test_cc_completed_call_ids_count_once_and_terminal_does_not_double_them(term
             "input_tokens": 150, "output_tokens": 30,
             "cache_read_input_tokens": 300, "cache_creation_input_tokens": 200,
         }})
-    result = _result(b"\n".join(json.dumps(frame).encode() for frame in frames), truncated=True)
+    result = _result(b"\n".join(json.dumps(frame).encode() for frame in frames), truncated=True, kind=CHECKPOINT_KIND)
     assert result.usage == {
         "prompt_tokens": 150, "completion_tokens": 30,
         "cache_read_tokens": 300, "cache_creation_tokens": 200,
@@ -33,12 +34,12 @@ def test_cc_completed_call_ids_count_once_and_terminal_does_not_double_them(term
 
 @pytest.mark.asyncio
 async def test_codex_receipt_and_notification_share_existing_volume_and_call_identity():
-    from core.checkpoint_codex_result import CodexCheckpointCapture
+    from core.fork_codex_result import CodexForkCapture
     from infra.provider_usage import TokenUsage
     from subagents.codex_app_server import CodexAppServerSession
     from subagents.codex_app_server_notifications import record_usage
 
-    capture = CodexCheckpointCapture()
+    capture = CodexForkCapture(kind=CHECKPOINT_KIND)
     session = CodexAppServerSession(binary="unused", task=None, on_event=capture.on_event)
     session._track_active_turn("checkpoint")
     usage = {
@@ -67,7 +68,7 @@ async def test_native_completed_effect_failure_records_checkpoint_usage_once(iso
     from dataclasses import replace
     from types import SimpleNamespace
 
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from llm.router import LLMResponse, ToolCallRequest
     from tests.plan_execution_helpers import ProbeTool, registry_of
     from tests.test_checkpoint_provider_adapters import _request, _source
@@ -102,8 +103,8 @@ async def test_native_completed_effect_failure_records_checkpoint_usage_once(iso
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda model: {"model": model})
     with pytest.raises(CompletedToolFailure):
-        await native.invoke_checkpoint(
-            replace(_request(_source(native)), on_usage=paid), asyncio.Event(),
+        await native.invoke_fork(
+            replace(_request(_source(native)), on_usage=paid), asyncio.Event(), kind=CHECKPOINT_KIND,
         )
 
     assert tool.calls == 1

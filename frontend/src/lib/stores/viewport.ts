@@ -23,5 +23,8 @@ function createMatchMediaStore(query: string): Readable<boolean> {
 
 export const isMobile = createMatchMediaStore(MOBILE_QUERY);
 
+/** True from a 1280px-wide window (80em, the unit SetupShell's own breakpoints use), where first-run setup shows Welcome beside the account form. */
+export const isSetupWide = createMatchMediaStore('(min-width: 80em)');
+
 /** True when the user asked for reduced motion — transitions become instant. */
 export const prefersReducedMotion = createMatchMediaStore('(prefers-reduced-motion: reduce)');

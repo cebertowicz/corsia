@@ -112,11 +112,12 @@ def _mcp_tool_definitions(definitions: tuple[dict, ...] | list[dict]):
     return [MCPTool(**payload) for payload in mcp_tool_payloads(definitions)]
 
 
-def _http_client(token: str, checkpoint_id: str | None = None) -> httpx.AsyncClient:
+def _http_client(token: str) -> httpx.AsyncClient:
     """Create a loopback-only client that ignores ambient proxy settings."""
     headers = {"X-CORSIA-Tool-Token": token}
-    if checkpoint_id:
-        headers["X-CORSIA-Checkpoint-Id"] = checkpoint_id
+    if fork_id := os.environ.get("CORSIA_FORK_ID"):
+        headers["X-CORSIA-Fork-Id"] = fork_id
+        headers["X-CORSIA-Tool-Token"] = os.environ.get("CORSIA_FORK_TOOL_TOKEN", token)
     return httpx.AsyncClient(
         headers=headers,
         timeout=None,
@@ -186,13 +187,12 @@ def _provider_tool_call_id() -> str | None:
 async def _run_stdio_server(
     endpoint: str,
     token: str,
-    checkpoint_id: str | None = None,
 ) -> None:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
 
     server = Server("corsia")
-    client = _http_client(token, checkpoint_id)
+    client = _http_client(token)
 
     @server.list_tools()
     async def list_tools():
@@ -233,8 +233,7 @@ def main() -> None:
     token = os.environ.get("CORSIA_CC_TOOL_TOKEN")
     if not endpoint or not token:
         raise SystemExit("CORSIA MCP loopback URL/token are required")
-    checkpoint_id = os.environ.get("CORSIA_CHECKPOINT_ID") or None
-    asyncio.run(_run_stdio_server(endpoint, token, checkpoint_id))
+    asyncio.run(_run_stdio_server(endpoint, token))
 
 
 if __name__ == "__main__":

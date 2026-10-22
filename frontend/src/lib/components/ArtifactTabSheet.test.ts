@@ -126,7 +126,9 @@ describe('ArtifactTabSheet', () => {
 		render({ onCloseSheet });
 		host.querySelector<HTMLElement>('.drawer-panel')!.click();
 		expect(onCloseSheet).not.toHaveBeenCalled();
-		host.querySelector<HTMLElement>('.drawer-backdrop')!.click();
+		const scrim = host.querySelector<HTMLElement>('.drawer-backdrop')!;
+		scrim.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+		scrim.click();
 		expect(onCloseSheet).toHaveBeenCalledOnce();
 	});
 

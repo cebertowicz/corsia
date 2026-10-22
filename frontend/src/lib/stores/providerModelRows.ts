@@ -54,6 +54,9 @@ export function networkProviderModels(data: any): ProviderModel[] {
 			providerContextLength: model.provider_context_length,
 			sizeBytes,
 			dbId: model.db_id,
+			pinned: !!model.pinned,
+			pinFits: model.pin_fits,
+			keepLine: model.keep_line,
 			imageInput: model.image_input ?? null,
 		};
 	});
@@ -69,6 +72,10 @@ export function networkProviderModels(data: any): ProviderModel[] {
 			providerContextLength: model.provider_context_length,
 			sizeBytes: model.size_bytes,
 			dbId: model.db_id,
+			pinned: !!model.pinned,
+			starting: !!model.starting,
+			pinFits: model.pin_fits,
+			keepLine: model.keep_line,
 			imageInput: model.image_input ?? null,
 		};
 	});

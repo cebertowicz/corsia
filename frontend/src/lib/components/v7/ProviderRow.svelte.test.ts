@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 import ProviderRow from './ProviderRow.svelte';
@@ -91,6 +91,25 @@ describe('ProviderRow External switch', () => {
 		flushSync();
 		expect(document.querySelector('button.tg')?.getAttribute('aria-label')).toBe('Enable');
 		unmount(c);
+	});
+});
+
+describe('ProviderRow local setup card', () => {
+	afterEach(() => { document.body.innerHTML = ''; });
+
+	it('offers setup without an inert expandable summary or chevron', () => {
+		const onSetup = vi.fn();
+		const provider = {
+			name: 'local-setup', label: 'Local model', type: 'local' as const, statusDot: 'disabled' as const,
+			subline: 'This computer', raw: { name: 'local-setup', label: 'Local model' } as ProviderEntry,
+		};
+		const component = mount(ProviderRow, { target: document.body, props: { provider, setupLabel: 'Set up', onSetup } });
+		flushSync();
+		expect(document.querySelector('button.pr-expand')).toBeNull();
+		expect(document.querySelector('.chev')).toBeNull();
+		(document.querySelector('button.setup-action') as HTMLButtonElement).click();
+		expect(onSetup).toHaveBeenCalledOnce();
+		unmount(component);
 	});
 });
 

@@ -19,9 +19,9 @@ def seed_model(
     try:
         db.execute(
             "INSERT INTO models (id,harness,provider,provider_model_id,"
-            "litellm_model,display_name,backend,enabled,available,"
+            "litellm_model,display_name,backend,source,enabled,available,"
             "context_window,created_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,32768,'t0','t0')",
+            "VALUES (?,?,?,?,?,?,?, 'test',?,?,32768,'t0','t0')",
             (
                 model_id, "native", provider, model_id.rpartition("/")[2],
                 model_id, model_id, backend, enabled, available,

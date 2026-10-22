@@ -326,7 +326,7 @@ def _process_findings(
 
     # Both finding channels participate in deduplication and resolution.
     comments = review_comments + issue_comments
-    new_threads, resolve_replies, unchanged_count = classify_review_findings(
+    new_threads, resolve_replies, still_raised = classify_review_findings(
         raw_findings, findings, comments, pr_number, repo, head_sha,
         approach_reset=required_action == "approach_reset",
     )
@@ -338,7 +338,7 @@ def _process_findings(
         findings=findings,
         new_threads=new_threads,
         resolve_replies=resolve_replies,
-        unchanged_count=unchanged_count,
+        still_raised=still_raised,
         model_label=model_label,
         existing_issue_comments=issue_comments,
     )
@@ -359,7 +359,7 @@ def _process_findings(
             "finding_count": len(findings),
             "block_count": block_count,
             "new_count": len(new_threads),
-            "unchanged_count": unchanged_count,
+            "unchanged_count": len(still_raised),
             "resolved_count": len(resolve_replies),
             "reviewer_version": reviewer_version,
             "reviewer_standards": reviewer_standards,

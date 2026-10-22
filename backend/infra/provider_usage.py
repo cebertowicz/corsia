@@ -367,19 +367,10 @@ def checkpoint_call_receipts(usage: dict[str, object]) -> dict[str, object]:
     return {"calls": [usage]}
 
 
-def checkpoint_receipt(usage: TokenUsage | None) -> dict[str, int | None] | None:
-    """Render one checkpoint's stored usage receipt, or ``None`` if unmeasured.
+def fork_receipt(usage: TokenUsage | None) -> dict[str, int | None] | None:
+    """Render measured fork usage using the ledger's disjoint token columns.
 
-    Checkpoints store the same disjoint columns as ``llm_usage`` so a receipt
-    is comparable across harnesses. Before this existed each fork stored its
-    provider's native shape, and ``input_tokens`` meant the prompt *including*
-    cache on Codex but *excluding* it on Claude Code -- so the same workload
-    read differently depending on who wrote it.
-
-    This function normalizes new receipts only. Deploying this format requires
-    a stopped-instance discard of prior checkpoint usage values; checkpoint
-    narratives and continuity remain intact. No legacy decoder or date-based
-    format boundary is supported here. The approved discard predicate and
-    preservation checks live in ``shared/context-memory/10-decision-log.md``.
+    Unmeasured calls return ``None``. This normalizes new receipts only; it
+    does not decode historical provider-specific usage shapes.
     """
     return None if usage is None else usage.ledger_row()

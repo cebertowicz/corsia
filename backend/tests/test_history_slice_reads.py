@@ -220,7 +220,7 @@ def _seed_both(monkeypatch, harness: str) -> ExecutionTarget:
     monkeypatch.setattr(
         "subagents.codex_runtime_support.resolve_working_dir", lambda *_a, **_k: "/tmp",
     )
-    monkeypatch.setattr("core.checkpoint_render.checkpoint_binary", lambda *_a, **_k: None)
+    monkeypatch.setattr("core.fork_render.fork_binary", lambda *_a, **_k: None)
     return target
 
 

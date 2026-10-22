@@ -217,9 +217,11 @@ pub trait Lifecycle {
         RESTART_POLL
     }
     /// `<checkout>/scripts/corsia stop`, which holds new work and drains the
-    /// running work for up to `CORSIA_DRAIN_MAX_WAIT`, then proof from the
-    /// service's own view that it is down: launchd no longer lists the job and
-    /// the backend port does not answer. While it runs, `progress` receives a
+    /// running work for up to `CORSIA_DRAIN_MAX_WAIT`, then proof, whatever its
+    /// exit status, that the source has let go of everything adoption touches
+    /// next: launchd no longer lists the job, the backend port does not answer,
+    /// the process launchd ran is gone and the database opens exclusively
+    /// (`release_proof`). While it runs, `progress` receives a
     /// read-only count of running turns about once a second, `None` when the
     /// count could not be read.
     fn stop_old(
@@ -276,6 +278,12 @@ pub struct StopProcess {
     pub started: String,
 }
 
+#[derive(Debug)]
+struct Failure {
+    step: String,
+    message: String,
+}
+
 #[derive(Deserialize, Serialize)]
 struct Journal {
     step: Step,
@@ -309,6 +317,19 @@ fn clear_journal(plan: &Plan) -> Result<(), String> {
 
 fn journal_path(plan: &Plan) -> PathBuf {
     plan.adopted_dir().join(JOURNAL)
+}
+
+/// Preserve rollback detail alongside the restored install that can act on it.
+fn write_failure_trail(plan: &Plan, failure: &Failure) {
+    let path = plan.source.state.join("backend.log");
+    let result = (|| -> Result<(), std::io::Error> {
+        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+        writeln!(file, "adoption rollback: {}: {}", failure.step, failure.message)?;
+        file.sync_all()
+    })();
+    if let Err(error) = result {
+        log::warn!("could not write adoption rollback detail: {error}");
+    }
 }
 
 /// Replace `path` so a crash leaves either the old contents or the new, never a
@@ -729,59 +750,209 @@ pub fn adopt(
         )
         .confirmed_running());
     }
+    // Rollback records are written only after the source files are restored.
     // From the stop request on the source may be down, so the journal says so
     // first and every failure after it ends in the old install's start.
     write_journal(plan, Step::Stopping, None)
         .map_err(|error| AdoptionError::untouched(error).confirmed_running())?;
     if let Err(error) = stop_source(plan, lifecycle, phase) {
-        return rollback(plan, lifecycle, phase, error, None);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "stop_old".into(),
+                message: error,
+            },
+            None,
+            false,
+        );
     }
     if requested(cancel) {
-        return rollback(plan, lifecycle, phase, "adoption cancelled".into(), None);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "cancelled".into(),
+                message: "adoption cancelled".into(),
+            },
+            None,
+            false,
+        );
     }
     phase(Phase::BackingUp);
     let snapshot = match lifecycle.backup(&plan.source.state) {
         Ok(snapshot) => snapshot,
-        Err(error) => return rollback(plan, lifecycle, phase, error, None),
+        Err(error) => return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "backup".into(),
+                message: error,
+            },
+            None,
+            false,
+        ),
     };
-    write_journal(plan, Step::BackedUp, Some(&snapshot)).map_err(AdoptionError::from)?;
+    if let Err(error) = write_journal(plan, Step::BackedUp, Some(&snapshot)) {
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "record_backup".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            false,
+        );
+    }
     if requested(cancel) {
-        return rollback(plan, lifecycle, phase, "adoption cancelled".into(), None);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "cancelled".into(),
+                message: "adoption cancelled".into(),
+            },
+            Some(&snapshot),
+            false,
+        );
     }
     if let Err(error) = move_to(&plan.source.plist, &plan.adopted_dir().join(PLIST)) {
-        return rollback(plan, lifecycle, phase, error, None);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "move_plist".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            false,
+        );
     }
     // The bootstrap config stays in place: it holds the workspace's identity
     // (name and id) and setup choices, which the app's backend reads from it.
     if plan.source.env_file.exists() {
-        let names = skipped_env_names(&plan.source.env_file)?;
+        let names = match skipped_env_names(&plan.source.env_file) {
+            Ok(names) => names,
+            Err(error) => return rollback(
+                plan,
+                lifecycle,
+                phase,
+                Failure {
+                    step: "read_environment".into(),
+                    message: error,
+                },
+                Some(&snapshot),
+                false,
+            ),
+        };
         if let Err(error) = move_to(
             &plan.source.env_file,
             &plan.adopted_dir().join("service.env"),
         ) {
-            return rollback(plan, lifecycle, phase, error, None);
+            return rollback(
+                plan,
+                lifecycle,
+                phase,
+                Failure {
+                    step: "move_environment".into(),
+                    message: error,
+                },
+                Some(&snapshot),
+                false,
+            );
         }
         if !names.is_empty() {
             log::info!("adoption skipped source .env keys: {}", names.join(", "));
         }
     }
-    write_journal(plan, Step::MetadataMoved, Some(&snapshot)).map_err(AdoptionError::from)?;
+    if let Err(error) = write_journal(plan, Step::MetadataMoved, Some(&snapshot)) {
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "record_metadata".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            false,
+        );
+    }
     // Nothing of the app's is registered yet, so if the source came back the
-    // backup stays where it is: only the files move back and its start is a no-op.
+    // backup is deleted because it is an untouched-state copy.
     if let Err(error) = lifecycle.old_is_down() {
-        return rollback(plan, lifecycle, phase, error, None);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "old_is_down".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            false,
+        );
     }
     if let Err(error) = write_service(plan) {
-        return rollback(plan, lifecycle, phase, error, None);
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "write_service".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            false,
+        );
     }
-    write_journal(plan, Step::ServiceWritten, Some(&snapshot)).map_err(AdoptionError::from)?;
+    if let Err(error) = write_journal(plan, Step::ServiceWritten, Some(&snapshot)) {
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "record_service".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            true,
+        );
+    }
     phase(Phase::Starting);
     if let Err(error) = lifecycle.start_new(&plan.source.state, plan.source.port, &plan.app_dir) {
-        return rollback(plan, lifecycle, phase, error, Some(&snapshot));
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "start_new".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            true,
+        );
     }
     // The switch is made: a Quit from here finishes it and then exits.
     if let Err(error) = write_journal(plan, Step::Registered, Some(&snapshot)) {
-        return rollback(plan, lifecycle, phase, error, Some(&snapshot));
+        return rollback(
+            plan,
+            lifecycle,
+            phase,
+            Failure {
+                step: "record_registered".into(),
+                message: error,
+            },
+            Some(&snapshot),
+            true,
+        );
     }
     Ok(())
 }
@@ -848,22 +1019,21 @@ pub fn recover_showing(
         // Nothing was moved: only the source start is left.
         Step::Stopping | Step::Reverted => start_source(plan, lifecycle),
         step => {
-            let snapshot = if step >= Step::ServiceWritten {
-                Some(
-                    journal
-                        .snapshot
-                        .as_deref()
-                        .ok_or("interrupted adoption has no backup snapshot")?,
-                )
-            } else {
-                None
-            };
+            let snapshot = journal.snapshot.as_deref();
+            let restore_snapshot = step >= Step::ServiceWritten;
+            if restore_snapshot && snapshot.is_none() {
+                return Err(AdoptionError::reopen("interrupted adoption has no backup snapshot"));
+            }
             match rollback(
                 plan,
                 lifecycle,
                 &mut |_| {},
-                "recovering interrupted adoption".into(),
+                Failure {
+                    step: "recover_interrupted_adoption".into(),
+                    message: "recovering interrupted adoption".into(),
+                },
                 snapshot,
+                restore_snapshot,
             ) {
                 Err(error) if error.outcome == Outcome::Restored => Ok(()),
                 other => other,
@@ -920,30 +1090,49 @@ fn rollback(
     plan: &Plan,
     lifecycle: &mut impl Lifecycle,
     phase: &mut dyn FnMut(Phase),
-    cause: String,
+    failure: Failure,
     snapshot: Option<&Path>,
+    restore_snapshot: bool,
 ) -> Result<(), AdoptionError> {
     phase(Phase::StartingExisting);
     // Any `?` before the journal says Reverted may leave files part-way
     // between homes, which converts to Recovery::Reopen.
-    if let Some(snapshot) = snapshot {
+    if restore_snapshot {
+        let snapshot = snapshot.ok_or("rollback needs its backup snapshot")?;
         lifecycle
             .stop_new(&plan.source.state, plan.source.port)
-            .map_err(|error| format!("{cause}; app service could not be stopped: {error}"))?;
+            .map_err(|error| format!("{}; app service could not be stopped: {error}", failure.message))?;
         lifecycle.restore_backup(&plan.source.state, snapshot)
-            .map_err(|error| format!("{cause}; backup could not be restored, so the old install was not restarted: {error}"))?;
+            .map_err(|error| format!("{}; backup could not be restored, so the old install was not restarted: {error}", failure.message))?;
     }
     restore_files(plan)?;
-    write_journal(plan, Step::Reverted, None)?;
+    write_failure_trail(plan, &failure);
+    if let Some(snapshot) = snapshot.filter(|_| !restore_snapshot) {
+        if let Err(error) = fs::remove_dir_all(snapshot) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                log::warn!("could not remove the disposable adoption snapshot: {error}");
+            }
+        }
+    }
+    write_journal_with(
+        plan,
+        Step::Reverted,
+        snapshot.filter(|_| restore_snapshot),
+        None,
+    )?;
     // From here every file is back, so starting the source again is safe to repeat.
-    lifecycle.start_old().map_err(|error| {
-        AdoptionError::start_again(format!(
-            "{cause}; old install could not be restored: {error}"
-        ))
-    })?;
+    if let Err(error) = lifecycle.start_old() {
+        let failure = Failure {
+            step: "start_old".into(),
+            message: format!("{}; old install could not be restored: {error}", failure.message),
+        };
+        write_failure_trail(plan, &failure);
+        return Err(AdoptionError::start_again(failure.message));
+    }
     forget_journal(plan);
     Err(AdoptionError::restored(format!(
-        "{cause}; the old install was restored"
+        "{}; the old install was restored",
+        failure.message
     )))
 }
 
@@ -963,6 +1152,7 @@ mod tests {
         fail: Option<&'static str>,
         also_fail: Option<&'static str>,
         real_state: bool,
+        snapshot_is_file: bool,
         /// Sets Quit's flag when the named step runs, as the menu would.
         quit_at: Option<(&'static str, Arc<AtomicBool>)>,
         service_json: PathBuf,
@@ -1082,7 +1272,10 @@ mod tests {
         fn backup(&mut self, state: &Path) -> Result<PathBuf, String> {
             self.step("backup", "backup failed")?;
             let snapshot = state.join("backups/fake-adoption");
-            if self.real_state {
+            if self.snapshot_is_file {
+                fs::create_dir_all(snapshot.parent().unwrap()).unwrap();
+                fs::write(&snapshot, "not a directory").unwrap();
+            } else if self.real_state {
                 copy_state(state, &snapshot);
             }
             Ok(snapshot)
@@ -1117,6 +1310,7 @@ mod tests {
             fail,
             also_fail: None,
             real_state: false,
+            snapshot_is_file: false,
             quit_at: None,
             service_json: plan.app_dir.join("service.json"),
             plist: plan.source.plist.clone(),
@@ -1453,6 +1647,45 @@ mod tests {
                 Phase::StartingExisting
             ]
         );
+    }
+
+    #[test]
+    fn early_rollback_removes_its_untouched_snapshot_but_late_rollback_keeps_one() {
+        let (_home, early_plan) = plan(false);
+        let mut early = fake_for(&early_plan, Some("old_is_down"));
+        early.real_state = true;
+        assert_eq!(adopt_quietly(&early_plan, &mut early).0.unwrap_err().outcome, Outcome::Restored);
+        assert!(!early_plan.source.state.join("backups/fake-adoption").exists());
+
+        let (_home, late_plan) = plan(false);
+        let mut late = fake_for(&late_plan, Some("start_new"));
+        late.real_state = true;
+        assert_eq!(adopt_quietly(&late_plan, &mut late).0.unwrap_err().outcome, Outcome::Restored);
+        assert!(late_plan.source.state.join("backups/fake-adoption").is_dir());
+    }
+
+    #[test]
+    fn an_early_rollback_restarts_the_source_when_snapshot_removal_fails() {
+        let (_home, plan) = plan(false);
+        let mut fake = fake_for(&plan, Some("old_is_down"));
+        fake.snapshot_is_file = true;
+        let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
+        assert_eq!(error.outcome, Outcome::Restored);
+        assert_eq!(fake.events, ["stop_old", "backup", "old_is_down", "start_old"]);
+        assert_eq!(journal_step(&plan), None);
+    }
+
+    #[test]
+    fn rollback_writes_failure_detail_to_the_restored_install_log() {
+        let (_home, plan) = plan(false);
+        let mut fake = fake_for(&plan, Some("start_new"));
+        fake.also_fail = Some("start_old");
+        let error = adopt_quietly(&plan, &mut fake).0.unwrap_err();
+        assert_eq!(error.recovery, Some(Recovery::StartAgain));
+        assert_eq!(read_journal(&plan).unwrap().unwrap().step, Step::Reverted);
+        let log = fs::read_to_string(plan.source.state.join("backend.log")).unwrap();
+        assert!(log.contains("start_new"));
+        assert!(log.contains("start_old"));
     }
 
     #[test]

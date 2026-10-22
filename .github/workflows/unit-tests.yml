@@ -72,8 +72,14 @@ jobs:
 
       - name: Install deps
         run: |
-          # The search tests assert real ripgrep semantics.
-          sudo apt-get update --quiet
+          # The search tests assert real ripgrep semantics. ripgrep comes from
+          # the Ubuntu archive, so refresh only the image's Ubuntu sources: a
+          # third-party source on the runner (packages.microsoft.com 403s) must
+          # not fail this job.
+          sudo apt-get update --quiet \
+            -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+            -o Dir::Etc::sourceparts=- \
+            -o APT::Get::List-Cleanup=0
           sudo apt-get install --yes --no-install-recommends ripgrep
           rg --version
           uv venv --python 3.11 --managed-python --seed .venv

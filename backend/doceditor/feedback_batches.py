@@ -8,7 +8,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from doceditor import comment_notifications, feedback_comments, feedback_delivery, feedback_edits, review_requests
+from doceditor import comment_notifications, feedback_comments, feedback_delivery, feedback_edits
+from doceditor.review_lifecycle import settle_for_batch
 from doceditor.feedback_state import (
     USER_AUTHOR_ID,
     annotate_pane,
@@ -276,7 +277,7 @@ def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None
             (delivered.node_id, delivered.outcome, now, batch_id),
         )
         db.execute("DELETE FROM doc_feedback_edit_items WHERE batch_id=?", (batch_id,))
-        review_woken = review_requests.settle_for_batch(db, batch)
+        review_woken = settle_for_batch(db, batch)
     return True, delivered.woken_threads + review_woken
 
 
@@ -391,6 +392,3 @@ def retry_for_document(db, *, author_kind: str, author_id: str, artifact_id: str
         _retried, selected = retry_batch(db, row["id"])
         woken.extend(selected)
     return woken
-
-
-# Read-only feedback projections are imported above to preserve existing callers.

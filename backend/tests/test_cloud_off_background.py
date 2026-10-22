@@ -187,7 +187,7 @@ async def test_switch_to_local_treats_a_cloud_off_source_as_unusable_and_makes_n
     _thread("t-off", OFF)
     request = _switch("t-off", SONNET, LOCAL, monkeypatch)
     capture = AsyncMock(side_effect=AssertionError("no warm capture on a refused source"))
-    monkeypatch.setattr("core.checkpoint_render.capture_warm_checkpoint_source", capture)
+    monkeypatch.setattr("core.fork_render.capture_warm_fork_source", capture)
 
     context = model_checkpoint.read_switch_checkpoint_context(request)
     admission = await model_checkpoint.prepare_source_checkpoint(request, "c1")
@@ -270,7 +270,7 @@ def _client(monkeypatch) -> TestClient:
 
 def test_manual_checkpoint_http_refusal_is_the_exact_pinned_body(world, launch, monkeypatch):
     capture = AsyncMock(side_effect=AssertionError("no provider capture for a cloud-off thread"))
-    monkeypatch.setattr("core.checkpoint_render.capture_warm_checkpoint_source", capture)
+    monkeypatch.setattr("core.fork_render.capture_warm_fork_source", capture)
     _thread("t-off", OFF)
 
     response = _client(monkeypatch).post("/api/threads/t-off/checkpoints", params={"token": "valid"})

@@ -44,7 +44,7 @@ def _input(db, message_id, thread_id, order, model, epoch, **fields):
 def _hold(**extra):
     return {
         "write_outcome": "proved_no_write", "delivery_attempt_id": "old-attempt",
-        "delivery_error": "minimum meaningful cold checkpoint input does not fit",
+        "delivery_error": "minimum meaningful cold fork input does not fit",
         **extra,
     }
 
@@ -221,6 +221,6 @@ def test_the_step_runs_once(schema_twentyfour):
 
     repeated = _migrate(db)
 
-    assert SCHEMA_VERSION == 132
+    assert SCHEMA_VERSION == 136
     assert (repeated.migrated, repeated.from_version, repeated.to_version) == (False, 25, 25)
     assert _row(db, "held-1")["delivery_revision"] == 2
