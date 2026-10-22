@@ -69,13 +69,13 @@ async def _emit(thread_id: str, kwargs: dict[str, Any]) -> str:
     event_type = kwargs.get("event_type")
     if not isinstance(event_type, str) or not event_type:
         return "Error: emit needs event_type, the declared name such as qa.review_completed."
-    event_id = emitted_event_id(event_type, kwargs.get("event_id"))
+    event_id = emitted_event_id(event_type, kwargs.get("id"))
     try:
         result = await admit_event(
             event_type=event_type, facts=kwargs.get("facts"), origin="agent",
             producer=thread_id, event_id=event_id,
         )
-    except Exception as exc:  # noqa: BLE001 - unreachable (retry with event_id) or a defect (report it)
+    except Exception as exc:  # noqa: BLE001 - unreachable (retry with the same id) or a defect (report it)
         logger.exception("event_rules emit failed inside the intake")
         if failure_code(exc) == "internal_error":
             return f"Error: {format_event_error('internal_error', 'the event intake failed unexpectedly')}"
@@ -117,8 +117,8 @@ class EventRulesTool(Tool):
             "such as owner/repo#7) did or didn't reach a chat through a rule, or, given `event_type`, "
             "the recent refusals of that declared type. emit: send one event of a declared "
             "`event_type` (its full name, such as qa.review_completed, declared use: route or "
-            "both) with `facts` as you; `event_id` makes a retry safe. The receipt says how "
-            "many rules matched."
+            "both) with `facts` as you; `id` makes a retry safe. The receipt says how many rules "
+            "matched and returns the event's `event_id`, which explain takes."
         )
 
     @property
@@ -146,7 +146,10 @@ class EventRulesTool(Tool):
                 "scope": {"type": "string", "description": "create: project:<id>; only your own"},
                 "rule_id": {"type": "string", "description": "disable: the rule to turn off"},
                 "facts": {"type": "object", "description": "test or emit: the event's fields"},
-                "event_id": {"type": "string", "description": "explain: the event's id; emit: a retry identity"},
+                "event_id": {"type": "string",
+                             "description": "explain: the event's id, as an emit receipt returns it"},
+                "id": {"type": "string", "description": "emit: a stable identity that makes a retry safe "
+                       "(same as the CLI's --id)"},
                 "event_type": {"type": "string", "description": "create/test: a declared type, e.g. pr.merged; "
                                "emit and explain: the full declared name, e.g. qa.review_completed"},
                 "artifact": {"type": "string", "description": "explain: the file's external id"},

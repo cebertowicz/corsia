@@ -32,12 +32,12 @@ def _raising(exc: Exception):
     return admit
 
 
-@pytest.mark.parametrize(("exc", "code"), [
-    (RuntimeError("boom"), "internal_error"),
-    (sqlite3.OperationalError("database is locked"), "intake_unreachable"),
+@pytest.mark.parametrize(("exc", "code", "text"), [
+    (RuntimeError("boom"), "internal_error", "the event intake failed unexpectedly"),
+    (sqlite3.OperationalError("database is locked"), "intake_unreachable", "event intake is unavailable"),
 ])
 def test_an_intake_exception_on_an_event_line_settles_the_run_as_an_owner_error(
-    intake_world, tmp_path, monkeypatch, exc, code,
+    intake_world, tmp_path, monkeypatch, exc, code, text,
 ):
     schedule = _schedule(intake_world, tmp_path)
     monkeypatch.setattr("events.intake.admit_event", _raising(exc))
@@ -45,8 +45,9 @@ def test_an_intake_exception_on_an_event_line_settles_the_run_as_an_owner_error(
         schedule, RunReport("ok", [], [], events=[{"type": "qa.route", "facts": {"code": "ok"}}], run_id="r1"),
     ))
 
-    assert report.status == "error" and report.error == f"event line refused: {code}"
-    assert [signal.kind for signal in report.signals] == ["error"] and code in report.signals[0].summary
+    message = f"event line refused: {intake.format_event_error(code, text)}"
+    assert report.status == "error" and report.error == message
+    assert [signal.kind for signal in report.signals] == ["error"] and message in report.signals[0].summary
 
 
 def test_run_claimed_returns_and_records_an_error_when_the_intake_raises(intake_world, tmp_path, monkeypatch):

@@ -198,15 +198,15 @@ def test_agent_emit_sets_origin_and_rejects_reserved_and_foreign_types(emit_worl
 def test_agent_emit_identity_is_scoped_to_declared_event_type(emit_world):
     tool = EventRulesTool()
     first = json.loads(asyncio.run(tool.execute(
-        operation="emit", event_type="qa.route", facts={"code": "one"}, event_id="shared-id",
+        operation="emit", event_type="qa.route", facts={"code": "one"}, id="shared-id",
         _thread_id=OWNER,
     )))
     second = json.loads(asyncio.run(tool.execute(
-        operation="emit", event_type="qa.followup", facts={"code": "two"}, event_id="shared-id",
+        operation="emit", event_type="qa.followup", facts={"code": "two"}, id="shared-id",
         _thread_id=OWNER,
     )))
     retry = json.loads(asyncio.run(tool.execute(
-        operation="emit", event_type="qa.route", facts={"code": "one"}, event_id="shared-id",
+        operation="emit", event_type="qa.route", facts={"code": "one"}, id="shared-id",
         _thread_id=OWNER,
     )))
     db = get_db()
@@ -217,6 +217,41 @@ def test_agent_emit_identity_is_scoped_to_declared_event_type(emit_world):
     assert first["event_id"] != second["event_id"]
     assert retry == {**first, "duplicate": True}
     assert delivered == [OWNER, OWNER]
+
+
+def test_explain_takes_the_receipts_event_id_and_never_blames_routing_for_a_raw_identity(emit_world):
+    tool = EventRulesTool()
+    json.loads(asyncio.run(tool.execute(
+        operation="create", connector="qa", event_type="route", match=[], mode="digest",
+        _thread_id=OTHER,
+    )))
+    receipt = json.loads(asyncio.run(tool.execute(
+        operation="emit", event_type="qa.route", facts={"code": "one"}, id="abc", _thread_id=OWNER,
+    )))
+    by_receipt = json.loads(asyncio.run(tool.execute(
+        operation="explain", event_id=receipt["event_id"], _thread_id=OTHER,
+    )))
+    by_identity = json.loads(asyncio.run(tool.execute(
+        operation="explain", event_id="abc", _thread_id=OTHER,
+    )))
+
+    assert receipt["event_id"] != "abc" and receipt["rules_matched"] == 1
+    assert [d["outcome"] for d in by_receipt["decisions"]] == ["digested"]
+    assert by_identity["decisions"] == []
+    assert "routing" not in by_identity["summary"]
+    assert "emit's receipt" in by_identity["summary"]
+
+
+def test_emit_event_id_is_not_a_retry_identity(emit_world):
+    tool = EventRulesTool()
+    args = {"operation": "emit", "event_type": "qa.route", "facts": {"code": "one"}}
+
+    assert tool.validate_params({**args, "id": "abc"}) == []
+    # event_id stays in the schema for explain, so emit ignores it: two emits sharing only an
+    # event_id are two events.
+    first = json.loads(asyncio.run(tool.execute(**args, event_id="abc", _thread_id=OWNER)))
+    second = json.loads(asyncio.run(tool.execute(**args, event_id="abc", _thread_id=OWNER)))
+    assert first["event_id"] != second["event_id"] and second["duplicate"] is False
 
 
 def test_agent_test_and_emit_share_declared_type_resolution(emit_world):

@@ -76,6 +76,8 @@ async def test_failing_rule_evaluation_never_costs_the_routed_owner_its_webhook(
     assert thread == "owner" and "[CORSIA PR notice] You own PR o/r#7" in content
     assert _rows("SELECT key FROM settings WHERE key LIKE '%o/r#7'")
     assert _wakes("watcher") == []
+    # The failure is only logged: no outcome row, since none of them is a rule's.
+    assert _rows("SELECT 1 FROM event_route_decisions") == []
 
 
 def test_a_refused_rule_recipient_never_rolls_back_the_platform_delivery(isolated_db):

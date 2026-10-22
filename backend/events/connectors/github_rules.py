@@ -19,15 +19,13 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from events import rule_reads, rules
+from events import rule_reads
 from events.connectors.github import CHECK_SUITE_PR, MANIFEST
 from events.envelope import EventEnvelope, normalize
 from events.github_mapper import ends_artifact
 from events.identity_formula import MalformedEventError
-from events.platform import rule_event
 from events.resolve import Target
 from events.webhook_rules import apply_webhook_rules_sync, record_rule_ride_sync
-from infra.database import write_transaction
 from infra.product_events import emit_product_event
 
 if TYPE_CHECKING:
@@ -66,12 +64,11 @@ class RuleScope:
     ``any_rule``: some rule for its type is enabled, in any project; without one,
     nothing else is read. ``repository_projects``: the projects tracking its
     repository, which scope rules when routing gives it no thread (``None``: the
-    lookup failed). ``unreadable``: the rule read failed, so none was evaluated.
+    lookup failed).
     """
 
     any_rule: bool = True
     repository_projects: frozenset[str] | None = frozenset()
-    unreadable: bool = False
 
 
 def rule_scope(
@@ -90,7 +87,7 @@ def rule_scope(
     except Exception:
         # Rules only add: a failed read costs this webhook its rules, never its routing.
         logger.exception("event rules: no rule evaluated {}: rule read failed", internal_event)
-        return RuleScope(any_rule=False, unreadable=True)
+        return RuleScope(any_rule=False)
     if not self_rule:
         return RuleScope(any_rule=any_rule)
     try:
@@ -113,40 +110,15 @@ def apply_routed_rules(
     then already holds today's result, which rules never change, and the
     ``scope`` read before the gate (:func:`rule_scope`) scopes the rules. Rules
     only add: when reading or evaluating them fails, the routed delivery and its
-    notice go ahead as routing prepared them, and the failure is recorded for ``explain``.
+    notice go ahead as routing prepared them, and the failure is logged.
     """
     scope = scope or RuleScope()
-    if scope.unreadable:
-        _record_unreadable(prepared, internal_event, payload, selected_pr)
-        return
     if not scope.any_rule:
         return
     try:
         _apply(prepared, internal_event, payload, selected_pr, routing_state, wake_reason, scope)
     except Exception:
         logger.exception("event rules: evaluation failed on {}; routing unchanged", internal_event)
-        _record_unreadable(prepared, internal_event, payload, selected_pr)
-
-
-def _record_unreadable(
-    prepared: PreparedRoute, internal_event: str, payload: dict[str, Any],
-    selected_pr: dict[str, Any] | None,
-) -> None:
-    """Make a rule failure visible to ``explain`` without costing routing its delivery.
-
-    Best effort: a database that cannot be written here must not raise out of routing.
-    """
-    try:
-        envelope = _envelope(internal_event, payload, selected_pr)
-        if envelope is None:
-            return
-        with write_transaction(None, scope="record_rules_unreadable") as conn:
-            rules.record(conn, rule_event(envelope, internal_event), [rules.Outcome(
-                rule_reads.UNREADABLE_RULE, prepared.thread_id, rules.DEAD_LETTERED,
-                reason=rule_reads.RULES_UNREADABLE)])
-    except Exception:
-        logger.exception("event rules: could not record that rules were unreadable for {}",
-                         internal_event)
 
 
 def _apply(

@@ -428,10 +428,41 @@ def test_script_event_lines_route_and_a_refusal_becomes_an_owner_error(intake_wo
     ))
 
     assert accepted.status == "ok" and both.status == "ok"
-    assert refused.status == "error" and refused.error == "event line refused: undeclared_fact"
-    assert refused.signals[-1].kind == "error" and "undeclared_fact" in refused.signals[-1].summary
+    undeclared_fact = intake.format_event_error(
+        "undeclared_fact", "facts include a name not declared for this event type")
+    assert refused.status == "error" and refused.error == f"event line refused: {undeclared_fact}"
+    assert refused.signals[-1].kind == "error" and undeclared_fact in refused.signals[-1].summary
     # The run's stamp, the same one a measure line from this run gets, so the two dedupe together.
     assert _stored(intake_world, "qa.both") == [(OWNER, "project", "ok", f"script:{schedule.id}:run-3")]
+
+
+def test_a_script_run_with_many_refusal_kinds_names_two_with_their_fixes_and_counts_the_rest(
+    intake_world, tmp_path,
+):
+    path = tmp_path / "events.py"
+    path.write_text("print('event')")
+    schedule = script_schedules.create_script(
+        OWNER, "project", script_path=path, script_sha256=script_schedules.file_sha256(path),
+        cadence_seconds=600, series=[], timeout_seconds=30,
+        now="2026-01-01T00:00:00+00:00", db=intake_world,
+    )
+    events = [
+        {"type": "qa.route", "facts": {"outside": "x"}},
+        {"type": "qa.route", "facts": {"outside": "y"}},
+        {"type": "qa.number", "facts": {"cost": "not a number"}},
+        {"type": "qa.missing", "facts": {}},
+    ]
+    report = asyncio.run(script_runner._admit_events(
+        schedule, RunReport("ok", [], [], events=events, run_id="run-many"),
+    ))
+
+    assert report.status == "error"
+    assert report.error.startswith("event line refused: bad_fact_kind: ")
+    assert intake._ERROR_FIXES["bad_fact_kind"] in report.error
+    assert intake._ERROR_FIXES["undeclared_fact"] in report.error
+    assert report.error.count("undeclared_fact:") == 1 and report.error.endswith(" and 1 more")
+    assert "undeclared_type" not in report.error
+    assert len(report.signals) == 1 and report.error in report.signals[0].summary
 
 
 def test_a_both_row_from_a_workflow_without_a_version_is_counted_unversioned_once(intake_world, tmp_path):

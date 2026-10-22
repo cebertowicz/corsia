@@ -176,7 +176,7 @@ async def _admit_events(schedule: Schedule, report: RunReport) -> RunReport:
     if not report.events:
         return report
     from automation.script_measures import WORKSPACE_SCOPE
-    from events.intake import MeasureStamps, admit_event, failure_code
+    from events.intake import MeasureStamps, admit_event, failure_code, format_event_error
 
     ref, version = report.workflow_stamp or (None, None)
     stamps = MeasureStamps(
@@ -184,7 +184,7 @@ async def _admit_events(schedule: Schedule, report: RunReport) -> RunReport:
         project_id=None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id,
         unversioned=bool((schedule.payload or {}).get("workflow")) and version is None,
     )
-    refusals: list[str] = []
+    refusals: dict[str, str] = {}  # each distinct code, with the first text it came with
     for index, event in enumerate(report.events):
         try:
             result = await admit_event(
@@ -196,13 +196,18 @@ async def _admit_events(schedule: Schedule, report: RunReport) -> RunReport:
             raise
         except Exception as exc:  # noqa: BLE001 - run_claimed never raises; the run settles as an error
             logger.exception("script schedule {} event line {} failed inside the intake", schedule.id, index)
-            refusals.append(failure_code(exc))
+            code = failure_code(exc)
+            refusals.setdefault(code, (
+                "the event intake failed unexpectedly" if code == "internal_error"
+                else "event intake is unavailable"))
             continue
         if result.refusal is not None:
-            refusals.append(result.refusal.code)
+            refusals.setdefault(result.refusal.code, result.refusal.text)
     if not refusals:
         return report
-    message = f"event line refused: {', '.join(sorted(set(refusals)))}"
+    shown = [format_event_error(code, refusals[code]) for code in sorted(refusals)[:2]]
+    more = f" and {len(refusals) - 2} more" if len(refusals) > 2 else ""
+    message = f"event line refused: {' '.join(shown)}{more}"
     return dataclasses.replace(
         report, status="error", error=message,
         signals=[*report.signals, Signal(

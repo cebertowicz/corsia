@@ -18,10 +18,6 @@ from typing import Any
 from infra.database import get_db
 from infra.queries import thread_available_sql
 
-# The one outcome row for an event whose rules could not be read: no rule is known to name.
-UNREADABLE_RULE = "(rules unreadable)"
-RULES_UNREADABLE = "rules could not be read"
-
 
 def enabled_rules(
     db: sqlite3.Connection, connector: str, event_type: str, prefix: str,
@@ -140,12 +136,11 @@ def wake_budgets(
     return {row["rule_id"]: (int(row["spent"]), int(row["capped"])) for row in rows}
 
 
-def explain_summary(db: sqlite3.Connection, event_id: Any, found: int) -> str:
+def explain_summary(event_id: Any, found: int) -> str:
     """The one-line answer to "why did this event go where it did", rule outcomes counted."""
-    counted = f"{found} rule outcome(s), newest first."
-    if event_id and db.execute(
-            "SELECT 1 FROM event_route_decisions WHERE event_id=? AND rule_id=? LIMIT 1",
-            (event_id, UNREADABLE_RULE)).fetchone():
-        return "Rules could not be read for this event, so none was applied." + (
-            f" {counted}" if found else " Routing alone decided where it went.")
-    return counted if found else "No rule acted on this event; routing alone decided where it went."
+    if found:
+        return f"{found} rule outcome(s), newest first."
+    if event_id:
+        return ("No rule acted on an event with this id. If you emitted it, pass the event_id "
+                "from emit's receipt.")
+    return "No rule acted on events for this file."

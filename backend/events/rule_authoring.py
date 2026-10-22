@@ -359,7 +359,7 @@ def explain(
         (*args, _EXPLAIN_LIMIT),
     ).fetchall()
     decisions = [_decision(db, row) for row in rows]
-    return {"decisions": decisions, "summary": rule_reads.explain_summary(db, event_id, len(decisions))}
+    return {"decisions": decisions, "summary": rule_reads.explain_summary(event_id, len(decisions))}
 
 
 def _decision(db: sqlite3.Connection, row: Mapping[str, Any]) -> dict[str, Any]:
