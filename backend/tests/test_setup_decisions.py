@@ -35,29 +35,19 @@ GITHUB_NO_ACCOUNT_OPTIONS = [
      "detail": "I open the browser and fill in the sign-up. You type the password and any code."},
     {"id": "B", "label": "Not now", "detail": "Ask me any time."},
 ]
-EXPECTED_COMMUNITY_USE = {
+EXPECTED_COMMUNITY = {
     "task_title": GITHUB_TASK,
-    "title": "Should your agents use improvements the community has proven?",
-    "context": "You can always turn down a change and keep your own version.",
-    "tradeoff": "Using them needs no account.",
+    "title": "Should your agents use improvements the community has proven, and offer the ones proven here?",
+    "context": ("You can always turn down a change and keep your own version, and nothing private ever goes "
+                "into what's shared."),
+    "tradeoff": "Sharing goes through GitHub, so use and share leads to one question about your account.",
     "recommendation": "A",
-    "rationale": "You get what others prove, and you approve what changes.",
+    "rationale": "You get what others prove, and a proven change helps everyone using CORSIA.",
     "options": [
-        {"id": "A", "label": "Yes", "detail": "Agents may take improvements other people proved."},
-        {"id": "B", "label": "No", "detail": "Agents keep to their own versions."},
-    ],
-    "other_enabled": True,
-}
-EXPECTED_COMMUNITY_SHARE = {
-    "task_title": GITHUB_TASK,
-    "title": "Should your agents offer the improvements proven here to the community?",
-    "context": "Nothing private ever goes into what's shared.",
-    "tradeoff": "Sharing goes through GitHub, so a yes leads to one question about your account.",
-    "recommendation": "A",
-    "rationale": "A proven change helps everyone using CORSIA.",
-    "options": [
-        {"id": "A", "label": "Yes", "detail": "Agents may offer a proven improvement."},
-        {"id": "B", "label": "No", "detail": "Agents share nothing."},
+        {"id": "A", "label": "Use and share",
+         "detail": "Agents take improvements other people proved and offer the ones proven here."},
+        {"id": "B", "label": "Only use", "detail": "Agents take proven improvements and share nothing."},
+        {"id": "C", "label": "Neither", "detail": "Agents keep their improvements here."},
     ],
     "other_enabled": True,
 }
@@ -143,7 +133,7 @@ def _facts(web_missing: bool, *, self_check: bool = True,
 def test_exact_decisions_for_every_presence_combination(sessions, web_missing):
     plan = setup.build_plan(_facts(web_missing, sessions=sessions))
 
-    expected = [EXPECTED_COMMUNITY_USE, EXPECTED_COMMUNITY_SHARE, EXPECTED_GITHUB, EXPECTED_GITHUB_NO_ACCOUNT, *([EXPECTED_FIND_PROJECTS] if sessions else [])]
+    expected = [EXPECTED_COMMUNITY, EXPECTED_GITHUB, EXPECTED_GITHUB_NO_ACCOUNT, *([EXPECTED_FIND_PROJECTS] if sessions else [])]
     assert plan["setup_decisions"] == expected
 
 
@@ -165,7 +155,7 @@ def test_every_payload_passes_plan_decision_validation(sessions, web_missing):
 def test_each_decision_is_raised_from_its_own_task_in_plan_order():
     decisions = setup.build_decisions(_facts(True, sessions=True))
 
-    assert [d["task_title"] for d in decisions] == [GITHUB_TASK] * 4 + [PROJECT_TASK]
+    assert [d["task_title"] for d in decisions] == [GITHUB_TASK] * 3 + [PROJECT_TASK]
     assert all("pick" not in d for d in decisions)
 
 
@@ -192,16 +182,15 @@ def test_github_never_invents_an_address_for_a_non_gmail_email(email):
     assert "@" not in github["tradeoff"]
 
 
-def test_the_community_questions_come_first_and_the_github_cards_drop_the_reasons():
+def test_the_community_decision_comes_first_and_the_github_cards_drop_the_reasons():
     decisions = [d for d in setup.build_decisions(_facts(True)) if d["task_title"] == GITHUB_TASK]
 
     assert [d["title"] for d in decisions] == [
-        "Should your agents use improvements the community has proven?",
-        "Should your agents offer the improvements proven here to the community?",
+        "Should your agents use improvements the community has proven, and offer the ones proven here?",
         "How should your agents post on GitHub?", "Make an account for your agents on GitHub?"]
-    assert [o["label"] for o in decisions[0]["options"]] == ["Yes", "No"]
-    assert decisions[0]["recommendation"] == decisions[1]["recommendation"] == "A"
-    assert "Their own account is allowed" in decisions[2]["context"]  # the bot-account answer
+    assert [o["label"] for o in decisions[0]["options"]] == ["Use and share", "Only use", "Neither"]
+    assert decisions[0]["recommendation"] == "A"
+    assert "Their own account is allowed" in decisions[1]["context"]  # the bot-account answer
     text = " ".join(str(v) for d in decisions for v in d.values())
     assert "build what you need" not in text and "keep that work there" not in text
     assert "AI" not in text

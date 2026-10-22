@@ -13,8 +13,6 @@ For the CORSIA agent: step 5 of `references/first-run-app.md` sends you here. Do
 
 ## B. Search
 
-When step 4 was skipped because search already worked (`web_search_ready`), first post `Next I'd like to look you up on the web, so you don't have to tell me everything yourself. I'll search Brave with your name and [what it will use, like your work or city]. Go ahead, or skip it?` and wait. Skip goes straight to section E. Go ahead continues. When step 4 just set search up, its message already covered this: post nothing here.
-
 Post `Looking you up.` once. Then:
 
 1. Run `web_search` with the name plus one detail from A (the domain's company, else the city, else the kind of work).

@@ -87,26 +87,17 @@ ASK_FOR_ADDRESS = "the address you give me in chat"
 
 # The two questions that come before GitHub: whether agents use and offer the community's proven
 # improvements. Both sit under the GitHub task; GitHub comes up only on a yes to sharing.
-COMMUNITY_USE = {
-    "title": "Should your agents use improvements the community has proven?",
-    "context": "You can always turn down a change and keep your own version.",
-    "tradeoff": "Using them needs no account.",
+COMMUNITY = {
+    "title": "Should your agents use improvements the community has proven, and offer the ones proven here?",
+    "context": ("You can always turn down a change and keep your own version, and nothing private ever goes "
+                "into what's shared."),
+    "tradeoff": "Sharing goes through GitHub, so use and share leads to one question about your account.",
     "options": (
-        ("Yes", "Agents may take improvements other people proved."),
-        ("No", "Agents keep to their own versions."),
+        ("Use and share", "Agents take improvements other people proved and offer the ones proven here."),
+        ("Only use", "Agents take proven improvements and share nothing."),
+        ("Neither", "Agents keep their improvements here."),
     ),
-    "rationale": "You get what others prove, and you approve what changes.",
-}
-
-COMMUNITY_SHARE = {
-    "title": "Should your agents offer the improvements proven here to the community?",
-    "context": "Nothing private ever goes into what's shared.",
-    "tradeoff": "Sharing goes through GitHub, so a yes leads to one question about your account.",
-    "options": (
-        ("Yes", "Agents may offer a proven improvement."),
-        ("No", "Agents share nothing."),
-    ),
-    "rationale": "A proven change helps everyone using CORSIA.",
+    "rationale": "You get what others prove, and a proven change helps everyone using CORSIA.",
 }
 
 # The person has a GitHub account: their agents use it or have their own.

@@ -251,8 +251,9 @@ def test_local_model_offer_reads_omlx_s_pick_and_never_sends_a_profile():
 
 
 FIRST_RUN_APP = BOOTSTRAP_SKILL.parent / "references/first-run-app.md"
-HANDOFF = ("That's everything. What's taking up your time this week? And what's one thing you keep meaning to get to "
-           "and never do? Those are often the quickest to take off your plate.")
+HANDOFF = ("That's everything. What's taking up your time this week? And what would you get done with a free afternoon at your computer: "
+           "a side project, something you've wanted to look into, or a chore you keep putting off? "
+           "That's usually the quickest way to see what I can do.")
 
 
 def test_first_run_routes_the_app_path_to_its_own_reference():
@@ -340,28 +341,30 @@ def test_the_subscription_step_installs_in_the_background_then_signs_in():
     assert "post the sign-in line below right after they answer the question in front of you" in step
 
 
-def test_the_community_step_explains_asks_two_questions_and_writes_the_profile_lines():
+def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_lines():
     step = _step(7)
 
     assert step.startswith("Learning from the community.** Always.")
     assert "Here's how CORSIA gets better: it learns from you." in step
     assert "sharing it means everyone using CORSIA gets better, and you get what others prove." in step
-    assert step.index("Should your agents use improvements the community has proven?") < step.index(
-        "Should your agents offer the improvements proven here to the community?")
+    assert "Should your agents use improvements the community has proven, and offer the ones proven here?" in step
+    assert "**Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No" in step
+    assert "would only share, write No and Yes" in step
     for line in ("`- **Use community improvements:** Yes`", "`- **Use community improvements:** No`",
                  "`- **Share improvements with the community:** Yes`", "`- **Share improvements with the community:** No`",
-                 "write no line for it, and agents share nothing and take nothing until it is answered"):
+                 "write no line, and agents share nothing and take nothing until it is answered"):
         assert line in step, line
     assert "context/50-USER-PROFILE.md" in step
     assert "Got it. Your agents keep their improvements here and don't take the community's. Ask me any time to change that." in step
     assert "no GitHub" in step
+    assert "**Only use:** no GitHub question." in step
     # The old three-reason list and "build what you need" are gone.
     assert "build what you need" not in step and "keep that work there" not in step
 
 
 def test_github_comes_only_on_a_yes_to_sharing_and_answers_the_bot_account_question():
     step = _step(7)
-    github = step.split("**Yes to sharing, and not `github_ready`:**", 1)[1]
+    github = step.split("**Use and share, or only share, and not `github_ready`:**", 1)[1]
 
     assert "When `github_ready`, skip the rest of this step" in github
     assert github.index("Do you have a GitHub account?") < github.index("Should your agents use your account, or have their own?")
@@ -387,9 +390,10 @@ def test_hand_off_names_a_match_for_question_2_and_keeps_the_fallback_line():
     hand_off = app.split("## The hand-off", 1)[1]
 
     assert ("`That's everything. You said you're working toward [their words], and I can see [X] in [where]. "
-            "Want me to get up to speed on it? And what's one thing you keep meaning to get to and never do? "
-            "Those are often the quickest to take off your plate.`") in hand_off
-    assert "finish the thing they never get to first" in hand_off
+            "Want me to get up to speed on it? And what would you get done with a free afternoon at your computer: "
+            "a side project, something you've wanted to look into, or a chore you keep putting off? "
+            "That's usually the quickest way to see what I can do.`") in hand_off
+    assert "Work on the free-afternoon answer first" in hand_off
     assert "Here's how I'll work unless you tell me otherwise." in ref
     assert "pre-approve something, like 'you can accept meeting invites without asking.'" in ref
     assert "- **Check first by default:** sending anything as them, spending money, deleting anything" in ref
@@ -432,7 +436,6 @@ def test_the_look_up_reference_carries_the_rules_outcomes_questions_and_examples
     for line in (
         "What's your full name? I'll use it to look you up.",
         "Looking you up.",
-        "Next I'd like to look you up on the web, so you don't have to tell me everything yourself. I'll search Brave with your name and [what it will use, like your work or city]. Go ahead, or skip it?",
         "Here's what I found. Tell me if any of it is wrong.",
         "You keep a low profile online. Good for your privacy, less for me to go on. Here's the little I found, and it may not be you:",
         "I couldn't search just now.",
