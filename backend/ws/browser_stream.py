@@ -22,8 +22,8 @@ from infra.queries import get_thread_for_user
 from ws.browser_frames import PaneFrames
 
 log = logging.getLogger(__name__)
-# Seconds before each re-establishment of a pane's page-address watch; it is not retried further.
-METADATA_RETRY_DELAYS = (0.5, 1.0, 2.0)
+# Seconds before each re-establishment of either CDP connection; it is not retried further.
+PANE_RETRY_DELAYS = (0.5, 1.0, 2.0)
 
 
 async def browser_stream_endpoint(ws: WebSocket, thread_id: str) -> None:
@@ -80,6 +80,21 @@ def _user_owns_thread(thread_id: str, user_id: str) -> bool:
         db.close()
 
 
+async def _screencast_events(thread_id: str, connection_token: str, frames: PaneFrames) -> None:
+    """Reconnect the pane frame stream after a transient CDP failure."""
+    # A frame only replaces the unsent frame, so frames never fill the bounded queue.
+    # A page's screencast uses its own CDP connection, which can drop while the shared
+    # browser and its pane connection remain open. Reattach before treating the pane as gone.
+    for attempt, delay in enumerate(PANE_RETRY_DELAYS, start=1):
+        try:
+            await browser_pane.screencast(thread_id, connection_token, frames.offer)
+        except (OSError, WebSocketException) as exc:
+            log.warning("browser pane %s lost its screencast (attempt %d of %d): %s",
+                        thread_id, attempt, len(PANE_RETRY_DELAYS), exc)
+        await asyncio.sleep(delay)
+    raise BrowserSessionError("The pane stopped showing the page")
+
+
 async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
     """Relay shared page frames and pane input for one authenticated connection."""
     connection_token = secrets.token_urlsafe(18)
@@ -94,10 +109,6 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
 
     browser_control.pane_connected(thread_id, connection_token, report,
                                    partial(browser_pane.password_probe, thread_id, connection_token))
-
-    async def from_page() -> None:
-        # A frame only replaces the unsent frame, so frames never fill the bounded queue.
-        await browser_pane.screencast(thread_id, connection_token, frames.offer)
 
     async def from_pane() -> None:
         while True:
@@ -125,12 +136,12 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
             report(message)
         # The address is the person's cue on a password page, so a lost watch is re-established a few
         # times and then ends the stream visibly rather than leaving a stale address on screen.
-        for attempt, delay in enumerate(METADATA_RETRY_DELAYS, start=1):
+        for attempt, delay in enumerate(PANE_RETRY_DELAYS, start=1):
             try:
                 await browser_pane.watch_page_metadata(thread_id, connection_token, emit)
             except (BrowserSessionError, ProcessOwnerError, OSError, WebSocketException) as exc:
                 log.warning("browser pane %s lost its page address watch (attempt %d of %d): %s",
-                            thread_id, attempt, len(METADATA_RETRY_DELAYS), exc)
+                            thread_id, attempt, len(PANE_RETRY_DELAYS), exc)
             await asyncio.sleep(delay)
         raise BrowserSessionError("The pane stopped following the page's address")
 
@@ -138,7 +149,7 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
     try:
         # Shared panes have no control-holder state.
         tasks = {
-            asyncio.create_task(from_page()),
+            asyncio.create_task(_screencast_events(thread_id, connection_token, frames)),
             asyncio.create_task(from_pane()),
             asyncio.create_task(metadata_events()),
             asyncio.create_task(frames.send(pane.send_text)),

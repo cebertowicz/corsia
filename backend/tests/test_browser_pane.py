@@ -409,7 +409,7 @@ async def test_agent_close_remains_available_while_a_pane_is_connected(monkeypat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("returncode", "show_window", "announced"), [
-    (0, False, []),
+    (0, False, ["thread-1", "thread-1"]),
     (0, True, ["thread-1", "thread-1"]),
     (1, True, []),
 ])
