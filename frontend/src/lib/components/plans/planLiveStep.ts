@@ -12,6 +12,8 @@
  */
 import { readable } from 'svelte/store';
 import type { OperatorNode } from '$lib/api/plans';
+import type { OpenTimeQuery } from '$lib/api/openTime';
+import { parseWsTimestamp } from '$lib/time';
 import type { ActiveTool } from '$lib/stores/threads';
 import type { ThreadTurnState } from '$lib/ws/turnState';
 
@@ -84,6 +86,8 @@ export interface LiveRollup {
 	threads: Map<string, string[]>;
 	/** Rows with a step at or beneath them that the server shows moving (`stepMoves`). */
 	moving: Set<string>;
+	/** The step each live thread belongs to: the row whose first try its open time counts from, wherever the line shows. */
+	owners: Map<string, OperatorNode>;
 }
 
 export function rolledLive(nodes: readonly OperatorNode[]): LiveRollup {
@@ -91,8 +95,10 @@ export function rolledLive(nodes: readonly OperatorNode[]): LiveRollup {
 	const parentOf = new Map(nodes.map((node) => [node.id, node.parent_id]));
 	const branches = new Set(nodes.map((node) => node.parent_id));
 	const moving = new Set<string>();
+	const owners = new Map<string, OperatorNode>();
 	for (const node of nodes) {
 		const own = liveStepThreads(node);
+		for (const threadId of own) if (!owners.has(threadId)) owners.set(threadId, node);
 		// A branch's label is its steps' rolled up, so only a step says whether work moves.
 		const moves = !branches.has(node.id) && stepMoves(node);
 		if (own.length === 0 && !moves) continue;
@@ -103,7 +109,7 @@ export function rolledLive(nodes: readonly OperatorNode[]): LiveRollup {
 		}
 		if (moves) moving.add(node.id);
 	}
-	return { threads, moving };
+	return { threads, moving, owners };
 }
 
 /**
@@ -261,6 +267,18 @@ export function planLiveStep(
 	return null;
 }
 
+/**
+ * The server's open-time question for a running step: from the step's first try to now, on the thread that
+ * executes it (its subagents' Turns and outside waits are part of the answer). Null when no start is proven.
+ */
+export function stepOpenQuery(node: OperatorNode, fallbackThreadId: string): OpenTimeQuery | null {
+	const starts = node.execution.attempts.map((attempt) => parseWsTimestamp(attempt.selected_at)).filter(Number.isFinite);
+	if (starts.length === 0) return null;
+	const threadId = node.execution.selection?.executor_thread_id ?? node.executor.thread_id ?? fallbackThreadId;
+	const since = Math.min(...starts);
+	return { key: `step|${node.id}|${threadId}|${since}`, threadId, since, until: null };
+}
+
 /** Whole minutes: the subline counts work, it is not a stopwatch. */
 export function elapsedLabel(ms: number): string {
 	const minutes = Math.floor(Math.max(0, ms) / 60_000);
@@ -271,9 +289,10 @@ export function elapsedLabel(ms: number): string {
 	return rest ? `${hours} h ${rest} min` : `${hours} h`;
 }
 
-export function liveStepLabel(step: LiveStep, now: number): string {
-	if (step.startedAt === null) return step.phrase;
-	const elapsed = elapsedLabel(now - step.startedAt);
+/** `Working 3 min · Reading plan`: the step's open time, or only its phrase while the server has not answered. */
+export function liveStepLabel(step: LiveStep, openMs: number | null): string {
+	if (openMs === null) return step.phrase;
+	const elapsed = elapsedLabel(openMs);
 	return step.phrase === UNKNOWN_STEP ? `Working ${elapsed}` : `Working ${elapsed} · ${step.phrase}`;
 }
 
