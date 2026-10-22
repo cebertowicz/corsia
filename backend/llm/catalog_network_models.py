@@ -330,7 +330,7 @@ def _reconcile_network_models(
     from llm.reasoning_config import reasoning_shape_from_discovery
 
     provider = server.get("provider", "omlx")
-    is_corsia_managed = corsia_omlx_server([server]) is not None
+    is_corsia_managed = bool(server.get("id")) and corsia_omlx_server([server]) is not None
     reasoning_by_pmid = {
         model["id"]: reasoning_shape_from_discovery(model, applies_default=is_corsia_managed)
         for model in canonical_models
