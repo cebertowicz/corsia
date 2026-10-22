@@ -5,7 +5,9 @@
 	const microsoftPermissionsUrl = (account: ConnectedAccount) => account.account_kind === 'personal' ? 'https://account.live.com/consent/Manage' : 'https://myapps.microsoft.com';
 </script>
 
-{#if account.provider === 'microsoft'}
+{#if account.provider === 'mailhost'}
+	<p class="manual-removal" role="status">Removed. To finish, delete the CORSIA app password in your {#if account.mailhost?.manage_url}<a href={account.mailhost.manage_url} target="_blank" rel="noopener" onclick={onDismiss}>{account.provider_display_name} account settings</a>{:else}{account.provider_display_name} account settings{/if}.</p>
+{:else if account.provider === 'microsoft'}
 	<p class:manual-removal={removed} class:impact={!removed} role="status">Microsoft may still list CORSIA as allowed for {account.address}. <a href={microsoftPermissionsUrl(account)} target="_blank" rel="noopener" onclick={onDismiss}>Manage Microsoft permissions</a></p>
 {:else if account.provider === 'google' && removed}
 	<p class="manual-removal" role="status">CORSIA removed {account.provider_display_name} — {account.address} here, but couldn’t reach Google. To remove it there, open your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account</a> and remove CORSIA.</p>

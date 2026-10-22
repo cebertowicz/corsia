@@ -19,7 +19,7 @@
 		type ServerKeyRow,
 	} from '$lib/stores/keys';
 	import { requestProviderCard, requestServerCard, settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
-	import { connectedAppStateLine, loadConnectedAppsList } from '$lib/api/connectedApps';
+	import { connectedAppStateLine, loadConnectedAppsList, loadMailHostAccount, mailHostStateLine } from '$lib/api/connectedApps';
 	import { ms } from '$lib/popoverMotion';
 
 	type Action = 'set' | 'clear' | 'remove';
@@ -93,6 +93,8 @@
 	function cardLabel(entry: KeyEntry): string {
 		const ref = connectedAppKey?.refs.find((candidate) => candidate.entry === entry.name);
 		if (!connectedAppKey || !ref) return entry.label;
+		// An account's key names its account (`iCloud key: you@icloud.com`), as its Keys entry does.
+		if (connectedAppKey.account) return entry.label;
 		return connectedAppKey.refs.length > 1 ? `${connectedAppKey.app} key: ${ref.name}` : `${connectedAppKey.app} key`;
 	}
 
@@ -124,6 +126,36 @@
 		keyValue = '';
 		password = '';
 		formError = '';
+	}
+
+	/** The destination line (H19): every distinct host the typed-in password will go to, in full. */
+	function destination(hosts: string[]): string {
+		const distinct = [...new Set(hosts)];
+		const list = distinct.length < 3 ? distinct.join(' and ') : `${distinct.slice(0, -1).join(', ')}, and ${distinct[distinct.length - 1]}`;
+		return `This password goes to ${list}.`;
+	}
+
+	/** A mail-host account's check after its app password is set, read from its row until the check ends. */
+	async function checkAccountAfterKeySave(entry: string, appName: string) {
+		const deadline = Date.now() + RECONNECT_TIMEOUT_MS;
+		try {
+			while (true) {
+				const account = await loadMailHostAccount(entry);
+				if (!account) break;
+				const problem = account.mailhost?.problem ?? null;
+				if (problem === null) { reconnectStatus = `${appName} is connected.`; return; }
+				if (problem === 'refused' || problem === 'revoked') {
+					reconnectStatus = `${appName} didn’t accept this app password. Make a new one in your ${appName} account settings, then press Replace.`;
+					return;
+				}
+				if (problem !== 'checking' && problem !== 'waiting') { reconnectStatus = mailHostStateLine(account); return; }
+				if (Date.now() >= deadline) break;
+				await new Promise<void>((resolve) => setTimeout(resolve, RECONNECT_RETRY_MS));
+			}
+		} catch {
+			// The key already saved; do not turn a check lookup failure into a failed save.
+		}
+		reconnectStatus = 'Saved.';
 	}
 
 	async function reconnectAfterKeySave(appName: string) {
@@ -182,11 +214,19 @@
 		}
 		open = null;
 		delete checkResults[name];
+		// A saved key reads Set from this moment, not once the list reloads after any check that follows.
+		if (action === 'set') entries = entries.map((entry) => entry.name === name ? { ...entry, is_set: true, set_at: new Date().toISOString() } : entry);
 		try {
 			if (action === 'set' && connectedAppKey?.entry === name) {
-				reconnectStatus = `Saved. Reconnecting ${connectedAppKey.app}…`;
-				await tick();
-				await reconnectAfterKeySave(connectedAppKey.app);
+				if (connectedAppKey.account) {
+					reconnectStatus = `Saved. Checking ${connectedAppKey.app}…`;
+					await tick();
+					await checkAccountAfterKeySave(name, connectedAppKey.app);
+				} else {
+					reconnectStatus = `Saved. Reconnecting ${connectedAppKey.app}…`;
+					await tick();
+					await reconnectAfterKeySave(connectedAppKey.app);
+				}
 			}
 		} finally {
 			await load();
@@ -272,12 +312,13 @@
 							{#if entry.checkable && entry.is_set}
 								<Button variant="ghost" size="sm" loading={checking === entry.name} onclick={() => check(entry.name)}>Check</Button>
 							{/if}
-							{#if !entry.builtin}
+							{#if !entry.builtin && entry.removable !== false}
 								<Button variant="ghost" size="sm" onclick={() => openForm(entry.name, 'remove')}>Remove</Button>
 							{/if}
 						{/if}
 					{/snippet}
 				</SettingsRow>
+				{#if connectedAppKey?.entry === entry.name && connectedAppKey.hosts?.length}<p class="note destination">{destination(connectedAppKey.hosts)}</p>{/if}
 				{#if connectedAppKey?.entry === entry.name && reconnectStatus}<p class="note" role="status">{reconnectStatus}</p>{/if}
 				{#if open?.name === entry.name}
 					{@render keyForm()}
@@ -329,6 +370,7 @@
 	.note { margin: 0 0 var(--space-1); padding: 0 var(--space-2); font-size: var(--text-caption); line-height: 1.45; color: var(--text-tertiary); }
 	.note.ok { color: var(--green-text); }
 	.note.failed { color: var(--red-text); }
+	.note.destination { color: var(--text-secondary); overflow-wrap: anywhere; }
 	.key-form { padding: 0 var(--space-2) var(--space-2); }
 	.form-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); }
 	.entry.arrival :global(.actions .btn:first-child) { animation: key-action-arrival calc(var(--dur-hero-plus) * 2) var(--ease-entrance); }

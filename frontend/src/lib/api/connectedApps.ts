@@ -1,5 +1,6 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
+import { write as keyWrite } from '$lib/stores/keys';
 import { plainResponseError } from '$lib/plainError';
 import { signInStateLine } from '$lib/appSignIn';
 
@@ -64,7 +65,7 @@ export function isOnlyCorsia(reach: AccountReach): boolean {
 export interface ConnectedAccount {
 	kind: 'account';
 	id: string;
-	provider: 'google' | 'microsoft';
+	provider: 'google' | 'microsoft' | 'mailhost';
 	/** The server-owned provider label for row and action copy. */
 	provider_display_name: string;
 	/** Display only: the address can change at the provider. */
@@ -79,7 +80,28 @@ export interface ConnectedAccount {
 	/** Microsoft Application (client) ID only; no credential or key-store reference leaves the server. */
 	client_id?: string | null;
 	tenant_id?: string | null;
+	/** Mail-host accounts only (iCloud, Yahoo, a work server): what the last check found. Never a credential. */
+	mailhost?: MailHostDetail;
 	reach: AccountReach;
+}
+
+/** What a mail-host row says about its last check. `problem: null` is Connected; a mail-only account sets `calendar_missing`. */
+export interface MailHostDetail {
+	problem: 'waiting' | 'checking' | 'refused' | 'revoked' | 'imap_off' | 'unreachable' | null;
+	/** The server the check could not reach. */
+	server?: string;
+	/** The host's page for deleting the CORSIA app password. */
+	manage_url?: string;
+	calendar_missing?: boolean;
+	imap?: string;
+	smtp?: string;
+	caldav?: string;
+	/** The server field the check could not reach, so the open Edit server form can put the error on it. */
+	failing?: 'imap' | 'smtp' | 'caldav';
+	/** The Keys card entry that holds the app password. */
+	key_refs?: { entry: string; name: string; set: boolean }[];
+	/** Servers that came from the agent or the person (H19): the Keys card names each before the password is set. */
+	destination_hosts?: string[];
 }
 
 /** A hosted or local app row, as `/api/mcp/servers` returns it, tagged for the union. */
@@ -95,7 +117,7 @@ export function needsManualGoogleStep(cause: RevocationCause): boolean {
 
 /** Only the provider's fixed manual-removal cause exposes its provider-specific next step. */
 export function needsManualAccountStep(account: Pick<ConnectedAccount, 'provider'>, cause: RevocationCause): boolean {
-	return account.provider === 'microsoft' ? cause === 'manual_only' : needsManualGoogleStep(cause);
+	return account.provider === 'microsoft' || account.provider === 'mailhost' ? cause === 'manual_only' : needsManualGoogleStep(cause);
 }
 
 export interface AccountSignOutResult { row: ConnectedAccount; revocation: RevocationCause }
@@ -146,6 +168,33 @@ async function response<T>(path: string, init?: RequestInit, fallback = 'Could n
 	const result = await fetch(url(path), init);
 	if (!result.ok) throw new Error(await plainResponseError(result, fallback));
 	return result.json() as Promise<T>;
+}
+
+/** The row status line of a mail-host account, as Connected apps shows it. */
+export function mailHostStateLine(account: Pick<ConnectedAccount, 'provider_display_name' | 'mailhost'>): string {
+	switch (account.mailhost?.problem ?? null) {
+		case 'waiting': return 'Needs an app password';
+		case 'checking': return 'Checking…';
+		case 'refused': case 'revoked': return 'App password not accepted';
+		case 'imap_off': return `Email access is off at ${account.provider_display_name}`;
+		case 'unreachable': return `Can’t reach ${account.mailhost?.server}`;
+		default: return 'Connected';
+	}
+}
+
+/** One mail-host account by the Keys entry that holds its app password, for the Keys card's check after the password is set. */
+export async function loadMailHostAccount(entry: string): Promise<ConnectedAccount | undefined> {
+	const result = await response<{ accounts?: ConnectedAccount[] }>('/api/mcp/servers');
+	return (result.accounts ?? []).find((account) => account.provider === 'mailhost' && account.mailhost?.key_refs?.some((ref) => ref.entry === entry));
+}
+
+/** The person-only mail-host row writes: each carries the CORSIA password and starts a check (H17). Throws `KeyWriteError`. */
+export async function retryMailHost(id: string, password: string): Promise<void> {
+	await keyWrite(`/api/mcp/accounts/${encodeURIComponent(id)}/mailhost/check`, 'POST', { password });
+}
+
+export async function saveMailHostServers(id: string, servers: { imap: string; smtp: string; caldav: string }, password: string): Promise<void> {
+	await keyWrite(`/api/mcp/accounts/${encodeURIComponent(id)}/mailhost/servers`, 'PUT', { ...servers, password });
 }
 
 export async function loadConnectedAppsList(): Promise<{ servers: ConnectedApp[]; signInHere: boolean }> {

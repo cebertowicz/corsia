@@ -8,7 +8,7 @@
 	import { requestAppKey } from '$lib/stores/settingsNavigation';
 
 	let { onClose, onConnected, onSignIn }: { onClose: () => void; onConnected: (app: ConnectedApp) => void; onSignIn: (app: ConnectedApp) => void } = $props();
-	type AppKind = 'local' | 'web' | 'google';
+	type AppKind = 'local' | 'web' | 'google' | 'mailhost';
 	type Step = 'what' | 'setup' | 'where' | 'result';
 	let step = $state<Step>('what');
 	let kind = $state<AppKind>('local');
@@ -70,6 +70,11 @@
 		error = '';
 		if (kind === 'google') {
 			connectGoogle();
+			return;
+		}
+		if (kind === 'mailhost') {
+			requestCorsiaMessage('Connect my other email account');
+			onClose();
 			return;
 		}
 		step = 'setup';
@@ -158,6 +163,7 @@
 					<label class="choice"><input type="radio" name="app-kind" checked={kind === 'local'} onchange={() => selectKind('local')} /><span><strong>An app that runs on this computer</strong><small>Its setup instructions give you something to run, often starting with npx or uvx.</small></span></label>
 					<label class="choice"><input type="radio" name="app-kind" checked={kind === 'web'} onchange={() => selectKind('web')} /><span><strong>An app at a web address</strong><small>Its setup instructions give you an address starting with https://, on the internet or your network.</small></span></label>
 					<label class="choice"><input type="radio" name="app-kind" checked={kind === 'google'} onchange={() => selectKind('google')} /><span><strong>Google (email, calendar and files)</strong><small>Opens a chat with CORSIA to sign in.</small></span></label>
+					<label class="choice"><input type="radio" name="app-kind" checked={kind === 'mailhost'} onchange={() => selectKind('mailhost')} /><span><strong>Other email (iCloud, Yahoo, Fastmail and more)</strong><small>Opens a chat with CORSIA to connect it.</small></span></label>
 				</div>
 			</section>
 		{:else if step === 'setup'}

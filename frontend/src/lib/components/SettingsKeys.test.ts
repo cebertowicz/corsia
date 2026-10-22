@@ -275,6 +275,72 @@ describe('Settings › Keys', () => {
 		});
 	});
 
+	describe('mail-host account keys', () => {
+		const ENTRY = 'mailhost-example';
+		const LABEL = 'example.com key: you@example.com';
+		const account = (problem: string | null) => ({
+			provider: 'mailhost', provider_display_name: 'example.com', mailhost: { problem, key_refs: [{ entry: ENTRY, name: LABEL, set: true }] },
+		});
+		async function openAccountKey(hosts?: string[], extra: Record<string, unknown> = {}) {
+			Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+			entries = [{ ...maps, name: ENTRY, label: LABEL, description: '', added_by: 'Mail host', ...extra }];
+			requestConnectedAppKey('example.com', ENTRY, [{ entry: ENTRY, name: LABEL }], { hosts });
+			await mountKeys(ENTRY);
+		}
+		async function saveAccountKey() {
+			button(ENTRY, 'Set').click();
+			await vi.waitFor(() => expect(host.querySelector('form')).not.toBeNull());
+			const form = host.querySelector('form')!;
+			const fields = form.querySelectorAll<HTMLInputElement>('input');
+			type(fields[0], VALUE);
+			type(fields[1], PASSWORD);
+			form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		}
+
+		it('names the account on its key and every host a typed-in password goes to', async () => {
+			await openAccountKey(['imap.example.com', 'smtp.example.net', 'imap.example.com']);
+			expect(host.querySelector(`[data-key-entry="${ENTRY}"]`)!.textContent).toContain(LABEL);
+			expect(host.querySelector('.destination')?.textContent).toBe('This password goes to imap.example.com and smtp.example.net.');
+		});
+		it('says nothing about a destination for a known host', async () => {
+			await openAccountKey(undefined);
+			expect(host.querySelector('.destination')).toBeNull();
+		});
+		it('reads Set at once and then Connected once the check passes', async () => {
+			vi.useFakeTimers();
+			connectedAppsAnswers = [{ servers: [], accounts: [account('checking')] } as never, { servers: [], accounts: [account(null)] } as never];
+			await openAccountKey(undefined);
+			await saveAccountKey();
+			await vi.waitFor(() => expect(host.textContent).toContain('Saved. Checking example.com…'));
+			expect(host.querySelector(`[data-key-entry="${ENTRY}"]`)!.textContent).not.toContain('Not set');
+			expect(button(ENTRY, 'Replace')).toBeDefined();
+			await vi.runAllTimersAsync();
+			await vi.waitFor(() => expect(host.textContent).toContain('example.com is connected.'));
+			vi.useRealTimers();
+		});
+		it('says the host did not accept the app password and points to Replace', async () => {
+			connectedAppsAnswers = [{ servers: [], accounts: [account('refused')] } as never];
+			await openAccountKey(undefined);
+			await saveAccountKey();
+			await vi.waitFor(() => expect(host.textContent).toContain('example.com didn’t accept this app password. Make a new one in your example.com account settings, then press Replace.'));
+		});
+		it('shows the row status line for any other failed check', async () => {
+			connectedAppsAnswers = [{ servers: [], accounts: [{ ...account('unreachable'), mailhost: { ...account('unreachable').mailhost, server: 'imap.example.com' } }] } as never];
+			await openAccountKey(undefined);
+			await saveAccountKey();
+			await vi.waitFor(() => expect(host.textContent).toContain('Can’t reach imap.example.com'));
+		});
+		it('keeps Clear but hides Remove while the account row still needs the key', async () => {
+			await openAccountKey(undefined, { is_set: true, removable: false });
+			expect(button(ENTRY, 'Clear')).toBeDefined();
+			expect(() => button(ENTRY, 'Remove')).toThrow();
+		});
+		it('shows Remove for a key that can be removed', async () => {
+			await openAccountKey(undefined, { is_set: true, removable: true });
+			expect(button(ENTRY, 'Remove')).toBeDefined();
+		});
+	});
+
 	describe('provider keys', () => {
 		const anthropic = {
 			name: 'provider-anthropic', provider: 'anthropic', label: 'Anthropic',

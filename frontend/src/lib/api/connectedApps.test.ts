@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	loadConnectedApps,
 	loadConnectedAppsRows,
+	loadMailHostAccount,
+	retryMailHost,
+	saveMailHostServers,
 	needsManualGoogleStep,
 	startAppSignIn,
 	removeAccount,
@@ -135,5 +138,26 @@ describe('which revocation causes show the manual Google Account step', () => {
 		const quiet: RevocationCause[] = ['revoked', 'not_signed_in'];
 		expect(shown.map(needsManualGoogleStep)).toEqual([true, true, true, true]);
 		expect(quiet.map(needsManualGoogleStep)).toEqual([false, false]);
+	});
+});
+
+describe('mail-host row calls', () => {
+	const headerOf = (fetchMock: ReturnType<typeof vi.fn>) => fetchMock.mock.calls[0][1].headers as Record<string, string>;
+	it('sends Try again with the CORSIA password to the account route', async () => {
+		const fetchMock = answer({ row: {} });
+		await retryMailHost('acc 1', 'pw');
+		expect(fetchMock).toHaveBeenCalledWith('/api/mcp/accounts/acc%201/mailhost/check', expect.objectContaining({ method: 'POST', body: JSON.stringify({ password: 'pw' }) }));
+		expect(headerOf(fetchMock)['Content-Type']).toBe('application/json');
+	});
+	it('sends Edit server as one PUT with the three addresses and the password', async () => {
+		const fetchMock = answer({ row: {} });
+		await saveMailHostServers('acc 1', { imap: 'a.example.com', smtp: 's.example.com', caldav: '' }, 'pw');
+		expect(fetchMock).toHaveBeenCalledWith('/api/mcp/accounts/acc%201/mailhost/servers', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ imap: 'a.example.com', smtp: 's.example.com', caldav: '', password: 'pw' }) }));
+	});
+	it('finds the account by the Keys entry that holds its password, not by name', async () => {
+		const row = (id: string, entry: string) => ({ id, provider: 'mailhost', provider_display_name: 'example.com', mailhost: { problem: null, key_refs: [{ entry, name: entry, set: true }] } });
+		answer({ servers: [], accounts: [row('one', 'mailhost-one'), row('two', 'mailhost-two')] });
+		expect((await loadMailHostAccount('mailhost-two'))?.id).toBe('two');
+		expect(await loadMailHostAccount('mailhost-none')).toBeUndefined();
 	});
 });

@@ -462,6 +462,72 @@ describe('ConnectedAppsSettings', () => {
 		expect(host.textContent).not.toContain('You’re signed out here');
 	});
 
+	describe('mail-host rows', () => {
+		const mailhost = (id: string, display: string, detail: Record<string, unknown>) => ({
+			...googleAccount, id, provider: 'mailhost' as const, provider_display_name: display, address: `you@${display.toLowerCase()}`,
+			capabilities: ['mail', 'calendar'] as ('mail' | 'calendar')[], state: detail.problem === null ? 'connected' as const : 'needs_sign_in' as const,
+			mailhost: { key_refs: [{ entry: `mailhost-${id}`, name: `${display} key`, set: true }], ...detail },
+		});
+		const openRow = (id: string) => { (host.querySelector(`[data-connected-account-id="${id}"] button`) as HTMLButtonElement).click(); flushSync(); };
+		const labelled = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((candidate) => candidate.textContent?.trim() === label);
+
+		it('says what each failed check found on the closed row', async () => {
+			const rows = [
+				mailhost('a', 'iCloud', { problem: 'waiting' }), mailhost('b', 'Yahoo', { problem: 'refused' }),
+				mailhost('c', 'AOL', { problem: 'imap_off' }), mailhost('d', 'example.com', { problem: 'unreachable', server: 'imap.example.com' }),
+				mailhost('e', 'Zoho', { problem: null }),
+			];
+			vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: rows }) })));
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="e"]')).not.toBeNull());
+			const line = (id: string) => host.querySelector(`[data-connected-account-id="${id}"] .sub`)?.textContent ?? '';
+			expect(line('a')).toContain('Needs an app password');
+			expect(line('b')).toContain('App password not accepted');
+			expect(line('c')).toContain('Email access is off at AOL');
+			expect(line('d')).toContain('Can’t reach imap.example.com');
+			expect(line('e')).toContain('Connected');
+		});
+
+		it('reads the list again while a row is Checking and stops once the check ends', async () => {
+			vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+			const answers = [[mailhost('a', 'iCloud', { problem: 'checking' })], [mailhost('a', 'iCloud', { problem: 'checking' })], [mailhost('a', 'iCloud', { problem: null })]];
+			const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: answers.length > 1 ? answers.shift() : answers[0] }) }));
+			vi.stubGlobal('fetch', fetchMock);
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Checking…'));
+			await vi.advanceTimersByTimeAsync(2000);
+			await vi.advanceTimersByTimeAsync(2000);
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="a"] .sub')?.textContent).toContain('Connected'));
+			const calls = fetchMock.mock.calls.length;
+			await vi.advanceTimersByTimeAsync(10000);
+			expect(fetchMock.mock.calls.length).toBe(calls);
+			vi.useRealTimers();
+		});
+
+		it('keeps the iCloud removal notice with its link, and drops the link for a typed-in server', async () => {
+			const rows = [
+				mailhost('icloud', 'iCloud', { problem: null, manage_url: 'https://account.apple.com/' }),
+				mailhost('typed', 'example.com', { problem: null }),
+			];
+			vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => ({ ok: true, json: async () => init?.method === 'DELETE' ? { id: String(input).includes('/typed') ? 'typed' : 'icloud', removed: true, revocation: 'manual_only' } : { servers: [], accounts: rows } })));
+			component = mount(ConnectedAppsSettings, { target: host });
+			await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="typed"]')).not.toBeNull());
+			const expected: Record<string, [string, string | null]> = {
+				icloud: ['Removed. To finish, delete the CORSIA app password in your iCloud account settings.', 'https://account.apple.com/'],
+				typed: ['Removed. To finish, delete the CORSIA app password in your example.com account settings.', null],
+			};
+			for (const id of ['icloud', 'typed']) {
+				openRow(id);
+				labelled('Remove')!.click();
+				flushSync();
+				expect(document.body.textContent).toContain('Agents lose access now.');
+				([...document.body.querySelectorAll<HTMLButtonElement>('button')].filter((candidate) => candidate.textContent?.trim() === 'Remove').at(-1) as HTMLButtonElement).click();
+				await vi.waitFor(() => expect(host.querySelector('.manual-removal')?.textContent).toBe(expected[id][0]));
+				expect(host.querySelector('.manual-removal a')?.getAttribute('href') ?? null).toBe(expected[id][1]);
+			}
+		});
+	});
+
 	it('keeps same-prefix Google account titles distinct while preserving their domains', async () => {
 		const accounts = [
 			{ ...googleAccount, id: 'google-work', address: 'shared.prefix.very-long-work-address@example.com' },

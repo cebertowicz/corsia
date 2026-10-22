@@ -6,13 +6,14 @@
 	import {
 		approveConnectedApp, connectedAppStateLine, declineConnectedApp, loadConnectedAppsRows, reconnectConnectedApp, removeAccount, removeConnectedApp,
 		runtimeDownloadFailureBody, signOutOfAccount, startAccountSignIn, type AccountSignOutResult, type ConnectedAccount, type ConnectedApp,
-		type ConnectedAppsRow, isOnlyCorsia, needsManualAccountStep,
+		type ConnectedAppsRow, isOnlyCorsia, mailHostStateLine, needsManualAccountStep,
 	} from '$lib/api/connectedApps';
 	import { anyFirstSignIn, hasSignInToShow, needsSignInAttention, SIGN_IN_LEDE } from '$lib/appSignIn';
 	import AppSignInPanel from './AppSignInPanel.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import SettingsRow from './SettingsRow.svelte';
 	import WhereItWorks from './WhereItWorks.svelte';
+	import MailHostDetail from './MailHostDetail.svelte';
 	import ConnectAppFlow from './ConnectAppFlow.svelte';
 	import AccountManualNotice from './AccountManualNotice.svelte';
 	type AccountAddress = { localPrefix: string; localSuffix: string; domain: string };
@@ -42,6 +43,8 @@
 	/** A hosted-app approval that returns needs-sign-in begins its existing one-shot repair path. */
 	let signInAfterApprove = $state<string | null>(null);
 	let closedLocalPrefixes = $state(new Map<string, string>());
+	// Rows whose long local-part suffix is dropped so the provider label and the whole domain keep their room.
+	let closedDroppedSuffix = $state(new Set<string>());
 	let linkedAccountId = $state<string | null>(null);
 	let copiedAdminMessageId = $state<string | null>(null);
 	let textContext: CanvasRenderingContext2D | null = null;
@@ -49,6 +52,7 @@
 	const isMicrosoft = (account: ConnectedAccount) => account.provider === 'microsoft';
 	const microsoftCause = (account: ConnectedAccount, cause: string) => isMicrosoft(account) && account.cause === cause;
 	function accountStateLine(account: ConnectedAccount): string {
+		if (account.provider === 'mailhost') return mailHostStateLine(account);
 		if (microsoftCause(account, 'admin_approval_required')) return 'Needs admin approval';
 		if (microsoftCause(account, 'registration_misconfigured')) return 'Microsoft app needs fixing';
 		if (microsoftCause(account, 'provider_unavailable')) return 'Sign-in didn’t finish';
@@ -59,6 +63,7 @@
 		}
 	}
 	function tone(row: ConnectedAppsRow): 'quiet' | 'failed' | 'attention' {
+		if (isAccount(row) && row.provider === 'mailhost') { const problem = row.mailhost?.problem ?? null; return problem === null || problem === 'checking' ? 'quiet' : problem === 'waiting' ? 'attention' : 'failed'; }
 		if (isAccount(row)) return microsoftCause(row, 'provider_unavailable') || microsoftCause(row, 'registration_misconfigured') ? 'failed' : row.state === 'connected' || row.state === 'signed_out' ? 'quiet' : 'attention';
 		if (row.state === 'failed' || (row.sign_in?.status === 'failed' && !row.sign_in.signed_in)) return 'failed';
 		return row.state === 'working' ? 'quiet' : 'attention';
@@ -230,8 +235,14 @@
 				if (!parts || !prefix || !provider || !suffix || !domain) return;
 				const providerStyle = getComputedStyle(provider);
 				const providerGap = Number.parseFloat(providerStyle.marginInlineEnd) || 0;
-				const available = Math.max(0, node.clientWidth - provider.getBoundingClientRect().width - providerGap - suffix.getBoundingClientRect().width - domain.getBoundingClientRect().width);
-				const next = distinctPrefix(current, available, getComputedStyle(prefix));
+				const prefixStyle = getComputedStyle(prefix);
+				const base = node.clientWidth - provider.getBoundingClientRect().width - providerGap - domain.getBoundingClientRect().width;
+				const withSuffix = Math.max(0, base - width(parts.localSuffix, getComputedStyle(suffix)));
+				// With too little room left for even the start of the name, the suffix goes first.
+				const dropSuffix = parts.localSuffix !== '' && withSuffix < width(`${[...parts.localPrefix].slice(0, 4).join('')}…`, prefixStyle);
+				const available = dropSuffix ? Math.max(0, base) : withSuffix;
+				const next = distinctPrefix(current, available, prefixStyle);
+				if (closedDroppedSuffix.has(current.id) !== dropSuffix) { const dropped = new Set(closedDroppedSuffix); if (dropSuffix) dropped.add(current.id); else dropped.delete(current.id); closedDroppedSuffix = dropped; }
 				if (closedLocalPrefixes.get(current.id) === next) return;
 				closedLocalPrefixes = new Map(closedLocalPrefixes).set(current.id, next);
 				requestAnimationFrame(() => {
@@ -256,6 +267,7 @@
 	function shownSuffix(account: ConnectedAccount): string {
 		const parts = accountAddress(account.address);
 		if (!parts) return '';
+		if (closedDroppedSuffix.has(account.id)) return '';
 		const prefix = shownPrefix(account);
 		return prefix.endsWith('…') && /^[._+\-]/.test(parts.localSuffix) ? parts.localSuffix.slice(1) : parts.localSuffix;
 	}
@@ -279,6 +291,12 @@
 		});
 	});
 	$effect(() => { if (offline) clearLinkedFocus(); });
+	// A mail-host check runs in the background; read the list again until no row is still Checking.
+	$effect(() => {
+		if (!rows.some((row) => isAccount(row) && row.provider === 'mailhost' && row.mailhost?.problem === 'checking')) return;
+		const timer = setInterval(() => { void refresh(); }, 2000);
+		return () => clearInterval(timer);
+	});
 	onMount(() => {
 		void loadProjects(); void load();
 		const afterSignIn = () => { void refresh(); };
@@ -315,6 +333,10 @@
 							</SettingsRow>
 							{#if openId === row.id}
 								<div class="details">
+									{#if row.provider === 'mailhost'}
+									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
+									<MailHostDetail account={row} {offline} onSetKey={() => requestAppKey({ name: row.provider_display_name, key_refs: row.mailhost?.key_refs }, { hosts: row.mailhost?.destination_hosts })} onWhere={() => { whereApprove = false; whereRow = row; }} onRemove={() => confirmingRemove = row} onChanged={() => void refresh()} />
+									{:else}
 									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
 									<p class="capabilities"><span class="capability-label">Reaches</span><span>{capabilityLabels(row)}</span></p>
 									{#if microsoftCause(row, 'admin_approval_required')}<p class="impact">Your organization needs to approve CORSIA before it can connect this account. Send this to your IT admin, then press Sign in.</p>{:else if microsoftCause(row, 'consent_cancelled')}<p class="impact">Sign-in was cancelled. Press Sign in to try again.</p>{:else if microsoftCause(row, 'refresh_token_invalid')}<p class="impact">Microsoft signed you out, so agents can’t use this account until you sign in again.</p>{:else if microsoftCause(row, 'provider_unavailable')}<p class="impact">Microsoft had a problem with sign-in. Try again.</p>{:else if microsoftCause(row, 'registration_misconfigured')}<p class="impact">Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in.</p>{:else if row.state === 'needs_sign_in'}<p class="impact">{row.provider_display_name} signed you out, so agents can’t use this account until you sign in again.</p>{/if}
@@ -327,6 +349,7 @@
 										<span class="danger-text account-action"><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => confirmingRemove = row}>Remove</Button></span>
 									</div>
 									{#if copiedAdminMessageId === row.id}<p class="copied" role="status">Message copied</p>{/if}
+									{/if}
 								</div>
 							{/if}
 						</div>
@@ -360,7 +383,7 @@
 {#if whereRow}<WhereItWorks app={whereRow} approve={whereApprove} onClose={() => whereRow = null} onSaved={(row) => { if (whereApprove && !isAccount(row)) approved(row); else replace(row); whereRow = null; }} />{/if}
 {#if connectAppOpen}<ConnectAppFlow onClose={() => connectAppOpen = false} onConnected={(app) => { rows = [...rows, { ...app, kind: 'hosted_app' }]; }} onSignIn={(app) => { openId = app.id; signInAfterApprove = app.id; }} />{/if}
 {#if confirmingOut}<ConfirmDialog open title={`Sign out of ${accountName(confirmingOut)}?`} description="Agents will no longer be able to use this account, including in conversations already running. You can sign in again any time." confirmLabel="Sign out" onConfirm={() => signOut(confirmingOut!)} onCancel={() => confirmingOut = null} />{/if}
-{#if confirmingRemove}<ConfirmDialog open title={`Remove ${accountName(confirmingRemove)}?`} description={confirmingRemove.provider === 'microsoft' ? 'Agents will no longer be able to use this account. CORSIA deletes its sign-in from this computer. Microsoft may still list CORSIA as allowed; remove it on Microsoft’s page.' : confirmingRemove.provider === 'google' ? 'Agents will no longer be able to use this account, including in conversations already running. This signs CORSIA out and revokes CORSIA’s access to this Google account.' : ''} confirmLabel="Remove" destructive onConfirm={() => remove(confirmingRemove!)} onCancel={() => confirmingRemove = null} />{/if}
+{#if confirmingRemove}<ConfirmDialog open title={`Remove ${accountName(confirmingRemove)}?`} description={confirmingRemove.provider === 'mailhost' ? `Agents lose access now. The app password still works until you delete it in your ${confirmingRemove.provider_display_name} account settings.` : confirmingRemove.provider === 'microsoft' ? 'Agents will no longer be able to use this account. CORSIA deletes its sign-in from this computer. Microsoft may still list CORSIA as allowed; remove it on Microsoft’s page.' : confirmingRemove.provider === 'google' ? 'Agents will no longer be able to use this account, including in conversations already running. This signs CORSIA out and revokes CORSIA’s access to this Google account.' : ''} confirmLabel="Remove" destructive onConfirm={() => remove(confirmingRemove!)} onCancel={() => confirmingRemove = null} />{/if}
 
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }
