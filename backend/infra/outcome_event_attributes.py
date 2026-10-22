@@ -155,7 +155,8 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     "github.pr.retargeted": {**_PR_ATTRS, "base_from": id_attr()},
     "github.pr.merged": {
         **_PR_ATTRS, **_PR_DECLARATION_ATTRS,
-        "head_ref": id_attr(), "merge_sha": id_attr(),
+        "head_ref": id_attr(), "merge_sha": id_attr(), "minutes_since_opened": count_attr(),
+        "reverts": id_attr(),
     },
     "github.pr.introduced_by": {
         "repo": id_attr(), "pr": id_attr(), "introduced_by_pr": id_attr(),
@@ -168,7 +169,7 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     "github.workflow_run.completed": {
         "repo": id_attr(), "run_id": id_attr(), "attempt": count_attr(),
         "workflow_id": id_attr(), "head_sha": id_attr(), "head_branch": id_attr(),
-        "pr": id_attr(), "pr_count": count_attr(),
+        "pr": id_attr(), "pr_count": count_attr(), "queue_minutes": count_attr(),
         "event": enum_attr(*_ACTIONS_TRIGGER_EVENTS),
         "conclusion": enum_attr(*_CONCLUSION_VALUES),
     },
