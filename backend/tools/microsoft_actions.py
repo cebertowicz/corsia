@@ -66,8 +66,8 @@ class MicrosoftMailSearchTool(Tool):
     self_describing_errors = True
     name = "microsoft_mail_search"
     description = (
-        "Search Microsoft mail in the required account_id. Returns message_id, thread_id, from, date, "
-        "optional to, and a screen state; subject is included only for a stored clean screen. No body text is returned."
+        "Search Microsoft mail in the required account_id. Returns message_id, thread_id, from, date "
+        "and a screen state; subject is included only for a stored clean screen. No body text is returned."
     )
     parameters = {"type": "object", "additionalProperties": False, "required": ["account_id", "query"], "properties": {"account_id": ACCOUNT_PARAM, "query": {"type": "string"}, "max": {"type": "integer", "minimum": 1, "maximum": 25}}}
     async def execute(self, **kwargs: Any) -> str:
@@ -85,8 +85,6 @@ class MicrosoftMailSearchTool(Tool):
                     "message_id": item.message_id, "thread_id": thread_key(account, item.thread_id),
                     "from": item.headers.get("from", ""), "date": item.headers.get("date", ""),
                 }
-                if item.headers.get("to"):
-                    entry["to"] = item.headers["to"]
                 if screen is not None and screen.clean:
                     entry["subject"] = item.headers.get("subject", "")
                 entry["screen"] = email_screen.search_screen(screen)
