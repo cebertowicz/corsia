@@ -3,8 +3,8 @@
 	const { id, pending = false, failure = null }: Props = $props();
 </script>
 
-{#if pending}<span class="policy-status" {id} role="status">Saving…</span>{/if}
-{#if failure}<span class="policy-status error" {id} role="status">{failure}</span>{/if}
+{#if pending}<span class="policy-status" {id} role="status">Saving…</span>
+{:else if failure}<span class="policy-status error" {id} role="status">{failure}</span>{/if}
 
 <style>
 	/* Each host places the line in its own grid; this owns only how it reads. */

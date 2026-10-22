@@ -18,6 +18,9 @@ export function createProviderPolicyState(projectId?: string | (() => string | u
 	const providerQueues = new Map<string, Promise<void>>();
 	// A patch function returns null when the change would not alter anything, so nothing is sent.
 	type PolicyPatch = Partial<ProviderEntry> | ((entry: ProviderEntry) => Partial<ProviderEntry> | null);
+	// A failed read names the read, never a route's wording; the host's Reload button is the next step.
+	const loadFailureText = (result: { ok: boolean; reached?: boolean }) =>
+		!result.ok && result.reached === false ? 'Couldn’t load providers. Check your connection.' : 'Couldn’t load providers.';
 
 	async function load() {
 		loading = true;
@@ -26,7 +29,7 @@ export function createProviderPolicyState(projectId?: string | (() => string | u
 		try {
 			const result = await loadProviderPolicy(currentProjectId());
 			if (result.ok && Array.isArray(result.value?.providers)) policy = result.value;
-			else error = result.ok ? 'Could not load providers.' : result.error;
+			else error = loadFailureText(result);
 		} finally {
 			loading = false;
 		}
@@ -51,17 +54,17 @@ export function createProviderPolicyState(projectId?: string | (() => string | u
 			policy = result.value;
 			return result.value;
 		}
-		error = result.ok ? 'Could not load providers.' : result.error;
+		error = loadFailureText(result);
 		return null;
 	}
 
 	/** Name why a save failed by the server's stable `code`; the routes' own wording is developer text, so none is shown. A change elsewhere or a lost response re-reads, so the retry has the current revision. */
 	async function failureLine(result: { reached?: boolean; code?: string }): Promise<string> {
-		if (result.code === 'project_not_found') return 'Couldn’t save this change. This project no longer exists.';
+		if (result.code === 'project_not_found') return 'Couldn’t save this change. This project doesn’t exist; choose another project.';
 		if (result.reached !== false && result.code !== 'policy_changed') return saveFailureText(undefined, true);
 		const latest = await refresh();
 		if (!latest || result.reached === false) return saveFailureText(undefined, false);
-		return saveFailureText('It changed elsewhere and now shows the latest setting.', true);
+		return saveFailureText('This shows the latest setting; try again to change it.', true);
 	}
 
 	function save(entry: ProviderEntry, patch: PolicyPatch, target = `provider:${entry.provider_key}`): Promise<void> {

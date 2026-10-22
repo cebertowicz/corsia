@@ -31,7 +31,7 @@ describe('providerPolicyState failures', () => {
 		const target = 'unit:codex:a';
 
 		await state.save(state.policy!.providers[0], { disabled: ['a'] }, target);
-		expect(state.failureText(target)).toBe('Couldn’t save this change. It changed elsewhere and now shows the latest setting.');
+		expect(state.failureText(target)).toBe('Couldn’t save this change. This shows the latest setting; try again to change it.');
 		expect(state.hasFailure(target)).toBe(true);
 		expect(state.policy!.providers[0].revision).toBe(2);
 		expect(state.loading).toBe(false);
@@ -74,11 +74,11 @@ describe('providerPolicyState failures', () => {
 		const state = createProviderPolicyState();
 		await state.load();
 		await state.save(state.policy!.providers[0], { rollover: false }, 'rollover:codex');
-		expect(state.failureText('rollover:codex')).toBe('Couldn’t save this change. This project no longer exists.');
+		expect(state.failureText('rollover:codex')).toBe('Couldn’t save this change. This project doesn’t exist; choose another project.');
 		expect(vi.mocked(fetch).mock.calls.filter(([, init]) => !init?.method)).toHaveLength(1);
 	});
 
-	it('says to check the connection, not "changed elsewhere", when a write committed but its response was lost', async () => {
+	it('says to check the connection, not "shows the latest setting", when a write committed but its response was lost', async () => {
 		let revision = 1;
 		vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
 			if (init?.method === 'PUT') { revision = 2; throw new TypeError('Failed to fetch'); }
@@ -102,8 +102,15 @@ describe('providerPolicyState failures', () => {
 		await state.load();
 		await state.save(state.policy!.providers[0], { rollover: false }, 'rollover:codex');
 		expect(state.failureText('rollover:codex')).toBe('Couldn’t save this change. Check your connection and try again.');
-		expect(state.error).not.toBe('');
+		expect(state.error).toBe('Couldn’t load providers. Check your connection.');
 		expect(state.policy!.providers[0].revision).toBe(1);
+	});
+
+	it('names a failed read as a load, never with the route’s or a save’s wording', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => new Response('oops', { status: 500 })));
+		const state = createProviderPolicyState();
+		await state.load();
+		expect(state.error).toBe('Couldn’t load providers.');
 	});
 
 	it('names the same causes for the project scope switch', async () => {
@@ -114,10 +121,10 @@ describe('providerPolicyState failures', () => {
 		const state = createProviderPolicyState('p1');
 		await state.load();
 		await state.toggleScope(true);
-		expect(state.failureText('scope')).toBe('Couldn’t save this change. It changed elsewhere and now shows the latest setting.');
+		expect(state.failureText('scope')).toBe('Couldn’t save this change. This shows the latest setting; try again to change it.');
 		failure = { detail: 'project does not exist', code: 'project_not_found', status: 404 };
 		await state.toggleScope(true);
-		expect(state.failureText('scope')).toBe('Couldn’t save this change. This project no longer exists.');
+		expect(state.failureText('scope')).toBe('Couldn’t save this change. This project doesn’t exist; choose another project.');
 		failure = { detail: 'rollover is not available for this provider', code: 'account_conflict', status: 422 };
 		await state.toggleScope(true);
 		expect(state.failureText('scope')).toBe('Couldn’t save this change. Try again.');

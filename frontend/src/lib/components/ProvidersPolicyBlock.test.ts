@@ -205,7 +205,8 @@ describe('ProvidersPolicyBlock', () => {
 		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
 
-		await vi.waitFor(() => expect(host.textContent).toContain('Policy unavailable'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t load providers.'));
+		expect(host.textContent).not.toContain('Policy unavailable');
 		expect(host.textContent).toContain('Reload providers');
 	});
 
@@ -214,7 +215,7 @@ describe('ProvidersPolicyBlock', () => {
 		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
 		flushSync();
 
-		await vi.waitFor(() => expect(host.textContent).toContain('Could not load providers.'));
+		await vi.waitFor(() => expect(host.textContent).toContain('Couldn’t load providers.'));
 		expect(host.textContent).toContain('Reload providers');
 	});
 

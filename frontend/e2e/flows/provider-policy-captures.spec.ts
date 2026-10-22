@@ -462,7 +462,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 
 			changedNext = true;
 			await region.getByRole('button', { name: 'Use Personal Max', exact: true }).click();
-			await expect(region.getByText('Couldn’t save this change. It changed elsewhere and now shows the latest setting.')).toBeVisible();
+			await expect(region.getByText('Couldn’t save this change. This shows the latest setting; try again to change it.')).toBeVisible();
 			changedNext = false;
 
 			failNext = false;
