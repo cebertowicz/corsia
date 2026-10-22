@@ -59,8 +59,7 @@ async def run_claude_control(
     depend on each other. ``in_turn`` sends each request only after the one
     before it was answered, for a request that needs the earlier one to have
     taken effect: nothing promises the CLI answers in send order, and a usage
-    read ahead of ``set_model`` would describe the previously selected model
-    (a 2.1.306 install failed every selector this way).
+    read ahead of ``set_model`` would describe the previously selected model.
     """
     env = clean_claude_env()
     if context is not None:

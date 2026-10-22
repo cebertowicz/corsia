@@ -138,23 +138,6 @@ async def test_the_window_read_is_the_selected_models_not_the_previous_one(monke
 
 
 @pytest.mark.asyncio
-async def test_frames_sent_together_read_the_previous_model(monkeypatch):
-    """What the probe used to do: the stub's usage answer outruns its set_model."""
-    cli = _StubCli()
-    _install(monkeypatch, cli)
-    frames = [
-        {"type": "control_request", "request_id": "corsia-set-model",
-         "request": {"subtype": "set_model", "model": "fable[1m]"}},
-        {"type": "control_request", "request_id": "corsia-context-usage",
-         "request": {"subtype": "get_context_usage"}},
-    ]
-
-    stdout = await claude_discovery.run_claude_control("/bin/claude", frames, operation="context")
-
-    assert b'"rawMaxTokens": 200000' in stdout
-
-
-@pytest.mark.asyncio
 async def test_a_refused_selector_names_the_reason_and_asks_for_no_usage(monkeypatch):
     cli = _StubCli(set_model="reject")
     _install(monkeypatch, cli)

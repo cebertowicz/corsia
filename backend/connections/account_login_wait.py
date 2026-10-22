@@ -19,18 +19,27 @@ async def login_done(
 
     A login that has stored its credentials but not exited is complete: the person did sign in.
     Status must read signed in twice running, so a login in the middle of storing them is not
-    caught, and the login then gets ``LINGER_SECONDS`` to exit by itself.
+    caught, and the login then gets ``LINGER_SECONDS`` to exit by itself. The first read is a
+    baseline: a home that already reads signed in (a sign-out whose logout failed, an earlier
+    login that stored its credentials) cannot show this login finished, so only the login's
+    own exit ends it then. A person who signs in before that first read is treated the same way.
     """
     if poll_status is None:
         await process.wait()
         return
     exited = asyncio.ensure_future(process.wait())
     try:
-        seen = 0
+        seen, baseline_read = 0, False
         while not exited.done():
             await asyncio.wait({exited}, timeout=STATUS_POLL_SECONDS)
             if exited.done():
                 return
+            if not baseline_read:
+                baseline_read = True
+                if await poll_status() is not False:
+                    await exited
+                    return
+                continue
             seen = seen + 1 if await poll_status() is True else 0
             if seen >= 2:
                 with contextlib.suppress(TimeoutError):

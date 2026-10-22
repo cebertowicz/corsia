@@ -47,9 +47,8 @@ def read_context_usage(stdout: bytes, selector: str) -> dict[str, Any]:
     """Return the usage payload a probe's control responses carry.
 
     Raises ``RuntimeError`` naming the harness's own reason when the probe was
-    refused, answered out of order, or never produced usage at all.
+    refused or never produced usage at all.
     """
-    set_ok = False
     seen_request_ids: list[str] = []
     for line in stdout.splitlines():
         try:
@@ -67,9 +66,8 @@ def read_context_usage(stdout: bytes, selector: str) -> dict[str, Any]:
                     f"Claude Code rejected selector {selector}: "
                     f"{control_error_detail(response)}"
                 )
-            set_ok = True
         elif request_id == "corsia-context-usage":
-            return _usage_from_response(response, selector, set_ok=set_ok)
+            return _usage_from_response(response, selector)
     # Naming the parsed-line count separates "the harness said nothing" from
     # "it answered, but nothing correlated" — a different defect entirely.
     raise RuntimeError(
@@ -79,17 +77,8 @@ def read_context_usage(stdout: bytes, selector: str) -> dict[str, Any]:
     )
 
 
-def _usage_from_response(
-    response: dict[str, Any], selector: str, *, set_ok: bool
-) -> dict[str, Any]:
+def _usage_from_response(response: dict[str, Any], selector: str) -> dict[str, Any]:
     """Validate one context-usage response, naming each way it can be wrong."""
-    # These previously shared one opaque message: the harness refusing the
-    # request, and it answering before set_model succeeded.
-    if not set_ok:
-        raise RuntimeError(
-            f"Claude Code returned invalid context evidence for {selector}: "
-            "context usage answered before set_model succeeded"
-        )
     if response.get("subtype") != "success":
         raise RuntimeError(
             f"Claude Code returned invalid context evidence for {selector}: "

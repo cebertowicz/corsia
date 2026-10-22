@@ -229,6 +229,13 @@ def _calls(log: Path) -> list[tuple[str, str]]:
     return [(home, args) for home, _, args in pairs]
 
 
+async def _baseline_read(log: Path) -> None:
+    """Wait until a held Claude Code login's status has been read once, before the person signs in."""
+    async with asyncio.timeout(30):
+        while "auth status" not in [args for _, args in _calls(log)]:
+            await asyncio.sleep(0.01)
+
+
 async def _started(log: Path, count: int = 1) -> None:
     """Wait until the fake vendor has recorded ``count`` commands; a spawn returns before the script runs."""
     async with asyncio.timeout(30):
@@ -653,12 +660,16 @@ async def test_a_claude_login_that_stored_its_credentials_but_never_exits_comple
     from connections import account_controls
 
     account = scripted_vendor_clis["claude-code"]
+    hold = tmp_path / "hold"
+    monkeypatch.setenv("LOGIN_HOLD", str(hold))
     monkeypatch.setenv("LOGIN_LINGER", str(tmp_path / "never"))
     monkeypatch.setattr(account_login_wait, "STATUS_POLL_SECONDS", 0.05)
     monkeypatch.setattr(account_login_wait, "LINGER_SECONDS", 0.2)
     await account_controls.start_signin(account["id"])
     await _started(scripted_vendor_clis["log"])
     process = account_controls._SIGNINS[account["id"]].process
+    await _baseline_read(scripted_vendor_clis["log"])
+    hold.touch()  # the person signs in after the baseline read
     finished = await asyncio.wait_for(_finished(account["id"]), 10)
     assert finished["status"] == "completed" and finished["cause"] is None
     assert _account(account["id"])["state"] == "signed_in"
@@ -671,19 +682,42 @@ async def test_a_claude_login_that_exits_inside_the_linger_window_is_not_killed(
     from connections import account_controls
 
     account = scripted_vendor_clis["claude-code"]
-    release = tmp_path / "release"
+    hold, release = tmp_path / "hold", tmp_path / "release"
+    monkeypatch.setenv("LOGIN_HOLD", str(hold))
     monkeypatch.setenv("LOGIN_LINGER", str(release))
     monkeypatch.setattr(account_login_wait, "STATUS_POLL_SECONDS", 0.05)
     monkeypatch.setattr(account_login_wait, "LINGER_SECONDS", 10.0)
     await account_controls.start_signin(account["id"])
     await _started(scripted_vendor_clis["log"])
     process = account_controls._SIGNINS[account["id"]].process
-    while "auth status" not in [args for _, args in _calls(scripted_vendor_clis["log"])]:
+    await _baseline_read(scripted_vendor_clis["log"])
+    hold.touch()
+    while [args for _, args in _calls(scripted_vendor_clis["log"])].count("auth status") < 3:
         await asyncio.sleep(0.01)
     release.touch()
     finished = await asyncio.wait_for(_finished(account["id"]), 10)
     assert finished["status"] == "completed"
     assert process.returncode == 0
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+async def test_credentials_already_in_the_home_never_end_a_new_login_early(scripted_vendor_clis, monkeypatch, tmp_path):
+    """A signed-out account can still hold credentials (a failed logout): only this login's own exit ends it."""
+    from connections import account_controls
+
+    account = scripted_vendor_clis["claude-code"]
+    (Path(account["source_home"]) / "signed").touch()
+    monkeypatch.setenv("LOGIN_HOLD", str(tmp_path / "never"))
+    monkeypatch.setattr(account_controls, "_SIGNIN_WAIT_SECONDS", 0.6)
+    monkeypatch.setattr(account_login_wait, "STATUS_POLL_SECONDS", 0.05)
+    await account_controls.start_signin(account["id"])
+    await _started(scripted_vendor_clis["log"])
+    ended = await _finished(account["id"])
+    assert ended["status"] == "failed" and ended["cause"] == "signin_timed_out"
+    assert _account(account["id"])["state"] == "signed_out"
+    # The one status read is the baseline; the old credentials are never polled again.
+    assert [args for _, args in _calls(scripted_vendor_clis["log"])].count("auth status") == 1
 
 
 @pytest.mark.real_harness_cli
