@@ -44,7 +44,7 @@ def _classify(raw: dict[str, Any]) -> str:
     return raw.get("event_type", "")
 
 
-def _extract_facts(raw: dict[str, Any]) -> dict[str, Any]:
+def _extract_facts(raw: dict[str, Any], _resolved: Any = None) -> dict[str, Any]:
     facts = {key: raw[key] for key in _FACTS if raw.get(key) is not None}
     name = facts.get("name")
     if name is not None:
