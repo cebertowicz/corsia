@@ -52,6 +52,7 @@
       "../bundle/bin/omlx": "bin/omlx",
       "../bundle/bin/git": "bin/git",
       "../bundle/bin/agent-browser": "bin/agent-browser",
+      "../bundle/bin/safehouse": "bin/safehouse",
       "../bundle/libexec": "libexec",
       "../bundle/share": "share",
       "../bundle/licenses": "licenses",

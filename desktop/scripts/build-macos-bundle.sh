@@ -26,6 +26,13 @@ readonly GIT_SOURCE="$BUILD_ROOT/git-${GIT_VERSION}"
 readonly AGENT_BROWSER_VERSION="0.31.2"
 readonly AGENT_BROWSER_URL="https://github.com/vercel-labs/agent-browser/releases/download/v${AGENT_BROWSER_VERSION}/agent-browser-darwin-arm64"
 readonly AGENT_BROWSER_SHA256="98042bcfee9afdf6119d6817a04ef5897f519f290491664911779b084ae1b82a"
+# The sandbox every agent shell runs inside: one self-contained bash script. Its floor is
+# _MIN_SAFEHOUSE_VERSION in backend/tools/shell_guard.py; without it every shell command is refused.
+readonly SAFEHOUSE_VERSION="0.11.1"
+readonly SAFEHOUSE_URL="https://github.com/eugene1g/agent-safehouse/releases/download/v${SAFEHOUSE_VERSION}/safehouse.sh"
+readonly SAFEHOUSE_SHA256="dd96f92d77aebf142e0ee33f38754b6dc6c6f7a1245129b715f7deea488e3d78"
+readonly SAFEHOUSE_LICENSE_URL="https://raw.githubusercontent.com/eugene1g/agent-safehouse/v${SAFEHOUSE_VERSION}/LICENSE"
+readonly SAFEHOUSE_LICENSE_SHA256="cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
 
 skip_dmg=false
 for argument in "$@"; do
@@ -47,6 +54,17 @@ fetch_agent_browser() {
   install -m 0755 "$download" "$BUNDLE_ROOT/bin/agent-browser"
   [ "$("$BUNDLE_ROOT/bin/agent-browser" --version)" = "agent-browser $AGENT_BROWSER_VERSION" ] \
     || fail "bundled agent-browser does not report version $AGENT_BROWSER_VERSION"
+}
+fetch_safehouse() {
+  local download="$BUILD_ROOT/downloads/safehouse.sh" license="$BUILD_ROOT/downloads/safehouse-LICENSE"
+  fetch_verified "$SAFEHOUSE_URL" "$download" "$SAFEHOUSE_SHA256"
+  fetch_verified "$SAFEHOUSE_LICENSE_URL" "$license" "$SAFEHOUSE_LICENSE_SHA256"
+  install -m 0755 "$download" "$BUNDLE_ROOT/bin/safehouse"
+  mkdir -p "$BUNDLE_ROOT/licenses/safehouse"
+  install -m 0644 "$license" "$BUNDLE_ROOT/licenses/safehouse/LICENSE"
+  printf 'agent-safehouse %s\n%s\nsha256 %s\n' "$SAFEHOUSE_VERSION" "$SAFEHOUSE_URL" "$SAFEHOUSE_SHA256" > "$BUNDLE_ROOT/licenses/safehouse/SOURCE"
+  [ "$("$BUNDLE_ROOT/bin/safehouse" --version | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" = "$SAFEHOUSE_VERSION" ] \
+    || fail "bundled safehouse does not report version $SAFEHOUSE_VERSION"
 }
 build_git_runtime() {
   local archive="$BUILD_ROOT/downloads/$GIT_ARCHIVE"
@@ -150,6 +168,7 @@ PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 
 build_git_runtime
 fetch_agent_browser
+fetch_safehouse
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
 (
   cd "$ROOT/frontend"

@@ -118,3 +118,81 @@ async def test_bash_fetches_before_it_spawns_and_spawns_with_the_tool_path(home,
     await tool.execute("gh --version", **dict(context))
     assert spawn.await_args.kwargs["env"]["PATH"].split(":")[:3] == [
         _runtime_dir("node", home), _runtime_dir("uv", home), _runtime_dir("gh", home)]
+
+
+def _protected_argv(tmp_path, monkeypatch, *, leased: bool = False) -> list[str]:
+    from tools import shell_guard
+
+    safehouse = tmp_path / "safehouse"
+    safehouse.write_text("")
+    monkeypatch.setattr(shell_guard.shutil, "which", lambda _name: str(safehouse))
+    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [tmp_path / "rw"])
+    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
+    monkeypatch.setattr(shell_guard, "agent_account_ro_dirs", lambda _view: [])
+    return shell_guard.safehouse_argv("true", tmp_path, tmp_path / "p.sb", leased=leased)
+
+
+def test_a_protected_shell_reads_the_python_and_runtime_folders_it_has_on_path(home, monkeypatch):
+    bundle = home / "CORSIA.app"
+    python = bundle / "Contents" / "Resources" / "python" / "bin" / "python3"
+    python.parent.mkdir(parents=True)
+    python.write_text("")
+    monkeypatch.setattr(agent_shell_tools, "app_bundle_root", lambda: bundle)
+    runtimes = managed_runtime.runtime_cache_root()
+    runtimes.mkdir(parents=True)
+    argv = _protected_argv(home, monkeypatch)
+    read_only = next(part for part in argv if part.startswith("--add-dirs-ro=")).split("=", 1)[1].split(":")
+    assert read_only == [str(python.parent.parent.resolve()), str(runtimes.resolve())]
+    assert not any(part.startswith("--add-dirs=") and str(runtimes.resolve()) in part for part in argv)  # never writable
+
+
+def test_a_protected_shell_grants_neither_folder_when_it_is_absent(home, monkeypatch):
+    monkeypatch.setattr(agent_shell_tools, "app_bundle_root", lambda: None)
+    assert not any(part.startswith("--add-dirs-ro=") for part in _protected_argv(home, monkeypatch))
+
+
+def _repo_file(*parts: str) -> Path:
+    return Path(__file__).resolve().parents[2].joinpath(*parts)
+
+
+def test_the_build_ships_the_pinned_safehouse_the_shell_guard_accepts():
+    import json
+    import re
+    from tools import shell_guard
+
+    script = _repo_file("desktop", "scripts", "build-macos-bundle.sh").read_text()
+    version = re.search(r'^readonly SAFEHOUSE_VERSION="([^"]+)"', script, re.MULTILINE).group(1)
+    assert tuple(map(int, version.split("."))) >= shell_guard._MIN_SAFEHOUSE_VERSION
+    for name in ("SAFEHOUSE_SHA256", "SAFEHOUSE_LICENSE_SHA256"):
+        assert re.search(rf'^readonly {name}="[0-9a-f]{{64}}"$', script, re.MULTILINE)
+    assert '"$SAFEHOUSE_URL" "$download" "$SAFEHOUSE_SHA256"' in script and "\nfetch_safehouse\n" in script
+    assert 'install -m 0755 "$download" "$BUNDLE_ROOT/bin/safehouse"' in script
+    assert '"$BUNDLE_ROOT/licenses/safehouse/LICENSE"' in script
+    resources = json.loads(_repo_file("desktop", "src-tauri", "tauri.conf.json").read_text())["bundle"]["resources"]
+    assert resources["../bundle/bin/safehouse"] == "bin/safehouse"
+    smoke = _repo_file("desktop", "scripts", "smoke-macos-bundle.sh").read_text()
+    assert '"$RESOURCES/bin/safehouse" --version' in smoke and "-m pip --version" in smoke and "--add-dirs-ro=" in smoke
+
+
+def test_the_build_refuses_a_download_whose_checksum_is_wrong(tmp_path):
+    import hashlib
+    import re
+    import subprocess
+
+    script = _repo_file("desktop", "scripts", "build-macos-bundle.sh").read_text()
+    function = re.search(r"^fetch_verified\(\) \{.*?^\}$", script, re.MULTILINE | re.DOTALL).group(0)
+    fail = re.search(r"^fail\(\) .*$", script, re.MULTILINE).group(0)
+    source = tmp_path / "safehouse.sh"
+    source.write_text("#!/usr/bin/env bash\n")
+    good = hashlib.sha256(source.read_bytes()).hexdigest()
+
+    def run(digest: str) -> subprocess.CompletedProcess:
+        url = source.as_uri()
+        return subprocess.run(
+            ["/bin/bash", "-c", f'set -e\n{fail}\n{function}\nfetch_verified "{url}" "{tmp_path}/out" {digest}'],
+            capture_output=True, text=True,
+        )
+
+    assert run(good).returncode == 0
+    wrong = run("0" * 64)
+    assert wrong.returncode == 1 and "SHA-256 mismatch" in wrong.stderr

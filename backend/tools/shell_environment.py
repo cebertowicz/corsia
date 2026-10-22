@@ -52,6 +52,11 @@ def agent_account_ro_dirs(view: AgentAccountView | None) -> list[Path]:
     return github_agent.sandbox_ro_dirs(github_agent.view() if view is None else view)
 
 
+def agent_tool_ro_dirs() -> list[Path]:
+    """The folders CORSIA's Python and runtimes live in, granted read-only so PATH can reach them."""
+    return agent_shell_tools.readable_dirs()
+
+
 def agent_account_deny_rule(render: Callable[[Path], str], view: AgentAccountView | None) -> str | None:
     """The profile rule hiding the person's own ``gh`` home, or None when it is not in use."""
     hidden = github_agent.default_home_deny(github_agent.view() if view is None else view)

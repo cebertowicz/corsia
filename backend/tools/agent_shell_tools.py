@@ -14,7 +14,7 @@ import tempfile
 
 from infra.platform_paths import app_bundle_root
 from tools.managed_runtime import (
-    ManagedRuntimeError, ensure_runtime, runtime_bin_dir, runtime_is_installed,
+    ManagedRuntimeError, ensure_runtime, runtime_bin_dir, runtime_cache_root, runtime_is_installed,
 )
 
 # The runtime each command comes from; node's folder also holds npm and npx, uv's holds uvx.
@@ -30,6 +30,13 @@ def _bundled_python_dir() -> Path | None:
     bundle = app_bundle_root()
     directory = None if bundle is None else bundle / "Contents" / "Resources" / "python" / "bin"
     return directory if directory is not None and (directory / "python3").is_file() else None
+
+
+def readable_dirs() -> list[Path]:
+    """The folders the PATH entries live in, read-only inside the sandbox: the app's Python and the runtime cache."""
+    python_dir = _bundled_python_dir()
+    candidates = [None if python_dir is None else python_dir.parent, runtime_cache_root()]
+    return [directory for directory in candidates if directory is not None and directory.is_dir()]
 
 
 def agent_cache_dir() -> Path:
