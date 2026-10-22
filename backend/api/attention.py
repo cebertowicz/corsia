@@ -85,9 +85,11 @@ def _review_bar(artifact_id: str) -> dict | None:
         row = AR.identity_row_for(artifact_id, db=db)
         if row is None or row["type"] not in public.ASKABLE_TYPES:
             return None
+        person_step = public.person_step_instructions(str(row["id"]), db=db)
         return {
             "artifact_id": artifact_id, "artifact_type": row["type"],
             **review_bar.round_state(db, str(row["id"])),
+            **({"person_step": person_step} if person_step is not None else {}),
         }
     finally:
         db.close()

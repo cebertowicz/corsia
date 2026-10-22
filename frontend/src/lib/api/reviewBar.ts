@@ -6,6 +6,16 @@ export type ReviewVerdict = 'approved' | 'approved_with_changes' | 'changes_requ
 
 export interface FeedbackCounts { comments: number; suggestions: number; edits: number }
 
+/** The person step whose instructions this document is: the bar offers its Done / Won't do. */
+export interface PersonStepInstruction {
+	node_id: string;
+	node_title: string;
+	node_revision: number;
+	plan_id: string;
+	owner_thread_id: string;
+	owner_name: string;
+}
+
 /** The review bar's read of one artifact: the newest raised ask and what the user did since it was raised. */
 export interface ReviewBarRead {
 	ask_raised: boolean;
@@ -19,6 +29,7 @@ export interface ReviewBarRead {
 	other_request_count: number;
 	round_feedback_count: number;
 	round_feedback_counts: FeedbackCounts;
+	person_step?: PersonStepInstruction;
 }
 
 export interface ReviewAnswer { verdict: ReviewVerdict; note: string | null; feedback_counts: FeedbackCounts }

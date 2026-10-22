@@ -26,6 +26,9 @@ CORRECTION = {"label": "correction", "truncated": False, "original_tokens": 9, "
 def seen(monkeypatch):
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr("jobs.corrections_realtime.notify", lambda kind, source: calls.append((kind, source)))
+    # Plans hears the same answer on a pool thread; with ``get_db`` patched to the one shared
+    # fixture connection it would race the route's own pool job on it. Its tests are Plans'.
+    monkeypatch.setattr("plans.public.person_words_arrived", lambda kind, source: None)
     return calls
 
 

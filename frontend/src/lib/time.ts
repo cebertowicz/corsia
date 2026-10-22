@@ -54,13 +54,14 @@ export function bucketOf(iso: string, now: Date = new Date()): TimeBucket {
  * a far date keeps its clock too ("Oct 9 at 9:00 AM PDT"), because a zone is
  * asked for only where the exact moment matters. `clock` keeps the clock on a
  * far date with no zone; `plain` joins day and clock with a space ("Monday
- * 9:00 AM") for a line that supplies its own "at". Empty for an invalid date.
+ * 9:00 AM") for a line that supplies its own "at". `compact` drops "today" and leaves the clock
+ * alone. Empty for an invalid date.
  */
 export function formatMoment(
 	at: Date,
 	now: Date = new Date(),
-	{ zone = false, clock = false, plain = false, locales = [] }: {
-		zone?: boolean; clock?: boolean; plain?: boolean; locales?: Intl.LocalesArgument;
+	{ zone = false, clock = false, plain = false, compact = false, locales = [] }: {
+		zone?: boolean; clock?: boolean; plain?: boolean; compact?: boolean; locales?: Intl.LocalesArgument;
 	} = {},
 ): string {
 	if (Number.isNaN(at.getTime())) return '';
@@ -70,6 +71,7 @@ export function formatMoment(
 	const time = at.toLocaleTimeString(locales, {
 		hour: 'numeric', minute: '2-digit', ...(zone ? { timeZoneName: 'short' as const } : {}),
 	});
+	if (compact && days === 0) return time;
 	if (days === 0) return `today${join}${time}`;
 	if (days === -1) return `yesterday${join}${time}`;
 	if (days === 1) return `tomorrow${join}${time}`;

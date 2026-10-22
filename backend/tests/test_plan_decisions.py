@@ -16,7 +16,9 @@ import threading
 import pytest
 
 from infra.schema import SCHEMA_SQL
+import plans.current as current
 import plans.decisions as decisions
+import plans.public as public
 import plans.service as service
 from plans.boundary import PlanActor
 
@@ -136,6 +138,43 @@ def _draft(db, plan, source, actor=None, **overrides):
         actor=actor or _thread_actor("worker"), provenance="tool.plans.decision",
         db=db, **_draft_kwargs(**overrides),
     ).result["decision"]
+
+
+def test_decision_review_task_references_its_source_intent(db):
+    """Server-created decision review work carries its source task by reference."""
+    plan, source = _delegated(db)
+
+    decision = _draft(db, plan, source)
+    detail = current.read_current_status(
+        actor=_thread_actor(), node_id=decision["node_id"], db=db,
+    )
+
+    assert service.get_node(decision["node_id"], db=db).intent_node_id == source.id
+    assert detail["intent"] is None
+    assert detail["intent_words"] == []
+    assert detail["canonical_intent"]["node_id"] == source.id
+    assert public.intent_of(decision["node_id"], db=db) == {
+        "node_id": source.id, "title": source.title,
+        "requirements_revision": 1, "intent": None,
+        "acceptance_criteria": "Implement decisions DOD", "intent_words": [],
+    }
+
+
+def test_decision_review_task_resolves_an_inherited_source_to_its_canonical_intent(db):
+    plan, _unused_source = _delegated(db)
+    canonical = service.add_node(
+        plan.id, kind="task", title="Canonical task", intent="Keep the scope narrow",
+        acceptance_criteria="The scoped task is complete", db=db,
+    )
+    source = service.add_node(
+        plan.id, kind="task", title="Inherited source", intent_node_id=canonical.id,
+        acceptance_criteria="The inherited task is complete", db=db,
+    )
+
+    decision = _draft(db, plan, source)
+
+    assert service.get_node(decision["node_id"], db=db).intent_node_id == canonical.id
+    assert public.intent_of(decision["node_id"], db=db)["node_id"] == canonical.id
 
 
 def _reviewed(db, plan, source, **overrides):

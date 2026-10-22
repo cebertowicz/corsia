@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from infra.schema import SCHEMA_SQL
 from plans import boundary, service
 from plans.boundary import PlanActor
@@ -30,6 +32,11 @@ def db():
             "INSERT INTO threads (id,user_id,spawned_by,created_at,updated_at) VALUES (?,?,?,?,?)",
             (thread_id, user_id, spawned_by, "t", "t"),
         )
+    _init_messages_fts(connection)
+    accept_thread_input(
+        "parent", role="user", content="Create the receipt-tested task.", intent="apply_now",
+        message_id="receipt-authority", db=connection,
+    )
     yield connection
     connection.close()
 
@@ -58,6 +65,8 @@ def _add_params(title="Task"):
         "title": title,
         "acceptance_criteria": f"{title} DOD",
         "size": "S",
+        "intent": "Create the receipt-tested task.",
+        "intent_words": [{"quote": "Create the receipt-tested task.", "role": "authority"}],
     }
 
 

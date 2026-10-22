@@ -63,13 +63,15 @@ def _pane_reason(db, node_id: str) -> str | None:
 
 def test_open_makes_one_system_user_step_and_the_selected_task_waits_on_it(db):
     plan = owner_plan(db)
-    mine = task(db, plan.id, "Read the page")
+    mine = task(db, plan.id, "Read the page", intent="Finish the browser sign-in")
     select(db, plan.id, mine.id)
 
     step = _open(db)
 
     node = row(db, step)
     assert (node["assignee"], node["title"], node["description"]) == ("user", TITLE, DESCRIPTION)
+    assert node["intent_node_id"] == mine.id
+    assert node["intent"] is None
     created = db.execute(
         "SELECT actor_id, provenance FROM plan_node_events WHERE node_id=? AND event='node_created'",
         (step,),
@@ -93,11 +95,26 @@ def test_the_same_key_returns_the_same_step_and_a_new_key_a_new_one(db):
     assert _open(db, "visit-2") != first
 
 
-def test_no_selected_task_means_no_dependency(db):
+def test_no_selected_task_means_no_dependency_or_intent_reference(db):
     owner_plan(db)
     step = _open(db)
     assert row(db, step)["state"] == "pending"
+    assert row(db, step)["intent_node_id"] is None
     assert db.execute("SELECT COUNT(*) FROM plan_node_dependencies").fetchone()[0] == 0
+
+
+def test_multiple_selected_tasks_do_not_supply_a_user_step_intent(db, monkeypatch):
+    plan = owner_plan(db)
+    first = task(db, plan.id, "First selected task")
+    second = task(db, plan.id, "Second selected task")
+    monkeypatch.setattr(
+        "plans.admission_attempts.current_for_executor",
+        lambda *_args: [{"node_id": first.id}, {"node_id": second.id}],
+    )
+
+    step = _open(db)
+
+    assert row(db, step)["intent_node_id"] is None
 
 
 def test_settle_marks_it_done_by_the_system_and_wakes_the_waiting_task(db):

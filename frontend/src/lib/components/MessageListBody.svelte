@@ -81,6 +81,7 @@
 			{onOpenLightbox}
 			{threadId}
 			renderedStreaming={false}
+			showWait={false}
 			{turnSummaries}
 			historyComplete
 		/>

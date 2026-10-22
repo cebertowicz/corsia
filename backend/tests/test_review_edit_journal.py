@@ -191,7 +191,7 @@ def test_a_user_save_through_a_thread_is_credited_to_the_user(ownership_scope):
 
 def test_plan_titles_and_notes_name_a_document_by_one_rule(ownership_scope):
     from doceditor.note_names import document_name
-    from plans.feedback_nodes import _artifact_name
+    from plans.feedback_items import artifact_name as _artifact_name
 
     scope = ownership_scope
     db = scope["db"]

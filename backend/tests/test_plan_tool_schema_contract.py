@@ -241,8 +241,8 @@ _CLOSING_FIELDS = {
         "next_node_id",
     },
     "accept_with_follow_up": {
-        "node_id", "title", "acceptance_criteria", "size", "verification_result",
-        "evidence", "expected_revision", "next_node_id",
+        "node_id", "title", "acceptance_criteria", "size", "intent", "intent_words",
+        "verification_result", "evidence", "expected_revision", "next_node_id",
     },
     # Bulk archive is the one closing body with no single node to describe, so
     # node_ids rides alongside and next_node_id is refused with it.
@@ -351,6 +351,17 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
     )
 
 
+def test_intent_words_publish_the_minimal_authority_quote_shape():
+    from tools.plans import PlanUpdateTool
+
+    words = PlanUpdateTool().parameters["properties"]["params"]["properties"]["intent_words"]
+
+    assert words["items"]["required"] == ["quote"]
+    assert words["items"]["properties"]["quote"] == {"type": "string"}
+    assert words["items"]["properties"]["author"]["enum"] == ["person", "agent"]
+    assert words["items"]["properties"]["role"]["enum"] == ["origin", "bears_on", "authority"]
+
+
 #: Published definition bytes (#1939). At bd4c5d3c the two tools measured
 #: 18,569 bytes together, half of it conditional rules no model was shown. Raise
 #: a budget only with the reason in the same change. plan_update 8,100 -> 8,300
@@ -374,7 +385,11 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # so, asks for evidence in plain words because the person reads it, and sends approvals to a decision.
 # plan_decision 3,000 -> 3,100: `rationale` publishes its purpose and 240-character limit at the field,
 # because the recommended option now shows it inline and an agent never told writes a second tradeoff.
-_PUBLISHED_BYTES = {"plan_update": 9_076, "plan_decision": 3_100}
+# plan_update 9,076 -> 9,152 (+76, AL1): compact `intent` and `intent_words`
+# fields and add/insert wording; bounds and item shape remain enforced server-side.
+# 9,152 -> 9,372 (+220, AL1 AX): publish the minimal quote item shape and add/insert
+# wording so an agent can supply a prior person's authority without a blind retry.
+_PUBLISHED_BYTES = {"plan_update": 9_481, "plan_decision": 3_100}
 
 
 def test_the_operation_text_names_each_neighboring_settlement_choice():
