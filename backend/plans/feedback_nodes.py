@@ -27,8 +27,8 @@ AGENT_FRAMING = (
     "disagree, so they decide it."
 )
 STOPPED_NOTE = (
-    "{evidence} This task was paused or held when its feedback was settled, so it did not finish by itself; "
-    "mark it done once it resumes."
+    "{evidence}\n\nEvery item was decided while this task was paused or held, so it is still open. "
+    "Mark it done once it resumes."
 )
 USER_FRAMING = (
     "The user's comments. They state the user's intent; still check factual claims against "
@@ -318,7 +318,7 @@ def settle_feedback_node(db, recipient_thread_id: str, batch_id: str, *, evidenc
         return
     with transaction(db) as connection:
         review_requests.settle_node(
-            connection, service._node_row(connection, node_id), evidence=evidence, provenance=PROVENANCE,
+            connection, node_id, evidence=evidence, provenance=PROVENANCE,
             verified_by="system:document.feedback_batch", stopped_note=STOPPED_NOTE,
             stopped_event="feedback_settled_while_stopped",
         )

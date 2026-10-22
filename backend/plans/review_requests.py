@@ -26,20 +26,21 @@ def append_review_note(db, node_id: str, request) -> None:
 def settle_review_node(db, node_id: str, *, evidence: str, provenance: str) -> None:
     """Record deterministic delivery evidence and legally accept once, atomically."""
     with transaction(db) as connection:
-        node = service._node_row(connection, _current(connection, node_id))
-        settle_node(connection, node, evidence=evidence, provenance=provenance,
+        settle_node(connection, node_id, evidence=evidence, provenance=provenance,
                     verified_by="system:document.review_request",
                     stopped_note=STOPPED_DELIVERY_NOTE, stopped_event="review_delivered_while_stopped")
 
 
-def settle_node(connection, node, *, evidence: str, provenance: str, verified_by: str,
+def settle_node(connection, node_id: str, *, evidence: str, provenance: str, verified_by: str,
                 stopped_note: str, stopped_event: str) -> None:
     """Record evidence on a delivery's task and accept it once, inside the caller's transaction.
 
-    A finished task stays as it is. A stopped one gets ``stopped_note`` (formatted with the
-    evidence) and a ``stopped_event`` instead, and never raises.
+    It settles the task's latest revision. A finished task stays as it is. A stopped one
+    gets ``stopped_note`` (formatted with the evidence) and a ``stopped_event`` instead,
+    and never raises.
     """
-    node_id = node["id"]
+    node_id = _current(connection, node_id)
+    node = service._node_row(connection, node_id)
     if node["state"] in service._TERMINAL_STATES:
         return
     if review_evidence.stop_reason(connection, node) is not None:

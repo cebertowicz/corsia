@@ -9,8 +9,9 @@ import pytest
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
 from doceditor import comment_actions, comments, feedback_batches
 from infra.database import get_db, write_transaction
-from plans import admission, admission_attempts, holds, lifecycle, service
+from plans import admission, admission_attempts, holds, lifecycle, rejection, service
 from plans.feedback_nodes import settle_feedback_node
+from tests.plan_review_helpers import submit_review_evidence
 
 
 def _delivered(db, *, suggestions: int = 1, comments_: int = 0, edit: bool = False):
@@ -162,9 +163,28 @@ def test_a_stopped_task_keeps_its_state_gets_a_note_and_the_resolve_still_commit
         description, events = _description_and_events(db, node_id)
         assert _state(db, node_id) == state != "accepted"
         assert f"Comment {plain[0]['id']}: resolved" in description
-        assert "did not finish by itself" in description and before.description in description
+        assert "Mark it done once it resumes." in description and before.description in description
+        assert f"resolved\n\nEvery item was decided while this task was paused or held" in description
         assert events.count("feedback_settled_while_stopped") == 1
         assert db.execute("SELECT resolved FROM doc_comments WHERE id=?", (plain[0]["id"],)).fetchone()[0] == 1
+    finally:
+        db.close()
+
+
+def test_a_task_sent_back_settles_through_its_live_revision(isolated_db):
+    db = get_db()
+    try:
+        _, suggested, plain, node_id, _ = _delivered(db, suggestions=1, comments_=1)
+        submit_review_evidence(node_id, db=db, actor_id="owner")
+        _, revision, _ = rejection.reject_submission(node_id, feedback="Cover the rest.", actor_id="parent", db=db)
+        db.commit()
+        assert _state(db, revision.id) == "pending"
+
+        _decide(db, suggested[0])
+        comments.update(plain[0]["id"], {"resolved": True}, db=db)
+
+        assert _state(db, revision.id) == "accepted"
+        assert _state(db, node_id) == "closed"
     finally:
         db.close()
 
