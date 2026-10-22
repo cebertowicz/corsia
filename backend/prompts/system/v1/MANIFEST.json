@@ -364,10 +364,10 @@
       "sha256": "103e85abfbddaecc29579119a38ab57d2b4469953ce42cd430982b72bc90963b"
     },
     {
-      "bytes": 4075,
+      "bytes": 4078,
       "kind": "skill",
       "path": "skills/workflow-design/SKILL.md",
-      "sha256": "f5d6f520d3e6fbe90e48cd8ded57120619af7d90b3ef8627215a02d641cb2b65"
+      "sha256": "acd367d62378e0130a3671fd9dd8c5b48894a1e2bf7416aff1bc90ddef1f808c"
     }
   ],
   "version": "v1"
