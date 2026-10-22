@@ -15,7 +15,7 @@ from doceditor.note_names import actor_name, document_name
 from registry import models
 
 
-def journal_reviewed_edit(
+def note_content_edit(
     db: sqlite3.Connection,
     artifact: dict | sqlite3.Row,
     *,
@@ -23,10 +23,14 @@ def journal_reviewed_edit(
     new_sha256: str | None,
     actor_thread_id: str | None,
 ) -> bool:
-    """Append ``content_edited`` when the bytes changed while a review of the document is open.
+    """Record what a content edit means to everyone waiting on the document's text.
 
-    Active forks and Plans' open escalated nodes use the same definition as
-    the reviewer watch, so no row is written that no reader would ever admit.
+    Tells each agent whose pending suggestion the edit stranded, and appends
+    ``content_edited`` when the bytes changed while a review of the document is
+    open. Active forks and Plans' open escalated nodes use the same definition
+    as the reviewer watch, so no row is written that no reader would ever admit.
+
+    Returns True when a review journal row was written.
     """
     if not new_sha256 or new_sha256 == previous_sha256:
         return False

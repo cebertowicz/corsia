@@ -34,7 +34,7 @@ def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict
         if comment["parent_id"] or comment["review"] or not comment["anchor_text"]:
             continue
         quote = _anchored_quote(comment)
-        lost = not comment.get("decision")
+        undecided = not comment.get("decision")
         resolved = (ranges or {}).get(comment["id"])
         if resolved is None:
             resolved = reanchor(
@@ -42,15 +42,15 @@ def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict
                 prefix=comment.get("anchor_prefix"), suffix=comment.get("anchor_suffix"),
             )
         if resolved is None:
-            comment["orphaned"] = lost
+            comment["orphaned"] = undecided
             continue
         from_off, to_off = resolved
         context = anchor_context(text, from_off, to_off, quote)
         if context is None:
-            comment["orphaned"] = lost
+            comment["orphaned"] = undecided
             # Preserve mapped collapsed ranges in the live response. Reload can
             # deliberately omit the range hint and resolve restored text anew.
-            if lost and comment["id"] in (ranges or {}):
+            if undecided and comment["id"] in (ranges or {}):
                 comment["from_off"], comment["to_off"] = resolved
             continue
         prefix, suffix = context

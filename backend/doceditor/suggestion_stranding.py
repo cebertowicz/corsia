@@ -9,6 +9,7 @@ be applied again, so a later stranding is told again.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from doceditor import comments as store
@@ -18,6 +19,9 @@ from doceditor.document_scope import UI_THREAD
 from doceditor.feedback_suggestion_decisions import stranded_note
 from doceditor.note_names import actor_name
 from doceditor.quote_anchor import reanchor
+from infra.database import write_transaction
+
+log = logging.getLogger(__name__)
 
 _PENDING_AGENT_SUGGESTION = (
     "SELECT 1 FROM doc_comments WHERE artifact_id=? AND parent_id IS NULL AND review=0 AND resolved=0 "
@@ -41,31 +45,30 @@ def note_stranded_suggestions(db, artifact, *, actor_thread_id: str | None) -> N
     artifact_id = str(artifact["id"])
     if db.execute(_PENDING_AGENT_SUGGESTION, (artifact_id,)).fetchone() is None:
         return
-    threads, anchored = anchored_threads(artifact_id, artifact["path"], db, persist=False)
-    if not anchored:
+    try:
+        text = read_doc_text(artifact["path"])
+    except (OSError, ValueError) as exc:  # a save is never failed by a note about it
+        log.info("stranded suggestion check skipped for %s: %s", artifact_id, exc)
         return
+    threads, _ = anchored_threads(artifact_id, artifact["path"], db, text=text, persist=False)
     pending = [
         row for row in threads
         if row.get("replacement") is not None and not row["resolved"]
         and not row["review"] and row.get("author_thread_id")
     ]
-    text = None
     editor = None if actor_thread_id in (None, UI_THREAD) else actor_thread_id
     for row in pending:
-        stranded = bool(row.get("orphaned"))
-        if stranded:
-            try:
-                text = read_doc_text(artifact["path"]) if text is None else text
-            except (OSError, ValueError):  # a save is never failed by a note about it
-                return
-            stranded = not _applied(row, text)
+        stranded = bool(row.get("orphaned")) and not _applied(row, text)
         if stranded == bool(row["stranded_notified_at"]):
             continue
-        store.set_stranded_notice(
-            row["id"], datetime.now(timezone.utc).isoformat() if stranded else None, db=db,
-        )
-        if (
-            stranded and editor != row["author_thread_id"]
-            and db.execute("SELECT 1 FROM threads WHERE id=?", (row["author_thread_id"],)).fetchone()
-        ):
-            stranded_note(db, row, editor=actor_name(db, editor))
+        # The mark and its note commit together, whoever owns the connection: a save with no
+        # registration holds no transaction, and a note written outside one would be rolled back.
+        with write_transaction(db, scope="note_stranded_suggestion") as connection:
+            store.set_stranded_notice(
+                row["id"], datetime.now(timezone.utc).isoformat() if stranded else None, db=connection,
+            )
+            if (
+                stranded and editor != row["author_thread_id"]
+                and connection.execute("SELECT 1 FROM threads WHERE id=?", (row["author_thread_id"],)).fetchone()
+            ):
+                stranded_note(connection, row, editor=actor_name(connection, editor))

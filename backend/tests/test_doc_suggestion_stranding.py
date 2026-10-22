@@ -70,7 +70,7 @@ def test_an_edit_by_another_writer_tells_the_author_once_while_it_stays_stranded
     )
     assert note["details"]["artifact_id"] == doc.artifact_id
     assert note["details"]["comment_id"] == suggestion["id"]
-    assert note["details"]["chip"] == "Documents's edit stranded a suggestion on doc."
+    assert note["details"]["chip"] == "A suggestion on doc no longer applies after an edit."
 
 
 def test_the_person_is_named_when_they_made_the_edit(doc):
@@ -172,4 +172,37 @@ def test_reading_the_comments_never_sends_the_note(doc):
 
     anchored_threads(doc.artifact_id, str(doc.path), doc.db)
 
+    assert doc.notes() == []
+
+
+def test_a_thread_less_save_commits_the_mark_and_the_note_on_a_connection_with_no_transaction(doc):
+    """The editor's thread-less save calls the journal on a bare pooled connection, not under a registration."""
+    from infra.database import db_job_boundary
+    from registry.review_edit_journal import note_content_edit
+
+    suggestion = doc.suggest()
+    artifact = service.find_file_identity(str(doc.path), db=doc.db)
+    doc.path.write_text(CHANGED)
+    assert not doc.db.in_transaction
+
+    with db_job_boundary("test_thread_less_save"):  # raises TransactionOwnershipError on an uncommitted write
+        note_content_edit(
+            doc.db, artifact, previous_sha256=hashlib.sha256(ORIGINAL.encode()).hexdigest(),
+            new_sha256=hashlib.sha256(CHANGED.encode()).hexdigest(), actor_thread_id="ui",
+        )
+
+    assert len(doc.notes()) == 1
+    assert doc.db.execute("SELECT stranded_notified_at FROM doc_comments WHERE id=?",
+                          (suggestion["id"],)).fetchone()[0] is not None
+    assert not doc.db.in_transaction
+
+
+def test_a_document_that_cannot_be_read_never_fails_the_save_or_sends_a_note(doc):
+    doc.suggest()
+    doc.path.unlink()
+
+    from registry.review_edit_journal import note_content_edit
+
+    artifact = service.find_file_identity(str(doc.path), db=doc.db)
+    assert note_content_edit(doc.db, artifact, previous_sha256="a", new_sha256="b", actor_thread_id="ui") is False
     assert doc.notes() == []

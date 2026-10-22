@@ -162,7 +162,7 @@ def test_a_stopped_task_keeps_its_state_gets_a_note_and_the_resolve_still_commit
         description, events = _description_and_events(db, node_id)
         assert _state(db, node_id) == state != "accepted"
         assert f"Comment {plain[0]['id']}: resolved" in description
-        assert "did not settle by itself" in description and before.description in description
+        assert "did not finish by itself" in description and before.description in description
         assert events.count("feedback_settled_while_stopped") == 1
         assert db.execute("SELECT resolved FROM doc_comments WHERE id=?", (plain[0]["id"],)).fetchone()[0] == 1
     finally:

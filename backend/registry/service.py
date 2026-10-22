@@ -308,8 +308,8 @@ def register_write_strict(
         merge_identity_metadata(_db, artifact_id, artifact_metadata)
         artifact = written_row(_db, artifact_id, thread_id)
         if existing is not None:
-            from registry.review_edit_journal import journal_reviewed_edit
-            journal_reviewed_edit(
+            from registry.review_edit_journal import note_content_edit
+            note_content_edit(
                 _db, artifact, previous_sha256=last_written_sha256(existing["metadata"]),
                 new_sha256=artifact_metadata.get("last_written_sha256"),
                 actor_thread_id=thread_id if actor_thread_id is None else actor_thread_id,
