@@ -48,4 +48,4 @@ First, when any suggestion is still open: accept nothing, remove nothing and wri
 
 ## 5. Write the profile
 
-From the document's final text (or, after "Not now" or a no above, from their chat answers), write what `references/look-up-the-person.md` sections E and F name, in the formats they give: `USER.md` for who they are, and the lines in `context/50-USER-PROFILE.md` for how they like to work. Write what the text says and nothing more.
+From the document's final text (or, after "Not now" or a no above, from their chat answers), write what `references/look-up-the-person.md` sections E and F name, in the formats they give: `USER.md` for who they are (work, place and background), and the lines in `context/50-USER-PROFILE.md` for their time zone, the name they go by and how they like to work. Write what the text says and nothing more.

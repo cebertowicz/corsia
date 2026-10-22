@@ -476,6 +476,31 @@ def test_the_look_up_leaves_out_a_personal_email_domain_and_checks_any_other_wit
     assert ref.count("`references/about-you-doc.md` says to write the profile") == 2
 
 
+def test_the_look_up_reads_and_writes_the_zone_and_name_in_the_workspace_profile():
+    from infra import user_profile
+
+    ref = (FIRST_RUN_APP.parent / "look-up-the-person.md").read_text(encoding="utf-8")
+    start = ref.index("4. This computer's time zone")
+    start_line = ref[start:ref.index("\n", start)]
+    assert "- **Timezone:**" in start_line and "context/50-USER-PROFILE.md" in start_line
+    assert "date +%Z" not in ref and "This Mac" not in ref
+    write = ref[ref.index("## F. Write it down"):ref.index("## G.")]
+    # The zone is written in the exact line the profile seeds, and the name replaces the preferred-name line.
+    seeded = user_profile.profile_text("Ada", "ZONE").splitlines()[-1].replace("ZONE", "<IANA zone>")
+    assert seeded in write
+    assert "replacing the profile's `- **Timezone:**` line" in write
+    assert "over the profile's `- **Preferred name:**` line" in write
+    assert "`USER.md`" in write and "(work, place, background)" in write
+    doc = (FIRST_RUN_APP.parent / "about-you-doc.md").read_text(encoding="utf-8")
+    assert "`context/50-USER-PROFILE.md` for their time zone, the name they go by" in doc
+
+
+def test_the_user_profile_fact_is_described_as_read_from_the_workspace_profile():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    assert "read from the workspace `context/50-USER-PROFILE.md`" in app
+    assert "what `USER.md` already holds" not in app
+
+
 def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggestions_only():
     doc = (FIRST_RUN_APP.parent / "about-you-doc.md").read_text(encoding="utf-8")
 
