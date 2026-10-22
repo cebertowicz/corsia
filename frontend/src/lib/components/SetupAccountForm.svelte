@@ -10,7 +10,7 @@
 		onValidateConfirmation }: Props = $props();
 	let suggested = $state('');
 	$effect(() => {
-		const next = (name.trim().split(/\s+/)[0] ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32);
+		const next = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32);
 		if (!requiredUsername && (!username || username === suggested)) username = next;
 		suggested = next;
 	});
