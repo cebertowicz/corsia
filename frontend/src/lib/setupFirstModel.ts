@@ -1,10 +1,9 @@
-import { getModelDispatchId, saveThreadModel, type Model } from '$lib/stores/models';
+import type { Model } from '$lib/stores/models';
 import { fetchCorsiaAgent } from '$lib/utils/conductor';
 
 export type SetupModel = Model & { is_default?: boolean };
 export type TestedProvider = { source: string; model?: string };
-export type SetupBinding = { model: string; source: string };
-export type SetupFirstModelErrorCode = 'no_model' | 'binding_incomplete' | 'catalog_refused' | 'catalog_unavailable' | 'agent_unavailable' | 'progress_save';
+export type SetupFirstModelErrorCode = 'catalog_refused' | 'catalog_unavailable' | 'agent_unavailable';
 
 /** Coded setup failures keep recovery copy independent of transport wording. */
 export class SetupFirstModelError extends Error {
@@ -66,22 +65,4 @@ export async function setupCatalog(session: string): Promise<{ models: SetupMode
 	}
 	if (!body || typeof body !== 'object' || !Array.isArray((body as { models?: unknown }).models)) throw new SetupFirstModelError('catalog_unavailable');
 	return { models: (body as { models: SetupModel[] }).models, thread };
-}
-
-/** Refresh and bind before completion; failures leave setup open. */
-export async function bindSetupFirstModel(session: string, tested: TestedProvider[] = [], beforeBind?: (binding: SetupBinding) => Promise<void>): Promise<SetupBinding> {
-	const { models, thread } = await setupCatalog(session);
-	const model = bestSetupModel(models, tested);
-	if (!model) throw new SetupFirstModelError('no_model');
-	const selector = getModelDispatchId(model);
-	const binding = { model: selector, source: model.connection ?? model.provider ?? '' };
-	try {
-		await beforeBind?.(binding);
-		const saved = await saveThreadModel(thread, selector, session, 'setup');
-		if (saved.kind !== 'committed' || saved.model !== selector) throw new SetupFirstModelError('binding_incomplete');
-		return binding;
-	} catch (error) {
-		if (error instanceof SetupFirstModelError) throw error;
-		throw new SetupFirstModelError('binding_incomplete');
-	}
 }

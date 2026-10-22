@@ -11,7 +11,7 @@ import { localSetupFix } from '../support/localSetupFix';
 import { WELCOME_ACCOUNT_LINE, WELCOME_LINES, WELCOME_ROWS, WELCOME_TITLE } from '../../src/lib/setupWelcome';
 
 type LocalFixture = 'downloading' | 'paused' | 'starting' | 'ready' | 'stopped' | 'disk-space' | 'pick-failed' | 'connection' | 'disk-full' | 'memory' | 'other-ref' | 'other-no-ref' | 'setup-failed' | 'start-failed';
-type Fixture = { name: string; element: string; screen?: 'checking' | 'error' | 'old-macos' | 'account' | 'invalid' | 'mismatch' | 'short-password' | 'protected' | 'unwritable' | 'creating' | 'create-failed' | 'account-exists' | 'welcome' | 'account-form'; only?: 'narrow' | 'short'; cli?: string; local?: LocalFixture; finish?: 'no-model' | 'progress-save'; api?: 'ready' | 'failed' | 'menu' | 'address'; classifier?: 'downloading' | 'failed'; requiredUsername?: string };
+type Fixture = { name: string; element: string; screen?: 'checking' | 'error' | 'old-macos' | 'account' | 'invalid' | 'mismatch' | 'short-password' | 'protected' | 'unwritable' | 'creating' | 'create-failed' | 'account-exists' | 'welcome' | 'account-form'; only?: 'narrow' | 'short'; cli?: string; local?: LocalFixture; finish?: 'progress-save'; api?: 'ready' | 'failed' | 'menu' | 'address'; classifier?: 'downloading' | 'failed'; requiredUsername?: string };
 const fixtures: Fixture[] = [
 	{ name: 'checking', screen: 'checking', element: 'Checking this computer' },
 	{ name: 'status-error', screen: 'error', element: 'CORSIA couldn’t start; Retry and Save a report' },
@@ -32,10 +32,9 @@ const fixtures: Fixture[] = [
 	{ name: 'folder-unwritable', screen: 'unwritable', element: 'CORSIA can’t write to this folder. Choose another one.' },
 	{ name: 'creating', screen: 'creating', element: 'Starting CORSIA; Continue spinner' },
 	{ name: 'create-failed', screen: 'create-failed', element: 'Couldn’t create your account. Try again.' },
-	...['ready', 'signed-out', 'not-installed', 'installing', 'signing-in', 'install-connection', 'install-failed', 'signin-failed', 'unusable', 'shadow', 'limited', 'both-ready', 'codex-ready', 'claude-ready-codex-signed-out', 'bind-failed'].map((cli): Fixture => ({ name: `cli-${cli}`, cli, element: `Claude Code ${cli} row` })),
+	...['ready', 'signed-out', 'not-installed', 'installing', 'signing-in', 'install-connection', 'install-failed', 'signin-failed', 'unusable', 'shadow', 'limited', 'both-ready', 'codex-ready', 'claude-ready-codex-signed-out'].map((cli): Fixture => ({ name: `cli-${cli}`, cli, element: `Claude Code ${cli} row` })),
 	{ name: 'cli-ready-background-download', cli: 'ready', local: 'downloading', element: 'Claude Code Ready; Local model Downloading 42%' },
 	...['downloading', 'paused', 'starting', 'ready', 'stopped', 'disk-space', 'pick-failed', 'connection', 'disk-full', 'memory', 'other-ref', 'other-no-ref', 'setup-failed', 'start-failed'].map((local): Fixture => ({ name: `local-${local}`, local, element: `Local model ${local} row` })),
-	{ name: 'finish-no-model', cli: 'ready', finish: 'no-model', element: 'CORSIA couldn’t find a working model; Retry' },
 	{ name: 'finish-progress-save', cli: 'ready', finish: 'progress-save', element: 'CORSIA couldn’t save setup progress; Retry' },
 	{ name: 'api-add-menu', api: 'menu', element: 'Add provider: Cloud providers before other ways to connect' },
 	{ name: 'api-address-sheet', api: 'address', element: 'Other provider by address: web address and API key, with more options hidden' },
@@ -77,7 +76,7 @@ function catalogRow(connection: string) {
 		...(['claude-code', 'codex'].includes(connection) ? { runs_on: [{ account_id: 'disposable-account', selected: true, status: 'ready' }] } : {}) };
 }
 async function serve(page: Page, fixture: Fixture) {
-	let installed = false, apiTested = false, statusReads = 0, bindFailed = false, modelReads = 0;
+	let installed = false, apiTested = false, statusReads = 0;
 	let releasePending: (() => void) | undefined;
 	let pendingSettled: Promise<void> | undefined;
 	const flight = localFlight(fixture.local);
@@ -145,14 +144,9 @@ async function serve(page: Page, fixture: Fixture) {
 			json = method === 'GET' ? { setup_completed: false, step: 'models' } : { ok: true };
 		}
 		else if (path === '/api/corsia-agent') json = { target: { thread_id: 'frame-corsia-agent' }, first_run_pending: true };
-		else if (path === '/api/threads/frame-corsia-agent' && method === 'PATCH') {
-			if (fixture.cli === 'bind-failed') { bindFailed = true; await route.fulfill({ status: 409, json: { detail: 'Model no longer ready' } }); return; }
-			json = { model: 'claude-code/vendor-default', model_updated_at: '2026-10-19T17:00:00Z' };
-		}
-		else if (path.includes('/providers/sources')) json = { sources: [cliSource(bindFailed ? 'signed-out' : fixture.cli === 'bind-failed' ? 'ready' : fixture.cli === 'codex-ready' ? 'not-installed' : fixture.cli === 'claude-ready-codex-signed-out' ? 'ready' : installed && fixture.cli === 'signing-in' ? 'signed-out' : fixture.cli), cliSource(['both-ready', 'codex-ready'].includes(fixture.cli ?? '') ? 'ready' : fixture.cli === 'claude-ready-codex-signed-out' ? 'signed-out' : 'not-installed', 'codex'), localSource(fixture.local)] };
+		else if (path.includes('/providers/sources')) json = { sources: [cliSource(fixture.cli === 'codex-ready' ? 'not-installed' : fixture.cli === 'claude-ready-codex-signed-out' ? 'ready' : installed && fixture.cli === 'signing-in' ? 'signed-out' : fixture.cli), cliSource(['both-ready', 'codex-ready'].includes(fixture.cli ?? '') ? 'ready' : fixture.cli === 'claude-ready-codex-signed-out' ? 'signed-out' : 'not-installed', 'codex'), localSource(fixture.local)] };
 		else if (path === '/api/models') {
-			modelReads += 1;
-			json = { models: fixture.finish === 'no-model' && modelReads > 1 ? [] : [...(!bindFailed && ['ready', 'both-ready', 'claude-ready-codex-signed-out', 'bind-failed'].includes(fixture.cli ?? '') ? [catalogRow('claude-code')] : []), ...(['both-ready', 'codex-ready'].includes(fixture.cli ?? '') ? [catalogRow('codex')] : []), ...(fixture.local === 'ready' ? [catalogRow('omlx')] : []), ...(apiTested ? [catalogRow('anthropic')] : [])] };
+			json = { models: [...(['ready', 'both-ready', 'claude-ready-codex-signed-out'].includes(fixture.cli ?? '') ? [catalogRow('claude-code')] : []), ...(['both-ready', 'codex-ready'].includes(fixture.cli ?? '') ? [catalogRow('codex')] : []), ...(fixture.local === 'ready' ? [catalogRow('omlx')] : []), ...(apiTested ? [catalogRow('anthropic')] : [])] };
 		}
 		else if (path === '/api/settings/providers') json = { providers: [{ name: 'anthropic', label: 'Anthropic', type: 'cloud', has_key: false, models: [], api_base: null, masked_key: null, docs_url: null }] };
 		else if (path.endsWith('/anthropic/test')) { apiTested = fixture.api === 'ready'; json = fixture.api === 'ready' ? { ok: true, message: 'Key is valid' } : { ok: false, error: 'Couldn’t test this key. Check it and try again.' }; }
@@ -232,12 +226,6 @@ async function navigate(page: Page, fixture: Fixture) {
 	await expect(page.getByRole('heading', { name: 'Providers & models', exact: true })).toBeVisible();
 	if (['installing', 'install-connection', 'install-failed', 'shadow'].includes(fixture.cli ?? '')) await page.getByRole('region', { name: 'Claude Code' }).getByRole('button', { name: 'Set up' }).click();
 	if (['signing-in', 'signin-failed'].includes(fixture.cli ?? '')) await page.getByRole('region', { name: 'Claude Code' }).getByRole('button', { name: 'Sign in', exact: true }).click();
-	if (fixture.cli === 'bind-failed') {
-		await page.getByRole('button', { name: 'Start using CORSIA', exact: true }).click();
-		await expect(page.getByRole('heading', { name: 'Providers & models', exact: true })).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Start using CORSIA', exact: true })).toBeDisabled();
-		await expect(page.getByRole('region', { name: 'Claude Code' }).getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
-	}
 	if (fixture.api) {
 		await page.getByRole('button', { name: 'Add provider', exact: true }).click();
 		if (fixture.api === 'address') await page.getByRole('button', { name: /^Other provider by address/ }).click();
@@ -302,8 +290,6 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.api === 'address') { await expect(page.getByRole('dialog').getByText('Other provider by address', { exact: true })).toBeVisible(); await expect(page.getByPlaceholder('https://host.example.com/compatible-mode/v1', { exact: true })).toBeVisible(); await expect(page.getByPlaceholder('(leave empty when the web address needs no key)', { exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'More options', exact: true })).toBeVisible(); await expect(page.getByText('Connection type', { exact: true })).toHaveCount(0); return; }
 	if (fixture.api === 'ready') { await expect(page.getByRole('region', { name: 'API provider' }).getByText('Anthropic · passed a test call')).toBeVisible(); return; }
 	if (fixture.api === 'failed') { await expect(text('Couldn’t test this key. Check it and try again.')).toBeVisible(); return; }
-	if (fixture.cli === 'bind-failed') { await expect(page.getByRole('button', { name: 'Start using CORSIA', exact: true })).toBeDisabled(); return; }
-	if (fixture.finish === 'no-model') { await expect(text('CORSIA couldn’t find a working model. Connect a provider or choose one that is ready, then try again.')).toBeVisible(); return; }
 	if (fixture.finish === 'progress-save') { await expect(text('CORSIA couldn’t save setup progress. Try again.')).toBeVisible(); return; }
 	if (fixture.cli === 'codex-ready') { await expect(page.getByRole('region', { name: 'Codex' }).getByText('Ready')).toBeVisible(); return; }
 	if (fixture.cli === 'claude-ready-codex-signed-out') { await expect(page.getByRole('region', { name: 'Codex' }).getByRole('button', { name: 'Sign in', exact: true })).toBeVisible(); return; }
@@ -432,7 +418,7 @@ test('setup redesign complete state frames @setup-redesign', async ({ browser, r
 	const cases = emailScenarios.filter((row) => row.name === `first-run-email-${emailCase}`);
 	expect(cases, 'CORSIA_SETUP_EMAIL_CASE is gmail, outlook, both or other').toHaveLength(1);
 	const threadId = await corsiaAgentThread(request);
-	const binding = await request.patch(`/api/threads/${threadId}`, { params: { token: TEST_TOKEN }, data: { model: 'mock/test-model', source: 'setup' } });
+	const binding = await request.patch(`/api/threads/${threadId}`, { params: { token: TEST_TOKEN }, data: { model: 'mock/test-model' } });
 	expect(binding.ok(), await binding.text()).toBeTruthy();
 	const opening = `I'm CORSIA, your assistant. My job is to give you back your time. I'm a bit different from most AI assistants: I measure how much of your time your work here takes, the AI agents working for you included, and I work to bring that number down. You can see it any time in Measurement. I keep everything here set up and running, and I take care of the everyday, like email, your calendar and research.
 
