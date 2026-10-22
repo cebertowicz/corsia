@@ -52,7 +52,7 @@ class BrowserClickTool(Tool):
     description = (
         "Click an element in the browser by ref (from snapshot) or CSS selector. "
         "These actions work alongside the person. Never click what would show a password, key or code "
-        "(such as creating or revealing a key) or grant access (an Allow or consent button): "
+        "(such as creating or revealing a key) or accept a consent screen's request for account access: "
         "post_update the person to click it, then watch only the page's URL and title. Only a skill "
         "that saves the password, key or code unseen may have you click to show it yourself.\n\n"
         "USE THIS to:\n"
