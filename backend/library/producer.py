@@ -47,14 +47,19 @@ def _installed_rows(db=None) -> list[dict[str, Any]]:
 def produce_once() -> int:
     """Compare one cached/raw index read with active installed artifacts and deliver notices."""
     from events.platform import DUPLICATE, deliver_platform_event_sync
+    from infra.config import WORKSPACE
+    from infra.user_profile import uses_community_improvements
     from library import load_index
 
+    use_community_improvements = uses_community_improvements(Path(WORKSPACE))
     index = load_index()  # Exactly one cache-backed raw-main read per producer refresh.
     items = {item["name"]: item for item in index.skills}
     delivered = 0
     for row in _installed_rows():
         payload = _notice_payload(row, items, index.generations)
         if payload is None:
+            continue
+        if payload["event_type"] == ITEM_CHANGED_EVENT and not use_community_improvements:
             continue
         deliveries = deliver_platform_event_sync(LIBRARY_CONNECTOR, payload)
         delivered += sum(delivery.outcome != DUPLICATE for delivery in deliveries)
