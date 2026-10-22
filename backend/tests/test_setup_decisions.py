@@ -35,13 +35,32 @@ GITHUB_NO_ACCOUNT_OPTIONS = [
      "detail": "I open the browser and fill in the sign-up. You type the password and any code."},
     {"id": "B", "label": "Not now", "detail": "Ask me any time."},
 ]
-GITHUB_REASONS = (
-    "With an account on GitHub, a free website where people share code and where CORSIA's "
-    "community shares skills, your agents can get the improvements other people make to the "
-    "skills you use, share an improvement they made to a skill, only when you approve it, and "
-    "build what you need when it doesn't exist yet, like a connection to an app or a fix to "
-    "CORSIA, and keep that work there."
-)
+EXPECTED_COMMUNITY_USE = {
+    "task_title": GITHUB_TASK,
+    "title": "Should your agents use improvements the community has proven?",
+    "context": "You can always turn down a change and keep your own version.",
+    "tradeoff": "Using them needs no account.",
+    "recommendation": "A",
+    "rationale": "You get what others prove, and you approve what changes.",
+    "options": [
+        {"id": "A", "label": "Yes", "detail": "Agents may take improvements other people proved."},
+        {"id": "B", "label": "No", "detail": "Agents keep to their own versions."},
+    ],
+    "other_enabled": True,
+}
+EXPECTED_COMMUNITY_SHARE = {
+    "task_title": GITHUB_TASK,
+    "title": "Should your agents offer the improvements proven here to the community?",
+    "context": "Nothing private ever goes into what's shared.",
+    "tradeoff": "Sharing goes through GitHub, so a yes leads to one question about your account.",
+    "recommendation": "A",
+    "rationale": "A proven change helps everyone using CORSIA.",
+    "options": [
+        {"id": "A", "label": "Yes", "detail": "Agents may offer a proven improvement."},
+        {"id": "B", "label": "No", "detail": "Agents share nothing."},
+    ],
+    "other_enabled": True,
+}
 
 
 def _github(sign_up_with: str) -> dict:
@@ -49,7 +68,7 @@ def _github(sign_up_with: str) -> dict:
         "task_title": GITHUB_TASK,
         "title": "How should your agents post on GitHub?",
         "context": (
-            GITHUB_REASONS + " Their own account is allowed: GitHub's terms let each person run "
+            "Their own account is allowed: GitHub's terms let each person run "
             "one free machine account besides their own. You accept GitHub's terms for it, and "
             "you're responsible for what it does. It keeps their posts apart from yours. Reports "
             "to CORSIA are text only and go only with your OK, from whichever you choose."
@@ -71,7 +90,7 @@ def _github_no_account(sign_up_with: str) -> dict:
         "task_title": GITHUB_TASK,
         "title": "Make an account for your agents on GitHub?",
         "context": (
-            GITHUB_REASONS + " Your agents can have their own account. You'd accept GitHub's "
+            "Your agents can have their own account. You'd accept GitHub's "
             "terms, type its password and enter a code from your email. I never see them."
         ),
         "tradeoff": (
@@ -124,7 +143,7 @@ def _facts(web_missing: bool, *, self_check: bool = True,
 def test_exact_decisions_for_every_presence_combination(sessions, web_missing):
     plan = setup.build_plan(_facts(web_missing, sessions=sessions))
 
-    expected = [EXPECTED_GITHUB, EXPECTED_GITHUB_NO_ACCOUNT, *([EXPECTED_FIND_PROJECTS] if sessions else [])]
+    expected = [EXPECTED_COMMUNITY_USE, EXPECTED_COMMUNITY_SHARE, EXPECTED_GITHUB, EXPECTED_GITHUB_NO_ACCOUNT, *([EXPECTED_FIND_PROJECTS] if sessions else [])]
     assert plan["setup_decisions"] == expected
 
 
@@ -146,7 +165,7 @@ def test_every_payload_passes_plan_decision_validation(sessions, web_missing):
 def test_each_decision_is_raised_from_its_own_task_in_plan_order():
     decisions = setup.build_decisions(_facts(True, sessions=True))
 
-    assert [d["task_title"] for d in decisions] == [GITHUB_TASK, GITHUB_TASK, PROJECT_TASK]
+    assert [d["task_title"] for d in decisions] == [GITHUB_TASK] * 4 + [PROJECT_TASK]
     assert all("pick" not in d for d in decisions)
 
 
@@ -167,20 +186,25 @@ def test_the_agents_address_adds_plus_agents_for_gmail_only(email, expected):
 @pytest.mark.parametrize("email", ["you@example.com", ""])
 def test_github_never_invents_an_address_for_a_non_gmail_email(email):
     github = next(d for d in setup.build_decisions(_facts(True, email=email))
-                  if d["task_title"] == GITHUB_TASK)
+                  if d["title"] == EXPECTED_GITHUB["title"])
 
     assert github == EXPECTED_GITHUB_NO_ADDRESS
     assert "@" not in github["tradeoff"]
 
 
-def test_both_github_decisions_give_the_reasons_and_never_say_ai():
-    both = [d for d in setup.build_decisions(_facts(True)) if d["task_title"] == GITHUB_TASK]
+def test_the_community_questions_come_first_and_the_github_cards_drop_the_reasons():
+    decisions = [d for d in setup.build_decisions(_facts(True)) if d["task_title"] == GITHUB_TASK]
 
-    assert [d["title"] for d in both] == [
+    assert [d["title"] for d in decisions] == [
+        "Should your agents use improvements the community has proven?",
+        "Should your agents offer the improvements proven here to the community?",
         "How should your agents post on GitHub?", "Make an account for your agents on GitHub?"]
-    assert all(GITHUB_REASONS in d["context"] for d in both)
-    assert "Their own account is allowed" in both[0]["context"]  # the bot-account answer
-    assert "AI" not in " ".join(str(v) for d in both for v in d.values())
+    assert [o["label"] for o in decisions[0]["options"]] == ["Yes", "No"]
+    assert decisions[0]["recommendation"] == decisions[1]["recommendation"] == "A"
+    assert "Their own account is allowed" in decisions[2]["context"]  # the bot-account answer
+    text = " ".join(str(v) for d in decisions for v in d.values())
+    assert "build what you need" not in text and "keep that work there" not in text
+    assert "AI" not in text
 
 
 

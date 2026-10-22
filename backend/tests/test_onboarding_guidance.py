@@ -268,7 +268,7 @@ def test_app_path_sends_the_message_then_eight_steps_and_ends_on_the_handoff():
     # The doc's order: the other subscription, the one import, Where your work lives, search, About you.
     assert [title.rstrip(".,") for title in titles] == [
         "The other subscription", "Bring over from your other tools", "Where your work lives",
-        "Web search", "About you", "Email and calendar", "GitHub for your agents",
+        "Web search", "About you", "Email and calendar", "Learning from the community",
         "Your files, and when agents ask first",
     ]
     assert "skill `connect-tools`" in steps
@@ -337,15 +337,33 @@ def test_the_subscription_step_installs_in_the_background_then_signs_in():
     assert "post the sign-in line below right after they answer the question in front of you" in step
 
 
-def test_github_asks_for_an_account_first_and_answers_the_bot_account_question():
+def test_the_community_step_explains_asks_two_questions_and_writes_the_profile_lines():
     step = _step(7)
 
-    assert step.index("Do you have a GitHub account?") < step.index("Should your agents use your account, or have their own?")
-    for reason in ("get the improvements other people make to the skills you use;",
-                   "share an improvement they made to a skill, only when you approve it;"):
-        assert reason in step
-    assert "Their own is allowed. GitHub's terms let each person run one free machine account besides their own." in step
-    assert "Your agents can have their own account. You'd accept GitHub's terms, type its password and enter a code from your email. I never see them." in step
+    assert step.startswith("Learning from the community.** Always.")
+    assert "Here's how CORSIA gets better: it learns from you." in step
+    assert "sharing it means everyone using CORSIA gets better, and you get what others prove." in step
+    assert step.index("Should your agents use improvements the community has proven?") < step.index(
+        "Should your agents offer the improvements proven here to the community?")
+    for line in ("`- **Use community improvements:** Yes`", "`- **Use community improvements:** No`",
+                 "`- **Share improvements with the community:** Yes`", "`- **Share improvements with the community:** No`",
+                 "write no line for it, and agents share nothing and take nothing until it is answered"):
+        assert line in step, line
+    assert "context/50-USER-PROFILE.md" in step
+    assert "Got it. Your agents keep their improvements here and don't take the community's. Ask me any time to change that." in step
+    assert "no GitHub" in step
+    # The old three-reason list and "build what you need" are gone.
+    assert "build what you need" not in step and "keep that work there" not in step
+
+
+def test_github_comes_only_on_a_yes_to_sharing_and_answers_the_bot_account_question():
+    step = _step(7)
+    github = step.split("**Yes to sharing, and not `github_ready`:**", 1)[1]
+
+    assert "When `github_ready`, skip the rest of this step" in github
+    assert github.index("Do you have a GitHub account?") < github.index("Should your agents use your account, or have their own?")
+    assert "Their own is allowed. GitHub's terms let each person run one free machine account besides their own." in github
+    assert "Your agents can have their own account. You'd accept GitHub's terms, type its password and enter a code from your email. I never see them." in github
 
 
 def test_the_connect_skill_holds_the_build_later_and_macos_permission_playbooks():

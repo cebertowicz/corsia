@@ -85,19 +85,35 @@ FIND_PROJECTS = {
 # Gmail: on option A the conductor then asks in chat for an address.
 ASK_FOR_ADDRESS = "the address you give me in chat"
 
-# The three reasons the person is given before either decision, in the chat line and on the card.
-GITHUB_REASONS = (
-    "With an account on GitHub, a free website where people share code and where CORSIA's community "
-    "shares skills, your agents can get the improvements other people make to the skills you use, "
-    "share an improvement they made to a skill, only when you approve it, and build what you need "
-    "when it doesn't exist yet, like a connection to an app or a fix to CORSIA, and keep that work there."
-)
+# The two questions that come before GitHub: whether agents use and offer the community's proven
+# improvements. Both sit under the GitHub task; GitHub comes up only on a yes to sharing.
+COMMUNITY_USE = {
+    "title": "Should your agents use improvements the community has proven?",
+    "context": "You can always turn down a change and keep your own version.",
+    "tradeoff": "Using them needs no account.",
+    "options": (
+        ("Yes", "Agents may take improvements other people proved."),
+        ("No", "Agents keep to their own versions."),
+    ),
+    "rationale": "You get what others prove, and you approve what changes.",
+}
+
+COMMUNITY_SHARE = {
+    "title": "Should your agents offer the improvements proven here to the community?",
+    "context": "Nothing private ever goes into what's shared.",
+    "tradeoff": "Sharing goes through GitHub, so a yes leads to one question about your account.",
+    "options": (
+        ("Yes", "Agents may offer a proven improvement."),
+        ("No", "Agents share nothing."),
+    ),
+    "rationale": "A proven change helps everyone using CORSIA.",
+}
 
 # The person has a GitHub account: their agents use it or have their own.
 GITHUB = {
     "title": "How should your agents post on GitHub?",
     "context": (
-        GITHUB_REASONS + " Their own account is allowed: GitHub's terms let each person run one free "
+        "Their own account is allowed: GitHub's terms let each person run one free "
         "machine account besides their own. You accept GitHub's terms for it, and you're responsible "
         "for what it does. It keeps their posts apart from yours. Reports to CORSIA are text only and "
         "go only with your OK, from whichever you choose."
@@ -122,7 +138,7 @@ GITHUB = {
 GITHUB_NO_ACCOUNT = {
     "title": "Make an account for your agents on GitHub?",
     "context": (
-        GITHUB_REASONS + " Your agents can have their own account. You'd accept GitHub's terms, type "
+        "Your agents can have their own account. You'd accept GitHub's terms, type "
         "its password and enter a code from your email. I never see them."
     ),
     "tradeoff": (

@@ -53,21 +53,20 @@ This message asks nothing, so don't end your turn on it: post the first step tha
    - **Something else:** post `There's no ready way to connect that email yet. I'll build one after setup. It's on my list.` and add your own task to build it after setup, as skill `connect-tools` says under "No connection exists yet". Never end on "I can't".
 
    On "not now" to the question: `Ask me any time to connect your email.` This is CORSIA's own platform sign-in; it creates no agent.
-7. **GitHub for your agents,** skipped when `github_ready`. Post, word for word:
+7. **Learning from the community.** Always. Post, word for word:
 
-   > GitHub is a free website where people share code, and where CORSIA's community shares skills. With an account there, your agents can:
-   > - get the improvements other people make to the skills you use;
-   > - share an improvement they made to a skill, only when you approve it;
-   > - build what you need when it doesn't exist yet, like a connection to an app or a fix to CORSIA, and keep that work there.
-   >
-   > Do you have a GitHub account?
+   > Here's how CORSIA gets better: it learns from you. When you correct me or one of your agents, CORSIA tries a change to the workflow, skill or instruction behind it, and measures whether the change works better. Agents do the same with the work you give them to own: they measure it and try ways to improve it. When a change is proven, sharing it means everyone using CORSIA gets better, and you get what others prove.
 
-   Then wait for **Yes**, **No** or **Not now**.
-   - **Yes:** post `Should your agents use your account, or have their own? Their own is allowed. GitHub's terms let each person run one free machine account besides their own. You accept GitHub's terms for it, and you're responsible for what it does. It keeps their posts apart from yours.` Then raise the decision from `setup.setup_decisions` titled `How should your agents post on GitHub?`, unchanged.
-   - **No:** post `Your agents can have their own account. You'd accept GitHub's terms, type its password and enter a code from your email. I never see them.` Then raise the decision from `setup.setup_decisions` titled `Make an account for your agents on GitHub?`, unchanged.
-   - **Not now:** `Ask me any time.`
+   Then raise, one at a time, the two decisions from `setup.setup_decisions` titled `Should your agents use improvements the community has proven?` and `Should your agents offer the improvements proven here to the community?`, each unchanged, with the `source_node_id` of the task it names if your plan has one, else your current plan task. Using the community's improvements needs no account.
+   - **Write each answer** as soon as it is given, as a line in the workspace's `context/50-USER-PROFILE.md`, replacing any line that already has the same label, so every agent receives it: `- **Use community improvements:** Yes` or `- **Use community improvements:** No` for the first question, and `- **Share improvements with the community:** Yes` or `- **Share improvements with the community:** No` for the second. The value is exactly Yes or No. On "not now" at either question, post `Ask me any time.`, write no line for it, and agents share nothing and take nothing until it is answered.
+   - **No to both:** post `Got it. Your agents keep their improvements here and don't take the community's. Ask me any time to change that.` and skip the rest of this step: no GitHub.
+   - **No to sharing:** no GitHub question. Skip the rest of this step.
+   - **Yes to sharing, and not `github_ready`:** post `Sharing goes through GitHub, a free website where people share code. CORSIA's community keeps what it shares there. Do you have a GitHub account?` Then wait for **Yes**, **No** or **Not now**. When `github_ready`, skip the rest of this step: the account is already set up.
+     - **Yes:** post `Should your agents use your account, or have their own? Their own is allowed. GitHub's terms let each person run one free machine account besides their own. You accept GitHub's terms for it, and you're responsible for what it does. It keeps their posts apart from yours.` Then raise the decision titled `How should your agents post on GitHub?`, unchanged.
+     - **No:** post `Your agents can have their own account. You'd accept GitHub's terms, type its password and enter a code from your email. I never see them.` Then raise the decision titled `Make an account for your agents on GitHub?`, unchanged.
+     - **Not now:** `Ask me any time.`
 
-   Both decisions use the `source_node_id` of the task they name if your plan has one, else your current plan task. Handle the answer the way Task 5 of `references/first-run.md` does (its A and B paths, sign-in and captcha rules), with nothing to start or mark done. On `Use mine`, when GitHub's CLI is already signed in on this computer, agents use that sign-in: post `Your agents will post as [login].` Otherwise sign it in to their account as that path says.
+   Both GitHub decisions use the `source_node_id` of the task they name if your plan has one, else your current plan task. Handle the answer the way Task 5 of `references/first-run.md` does (its A and B paths, sign-in and captcha rules), with nothing to start or mark done. On `Use mine`, when GitHub's CLI is already signed in on this computer, agents use that sign-in: post `Your agents will post as [login].` Otherwise sign it in to their account as that path says.
 8. **Your files, and when agents ask first.** Told once, to everyone, with no question. When step 5 gave a check-first answer, open with `You said [to check with you first | to just do it and tell you after]. Inside CORSIA's folder I'll work that way. Outside it, this is how it works:` Then post, word for word:
 
    > Agents work in a sandbox on this computer. Inside it they can read and change what's in CORSIA's folder, documents included. When one needs something outside it, like installing an app or reading another folder, it asks for stated actions, for a set time, and a reviewer model checks the request and every action against the task you gave it.
