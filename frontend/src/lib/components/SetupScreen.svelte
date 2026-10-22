@@ -31,7 +31,7 @@
 	import { measuredDownloadTime } from '$lib/setupLocalPresentation';
 	import { WELCOME_ACCOUNT_LINE, WELCOME_TITLE } from '$lib/setupWelcome';
 	import { isSetupWide } from '$lib/stores/viewport';
-	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void }
+	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
 	type LocalStartResult = 'started' | 'failed';
 	type LocalStartResponse = { result: LocalStartResult; reference?: string; fix?: string };
 	const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';
@@ -52,7 +52,7 @@
 	function accountRefusal(detail: unknown): string | null {
 		return typeof detail === 'string' && detail.trim() ? detail.trim() : null;
 	}
-	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect }: Props = $props();
+	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'account' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
 	const CLI_VENDORS = ['claude-code', 'codex'] as const;
 	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; local_started?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
@@ -70,7 +70,7 @@
 	// The pre-start (pick, then start) is under way, so the local row shows progress instead of a Download button.
 	let localPreparing = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
-	// The subscriptions answer; null until answered (or skipped), when every CLI row shows.
+	// The subscriptions answer; null until answered (or skipped, or a resumed setup), when every CLI row shows.
 	let picks = $state<SetupPicks | null>(null), confirmLocalStop = $state(false), localOffFailed = $state<{ reference?: string } | undefined>();
 	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources });
 	const canConnect = shellInfo() !== null;
@@ -136,7 +136,7 @@
 	const view = $derived.by((): View => {
 		if (page === 'connect') return remote.view;
 		if (page === 'checking') return { title: 'Checking this computer' };
-		if (page === 'error') return { title: 'CORSIA couldn’t start', lede: reportError || statusError || 'Something went wrong while starting. Try again, or save a report to send.', primary: { label: 'Retry' }, onPrimary: readStatus };
+		if (page === 'error') return { title: 'CORSIA couldn’t start', lede: reportError || statusError || 'Something went wrong while starting. Try again, or save a report to send.', primary: { label: 'Retry' }, onPrimary: resume ? resumeSetup : readStatus };
 		if (page === 'hard-stop') return { title: 'Update macOS to open CORSIA', lede: 'CORSIA needs macOS 15 or later. Update in System Settings › General › Software Update, then open CORSIA again.' };
 		if (screen === 'welcome') return { title: WELCOME_TITLE, primary: { label: 'Continue' }, onPrimary: () => { welcomeSeen = true; } };
 		// Once the account exists, the screen reads back what was set: neither the account nor its folder can change after it.
@@ -270,6 +270,20 @@
 			onFinished();
 		} finally { finishing = false; }
 	}
+	async function resumeSetup() {
+		const progress = await fetchSetupProgress(get(token));
+		if (!progress) { page = 'error'; return; }
+		if (progress.setup_completed) { onFinished(); return; }
+		status = (progress.status ?? {}) as Status; folder = status.work_folder || folder; page = 'models';
+		if (status.classifier) classifier.accept(status.classifier);
+		// A relaunch after the account step has no screen-1 start to rerun, so a local download that was never claimed starts here.
+		const unstarted = eligible && status.local_started === false;
+		if (unstarted) localPreparing = true;
+		try {
+			await Promise.all([refreshSources(true), classifier.read(), loadProviders()]);
+			if (unstarted) await startLocal();
+		} finally { localPreparing = false; }
+	}
 	function selectProvider(provider: ProviderEntry) { showAdd = false; openProvider = { name: provider.name, label: provider.label, type: provider.type, statusDot: 'disabled', subline: '', raw: provider }; }
 	$effect(() => {
 		// Authenticated source/catalog state arrives through models_updated. Poll only the two setup-owned jobs
@@ -283,7 +297,7 @@
 	});
 	$effect(() => (page === 'connect' ? remote.start() : undefined));
 	onMount(() => {
-		if (!startConnect) void readStatus();
+		if (!startConnect) void (resume ? resumeSetup() : readStatus());
 		const offModels = on('models_updated', () => { if (page === 'models') void refreshSources(); });
 		const offClassifier = on('classifier_updated', () => { void classifier.read(); });
 		const focus = () => { if (page === 'models') void refreshSources(true); };

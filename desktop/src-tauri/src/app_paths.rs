@@ -25,7 +25,7 @@ pub fn app_dir_for_home(home: &Path) -> PathBuf {
         .join(APP_FOLDER)
 }
 
-fn state_dir_with_override(
+pub(crate) fn state_dir_with_override(
     app_dir: &Path,
     state_override: Option<OsString>,
 ) -> Result<PathBuf, String> {

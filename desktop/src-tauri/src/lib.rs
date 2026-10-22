@@ -46,6 +46,7 @@ mod startup_failure;
 mod test_tls;
 use startup_failure::StartupFailure;
 mod trust;
+mod unfinished_setup;
 mod version_check;
 mod window_placement;
 mod update_stage;
@@ -68,6 +69,8 @@ struct AppServiceState {
     app_dir: Mutex<Option<PathBuf>>,
     /// The local service ports already granted their commands; a capability can't be removed, so each is added once.
     granted_local_ports: Mutex<std::collections::BTreeSet<u16>>,
+    /// Set once this process has answered a launch with a running service: after that, nothing is started over.
+    launched: AtomicBool,
     quitting: AtomicBool,
     exit_cleanup_attempted: AtomicBool,
     adoption_in_progress: AtomicBool,
@@ -346,6 +349,29 @@ fn unregister_service() -> Result<(), String> {
     run_service_command("unregister")
 }
 
+/// An unfinished first-run setup leaves nothing: before anything is planned or started, a marker the first run
+/// left (and the backend deletes when setup finishes) makes this launch wipe the state folder and what setup
+/// created, so first run begins again at step 1. Without a marker, or with one that cannot be trusted, nothing
+/// is touched. A failure stops the launch with its reason, and the marker stays for the next try.
+///
+/// Returns the work folder that setup made, so planning the new first run reuses it.
+fn start_over_if_unfinished(app_dir: &Path) -> Result<Option<PathBuf>, String> {
+    match unfinished_setup::at_launch(app_dir) {
+        unfinished_setup::Launch::Nothing => Ok(None),
+        unfinished_setup::Launch::Untrusted(reason) => {
+            log::error!("an unfinished-setup marker was left alone: {reason}");
+            Ok(None)
+        }
+        unfinished_setup::Launch::Wipe(marker) => {
+            log::info!("setup was never finished: starting it over");
+            // The service holds the state folder open, so it stops first.
+            unregister_service()?;
+            unfinished_setup::wipe(app_dir, &marker).inspect_err(|error| log::error!("{error}"))?;
+            Ok(Some(PathBuf::from(marker.workspace)))
+        }
+    }
+}
+
 fn restart_service() -> Result<(), String> {
     unregister_service()?;
     run_service_command("register")
@@ -538,6 +564,11 @@ fn start_service<R: tauri::Runtime>(
         log::error!("interrupted adoption could not be undone: {}", failure.message);
         return Ok(ServiceStartup::AdoptionFailed { failure });
     }
+    let started_over = if !service.launched.load(Ordering::SeqCst) && !first_run::environment_names_the_roots() {
+        start_over_if_unfinished(&app_dir)?
+    } else {
+        None
+    };
     // Decide about the workspace before anything is written: a refusal leaves
     // the computer exactly as it was.
     let first_run = if first_run::environment_names_the_roots() {
@@ -547,7 +578,7 @@ fn start_service<R: tauri::Runtime>(
             .path()
             .home_dir()
             .map_err(|error| format!("could not resolve the home folder: {error}"))?;
-        first_run::plan(&home, &app_dir)?
+        first_run::plan_trusting(&home, &app_dir, started_over.as_deref())?
     };
     if let first_run::FirstRun::ExistingInstall { reason } = first_run {
         return Err(reason);
@@ -567,6 +598,12 @@ fn start_service<R: tauri::Runtime>(
                 first_run::command_line_tools_installed,
             )
         })?;
+        // Only a first run that made the state folder marks it; a failed mark just means no wipe later.
+        match unfinished_setup::mark(&app_dir, &workspace) {
+            Ok(true) => {}
+            Ok(false) => log::info!("the state folder was not new, so setup is not marked unfinished"),
+            Err(error) => log::warn!("could not mark setup as unfinished: {error}"),
+        }
     }
     *service
         .app_dir
@@ -577,6 +614,7 @@ fn start_service<R: tauri::Runtime>(
         service_management::ServiceStatus::Enabled => {
             wait_for_service(port, &app_dir)?;
             grant_local_service_origin(app, service, port)?;
+            service.launched.store(true, Ordering::SeqCst);
             Ok(ServiceStartup::Ready {
                 url: service_url(port),
             })

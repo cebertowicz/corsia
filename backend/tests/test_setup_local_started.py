@@ -30,7 +30,7 @@ def setup_facts(isolated_db, monkeypatch, tmp_path):
     db = get_db()  # a Mac that has never run setup lists no local model and no account; the shared test database seeds both
     db.execute("DELETE FROM models WHERE provider = 'omlx'")
     db.execute("DELETE FROM users")
-    setup_progress.start_after_account("app", db=db, user_id="ada")  # an account was just made, so setup is unfinished and resumable
+    setup_progress.start_after_account("app", db=db)  # an account was just made, so setup is unfinished and resumable
     db.commit()
     db.close()
 

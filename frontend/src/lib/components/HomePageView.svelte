@@ -10,9 +10,9 @@
 	import type ChatPanel from './ChatPanel.svelte';
 	import type { View } from '$lib/homePaneConfig';
 	import type { ProjectPick } from '$lib/stores/projects';
-	import { logout, token } from '$lib/stores/auth';
-	import { resetUnfinishedSetup } from '$lib/setupProgress';
-	
+	import { token } from '$lib/stores/auth';
+	import { fetchSetupProgress } from '$lib/setupProgress';
+
 	let {
 		isAuthenticated,
 		activeView,
@@ -89,19 +89,17 @@
 
 	const easeOutQuint = cubicOut;
 	let setupMode = $state<'login' | 'flow'>('login');
-	// An unfinished setup the app itself started is not kept: the backend starts it over, and the person lands on step 1.
-	// It refuses any other install (adopted, taken over, older, or one already in use), which then opens as it is.
+	// The backend, not this tab, knows whether a signed-in person finished setup. Read once per session, never during setup itself.
+	let setupResume = $state(false);
 	let setupChecked = false;
 	$effect(() => {
 		if (!isAuthenticated) { setupChecked = false; return; }
 		if (setupMode === 'flow') { setupChecked = true; return; }
 		if (setupChecked) return;
 		setupChecked = true;
-		void resetUnfinishedSetup(get(token)).then(async (result) => {
-			// An unreadable answer leaves the app as it is: a failed read must never lock out someone who finished setup.
-			if (!result?.reset) return;
-			await logout();
-			setupMode = 'flow';
+		void fetchSetupProgress(get(token)).then((progress) => {
+			// An unreadable record leaves the app as it is: a failed read must never lock out someone who finished setup.
+			if (progress && !progress.setup_completed) { setupResume = true; setupMode = 'flow'; }
 		});
 	});
 
@@ -130,9 +128,10 @@
 {#if setupMode === 'flow'}
 	<div class="auth-gate" out:authGateExit>
 		<SetupScreen
+			resume={setupResume}
 			onExistingAccount={() => setupMode = 'login'}
 			onAccountCreated={() => setupMode = 'flow'}
-			onFinished={() => { setupMode = 'login'; }}
+			onFinished={() => { setupMode = 'login'; setupResume = false; }}
 		/>
 	</div>
 {:else if $connectOpen}

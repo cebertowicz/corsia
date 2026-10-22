@@ -211,6 +211,13 @@ fn existing_install(reason: String) -> Result<FirstRun, String> {
 
 /// Decide what a launch must do about the workspace, reading only.
 pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
+    plan_trusting(home, app_dir, None)
+}
+
+/// `plan`, for a launch that just started an unfinished setup over: `trusted` is the work folder that setup
+/// made, and a default folder at exactly that path is reused even though the backend left files in it. Nothing
+/// else about the refusal rules changes.
+pub fn plan_trusting(home: &Path, app_dir: &Path, trusted: Option<&Path>) -> Result<FirstRun, String> {
     if present(&app_dir.join(SERVICE_FILE))? {
         return Ok(FirstRun::Configured);
     }
@@ -262,7 +269,7 @@ pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
                 "A file named {shown} is in the way of CORSIA's default workspace folder."
             ));
         }
-        if !workspace_is_fresh(&path)? {
+        if trusted != Some(path.as_path()) && !workspace_is_fresh(&path)? {
             return existing_install(format!(
                 "The folder {shown} already has files in it, so CORSIA left it alone."
             ));

@@ -31,7 +31,7 @@ import secrets
 import sqlite3
 from datetime import timedelta
 
-from infra import user_profile
+from infra import setup_marker, user_profile
 from infra.account_validation import AccountError, FirstAccountExists, normalize_username, require_password
 from infra.database import get_db, write_transaction
 from infra.passwords import hash_password, verify_password
@@ -124,12 +124,11 @@ def _credentials(username: str, password: str) -> tuple[str, str]:
 def _create_account(
     name: str, encoded: str, *, db: sqlite3.Connection | None, first_run_wake: bool,
     require_first: bool = False, first_run_path: str = "script", claim_data_owner: bool = False,
-    before_commit=None, created_files: dict[str, str] | None = None, pending_profile: dict[str, str] | None = None,
+    before_commit=None,
 ):
     """Insert the account (and the first one's CORSIA agent) in one transaction.
 
-    ``before_commit`` runs as its last step. ``created_files`` maps each work-folder file this
-    setup creates to its digest, for the app path's creation marker. Returns the effects owed after
+    ``before_commit`` runs as its last step. Returns the effects owed after
     the commit, for the caller to run once it has seen the commit succeed.
     """
     if first_run_path not in {"app", "script"}:
@@ -159,9 +158,7 @@ def _create_account(
             conductor_id = ensure_corsia_agent(name, model=None, db=conn)
             from infra.setup_progress import start_after_account
 
-            start_after_account(
-                first_run_path, db=conn, user_id=name, created_files=created_files, pending_profile=pending_profile,
-            )
+            start_after_account(first_run_path, db=conn)
             if not data_owners_without_accounts(conn):
                 from infra import config
                 from registry.shared_ownership_assignment import enforce_scaffold_ownership
@@ -215,6 +212,20 @@ def create_user(
     return name
 
 
+def _publish_profile(staged: user_profile.StagedProfile, first_run_path: str):
+    """The account transaction's last step: publish the staged profile.
+
+    The app's setup first tells the shell's unfinished-setup marker about a profile it creates, so a relaunch
+    removes it. A marker that cannot be written refuses the account before the file exists.
+    """
+    def publish() -> None:
+        if first_run_path == "app" and staged.created_sha256:
+            setup_marker.record_created_file(user_profile.PROFILE_RELATIVE_PATH.as_posix(), staged.created_sha256)
+        staged.publish()
+
+    return publish
+
+
 def create_first_account(
     username: str, password: str, *, full_name: str | None = None, email: str = "",
     first_run_wake: bool = True, first_run_path: str = "script",
@@ -232,23 +243,15 @@ def create_first_account(
         raise AccountError("A name is required.")
     name, encoded = _credentials(username, password)
     staged = None
-    pending_profile = None
     if full_name is not None:
-        timezone = user_profile.mac_timezone()
-        if first_run_path == "app" and user_profile.profile_exists(config.WORKSPACE):
-            # A profile the person already had is not touched until they finish setup.
-            pending_profile = {"full_name": full_name, "timezone": timezone, "email": email} if email else None
-        else:
-            staged = user_profile.stage_user_profile(config.WORKSPACE, full_name, timezone, email)
+        staged = user_profile.stage_user_profile(
+            config.WORKSPACE, full_name, user_profile.mac_timezone(), email,
+        )
     try:
         announce = _create_account(
             name, encoded, db=None, first_run_wake=first_run_wake, require_first=True,
-            first_run_path=first_run_path, claim_data_owner=True, pending_profile=pending_profile,
-            before_commit=staged.publish if staged else None,
-            created_files=(
-                {user_profile.PROFILE_RELATIVE_PATH.as_posix(): staged.created_sha256}
-                if staged and staged.created_sha256 else None
-            ),
+            first_run_path=first_run_path, claim_data_owner=True,
+            before_commit=_publish_profile(staged, first_run_path) if staged else None,
         )
     except BaseException:
         if staged:
