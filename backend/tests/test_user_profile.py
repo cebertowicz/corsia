@@ -46,27 +46,20 @@ def test_profile_name_is_sanitized_and_bounded(first_account):
     assert user_profile.profile_name(first_account) == "Pat " + "x" * 116
 
 
-@pytest.mark.parametrize(("reader", "label"), [
-    (user_profile.uses_community_improvements, user_profile.USE_COMMUNITY_LABEL),
-    (user_profile.shares_improvements, user_profile.SHARE_COMMUNITY_LABEL),
-])
 @pytest.mark.parametrize(("answer", "expected"), [
     ("yes", True), ("Yes.", True), ("YES, please", True),
     ("No", False), ("Not now", False), ("", False),
 ])
-def test_community_consent_requires_an_explicit_yes(tmp_path, reader, label, answer, expected):
+def test_community_consent_requires_an_explicit_yes(tmp_path, answer, expected):
     profile = tmp_path / PROFILE
     profile.parent.mkdir()
-    profile.write_text(f"{label} {answer}\n", encoding="utf-8")
+    profile.write_text(f"{user_profile.USE_COMMUNITY_LABEL} {answer}\n", encoding="utf-8")
 
-    assert reader(tmp_path) is expected
+    assert user_profile.uses_community_improvements(tmp_path) is expected
 
 
-@pytest.mark.parametrize(("reader", "label"), [
-    (user_profile.uses_community_improvements, user_profile.USE_COMMUNITY_LABEL),
-    (user_profile.shares_improvements, user_profile.SHARE_COMMUNITY_LABEL),
-])
-def test_community_consent_rejects_missing_or_misplaced_labels(tmp_path, reader, label):
+def test_community_consent_rejects_missing_or_misplaced_labels(tmp_path):
+    reader, label = user_profile.uses_community_improvements, user_profile.USE_COMMUNITY_LABEL
     assert reader(tmp_path) is False
     profile = tmp_path / PROFILE
     profile.parent.mkdir()

@@ -18,7 +18,7 @@ If the library can't be reached, search uses the last copy it fetched and says h
 
 ## Community improvements consent
 
-The library works only after the person says yes to using community improvements during setup. CORSIA stores that answer in the `Use community improvements` line of the profile. Until then, search, install, and update are refused; remove still works for a copy the agent already has. Change notices stop while the library is off, but withdrawal notices continue so agents can stop loading withdrawn copies.
+The library works only after the person says yes to using community improvements. The first chat asks, and the person can change the answer any time by telling an agent. CORSIA stores that answer in the `Use community improvements` line of the profile. Until then, search, install, and update are refused; remove still works for a copy the agent already has. Change notices stop while the library is off, but withdrawal notices continue so agents can stop loading withdrawn copies.
 
 ## Adapting an installed skill
 
