@@ -28,7 +28,7 @@ def _fields(card=CARD):
 
 def test_the_card_is_appendix_a1_word_for_word():
     card = setup.agent_import(CARD)
-    assert card["title"] == "Bring over what your other AI tools know"
+    assert card["title"] == "Bring over what your other tools know"
     assert card["context"] == (
         "Claude Code and Codex are on this computer. I can read what they remember about you and how "
         "you like to work, the skills you keep in them, and the connected apps that "
@@ -61,7 +61,7 @@ def test_a_model_with_no_known_provider_says_the_read_may_leave_this_mac():
 def test_no_tool_found_means_no_card_and_the_card_goes_first(monkeypatch):
     assert setup.agent_import(None) is None
     decisions = setup.build_decisions(setup.Facts(agent_import=CARD))
-    assert decisions[0]["title"] == "Bring over what your other AI tools know"
+    assert decisions[0]["title"] == "Bring over what your other tools know"
     assert setup.build_decisions(setup.Facts())[0]["title"] != decisions[0]["title"]
 
 
@@ -292,7 +292,7 @@ def test_install_needs_a_finished_read(wired):
 
 @pytest.mark.parametrize(("kwargs", "message"), [
     ({"thread_id": "worker"}, "not in your plan"),
-    ({"option": "B"}, "did not choose to have their other AI tools read"),
+    ({"option": "B"}, "did not choose to have their other tools read"),
     ({"facts": ImportCard(("Codex",), ("Codex",), "Claude, by Anthropic")}, "does not carry the fixed import consent wording"),
 ])
 def test_a_consent_that_cannot_authorize_refuses_and_reads_nothing(wired, monkeypatch, kwargs, message):
@@ -322,7 +322,7 @@ def test_the_app_wake_builds_the_card_for_the_conductors_model(monkeypatch):
     monkeypatch.setattr(setup, "read_facts", read_facts)
     built = asyncio.run(first_run_wake._app_setup("claude-code/sonnet"))
     assert seen["agent_model"] == "claude-code/sonnet"
-    assert built["setup_decisions"][0]["title"] == "Bring over what your other AI tools know"
+    assert built["setup_decisions"][0]["title"] == "Bring over what your other tools know"
 
 
 def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
@@ -331,11 +331,12 @@ def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
     skill = Path(__file__).parents[1] / "prompts/system/v1/skills/conductor-bootstrap"
     app = (skill / "references/first-run-app.md").read_text(encoding="utf-8")
     steps = app.split("## The steps, in this order", 1)
-    assert "raise it first" in steps[0] and "`references/agent-import.md`" in steps[0]
-    assert "or what the person confirmed earlier in this conversation" in steps[1]
-    assert "already said yes for the tools its connections clause named" in steps[1]
-    assert "OpenClaw and Hermes Agent included" in steps[1]
-    assert 'On "not now" to that shorter question, list only the card\'s tools.' in steps[1]
+    assert "`references/agent-import.md`" in steps[1].split("3. **Where your work lives,**", 1)[0]
+    assert "Raise it unchanged" in steps[1]
+    connected = (skill / "references/agent-import.md").read_text(encoding="utf-8").split("## Their connected apps", 1)[1]
+    assert "only for the tools whose connected apps the consent card named" in connected
+    assert "OpenClaw and Hermes Agent can be among them" in connected
+    assert "Read nothing until a yes; on \"not now\"" in connected
     guide = (skill / "references/agent-import.md").read_text(encoding="utf-8")
     for line in (
         "Kept [N] things about you and how you work.",

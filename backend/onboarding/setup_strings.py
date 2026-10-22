@@ -14,9 +14,9 @@ from __future__ import annotations
 # The consent hash binds the rendered title, context and option A label, so a changed word
 # here needs a new consent review.
 
-# --- task "Getting started": bring over what other AI tools know -----------
+# --- task "Getting started": bring over what other tools know -----------
 
-# AGENT_IMPORT option A authorizes one read of the person's other AI tools
+# AGENT_IMPORT option A authorizes one read of the person's other tools
 # (onboarding.agent_import); its consent hash binds the rendered title, context and
 # option A label like FIND_PROJECTS'. {tools} names the found tools, {verb} is
 # "is" for one and "are" for several, {connections} is AGENT_IMPORT_CONNECTIONS
@@ -24,7 +24,7 @@ from __future__ import annotations
 # are read from the tools' settings) else AGENT_IMPORT_SETTINGS, {where} one of
 # AGENT_IMPORT_CLOUD, AGENT_IMPORT_LOCAL and AGENT_IMPORT_OTHER.
 AGENT_IMPORT = {
-    "title": "Bring over what your other AI tools know",
+    "title": "Bring over what your other tools know",
     "context": (
         "{tools} {verb} on this computer. I can read what they remember about you and how you like to "
         "work, the skills you keep in them{connections}, so you don't have to set them up again. "
@@ -85,26 +85,53 @@ FIND_PROJECTS = {
 # Gmail: on option A the conductor then asks in chat for an address.
 ASK_FOR_ADDRESS = "the address you give me in chat"
 
+# The three reasons the person is given before either decision, in the chat line and on the card.
+GITHUB_REASONS = (
+    "With an account on GitHub, a free website where people share code and where CORSIA's community "
+    "shares skills, your agents can get the improvements other people make to the skills you use, "
+    "share an improvement they made to a skill, only when you approve it, and build what you need "
+    "when it doesn't exist yet, like a connection to an app or a fix to CORSIA, and keep that work there."
+)
+
+# The person has a GitHub account: their agents use it or have their own.
 GITHUB = {
     "title": "How should your agents post on GitHub?",
     "context": (
-        "Agents use GitHub to file issues and feature requests, comment, and send pull requests on "
-        "your repositories, and report to CORSIA when it falls short. They can post as you, using "
-        "your GitHub sign-in, or from their own account, so their posts stay separate from yours. "
-        "Reports to CORSIA are text only and go only with your OK, from whichever you choose; until "
-        "GitHub is set up, they keep the write-up and send it once it is. GitHub allows each person "
-        "one extra machine account for this."
+        GITHUB_REASONS + " Their own account is allowed: GitHub's terms let each person run one free "
+        "machine account besides their own. You accept GitHub's terms for it, and you're responsible "
+        "for what it does. It keeps their posts apart from yours. Reports to CORSIA are text only and "
+        "go only with your OK, from whichever you choose."
     ),
     "tradeoff": (
-        "Posting as you takes one sign-in, and everything agents post shows your name. Their own "
-        "account takes a few minutes in a browser you can watch: I fill in the sign-up with "
-        "{sign_up_with}, and you type the password and any verification code."
+        "Their own account takes a few minutes in a browser you can watch: I fill in the sign-up with "
+        "{sign_up_with}, and you type the password and any verification code. Using yours takes one "
+        "sign-in, and everything agents post shows your name."
     ),
     "options": (
         ("Their own account",
          "I open the browser and fill in the sign-up. You type the password and any code."),
-        ("Post as me",
-         "I sign the GitHub CLI in to your account. You approve that sign-in in your browser."),
+        ("Use mine",
+         "Agents use the GitHub sign-in already on this computer, or I sign the GitHub CLI in to "
+         "your account and you approve that sign-in in your browser."),
+        ("Not now", "Ask me any time."),
+    ),
+    "rationale": "You can always tell what you wrote from what an agent wrote.",
+}
+
+# The person has no GitHub account: only their agents' own account is offered.
+GITHUB_NO_ACCOUNT = {
+    "title": "Make an account for your agents on GitHub?",
+    "context": (
+        GITHUB_REASONS + " Your agents can have their own account. You'd accept GitHub's terms, type "
+        "its password and enter a code from your email. I never see them."
+    ),
+    "tradeoff": (
+        "It takes a few minutes in a browser you can watch: I fill in the sign-up with "
+        "{sign_up_with}, and you type the password and any verification code."
+    ),
+    "options": (
+        ("Make their account",
+         "I open the browser and fill in the sign-up. You type the password and any code."),
         ("Not now", "Ask me any time."),
     ),
     "rationale": "You can always tell what you wrote from what an agent wrote.",

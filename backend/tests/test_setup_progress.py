@@ -240,6 +240,26 @@ def test_handoff_refuses_missing_tool_or_unsafe_failure_shape(client, handoff):
     assert "handoff" not in (setup_progress.read() or {})
 
 
+def test_handoff_keeps_which_subscriptions_the_person_said_they_pay_for(client):
+    token = _create_account(client)
+    handoff = {**HANDOFF, "subscriptions": {"claude-code": False, "codex": True}}
+
+    assert _put(client, {"handoff": handoff}, token).status_code == 200
+    assert setup_progress.read()["handoff"] == handoff
+
+
+@pytest.mark.parametrize("subscriptions", [
+    {"claude-code": True},
+    {"claude-code": True, "codex": "yes"},
+    {"claude-code": True, "codex": True, "key": True},
+])
+def test_handoff_refuses_a_partial_or_untyped_subscriptions_answer(client, subscriptions):
+    token = _create_account(client)
+
+    assert _put(client, {"handoff": {**HANDOFF, "subscriptions": subscriptions}}, token).status_code == 422
+    assert "handoff" not in (setup_progress.read() or {})
+
+
 def test_after_an_account_a_write_needs_a_session(client):
     token = _create_account(client)
 
