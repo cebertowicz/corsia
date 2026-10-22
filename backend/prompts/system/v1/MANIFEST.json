@@ -268,10 +268,10 @@
       "sha256": "09150443b712dcccd43cb76a8786629d9f80f36d0d14b48d773fb86834bc4d46"
     },
     {
-      "bytes": 3265,
+      "bytes": 3266,
       "kind": "skill",
       "path": "skills/decision-brief/SKILL.md",
-      "sha256": "c69da0a059bae1d1e03cc7308fd11b4ecfdc65adafb1ee8057d2a8ff30bbe30b"
+      "sha256": "22965355e58b4c34ca81d1234874563b6a5609d18163ba501bf7112e47f61fb1"
     },
     {
       "bytes": 1529,
@@ -298,10 +298,10 @@
       "sha256": "39d0a439a185d99fea0382d63737b64fdc849ba726a80ac643dbcd01053b7371"
     },
     {
-      "bytes": 6887,
+      "bytes": 6881,
       "kind": "skill",
       "path": "skills/github/references/agent-account.md",
-      "sha256": "b0f1f09184551b4d60e2406078b47c5f62263e8095ff54c5a6c24eb43658ec00"
+      "sha256": "dfb7e2a0b7160bace5485ed7898463385cda62bd58d094f1b08922703b0caf8a"
     },
     {
       "bytes": 5347,
