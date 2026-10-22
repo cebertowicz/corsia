@@ -1,9 +1,10 @@
-"""Move the first chat from the local model to Claude Code or Codex once setup's sign-in finishes.
+"""Move the first chat from the model setup gave it to Claude Code or Codex once a new sign-in is ready.
 
-A person who picked a subscription in setup can start using CORSIA on the local model
-while that tool is still installing. When their sign-in completes, the first chat
-switches to the tool, with the conversation carried over, through the one model-switch
-door (``thread.model.switch_model``). Three guards keep it narrow:
+A person can start using CORSIA on the local model or an API key while a subscription is
+still installing, or sign in to one later from Settings. The first time such a sign-in
+reads ready, the first chat switches to the tool, with the conversation carried over, through
+the one model-switch door (``thread.model.switch_model``). The CORSIA agent is the
+instance's one agent, so a Settings sign-in has no first-run bind and no user. Three guards keep it narrow:
 
 1. only the first chat setup created: the CORSIA agent, whose first model setup recorded;
 2. only if the person has not picked a model in it since: the thread still holds that
@@ -103,8 +104,11 @@ def release_claim(operation_id: str, *, db: sqlite3.Connection) -> None:
             set_setting(SETTINGS_KEY, {**marker, "claimed": None}, db=connection)
 
 
-async def switch_when_ready(provider: str, operation_id: str, *, user_id: str, account_id: str) -> bool:
-    """Switch the first chat to ``provider``'s model if the three guards hold; whether a switch was asked for."""
+async def switch_when_ready(provider: str, operation_id: str, *, user_id: str | None, account_id: str) -> bool:
+    """Switch the first chat to ``provider``'s model if the three guards hold; whether a switch was asked for.
+
+    A sign-in started from Settings has no first-run bind and so no ``user_id``; the switch door then skips its ownership check.
+    """
     from infra.db_async import run_in_db
     from infra.database import get_db
     from thread.model import switch_model

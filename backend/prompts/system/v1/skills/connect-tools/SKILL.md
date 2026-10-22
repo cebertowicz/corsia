@@ -1,6 +1,6 @@
 ---
 name: connect-tools
-description: Use when work needs a tool, service or account that isn't connected yet, or the person asks to connect one. Not for a one-off lookup.
+description: Use when work needs a tool, service or account you can't reach yet, or the person asks to connect one. Not for one you already reach or a one-off lookup.
 ---
 
 # Connect your tools
@@ -14,7 +14,7 @@ Settle who it is for, what it must read, change and hear about, when and where i
 
 ## Reuse first
 
-Use an existing connection before making one. Look at what is already connected and at any note of an earlier connection. A connected app the person already uses in another app (Claude, Cursor) is brought over, with their yes, rather than set up again.
+Use an existing connection before making one. Look at what is already connected and at any note of an earlier connection. When the person names one to use, find it in that list now and say what it reaches; that is the work, not a note for later. A connected app the person already uses in another app (Claude, Cursor) is brought over, with their yes, rather than set up again.
 
 ## To act on a tool
 
@@ -31,7 +31,6 @@ When a method can't do what the work needs, use the next one. Setting up or reco
 
 - Name the publisher only after checking it on the maker's own site or repository, through web search or opened in the browser, never from the package's description of itself. If you can't check it, say you couldn't confirm who publishes it.
 - Say what will run and who can use it: every agent in the workspace, or only this project's. For a program on this computer, add `It runs as you on this computer, so it can open your files and accounts the way you can, except CORSIA's private data and your stored keys.` If CORSIA installs a runtime or CLI for it, say in one line what, from whom, and that only CORSIA's agents use that copy.
-- A CLI acts with the person's whole account there: say which account it uses, and before its first write confirm that account and that writes are expected. Never read its stored sign-in.
 
 ## To hear about changes
 
@@ -42,6 +41,7 @@ For both lists, find out what is available from CORSIA's own tools at the time, 
 ## Permissions and reach
 
 - Reading access never permits sending. Ask the person before any send, post, change or purchase they have not asked for; a yes covers only the action it named.
+- A CLI acts as the person's whole account there. Before its first write, even one they asked for, read which account it is signed in as (its status or whoami command), name it to them and wait for their yes. Learn its other commands from its help, never by trying them. Never read its stored sign-in.
 - A new connection reaches only where it is added: the whole workspace, or one project. One that would help every project goes through CORSIA, as skill `coordination-api` says; otherwise add it where it is needed.
 - The person types a key only into the field CORSIA names, never into chat. You never read it.
 

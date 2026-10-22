@@ -10,6 +10,7 @@ guard keeps it that way.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -42,9 +43,13 @@ def _event_class(decl: EventTypeDecl, facts: dict[str, Any]) -> str:
 
 
 def normalize(
-    connector: str, raw_payload: dict[str, Any], event_type: str | None = None
+    connector: str, raw_payload: dict[str, Any], event_type: str | None = None, *,
+    resolved: Mapping[str, Any] | None = None,
 ) -> EventEnvelope:
     """Normalize a raw source payload into a canonical envelope.
+
+    ``resolved`` is what a router already looked up for this payload (e.g. the
+    artifact it selected), so the connector never looks it up again.
 
     Rejects loudly (``UnregisteredConnectorError`` / ``UnregisteredEventTypeError``
     / ``MalformedEventError``) rather than guessing — an event whose source,
@@ -54,7 +59,7 @@ def normalize(
     etype = event_type or manifest.classify(raw_payload)
     decl = manifest.decl(etype)
 
-    facts = manifest.extract_facts(raw_payload)
+    facts = manifest.extract_facts(raw_payload, resolved)
     event_id = compute_event_id(connector, etype, facts, decl.identity_facts)
     artifact_ref = manifest.build_artifact_ref(etype, facts, raw_payload)
     relationships = manifest.resolve_relationships(etype, facts, raw_payload)

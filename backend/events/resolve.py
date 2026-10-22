@@ -50,7 +50,8 @@ def _routing(ref: dict, db=None) -> dict:
         ref["integration"], ref["type"], ref["external_id"], db=db)
 
 
-def _lifecycle(routing_state: dict | None) -> str:
+def lifecycle(routing_state: dict | None) -> str:
+    """The artifact's lifecycle state, as the disposition table reads it."""
     identity = (routing_state or {}).get("identity")
     return identity["state"] if identity else "active"
 
@@ -61,7 +62,7 @@ def _deliverable(thread: str, relationship: str, routing_state: dict,
     return Target(
         thread, _resolution_for(relationship), relationship,
         routing_state=routing_state,
-        disposition=_disp(relationship, event_class, _lifecycle(routing_state)))
+        disposition=_disp(relationship, event_class, lifecycle(routing_state)))
 
 
 def _resolution_for(relationship: str) -> str:
@@ -123,7 +124,7 @@ def resolve_targets(
         rs = _routing(ref, db=db)
         return [Target(bind.record.owner_thread, resolution, "owner",
                        routing_state=rs,
-                       disposition=_disp("owner", ec, _lifecycle(rs)))]
+                       disposition=_disp("owner", ec, lifecycle(rs)))]
 
     if bind.via == "repair":
         repair_thread = bind.repair_artifact.owner_thread if bind.repair_artifact else None

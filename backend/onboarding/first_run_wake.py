@@ -43,7 +43,7 @@ UNAVAILABLE_READS = {
     "pays_for": "setup progress picks saved on the subscriptions screen; offer no subscription",
     "web_search_ready": "one web_search call",
     "github_ready": "tool model_sources, once, without recheck",
-    "user_profile": "preferred-name read from the workspace profile",
+    "user_profile": "preferred and full name read from the workspace profile",
 }
 
 INLINE_SUMMARY = (
@@ -177,14 +177,11 @@ def _pays_for(picks: object) -> list[str]:
 
 def _app_user_profile() -> dict[str, str | None]:
     from infra import config
-    from infra.user_profile import profile_name
+    from infra.user_profile import profile_full_name, profile_name
 
     return {
         "name": profile_name(config.WORKSPACE) or None,
-        "work": None,
-        "place": None,
-        "check_first": None,
-        "answer_style": None,
+        "full_name": profile_full_name(config.WORKSPACE) or None,
     }
 
 

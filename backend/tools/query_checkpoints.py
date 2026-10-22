@@ -178,10 +178,6 @@ class GetCheckpointsTool(Tool):
         result = await run_in_db(_query)
 
         if checkpoint_id:
-            from memory.node_start_opened import note_opened
-
-            if "error_code" not in result:
-                note_opened(caller, checkpoint_id)
             return _format_exact(result)
 
         if not result:

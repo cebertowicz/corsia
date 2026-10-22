@@ -211,9 +211,9 @@ def with_next(db, plan_id: str, executor: str, line: str, **facts) -> str:
     from plans import close_next
 
     block = close_next.executor_next(db, plan_id, executor)
-    related = node_start_recall.related_for_next(db, block, caller_thread_id=executor)
-    if related:
-        facts[node_start_recall.RESULT_KEY] = related
+    prior_words = node_start_recall.related_for_next(db, block, caller_thread_id=executor)
+    if prior_words:
+        facts[node_start_recall.RESULT_KEY] = prior_words
     return f"{line}\n{json.dumps({**facts, 'next': block}, sort_keys=True)}"
 
 

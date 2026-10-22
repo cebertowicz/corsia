@@ -11,16 +11,15 @@ import { localSetupFix } from '../support/localSetupFix';
 import { WELCOME_ACCOUNT_LINE, WELCOME_LINES, WELCOME_ROWS, WELCOME_TITLE } from '../../src/lib/setupWelcome';
 
 type LocalFixture = 'downloading' | 'paused' | 'starting' | 'ready' | 'stopped' | 'disk-space' | 'pick-failed' | 'connection' | 'disk-full' | 'memory' | 'other-ref' | 'other-no-ref' | 'setup-failed' | 'start-failed';
-type Fixture = { name: string; element: string; screen?: 'checking' | 'error' | 'old-macos' | 'account' | 'invalid' | 'mismatch' | 'short-password' | 'folder' | 'protected' | 'unwritable' | 'creating' | 'create-failed' | 'account-exists' | 'welcome' | 'account-form' | 'back-to-form'; only?: 'narrow' | 'short'; cli?: string; local?: LocalFixture; finish?: 'no-model' | 'progress-save'; api?: 'ready' | 'failed' | 'menu' | 'address'; classifier?: 'downloading' | 'failed'; requiredUsername?: string };
+type Fixture = { name: string; element: string; screen?: 'checking' | 'error' | 'old-macos' | 'account' | 'invalid' | 'mismatch' | 'short-password' | 'protected' | 'unwritable' | 'creating' | 'create-failed' | 'account-exists' | 'welcome' | 'account-form'; only?: 'narrow' | 'short'; cli?: string; local?: LocalFixture; finish?: 'no-model' | 'progress-save'; api?: 'ready' | 'failed' | 'menu' | 'address'; classifier?: 'downloading' | 'failed'; requiredUsername?: string };
 const fixtures: Fixture[] = [
 	{ name: 'checking', screen: 'checking', element: 'Checking this computer' },
 	{ name: 'status-error', screen: 'error', element: 'CORSIA couldn’t start; Retry and Save a report' },
 	{ name: 'old-macos', screen: 'old-macos', element: 'Update macOS to open CORSIA' },
-	{ name: 'account-empty', screen: 'account', element: 'Lede under the title, the five account fields, and Welcome beside them' },
-	{ name: 'account-welcome-short', screen: 'account', only: 'short', element: 'The lede above the form, and all of Welcome to its last row beside it, in a 1280×600 window with no scrolling' },
+	{ name: 'account-empty', screen: 'account', element: 'Lede under the title, the five account fields and the work folder row, with Welcome and the logo beside them' },
+	{ name: 'account-welcome-short', screen: 'account', only: 'short', element: 'The lede above the form, and all of Welcome to its last row beside it, in a 1280×600 window with no scrolling; the logo hides here only if under its minimum size is free' },
 	{ name: 'welcome', screen: 'welcome', only: 'narrow', element: 'Welcome screen: three rows and Continue' },
 	{ name: 'account-form', screen: 'account-form', only: 'narrow', element: 'Create your account form after Continue, with no Welcome' },
-	{ name: 'folder-back', screen: 'back-to-form', only: 'narrow', element: 'Back from the work folder lands on the filled form, not Welcome' },
 	{ name: 'account-early-download-failed', screen: 'account', local: 'connection', element: 'Local model rail job: Couldn’t download' },
 	{ name: 'account-invalid', screen: 'invalid', element: 'Use up to 32 lowercase letters, numbers, dashes or underscores.' },
 	{ name: 'account-short-password', screen: 'short-password', element: 'Use at least 8 characters.' },
@@ -29,7 +28,6 @@ const fixtures: Fixture[] = [
 	{ name: 'account-classifier-downloading', screen: 'account', classifier: 'downloading', element: 'Finishing setup: Downloading · 60%' },
 	{ name: 'account-classifier-failed', screen: 'account', classifier: 'failed', element: 'Finishing setup: Couldn’t download · Try again' },
 	{ name: 'account-exists', screen: 'account-exists', element: 'This computer already has a CORSIA account. Sign in instead.' },
-	{ name: 'folder', screen: 'folder', element: 'Choose your work folder; Back' },
 	{ name: 'folder-protected', screen: 'protected', element: 'Choose Allow when it does.' },
 	{ name: 'folder-unwritable', screen: 'unwritable', element: 'CORSIA can’t write to this folder. Choose another one.' },
 	{ name: 'creating', screen: 'creating', element: 'Starting CORSIA; Continue spinner' },
@@ -193,14 +191,14 @@ async function expectWelcomeCopy(page: Page) {
 	if (isNarrow(page)) { await expect(page.locator('.welcome .account')).toHaveText(WELCOME_ACCOUNT_LINE); return; }
 	await expect(page.locator('.welcome .account')).toHaveCount(0);
 	await expect(page.locator('.pane-scene > .lede')).toHaveText(WELCOME_ACCOUNT_LINE);
-	await expect(page.locator('.aside .lede')).toHaveCount(0);
+	await expect(page.locator('.brand .lede')).toHaveCount(0);
 	const box = async (selector: string) => (await page.locator(selector).first().boundingBox())!;
-	const [title, lede, name, welcome] = [await box('.pane-scene h1'), await box('.pane-scene > .lede'), await box('#setup-name'), await box('.aside .welcome .line')];
+	const [title, lede, name, welcome] = [await box('.pane-scene h1'), await box('.pane-scene > .lede'), await box('#setup-name'), await box('.brand .welcome .line')];
 	expect(title.y + title.height, 'the lede sits directly under the title').toBeLessThanOrEqual(lede.y + 1);
 	expect(lede.y + lede.height, 'the lede sits above Name').toBeLessThanOrEqual(name.y);
 	expect(Math.abs(welcome.y - lede.y), 'the first Welcome line is top-aligned with the lede').toBeLessThanOrEqual(2);
 	// Title, lede, fields, then the Welcome column, in DOM order (which is tab and screen-reader order).
-	const order = await page.locator('.pane-scene').evaluate((scene) => ['h1', '.lede', '#setup-name', '.aside'].map((selector) => scene.querySelector(selector)!).every((node, index, nodes) => index === 0 || Boolean(nodes[index - 1].compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)));
+	const order = await page.locator('.pane-scene').evaluate((scene) => ['h1', '.lede', '#setup-name', '.brand'].map((selector) => scene.querySelector(selector)!).every((node, index, nodes) => index === 0 || Boolean(nodes[index - 1].compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)));
 	expect(order, 'DOM order is title, lede, fields, Welcome').toBe(true);
 }
 const accountScreens = ['account', 'invalid', 'mismatch', 'short-password', 'account-exists'];
@@ -220,22 +218,15 @@ async function navigate(page: Page, fixture: Fixture) {
 	if (fixture.screen === 'short-password') { await page.getByLabel('Password', { exact: true }).fill('short'); await page.getByLabel('Name', { exact: true }).focus(); return; }
 	if (fixture.screen === 'mismatch') { await fillAccount(page); await page.getByLabel('Confirm password', { exact: true }).fill('does-not-match'); await page.getByLabel('Name', { exact: true }).focus(); return; }
 	await fillAccount(page);
-	await page.getByRole('button', { name: 'Continue', exact: true }).click();
-	await expect(page.getByRole('heading', { name: 'Choose your work folder' })).toBeVisible();
-	if (fixture.screen === 'back-to-form') {
-		await page.getByRole('button', { name: 'Back', exact: true }).click();
-		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
-		return;
-	}
+	// The work folder is a row under the account form: Change is on the same screen as the fields.
 	if (fixture.screen === 'protected' || fixture.screen === 'unwritable') { await page.getByRole('button', { name: 'Change', exact: true }).click(); return; }
-	if (fixture.screen === 'folder') return;
 	await page.getByRole('button', { name: 'Continue', exact: true }).click();
 	if (fixture.screen === 'account-exists') {
 		await expect(page.getByText('This computer already has a CORSIA account. Sign in instead.', { exact: true })).toBeVisible();
 		return;
 	}
 	if (fixture.screen === 'creating' || fixture.screen === 'create-failed') {
-		await expect(page.getByRole('heading', { name: 'Choose your work folder', exact: true })).toBeVisible();
+		await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
 		return;
 	}
 	await expect(page.getByRole('heading', { name: 'Providers & models', exact: true })).toBeVisible();
@@ -271,23 +262,22 @@ async function assertState(page: Page, fixture: Fixture) {
 		await expect(page.locator('#setup-name')).toHaveCount(0);
 		return;
 	}
-	if (fixture.screen === 'account-form' || fixture.screen === 'back-to-form') {
+	if (fixture.screen === 'account-form') {
 		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
 		await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
 		await expect(page.locator('.welcome')).toHaveCount(0);
-		if (fixture.screen === 'back-to-form') await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Alex Morgan');
 		return;
 	}
 	// Account frames at 1280 and up show Welcome beside the form, so the form and every Welcome string are on screen together.
 	if (accountScreens.includes(fixture.screen ?? '')) {
 		await expect(page.getByRole('heading', { name: WELCOME_TITLE })).toBeVisible();
-		await expect(page.locator('.aside .welcome')).toBeVisible();
+		await expect(page.locator('.brand .welcome')).toBeVisible();
 		await expect(page.getByLabel('Name', { exact: true })).toBeVisible();
 		await expectWelcomeCopy(page);
 		if (fixture.only === 'short') {
 			// Nothing is cut or hidden behind a scroll: the first and the last line of Welcome are both fully in the window.
-			const aside = page.locator('.aside');
-			expect(await aside.evaluate((node) => node.scrollHeight <= node.clientHeight), 'Welcome fits without scrolling').toBe(true);
+			const brand = page.locator('.brand');
+			expect(await brand.evaluate((node) => node.scrollHeight <= node.clientHeight), 'Welcome fits without scrolling').toBe(true);
 			await expect(page.locator('.welcome .line').first()).toBeInViewport({ ratio: 1 });
 			await expect(page.locator('.welcome li').last()).toBeInViewport({ ratio: 1 });
 			await expect(page.locator('.pane-scene > .lede')).toBeInViewport({ ratio: 1 });
@@ -308,7 +298,6 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.classifier === 'downloading') { await expect(text('Finishing setup')).toBeVisible(); await expect(text('Downloading · 60%')).toBeVisible(); }
 	if (fixture.classifier === 'failed') { await expect(text('Finishing setup')).toBeVisible(); await expect(page.getByRole('button', { name: /^Retry: Finishing setup/ })).toBeVisible(); }
 	if (fixture.screen === 'account') { await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible(); if (fixture.local === 'connection') await expect(text(localSetupFix('connection'))).toBeVisible(); return; }
-	if (fixture.screen === 'folder') { await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible(); return; }
 	if (fixture.api === 'menu') { await expect(page.getByText('Cloud', { exact: true })).toBeVisible(); await expect(page.getByText('Other ways to connect', { exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: /^oMLX on another Mac/ })).toBeVisible(); return; }
 	if (fixture.api === 'address') { await expect(page.getByRole('dialog').getByText('Other provider by address', { exact: true })).toBeVisible(); await expect(page.getByPlaceholder('https://host.example.com/compatible-mode/v1', { exact: true })).toBeVisible(); await expect(page.getByPlaceholder('(leave empty when the web address needs no key)', { exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'More options', exact: true })).toBeVisible(); await expect(page.getByText('Connection type', { exact: true })).toHaveCount(0); return; }
 	if (fixture.api === 'ready') { await expect(page.getByRole('region', { name: 'API provider' }).getByText('Anthropic · passed a test call')).toBeVisible(); return; }
@@ -324,7 +313,7 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.local) {
 		const row = page.getByRole('region', { name: 'Local model' });
 		const expected = fixture.local === 'ready' ? 'Ready'
-			: fixture.local === 'memory' ? 'Local models need at least 24 GB of memory, and this computer has less. Connect a subscription or an API provider.'
+			: fixture.local === 'memory' ? 'Local models need at least 24 GB of memory, and this computer has less. Smaller models and future updates may bring them to 16 GB computers. Connect a subscription or an API provider.'
 			: fixture.local === 'downloading' ? 'Downloading 42%'
 			: fixture.local === 'paused' ? 'Download paused. It continues when the connection returns.'
 			: fixture.local === 'starting' ? 'Starting the local model…'
@@ -417,7 +406,7 @@ test('setup redesign complete state frames @setup-redesign', async ({ browser, r
 			await capture(page, fixture, theme, 1280, 900); await page.close(); await context.close();
 		}
 		// Narrow (below 1280): Welcome is its own screen, so these frames walk through its Continue.
-		for (const fixture of selectedFixtures.filter((row) => row.only === 'narrow' || ['folder', 'cli-ready'].includes(row.name))) {
+		for (const fixture of selectedFixtures.filter((row) => row.only === 'narrow' || ['cli-ready'].includes(row.name))) {
 			const context = await browser.newContext(); const page = await context.newPage();
 			await capture(page, fixture, theme, 800, 600); await page.close(); await context.close();
 		}

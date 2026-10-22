@@ -40,10 +40,25 @@ PR_MERGED_KEY = "merged"
 """The one GitHub field that decides a PR's end. Named here so no consumer
 spells it out again; a rename moves the rule, the classifier and the tests."""
 
+# The connector owns the names its manifest declares for routed GitHub events.
+# The webhook mapper (events/github_mapper.py) imports these values when it maps
+# payloads, so a declaration cannot silently name an event the mapper never emits.
+GITHUB_ROUTED_EVENTS = {
+    "pr.opened": "webhook.github.pr_opened",
+    "pr.synchronize": "webhook.github.pr_synchronize",
+    "pr.ready_for_review": "webhook.github.pr_ready_for_review",
+    "pr.labeled": "webhook.github.pr_labeled",
+    "pr.merged": "webhook.github.pr_merged",
+    "pr.closed": "webhook.github.pr_closed",
+    "check.completed": "webhook.github.check_suite_completed",
+}
+
 # Each consumer maps PrEnd into its own vocabulary; the rule itself is never
-# re-written. The connector names the manifest event types; the webhook mapper
-# (events/github_mapper.py) owns the ``webhook.github.*`` names and their inverse.
+# re-written.
 _PR_END_TYPES: dict[PrEnd, str] = {"merged": "pr.merged", "closed": "pr.closed"}
+
+#: The ``resolved`` key for the pull request routing selected for a check suite.
+CHECK_SUITE_PR = "check_suite_pr"
 
 
 def _json_object(payload: Mapping[str, Any], key: str) -> Mapping[str, Any]:
@@ -139,26 +154,34 @@ def _classify(raw: dict[str, Any]) -> str:
     return "pr.opened"
 
 
-def _extract_facts(raw: dict[str, Any]) -> dict[str, Any]:
+def _extract_facts(raw: dict[str, Any], resolved: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """A webhook's facts. A check suite's pull request is the one routing selected
+    (``resolved[CHECK_SUITE_PR]``), looked up here only when none was passed."""
     facts: dict[str, Any] = {"repo": (raw.get("repository") or {}).get("full_name")}
     pr = raw.get("pull_request") or {}
     if pr:
+        user = _json_object(pr, "user")
         facts.update({
             "pr_number": pr.get("number"), "action": raw.get("action"),
             "merged": pr.get("merged"), "title": pr.get("title"),
             "branch": (pr.get("base") or {}).get("ref"),
-            "sha": (pr.get("head") or {}).get("sha"),
+            "sha": (pr.get("head") or {}).get("sha"), "author": user.get("login"),
         })
     cs = raw.get("check_suite") or {}
     if cs:
-        selected_pr = check_suite_pr_metadata_from_event(raw)
-        facts.update({
-            "check_suite_id": cs.get("id"), "conclusion": cs.get("conclusion"),
-            "head_sha": cs.get("head_sha"),
-            "pr_number": selected_pr.get("number") if selected_pr else None,
-            "branch": selected_pr.get("base_ref") if selected_pr else None,
-        })
+        selected = (resolved[CHECK_SUITE_PR] if resolved is not None and CHECK_SUITE_PR in resolved
+                    else check_suite_pr_metadata_from_event(raw))
+        facts.update(_check_suite_facts(cs, selected))
     return {k: v for k, v in facts.items() if v is not None}
+
+
+def _check_suite_facts(cs: Mapping[str, Any], selected_pr: Mapping[str, Any] | None) -> dict[str, Any]:
+    return {
+        "check_suite_id": cs.get("id"), "conclusion": cs.get("conclusion"),
+        "head_sha": cs.get("head_sha"),
+        "pr_number": selected_pr.get("number") if selected_pr else None,
+        "branch": selected_pr.get("base_ref") if selected_pr else None,
+    }
 
 
 def _artifact_ref(event_type: str, facts: dict, raw: dict) -> dict | None:
@@ -180,6 +203,29 @@ def _relationships(event_type: str, facts: dict, raw: dict) -> tuple[dict, ...]:
              "to_ref": pr_external_id(facts.get("repo"), number)},)
 
 
+def _project_repositories(project_id: str) -> frozenset[str] | None:
+    """The repositories a project's registered source repositories track."""
+    from events.connectors.github_notifications_feed import FeedError, tracked_github_repositories
+
+    try:
+        return tracked_github_repositories(project_id)
+    except FeedError:
+        return None
+
+
+def _repository_projects(repository: str) -> frozenset[str] | None:
+    """The projects whose registered source repositories track ``repository``."""
+    from events.connectors.github_notifications_feed import (
+        FeedError,
+        projects_tracking_github_repository,
+    )
+
+    try:
+        return projects_tracking_github_repository(repository)
+    except FeedError:
+        return None
+
+
 _PR_FILTERABLE = ("repo", "branch", "sha", "pr_number", "author")
 _CHECK_FILTERABLE = ("repo", "branch", "head_sha", "check_suite_id", "conclusion")
 
@@ -191,33 +237,36 @@ MANIFEST = register(ConnectorManifest(
         "pr.opened": EventTypeDecl(
             "pr.opened", ("repo", "pr_number", "action"), _PR_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
-            event_class="actionable"),
+            event_class="actionable", routed_event=GITHUB_ROUTED_EVENTS["pr.opened"]),
         "pr.synchronize": EventTypeDecl(
             "pr.synchronize", ("repo", "pr_number", "action", "sha"), _PR_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
-            event_class="actionable"),
+            event_class="actionable", routed_event=GITHUB_ROUTED_EVENTS["pr.synchronize"]),
         "pr.ready_for_review": EventTypeDecl(
             "pr.ready_for_review", ("repo", "pr_number", "action", "sha"),
             _PR_FILTERABLE, artifact_type=PR_TYPE,
-            artifact_integration=GITHUB_INTEGRATION, event_class="informational"),
+            artifact_integration=GITHUB_INTEGRATION, event_class="informational",
+            routed_event=GITHUB_ROUTED_EVENTS["pr.ready_for_review"]),
         "pr.labeled": EventTypeDecl(
             "pr.labeled", ("repo", "pr_number", "action", "sha"),
             _PR_FILTERABLE, artifact_type=PR_TYPE,
-            artifact_integration=GITHUB_INTEGRATION, event_class="informational"),
+            artifact_integration=GITHUB_INTEGRATION, event_class="informational",
+            routed_event=GITHUB_ROUTED_EVENTS["pr.labeled"]),
         "pr.merged": EventTypeDecl(
             "pr.merged", ("repo", "pr_number", "action"), _PR_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
-            event_class="informational"),
+            event_class="informational", routed_event=GITHUB_ROUTED_EVENTS["pr.merged"]),
         "pr.closed": EventTypeDecl(
             "pr.closed", ("repo", "pr_number", "action"), _PR_FILTERABLE,
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
-            event_class="informational"),
+            event_class="informational", routed_event=GITHUB_ROUTED_EVENTS["pr.closed"]),
         "check.completed": EventTypeDecl(
             "check.completed",
             ("repo", "check_suite_id", "conclusion", "head_sha"),
             _CHECK_FILTERABLE, artifact_type=PR_TYPE,
             artifact_integration=GITHUB_INTEGRATION,
-            relationships=(_CHECK_TO_PR,), event_class="actionable"),
+            relationships=(_CHECK_TO_PR,), event_class="actionable",
+            routed_event=GITHUB_ROUTED_EVENTS["check.completed"]),
     },
     classify=_classify,
     extract_facts=_extract_facts,
@@ -231,6 +280,9 @@ MANIFEST = register(ConnectorManifest(
         ),
     ),
     resolve_relationships=_relationships,
+    repository_fact="repo",
+    project_repositories=_project_repositories,
+    repository_projects=_repository_projects,
 ))
 
 

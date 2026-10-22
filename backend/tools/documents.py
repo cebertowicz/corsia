@@ -13,9 +13,10 @@ from doceditor.comment_create_db import CommentInput
 from doceditor.document_save import DocumentSaveError, agent_document_writer
 
 from doceditor.comment_actions import (
-    CommentActionError, SUGGESTION_REASON_MAX_CHARS, check_agent_update, decide_all_from_author,
+    CommentActionError, SUGGESTION_REASON_MAX_CHARS, check_agent_update,
     decide_suggestion, reopen_fields, validate_create,
 )
+from doceditor.comment_batch_actions import decide_all_from_author
 from doceditor.comment_action_errors import decision_only_error
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
 from doceditor.comment_state_updates import update_comment
@@ -246,7 +247,7 @@ class DocCommentCreateTool(Tool):
             return f"Error creating document comment: {dict(error=exc.kind, message=exc.message, candidate_lines=exc.candidate_lines)}"
         except CrossArtifactIdError:
             return "Error: client_id collides with another artifact's comment; re-mint and retry"
-        except PermissionError as e:
+        except (PermissionError, CommentActionError) as e:
             return f"Error: {e}"
         except Exception as e:
             return f"Error creating document comment: {e}"

@@ -236,10 +236,12 @@ async def _check_graph(response: httpx.Response, account_id: str) -> None:
         raise _GraphUnauthorized()
     if response.status_code == 410:
         raise DeltaExpired()
-    if response.status_code in (400, 403, 404):
-        raise MicrosoftError(REQUEST_REFUSED, never_sent=True)
-    if 400 <= response.status_code < 500:
+    if response.status_code in (408, 429):
         raise MicrosoftError(SERVICE_UNAVAILABLE, never_sent=True)
+    if 400 <= response.status_code < 500:
+        # Anything else Microsoft refused about this request: the account stays connected
+        # and repeating the call cannot help, so it is never sold as a wait-a-minute retry.
+        raise MicrosoftError(REQUEST_REFUSED, never_sent=True)
     if response.status_code >= 500:
         raise MicrosoftError(SERVICE_UNAVAILABLE)
 

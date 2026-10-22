@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from events.connectors.github_rules import RuleScope
     from events.router import RouteResult
 
 
@@ -23,6 +24,7 @@ class PreparedRoute:
     chip: str | None = None
     notice: str | None = None
     reap_payload: dict[str, Any] | None = None
+    rule_plan: Any = None  # agent-written rules riding the routed delivery
 
 
 @dataclass
@@ -62,11 +64,12 @@ def _prepare_route(
     internal_event: str,
     payload: dict[str, Any],
     identity: Any,
-    check_suite_base_ref: str | None,
-    check_suite_pr_selected: bool,
+    selected_pr: dict[str, Any] | None,
+    scope: RuleScope | None = None,
 ) -> None:
     """Perform each canonical write in the original noninterleaved stage order."""
     from events import router
+    from events.connectors.github_rules import apply_routed_rules
     from events.identity import PrResolutionError
     from events.routing_inputs import structured_tag
 
@@ -86,14 +89,16 @@ def _prepare_route(
         return
     external_id = identity.external_id if identity else None
     tag_provenance = structured_tag(payload)
-    selected = router._select_route(
-        internal_event, payload, identity, external_id, tag_provenance,
-        check_suite_base_ref, check_suite_pr_selected,
+    selected, routing_state = router._select_route(
+        internal_event, payload, identity, external_id, tag_provenance, selected_pr,
     )
     if isinstance(selected, router.RouteResult):
         prepared.result = selected
+        # Routing chose no thread; rules may still add recipients, never change this result.
+        apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state,
+                           scope=scope)
         return
-    thread_id, wake_reason, routing_state = selected
+    thread_id, wake_reason = selected
     summary, details = router._summarize(internal_event, payload, external_id)
     if tag_provenance:
         details["tag_provenance"] = tag_provenance
@@ -107,6 +112,9 @@ def _prepare_route(
     prepared.thread_id, prepared.identity = thread_id, identity
     prepared.summary, prepared.details, prepared.chip = summary, details, chip
     prepared.notice = router.github_pr_notice.notice_for_routed_event(thread_id, identity)
+    # Routing has decided; agent-written rules add recipients or drop or annotate this one.
+    apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state, wake_reason,
+                       scope)
 
 
 async def release_notice_off_loop(thread_id: str, identity: Any) -> None:
@@ -122,23 +130,36 @@ async def release_notice_off_loop(thread_id: str, identity: Any) -> None:
         raise cancellation
 
 
+async def settle_routed_delivery(prepared: PreparedRoute, delivered: bool) -> None:
+    """After the routed delivery: release an undelivered notice and record the rules that rode it."""
+    from events.connectors.github_rules import record_routed_rides
+    from infra.db_async import run_in_db
+
+    if not delivered and prepared.notice and prepared.thread_id is not None:
+        await release_notice_off_loop(prepared.thread_id, prepared.identity)
+    if prepared.rule_plan is not None:
+        await run_in_db(record_routed_rides, prepared, delivered)
+
+
 async def prepare_route_ordered(
     internal_event: str,
     payload: dict[str, Any],
     identity: Any,
-    check_suite_base_ref: str | None,
-    check_suite_pr_selected: bool,
+    selected_pr: dict[str, Any] | None,
 ) -> PreparedRoute:
     """Join the exact DB unit and recover committed effects before leaving its gate."""
     from events import router
+    from events.connectors.github_rules import rule_scope
     from infra.db_async import run_in_db
     from subagents.runtime_guard import join_task_through_cancellation
 
+    # Like the check suite's pull request, read before the gate: the projects
+    # tracking the repository run git, which must never hold every webhook's turn.
+    scope = await asyncio.to_thread(rule_scope, internal_event, payload, selected_pr)
     async with _preparation_gate():
         unit = _Preparation()
         preparation = asyncio.create_task(run_in_db(
-            _prepare_route, unit, internal_event, payload, identity,
-            check_suite_base_ref, check_suite_pr_selected,
+            _prepare_route, unit, internal_event, payload, identity, selected_pr, scope,
         ))
         cancellation = None
         try:

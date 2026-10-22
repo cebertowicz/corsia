@@ -146,13 +146,13 @@ def _prompt_username(owners: list[str]) -> str:
 
 
 def _prompt_profile_name(username: str) -> str:
-    """Ask what agents should call the person; with no terminal, use the Mac's name."""
+    """Ask for the person's full name; with no terminal, use the Mac's name."""
     from infra.user_profile import mac_full_name
 
     default = mac_full_name() or username
     if not sys.stdin.isatty():
         return default
-    return input(f"What should agents call you? [{default}]: ").strip() or default
+    return input(f"What's your full name? [{default}]: ").strip() or default
 
 
 def _email_choice(answer: str, found: list[str]) -> str:
@@ -212,14 +212,14 @@ def cmd_user_add(args: argparse.Namespace) -> int:
     first = not accounts.has_users()
     seeds_profile = first and not args.password_stdin
     try:
-        call_name = _prompt_profile_name(name) if seeds_profile else None
+        full_name = _prompt_profile_name(name) if seeds_profile else None
         email = _prompt_contact_email() if seeds_profile else ""
     except EOFError:
         return _fail(_INPUT_ENDED)
     password = _read_password(args.password_stdin)
     try:
         if first:
-            accounts.create_first_account(name, password, call_name=call_name, email=email)
+            accounts.create_first_account(name, password, full_name=full_name, email=email)
         else:
             accounts.create_user(name, password)
     except account_validation.AccountError as error:

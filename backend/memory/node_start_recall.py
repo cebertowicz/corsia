@@ -1,98 +1,46 @@
-"""Related past work for a plan node at the moment it starts.
+"""Earlier words from the person that match a task when it starts.
 
-Agents treat a known subject as new because they never think to search. A
-node start, activation or add, and a raised decision, are moments every agent
-passes through, so the plan tool's own response carries up to three one-line
-pointers to past work: retained checkpoint continuity entries from every
-epoch the caller's owner holds, and settled plan nodes with their evidence.
-Nothing is shown when nothing clears the floor, because noise teaches agents
-to skip the block.
-
-The lookup is synchronous FTS and a bounded scan: no event, no background job.
-It never fails the caller: any error is logged and the block is left out.
-
-Every outcome is logged at the decision point (``node_start_recall reason=``):
-``no_terms``, ``below_floor``, ``delivered`` or ``error``, and ``opened`` when
-a later successful ``get_checkpoints``, ``plan_read`` or ``get_thread_history``
-reads a delivered pointer.
+The lookup is advisory, bounded, and synchronous.  It never changes a plan
+operation's outcome: failures are logged and simply omit the optional block.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
+from datetime import UTC, datetime
+from functools import lru_cache
+import json
 import re
 import sqlite3
+from time import perf_counter
 
 from loguru import logger as log
 
-from memory.checkpoint_entry_rows import entry_hits_matching
+from core.correction_notes import local_clock
+from core.corrections_recording import is_owner_authored_message, owner_message_sql_predicate
+from infra.checkpoint_queries import current_installed_through_seq
+from infra.product_events import emit_product_event
+from llm.locality import cloud_off_project_ids
 from memory.checkpoint_search import caller_user_id
-from memory.checkpoint_search_entries import snippet
-from memory.node_start_opened import remember
+from memory.task_match import Match, NodeText, TaskTerms, first_term_at, match, task_terms
 
 MAX_HITS = 3
-MAX_TERMS = 8
-LINE_TEXT_CHARS = 140
-ENTRY_CANDIDATES = 100
-NODE_CANDIDATES = 20
-
-SETTLED_NODE_STATES = ("accepted", "accepted_with_followup", "failed", "closed")
-
-_TOKEN = re.compile(r"[a-z0-9][a-z0-9_\-]{2,}")
-_STOPWORDS = frozenset("""
-    about above after again against all also and any are because been before
-    being below between both but can could did does doing done down during each
-    either else every few for from further had has have having here how into
-    its itself just like made make many may more most must need needs new not
-    now off once only other our out over own per same see should since some such
-    than that the their them then there these they this those through too
-    under until upon use used using very via was were what when where which
-    while who whom why will with within without would yes you your
-    add adds added change changes fix fixes fixed update updates updated
-    task tasks node nodes plan step steps work item items pass passes passing
-    passed test tests tested green done result results evidence criteria
-    acceptance record recorded show shows shown one two three
-""".split())
+SOURCE_CANDIDATES = 100
+RULE_FIELDS = frozenset({"active_constraints", "approvals_and_preferences"})
+RESULT_KEY = "prior_words"
+_NODE_OPERATIONS = frozenset({"start", "activate", "add", "insert"})
+_STARTED_HOWS = frozenset({"started", "auto_selected"})
+_HEADER = "Earlier words from the person that match this task, newest first; where they differ, the newer one governs."
+_MATCH_FUNCTION = "prior_words_match"
+_OWNER_FUNCTION = "prior_words_owner"
 
 
 @dataclass(frozen=True)
-class NodeText:
-    """The words a lookup is built from: the node's own title comes first."""
-
-    title: str
-    criteria: str = ""
-    description: str = ""
-    node_id: str | None = None
-
-
-def terms(text: NodeText) -> tuple[list[str], set[str]]:
-    """Return up to ``MAX_TERMS`` distinctive terms and which came from the title."""
-    title_terms = _distinct(_TOKEN.findall((text.title or "").lower()))
-    rest = _distinct(_TOKEN.findall(
-        f"{text.criteria or ''} {text.description or ''}".lower()
-    ))
-    chosen = (title_terms + [term for term in rest if term not in title_terms])
-    chosen = chosen[:MAX_TERMS]
-    return chosen, {term for term in title_terms if term in chosen}
-
-
-def _distinct(tokens: list[str]) -> list[str]:
-    """Drop stopwords and bare numbers shorter than an issue number, keep order."""
-    seen: dict[str, None] = {}
-    for token in tokens:
-        token = token.strip("-_")
-        if len(token) < 3 or token in _STOPWORDS:
-            continue
-        if token.isdigit() and len(token) < 4:
-            continue
-        seen.setdefault(token, None)
-    return list(seen)
-
-
-def floor(term_count: int) -> int:
-    """Distinct terms a hit must share: two, or a third of the terms if more."""
-    return max(2, math.ceil(term_count / 3))
+class _Hit:
+    matched: Match
+    created_at: str
+    kind: str
+    line: str
 
 
 def related(
@@ -102,49 +50,28 @@ def related(
     caller_thread_id: str,
     trigger: str,
 ) -> list[str]:
-    """Return at most three one-line pointers to related past work, or none.
-
-    Owner-scoped exactly as checkpoint search is: only threads of the caller's
-    user. Entries the caller already carries live (its own current-epoch,
-    current entries) are skipped, since they are in its context already.
-    """
+    """Return prior person words for ``text`` or no lines on any failure."""
+    started = perf_counter()
     try:
-        found = _related(db, text, caller_thread_id)
-    except Exception as exc:  # noqa: BLE001 - advisory block never fails its caller
-        _log_error(trigger, exc)
+        reason, hits = _related(db, text, caller_thread_id)
+    except Exception as exc:  # noqa: BLE001 - advisory context must not fail its caller
+        _log_error(trigger, exc, started, caller_thread_id)
         return []
-    reason, hits = found
-    _log(reason, trigger, len(hits))
-    for hit in hits:
-        remember(caller_thread_id, hit.pointer)
-    return [hit.line for hit in hits]
-
-
-#: The key the related lines ride under, in a tool result and in a wake.
-RESULT_KEY = "related_past_work"
-
-_NODE_OPERATIONS = frozenset({"start", "activate", "add", "insert"})
-#: ``next.selected.how`` values that mean the close just gave the slot a task.
-_STARTED_HOWS = frozenset({"started", "auto_selected"})
+    _log(reason, trigger, hits, started, caller_thread_id)
+    return [_HEADER, *(hit.line for hit in hits)] if hits else []
 
 
 def attach_to_result(
     db: sqlite3.Connection, operation: str, result: object, *, caller_thread_id: str,
 ) -> None:
-    """Add ``related_past_work`` to a plan tool result that starts or opens work.
-
-    Covers start, activate, add and insert (the node in the result), a close
-    whose ``next`` block started or selected a task, and a raised decision.
-    Anything else, and an empty lookup, leaves the result untouched. A
-    mutation outcome wrapper is unwrapped to the result dict it carries.
-    """
+    """Attach ``prior_words`` to a plan result that starts a task or raises a decision."""
     result = getattr(result, "result", result)
     if not isinstance(result, dict):
         return
     try:
         subject = _subject(db, operation, result)
-    except Exception as exc:  # noqa: BLE001 - advisory block never fails its caller
-        _log_error(operation, exc)
+    except Exception as exc:  # noqa: BLE001 - advisory context must not fail its caller
+        _log_error(operation, exc, perf_counter(), caller_thread_id)
         return
     if subject is None:
         return
@@ -157,36 +84,27 @@ def attach_to_result(
 def related_for_next(
     db: sqlite3.Connection, block: dict, *, caller_thread_id: str,
 ) -> list[str]:
-    """Return the related lines for the task a ``next`` block reports started."""
+    """Return prior words for the task a wake's ``next`` block reports started."""
     node_id = _started_node_id(block)
     if node_id is None:
         return []
     try:
         text = _node_text(db, node_id)
-    except Exception as exc:  # noqa: BLE001 - advisory block never fails its caller
-        _log_error("wake", exc)
+    except Exception as exc:  # noqa: BLE001 - advisory context must not fail its caller
+        _log_error("wake", exc, perf_counter(), caller_thread_id)
         return []
-    if text is None:
-        return []
-    return related(db, text, caller_thread_id=caller_thread_id, trigger="wake")
+    return [] if text is None else related(db, text, caller_thread_id=caller_thread_id, trigger="wake")
 
 
 def _subject(db, operation: str, result: dict) -> tuple[NodeText, str] | None:
     if operation in _NODE_OPERATIONS and isinstance(result.get("node"), dict):
         node = result["node"]
-        return NodeText(
-            str(node.get("title") or ""), str(node.get("acceptance_criteria") or ""),
-            str(node.get("description") or ""), node.get("id"),
-        ), operation
+        return NodeText(str(node.get("title") or ""), criteria=str(node.get("acceptance_criteria") or ""), node_id=node.get("id")), operation
     if operation == "raise" and isinstance(result.get("decision"), dict):
         decision = result["decision"]
-        return NodeText(
-            str(decision.get("title") or ""), str(decision.get("context") or ""),
-        ), "decision_raise"
+        return NodeText(str(decision.get("title") or ""), intent=str(decision.get("context") or "")), "decision_raise"
     node_id = _started_node_id(result.get("next"))
-    if node_id is None:
-        return None
-    text = _node_text(db, node_id)
+    text = _node_text(db, node_id) if node_id else None
     return None if text is None else (text, "close_next")
 
 
@@ -199,189 +117,271 @@ def _started_node_id(block: object) -> str | None:
 
 def _node_text(db, node_id: str) -> NodeText | None:
     row = db.execute(
-        "SELECT id, title, acceptance_criteria, description FROM plan_nodes WHERE id=?",
-        (node_id,),
+        "SELECT id,title,acceptance_criteria FROM plan_nodes WHERE id=?", (node_id,),
     ).fetchone()
     if row is None:
         return None
-    return NodeText(
-        str(row["title"]), str(row["acceptance_criteria"]),
-        str(row["description"] or ""), str(row["id"]),
-    )
+    return NodeText(str(row["title"]), criteria=str(row["acceptance_criteria"] or ""), node_id=str(row["id"]))
 
 
-@dataclass(frozen=True)
-class _Hit:
-    score: tuple[int, int]
-    rank: float
-    line: str
-    pointer: str
-
-
-def _related(
-    db: sqlite3.Connection, text: NodeText, caller_thread_id: str,
-) -> tuple[str, list[_Hit]]:
-    chosen, title_terms = terms(text)
-    if len(chosen) < 2 or not title_terms:
+def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]]:
+    terms = task_terms(text)
+    if len(terms.terms) < 2 or not terms.title_terms:
         return "no_terms", []
     user_id = caller_user_id(db, caller_thread_id)
-    if user_id is None:
-        return "no_terms", []
-    need = floor(len(chosen))
-    candidates = [
-        *_entry_candidates(db, chosen, title_terms, need, user_id, caller_thread_id),
-        *_node_candidates(
-            db, chosen, title_terms, need, user_id, text.node_id, caller_thread_id,
-        ),
-    ]
-    kept = [hit for hit in candidates if _clears(hit.score, need)]
-    if not kept:
+    caller = db.execute("SELECT project_id,local_only FROM threads WHERE id=?", (caller_thread_id,)).fetchone()
+    if user_id is None or caller is None:
+        return "unresolved_caller", []
+    cutoff = _start_cutoff(db, text.node_id)
+    cloud_off = cloud_off_project_ids(db=db)
+    _ensure_functions(db)
+
+    candidates = [*_message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff),
+                  *_comment_candidates(db, terms, user_id, caller, cloud_off, cutoff),
+                  *_decision_candidates(db, terms, user_id, caller, cloud_off, cutoff),
+                  *_rule_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff)]
+    if not candidates:
         return "below_floor", []
-    # Shared terms decide; a tie goes to an entry (bm25 is negative) before a
-    # node (scan position), then to the better bm25 or the newer node.
-    kept.sort(key=lambda hit: (-hit.score[0], -hit.score[1], hit.rank))
-    return "delivered", kept[:MAX_HITS]
-
-
-def _clears(score: tuple[int, int], need: int) -> bool:
-    """The floor: enough shared terms, at least one of them from the title."""
-    return score[0] >= need and score[1] > 0
-
-
-def _coverage(body: str, chosen: list[str], title_terms: set[str]) -> tuple[int, int]:
-    """Return (distinct terms matched, title terms matched), prefix-matched."""
-    tokens = set(_TOKEN.findall(body.lower()))
-    matched = {
-        term for term in chosen
-        if any(token.startswith(term) for token in tokens)
-    }
-    return len(matched), len(matched & title_terms)
-
-
-def _entry_candidates(
-    db, chosen: list[str], title_terms: set[str], need: int, user_id: str,
-    caller_thread_id: str,
-) -> list[_Hit]:
-    scores: dict[tuple, tuple[int, int]] = {}
-
-    def select(rows: list[dict]) -> list[dict]:
-        # Score on the indexed text and keep only the best few, so at most
-        # MAX_HITS frozen snapshots are decoded. An entry the caller still
-        # holds live is already in its context, whatever revision matched.
-        scored = [
-            (_coverage(str(row["search_text"]), chosen, title_terms), row)
-            for row in rows
-            if not (
-                row["thread_id"] == caller_thread_id
-                and not row["historical"]
-                and row["canonical_state"] == "active"
-            )
-        ]
-        kept = [(score, row) for score, row in scored if _clears(score, need)]
-        kept.sort(key=lambda pair: (-pair[0][0], -pair[0][1], pair[1]["relevance"]))
-        for score, row in kept[:MAX_HITS]:
-            scores[(row["thread_id"], row["history_epoch"], row["entry_id"])] = score
-        return [row for _score, row in kept[:MAX_HITS]]
-
-    match = " OR ".join(f'"{term}"*' for term in chosen)
-    rows = entry_hits_matching(
-        db, match, user_id=user_id, candidate_limit=ENTRY_CANDIDATES, per_thread=3,
-        select=select,
+    # Scores are primary, then newest sources, then direct person words ahead of a rule.
+    candidates.sort(
+        key=lambda hit: (-hit.matched.shared, -hit.matched.title_shared, _newest_first(hit.created_at), hit.kind == "rule"),
     )
-    hits = []
-    for relevance, _order, hit in rows:
-        latest = hit.get("latest_checkpoint") or hit.get("first_checkpoint")
-        if latest is None:
+    kept: list[_Hit] = []
+    rules = 0
+    for hit in candidates:
+        if hit.kind == "rule" and rules >= 1:
             continue
-        state = hit["entry_state"]
-        if hit["historical"]:
-            state = f"{state}, epoch {hit['history_epoch']}"
-        line = (
-            f"{hit['field']} ({state}) · thread {str(hit['thread_id'])[:8]} · "
-            f"{str(latest['generated_at'])[:10]} · "
-            f"{snippet(hit['statement'], LINE_TEXT_CHARS)} → "
-            f"get_checkpoints(checkpoint_id=\"{latest['checkpoint_id']}\") "
-            f"entry {hit['entry_id']}"
-        )
-        score = scores[(hit["thread_id"], hit["history_epoch"], hit["entry_id"])]
-        hits.append(_Hit(score, relevance, line, str(latest["checkpoint_id"])))
-    return hits
+        kept.append(hit)
+        rules += hit.kind == "rule"
+        if len(kept) == MAX_HITS:
+            break
+    kept.sort(key=lambda hit: _newest_first(hit.created_at))
+    return "delivered", kept
 
 
-def _node_candidates(
-    db, chosen: list[str], title_terms: set[str], need: int, user_id: str,
-    own_node: str | None, caller_thread_id: str,
-) -> list[_Hit]:
-    from plans import public
+def _start_cutoff(db, node_id: str | None) -> str | None:
+    if not node_id:
+        return None
+    row = db.execute("SELECT updated_at FROM plan_nodes WHERE id=?", (node_id,)).fetchone()
+    return str(row["updated_at"]) if row and row["updated_at"] else None
 
-    # Titles carry a node's subject, so the scan matches titles only (a short
-    # column: this is the cost that grows with settled work) and orders by how
-    # many terms a title shares, not by recency: a common term would otherwise
-    # fill the window with new nodes that share nothing else. Coverage is then
-    # scored on title, criteria and description together. Archived nodes stay:
-    # close_node always archives, and archival retires a node from the live
-    # plan, not from history. A purged thread's work does not.
-    matched = " + ".join("(n.title LIKE ?)" for _ in chosen)
-    marks = ",".join("?" for _ in SETTLED_NODE_STATES)
-    params: list[object] = [f"%{term}%" for term in chosen]
-    params.extend((user_id, *SETTLED_NODE_STATES, own_node or "", NODE_CANDIDATES))
+
+def _ensure_functions(db) -> None:
+    """Add the matcher and owner check to ``db`` once; SQLite refuses to redefine one under an open statement."""
+    try:
+        db.execute(f"SELECT {_MATCH_FUNCTION}('[[],[]]','')").fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such function" not in str(exc):
+            raise
+        db.create_function(_MATCH_FUNCTION, 2, _sql_match, deterministic=True)
+        db.create_function(_OWNER_FUNCTION, 3, _sql_owner, deterministic=True)
+
+
+@lru_cache(maxsize=8)
+def _decoded(encoded: str) -> TaskTerms:
+    terms, title_terms = json.loads(encoded)
+    return TaskTerms(tuple(terms), frozenset(title_terms))
+
+
+def _encoded(terms: TaskTerms) -> str:
+    return json.dumps([list(terms.terms), sorted(terms.title_terms)])
+
+
+def _sql_match(encoded: str, words: str | None) -> bool:
+    """``match()`` as SQL, so each reader's ``LIMIT`` counts only rows it accepts."""
+    return match(_decoded(encoded), words or "") is not None
+
+
+def _sql_owner(role: str | None, content: str | None, metadata: str | None) -> bool:
+    return is_owner_authored_message(role=role, content=content, metadata=metadata)
+
+
+def _fts_title(terms: TaskTerms) -> str:
+    """An FTS query for user messages whose content holds a title term.
+
+    Only narrows the scan: every message ``match()`` accepts has a word starting with a title term.
+    """
+    title = " OR ".join(f'"{term}"*' for term in terms.terms if term in terms.title_terms)
+    return f"role:user AND content:({title})"
+
+
+def _positional(clause: str, params: dict[str, str]) -> tuple[str, list[str]]:
+    """Bind a named-placeholder clause by name so it can sit among ``?`` markers."""
+    names = re.findall(r":(\w+)", clause)
+    return re.sub(r":\w+", "?", clause), [params[name] for name in names]
+
+
+def _matching(column: str, terms: TaskTerms) -> tuple[str, list[object]]:
+    """The predicate keeping rows whose ``column`` ``match()`` accepts."""
+    return f"AND {_MATCH_FUNCTION}(?,{column})", [_encoded(terms)]
+
+
+def _owned_threads(alias: str) -> str:
+    return f"{alias}.user_id=? AND {alias}.purged_at IS NULL"
+
+
+def _source_scope(alias: str, timestamp: str, caller: sqlite3.Row, cloud_off: set[str], cutoff: str | None) -> tuple[str, list[object]]:
+    """Return the locality and start-window predicates every source reader applies before its limit."""
+    return (
+        f"""AND (COALESCE({alias}.local_only, 0)=0 OR ?=1)
+              AND ({alias}.project_id IS NULL OR {alias}.project_id=?
+                   OR {alias}.project_id NOT IN (SELECT value FROM json_each(?)))
+              AND (? IS NULL OR {timestamp}<=?)""",
+        [int(bool(caller["local_only"])), caller["project_id"], json.dumps(sorted(cloud_off)), cutoff, cutoff],
+    )
+
+
+def _message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[_Hit]:
+    owner_filter, owner_params = _positional(*owner_message_sql_predicate("m"))
+    source_scope, source_params = _source_scope("t", "m.created_at", caller, cloud_off, cutoff)
+    caller_cut = current_installed_through_seq(caller_thread_id, db=db) or 0
+    matching, match_params = _matching("m.content", terms)
     rows = db.execute(
-        "SELECT * FROM ("
-        "  SELECT n.id, n.title, n.acceptance_criteria, n.description, n.state, "
-        "         n.updated_at, n.requirements_revision, p.owner_id, "
-        f"        ({matched}) AS matched "
-        "  FROM plan_nodes n JOIN plans p ON p.id = n.plan_id "
-        "  JOIN threads t ON t.id = p.owner_id "
-        "  WHERE p.owner_kind = 'thread' AND t.user_id = ? AND t.purged_at IS NULL "
-        f"    AND n.state IN ({marks}) AND n.id != ?"
-        ") WHERE matched > 0 ORDER BY matched DESC, updated_at DESC LIMIT ?",
-        params,
+        f"""SELECT m.id,m.thread_id,m.content,m.created_at,t.title
+            FROM messages_fts JOIN messages m ON m.rowid=messages_fts.rowid
+            JOIN threads t ON t.id=m.thread_id
+            WHERE messages_fts MATCH ? AND {owner_filter} AND m.delivery_state='delivered'
+              AND {_owned_threads('t')} {source_scope}
+              AND (m.thread_id<>? OR m.seq IS NOT NULL AND m.seq<=?)
+              AND {_OWNER_FUNCTION}(m.role,m.content,m.metadata) {matching}
+            ORDER BY m.created_at DESC LIMIT ?""",
+        [_fts_title(terms), *owner_params, user_id, *source_params,
+         caller_thread_id, caller_cut, *match_params, SOURCE_CANDIDATES],
     ).fetchall()
-    scored = []
-    for position, row in enumerate(rows):
-        body = f"{row['title']} {row['acceptance_criteria']} {row['description'] or ''}"
-        score = _coverage(body, chosen, title_terms)
-        if _clears(score, need):
-            scored.append((score, position, row))
-    scored.sort(key=lambda item: (-item[0][0], -item[0][1], item[1]))
     hits = []
-    for score, position, row in scored[:MAX_HITS]:
-        evidence = public.latest_review_evidence(
-            str(row["id"]), requirements_revision=row["requirements_revision"], db=db,
-        )
-        said = "" if evidence is None else f" — {evidence['evidence']}"
-        # plan_read opens a node only in the caller's own plan, and nothing
-        # reads another thread's node: the pointer names what the read does
-        # return (that thread's messages) and says the node is not it.
-        owner = str(row["owner_id"])
-        if owner == caller_thread_id:
-            pointer, action = str(row["id"]), f'plan_read(node_id="{row["id"]}")'
-        else:
-            pointer = owner
-            action = (
-                f'get_thread_history(thread_id="{owner}") — '
-                "that thread's messages, not this node"
-            )
-        line = (
-            f"node {row['state']} · thread {owner[:8]} · "
-            f"{str(row['updated_at'])[:10]} · "
-            f"{snippet(str(row['title']) + said, LINE_TEXT_CHARS)} → {action}"
-        )
-        # Scan position (most shared title terms, then newest) breaks ties.
-        hits.append(_Hit(score, float(position), line, pointer))
+    for row in rows:
+        found = match(terms, str(row["content"]))
+        if found:
+            line = f'{local_clock(str(row["created_at"]))} · message in “{row["title"]}” · “{_excerpt(found)}” → get_thread_history(thread_id="{row["thread_id"]}")'
+            hits.append(_Hit(found, str(row["created_at"]), "message", line))
     return hits
 
 
+def _comment_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[_Hit]:
+    from core.correction_targets import comment_target_sql
 
-def _log(reason: str, trigger: str, hits: int) -> None:
-    log.info(
-        "node_start_recall reason={} trigger={} hits={}", reason, trigger, hits,
-    )
+    source_scope, source_params = _source_scope("t", "c.created_at", caller, cloud_off, cutoff)
+    matching, match_params = _matching("c.body", terms)
+    rows = db.execute(
+        f"""SELECT c.id,c.artifact_id,c.body,c.created_at,ai.title,ai.path
+            FROM doc_comments c JOIN threads t ON t.id=({comment_target_sql('c')})
+            LEFT JOIN artifact_identities ai ON ai.id=c.artifact_id
+            WHERE c.author_kind='user' AND {_owned_threads('t')} {source_scope} {matching}
+            ORDER BY c.created_at DESC,c.id DESC LIMIT ?""",
+        [user_id, *source_params, *match_params, SOURCE_CANDIDATES],
+    ).fetchall()
+    hits = []
+    for row in rows:
+        found = match(terms, str(row["body"]))
+        if found:
+            about = row["title"] or row["path"] or row["artifact_id"]
+            line = f'{local_clock(str(row["created_at"]))} · comment on “{about}” · “{_excerpt(found)}”'
+            hits.append(_Hit(found, str(row["created_at"]), "comment", line))
+    return hits
 
 
-def _log_error(trigger: str, exc: Exception) -> None:
-    """Log a skipped lookup loudly enough that a lasting failure is diagnosable."""
-    log.opt(exception=exc).warning(
-        "node_start_recall reason=error trigger={} hits=0 error={}: {}",
-        trigger, type(exc).__name__, exc,
-    )
+def _decision_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[_Hit]:
+    from plans.public import DECISION_TYPE
+
+    answer = "json_extract(ai.metadata,'$.plan_decision.answer.text')"
+    answered_at = "json_extract(ai.metadata,'$.plan_decision.answered_at')"
+    source_scope, source_params = _source_scope("t", answered_at, caller, cloud_off, cutoff)
+    matching, match_params = _matching(answer, terms)
+    rows = db.execute(
+        f"""SELECT ai.external_id,json_extract(ai.metadata,'$.plan_decision.title') AS title,
+                   {answer} AS answer,{answered_at} AS answered_at
+            FROM artifact_identities ai
+            JOIN threads t ON t.id=json_extract(ai.metadata,'$.plan_decision.thread_id')
+            WHERE ai.integration='local' AND ai.type=? AND ai.state='active'
+              AND json_extract(ai.metadata,'$.plan_decision.state')='answered'
+              AND json_type(ai.metadata,'$.plan_decision.answer.text')='text'
+              AND {_owned_threads('t')} {source_scope} {matching}
+            ORDER BY answered_at DESC LIMIT ?""",
+        [DECISION_TYPE, user_id, *source_params, *match_params, SOURCE_CANDIDATES],
+    ).fetchall()
+    hits = []
+    for row in rows:
+        text, created_at = str(row["answer"]), str(row["answered_at"])
+        found = match(terms, text)
+        if found:
+            line = f'{local_clock(created_at)} · answer to decision “{row["title"] or row["external_id"]}” · “{_excerpt(found)}”'
+            hits.append(_Hit(found, created_at, "decision", line))
+    return hits
+
+
+def _rule_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[_Hit]:
+    # Both rule fields are statement entries (core.continuity_types), so the statement is the rule's text.
+    statement = "json_extract(ce.body,'$.statement')"
+    source_scope, source_params = _source_scope("t", "ce.updated_at", caller, cloud_off, cutoff)
+    fields = sorted(RULE_FIELDS)
+    matching, match_params = _matching(statement, terms)
+    rows = db.execute(
+        f"""WITH top AS (
+              SELECT ce.thread_id,ce.history_epoch,ce.entry_id,ce.revision,ce.updated_at,{statement} AS statement
+              FROM continuity_entries ce JOIN threads t ON t.id=ce.thread_id
+              WHERE {_owned_threads('t')} AND ce.state='active'
+                AND ce.field IN (?,?)
+                AND EXISTS (SELECT 1 FROM json_each(ce.body,'$.source_refs')
+                            WHERE json_extract(value,'$.kind')='user')
+                AND NOT (ce.thread_id=? AND ce.history_epoch=t.history_epoch)
+                {source_scope} {matching}
+              ORDER BY ce.updated_at DESC LIMIT ?)
+            SELECT top.*,checkpoints.id AS checkpoint_id
+            FROM top LEFT JOIN checkpoint_entry_search entry_index
+              ON entry_index.thread_id=top.thread_id AND entry_index.history_epoch=top.history_epoch
+             AND entry_index.entry_id=top.entry_id AND entry_index.revision=top.revision
+            LEFT JOIN checkpoints ON checkpoints.generation_order=entry_index.last_generation_order
+            ORDER BY top.updated_at DESC""",
+        [user_id, *fields, caller_thread_id, *source_params, *match_params, SOURCE_CANDIDATES],
+    ).fetchall()
+    hits = []
+    for row in rows:
+        found = match(terms, str(row["statement"] or ""))
+        if found:
+            pointer = f' → get_checkpoints(checkpoint_id="{row["checkpoint_id"]}")' if row["checkpoint_id"] else ""
+            line = f'{local_clock(str(row["updated_at"]))} · rule an agent recorded from their words (thread {str(row["thread_id"])[:8]}) · “{_excerpt(found)}”{pointer}'
+            hits.append(_Hit(found, str(row["updated_at"]), "rule", line))
+    return hits
+
+
+def _excerpt(found: Match) -> str:
+    text = " ".join(found.span.split())
+    if len(text) <= 280:
+        return text
+    first = first_term_at(found.matched_terms, text)
+    start = max(0, min(first - 120, len(text) - 277))
+    end = min(len(text), start + 277)
+    prefix = "…" if start else ""
+    suffix = "…" if end < len(text) else ""
+    return prefix + text[start:end].strip() + suffix
+
+
+def _newest_first(created_at: str) -> float:
+    try:
+        value = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        return -value.replace(tzinfo=value.tzinfo or UTC).timestamp()
+    except ValueError:
+        return 0
+
+
+def _kind_counts(hits: list[_Hit]) -> str:
+    return ",".join(f"{kind}:{sum(hit.kind == kind for hit in hits)}" for kind in ("message", "comment", "decision", "rule"))
+
+
+def _log(reason: str, trigger: str, hits: list[_Hit], started: float, thread_id: str) -> None:
+    ms = (perf_counter() - started) * 1000
+    log.info("prior_words reason={} trigger={} hits={} kinds={} ms={:.1f}", reason, trigger, len(hits), _kind_counts(hits), ms)
+    _emit(reason, trigger, hits, ms, thread_id)
+
+
+def _log_error(trigger: str, exc: Exception, started: float, thread_id: str) -> None:
+    ms = (perf_counter() - started) * 1000
+    log.opt(exception=exc).warning("prior_words reason=error trigger={} hits=0 kinds=message:0,comment:0,decision:0,rule:0 ms={:.1f} error={}: {}", trigger, ms, type(exc).__name__, exc)
+    _emit("error", trigger, [], ms, thread_id)
+
+
+def _emit(reason: str, trigger: str, hits: list[_Hit], ms: float, thread_id: str) -> None:
+    """Record each lookup's outcome as counts only; no words leave the lookup."""
+    emit_product_event("prior_words", reason, thread_id=thread_id, properties={
+        "trigger": trigger, "hits": len(hits), "kinds": _kind_counts(hits), "ms": round(ms, 1),
+    })

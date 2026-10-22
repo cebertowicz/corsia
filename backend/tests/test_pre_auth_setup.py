@@ -265,7 +265,7 @@ def test_first_account_issues_normal_browser_session(client, workspace):
     assert len(sessions) == 1
     assert sessions[0]["label"] == "browser"
     profile = (workspace / "context" / "50-USER-PROFILE.md").read_text(encoding="utf-8")
-    assert "- **Preferred name:** First Person\n" in profile
+    assert "- **Preferred name:** First\n- **Full name:** First Person\n" in profile
     assert "- **Email:** first@example.test\n" in profile
 
 

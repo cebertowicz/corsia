@@ -56,7 +56,7 @@ fn unregister_unless_locked_with(
     }
 }
 
-pub(super) fn unregister_unless_locked(app: &tauri::AppHandle) -> Result<(), String> {
+pub(super) fn unregister_unless_locked<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
     unregister_unless_locked_with(
         || match app.try_state::<super::AppServiceState>() {
             Some(service) => super::operation_is_active(service_port(app, &service)),
@@ -132,7 +132,7 @@ pub fn retry_quit(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn service_port(app: &tauri::AppHandle, service: &super::AppServiceState) -> u16 {
+pub(super) fn service_port<R: tauri::Runtime>(app: &tauri::AppHandle<R>, service: &super::AppServiceState) -> u16 {
     service.app_dir.lock().ok().and_then(|dir| dir.clone())
         .or_else(|| super::default_app_dir(app).ok())
         .as_deref().and_then(super::first_run::recorded_port)
