@@ -25,7 +25,7 @@ export interface RunStub {
 	kinds: string[];
 	/** Older rows of this run may sit on a page not read yet: the server cut the run at its scan edge. */
 	continuesOlder: boolean;
-	/** The window the run's last visible `browser_open` put in front of the person, for the said-to-you row after it. */
+	/** The window the run's newest open put in front of the person, as its Steps stored it; the block shows it. */
 	browserChip?: BrowserChip;
 }
 
@@ -83,7 +83,6 @@ export function combineStubs(stubs: readonly RunStub[]): RunStub {
 	for (const id of ordered.flatMap((stub) => stub.turnIds)) {
 		if (turnIds[turnIds.length - 1] !== id) turnIds.push(id);
 	}
-	const browserChip = [...ordered].reverse().find((stub) => stub.browserChip)?.browserChip;
 	return {
 		firstId: oldest.firstId,
 		lastId: newest.lastId,
@@ -94,7 +93,6 @@ export function combineStubs(stubs: readonly RunStub[]): RunStub {
 		weight: ordered.reduce((total, stub) => total + stub.weight, 0),
 		kinds: [...new Set(ordered.flatMap((stub) => stub.kinds))].sort(),
 		continuesOlder: oldest.continuesOlder,
-		...(browserChip && { browserChip }),
 	};
 }
 

@@ -342,3 +342,22 @@ def message_transcript_seq(thread_id: str, message_id: str, db=None) -> int | No
         return None
     value = _row_value(row, "seq")
     return int(value) if isinstance(value, int) and value > 0 else None
+
+
+def stored_browser_chip(thread_id: str, message_id: str, db=None) -> dict:
+    """The browser chip a Step's result write stored on it, as metadata to merge; `{}` when it has none.
+
+    A live frame that finalizes the Step carries what the row holds, so it reads the same as a reload
+    (``core.tool_result_delivery`` stores it).
+    """
+    connection = db or get_db()
+    try:
+        row = connection.execute(
+            "SELECT json_extract(metadata, '$.browser_chip') FROM messages "
+            "WHERE id=? AND thread_id=? AND json_valid(metadata)",
+            (message_id, thread_id),
+        ).fetchone()
+    finally:
+        if db is None:
+            connection.close()
+    return {"browser_chip": json.loads(row[0])} if row is not None and row[0] else {}

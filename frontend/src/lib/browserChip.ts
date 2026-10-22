@@ -1,8 +1,8 @@
 /**
- * The chip that reopens the shared browser from the message whose tool call opened it in front of the person.
+ * The chip that reopens the shared browser from the Step whose tool call opened it in front of the person.
  *
- * The server decides whether a call earns one (a settled, visible `browser_open`) and puts `browser_chip` on that
- * call, on a Focus run stub, and on live frames alike. This module only reads it: it picks the last one and words it.
+ * The server decides whether a call earns one (a visible `browser_open` that succeeded) and stores `browser_chip` on
+ * that call's Step as it settles; a Focus run stub carries the newest of its Steps'. This module only reads and words it.
  */
 export interface BrowserChip {
 	/** The page's host without `www.`; `null` when the opened URL named none. */
@@ -23,14 +23,4 @@ export function parseBrowserChip(raw: unknown): BrowserChip | null {
 	const host = (raw as { host?: unknown }).host;
 	if (host !== null && typeof host !== 'string') return null;
 	return { host: host || null };
-}
-
-/** Every open in a thread reopens the same browser view, so a message gets one chip, for its last call that has one. */
-export function lastBrowserChip(calls: unknown): BrowserChip | null {
-	if (!Array.isArray(calls)) return null;
-	for (let i = calls.length - 1; i >= 0; i--) {
-		const chip = parseBrowserChip(calls[i]?.browser_chip);
-		if (chip) return chip;
-	}
-	return null;
 }

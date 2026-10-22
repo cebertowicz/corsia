@@ -167,53 +167,57 @@ describe('a seed, which the transcript never draws', () => {
 
 describe('the browser chip a stub carries', () => {
 	const github = { host: 'github.com' };
-	const shown = (entries: TranscriptEntry[]) => entries.flatMap((entry) => (
-		entry.kind === 'message' ? [entry.message.browserChip ?? null] : []
-	));
+	const other = { host: 'example.org' };
+	const blockChips = (entries: TranscriptEntry[]) => folds(entries).map((fold) => fold.browserChip ?? null);
+	const opened = (row: TranscriptMessage, chip: { host: string }) => ({ ...row, metadata: { ...row.metadata, browser_chip: chip } });
 
-	it('goes to the said-to-you row after the stub, and only that row', () => {
+	it('goes to the block the stub stands for, never to the said-to-you row after it', () => {
 		const entries = build(
 			[human('ask', 1, '10:00:00', 't1', '10:00:00'), said('reply', 6, '10:10:00')],
 			[stub(2, 5, { browserChip: github })],
 		);
 
-		expect(shown(entries)).toEqual([null, github]);
-		expect(folds(entries)[0].items).toEqual([]);
+		expect(blockChips(entries)).toEqual([github]);
+		expect(entries.flatMap((entry) => (entry.kind === 'message' ? [entry.message.metadata?.browser_chip ?? null] : []))).toEqual([null, null]);
 	});
 
-	it('is not carried past a human message into the next run', () => {
+	it('is not carried past a human message into the next block', () => {
 		const entries = build(
 			[human('ask', 1, '10:00:00', 't1', '10:00:00'), human('again', 6, '10:05:00', 't1', '10:05:00'), said('reply', 9, '10:10:00')],
-			[stub(2, 5, { browserChip: github })],
+			[stub(2, 5, { browserChip: github }), stub(7, 8)],
 		);
 
-		expect(shown(entries)).toEqual([null, null, null]);
+		expect(blockChips(entries)).toEqual([github, null]);
 	});
 
-	it('goes to the first said-to-you row of its run, not a later one', () => {
-		const entries = build(
-			[said('first', 6, '10:10:00'), said('second', 7, '10:11:00')],
-			[stub(2, 5, { browserChip: github })],
-		);
-
-		expect(shown(entries)).toEqual([github, null]);
-	});
-
-	it('gives each run its own chip', () => {
-		const other = { host: 'example.org' };
+	it('gives each block its own chip', () => {
 		const entries = build(
 			[said('one', 6, '10:10:00'), said('two', 12, '10:20:00')],
 			[stub(2, 5, { browserChip: github }), stub(8, 11, { browserChip: other })],
 		);
 
-		expect(shown(entries)).toEqual([github, other]);
+		expect(blockChips(entries)).toEqual([github, other]);
 	});
 
-	it('is read from the page, dropped when malformed, and kept by the last stub of a joined run', () => {
+	it('takes the newest of the stubs a block joins and the Steps it loaded, by position', () => {
+		const newerStep = build(
+			[opened(work('w6', 6, '10:06:00'), other), said('reply', 7, '10:10:00')],
+			[stub(2, 5, { browserChip: github })],
+		);
+		const newerStub = build(
+			[opened(work('w2', 2, '10:02:00'), other), said('reply', 9, '10:10:00')],
+			[stub(3, 5), stub(6, 8, { browserChip: github })],
+		);
+
+		expect(blockChips(newerStep)).toEqual([other]);
+		expect(blockChips(newerStub)).toEqual([github]);
+	});
+
+	it('is read from the page and dropped when malformed; joining stubs keeps no chip of its own', () => {
 		const raw = (browser_chip: unknown) => ({ kind: 'run', first_id: 'a', last_id: 'b', first_seq: 2, last_seq: 5, browser_chip });
 		expect(parseRunStubs({ runs: [raw(github)] })[0].browserChip).toEqual(github);
 		expect(parseRunStubs({ runs: [raw({ label: 'x' })] })[0].browserChip).toBeUndefined();
 		expect(parseRunStubs({ runs: [raw(undefined)] })[0].browserChip).toBeUndefined();
-		expect(combineStubs([stub(2, 3, { browserChip: github }), stub(4, 5)]).browserChip).toEqual(github);
+		expect(combineStubs([stub(2, 3, { browserChip: github }), stub(4, 5)])).not.toHaveProperty('browserChip');
 	});
 });

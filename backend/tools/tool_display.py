@@ -2,7 +2,10 @@
 
 Live ``tool_start``/``tool_done`` frames and the reload projection call
 ``project_tool_display`` with the same inputs, so a row reads the same live
-and after reload. Nothing it derives is stored.
+and after reload. Nothing it derives is stored but the browser chip: the result
+write (``core.tool_result_delivery``) keeps it on the call's Assistant Step
+once, as the call settles, so a Focus page reads it in SQL the way it reads an
+error's ``recovered`` mark (``infra.error_recovery``).
 """
 
 from __future__ import annotations
@@ -53,7 +56,8 @@ class ToolDisplay:
     error_line: str | None = None
     # The argument the phrase names, unshortened; block summaries count by it.
     object: str = ""
-    # The shared browser window a settled, visible `browser_open` put in front of the person: `{"host": ...}`.
+    # The shared browser window a visible `browser_open` put in front of the person: `{"host": ...}`. Stored on
+    # the Step when the call settles, never sent per call.
     browser_chip: dict | None = None
 
     def outcome_fields(self) -> dict:
@@ -66,10 +70,7 @@ class ToolDisplay:
         return fields
 
     def fields(self) -> dict:
-        fields = {"phrase": self.phrase, "object": self.object, **self.outcome_fields()}
-        if self.browser_chip is not None:
-            fields["browser_chip"] = self.browser_chip
-        return fields
+        return {"phrase": self.phrase, "object": self.object, **self.outcome_fields()}
 
 
 def _outcome(settled: SettledResult) -> ToolOutcome | None:
@@ -118,8 +119,8 @@ def _browser_host(url: object) -> str | None:
 
 
 def _browser_chip(tool: str, arguments: object, outcome: ToolOutcome | None) -> dict | None:
-    """The chip for a visible `browser_open` that did not fail; a headless open puts nothing in front of anyone."""
-    if normalize_tool_name(tool) != "browser_open" or outcome in ("failed", "refused"):
+    """The chip for a visible `browser_open` that succeeded; a headless open puts nothing in front of anyone."""
+    if normalize_tool_name(tool) != "browser_open" or outcome != "done":
         return None
     if not isinstance(arguments, dict) or arguments.get("show_window") is not True:
         return None

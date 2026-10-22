@@ -16,7 +16,7 @@ from infra.context_receipts import (
     context_usage_summary, live_context_usage_payload,
 )
 from core.turn_error_surface import persist_llm_error
-from infra.queries import insert_message
+from infra.queries import insert_message, stored_browser_chip
 from llm.error_cause import error_fields
 from core.plan_turn_end import record_turn_end_logged
 from core.turn_core import TurnIdentity
@@ -280,7 +280,7 @@ class StepHandler:
         if any(call.get("result") is None for call in self.tool_calls):
             raise RuntimeError("Assistant Step finalized before every tool result settled")
 
-        metadata = self._base_meta()
+        metadata = {**self._base_meta(), **await run_in_db(stored_browser_chip, self.thread_id, self.tool_step_id)}
         metadata["tool_hints"] = self.tool_hints[:]
         metadata["tool_calls"] = [dict(call) for call in self.tool_calls]
         if self.tool_step_reasoning:

@@ -4,7 +4,7 @@
 	import { externalModelDisplayName } from '$lib/modelDisplayName';
 	import { models, type Model } from '$lib/stores/models';
 	import { canonicalName } from '$lib/stores/modelGroups';
-	import { lastBrowserChip } from '$lib/browserChip';
+	import { parseBrowserChip } from '$lib/browserChip';
 	import MessageArtifactCards from './MessageArtifactCards.svelte';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
 
@@ -54,8 +54,8 @@
 			status: 'done' as const,
 		}));
 	});
-	// Focus shows a said-to-you message without its tool calls, so a row that already read the chip carries it as `browserChip`.
-	const browserChip = $derived(msg.browserChip !== undefined ? msg.browserChip : lastBrowserChip(msg.metadata?.tool_calls));
+	// The Step that opened the browser carries the chip the server stored on it as the open settled.
+	const browserChip = $derived(parseBrowserChip(msg.metadata?.browser_chip));
 	const footerLabel = $derived(messageFooterLabel(msg.metadata, $models));
 
 	function modelTail(id: string): string {

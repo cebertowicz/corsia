@@ -8,9 +8,9 @@ import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { setFocusMode } from '../support/focusMode';
 
 /**
- * The chip a message carries after it opened the shared browser in front of the person. The fixture writes the
- * assistant steps and the tool results that settle them the way the backend stores them, so the transcript is
- * read through the production display projection and the real components draw the chip.
+ * The chip a Step carries after it opened the shared browser in front of the person. The fixture writes the
+ * assistant steps, the tool results that settle them, and the chip the result write stores on a Step whose visible
+ * open succeeded, the way the backend stores them, so the real page read and components draw the chip.
  */
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const backendDir = path.join(repoRoot, 'backend');
@@ -41,9 +41,16 @@ function insertRow(threadId: string, role: string, content: string, metadata: Re
 
 type Call = ReturnType<typeof open>;
 
-// A step that made tool calls, then the stored result of each, which is what settles them.
+// A step that made tool calls, then the stored result of each, which is what settles them. The newest visible open's
+// chip is stored on the Step as the backend's result write stores it (`core.tool_result_delivery`).
 function insertStep(threadId: string, content: string, metadata: Record<string, unknown>, calls: Call[] = []): void {
-	const stepId = insertRow(threadId, 'assistant', content, calls.length ? { ...metadata, llm_tool_calls: calls } : metadata);
+	const chip = calls.map((call) => call.chip).filter((host) => host !== null).at(-1);
+	const stored = {
+		...metadata,
+		...(calls.length && { llm_tool_calls: calls.map(({ chip: _, ...call }) => call) }),
+		...(chip !== undefined && { browser_chip: { host: chip } }),
+	};
+	const stepId = insertRow(threadId, 'assistant', content, stored);
 	for (const call of calls) {
 		insertRow(threadId, 'tool', 'opened', { assistant_step_id: stepId, tool_call_id: call.id });
 	}
@@ -54,6 +61,8 @@ function open(url: string, showWindow: boolean) {
 		id: `call-${Math.random().toString(36).slice(2, 9)}`,
 		type: 'function',
 		function: { name: 'browser_open', arguments: JSON.stringify(showWindow ? { url, show_window: true } : { url }) },
+		// The host the server would store for this open; a headless one earns none.
+		chip: showWindow ? new URL(url).hostname.replace(/^www\./, '') : null,
 	};
 }
 
@@ -85,6 +94,15 @@ async function seedOpenThenUpdate(request: APIRequestContext, label: string): Pr
 	const threadId = await createSession(request, title);
 	insertStep(threadId, 'Opening the repository.', { turn_id: 't1' }, [open('https://www.github.com/cebertowicz/corsia', true)]);
 	insertStep(threadId, 'I put the repository in front of you.', { turn_id: 't1', for_user: true });
+	return { threadId, title };
+}
+
+// The update says it first and the open comes after it, with nothing said since.
+async function seedUpdateThenOpen(request: APIRequestContext, label: string): Promise<Seed> {
+	const title = `Browser chip ${label} ${Math.random().toString(36).slice(2, 7)}`;
+	const threadId = await createSession(request, title);
+	insertStep(threadId, 'I will put the repository in front of you.', { turn_id: 't1', for_user: true });
+	insertStep(threadId, 'Opening the repository.', { turn_id: 't1' }, [open('https://www.github.com/cebertowicz/corsia', true)]);
 	return { threadId, title };
 }
 
@@ -145,39 +163,60 @@ for (const width of [1440, 393] as const) {
 			await screenshot(page, `browser-chip-clicked-${width}`);
 		});
 
-		test(`@surface:browser-chip Focus on: the chip shows with the update the person reads, other opens stay inside their block (${width})`, async ({ page, request }, info) => {
+		const block = (page: Page) => page.locator('[data-work-block]');
+		const blockChip = (page: Page, host: string) => block(page).locator('.fold-browser').getByRole('button', { name: host, exact: true });
+
+		test(`@surface:browser-chip Focus on: the collapsed block that holds the opens shows the newest one, each opening row shows its own once open (${width})`, async ({ page, request }, info) => {
 			test.skip(width !== 393 && info.project.name === 'chromium-mobile', 'desktop is proved by the desktop project');
 			await setFocusMode(request, true);
 			const seeded = await seed(request, `on ${width}`);
 			await openTranscript(page, seeded, width);
 
-			const chip = reopen(page, 'github.com');
-			await expect(chip).toBeVisible();
-			await expect(chip.locator('xpath=ancestor::ul[contains(@class, "chips")]').locator('button.tile.chip')).toHaveCount(2);
-			// The earlier step is work Focus tucks into its block, so its chip is not on screen until the block opens.
+			// The update's own open is work, so its chip goes to the block with the earlier one; the newest shows.
+			await expect(blockChip(page, 'github.com')).toBeVisible();
+			await expect(reopen(page, 'github.com')).toHaveCount(1);
 			await expect(reopen(page, 'example.org')).toHaveCount(0);
+			// The update keeps its file chip alone.
+			const update = page.locator('.message').filter({ hasText: 'I opened the repository for you' });
+			await expect(update.locator('button.tile.chip')).toHaveCount(1);
 			await screenshot(page, `browser-chip-focus-on-${width}`);
-			// Opening the block shows the step's own chip beside its words, as it does for a file the step names.
+			// Opening the block moves each chip to the row that opened it.
 			await page.getByRole('button', { name: /Worked/ }).click();
+			await expect(block(page).locator('.fold-browser')).toHaveCount(0);
 			await expect(reopen(page, 'example.org')).toBeVisible();
+			await expect(reopen(page, 'github.com')).toBeVisible();
 			await screenshot(page, `browser-chip-focus-on-block-open-${width}`);
-			await chip.click();
+			await reopen(page, 'github.com').click();
 			await expect(page.locator('.browser-leaf')).toBeVisible();
 			await screenshot(page, `browser-chip-focus-on-clicked-${width}`);
 		});
 
-		test(`@surface:browser-chip Focus on: an update sent after the open, in its own message, carries the chip (${width})`, async ({ page, request }, info) => {
+		test(`@surface:browser-chip Focus on: an update sent after the open leaves the chip on the block that opened it (${width})`, async ({ page, request }, info) => {
 			test.skip(width !== 393 && info.project.name === 'chromium-mobile', 'desktop is proved by the desktop project');
 			await setFocusMode(request, true);
 			const seeded = await seedOpenThenUpdate(request, `later ${width}`);
 			await openTranscript(page, seeded, width);
 
 			await expect(page.getByText('I put the repository in front of you.')).toBeVisible();
-			const chip = reopen(page, 'github.com');
-			await expect(chip).toHaveCount(1);
-			await expect(chip).toBeVisible();
+			await expect(reopen(page, 'github.com')).toHaveCount(1);
+			await expect(blockChip(page, 'github.com')).toBeVisible();
 			await screenshot(page, `browser-chip-focus-on-later-update-${width}`);
-			await chip.click();
+			await blockChip(page, 'github.com').click();
+			await expect(page.locator('.browser-leaf')).toBeVisible();
+		});
+
+		test(`@surface:browser-chip Focus on: an open after the update, with nothing said since, shows on its block (${width})`, async ({ page, request }, info) => {
+			test.skip(width !== 393 && info.project.name === 'chromium-mobile', 'desktop is proved by the desktop project');
+			await setFocusMode(request, true);
+			const seeded = await seedUpdateThenOpen(request, `trailing ${width}`);
+			await openTranscript(page, seeded, width);
+
+			await expect(page.getByText('I will put the repository in front of you.')).toBeVisible();
+			const update = page.locator('.message').filter({ hasText: 'I will put the repository in front of you.' });
+			await expect(update.locator('button.tile.chip')).toHaveCount(0);
+			await expect(blockChip(page, 'github.com')).toBeVisible();
+			await screenshot(page, `browser-chip-focus-on-update-then-open-${width}`);
+			await blockChip(page, 'github.com').click();
 			await expect(page.locator('.browser-leaf')).toBeVisible();
 		});
 	});

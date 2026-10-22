@@ -13,14 +13,9 @@ afterEach(() => {
 	host = null;
 });
 
-const call = (args: Record<string, unknown>, over: Record<string, unknown> = {}) => (
-	{ id: 'c1', name: 'browser_open', args, ...over }
-);
-// The server marks a settled, visible open; the message reads the mark and decides nothing.
-const opened = (hostName: string | null = 'github.com') =>
-	call({ url: 'https://github.com', show_window: true }, { browser_chip: { host: hostName } });
+const open = { id: 'c1', name: 'browser_open', args: { url: 'https://github.com', show_window: true } };
 
-function render(calls: unknown[], over: Record<string, unknown> = {}): HTMLElement {
+function render(metadata: Record<string, unknown>): HTMLElement {
 	if (component) unmount(component);
 	host?.remove();
 	host = document.createElement('div');
@@ -28,7 +23,7 @@ function render(calls: unknown[], over: Record<string, unknown> = {}): HTMLEleme
 	component = mount(AssistantMessage, {
 		target: host,
 		props: {
-			msg: { id: 'a1', thread_id: 't1', content: '', created_at: '2026-09-25T08:00:00Z', metadata: { tool_calls: calls }, ...over },
+			msg: { id: 'a1', thread_id: 't1', content: '', created_at: '2026-09-25T08:00:00Z', metadata },
 			expandedTools: new Set<string>(),
 			expandedReasoning: new Set<string>(),
 			onToggleToolBlock: () => {},
@@ -40,21 +35,22 @@ function render(calls: unknown[], over: Record<string, unknown> = {}): HTMLEleme
 }
 
 describe('AssistantMessage browser chip', () => {
-	it('shows the chip on a message with no cards whose tool call carries one', () => {
-		const chips = render([opened()]).querySelectorAll('button.tile.chip');
+	// The server stores the chip on the Step as a visible open succeeds; the message reads it and decides nothing.
+	it('shows the chip the Step carries', () => {
+		const chips = render({ tool_calls: [open], browser_chip: { host: 'github.com' } }).querySelectorAll('button.tile.chip');
 		expect(chips).toHaveLength(1);
 		expect(chips[0].getAttribute('title')).toBe('Reopen the shared browser');
 		expect(chips[0].querySelector('.title')?.textContent).toBe('github.com');
 	});
 
-	it('shows no strip for a call the server gave no chip, however it looks, or for no tool calls', () => {
-		expect(render([call({ url: 'https://github.com', show_window: true })]).querySelector('.cards')).toBeNull();
-		expect(render([call({ url: 'https://github.com', show_window: true }, { status: 'running' })]).querySelector('.cards')).toBeNull();
-		expect(render([]).querySelector('.cards')).toBeNull();
+	it('names the shared browser when the open had no host', () => {
+		expect(render({ browser_chip: { host: null } }).querySelector('button.tile.chip .title')?.textContent).toBe('Shared browser');
 	});
 
-	it('keeps the chip a Focus row carries after its tool calls are stripped', () => {
-		expect(render([], { browserChip: { host: 'github.com' } }).querySelectorAll('button.tile.chip')).toHaveLength(1);
-		expect(render([opened()], { browserChip: null }).querySelector('.cards')).toBeNull();
+	it('shows no strip for a Step with no stored chip, however its calls look', () => {
+		expect(render({ tool_calls: [open] }).querySelector('.cards')).toBeNull();
+		expect(render({ tool_calls: [{ ...open, browser_chip: { host: 'github.com' } }] }).querySelector('.cards')).toBeNull();
+		expect(render({ browser_chip: { host: 3 } }).querySelector('.cards')).toBeNull();
+		expect(render({}).querySelector('.cards')).toBeNull();
 	});
 });
