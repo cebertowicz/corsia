@@ -1,8 +1,9 @@
-"""The reads rule evaluation makes once a rule matched: threads and wake budget.
+"""The reads rule evaluation makes: the rules for an event, then threads and wake budget.
 
-Each is one indexed read, made only after ``events.rules`` found a matching
-rule, so an event no rule matches never pays them. The artifact's owner and
-lifecycle are routing's, never read again here. Names no connector.
+Each is one indexed read. The rules read is the one every event pays; the
+others are made only after ``events.rules`` found a matching rule, so an event
+no rule matches never pays them. The artifact's owner and lifecycle are
+routing's, never read again here. Names no connector.
 """
 
 from __future__ import annotations
@@ -12,6 +13,26 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from infra.queries import thread_available_sql
+
+
+def enabled_rules(
+    db: sqlite3.Connection, connector: str, event_type: str, prefix: str,
+    thread: str | None, scopes: list[str],
+) -> list[sqlite3.Row]:
+    """The enabled rules for one declared type in ``thread``'s project (scope
+    ``prefix`` + its project), else in ``scopes``: one read through the
+    ``(scope, connector, event_type, enabled)`` index."""
+    if thread is not None:
+        where, params = "scope=? || (SELECT project_id FROM threads WHERE id=?)", [prefix, thread]
+    elif scopes:
+        where, params = f"scope IN ({','.join('?' * len(scopes))})", list(scopes)
+    else:
+        return []
+    return db.execute(
+        f"SELECT * FROM event_rules WHERE {where} AND connector=? AND event_type=? "
+        "AND enabled=1 ORDER BY created_at, id",
+        [*params, connector, event_type],
+    ).fetchall()
 
 
 def threads(db: sqlite3.Connection, ids: Iterable[str | None]) -> dict[str, Mapping[str, Any]]:

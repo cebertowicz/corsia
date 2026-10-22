@@ -202,6 +202,19 @@ def _project_repositories(project_id: str) -> frozenset[str] | None:
         return None
 
 
+def _repository_projects(repository: str) -> frozenset[str] | None:
+    """The projects whose registered source repositories track ``repository``."""
+    from events.connectors.github_notifications_feed import (
+        FeedError,
+        projects_tracking_github_repository,
+    )
+
+    try:
+        return projects_tracking_github_repository(repository)
+    except FeedError:
+        return None
+
+
 _PR_FILTERABLE = ("repo", "branch", "sha", "pr_number", "author")
 _CHECK_FILTERABLE = ("repo", "branch", "head_sha", "check_suite_id", "conclusion")
 
@@ -258,6 +271,7 @@ MANIFEST = register(ConnectorManifest(
     resolve_relationships=_relationships,
     repository_fact="repo",
     project_repositories=_project_repositories,
+    repository_projects=_repository_projects,
 ))
 
 

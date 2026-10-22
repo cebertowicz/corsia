@@ -87,6 +87,8 @@ class RuleEvent:
     facts: Mapping[str, Any]
     artifact_ref: Mapping[str, str] | None
     ends_artifact: bool = False
+    # Read only when routing gave the event no thread: the projects tracking its repository.
+    repository_projects: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -180,15 +182,28 @@ def from_row(row: Mapping[str, Any]) -> Rule:
     )
 
 
-def lookup(db: sqlite3.Connection, connector: str, event_type: str, thread: str) -> list[Rule]:
-    """The enabled rules for one declared type in ``thread``'s project: the one
-    indexed read every event pays. Rules resolve in the artifact owner's scope."""
-    rows = db.execute(
-        "SELECT * FROM event_rules WHERE scope=? || (SELECT project_id FROM threads WHERE id=?) "
-        "AND connector=? AND event_type=? AND enabled=1 ORDER BY created_at, id",
-        (PROJECT_PREFIX, thread, connector, event_type),
-    ).fetchall()
+def lookup(
+    db: sqlite3.Connection, connector: str, event_type: str, thread: str | None,
+    projects: Iterable[str] = (),
+) -> list[Rule]:
+    """The enabled rules for one declared type in ``thread``'s project (rules resolve
+    in the artifact owner's scope), or, with no thread, in each of ``projects``: the
+    one indexed read every event pays."""
+    rows = rule_reads.enabled_rules(db, connector, event_type, PROJECT_PREFIX, thread,
+                                    [project_scope(project) for project in projects])
     return [from_row(row) for row in rows]
+
+
+def self_on_repository(rule: Rule) -> bool:
+    """An event with no owner and nothing routed reaches only a writer's rule to
+    itself that names the event's repository: create checked that the writer's
+    project tracks that repository, and no one else is reached."""
+    if rule.action != DELIVER or thread_target(rule.to) != rule.created_by:
+        return False
+    from events.connectors import get_manifest
+
+    fact = get_manifest(rule.connector).repository_fact
+    return any(test["field"] == fact and test["op"] in NAMING for test in rule.match)
 
 
 def _same(actual: Any, expected: Any) -> bool:
@@ -327,10 +342,9 @@ def evaluate(
     matches its facts; the caller then delivers exactly as it would without rules.
     """
     by_thread, state, anchor = routed(targets, skipped)
-    if anchor is None:
-        return None  # no owner and nothing routed: no project, so no rule
-    rules = [rule for rule in lookup(db, event.connector, event.event_type, anchor)
-             if matches(rule, event.facts)]
+    rules = [rule for rule in lookup(db, event.connector, event.event_type, anchor,
+                                     () if anchor else event.repository_projects)
+             if matches(rule, event.facts) and (anchor or self_on_repository(rule))]
     if not rules:
         return None
     owner = (state.get("owner") or {}).get("parent_thread_id")

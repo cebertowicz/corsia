@@ -52,8 +52,15 @@ def resolved(monkeypatch):
         in_transaction.append(get_db().in_transaction)
         return TRACKED.get(project_id, frozenset())
 
+    def _tracking(repository):
+        in_transaction.append(get_db().in_transaction)
+        return frozenset(project for project, repos in TRACKED.items() if repository in repos)
+
     monkeypatch.setattr("events.connectors.github_notifications_feed.tracked_github_repositories",
                         _tracked)
+    monkeypatch.setattr(
+        "events.connectors.github_notifications_feed.projects_tracking_github_repository",
+        _tracking)
     yield in_transaction
 
 
@@ -147,8 +154,8 @@ def _sync(number: int, n: int, **kwargs) -> dict:
     return payload
 
 
-def _merged(number: int, author: str = "alice") -> dict:
-    payload = pr_payload(REPO, number, action="closed")
+def _merged(number: int, author: str = "alice", repo: str = REPO) -> dict:
+    payload = pr_payload(repo, number, action="closed")
     payload["pull_request"]["merged"] = True
     payload["pull_request"]["user"] = {"login": author, "type": "User"}
     return payload
@@ -284,7 +291,45 @@ def _purge(thread_id: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_self_rule_fires_on_a_pr_routing_gave_no_thread(isolated_db, sent):
+async def test_a_self_rule_fires_on_a_pr_routing_gave_no_thread(isolated_db, sent, resolved):
+    _project(P, conductor="cond")
+    _agent("cond")
+    _agent("a")
+    _agent("b")
+    rule = await _tool("a", operation="create", connector="github", event_type="pr.merged",
+                       match=[{"field": "repo", "op": "eq", "value": REPO}], note="Unowned PR merged.")
+    # A rule for someone else can't see an event no owner claims, nor can a
+    # self-rule that doesn't name the event's repository.
+    other = await _tool("cond", operation="create", connector="github", event_type="pr.merged",
+                        to="thread:b", mode="digest")
+    unnamed = await _tool("b", operation="create", connector="github", event_type="pr.merged",
+                          note="Any PR merged.")
+
+    with patch("events.connectors.github_rules.apply_routed_rules", lambda *a, **k: None):
+        today = await route(MERGED, _merged(41))
+    resolved.clear()
+    result = await route(MERGED, _merged(42))
+
+    # Today's result and its dead-letter record are unchanged; the rule only adds a wake.
+    assert (result.outcome, result.thread_id, result.reason) == (
+        today.outcome, today.thread_id, today.reason)
+    assert result.outcome == RouteOutcome.DEAD_LETTERED
+    parked = _rows("SELECT external_id, reason FROM dead_letter_events ORDER BY id")
+    assert [row["reason"] for row in parked] == [today.reason, today.reason]
+    assert sent == []
+    [wake] = _wakes("a")
+    assert "Unowned PR merged." in wake
+    [decision] = _decisions()
+    assert (decision["rule_id"], decision["thread_id"], decision["outcome"], decision["via"]) == (
+        rule["id"], "a", "woke", "rule")
+    assert _decisions(rule_id=other["id"]) == [] and _notes("b") == []
+    assert _decisions(rule_id=unnamed["id"]) == [] and _wakes("b") == []
+    # The projects tracking the repository were read once, outside any transaction.
+    assert resolved == [False]
+
+
+@pytest.mark.asyncio
+async def test_a_rule_fires_when_routing_dead_letters_for_an_inactive_owner(isolated_db, sent):
     _project(P)
     _agent("owner")
     _agent("a")
@@ -317,25 +362,42 @@ async def test_a_self_rule_fires_on_a_pr_routing_gave_no_thread(isolated_db, sen
 
 
 @pytest.mark.asyncio
-async def test_an_event_with_no_owner_and_no_thread_reads_no_rule(isolated_db, sent):
-    """Rules resolve in the artifact owner's scope: a PR nobody registered has none."""
-    _project(P)
-    _agent("a")
+async def test_webhook_reads_when_routing_chose_no_thread(isolated_db, sent, monkeypatch):
+    from events import rules
 
-    async def run(number: int) -> list[str]:
+    _project(P)
+    _project(Q)
+    _agent("a")
+    _agent("q", Q)
+    rows: list[str] = []
+    real = rules.from_row
+    monkeypatch.setattr("events.rules.from_row", lambda row: rows.append(row["scope"]) or real(row))
+
+    async def run(number: int, repo: str = REPO) -> list[str]:
+        rows.clear()
         with _statements() as seen:
-            await route(MERGED, _merged(number))
+            await route(MERGED, _merged(number, repo=repo))
         return _reads(seen)
 
     with patch("events.connectors.github_rules.apply_routed_rules", lambda *a, **k: None):
         await run(60)
         before = await run(61)
+    no_rule = await run(62)
     await _tool("a", operation="create", connector="github", event_type="pr.merged",
                 match=[{"field": "repo", "op": "eq", "value": REPO}])
-    matched = await run(62)
+    await _tool("q", operation="create", connector="github", event_type="pr.merged",
+                match=[{"field": "repo", "op": "eq", "value": "q/r"}])
+    matched = await run(63)
+    matched_rows = list(rows)
+    untracked = await run(64, "nobody/tracks")
 
-    assert len(matched) == len(before)
-    assert _decisions() == [] and _wakes("a") == []
+    assert len(no_rule) - len(before) == 1
+    assert _decisions(thread_id="a")[-1]["outcome"] == "woke"
+    # Only the tracking project's rules are read: Q's rule for another repository is not.
+    assert matched_rows == [f"project:{P}"] * 2  # the read-only check, then evaluation
+    assert len(untracked) == len(before) and rows == []
+    print(f"unrouted webhook reads: dev={len(before)} no_rule=+{len(no_rule) - len(before)} "
+          f"matched=+{len(matched) - len(before)} untracked=+{len(untracked) - len(before)}")
 
 
 # -- Burst -----------------------------------------------------------------------------------
@@ -512,6 +574,32 @@ async def test_rules_hold_threads_that_left_their_project(isolated_db, sent, mon
 
 
 @pytest.mark.asyncio
+async def test_r29_a_cloud_off_projects_events_reach_no_cloud_recipient_outside_it(isolated_db, sent):
+    """R29 holds by construction in 2.A: a rule's recipient must be in the rule's
+    project, which is the event's, and no scope can cross projects."""
+    import sqlite3
+
+    _project(P, conductor="cond", cloud_off=True)
+    _project(Q)
+    _agent("cond", local_only=True)
+    _agent("owner", local_only=True)
+    _agent("cloud", local_only=True)
+    register_pr(REPO, 7, "owner")
+    rule = await _tool("cond", operation="create", connector="github",
+                       event_type="pr.synchronize", to="thread:cloud", mode="digest")
+    # The recipient leaves for a project that runs cloud models.
+    _write("UPDATE threads SET project_id=?, local_only=0 WHERE id='cloud'", Q)
+
+    await route(SYNC, _sync(7, 1))
+
+    assert _wakes("cloud") == [] and _notes("cloud") == [] and _digest("cloud") == []
+    assert [(d["outcome"], d["reason"]) for d in _decisions(rule_id=rule["id"])] == [
+        ("held", "recipient outside the rule's project")]
+    with pytest.raises(sqlite3.IntegrityError):  # no rule scope spans projects
+        _write("UPDATE event_rules SET scope='global' WHERE id=?", rule["id"])
+
+
+@pytest.mark.asyncio
 async def test_disabled_rules_age_out_on_the_next_write(isolated_db):
     _project(P)
     _agent("writer")
@@ -591,6 +679,41 @@ async def test_todays_drops_still_come_before_any_rule(isolated_db, sent):
     assert own.outcome == RouteOutcome.SUPPRESSED
     assert sent == []
     assert (_wakes("watcher"), _notes("watcher"), _decisions()) == ([], [], [])
+
+
+def _suite(number: int) -> dict:
+    payload = check_suite_payload(REPO, number, base_ref="dev")
+    payload["check_suite"]["head_sha"] = "sha-s"
+    return payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("internal_event", "payload"), [
+    (SYNC, _sync(7, 1)), ("webhook.github.check_suite_completed", _suite(7))])
+async def test_the_rule_events_artifact_is_the_one_routing_resolved(
+        isolated_db, sent, monkeypatch, internal_event, payload):
+    from events import platform
+
+    monkeypatch.setattr("reviewer.gh_helpers.get_prs_for_sha", lambda *_args: [
+        {"number": 7, "state": "open", "base_ref": "dev", "head_ref": "f", "head_sha": "sha-s"}])
+
+    _project(P)
+    _agent("owner")
+    register_pr(REPO, 7, "owner")
+    seen: list[tuple[dict | None, dict | None]] = []
+    real = platform.apply_webhook_rules_sync
+
+    def capture(envelope, watch_event, targets, **kwargs):
+        identity = next(t.routing_state for t in targets if t.routing_state)["identity"]
+        seen.append((envelope.artifact_ref, identity))
+        return real(envelope, watch_event, targets, **kwargs)
+
+    with patch("events.connectors.github_rules.apply_webhook_rules_sync", capture):
+        await route(internal_event, payload)
+
+    [(artifact_ref, identity)] = seen
+    assert identity is not None
+    assert artifact_ref == {key: identity[key] for key in ("integration", "type", "external_id")}
 
 
 def test_r30_the_mail_pollers_reach_filter_holds_rule_recipients(isolated_db):
