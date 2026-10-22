@@ -249,7 +249,8 @@ def test_the_build_precompiles_and_immutability_checks_bundled_python():
     assert "env -i PATH=" in test
     for module in ("sitecustomize", "json", "ssl", "fastapi"):
         assert f"import {module}" in test
-    assert "stat -f '%m\\t%N'" in test
+    assert "stat -f '%m\\t%p\\t%N'" in test
+    assert "shasum -a 256" in test
     assert "bundled-python-immutability=passed" in test
 
 
