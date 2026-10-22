@@ -23,7 +23,15 @@ def _container_type(schema: Any) -> str | None:
     return declared if isinstance(declared, str) and declared in ("object", "array") else None
 
 
-_SCALAR_TYPES: dict[str, Any] = {"integer": int, "number": (int, float), "boolean": bool}
+_JSON_TYPES: dict[str, Any] = {
+    "string": str,
+    "integer": int,
+    "number": (int, float),
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+}
+_SCALAR_TYPES = ("integer", "number", "boolean")
 
 
 def _scalar_text(value: str, declared: str) -> Any:
@@ -40,7 +48,7 @@ def _scalar_text(value: str, declared: str) -> Any:
         return value
     if declared == "boolean":
         return parsed if isinstance(parsed, bool) else value
-    if isinstance(parsed, bool) or not isinstance(parsed, _SCALAR_TYPES[declared]):
+    if isinstance(parsed, bool) or not isinstance(parsed, _JSON_TYPES[declared]):
         return value
     return parsed if math.isfinite(parsed) else value
 
@@ -65,14 +73,7 @@ class Tool(ABC):
     #: Operator opt-in to advertise a configured tool's schema without discovery.
     always_advertised: bool = False
 
-    _TYPE_MAP: dict[str, Any] = {
-        "string": str,
-        "integer": int,
-        "number": (int, float),
-        "boolean": bool,
-        "array": list,
-        "object": dict,
-    }
+    _TYPE_MAP: dict[str, Any] = _JSON_TYPES
 
     @property
     def workspace(self) -> Path | None:

@@ -147,7 +147,7 @@ def test_scalar_text_decodes_only_when_it_spells_the_declared_type():
 
 
 def test_deferred_automation_schedule_called_by_name_accepts_text_max_runs():
-    """A local model calling the deferred tool directly sends max_runs '52'; it was refused 7 times."""
+    """A direct call to the deferred tool with max_runs '52' decodes it to the integer 52."""
     from tools.automations import AutomationScheduleTool
 
     tool = AutomationScheduleTool()
