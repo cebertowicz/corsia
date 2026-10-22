@@ -218,8 +218,8 @@ async def _run_warm_with_progress(
                 await warm
                 break
             if probe is None:
-                done, _ = await asyncio.wait({warm}, timeout=WARM_PROGRESS_PROBE_SECONDS)
-                if warm in done:
+                warm_done, _ = await asyncio.wait({warm}, timeout=WARM_PROGRESS_PROBE_SECONDS)
+                if warm in warm_done:
                     break
                 probe = asyncio.ensure_future(progress_probe())
             done, _ = await asyncio.wait({warm, probe}, return_when=asyncio.FIRST_COMPLETED)
