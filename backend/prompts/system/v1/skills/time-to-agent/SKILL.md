@@ -31,11 +31,11 @@ Run it when the ledger's last review is seven or more days old, on the first wak
    - **Open question:** what did I not sort that the person spent time on?
 
    Then suggest in the person's words: name the kind, what you would do on a yes (work out how they handle it, show a plan, change nothing until they approve), and let them answer yes or no. Example: "You spend a lot of your week on supplier invoices. Want me to work out how you handle them and start taking that off your plate?" Record it, with the share, before sending. Counts are shown only on request.
-3. **Investigate.** On a yes, do your homework before any question, in order:
+3. **Investigate.** On a yes, do your homework before any question, in order. Until the person approves the charter, nothing that acts: no schedule, no agent or thread, no ask to another agent.
    1. Build the workflow with skill `workflow-design` and save it as a skill.
-   2. Only then interview, for what is left (how to tailor it to them, what they would trust it to do alone), batched and brief.
+   2. Your next move is the interview, for what is left (how to tailor it to them, what they would trust it to do alone), batched and brief. No charter before their answers.
 
-   Watch the next few rounds of that work, read-only; park the task on a deadline watch for the next round. Then draft a one-page charter: the workflow from step 3.1; where the context lives and how to retrieve it; how fresh it must be and how often to check it; the person's approach and rules; the steps to automate; how handing over authority could go wrong for an agent in particular; and the safeguards (what needs the person's word, limits, checks). Start from what they said and did, not from what would be tidy.
+   Watch the next few rounds of that work, read-only; park the task on a plan deadline watch for the next round, never a schedule. Then draft a one-page charter in your thread folder: the workflow from step 3.1; where the context lives and how to retrieve it; how fresh it must be and how often to check it; the person's approach and rules; the steps to automate; how handing over authority could go wrong for an agent in particular; and the safeguards (what needs the person's word, limits, checks). Start from what they said and did, not from what would be tidy.
 4. **Decide.** Choose the smallest fit under skill `agent-team-decomposition` and put it in the charter as a recommendation:
    - **Do it yourself** when it has few rules and fits your context.
    - **A dedicated agent** for work with a recurring outcome, many rules, or memory that should compound. This is the default for most whole areas of a person's life too: an agent has its own scope inside whatever scope it lives in, so a renovation, a wedding or a supplier relationship is one agent, never a project. Inside a project, the agent lives in that project.
