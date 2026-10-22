@@ -358,16 +358,16 @@
       "sha256": "d8aba237339fa676c10bd40118fd7a528d35c656a455f5f14d6d77ee2ffce1c7"
     },
     {
-      "bytes": 10411,
+      "bytes": 10640,
       "kind": "skill",
       "path": "skills/time-to-agent/SKILL.md",
-      "sha256": "7c6dde6ae6c70cfcf18255fbf4df5b5eb9b519f7e1f688b680c74c7f3c6dd740"
+      "sha256": "c0652805b3f4b3443b06b0177bd41cf7a04ade4350eb4e2360cb3c9fd63f28d6"
     },
     {
-      "bytes": 3928,
+      "bytes": 4428,
       "kind": "skill",
       "path": "skills/workflow-design/SKILL.md",
-      "sha256": "cc549f773a77d84b78566ac2da1642378406e1ed98c00f44fea3337835dc430f"
+      "sha256": "77b6504c32b74a807db195686e1d9e393de433cee23c5d83829a087ce09685e0"
     }
   ],
   "version": "v1"
