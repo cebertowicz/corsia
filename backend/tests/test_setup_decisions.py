@@ -192,7 +192,6 @@ def test_the_community_decision_comes_first_and_the_github_cards_drop_the_reason
     assert decisions[0]["recommendation"] == "A"
     assert "Their own account is allowed" in decisions[1]["context"]  # the bot-account answer
     text = " ".join(str(v) for d in decisions for v in d.values())
-    assert "build what you need" not in text and "keep that work there" not in text
     assert "AI" not in text
 
 

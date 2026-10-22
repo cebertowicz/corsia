@@ -69,18 +69,18 @@ pub fn place_main_window(app: &tauri::App, state_dir: &Path) {
         })
         .collect();
     let visible = saved_place_is_visible(saved_main_window(state_dir), &screens);
-    if !visible {
-        let target = window.current_monitor().ok().flatten().or_else(|| window.primary_monitor().ok().flatten());
-        if let Some(monitor) = target {
-            let area = monitor.work_area();
-            log::info!("main window: no saved place on a connected screen; filling the usable area {}x{}", area.size.width, area.size.height);
-            let _ = window.set_position(PhysicalPosition::new(area.position.x, area.position.y));
-            let _ = window.set_size(PhysicalSize::new(area.size.width, area.size.height));
-        }
-    }
     if visible {
         if let (Ok(size), Ok(position)) = (window.outer_size(), window.outer_position()) {
             log::info!("main window {}x{} at ({}, {}) restored from the saved place", size.width, size.height, position.x, position.y);
+        }
+    } else if let Some(monitor) = window.current_monitor().ok().flatten().or_else(|| window.primary_monitor().ok().flatten()) {
+        let area = monitor.work_area();
+        log::info!("main window: no saved place on a connected screen; filling the usable area {}x{}", area.size.width, area.size.height);
+        if let Err(error) = window.set_position(PhysicalPosition::new(area.position.x, area.position.y)) {
+            log::warn!("could not move the main window to the usable area: {error}");
+        }
+        if let Err(error) = window.set_size(PhysicalSize::new(area.size.width, area.size.height)) {
+            log::warn!("could not size the main window to the usable area: {error}");
         }
     }
 }
