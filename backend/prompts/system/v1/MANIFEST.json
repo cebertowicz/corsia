@@ -304,10 +304,10 @@
       "sha256": "ddb2e532b6ec82c809e9faba2453f4edb2925740ede0b86cb87d0f6d72d68286"
     },
     {
-      "bytes": 6469,
+      "bytes": 6505,
       "kind": "skill",
       "path": "skills/google-setup/SKILL.md",
-      "sha256": "a1fd3d4b7b39dfe6c2032374a50cbd12377c3e1d295530826a722f629e0896f1"
+      "sha256": "4fdbfe7bccb0854ff67a096dd6c2bc88d93bde73dadd7fc39c3a328044407702"
     },
     {
       "bytes": 9080,
@@ -316,10 +316,10 @@
       "sha256": "b6e513e6b01040266b7eaa974c751e819f5fb5da7e9c966951e2c35c61d0df9a"
     },
     {
-      "bytes": 5921,
+      "bytes": 6052,
       "kind": "skill",
       "path": "skills/microsoft-setup/SKILL.md",
-      "sha256": "6dc9c7e8d5a5c3e6e74ba486433b2c83ea94fc5b1a17a1ef072de243b7d84d51"
+      "sha256": "792ce768a99c649911e48e8c2ef4905d9fc7ba1f6d3f5f69f5028033e4848f8c"
     },
     {
       "bytes": 2063,

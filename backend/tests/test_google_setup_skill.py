@@ -112,15 +112,15 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     skill = SKILL.read_text(encoding="utf-8")
     steps = skill.split("# Connect Google", 1)[1]
 
-    assert "I'll set up your own private Google project in a browser you can watch" in steps
-    assert "Google will also ask for your Drive, Docs and Sheets, so you won't have to sign in again later." in steps
+    assert "CORSIA creates a private Google project you own, in a browser you can watch" in steps
+    assert "`Open your Drive, Docs and Sheets, so you won't have to sign in again later.`" in steps
     enable_link = "https://console.cloud.google.com/flows/enableapi?apiid="
     assert enable_link in steps
     enabled = steps.split(enable_link, 1)[1].split("`", 1)[0].split(",")
     assert enabled == ["gmail.googleapis.com", "calendar-json.googleapis.com", "drive.googleapis.com",
                        "docs.googleapis.com", "sheets.googleapis.com"]
     assert '"Go to CORSIA (unsafe)"' in steps
-    assert "a project left in Testing stops letting me in after 7 days. Go ahead?" in steps
+    assert "a project left in Testing stops letting CORSIA in after 7 days.` then `Go ahead?" in steps
     assert "`Ask me any time to connect your email.`" in steps
     assert "go on only when it says In production" in steps
     assert "browser-person-steps.md` B" in steps
