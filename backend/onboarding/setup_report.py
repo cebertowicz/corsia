@@ -12,6 +12,8 @@ import re
 from pathlib import Path
 from typing import Iterable
 
+from infra.failure_reference import REFERENCE
+
 TAIL_BYTES = 2 * 1024 * 1024
 MAX_LINES = 60
 MAX_LINE_CHARS = 400
@@ -24,8 +26,6 @@ _CREDENTIAL = re.compile(
     r"[\w.+-]+@[\w-]+\.[\w.-]+",
     re.IGNORECASE,
 )
-# Only a reference CORSIA minted (see infra.failure_reference) selects lines, and only as its whole log token.
-REFERENCE = re.compile(r"^(?:cli|local|signin)-[0-9a-f]{16}$")
 
 
 def _tail(path: Path) -> list[str] | None:
@@ -44,6 +44,7 @@ def _tail(path: Path) -> list[str] | None:
 
 def relevant_lines(lines: Iterable[str], rows: list[dict]) -> list[str]:
     """The last log lines carrying a failed row's reference, with credential-shaped lines withheld."""
+    # Only a reference CORSIA minted selects lines, and only as its whole log token.
     refs = {f"reference={row['reference']}" for row in rows if REFERENCE.match(str(row.get("reference") or ""))}
     picked = []
     for line in lines:

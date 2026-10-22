@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from api.setup_handoff import SetupHandoff
 from infra import user_profile
+from infra.failure_reference import PATTERN as REFERENCE_PATTERN
 
 
 class LocalDownloadRequest(BaseModel):
@@ -32,8 +33,8 @@ class SetupReportRow(BaseModel):
     key: Literal["claude-code", "codex", "omlx", "api"]
     name: str = Field(min_length=1, max_length=80)
     cause: str | None = Field(default=None, max_length=400)
-    # Only a reference CORSIA minted: cli-, local- or signin- and 16 hex digits.
-    reference: str | None = Field(default=None, pattern=r"^(?:cli|local|signin)-[0-9a-f]{16}$")
+    # Only a reference CORSIA minted.
+    reference: str | None = Field(default=None, pattern=REFERENCE_PATTERN)
 
 
 class SetupReportRequest(BaseModel):

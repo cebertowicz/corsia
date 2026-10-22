@@ -111,8 +111,9 @@
 			cause: row.key === 'omlx' ? (localOffFailed ? 'turn_off_failed' : local?.setup_error_code ?? (localStartError || undefined)) : connectFlow.attempts[row.key]?.cause,
 		}));
 	}
+	/** Save a report only where a reference gives the report log lines to find; the row's own action covers the rest. */
 	function withReportAction(row: AiRow): AiRow {
-		return row.reportable ? { ...row, more: [...(row.more ?? []), { label: 'Save a report', run: () => void saveSetupReport(reportRows()) }] } : row;
+		return row.reportable && row.reference ? { ...row, more: [...(row.more ?? []), { label: 'Save a report', run: () => void saveSetupReport(reportRows()) }] } : row;
 	}
 	const jobs = $derived<SetupJob[]>([
 		...(page !== 'models' && (downloading || localFailed) ? [{ label: 'Local model', state: localFailed ? 'error' as const : 'busy' as const,

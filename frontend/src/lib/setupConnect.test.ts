@@ -20,6 +20,13 @@ describe('setup CLI installer failure copy', () => {
 		});
 	});
 
+	it.each([
+		['site_refused', 'Couldn’t download Codex. The download site refused the request. Retry.'],
+		['installer_failed', 'Couldn’t install Codex. Retry.'],
+	] as const)('asks for no report on a %s failure with no reference to find', (cause, meta) => {
+		expect(installFailureCopy('Codex', cause, null)).toEqual({ meta, reference: undefined, retry: true });
+	});
+
 	it('uses the approved connection recovery copy when the network is unavailable', () => {
 		expect(installFailureCopy('Claude Code', 'connection', 'cli-offline')).toEqual({
 			meta: 'Couldn’t download Claude Code. Check your internet connection, then Retry.',
@@ -50,8 +57,13 @@ describe('setup CLI installer failure copy', () => {
 
 describe('setup sign-in failure copy', () => {
 	it('never puts an unknown cause code into the sentence', () => {
-		const copy = signinFailureCopy('codex', 'some_new_cause');
+		const copy = signinFailureCopy('codex', 'some_new_cause', 'signin-0123456789abcdef');
 		expect(copy).toEqual({ meta: 'Couldn’t finish signing in to Codex. Sign in again, or save a report.', reportable: true });
+	});
+
+	it('asks for a report only when a reference gives it something to find', () => {
+		expect(signinFailureCopy('codex', 'some_new_cause').meta).toBe('Couldn’t finish signing in to Codex. Sign in again.');
+		expect(signinFailureCopy('codex', 'agent_unavailable').meta).toBe('CORSIA couldn’t reach its agent to start signing in. Sign in again.');
 	});
 
 	it('names a missing CORSIA agent apart from an unreachable service', () => {

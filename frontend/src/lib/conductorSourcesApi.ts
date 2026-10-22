@@ -177,10 +177,10 @@ export async function cancelSignin(t: string, accountId: string): Promise<Signin
 	return signinOf(await response.json().catch(() => null), accountId);
 }
 
-/** Start or stop the person's own local server through the existing lifecycle route. */
 /** A lifecycle action's outcome; a failure the service logged carries its reference. */
 export type LifecycleResult = { ok: boolean; ref?: string };
 
+/** Start or stop the person's own local server through the existing lifecycle route. */
 async function localServerLifecycle(t: string, action: 'start' | 'stop'): Promise<LifecycleResult> {
 	const listed = await fetch('/api/settings/network-servers', { headers: headers(t) });
 	if (!listed.ok) return { ok: false };

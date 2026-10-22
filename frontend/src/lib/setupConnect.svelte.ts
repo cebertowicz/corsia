@@ -31,32 +31,40 @@ export function installCause(cause?: InstallFailureCause | null): InstallFailure
 	return cause ?? 'installer_failed';
 }
 
+/** The action that fixes a failure, plus a report ask only when a reference gives the report something to find. */
+export function failureAction(action: string, ref?: string | null): string {
+	return ref ? `${action}, or save a report.` : `${action}.`;
+}
+
 /** Keep refusal recovery distinct from retryable installer failures without exposing installer output. */
 export function installFailureCopy(cli: string, cause?: InstallFailureCause | null, ref?: string | null) {
 	if (installCause(cause) === 'site_refused') {
-		return { meta: `Couldn’t download ${cli}. The download site refused the request. Save a report.`, reference: ref ?? undefined, retry: false };
+		// Without a reference there is nothing to report, so Retry is the only action left.
+		return ref ? { meta: `Couldn’t download ${cli}. The download site refused the request. Save a report.`, reference: ref, retry: false }
+			: { meta: `Couldn’t download ${cli}. The download site refused the request. Retry.`, reference: undefined, retry: true };
 	}
 	if (installCause(cause) === 'connection') {
 		return { meta: `Couldn’t download ${cli}. Check your internet connection, then Retry.`, reference: ref ?? undefined, retry: true };
 	}
-	return { meta: `Couldn’t install ${cli}. Retry, or save a report.`, reference: ref ?? undefined, retry: true };
+	return { meta: `Couldn’t install ${cli}. ${failureAction('Retry', ref)}`, reference: ref ?? undefined, retry: true };
 }
 
 /** The sign-in's real cause in words, and whether a report would help diagnose it. */
-export function signinFailureCopy(vendor: string, cause?: string | null): { meta: string; reportable: boolean } {
+export function signinFailureCopy(vendor: string, cause?: string | null, ref?: string | null): { meta: string; reportable: boolean } {
 	const { cli, account } = VENDOR_COPY[vendor] ?? { cli: vendor, account: vendor };
+	const again = failureAction('Sign in again', ref);
 	if (cause === 'unreachable') return { meta: `CORSIA didn’t answer while starting the ${cli} sign-in. Sign in again.`, reportable: true };
-	if (cause === 'agent_unavailable') return { meta: `CORSIA couldn’t reach its agent to start signing in. Sign in again, or save a report.`, reportable: true };
+	if (cause === 'agent_unavailable') return { meta: `CORSIA couldn’t reach its agent to start signing in. ${again}`, reportable: true };
 	if (cause?.endsWith('_executable_missing')) return { meta: `CORSIA couldn’t find ${cli} on this computer. Sign in again to install it.`, reportable: true };
 	if (cause?.endsWith('_signin_in_progress')) return { meta: `Another ${cli} sign-in is already open. Finish it in your browser, or sign in again.`, reportable: false };
 	if (cause === 'vendor_login_failed') return { meta: `Signing in to ${cli} didn’t finish in the browser. Sign in again.`, reportable: false };
 	if (cause === 'vendor_not_signed_in') return { meta: `${cli} didn’t report a signed-in ${account} account. Sign in again.`, reportable: false };
 	if (cause === 'same_account') return { meta: `That ${account} account is already signed in here. To add another, sign in again with a different ${account} account.`, reportable: false };
-	if (cause === 'signin_check_failed' || cause === 'vendor_status_failed') return { meta: `CORSIA couldn’t check the ${cli} sign-in. Sign in again, or save a report.`, reportable: true };
-	if (cause === 'vendor_login_unavailable' || cause === 'vendor_logout_unavailable') return { meta: `CORSIA couldn’t start the ${cli} sign-in. Sign in again, or save a report.`, reportable: true };
-	if (cause === 'prompt_unrecognized') return { meta: `${cli} asked something CORSIA didn’t expect. Sign in again, or save a report.`, reportable: true };
+	if (cause === 'signin_check_failed' || cause === 'vendor_status_failed') return { meta: `CORSIA couldn’t check the ${cli} sign-in. ${again}`, reportable: true };
+	if (cause === 'vendor_login_unavailable' || cause === 'vendor_logout_unavailable') return { meta: `CORSIA couldn’t start the ${cli} sign-in. ${again}`, reportable: true };
+	if (cause === 'prompt_unrecognized') return { meta: `${cli} asked something CORSIA didn’t expect. ${again}`, reportable: true };
 	// The cause code itself goes to the report, never into the sentence.
-	return { meta: `Couldn’t finish signing in to ${cli}. Sign in again, or save a report.`, reportable: true };
+	return { meta: `Couldn’t finish signing in to ${cli}. ${again}`, reportable: true };
 }
 
 /** The ready account's name for its row: an email, plan, or the vendor's own label. */
@@ -85,6 +93,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		let result: Signin | null = null;
 		try {
 			const lookup = await fetchCorsiaAgent(current);
+			if (stopped()) return;
 			if (lookup.kind !== 'target') { signinFailed(source.source, null, installed, 'agent_unavailable'); return; }
 			const accountId = await accountToSignIn(current, source.source, source.name);
 			if (stopped()) return;
@@ -94,6 +103,8 @@ export function createSetupConnect(deps: ConnectDeps) {
 			setConnect(source.source, { phase: 'signing-in', installed, accountId });
 			await tickConnect();
 		} catch (error) {
+			// An unpicked tool stays cleared: its failure is never written back over the row stop() cleared.
+			if (stopped()) return;
 			// Only a request that got no answer is unreachable; a refusal's cause is unknown here.
 			signinFailed(source.source, result, installed, error instanceof TypeError ? 'unreachable' : undefined);
 		}
@@ -193,7 +204,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		}
 		if (entry?.phase === 'signing-in') return { meta: 'Finish signing in in your browser.', busy: true, action: { label: 'Open sign-in again', run: () => void openSignInAgain(source) } };
 		if (entry?.phase === 'failed' && entry.failed === 'signin') {
-			const failure = signinFailureCopy(source.source, entry.signinCause);
+			const failure = signinFailureCopy(source.source, entry.signinCause, entry.ref);
 			return { meta: failure.meta, reference: entry.ref ?? undefined, error: true, reportable: failure.reportable, action: signInAction };
 		}
 		if (entry?.phase === 'failed') {

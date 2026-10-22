@@ -38,11 +38,11 @@ function mountResume() {
 		if (url === '/api/setup/progress') return json({ setup_completed: false, step: 'models', local_ai: false, status: { local_eligible: true, work_folder: '~/CORSIA' } });
 		if (url === '/api/providers/sources' || url === '/api/providers/sources/recheck') return json({ sources: [
 			{ source: 'codex', name: 'Codex', state: sourceState },
-			...(localFailure ? [{ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'start_failed', setup_error_code: 'start_failed', fix: 'CORSIA couldn’t set up the local model.' }] : []),
+			...(localFailure ? [{ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'start_failed', setup_error_code: 'start_failed', setup_error_reference: 'local-0123456789abcdef', fix: 'CORSIA couldn’t set up the local model.' }] : []),
 		] });
 		if (url.startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
 		if (url.startsWith('/api/models?')) return json({ models: catalogModels });
-		if (url === '/api/settings/network-servers') return json({}, 500);
+		if (url === '/api/settings/network-servers') return new Response('{}', { status: 500 });
 		if (url.startsWith('/api/vendor-accounts?')) return json({ accounts: [] });
 		if (url === '/api/vendor-accounts' && method === 'POST') return json({ id: 'account-1' });
 		if (url === '/api/vendor-accounts/account-1/signin/check' && method === 'POST') return json(signinState === 'failed' ? { status: 'failed', cause: 'vendor_status_failed', ref: 'signin-0123456789abcdef' } : { status: signinState });
@@ -193,7 +193,9 @@ describe('SetupScreen owned-job polling', () => {
 		(host.querySelector('button[aria-label="Local model"]') as HTMLButtonElement | null)?.click(); await settle();
 		expect(calls).toContain('GET /api/settings/network-servers');
 		// On the row whose switch retries it, never in the sources slot whose Retry only rechecks.
-		expect(host.querySelector('#setup-row-detail-omlx')?.textContent).toBe('CORSIA couldn’t turn off the local model. Turn it off again, or save a report.');
+		expect(host.querySelector('#setup-row-detail-omlx')?.textContent).toBe('CORSIA couldn’t turn off the local model. Turn it off again.');
+		// No reference was logged, so there is no report to ask for.
+		expect([...host.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Save a report')).toBe(false);
 	});
 
 	it('cleans up a pre-account local download timer when the screen unmounts', async () => {

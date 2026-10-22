@@ -33,7 +33,37 @@ describe('setup connect stop', () => {
 	});
 
 	it.each([
-		['a refusal the service sent', () => Promise.resolve(new Response('{}', { status: 409 })), 'Couldn’t finish signing in to Codex. Sign in again, or save a report.'],
+		['the account request is refused', '/api/vendor-accounts', () => Promise.resolve(new Response('{}', { status: 500 }))],
+		['the account request gets no answer', '/api/vendor-accounts', () => Promise.reject(new TypeError('Failed to fetch'))],
+		['the CORSIA agent is missing', '/api/corsia-agent', () => Promise.resolve(json({}))],
+	] as const)('leaves an unpicked tool cleared when its sign-in start then fails: %s', async (_case, held, answer) => {
+		let release: () => void = () => undefined;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const calls: string[] = [];
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input), method = init?.method ?? 'GET'; calls.push(`${method} ${url}`);
+			const hold = url.startsWith(held) && (held !== '/api/vendor-accounts' || (url === held && method === 'POST'));
+			if (hold) { await gate; return answer(); }
+			if (url.startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
+			if (url.startsWith('/api/vendor-accounts?')) return json({ accounts: [] });
+			return json({});
+		}));
+		const source = { source: 'codex', name: 'Codex', state: 'needs_auth' as const };
+		const flow = createSetupConnect({ token: () => 'session', sources: () => [source], refreshSources: async () => undefined });
+
+		const signing = flow.signIn(source);
+		await vi.waitFor(() => expect(calls.some((call) => call.includes(held))).toBe(true));
+		await flow.stop('codex');
+		release();
+		await signing;
+
+		expect(flow.row(source)).toMatchObject({ meta: 'Uses your ChatGPT subscription.' });
+		expect(flow.row(source).error).toBeUndefined();
+		expect(flow.attempts.codex).toEqual({ attempt: 'none' });
+	});
+
+	it.each([
+		['a refusal the service sent', () => Promise.resolve(new Response('{}', { status: 409 })), 'Couldn’t finish signing in to Codex. Sign in again.'],
 		['no answer at all', () => Promise.reject(new TypeError('Failed to fetch')), 'CORSIA didn’t answer while starting the Codex sign-in. Sign in again.'],
 	])('names the sign-in start failure only as far as it is known: %s', async (_case, answer, line) => {
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

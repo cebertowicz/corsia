@@ -2,6 +2,7 @@ import type { AiRow } from './components/SetupAiRows.svelte';
 import type { ModelSource } from './conductorSources';
 import { LOW_MEMORY_LOCAL_MODEL_MESSAGE, type LocalPick } from './setupLocalPick.svelte';
 import { measuredDownloadTime } from './setupLocalPresentation';
+import { failureAction } from './setupConnect.svelte';
 
 // Settings imports the separable first sentence from setupLocalPick.
 export type LocalRowState = ModelSource;
@@ -20,7 +21,7 @@ export type LocalRowInput = {
 const LOCAL_FAILURE_STATES = new Set(['failed', 'setup_failed', 'start_failed']);
 export const LOCAL_HELD_DOWNLOADING = 'CORSIA is downloading this so setup can continue. To turn it off, connect a cloud provider first.';
 export const LOCAL_HELD_READY = 'CORSIA needs this to continue setup. To turn it off, connect a cloud provider first.';
-export const LOCAL_TURN_OFF_FAILED = 'CORSIA couldn’t turn off the local model. Turn it off again, or save a report.';
+export const localTurnOffFailed = (ref?: string) => `CORSIA couldn’t turn off the local model. ${failureAction('Turn it off again', ref)}`;
 
 /** How much of the download is on disk, in GB, or null when the size or progress is unknown. */
 function downloadedGb(sizeGb: number | null, percent?: number | null): number | null {
@@ -38,7 +39,7 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 	if (ready) {
 		const failed = cloudReady && turnOffFailed;
 		return { ...row, meta: `${model} · runs on this computer`, pill: { state: 'success', label: 'Ready' },
-			detail: failed ? LOCAL_TURN_OFF_FAILED : cloudReady ? undefined : LOCAL_HELD_READY, error: Boolean(failed), reference: failed ? turnOffFailed.reference : undefined, reportable: Boolean(failed),
+			detail: failed ? localTurnOffFailed(turnOffFailed.reference) : cloudReady ? undefined : LOCAL_HELD_READY, error: Boolean(failed), reference: failed ? turnOffFailed.reference : undefined, reportable: Boolean(failed),
 			toggle: { on: true, held: !cloudReady, run: (next) => { if (!next) turnOff?.(); } } };
 	}
 	if (downloading) {

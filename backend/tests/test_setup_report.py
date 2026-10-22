@@ -92,3 +92,16 @@ def test_a_reference_selects_only_its_whole_log_token():
 ])
 def test_sign_in_codes_and_emails_are_withheld_whole(line):
     assert relevant_lines([f"{line} reference={ROWS[0]['reference']}"], ROWS[:1]) == [WITHHELD]
+
+
+@pytest.mark.parametrize("prefix", ["cli", "local", "signin"])
+def test_every_minted_reference_is_accepted_by_the_route_and_selects_its_lines(prefix):
+    from typing import get_args
+
+    from api.setup_requests import SetupReportRow
+    from infra.failure_reference import Prefix, new_reference
+
+    assert prefix in get_args(Prefix)
+    ref = new_reference(prefix)
+    row = SetupReportRow(key="omlx", name="Local model", reference=ref).model_dump()
+    assert relevant_lines([f"failed reference={ref}"], [row]) == [f"failed reference={ref}"]
