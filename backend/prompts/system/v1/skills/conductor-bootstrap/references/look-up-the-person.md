@@ -66,7 +66,7 @@ Follow up once on anything vague. On "not now", carry on and learn as you go.
 
 ## F. Write it down
 
-1. Set their time zone from the place they name (Tucson is America/Phoenix) and write it at once, with no question, replacing the profile's `- **Timezone:**` line with `- **Timezone:** <IANA zone>. Give every time and timestamp in this zone, never UTC.` Section A's zone is for when they name no place.
+1. Set their time zone from the place they name (Tucson is America/Phoenix) and write it at once, with no question, replacing it, or adding it when there is none, with `- **Timezone:** <IANA zone>. Give every time and timestamp in this zone, never UTC.` Section A's zone is for when they name no place.
 2. Write the name they go by over the profile's `- **Preferred name:**` line, and the rest (work, place, background) into the workspace `USER.md`, only what they said or didn't correct, the way `references/project-import.md` does for role and working style, when `references/about-you-doc.md` says to write the profile.
 3. If the name they go by is not the one you searched, run one more search with it (within the limit of 6), show what it finds the same way, and ask nothing more about it.
 

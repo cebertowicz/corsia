@@ -488,7 +488,7 @@ def test_the_look_up_reads_and_writes_the_zone_and_name_in_the_workspace_profile
     # The zone is written in the exact line the profile seeds, and the name replaces the preferred-name line.
     seeded = user_profile.profile_text("Ada", "ZONE").splitlines()[-1].replace("ZONE", "<IANA zone>")
     assert seeded in write
-    assert "replacing the profile's `- **Timezone:**` line" in write
+    assert "replacing it, or adding it when there is none, with" in write
     assert "over the profile's `- **Preferred name:**` line" in write
     assert "`USER.md`" in write and "(work, place, background)" in write
     doc = (FIRST_RUN_APP.parent / "about-you-doc.md").read_text(encoding="utf-8")
@@ -499,6 +499,7 @@ def test_the_user_profile_fact_is_described_as_read_from_the_workspace_profile()
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
     assert "read from the workspace `context/50-USER-PROFILE.md`" in app
     assert "what `USER.md` already holds" not in app
+    assert "`work`, `place`, `check_first`" not in app and "`user_profile`'s `name` and `full_name`" in app
 
 
 def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggestions_only():
@@ -519,14 +520,20 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "A heading with nothing to put under it gets no suggestion." in doc
     # Cloud: one helper per heading, in parallel, no web search. Local: CORSIA writes it.
     assert "start one helper per heading that has material, all at once" in doc
-    assert "`plan_node_id` `none`" in doc and "runs no web search" in doc
-    assert "A helper that fails or returns nothing: write that heading's suggestion yourself." in doc
+    assert "`plan_node_id` `none`" not in doc and "runs no web search" in doc
+    # Each helper hangs off its own `About you: <heading>` task, which CORSIA settles once the result lands.
+    assert "add one `About you: <heading>` task to your plan per helper" in doc and "that task's id as `plan_node_id`" in doc
+    assert "If `delegate_task` refuses the model, write that heading yourself." in doc
+    assert "A helper that fails or returns nothing: keep its task as your own, write that heading's suggestion yourself, then settle the task." in doc
+    assert "accept it when that heading's suggestion is in" in doc
+    assert "When every `About you: <heading>` task is settled and every suggestion is in" in doc
     assert "`bound_model` `source` is `omlx`): start no helper. Write the suggestions yourself, one heading at a time." in doc
     # One review ask, worded for the review bar with or without the accept-all button.
     assert doc.count("`I put what I know in your About you doc. Change anything that's wrong, accept the suggestions you want, then press Approve.`") == 1
     assert doc.count("Change anything that's wrong, accept the suggestions you want, then press Approve.") == 2  # the ask's reason, then the one chat line
     assert "`block_node` with `owner_kind` `user`" in doc and "`ask_artifact_id` the document's artifact id" in doc  # Approve only shows with an ask
-    assert "suggest that line again yourself on the text now in the doc. Never wait on a helper" in doc
+    assert "Whenever you read the document (on Approve in section 4, or on the person's reply), suggest again yourself" in doc
+    assert "any suggestion that can no longer apply to it. Never wait on a helper" in doc
     assert "A comment from the person on a line: answer with a suggested change to that line." in doc
     # On approve CORSIA accepts nothing, removes empty headings, then writes the profile.
     assert "With none open: accept nothing yourself." in doc

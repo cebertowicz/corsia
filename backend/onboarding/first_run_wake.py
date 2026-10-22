@@ -182,10 +182,6 @@ def _app_user_profile() -> dict[str, str | None]:
     return {
         "name": profile_name(config.WORKSPACE) or None,
         "full_name": profile_full_name(config.WORKSPACE) or None,
-        "work": None,
-        "place": None,
-        "check_first": None,
-        "answer_style": None,
     }
 
 
