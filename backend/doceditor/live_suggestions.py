@@ -12,7 +12,8 @@ from doceditor.live_tools import find_live
 
 def suggestion_text(live, operation: Operation):
     """Resolve immutable input at the lane start, refusing changed tracked quotes."""
-    from doceditor.comment_actions import CommentActionError, STALE_MESSAGE, _batch_text
+    from doceditor.comment_actions import CommentActionError, STALE_MESSAGE
+    from doceditor.comment_batch_actions import _batch_text
     rows = [json.loads(value) for value in operation.suggestions]
     valid, skipped = [], []
     for row in rows:
@@ -30,7 +31,8 @@ def suggestion_text(live, operation: Operation):
     return text, tuple(accepted), tuple(skipped + batch_skipped)
 
 
-async def accept_live(artifact, project_id, rows, actor_thread_id, *, user_id=None, single=False):
+async def accept_live(artifact, project_id, rows, actor_thread_id, *, user_id=None, single=False,
+                      suggestion_accept=False):
     """Return None only for a legacy file; all adapters share this live branch."""
     from doceditor.comment_actions import CommentActionError, suggestion_span
     entry = find_live(Path(artifact["path"]))
@@ -46,7 +48,8 @@ async def accept_live(artifact, project_id, rows, actor_thread_id, *, user_id=No
                 continue
             live.track_range(row["id"], len(live.text[:start].encode("utf-16-le")) // 2,
                              len(live.text[:end].encode("utf-16-le")) // 2)
-    actor = WriteActor(actor_thread_id or UI_THREAD, project_id, direct_user=actor_thread_id is None, user_id=user_id)
+    actor = WriteActor(actor_thread_id or UI_THREAD, project_id, direct_user=actor_thread_id is None, user_id=user_id,
+                       suggestion_accept=suggestion_accept)
     from doceditor.document_save import DocumentSaveError
     from doceditor.live_lane import LaneRefused
     from doceditor.live_store import StoreRefused

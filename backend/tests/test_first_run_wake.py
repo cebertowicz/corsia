@@ -243,7 +243,8 @@ class TestAppPath:
             "first_run_path": "app", "harness_ready": ["codex"], "sources_missing": {},
             "agents_found": ["hermes"], "local_download": {"state": "stopped"},
             "tool_attempts": {"claude_code": {"attempt": "none"}, "codex": {"attempt": "none"}},
-            "other_omlx": "none", "bound_model": None,
+            "pays_for": [],
+            "bound_model": None,
             "web_search_ready": False, "github_ready": False, "setup": {"setup_decisions": []},
             "user_profile": {"name": "Pat", "work": None, "place": None, "check_first": None, "answer_style": None},
         }
@@ -288,9 +289,8 @@ class TestAppPath:
         monkeypatch.setattr("llm.local_setup.setup_status", lambda: status)
         monkeypatch.setattr(first_run_wake, "_app_setup_handoff", lambda: {
             "tools": {"claude-code": {"attempt": "none"}, "codex": {"attempt": "install_failed", "cause": "download_unavailable"}},
-            "other_omlx": "stale_handoff_value",
         })
-        monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_answer", lambda: "kept_both")
+        monkeypatch.setattr(first_run_wake, "_app_setup_picks", lambda: {"claude": False, "chatgpt": True, "key": False})
         monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
         monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
         monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=False))
@@ -304,7 +304,7 @@ class TestAppPath:
             "claude_code": {"attempt": "none"},
             "codex": {"attempt": "install_failed", "cause": "download_unavailable"},
         }
-        assert facts["other_omlx"] == "kept_both"
+        assert facts["pays_for"] == ["codex"]
         assert facts["bound_model"] is None
         assert facts["agents_found"] == ["openclaw"]
         assert set(facts) == first_run_wake.APP_FACT_KEYS
@@ -387,7 +387,6 @@ class TestAppPath:
             "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
         monkeypatch.setattr(first_run_wake, "_app_setup_handoff", lambda: None)
-        monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_answer", lambda: "kept_both")
         monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=True))
         monkeypatch.setattr(first_run_wake, "app_reference_served", lambda: True)
         monkeypatch.setattr(first_run_wake, "instructions", lambda path="script": "safe instructions")
@@ -396,7 +395,6 @@ class TestAppPath:
         wake = first_run_wake.render(facts, "safe instructions")
 
         assert facts["tool_attempts"] is None
-        assert facts["other_omlx"] == "kept_both"
         assert facts["bound_model"] is None
         assert facts["user_profile"] == {"name": "Pat " + "n" * 116, "work": None, "place": None, "check_first": None, "answer_style": None}
         assert "the address you give me in chat" in wake
@@ -411,7 +409,7 @@ class TestAppPath:
         ("model_sources", ("harness_ready", "sources_missing", "github_ready")),
         ("local_download", ("local_download",)),
         ("setup_handoff", ("tool_attempts",)),
-        ("other_omlx", ("other_omlx",)),
+        ("setup_picks", ("pays_for",)),
         ("web_search_ready", ("web_search_ready",)),
         ("setup", ("setup",)),
         ("user_profile", ("user_profile",)),
@@ -427,6 +425,7 @@ class TestAppPath:
             "sources": [], "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
         monkeypatch.setattr(first_run_wake, "_app_setup_handoff", lambda: None)
+        monkeypatch.setattr(first_run_wake, "_app_setup_picks", lambda: None)
         monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
         monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
         monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=False))
@@ -438,8 +437,8 @@ class TestAppPath:
             monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(side_effect=OSError("unavailable")))
         elif failed == "setup_handoff":
             monkeypatch.setattr(first_run_wake, "_app_setup_handoff", fail)
-        elif failed == "other_omlx":
-            monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_answer", fail)
+        elif failed == "setup_picks":
+            monkeypatch.setattr(first_run_wake, "_app_setup_picks", fail)
         elif failed == "setup":
             monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(side_effect=OSError("unavailable")))
         elif failed == "agents_found":
@@ -450,8 +449,50 @@ class TestAppPath:
         facts = await first_run_wake.setup_facts("codex/gpt-5.6-terra", "app")
 
         for name in expected:
-            unavailable_name = "tool_attempts" if failed == "setup_handoff" else name
-            assert facts[name] == {"unavailable": first_run_wake.UNAVAILABLE_READS[unavailable_name]}
+            assert facts[name] == {"unavailable": first_run_wake.UNAVAILABLE_READS[name]}
+
+    @pytest.mark.parametrize(("record", "expected"), [
+        ({"step": "models", "picks": {"claude": True, "chatgpt": True, "key": False}}, ["claude_code", "codex"]),
+        ({"step": "models", "picks": {"claude": True, "chatgpt": False, "key": False}}, ["claude_code"]),
+        ({"step": "models", "picks": {"claude": False, "chatgpt": True, "key": False}}, ["codex"]),
+        ({"step": "models", "picks": {"claude": False, "chatgpt": False, "key": False}}, []),
+        ({"step": "models", "picks": None}, []),
+        ({"step": "models"}, []),
+        (None, []),
+    ])
+    def test_pays_for_comes_from_the_subscriptions_screens_saved_picks(self, monkeypatch, record, expected):
+        from infra import setup_progress
+        from onboarding import first_run_wake
+
+        monkeypatch.setattr(setup_progress, "read", lambda **_: record)
+
+        assert first_run_wake._pays_for(first_run_wake._app_setup_picks()) == expected
+
+    @pytest.mark.asyncio
+    async def test_a_person_who_pays_for_both_with_only_claude_signed_in_is_offered_codex(self, monkeypatch):
+        from infra import setup_progress
+        from onboarding import first_run_wake
+
+        monkeypatch.setattr(setup_progress, "read", lambda **_: {
+            "step": "models", "picks": {"claude": True, "chatgpt": True, "key": False},
+            "handoff": {"tools": {"claude-code": {"attempt": "none"}, "codex": {"attempt": "none"}}},
+        })
+        monkeypatch.setattr(first_run_wake, "_model_sources", lambda: {
+            "sources": [{"source": "claude-code", "state": "ready"}, {"source": "codex", "state": "not_installed"}],
+            "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
+        })
+        monkeypatch.setattr("llm.local_setup.setup_status", lambda: {"state": "idle", "stage": None, "result": None})
+        monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
+        monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
+        monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=False))
+        monkeypatch.setattr(first_run_wake, "_app_agents_found", lambda: [])
+
+        facts = await first_run_wake.setup_facts("codex/gpt-5.6-terra", "app")
+
+        assert facts["sources_missing"] == {"codex": "not_installed"}
+        assert facts["pays_for"] == ["claude_code", "codex"]
+        offered = [tool for tool in facts["sources_missing"] if tool in facts["pays_for"]]
+        assert offered == ["codex"]
 
     async def test_app_setup_decisions_omit_projects_consent_and_address(self, monkeypatch):
         from onboarding import first_run_wake, setup_decisions
@@ -461,7 +502,8 @@ class TestAppPath:
 
         decisions = (await first_run_wake._app_setup())["setup_decisions"]
 
-        assert len(decisions) == 1  # GitHub only; no projects consent
+        assert len(decisions) == 3  # the community card and both GitHub cards; no projects consent
+        assert {d["task_title"] for d in decisions} == {"Set up GitHub"}
         assert "person@gmail.com" not in json.dumps(decisions)
         assert "Claude Code" not in json.dumps(decisions)
 
@@ -476,8 +518,8 @@ class TestAppPath:
 
         assert "if a local model is connected, make no offer" in local_offer
         assert "download lands in the person's oMLX" not in local_offer
-        assert "When it is empty, leave out the first sentence." in reference
-        assert "if you have a [Claude | ChatGPT] subscription" in reference
+        assert "a tool `pays_for` doesn't list is never offered or mentioned" in reference
+        assert "You said you pay for [Claude | ChatGPT]." in reference
         assert "Setup couldn't install [Claude Code | Codex]: [what went wrong, in plain words]." in reference
         assert "Sign in to [Claude Code | Codex] in Settings › Providers, then tell me when it's done." in reference
         assert "If it shows the source is ready, carry on." in reference
@@ -486,7 +528,7 @@ class TestAppPath:
         assert "Post the news first, as its own message, word for word as below; it never asks anything." in reference
         assert "when your question is still unanswered, end your turn: that question stays open" in reference
         assert "never track a step itself in the plan (no `start`, no `mark_done`" in reference
-        assert "the tasks step 6 makes are follow-up work, so do make them" in reference
+        assert "the tasks steps 3 and 6 make are follow-up work, so do make them" in reference
         assert "already shows that same outcome, say nothing" in reference
         assert "Done for now. Anything I skipped, ask me any time and I'll set it up." in reference
 

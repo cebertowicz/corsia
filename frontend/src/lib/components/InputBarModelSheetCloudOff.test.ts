@@ -2,11 +2,12 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn() }));
-const setup = vi.hoisted(() => ({ status: { value: null as null | { line: string; retry: null } }, canAdd: { value: false } }));
+const setup = vi.hoisted(() => ({ status: { value: null as null | { line: string; retry: null } }, canAdd: { value: false }, canSetUp: { value: false } }));
 vi.mock('$lib/stores/localPickerStatus', async () => {
 	return {
 		localStatus: { subscribe: (run: (value: unknown) => void) => { run(setup.status.value); return () => {}; } },
 		canAddLocalModel: { subscribe: (run: (value: unknown) => void) => { run(setup.canAdd.value); return () => {}; } },
+		canSetUpLocalModel: { subscribe: (run: (value: unknown) => void) => { run(setup.canSetUp.value); return () => {}; } },
 		retryLocalSetup: vi.fn(), watchLocalStatus: () => () => {},
 	};
 });

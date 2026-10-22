@@ -479,8 +479,11 @@ struct SigningIdentity {
 }
 
 pub(crate) fn verify_bundle_identity(current: &Path, staged: &Path) -> Result<(), String> {
-    let current_identity = code_identity(current)?;
-    let staged_identity = code_identity(staged)?;
+    // The installed app's seal is not re-verified: a file written into it after install (a
+    // __pycache__) breaks the seal, and refusing to update is then the one thing that keeps
+    // the broken copy. Its identity still has to match; the staged app is verified in full.
+    let current_identity = code_identity(current, false)?;
+    let staged_identity = code_identity(staged, true)?;
     ensure_matching_identity(&current_identity, &staged_identity)
 }
 
@@ -500,14 +503,16 @@ fn ensure_matching_identity(
     Ok(())
 }
 
-fn code_identity(bundle: &Path) -> Result<SigningIdentity, String> {
-    let verify = Command::new("/usr/bin/codesign")
-        .args(["--verify", "--strict"])
-        .arg(bundle)
-        .output()
-        .map_err(|error| error.to_string())?;
-    if !verify.status.success() {
-        return Err(String::from_utf8_lossy(&verify.stderr).into_owned());
+fn code_identity(bundle: &Path, verify_seal: bool) -> Result<SigningIdentity, String> {
+    if verify_seal {
+        let verify = Command::new("/usr/bin/codesign")
+            .args(["--verify", "--strict"])
+            .arg(bundle)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !verify.status.success() {
+            return Err(String::from_utf8_lossy(&verify.stderr).into_owned());
+        }
     }
     let output = Command::new("/usr/bin/codesign")
         .args(["--display", "--verbose=4", "--requirements", "-"])

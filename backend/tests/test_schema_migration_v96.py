@@ -140,7 +140,7 @@ def _selected(db: sqlite3.Connection) -> list[tuple]:
 
 
 def test_the_step_is_registered_at_95_and_96_is_current() -> None:
-    assert SCHEMA_VERSION == 133
+    assert SCHEMA_VERSION == 135
     assert MIGRATIONS[95] is migrate_95_to_96
 
 

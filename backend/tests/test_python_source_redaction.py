@@ -4,6 +4,7 @@ import io
 import re
 from pathlib import Path
 import tokenize
+import zlib
 
 import pytest
 
@@ -372,10 +373,20 @@ def test_only_read_and_grep_construct_the_safe_text_marker():
     assert constructors == [root / "tools" / "filesystem_rw.py", root / "tools" / "grep_content.py"]
 
 
-def test_corpus_meets_the_falsification_property():
+# The corpus grows with the backend, so one sweep would eventually outrun the
+# per-test timeout. A stable hash of each relative path splits it into shards
+# that together still cover every file exactly once.
+_CORPUS_SHARDS = 16
+
+
+@pytest.mark.parametrize("shard", range(_CORPUS_SHARDS))
+def test_corpus_meets_the_falsification_property(shard):
     # A None is only acceptable for a file this module cannot prove is Python.
     root = Path(__file__).parents[1]
     for path in root.rglob("*.py"):
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        if zlib.crc32(relative) % _CORPUS_SHARDS != shard:
+            continue
         content = path.read_text(encoding="utf-8")
         safe = sanitize_python_source(content)
         assert safe is not None, path

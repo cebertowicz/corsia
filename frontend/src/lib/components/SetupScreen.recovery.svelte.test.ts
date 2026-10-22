@@ -33,10 +33,10 @@ afterEach(async () => {
 	component = null; host?.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); token.set(null); user.set(null);
 });
 
-async function openModels({ localEligible = false, otherOmlx = 'none', localReplies = [], progressFails = false }: { localEligible?: boolean; otherOmlx?: 'none' | 'stopped_theirs' | 'kept_both'; localReplies?: Array<Response | Error>; progressFails?: boolean } = {}) {
+async function openModels({ localEligible = false, localReplies = [], progressFails = false }: { localEligible?: boolean; localReplies?: Array<Response | Error>; progressFails?: boolean } = {}) {
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
-		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: localEligible, other_omlx: otherOmlx, work_folder: '~/CORSIA' });
+		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: localEligible, work_folder: '~/CORSIA' });
 		if ((url === '/api/setup/local-download' || url === '/api/providers/local/setup') && init?.method === 'POST') {
 			const reply = localReplies.shift() ?? json({ ok: true });
 			if (reply instanceof Error) throw reply;
@@ -54,6 +54,8 @@ async function openModels({ localEligible = false, otherOmlx = 'none', localRepl
 	flushSync(); await settle(); click('Continue'); await settle(); // past the Welcome screen of a narrow window
 	fill('#setup-name', 'Ada'); fill('#setup-username', 'ada'); fill('#setup-password', 'password1'); fill('#setup-confirm-password', 'password1');
 	await settle(); click('Continue'); await settle(); click('Continue'); await settle();
+	await vi.waitFor(() => expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions'));
+	click('Neither'); await settle();
 	expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
 	await vi.waitFor(() => expect(Array.from(host.querySelectorAll('button')).find((candidate) => candidate.textContent?.trim() === 'Start using CORSIA')?.disabled).toBe(false));
 }
@@ -76,32 +78,19 @@ describe('SetupScreen account recovery', () => {
 		click('Continue'); await settle();
 		expect(host.textContent).toContain('Couldn’t create your account. Try again.');
 		click('Save a report'); await settle();
-		expect(invoke).toHaveBeenCalledWith('save_setup_report');
+		// No provider row failed, so the report adds no row details that would claim nothing went wrong.
+		expect(invoke).toHaveBeenCalledWith('save_setup_report', { details: '' });
 	});
 });
 
 describe('SetupScreen local-start recovery', () => {
 	it.each([
-		['a changed foreign oMLX', [json({ code: 'foreign_omlx_changed', fix: 'CORSIA couldn’t stop another oMLX server. Try again, or leave it running.' }, 409)], 'CORSIA couldn’t stop another oMLX server. Try again, or leave it running.'],
 		['an unrecognized refusal without exposing its message', [json({ message: 'private route detail' }, 500)], 'CORSIA couldn’t start local setup.'],
 		['an unrecognized refusal with a reference', [json({ message: 'private route detail', ref: 'local-start-123' }, 500)], 'CORSIA couldn’t start local setup.'],
 		['an unreachable local backend', [new Error('network down')], 'CORSIA couldn’t start local setup.'],
 	] as const)('shows the local row recovery for %s', async (_name, localReplies, expected) => {
 		await openModels({ localEligible: true, localReplies: [...localReplies] });
 		await vi.waitFor(() => expect(host.textContent).toContain(expected));
-		if (_name === 'a changed foreign oMLX') expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Retry')).toBe(true);
-		expect(host.textContent).not.toContain('private route detail');
-	});
-
-	it('always shows the other-oMLX question when the server requires a fresh choice', async () => {
-		await openModels({ localEligible: true, otherOmlx: 'stopped_theirs', localReplies: [json({ code: 'consent_required' }, 409)] });
-		await vi.waitFor(() => expect(host.textContent).toContain('Stop other oMLX processes?'));
-	});
-
-	it('shows generic recovery when the person’s other-oMLX choice cannot start setup', async () => {
-		await openModels({ localEligible: true, localReplies: [json({ code: 'consent_required' }, 409), json({ message: 'private route detail' }, 500)] });
-		click('Keep them running');
-		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t start local setup.'));
 		expect(host.textContent).not.toContain('private route detail');
 	});
 });

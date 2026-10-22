@@ -147,7 +147,7 @@ def test_pre_account_local_download_status_exposes_only_the_safe_projection(clie
     response = client.get("/api/setup/local-download", headers=HOST)
 
     assert response.status_code == 200
-    assert response.json() == {"state": "failed", "cause": "disk_full", "bytes_to_free": 1024, "other_omlx": "none"}
+    assert response.json() == {"state": "failed", "cause": "disk_full", "bytes_to_free": 1024}
 
 
 @pytest.mark.parametrize(("result", "downloaded"), [
@@ -195,40 +195,16 @@ def test_settings_flight_never_projects_local_download_fields(monkeypatch):
     assert not {"local_state", "setup_error_code", "setup_error_reference", "bytes_to_free"} & source.keys()
 
 
-def test_local_download_applies_the_foreign_process_choice_before_starting(client, monkeypatch):
-    from unittest.mock import AsyncMock, Mock, call
+def test_local_download_starts_the_onboarding_flight_with_no_question(client, monkeypatch):
+    from unittest.mock import AsyncMock, call
 
     started = AsyncMock(return_value={"ok": True})
-    choice = Mock(side_effect=["consent_required", None, None])
-    monkeypatch.setattr(setup_api, "apply_foreign_omlx_choice", choice)
     monkeypatch.setattr("llm.local_setup_flow.begin_local_setup", started)
-
-    assert client.post("/api/setup/local-download", json={}, headers=JSON_HEADERS).json() == {"code": "consent_required"}
-    kept = client.post("/api/setup/local-download", json={"other_omlx": "keep"}, headers=JSON_HEADERS)
-    assert kept.status_code == 200 and kept.json() == {"ok": True}
-    stopped = client.post("/api/setup/local-download", json={"other_omlx": "stop"}, headers=JSON_HEADERS)
-    assert stopped.status_code == 200 and stopped.json() == {"ok": True}
-    assert choice.call_args_list == [
-        call(other_omlx=None),
-        call(other_omlx="keep"),
-        call(other_omlx="stop"),
-    ]
-    assert started.await_count == 2
-    assert started.await_args_list == [call(onboarding=True), call(onboarding=True)]
-
-
-def test_local_download_returns_backend_recovery_for_a_changed_foreign_omlx(client, monkeypatch):
-    from unittest.mock import Mock
-
-    monkeypatch.setattr(setup_api, "apply_foreign_omlx_choice", Mock(return_value="foreign_omlx_changed"))
 
     response = client.post("/api/setup/local-download", json={}, headers=JSON_HEADERS)
 
-    assert response.status_code == 409
-    assert response.json() == {
-        "code": "foreign_omlx_changed",
-        "fix": "CORSIA couldn’t stop another oMLX server. Try again, or leave it running.",
-    }
+    assert response.status_code == 200 and response.json() == {"ok": True}
+    assert started.await_args_list == [call(onboarding=True)]
 
 
 def test_before_an_account_only_the_local_choice_is_taken(client):
@@ -307,7 +283,7 @@ def test_update_reads_and_writes_inside_one_write_transaction(isolated_db, monke
     assert in_transaction == [True]
 
 
-ALL_PICKS = {"claude": True, "chatgpt": False, "key": True}
+ALL_PICKS = {"claude": True, "chatgpt": False}
 HANDOFF = {
     "tools": {
         "claude-code": {"attempt": "install_failed", "cause": "download_unavailable", "ref": "setup-42"},
@@ -330,12 +306,20 @@ def test_welcome_picks_survive_the_account_and_a_reload(client):
 def test_picks_change_after_the_account_and_a_later_write_keeps_the_rest(client):
     token = _create_account(client)
     assert _put(client, {"picks": ALL_PICKS}, token).status_code == 200
-    assert _put(client, {"picks": {"claude": False, "chatgpt": True, "key": False}}, token).status_code == 200
+    assert _put(client, {"picks": {"claude": False, "chatgpt": True}}, token).status_code == 200
     assert _put(client, {"local_ai": False}, token).status_code == 200
 
     progress = _progress(client, token)
-    assert progress["picks"] == {"claude": False, "chatgpt": True, "key": False}
+    assert progress["picks"] == {"claude": False, "chatgpt": True}
     assert progress["local_ai"] is False
+
+
+def test_a_subscriptions_answer_is_stored_as_given(client):
+    token = _create_account(client)
+
+    assert _put(client, {"picks": {"claude": True, "chatgpt": False}}, token).status_code == 200
+
+    assert _progress(client, token)["picks"] == {"claude": True, "chatgpt": False}
 
 
 def test_no_picks_reads_as_none_not_as_all_unchecked(client):
@@ -344,10 +328,11 @@ def test_no_picks_reads_as_none_not_as_all_unchecked(client):
 
 @pytest.mark.parametrize("picks", [
     {"claude": True},
-    {"claude": True, "chatgpt": True, "key": True, "other": True},
-    {"claude": "yes", "chatgpt": False, "key": False},
+    {"claude": True, "chatgpt": True, "other": True},
+    {"claude": True, "chatgpt": True, "key": False},
+    {"claude": "yes", "chatgpt": False},
 ])
-def test_picks_must_say_yes_or_no_for_exactly_the_three_choices(client, picks):
+def test_picks_must_say_yes_or_no_for_exactly_the_two_subscriptions(client, picks):
     token = _create_account(client)
 
     assert _put(client, {"picks": picks}, token).status_code == 422
@@ -358,6 +343,6 @@ def test_a_completed_setup_ignores_a_late_picks_write(client):
     token = _create_account(client)
     assert _put(client, {"picks": ALL_PICKS}, token).status_code == 200
     assert _put(client, {"completed": True}, token).status_code == 200
-    assert _put(client, {"picks": {"claude": False, "chatgpt": False, "key": False}}, token).status_code == 200
+    assert _put(client, {"picks": {"claude": False, "chatgpt": False}}, token).status_code == 200
 
     assert _progress(client, token)["picks"] == ALL_PICKS

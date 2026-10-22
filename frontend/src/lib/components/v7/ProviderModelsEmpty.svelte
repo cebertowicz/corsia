@@ -4,9 +4,17 @@
 	import { fetchSources } from '$lib/conductorSources';
 	import { get } from 'svelte/store';
 	import { token } from '$lib/stores/auth';
+	import ProviderModelsPhase from './ProviderModelsPhase.svelte';
 	interface Props { provider: HostProvider; isExternal: boolean; isHarness: boolean; }
 	const { provider, isExternal, isHarness }: Props = $props();
 	let showLocalEmpty = $state(false);
+	const isCorsiaOmlx = $derived(provider.server?.corsia_omlx === true);
+	// "That computer" only for a server on another computer; a person's own oMLX here is just "in oMLX".
+	const localEmptyMessage = $derived(
+		isCorsiaOmlx
+			? 'No local models on this computer. Add one that fits.'
+			: `No models on ${provider.server?.instance_name ?? provider.label}. Add them in oMLX${provider.server?.on_this_mac === true ? '' : ' on that computer'}.`,
+	);
 
 	onMount(async () => {
 		if (provider.name !== 'omlx') return;
@@ -20,17 +28,15 @@
 </script>
 
 {#if provider.name !== 'omlx' || showLocalEmpty}
-	<div class="phase-stub">
-	{#if provider.name === 'omlx'}
-		No local models on this computer. Add one that fits.
-	{:else if isExternal}
-		This endpoint hasn't listed any models. Some providers never list them: add their model IDs in the provider settings. Otherwise, check its URL and key there.
-	{:else if isHarness}
-		{provider.label} hasn't reported any models. Check that its CLI is installed and signed in.
-	{:else if provider.type === 'cloud'}
-		No models exposed by this provider yet. Try <em>Refresh models</em> in the provider settings.
-	{:else}
-		No models discovered yet. Check the provider's logs.
-	{/if}
-	</div>
+	<ProviderModelsPhase message={
+		provider.name === 'omlx'
+			? localEmptyMessage
+			: isExternal
+				? "This endpoint hasn’t listed any models. Some providers never list them: add their model IDs in the provider settings. Otherwise, check its URL and key there."
+				: isHarness
+					? `${provider.label} hasn’t reported any models. Check that its CLI is installed and signed in.`
+					: provider.type === 'cloud'
+						? 'No models exposed by this provider. Try Refresh models in the provider settings.'
+						: "No models discovered. Check the provider’s logs."
+	} />
 {/if}

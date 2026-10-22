@@ -169,7 +169,6 @@ def test_polling_setup_status_and_local_download_spawn_no_processes(client, monk
     def forbidden(*_args, **_kwargs):
         pytest.fail("polling must not inspect processes")
 
-    monkeypatch.setattr("llm.managed_omlx_binary.foreign_omlx_processes", forbidden)
     monkeypatch.setattr(subprocess, "run", forbidden)
     monkeypatch.setattr(subprocess, "Popen", forbidden)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden)
@@ -182,10 +181,9 @@ def test_polling_setup_status_and_local_download_spawn_no_processes(client, monk
     assert local_download.json()["state"] == "stopped"
 
 
-def test_local_download_uses_the_single_managed_flight_when_no_foreign_process_exists(client, monkeypatch):
+def test_local_download_uses_the_single_managed_flight(client, monkeypatch):
     from llm import local_setup_flow as flow
 
-    monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_processes", lambda: ())
     calls = 0
 
     async def begin_local_setup(*, onboarding):
@@ -200,59 +198,6 @@ def test_local_download_uses_the_single_managed_flight_when_no_foreign_process_e
     assert first.status_code == second.status_code == 200
     assert first.json() == second.json() == {"ok": True, "in_progress": True, "stage": "Installing"}
     assert calls == 2
-
-
-def test_local_download_continues_when_process_inspection_is_unknown(client, monkeypatch, caplog):
-    from llm import local_setup_flow as flow, local_setup_foreign
-
-    monkeypatch.setattr(local_setup_foreign, "foreign_omlx_processes", lambda: None)
-
-    async def begin_local_setup(*, onboarding):
-        assert onboarding is True
-        return {"ok": True, "in_progress": True}
-
-    monkeypatch.setattr(flow, "begin_local_setup", begin_local_setup)
-    response = _post(client, "/api/setup/local-download")
-
-    assert response.status_code == 200
-    assert response.json() == {"ok": True, "in_progress": True}
-    assert "continuing without stopping reference=local-" in caplog.text
-
-
-def test_local_download_requires_explicit_choice_before_foreign_omlx_action(client, monkeypatch):
-    from llm import local_setup_flow as flow
-
-    monkeypatch.setattr(setup_api, "apply_foreign_omlx_choice", lambda **_kwargs: "consent_required")
-
-    async def should_not_start():
-        raise AssertionError("setup must wait for the person's foreign-process choice")
-
-    monkeypatch.setattr(flow, "begin_local_setup", should_not_start)
-    response = _post(client, "/api/setup/local-download")
-
-    assert response.status_code == 409
-    assert response.json() == {"code": "consent_required"}
-
-
-def test_local_download_stops_only_the_identified_foreign_process_after_choice(client, monkeypatch):
-    from llm import local_setup_flow as flow
-
-    choices: list[str | None] = []
-    monkeypatch.setattr(
-        setup_api, "apply_foreign_omlx_choice",
-        lambda **kwargs: choices.append(kwargs["other_omlx"]) or None,
-    )
-    async def begin_local_setup(*, onboarding):
-        assert onboarding is True
-        return {"ok": True, "in_progress": True}
-
-    monkeypatch.setattr(flow, "begin_local_setup", begin_local_setup)
-
-    keep_running = _post(client, "/api/setup/local-download", {"other_omlx": "keep"})
-    stop_foreign = _post(client, "/api/setup/local-download", {"other_omlx": "stop"})
-
-    assert keep_running.status_code == stop_foreign.status_code == 200
-    assert choices == ["keep", "stop"]
 
 
 def test_operation_active_accepts_raw_loopback_shape_without_origin(system_client, monkeypatch):
@@ -486,7 +431,6 @@ def welcome(no_users, monkeypatch, fresh_local_setup):
     """The setup routes on a non-default bound port, as the app reaches them before any account."""
     from llm import local_setup
 
-    monkeypatch.setattr("llm.local_setup_foreign.foreign_omlx_processes", lambda: ())
     port = 43124
     headers = {"Host": f"127.0.0.1:{port}", "Content-Type": "application/json"}
     app = FastAPI()
@@ -521,6 +465,7 @@ def test_welcome_picks_then_get_started_downloads_that_model_through_the_setup_r
         "download_size_bytes": row["download_bytes"], "download_size_gb": round(row["download_bytes"] / 1000**3, 1),
         "context_window": 262_144, "quantization_bits": row["level"], "relative_speed": row["relative_speed"],
         "resident_bytes": row["resident_bytes"],
+        "smarts_level": row["smarts_level"], "tokens_per_second": row["tokens_per_second"],
     }}
     # Welcome only picked; nothing downloaded and nothing was written to oMLX.
     assert mac.downloads == [] and mac.omlx.puts() == []

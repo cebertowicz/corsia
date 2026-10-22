@@ -6,13 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from api.setup_handoff import SetupHandoff
 from infra import user_profile
+from infra.failure_reference import PATTERN as REFERENCE_PATTERN
 
 
 class LocalDownloadRequest(BaseModel):
-    """The person's one choice to stop another oMLX or keep both running."""
+    """Starting the pre-account download takes no fields."""
 
     model_config = ConfigDict(extra="forbid")
-    other_omlx: Literal["stop", "keep"] | None = None
 
 
 class SetupProgressUpdate(BaseModel):
@@ -24,6 +24,24 @@ class SetupProgressUpdate(BaseModel):
     picks: dict[str, StrictBool] | None = None
     handoff: SetupHandoff | None = None
     completed: bool = False
+
+
+class SetupReportRow(BaseModel):
+    """One failed setup row as the screen shows it."""
+
+    model_config = ConfigDict(extra="forbid")
+    key: Literal["claude-code", "codex", "omlx", "api"]
+    name: str = Field(min_length=1, max_length=80)
+    cause: str | None = Field(default=None, max_length=400)
+    # Only a reference CORSIA minted.
+    reference: str | None = Field(default=None, pattern=REFERENCE_PATTERN)
+
+
+class SetupReportRequest(BaseModel):
+    """The failed rows a setup report describes."""
+
+    model_config = ConfigDict(extra="forbid")
+    rows: list[SetupReportRow] = Field(default_factory=list, max_length=8)
 
 
 class FirstAccountRequest(BaseModel):

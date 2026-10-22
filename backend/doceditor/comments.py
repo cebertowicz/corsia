@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from doceditor import comment_notifications, feedback_reopens, live_events
+from doceditor import comment_notifications, feedback_reopens, feedback_settlement, live_events
 from infra.database import get_db, write_transaction
 
 _CLIENT_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
@@ -184,14 +184,14 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
 
     Resolving drops any unsent re-opened item for the comment, whichever route resolved it.
     """
-    allowed = {"resolved", "acked", "body", "from_off", "to_off", "anchor_text", "decision", "decided_by", "decided_by_thread_id", "decided_at", "decision_event_id",
+    allowed = {"resolved", "acked", "body", "from_off", "to_off", "anchor_text", "decision", "decided_by", "decided_by_thread_id", "decided_at", "decision_event_id", "decided_in_bulk",
                "region_x", "region_y", "region_w", "region_h", "image_rev"}
     sets, params = [], []
     for k, v in fields.items():
         if k not in allowed:
             continue
         sets.append(f"{k}=?")
-        params.append(int(v) if k in ("resolved", "acked") and isinstance(v, bool) else v)
+        params.append(int(v) if k in ("resolved", "acked", "decided_in_bulk") and isinstance(v, bool) else v)
     if not sets:
         return None
     now = _now()
@@ -203,11 +203,21 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
             return None
         if fields.get("resolved"):
             feedback_reopens.discard_open_item(connection, comment_id, now)
+            feedback_settlement.settle_batches_of(connection, comment_id)
         row = dict(connection.execute("SELECT * FROM doc_comments WHERE id=?", (comment_id,)).fetchone())
         if "region_x" in fields:
             live_events.region_after_commit(connection, "moved", row["artifact_id"], row["region_w"], row["region_h"])
         comment_notifications.announce_after_commit(connection, row["artifact_id"])
         return row
+
+
+def set_stranded_notice(comment_id: str, at: str | None, *, db=None) -> None:
+    """Record when a suggestion's author was told its text was changed, or clear that once it can be applied again.
+
+    Not an edit of the comment: nothing is announced and its update time stays.
+    """
+    with write_transaction(db, scope="set_doc_comment_stranded_notice") as connection:
+        connection.execute("UPDATE doc_comments SET stranded_notified_at=? WHERE id=?", (at, comment_id))
 
 
 def update_positions(artifact_id: str, updates: list[dict], *, db=None) -> int:

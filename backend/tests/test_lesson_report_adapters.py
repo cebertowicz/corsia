@@ -251,8 +251,12 @@ async def test_report_render_uses_real_off_db_executor_after_closed_collection(r
     assert facts["snapshot_thread"] == facts["snapshot_close_thread"] == facts["collection_thread"]
     assert facts["snapshot_thread"].startswith("db")
     assert facts["blob_calls"] == 1
-    assert facts["sources_thread"] == facts["blob_thread"]
-    assert not facts["sources_thread"].startswith("db")
+    # Sources and render are separate run_off_db submissions, so the default executor may hand
+    # them different worker threads; each must be off both the DB pool and the event loop.
+    main_thread = threading.main_thread().name
+    for stage in ("sources_thread", "blob_thread"):
+        assert not facts[stage].startswith("db")
+        assert facts[stage] != main_thread
 
 
 def test_the_fingerprint_frames_any_snapshot_string_or_key_as_data():

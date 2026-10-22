@@ -186,6 +186,19 @@ def test_lifecycle_stop_dispatches_to_provider_connector(client, monkeypatch):
     assert r.json()["ok"] is True
 
 
+def test_a_failed_stop_carries_a_reference_logged_with_it(client, caplog):
+    with patch(
+        "llm.providers.omlx.stop_server",
+        new=AsyncMock(return_value={"ok": False, "message": "Still running"}),
+    ):
+        r = client.post(
+            f"/api/settings/network-servers/ns-test/lifecycle/stop?token={_TOKEN}"
+        )
+    body = r.json()
+    assert body["ok"] is False and body["ref"].startswith("local-")
+    assert f"reference={body['ref']}" in caplog.text
+
+
 def test_lifecycle_unknown_provider_returns_clean_error(client, monkeypatch):
     from llm import network_discovery as _nd
     monkeypatch.setattr(
@@ -202,3 +215,23 @@ def test_lifecycle_unknown_provider_returns_clean_error(client, monkeypatch):
     body = r.json()
     assert body["ok"] is False
     assert "retired" in body["message"]
+
+
+def test_loading_or_pinning_a_model_clears_a_failed_keep_attempt(client, monkeypatch):
+    from llm import local_keep_loaded
+
+    model = "Qwen3.8-27B-oQ4e"
+    monkeypatch.setitem(local_keep_loaded._FAILED, ("ns-test", model), local_keep_loaded.NOT_LOADED)
+    with patch("llm.providers.omlx.load_model", new=AsyncMock(return_value={"ok": False, "message": "no"})):
+        client.post("/api/settings/network-servers/ns-test/models/load", params=_auth(), json={"model": model})
+    assert local_keep_loaded.failures("ns-test") == {}
+
+    monkeypatch.setitem(local_keep_loaded._FAILED, ("ns-test", model), local_keep_loaded.NOT_KEPT)
+    with patch("llm.providers.omlx.update_model_settings", new=AsyncMock(return_value={"ok": True})):
+        r = client.put(f"/api/settings/network-servers/ns-test/models/{model}/settings", params=_auth(), json={"pinned": True})
+    assert r.status_code == 200, r.text
+    assert local_keep_loaded.failures("ns-test") == {}
+
+
+def _auth() -> dict[str, str]:
+    return dict(zip(("token",), (_TOKEN,)))

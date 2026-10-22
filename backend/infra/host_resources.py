@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import logging
+import math
 from functools import lru_cache
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-SAFE_RESERVE_BYTES = 16 * 1024 * 1024 * 1024
+GIB = 1024 ** 3
+SAFE_RESERVE_BYTES = 16 * GIB
 
 # RAM preload checks apply only to managed engines — the ones CORSIA actually
 # loads models into. External providers are user-run (observe-only), so their
@@ -69,9 +71,22 @@ def load_reserve_bytes(total_bytes: int) -> int:
     return min(SAFE_RESERVE_BYTES, total_bytes // 8)
 
 
+def pin_room_bytes() -> int:
+    """The memory pinned models may take together: total RAM less the same load reserve.
+
+    Fixed for a given Mac, so the pin limit never shifts with what else is running.
+    """
+    total = host_total_ram_bytes()
+    return max(0, total - load_reserve_bytes(total))
+
+
+def _room_bytes(available_bytes: int, total_bytes: int) -> int:
+    return max(0, available_bytes - load_reserve_bytes(total_bytes))
+
+
 def model_room_bytes() -> int:
     """The memory a model may take now: what is available less the load reserve."""
-    return max(0, host_available_ram_bytes() - load_reserve_bytes(host_total_ram_bytes()))
+    return _room_bytes(host_available_ram_bytes(), host_total_ram_bytes())
 
 
 @lru_cache(maxsize=1)
@@ -209,7 +224,6 @@ async def get_host_resources() -> dict[str, Any]:
         }
         for name, models in by_provider.items()
     }
-    GIB = 1024 ** 3
     models_used_bytes = sum(p["used_gb"] for p in breakdown.values()) * GIB
     other_used_bytes = max(0, used - models_used_bytes)
     reserve = load_reserve_bytes(total)
@@ -221,10 +235,76 @@ async def get_host_resources() -> dict[str, Any]:
         "free_gb": round(free / GIB, 2),
         "models_used_gb": round(models_used_bytes / GIB, 2),
         "other_used_gb": round(other_used_bytes / GIB, 2),
-        "safe_free_gb": round(max(0, free - reserve) / GIB, 2),
+        "safe_free_gb": round(_room_bytes(free, total) / GIB, 2),
         "safe_reserve_gb": round(reserve / GIB, 2),
         "by_provider": breakdown,
     }
+
+
+def fits_now(needed_gb: float, safe_free_gb: float) -> bool:
+    """The one "fits now" rule: a model fits when what it needs is within the room a model may take now."""
+    return safe_free_gb - needed_gb >= 0
+
+
+def pin_fits(size_bytes: int, other_pinned_bytes: int, room_bytes: int) -> bool:
+    """The one "pins fit the room" rule: a model may be pinned when the pins stay within the room for pins."""
+    return other_pinned_bytes + size_bytes <= room_bytes
+
+
+def _gb_text(value_bytes: float, *, up: bool = False) -> int:
+    """Whole GB for a sentence: rounded half up, or up when a shortfall must not read short."""
+    gb = value_bytes / GIB
+    return math.ceil(gb) if up else math.floor(gb + 0.5)
+
+
+def pins_full_line(used_bytes: int, room_bytes: int, *, loaded: bool = False) -> str:
+    """The one sentence for a model that can't be pinned: the pins already use the room for pins.
+
+    ``loaded`` adds what that means for a model that is running now.
+    """
+    line = (f"Models kept loaded use {_gb_text(used_bytes)} of {_gb_text(room_bytes)} GB. "
+            "Turn one off to keep this one loaded.")
+    return f"{line} It’s loaded, but won’t load at the next start." if loaded else line
+
+
+#: Without a size CORSIA can't judge the room for pins, so turning the switch on only loads the model.
+NO_SIZE_LINE = "CORSIA can’t keep this model loaded: oMLX didn’t report its size. Turning it on loads it until the next start."
+
+
+def not_loaded_line(size_bytes: int, safe_free_bytes: int) -> str | None:
+    """The sentence for a pinned model that didn't load because it doesn't fit now; None when it fits."""
+    if fits_now(size_bytes / GIB, safe_free_bytes / GIB):
+        return None
+    return (f"Not loaded: needs {_gb_text(size_bytes, up=True)} GB, "
+            f"{_gb_text(safe_free_bytes)} GB free for a model now")
+
+
+def annotate_keep_loaded(models: list[dict], failed: dict[str, str] | None = None) -> None:
+    """Give each row of CORSIA's own oMLX what the switch and the line under it read, on every read.
+
+    ``pin_fits`` says whether turning the model on may pin it. ``keep_line`` is the row's one
+    sentence about keeping it loaded, and this is its only writer: a failed keep attempt
+    (``failed``, by model id, from ``local_keep_loaded.failures``), else the no-size line for
+    an unpinned model with no size (it can't be pinned), else pins full for an unpinned model
+    the pins can't take, else a pinned model that didn't load because it doesn't fit now.
+    """
+    room, free = pin_room_bytes(), model_room_bytes()
+    size_of = {m["id"]: int(m.get("size_bytes") or 0) for m in models}
+    used = sum(size_of[m["id"]] for m in models if m.get("pinned"))
+    for m in models:
+        size = size_of[m["id"]]
+        if size > 0:
+            m["pin_fits"] = pin_fits(size, used - (size if m.get("pinned") else 0), room)
+        line = (failed or {}).get(m["id"])
+        if line is None and size <= 0 and not m.get("pinned"):
+            line = NO_SIZE_LINE
+        elif line is None and size > 0:
+            if not m.get("pinned") and not m["pin_fits"]:
+                line = pins_full_line(used, room, loaded=bool(m.get("loaded")))
+            elif m.get("pinned") and not m.get("loaded") and not m.get("starting"):
+                line = not_loaded_line(size, free)
+        if line:
+            m["keep_line"] = line
 
 
 async def check_can_load(estimated_gb: float, target_provider: str) -> dict[str, Any]:
@@ -236,17 +316,15 @@ async def check_can_load(estimated_gb: float, target_provider: str) -> dict[str,
     free = res["free_gb"]
     after_load = free - estimated_gb
     safe_free = res["safe_free_gb"]
-    safe_after_load = safe_free - estimated_gb
-    ok = safe_after_load >= 0
+    ok = fits_now(estimated_gb, safe_free)
 
     warning = None
     if not ok:
         warning = (
-            f"Loading would leave {after_load:.1f} GB free "
-            f"(below {res['safe_reserve_gb']:.0f} GB safe reserve)."
+            f"Loading would leave {after_load:.1f} GB of memory free "
+            f"(below the {res['safe_reserve_gb']:.0f} GB safe reserve)."
             if after_load >= 0 else
-            f"Loading would exceed available RAM by {-after_load:.1f} GB. "
-            f"OS will swap or kill processes."
+            f"Loading would need {-after_load:.1f} GB more memory than is free."
         )
 
     return {
@@ -254,6 +332,7 @@ async def check_can_load(estimated_gb: float, target_provider: str) -> dict[str,
         "free_gb": free,
         "after_load_gb": round(after_load, 2),
         "safe_free_gb": safe_free,
+        "safe_reserve_gb": res["safe_reserve_gb"],
         "warning": warning,
         "remote": False,
     }

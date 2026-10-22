@@ -12,9 +12,10 @@
 		onStarted: () => void;
 		onAddProvider: () => void;
 		empty?: boolean;
+		corsiaManaged?: boolean;
 	}
 
-	const { onStarted, onAddProvider, empty = false }: Props = $props();
+	const { onStarted, onAddProvider, empty = false, corsiaManaged = false }: Props = $props();
 	let source = $state<ModelSource | undefined>(undefined);
 	let showAddLocal = $state(false);
 	let stop: (() => void) | null = null;
@@ -34,12 +35,12 @@
 	onDestroy(() => stop?.());
 </script>
 
-{#if lowMemory}
+{#if corsiaManaged && lowMemory}
 	<div class="local-refusal">
 		<p>{LOW_MEMORY_LOCAL_MODEL_MESSAGE}</p>
 		<Button size="sm" variant="secondary" onclick={onAddProvider}>Add provider</Button>
 	</div>
-{:else}
+{:else if corsiaManaged}
 	<div class="add-local">
 		<Button size="sm" variant={empty ? 'primary' : 'ghost'} onclick={() => showAddLocal = true}>Add model</Button>
 	</div>

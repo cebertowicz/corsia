@@ -1,7 +1,8 @@
 <script lang="ts">
 	// The model list's Local only notes (design §5): `empty` when no local model is ready, `quiet` once local rows are showing.
+	// onsetuplocal is passed only when nothing else in the sheet offers to add a local model.
 	let { kind, projectCloudOff, inherited = false, onsetuplocal, onprojectsettings }: {
-		kind: 'empty' | 'quiet'; projectCloudOff: boolean; inherited?: boolean; onsetuplocal: () => void; onprojectsettings: () => void;
+		kind: 'empty' | 'quiet'; projectCloudOff: boolean; inherited?: boolean; onsetuplocal?: () => void; onprojectsettings: () => void;
 	} = $props();
 </script>
 
@@ -10,7 +11,7 @@
 		{#if projectCloudOff}
 			This project uses local models only, and no local model is ready.<br /><button type="button" class="add-local-link" onclick={onprojectsettings}>Open project settings</button>
 		{:else}
-			No local model is ready.<br /><button type="button" class="add-local-link" onclick={onsetuplocal}>Set up a local model</button>
+			No local model is ready.{#if onsetuplocal}<br /><button type="button" class="add-local-link" onclick={onsetuplocal}>Set up a local model</button>{/if}
 		{/if}
 	</div>
 {:else if projectCloudOff}
