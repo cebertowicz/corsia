@@ -17,8 +17,8 @@ from loguru import logger
 from plans import intent_words, node_states, service
 
 #: The (shared, title_shared) counts a text match must reach: stricter than Context & Memory's
-#: floor, which only says "plausibly related". A conservative placeholder; Plans calibrates it
-#: before wakes turn on (``calibrate_intent_input_bar.py``).
+#: floor, which only says "plausibly related". The bar is live but has not been calibrated on
+#: real traffic yet.
 TEXT_BAR = (4, 2)
 MAX_WAKES = 3
 WORDS_MAX_BYTES = 1200
@@ -142,7 +142,10 @@ def _picked(db, source: Source) -> list[tuple]:
 
 
 def text_candidates(db, project_id: str | None) -> list:
-    """Every started canonical task in the project's plans (running is decided after)."""
+    """Every started canonical task in the project's plans (running is decided after).
+
+    Who may hear the words is decided per owner in ``_wake``.
+    """
     return db.execute(
         f"""SELECT n.* FROM plan_nodes n JOIN plans p ON p.id=n.plan_id
             LEFT JOIN threads t ON p.owner_kind='thread' AND t.id=p.owner_id
@@ -204,7 +207,9 @@ def running(db, nodes) -> list[tuple]:
     for node in nodes:
         if node_states.retired(node) or node["state"] not in ("active", "review_requested"):
             continue
-        plan = plans.setdefault(str(node["plan_id"]), service._plan_row(db, node["plan_id"]))
+        plan = plans.get(str(node["plan_id"]))
+        if plan is None:
+            plan = plans[str(node["plan_id"])] = service._plan_row(db, node["plan_id"])
         if plan["state"] == "active":
             pairs.append((node, plan))
     projected = admission.project_many(pairs, db=db) if pairs else {}
@@ -216,12 +221,16 @@ def running(db, nodes) -> list[tuple]:
 
 
 def _wake(db, source: Source, picked: list[tuple]) -> list[str]:
+    from memory.node_start_recall import source_reaches_thread
     from plans import admission_projection, plan_wake
 
     woken: list[str] = []
     for node, plan in picked:
         recipient = admission_projection.executor_of(node, plan)
         if recipient is None or recipient == source.thread_id:
+            continue
+        # The person's words reach an owner only by the scope rule Context & Memory applies to the same words.
+        if not source_reaches_thread(db, source.thread_id, recipient):
             continue
         wake = plan_wake.append(
             db, recipient=recipient, kind=plan_wake.INTENT_INPUT, subject_id=str(node["id"]),

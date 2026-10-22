@@ -2,6 +2,9 @@ import { fetchArtifactPane } from '$lib/api/docs';
 import type { ArtifactNode, PaneNode } from '$lib/api/artifactPane';
 import { openArtifactAndShowThread } from '$lib/openArtifactInThread';
 
+/** What a wait's label says once its document would not open: the state and the person's next step (C9). */
+export const UNOPENABLE_DOCUMENT = 'Couldn’t open this document. Ask the agent in chat for a working link.';
+
 /**
  * Opens the artifact an outside wait watches (EW7, EW8). The app opens a document by its path, so the id is
  * looked up in the pane of the thread that armed the watch, the same row an ask's tile opens from.

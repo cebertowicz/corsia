@@ -184,6 +184,19 @@ def _source_scope(alias: str, timestamp: str, caller: sqlite3.Row, cloud_off: se
     )
 
 
+def source_reaches_thread(db: sqlite3.Connection, source_thread_id: str, recipient_thread_id: str) -> bool:
+    """Whether the person's words in one thread may reach another thread, by the rule every source reader applies."""
+    user_id = caller_user_id(db, recipient_thread_id)
+    recipient = db.execute("SELECT project_id,local_only FROM threads WHERE id=?", (recipient_thread_id,)).fetchone()
+    if user_id is None or recipient is None:
+        return False
+    source_scope, params = _source_scope("t", "t.id", recipient, cloud_off_project_ids(db=db), None)
+    return db.execute(
+        f"SELECT 1 FROM threads t WHERE t.id=? AND {_owned_threads('t')} {source_scope}",
+        [source_thread_id, user_id, *params],
+    ).fetchone() is not None
+
+
 def _message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[_Hit]:
     owner_filter, owner_params = owner_message_sql_predicate("m")
     source_scope, source_params = _source_scope("t", "m.created_at", caller, cloud_off, cutoff)

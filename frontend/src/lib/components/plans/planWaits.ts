@@ -26,11 +26,11 @@ export function waitPassed(until: string | null | undefined, now: Date = new Dat
 	return Number.isFinite(ms) && ms <= now.getTime();
 }
 
-/** The short form every surface shows: "back 11:46 PM", "back Thursday 9:00 AM", or "back now" once passed (EW10). */
+/** The short form every surface shows: "back 11:46 PM", "back Thursday 9:00 AM", or "back now" once passed (EW10); empty when the moment cannot be formatted. */
 export function waitBack(until: string, now: Date = new Date()): string {
 	if (waitPassed(until, now)) return 'back now';
 	const at = formatMoment(new Date(parseWsTimestamp(until)), now, { compact: true, plain: true, clock: true });
-	return at ? `back ${at}` : 'back soon';
+	return at ? `back ${at}` : '';
 }
 
 /** The set-aside row's line: "Set aside until Thursday 9:00 AM", or "Back now" once the time has passed (EW7, EW10). */
@@ -40,11 +40,11 @@ export function setAsideLine(until: string, now: Date = new Date()): string {
 	return at ? `Set aside until ${at}` : 'Set aside';
 }
 
-/** The long form for titles and accessible names: "checks back today at 11:46 PM", or "checks back now". */
+/** The long form for titles and accessible names: "checks back today at 11:46 PM", or "checks back now"; empty when the moment cannot be formatted. */
 export function waitChecksBack(until: string, now: Date = new Date()): string {
 	if (waitPassed(until, now)) return 'checks back now';
 	const at = formatMoment(new Date(parseWsTimestamp(until)), now);
-	return at ? `checks back ${at}` : 'checks back soon';
+	return at ? `checks back ${at}` : '';
 }
 
 /** A plan wait the server names on this row: a watch with a deadline, apart from set-aside, dependency and worker waits (EW11). */
@@ -60,7 +60,7 @@ export function outsideWaitReason(node: OperatorNode, now: Date): string | null 
 	if (node.child?.wait && node.execution.condition === 'waiting') return null;
 	if (!isOutsideWait(node) || !node.wait) return undefined;
 	const more = node.wait.more > 0 ? ` +${node.wait.more} more` : '';
-	return `${node.wait.label}${more} · ${waitBack(node.wait.until, now)}`;
+	return [`${node.wait.label}${more}`, waitBack(node.wait.until, now)].filter(Boolean).join(' · ');
 }
 
 const HOUR_MS = 3_600_000;

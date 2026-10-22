@@ -13,9 +13,15 @@ import PlanChildControls from './plans/PlanChildControls.svelte';
 import { nodeSubline } from './plans/planDisplay';
 import { _resetLiveStepForTests } from './plans/planLiveStep';
 import { setAsideLine, waitBack, waitChecksBack } from './plans/planWaits';
+import { UNOPENABLE_DOCUMENT } from '$lib/openWaitArtifact';
 import { waitMarkTitle } from './threadRowMark';
 import TranscriptContent from './TranscriptContent.svelte';
 import type { TranscriptEntry } from './messageListModel';
+
+vi.mock('$lib/openWaitArtifact', async (original) => ({
+	...(await original<typeof import('$lib/openWaitArtifact')>()),
+	openWaitArtifact: vi.fn().mockResolvedValue(false),
+}));
 
 const NOW = new Date(2026, 9, 2, 10, 30, 0);
 const at = (minutes: number): string => new Date(NOW.getTime() + minutes * 60_000).toISOString();
@@ -259,5 +265,23 @@ describe('the label link is its own control', () => {
 		const chip = host.querySelectorAll('.fold-toggle')[1]!;
 		expect(chip.querySelector('button.wait-link')).not.toBeNull();
 		expect(chip.querySelectorAll('button')).toHaveLength(1);
+	});
+
+	it('a document that will not open says what to do next, once, from one shared string', async () => {
+		focus(true);
+		threadPlanStates.set({ [THREAD]: linked(at(40)) });
+		render(afterReply());
+
+		host.querySelector<HTMLButtonElement>('button.wait-link')!.click();
+		await vi.waitFor(() => expect(host.querySelector('.wait-label[title]')?.getAttribute('title')).toBe(UNOPENABLE_DOCUMENT));
+		expect(UNOPENABLE_DOCUMENT).toBe('Couldn\u2019t open this document. Ask the agent in chat for a working link.');
+	});
+});
+
+describe('a wait time that cannot be formatted', () => {
+	it('omits the time phrase instead of promising "soon"', () => {
+		expect(waitBack('nope', NOW)).toBe('');
+		expect(waitChecksBack('nope', NOW)).toBe('');
+		expect(waitMarkTitle(waiting('nope'), NOW)).toBe('Waiting for CI on PR #1193');
 	});
 });

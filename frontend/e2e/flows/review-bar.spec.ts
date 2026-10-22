@@ -223,7 +223,7 @@ journey('a stale answer to a person step keeps it open', PERSON_STEP, async ({ p
 		return route.continue({ postData: JSON.stringify(body) });
 	}, { times: 1 });
 	await button('Done').click();
-	await expect(bar(page).locator('.rb-status')).toHaveText('This step changed. Refreshing the latest state.');
+	await expect(bar(page).locator('.rb-status')).toHaveText('This task changed. Refreshing the latest state.');
 	await expect(bar(page).locator('.rb-receipt')).toHaveCount(0);
 	await settled(page);
 	await shot(page, 'person-step-conflict', info);

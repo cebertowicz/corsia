@@ -15,7 +15,7 @@
 	import SnoozeClock from '$lib/components/plans/SnoozeClock.svelte';
 	import { threadPlanStates } from '$lib/stores/threadPlanStates';
 	import { setAsideLine, waitBack, waitChecksBack } from '$lib/components/plans/planWaits';
-	import { openWaitArtifact } from '$lib/openWaitArtifact';
+	import { openWaitArtifact, UNOPENABLE_DOCUMENT } from '$lib/openWaitArtifact';
 	import { minuteClock } from '$lib/time';
 
 	let {
@@ -85,7 +85,7 @@
 		: wait.label.charAt(0).toUpperCase() + wait.label.slice(1));
 	const waitMore = $derived(wait && wait.more > 0 ? ` +${wait.more} more` : '');
 	const waitBackText = $derived(wait ? waitBack(wait.until, $minuteClock) : '');
-	const waitTitle = $derived(wait ? `Waiting for ${wait.label}${waitMore} · ${waitChecksBack(wait.until, $minuteClock)}` : '');
+	const waitTitle = $derived(wait ? [`Waiting for ${wait.label}${waitMore}`, waitChecksBack(wait.until, $minuteClock)].filter(Boolean).join(' · ') : '');
 
 	// A document that fails to open stops being a link, and its title says so.
 	let unopenable = $state<string | null>(null);
@@ -167,7 +167,7 @@
 					<strong aria-hidden="true">{row.entry.owner.label}</strong>
 					{#if wait}
 						<!-- One line at every width: only the label truncates, and the time always shows. -->
-						<span class="wait" title={waitTitle}>{#if waitLinked}<button type="button" class="wait-label wait-link" onclick={openWait}>{waitLabel}{waitMore}</button>{:else}<span class="wait-label" title={wait.artifact_id ? "Couldn't open this document" : undefined}>{waitLabel}{waitMore}</span>{/if}<span class="wait-when">{' · '}{waitBackText}</span></span>
+						<span class="wait" title={waitTitle}>{#if waitLinked}<button type="button" class="wait-label wait-link" onclick={openWait}>{waitLabel}{waitMore}</button>{:else}<span class="wait-label" title={wait.artifact_id ? UNOPENABLE_DOCUMENT : undefined}>{waitLabel}{waitMore}</span>{/if}{#if waitBackText}<span class="wait-when">{' · '}{waitBackText}</span>{/if}</span>
 					{:else if setAside}
 						<span class="set-aside">{setAside}</span>
 					{:else}

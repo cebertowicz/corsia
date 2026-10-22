@@ -487,6 +487,11 @@ def _missing_intent_word(_db, _scene):
     return partial(intent_words.validate_intent, "")
 
 
+def _too_many_intent_words(db, scene):
+    words = [{"quote": f"Word {index}", "author": "agent"} for index in range(intent_words.MAX_WORDS_PER_CALL + 1)]
+    return partial(intent_words.resolve_words, db, scene.plan_id, words, actor_id=None)
+
+
 def _oversized_intent_word(_db, _scene):
     return partial(intent_words.validate_intent, "x" * (intent_words.MAX_INTENT_BYTES + 1))
 
@@ -575,6 +580,7 @@ _CASES = {
     ("intent_words.py", 'f"{field} is required"'): _missing_intent_word,
     ("intent_words.py", 'f"{field} exceeds the {limit}-byte limit"'): _oversized_intent_word,
     ("intent_words.py", '"intent_words must be a nonempty array"'): _missing_intent_word,
+    ("intent_words.py", 'f"intent_words takes at most {MAX_WORDS_PER_CALL} quotes per call; keep the strongest {MAX_WORDS_PER_CALL}"'): _too_many_intent_words,
     ("intent_words.py", '"intent_words items require quote, author?, and role?"'): _missing_intent_word,
     ("intent_words.py", '"intent word author must be person or agent"'): _missing_intent_word,
     ("intent_words.py", '"intent word role must be origin, bears_on, or authority"'): _missing_intent_word,

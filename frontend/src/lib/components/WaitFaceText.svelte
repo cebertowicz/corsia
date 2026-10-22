@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { openWaitArtifact } from '$lib/openWaitArtifact';
+	import { openWaitArtifact, UNOPENABLE_DOCUMENT } from '$lib/openWaitArtifact';
 	import type { WaitFace } from './waitFace';
 
 	// One line at every width, never wrapping (EW8): only the label truncates, and the state word and the time always show.
@@ -26,11 +26,11 @@
 	{#if linked}
 		<button type="button" class="wait-label wait-link" onclick={open}>{face.label}</button>
 	{:else if face.artifactId && unopenable === face.artifactId}
-		<span class="wait-label" title="Couldn't open this document">{face.label}</span>
+		<span class="wait-label" title={UNOPENABLE_DOCUMENT}>{face.label}</span>
 	{:else}
 		<span class="wait-label" aria-hidden={decorative || undefined}>{face.label}</span>
 	{/if}
-	<span class="wait-fixed" aria-hidden={decorative || undefined}>· {face.back}</span>
+	{#if face.back}<span class="wait-fixed" aria-hidden={decorative || undefined}>· {face.back}</span>{/if}
 </span>
 
 <style>

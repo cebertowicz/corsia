@@ -45,12 +45,12 @@
 		}
 		action = 'idle';
 		if (outcome.status === 'conflict') {
-			failure = 'This step changed. Refreshing the latest state.';
+			failure = 'This task changed. Refreshing the latest state.';
 			onConflict?.();
 			return;
 		}
 		failure = outcome.status === 'forbidden'
-			? 'You no longer have permission to change this step.'
+			? 'You can’t change this task. Ask the agent in chat to change it.'
 			: outcome.message;
 	}
 </script>
@@ -59,8 +59,8 @@
 	view={receipt ? 'receipt' : 'ask'}
 	who={personStep ? { name: personStep.owner_name, id: personStep.owner_thread_id } : undefined}
 	full={personStep ? `Needs you to do this: ${personStep.node_title}` : ''}
-	askLabel="Person step" {busy} status={busy ? 'Recording your answer…' : failure} {suppressed} bind:capsuleClearance
-	receipt={receipt ? { icon: receipt === 'done' ? 'check' : 'dash', label: 'Person step answered', segments: [receipt === 'done' ? 'Done' : 'Won’t do'] } : null}
+	askLabel="Task for you" {busy} status={busy ? 'Recording your answer…' : failure} {suppressed} bind:capsuleClearance
+	receipt={receipt ? { icon: receipt === 'done' ? 'check' : 'dash', label: 'Task answered', segments: [receipt === 'done' ? 'Done' : 'Won’t do'] } : null}
 >
 	{#snippet actions()}
 		<div class="rb-actions">

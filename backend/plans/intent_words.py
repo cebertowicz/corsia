@@ -11,6 +11,7 @@ from core.corrections_recording import is_owner_authored_message
 
 MAX_INTENT_BYTES = 600
 MAX_QUOTE_BYTES = 400
+MAX_WORDS_PER_CALL = 3  # the read budget `newest` already shows
 _WORD_AUTHORS = frozenset({"person", "agent"})
 _WORD_ROLES = frozenset({"origin", "bears_on", "authority"})
 _WS = re.compile(r"\s+")
@@ -59,14 +60,19 @@ def _is_agent_message(row: sqlite3.Row) -> bool:
     return row["role"] == "assistant" or '"sender_kind":"agent"' in (row["metadata"] or "").replace(" ", "")
 
 
-def _message_quote(connection: sqlite3.Connection, plan_id: str, quote: str):
+def _token(quote: str) -> str:
+    """The longest whitespace-free piece of the quote: it appears verbatim in any text that holds the quote."""
+    return max(_normal(quote).split(" "), key=len)
+
+
+def _message_quote(connection: sqlite3.Connection, project_id: str | None, quote: str):
     rows = connection.execute(
         """SELECT m.id,m.content,m.role,m.metadata,m.created_at FROM messages m
            JOIN messages_fts f ON f.rowid=m.rowid
            JOIN threads t ON t.id=m.thread_id
            WHERE messages_fts MATCH ? AND t.project_id IS ?
            ORDER BY m.created_at DESC LIMIT 20""",
-        (_phrase(quote), _project_id(connection, plan_id)),
+        (_phrase(quote), project_id),
     ).fetchall()
     wanted = _normal(quote)
     return next(
@@ -75,37 +81,33 @@ def _message_quote(connection: sqlite3.Connection, plan_id: str, quote: str):
     )
 
 
-def _comment_quote(connection: sqlite3.Connection, plan_id: str, quote: str):
+def _comment_quote(connection: sqlite3.Connection, project_id: str | None, quote: str):
     rows = connection.execute(
         """SELECT c.id,c.body,c.created_at FROM doc_comments c
            JOIN artifact_registrations r ON r.artifact_id=c.artifact_id
            JOIN threads t ON t.id=r.parent_thread_id
-           WHERE c.author_kind='user' AND t.project_id IS ?
+           WHERE c.author_kind='user' AND t.project_id IS ? AND instr(c.body, ?) > 0
            ORDER BY c.created_at DESC LIMIT 20""",
-        (_project_id(connection, plan_id),),
+        (project_id, _token(quote)),
     ).fetchall()
     wanted = _normal(quote)
     return next((row for row in rows if wanted in _normal(row["body"])), None)
 
 
-def _decision_quote(connection: sqlite3.Connection, plan_id: str, quote: str):
+def _decision_quote(connection: sqlite3.Connection, project_id: str | None, quote: str):
     rows = connection.execute(
-        """SELECT a.id,a.external_id,a.metadata,a.updated_at FROM artifact_identities a
+        """SELECT a.id,a.external_id,json_extract(a.metadata, '$.plan_decision.answer') AS answer
+           FROM artifact_identities a
            JOIN threads t ON t.id=json_extract(a.metadata, '$.plan_decision.thread_id')
            WHERE a.integration='local' AND a.type='plan-decision'
              AND t.project_id IS ?
-             AND json_extract(a.metadata, '$.plan_decision.answer') IS NOT NULL
+             AND json_type(a.metadata, '$.plan_decision.answer')='text'
+             AND instr(json_extract(a.metadata, '$.plan_decision.answer'), ?) > 0
            ORDER BY a.updated_at DESC LIMIT 20""",
-        (_project_id(connection, plan_id),),
+        (project_id, _token(quote)),
     ).fetchall()
     wanted = _normal(quote)
-    for row in rows:
-        answer = connection.execute(
-            "SELECT json_extract(?, '$.plan_decision.answer')", (row["metadata"],)
-        ).fetchone()[0]
-        if isinstance(answer, str) and wanted in _normal(answer):
-            return row
-    return None
+    return next((row for row in rows if wanted in _normal(row["answer"])), None)
 
 
 def resolve_words(
@@ -117,6 +119,11 @@ def resolve_words(
         return []
     if not isinstance(words, list) or not words:
         raise service.PlanInputError("intent_words must be a nonempty array")
+    if len(words) > MAX_WORDS_PER_CALL:
+        raise service.PlanInputError(
+            f"intent_words takes at most {MAX_WORDS_PER_CALL} quotes per call; keep the strongest {MAX_WORDS_PER_CALL}"
+        )
+    project_id = _project_id(connection, plan_id)
     resolved: list[dict[str, str]] = []
     for raw in words:
         if not isinstance(raw, dict) or set(raw) - {"quote", "author", "role"}:
@@ -132,17 +139,17 @@ def resolve_words(
             resolved.append({"quote": quote, "author": author, "role": role,
                              "source_kind": "message", "source_id": actor_id or "agent"})
             continue
-        message = _message_quote(connection, plan_id, quote)
+        message = _message_quote(connection, project_id, quote)
         if message is not None:
             resolved.append({"quote": quote, "author": author, "role": role,
                              "source_kind": "message", "source_id": message["id"]})
             continue
-        comment = _comment_quote(connection, plan_id, quote)
+        comment = _comment_quote(connection, project_id, quote)
         if comment is not None:
             resolved.append({"quote": quote, "author": author, "role": role,
                              "source_kind": "doc_comment", "source_id": comment["id"]})
             continue
-        decision = _decision_quote(connection, plan_id, quote)
+        decision = _decision_quote(connection, project_id, quote)
         if decision is not None:
             resolved.append({"quote": quote, "author": author, "role": role,
                              "source_kind": "decision_answer", "source_id": decision["external_id"]})
@@ -260,16 +267,19 @@ def detail(connection: sqlite3.Connection, node: sqlite3.Row) -> dict[str, Any]:
     return result
 
 
-def newest(connection: sqlite3.Connection, node_id: str, *, limit: int = 3) -> list[dict[str, Any]]:
+def newest(connection: sqlite3.Connection, node_id: str, *, limit: int = MAX_WORDS_PER_CALL) -> list[dict[str, Any]]:
     """Return recent words while retaining the task's origin or authority."""
-    rows = connection.execute(
-        """SELECT author,role,quote,added_at FROM plan_node_intent_words
-           WHERE node_id=? AND removed_at IS NULL ORDER BY added_at DESC,rowid DESC""",
-        (node_id,),
+    anchor = connection.execute(
+        """SELECT rowid,author,role,quote,added_at FROM plan_node_intent_words
+           WHERE node_id=? AND removed_at IS NULL AND role IN ('authority','origin')
+           ORDER BY added_at DESC,rowid DESC LIMIT 1""", (node_id,),
+    ).fetchone()
+    recent = connection.execute(
+        """SELECT rowid,author,role,quote,added_at FROM plan_node_intent_words
+           WHERE node_id=? AND removed_at IS NULL AND rowid IS NOT ?
+           ORDER BY added_at DESC,rowid DESC LIMIT ?""",
+        (node_id, None if anchor is None else anchor["rowid"], limit - (1 if anchor is not None else 0)),
     ).fetchall()
-    anchor = next((row for row in rows if row["role"] in {"authority", "origin"}), None)
-    selected = ([anchor] if anchor is not None else []) + [
-        row for row in rows if row is not anchor
-    ][:limit - (1 if anchor is not None else 0)]
+    selected = ([anchor] if anchor is not None else []) + recent
     return [{"author": row["author"], "role": row["role"], "quote": row["quote"].encode()[:240].decode(errors="ignore"),
              "added_at": row["added_at"]} for row in selected]

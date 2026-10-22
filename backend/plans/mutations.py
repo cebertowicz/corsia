@@ -163,6 +163,8 @@ def edit_node(
                 connection, node_id, title=next_title, description=next_description, intent=next_intent,
                 acceptance_criteria=next_dod, watchdog_budget_seconds=next_watchdog,
                 requirements_revision=node["requirements_revision"] + int(requirements_changed),
+                # Editing the intent of a node that inherits one makes the node its own owner.
+                **({"intent_node_id": None} if intent is not _UNSET and node["intent_node_id"] else {}),
                 **({"size": next_size} if size_changed else {}),
             )
         else:

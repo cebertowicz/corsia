@@ -54,7 +54,7 @@
 	const waitMore = $derived(childWait && childWait.more > 0 ? ` +${childWait.more} more` : '');
 	// The accessible name and title keep the word the glyph stands for.
 	const waitName = $derived(childWait
-		? `Waiting for ${childWait.label}${waitMore}, ${waitChecksBack(childWait.until, $minuteClock)}`
+		? [`Waiting for ${childWait.label}${waitMore}`, waitChecksBack(childWait.until, $minuteClock)].filter(Boolean).join(', ')
 		: null);
 </script>
 
@@ -74,7 +74,7 @@
 	>
 		{#if childWait}
 			<ThreadWaitingMark size={12} />
-			<span class="child-wait"><span class="child-wait-label">{childWait.label}{waitMore}</span><span class="child-wait-fixed">{' · '}{waitBack(childWait.until, $minuteClock)}</span></span>
+			<span class="child-wait"><span class="child-wait-label">{childWait.label}{waitMore}</span>{#if waitBack(childWait.until, $minuteClock)}<span class="child-wait-fixed">{' · '}{waitBack(childWait.until, $minuteClock)}</span>{/if}</span>
 		{:else}
 			<span class="child-dot {childActivity()}" aria-hidden="true"></span>
 		{/if}

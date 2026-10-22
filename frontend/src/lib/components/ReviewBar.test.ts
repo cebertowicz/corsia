@@ -136,8 +136,20 @@ describe('ReviewBar', () => {
 		await render();
 		button('Done')!.click();
 		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalledTimes(2));
-		expect(host.querySelector('.rb-status')?.textContent).toBe('This step changed. Refreshing the latest state.');
+		expect(host.querySelector('.rb-status')?.textContent).toBe('This task changed. Refreshing the latest state.');
 		expect(host.querySelector('.rb-receipt')).toBeNull();
+	});
+
+	it('names the task and the next step when the answer is not permitted', async () => {
+		token.set('user-token');
+		planApi.mutateUserTask.mockResolvedValue({ status: 'forbidden', detail: 'not allowed' });
+		const step = { node_id: 'step-1', node_title: 'Set up the workspace', node_revision: 3, plan_id: 'plan-1', owner_thread_id: 'agent-1', owner_name: 'Setup agent' };
+		api.fetchReviewBar.mockResolvedValue({ ...read(0), ask_raised: false, person_step: step });
+		await render();
+		expect(host.querySelector('section.review-bar')?.getAttribute('aria-label')).toBe('Task for you');
+		button('Done')!.click();
+		await vi.waitFor(() => expect(host.querySelector('.rb-status')?.textContent)
+			.toBe('You can’t change this task. Ask the agent in chat to change it.'));
 	});
 
 	it('keeps the plan-row receipt after the plans refresh removes the settled person step', async () => {
