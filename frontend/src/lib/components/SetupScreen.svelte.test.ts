@@ -53,7 +53,8 @@ beforeEach(() => {
 		return json({});
 	}));
 	host = document.createElement('div'); document.body.appendChild(host);
-	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+	finished = vi.fn();
+	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: finished } });
 	flushSync();
 });
 
@@ -94,6 +95,7 @@ function expectWelcomeCopy() {
 /** The Getting started screen's Continue, then the account form. */
 async function openAccount() { await settle(); button('Continue')?.click(); await settle(); }
 /** Back on the account screen after the account was made and the person moved on to subscriptions. */
+let finished = vi.fn();
 async function backToAccount() {
 	await passFolder();
 	expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
@@ -312,6 +314,9 @@ describe('SetupScreen', () => {
 			expect(username.readOnly).toBe(true);
 			expect((host.querySelector('#setup-password') as HTMLInputElement).value).toBe('');
 			expect((host.querySelector('#setup-confirm-password') as HTMLInputElement).value).toBe('');
+			// A blank pair reads as optional, not as something still to fill in.
+			expect(host.querySelector('label[for="setup-password"]')?.textContent).toContain('New password (optional)');
+			expect(host.querySelector('label[for="setup-confirm-password"]')?.textContent).toContain('Confirm new password');
 			// The folder was made with the account, so it reads back and cannot be changed here.
 			expect(host.querySelector('[data-testid="setup-folder-made"]')?.textContent).toContain('CORSIA keeps your work in ~/CORSIA');
 			expect(button('Change')).toBeUndefined();
@@ -403,6 +408,16 @@ describe('SetupScreen', () => {
 			expect(getByRole('alert').textContent).toContain('Couldn’t save your account. Try again.');
 			// What was typed stays, and the next press tries the same change again.
 			expect((host.querySelector('#setup-name') as HTMLInputElement).value).toBe('Ada King');
+		});
+
+		it('ends the account step instead of offering a retry when setup finished somewhere else', async () => {
+			await backToAccount();
+			const answer = vi.mocked(fetch).getMockImplementation()!;
+			vi.mocked(fetch).mockImplementation(async (input, init) => String(input) === '/api/setup/account' ? json({ code: 'setup_complete' }, 409) : answer(input, init));
+			setInput('setup-name', 'Ada King'); await settle();
+			button('Continue')?.click(); await settle();
+			expect(finished).toHaveBeenCalledTimes(1);
+			expect(host.querySelector('[role="alert"]')).toBeNull();
 		});
 
 		it('goes Back to Getting started from the account screen', async () => {

@@ -249,11 +249,11 @@
 	.traffic-space { height: calc(var(--space-7) + var(--space-5)); }
 	.pane { position: relative; flex: 1; min-width: 0; height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; padding: calc(var(--space-8) + var(--space-4)) var(--space-4) var(--space-6) var(--space-7); }
 	.drag { position: absolute; inset: 0 0 auto; height: var(--space-8); }
-	.pane-scenes { position: relative; display: grid; flex: 1; min-height: 0; }
+	.pane-scenes { display: grid; flex: 1; min-height: 0; }
 	.pane-scene { position: relative; grid-area: 1 / 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 	header { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); }
-	/* From 1280 wide every scene is two columns: content on the left, the mark in the right half. Below that there is no mark. */
-	.brand { position: absolute; top: calc(var(--space-7) + var(--space-3)); right: 0; bottom: 0; width: 50%; box-sizing: border-box; padding-left: var(--space-5); pointer-events: none; }
+	/* From 1280 wide every scene is two columns: content on the left, the mark in the right half. Below that there is no mark. The mark is placed against the pane, not the scene column, so a taller footer (a note beside Continue) never moves it between steps. */
+	.brand { position: absolute; top: calc(var(--space-8) + var(--space-4) + var(--space-7) + var(--space-3)); right: 0; bottom: calc(var(--space-6) + var(--space-7) + var(--space-2)); width: 50%; box-sizing: border-box; padding-left: var(--space-5); pointer-events: none; }
 	@media (min-width: 80em) {
 		.pane-scene header, .pane-scene .lede, .pane-scene .body { width: 50%; box-sizing: border-box; padding-right: var(--space-5); }
 	}
@@ -265,7 +265,9 @@
 	.body:global([data-more='true']), .body:global([data-above='true']) { --cue-top: 0px; --cue-bottom: 0px; mask-image: linear-gradient(to bottom, transparent, black var(--cue-top), black calc(100% - var(--cue-bottom)), transparent); }
 	.body:global([data-above='true']) { --cue-top: var(--space-4); }
 	.body:global([data-more='true']) { --cue-bottom: var(--space-4); }
-	footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--space-7); }
+	/* Bottom-aligned and as tall as the pill (--space-7 + --space-2) whether or not a primary or a note renders, so Back and Continue sit in the same place on every step. */
+	footer { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); min-height: calc(var(--space-7) + var(--space-2)); }
+	footer > div { display: flex; align-items: center; gap: var(--space-1); min-height: calc(var(--space-7) + var(--space-2)); }
 	.primary-action { display: flex; align-items: center; gap: var(--space-3); }
 	.primary-label-stack { display: grid; grid-template-areas: 'label'; }
 	.primary-label { grid-area: label; }
@@ -278,7 +280,7 @@
 	@media (max-height: 43.75em) {
 		.pane { padding-top: var(--space-8); }
 		.lede { margin-top: var(--space-2); }
-		.brand { top: calc(var(--space-7) + var(--space-2)); }
+		.brand { top: calc(var(--space-8) + var(--space-7) + var(--space-2)); }
 		.body { margin-top: var(--space-3); padding-bottom: var(--space-2); }
 	}
 	@media (max-width: 40em) {

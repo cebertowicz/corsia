@@ -270,6 +270,8 @@
 		try {
 			const response = await fetch('/api/setup/account', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${get(token)}` }, body: JSON.stringify(changes) });
 			const result = await response.json().catch(() => null);
+			// Setup finished elsewhere: the account step is over, and trying again would only loop.
+			if (response.status === 409) { onFinished(); return; }
 			if (!response.ok) { accountError = (response.status === 422 ? accountRefusal(result?.detail) : null) ?? 'Couldn’t save your account. Try again.'; return; }
 			// A new password ends the old session, so the reply carries the next one.
 			if (result?.token) { token.set(result.token); user.set(result.user ?? get(user)); connect(); }
