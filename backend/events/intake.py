@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
+from loguru import logger
+
 from events import rule_declarations, rule_reads, rules
 from events.connectors import EventTypeDecl
 from events.disposition import delivery_disposition
@@ -278,7 +280,7 @@ def _record_acceptance(conn, *, event_id: str, event_type: str, origin: str,
 
 def record_refusal(*, event_id: str, event_type: str, origin: Literal["emitter", "agent"],
                    producer: str, refusal: IntakeRefusal) -> None:
-    """Retain a caller-visible CLI or tool refusal without retaining event facts or text."""
+    """Retain an emitter or agent refusal for `explain`, without retaining event facts or text."""
     with write_transaction(None, scope="record_event_refusal") as conn:
         conn.execute(
             "INSERT INTO event_intake_records "
@@ -355,8 +357,19 @@ async def admit_event(*, event_type: str, facts: dict, origin: Literal["connecto
     """Validate, deduplicate, evaluate and deliver one declared event without trusting producer input.
 
     A use: both type is also recorded as a measure in the same transaction, before routing.
+    An emitter or agent refusal is retained here, the one owner of that receipt; failing to
+    retain it only logs and never changes the result.
     """
     problem = _facts_problem(facts)
-    if problem is not None:
-        return problem
-    return await asyncio.to_thread(_admit_sync, event_type, facts, origin, producer, event_id, stamps)
+    result = problem if problem is not None else await asyncio.to_thread(
+        _admit_sync, event_type, facts, origin, producer, event_id, stamps,
+    )
+    if result.refusal is not None and origin in ("emitter", "agent"):
+        try:
+            await asyncio.to_thread(
+                record_refusal, event_id=event_id, event_type=event_type, origin=origin,
+                producer=producer, refusal=result.refusal,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("could not record {} event refusal for {}", origin, producer)
+    return result

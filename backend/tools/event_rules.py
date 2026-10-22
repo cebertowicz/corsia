@@ -64,7 +64,7 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
 
 async def _emit(thread_id: str, kwargs: dict[str, Any]) -> str:
     """Send one declared event as this chat; the receipt, or the refusal with its fix."""
-    from events.intake import admit_event, emitted_event_id, failure_code, format_event_error, record_refusal
+    from events.intake import admit_event, emitted_event_id, failure_code, format_event_error
 
     event_type = kwargs.get("event_type")
     if not isinstance(event_type, str) or not event_type:
@@ -83,12 +83,6 @@ async def _emit(thread_id: str, kwargs: dict[str, Any]) -> str:
     if result.refusal is None:
         return json.dumps({"event_id": event_id, "duplicate": result.duplicate,
                            "rules_matched": result.rules_matched}, ensure_ascii=False)
-    try:
-        await asyncio.to_thread(
-            record_refusal, event_id=event_id, event_type=event_type, origin="agent",
-            producer=thread_id, refusal=result.refusal)
-    except Exception:  # noqa: BLE001
-        logger.exception("could not record agent event refusal")
     return f"Error: {format_event_error(result.refusal.code, result.refusal.text)}"
 
 

@@ -199,11 +199,14 @@ def test_refused_id_can_retry_after_fix_without_persisting_facts(intake_world):
     refused = _admit(facts={"outside": "secret"})
     accepted = _admit(facts={"code": "fixed"})
     stored = intake_world.execute(
-        "SELECT event_id,outcome,rules_matched FROM event_intake_records WHERE event_id='event-1'",
-    ).fetchone()
+        "SELECT event_id,outcome,rules_matched,refusal_code FROM event_intake_records "
+        "WHERE event_id='event-1' ORDER BY id",
+    ).fetchall()
 
     assert refused.refusal and accepted.accepted and not accepted.duplicate
-    assert tuple(stored) == ("event-1", "accepted", 0)
+    assert [tuple(row) for row in stored] == [
+        ("event-1", "refused", 0, "undeclared_fact"), ("event-1", "accepted", 0, None),
+    ]
 
 
 def test_connector_manifest_accepts_nullable_pr_number_and_refuses_unknown_fact(intake_world, github_checks_type):
@@ -427,10 +430,12 @@ def test_a_both_event_the_store_refuses_is_not_routed(intake_world):
     # Valid for routing (no undeclared fact) but the store's dedupe needs code.
     result = _admit(event_type="qa.both", event_id="both-refused", facts={})
     routed = _digested(intake_world, OWNER, "both-refused")
-    accepted = intake_world.execute("SELECT 1 FROM event_intake_records WHERE event_id='both-refused'").fetchall()
+    receipts = intake_world.execute(
+        "SELECT outcome, refusal_code FROM event_intake_records WHERE event_id='both-refused'",
+    ).fetchall()
 
     assert result.refusal and result.refusal.code == "record_refused" and "dedupe needs" in result.refusal.text
-    assert routed == 0 and accepted == []
+    assert routed == 0 and [tuple(row) for row in receipts] == [("refused", "record_refused")]
 
 
 def test_script_event_lines_route_and_a_refusal_becomes_an_owner_error(intake_world, tmp_path):

@@ -40,7 +40,7 @@ def _print_error(code: str, text: str, fix: str | None = None) -> None:
 
 
 def _cmd_emit(args: argparse.Namespace) -> int:
-    from events.intake import admit_event, emitted_event_id, failure_code, record_refusal
+    from events.intake import admit_event, emitted_event_id, failure_code
 
     session = args.as_thread or os.environ.get("CORSIA_THREAD_ID")
     if not session:
@@ -64,13 +64,6 @@ def _cmd_emit(args: argparse.Namespace) -> int:
         )
         return 3
     if result.refusal is not None:
-        try:
-            record_refusal(
-                event_id=event_id, event_type=args.event_type, origin="emitter",
-                producer=session, refusal=result.refusal,
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception("could not record CLI event refusal")
         _print_error(result.refusal.code, result.refusal.text)
         return 1
     print(json.dumps({
