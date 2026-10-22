@@ -223,17 +223,14 @@ def setup_kind() -> str | None:
 
 
 def ever_started() -> bool:
-    """Whether this Mac has any local-model state, so a resumed setup must not start a download of its own.
+    """Whether this Mac already began local setup, so a resumed setup must not start a download of its own.
 
     The operation record is written by every claimed flight and keeps its cancelled, failed or finished
-    result. A recorded set-up model covers an earlier install, and a catalog row covers a model that
-    arrived without setup (a taken-over install, a person's own oMLX, a download made elsewhere).
+    result. The recorded set-up model covers a setup that finished before that record existed. A model on a
+    server needs no clause: the start itself ends without a download when CORSIA's own oMLX already serves
+    one, and a person's own oMLX is never this install's server, so screen 1 would start here as well.
     """
-    if local_setup_operation.read() is not None or local_model.set_up_model() is not None:
-        return True
-    from llm.catalog import list_models
-
-    return bool(list_models(provider="omlx"))
+    return local_setup_operation.read() is not None or local_model.set_up_model() is not None
 
 
 def setup_failure() -> dict | None:

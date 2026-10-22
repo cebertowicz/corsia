@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from dataclasses import replace
@@ -11,6 +12,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api import setup as setup_api  # noqa: E402
+from infra import setup_progress  # noqa: E402
 from llm import local_model, local_setup_operation  # noqa: E402
 from llm.local_model import LocalModel  # noqa: E402
 
@@ -25,8 +27,10 @@ def setup_facts(isolated_db, monkeypatch, tmp_path):
     monkeypatch.setattr(setup_api.platform, "machine", lambda: "arm64")
     from infra.database import get_db
 
-    db = get_db()  # a Mac that has never run setup lists no local model; the shared test database seeds one
+    db = get_db()  # a Mac that has never run setup lists no local model and no account; the shared test database seeds both
     db.execute("DELETE FROM models WHERE provider = 'omlx'")
+    db.execute("DELETE FROM users")
+    setup_progress.start_after_account("app", db=db)  # an account was just made, so setup is unfinished and resumable
     db.commit()
     db.close()
 
@@ -37,21 +41,23 @@ def _flight(**changes) -> None:
 
 
 def _started() -> bool:
-    return setup_api._setup_status()["local_started"]
+    return asyncio.run(setup_api.setup_progress_view(_user={}))["status"]["local_started"]
 
 
-def _omlx_model_row(available: int = 1) -> None:
-    """A model on a local server that setup never downloaded (a taken-over install, a person's own oMLX)."""
+def _omlx_model_row(host: str) -> None:
+    """A model listed by an oMLX server at `host` that setup never downloaded."""
     from infra.database import get_db
+    from llm import network_discovery
 
+    server = network_discovery.upsert_server("omlx", f"own-{host}", "Own oMLX", host, 8000, "online", kind="external", source="manual")
     db = get_db()
     db.execute(
         """INSERT INTO models
            (id, provider, provider_model_id, litellm_model, display_name, backend,
             source, enabled, available, created_at, updated_at)
-           VALUES ('own-model', 'omlx', 'own-model', 'omlx@own/own-model', 'own-model', 'network',
-                   'discovered', 1, ?, 'now', 'now')""",
-        (available,),
+           VALUES ('own-model', 'omlx', 'own-model', ?, 'own-model', 'network',
+                   'discovered', 1, 1, 'now', 'now')""",
+        (f"omlx@{server}/own-model",),
     )
     db.commit()
     db.close()
@@ -78,10 +84,15 @@ def test_a_model_a_finished_setup_recorded_reports_started_without_a_flight_reco
     assert _started() is True
 
 
-@pytest.mark.parametrize("available", [1, 0], ids=["listed", "server-offline"])
-def test_a_model_already_on_a_local_server_reports_started_without_any_setup_record(available):
-    _omlx_model_row(available)
-    assert _started() is True
+@pytest.mark.parametrize("host", ["127.0.0.1", "192.168.1.50"], ids=["on-this-mac", "on-another-computer"])
+def test_a_model_on_an_omlx_server_alone_does_not_report_started(host):
+    # Screen 1 starts here too: the start ends without a download only when CORSIA's own oMLX serves a model.
+    _omlx_model_row(host)
+    assert _started() is False
+
+
+def test_the_pre_auth_status_never_asks():
+    assert "local_started" not in setup_api._setup_status()
 
 
 def test_a_record_the_app_cannot_read_does_not_count_as_a_started_flight():

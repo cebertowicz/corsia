@@ -142,7 +142,6 @@ def _ai_check_pending() -> bool:
 
 def _setup_status() -> dict:
     """Build the bounded pre-auth screen facts without exposing machine identity."""
-    from llm.local_setup import ever_started
     from llm.local_setup_gates import local_memory_ok
 
     apple_silicon = platform.system() == "Darwin" and platform.machine().lower() in {"arm64", "aarch64"}
@@ -159,7 +158,6 @@ def _setup_status() -> dict:
         "ram_tier": "eligible" if memory_ok else "below_minimum",
         "free_disk_gb": free_disk_gb,
         "local_eligible": apple_silicon and macos_supported and memory_ok,
-        "local_started": ever_started(),
         "work_folder": _work_folder_display(config.WORKSPACE),
         "required_username": _required_username(),
         "classifier": classifier_state(CLASSIFIER_DOWNLOAD.status()),
@@ -183,8 +181,13 @@ async def setup_progress_view(_user: dict = Depends(require_user)) -> dict:
     """Where setup stands for a signed-in person; while unfinished, the eligibility facts are read fresh."""
 
     def _read() -> dict:
+        from llm.local_setup import ever_started
+
         progress = setup_progress.view()
-        return progress if progress["setup_completed"] else {**progress, "status": _setup_status()}
+        if progress["setup_completed"]:
+            return progress
+        # Only a resumed setup asks whether local setup ever began; the pre-auth status never does.
+        return {**progress, "status": {**_setup_status(), "local_started": ever_started()}}
 
     return await run_in_db(_read)
 
