@@ -135,6 +135,8 @@ from plans.status_context import render as render_status
 from plans.status_drain import drain_for_digest as drain_status_for_digest, sweep as sweep_owed_status
 # The person's new words, matched against running tasks off-path (jobs/corrections_recording).
 from plans.person_input import arrived as person_words_arrived
+# The node holding a task's intent, itself unless inherited (memory/node_text).
+from plans.intent_words import canonical as canonical_intent_node
 
 
 def intent_of(node_id: str, *, db) -> dict:

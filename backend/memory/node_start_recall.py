@@ -103,12 +103,9 @@ def related_for_next(
 
 def _subject(db, operation: str, result: dict) -> tuple[NodeText, str] | None:
     if operation in _NODE_OPERATIONS and isinstance(result.get("node"), dict):
-        node = result["node"]
-        stored = _node_text(db, str(node["id"])) if node.get("id") else None
-        return stored or NodeText(
-            str(node.get("title") or ""), str(node.get("intent") or ""),
-            str(node.get("acceptance_criteria") or ""), node_id=node.get("id"),
-        ), operation
+        node_id = result["node"].get("id")
+        text = _node_text(db, str(node_id)) if node_id else None
+        return None if text is None else (text, operation)
     if operation == "raise" and isinstance(result.get("decision"), dict):
         decision = result["decision"]
         return NodeText(str(decision.get("title") or ""), intent=str(decision.get("context") or "")), "decision_raise"
