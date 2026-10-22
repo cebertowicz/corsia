@@ -62,8 +62,10 @@ async def continuation_sweep_loop() -> None:
             until_due = None
         if until_due is not None and 0 < until_due < delay:
             delay = until_due
+        # asyncio.timeout waits inside this task; on 3.11 wait_for would start and drop a task every poll.
         try:
-            await asyncio.wait_for(nudged.wait(), timeout=delay)
-        except asyncio.TimeoutError:
+            async with asyncio.timeout(delay):
+                await nudged.wait()
+        except TimeoutError:
             pass
         nudged.clear()
