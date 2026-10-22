@@ -8,7 +8,9 @@ those rules; the tool's list, explain and the hourly wake budget read it.
 from __future__ import annotations
 
 # Fixed-size checks keep a malformed test out of storage: at most four AND-ed
-# tests, each naming a field and one of the five operators.
+# tests, each naming a field and one of the five operators. These literals copy
+# events.rules on purpose: migration 134's DDL must not move when that code does,
+# and test_event_rule_schema_matches_rules fails when the two disagree.
 _MATCH_CHECKS = " AND ".join(
     f"(json_array_length(\"match\") <= {i} OR COALESCE(("
     f"json_type(\"match\", '$[{i}]') = 'object' AND "

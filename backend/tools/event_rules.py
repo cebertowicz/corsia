@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from events import rule_authoring
+from events import rule_authoring, rules
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.product_events import emit_product_event
@@ -68,9 +68,9 @@ class EventRulesTool(Tool):
             "Rules that act on events from connected apps (a pull request merging, a check "
             "finishing, an email arriving), on top of the routing that already wakes a file's "
             "owner. create: `deliver` wakes you (or puts the event in your digest) when an event "
-            "of `connector`/`event_type` matches up to 4 `match` tests (op eq, not_eq, in, prefix, "
-            "present) on that type's declared fields; your `note` (500 characters) comes with the "
-            "wake, so write what to do then. `drop` stops deliveries of matching events to you. "
+            f"of `connector`/`event_type` matches up to {rules.MAX_TESTS} `match` tests (op "
+            f"{', '.join(rules.OPERATORS)}) on that type's declared fields; your `note` "
+            f"({rules.NOTE_LIMIT} characters) comes with the wake, so write what to do then. `drop` stops deliveries of matching events to you. "
             "Your rules cover your own project and deliver only to you (`to: self`, the default) or "
             "to the event's file's registered owner (`to: registered_owner`). A rule wakes a chat "
             "at most once an hour; more go to its digest. A paused chat gets a digest instead. "
@@ -89,20 +89,20 @@ class EventRulesTool(Tool):
                 "connector": {"type": "string", "description": "create/test: the connected app, e.g. github"},
                 "event_type": {"type": "string", "description": "create/test: a declared type, e.g. pr.merged"},
                 "match": {
-                    "type": "array", "maxItems": 4,
+                    "type": "array", "maxItems": rules.MAX_TESTS,
                     "items": {"type": "object", "properties": {
                         "field": {"type": "string"},
-                        "op": {"type": "string", "enum": ["eq", "not_eq", "in", "prefix", "present"]},
+                        "op": {"type": "string", "enum": list(rules.OPERATORS)},
                         "value": {},
                     }, "required": ["field"]},
                     "description": "create: tests that must all pass",
                 },
-                "action": {"type": "string", "enum": ["deliver", "drop"]},
+                "action": {"type": "string", "enum": [rules.DELIVER, rules.DROP]},
                 "to": {"type": "string",
                        "description": "create: self (default) or registered_owner; a conductor may "
                                       "name thread:<agent id> for a digest"},
-                "mode": {"type": "string", "enum": ["wake", "digest"]},
-                "note": {"type": "string", "maxLength": 500},
+                "mode": {"type": "string", "enum": [rules.WAKE, rules.DIGEST]},
+                "note": {"type": "string", "maxLength": rules.NOTE_LIMIT},
                 "scope": {"type": "string", "description": "create: project:<id>; only your own"},
                 "rule_id": {"type": "string", "description": "disable: the rule to turn off"},
                 "facts": {"type": "object", "description": "test: the event's fields"},

@@ -693,6 +693,38 @@ def test_a_watch_ends_when_an_authored_rule_delivers_its_event(isolated_db):
     assert _armed(node) == 0
 
 
+def test_event_rule_schema_matches_rules():
+    from events import rules
+    from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
+
+    operators = ",".join(f"'{op}'" for op in rules.OPERATORS)
+    assert f"IN ({operators})" in EVENT_RULE_SCHEMA_SQL
+    assert f"json_array_length(\"match\") <= {rules.MAX_TESTS})" in EVENT_RULE_SCHEMA_SQL
+    assert f"$[{rules.MAX_TESTS - 1}]" in EVENT_RULE_SCHEMA_SQL
+    assert f"$[{rules.MAX_TESTS}]" not in EVENT_RULE_SCHEMA_SQL
+    assert f"length(note) <= {rules.NOTE_LIMIT})" in EVENT_RULE_SCHEMA_SQL
+
+
+def test_a_capped_rule_riding_a_routed_digest_counts_like_an_added_one(isolated_db):
+    import asyncio
+
+    _project(P)
+    _agent("owner")
+    _library_owner("owner")
+    rule = asyncio.run(_tool("owner", operation="create", connector=library.LIBRARY_CONNECTOR,
+                             event_type=library.ITEM_CHANGED_EVENT, note="Reread the skill."))
+
+    [first] = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-1"))
+    [second] = deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed("m-2"))
+
+    # The cap turns the second wake back into routing's digest, with the rule's count and path.
+    assert (first.outcome, second.outcome) == ("woke", DIGESTED)
+    [note] = _notes("owner")
+    assert f"; 1 since rule {rule['id']} last woke you" in note["summary"]
+    assert note["summary"].endswith("; rule note: Reread the skill.")
+    assert json.loads(note["details_json"])["path"] == f"rule:{rule['id']}"
+
+
 def test_a_platform_drop_filters_the_writers_delivery_and_keeps_the_wait(isolated_db):
     import asyncio
 

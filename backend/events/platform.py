@@ -346,7 +346,7 @@ def _deliver_routed(
     if ride is None:
         return _deliver_target(db, envelope, target, decl)
     return _deliver_target(db, envelope, _rule_target(thread, ride, target), decl,
-                           tuple(ride.notes))
+                           tuple(ride.notes), tuple(ride.capped))
 
 
 async def deliver_platform_event(
