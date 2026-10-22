@@ -208,7 +208,7 @@ class TestSwitch:
         assert door.await_args.kwargs["checkpoint_override"] == "target"
         assert door.await_args.kwargs["account_id"] == _account_id()
 
-    async def test_a_settings_sign_in_switches_as_the_chats_owner(self, agent, monkeypatch):
+    async def test_a_settings_sign_in_switches_with_no_user(self, agent, monkeypatch):
         hook.record_first_model(agent, LOCAL)
         door = AsyncMock()
         monkeypatch.setattr("thread.model.switch_model", door)
@@ -216,7 +216,7 @@ class TestSwitch:
         asked = await hook.switch_when_ready("claude-code", "account-1:1", user_id=None, account_id=_account_id())
 
         assert asked is True
-        assert door.await_args.kwargs["user_id"] == "u1"
+        assert door.await_args.kwargs["user_id"] is None
 
     async def test_a_later_completion_after_success_is_a_no_op(self, agent, monkeypatch):
         hook.record_first_model(agent, LOCAL)
