@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
-from plans import admission, artifact_links, service
+from infra.write_effects import after_commit
+from plans import admission, artifact_links, boundary_after, notifications, review_evidence, service
+from plans.plan_write import transaction
 from registry.identity_metadata import last_written_sha256, sha256_file
 from registry.shared_edit_classification import combine_capped_diffs, capped_unified_diff
 
@@ -304,6 +306,28 @@ def _existing(db, recipient_thread_id: str, batch_id: str, provenance: str = PRO
         (recipient_thread_id, provenance, batch_id),
     ).fetchone()
     return str(row["node_id"]) if row else None
+
+
+def settle_feedback_node(db, recipient_thread_id: str, batch_id: str, *, evidence: str) -> None:
+    """Record the evidence and accept a batch's task once, atomically; a finished or stopped task stays as it is."""
+    node_id = _existing(db, recipient_thread_id, batch_id)
+    if node_id is None:
+        return
+    with transaction(db) as connection:
+        node = service._node_row(connection, node_id)
+        if node["state"] in service._TERMINAL_STATES or review_evidence.stop_reason(connection, node) is not None:
+            return
+        if node["state"] == "pending":
+            service._transition(connection, node_id, "active", actor_id=None, provenance=PROVENANCE,
+                                verification_result=None, verified_by=None)
+        review_evidence.submit(node_id, evidence=evidence, expected_revision=None,
+                               actor_id=None, provenance=PROVENANCE, db=connection)
+        service._transition(connection, node_id, "accepted", actor_id=None, provenance=PROVENANCE,
+                            verification_result="passed", verified_by="system:document.feedback_batch")
+        boundary_after.after_transition(node_id, "accepted", {
+            "db": connection, "actor_id": None, "provenance": PROVENANCE,
+        })
+        after_commit(connection, lambda: notifications.notify_after_commit((node["plan_id"],), db=connection))
 
 
 def create_feedback_node(
