@@ -104,6 +104,15 @@ class Screen:
         return self.status == STATUS_SCREENED and self.injection
 
 
+def search_screen(screen: Screen | None) -> dict[str, Any]:
+    """The privacy-safe screen state returned with a mail-search result."""
+    if screen is None or screen.status != STATUS_SCREENED:
+        return {"state": "unscreened"}
+    if screen.injection:
+        return {"state": "flagged", "rule": screen.rule}
+    return {"state": "clean", "kind": screen.kind, "needs_person": screen.needs_person}
+
+
 def validate_screen(raw: object) -> dict[str, Any]:
     """Accept exactly the declared shape, or raise :class:`ScreenOutputError` without echoing the input."""
     if isinstance(raw, str):
