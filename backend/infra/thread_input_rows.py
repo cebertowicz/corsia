@@ -27,11 +27,18 @@ def turn_running(db: sqlite3.Connection, thread_id: str) -> bool:
 
 
 def liveness_wake_queued(db: sqlite3.Connection, thread_id: str) -> bool:
-    """Whether a plan liveness wake still waits, unclaimed, in the thread's FIFO."""
+    """Whether a plan liveness wake in the thread's FIFO has not begun its write.
+
+    Unclaimed and claimed-but-unwritten wakes both count: either will still be
+    read. A claim held by a Turn that is no longer running does not, so an
+    orphaned claim cannot suppress every later wake.
+    """
     return db.execute(
-        "SELECT 1 FROM messages WHERE thread_id=? AND delivery_state='queued' "
-        "AND active_turn_id IS NULL AND input_order IS NOT NULL "
-        "AND json_extract(metadata,'$.event_type')='plan.liveness_wake' LIMIT 1",
+        "SELECT 1 FROM messages m WHERE m.thread_id=? AND m.delivery_state='queued' "
+        "AND m.input_order IS NOT NULL AND m.write_started_at IS NULL "
+        "AND json_extract(m.metadata,'$.event_type')='plan.liveness_wake' "
+        "AND (m.active_turn_id IS NULL OR EXISTS (SELECT 1 FROM active_turns t "
+        "WHERE t.id=m.active_turn_id AND t.status='running')) LIMIT 1",
         (thread_id,),
     ).fetchone() is not None
 
@@ -46,7 +53,8 @@ def liveness_wake_read_in_turn_since(
     one Turn's inputs, not the thread's history. A begun write stays a read
     reminder while it is queued, delivered or ambiguous: the in-flight, accepted
     and uncertain sequence-attempt states. A proved-no-write release clears
-    ``write_started_at`` and the claim, so it cannot suppress the next wake.
+    ``write_started_at`` and the claim, so it is not a read; the requeued wake
+    is still unread and ``liveness_wake_queued`` holds the next one behind it.
     """
     return db.execute(
         "SELECT 1 FROM active_turns t CROSS JOIN messages m "

@@ -201,7 +201,7 @@ async def test_a_turn_after_idle_backoff_still_gets_the_flat_interval(isolated_d
 
 
 @pytest.mark.asyncio
-async def test_a_proved_no_write_release_does_not_suppress_the_next_wake(
+async def test_an_unwritten_wake_holds_the_next_one_until_it_is_read(
     isolated_db, monkeypatch,
 ):
     clock = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
@@ -214,11 +214,50 @@ async def test_a_proved_no_write_release_does_not_suppress_the_next_wake(
     [released] = _wakes(db, "owner")
     assert (released["active_turn_id"], released["delivery_state"]) == (None, "queued")
 
-    # The requeued unread input blocks a duplicate wake. Claim it again without
-    # starting provider I/O: its cleared timestamp must not suppress the source.
-    assert claim_safe_boundary("owner", _TURN, db=db) is not None
+    # The released wake was never read, so it is still the pending reminder.
     clock[0] += timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS)
+    assert (await _sweep(db, clock[0].isoformat()))["woken"] == []
+
+    # Claimed into the running Turn but not yet written: still no second wake.
+    claimed = claim_safe_boundary("owner", _TURN, db=db)
+    assert claimed is not None
+    clock[0] += timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS)
+    assert (await _sweep(db, clock[0].isoformat()))["woken"] == []
+    assert len(_wakes(db, "owner")) == 1
+
+    # Once written, the next one comes a flat interval after that read.
+    attempt_id = f"owner:{clock[0].isoformat()}"
+    begin_batch_write(claimed, attempt_id=attempt_id, started_at=clock[0].isoformat(), db=db)
+    settle_batch_write(attempt_id, outcome="accepted", db=db)
+    read_at = clock[0]
+    clock[0] = read_at + timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS - 1)
+    assert (await _sweep(db, clock[0].isoformat()))["woken"] == []
+    clock[0] = read_at + timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS + 1)
     assert (await _sweep(db, clock[0].isoformat()))["woken"] == ["owner"]
+    assert len(_wakes(db, "owner")) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_claim_left_by_a_finished_turn_does_not_hold_wakes(isolated_db, monkeypatch):
+    clock = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+    monkeypatch.setattr(pl, "_now", lambda: clock[0])
+    db, _task = _owner("owner")
+    _make_due(db, "owner")
+    await _sweep(db, clock[0].isoformat())
+    assert claim_safe_boundary("owner", _TURN, db=db) is not None
+    db.execute("UPDATE active_turns SET status='completed' WHERE id=?", (_TURN,))
+    db.commit()
+
+    delivered = []
+
+    async def deliver(*args):
+        delivered.append(args)
+        return True
+
+    clock[0] += timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS + 1)
+    _make_due(db, "owner")
+    assert (await _sweep(db, clock[0].isoformat(), deliver=deliver))["woken"] == ["owner"]
+    assert len(delivered) == 1
 
 
 @pytest.mark.asyncio
