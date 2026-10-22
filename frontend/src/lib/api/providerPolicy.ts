@@ -19,7 +19,7 @@ export type ProviderPolicy = {
 	overriding_projects?: { id: string; name: string }[];
 };
 export type ProjectCloudModelsPolicy = { cloud_models_off: boolean };
-export type Result<T> = { ok: true; value: T } | { ok: false; error: string; detail?: unknown; reached?: boolean };
+export type Result<T> = { ok: true; value: T } | { ok: false; error: string; detail?: unknown; code?: string; reached?: boolean };
 
 async function request<T>(path: string, init?: RequestInit): Promise<Result<T>> {
 	const auth = get(token);
@@ -27,7 +27,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<Result<T>> 
 	try {
 		const response = await fetch(path, { ...init, headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
 		const data = await response.json().catch(() => null);
-		if (!response.ok) return { ok: false, error: plainErrorText(data?.detail, 'Could not save subscriptions.'), detail: data?.detail, reached: true };
+		if (!response.ok) return { ok: false, error: plainErrorText(data?.detail, 'Could not save subscriptions.'), detail: data?.detail, code: data?.code, reached: true };
 		return { ok: true, value: data as T };
 	} catch { return { ok: false, error: SERVER_UNREACHABLE, reached: false }; }
 }

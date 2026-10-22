@@ -109,13 +109,34 @@ describe('ProvidersPolicyBlock', () => {
 		await vi.waitFor(() => expect(host.querySelector('.policy-status.error')?.textContent).toBe('Couldn’t save this change. Check your connection and try again.'));
 	});
 
+	it('shows both load errors above a single Reload providers button', async () => {
+		const provider = { provider_key: 'claude-code', capabilities: { units: 'accounts' as const, rollover: true }, rollover: true, order: null, disabled: [], revision: 1,
+			units: [{ id: 'account-a', label: 'Account A', enabled: true }, { id: 'account-b', label: 'Account B', enabled: true }] };
+		let policyReads = 0;
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const path = input.toString();
+			if (init?.method === 'PUT') return { ok: false, status: 409, json: async () => ({ detail: 'changed', code: 'policy_changed' }) };
+			if (path.startsWith('/api/vendor-accounts')) return { ok: false, status: 500, json: async () => ({ detail: 'Accounts unavailable' }) };
+			if (path.startsWith('/api/projects/project/cloud-models-off')) return { ok: true, json: async () => ({ cloud_models_off: false }) };
+			if (policyReads++ > 0) throw new TypeError('Failed to fetch');
+			return { ok: true, json: async () => ({ scope: 'project', use_workspace: false, override_revision: 1, providers: [provider] }) };
+		}));
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')).not.toBeNull());
+		host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')!.click();
+		await vi.waitFor(() => expect(host.querySelectorAll('p.error[role="alert"]')).toHaveLength(2));
+		expect([...host.querySelectorAll('button')].filter((button) => button.textContent?.trim() === 'Reload providers')).toHaveLength(1);
+	});
+
 	it('keeps the error and a Reload providers button when the policy cannot be re-read after a failed save', async () => {
 		const provider = { provider_key: 'claude-code', capabilities: { units: 'accounts' as const, rollover: true }, rollover: true, order: null, disabled: [], revision: 1,
 			units: [{ id: 'account-a', label: 'Account A', enabled: true }, { id: 'account-b', label: 'Account B', enabled: true }] };
 		let policyReads = 0;
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			const path = input.toString();
-			if (init?.method === 'PUT') return { ok: false, status: 409, json: async () => ({ detail: 'provider policy revision changed; refresh before acting' }) };
+			if (init?.method === 'PUT') return { ok: false, status: 409, json: async () => ({ detail: 'provider policy revision changed; refresh before acting', code: 'policy_changed' }) };
 			if (path.startsWith('/api/vendor-accounts')) return { ok: true, json: async () => ({ accounts: [] }) };
 			if (path.startsWith('/api/projects/project/cloud-models-off')) return { ok: true, json: async () => ({ cloud_models_off: false }) };
 			if (policyReads++ > 0 && policyReads < 3) throw new TypeError('Failed to fetch');

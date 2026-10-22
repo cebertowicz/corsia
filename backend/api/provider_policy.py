@@ -1,11 +1,12 @@
 """Workspace and project provider-policy API."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictBool, StrictInt
 
 from api.locality_policy_guard import require_person_for_locality
-from connections.provider_policy import policy_payload, set_policy, set_use_workspace
+from connections.provider_policy import PolicyChanged, ProjectNotFound, policy_payload, set_policy, set_use_workspace
 from llm.locality import project_cloud_models_off, set_project_cloud_models_off
 from connections.vendor_accounts import AccountError
 from infra.auth import require_user
@@ -45,7 +46,8 @@ async def _run(fn, *args, **kwargs):
     try:
         return await run_in_db(_call, fn, *args, **kwargs)
     except AccountError as error:
-        raise HTTPException(409, str(error)) from error
+        status = 409 if isinstance(error, PolicyChanged) else 404 if isinstance(error, ProjectNotFound) else 422
+        return JSONResponse(status_code=status, content={"detail": str(error), "code": error.code})
 
 
 @router.get("/provider-policy")

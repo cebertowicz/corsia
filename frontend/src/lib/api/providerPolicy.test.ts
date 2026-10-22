@@ -14,6 +14,11 @@ describe('saveCloudModelsOff failure text', () => {
 		expect(await saveCloudModelsOff('p1', true)).toMatchObject({ ok: false, detail: 'Project not found.', reached: true });
 	});
 
+	it('carries the server’s stable code beside the detail', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => response(404, { detail: 'project does not exist', code: 'project_not_found' })));
+		expect(await saveCloudModelsOff('p1', true)).toMatchObject({ ok: false, code: 'project_not_found', reached: true });
+	});
+
 	it('passes a code through as detail and marks an unreachable server', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => response(403, { detail: 'Only the signed-in person can change where models run. Change it in CORSIA while signed in.' })));
 		expect(await saveCloudModelsOff('p1', true)).toMatchObject({ ok: false, detail: 'Only the signed-in person can change where models run. Change it in CORSIA while signed in.', reached: true });

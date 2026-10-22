@@ -55,23 +55,13 @@ export function createProviderPolicyState(projectId?: string | (() => string | u
 		return null;
 	}
 
-	/** Name why a save failed from what the server shows now, never from the HTTP status. The re-read also gives the retry its revision. These routes' own reasons are validation text written for developers, so none is shown. */
-	async function failureAfter(result: { reached?: boolean }, sent: number, revisionOf: (latest: ProviderPolicy) => number | undefined): Promise<string> {
+	/** Name why a save failed by the server's stable `code`; the routes' own wording is developer text, so none is shown. A change elsewhere or a lost response re-reads, so the retry has the current revision. */
+	async function failureLine(result: { reached?: boolean; code?: string }): Promise<string> {
+		if (result.code === 'project_not_found') return 'Couldn’t save this change. This project no longer exists.';
+		if (result.reached !== false && result.code !== 'policy_changed') return saveFailureText(undefined, true);
 		const latest = await refresh();
-		// Unreached first: a write that committed but lost its response moved the revision itself.
 		if (!latest || result.reached === false) return saveFailureText(undefined, false);
-		if (revisionOf(latest) !== sent) return saveFailureText('It changed elsewhere and now shows the latest setting.', true);
-		return saveFailureText(undefined, true);
-	}
-
-	/** Every save is built from the server's `units`: the accounts that exist now, in effective order. A removed account's id may linger in the raw arrays and is rejected on save, so it is never sent back. */
-	function fromUnits(entry: ProviderEntry): ProviderEntry {
-		const ids = new Set(entry.units.map((unit) => unit.id));
-		return {
-			...entry,
-			order: entry.order && entry.order.filter((id) => ids.has(id)),
-			disabled: entry.units.filter((unit) => !unit.enabled).map((unit) => unit.id),
-		};
+		return saveFailureText('It changed elsewhere and now shows the latest setting.', true);
 	}
 
 	function save(entry: ProviderEntry, patch: PolicyPatch, target = `provider:${entry.provider_key}`): Promise<void> {
@@ -82,14 +72,14 @@ export function createProviderPolicyState(projectId?: string | (() => string | u
 		const previous = providerQueues.get(entry.provider_key) ?? Promise.resolve();
 		let queued: Promise<void>;
 		queued = previous.then(async () => {
-			const current = fromUnits(policy?.providers.find((item) => item.provider_key === entry.provider_key) ?? entry);
+			const current = policy?.providers.find((item) => item.provider_key === entry.provider_key) ?? entry;
 			const resolvedPatch = typeof patch === 'function' ? patch(current) : patch;
 			if (!resolvedPatch) return;
 			const result = await saveProviderPolicy({ ...current, ...resolvedPatch }, currentProjectId());
 			if (result.ok && policy) {
 				policy = { ...policy, providers: policy.providers.map((item) => item.provider_key === entry.provider_key ? result.value : item) };
 			} else if (!result.ok) {
-				setFailure(target, await failureAfter(result, current.revision, (latest) => latest.providers.find((item) => item.provider_key === entry.provider_key)?.revision));
+				setFailure(target, await failureLine(result));
 			}
 		}).finally(() => {
 			setPending(target, false);
@@ -107,10 +97,9 @@ export function createProviderPolicyState(projectId?: string | (() => string | u
 		setFailure(target, null);
 		error = '';
 		try {
-			const sent = policy.override_revision ?? 0;
-			const result = await saveUseWorkspace(current, useWorkspace, sent);
+			const result = await saveUseWorkspace(current, useWorkspace, policy.override_revision ?? 0);
 			if (result.ok) policy = result.value;
-			else setFailure(target, await failureAfter(result, sent, (latest) => latest.override_revision ?? 0));
+			else setFailure(target, await failureLine(result));
 		} finally {
 			setPending(target, false);
 		}

@@ -58,8 +58,9 @@
 		{#if cloudOffLine}<p>{cloudOffLine}</p>{/if}
 	{:else if error && !policy}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
 	{:else if policy}
-		{#if error}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>{/if}
-		{#if accountsError}<p class="error" role="alert">{accountsError}</p><Button size="sm" onclick={load}>Reload providers</Button>{/if}
+		{#if error}<p class="error" role="alert">{error}</p>{/if}
+		{#if accountsError}<p class="error" role="alert">{accountsError}</p>{/if}
+		{#if error || accountsError}<Button size="sm" onclick={load}>Reload providers</Button>{/if}
 		<div class="scope-setting">
 				<div>
 					<span class="scope-label">Use workspace settings</span>

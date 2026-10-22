@@ -110,7 +110,7 @@ describe('rendering and actions', () => {
 			const policy = { providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }] }] };
 			vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
 				const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
-				if (init?.method === 'PUT') return Promise.resolve(response({ detail: 'provider policy revision changed' }, 409));
+				if (init?.method === 'PUT') return Promise.resolve(response({ detail: 'provider policy revision changed', code: 'policy_changed' }, 409));
 				if (!path.startsWith('/api/provider-policy')) return Promise.resolve(response({ accounts: [defaultAccount] }));
 				return policyReads++ === 1 ? Promise.reject(new TypeError('Failed to fetch')) : Promise.resolve(response(policy));
 			}));

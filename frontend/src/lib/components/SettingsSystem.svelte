@@ -183,12 +183,18 @@
 				{#if accountConfirm !== 'disconnect'}
 					<Button variant="ghost" size="sm" onclick={() => accountConfirm = 'disconnect'}>Disconnect</Button>
 				{:else}
-					<span class="confirm-text">Disconnect from {remoteName}? Your work stays on {remoteName}. This app signs out and returns to setup.</span>
 					<Button variant="ghost" size="sm" disabled={accountInProgress} onclick={disconnect}>Disconnect</Button>
 					<Button variant="ghost" size="sm" onclick={() => accountConfirm = null}>Cancel</Button>
 				{/if}
 			{/snippet}
 		</SettingsRow>
+		<!-- Three sentences get their own wrapping block under the row, never the row's non-wrapping actions. -->
+		{#if accountConfirm === 'disconnect'}
+			<div class="confirm-block" role="group" aria-label="Disconnect from {remoteName}?">
+				<span class="confirm-text">Disconnect from {remoteName}?</span>
+				<span class="confirm-detail">Your work stays on {remoteName}. This app signs out and returns to setup.</span>
+			</div>
+		{/if}
 	{:else if shell}
 		<SettingsRow name="Computer" sub="This computer">
 			{#snippet actions()}<Button variant="ghost" size="sm" onclick={() => connectOpen.set(true)}>Connect to another computer</Button>{/snippet}
@@ -218,6 +224,8 @@
 	/* Restart progress is announced on its own; the row's second line shows it. */
 	.live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	.confirm-text { font-size: var(--text-caption); color: var(--text-secondary); }
+	.confirm-block { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-1) var(--space-2); overflow-wrap: anywhere; }
+	.confirm-detail { font-size: var(--text-caption); color: var(--text-tertiary); }
 	/* Theme stays the inline three-way control until the SegmentedControl primitive lands (DESIGN-SYSTEM §4.1);
 	   the chosen option takes the selected-row wash (§0.1), not a solid accent fill. */
 	.theme-opts { display: inline-flex; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 2px; gap: 2px; }

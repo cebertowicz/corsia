@@ -212,7 +212,7 @@ def test_cloud_models_off_on_an_unknown_project_uses_the_policy_error_shape(clie
     refused = client.put("/api/projects/nope/cloud-models-off", json={"cloud_models_off": True}, headers=_h(SESSION))
     existing = client.put("/api/projects/nope/provider-policy/use-workspace",
                           json={"expected_revision": 0, "use_workspace": False}, headers=_h(SESSION))
-    assert (refused.status_code, refused.json()) == (409, {"detail": "project does not exist"})
+    assert (refused.status_code, refused.json()) == (404, {"detail": "project does not exist", "code": "project_not_found"})
     assert (existing.status_code, existing.json()) == (refused.status_code, refused.json())
 
 

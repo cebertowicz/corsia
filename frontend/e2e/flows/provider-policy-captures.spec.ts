@@ -415,6 +415,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 		test.setTimeout(240_000);
 		let policy = policyFor('R2');
 		let failNext = false;
+		let changedNext = false;
 		let release: (() => void) | null = null;
 		await serveHarnessCatalog(page);
 		await page.route('**/api/vendor-accounts**', (route) => route.request().method() === 'GET'
@@ -423,6 +424,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			const request = route.request();
 			if (request.method() === 'GET') { await route.fulfill({ json: policy }); return; }
 			if (request.method() === 'PUT') {
+				if (changedNext) { await route.fulfill({ status: 409, json: { detail: 'provider policy revision changed; refresh before acting', code: 'policy_changed' } }); return; }
 				if (failNext) { await route.fulfill({ status: 500, json: { detail: 'Could not save subscriptions.' } }); return; }
 				await new Promise<void>((resolve) => { release = resolve; });
 				const provider = policy.providers.find((item) => request.url().includes(item.provider_key));
@@ -457,6 +459,11 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await region.getByRole('button', { name: 'Use Personal Max', exact: true }).click();
 			await expect(region.getByText('Couldn’t save this change. Try again.')).toBeVisible();
 			await page.screenshot({ path: testInfo.outputPath(`project-account-save-error-${surface}.png`), animations: 'disabled', scale: 'css' });
+
+			changedNext = true;
+			await region.getByRole('button', { name: 'Use Personal Max', exact: true }).click();
+			await expect(region.getByText('Couldn’t save this change. It changed elsewhere and now shows the latest setting.')).toBeVisible();
+			changedNext = false;
 
 			failNext = false;
 			release = null;
