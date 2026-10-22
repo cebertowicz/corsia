@@ -36,7 +36,7 @@ A heading with nothing to put under it gets no suggestion.
 
 ## 3. Ask for the review, once
 
-When every suggestion is in, post once `I put what I know in your About you doc. Accept them all, or change any line first.` That works with the review bar's Approve plus accepting all, and with its one button for both.
+When every suggestion is in, post once `I put what I know in your About you doc. Change anything that's wrong, accept the suggestions you want, then press Approve.`
 
 - When the person's edit leaves a suggestion with nothing to attach to, suggest that line again yourself on the text now in the doc. Never wait on a helper that is still running.
 - A comment from the person on a line: answer with a suggested change to that line.
@@ -44,7 +44,7 @@ When every suggestion is in, post once `I put what I know in your About you doc.
 
 ## 4. When they approve
 
-Accept nothing yourself. Read the document's final text. Remove any heading left with nothing under it, so no placeholder ever stays in their document. Then post `Saved. I'll work from this, and you can change it any time.` and go on to step 6 of `references/first-run-app.md`, after writing the profile (section 5).
+First, when any suggestion is still open: accept nothing, remove nothing and write no profile. Post `[N] of my suggestions are still open, so nothing's saved yet. Accept the ones that are right, reject the rest, then tell me here when you're done.` with N the number open. When they reply, read the document again: while any is still open, post the same line with the new count; when none is open, go on. With none open: accept nothing yourself. Read the document's final text. Remove any heading left with nothing under it, so no placeholder ever stays in their document. Then post `Saved. I'll work from this, and you can change it any time.` and go on to step 6 of `references/first-run-app.md`, after writing the profile (section 5).
 
 ## 5. Write the profile
 

@@ -451,7 +451,7 @@ def test_the_look_up_reference_carries_the_rules_outcomes_questions_and_examples
     examples = ref.split("## Worked examples", 1)[1]
     assert re.findall(r"^\*\*(\d)\. ([^.]+)\.\*\*", examples, flags=re.MULTILINE) == [
         ("1", "One clear match"), ("2", "Two people with the same name"), ("3", "A famous namesake"), ("4", "Nothing found")]
-    assert len(ref.split()) < 2000
+    assert len(ref.split()) < 2100
     assert not re.search(r"\bAI\b", ref)
 
 
@@ -459,6 +459,7 @@ def test_the_look_up_uses_a_domain_only_when_a_search_finds_a_page_on_it_and_kee
     ref = (FIRST_RUN_APP.parent / "look-up-the-person.md").read_text(encoding="utf-8")
 
     assert "returns a page on that domain" in ref
+    assert "never covers sending their name out" not in ref
     assert "Never put the full address in a query" in ref
     for provider in ("mail-provider", "gmail.com, googlemail.com", "fastmail.com", "protonmail.com", "consumer-mail"):
         assert provider not in ref, provider
@@ -497,16 +498,55 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "A helper that fails or returns nothing: write that heading's suggestion yourself." in doc
     assert "`bound_model` `source` is `omlx`): start no helper. Write the suggestions yourself, one heading at a time." in doc
     # One review ask, worded for the review bar with or without the accept-all button.
-    assert doc.count("Accept them all, or change any line first.") == 1
+    assert doc.count("I put what I know in your About you doc. Change anything that's wrong, accept the suggestions you want, then press Approve.") == 1
+    assert "Accept them all" not in doc
     assert "suggest that line again yourself on the text now in the doc. Never wait on a helper" in doc
     assert "A comment from the person on a line: answer with a suggested change to that line." in doc
     # On approve CORSIA accepts nothing, removes empty headings, then writes the profile.
-    assert "Accept nothing yourself." in doc
+    assert "With none open: accept nothing yourself." in doc
     assert "Remove any heading left with nothing under it, so no placeholder ever stays" in doc
     # Failure paths.
     assert "ask `Keep these?`" in doc
     assert "\"Not now\", or they carry on with something else: skip to section 5 and write the profile from the chat answers." in doc
     assert len(doc.split()) < 900
+
+
+def test_approve_with_suggestions_still_open_saves_nothing_and_asks_to_be_told():
+    doc = (FIRST_RUN_APP.parent / "about-you-doc.md").read_text(encoding="utf-8")
+    section = doc.split("## 4. When they approve", 1)[1].split("## 5.", 1)[0]
+
+    assert section.lstrip().startswith("First, when any suggestion is still open: accept nothing, remove nothing and write no profile.")
+    assert ("`[N] of my suggestions are still open, so nothing's saved yet. Accept the ones that are right, "
+            "reject the rest, then tell me here when you're done.`") in section
+    assert "press Approve again" not in doc
+    assert "When they reply, read the document again: while any is still open, post the same line with the new count" in section
+    assert section.index("still open") < section.index("Remove any heading left")
+
+
+ASK_FIRST = ("`I can look you up on the web, so you don't have to tell me everything yourself. "
+             "Your name and anything I search for go to Brave. Want me to?`")
+
+
+def test_a_search_set_up_before_this_chat_asks_first_and_searches_only_on_a_yes():
+    ref = (FIRST_RUN_APP.parent / "look-up-the-person.md").read_text(encoding="utf-8")
+    ask = ref.split("## Before anything: ask when search was already set up", 1)[1].split("## A.", 1)[0]
+
+    assert ref.index("## Before anything") < ref.index("## A. What you start from")
+    assert "`web_search_ready` was already true before step 4" in ask
+    assert ASK_FIRST in ask and "wait for the answer" in ask
+    assert "On a yes, go on from section A." in ask
+    assert "On a no, or anything but a yes, go straight to section E." in ask
+
+
+def test_a_key_saved_in_this_chat_is_not_asked_about_again_and_without_search_there_is_no_mention():
+    ref = (FIRST_RUN_APP.parent / "look-up-the-person.md").read_text(encoding="utf-8")
+    step = _step(5)
+
+    assert "When the key was saved in step 4, ask nothing: step 4 already offered the opt-out." in ref
+    assert ref.count("Your name and anything I search for go to Brave") == 1
+    assert "(`web_search_ready` is false and no key was just saved)" in ref
+    assert "When search does not work, step 5 says nothing about search or about skipping it, anywhere." in step
+    assert "When search was already set up before this chat, the lookup opens with the one question that reference carries." in step
 
 
 def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
