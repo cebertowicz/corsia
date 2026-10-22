@@ -96,7 +96,7 @@ def safehouse_subprocess_env(
         env["CORSIA_TOOL_INVOCATION_ID"] = invocation_id
     # Chromium cannot nest its own Seatbelt sandbox inside Safehouse's.
     env["AGENT_BROWSER_ARGS"] = "--no-sandbox"
-    env.update(agent_shell_tools.shell_environment(env.get("PATH", "")))
+    env.update(agent_shell_tools.shell_environment(env.get("PATH", ""), thread_id))
     return env
 
 

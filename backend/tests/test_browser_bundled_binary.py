@@ -39,6 +39,18 @@ def test_the_bundled_binary_wins_over_path_and_still_passes_native_admission(tmp
     assert cli.resolve_native("agent-browser")[0] == str(elsewhere.resolve())
 
 
+def test_a_packaged_app_with_its_copy_missing_never_runs_one_from_path(tmp_path, monkeypatch):
+    bundle, _ = _bundle(tmp_path, with_binary=False)
+    elsewhere = tmp_path / "path" / "agent-browser"
+    elsewhere.parent.mkdir()
+    shutil.copy(sys.executable, elsewhere)
+    monkeypatch.setenv("PATH", str(elsewhere.parent))
+    monkeypatch.setattr(cli, "app_bundle_root", lambda: bundle)
+    with pytest.raises(cli.identity.BrowserIdentityError, match="missing from this app") as missing:
+        cli.resolve_native("agent-browser")
+    assert "damaged" not in str(missing.value)
+
+
 def test_a_bundled_script_is_still_refused(tmp_path, monkeypatch):
     bundle, bundled = _bundle(tmp_path, with_binary=False)
     bundled.write_text("#!/usr/bin/env node\n")

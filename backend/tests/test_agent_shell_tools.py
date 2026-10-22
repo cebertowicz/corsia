@@ -31,7 +31,7 @@ def test_shell_path_leads_with_the_pinned_runtimes_even_before_they_are_fetched(
     assert parts[3:] == ["/usr/bin", "/bin"]
 
 
-def test_bundled_python_comes_first_and_uv_uses_it(home, monkeypatch):
+def test_bundled_python_comes_first_and_a_projects_own_python_choice_is_left_alone(home, monkeypatch):
     bundle = home / "CORSIA.app"
     python = bundle / "Contents" / "Resources" / "python" / "bin" / "python3"
     python.parent.mkdir(parents=True)
@@ -39,7 +39,7 @@ def test_bundled_python_comes_first_and_uv_uses_it(home, monkeypatch):
     monkeypatch.setattr(agent_shell_tools, "app_bundle_root", lambda: bundle)
     env = safehouse_subprocess_env("thread-1")
     assert env["PATH"].split(":")[0] == str(python.parent)
-    assert env["UV_PYTHON"] == str(python) and env["UV_NO_MANAGED_PYTHON"] == "1"
+    assert not {"UV_PYTHON", "UV_NO_MANAGED_PYTHON"} & set(env)
 
 
 def test_package_caches_are_writable_and_never_the_runtime_folder_or_home(home):
@@ -50,6 +50,17 @@ def test_package_caches_are_writable_and_never_the_runtime_folder_or_home(home):
         assert not cache.is_relative_to(home) and not cache.is_relative_to(runtimes)
         assert cache.is_relative_to(tempfile.gettempdir())  # a temp root, which the sandbox lets shells write
     assert set(agent_shell_tools.ENV_NAMES) <= set(shell_env_pass_names().split(","))
+    other = safehouse_subprocess_env("thread-2")
+    assert not {env[name] for name in agent_shell_tools.ENV_NAMES} & {other[name] for name in agent_shell_tools.ENV_NAMES}
+
+
+@pytest.mark.asyncio
+async def test_a_tool_the_person_already_has_is_never_fetched(home, monkeypatch):
+    fetch = AsyncMock()
+    monkeypatch.setattr(agent_shell_tools, "ensure_runtime", lambda kind: fetch(kind))
+    monkeypatch.setattr(agent_shell_tools.shutil, "which", lambda name: "/usr/local/bin/" + name)
+    assert await agent_shell_tools.prepare_for_command("node -v && gh --version") is None
+    fetch.assert_not_called()
 
 
 @pytest.mark.asyncio

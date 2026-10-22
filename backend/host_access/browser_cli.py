@@ -117,8 +117,9 @@ def install_hint() -> str:
 
 
 def _not_installed() -> str:
-    where = "is missing from this app" if app_bundle_root() is not None else "is not installed or not on PATH"
-    return f"agent-browser {where}; {install_hint()}"
+    if app_bundle_root() is not None:
+        return "agent-browser is missing from this app; reinstall or update CORSIA to restore it"
+    return f"agent-browser is not installed or not on PATH; {install_hint()}"
 
 
 def _application_dirs() -> tuple[Path, ...]:
@@ -149,11 +150,11 @@ def chrome_download_missing() -> bool:
 def resolve_native(binary: str) -> tuple[str, str]:
     """Reject scripts/wrappers before invoking even --version; follow symlinks.
 
-    The app's own copy comes first, PATH second (a source install).
+    A packaged app runs only its own copy; a source install uses PATH.
     """
     selected: str | None
-    if binary == BROWSER_COMMAND and (bundled := bundled_executable()) is not None:
-        selected = bundled
+    if binary == BROWSER_COMMAND and app_bundle_root() is not None:
+        selected = bundled_executable()
     else:
         selected = shutil.which(binary) if not Path(binary).is_absolute() else binary
     if selected is None:

@@ -11,6 +11,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import shutil
 import tempfile
 
 from infra.platform_paths import app_bundle_root
@@ -25,7 +26,7 @@ _MANAGED = "|".join(sorted(COMMAND_RUNTIME, key=len, reverse=True))
 _COMMAND_USED = re.compile(rf"(?:^|[;&|(\n`])\s*(?:\w+=\S*\s+)*({_MANAGED})(?=[\s;&|)`]|$)")
 _NOT_FOUND = re.compile(rf"(?:^|[\s:])({_MANAGED}): (?:command )?not found")
 # Environment names a shell child needs from CORSIA, passed through the sandbox by name.
-ENV_NAMES = ("npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "UV_NO_MANAGED_PYTHON", "UV_PYTHON")
+ENV_NAMES = ("npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR")
 
 
 def _bundled_python_dir() -> Path | None:
@@ -41,32 +42,31 @@ def readable_dirs() -> list[Path]:
     return [directory for directory in candidates if directory is not None and directory.is_dir()]
 
 
-def agent_cache_dir() -> Path:
-    """The shared package cache: writable by shells, outside the runtime folder and the person's home."""
-    return Path(tempfile.gettempdir()) / "corsia-agent-cache"
+def agent_cache_dir(thread_id: str | None) -> Path:
+    """One thread's package cache: writable by its shells, shared with no other thread, outside the runtime folder and home."""
+    return Path(tempfile.gettempdir()) / "corsia-agent-cache" / re.sub(r"[^\w.-]", "_", thread_id or "none")
 
 
-def shell_environment(path: str) -> dict[str, str]:
-    """PATH with CORSIA's tools first, and the caches and Python rules that keep installs in writable places."""
+def shell_environment(path: str, thread_id: str | None) -> dict[str, str]:
+    """PATH with CORSIA's tools first, and the caches that keep installs in writable places."""
     python_dir = _bundled_python_dir()
     entries = [str(python_dir)] if python_dir is not None else []
     entries += [str(directory) for kind in ("node", "uv", "gh") if (directory := runtime_bin_dir(kind)) is not None]
-    cache = agent_cache_dir()
+    cache = agent_cache_dir(thread_id)
     env = {
         "PATH": os.pathsep.join(dict.fromkeys([*entries, *(part for part in path.split(os.pathsep) if part)])),
         "npm_config_cache": str(cache / "npm"),
         "PIP_CACHE_DIR": str(cache / "pip"),
         "UV_CACHE_DIR": str(cache / "uv"),
     }
-    if python_dir is not None:
-        # uv uses the app's Python rather than downloading an unpinned one of its own.
-        env |= {"UV_NO_MANAGED_PYTHON": "1", "UV_PYTHON": str(python_dir / "python3")}
     return env
 
 
 def _missing(commands: set[str]) -> set[str]:
     try:
-        return {kind for command in commands if not runtime_is_installed(kind := COMMAND_RUNTIME[command])}
+        # A tool the person already has is theirs to run: only a command found nowhere is fetched.
+        return {COMMAND_RUNTIME[command] for command in commands
+                if not shutil.which(command) and not runtime_is_installed(COMMAND_RUNTIME[command])}
     except ManagedRuntimeError:
         return set()  # No pinned runtime for this Mac: the command resolves from the person's PATH or not at all.
 
