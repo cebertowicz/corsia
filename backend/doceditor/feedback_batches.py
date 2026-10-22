@@ -224,7 +224,7 @@ def record_comment(
             for batch_id, delivered in joins:
                 if not delivered:
                     _closed, selected = _claim_and_deliver(db, batch_id, from_state="open", reason="send")
-                    woken.extend(selected)
+                    woken.extend(feedback_delivery.wake_after_unselected_person_delivery(db, batch_id, selected))
         if submit and comment["author_kind"] == "agent":
             woken = close_for_document(
                 db,
