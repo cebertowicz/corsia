@@ -24,7 +24,7 @@ def _reconcile(monkeypatch, *, has_account: bool, current_asset: bool, test_mode
 def test_startup_starts_download_when_the_current_asset_is_missing(monkeypatch):
     flight = _reconcile(monkeypatch, has_account=True, current_asset=False)
 
-    flight.start.assert_called_once_with(on_failure=app_startup_runtime._report_classifier_download_failure)
+    flight.start.assert_called_once_with(on_failure=app_startup_runtime.report_classifier_download_failure)
 
 
 def test_startup_does_nothing_when_the_current_asset_is_verified(monkeypatch):
@@ -42,7 +42,7 @@ def test_startup_never_starts_before_an_account_exists(monkeypatch):
 def test_startup_resumes_a_download_setup_requested_before_any_account_exists(monkeypatch):
     flight = _reconcile(monkeypatch, has_account=False, current_asset=False)
 
-    flight.resume.assert_called_once_with(on_failure=app_startup_runtime._report_classifier_download_failure)
+    flight.resume.assert_called_once_with(on_failure=app_startup_runtime.report_classifier_download_failure)
     flight.start.assert_not_called()
 
 
@@ -69,7 +69,7 @@ def test_a_test_run_fetches_nothing_unless_it_names_its_own_release_host(monkeyp
     monkeypatch.setattr(corrections_asset_download, "FLIGHT", flight)
     monkeypatch.setenv(corrections_asset_download.BASE_URL_ENV, "http://127.0.0.1:1")
     app_startup_runtime._start_current_corrections_classifier()
-    flight.start.assert_called_once_with(on_failure=app_startup_runtime._report_classifier_download_failure)
+    flight.start.assert_called_once_with(on_failure=app_startup_runtime.report_classifier_download_failure)
 
 
 def _failed_startup_flight(tmp_path, monkeypatch, *, installed: bool, loop: bool = True) -> list[tuple]:
@@ -101,7 +101,7 @@ def _failed_startup_flight(tmp_path, monkeypatch, *, installed: bool, loop: bool
     flight = download.ClassifierDownload(
         root=lambda: tmp_path / "asset", url=lambda: "http://127.0.0.1:1", sleep=lambda _seconds: None,
     )
-    flight.start(wait=True, on_failure=app_startup_runtime._report_classifier_download_failure)
+    flight.start(wait=True, on_failure=app_startup_runtime.report_classifier_download_failure)
     assert flight.status()["state"] == "failed"
     return notices
 

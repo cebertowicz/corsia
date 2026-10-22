@@ -108,7 +108,6 @@
 	const jobs = $derived<SetupJob[]>([
 		...(page !== 'models' && (downloading || localFailed) ? [{ label: 'Local model', state: localFailed ? 'error' as const : 'busy' as const,
 			meta: localFailed ? (localStartError ? startFix : local?.fix) ?? '' : local?.local_state === 'starting' ? 'Starting the local model…' : ['Downloading', `${local?.download_percent ?? 0}%`, measuredDownloadTime(local?.download_eta_seconds)].filter(Boolean).join(' · '), progress: (local?.download_percent ?? 0) / 100 }] : []),
-		...(classifier.job ? [classifier.job] : []),
 		...(accountBusy ? [{ label: 'Starting CORSIA', state: 'busy' as const }] : []),
 	]);
 	const aiRows = $derived.by((): AiRow[] => {
@@ -122,7 +121,7 @@
 			const works = catalog.some((row) => row.connection === vendor && setupModelWorks(row));
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, pill: works ? { state: 'success', label: 'Ready' } : undefined });
 		});
-		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localPick.pick?.state === 'checking', ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
+		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localBusy || localPick.pick?.state === 'checking', ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
 			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed,
 			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
 			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() })));
@@ -300,7 +299,7 @@
 		if (!startConnect) void (resume ? resumeSetup() : readStatus());
 		const offModels = on('models_updated', () => { if (page === 'models') void refreshSources(); });
 		const offClassifier = on('classifier_updated', () => { void classifier.read(); });
-		const focus = () => { if (page === 'models') void refreshSources(true); };
+		const focus = () => { if (page === 'models') void refreshSources(true); void classifier.retryIfFailed(); };
 		window.addEventListener('focus', focus);
 		return () => { offModels(); offClassifier(); window.removeEventListener('focus', focus); };
 	});

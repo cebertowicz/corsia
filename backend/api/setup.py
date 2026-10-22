@@ -338,7 +338,9 @@ async def classifier_download(request: Request) -> dict | Response:
     """Start, join or retry the one classifier flight. Takes no path or URL from the caller."""
     if not _trusted_json_post(request):
         return Response(status_code=403)
-    return classifier_state(CLASSIFIER_DOWNLOAD.start())
+    from app_startup_runtime import report_classifier_download_failure
+
+    return classifier_state(CLASSIFIER_DOWNLOAD.start(on_failure=report_classifier_download_failure))
 
 
 @router.post("/classifier/recheck", response_model=None)
