@@ -103,6 +103,27 @@ describe('rendering and actions', () => {
 			unmount(component);
 		});
 
+		it('keeps the error and offers a Reload when the policy cannot be re-read after a failed save', async () => {
+			token.set('test-token');
+			let policyReads = 0;
+			const policy = { providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }] }] };
+			vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+				const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+				if (init?.method === 'PUT') return Promise.resolve(response({ detail: 'provider policy revision changed' }, 409));
+				if (!path.startsWith('/api/provider-policy')) return Promise.resolve(response({ accounts: [defaultAccount] }));
+				return policyReads++ === 1 ? Promise.reject(new TypeError('Failed to fetch')) : Promise.resolve(response(policy));
+			}));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')).not.toBeNull());
+			document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')!.click();
+			await vi.waitFor(() => expect(document.querySelector('.account-usage-row .policy-status')?.textContent).toBe('Couldn’t save this change. Check your connection and try again.'));
+			await settle();
+			expect(button('Reload')).toBeDefined();
+			button('Reload').click();
+			await vi.waitFor(() => expect(document.querySelector('.msg.err')).toBeNull());
+			unmount(component);
+		});
+
 		describe('workspace account policy', () => {
 			const signedIn = (id: string, name: string) => ({ ...workAccount, id, name, state: 'signed_in' as const, label: { name, email: null, text: name, custom: name } });
 			const entry = (ids: string[], order: string[] | null = null) => ({

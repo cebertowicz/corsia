@@ -191,7 +191,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 					await expect(region).toBeVisible();
 					if (screen === 'R1') await expect(region.getByRole('button', { name: 'Use workspace settings' })).toHaveAttribute('aria-pressed', 'true');
 					if (screen === 'R2') {
-						await expect(region.getByText("Use the workspace's account order and rollover.")).toBeVisible();
+						await expect(region.getByText("Turning this on replaces this project's settings with the workspace's.")).toBeVisible();
 						await expect(region.getByRole('button', { name: 'Open workspace providers' })).toBeVisible();
 					}
 					if (screen === 'R3') await expect(region.getByRole('button', { name: 'Use Personal Max', exact: true })).toHaveAttribute('aria-pressed', 'false');

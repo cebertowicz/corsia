@@ -17,7 +17,6 @@
 	const policy = $derived(policyState.policy);
 	const error = $derived(policyState.error);
 	const loading = $derived(policyState.loading);
-	const hasControlFailure = $derived(policyState.hasControlFailure());
 	const scopeTarget = 'scope';
 	let accountsError = $state('');
 	// `null` stays loading until the project's persisted Local models only setting settles.
@@ -57,8 +56,9 @@
 	{#if loading || cloudModelsOff === null}<p role="status">Loading providers…</p>
 	{:else if cloudModelsOff === true && policy}
 		{#if cloudOffLine}<p>{cloudOffLine}</p>{/if}
-	{:else if error && !hasControlFailure}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
+	{:else if error && !policy}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
 	{:else if policy}
+		{#if error}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>{/if}
 		{#if accountsError}<p class="error" role="alert">{accountsError}</p><Button size="sm" onclick={load}>Reload providers</Button>{/if}
 		<div class="scope-setting">
 				<div>

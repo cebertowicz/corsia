@@ -199,6 +199,9 @@ test('renders the approved local-model evidence states from intercepted fixtures
 					await expect(downloadingRow).toHaveCount(1);
 					// R6: the standard row; its switch is on the row, disabled until the model is on disk.
 					await expect(downloadingRow.locator('.tg')).toBeDisabled();
+					// The progress hairline is positioned against this row, not the provider block around it.
+					await expect(downloadingRow).toHaveClass(/dl-row/);
+					await expect(downloadingRow).toHaveCSS('position', 'relative');
 					await expect(card.getByRole('button', { name: 'Cancel' })).toBeVisible();
 				} else if (state === 'complete') {
 					await expect(card).toContainText('262k context · 16 GB · 52 tokens/s');

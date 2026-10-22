@@ -109,6 +109,32 @@ describe('ProvidersPolicyBlock', () => {
 		await vi.waitFor(() => expect(host.querySelector('.policy-status.error')?.textContent).toBe('Couldn’t save this change. Check your connection and try again.'));
 	});
 
+	it('keeps the error and a Reload providers button when the policy cannot be re-read after a failed save', async () => {
+		const provider = { provider_key: 'claude-code', capabilities: { units: 'accounts' as const, rollover: true }, rollover: true, order: null, disabled: [], revision: 1,
+			units: [{ id: 'account-a', label: 'Account A', enabled: true }, { id: 'account-b', label: 'Account B', enabled: true }] };
+		let policyReads = 0;
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const path = input.toString();
+			if (init?.method === 'PUT') return { ok: false, status: 409, json: async () => ({ detail: 'provider policy revision changed; refresh before acting' }) };
+			if (path.startsWith('/api/vendor-accounts')) return { ok: true, json: async () => ({ accounts: [] }) };
+			if (path.startsWith('/api/projects/project/cloud-models-off')) return { ok: true, json: async () => ({ cloud_models_off: false }) };
+			if (policyReads++ > 0 && policyReads < 3) throw new TypeError('Failed to fetch');
+			return { ok: true, json: async () => ({ scope: 'project', use_workspace: false, override_revision: 1, providers: [provider] }) };
+		}));
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')).not.toBeNull());
+		host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')!.click();
+		await vi.waitFor(() => expect(host.querySelector('.policy-status.error')?.textContent).toBe('Couldn’t save this change. Check your connection and try again.'));
+		const reload = [...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Reload providers');
+		expect(reload).toBeDefined();
+		expect(host.querySelector('p.error[role="alert"]')).not.toBeNull();
+		reload!.click();
+		await vi.waitFor(() => expect(host.querySelector('p.error[role="alert"]')).toBeNull());
+		expect(host.querySelector('[aria-label="Use Account A"]')).not.toBeNull();
+	});
+
 	it('lets a one-account Claude provider be disabled without rollover or order controls', async () => {
 		const provider = { provider_key: 'claude-code', capabilities: { units: 'accounts', rollover: true }, rollover: true, order: ['personal'], disabled: [], revision: 1,
 			units: [{ id: 'personal', label: 'Personal Max', enabled: true }] };

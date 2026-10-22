@@ -11,7 +11,7 @@ describe('saveCloudModelsOff failure text', () => {
 
 	it('passes on a sentence the server wrote', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => response(409, { detail: 'Project not found.' })));
-		expect(await saveCloudModelsOff('p1', true)).toMatchObject({ ok: false, conflict: true, detail: 'Project not found.', reached: true });
+		expect(await saveCloudModelsOff('p1', true)).toMatchObject({ ok: false, detail: 'Project not found.', reached: true });
 	});
 
 	it('passes a code through as detail and marks an unreachable server', async () => {

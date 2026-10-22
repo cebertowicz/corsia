@@ -176,6 +176,8 @@
 		padding: var(--space-1) var(--space-2) var(--space-1) calc(var(--space-2) + var(--project-mark-size) + var(--space-3));
 		border-radius: var(--radius-sm);
 		transition: background var(--dur-tight) var(--ease-snap);
+		/* The download hairline is absolutely placed, so the row anchors it. */
+		position: relative;
 	}
 	.mr-toggle-wrap { grid-area: toggle; }
 	.mname { grid-area: name; }
