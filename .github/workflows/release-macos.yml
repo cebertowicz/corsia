@@ -60,7 +60,7 @@ jobs:
               should_build=true
               ;;
             dev)
-              [ "$GITHUB_REF" = "refs/heads/dev" ] || {
+              case "$GITHUB_REF" in refs/heads/dev|refs/heads/integration/*) true ;; *) false ;; esac || {
                 echo "dev channel builds must be dispatched from refs/heads/dev" >&2
                 exit 1
               }
