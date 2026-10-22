@@ -455,7 +455,7 @@ class TestAppPath:
 
         decisions = (await first_run_wake._app_setup())["setup_decisions"]
 
-        assert len(decisions) == 4  # the two community cards and both GitHub cards; no projects consent
+        assert len(decisions) == 3  # the community card and both GitHub cards; no projects consent
         assert {d["task_title"] for d in decisions} == {"Set up GitHub"}
         assert "person@gmail.com" not in json.dumps(decisions)
         assert "Claude Code" not in json.dumps(decisions)

@@ -179,8 +179,7 @@ def build_decisions(facts: Facts) -> list[dict[str, Any]]:
     imported = agent_import(facts.agent_import)
     return [
         *([imported] if imported else []),
-        _community(text.COMMUNITY_USE),
-        _community(text.COMMUNITY_SHARE),
+        _community(text.COMMUNITY),
         _github(facts.email),
         _github(facts.email, text.GITHUB_NO_ACCOUNT),
         *([projects] if projects else []),
