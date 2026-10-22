@@ -348,3 +348,38 @@ def test_a_completed_setup_ignores_a_late_picks_write(client):
     assert _put(client, {"picks": {"claude": False, "chatgpt": False}}, token).status_code == 200
 
     assert _progress(client, token)["picks"] == ALL_PICKS
+
+
+def test_finishing_setup_picks_no_model_and_the_held_first_message_starts_on_the_persons_pick(client, monkeypatch):
+    """Setup never chooses the CORSIA agent's model: its first-run message waits for the person's own pick."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    import infra.thread_execution as thread_execution
+    from infra.corsia_agent import get_corsia_agent
+    from infra.database import get_db
+    from thread.model import switch_model
+
+    def first_run_state(agent: str) -> tuple:
+        db = get_db()
+        try:
+            thread = db.execute("SELECT model FROM threads WHERE id=?", (agent,)).fetchone()
+            wake = db.execute(
+                "SELECT delivery_state, delivery_error, target_model FROM messages WHERE id LIKE 'first-run:%'"
+            ).fetchone()
+            return thread["model"], tuple(wake)
+        finally:
+            db.close()
+
+    token = _create_account(client)
+    assert _put(client, {"completed": True}, token).status_code == 200
+    agent = get_corsia_agent()
+    assert first_run_state(agent) == (None, ("queued", "no_model_selected", None))
+
+    drive = AsyncMock()
+    monkeypatch.setattr(thread_execution, "drive_thread", drive)
+    asyncio.run(switch_model(agent, "claude-code/sonnet", user_id=None, actor_kind="user", actor_id=None,
+                             reason="harness_model_switch"))
+
+    assert first_run_state(agent) == ("claude-code/sonnet", ("queued", None, "claude-code/sonnet"))
+    drive.assert_awaited_once_with(agent)
