@@ -27,7 +27,7 @@ AGENT_FRAMING = (
     "disagree, so they decide it."
 )
 STOPPED_NOTE = (
-    "{evidence}\n\nEvery item was decided while this task was paused or held, so it is still open. "
+    "{evidence}\n\nThe user settled every item while this task was paused or held, so it is still open. "
     "Mark it done once it resumes."
 )
 USER_FRAMING = (

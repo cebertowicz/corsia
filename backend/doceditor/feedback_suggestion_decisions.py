@@ -62,7 +62,7 @@ def stranded_note(db, suggestion: dict[str, Any], *, editor: str) -> None:
         ),
         details={
             "kind": "suggestion_stranded", "artifact_id": artifact_id, "comment_id": suggestion["id"],
-            "chip": f"A suggestion on {document} no longer applies after an edit.",
+            "chip": f"A suggestion on {document} can't apply to the current text.",
         },
     )
 

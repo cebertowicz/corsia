@@ -70,7 +70,7 @@ def test_an_edit_by_another_writer_tells_the_author_once_while_it_stays_stranded
     )
     assert note["details"]["artifact_id"] == doc.artifact_id
     assert note["details"]["comment_id"] == suggestion["id"]
-    assert note["details"]["chip"] == "A suggestion on doc no longer applies after an edit."
+    assert note["details"]["chip"] == "A suggestion on doc can't apply to the current text."
 
 
 def test_the_person_is_named_when_they_made_the_edit(doc):

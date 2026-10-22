@@ -164,9 +164,13 @@ def test_a_stopped_task_keeps_its_state_gets_a_note_and_the_resolve_still_commit
         assert _state(db, node_id) == state != "accepted"
         assert f"Comment {plain[0]['id']}: resolved" in description
         assert "Mark it done once it resumes." in description and before.description in description
-        assert f"resolved\n\nEvery item was decided while this task was paused or held" in description
+        assert f"resolved\n\nThe user settled every item while this task was paused or held" in description
         assert events.count("feedback_settled_while_stopped") == 1
         assert db.execute("SELECT resolved FROM doc_comments WHERE id=?", (plain[0]["id"],)).fetchone()[0] == 1
+
+        comments.update(plain[0]["id"], {"resolved": True}, db=db)
+
+        assert _description_and_events(db, node_id) == (description, events)
     finally:
         db.close()
 

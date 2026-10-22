@@ -37,7 +37,7 @@ def settle_node(connection, node_id: str, *, evidence: str, provenance: str, ver
 
     It settles the task's latest revision. A finished task stays as it is. A stopped one
     gets ``stopped_note`` (formatted with the evidence) and a ``stopped_event`` instead,
-    and never raises.
+    once per distinct evidence, and never raises.
     """
     node_id = _current(connection, node_id)
     node = service._node_row(connection, node_id)
@@ -48,6 +48,13 @@ def settle_node(connection, node_id: str, *, evidence: str, provenance: str, ver
         # settles it now or later: its owner finishes it after resume (pause
         # contract S26). The note replaces the framing's "settles by itself"
         # promise. Raising here would roll back every other document's delivery.
+        # The same evidence again (a comment resolved twice) adds nothing.
+        if connection.execute(
+            "SELECT 1 FROM plan_node_events WHERE node_id=? AND event=? "
+            "AND json_extract(payload_json,'$.evidence')=? LIMIT 1",
+            (node_id, stopped_event, evidence),
+        ).fetchone():
+            return
         text = f"{node['description']}\n\n{stopped_note.format(evidence=evidence)}"
         service.touch_node(connection, node_id, description=text)
         service._event(connection, node_id, stopped_event, actor_id=None,
@@ -63,7 +70,7 @@ def settle_node(connection, node_id: str, *, evidence: str, provenance: str, ver
         # out the reviewer's current task only to settle it at once. Structured
         # Plans approved this attempt-less pending -> active step for review
         # settlement (corsia#79 at ec416332) and for feedback-batch settlement
-        # in its review of corsia#1249.
+        # (cebertowicz/corsia#1249 at 34a64f69c).
         service._transition(connection, node_id, "active", actor_id=None,
                             provenance=provenance, verification_result=None, verified_by=None)
     review_evidence.submit(node_id, evidence=evidence, expected_revision=None,
