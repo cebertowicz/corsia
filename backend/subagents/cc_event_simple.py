@@ -7,6 +7,7 @@ import uuid
 from core.reasoning_provenance import merge_reasoning_provenance_evidence
 from infra import provider_usage
 from infra.context_receipts import live_context_usage_payload
+from infra.turn_errors import insert_turn_error
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_stored_message
 import subagents.cc_event_tool_boundary as tool_boundary
@@ -21,16 +22,21 @@ from subagents.cc_runtime_state import Broadcast, _Live
 
 def record_tool_boundary_violation(
     child_id: str, bcast: Broadcast, db, metadata: dict, content: str,
-    *, live: _Live | None = None,
+    *, turn_id: str | None = None, live: _Live | None = None,
 ) -> str:
-    message_id = insert_message(
-        child_id, "system", content, metadata,
-        msg_id=str(uuid.uuid4()), db=db,
+    """Write the boundary error; ``live`` marks it as the Turn's terminal row."""
+    message_id = insert_turn_error(
+        insert_message, child_id, content, metadata,
+        turn_id=turn_id, msg_id=str(uuid.uuid4()), db=db,
     )
     if live is not None:
         live.tool_boundary_marker_id = message_id
     broadcast_stored_message(child_id, message_id, db=db, broadcast=bcast)
     return message_id
+
+
+def _turn_id(ctx: CCEventContext) -> str | None:
+    return getattr(getattr(ctx.live, "corsia_turn", None), "turn_id", None)
 
 
 async def on_thinking_delta(ctx: CCEventContext, ev: dict) -> None:
@@ -126,7 +132,8 @@ async def on_tool_boundary_violation(ctx: CCEventContext, ev: dict) -> None:
     if not ctx.live.tool_boundary_violation_recorded:
         ctx.live.tool_boundary_violation_recorded = True
         record_tool_boundary_violation(
-            ctx.child_id, ctx.bcast, ctx.db, metadata, content, live=ctx.live
+            ctx.child_id, ctx.bcast, ctx.db, metadata, content,
+            turn_id=_turn_id(ctx), live=ctx.live,
         )
     raise RuntimeError("Claude Code capability boundary violated")
 
@@ -145,8 +152,10 @@ async def on_init(ctx: CCEventContext, ev: dict) -> None:
         unavailable = tool_boundary._tool_bridge_unavailable_from_init(ev)
         if unavailable is not None:
             metadata, content = unavailable
+            # Not the Turn's terminal row: the process exit still surfaces.
             record_tool_boundary_violation(
-                ctx.child_id, ctx.bcast, ctx.db, metadata, content
+                ctx.child_id, ctx.bcast, ctx.db, metadata, content,
+                turn_id=_turn_id(ctx),
             )
             # Never run a Turn toolless: ending the handle here makes the
             # Turn fail visibly and the next input start a fresh bridge.

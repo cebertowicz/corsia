@@ -579,6 +579,8 @@ async def test_native_provider_error_persists_last_successful_call_occupancy(mon
         if fn is step_handler._attach_delivered_context_to_latest_assistant:
             attached.append(kwargs["context_usage"])
             return "assistant-row", kwargs["context_usage"]
+        if fn is step_handler.persist_llm_error:
+            return {"turn_id": identity.turn_id, "reference": "ABC123", "next_step": "failed"}
         return None
 
     async def fake_terminal(*_args, **_kwargs):

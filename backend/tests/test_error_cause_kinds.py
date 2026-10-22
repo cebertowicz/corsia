@@ -230,6 +230,10 @@ def test_native_error_step_writes_cause_kind_to_the_row_and_the_live_frame(monke
     monkeypatch.setattr("core.step_handler.write_transaction", lambda *a, **kw: _Tx())
     monkeypatch.setattr("core.step_handler.record_turn_end_logged", _turn_end)
     monkeypatch.setattr(
+        "core.turn_error_surface.apply_error_next_steps",
+        lambda db, thread_id, rows: rows[0]["metadata"].setdefault("next_step", None),
+    )
+    monkeypatch.setattr(
         "core.step_handler.insert_message",
         lambda thread_id, role, content, meta, **kw: stored.append(meta),
     )
@@ -245,12 +249,15 @@ def test_native_error_step_writes_cause_kind_to_the_row_and_the_live_frame(monke
     asyncio.run(handler.handle("error", payload))
     asyncio.run(handler.handle("error", {"message": "plain"}))
 
+    reference = stored[0].pop("reference")
     assert stored[0] == {
         "type": "llm_error", "model": "test/model", "turn_id": "turn-cause",
         "cause_kind": "usage_limit", "resets_at": "2099-01-01T00:00:00+00:00",
+        "next_step": None,
     }
     assert stored[1]["cause_kind"] == "unknown" and "resets_at" not in stored[1]
     assert frames[0]["cause_kind"] == "usage_limit" and frames[0]["resets_at"] == payload["resets_at"]
+    assert frames[0]["reference"] == reference
     assert frames[1]["cause_kind"] == "unknown"
 
 

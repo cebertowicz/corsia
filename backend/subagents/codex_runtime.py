@@ -33,6 +33,7 @@ from subagents.codex_runtime_errors import (
     surface_exit_error,
 )
 from subagents.codex_runtime_events import record_terminal_marker
+from subagents.codex_shutdown_error import record_backend_shutdown_marker as _record_backend_shutdown_marker
 from subagents.codex_retirement import retire_if_current
 from subagents.codex_runtime_event_delivery import (
     arm_delivery_event_barrier as _arm_delivery_event_barrier,
@@ -2215,28 +2216,6 @@ async def _force_shutdown_unsettled_app_server(
     )
 
 
-def _record_backend_shutdown_marker(thread_id: str) -> None:
-    from llm.error_cause import cause_fields
-
-    try:
-        insert_message(
-            thread_id,
-            "system",
-            "Terminated by backend shutdown.",
-            {
-                "codex": True, "type": "cc_error", "event_type": "harness.error",
-                "harness": "codex", **cause_fields("codex", "backend_shutdown"),
-                "shutdown": True,
-            },
-            msg_id=str(uuid.uuid4()),
-        )
-    except Exception as exc:
-        log.warning(
-            "codex_runtime: shutdown marker failed for %s: %s",
-            thread_id,
-            exc,
-        )
-
 
 async def _shutdown_live_owner(
     thread_id: str,
@@ -2245,6 +2224,7 @@ async def _shutdown_live_owner(
 ) -> None:
     from subagents.lifecycle import terminate_and_pop
 
+    turn_id = getattr(live.corsia_turn, "turn_id", None)
     drain_result = await _quiesce_tool_turn(thread_id, live, bcast)
     if _LIVE.get(thread_id) is not live:
         return
@@ -2273,7 +2253,7 @@ async def _shutdown_live_owner(
     if not cleaned:
         raise RuntimeError(f"Codex exact live survived shutdown: {thread_id}")
     if terminal is TurnTerminalResult.APPLIED:
-        await run_in_db(_record_backend_shutdown_marker, thread_id)
+        await run_in_db(_record_backend_shutdown_marker, thread_id, turn_id)
 
 
 async def _shutdown_idle_app_owner(thread_id: str) -> None:

@@ -7,6 +7,7 @@ import logging
 import uuid
 
 from infra.db_async import run_in_db
+from infra.turn_errors import insert_turn_error
 from infra.queries import insert_message
 from llm.error_cause import cause_fields
 from subagents.cc_handle_close import (
@@ -92,16 +93,16 @@ async def _terminate_for_shutdown(
     return False, None
 
 
-def _record_shutdown_marker(child_id: str) -> None:
+def _record_shutdown_marker(child_id: str, turn_id: str | None) -> None:
     try:
-        insert_message(
-            child_id, "system", "Terminated by backend shutdown.",
+        insert_turn_error(
+            insert_message, child_id, "Terminated by backend shutdown.",
             {
                 "cc": True, "type": "cc_error",
                 "event_type": "harness.error", "harness": "claude-code",
                 **cause_fields("claude-code", "backend_shutdown"), "shutdown": True,
             },
-            msg_id=str(uuid.uuid4()),
+            turn_id=turn_id, msg_id=str(uuid.uuid4()),
         )
     except Exception as exc:
         log.warning("shutdown marker failed for %s: %s", child_id, exc)
@@ -137,7 +138,9 @@ async def shutdown_one_live(child_id: str, live: _Live) -> None:
         finalized and was_active and not replaying_natural_exit
         and not live.turn_active and live.parent_thread_id
     ):
-        await run_in_db(_record_shutdown_marker, child_id)
+        await run_in_db(
+            _record_shutdown_marker, child_id, getattr(identity, "turn_id", None),
+        )
 
 
 async def shutdown_all() -> None:
