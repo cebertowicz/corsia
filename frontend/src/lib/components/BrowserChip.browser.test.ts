@@ -36,13 +36,15 @@ describe('BrowserChip', () => {
 		expect(button.tagName).toBe('BUTTON');
 		expect(button.type).toBe('button');
 		expect(button.querySelector('.title')?.textContent).toBe('github.com');
-		expect(button.hasAttribute('aria-label')).toBe(false);
+		expect(button.getAttribute('aria-label')).toBe('github.com, reopen the shared browser');
 		expect(button.getAttribute('title')).toBe('Reopen the shared browser');
 		expect(button.querySelector('.ic svg')).not.toBeNull();
 	});
 
 	it('says Shared browser when the open named no host', () => {
-		expect(render({ host: null }).querySelector('.title')?.textContent).toBe('Shared browser');
+		const button = render({ host: null });
+		expect(button.querySelector('.title')?.textContent).toBe('Shared browser');
+		expect(button.getAttribute('aria-label')).toBe('Reopen the shared browser');
 	});
 
 	it('shows the live browser in its thread on click and reports one product event', () => {
