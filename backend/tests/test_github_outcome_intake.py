@@ -112,6 +112,59 @@ def test_body_parsers_are_order_stable_deduped_and_repo_qualified():
     assert introduced_by_numbers("Introduced by #5\n> introduced by #6\nIntroduced by #5") == [5, 6]
 
 
+def test_merged_pr_measurement_attributes_are_optional_and_exact():
+    payload = copy.deepcopy(fixture("pr_introduced_by_merged")["payload"])
+    pr = payload["pull_request"]
+    pr["created_at"] = "2026-09-28T10:00:00Z"
+    pr["merged_at"] = "2026-09-28T12:34:00Z"
+    primary = drafts_by_name(map_github_outcomes("pull_request", payload))["github.pr.merged"][0]
+    assert primary.attributes["minutes_since_opened"] == 154
+
+    del pr["created_at"]
+    primary = drafts_by_name(map_github_outcomes("pull_request", payload))["github.pr.merged"][0]
+    assert "minutes_since_opened" not in primary.attributes
+
+    pr["created_at"] = "not-a-timestamp"
+    from events.connectors.github_outcome_input import PayloadRefusal
+
+    with pytest.raises(PayloadRefusal):
+        map_github_outcomes("pull_request", payload)
+
+    pr["created_at"] = "2026-09-28T13:00:00Z"
+    primary = drafts_by_name(map_github_outcomes("pull_request", payload))["github.pr.merged"][0]
+    assert "minutes_since_opened" not in primary.attributes
+
+
+_REVERT_SHA = "a" * 40
+
+
+@pytest.mark.parametrize(("title", "body", "expected"), [
+    ('Revert "change"', f"This reverts commit {_REVERT_SHA}.", _REVERT_SHA),
+    ('Revert "change"', "This reverts commit a change.", None),
+    ('Revert "change"', f"This reverts commit {'a' * 39}.", None),
+    ("Normal change", f"This reverts commit {_REVERT_SHA}.", None),
+])
+def test_merged_pr_revert_sha_requires_local_git_revert_template(title, body, expected):
+    payload = copy.deepcopy(fixture("pr_introduced_by_merged")["payload"])
+    payload["pull_request"].update(title=title, body=body)
+    primary = drafts_by_name(map_github_outcomes("pull_request", payload))["github.pr.merged"][0]
+    assert primary.attributes.get("reverts_sha") == expected
+
+
+@pytest.mark.parametrize(("title", "body", "expected"), [
+    ('Revert "change"', f"Reverts {REPO.upper()}#42", "42"),
+    ('Revert "change"', f"Reverts {REPO}#0", None),
+    ('Revert "change"', f"Reverts {REPO}#042", "42"),
+    ('Revert "change"', "Reverts other/repo#42", None),
+    ("Normal change", f"Reverts {REPO}#42", None),
+])
+def test_merged_pr_revert_button_attribute_requires_same_repo(title, body, expected):
+    payload = copy.deepcopy(fixture("pr_introduced_by_merged")["payload"])
+    payload["pull_request"].update(title=title, body=body)
+    primary = drafts_by_name(map_github_outcomes("pull_request", payload))["github.pr.merged"][0]
+    assert primary.attributes.get("reverts_pr") == expected
+
+
 def test_workflow_run_key_is_run_id_plus_attempt():
     first = fixture("workflow_run_success")
     (draft,) = map_github_outcomes(first["event"], first["payload"])
@@ -131,6 +184,7 @@ def test_workflow_run_key_is_run_id_plus_attempt():
     (red,) = map_github_outcomes("workflow_run", failure)
     assert red.attributes["conclusion"] == "failure"
     assert red.attributes["event"] == "workflow_dispatch"
+
 
 
 _MALFORMED_ATTEMPTS: list[Any] = [
