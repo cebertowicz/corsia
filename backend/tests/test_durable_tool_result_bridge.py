@@ -826,10 +826,10 @@ def test_bind_tool_result_echo_settles_undispatched_call_for_any_provider(
 def test_late_result_cannot_replace_terminal_synthetic_result(isolated_db) -> None:
     from core._tool_result_delivery_support import ToolResultBindingError
     from core.tool_result_delivery import (
-        PROVIDER_MISSING_RESULT_REASON,
         persist_tool_execution_result,
         synthetic_result_identity,
     )
+    from infra.delivery_states import PROVIDER_MISSING_RESULT_REASON
     from infra.database import get_db
     from subagents.child_thread import persist_tool_use
 

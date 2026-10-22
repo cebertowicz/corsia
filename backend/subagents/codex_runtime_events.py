@@ -14,7 +14,7 @@ from automation.turn_end_effects import (
     record_external_turn_end,
 )
 from core.reasoning_provenance import merge_reasoning_provenance_evidence
-from core.tool_result_delivery import PROVIDER_MISSING_RESULT_REASON
+from infra.delivery_states import PROVIDER_MISSING_RESULT_REASON
 from core.turn_core import (
     TurnIdentity,
     TurnTerminalResult,

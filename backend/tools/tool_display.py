@@ -2,16 +2,27 @@
 
 Live ``tool_start``/``tool_done`` frames and the reload projection call
 ``project_tool_display`` with the same inputs, so a row reads the same live
-and after reload. Nothing it derives is stored.
+and after reload. Nothing it derives is stored but the browser chip: the result
+write (``core.tool_result_delivery``) keeps it on the call's Assistant Step
+once, as the call settles, so a Focus page reads it in SQL the way it reads an
+error's ``recovered`` mark (``infra.error_recovery``).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
+from urllib.parse import urlsplit
 
+from infra.delivery_states import (
+    PROVIDER_MISSING_RESULT_REASON,
+    TURN_ENDED_WITHOUT_RESULT_REASON,
+    UNDISPATCHED_TOOL_REASON,
+    USER_INTERRUPTION_REASON,
+)
 from infra.tool_result_errors import is_error_result
-from tools.tool_activity import tool_display_activity
+from tools.catalog import normalize_tool_name
+from tools.tool_activity import resolve_display_call, tool_activity
 
 ToolOutcome = Literal["done", "failed", "refused", "unknown"]
 
@@ -51,6 +62,9 @@ class ToolDisplay:
     error_line: str | None = None
     # The argument the phrase names, unshortened; block summaries count by it.
     object: str = ""
+    # The shared browser window a visible `browser_open` put in front of the person: `{"host": ...}`. Stored on
+    # the Step when the call settles, never sent per call.
+    browser_chip: dict | None = None
 
     def outcome_fields(self) -> dict:
         """The settled fields a row carries; absent while nothing settled."""
@@ -74,13 +88,6 @@ def _outcome(settled: SettledResult) -> ToolOutcome | None:
     happened through their synthetic reason: a stub standing in for a result
     nobody saw is ``unknown``, never ``failed``, since the call may have run.
     """
-    from core.tool_result_delivery import (
-        PROVIDER_MISSING_RESULT_REASON,
-        TURN_ENDED_WITHOUT_RESULT_REASON,
-        UNDISPATCHED_TOOL_REASON,
-        USER_INTERRUPTION_REASON,
-    )
-
     if settled.synthetic_reason in (
         USER_INTERRUPTION_REASON,
         PROVIDER_MISSING_RESULT_REASON,
@@ -101,20 +108,41 @@ def _first_line(content: str) -> str | None:
     return None
 
 
+def _browser_host(url: object) -> str | None:
+    """The page's host as a person reads it (lowercase, no ``www.``), or ``None`` when the URL names none."""
+    try:
+        host = urlsplit(url.strip()).hostname if isinstance(url, str) else None
+    except ValueError:
+        return None
+    return (host or "").lower().removeprefix("www.") or None
+
+
+def _browser_chip(tool: str, arguments: object, outcome: ToolOutcome | None) -> dict | None:
+    """The chip for a visible `browser_open` that succeeded; a headless open puts nothing in front of anyone."""
+    if normalize_tool_name(tool) != "browser_open" or outcome != "done":
+        return None
+    if not isinstance(arguments, dict) or arguments.get("show_window") is not True:
+        return None
+    return {"host": _browser_host(arguments.get("url"))}
+
+
 def project_tool_display(
     name: str | None, arguments: object, settled: SettledResult | None,
 ) -> ToolDisplay:
-    """Project one call to its row: phrase, object, outcome and a failure's first line.
+    """Project one call to its row: phrase, object, outcome, a failure's first line and a browser chip.
 
     ``settled`` is ``None`` while the call runs or when no result was stored;
-    such a row claims no outcome.
+    such a row claims no outcome and no chip.
     """
-    activity = tool_display_activity(name, arguments)
+    tool, resolved = resolve_display_call(name, arguments)
+    activity = tool_activity(tool, resolved)
     if settled is None:
         return ToolDisplay(activity.phrase, object=activity.object)
     outcome = _outcome(settled)
     error_line = _first_line(settled.content) if outcome == "failed" else None
-    return ToolDisplay(activity.phrase, outcome, error_line, activity.object)
+    return ToolDisplay(
+        activity.phrase, outcome, error_line, activity.object, _browser_chip(tool, resolved, outcome),
+    )
 
 
 def tool_start_frame(

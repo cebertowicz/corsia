@@ -11,7 +11,7 @@ from infra.db_async import run_in_db
 from infra.queries import get_thread_project_id
 from infra.state.context import tool_invocation_context
 
-from core.tool_result_delivery import USER_INTERRUPTION_REASON
+from infra.delivery_states import USER_INTERRUPTION_REASON
 from core.turns_instrument import tool_loop_span
 from tools.tool_surface import dispatch_metadata
 from tools.recorded_call import (

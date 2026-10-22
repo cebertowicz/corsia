@@ -53,7 +53,7 @@ describe('MessageArtifactCards', () => {
 		expect(tile.getAttribute('aria-label')).toBe('Launch plan, document, Needs your review');
 		expect(tile.querySelector('.title')?.textContent).toBe('Launch plan');
 		expect(tile.querySelector('.state')?.textContent).toBe('Needs your review');
-		expect(host.querySelector('button.tile')?.closest('ul')?.getAttribute('aria-label')).toBe('Artifacts');
+		expect(host.querySelector('button.tile')?.closest('ul')?.getAttribute('aria-label')).toBe('Files to review');
 		tile.click();
 		const opened = get(threadWorkspaces).t1.tabs.map((tab) => tab.artifactId);
 		expect(opened).toContain('a1');
