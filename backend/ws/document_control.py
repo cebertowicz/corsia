@@ -18,6 +18,7 @@ from doceditor.live_runtime import LiveEntry, get_documents
 from doceditor.live_store import BrowserMessage, StoreRefused
 from infra.db_async import run_in_db
 from infra.state import send_to_client
+from ws import user_feedback_delivery
 from ws.document_failures import failure_state
 
 FRAME_TYPES = {"doc_open", "doc_update", "doc_sync", "doc_flush", "doc_replace", "doc_choice", "doc_close", "doc_positions",
@@ -287,6 +288,8 @@ async def _operate(socket, user: dict, data: dict) -> None:
         await send_to_client(socket, {"type": "doc_received", "artifact_id": artifact_id,
                                     "store_id": live.store.store_id, "message_ids": [identifier]})
         _schedule_commit(artifact_id, entry)
+        if subscription.actor.direct_user:
+            user_feedback_delivery.schedule(artifact_id)
         return
     if kind == "doc_flush" and data.get("retry") is True:
         await entry.lane.retry.retry_blocked()
@@ -356,6 +359,7 @@ async def _leave(socket, artifact_id: str) -> None:
         subscription.entry.live.release_holder(socket)
     if subscription is None or any(artifact_id in rows for rows in _subscriptions.values()):
         return
+    user_feedback_delivery.cancel(artifact_id)
     async def flush():
         task = _commits.get(artifact_id)
         if task:
@@ -368,6 +372,8 @@ async def _leave(socket, artifact_id: str) -> None:
     if manager is not None:
         await manager.evict(artifact_id, subscription.entry, before_close=flush,
                             can_evict=lambda: not any(artifact_id in rows for rows in _subscriptions.values()))
+    if subscription.actor.direct_user:
+        await user_feedback_delivery.deliver(artifact_id)
 
 
 async def disconnect(socket) -> None:

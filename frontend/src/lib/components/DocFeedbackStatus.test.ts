@@ -231,7 +231,7 @@ describe('DocFeedbackStatus', () => {
 		component!.sync('artifact-1', { open_count: 0, owner_label: null, grace_closes_at: null, undelivered_batches: [] });
 	});
 
-	it('shows the server grace deadline and sends now through the existing action', async () => {
+	it('keeps Send available even when a fallback deadline is present', async () => {
 		const deadline = new Date(Date.now() + 61_000).toISOString();
 		component!.sync('artifact-1', {
 			open_count: 2,
@@ -241,10 +241,8 @@ describe('DocFeedbackStatus', () => {
 		});
 		flushSync();
 
-		expect(host.textContent).toContain('Sending to Documents & Artifacts in 2 min');
-		expect(host.textContent).not.toContain('Send 2 comments');
-		const grace = host.querySelector('[role="status"].sending-grace')!;
-		expect(grace.getAttribute('title')).toBe('Sending to Documents & Artifacts in 2 min');
+		expect(host.textContent).toContain('Send 2 comments to Documents & Artifacts');
+		expect(host.querySelector('[role="status"].sending-grace')).toBeNull();
 		host.querySelector<HTMLButtonElement>('button')!.click();
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/doc-feedback/send', expect.anything()));
 	});
@@ -260,7 +258,7 @@ describe('DocFeedbackStatus', () => {
 		component!.sync('artifact-1', { open_count: 0, owner_label: null, grace_closes_at: null, undelivered_batches: [] });
 	});
 
-	it('sends leave once with keepalive when the page hides or unloads', async () => {
+	it('sends pending feedback once when the page hides or unloads', async () => {
 		fetchMock.mockImplementation(() => Promise.resolve(result()));
 		component!.commentCreated();
 		Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
@@ -268,19 +266,18 @@ describe('DocFeedbackStatus', () => {
 		window.dispatchEvent(new Event('beforeunload'));
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
-		expect(fetchMock).toHaveBeenCalledWith('/api/doc-feedback/leave', expect.objectContaining({
-			keepalive: true,
+		expect(fetchMock).toHaveBeenCalledWith('/api/doc-feedback/send', expect.objectContaining({
+			keepalive: false,
 			headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
 		}));
 	});
 
-	it('retries leave after its request fails', async () => {
-		const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+	it('retries pending feedback after its send fails', async () => {
 		setVisibility('hidden');
 		fetchMock.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(result());
 		component!.commentCreated();
 		window.dispatchEvent(new Event('beforeunload'));
-		await vi.waitFor(() => expect(error).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(get(toasts).map((toast) => toast.message)).toContain("Couldn't send your comments — try again"));
 		component!.sync('artifact-1', { open_count: 1, owner_label: null, grace_closes_at: null, undelivered_batches: [] });
 		window.dispatchEvent(new Event('beforeunload'));
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -323,14 +320,11 @@ describe('DocFeedbackStatus', () => {
 		expect(host.textContent).not.toContain('not delivered:');
 	});
 
-	it('reports the user returned when fresh state reaches a visible document', async () => {
+	it('does not report a return when fresh state reaches a visible document', async () => {
 		component!.sync('artifact-1', { open_count: 1, owner_label: null, grace_closes_at: null, undelivered_batches: [] });
-		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+		await Promise.resolve();
 
-		expect(fetchMock).toHaveBeenCalledWith('/api/doc-feedback/return', expect.objectContaining({
-			body: JSON.stringify({ artifact_id: 'artifact-1' }),
-			headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
-		}));
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
 	it('does not report a return when a hidden tab refreshes its comments', async () => {
