@@ -40,13 +40,10 @@ def _refused(reason: str) -> ResetResult:
 
 def _only_held_inputs(db, thread_id: str) -> bool:
     """Whether every message in the thread is a system input no model has read."""
-    rows = db.execute(
-        "SELECT role, delivery_state, delivery_error FROM messages WHERE thread_id = ?", (thread_id,),
-    ).fetchall()
-    return all(
-        row["role"] == "system" and row["delivery_state"] == "queued" and row["delivery_error"] == NO_MODEL_SELECTED
-        for row in rows
-    )
+    return not db.execute(
+        "SELECT 1 FROM messages WHERE thread_id = ? AND NOT (role = 'system' AND delivery_state = 'queued' "
+        "AND delivery_error = ?) LIMIT 1", (thread_id, NO_MODEL_SELECTED),
+    ).fetchone()
 
 
 def _marker_refusal(record: dict | None, user_id: str) -> str | None:
@@ -68,10 +65,10 @@ def _guard(db, record: dict | None, user_id: str) -> tuple[str | None, str | Non
     refusal = _marker_refusal(record, user_id)
     if refusal is not None:
         return refusal, None
-    if [row["id"] for row in db.execute("SELECT id FROM users")] != [user_id]:
+    if [row["id"] for row in db.execute("SELECT id FROM users LIMIT 2")] != [user_id]:
         return "other_accounts", None
     agent = get_corsia_agent(db=db)
-    if agent is None or [row["id"] for row in db.execute("SELECT id FROM threads")] != [agent]:
+    if agent is None or [row["id"] for row in db.execute("SELECT id FROM threads LIMIT 2")] != [agent]:
         return "in_use", None
     if not _only_held_inputs(db, agent):
         return "in_use", None
@@ -79,19 +76,19 @@ def _guard(db, record: dict | None, user_id: str) -> tuple[str | None, str | Non
 
 
 def _remove_unchanged_files(workspace: Path, files: object) -> None:
-    """Delete each file setup created, only while it is a plain file still matching the digest recorded for it."""
+    """Delete each file setup created, only while it is a plain file still matching the digest recorded for it.
+
+    A file that cannot be removed raises, so the reset is refused whole and the account stays as it was.
+    """
     if not isinstance(files, dict):
         return
     root = workspace.resolve()
     for relative, digest in files.items():
         path = workspace / str(relative)
-        try:
-            if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root):
-                continue
-            if hashlib.sha256(path.read_bytes()).hexdigest() == digest:
-                path.unlink()
-        except OSError:
-            logger.exception("Could not remove a file the unfinished setup created")
+        if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root):
+            continue
+        if hashlib.sha256(path.read_bytes()).hexdigest() == digest:
+            path.unlink()
 
 
 def reset_unfinished_setup(user_id: str) -> ResetResult:
@@ -103,17 +100,21 @@ def reset_unfinished_setup(user_id: str) -> ResetResult:
     early = _marker_refusal(setup_progress.read(), user_id)
     if early is not None:
         return _refused(early)
-    with write_transaction(None, scope="setup_reset") as db:
-        record = setup_progress.read(db=db)
-        refusal, agent = _guard(db, record, user_id)
-        if refusal is not None or agent is None or record is None:
-            return _refused(refusal or "in_use")
-        files = record[setup_progress.CREATED_BY_APP].get("files")
-        with public.collect_wake_recipients(db, None):
-            delete_thread_family(db, thread_family_ids(db, agent))
-        db.execute("DELETE FROM auth_tokens WHERE user_id = ?", (user_id,))
-        db.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        set_corsia_agent(None, db=db)
-        setup_progress.clear(db=db)
-    _remove_unchanged_files(config.WORKSPACE, files)
+    try:
+        with write_transaction(None, scope="setup_reset") as db:
+            record = setup_progress.read(db=db)
+            refusal, agent = _guard(db, record, user_id)
+            if refusal is not None or agent is None or record is None:
+                return _refused(refusal or "in_use")
+            with public.collect_wake_recipients(db, None):
+                delete_thread_family(db, thread_family_ids(db, agent))
+            db.execute("DELETE FROM auth_tokens WHERE user_id = ?", (user_id,))
+            db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            set_corsia_agent(None, db=db)
+            setup_progress.clear(db=db)
+            # Last, still inside the transaction: a file that will not go rolls the whole reset back.
+            _remove_unchanged_files(config.WORKSPACE, record[setup_progress.CREATED_BY_APP].get("files"))
+    except OSError:
+        logger.exception("Could not remove a file the unfinished setup created; the setup was left as it was")
+        return _refused("files_not_removed")
     return ResetResult(reset=True)

@@ -293,6 +293,21 @@ def test_the_profile_goes_only_while_it_is_unchanged(workspace):
     assert not (workspace / PROFILE).exists()
 
 
+def test_a_file_that_cannot_be_removed_refuses_the_whole_reset(workspace, monkeypatch):
+    user_id = _app_account()
+    state = _state()
+
+    def refuse(self, *args, **kwargs):
+        raise PermissionError("read-only folder")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(Path, "unlink", refuse)
+        result = reset_unfinished_setup(user_id)
+    assert (result.reset, result.refused) == (False, "files_not_removed")
+    _unchanged(state)
+    assert reset_unfinished_setup(user_id).reset is True
+
+
 def test_an_edited_profile_stays(workspace):
     user_id = _app_account()
     with (workspace / PROFILE).open("a", encoding="utf-8") as profile:

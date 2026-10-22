@@ -4,11 +4,11 @@ The record is the only owner of "did this person finish setup". It holds the
 step reached after the account exists, the person's local-AI choice, which
 subscriptions they said they pay for (``picks``), the setup-to-chat handoff, and
 ``setup_completed``, which is written only when they finish. Eligibility facts
-(memory, disk, sources) are never stored here: a reopened setup re-reads them.
+(memory, disk, sources) are never stored here: setup re-reads them.
 
-An install with no record, or one made by ``corsia user add``, has no setup to
-reopen: with an account present it counts as completed. Only a record that
-reached a step and was never completed reopens setup.
+An install with no record, or one made by ``corsia user add``, has no setup in
+progress: with an account present it counts as completed. A record the app's own
+setup made and nobody finished is reset on the next launch (``onboarding.setup_reset``).
 """
 
 from __future__ import annotations
