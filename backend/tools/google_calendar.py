@@ -13,11 +13,14 @@ from datetime import timedelta
 from typing import Any
 from urllib.parse import quote
 
+from connections import mail_accounts
+from connections.connected_accounts import MAILHOST_PROVIDER
 from connections.google import client as google_client
 from connections.google.accounts import ACCOUNT_PARAM, resolve_for_thread
 from connections.calendar_document import OFFSET_REQUIRED, compose_document, parse_time, read_draft, read_invite
 from connections.google.calendar_document import event_summaries
 from connections.google.client import GoogleError, GoogleRequestFailed
+from connections.mailhost import agenda
 from infra import config
 from infra.db_async import run_in_db
 from tools.action_delivery import deliver_claimed
@@ -55,7 +58,12 @@ OTHER_ACCOUNT = "This invite was drafted from {address}; save a new one (omit dr
 
 
 async def _account(kwargs: dict[str, Any]) -> dict:
-    """The account the call names and this thread may use, or :class:`GoogleError`."""
+    """The Gmail or mail-host account the call names and this thread may use, or :class:`GoogleError`."""
+    return await run_in_db(mail_accounts.resolve_for_thread, kwargs.get("account_id"), kwargs.get("_thread_id"))
+
+
+async def _google_account(kwargs: dict[str, Any]) -> dict:
+    """The Google account an invite is drafted from; invites are Google-only."""
     return await run_in_db(resolve_for_thread, kwargs.get("account_id"), kwargs.get("_thread_id"))
 
 
@@ -74,7 +82,10 @@ class CalendarListTool(Tool):
 
     @property
     def description(self) -> str:
-        return "List the Google Calendar events of the account named by account_id, in a range of up to 31 days"
+        return (
+            "List the Google Calendar events of the account named by account_id, in a range of up to 31 days\n"
+            "An account on another email host lists its calendar the same way."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -91,9 +102,10 @@ class CalendarListTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         try:
-            account_id = str((await _account(kwargs))["id"])
+            account = await _account(kwargs)
         except GoogleError as exc:
             return f"Error: {exc}"
+        account_id = str(account["id"])
         try:
             time_min, start = parse_time(kwargs.get("time_min"))
             time_max, end = parse_time(kwargs.get("time_max"))
@@ -104,6 +116,10 @@ class CalendarListTool(Tool):
             calendar_id = kwargs.get("calendar_id", "primary")
             if not isinstance(calendar_id, str) or not calendar_id:
                 return "Error: calendar_id must be a calendar id."
+            if account.get("provider") == MAILHOST_PROVIDER:
+                if calendar_id != "primary":
+                    return "Error: This account lists all its calendars together; leave calendar_id out."
+                return json.dumps({"events": await agenda.list_events(account_id, start, end)})
             response = await google_client.get_json(account_id, _event_url(calendar_id), params={
                 "timeMin": time_min, "timeMax": time_max, "maxResults": 250,
                 "singleEvents": "true", "orderBy": "startTime",
@@ -152,7 +168,7 @@ class CalendarDraftInviteTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         try:
-            account = await _account(kwargs)
+            account = await _google_account(kwargs)
         except GoogleError as exc:
             return f"Error: {exc}"
         try:
