@@ -154,8 +154,8 @@ def test_operator_contract_v2_projects_canonical_execution_evidence_and_cost():
             "label_key": "working",
             "tone_key": "active",
         }
-        # EW3: an untitled watched artifact names no one, so the waiting task does; its id lets the surface open it.
-        assert wait["label"] == "Waiting"
+        # EW3: an untitled watched artifact is named as the item it opens; its id lets the surface open it.
+        assert wait["label"] == "the linked item"
         assert wait["artifact_id"] and wait["more"] == 0
     finally:
         db.close()

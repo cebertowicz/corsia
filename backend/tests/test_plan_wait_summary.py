@@ -21,20 +21,22 @@ def test_the_earliest_wait_is_chosen_across_offset_forms():
     assert (summary["label"], summary["until"], summary["more"]) == ("Sooner", "2026-10-22T16:00:00Z", 1)
 
 
-def test_a_wait_nothing_names_is_labelled_with_the_waiting_task():
-    summary = wait_summary.from_nodes([_node({"kind": "waiting", "ends_at": "2026-10-22T16:00:00Z"})])
+def test_a_wait_nothing_names_reads_as_the_check_it_ends_in():
+    # Surfaces show "Waiting for {label}", so the waiting task's own title would read as what it waits for.
+    unnamed = {"kind": "waiting", "ends_at": "2026-10-22T16:00:00Z"}
 
-    assert summary["label"] == "Task"
+    assert wait_summary.from_nodes([_node(unnamed)])["label"] == "a scheduled check"
+    assert wait_summary.from_nodes([_node({**unnamed, "artifact_id": "a1"})])["label"] == "the linked item"
 
 
-def test_a_child_plans_unnamed_wait_is_labelled_with_its_task(monkeypatch):
+def test_a_child_plans_wait_carries_its_tasks_title(monkeypatch):
     from plans import node_waits
 
-    cause = {"kind": "waiting", "ends_at": "2026-10-22T16:00:00Z"}
+    cause = {"kind": "waiting", "ends_at": "2026-10-22T16:00:00Z", "child_thread_id": "child"}
     monkeypatch.setattr(node_waits, "armed_in_plans", lambda _db, _ids: {"plan": [("watch-row", "Ship the export")]})
     monkeypatch.setattr(node_waits, "named_watch_cause", lambda row: cause if row == "watch-row" else {})
 
-    assert wait_summary.for_plans(None, ["plan"])["plan"]["label"] == "Ship the export"
+    assert wait_summary.for_plans(None, ["plan"])["plan"]["label"] == "an agent working on Ship the export"
 
 
 def test_set_aside_until_is_the_earliest_instant_as_written():

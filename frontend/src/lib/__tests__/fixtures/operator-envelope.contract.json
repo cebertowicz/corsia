@@ -17,7 +17,7 @@
     "tone_key": "active",
     "wait": {
      "artifact_id": "181fed67-b12",
-     "label": "Waiting",
+     "label": "the linked item",
      "more": 0,
      "until": "2026-10-22T17:42:12.299412+00:00"
     }
@@ -431,7 +431,7 @@
      ],
      "wait": {
       "artifact_id": "181fed67-b12",
-      "label": "Waiting",
+      "label": "the linked item",
       "more": 0,
       "until": "2026-10-22T17:42:12.299412+00:00"
      },

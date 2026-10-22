@@ -67,7 +67,8 @@ def _label(cause: dict, node: dict) -> str:
         return _url_label(reason)
     if cause.get("child_thread_id"):
         return f"an agent working on {node.get('title') or 'a task'}"
-    return str(node["title"])  # nothing else names it: the waiting task itself does
+    # Surfaces read "Waiting for {label}": with nothing named, the wait is the item it opens or the check it ends in.
+    return "the linked item" if cause.get("artifact_id") else "a scheduled check"
 
 
 def _stripped_reason(value: object) -> str:
