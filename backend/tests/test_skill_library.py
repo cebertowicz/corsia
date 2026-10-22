@@ -3,10 +3,23 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
+import pytest
 import yaml
 
 from registry import models
 from tests.event_routing_helpers import mk_session
+
+
+@pytest.fixture
+def community_workspace(tmp_path, monkeypatch):
+    from infra.user_profile import PROFILE_RELATIVE_PATH, USE_COMMUNITY_LABEL
+    from tools import skill_library
+
+    profile = tmp_path / PROFILE_RELATIVE_PATH
+    profile.parent.mkdir()
+    profile.write_text(f"{USE_COMMUNITY_LABEL} Yes\n", encoding="utf-8")
+    monkeypatch.setattr(skill_library, "_workspace", lambda: tmp_path)
+    return tmp_path
 
 
 def _item(*, withdrawn: bool = False) -> dict:
@@ -146,7 +159,7 @@ def test_install_repairs_registration_for_an_existing_local_library_copy(monkeyp
     assert repaired == [("owner", "pdf", None, db)]
 
 
-def test_completed_skill_library_action_emits_a_privacy_safe_outcome(isolated_db, monkeypatch):
+def test_completed_skill_library_action_emits_a_privacy_safe_outcome(isolated_db, monkeypatch, community_workspace):
     from infra import product_events
     from tools import skill_library
 
@@ -157,6 +170,60 @@ def test_completed_skill_library_action_emits_a_privacy_safe_outcome(isolated_db
 
     assert skill_library._execute("search", "thread", {}, "pdf", None, False) == {"results": []}
     assert emitted == [(("skill_library", "search"), {"thread_id": "thread", "properties": {"outcome": "empty"}})]
+
+
+@pytest.mark.parametrize(("action", "query", "name"), [
+    ("search", "pdf", None), ("install", None, "pdf"), ("update", None, "pdf"),
+])
+def test_community_library_actions_stop_before_loading_the_index(
+    isolated_db, monkeypatch, community_workspace, action, query, name,
+):
+    from infra.user_profile import PROFILE_RELATIVE_PATH, USE_COMMUNITY_LABEL
+    from tools import skill_library
+
+    profile = community_workspace / PROFILE_RELATIVE_PATH
+    profile.write_text(f"{USE_COMMUNITY_LABEL} No\n", encoding="utf-8")
+    emitted = []
+    monkeypatch.setattr(skill_library, "_index", lambda: pytest.fail("loaded library index"))
+    monkeypatch.setattr(
+        skill_library, "_emit_action", lambda *args: emitted.append(args),
+    )
+
+    result = skill_library._execute(action, "thread", {}, query, name, False)
+
+    assert result == {
+        "error": "community_off",
+        "message": "The person hasn't agreed to use the community's improvements (the 'Use community improvements' line in their profile), so the library is off and nothing was searched, installed or updated. Continue without it, and write your own skill with skill skill-creator if you need one. Only the person changes this answer; don't ask them for it just for this task. remove still works on a copy you already hold.",
+    }
+    assert emitted == [(action, "thread", result)]
+
+
+def test_invalid_library_action_precedes_community_consent(isolated_db, monkeypatch, community_workspace):
+    from infra.user_profile import PROFILE_RELATIVE_PATH, USE_COMMUNITY_LABEL
+    from tools import skill_library
+
+    profile = community_workspace / PROFILE_RELATIVE_PATH
+    profile.write_text(f"{USE_COMMUNITY_LABEL} No\n", encoding="utf-8")
+    monkeypatch.setattr(skill_library, "_emit_action", lambda *_args: None)
+
+    assert skill_library._execute("replace", "thread", {}, None, None, False) == {
+        "error": "invalid_action", "message": "action must be search, install, update, or remove",
+    }
+
+
+def test_removing_a_library_copy_does_not_require_community_consent(isolated_db, monkeypatch, community_workspace):
+    from infra.user_profile import PROFILE_RELATIVE_PATH, USE_COMMUNITY_LABEL
+    from tools import skill_library
+
+    profile = community_workspace / PROFILE_RELATIVE_PATH
+    profile.write_text(f"{USE_COMMUNITY_LABEL} No\n", encoding="utf-8")
+    removed = []
+    monkeypatch.setattr(skill_library, "_persistent_owner", lambda *_args: "owner")
+    monkeypatch.setattr(skill_library, "_remove", lambda *args: removed.append(args) or {"outcome": "removed"})
+    monkeypatch.setattr(skill_library, "_emit_action", lambda *_args: None)
+
+    assert skill_library._execute("remove", "thread", {}, None, "pdf", False) == {"outcome": "removed"}
+    assert len(removed) == 1
 
 
 def test_same_source_with_a_changed_declared_manifest_is_an_available_update():
@@ -215,7 +282,7 @@ def test_update_results_omit_unchanged_installed_files():
     assert changed == []
 
 
-def test_raw_index_failures_return_actionable_agent_errors(isolated_db, monkeypatch):
+def test_raw_index_failures_return_actionable_agent_errors(isolated_db, monkeypatch, community_workspace):
     from tools import skill_library
 
     monkeypatch.setattr(skill_library, "_persistent_owner", lambda *_args: "owner")
