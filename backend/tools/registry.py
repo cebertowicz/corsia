@@ -233,12 +233,7 @@ class ToolRegistry:
             execution_params["_review_request_id"] = review_request_id
         return execution_params
 
-    async def _execute_unredacted(
-        self,
-        name: str,
-        params: dict[str, Any],
-        *, review_request_id: str | None = None,
-    ) -> str:
+    async def _execute_unredacted(self, name: str, params: dict[str, Any], *, review_request_id: str | None = None) -> str:
         """Execute once, a ``tool_call`` as the tool it names; the boundary sanitizes."""
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
         name, params, dispatcher = resolve_dispatch(name, params)
@@ -290,13 +285,9 @@ class ToolRegistry:
                 reach_refusal = await mcp_reach_refusal(tool, thread_context)
                 if reach_refusal is not None:
                     return reach_refusal
-                execution_params = self._execution_params(
-                    model_params, thread_context, name, review_request_id,
-                )
+                execution_params = self._execution_params(model_params, thread_context, name, review_request_id)
 
-                drain_refusal = await self._restart_drain_refusal(
-                    name, model_params, thread_context["id"],
-                )
+                drain_refusal = await self._restart_drain_refusal(name, model_params, thread_context["id"])
                 if drain_refusal is not None:
                     return drain_refusal
 

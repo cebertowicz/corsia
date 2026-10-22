@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from loguru import logger as log
+
 
 def attach_trial_lessons(
     db: sqlite3.Connection, facts: dict, *, thread_id: str, node_id: str,
@@ -21,3 +23,24 @@ def attach_trial_lessons(
     )
     if trials:
         facts["trial_lessons"] = trials
+
+
+def attach_trial_lessons_advisory(
+    db: sqlite3.Connection,
+    facts: dict,
+    *,
+    thread_id: str,
+    node_id: str,
+    checkpoint_generation_id: str | None = None,
+) -> None:
+    """Attach advisory trial lessons without changing the plan operation's outcome."""
+    try:
+        attach_trial_lessons(
+            db,
+            facts,
+            thread_id=thread_id,
+            node_id=node_id,
+            checkpoint_generation_id=checkpoint_generation_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - advisory sibling never fails a plan mutation
+        log.exception("trial delivery unavailable for selected node %s: %s", node_id, exc)

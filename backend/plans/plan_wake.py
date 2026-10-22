@@ -28,8 +28,6 @@ from __future__ import annotations
 import json
 from typing import Literal
 
-from loguru import logger as log
-
 #: A task this thread executes was closed by another actor.
 TASK_CLOSED = "task_closed"
 #: Another actor's write gave this thread's slot to a task.
@@ -222,12 +220,9 @@ def with_next(db, plan_id: str, executor: str, line: str, **facts) -> str:
         facts[node_start_recall.RESULT_KEY] = related
     node_id = node_start_recall._started_node_id(block)
     if node_id is not None:
-        try:
-            from plans.trial_lessons import attach_trial_lessons
+        from plans.trial_lessons import attach_trial_lessons_advisory
 
-            attach_trial_lessons(db, facts, thread_id=executor, node_id=node_id)
-        except Exception as exc:  # noqa: BLE001 - advisory sibling never fails a plan wake
-            log.exception("trial delivery unavailable for selected node %s: %s", node_id, exc)
+        attach_trial_lessons_advisory(db, facts, thread_id=executor, node_id=node_id)
     return f"{line}\n{json.dumps({**facts, 'next': block}, sort_keys=True)}"
 
 

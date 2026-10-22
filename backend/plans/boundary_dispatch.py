@@ -230,18 +230,11 @@ def _mark_done(params: dict[str, Any], actor, common: dict, db) -> dict:
         node_id, "accepted", verification_result="passed",
         verified_by=actor.audit_id, **expected, **common,
     )
-    return after.after_close(
-        node_id, "accepted", params, common, executor=actor.thread_id,
-    )
+    return after.after_close(node_id, "accepted", params, common, executor=actor.thread_id)
 
 
 def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, db):
-    """Submit for review, reject, fail, attach a worker, or accept.
-
-    Acceptance first attributes a still-unbound reviewer Turn to the accepted
-    node's commitment, so verification cost lands on the work it judged rather
-    than on the reviewer's own plan. That attribution never refuses acceptance.
-    """
+    """Dispatch settlement after advisory reviewer-cost attribution."""
     node_id = params["node_id"]
     # Who is acting. A human actor executes nothing, so every executor this
     # settlement touches learns about it.
@@ -263,12 +256,7 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
     if operation == "reject":
         return rejection.dispatch_reject(node_id, params, common, executor=acting)
     if operation == "fail":
-        _record_verdict(params, "Failed", common)
-        mutations.fail_node(node_id, **fields.expected(params), **common)
-        from core.self_caught_corrections import record_failed_plan_node
-
-        record_failed_plan_node(db, node_id)
-        return after.after_close(node_id, "failed", params, common, executor=acting)
+        return _fail_settlement(node_id, params, common, db, acting)
     if operation == "close_node":
         import plans.closure as closure
 
@@ -320,6 +308,15 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
     return result
 
 
+def _fail_settlement(node_id: str, params: dict, common: dict, db, acting: str | None) -> dict:
+    _record_verdict(params, "Failed", common)
+    mutations.fail_node(node_id, **fields.expected(params), **common)
+    from core.self_caught_corrections import record_failed_plan_node
+
+    record_failed_plan_node(db, node_id)
+    return after.after_close(node_id, "failed", params, common, executor=acting)
+
+
 def _submit_finished_work(
     node_id: str, params: dict[str, Any], common: dict, acting: str | None, db,
 ) -> dict[str, Any]:
@@ -358,13 +355,7 @@ def _record_verdict(params: dict[str, Any], verdict: str, common: dict) -> None:
 
 
 def dispatch(plan_id, operation, params, actor, provenance, db, *, workflow_version=None):
-    """Route one validated mutation without creating a second plan service.
-
-    The user's Mark done and Won't do settle through ``user_settle``. Their
-    pause or resume of a task takes the same path an agent's does;
-    ``user_steering`` only fills and checks it first, moves the worker's plan
-    instead for a delegated task, and tells the owner after.
-    """
+    """Route a validated mutation through its sole plan-service owner."""
     common = {"actor_id": actor.audit_id, "provenance": provenance, "db": db}
     if actor.kind != "user" or operation not in user_steering.STEERING_OPERATIONS:
         return _route(plan_id, operation, params, actor, common, db, workflow_version)

@@ -1,8 +1,4 @@
-"""Earlier words from the person that match a task when it starts.
-
-The lookup is advisory, bounded, and synchronous.  It never changes a plan
-operation's outcome: failures are logged and simply omit the optional block.
-"""
+"""Bounded advisory prior-person words delivered when a task starts."""
 
 from __future__ import annotations
 
@@ -67,8 +63,7 @@ def related(
 
 
 def attach_to_result(
-    db: sqlite3.Connection, operation: str, result: object, *, caller_thread_id: str, checkpoint_generation_id: str | None = None,
-) -> None:
+    db: sqlite3.Connection, operation: str, result: object, *, caller_thread_id: str, checkpoint_generation_id: str | None = None) -> None:
     """Attach ``prior_words`` to a plan result that starts a task or raises a decision."""
     result = getattr(result, "result", result)
     if not isinstance(result, dict):
@@ -83,25 +78,20 @@ def attach_to_result(
     text, trigger = subject
     lines = related(db, text, caller_thread_id=caller_thread_id, trigger=trigger)
     if lines:
-        result[RESULT_KEY] = lines
+        result.update({RESULT_KEY: lines})
     node = result.get("node") if isinstance(result.get("node"), dict) else None
     node_started = (node is not None and node.get("kind") == "task") or _started_node_id(result.get("next")) == text.node_id
     if not node_started or text.node_id is None:
         return
-    try:
-        from plans.public import attach_trial_lessons
+    from plans.trial_lessons import attach_trial_lessons_advisory
 
-        attach_trial_lessons(
-            db, result, thread_id=caller_thread_id, node_id=text.node_id,
-            checkpoint_generation_id=checkpoint_generation_id,
-        )
-    except Exception as exc:  # noqa: BLE001 - advisory sibling never fails a plan mutation
-        _log_error("trial_delivery", exc, perf_counter(), caller_thread_id)
+    attach_trial_lessons_advisory(
+        db, result, thread_id=caller_thread_id, node_id=text.node_id,
+        checkpoint_generation_id=checkpoint_generation_id,
+    )
 
 
-def related_for_next(
-    db: sqlite3.Connection, block: dict, *, caller_thread_id: str,
-) -> list[str]:
+def related_for_next(db: sqlite3.Connection, block: dict, *, caller_thread_id: str) -> list[str]:
     """Return prior words for the task a wake's ``next`` block reports started."""
     node_id = _started_node_id(block)
     if node_id is None:
