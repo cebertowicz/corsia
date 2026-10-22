@@ -120,7 +120,8 @@ describe('setup local row switch', () => {
 		expect(row.action?.label).toBe('Check again');
 		expect(row.busy).toBe(true);
 		expect(row.spinning).toBe(true);
-		expect(row.meta).toContain('Finishing setup');
+		expect(row.meta).toContain('Loading…');
+		expect(row.meta).not.toContain('Finishing setup');
 	});
 
 	it('shows a turned-off local model as off, and its switch turns it back on', () => {
