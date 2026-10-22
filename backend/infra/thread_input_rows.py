@@ -36,22 +36,26 @@ def liveness_wake_queued(db: sqlite3.Connection, thread_id: str) -> bool:
     ).fetchone() is not None
 
 
-def liveness_wake_read_since(
+def liveness_wake_read_in_turn_since(
     db: sqlite3.Connection, thread_id: str, since: str,
 ) -> bool:
-    """Whether a liveness wake began a provider write since ``since``.
+    """Whether the thread's running Turn began writing a liveness wake since ``since``.
 
-    A begun write remains a read reminder while it is queued, delivered, or
-    ambiguous: those are the in-flight, accepted, and uncertain sequence-attempt
-    states. A proved-no-write release clears ``write_started_at`` before returning
-    to queued, so it deliberately cannot suppress the next wake.
+    Only the running Turn's own claimed inputs are read (the
+    ``messages(active_turn_id, input_order)`` index), so the cost is bounded by
+    one Turn's inputs, not the thread's history. A begun write stays a read
+    reminder while it is queued, delivered or ambiguous: the in-flight, accepted
+    and uncertain sequence-attempt states. A proved-no-write release clears
+    ``write_started_at`` and the claim, so it cannot suppress the next wake.
     """
     return db.execute(
-        "SELECT 1 FROM messages WHERE thread_id=? "
-        "AND delivery_state IN ('queued','delivered','ambiguous') "
-        "AND json_extract(metadata,'$.event_type')='plan.liveness_wake' "
-        "AND write_started_at IS NOT NULL "
-        "AND julianday(write_started_at) > julianday(?) LIMIT 1",
+        "SELECT 1 FROM active_turns t CROSS JOIN messages m "
+        "ON m.active_turn_id=t.id "
+        "WHERE t.thread_id=? AND t.status='running' "
+        "AND m.delivery_state IN ('queued','delivered','ambiguous') "
+        "AND m.write_started_at IS NOT NULL "
+        "AND julianday(m.write_started_at) > julianday(?) "
+        "AND json_extract(m.metadata,'$.event_type')='plan.liveness_wake' LIMIT 1",
         (thread_id, since),
     ).fetchone() is not None
 

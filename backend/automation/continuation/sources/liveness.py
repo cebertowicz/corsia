@@ -13,7 +13,7 @@ from automation.continuation.progress import (
 from automation.continuation.triggers import Trigger, TriggerRequest
 from infra.thread_input_rows import (
     liveness_wake_queued,
-    liveness_wake_read_since,
+    liveness_wake_read_in_turn_since,
     turn_running,
     turn_starting_work_pending,
 )
@@ -63,9 +63,9 @@ class LivenessSource:
             # times reads one reminder, not a stack of them.
             if liveness_wake_queued(db, wake.thread_id):
                 continue
-            if turn_running(db, wake.thread_id) and liveness_wake_read_since(
-                db, wake.thread_id, in_turn_since,
-            ):
+            # A running Turn that read a reminder gets the next one a flat
+            # interval after that read, however late its boundary claimed it.
+            if liveness_wake_read_in_turn_since(db, wake.thread_id, in_turn_since):
                 continue
             requests.append(self._request(wake, db, now))
         return requests
@@ -127,8 +127,8 @@ class LivenessSource:
         """Return whether the work this wake was collected for can still move.
 
         This is the only question a claim may ask. Delivering a wake settles its
-        source and re-arms the row; while its Turn runs, the due source uses the
-        message's provider-write timestamp to wait the flat in-Turn interval.
+        source and re-arms the row; while its Turn runs, the due source also
+        waits the flat in-Turn interval from the Turn's last read of a wake.
         Asking here whether the row still matches the transition it was collected
         at would call a wake stale for having been delivered, and the Turn it
         waited for would never start.
@@ -175,12 +175,13 @@ class LivenessSource:
     def _settle_delivery(self, wake, db) -> None:
         signal = self._signal(wake.thread_id, db)
         progress = classify_progress(signal, wake_snapshot(wake))
-        if progress == ADVANCED:
-            next_cycle = 0
-        elif turn_running(db, wake.thread_id):
-            # A running Turn uses the flat read-to-read interval; neither a queued
-            # nor already-claimed reminder advances idle backoff.
-            next_cycle = wake.cycle
-        else:
-            next_cycle = wake.cycle + 1
+        if turn_running(db, wake.thread_id):
+            # A running Turn gets the flat in-Turn interval whatever the idle
+            # cycle reached, and its unread reminders never advance that cycle.
+            plan_liveness._rearm_due_wake(
+                wake, signal, 0 if progress == ADVANCED else wake.cycle, db,
+                seconds=plan_liveness.PLAN_WAKE_IN_TURN_SECONDS,
+            )
+            return
+        next_cycle = 0 if progress == ADVANCED else wake.cycle + 1
         plan_liveness._rearm_due_wake(wake, signal, next_cycle, db)

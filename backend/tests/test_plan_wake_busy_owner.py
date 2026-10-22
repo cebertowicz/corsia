@@ -66,6 +66,12 @@ def _cycle(db, thread_id: str) -> int:
     ).fetchone()["cycle"]
 
 
+def _deadline(db, thread_id: str) -> datetime:
+    return datetime.fromisoformat(db.execute(
+        "SELECT deadline FROM plan_liveness_wakes WHERE thread_id=?", (thread_id,),
+    ).fetchone()["deadline"])
+
+
 def _wakes(db, thread_id: str) -> list[sqlite3.Row]:
     """Every liveness wake input the thread holds, oldest first."""
     return [
@@ -116,6 +122,7 @@ async def test_a_long_turn_uses_a_flat_interval_from_the_claim(isolated_db, monk
     [wake] = _wakes(db, "owner")
     assert (wake["delivery_state"], wake["active_turn_id"]) == ("queued", None)
     assert _cycle(db, "owner") == 0
+    assert _deadline(db, "owner") - clock[0] == timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS)
 
     claimed = _claim_and_settle_write(db, "owner", now=clock[0])
     assert [item.message_id for item in claimed.items].count(wake["id"]) == 1
@@ -150,11 +157,8 @@ async def test_a_long_turn_uses_a_flat_interval_from_the_claim(isolated_db, monk
     _make_due(db, "owner")
     assert (await _sweep(db, clock[0].isoformat(), deliver=deliver))["woken"] == ["owner"]
     assert len(delivered) == 1
-    armed = db.execute(
-        "SELECT deadline FROM plan_liveness_wakes WHERE thread_id=?", ("owner",),
-    ).fetchone()
     assert _cycle(db, "owner") == 1
-    assert datetime.fromisoformat(armed["deadline"]) - clock[0] == timedelta(
+    assert _deadline(db, "owner") - clock[0] == timedelta(
         seconds=pl.PLAN_WAKE_IDLE_SECONDS * pl.PLAN_WAKE_BACKOFF,
     )
 
@@ -165,14 +169,35 @@ async def test_a_late_claim_does_not_rearm_inside_the_flat_interval(isolated_db,
     monkeypatch.setattr(pl, "_now", lambda: clock[0])
     db, _task = _owner("owner")
     _make_due(db, "owner")
-    await _sweep(db, clock[0].isoformat())
+    start = clock[0]
+    await _sweep(db, start.isoformat())
 
-    clock[0] += timedelta(seconds=pl.PLAN_WAKE_IDLE_SECONDS + 1)
-    _claim_and_settle_write(db, "owner", now=clock[0])
+    # The boundary claims the reminder halfway to its next deadline.
+    claimed_at = start + timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS / 2)
+    _claim_and_settle_write(db, "owner", now=claimed_at)
 
+    clock[0] = start + timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS)
     assert (await _sweep(db, clock[0].isoformat()))["woken"] == []
     assert len(_wakes(db, "owner")) == 1
     assert _cycle(db, "owner") == 0
+
+    clock[0] = claimed_at + timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS + 1)
+    assert (await _sweep(db, clock[0].isoformat()))["woken"] == ["owner"]
+    assert len(_wakes(db, "owner")) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_turn_after_idle_backoff_still_gets_the_flat_interval(isolated_db, monkeypatch):
+    clock = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+    monkeypatch.setattr(pl, "_now", lambda: clock[0])
+    db, _task = _owner("owner")
+    db.execute("UPDATE plan_liveness_wakes SET cycle=3 WHERE thread_id=?", ("owner",))
+    _make_due(db, "owner")
+
+    assert (await _sweep(db, clock[0].isoformat()))["woken"] == ["owner"]
+
+    assert _cycle(db, "owner") == 3
+    assert _deadline(db, "owner") - clock[0] == timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS)
 
 
 @pytest.mark.asyncio
@@ -192,7 +217,7 @@ async def test_a_proved_no_write_release_does_not_suppress_the_next_wake(
     # The requeued unread input blocks a duplicate wake. Claim it again without
     # starting provider I/O: its cleared timestamp must not suppress the source.
     assert claim_safe_boundary("owner", _TURN, db=db) is not None
-    clock[0] += timedelta(seconds=pl.PLAN_WAKE_IDLE_SECONDS)
+    clock[0] += timedelta(seconds=pl.PLAN_WAKE_IN_TURN_SECONDS)
     assert (await _sweep(db, clock[0].isoformat()))["woken"] == ["owner"]
 
 

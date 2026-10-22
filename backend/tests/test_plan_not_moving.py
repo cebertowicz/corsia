@@ -474,3 +474,17 @@ def test_two_overdue_waits_keep_plan_order_and_name_each_task():
         "resolve it if it cleared, wait again with a new deadline and a reason, raise a "
         "decision, or close the task."
     )
+
+
+def test_unnamed_facts_count_overdue_waits_without_an_empty_list():
+    """Aggregate facts (Activity) carry the count only; the note names no one."""
+    counts = dict.fromkeys(operator_node_state.DISTRIBUTION_KEYS, 0)
+    counts["waiting"] = 1
+    late = _ago(timedelta(days=1))
+    facts = not_moving.read_from_facts(
+        counts, user_ready=0, user_blocked=0, paused_by_user=0, wait_deadlines=[(late, late)],
+    )
+
+    assert facts is not None and facts["overdue_waits"] == 1
+    assert "overdue_wait_entries" not in facts
+    assert "1 wait is past the deadline. Check each:" in not_moving.note(facts)

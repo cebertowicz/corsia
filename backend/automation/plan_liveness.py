@@ -260,18 +260,20 @@ def _rearm_due_wake(
     signal: PlanLivenessSignal,
     cycle: int,
     db,
+    *,
+    seconds: float | None = None,
 ) -> bool:
-    """Move the exact due wake to its next deadline without a claim gap."""
+    """Move the exact due wake to its next deadline without a claim gap.
+
+    ``seconds`` overrides the idle backoff spacing (the flat in-Turn interval).
+    """
 
     if signal.count <= 0:
         return False
     now = _now()
-    deadline = _iso(
-        now
-        + timedelta(
-            seconds=PLAN_WAKE_IDLE_SECONDS * (PLAN_WAKE_BACKOFF**cycle)
-        )
-    )
+    if seconds is None:
+        seconds = PLAN_WAKE_IDLE_SECONDS * (PLAN_WAKE_BACKOFF**cycle)
+    deadline = _iso(now + timedelta(seconds=seconds))
     cursor = db.execute(
         """UPDATE plan_liveness_wakes
            SET status='armed',deadline=?,cycle=?,last_open_count=?,

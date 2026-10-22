@@ -412,7 +412,7 @@ def _detailed_deliveries():
 
 
 @pytest.mark.asyncio
-async def test_a_review_wake_is_delivered_once_and_not_again_after_the_turn(db):
+async def test_a_review_wake_reaches_a_busy_owner_in_the_sweep_it_falls_due(db):
     from automation import plan_liveness
 
     plan = service.ensure_plan("thread", "owner", db=db)
@@ -423,6 +423,12 @@ async def test_a_review_wake_is_delivered_once_and_not_again_after_the_turn(db):
     admission.reconcile_plan(plan.id, actor_id=None, provenance="test.lesson_reviews", db=db)
     due = _due(days=14)
     node_id, _ = _lesson(db, due=due)
+    db.execute(
+        """INSERT INTO active_turns
+           (id,thread_id,execution_epoch,model,status,started_at,boot_epoch)
+           VALUES ('turn-1','owner',0,'native/model','running','2000-01-01T00:00:00','boot-1')""",
+    )
+    db.commit()
     seen, deliver = _detailed_deliveries()
     sources = [LivenessSource(), WatchExpirySource()]
 
