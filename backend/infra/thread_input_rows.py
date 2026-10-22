@@ -39,9 +39,16 @@ def liveness_wake_queued(db: sqlite3.Connection, thread_id: str) -> bool:
 def liveness_wake_read_since(
     db: sqlite3.Connection, thread_id: str, since: str,
 ) -> bool:
-    """Whether a liveness wake reached provider delivery since ``since``."""
+    """Whether a liveness wake began a provider write since ``since``.
+
+    A begun write remains a read reminder while it is queued, delivered, or
+    ambiguous: those are the in-flight, accepted, and uncertain sequence-attempt
+    states. A proved-no-write release clears ``write_started_at`` before returning
+    to queued, so it deliberately cannot suppress the next wake.
+    """
     return db.execute(
-        "SELECT 1 FROM messages WHERE thread_id=? AND delivery_state='queued' "
+        "SELECT 1 FROM messages WHERE thread_id=? "
+        "AND delivery_state IN ('queued','delivered','ambiguous') "
         "AND json_extract(metadata,'$.event_type')='plan.liveness_wake' "
         "AND write_started_at IS NOT NULL "
         "AND julianday(write_started_at) > julianday(?) LIMIT 1",

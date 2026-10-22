@@ -16,7 +16,11 @@ import pytest
 from automation import plan_liveness as pl
 from automation.continuation import runner
 from automation.continuation.sources.liveness import LivenessSource
-from infra.input_writes import begin_batch_write
+from infra.input_writes import (
+    begin_batch_write,
+    release_batch_after_proved_no_write,
+    settle_batch_write,
+)
 from infra.thread_inputs import claim_safe_boundary
 from plans import admission, service
 from tests.event_routing_helpers import mk_session
@@ -79,16 +83,25 @@ async def _sweep(db, now: str = _NOW, **kwargs) -> dict:
     return await runner.sweep(now, db=db, sources=[LivenessSource()], **kwargs)
 
 
-def _claim_and_start_write(db, thread_id: str, *, now: datetime):
-    """Use the real FIFO claim and write-start timestamp for one live Turn."""
+def _claim_and_settle_write(
+    db, thread_id: str, *, now: datetime, outcome: str = "accepted",
+):
+    """Run the real FIFO claim and provider-write settlement for one live Turn."""
     claimed = claim_safe_boundary(thread_id, _TURN, db=db)
     assert claimed is not None
+    attempt_id = f"{thread_id}:{now.isoformat()}"
     begin_batch_write(
         claimed,
-        attempt_id=f"{thread_id}:{now.isoformat()}",
+        attempt_id=attempt_id,
         started_at=now.isoformat(),
         db=db,
     )
+    if outcome == "proved_no_write":
+        release_batch_after_proved_no_write(
+            claimed, attempt_id=attempt_id, error=None, db=db,
+        )
+    else:
+        settle_batch_write(attempt_id, outcome=outcome, db=db)
     return claimed
 
 
@@ -104,10 +117,12 @@ async def test_a_long_turn_uses_a_flat_interval_from_the_claim(isolated_db, monk
     assert (wake["delivery_state"], wake["active_turn_id"]) == ("queued", None)
     assert _cycle(db, "owner") == 0
 
-    claimed = _claim_and_start_write(db, "owner", now=clock[0])
+    claimed = _claim_and_settle_write(db, "owner", now=clock[0])
     assert [item.message_id for item in claimed.items].count(wake["id"]) == 1
     [claimed_wake] = _wakes(db, "owner")
-    assert claimed_wake["active_turn_id"] == _TURN
+    assert (claimed_wake["active_turn_id"], claimed_wake["delivery_state"]) == (
+        _TURN, "delivered",
+    )
 
     clock[0] += timedelta(seconds=pl.PLAN_WAKE_IDLE_SECONDS)
     assert (await _sweep(db, clock[0].isoformat()))["woken"] == []
@@ -120,7 +135,7 @@ async def test_a_long_turn_uses_a_flat_interval_from_the_claim(isolated_db, monk
     assert len(_wakes(db, "owner")) == 2
     assert _cycle(db, "owner") == 0
 
-    _claim_and_start_write(db, "owner", now=clock[0])
+    _claim_and_settle_write(db, "owner", now=clock[0])
     db.execute("UPDATE active_turns SET status='completed' WHERE id=?", (_TURN,))
     db.commit()
 
@@ -153,11 +168,32 @@ async def test_a_late_claim_does_not_rearm_inside_the_flat_interval(isolated_db,
     await _sweep(db, clock[0].isoformat())
 
     clock[0] += timedelta(seconds=pl.PLAN_WAKE_IDLE_SECONDS + 1)
-    _claim_and_start_write(db, "owner", now=clock[0])
+    _claim_and_settle_write(db, "owner", now=clock[0])
 
     assert (await _sweep(db, clock[0].isoformat()))["woken"] == []
     assert len(_wakes(db, "owner")) == 1
     assert _cycle(db, "owner") == 0
+
+
+@pytest.mark.asyncio
+async def test_a_proved_no_write_release_does_not_suppress_the_next_wake(
+    isolated_db, monkeypatch,
+):
+    clock = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+    monkeypatch.setattr(pl, "_now", lambda: clock[0])
+    db, _task = _owner("owner")
+    _make_due(db, "owner")
+    await _sweep(db, clock[0].isoformat())
+
+    _claim_and_settle_write(db, "owner", now=clock[0], outcome="proved_no_write")
+    [released] = _wakes(db, "owner")
+    assert (released["active_turn_id"], released["delivery_state"]) == (None, "queued")
+
+    # The requeued unread input blocks a duplicate wake. Claim it again without
+    # starting provider I/O: its cleared timestamp must not suppress the source.
+    assert claim_safe_boundary("owner", _TURN, db=db) is not None
+    clock[0] += timedelta(seconds=pl.PLAN_WAKE_IDLE_SECONDS)
+    assert (await _sweep(db, clock[0].isoformat()))["woken"] == ["owner"]
 
 
 @pytest.mark.asyncio

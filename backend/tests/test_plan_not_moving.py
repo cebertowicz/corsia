@@ -450,6 +450,9 @@ def test_the_digest_names_overdue_waits_and_what_to_do():
     text = not_moving.note(_parts(overdue=3, ends=_ago(timedelta(hours=8))))
     assert "3 waits are past the deadline" in text
     assert "nothing is owed" not in text
+    for exit_ in ("resolve it", "wait again", "raise a decision", "close the task"):
+        assert exit_ in text
+    assert "1 wait is past the deadline" in not_moving.note(_parts(overdue=1))
 
 
 def test_two_overdue_waits_keep_plan_order_and_name_each_task():
@@ -471,6 +474,3 @@ def test_two_overdue_waits_keep_plan_order_and_name_each_task():
         "resolve it if it cleared, wait again with a new deadline and a reason, raise a "
         "decision, or close the task."
     )
-    for exit_ in ("resolve it", "wait again", "raise a decision", "close the task"):
-        assert exit_ in text
-    assert "1 wait is past the deadline" in not_moving.note(_parts(overdue=1))
