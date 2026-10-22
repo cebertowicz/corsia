@@ -21,8 +21,8 @@ export type LocalRowInput = {
 };
 
 const LOCAL_FAILURE_STATES = new Set(['failed', 'setup_failed', 'start_failed']);
-export const LOCAL_HELD_DOWNLOADING = 'CORSIA is downloading this so setup can continue. To turn it off, connect a cloud provider first.';
-export const LOCAL_HELD_READY = 'CORSIA needs this to continue setup. To turn it off, connect a cloud provider first.';
+export const LOCAL_HELD_DOWNLOADING = 'CORSIA is downloading the local model so setup can continue. To turn it off, set up a subscription or add an API provider first.';
+export const LOCAL_HELD_READY = 'CORSIA needs the local model to continue setup. To turn it off, set up a subscription or add an API provider first.';
 export const localTurnOffFailed = (ref?: string) => `CORSIA couldn’t turn off the local model. ${failureAction('Turn it off again', ref)}`;
 
 /** How much of the download is on disk, in GB, or null when the size or progress is unknown. */
