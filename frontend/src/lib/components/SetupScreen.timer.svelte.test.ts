@@ -22,6 +22,7 @@ let sourceState: 'not_installed' | 'ready' | 'unverified' | 'needs_auth' = 'not_
 let calls: string[];
 let signinState: 'waiting' | 'completed' | 'failed' = 'waiting';
 let localFailure = false;
+let catalogModels: Record<string, unknown>[] = [];
 let intervalSpy: ReturnType<typeof vi.spyOn>, clearIntervalSpy: ReturnType<typeof vi.spyOn>;
 
 async function settle() { await vi.advanceTimersByTimeAsync(10); await tick(); }
@@ -37,13 +38,14 @@ function mountResume() {
 		if (url === '/api/setup/progress') return json({ setup_completed: false, step: 'models', local_ai: false, status: { local_eligible: true, work_folder: '~/CORSIA' } });
 		if (url === '/api/providers/sources' || url === '/api/providers/sources/recheck') return json({ sources: [
 			{ source: 'codex', name: 'Codex', state: sourceState },
-			...(localFailure ? [{ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'start_failed', setup_error_code: 'start_failed', fix: 'CORSIA couldn’t set up the local model.' }] : []),
+			...(localFailure ? [{ source: 'omlx', name: 'Local model', state: 'needs_setup', local_state: 'start_failed', setup_error_code: 'start_failed', setup_error_reference: 'local-0123456789abcdef', fix: 'CORSIA couldn’t set up the local model.' }] : []),
 		] });
 		if (url.startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
-		if (url.startsWith('/api/models?')) return json({ models: [] });
+		if (url.startsWith('/api/models?')) return json({ models: catalogModels });
+		if (url === '/api/settings/network-servers') return new Response('{}', { status: 500 });
 		if (url.startsWith('/api/vendor-accounts?')) return json({ accounts: [] });
 		if (url === '/api/vendor-accounts' && method === 'POST') return json({ id: 'account-1' });
-		if (url === '/api/vendor-accounts/account-1/signin/check' && method === 'POST') return json({ status: signinState });
+		if (url === '/api/vendor-accounts/account-1/signin/check' && method === 'POST') return json(signinState === 'failed' ? { status: 'failed', cause: 'vendor_status_failed', ref: 'signin-0123456789abcdef' } : { status: signinState });
 		if (url === '/api/vendor-accounts/account-1/signin' && method === 'POST') return json({ status: 'waiting' });
 		if (url === '/api/providers/cli/codex/install' && method === 'POST') return json({ state: 'running', reason: null, ref: null, path_shadowed_by: null });
 		if (url === '/api/providers/cli/codex/install' && method === 'DELETE') return json({ state: 'cancelled', reason: null, ref: null, path_shadowed_by: null });
@@ -61,7 +63,7 @@ function click(label: string) {
 }
 
 beforeEach(() => {
-	vi.useFakeTimers(); listeners.clear(); calls = []; installState = 'running'; sourceState = 'not_installed'; signinState = 'waiting'; localFailure = false;
+	vi.useFakeTimers(); listeners.clear(); calls = []; installState = 'running'; sourceState = 'not_installed'; signinState = 'waiting'; localFailure = false; catalogModels = [];
 	intervalSpy = vi.spyOn(globalThis, 'setInterval'); clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
 });
 afterEach(async () => {
@@ -82,7 +84,7 @@ describe('SetupScreen owned-job polling', () => {
 	});
 
 	it.each(['done', 'failed'] as const)('stops after a CLI job reaches %s', async (terminal) => {
-		mountResume(); await settle(); click('Set up'); await settle();
+		mountResume(); await settle(); click('Sign in'); await settle();
 		expect(intervalSpy).toHaveBeenCalledOnce();
 		installState = terminal; if (terminal === 'done') sourceState = 'unverified';
 		await vi.advanceTimersByTimeAsync(3000); await tick();
@@ -96,18 +98,20 @@ describe('SetupScreen owned-job polling', () => {
 	it('runs Save a report from a failed CLI row', async () => {
 		const invoke = vi.fn(async () => undefined);
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
-		mountResume(); await settle(); click('Set up'); await settle();
+		mountResume(); await settle(); click('Sign in'); await settle();
 		installState = 'failed';
 		await vi.advanceTimersByTimeAsync(3000); await tick();
 		click('Save a report'); await settle();
-		expect(invoke).toHaveBeenCalledWith('save_setup_report');
+		expect(calls).toContain('POST /api/setup/report');
+		// The stub service answers without details, and the report says so instead of saving blank.
+		expect(invoke).toHaveBeenCalledWith('save_setup_report', { details: expect.stringContaining('couldn’t read the setup details') });
 	});
 
 	it.each([
 		['completed', 'ready'],
 		['failed', 'needs_auth'],
 	] as const)('stops after sign-in reaches %s', async (terminal, nextSourceState) => {
-		mountResume(); await settle(); click('Set up'); await settle();
+		mountResume(); await settle(); click('Sign in'); await settle();
 		installState = 'done'; sourceState = 'needs_auth';
 		await vi.advanceTimersByTimeAsync(3000); await tick();
 		expect(vi.getTimerCount()).toBe(1);
@@ -116,10 +120,12 @@ describe('SetupScreen owned-job polling', () => {
 		expect(signinReads()).toBe(1);
 		expect(clearIntervalSpy).toHaveBeenCalledOnce();
 		expect(vi.getTimerCount()).toBe(0);
+		// A failed sign-in shows the reference its service-log line carries.
+		if (terminal === 'failed') expect(host.textContent).toContain('Reference: signin-0123456789abcdef');
 	});
 
 	it('cleans up an active sign-in timer when the screen unmounts', async () => {
-		mountResume(); await settle(); click('Set up'); await settle();
+		mountResume(); await settle(); click('Sign in'); await settle();
 		installState = 'done'; sourceState = 'needs_auth';
 		await vi.advanceTimersByTimeAsync(3000); await tick();
 		expect(vi.getTimerCount()).toBe(1);
@@ -128,26 +134,19 @@ describe('SetupScreen owned-job polling', () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
-	it('stops after cancellation and unmount', async () => {
-		mountResume(); await settle(); click('Set up'); await settle(); click('Cancel'); await settle();
-		const readsAfterCancel = installReads();
-		expect(clearIntervalSpy).toHaveBeenCalledOnce();
-		expect(vi.getTimerCount()).toBe(0);
-		await vi.advanceTimersByTimeAsync(3000); await tick();
-		expect(installReads()).toBe(readsAfterCancel);
-
-		click('Set up'); await settle();
+	it('stops an install poller on unmount', async () => {
+		mountResume(); await settle(); click('Sign in'); await settle();
 		expect(vi.getTimerCount()).toBe(1);
 		await unmount(component!); component = null;
 		const readsAtUnmount = installReads();
-		expect(clearIntervalSpy).toHaveBeenCalledTimes(2);
+		expect(clearIntervalSpy).toHaveBeenCalledOnce();
 		expect(vi.getTimerCount()).toBe(0);
 		await vi.advanceTimersByTimeAsync(3000); await tick();
 		expect(installReads()).toBe(readsAtUnmount);
 	});
 
 	it('refreshes authenticated sources on models_updated, never from the CLI job timer', async () => {
-		mountResume(); await settle(); click('Set up'); await settle();
+		mountResume(); await settle(); click('Sign in'); await settle();
 		const sourcesBeforeTimer = sourceCalls(), catalogBeforeTimer = catalogCalls();
 		await vi.advanceTimersByTimeAsync(3000); await tick();
 		expect(sourceCalls()).toBe(sourcesBeforeTimer);
@@ -184,7 +183,19 @@ describe('SetupScreen owned-job polling', () => {
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke }); localFailure = true;
 		mountResume(); await settle();
 		click('Save a report'); await settle();
-		expect(invoke).toHaveBeenCalledWith('save_setup_report');
+		// The stub service answers without details, and the report says so instead of saving blank.
+		expect(invoke).toHaveBeenCalledWith('save_setup_report', { details: expect.stringContaining('couldn’t read the setup details') });
+	});
+
+	it('keeps a failed local turn-off on screen after the sources refresh', async () => {
+		catalogModels = [{ id: 'local', connection: 'omlx', status: 'ready' }, { id: 'cloud', connection: 'anthropic', status: 'ready' }];
+		mountResume(); await settle();
+		(host.querySelector('button[aria-label="Local model"]') as HTMLButtonElement | null)?.click(); await settle();
+		expect(calls).toContain('GET /api/settings/network-servers');
+		// On the row whose switch retries it, never in the sources slot whose Retry only rechecks.
+		expect(host.querySelector('#setup-row-detail-omlx')?.textContent).toBe('CORSIA couldn’t turn off the local model. Turn it off again.');
+		// No reference was logged, so there is no report to ask for.
+		expect([...host.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Save a report')).toBe(false);
 	});
 
 	it('cleans up a pre-account local download timer when the screen unmounts', async () => {

@@ -171,7 +171,7 @@ def _insert_node_row(
     workflow_columns = {"workflow_ref", "workflow_version", "workflow_step", "difficulty"}
     present_columns = {row[1] for row in connection.execute("PRAGMA table_info(plan_nodes)")}
     if not {"intent", "intent_node_id"} <= present_columns and (intent, intent_node_id) != (None, None):
-        raise service.PlanInputError("task intent requires schema version 134")
+        raise service.PlanInputError("task intent requires schema version 136")
     if workflow_columns <= present_columns:
         if {"intent", "intent_node_id"} <= present_columns:
             writer_context.execute(

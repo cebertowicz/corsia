@@ -223,11 +223,12 @@ async def finish_signin(operation: Any, receipt: ReceiptFence | None, binary: st
         except Exception as exc:  # noqa: BLE001 - a poller waits on this outcome, so it must always land
             log.warning("account %s sign-in outcome failed: %s", operation.account_id, type(exc).__name__)
             bind.outcome, bind.bind_reason = UNCHECKED, None
-    if bind is not None and refresh == READY:
+    if reads and refresh == READY:
         from onboarding.first_chat_switch import switch_when_ready
 
+        # A Settings sign-in has no bind; the switch's own guards decide whether the first chat moves.
         await switch_when_ready(operation.provider, f"{operation.account_id}:{operation.revision}",
-                                user_id=bind.user_id, account_id=operation.account_id)
+                                user_id=bind.user_id if bind is not None else None, account_id=operation.account_id)
     if refresh != READY:
         notify_models_changed()
 

@@ -289,3 +289,24 @@ def test_finishing_a_setup_flight_nudges_open_screens(monkeypatch) -> None:
     local_setup.finish_flight({"ok": False})
 
     assert nudges == [1]
+
+
+def _stopped_server_with_flight(monkeypatch, flight_state: str) -> dict:
+    monkeypatch.setattr(local_sources, "local_memory_ok", lambda: True)
+    monkeypatch.setattr("llm.local_setup_prepare.known_model", lambda: None)
+    monkeypatch.setattr(local_setup, "setup_kind", lambda: "setup")
+    monkeypatch.setattr("onboarding.local_download_state.current", lambda: {"state": flight_state})
+    monkeypatch.setattr(local_sources, "local_omlx_servers", lambda _rows=None: [{"id": "s1", "status": "offline", "updated_at": None}])
+    return local_sources._omlx_state((set(), set()))
+
+
+def test_a_finished_setup_whose_server_was_turned_off_reads_stopped(monkeypatch) -> None:
+    """Turning the Ready local server off must not read as a setup still finishing."""
+    result = _stopped_server_with_flight(monkeypatch, "ready")
+
+    assert result["reason_code"] == "not_running"
+    assert result["local_state"] == "stopped"
+
+
+def test_a_failed_setup_on_a_stopped_server_still_reads_failed(monkeypatch) -> None:
+    assert _stopped_server_with_flight(monkeypatch, "start_failed")["local_state"] == "start_failed"

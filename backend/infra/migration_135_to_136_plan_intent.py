@@ -4,7 +4,7 @@ from __future__ import annotations
 import sqlite3
 
 
-def migrate_133_to_134(conn: sqlite3.Connection) -> None:
+def migrate_135_to_136(conn: sqlite3.Connection) -> None:
     """Keep existing tasks unchanged while allowing newly created intent data."""
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if "plan_nodes" not in tables:

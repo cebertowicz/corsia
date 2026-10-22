@@ -71,7 +71,7 @@ def _size_before_migration(db, scene):
 
 
 def _intent_before_migration(db, scene):
-    """A pre-v134 plan-node table cannot persist a task's intent yet."""
+    """A pre-v136 plan-node table cannot persist a task's intent yet."""
     db.execute("DROP INDEX idx_plan_nodes_intent_node")
     for column in ("intent_node_id", "intent"):
         db.execute(f"ALTER TABLE plan_nodes DROP COLUMN {column}")
@@ -665,7 +665,7 @@ _CASES = {
         }),
     ("node_creation.py", '"workflow fields require schema version 51"'):
         _workflow_fields_before_migration,
-    ("node_creation.py", '"task intent requires schema version 134"'): _intent_before_migration,
+    ("node_creation.py", '"task intent requires schema version 136"'): _intent_before_migration,
     # --- plans/workflow_fields.py ---
     ("workflow_fields.py", 'f"{field} must be a non-empty string or null"'):
         _operation("add", {

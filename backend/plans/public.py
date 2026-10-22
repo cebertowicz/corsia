@@ -193,6 +193,7 @@ from plans.artifact_links import link as link_node_artifact
 from plans.user_step_instructions import read_for_artifact as person_step_instructions
 from plans.feedback_nodes import (
     create_feedback_node, create_review_node, feedback_display, feedback_item_counts, load_feedback_items,
+    settle_feedback_node,
 )
 from plans.review_requests import (
     append_review_note, close_review_node, review_is_open, settle_review_node,

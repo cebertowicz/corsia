@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createSetupConnect, installCause, installFailureCopy } from './setupConnect.svelte';
+import { createSetupConnect, installCause, installFailureCopy, signinFailureCopy } from './setupConnect.svelte';
 
 describe('setup CLI installer failure copy', () => {
 	it.each([
@@ -18,6 +18,13 @@ describe('setup CLI installer failure copy', () => {
 			reference: 'cli-refused',
 			retry: false,
 		});
+	});
+
+	it.each([
+		['site_refused', 'Couldn’t download Codex. The download site refused the request. Retry.'],
+		['installer_failed', 'Couldn’t install Codex. Retry.'],
+	] as const)('asks for no report on a %s failure with no reference to find', (cause, meta) => {
+		expect(installFailureCopy('Codex', cause, null)).toEqual({ meta, reference: undefined, retry: true });
 	});
 
 	it('uses the approved connection recovery copy when the network is unavailable', () => {
@@ -45,5 +52,26 @@ describe('setup CLI installer failure copy', () => {
 
 		expect(flow.row({ source: 'claude-code', name: 'Claude Code', state: 'ready', limited: true }).meta)
 			.toBe('Signed in, but your Claude subscription has reached its usage limit.');
+	});
+});
+
+describe('setup sign-in failure copy', () => {
+	it('never puts an unknown cause code into the sentence', () => {
+		const copy = signinFailureCopy('codex', 'some_new_cause', 'signin-0123456789abcdef');
+		expect(copy).toEqual({ meta: 'Couldn’t finish signing in to Codex. Sign in again, or save a report.', reportable: true });
+	});
+
+	it('asks for a report only when a reference gives it something to find', () => {
+		expect(signinFailureCopy('codex', 'some_new_cause').meta).toBe('Couldn’t finish signing in to Codex. Sign in again.');
+		expect(signinFailureCopy('codex', 'agent_unavailable').meta).toBe('CORSIA couldn’t reach its agent to start signing in. Sign in again.');
+	});
+
+	it('names a missing CORSIA agent apart from an unreachable service', () => {
+		expect(signinFailureCopy('codex', 'agent_unavailable').meta).not.toBe(signinFailureCopy('codex', 'unreachable').meta);
+		expect(signinFailureCopy('codex', 'agent_unavailable').reportable).toBe(true);
+	});
+
+	it('tells a person who signed in to the same account what to do next', () => {
+		expect(signinFailureCopy('claude-code', 'same_account').meta).toContain('sign in again with a different Claude account');
 	});
 });
