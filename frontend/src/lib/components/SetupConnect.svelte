@@ -98,12 +98,12 @@
 <style>
 	/* As tall as its rows, up to four, so the link below sits right under the last computer. */
 	.list { list-style: none; margin: 0 0 var(--space-4); padding: 0; max-height: calc(var(--space-8) * 4); overflow-y: auto; flex: none; }
-	.note { margin: calc(var(--space-2) * -1) 0 var(--space-4); font-size: var(--text-footnote); color: var(--text-secondary); }
+	.note { margin: calc(var(--space-2) * -1) 0 var(--space-4); font-size: var(--text-subhead); color: var(--text-secondary); }
 	.list.more { mask-image: linear-gradient(to bottom, currentColor calc(100% - var(--space-6)), transparent); }
 	.state { margin: 0 0 var(--space-4); display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-subhead); color: var(--text-secondary); }
-	.sentence { margin: 0 0 var(--space-3); max-width: calc(var(--space-8) * 9); font-size: var(--text-body); line-height: var(--lh-normal); text-wrap: pretty; }
+	.sentence { margin: 0 0 var(--space-3); max-width: calc(var(--space-8) * 9); font-size: var(--text-title3); line-height: var(--lh-normal); text-wrap: pretty; }
 	.action { margin: 0 0 var(--space-4); }
-	.sub { margin: 0 0 var(--space-5); font-size: var(--text-body); font-weight: var(--fw-semibold); }
+	.sub { margin: 0 0 var(--space-5); font-size: var(--text-title3); font-weight: var(--fw-semibold); }
 	.crop { margin: 0 0 var(--space-4); }
 	.address { max-width: calc(var(--space-8) * 8); }
 	/* The boxes sit one --space-5 under the picture, so they read as its answer. */
@@ -116,5 +116,5 @@
 	.scroll.above { mask-image: linear-gradient(to bottom, transparent, currentColor var(--space-6)); }
 	.scroll.above.more { mask-image: linear-gradient(to bottom, transparent, currentColor var(--space-6), currentColor calc(100% - var(--space-6)), transparent); }
 	.code { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-5); }
-	.err { margin: 0; font-size: var(--text-footnote); color: var(--red-text); text-wrap: pretty; }
+	.err { margin: 0; font-size: var(--text-subhead); color: var(--red-text); text-wrap: pretty; }
 </style>

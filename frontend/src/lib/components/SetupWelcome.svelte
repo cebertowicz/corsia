@@ -14,7 +14,7 @@
 </div>
 
 <style>
-	.welcome { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); font-size: var(--text-body); line-height: var(--lh-normal); text-wrap: pretty; }
+	.welcome { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); font-size: var(--text-title3); line-height: var(--lh-normal); text-wrap: pretty; }
 	p, ul { margin: 0; }
 	ul { display: flex; flex-direction: column; gap: var(--space-2); padding-left: var(--space-5); }
 	.account { color: var(--text-primary); }

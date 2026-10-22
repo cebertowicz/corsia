@@ -30,6 +30,6 @@
 <style>
 	.form { display: flex; flex-direction: column; gap: var(--space-3); width: 100%; }
 	.passwords { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
-	.error-text { margin: 0; }
+	.error-text { margin: 0; font-size: var(--text-subhead); }
 	@media (max-width: 40em) { .passwords { grid-template-columns: 1fr; } }
 </style>
