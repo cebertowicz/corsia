@@ -9,6 +9,7 @@ the first account); it exists only while no account does.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import platform
@@ -19,7 +20,7 @@ from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from api.setup_requests import FirstAccountRequest, LocalDownloadRequest, SetupProgressUpdate
+from api.setup_requests import FirstAccountRequest, LocalDownloadRequest, SetupProgressUpdate, SetupReportRequest
 from core.corrections_asset_download import FLIGHT as CLASSIFIER_DOWNLOAD
 from core.corrections_asset_download import public_state as classifier_state
 from infra import account_validation, accounts, config, setup_progress
@@ -188,9 +189,9 @@ async def setup_progress_view(_user: dict = Depends(require_user)) -> dict:
 
 @router.put("/progress", response_model=None)
 async def setup_progress_update(request: Request, authorization: str | None = Header(None)) -> dict | Response:
-    """Record a setup step, the local-AI choice, Welcome's picks or completion.
+    """Record a setup step, the local-AI choice, the subscriptions they pay for or completion.
 
-    Before the first account only the local-AI choice and Welcome's picks are taken, on the same loopback boundary as the
+    Before the first account only the local-AI choice and the subscriptions they pay for are taken, on the same loopback boundary as the
     other pre-account routes; after it, any signed-in session may record all of them.
     """
     signed_in = await run_in_db(accounts.has_users)
@@ -213,6 +214,29 @@ async def setup_progress_update(request: Request, authorization: str | None = He
     except setup_progress.SetupProgressError:
         return Response(status_code=422)
     return {"ok": True}
+
+
+@router.post("/report", response_model=None)
+async def setup_report(request: Request, authorization: str | None = Header(None)) -> dict | Response:
+    """The body of a saved setup report: the failed rows' causes and the service-log lines about them.
+
+    Before the first account, on the loopback boundary of the other pre-account routes; after it, any signed-in
+    session.
+    """
+    if await run_in_db(accounts.has_users):
+        if not authenticate(token_from_request(None, authorization)):
+            return Response(status_code=401)
+    elif not _trusted_json_post(request):
+        return Response(status_code=403)
+    try:
+        body = SetupReportRequest.model_validate(await request.json())
+    except (ValidationError, ValueError):
+        return Response(status_code=422)
+    from onboarding.setup_report import report_details
+
+    rows = [row.model_dump() for row in body.rows]
+    text = await asyncio.to_thread(report_details, rows, config.LOGS_DIR / "service.log")
+    return {"text": text}
 
 
 async def _before_first_account(request: Request, *, post: bool) -> Response | None:

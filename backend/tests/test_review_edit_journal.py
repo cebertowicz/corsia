@@ -123,7 +123,7 @@ def test_a_live_publication_names_the_editing_actor_not_the_registering_owner(ow
 
 
 def test_a_user_save_with_no_thread_is_journaled_as_the_user(ownership_scope):
-    from registry.review_edit_journal import journal_reviewed_edit
+    from registry.review_edit_journal import note_content_edit
 
     scope = ownership_scope
     _write(scope, "saved.md", "one\n")
@@ -131,7 +131,7 @@ def test_a_user_save_with_no_thread_is_journaled_as_the_user(ownership_scope):
     artifact = service.find_file_identity(str(scope["category"] / "saved.md"), db=scope["db"])
 
     def save(before: str, after: str) -> bool:
-        return journal_reviewed_edit(
+        return note_content_edit(
             scope["db"], artifact, previous_sha256=_sha(before), new_sha256=_sha(after), actor_thread_id="ui")
 
     assert save("one\n", "two\n")

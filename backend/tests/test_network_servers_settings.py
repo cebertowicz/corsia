@@ -186,6 +186,19 @@ def test_lifecycle_stop_dispatches_to_provider_connector(client, monkeypatch):
     assert r.json()["ok"] is True
 
 
+def test_a_failed_stop_carries_a_reference_logged_with_it(client, caplog):
+    with patch(
+        "llm.providers.omlx.stop_server",
+        new=AsyncMock(return_value={"ok": False, "message": "Still running"}),
+    ):
+        r = client.post(
+            f"/api/settings/network-servers/ns-test/lifecycle/stop?token={_TOKEN}"
+        )
+    body = r.json()
+    assert body["ok"] is False and body["ref"].startswith("local-")
+    assert f"reference={body['ref']}" in caplog.text
+
+
 def test_lifecycle_unknown_provider_returns_clean_error(client, monkeypatch):
     from llm import network_discovery as _nd
     monkeypatch.setattr(

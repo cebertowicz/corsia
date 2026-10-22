@@ -9,7 +9,9 @@
 
 	// The Local only row at the top of the model sheet: the thread's switch, its cause when locked,
 	// and why it can't be turned on. Every state and its copy are in the Local only design, §5.
-	let { onsetuplocal = () => {}, onleave = () => {}, focusOnMount = false, onfocusconsumed = () => {} }: { onsetuplocal?: () => void; onleave?: () => void; focusOnMount?: boolean; onfocusconsumed?: () => void } = $props();
+	// onsetuplocal is passed only when nothing else in the sheet offers to add a local model.
+	// offerssetup reports whether this row is showing that link, so the sheet adds no second one.
+	let { onsetuplocal, onleave = () => {}, focusOnMount = false, onfocusconsumed = () => {}, offerssetup = $bindable(false) }: { offerssetup?: boolean; onsetuplocal?: () => void; onleave?: () => void; focusOnMount?: boolean; onfocusconsumed?: () => void } = $props();
 
 	const thread = $derived($threads.find((row) => row.id === $activeThreadId));
 	const policy = $derived(threadLocalOnly(thread));
@@ -26,6 +28,9 @@
 	const hasReadyLocalModel = $derived($models.some((model) => model.is_local === true && model.status === 'ready'));
 	const needsLocalModel = $derived(!on && !hasReadyLocalModel);
 	const needsModelSwitch = $derived(!on && hasReadyLocalModel && activeModel?.is_local !== true);
+	// The one rule for this row's setup link; the template and the sheet both read it.
+	const showsSetupLink = $derived(!!$activeThreadId && !!onsetuplocal && !held && needsLocalModel);
+	$effect.pre(() => { offerssetup = showsSetupLink; });
 
 	async function change(next: boolean) {
 		const threadId = $activeThreadId;
@@ -67,7 +72,7 @@
 				{:else if cause === 'project'}
 					<button type="button" class="local-only-link" onclick={openProject}>Set by this project</button>
 				{:else if needsLocalModel}
-					No local model is ready. <button type="button" class="local-only-link" onclick={onsetuplocal}>Set up a local model</button>
+					No local model is ready.{#if showsSetupLink} <button type="button" class="local-only-link" onclick={onsetuplocal}>Set up a local model</button>{/if}
 				{:else if needsModelSwitch}
 					Switch this chat to a local model first.
 				{:else if !on}

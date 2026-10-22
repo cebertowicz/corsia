@@ -283,7 +283,7 @@ def test_update_reads_and_writes_inside_one_write_transaction(isolated_db, monke
     assert in_transaction == [True]
 
 
-ALL_PICKS = {"claude": True, "chatgpt": False, "key": True}
+ALL_PICKS = {"claude": True, "chatgpt": False}
 HANDOFF = {
     "tools": {
         "claude-code": {"attempt": "install_failed", "cause": "download_unavailable", "ref": "setup-42"},
@@ -306,12 +306,20 @@ def test_welcome_picks_survive_the_account_and_a_reload(client):
 def test_picks_change_after_the_account_and_a_later_write_keeps_the_rest(client):
     token = _create_account(client)
     assert _put(client, {"picks": ALL_PICKS}, token).status_code == 200
-    assert _put(client, {"picks": {"claude": False, "chatgpt": True, "key": False}}, token).status_code == 200
+    assert _put(client, {"picks": {"claude": False, "chatgpt": True}}, token).status_code == 200
     assert _put(client, {"local_ai": False}, token).status_code == 200
 
     progress = _progress(client, token)
-    assert progress["picks"] == {"claude": False, "chatgpt": True, "key": False}
+    assert progress["picks"] == {"claude": False, "chatgpt": True}
     assert progress["local_ai"] is False
+
+
+def test_a_subscriptions_answer_is_stored_as_given(client):
+    token = _create_account(client)
+
+    assert _put(client, {"picks": {"claude": True, "chatgpt": False}}, token).status_code == 200
+
+    assert _progress(client, token)["picks"] == {"claude": True, "chatgpt": False}
 
 
 def test_no_picks_reads_as_none_not_as_all_unchecked(client):
@@ -320,10 +328,11 @@ def test_no_picks_reads_as_none_not_as_all_unchecked(client):
 
 @pytest.mark.parametrize("picks", [
     {"claude": True},
-    {"claude": True, "chatgpt": True, "key": True, "other": True},
-    {"claude": "yes", "chatgpt": False, "key": False},
+    {"claude": True, "chatgpt": True, "other": True},
+    {"claude": True, "chatgpt": True, "key": False},
+    {"claude": "yes", "chatgpt": False},
 ])
-def test_picks_must_say_yes_or_no_for_exactly_the_three_choices(client, picks):
+def test_picks_must_say_yes_or_no_for_exactly_the_two_subscriptions(client, picks):
     token = _create_account(client)
 
     assert _put(client, {"picks": picks}, token).status_code == 422
@@ -334,6 +343,6 @@ def test_a_completed_setup_ignores_a_late_picks_write(client):
     token = _create_account(client)
     assert _put(client, {"picks": ALL_PICKS}, token).status_code == 200
     assert _put(client, {"completed": True}, token).status_code == 200
-    assert _put(client, {"picks": {"claude": False, "chatgpt": False, "key": False}}, token).status_code == 200
+    assert _put(client, {"picks": {"claude": False, "chatgpt": False}}, token).status_code == 200
 
     assert _progress(client, token)["picks"] == ALL_PICKS

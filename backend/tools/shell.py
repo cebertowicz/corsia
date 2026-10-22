@@ -32,7 +32,7 @@ from registry.observer import (
 )
 from registry.registration_writer import origin_from_tool_context
 from registry.service import notify_changed
-from tools import shell_long_running
+import tools.agent_shell_tools as agent_shell_tools, tools.shell_long_running as shell_long_running
 from tools.shell_fast_forward import settle_cancelled_fast_forward
 from tools.base import Tool
 from tools.sandbox_config import (
@@ -180,7 +180,7 @@ class BashTool(Tool):
             "USE THIS for:\n"
             "- Running build commands, tests, and scripts\n"
             "- Git operations (status, log, diff, commit)\n"
-            "- Package management (pip, npm, brew)\n"
+            "- Package management (pip, npm, uv; CORSIA supplies Python, Node, uv and gh)\n"
             "- System commands that don't have a dedicated tool\n\n"
             "DO NOT use this for operations that have dedicated tools:\n"
             "- Reading files → use read_file (not cat/head/tail)\n"
@@ -424,11 +424,11 @@ class BashTool(Tool):
                 working_dir,
                 leased=leased,
                 policies=policies,
-                thread_id=thread_id,
-                path_allowed=is_path_allowed,
+                thread_id=thread_id, path_allowed=is_path_allowed,
             )
             if cwd_denial is not None:
                 return cwd_denial
+            await agent_shell_tools.wait_for_prefetch()
             envelope = execution_envelope_for_consumed_action(
                 consumed,
                 leased=leased, thread_id=thread_id,

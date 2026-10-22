@@ -71,7 +71,8 @@ class SharedLivePolicy:
                 direct_user=actor.direct_user, db=db,
             )
         decision = Publication.decision_for(self.live.path, shared, authority)
-        return Publication(actor.thread_id, actor.origin, actor.description, mirror.state, decision)
+        return Publication(actor.thread_id, actor.origin, actor.description, mirror.state, decision,
+                           suggestion_accept=actor.suggestion_accept)
 
     def _check_failure(self) -> None:
         failure, _ = self.owner.setup_state(self.live.path)

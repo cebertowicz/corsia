@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from infra.db_async import run_in_db
+from infra.failure_reference import new_reference
 from infra.product_events import emit_product_event
 from infra.state.ws import notify_models_changed
 from llm import network_discovery as nd
 from llm.providers import for_provider
 
 router = APIRouter(tags=["network-servers"])
+log = logging.getLogger(__name__)
 
 
 @router.post("/{server_id}/lifecycle/{action}")
@@ -58,6 +62,10 @@ async def lifecycle_action(server_id: str, action: str):
             await run_in_db(nd.update_server_status, server_id, status="online")
         elif action == "stop":
             await run_in_db(nd.update_server_status, server_id, status="offline")
+    else:
+        # The reference ties the failure the person sees to this line.
+        result = {**result, "ref": new_reference("local")}
+        log.warning("Local server %s failed reference=%s", action, result["ref"])
 
     return result
 

@@ -144,8 +144,10 @@ async def lifespan(app: FastAPI):
         from automation import restart_startup
         from doceditor.live_runtime import start_documents
         from llm.lifecycle import autostart_local_providers
+        from tools.agent_shell_tools import start_prefetch
         from tools.mcp_runtime import start_connected_app_runtime
 
+        start_prefetch()
         await start_connected_app_runtime()
 
         startup_tasks[0] = asyncio.create_task(autostart_local_providers())

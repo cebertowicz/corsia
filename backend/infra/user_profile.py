@@ -18,6 +18,7 @@ import logging
 import os
 import pwd
 import stat
+import string
 import uuid
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -28,6 +29,7 @@ PROFILE_RELATIVE_PATH = Path("context") / "50-USER-PROFILE.md"
 _LOCALTIME = Path("/etc/localtime")
 _EMAIL_LABEL = "- **Email:**"
 _NAME_LABEL = "- **Preferred name:**"
+USE_COMMUNITY_LABEL = "- **Use community improvements:**"
 
 
 def mac_full_name() -> str:
@@ -70,32 +72,40 @@ def profile_text(name: str, timezone: str, email: str = "") -> str:
     return "\n".join(lines) + "\n"
 
 
-def _email_in(text: str) -> str:
+def _labeled_value(text: str, label: str) -> str:
+    """The rest of the first line that starts with ``label``, or empty."""
     for line in text.splitlines():
-        if line.startswith(_EMAIL_LABEL):
-            return line[len(_EMAIL_LABEL):].strip()
+        if line.startswith(label):
+            return line.removeprefix(label)
     return ""
+
+
+def _read_profile(workspace: Path) -> str:
+    try:
+        return (Path(workspace) / PROFILE_RELATIVE_PATH).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return ""
+
+
+def _email_in(text: str) -> str:
+    return _labeled_value(text, _EMAIL_LABEL).strip()
 
 
 def profile_email(workspace: Path) -> str:
     """The email an existing profile already names, or empty."""
-    try:
-        return _email_in((Path(workspace) / PROFILE_RELATIVE_PATH).read_text(encoding="utf-8"))
-    except OSError:
-        return ""
+    return _email_in(_read_profile(workspace))
 
 
 def profile_name(workspace: Path) -> str:
     """The existing profile's preferred name, without control characters, or empty."""
-    try:
-        text = (Path(workspace) / PROFILE_RELATIVE_PATH).read_text(encoding="utf-8")
-    except OSError:
-        return ""
-    for line in text.splitlines():
-        if line.startswith(_NAME_LABEL):
-            name = "".join(char for char in line.removeprefix(_NAME_LABEL) if char.isprintable())
-            return one_line(name)[:120]
-    return ""
+    name = "".join(char for char in _labeled_value(_read_profile(workspace), _NAME_LABEL) if char.isprintable())
+    return one_line(name)[:120]
+
+
+def uses_community_improvements(workspace: Path) -> bool:
+    """Whether the person explicitly answered yes to using community improvements."""
+    words = _labeled_value(_read_profile(workspace), USE_COMMUNITY_LABEL).split(maxsplit=1)
+    return bool(words) and words[0].rstrip(string.punctuation).casefold() == "yes"
 
 
 class StagedProfile:

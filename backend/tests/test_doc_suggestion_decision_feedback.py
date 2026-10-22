@@ -7,7 +7,7 @@ import json
 import pytest
 
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
-from doceditor import comment_actions, feedback_batches, feedback_state, feedback_suggestion_decisions
+from doceditor import comment_actions, comment_batch_actions, feedback_batches, feedback_state, feedback_suggestion_decisions
 from doceditor.comment_action_errors import decision_only_error
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
 from infra.database import get_db, write_transaction
@@ -230,7 +230,7 @@ async def test_bulk_rejection_sends_one_note_for_all_suggestions_without_a_node_
         async def unused_writer(*_args):
             raise AssertionError("reject must not write the document")
 
-        await comment_actions.decide_all_from_author(
+        await comment_batch_actions.decide_all_from_author(
             first["id"], "reject", user_id="owner-token", decided_by="Robin",
             actor_thread_id=None, write=unused_writer,
         )
@@ -457,7 +457,7 @@ def test_migration_preserves_reopened_rows_and_admits_rejected_rows(isolated_db)
         db.commit()
 
         assert migrate_to_current(db, SCHEMA_VERSION).migrated
-        assert SCHEMA_VERSION == 134
+        assert SCHEMA_VERSION == 135
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert db.execute(
             "SELECT event FROM doc_feedback_batch_items WHERE comment_id=?", (comment["id"],)
@@ -488,7 +488,7 @@ async def test_the_decide_path_wakes_nobody_for_a_rejection(isolated_db, monkeyp
         async def unused_writer(*_args):
             raise AssertionError("reject must not write the document")
 
-        decide = comment_actions.decide_all_from_author if bulk else comment_actions.decide_suggestion
+        decide = comment_batch_actions.decide_all_from_author if bulk else comment_actions.decide_suggestion
         result = await decide(
             suggestion["id"], "reject", user_id="owner-token", decided_by="Robin",
             actor_thread_id=None, write=unused_writer,

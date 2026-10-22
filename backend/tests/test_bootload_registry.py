@@ -13,7 +13,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from registry import bootload, models  # noqa: E402
-from infra.doc_review_schema import DOC_REVIEW_SCHEMA_SQL  # noqa: E402
+from infra.doc_comments_schema import DOCUMENT_SCHEMA_SQL  # noqa: E402
 from infra.schema import STRUCTURED_PLAN_SCHEMA_SQL  # noqa: E402
 from tests.registry_helpers import ARTIFACT_REGISTRY_DDL  # noqa: E402
 from auth_fixtures import OWNER_TOKEN
@@ -47,7 +47,7 @@ def db(tmp_path, monkeypatch):
     conn.executescript(
         ARTIFACT_REGISTRY_DDL
         + STRUCTURED_PLAN_SCHEMA_SQL
-        + DOC_REVIEW_SCHEMA_SQL
+        + DOCUMENT_SCHEMA_SQL
         + "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, path TEXT);"
     )
     conn.commit()

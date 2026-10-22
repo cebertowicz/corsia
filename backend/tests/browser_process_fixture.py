@@ -172,6 +172,7 @@ def synthetic_browser(monkeypatch):
     monkeypatch.setattr(browser_cdp, 'page_endpoint', synthetic_page)
     monkeypatch.setattr(browser_cdp, 'page_password_probe', no_password_field)
     monkeypatch.setattr(browser_cli, 'chrome_executable', lambda: (None, 'default'))
+    monkeypatch.setattr(browser_cli, 'chrome_download_missing', lambda: False)
     yield fake
     fake.finish()
     shutil.rmtree(root)

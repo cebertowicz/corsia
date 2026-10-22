@@ -217,9 +217,11 @@ pub trait Lifecycle {
         RESTART_POLL
     }
     /// `<checkout>/scripts/corsia stop`, which holds new work and drains the
-    /// running work for up to `CORSIA_DRAIN_MAX_WAIT`, then proof from the
-    /// service's own view that it is down: launchd no longer lists the job and
-    /// the backend port does not answer. While it runs, `progress` receives a
+    /// running work for up to `CORSIA_DRAIN_MAX_WAIT`, then proof, whatever its
+    /// exit status, that the source has let go of everything adoption touches
+    /// next: launchd no longer lists the job, the backend port does not answer,
+    /// the process launchd ran is gone and the database opens exclusively
+    /// (`release_proof`). While it runs, `progress` receives a
     /// read-only count of running turns about once a second, `None` when the
     /// count could not be read.
     fn stop_old(
