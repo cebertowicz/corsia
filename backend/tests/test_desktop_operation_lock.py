@@ -64,3 +64,33 @@ def test_the_real_guard_admits_the_shells_host_and_nothing_portless(monkeypatch,
     assert response.status_code == status
     if status == 200:
         assert response.json() == {"active": False}
+
+
+@pytest.mark.asyncio
+async def test_stop_local_model_stops_only_what_the_supervisor_recorded(monkeypatch):
+    from api import system
+    from llm.providers import omlx_supervisor
+
+    async def fake_stop_all():
+        return [{"ok": True, "pid": 4242}]
+
+    monkeypatch.setattr(system, "_trusted_request", lambda request: True)
+    monkeypatch.setattr(omlx_supervisor, "stop_all_servers", fake_stop_all)
+
+    assert await system.system_stop_local_model(object()) == {"stopped": [4242], "ok": True}
+
+
+@pytest.mark.asyncio
+async def test_stop_local_model_refuses_an_untrusted_caller(monkeypatch):
+    from api import system
+    from llm.providers import omlx_supervisor
+
+    async def fail_stop_all():
+        raise AssertionError("an untrusted caller must not stop the model")
+
+    monkeypatch.setattr(system, "_trusted_request", lambda request: False)
+    monkeypatch.setattr(omlx_supervisor, "stop_all_servers", fail_stop_all)
+
+    with pytest.raises(HTTPException) as refused:
+        await system.system_stop_local_model(object())
+    assert refused.value.status_code == 403

@@ -64,6 +64,17 @@ async def system_operation_active(request: Request):
     return {"active": await run_in_db(self_restart.in_flight_request) is not None}
 
 
+@router.post("/system/stop-local-model")
+async def system_stop_local_model(request: Request):
+    """Stop the oMLX CORSIA spawned; the desktop shell calls it on Quit only, never on restart or update."""
+    if not _trusted_request(request):
+        raise HTTPException(403)
+    from llm.providers.omlx_supervisor import stop_all_servers
+
+    results = await stop_all_servers()
+    return {"stopped": [result["pid"] for result in results if result.get("pid")], "ok": all(r.get("ok") for r in results)}
+
+
 def _security_alert_path() -> Path:
     """Return the alert sentinel beneath the selected operational state root."""
     return config.STATE_ROOT / "security" / "ALERT"
