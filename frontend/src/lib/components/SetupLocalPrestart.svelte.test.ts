@@ -24,7 +24,7 @@ function setInput(id: string, value: string) {
 }
 
 /** A Mac that can run a local model, with the pick and the pre-account start answered by the given handlers. */
-function mountSetup(handlers: { pick: () => Promise<Response>; preStart: () => Response; eligible?: boolean }) {
+function mountSetup(handlers: { pick: () => Promise<Response>; preStart: () => Response; signedInStart?: () => Response; eligible?: boolean }) {
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input); const method = init?.method ?? 'GET'; calls.push(`${method} ${url}`);
 		const eligible = handlers.eligible !== false;
@@ -32,7 +32,7 @@ function mountSetup(handlers: { pick: () => Promise<Response>; preStart: () => R
 		if (url === '/api/setup/local-model' && method === 'POST') return handlers.pick();
 		if (url === '/api/setup/local-download' && method === 'POST') return handlers.preStart();
 		if (url === '/api/setup/local-download') return json({ state: 'stopped' });
-		if (url === '/api/providers/local/setup') return json({ ok: true, in_progress: true });
+		if (url === '/api/providers/local/setup') return handlers.signedInStart?.() ?? json({ ok: true, in_progress: true });
 		if (url === '/api/setup/first-account') return json({ token: 'setup-token', user: { id: 'user', name: 'Ada Lovelace' } });
 		if (url === '/api/setup/progress') return json({ setup_completed: false, status: { local_eligible: true, work_folder: '~/CORSIA' } });
 		if (url.includes('/sources')) {
@@ -78,6 +78,38 @@ describe('the local model starts itself during setup', () => {
 		await settle();
 		expect(calls.filter((call) => call === 'POST /api/providers/local/setup')).toHaveLength(1);
 		expect(host.textContent).not.toContain('Getting the local model ready');
+	});
+
+	it('offers Download, not the preparing line, once the start returns and nothing is in flight', async () => {
+		let release: (response: Response) => void = () => {};
+		mountSetup({ pick: () => new Promise<Response>((done) => { release = done; }), preStart: () => json({ ok: true, in_progress: true }) });
+		await toModels();
+		expect(host.textContent).toContain('Getting the local model ready');
+
+		release(json(PICKED)); await settle();
+		await vi.waitFor(() => expect(host.textContent).not.toContain('Getting the local model ready'));
+		expect(button('Download')).toBeTruthy();
+	});
+
+	it('shows Retry, not the preparing line, when the pick fails', async () => {
+		mountSetup({ pick: async () => json({}, 500), preStart: () => json({ ok: true, in_progress: true }) });
+		await toModels(); await settle();
+
+		expect(host.textContent).not.toContain('Getting the local model ready');
+		expect(button('Retry')).toBeTruthy();
+		expect(button('Download')).toBeUndefined();
+	});
+
+	it('shows the failure and Retry, not the preparing line, when the start after sign-in is refused', async () => {
+		let release: (response: Response) => void = () => {};
+		mountSetup({ pick: () => new Promise<Response>((done) => { release = done; }), preStart: () => json({ ok: true, in_progress: true }),
+			signedInStart: () => json({ ok: false, fix: 'Free up 5 GB, then try again.' }, 500) });
+		await toModels();
+		release(json(PICKED)); await settle();
+
+		await vi.waitFor(() => expect(host.textContent).toContain('Free up 5 GB, then try again.'));
+		expect(host.textContent).not.toContain('Getting the local model ready');
+		expect(button('Retry')).toBeTruthy();
 	});
 
 	it('starts nothing and shows no preparing line on a Mac that cannot run the local model', async () => {
