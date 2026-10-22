@@ -130,7 +130,8 @@ async def stable_counts(client, *, quiet_seconds=0.15):
         response = await client.get("/__i9/counts")
         response.raise_for_status()
         counts = response.json()
-        if counts != previous:
+        # Only CORSIA's own resources decide quiet; native idle threads come and go.
+        if previous is None or owned_resource_counts(counts) != owned_resource_counts(previous):
             unchanged_since = time.monotonic()
         elif time.monotonic() - unchanged_since >= quiet_seconds:
             return counts
@@ -187,10 +188,12 @@ async def test_devices_open_streams_stop_under_grace_and_50_cycles_release_resou
 async def test_devices_sigterm_with_open_streams_matches_no_devices_baseline():
     with backend_process() as baseline:
         async with httpx.AsyncClient(base_url=baseline.url, timeout=5, trust_env=False) as client:
+            await wait_for_cloud_discovery(client)
             await stable_counts(client, quiet_seconds=5)
         baseline_code, baseline_time = baseline.terminate()
     with backend_process() as backend:
         async with httpx.AsyncClient(base_url=backend.url, timeout=5, trust_env=False) as client:
+            await wait_for_cloud_discovery(client)
             await stable_counts(client, quiet_seconds=5)
             async with open_streams(client):
                 # Keep the peer idle while the real backend handles SIGTERM.
