@@ -32,7 +32,7 @@ from registry.observer import (
 )
 from registry.registration_writer import origin_from_tool_context
 from registry.service import notify_changed
-from tools import shell_long_running
+import tools.agent_shell_tools as agent_shell_tools, tools.shell_long_running as shell_long_running
 from tools.shell_fast_forward import settle_cancelled_fast_forward
 from tools.base import Tool
 from tools.sandbox_config import (
@@ -180,7 +180,7 @@ class BashTool(Tool):
             "USE THIS for:\n"
             "- Running build commands, tests, and scripts\n"
             "- Git operations (status, log, diff, commit)\n"
-            "- Package management (pip, npm, brew)\n"
+            "- Package management (pip, npm, uv; CORSIA supplies Python, Node, uv and gh)\n"
             "- System commands that don't have a dedicated tool\n\n"
             "DO NOT use this for operations that have dedicated tools:\n"
             "- Reading files → use read_file (not cat/head/tail)\n"
@@ -427,8 +427,8 @@ class BashTool(Tool):
                 thread_id=thread_id,
                 path_allowed=is_path_allowed,
             )
-            if cwd_denial is not None:
-                return cwd_denial
+            if denial := cwd_denial or await agent_shell_tools.prepare_for_command(command):
+                return denial
             envelope = execution_envelope_for_consumed_action(
                 consumed,
                 leased=leased, thread_id=thread_id,
@@ -467,7 +467,7 @@ class BashTool(Tool):
             if owned.timed_out:
                 return f"Error: Command timed out after {effective_timeout} seconds"
 
-            output_parts, stdout_text, stderr_text = foreground_output_parts(owned)
+            output_parts, stdout_text, stderr_text = await agent_shell_tools.noted_output(owned, foreground_output_parts(owned))
             combined_output = stdout_text + stderr_text
             if owned.returncode != 0 and not leased and is_sandbox_denial(
                 combined_output,

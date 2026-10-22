@@ -47,7 +47,7 @@ def test_safehouse_subprocess_env_strips_control_and_provider_secrets(
 
     env = shell_guard.safehouse_subprocess_env("thread-1")
 
-    assert env["PATH"] == "/usr/bin:/bin"
+    assert env["PATH"].endswith(":/usr/bin:/bin")  # CORSIA's tools come first; the inherited PATH stays
     assert env["SSH_AUTH_SOCK"] == "/private/tmp/agent.sock"
     assert env["CORSIA_THREAD_ID"] == "thread-1"
     assert "SAFEHOUSE_ADD_DIRS" not in env
@@ -129,6 +129,7 @@ def test_safehouse_argv_is_direct_and_ignores_workdir_config(
     assert (
         "--env-pass=CORSIA_THREAD_ID,CORSIA_PROCESS_OWNER_MARKER,"
         "CORSIA_TOOL_INVOCATION_ID,AGENT_BROWSER_ARGS,"
+        "npm_config_cache,PIP_CACHE_DIR,UV_CACHE_DIR,"
         "GH_CONFIG_DIR,GIT_CONFIG_COUNT,"
         + ",".join(f"GIT_CONFIG_KEY_{i},GIT_CONFIG_VALUE_{i}" for i in range(7)) in argv
     )

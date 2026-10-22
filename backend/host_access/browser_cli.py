@@ -16,6 +16,7 @@ from typing import IO, Literal, Sequence
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import Version
 from host_access import browser_identity as identity
+from infra.platform_paths import app_bundle_root
 
 logger = logging.getLogger(__name__)
 _PENDING_CLIENTS: set[asyncio.Task] = set()
@@ -23,12 +24,17 @@ _PRE_DAEMON_ERRORS = frozenset({
     "unknown_command", "unknown_subcommand", "missing_arguments",
     "invalid_value", "invalid_session_name",
 })
-INSTALL_HINT = (
+BROWSER_COMMAND = "agent-browser"
+_SOURCE_INSTALL_HINT = (
     "install a supported build with `npm install -g agent-browser@0.31`, "
     "run `agent-browser install`, and make sure PATH selects it"
 )
+_PACKAGED_INSTALL_HINT = (
+    "the browser tool ships inside the CORSIA app, so this copy is damaged; "
+    "reinstall or update CORSIA to restore it"
+)
 WAIT_TIMED_OUT = "Wait timed out; the browser session is still running. Take a snapshot to see the page."
-_NOT_INSTALLED = f"agent-browser is not installed or not on PATH; {INSTALL_HINT}"
+CHROME_INSTALL_TIMEOUT = 600.0
 # Each family's producer contract was verified against the real native build.
 _VERIFIED_FAMILIES = (">=0.27.0,<0.28.0", ">=0.31.0,<0.32.0")
 
@@ -92,8 +98,28 @@ def admitted_version(output: str) -> str:
         ) from exc
     found = f"agent-browser {match[1]} is" if match is not None else "the installed agent-browser reports an unrecognized version and is"
     raise identity.BrowserIdentityError(
-        f"{found} not a supported native agent-browser version ({policy}); {INSTALL_HINT}"
+        f"{found} not a supported native agent-browser version ({policy}); {install_hint()}"
     )
+
+
+def bundled_executable() -> str | None:
+    """The agent-browser shipped in this app bundle, or None outside one."""
+    bundle = app_bundle_root()
+    if bundle is None:
+        return None
+    executable = bundle / "Contents" / "Resources" / "bin" / BROWSER_COMMAND
+    return str(executable) if executable.is_file() else None
+
+
+def install_hint() -> str:
+    """How to get a supported agent-browser: a packaged app never sends anyone to npm."""
+    return _PACKAGED_INSTALL_HINT if app_bundle_root() is not None else _SOURCE_INSTALL_HINT
+
+
+def _not_installed() -> str:
+    if app_bundle_root() is not None:
+        return "agent-browser is missing from this app; reinstall or update CORSIA to restore it"
+    return f"agent-browser is not installed or not on PATH; {install_hint()}"
 
 
 def _application_dirs() -> tuple[Path, ...]:
@@ -116,11 +142,23 @@ def chrome_executable() -> tuple[str | None, Literal["env", "system", "default"]
     return None, "default"
 
 
+def chrome_download_missing() -> bool:
+    """Whether agent-browser has no Chrome for Testing in the person's home yet."""
+    return next(iter((Path.home() / ".agent-browser" / "browsers").glob("chrome-*")), None) is None
+
+
 def resolve_native(binary: str) -> tuple[str, str]:
-    """Reject scripts/wrappers before invoking even --version; follow symlinks."""
-    selected = shutil.which(binary) if not Path(binary).is_absolute() else binary
+    """Reject scripts/wrappers before invoking even --version; follow symlinks.
+
+    A packaged app runs only its own copy; a source install uses PATH.
+    """
+    selected: str | None
+    if binary == BROWSER_COMMAND and app_bundle_root() is not None:
+        selected = bundled_executable()
+    else:
+        selected = shutil.which(binary) if not Path(binary).is_absolute() else binary
     if selected is None:
-        raise identity.BrowserIdentityError(_NOT_INSTALLED)
+        raise identity.BrowserIdentityError(_not_installed())
     try:
         path = Path(selected).resolve(strict=True)
         metadata = path.stat()
@@ -135,11 +173,11 @@ def resolve_native(binary: str) -> tuple[str, str]:
             raise ValueError
         return identity.executable_fingerprint_for_path(path)
     except FileNotFoundError as exc:
-        raise identity.BrowserIdentityError(_NOT_INSTALLED) from exc
+        raise identity.BrowserIdentityError(_not_installed()) from exc
     except (OSError, ValueError) as exc:
         raise identity.BrowserIdentityError(
             "agent-browser must resolve to the native agent-browser executable, "
-            f"not a script or launcher; {INSTALL_HINT}"
+            f"not a script or launcher; {install_hint()}"
         ) from exc
 
 
