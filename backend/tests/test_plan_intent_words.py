@@ -87,6 +87,16 @@ def test_add_resolves_a_person_authority_quote_through_the_message_producer(db):
     }
 
 
+def test_node_owner_thread_names_the_plan_owning_thread(db):
+    from plans.public import node_owner_thread
+
+    plan = service.ensure_plan("thread", "root", db=db)
+    node = service.add_node(plan.id, kind="task", title="Owned", acceptance_criteria="Read", intent="Own it", db=db)
+
+    assert node_owner_thread(node.id, db=db) == "root"
+    assert node_owner_thread("no-such-node", db=db) is None
+
+
 @pytest.mark.parametrize("operation", ("add", "insert"))
 def test_add_and_insert_refuse_missing_intent(db, operation):
     plan = service.ensure_plan("thread", "root", db=db)

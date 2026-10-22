@@ -130,6 +130,8 @@ from plans.status_context import render as render_status
 # The status a plan write left owed: drained before a digest (infra/passive_changes)
 # and swept at startup (app_lifecycle).
 from plans.status_drain import drain_for_digest as drain_status_for_digest, sweep as sweep_owed_status
+# The person's new words, matched against running tasks off-path (jobs/corrections_recording).
+from plans.person_input import arrived as person_words_arrived
 
 
 def intent_of(node_id: str, *, db) -> dict:
@@ -144,6 +146,18 @@ def intent_of(node_id: str, *, db) -> dict:
             "intent": source["intent"], "acceptance_criteria": source["acceptance_criteria"],
             "intent_words": intent_words.newest(connection, source["id"]),
         }
+
+
+def node_owner_thread(node_id: str, *, db) -> str | None:
+    """The thread whose plan holds this node, or None for an unknown node or a non-thread plan."""
+    from plans import service
+
+    with service._connection(db) as connection:
+        row = connection.execute(
+            "SELECT p.owner_kind, p.owner_id FROM plan_nodes n JOIN plans p ON p.id = n.plan_id WHERE n.id = ?",
+            (node_id,),
+        ).fetchone()
+    return row["owner_id"] if row is not None and row["owner_kind"] == "thread" else None
 
 
 # Notifications raised by a plan write, driven after its commit.

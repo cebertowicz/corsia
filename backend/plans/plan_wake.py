@@ -40,13 +40,15 @@ CHILD_RETURNED = "child_returned"
 REVISION_REQUESTED = "revision_requested"
 #: A canonical task's requirements changed while this thread has live work under it.
 INTENT_REVISED = "intent_revised"
+#: The person's new words may bear on a running task this thread owns (``plans.person_input``).
+INTENT_INPUT = "intent_input"
 #: A task one of this thread's tasks depends on settled: in another plan, or
 #: failed or closed by someone else in its own (``plans.cross_plan``).
 PREREQUISITE_SETTLED = "prerequisite_settled"
 #: A conductor-added task in another agent's plan reached a terminal outcome.
 CONDUCTOR_TASK_SETTLED = "conductor_task_settled"
 
-def wake_id(kind: str, subject_id: str, revision: int, about: str | None = None) -> str:
+def wake_id(kind: str, subject_id: str, revision: int | str, about: str | None = None) -> str:
     """The durable identity of one wake, so a reader can ask whether it was sent."""
     return f"plan-wake:{kind}:{subject_id}:{revision}" + (f":{about}" if about else "")
 
@@ -116,7 +118,7 @@ def append(
     recipient: str,
     kind: str,
     subject_id: str,
-    revision: int,
+    revision: int | str,
     plan_id: str,
     content: str,
     delegated_step_id: str | None = None,
@@ -213,9 +215,9 @@ def with_next(db, plan_id: str, executor: str, line: str, **facts) -> str:
     from plans import close_next
 
     block = close_next.executor_next(db, plan_id, executor)
-    related = node_start_recall.related_for_next(db, block, caller_thread_id=executor)
-    if related:
-        facts[node_start_recall.RESULT_KEY] = related
+    prior_words = node_start_recall.related_for_next(db, block, caller_thread_id=executor)
+    if prior_words:
+        facts[node_start_recall.RESULT_KEY] = prior_words
     return f"{line}\n{json.dumps({**facts, 'next': block}, sort_keys=True)}"
 
 
