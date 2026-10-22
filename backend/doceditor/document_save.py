@@ -270,9 +270,9 @@ def _write_document(
         else:
             artifact = registry_service.resolve_file_identity(str(resolved), db=db)
             if artifact is not None:
-                from registry.review_edit_journal import journal_reviewed_edit
+                from registry.review_edit_journal import note_content_edit
 
-                journal_reviewed_edit(
+                note_content_edit(
                     db, artifact, previous_sha256=prior_sha256,
                     new_sha256=new_sha256, actor_thread_id=UI_THREAD,
                 )
