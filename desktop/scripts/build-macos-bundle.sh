@@ -172,6 +172,11 @@ fetch_verified "$OMLX_URL" "$BUILD_ROOT/downloads/$OMLX_WHEEL" "$OMLX_SHA256"
 PYTHONPATH="$BUNDLE_ROOT/python/backend-packages" "$PYTHON" -m pip check
 PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 
+# Nothing may write bytecode into the signed bundle: an added __pycache__ breaks
+# its seal, and Update refuses to stage from an app whose seal is broken.
+printf 'import sys\nsys.dont_write_bytecode = True\n' \
+  >"$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/sitecustomize.py"
+
 build_git_runtime
 fetch_agent_browser
 fetch_safehouse
@@ -199,6 +204,8 @@ readonly APP="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle
 readonly DMG_DIR="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
 readonly DMG="$DMG_DIR/CORSIA-unsigned-aarch64.dmg"
 [ -d "$APP" ] || fail "Tauri did not produce $APP"
+# scripts/corsia.d/app_mode.sh runs Contents/MacOS/CORSIA to stage, swap and roll back an update.
+[ -x "$APP/Contents/MacOS/CORSIA" ] || fail "$APP has no Contents/MacOS/CORSIA, so Update could never run"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $macos_short_version" "$APP/Contents/Info.plist"
 # SMAppService discovers this static, signed definition inside the app bundle.
 # It intentionally contains no per-user environment; the launcher reads the
