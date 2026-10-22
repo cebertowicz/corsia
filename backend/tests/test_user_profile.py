@@ -77,13 +77,15 @@ def test_a_new_profile_holds_the_answer_and_the_macs_timezone(first_account, mon
     assert (first_account / PROFILE).read_text() == (
         "# User profile\n\n"
         "- **Preferred name:** Patricia\n"
+        "- **Full name:** Patricia\n"
         "- **Timezone:** America/Los_Angeles. Give every time and timestamp in this zone, never UTC.\n"
     )
 
 
 def test_an_empty_answer_takes_the_full_name_on_this_mac(first_account, monkeypatch):
     assert _add(monkeypatch, tty=True, answer="") == 0
-    assert "- **Preferred name:** Pat Example\n" in (first_account / PROFILE).read_text()
+    text = (first_account / PROFILE).read_text()
+    assert "- **Preferred name:** Pat\n- **Full name:** Pat Example\n" in text
 
 
 def test_with_no_terminal_it_asks_nothing_and_uses_the_macs_full_name(first_account, monkeypatch):
@@ -96,7 +98,7 @@ def test_with_no_terminal_it_asks_nothing_and_uses_the_macs_full_name(first_acco
     monkeypatch.setattr(sys, "stdin", stdin)
     args = argparse.Namespace(name="pat", password_stdin=False)
     assert cli_accounts.cmd_user_add(args) == 0
-    assert "- **Preferred name:** Pat Example\n" in (first_account / PROFILE).read_text()
+    assert "- **Full name:** Pat Example\n" in (first_account / PROFILE).read_text()
 
 
 def test_an_existing_profile_is_never_changed(first_account, monkeypatch, capsys):
@@ -134,7 +136,26 @@ def test_the_timezone_is_read_from_the_macs_localtime_link(tmp_path, monkeypatch
 
 
 def test_a_mac_that_reports_no_timezone_leaves_that_line_out():
-    assert user_profile.profile_text("Pat", "") == "# User profile\n\n- **Preferred name:** Pat\n"
+    assert user_profile.profile_text("Pat", "") == (
+        "# User profile\n\n- **Preferred name:** Pat\n- **Full name:** Pat\n"
+    )
+
+
+def test_a_full_name_seeds_its_first_word_as_the_preferred_name():
+    text = user_profile.profile_text("  Ada   Lovelace ", "")
+    assert "- **Preferred name:** Ada\n- **Full name:** Ada Lovelace\n" in text
+    assert "- **Preferred name:** Cher\n- **Full name:** Cher\n" in user_profile.profile_text("Cher", "")
+
+
+def test_profile_full_name_is_sanitized_bounded_and_empty_when_absent(first_account):
+    assert user_profile.profile_full_name(first_account) == ""
+    path = first_account / PROFILE
+    path.parent.mkdir()
+    path.write_text("- **Preferred name:** Pat\n", encoding="utf-8")
+    assert user_profile.profile_full_name(first_account) == ""
+    path.write_text("- **Full name:** Pat\x01 " + "x" * 130 + "\n", encoding="utf-8")
+    assert user_profile.profile_full_name(first_account) == "Pat " + "x" * 116
+    assert user_profile.profile_name(first_account) == ""
 
 
 def _add_with_answers(monkeypatch, *answers: str) -> int:

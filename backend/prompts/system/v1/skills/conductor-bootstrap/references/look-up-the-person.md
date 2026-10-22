@@ -8,7 +8,7 @@ When `web_search_ready` was already true before step 4, so no key was saved in t
 
 ## A. What you start from
 
-1. Name: `user_profile` `name`. When it is empty, post `What's your full name? I'll use it to look you up.` and wait for the answer.
+1. Name: `user_profile` `full_name`, else `name`. When both are empty, post `What's your full name? I'll use it to look you up.` and wait for the answer.
 2. Domain: the part of the person's email after the `@` (the `- **Email:**` line of the workspace's `context/50-USER-PROFILE.md`). Use it only when a `web_search` of the domain alone returns a page on that domain (the company's own site); that search counts toward the limit of 6. Otherwise leave it out. Never put the full address in a query.
 3. What the import kept: their work, their city, a GitHub handle or website.
 4. This Mac's time zone: the `Timezone` line of the workspace `USER.md` if it has one, else `date +%Z`.
