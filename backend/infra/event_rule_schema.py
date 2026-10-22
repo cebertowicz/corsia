@@ -51,7 +51,7 @@ EVENT_RULE_SCHEMA_SQL = f"""
         CHECK (action = 'deliver' OR "to" = 'thread:' || created_by)
     );
     CREATE INDEX IF NOT EXISTS idx_event_rules_type
-        ON event_rules(scope, connector, event_type, enabled);
+        ON event_rules(connector, event_type, enabled, scope, created_at);
     CREATE INDEX IF NOT EXISTS idx_event_rules_scope
         ON event_rules(scope, created_at);
 

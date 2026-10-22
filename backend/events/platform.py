@@ -22,7 +22,7 @@ from dataclasses import dataclass, replace
 from collections.abc import Iterable
 from typing import Any, Callable
 
-from events import dead_letter, rules
+from events import dead_letter, rule_reads, rules
 from events.connectors import EventTypeDecl, get_manifest
 from events.delivery import enqueue_event_wake
 from events.disposition import delivery_disposition
@@ -261,15 +261,6 @@ def emit_route_events(envelope: EventEnvelope, deliveries: Iterable[PlatformDeli
         )
 
 
-def _repository_projects(envelope: EventEnvelope) -> frozenset[str]:
-    """The projects tracking the event's repository; none when unreadable."""
-    manifest = get_manifest(envelope.connector or "")
-    repository = envelope.facts.get(manifest.repository_fact or "")
-    if manifest.repository_projects is None or not repository:
-        return frozenset()
-    return manifest.repository_projects(str(repository)) or frozenset()
-
-
 def apply_webhook_rules_sync(
     envelope: EventEnvelope, watch_event: str, targets: list[Target], *, ends_artifact: bool,
 ) -> rules.RulePlan | None:
@@ -279,13 +270,15 @@ def apply_webhook_rules_sync(
     thread, and this returns the plan so it can drop that delivery or add the
     rules' notes to it. One read when no rule for the type in the event's project
     matches; the write transaction opens only when one does. With no owner and
-    nothing routed, the projects tracking the event's repository are read first
-    (it runs git, so outside the transaction).
+    nothing routed, the projects tracking the event's repository are read first,
+    and only when a self-rule for the type exists (it runs git, so outside the
+    transaction).
     """
     event = rule_event(envelope, watch_event, ends_artifact=ends_artifact)
     anchor = rules.routed(targets)[2]
     if anchor is None:
-        event = replace(event, repository_projects=_repository_projects(envelope))
+        event = replace(event, repository_projects=rule_reads.unrouted_projects(
+            event.connector, event.event_type, envelope.facts))
         if not event.repository_projects:
             return None
     reader = get_db()

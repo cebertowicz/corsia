@@ -362,7 +362,7 @@ async def test_a_rule_fires_when_routing_dead_letters_for_an_inactive_owner(isol
 
 
 @pytest.mark.asyncio
-async def test_webhook_reads_when_routing_chose_no_thread(isolated_db, sent, monkeypatch):
+async def test_webhook_reads_when_routing_chose_no_thread(isolated_db, sent, resolved, monkeypatch):
     from events import rules
 
     _project(P)
@@ -373,15 +373,17 @@ async def test_webhook_reads_when_routing_chose_no_thread(isolated_db, sent, mon
     real = rules.from_row
     monkeypatch.setattr("events.rules.from_row", lambda row: rows.append(row["scope"]) or real(row))
 
-    async def run(number: int, repo: str = REPO) -> list[str]:
+    async def run(number: int, repo: str = REPO) -> tuple[int, int]:
+        """DB reads, and calls to the repository lookup (a policy query and git)."""
         rows.clear()
+        resolved.clear()
         with _statements() as seen:
             await route(MERGED, _merged(number, repo=repo))
-        return _reads(seen)
+        return len(_reads(seen)), len(resolved)
 
     with patch("events.connectors.github_rules.apply_routed_rules", lambda *a, **k: None):
         await run(60)
-        before = await run(61)
+        before, _ = await run(61)
     no_rule = await run(62)
     await _tool("a", operation="create", connector="github", event_type="pr.merged",
                 match=[{"field": "repo", "op": "eq", "value": REPO}])
@@ -391,13 +393,52 @@ async def test_webhook_reads_when_routing_chose_no_thread(isolated_db, sent, mon
     matched_rows = list(rows)
     untracked = await run(64, "nobody/tracks")
 
-    assert len(no_rule) - len(before) == 1
+    # With no self-rule for the type, one read and no repository lookup.
+    assert no_rule == (before + 1, 0)
     assert _decisions(thread_id="a")[-1]["outcome"] == "woke"
     # Only the tracking project's rules are read: Q's rule for another repository is not.
     assert matched_rows == [f"project:{P}"] * 2  # the read-only check, then evaluation
-    assert len(untracked) == len(before) and rows == []
-    print(f"unrouted webhook reads: dev={len(before)} no_rule=+{len(no_rule) - len(before)} "
-          f"matched=+{len(matched) - len(before)} untracked=+{len(untracked) - len(before)}")
+    assert matched[1] == 1
+    assert untracked == (before + 1, 1) and rows == []
+    print(f"unrouted webhook (DB reads, lookups): dev=({before}, 0) "
+          f"no_rule=+({no_rule[0] - before}, {no_rule[1]}) "
+          f"matched=+({matched[0] - before}, {matched[1]}) "
+          f"untracked=+({untracked[0] - before}, {untracked[1]})")
+
+
+@pytest.mark.asyncio
+async def test_an_unrouted_event_with_no_self_rule_never_looks_up_its_repository(
+        isolated_db, sent, resolved):
+    _project(P, conductor="cond")
+    _agent("cond")
+    _agent("a")
+    _agent("b")
+    # Rules that can't fire on an event no one routed: another type, someone
+    # else's recipient, and a disabled self-rule.
+    made = [
+        await _tool("a", operation="create", connector="github", event_type="pr.synchronize",
+                    match=[{"field": "repo", "op": "eq", "value": REPO}]),
+        await _tool("cond", operation="create", connector="github", event_type="pr.merged",
+                    to="thread:b", mode="digest"),
+        await _tool("a", operation="create", connector="github", event_type="pr.merged",
+                    match=[{"field": "repo", "op": "eq", "value": REPO}]),
+    ]
+    assert all(isinstance(rule, dict) for rule in made), made
+    assert (await _tool("a", operation="disable", rule_id=made[2]["id"]))["enabled"] is False
+    resolved.clear()
+
+    await route(MERGED, _merged(70))
+
+    assert resolved == [] and _decisions() == []
+    # That read, and the project-scoped lookup, both search the one type index.
+    for query, args in (
+            ("SELECT 1 FROM event_rules WHERE connector=? AND event_type=? AND enabled=1 "
+             "AND action='deliver' AND \"to\"='thread:' || created_by LIMIT 1", ()),
+            ("SELECT * FROM event_rules WHERE scope=? || (SELECT project_id FROM threads "
+             "WHERE id=?) AND connector=? AND event_type=? AND enabled=1 ORDER BY created_at, id",
+             ("project:", "a"))):
+        [plan, *_] = _rows(f"EXPLAIN QUERY PLAN {query}", *args, "github", "pr.merged")
+        assert "USING INDEX idx_event_rules_type (connector=?" in plan["detail"]
 
 
 # -- Burst -----------------------------------------------------------------------------------
