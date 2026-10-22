@@ -16,6 +16,10 @@ Agents do this through the `skill_library` tool:
 
 If the library can't be reached, search uses the last copy it fetched and says how old that is. Install and update stop and say to try again later.
 
+## Community improvements consent
+
+The library works only after the person says yes to using community improvements. The first chat asks, and the person can change the answer any time by telling an agent. CORSIA stores that answer in the `Use community improvements` line of the profile. Until then, search, install, and update are refused; remove still works for a copy the agent already has. Change notices stop while the library is off, but withdrawal notices continue so agents can stop loading withdrawn copies.
+
 ## Adapting an installed skill
 
 An installed copy is the agent's own to change, but a changed copy is no longer the library's version. Before an update or removal replaces the agent's changes, it lists the changed files and asks the agent to confirm.
