@@ -119,7 +119,7 @@ for (const [label, width, height, colorScheme] of [
 			const pickOne = await openDesktopChatDecision(page, request, `recommendation-frame-${label}`);
 			await expect(pickOne.getByText('Why', { exact: true })).toBeVisible();
 			await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible();
-			await capture(page, testInfo, `pick-one-recommended-b-${label}`);
+			await capture(page, testInfo, `pick-one-recommended-${label}`);
 
 			await page.unroute('**/api/attention/queue');
 			await seedQueue(page, { external_id: 'decision-1', renderer: 'decision', detail: decision({
@@ -143,7 +143,7 @@ for (const [label, width, height, colorScheme] of [
 		} else {
 			const pickOne = await openScenario(page, 'one');
 			await expect(pickOne.getByText('Why', { exact: true })).toBeVisible();
-			await capture(page, testInfo, `pick-one-recommended-b-${label}`);
+			await capture(page, testInfo, `pick-one-recommended-${label}`);
 
 			const pickAny = await openScenario(page, 'pick-any');
 			await expect(pickAny.getByRole('checkbox').nth(0)).toBeChecked();

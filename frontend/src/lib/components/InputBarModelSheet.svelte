@@ -102,7 +102,7 @@
 	function openRolloverSettings() {
 		threadSettingsOpen.set(false);
 		if (activeThread?.project_id) openProjectSettings(activeThread.project_id, 'project-provider-policy');
-		else requestSettingsSection('providers', 'workspace-provider-policy');
+		else requestSettingsSection('providers');
 		onclose();
 	}
 

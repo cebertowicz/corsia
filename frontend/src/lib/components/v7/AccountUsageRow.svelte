@@ -21,6 +21,8 @@
 		compact?: boolean;
 		/** Rollover position, shown only while rollover is on. */
 		order?: number | null;
+		/** A short account marker that stays with the account name. */
+		marker?: string | null;
 		/** Settings: controls beside the row. */
 		children?: Snippet;
 		/** Picker: the account the next turn runs on. */
@@ -32,7 +34,7 @@
 		onselect?: () => void;
 	}
 
-	const { account, variant = 'settings', compact = false, order = null, children, marked = false, choosable = true, pending = false, onselect }: Props = $props();
+	const { account, variant = 'settings', compact = false, order = null, marker = null, children, marked = false, choosable = true, pending = false, onselect }: Props = $props();
 	const label = $derived(account.label);
 	const hasEmail = $derived(!!label.email && label.email !== label.name);
 	const usageLimit = $derived(account.usage?.state === 'limited' ? formatUsageLimit(account.usage) : null);
@@ -73,9 +75,10 @@
 {:else}
 	<div class="account-usage-row" class:compact class:ordered={order !== null}>
 		{#if order !== null}<span class="order" aria-label={`Rollover order ${order}`}>{order}</span>{/if}
-		<strong>{label.name}{#if hasEmail}{' · '}<span class="email">{label.email}</span>{/if}</strong>
+		<strong><span class="name">{label.name}</span>{#if marker}<span class="separator" aria-hidden="true">{' · '}</span><span class="marker">{marker}</span>{/if}{#if hasEmail}<span class="separator" aria-hidden="true">{' · '}</span><span class="email">{label.email}</span>{/if}</strong>
 		{#if usageLimit}
-			<p class="usage" aria-label="Account usage">{usageLimit}</p>
+			<!-- A limited account cannot run a turn: red, as the picker shows it. -->
+			<p class="usage" aria-label="Account usage"><span class="red">{usageLimit}</span></p>
 		{:else if segments.length}
 			<p class="usage" aria-label={`Account usage: ${usageLabel}`}>
 				{#each segments as segment, index (index)}
@@ -94,14 +97,22 @@
 	.account-usage-row { min-width: 0; }
 	strong { display: block; color: var(--text-primary); font-size: var(--text-subhead); overflow-wrap: anywhere; }
 	.email { color: var(--text-secondary); font-weight: 400; }
+	.marker { margin-left: var(--space-1); color: var(--text-secondary); font-size: var(--text-caption); font-weight: 400; }
 	.usage { margin: 3px 0 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 	.usage .amber { color: var(--amber-text); }
 	.usage .red { color: var(--red-text); }
-	.compact { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
-	.compact strong { min-width: 0; font-size: var(--text-footnote); font-weight: 600; }
-	.compact .usage { margin: 0 0 0 auto; text-align: right; white-space: nowrap; }
-	.order { flex: 0 0 auto; color: var(--text-secondary); font-size: var(--text-footnote); font-variant-numeric: tabular-nums; }
-	.controls { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+	/* Compact is a Settings list row: row-name type, usage as trailing detail, space alone between rows. */
+	.compact { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: var(--space-2); row-gap: var(--space-1); min-width: 0; min-height: var(--list-row-min-height); }
+	.compact.ordered { grid-template-columns: var(--space-3) minmax(0, 1fr) auto auto; }
+	.compact strong { grid-column: 1; min-width: 0; font-size: var(--text-subhead); font-weight: 400; }
+	.compact.ordered > strong { grid-column: 2; }
+	.compact .usage { grid-column: 2; margin: 0; text-align: right; white-space: nowrap; font-size: var(--text-caption); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+	.compact.ordered > .usage { grid-column: 3; }
+	.order { grid-column: 1; color: var(--text-secondary); font-size: var(--text-footnote); font-variant-numeric: tabular-nums; text-align: center; }
+	/* The shared control and status are separate grid participants, so status never widens controls. */
+	.compact .controls, .compact :global(.provider-account-policy-control) { display: contents; }
+	.compact :global(.provider-account-policy-controls) { grid-column: -2 / -1; grid-row: 1; justify-self: end; }
+	.compact :global(.policy-status) { grid-column: 1 / -1; justify-self: end; text-align: right; }
 
 	/* Picker: one compact line under the vendor's group header, set in with the model rows. */
 	.account-usage-row.picker {
@@ -139,11 +150,17 @@
 	@media (max-width: 480px) {
 		.figures { flex-basis: 100%; margin-left: 0; text-align: left; }
 		/* Phone: name and usage stack in the middle column; order and controls stay beside them. */
-		.compact { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; row-gap: 2px; }
-		.compact.ordered { grid-template-columns: auto minmax(0, 1fr) auto; }
+		.compact { grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--space-2); row-gap: var(--space-1); }
+		/* Match the ordered detail indent to this fixed gutter, rather than a numeral's glyph width. */
+		.compact.ordered { grid-template-columns: var(--space-3) minmax(0, 1fr) auto; }
 		.compact > strong, .compact > .usage { grid-column: -3 / -2; }
 		.compact .usage { margin: 0; text-align: left; white-space: normal; }
-		.compact > .order { grid-column: 1; grid-row: 1 / span 2; }
-		.compact > .controls { grid-column: -2 / -1; grid-row: 1 / span 2; }
+		.compact > .order { grid-column: 1; grid-row: 1 / span 2; align-self: start; }
+		.compact :global(.provider-account-policy-controls) { grid-column: -2 / -1; grid-row: 1 / span 2; }
+		.compact :global(.policy-status) { grid-column: -3 / -1; justify-self: end; }
+		.compact strong { display: flex; flex-wrap: wrap; align-items: baseline; }
+		.compact strong .email { flex-basis: 100%; }
+		.compact strong .separator { display: none; }
+		.compact strong .marker { flex: 0 0 auto; }
 	}
 </style>

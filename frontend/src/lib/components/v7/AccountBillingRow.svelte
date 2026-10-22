@@ -94,7 +94,7 @@
 			{#if overageError}<Message variant="err">{overageError}</Message>{/if}
 		{:else}
 			<div class="overage-line">
-				<Button size="sm" variant="secondary" onclick={openOverage}>Add overage</Button>
+				<Button size="sm" variant="ghost" onclick={openOverage}>Add overage</Button>
 				{#if recorded}<span role="status">{recorded}</span>{/if}
 			</div>
 		{/if}

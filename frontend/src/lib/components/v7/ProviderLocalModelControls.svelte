@@ -38,7 +38,7 @@
 {#if corsiaManaged && lowMemory}
 	<div class="local-refusal">
 		<p>{LOW_MEMORY_LOCAL_MODEL_MESSAGE}</p>
-		<Button size="sm" variant="secondary" onclick={onAddProvider}>Add provider</Button>
+		<Button size="sm" variant="ghost" onclick={onAddProvider}>Add provider</Button>
 	</div>
 {:else if corsiaManaged}
 	<div class="add-local">
@@ -50,7 +50,12 @@
 {/if}
 
 <style>
-	.add-local, .local-refusal { padding: var(--space-2) var(--space-3); }
-	.local-refusal { color: var(--text-secondary); font-size: var(--text-footnote); }
+	/* Nested-list actions start on the provider's name column, like its rows and messages. */
+	.add-local, .local-refusal {
+		margin-left: calc(var(--space-2) + var(--project-mark-size) + var(--space-3));
+		margin-right: var(--space-2);
+		padding: var(--space-1) 0;
+	}
+	.local-refusal { color: var(--text-tertiary); font-size: var(--text-caption); }
 	.local-refusal p { margin: 0 0 var(--space-1); }
 </style>

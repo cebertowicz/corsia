@@ -126,13 +126,13 @@ describe('SystemBulletinsSetting', () => {
 		expect(host.querySelector('[role="alert"]')).toBeNull();
 	});
 
-	it('shows the error in its own card when saving fails', async () => {
+	it('shows the save error as its own line when saving fails', async () => {
 		stubSettingsApi(false, () => ({ live_bulletins: { enabled: true } }));
 		render();
 		toggle().click();
 
 		await vi.waitFor(() => {
-			expect(host.querySelector('.settings-error')?.textContent).toContain('Bulletin preference could not be saved.');
+			expect(host.querySelector('.error')?.textContent).toContain('Bulletin preference could not be saved.');
 		});
 		expect(toggle().getAttribute('aria-pressed')).toBe('true');
 	});
@@ -150,7 +150,7 @@ describe('SystemBulletinsSetting', () => {
 			});
 			expect(toggle().getAttribute('aria-pressed')).toBe(String(to));
 			expect(toggle().disabled).toBe(false);
-			expect(host.querySelector('.settings-error')).toBeNull();
+			expect(host.querySelector('.error')).toBeNull();
 		});
 	}
 

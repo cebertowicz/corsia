@@ -208,12 +208,16 @@ def test_cloud_models_off_round_trips_and_rejects_a_non_bool(client):
     assert client.get(path, headers=_h(SESSION)).json()["cloud_models_off"] is True
 
 
-def test_cloud_models_off_on_an_unknown_project_uses_the_policy_error_shape(client):
+def test_cloud_models_off_on_an_unknown_project_uses_the_policy_error_shape(client, monkeypatch):
+    effects = []
+    monkeypatch.setattr("api.provider_policy.notify_models_changed", lambda: effects.append("notify"))
+    monkeypatch.setattr("api.provider_policy.emit_product_event", lambda *a, **k: effects.append("event"))
     refused = client.put("/api/projects/nope/cloud-models-off", json={"cloud_models_off": True}, headers=_h(SESSION))
     existing = client.put("/api/projects/nope/provider-policy/use-workspace",
                           json={"expected_revision": 0, "use_workspace": False}, headers=_h(SESSION))
-    assert (refused.status_code, refused.json()) == (409, {"detail": "project does not exist"})
+    assert (refused.status_code, refused.json()) == (404, {"detail": "project does not exist", "code": "project_not_found"})
     assert (existing.status_code, existing.json()) == (refused.status_code, refused.json())
+    assert effects == []
 
 
 def test_private_mark_shows_on_the_server_list_and_unknown_server_404s(client):
