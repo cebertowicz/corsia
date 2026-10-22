@@ -1,9 +1,11 @@
 """Agent-written event rules and the record of what each one did.
 
-Shared by fresh installs and migration 136. ``event_rules`` holds only rules an
-agent wrote through the ``event_rules`` tool: no row is seeded, and today's
-routing stays in code. ``event_route_decisions`` is the one outcome record for
-those rules; the tool's list, explain and the hourly wake budget read it.
+Shared by fresh installs and migrations 136 and 138. ``event_rules`` holds only
+rules an agent wrote through the ``event_rules`` tool: no row is seeded, and
+today's routing stays in code. ``event_route_decisions`` is the one outcome
+record for those rules; the tool's list, explain and the hourly wake budget read
+it, and a ``run_script`` rule's row is also its run's queue until the script
+runner settles it.
 """
 from __future__ import annotations
 
@@ -39,15 +41,18 @@ EVENT_RULE_SCHEMA_SQL = f"""
             CHECK (json_valid("match") AND json_type("match") = 'array'
                    AND json_array_length("match") <= 4)
             CHECK ({_MATCH_CHECKS}),
-        action TEXT NOT NULL CHECK (action IN ('deliver', 'drop')),
+        action TEXT NOT NULL CHECK (action IN ('deliver', 'drop', 'run_script')),
         "to" TEXT NOT NULL CHECK ("to" = 'registered_owner' OR "to" LIKE 'thread:_%'),
         mode TEXT CHECK (COALESCE((action = 'deliver' AND mode IN ('wake', 'digest'))
-                                  OR (action = 'drop' AND mode IS NULL), 0)),
+                                  OR (action != 'deliver' AND mode IS NULL), 0)),
         note TEXT CHECK (note IS NULL OR (action = 'deliver' AND length(note) <= 500)),
         origin TEXT NOT NULL,
         created_by TEXT NOT NULL,
         authority_ref TEXT NOT NULL,
-        -- A drop removes only its writer's own deliveries.
+        -- run_script: the writer's own script schedule, which it runs with the event's facts.
+        script_id TEXT CHECK ((action = 'run_script') = (script_id IS NOT NULL)),
+        -- A drop removes only its writer's own deliveries, and a script run is the writer's own.
+        -- (No semicolon in these comments: migration 139 runs this text statement by statement.)
         CHECK (action = 'deliver' OR "to" = 'thread:' || created_by)
     );
     CREATE INDEX IF NOT EXISTS idx_event_rules_type
@@ -68,10 +73,13 @@ EVENT_RULE_SCHEMA_SQL = f"""
         rule_id TEXT NOT NULL,
         thread_id TEXT,
         outcome TEXT NOT NULL CHECK (outcome IN (
-            'woke', 'digested', 'dropped', 'held', 'dead_lettered', 'ended', 'duplicate')),
+            'woke', 'digested', 'dropped', 'held', 'dead_lettered', 'ended', 'duplicate',
+            'queued', 'running', 'ran', 'failed', 'skipped')),
         -- 'routed': the rule rode a delivery today's routing already made.
         via TEXT NOT NULL CHECK (via IN ('rule', 'routed')),
-        reason TEXT
+        reason TEXT,
+        -- A queued run's input (the event and its rule chain), cleared when the run is claimed.
+        run_input TEXT CHECK (run_input IS NULL OR (outcome = 'queued' AND json_valid(run_input)))
     );
     CREATE INDEX IF NOT EXISTS idx_event_route_decisions_rule
         ON event_route_decisions(rule_id, thread_id, outcome, at);
@@ -81,4 +89,8 @@ EVENT_RULE_SCHEMA_SQL = f"""
         ON event_route_decisions(artifact_external_id, at);
     CREATE INDEX IF NOT EXISTS idx_event_route_decisions_at
         ON event_route_decisions(at);
+    -- The run queue in order (outcome = 'queued' ORDER BY id) and the runs in flight. Not partial:
+    -- SQLite uses a partial index only when the query repeats its WHERE term, and these bind the outcome.
+    CREATE INDEX IF NOT EXISTS idx_event_route_decisions_runs
+        ON event_route_decisions(outcome, id);
 """

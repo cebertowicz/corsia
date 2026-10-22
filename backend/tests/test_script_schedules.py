@@ -435,6 +435,18 @@ def test_script_command_caps_stdout_and_keeps_exit_code(tmp_path):
     assert len(result.stdout) == STDOUT_CAP_BYTES + 1
     assert result.returncode != 0
 
+
+def test_script_command_reads_its_input_file_on_stdin_and_nothing_without_one(tmp_path):
+    path = tmp_path / "echo.sh"
+    path.write_text("#!/bin/bash\ncat\n")
+    path.chmod(0o755)
+    given = tmp_path / "input.json"
+    given.write_text('{"type": "qa.route"}')
+    read = subprocess.run(["bash", "-c", script_command(path, given)], capture_output=True, timeout=30)
+    none = subprocess.run(["bash", "-c", script_command(path)], capture_output=True, timeout=30)
+    assert (read.returncode, read.stdout) == (0, b'{"type": "qa.route"}')
+    assert (none.returncode, none.stdout) == (0, b"")
+
 def test_deleting_the_owner_removes_its_schedules_and_the_thread(tmp_path):
     from core.thread_family import delete_thread_family
 
@@ -500,6 +512,14 @@ def test_tool_registers_script_and_lists_its_status(isolated_db, tmp_path, monke
     listed = automations._operate("owner", actor, "list", {})["schedules"]
     assert [item["id"] for item in listed] == [created["id"]]
     assert listed[0]["last_status"] is None
+    rules_only = automations._operate(
+        "owner", actor, "schedule", {"kind": "script", "script_path": str(path)},
+    )["schedule"]
+    assert (rules_only["state"], rules_only["spec"], rules_only["next_run_at"]) == ("active", "rules", None)
+    assert rules_only["runs_from"].startswith("event rules only")
+    shown = {item["id"]: item for item in automations._operate("owner", actor, "list", {})["schedules"]}
+    assert shown[rules_only["id"]]["next_run_at"] is None and "runs_from" not in shown[created["id"]]
+    assert shown[rules_only["id"]]["runs_from"].startswith("event rules only")
     with pytest.raises(ValueError, match="script_path"):
         automations._operate("owner", actor, "schedule", {"kind": "script"})
     with pytest.raises(ValueError, match="spec"):

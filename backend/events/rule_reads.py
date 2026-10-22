@@ -40,7 +40,7 @@ def enabled_rules(
 
 
 _TYPE_RULES = "FROM event_rules WHERE connector=? AND event_type=? AND enabled=1"
-_SELF_RULES = f"{_TYPE_RULES} AND action='deliver' AND \"to\"='thread:' || created_by"
+_SELF_RULES = f"{_TYPE_RULES} AND action IN ('deliver','run_script') AND \"to\"='thread:' || created_by"
 
 
 def _manifest(connector: str) -> Any:
@@ -54,7 +54,7 @@ def _manifest(connector: str) -> Any:
 
 
 def self_rules(db: sqlite3.Connection, connector: str, event_type: str) -> list[sqlite3.Row]:
-    """Every enabled deliver rule to its own writer for one type, in any project."""
+    """Every enabled deliver or run_script rule to its own writer for one type, in any project."""
     return db.execute(f"SELECT * {_SELF_RULES} ORDER BY created_at, id",
                       (connector, event_type)).fetchall()
 

@@ -39,6 +39,20 @@ def _print_error(code: str, text: str, fix: str | None = None) -> None:
     print(f"error: {format_event_error(code, text, fix)}", file=sys.stderr)
 
 
+def _trace() -> tuple[str, ...] | None:
+    """The rule chain the script runner set for a rule-started run; ``None`` if malformed."""
+    from events.trace_env import TRACE_ENV, parse
+
+    raw = os.environ.get(TRACE_ENV)
+    if raw is None:
+        return ()
+    try:
+        return parse(raw)
+    except ValueError as exc:
+        print(f"error: usage: {exc}. Run corsia event emit --help.", file=sys.stderr)
+        return None
+
+
 def _cmd_emit(args: argparse.Namespace) -> int:
     from events.intake import admit_event, emitted_event_id, failure_code
 
@@ -46,12 +60,15 @@ def _cmd_emit(args: argparse.Namespace) -> int:
     if not session:
         print("error: usage: pass --as-session or set CORSIA_THREAD_ID. Run corsia event emit --help.", file=sys.stderr)
         return 2
+    trace = _trace()
+    if trace is None:
+        return 2
     facts = _read_facts(args.facts)
     event_id = emitted_event_id(args.event_type, args.identity)
     try:
         result = asyncio.run(admit_event(
             event_type=args.event_type, facts=facts, origin="emitter",
-            producer=session, event_id=event_id,
+            producer=session, event_id=event_id, trace=trace,
         ))
     except Exception as exc:  # noqa: BLE001 - split into retryable and defect below
         if failure_code(exc) == "internal_error":

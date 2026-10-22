@@ -25,13 +25,12 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from events import dead_letter, rule_reads, rules
+from events import dead_letter, rules
 from events.connectors import EventTypeDecl, get_manifest
 from events.delivery import enqueue_event_wake
 from events.disposition import delivery_disposition
 from events.envelope import EventEnvelope, normalize
 from events.resolve import Target, lifecycle, resolve_targets
-from events.rule_match import matches, repository_fact
 from infra.database import write_transaction
 from infra.db_async import run_in_db_unless_owned
 from infra.passive_changes import append_thread_context_note
@@ -181,6 +180,7 @@ def rule_event(
     return rules.RuleEvent(
         envelope.event_id, envelope.connector or "", envelope.type,
         watch_event or envelope.type, envelope.facts, envelope.artifact_ref, ends_artifact,
+        trace=tuple(envelope.provenance.get("rule_trace") or ()),
     )
 
 
@@ -312,7 +312,7 @@ def deliver_envelope_sync(
     One write transaction; the plan is returned so intake can say which rules acted.
     ``repository_projects`` (``rule_reads.unrouted_projects``, read before the
     transaction) scope the rules when ``resolve`` routes the event to no thread;
-    ``None``, that lookup failed, and no rule fires there (:func:`lookup_failed`).
+    ``None``, that lookup failed, and no rule fires there (``rules.lookup_failed``).
     """
     with write_transaction(db, scope="deliver_platform_event") as conn:
         targets = resolve(conn)
@@ -324,7 +324,7 @@ def deliver_envelope_sync(
         event = rule_event(envelope)
         plan = None
         if repository_projects is None and rules.routed(targets, skipped)[2] is None:
-            rules.record(conn, event, lookup_failed(conn, event))
+            rules.record(conn, event, rules.lookup_failed(conn, event))
         else:
             event = replace(event, repository_projects=repository_projects or frozenset())
             plan = rules.evaluate(conn, event, targets, skipped=skipped)
@@ -347,20 +347,6 @@ def deliver_envelope_sync(
             rules.record(conn, plan.event, [*outcomes, *added_outcomes])
         emit_route_events(envelope, deliveries)
         return deliveries, plan
-
-
-def lookup_failed(db: sqlite3.Connection, event: rules.RuleEvent) -> list[rules.Outcome]:
-    """Fail closed, as ``create`` does: no self-rule fires on an event routing gave no
-    thread when the projects tracking its repository can't be read; each that matched
-    is dead-lettered with the reason."""
-    repository = event.facts.get(repository_fact(event.connector) or "")
-    logger.warning("event rules: repository lookup failed for {} {} on {}; no self-rule fired",
-                   event.connector, event.event_type, repository)
-    return [
-        rules.Outcome(rule.id, rule.created_by, rules.DEAD_LETTERED, reason=rules.LOOKUP_FAILED)
-        for rule in map(rules.from_row, rule_reads.self_rules(db, event.connector, event.event_type))
-        if matches(rule, event.facts) and rules.self_on_repository(rule)
-    ]
 
 
 def _deliver_routed(
