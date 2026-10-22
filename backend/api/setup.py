@@ -142,6 +142,7 @@ def _ai_check_pending() -> bool:
 
 def _setup_status() -> dict:
     """Build the bounded pre-auth screen facts without exposing machine identity."""
+    from llm.local_setup import ever_started
     from llm.local_setup_gates import local_memory_ok
 
     apple_silicon = platform.system() == "Darwin" and platform.machine().lower() in {"arm64", "aarch64"}
@@ -158,6 +159,7 @@ def _setup_status() -> dict:
         "ram_tier": "eligible" if memory_ok else "below_minimum",
         "free_disk_gb": free_disk_gb,
         "local_eligible": apple_silicon and macos_supported and memory_ok,
+        "local_started": ever_started(),
         "work_folder": _work_folder_display(config.WORKSPACE),
         "required_username": _required_username(),
         "classifier": classifier_state(CLASSIFIER_DOWNLOAD.status()),
