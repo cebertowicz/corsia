@@ -192,6 +192,15 @@ fn default_app_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathB
         .map_err(|error| format!("could not resolve the CORSIA app folder: {error}"))
 }
 
+/// Whether this desktop app has already configured its own local CORSIA. The existing first-run plan owns this
+/// distinction; remote surfaces consume it only to choose their return-action label.
+fn local_corsia_configured<R: tauri::Runtime>(app: &tauri::AppHandle<R>, app_dir: &Path) -> bool {
+    let Ok(home) = app.path().home_dir() else {
+        return false;
+    };
+    matches!(first_run::plan(&home, app_dir), Ok(first_run::FirstRun::Configured))
+}
+
 fn service_log_path(app_dir: &Path) -> Result<PathBuf, String> {
     Ok(app_paths::state_dir_for(app_dir)?
         .join("logs")
@@ -721,9 +730,10 @@ async fn configure_work_folder(app: tauri::AppHandle, path: PathBuf) -> Result<(
 }
 
 fn remote_shell_context(connection: &shell_state::ShellState) -> serde_json::Value {
+    let local_configured = connection.local_corsia_configured();
     match connection.state() {
-        shell_state::LaunchState::Remote { name } => serde_json::json!({ "mode": "remote", "name": name }),
-        _ => serde_json::json!({ "mode": "local" }),
+        shell_state::LaunchState::Remote { name } => serde_json::json!({ "mode": "remote", "name": name, "localConfigured": local_configured }),
+        _ => serde_json::json!({ "mode": "local", "localConfigured": local_configured }),
     }
 }
 
@@ -1139,8 +1149,12 @@ fn pairing_failed(step: &str, cause: impl std::fmt::Debug, response: RemotePairR
 
 async fn pair_remote<R: tauri::Runtime>(target: RemoteTarget, code: &str, app: &tauri::AppHandle<R>, remote: &RemoteRuntime) -> Result<RemotePairResponse, String> {
     use classify::ConnectFailure;
-    update_shell_state(app, |connection| connection.begin_pairing())?;
     let app_dir = default_app_dir(app)?;
+    let local_configured = local_corsia_configured(app, &app_dir);
+    update_shell_state(app, |connection| {
+        connection.set_local_corsia_configured(local_configured);
+        connection.begin_pairing();
+    })?;
     let locator = match target {
         RemoteTarget::DnsSd { instance } => remote_config::Locator::DnsSd { instance },
         RemoteTarget::Address { host, port } => {
@@ -1927,8 +1941,10 @@ pub fn run() {
             // service, whose login item was intentionally removed on pairing.
             if let Ok(app_dir) = default_app_dir(app.handle()) {
                 if let Ok(Some(saved)) = remote_config::load_remote(&app_dir) {
+                    let local_configured = local_corsia_configured(app.handle(), &app_dir);
                     if let Ok(mut connection) = app.state::<RemoteRuntime>().shell.lock() {
                         *connection = shell_state::ShellState::launch(Some(&saved));
+                        connection.set_local_corsia_configured(local_configured);
                     }
                     let app_handle = app.handle().clone();
                     tauri::async_runtime::spawn(async move { connect_saved_remote(app_handle, saved).await; });
@@ -2117,11 +2133,12 @@ mod tests {
             outside: None,
         };
         let mut connection = shell_state::ShellState::launch(Some(&saved));
-        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local" }));
+        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local", "localConfigured": false }));
+        connection.set_local_corsia_configured(true);
         connection.connected("Studio");
-        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "remote", "name": "Studio" }));
+        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "remote", "name": "Studio", "localConfigured": true }));
         connection.failed("Studio", classify::ConnectFailure::Network);
-        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local" }));
+        assert_eq!(remote_shell_context(&connection), serde_json::json!({ "mode": "local", "localConfigured": true }));
     }
 
     #[test]

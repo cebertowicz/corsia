@@ -4,7 +4,7 @@
  * neither, so every remote-connect surface checks `shellInfo()` first.
  */
 
-export type ShellInfo = { mode: 'local' } | { mode: 'remote'; name: string };
+export type ShellInfo = { mode: 'local' } | { mode: 'remote'; name: string; localConfigured: boolean };
 
 export type PairTarget =
 	| { kind: 'dns_sd'; instance: string }
@@ -27,7 +27,9 @@ export function shellInfo(): ShellInfo | null {
 	if (typeof window === 'undefined') return null;
 	const info = (window as ShellWindow).__CORSIA_SHELL__;
 	if (!info) return null;
-	return info.mode === 'remote' && typeof info.name === 'string' ? info : { mode: 'local' };
+	return info.mode === 'remote' && typeof info.name === 'string'
+		? { mode: 'remote', name: info.name, localConfigured: info.localConfigured === true }
+		: { mode: 'local' };
 }
 
 function invoke(command: string, args?: Record<string, unknown>): Promise<unknown> {

@@ -7,6 +7,7 @@
 	import { Button } from '$lib/components/ui';
 	import SetupShell from './SetupShell.svelte';
 	import { saveSetupReport } from '$lib/setupReport';
+	import { disconnectRemote, shellInfo } from '$lib/remoteShell';
 
 	interface Props { onNoAccount?: () => void; }
 	const { onNoAccount }: Props = $props();
@@ -19,6 +20,11 @@
 	let loginError = $state('');
 	let submitting = $state(false);
 	let checkingAgain = $state(false);
+	let returningToThisComputer = $state(false);
+	const shell = shellInfo();
+	const localReturnLabel = shell?.mode === 'remote'
+		? shell.localConfigured ? 'Use this computer instead' : 'Set up this computer instead'
+		: null;
 
 	// Setup is reachable only from the computer CORSIA runs on; the setup routes
 	// answer 403 to anyone else, who keeps the `corsia user add` guidance.
@@ -92,6 +98,17 @@
 		connect();
 	}
 
+	async function returnToThisComputer() {
+		if (returningToThisComputer) return;
+		returningToThisComputer = true;
+		try {
+			await disconnectRemote();
+		} catch {
+			loginError = `CORSIA couldn’t disconnect from ${shell?.mode === 'remote' ? shell.name : 'the other computer'}. Try again.`;
+			returningToThisComputer = false;
+		}
+	}
+
 	$effect(() => {
 		if ($connectionError === 'Invalid or expired session') {
 			loginError = 'Your session ended. Sign in again.';
@@ -148,6 +165,11 @@
 				<Button type="submit" variant="primary" loading={submitting} disabled={submitting}>
 					Sign in
 				</Button>
+				{#if localReturnLabel}
+					<Button variant="chip" onclick={returnToThisComputer} loading={returningToThisComputer} disabled={submitting || returningToThisComputer}>
+						{localReturnLabel}
+					</Button>
+				{/if}
 			</form>
 		{/if}
 	</div>
