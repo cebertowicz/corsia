@@ -88,18 +88,15 @@ class WebSearchTool(Tool):
             if outcome.kind != WORKS:
                 return outcome_line(outcome)
         else:
-            outcome = await run_omlx_search(query)
+            # The keyless engine sometimes answers empty; two short retries usually recover it.
+            for attempt in range(3):
+                if attempt:
+                    await asyncio.sleep(1)
+                outcome = await run_omlx_search(query)
+                if outcome is None or outcome.kind != WORKS or outcome.results:
+                    break
             if outcome is None:
                 return NO_KEY_TEXT
-            for attempt in range(2):
-                if outcome.kind != WORKS:
-                    return outcome_line(outcome)
-                if outcome.results:
-                    break
-                await asyncio.sleep(1)
-                outcome = await run_omlx_search(query)
-                if outcome is None:
-                    return NO_KEY_TEXT
             if outcome.kind != WORKS:
                 return outcome_line(outcome)
             if not outcome.results:
