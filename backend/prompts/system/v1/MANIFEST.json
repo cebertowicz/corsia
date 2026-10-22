@@ -184,10 +184,10 @@
       "sha256": "e7dab36e3d55d8b9eb8c06ac3bb155057e87906567c199c9c800a82e48009939"
     },
     {
-      "bytes": 21649,
+      "bytes": 21641,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "79ae144cef74842f02cd4903629b9231e27288ca3bc30450beedcf6d4bb8c4ff"
+      "sha256": "08b337f32547a178209271e4bb012a643afddfeed42830c83c7180e7eb2664a0"
     },
     {
       "bytes": 17519,
@@ -196,10 +196,10 @@
       "sha256": "c5c00a5c8fe1cc91132db225533f30b36f96162ee6fc8bb8db16a97f1bea2914"
     },
     {
-      "bytes": 910,
+      "bytes": 906,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/import-result-lines.md",
-      "sha256": "2190c320c4b1199e012ca9b1551e3f2ead5865c14abd83e9f1bb8bf71e749900"
+      "sha256": "26983466a27c18f441c5d82482388f5776fdbd6e381e20898fa5a7809d89df35"
     },
     {
       "bytes": 3838,
@@ -208,10 +208,10 @@
       "sha256": "582fe0631a98012f88d545e7b4d4e82a78d9d13d812d6e32a42ca8d40ec2b3b6"
     },
     {
-      "bytes": 10543,
+      "bytes": 10535,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/look-up-the-person.md",
-      "sha256": "9122bd45240a03ed622cfff4000c0dd44a5f993e2dd71f7772b7de0788d7cc1d"
+      "sha256": "ea053f7d947dc6b0552ddf1947b841444a481e9ef4b41aa6ccffcd781b91330a"
     },
     {
       "bytes": 5753,
@@ -232,16 +232,16 @@
       "sha256": "586b814c75cde6491212911ba8c4af4c9131e726585fb2e587a639e000c3a566"
     },
     {
-      "bytes": 5387,
+      "bytes": 5540,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/web-search.md",
-      "sha256": "d8cc3ba205055cee52d3b88b2bcb55d1c3c79aca35d0b794844dc24a9442a6c4"
+      "sha256": "179e93d9f73bbf5f841a5fbea5a2e91c7aab853e88d2aef661a2d9cf7058f673"
     },
     {
-      "bytes": 6127,
+      "bytes": 6123,
       "kind": "skill",
       "path": "skills/connect-tools/SKILL.md",
-      "sha256": "6d7a65b0c04c7c680b81a6b48a98c71e8eb05a305898fd735ccef8518c788b42"
+      "sha256": "ad906d2176feaf8fc887dad61472f0acdc92809b297929b63164d81e3d85a2b8"
     },
     {
       "bytes": 4409,
