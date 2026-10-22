@@ -421,8 +421,9 @@ def test_about_you_loads_the_look_up_reference_and_keeps_the_profile_rule():
     step = _step(5)
 
     assert "Follow `references/look-up-the-person.md`" in step
-    assert "Write only what they said or didn't correct into the workspace `USER.md`" in step
-    assert "their place also sets their time zone" in step
+    assert "Their place sets their time zone, written with no question" in step
+    assert "follow `references/about-you-doc.md`" in step
+    assert "written from the doc they approve, only what they said or didn't correct" in step
 
 
 def test_the_look_up_reference_carries_the_rules_outcomes_questions_and_examples():
@@ -452,6 +453,60 @@ def test_the_look_up_reference_carries_the_rules_outcomes_questions_and_examples
         ("1", "One clear match"), ("2", "Two people with the same name"), ("3", "A famous namesake"), ("4", "Nothing found")]
     assert len(ref.split()) < 2000
     assert not re.search(r"\bAI\b", ref)
+
+
+def test_the_look_up_uses_a_domain_only_when_a_search_finds_a_page_on_it_and_keeps_the_run_fixes():
+    ref = (FIRST_RUN_APP.parent / "look-up-the-person.md").read_text(encoding="utf-8")
+
+    assert "returns a page on that domain" in ref
+    assert "Never put the full address in a query" in ref
+    for provider in ("mail-provider", "gmail.com, googlemail.com", "fastmail.com", "protonmail.com", "consumer-mail"):
+        assert provider not in ref, provider
+    # Nothing found is said out loud before the questions.
+    assert "**Nothing.** Post `I couldn't find anything about you online. That's fine.` and then the questions." in ref
+    # The time zone comes from the place they name, with no question.
+    assert "Tucson is America/Phoenix) and write it at once, with no question" in ref
+    # Question 1 stays whole: ask only the missing parts, in one message.
+    assert "ask only the remaining parts, in the same message as questions 2 and 3, never over two turns" in ref
+    # 'That's not me' about one line drops the line and asks nothing.
+    assert "About one line: drop that line and ask nothing." in ref
+    assert "About the person as a whole: drop every line from that group." in ref
+    # The profile is written only once the doc flow says so.
+    assert ref.count("`references/about-you-doc.md` says to write the profile") == 2
+
+
+def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggestions_only():
+    doc = (FIRST_RUN_APP.parent / "about-you-doc.md").read_text(encoding="utf-8")
+
+    assert "`shared/about-you.md`, outside `.threads/`" in doc and "`document_open`" in doc
+    assert re.findall(r"^## (.+)$", doc.split("```", 2)[1], flags=re.MULTILINE) == [
+        "Who you are", "What you're working toward", "How you like to work"]
+    assert "no text under a heading" in doc
+    assert "Skip this whole reference when they answered none of the questions" in doc
+    # Every line is a suggestion on the heading, never text written into the doc.
+    assert "`doc_comment_create` with `quote` the heading line exactly and `replacement`" in doc
+    assert "never as text you wrote into the doc" in doc
+    # Each heading gets only its own material.
+    assert "**Who you are:** the lookup's kept lines and their answer to question 1." in doc
+    assert "**What you're working toward:** their answer to question 2 and the matches" in doc
+    assert "**How you like to work:** their answer to question 3 and the working-style notes the import kept." in doc
+    assert "A heading with nothing to put under it gets no suggestion." in doc
+    # Cloud: one helper per heading, in parallel, no web search. Local: CORSIA writes it.
+    assert "start one helper per heading that has material, all at once" in doc
+    assert "`plan_node_id` `none`" in doc and "runs no web search" in doc
+    assert "A helper that fails or returns nothing: write that heading's suggestion yourself." in doc
+    assert "`bound_model` `source` is `omlx`): start no helper. Write the suggestions yourself, one heading at a time." in doc
+    # One review ask, worded for the review bar with or without the accept-all button.
+    assert doc.count("Accept them all, or change any line first.") == 1
+    assert "suggest that line again yourself on the text now in the doc. Never wait on a helper" in doc
+    assert "A comment from the person on a line: answer with a suggested change to that line." in doc
+    # On approve CORSIA accepts nothing, removes empty headings, then writes the profile.
+    assert "Accept nothing yourself." in doc
+    assert "Remove any heading left with nothing under it, so no placeholder ever stays" in doc
+    # Failure paths.
+    assert "ask `Keep these?`" in doc
+    assert "\"Not now\", or they carry on with something else: skip to section 5 and write the profile from the chat answers." in doc
+    assert len(doc.split()) < 900
 
 
 def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
