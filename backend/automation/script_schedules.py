@@ -27,6 +27,8 @@ from host_access.credential_sanitizer import sanitize_credential_text
 from infra.database import write_transaction
 
 SCRIPT_KIND = "script"
+#: The spec of a script with no cadence: only ``run_script`` event rules start it.
+RULES_ONLY = "rules"
 MIN_CADENCE_SECONDS = 300
 DEFAULT_TIMEOUT_SECONDS = 60
 MAX_TIMEOUT_SECONDS = 300
@@ -147,17 +149,21 @@ def create_script(
     *,
     script_path: Path,
     script_sha256: str,
-    cadence_seconds: int,
+    cadence_seconds: int | None,
     series: list[Series],
     timeout_seconds: int,
     now: str,
     db,
     workflow: str | None = None,
 ) -> Schedule:
-    """Register one script schedule, due at once, under the per-agent and instance caps."""
-    if isinstance(cadence_seconds, bool) or not (
+    """Register one script schedule, due at once, under the per-agent and instance caps.
+
+    ``cadence_seconds=None`` registers a script only event rules start: the sweep never
+    claims it, so it never runs without an event and never reports no data.
+    """
+    if cadence_seconds is not None and (isinstance(cadence_seconds, bool) or not (
         MIN_CADENCE_SECONDS <= cadence_seconds <= MAX_CADENCE_SECONDS
-    ):
+    )):
         raise ValueError(
             f"cadence_seconds must be between {MIN_CADENCE_SECONDS} and "
             f"{MAX_CADENCE_SECONDS}"
@@ -177,7 +183,8 @@ def create_script(
                 script_path,script_sha256,timeout_seconds)
                VALUES (?,?,?,'script',?,?,?,'active',?,?,?,?,?,?,?)""",
             (
-                schedule_id, thread_id, scope_id, str(cadence_seconds), now,
+                schedule_id, thread_id, scope_id,
+                RULES_ONLY if cadence_seconds is None else str(cadence_seconds), now,
                 UNBOUNDED_RUNS, payload, thread_id, now, now,
                 str(script_path), script_sha256, timeout_seconds,
             ),
@@ -236,13 +243,13 @@ def claim(schedule: Schedule, now: str, *, db) -> bool:
 
 
 def due_scripts(now: str, *, db) -> list[Schedule]:
-    """Active script schedules due and not in flight, oldest first."""
+    """Active script schedules due and not in flight, oldest first; never a rules-only one."""
     rows = db.execute(
         """SELECT * FROM automation_schedules
            WHERE kind='script' AND state='active' AND running_since IS NULL
-             AND next_run_at<=?
+             AND next_run_at<=? AND spec!=?
            ORDER BY next_run_at,id""",
-        (now,),
+        (now, RULES_ONLY),
     ).fetchall()
     return [_row(row) for row in rows]
 

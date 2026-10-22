@@ -512,6 +512,13 @@ def test_tool_registers_script_and_lists_its_status(isolated_db, tmp_path, monke
     listed = automations._operate("owner", actor, "list", {})["schedules"]
     assert [item["id"] for item in listed] == [created["id"]]
     assert listed[0]["last_status"] is None
+    rules_only = automations._operate(
+        "owner", actor, "schedule", {"kind": "script", "script_path": str(path)},
+    )["schedule"]
+    assert (rules_only["state"], rules_only["spec"]) == ("active", "rules")
+    shown = {item["id"]: item for item in automations._operate("owner", actor, "list", {})["schedules"]}
+    assert shown[rules_only["id"]]["next_run_at"] is None and "runs_from" not in shown[created["id"]]
+    assert shown[rules_only["id"]]["runs_from"].startswith("event rules only")
     with pytest.raises(ValueError, match="script_path"):
         automations._operate("owner", actor, "schedule", {"kind": "script"})
     with pytest.raises(ValueError, match="spec"):

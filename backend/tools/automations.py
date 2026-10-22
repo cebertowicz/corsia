@@ -65,11 +65,16 @@ def _check_workflow(thread_id: str, project_id: str | None, workflow: Any) -> No
 
 def _listed(thread_id: str, project_id: str | None, items: list) -> list[dict]:
     """Each schedule as a dict; a script schedule naming a workflow also shows workflow_stale,
-    true when that workflow is no longer one the owner may use (read live, never stored)."""
+    true when that workflow is no longer one the owner may use (read live, never stored).
+    A script with no cadence shows no next run and says only event rules start it."""
     from infra.measure_registry import workflow_problem
     from tools.workflow_owners import workflow_owners
 
     listed = [asdict(item) for item in items]
+    for entry in listed:
+        if entry["kind"] == script_schedules.SCRIPT_KIND and entry["spec"] == script_schedules.RULES_ONLY:
+            entry["next_run_at"] = None
+            entry["runs_from"] = "event rules only: it has no cadence and runs when a run_script rule matches"
     named = [entry for entry in listed if (entry.get("payload") or {}).get("workflow") and entry["kind"] == script_schedules.SCRIPT_KIND]
     if named:
         db = get_db()
@@ -86,9 +91,8 @@ def _script_schedule(thread_id: str, scope_id: str, params: dict, project_id: st
     """Register one model-free script run for the current thread."""
     from infra.config import WORKSPACE
 
-    for name in ("script_path", "cadence_seconds"):
-        if params.get(name) is None:
-            raise ValueError(f"{name} is required for a script schedule")
+    if params.get("script_path") is None:
+        raise ValueError("script_path is required for a script schedule")
     series = script_schedules.parse_series(params.get("series", []))
     if params.get("workflow") is not None:
         _check_workflow(thread_id, project_id, params["workflow"])
@@ -100,7 +104,7 @@ def _script_schedule(thread_id: str, scope_id: str, params: dict, project_id: st
         scope_id,
         script_path=path,
         script_sha256=sha256,
-        cadence_seconds=params["cadence_seconds"],
+        cadence_seconds=params.get("cadence_seconds"),
         series=series,
         timeout_seconds=params.get(
             "timeout_seconds", script_schedules.DEFAULT_TIMEOUT_SECONDS,
@@ -200,7 +204,9 @@ class AutomationScheduleTool(Tool):
             "registration; readings inside bounds reach you as a passive "
             "update. A scheduled run reads nothing on stdin; a run an event_rules "
             "run_script rule starts reads the event as one JSON object, {\"type\", "
-            "\"id\", \"rule_id\", \"facts\"}, and may print nothing. A script schedule "
+            "\"id\", \"rule_id\", \"facts\"}, and may print nothing. Leave out "
+            "cadence_seconds for a script only rules start: it never runs on its own "
+            "and never reports no data. A script schedule "
             "has no expiry: cancel it with "
             "automation_cancel. Check its last_status with automation_list."
         )
@@ -237,7 +243,8 @@ class AutomationScheduleTool(Tool):
                     "type": "integer",
                     "minimum": script_schedules.MIN_CADENCE_SECONDS,
                     "maximum": schedules.MAX_CADENCE_SECONDS,
-                    "description": "script kind: seconds between runs, at least 300.",
+                    "description": "script kind: seconds between runs, at least 300; leave it "
+                                   "out for a script only event_rules run_script rules start.",
                 },
                 "series": {
                     "type": "array",

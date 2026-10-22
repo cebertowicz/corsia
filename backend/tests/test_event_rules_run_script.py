@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -17,8 +17,7 @@ from tests.event_routing_helpers import mk_session
 from tools.event_rules import EventRulesTool
 
 OWNER, OTHER = "run-owner", "run-other"
-#: Schedules register after every sweep below, so only rule runs start.
-_LATER = "2099-01-01T00:00:00+00:00"
+_START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 _DECLARATIONS = """schema: corsia.measures/1
 namespace: qa
@@ -77,14 +76,15 @@ def _tool(thread: str, **kwargs) -> str:
     return asyncio.run(EventRulesTool().execute(_thread_id=thread, **kwargs))
 
 
-def _script(world, name: str, owner: str = OWNER) -> str:
+def _script(world, name: str, owner: str = OWNER, cadence: int | None = None) -> str:
+    """A script schedule; with no cadence only rules start it."""
     path = world["tmp"] / name
     path.write_text(f"# {name}\n")
     db = get_db()
     try:
         return script_schedules.create_script(
             owner, "project-a", script_path=path, script_sha256=script_schedules.file_sha256(path),
-            cadence_seconds=600, series=[], timeout_seconds=30, now=_LATER, db=db,
+            cadence_seconds=cadence, series=[], timeout_seconds=30, now=_START.isoformat(), db=db,
         ).id
     finally:
         db.close()
@@ -105,11 +105,11 @@ def _emits(*lines: tuple[str, str]) -> ScriptRun:
     return ScriptRun(0, out.encode(), b"", False)
 
 
-def _sweep() -> None:
+def _sweep(at: datetime | None = None) -> None:
     """Sweep until no run starts, settling each sweep's runs before the next."""
 
     async def go():
-        now = datetime.now(timezone.utc).isoformat()
+        now = (at or datetime.now(timezone.utc)).isoformat()
         while await script_runner.drive(now):
             await asyncio.gather(*script_runner._in_flight.values())
 
@@ -218,8 +218,39 @@ def test_a_failed_run_reports_to_its_owner_through_the_existing_failure_path(run
         db.close()
     [(outcome, reason)] = _outcomes(rule["id"])
     assert outcome == "failed" and reason == row["last_error"] and "boom" in reason
-    assert (row["last_status"], row["running_since"], row["next_run_at"]) == ("error", None, _LATER)
+    assert (row["last_status"], row["running_since"]) == ("error", None)
     assert runs["driven"] == [OWNER]
+
+
+# A script with no cadence runs only from rules; a cadence script with a rule runs both ways.
+def test_a_rules_only_script_never_runs_on_the_sweep_and_a_cadence_script_runs_both_ways(runs):
+    from automation.schedules import get
+    from tools.automations import _listed
+
+    rules_only = _script(runs, "events-only.sh")
+    both = _script(runs, "both.sh", cadence=86400)
+    _rule(rules_only)
+    _rule(both)
+    for day in range(8):  # eight simulated days of hourly sweeps
+        for hour in range(24):
+            _sweep(_START + timedelta(days=day, hours=hour))
+    assert [name for name, _ in runs["calls"]] == ["both.sh"] * 8
+    assert all(stdin is None for _, stdin in runs["calls"])
+    db = get_db()
+    try:
+        row = db.execute("SELECT runs, last_status, next_run_at FROM automation_schedules WHERE id=?",
+                         (rules_only,)).fetchone()
+        [listed] = _listed(OWNER, "project-a", [get(rules_only, db=db)])
+    finally:
+        db.close()
+    assert (row["runs"], row["last_status"]) == (0, None)  # never ran, so never reported no data
+    assert listed["next_run_at"] is None and listed["runs_from"].startswith("event rules only")
+
+    runs["calls"].clear()
+    event_id = _emit()
+    _sweep(_START + timedelta(days=8, minutes=30))  # day 8's slot is due as well
+    assert sorted((name, stdin["id"] if stdin else "") for name, stdin in runs["calls"]) == [
+        ("both.sh", ""), ("both.sh", event_id), ("events-only.sh", event_id)]
 
 
 # 9 -- create refuses what a run_script rule can't run.
