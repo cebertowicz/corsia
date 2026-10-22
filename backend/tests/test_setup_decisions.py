@@ -37,7 +37,7 @@ GITHUB_NO_ACCOUNT_OPTIONS = [
 ]
 EXPECTED_COMMUNITY = {
     "task_title": GITHUB_TASK,
-    "title": "Should your agents use improvements the community has proven, and offer the ones proven here?",
+    "title": "Use and share community improvements?",
     "context": ("You can always turn down a change and keep your own version, and nothing private ever goes "
                 "into what's shared."),
     "tradeoff": "Sharing goes through GitHub, so use and share leads to one question about your account.",
@@ -186,7 +186,7 @@ def test_the_community_decision_comes_first_and_the_github_cards_drop_the_reason
     decisions = [d for d in setup.build_decisions(_facts(True)) if d["task_title"] == GITHUB_TASK]
 
     assert [d["title"] for d in decisions] == [
-        "Should your agents use improvements the community has proven, and offer the ones proven here?",
+        "Use and share community improvements?",
         "How should your agents post on GitHub?", "Make an account for your agents on GitHub?"]
     assert [o["label"] for o in decisions[0]["options"]] == ["Use and share", "Only use", "Neither"]
     assert decisions[0]["recommendation"] == "A"
