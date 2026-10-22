@@ -328,7 +328,7 @@ async def _native_title(monkeypatch, raw):
     async def invoke_native(target, request, **kwargs):
         return raw
 
-    monkeypatch.setattr(thread_naming, "_resolve_title_target", lambda model: (_native_title_target(), ""))
+    monkeypatch.setattr(thread_naming, "_resolve_title_target", lambda model, thread_id: (_native_title_target(), ""))
     monkeypatch.setattr(isolated_structured, "_invoke_native_structured", invoke_native)
     return await thread_naming._call_title_llm("User: debug login", "omlx@local/Qwen")
 
@@ -376,7 +376,7 @@ async def test_native_title_call_carries_the_off_switch_to_the_model(monkeypatch
         requests.append(request)
         return '{"title": "Login Flow Debug"}'
 
-    monkeypatch.setattr(thread_naming, "_resolve_title_target", lambda model: (_native_title_target(), ""))
+    monkeypatch.setattr(thread_naming, "_resolve_title_target", lambda model, thread_id: (_native_title_target(), ""))
     monkeypatch.setattr(isolated_structured, "_invoke_native_structured", invoke_native)
     monkeypatch.setattr(
         "llm.reasoning_config.reasoning_config_for_model",

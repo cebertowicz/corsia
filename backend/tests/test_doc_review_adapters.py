@@ -45,7 +45,7 @@ def test_user_http_create_list_cancel_and_missing_foreign_thread_have_no_effect(
     row = response.json()["request"]
     assert row["requester_kind"] == "user"
     assert client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"][0]["id"] == row["id"]
-    assert client.delete(f"/api/doc-reviews/{row['id']}").json()["request"]["outcome"] == "cancelled"
+    assert client.delete(f"/api/doc-reviews/{row['id']}").json()["request"]["state"] == "withdrawn"
     assert client.get(f"/api/artifacts/{aid}/reviews").json()["reviews"] == []
 
 
@@ -62,7 +62,7 @@ def test_cli_http_requires_existing_authoring_seam_and_retries_idempotently(clie
     assert first.json()["request"]["id"] == again.json()["request"]["id"]
     row = first.json()["request"]
     cancelled = client.delete(f"/api/delegation/docs/reviews/{row['id']}", params={"as_session_id": "requester"})
-    assert cancelled.status_code == 200 and cancelled.json()["request"]["outcome"] == "cancelled"
+    assert cancelled.status_code == 200 and cancelled.json()["request"]["state"] == "withdrawn"
 
 
 @pytest.mark.parametrize("fields", [{}, {"doc_path": "/workspace/shared/PRD.md", "artifact_id": "both"}, {"artifact_id": "foreign"}])
@@ -140,6 +140,10 @@ async def test_tool_uses_real_context_schema_and_approved_description(review_env
     result = json.loads(await tool.execute(artifact_id=aid, reviewer="reviewer", client_id="tool-key", _thread_id="requester"))
     assert result["request"]["requester_id"] == "requester"
     assert result["request"]["reviewer_thread_id"] == "reviewer"
+    assert result["request"]["state"] == "forked"
+    assert result["request"]["node_id"] is None
+    from core.artifact_review_runtime import start
+    await start(result["request"]["id"])
     assert db.execute("SELECT COUNT(*) FROM plan_nodes").fetchone()[0] == 1
 
 

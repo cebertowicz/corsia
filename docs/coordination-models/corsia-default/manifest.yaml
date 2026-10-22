@@ -1,7 +1,8 @@
+schema: corsia.pack/1
 name: corsia-default
-version: 0
+version: "0.1.0"
 status: unpublished
-summary: Generic coordination rules, charter and safety templates, additive role files, pinned starter-kit references and declared KPIs for a conductor plus at most one owner role
+summary: Generic coordination rules, charter and safety templates, additive role files, a responsibility template and standard, a routing policy and declared KPIs for a conductor plus at most one owner role
 parameters:  # filled by the conductor from the interview (conductor-bootstrap section 2); fills lists the template placeholders each answer feeds
   - {id: project_name, ask: "What is the project called?", fills: [project_name]}
   - {id: owner_name, ask: "Who decides direction for this project?", fills: [owner_name]}
@@ -13,23 +14,23 @@ parameters:  # filled by the conductor from the interview (conductor-bootstrap s
   - {id: non_goals, ask: "What is explicitly not this project?", fills: [non_goals]}
   - {id: canonical_sources, ask: "Where does truth live today (repositories, documents, systems, people)?", fills: [canonical_sources]}
   - {id: tolerances, ask: "How much error, rework, delay and spend can this project tolerate, and which items are zero tolerance?", fills: [error_tolerance, rework_tolerance, delay_tolerance, spend_tolerance, zero_tolerance_items]}
-files:  # ref: true is a starter-kit file pinned by repo-relative path, never copied into the package
+files:
   - kind: charter-template
     path: context/PROJECT.md.tmpl
-    bytes: 2121
-    sha256: 4db0e4b21c16398f8cd2726eb35ed63aa4af9c73340e7eaea5523ef9ebdff685
+    bytes: 2125
+    sha256: 67c8401f72d819521c7565acf43341825ab3ce8399c621017cfa0fa9390f2d40
   - kind: rules
     path: context/COORDINATION-CORE.md
-    bytes: 9673
-    sha256: 38e1a4e1b87b1dd38764ea60ac18223e663e70f8408a9691da1745ae8e1db2e4
+    bytes: 9012
+    sha256: 28f0fa4fb738d19025e9d1453fb34be33bdbdba39d9f3f7dee2a61438f202890
   - kind: project-layer-template
     path: context/COORDINATION-MODEL.md.tmpl
     bytes: 740
     sha256: 7fac89244083b32fe527608a2b319cac70b1f5a7c97f83f9e0d344fff2e3c10c
   - kind: safety-template
     path: context/SAFETY-INVARIANTS.md.tmpl
-    bytes: 1862
-    sha256: e7905c770022a0e5f0c1daf49efb43313674695933f9b1286494747173d85fde
+    bytes: 1866
+    sha256: 11c3dfc5f0945fb5ceb9af78ed8751e3c96adcf6f4b28d3e41d0feac66c5d0bf
   - kind: role-context
     path: context/roles/agent/05-waiting-is-work.md
     bytes: 730
@@ -39,18 +40,15 @@ files:  # ref: true is a starter-kit file pinned by repo-relative path, never co
     bytes: 812
     sha256: 3bff6d1f27574b6082e14c4cbee914e1e937b8b6fcc9a19f742a03506a01265f
   - kind: responsibility-template
-    path: docs/contributing/bootstrap/starter-kit/templates/RESPONSIBILITY.md
-    ref: true
+    path: templates/RESPONSIBILITY.md
     bytes: 4580
     sha256: 1ca79f669304f24f60c13235a91b8d9c7edf0f35d125b9f4f21117d012fafc6f
   - kind: responsibility-standard
-    path: docs/contributing/bootstrap/starter-kit/shared/standards/RESPONSIBILITY-STANDARD.md
-    ref: true
+    path: standards/RESPONSIBILITY-STANDARD.md
     bytes: 3492
     sha256: 1afe075f552a1ab4a3930e73308cdf7d5e4654aa416bba91495136225a27f06e
   - kind: routing
-    path: docs/contributing/bootstrap/starter-kit/context/SPAWN-POLICY.md
-    ref: true
+    path: context/SPAWN-POLICY.md
     bytes: 4534
     sha256: 9121f7c87f5ae8e4922a6bd99d2eb505a4f97a624f214dc4b342cfed2f0be192
 starter_roster:  # default; max applies to the starter roster; later roles go through conductor-bootstrap roster design
@@ -78,7 +76,6 @@ tests:  # repo-relative bundled tests; run by the tools pytest gate
 notes:
   - "COORDINATION-CORE.md is the installed context/COORDINATION-CORE.md without its first line (the origin header)."
   - "The cite to shared/standards/llm-anti-patterns.md #10 in COORDINATION-CORE.md points to an optional file that this version does not ship."
-  - "A ref entry pins the starter-kit file's bytes and sha256 on the branch that carries this package, so an edit to that file makes the pin visibly stale."
   - "The pinned SPAWN-POLICY.md is selector-free (tier placeholders only) and is filled from the live /api/models at install."
-  - "The bundled tests guard the package's structure (placeholder coverage, pins, manifest shape); what still keeps the package unpublished is the behavioral evals of the model itself, which do not exist yet."
-  - "Follow-ups not in this version: standards with an update path, optional/, evals/ (the behavioral evals), repository setup, install script, version stamping and requires_corsia."
+  - "The bundled tests guard the package's structure (placeholder coverage, pins, manifest shape); behavioral evals of the model itself are absent, so the package remains unpublished."
+  - "Follow-ups not in this version: standards with an update path, optional/, evals/ (the behavioral evals), repository setup, install script and requires_corsia."

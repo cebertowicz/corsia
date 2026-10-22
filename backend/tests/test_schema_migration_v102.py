@@ -11,7 +11,7 @@ from infra.schema import SCHEMA_VERSION
 
 
 def test_migration_registered_and_adds_the_reviewer_index(tmp_path):
-    assert SCHEMA_VERSION == 126 and MIGRATIONS[101] is migrate_101_to_102
+    assert SCHEMA_VERSION == 135 and MIGRATIONS[101] is migrate_101_to_102
     path = tmp_path / "v101.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)

@@ -346,6 +346,15 @@ describe('groupModels', () => {
 		expect(groupStatusText(group)).toBe('');
 	});
 
+	it('keeps legacy and CORSIA-managed local oMLX models in distinct picker groups', () => {
+		const groups = groupModels([
+			row({ id: 'legacy', connection: 'omlx', provider: 'omlx', backend: 'network', server_name: 'This Mac' }),
+			row({ id: 'managed', connection: 'omlx', provider: 'omlx', backend: 'network', server_name: "CORSIA's own oMLX" }),
+		]);
+
+		expect(groups.map(group => group.name)).toEqual(['This Mac', "CORSIA's own oMLX"]);
+	});
+
 	it('uses first back only when several accounts are limited', () => {
 		const [group] = groupModels([
 			row({ id: 'a', status: 'unavailable', status_reason: 'usage_limited', status_resets_at: '2026-10-03T05:00:00Z' }),

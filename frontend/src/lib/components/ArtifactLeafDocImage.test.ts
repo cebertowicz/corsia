@@ -38,6 +38,7 @@ import {
 	clearTabDocumentImage, openTabDocumentImage, remapTabDocumentImage, tabDocumentImage, tabViewState,
 } from '$lib/stores/tabViewState';
 import { EditorView } from '@codemirror/view';
+import { forceParsing } from '@codemirror/language';
 import { paneCollapsed, paneSnapping } from '$lib/stores/paneCollapsed';
 import { paneOpen } from '$lib/stores/paneOpen';
 import { token } from '$lib/stores/auth';
@@ -70,11 +71,11 @@ async function commentOnWholeImage(text: string) {
 	await settle();
 	overlay.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
 	await settle();
-	const textarea = host.querySelector<HTMLTextAreaElement>('.image-overlay textarea')!;
+	const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea')!;
 	textarea.value = text;
 	textarea.dispatchEvent(new Event('input', { bubbles: true }));
 	await settle();
-	host.querySelector<HTMLButtonElement>('.image-overlay button.submit')!.click();
+	document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
 	await settle();
 }
 
@@ -84,6 +85,11 @@ async function mountLeaf(mode: 'expanded' | 'rail' | 'compact' = 'expanded', pro
 }
 
 async function openImageFromDocument() {
+	// The first parse stops after 20ms of wall time and finishes on a timer these tests never run: under load the image would not
+	// be drawn yet.
+	const editor = EditorView.findFromDOM(host.querySelector<HTMLElement>('.doc-host .cm-content')!)!;
+	if (!forceParsing(editor, editor.state.doc.length, 1_000)) throw new Error('markdown parser did not finish');
+	await settle();
 	const image = host.querySelector<HTMLImageElement>('.cm-md-image img')!;
 	Object.defineProperties(image, {
 		complete: { configurable: true, value: true },

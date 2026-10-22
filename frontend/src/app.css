@@ -55,6 +55,9 @@ html, body {
 body { max-width: 100vw; }
 #svelte { max-width: 100vw; overflow-x: hidden; }
 
+/* A one-line error under a field or row (ui/Field, setup and provider rows). A boxed error with its own layout uses <Message variant="err">. Placement stays with each caller. */
+.error-text { color: var(--red-text); font-size: var(--text-footnote); line-height: var(--lh-normal); }
+
 /* The opaque color the header's top edge is drawn over: the base of the desktop header's
    --glass-thin top, and the color the phone header's gradient mixes from (Header.svelte).
    The phone value is set in the max-width: 768px :root block below. */
@@ -141,8 +144,12 @@ body { max-width: 100vw; }
 	opacity: 0; transition: opacity var(--dur-tight);
 }
 .md-content .code-block:hover .copy-btn { opacity: 1; }
+/* Long messages use a text fence so they wrap instead of becoming a sideways-scrolling code line. */
+.md-content .text-code-block pre, .md-content .text-code-block code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.md-content .text-code-block pre { overflow-x: hidden; }
 .md-content .copy-btn:hover { background: var(--bg-active); color: var(--text-primary); }
 .md-content .code-lang + .copy-btn + pre { padding-top: 28px; }
+@media (hover: none) { .md-content .copy-btn { opacity: 1; } }
 .md-content .hl-keyword { color: var(--hl-keyword); font-weight: 500; }
 .md-content .hl-string { color: var(--hl-string); }
 .md-content .hl-comment { color: var(--hl-comment); font-style: italic; }

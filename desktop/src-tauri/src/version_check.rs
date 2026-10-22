@@ -54,6 +54,27 @@ async fn check_endpoint(endpoint: &Endpoint, trust: &Trust, app_version: &str) -
         .send()
         .await
         .map_err(PairError::from)?;
+    compat_of(response, app_version).await
+}
+
+/// The same check through a started proxy on `port`, which proves whichever route reaches the host. A transport
+/// error here is the caller's to classify: the proxy answers 502 when no route connects or a route was refused.
+pub async fn check_through_proxy(port: u16, app_version: &str) -> Result<Compat, PairError> {
+    let response = Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| PairError::Protocol(error.to_string()))?
+        .get(format!("http://127.0.0.1:{port}/api/version"))
+        .send()
+        .await
+        .map_err(|error| PairError::Protocol(error.to_string()))?;
+    compat_of(response, app_version).await
+}
+
+async fn compat_of(response: reqwest::Response, app_version: &str) -> Result<Compat, PairError> {
+    if response.headers().contains_key(crate::proxy::ROUTE_UNREACHABLE_HEADER) {
+        return Err(PairError::Unreachable(crate::classify::ConnectFailure::Network));
+    }
     if response.status() == StatusCode::NOT_FOUND {
         return Ok(Compat::TooOld);
     }

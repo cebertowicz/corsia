@@ -30,7 +30,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import gc
-import importlib.util
 import itertools
 import json
 import os
@@ -304,6 +303,13 @@ def _open_app(backend: Path, db_file: Path):
     """Import the target application with the fixture installed as its database."""
     sys.path[:0] = [str(backend), str(backend / "tests")]
     os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
+    # The document routes receive the same absolute path the frontend sends
+    # after selecting a workspace file. It is synthetic and lives under this
+    # run's disposable workspace.
+    workspace = Path(os.environ["CORSIA_WORKSPACE"])
+    document = workspace / "README.md"
+    document.write_text("speed-gate synthetic document\n")
+    os.utime(document, (1_700_000_000, 1_700_000_000))  # its mtime is part of file-route responses
     from infra.database import DB_PATH, close_thread_db
 
     shutil.copyfile(db_file, DB_PATH)
@@ -318,13 +324,6 @@ def _open_app(backend: Path, db_file: Path):
 
     return app, TestClient(app, raise_server_exceptions=False), OWNER_TOKEN
 
-
-def _extra_query(app) -> dict[str, str]:
-    """Per-route query values that need the application (the registered metric ids)."""
-    if importlib.util.find_spec("api.measurement_registry") is None:  # an older tree has no such route
-        return {}
-    from api.measurement_registry import REGISTRY
-    return {"ids": ",".join(sorted(name for name, item in REGISTRY.items() if item.available))}
 
 
 def measure_route(client, counters: Counters, background: Background, headers: dict, url: str) -> dict:
@@ -359,22 +358,24 @@ def run(backend: Path, db_file: Path) -> dict:
     background = Background(backend)
     background.attach(client)
     ids = routes.fixture_ids(str(db_file))
-    extra = _extra_query(app)
+    extra = routes.runtime_query_values()
     headers = {"Authorization": f"Bearer {owner}"}
     measured: dict[str, dict] = {}
     not_called: dict[str, str] = {}
-    for number, (template, route) in enumerate(routes.get_routes(app), 1):
-        print(f"route {number}: {template}", flush=True)  # a stuck run shows which route it stopped on
-        target = routes.build_target(template, route, ids, extra, owner)
-        if target.url is None:
-            not_called[template] = target.reason or "not callable"
-            continue
-        result = measure_route(client, counters, background, headers, target.url)
-        result["url"] = target.url.replace(owner, "<owner credential>")  # a measurement file never holds the test credential
-        measured[template] = result
-        if result["status"] >= 400:
-            not_called[template] = (f"HTTP {result['status']} from the fixture request "
-                                    f"({result['info']['detail'][:100]}), so the read it guards is not exercised")
+    number = 0
+    for template, route in routes.get_routes(app):
+        for target in routes.build_targets(template, route, ids, extra, owner):
+            number += 1
+            print(f"route {number}: {target.template}", flush=True)  # a stuck run shows which route it stopped on
+            if target.url is None:
+                not_called[target.template] = target.reason or "not callable"
+                continue
+            result = measure_route(client, counters, background, headers, target.url)
+            result["url"] = target.url.replace(owner, "<owner credential>")  # a measurement file never holds the test credential
+            measured[target.template] = result
+            if result["status"] >= 400:
+                not_called[target.template] = (f"HTTP {result['status']} from the fixture request "
+                                                f"({result['info']['detail'][:100]}), so the read it guards is not exercised")
     assert_one_worker_per_lane(counters)
     assert_all_counted()
     return {"sqlite_version": sqlite3.sqlite_version, "sqlite_package": PINNED_PACKAGE,

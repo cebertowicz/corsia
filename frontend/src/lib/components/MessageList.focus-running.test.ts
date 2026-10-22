@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { coreSettings } from '$lib/stores/settings';
 import {
@@ -9,6 +9,8 @@ import {
 	streamContentByThread,
 } from '$lib/stores/threads';
 import { _resetTurnStateForTests, applyLifecycle, applyTerminal } from '$lib/ws/turnState';
+import { registerSubagent, subagentMeta } from '$lib/stores/subagents';
+import { setWs, subscribedThreads } from '$lib/ws/state';
 import MessageList from './MessageList.svelte';
 
 const THREAD_ID = 'focus-running';
@@ -36,8 +38,11 @@ beforeEach(() => {
 	activeThreadId.set(THREAD_ID);
 	_resetTurnStateForTests();
 	activeToolsByThread.set(new Map());
+	subagentMeta.set(new Map());
 	streamContentByThread.set(new Map());
 	messages.set([]);
+	subscribedThreads.clear();
+	setWs(null);
 	coreSettings.set({ features: { focus_mode: true } } as any);
 });
 
@@ -47,8 +52,11 @@ afterEach(() => {
 	host.remove();
 	activeThreadId.set(null);
 	activeToolsByThread.set(new Map());
+	subagentMeta.set(new Map());
 	streamContentByThread.set(new Map());
 	messages.set([]);
+	subscribedThreads.clear();
+	setWs(null);
 	coreSettings.set(null);
 });
 
@@ -83,6 +91,44 @@ describe('Focus mode while a Turn is running', () => {
 		flushSync();
 		expect(host.textContent).toContain('Persisted running work');
 		expect(host.querySelector('.tool-activity')).not.toBeNull();
+	});
+
+	it('subscribes to an active descendant for its title and tool state, then releases it on completion', async () => {
+		const sent: Array<{ type: string; thread_id: string }> = [];
+		setWs({ readyState: WebSocket.OPEN, send: (raw: string) => sent.push(JSON.parse(raw)) } as unknown as WebSocket);
+		applyLifecycle('child', { turnId: 'child-turn', turnOrder: 1 }, THREAD_ID, Date.now() - 65_000);
+		renderList();
+
+		expect(sent).toContainEqual({ type: 'subscribe_session', thread_id: 'child' });
+		expect(host.querySelector('.live-spinner')?.classList.contains('subagent-only')).toBe(true);
+		expect(host.querySelector('.live-step')?.textContent).toBe('Working');
+
+		registerSubagent(THREAD_ID, 'child', 'UI worker');
+		activeToolsByThread.set(new Map([['child', [{ id: 'child-tool', name: 'read_file', phrase: 'Checking UI', status: 'running' }]]]) as any);
+		flushSync();
+		// The new phrase waits out the shown one's minimum hold before it replaces it.
+		await vi.waitFor(() => expect(host.querySelector('.live-step')?.textContent).toBe('Working · UI worker: Checking UI'), { timeout: 3000 });
+		expect(host.querySelector('.live-work .fold-toggle')?.getAttribute('aria-label')).toBe('Expand current work: UI worker: Checking UI');
+
+		applyTerminal('child', { turnId: 'child-turn', turnOrder: 1 });
+		flushSync();
+		expect(sent).toContainEqual({ type: 'unsubscribe_session', thread_id: 'child' });
+	});
+
+	it('holds the actor with its phrase when a newer descendant takes the preview', async () => {
+		applyLifecycle('older', { turnId: 'older-turn', turnOrder: 1 }, THREAD_ID, Date.now() - 65_000);
+		registerSubagent(THREAD_ID, 'older', 'Older worker');
+		registerSubagent(THREAD_ID, 'newer', 'Newer worker');
+		activeToolsByThread.set(new Map([['older', [{ id: 'older-tool', name: 'read_file', phrase: 'Reading old task', status: 'running' }]]]) as any);
+		renderList();
+		await vi.waitFor(() => expect(host.querySelector('.live-step')?.textContent).toBe('Working · Older worker: Reading old task'), { timeout: 3000 });
+
+		applyLifecycle('newer', { turnId: 'newer-turn', turnOrder: 1 }, THREAD_ID, Date.now());
+		activeToolsByThread.update((byThread) => new Map([...byThread, ['newer', [{ id: 'newer-tool', name: 'grep', hint: '', phrase: 'Checking UI', status: 'running' }]]]));
+		flushSync();
+		// The held phrase keeps its own actor; the name never changes ahead of it.
+		expect(host.querySelector('.live-step')?.textContent).toBe('Working · Older worker: Reading old task');
+		await vi.waitFor(() => expect(host.querySelector('.live-step')?.textContent).toBe('Working · Newer worker: Checking UI'), { timeout: 3000 });
 	});
 
 	it('renders streaming tools plainly with no live fold when Focus is off', () => {

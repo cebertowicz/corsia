@@ -7,7 +7,10 @@ import { activeThreadId, messages, threads, type Thread } from '$lib/stores/thre
 import { uiScope } from '$lib/stores/uiScope';
 import { _resetProjectsForTests } from '$lib/stores/projects';
 import * as conductor from '$lib/utils/conductor';
+import { pendingCorsiaMessage, requestCorsiaMessage } from '$lib/corsiaRequest';
+import { activeModelId, models, type Model } from '$lib/stores/models';
 import { disconnect } from '$lib/ws';
+import { resetTurnState } from '$lib/ws/turnState';
 
 // Only transport is replaced. The route, auth handlers, auth gate, ChatPanel,
 // first-run helper, and both selection functions are the production modules.
@@ -48,6 +51,7 @@ let paths: string[];
 let scopeLookups: Map<string, Promise<Response>>;
 let firstRunPending: boolean;
 let listedThreads: Thread[];
+let catalogModels: Model[];
 let deferredThreadList: ReturnType<typeof deferred<Response>> | null;
 let deferredProjectList: ReturnType<typeof deferred<Response>> | null;
 let landSpy: MockInstance<typeof conductor.landOnFirstRun>;
@@ -65,25 +69,29 @@ beforeEach(() => {
 	threads.set([]);
 	uiScope.set(null);
 	_resetProjectsForTests();
+	activeModelId.set(null);
+	models.set([]);
 	firstRunPending = true;
 	listedThreads = [];
+	catalogModels = [];
 	deferredThreadList = null;
 	deferredProjectList = null;
 	lookup = deferred<Response>();
 	paths = [];
 	scopeLookups = new Map();
+	const currentPaths = paths;
 	FakeSocket.instances = [];
 	vi.stubGlobal('WebSocket', FakeSocket);
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = new URL(String(input), 'http://fixture.invalid');
-		paths.push(url.pathname);
+		currentPaths.push(url.pathname);
 		if (url.pathname === '/api/auth/logout' && init?.method === 'POST') return json({});
 		if (init?.method && init.method !== 'GET') throw new Error(`Unexpected write: ${init.method} ${url.pathname}`);
 		if (url.pathname === '/api/corsia-agent') return scopeLookups.get('workspace') ?? lookup.promise;
 		if (url.pathname === '/api/conductor') return scopeLookups.get(url.searchParams.get('scope') ?? '') ?? lookup.promise;
 		if (url.pathname === '/api/threads') return deferredThreadList?.promise ?? json({ threads: listedThreads });
 		if (url.pathname === '/api/projects') return deferredProjectList?.promise ?? json({ projects: [] });
-		if (url.pathname === '/api/models') return json({ models: [] });
+		if (url.pathname === '/api/models') return json({ models: catalogModels });
 		if (url.pathname === '/api/settings' || url.pathname === '/api/system/drain') return json({});
 		if (url.pathname.startsWith('/api/delegation/threads/')) return json({ thread_kind: 'conductor' });
 		if (url.pathname.endsWith('/messages')) return json({ messages: [], has_more: false, next_cursor: null });
@@ -106,6 +114,10 @@ afterEach(async () => {
 	threads.set([]);
 	uiScope.set(null);
 	_resetProjectsForTests();
+	activeModelId.set(null);
+	models.set([]);
+	resetTurnState('fixture-conductor');
+	pendingCorsiaMessage.set(null);
 	conductor._resetFirstRunLandingForTests();
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
@@ -165,6 +177,34 @@ describe('first-run entry across auth readiness', () => {
 		resolveLookup();
 		await vi.waitFor(() => expect(get(activeThreadId)).toBe('fixture-conductor'));
 		expect(historyReads('fixture-conductor')).toHaveLength(1);
+	});
+
+	it('opens CORSIA and sends one pending request through the composer', async () => {
+		firstRunPending = false;
+		render();
+		authenticate();
+		await settle();
+		resolveLookup();
+		await settle();
+		scopeLookups.set('workspace', Promise.resolve(json({ target: { thread_id: 'fixture-conductor' }, first_run_pending: false })));
+		requestCorsiaMessage('Connect a Google account for all my projects');
+		await vi.waitFor(() => expect(get(pendingCorsiaMessage)).toBeNull());
+		await vi.waitFor(() => expect(get(activeThreadId)).toBe('fixture-conductor'));
+		expect(get(activeModelId)).toBeNull();
+		expect(get(models)).toEqual([]);
+		await vi.waitFor(() => expect(FakeSocket.instances[0].sent.filter((frame) => frame.type === 'message')).toHaveLength(1));
+		const messageFrame = FakeSocket.instances[0].sent.find((frame) => frame.type === 'message');
+		expect(messageFrame).toMatchObject({
+			type: 'message', thread_id: 'fixture-conductor', content: 'Connect a Google account for all my projects',
+		});
+		FakeSocket.instances[0].onmessage?.({ data: JSON.stringify({
+			type: 'input_accepted', thread_id: 'fixture-conductor', input_id: messageFrame?.input_id,
+			message_id: 'fixture-message', created_at: '2026-10-01T00:00:01Z', turn_id: 'fixture-turn', turn_order: 1,
+		}) });
+		await vi.waitFor(() => expect(historyReads('fixture-conductor')).toHaveLength(1));
+		await settle();
+		expect(FakeSocket.instances[0].sent.filter((frame) => frame.type === 'message')).toHaveLength(1);
+		expect(get(pendingCorsiaMessage)).toBeNull();
 	});
 
 	it('preserves a previously opened thread', async () => {

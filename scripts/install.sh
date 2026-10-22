@@ -69,6 +69,11 @@ open_prompt_input() {
 check_platform() {
     [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] \
         || stop "CORSIA installs on macOS with Apple Silicon only (found $(uname -s) $(uname -m))."
+    # The corrections classifier always runs on the local model, which needs macOS 15.
+    local macos
+    macos="$(sw_vers -productVersion)"
+    version_at_least "$macos" 15 0 0 \
+        || stop "CORSIA needs macOS 15 or later (found macOS $macos). Update macOS in System Settings › General › Software Update, then run this again."
 }
 
 service_which() { (PATH="$SERVICE_PATH" command -v "$1") || return 1; }

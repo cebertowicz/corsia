@@ -6,11 +6,12 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 
 @pytest.mark.asyncio
 async def test_native_checkpoint_aggregate_results_cannot_exceed_selected_window(monkeypatch):
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from core.token_estimation import measure_request
     from llm.router import LLMResponse, ToolCallRequest
     from test_checkpoint_provider_adapters import _request, _source
@@ -48,7 +49,7 @@ async def test_native_checkpoint_aggregate_results_cannot_exceed_selected_window
     monkeypatch.setattr(native, "_get_agent", agent)
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda model: {"model": model})
-    result = await native.invoke_checkpoint(request, asyncio.Event())
+    result = await native.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     # The results that overflow the wall are answered with a short error, so the
     # fork's next call still fits and writes its checkpoint (#2514).
     assert len(writes) == 2
@@ -63,7 +64,7 @@ async def test_cutoff_installs_prior_state_and_warning_without_inventing_complet
 ):
     from core import checkpoint_runtime as runtime
     from core.checkpoint_render import render_installed_checkpoint
-    from core.checkpoint_types import ProviderCheckpointResult
+    from core.fork_types import ProviderForkResult
     from infra import checkpoint_queries, checkpoints as store
     from test_checkpoint_runtime import _checkpoint, _provider, _seed
 
@@ -77,7 +78,7 @@ async def test_cutoff_installs_prior_state_and_warning_without_inventing_complet
     wakes = []
 
     async def invoke(_request, _cancel):
-        return ProviderCheckpointResult(partial, {"calls": [{"input_tokens": 123}]},
+        return ProviderForkResult(partial, {"calls": [{"input_tokens": 123}]},
                                         "checkpoint_context_truncated")
 
     async def notify(record):
@@ -108,8 +109,8 @@ async def test_cutoff_installs_prior_state_and_warning_without_inventing_complet
 @pytest.mark.parametrize("body", ["", "Partial checkpoint narrative."])
 @pytest.mark.parametrize("failure_surface", ["result", "stderr"])
 def test_cc_context_limit_preserves_partial_output(body, failure_surface):
-    from core.checkpoint_cc_fork import _result_after_process
-    from core.checkpoint_types import ProviderCheckpointRejected
+    from core.fork_cc_result import result_after_process as _result_after_process
+    from core.fork_types import ProviderForkRejected
 
     records = [{"type": "assistant", "message": {"content": body}}]
     failure = "prompt is too long: context_length_exceeded"
@@ -118,10 +119,10 @@ def test_cc_context_limit_preserves_partial_output(body, failure_surface):
     stdout = b"\n".join(json.dumps(record).encode() for record in records)
     stderr = failure if failure_surface == "stderr" else None
     if not body:  # No narrative is a named failure, never an empty success.
-        with pytest.raises(ProviderCheckpointRejected, match="checkpoint_context_truncated"):
-            _result_after_process(stdout, stderr, 1)
+        with pytest.raises(ProviderForkRejected, match="checkpoint_context_truncated"):
+            _result_after_process(stdout, stderr, 1, kind=CHECKPOINT_KIND)
         return
-    result = _result_after_process(stdout, stderr, 1)
+    result = _result_after_process(stdout, stderr, 1, kind=CHECKPOINT_KIND)
     assert result.raw_body == body
     assert result.diagnostic == "checkpoint_context_truncated"
 
@@ -132,7 +133,7 @@ def test_cc_context_limit_preserves_partial_output(body, failure_surface):
 async def test_codex_context_limit_preserves_streamed_partial_output(
     monkeypatch, tmp_path, body, prior,
 ):
-    from core import checkpoint_codex_fork as codex
+    from core import fork_codex as codex
     from test_checkpoint_external_adapters import _request, _target
 
     terminated = []
@@ -155,17 +156,18 @@ async def test_codex_context_limit_preserves_streamed_partial_output(
         return Session()
 
     events = None
-    monkeypatch.setattr(codex, "_checkpoint_session", session)
-    run = codex._run_app_server_checkpoint(
+    monkeypatch.setattr(codex, "_fork_session", session)
+    run = codex._run_app_server_fork(
         _request(_target("codex"), None, binary="unused"), None,
         source_home=tmp_path, isolated_home=tmp_path, cwd=str(tmp_path),
         cancel_event=asyncio.Event(),
         cold_input=SimpleNamespace(input_tokens=10),
+        kind=CHECKPOINT_KIND,
     )
     if not (prior or body):  # No narrative is a named failure.
-        from core.checkpoint_types import ProviderCheckpointRejected
+        from core.fork_types import ProviderForkRejected
 
-        with pytest.raises(ProviderCheckpointRejected, match="checkpoint_context_truncated"):
+        with pytest.raises(ProviderForkRejected, match="checkpoint_context_truncated"):
             await run
         assert terminated == [True]
         return
@@ -181,7 +183,7 @@ async def test_cutoff_without_narrative_and_no_prior_generation_fails_unless_sto
     isolated_db, monkeypatch, stop,
 ):
     from core import checkpoint_runtime as runtime
-    from core.checkpoint_types import ProviderCheckpointResult
+    from core.fork_types import ProviderForkResult
     from infra.continuity_staging import stage_edit
     from infra.continuity_store import active_entry_snapshot
     from infra.database import get_db
@@ -193,7 +195,7 @@ async def test_cutoff_without_narrative_and_no_prior_generation_fails_unless_sto
     async def invoke(request, cancel):
         db = get_db()
         try:
-            stage_edit(db, checkpoint_id=request.checkpoint_id,
+            stage_edit(db, checkpoint_id=request.fork_id,
                        thread_id=request.thread_id, operation="add", params={
                            "field": "next_actions",
                            "body": {"statement": "Verify the remaining change.",
@@ -204,7 +206,7 @@ async def test_cutoff_without_narrative_and_no_prior_generation_fails_unless_sto
             db.close()
         if stop:
             cancel.set()
-        return ProviderCheckpointResult("", None, "checkpoint_context_truncated")
+        return ProviderForkResult("", None, "checkpoint_context_truncated")
 
     async def notify(record):
         wakes.append(record.status)
@@ -237,13 +239,13 @@ async def test_first_checkpoint_cutoff_without_edits_cannot_advance_coverage(
     isolated_db, monkeypatch,
 ):
     from core import checkpoint_runtime as runtime
-    from core.checkpoint_types import ProviderCheckpointResult
+    from core.fork_types import ProviderForkResult
     from test_checkpoint_runtime import _checkpoint, _provider, _seed
 
     _seed("empty-cutoff")
 
     async def invoke(_request, _cancel):
-        return ProviderCheckpointResult("", None, "checkpoint_context_truncated")
+        return ProviderForkResult("", None, "checkpoint_context_truncated")
 
     async def notify(_record):
         pass
@@ -262,8 +264,8 @@ async def test_first_checkpoint_cutoff_without_edits_cannot_advance_coverage(
 @pytest.mark.asyncio
 async def test_native_first_input_nonfit_is_not_partial_completion(monkeypatch):
     from unittest.mock import AsyncMock
-    from core import checkpoint_native_fork as native
-    from core.checkpoint_types import ProviderCheckpointRejected
+    from core import fork_native as native
+    from core.fork_types import ProviderForkRejected
     from test_checkpoint_provider_adapters import _request, _source
 
     request = _request(_source(native))
@@ -272,15 +274,15 @@ async def test_native_first_input_nonfit_is_not_partial_completion(monkeypatch):
     monkeypatch.setattr(native, "_get_agent", AsyncMock(return_value=SimpleNamespace(max_iterations=2)))
     monkeypatch.setattr(native, "_provider_params", lambda _model: {})
     monkeypatch.setattr(native, "_chat_completion", completion)
-    with pytest.raises(ProviderCheckpointRejected, match="initial.*input"):
-        await native.invoke_checkpoint(request, asyncio.Event())
+    with pytest.raises(ProviderForkRejected, match="initial.*input"):
+        await native.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
     completion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("normalized", [False, True])
 async def test_native_provider_context_limit_is_degraded_not_error_prose(monkeypatch, normalized):
-    from core import checkpoint_native_fork as native
+    from core import fork_native as native
     from llm.router import LLMResponse, ToolCallRequest
     from test_checkpoint_provider_adapters import _request, _source
     from llm.provider_overflow import context_overflow_response
@@ -305,7 +307,7 @@ async def test_native_provider_context_limit_is_degraded_not_error_prose(monkeyp
     monkeypatch.setattr(native, "_get_agent", agent)
     monkeypatch.setattr(native, "_chat_completion", completion)
     monkeypatch.setattr(native, "_provider_params", lambda _model: {})
-    result = await native.invoke_checkpoint(_request(_source(native)), asyncio.Event())
+    result = await native.invoke_fork(_request(_source(native)), asyncio.Event(), kind=CHECKPOINT_KIND)
     assert result.raw_body == "Retain this partial checkpoint."
     assert result.diagnostic == "checkpoint_context_truncated"
     assert responses == []

@@ -358,7 +358,7 @@ async def send_thread_input(
         delivery_options=options,
         continuation=continuation,
     )
-    from jobs.corrections_realtime import notify_if_owner  # best effort; never fails the send
+    from jobs.corrections_recording import notify_if_owner  # best effort; never fails the send
     notify_if_owner(admission.accepted, role=role, content=text, metadata=metadata)
     return await _deliver_admission(
         admission, thread_row,

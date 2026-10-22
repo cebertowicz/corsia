@@ -30,9 +30,10 @@ from infra.app_loop import AppLoopUnavailable
 from doceditor.comment_feedback_transitions import apply_user_transition
 from doceditor.comment_state_updates import update_comment
 from doceditor.comment_actions import (
-    CommentActionError, SUGGESTION_REASON_MAX_CHARS, check_user_text_edit, decide_all_from_author,
+    CommentActionError, SUGGESTION_REASON_MAX_CHARS, check_user_text_edit,
     decide_suggestion, reopen_fields, validate_create,
 )
+from doceditor.comment_batch_actions import accept_all_open, decide_all_from_author
 from doceditor.comments import CrossArtifactIdError
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context
@@ -285,14 +286,8 @@ class CommentDecision(BaseModel):
 
 
 
-@router.post("/comments/{comment_id}/decision")
-async def decide_comment(comment_id: str, token: str, body: CommentDecision):
-    user = authenticate(token)
-    if not user:
-        raise HTTPException(401)
-
-    saved: dict = {}
-
+def _person_writer(user: dict, saved: dict):
+    """The document writer a person's accept uses; it notes the text and revision it saved."""
     async def write(
         path: str, text: str, project_id: str | None, reason: str, expected_sha256: str | None,
     ) -> dict:
@@ -305,6 +300,35 @@ async def decide_comment(comment_id: str, token: str, body: CommentDecision):
             raise document_save_http_exception(exc) from exc
         saved.update(text=text, revision=receipt["revision"])
         return receipt
+    return write
+
+
+@router.post("/artifacts/{artifact_id}/suggestions/accept-all")
+async def accept_all_suggestions(artifact_id: str, token: str):
+    """Accept every open suggestion on the document, from every author, in one write."""
+    user = authenticate(token)
+    if not user:
+        raise HTTPException(401)
+    saved: dict = {}
+    try:
+        result = await accept_all_open(
+            artifact_id, user_id=user["id"], decided_by=user["name"], actor_thread_id=None,
+            write=_person_writer(user, saved))
+    except CommentActionError as exc:
+        return decision_refusal(exc)
+    except DocumentSaveError as exc:
+        raise document_save_http_exception(exc) from exc
+    return {**result, **saved}
+
+
+@router.post("/comments/{comment_id}/decision")
+async def decide_comment(comment_id: str, token: str, body: CommentDecision):
+    user = authenticate(token)
+    if not user:
+        raise HTTPException(401)
+
+    saved: dict = {}
+    write = _person_writer(user, saved)
 
     try:
         decide = decide_all_from_author if body.all_from_author else decide_suggestion

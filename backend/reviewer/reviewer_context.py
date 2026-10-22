@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
+import json
 from pathlib import Path
 
 from loguru import logger
@@ -70,6 +72,17 @@ def reviewer_context_to_prompt_text(resolved: list[tuple[str, str]]) -> str:
 def reviewer_standards_registry() -> dict[str, str]:
     """Return a copy of the reviewer standards path map."""
     return dict(_STANDARDS_REGISTRY)
+
+
+def reviewer_version_digest(prompt_template: str, standards_context: str) -> str:
+    """Return a stable digest of the template and injected standards context."""
+    serialized = json.dumps(
+        {"prompt": prompt_template, "standards": standards_context},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:12]
 
 
 def _read_file(path: str) -> str | None:

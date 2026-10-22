@@ -6,10 +6,30 @@ LOCAL_APP_NOTICE = (
     "It can do anything you can do on this Mac, except open CORSIA's own files and saved keys. "
     "Connect only apps you trust."
 )
+_RUNTIME_NOTICE = {
+    "node": ("Node", "nodejs.org"),
+    "uv": ("uv", "GitHub"),
+    "gh": ("GitHub CLI", "GitHub"),
+}
 
 
 def local_app_notice(config: object) -> str | None:
-    return LOCAL_APP_NOTICE if isinstance(config, dict) and isinstance(config.get("command"), str) else None
+    """Return the approval disclosure, including only a pending pinned download."""
+    if not isinstance(config, dict) or not isinstance(config.get("command"), str):
+        return None
+    notice = LOCAL_APP_NOTICE
+    configured_env = config.get("env")
+    path = configured_env.get("PATH") if isinstance(configured_env, dict) else None
+    if not isinstance(path, str):
+        path = None
+    from tools.managed_runtime import runtime_fetch_plan
+
+    plan = runtime_fetch_plan(config["command"], path=path)
+    if plan is None:
+        return notice
+    kind, _pin = plan
+    label, maker = _RUNTIME_NOTICE[kind]
+    return f"{notice} CORSIA will download {label} from {maker} to run it."
 
 
 def _transport(config: object) -> str | None:
@@ -63,15 +83,26 @@ def _agent_next_step(
     if state == "failed":
         detail = {
             "cannot_start": "app didn't start",
+            "runtime_download_failed": "download failed",
             "timed_out": "no response",
             "protocol_error": "not compatible",
             "name_collision": "clashes with another app",
-        }.get(failure_class, "an unknown reason")
+        }.get(failure_class if isinstance(failure_class, str) else "", "an unknown reason")
         return (
             f"Reconnect {label} once. If it fails again, tell the person: {label} couldn't connect: {detail}. "
             f"I tried once more and it still didn't connect. Open {label} in {place} to see why."
         )
     return None
+
+
+def _with_entry_names(app_id: object, key_refs: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Add each key's managed entry name for the person's Settings; an agent's row never carries it."""
+    from tools.mcp_secrets import entry_name
+
+    return [
+        {**ref, "entry": entry_name(str(app_id), "secret_env" if ref["kind"] == "env" else "secret_headers", str(ref["name"]))}
+        for ref in key_refs
+    ]
 
 
 def server_row(app: dict[str, object], *, on_here: bool, full: bool, db, person: bool = False) -> dict[str, object]:
@@ -106,7 +137,7 @@ def server_row(app: dict[str, object], *, on_here: bool, full: bool, db, person:
         "next_step": _agent_next_step(
             app["name"], live["state"], live["failure_class"], key_refs, on_here=on_here,
         ),
-        "key_refs": key_refs,
+        "key_refs": _with_entry_names(app["id"], key_refs) if person else key_refs,
         "config": {key: value for key, value in config.items() if key != "key_refs"},
         "pending_config": app["pending_config"],
         "pending_actor_thread_id": app["pending_actor_thread_id"],

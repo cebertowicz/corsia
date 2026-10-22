@@ -98,8 +98,8 @@ def test_execute_does_not_raise_import_error(monkeypatch, tmp_path):
     conn.execute(
         "CREATE TABLE threads ("
         "  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, model TEXT,"
-        "  reasoning_effort TEXT, project_id TEXT, created_at TEXT, updated_at TEXT,"
-        "  runtime_context_epoch INTEGER DEFAULT 0,"
+        "  reasoning_effort TEXT, project_id TEXT, local_only INTEGER NOT NULL DEFAULT 0,"
+        "  created_at TEXT, updated_at TEXT, runtime_context_epoch INTEGER DEFAULT 0,"
         "  last_context_change_seq INTEGER DEFAULT 0"
         ")"
     )
@@ -323,8 +323,8 @@ def test_execute_returns_loud_collision_error(monkeypatch, tmp_path):
     conn.execute(
         "CREATE TABLE threads ("
         "  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, model TEXT,"
-        "  reasoning_effort TEXT, project_id TEXT, created_at TEXT, updated_at TEXT,"
-        "  runtime_context_epoch INTEGER DEFAULT 0,"
+        "  reasoning_effort TEXT, project_id TEXT, local_only INTEGER NOT NULL DEFAULT 0,"
+        "  created_at TEXT, updated_at TEXT, runtime_context_epoch INTEGER DEFAULT 0,"
         "  last_context_change_seq INTEGER DEFAULT 0"
         ")"
     )
@@ -488,8 +488,8 @@ def test_initialize_project_stores_logical_truth_and_seeds_only_project_context(
     conn.execute(
         "CREATE TABLE threads ("
         "id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT, model TEXT, "
-        "reasoning_effort TEXT, project_id TEXT, created_at TEXT, updated_at TEXT, "
-        "runtime_context_epoch INTEGER DEFAULT 0, "
+        "reasoning_effort TEXT, project_id TEXT, local_only INTEGER NOT NULL DEFAULT 0, "
+        "created_at TEXT, updated_at TEXT, runtime_context_epoch INTEGER DEFAULT 0, "
         "last_context_change_seq INTEGER DEFAULT 0)"
     )
     conn.execute(
@@ -582,6 +582,7 @@ def test_initialize_project_registers_default_repo_policy(
             model TEXT,
             reasoning_effort TEXT,
             project_id TEXT,
+            local_only INTEGER NOT NULL DEFAULT 0,
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,
@@ -672,6 +673,7 @@ async def test_project_create_api_rejects_repo_registration_during_owned_process
             model TEXT,
             reasoning_effort TEXT,
             project_id TEXT,
+            local_only INTEGER NOT NULL DEFAULT 0,
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,
@@ -762,6 +764,7 @@ def test_initialize_project_removes_only_its_link_when_policy_write_fails(
             model TEXT,
             reasoning_effort TEXT,
             project_id TEXT,
+            local_only INTEGER NOT NULL DEFAULT 0,
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,
@@ -850,6 +853,7 @@ def test_initialize_project_replacement_before_ownership_capture_is_not_removed(
             model TEXT,
             reasoning_effort TEXT,
             project_id TEXT,
+            local_only INTEGER NOT NULL DEFAULT 0,
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,
@@ -938,6 +942,7 @@ def test_initialize_project_rechecks_source_ownership_before_commit(
             model TEXT,
             reasoning_effort TEXT,
             project_id TEXT,
+            local_only INTEGER NOT NULL DEFAULT 0,
             created_at TEXT,
             updated_at TEXT,
             runtime_context_epoch INTEGER DEFAULT 0,

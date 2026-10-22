@@ -276,7 +276,7 @@ def test_no_target_gives_no_note(main_db, target):
         ("ui" if target == "ui" else THREAD, "user", "Wrong file.", "{}", "2026-10-16T20:00:00Z"),
     )
     main_db.commit()
-    candidate = CorrectionCandidate("c1", thread, None, "Wrong file.", "2026-10-16T20:00:00Z", arrived=True)
+    candidate = CorrectionCandidate("message", "c1", thread, None, "Wrong file.", "2026-10-16T20:00:00Z", arrived=True)
 
     assert _record_fact(candidate, CORRECTION, _version())
     assert _journal(main_db) == []

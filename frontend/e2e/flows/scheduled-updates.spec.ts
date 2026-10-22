@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { test } from '../support/test';
+import { expect } from '@playwright/test';
 import { TEST_SESSION_TOKEN, openSettings, saveEvidenceScreenshot } from '../support/corsia';
 
 test.describe('@surface:settings scheduled updates', () => {

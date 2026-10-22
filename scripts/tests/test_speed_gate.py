@@ -86,6 +86,14 @@ def test_a_route_that_crosses_the_ceiling_without_being_grandfathered_fails():
     assert ("/a", "ceiling", "steps") in kinds(verdict)
 
 
+def test_focus_byte_cap_applies_when_its_step_cost_is_grandfathered():
+    focus = "/api/threads/{thread_id}/messages?limit=50&view=focus"
+    base = baseline_for({focus: cost(900_000, size=131_000)})
+    assert focus in base["grandfathered"]
+    verdict = ratchet.compare(result({focus: cost(900_000, size=131_100)}), base)
+    assert (focus, "ceiling", "bytes") in kinds(verdict)
+
+
 def test_improvement_is_reported_but_never_fails():
     base = baseline_for({"/a": cost(1_000_000)})
     verdict = ratchet.compare(result({"/a": cost(100_000)}), base)
@@ -144,6 +152,55 @@ def test_route_target_fills_path_and_required_query_and_reports_the_unfillable()
     assert static.url is None and "no application read" in static.reason
 
 
+def test_path_query_fixture_matches_each_route_semantics():
+    optional = lambda name: SimpleNamespace(name=name, field_info=SimpleNamespace(alias=None, is_required=lambda: False))
+    route = SimpleNamespace(dependant=SimpleNamespace(query_params=[optional("path")]))
+    extra = {
+        "/api/artifacts/resolve": {"path": "/workspace/README.md"},
+        "/api/files/content": {"path": "/workspace/README.md"},
+        "/api/files/revision": {"path": "/workspace/README.md"},
+        "/api/fs/browse": {"path": "/workspace"},
+    }
+    assert routes.build_target("/api/artifacts/resolve", route, {}, extra, "tok").url == (
+        "/api/artifacts/resolve?path=%2Fworkspace%2FREADME.md"
+    )
+    assert routes.build_target("/api/files/content", route, {}, extra, "tok").url == (
+        "/api/files/content?path=%2Fworkspace%2FREADME.md"
+    )
+    assert routes.build_target("/api/files/revision", route, {}, extra, "tok").url == (
+        "/api/files/revision?path=%2Fworkspace%2FREADME.md"
+    )
+    assert routes.build_target("/api/fs/browse", route, {}, extra, "tok").url == "/api/fs/browse?path=%2Fworkspace"
+
+
+def test_message_targets_measure_default_and_focus_client_query_shapes():
+    optional = lambda name: SimpleNamespace(name=name, field_info=SimpleNamespace(alias=None, is_required=lambda: False))
+    route = SimpleNamespace(dependant=SimpleNamespace(query_params=[optional("token"), optional("limit"), optional("view")]))
+    targets = routes.build_targets(
+        "/api/threads/{thread_id}/messages", route, {"thread_id": "thread-1"}, {}, "tok",
+    )
+    assert [(target.template, target.url) for target in targets] == [
+        ("/api/threads/{thread_id}/messages", "/api/threads/thread-1/messages?token=tok&limit=50"),
+        ("/api/threads/{thread_id}/messages?limit=50&view=focus",
+         "/api/threads/thread-1/messages?token=tok&limit=50&view=focus"),
+    ]
+
+
+def test_message_targets_do_not_duplicate_the_generic_paged_read():
+    optional = lambda name: SimpleNamespace(name=name, field_info=SimpleNamespace(alias=None, is_required=lambda: False))
+    route = SimpleNamespace(dependant=SimpleNamespace(query_params=[optional("token"), optional("limit"), optional("view")]))
+    targets = routes.build_targets(
+        "/api/threads/{thread_id}/messages", route, {"thread_id": "agent-thread"}, {}, "tok",
+    )
+
+    assert [target.template for target in targets] == [
+        "/api/threads/{thread_id}/messages",
+        "/api/threads/{thread_id}/messages?limit=50&view=focus",
+    ]
+    assert targets[0].url.endswith("/agent-thread/messages?token=tok&limit=50")
+    assert targets[1].url.endswith("/agent-thread/messages?token=tok&limit=50&view=focus")
+
+
 def test_update_baseline_needs_a_reason_and_grandfathers_over_ceiling_routes(tmp_path):
     current = tmp_path / "current.json"
     current.write_text(json.dumps(result({"/a": cost(), "/slow": cost(900_000)})))
@@ -192,6 +249,8 @@ def test_measurement_runs_with_an_empty_home_and_account_columns_reference_real_
     monkeypatch.setenv("CODEX_HOME", "/somewhere/on/the/host")
     env = runner._env(tmp_path)
     assert env["HOME"] == str(tmp_path / "home") and "CODEX_HOME" not in env
+    # The update-status route must never reach the host checkout's remote.
+    assert env["GIT_DIR"] == str(tmp_path / "no-repository") and not (tmp_path / "no-repository").exists()
     pools = SimpleNamespace(ids={"vendor_account": ["a1"]})
     assert [fixture_rows.pool_for(column, pools) for column in ("account_id", "pending_account_id", "vendor_account_id")] \
         == ["vendor_account"] * 3

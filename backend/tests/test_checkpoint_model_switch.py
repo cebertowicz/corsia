@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
+from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
 
 @pytest.mark.asyncio
@@ -119,7 +120,7 @@ class CheckpointModelSwitchHarness:
             ):
                 return None, False
             if mode == "cold" and journey == "minimum_target_replay_impossible":
-                from core.checkpoint_fit import ColdFoldInputTooLarge
+                from core.fork_fit import ColdFoldInputTooLarge
 
                 raise ColdFoldInputTooLarge("minimum meaningful replay does not fit")
             state.mode = mode
@@ -359,7 +360,7 @@ async def test_unavailable_native_omlx_source_skips_warm_capture(
     )
     capture = AsyncMock(return_value=None)
     monkeypatch.setattr(
-        "core.checkpoint_render.capture_warm_checkpoint_source",
+        "core.fork_render.capture_warm_fork_source",
         capture,
     )
 
@@ -428,7 +429,7 @@ def test_target_cold_preserves_unavailable_source_model(monkeypatch) -> None:
         model_checkpoint, "read_switch_checkpoint_context", lambda _request: context,
     )
     monkeypatch.setattr("infra.database.get_db", lambda: _Db())
-    monkeypatch.setattr("core.checkpoint_render.build_cold_checkpoint_admission", build)
+    monkeypatch.setattr("core.checkpoint_cold_admission.build_checkpoint_admission", build)
 
     model_checkpoint._target_cold_admission(request, "checkpoint-1")
 
@@ -445,7 +446,7 @@ async def test_model_switch_target_cold_without_bridge_reaches_denied_tool_comma
     from dataclasses import replace
     from unittest.mock import AsyncMock, Mock
 
-    from core import checkpoint_cc_fork as cc
+    from core import fork_cc as cc
     from infra.model_switch_types import SwitchRequest
     from native_checkpoint_fixtures import cold_source, native_target, seed_vendor_checkpoint_thread
     from thread import model_checkpoint
@@ -475,7 +476,7 @@ async def test_model_switch_target_cold_without_bridge_reaches_denied_tool_comma
     context_stream.feed_data((json.dumps({
         "type": "control_response",
         "response": {
-            "request_id": "corsia-checkpoint-context", "subtype": "success",
+            "request_id": "corsia-fork-context", "subtype": "success",
             "response": {"model": "sonnet", "totalTokens": 10_000, "maxTokens": 200_000},
         },
     }) + "\n").encode())
@@ -499,7 +500,7 @@ async def test_model_switch_target_cold_without_bridge_reaches_denied_tool_comma
     monkeypatch.setattr(cc, "_spawn_process", spawn)
 
     admission = await model_checkpoint.prepare_target_checkpoint(request, "checkpoint-1")
-    result = await cc.invoke_checkpoint(admission.provider_request, asyncio.Event())
+    result = await cc.invoke_fork(admission.provider_request, asyncio.Event(), kind=CHECKPOINT_KIND)
     assert spawn.await_args is not None
     argv = spawn.await_args.args[0]
 

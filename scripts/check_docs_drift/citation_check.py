@@ -1,8 +1,7 @@
-"""Check 2 orchestration: extract citations from the bootstrap docs, verify.
+"""Citation-check orchestration: extract living-document citations, verify.
 
-Route and ``corsia`` subcommand citations are only extracted from
-``OFFLINE-BOOTSTRAP.md`` and the repository README, per the deliverable's own
-scope. Path citations are additionally checked in ``ARCHITECTURE.md``,
+Route and ``corsia`` subcommand citations are extracted from the repository
+README. Path citations are additionally checked in ``ARCHITECTURE.md``,
 ``BACKEND.md``, ``FRONTEND.md``, and ``SECURITY.md`` -- the deliverable's
 minimum bar for those four ("paths and commands they cite must still
 resolve") without inventing route/subcommand extraction for them.
@@ -31,10 +30,7 @@ from . import citation_extract as extract
 from . import citation_verify as verify
 from .discovery import top_level_names
 
-PRIMARY_DOCS = (
-    Path("docs/contributing/bootstrap/OFFLINE-BOOTSTRAP.md"),
-    Path("README.md"),
-)
+PRIMARY_DOCS = (Path("README.md"),)
 # CHANGELOG.md is deliberately excluded here even though the deliverable
 # names it: it is an append-only historical record (the same treatment
 # `scripts/file_size_limits.py` gives append-only files elsewhere in this
@@ -73,7 +69,7 @@ class CitationResult:
 
 
 def check_citations(repo_root: Path) -> CitationResult:
-    """Run check 2 against the bootstrap docs and the current repo state."""
+    """Check citations against living docs and the current repo state."""
     result = CitationResult()
     top_level = top_level_names(repo_root)
     _check_paths(repo_root, top_level, result)

@@ -1,4 +1,5 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext } from '@playwright/test';
 import {
 	chatComposer, createSession, lastAssistantMessage, saveEvidenceScreenshot,
 	TEST_TOKEN, watchSessionSubscriptions,

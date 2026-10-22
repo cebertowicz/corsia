@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { token } from '$lib/stores/auth';
-	import { activeThreadId, threads } from '$lib/stores/threads';
+	import { composerSelectionFor } from '$lib/stores/composerSelection';
+	import { threadLocalOnly } from '$lib/stores/threadLocalOnly';
 	import { loadCheckpoints } from '$lib/stores/checkpoints';
-	import { activeModelId, beginThreadModelSwitch, finishThreadModelSwitch, getModelDispatchId, modelMatchesId, models, modelAvailability, saveThreadModel, setActiveModel, type Model } from '$lib/stores/models';
+	import { beginThreadModelSwitch, finishThreadModelSwitch, getModelDispatchId, modelMatchesId, modelAvailability, saveThreadModel, setActiveModel, type Model } from '$lib/stores/models';
 	import { accountSegments, canonicalName, groupModels, groupStatusSegments, rowNote, usageBreakdown, type ModelGroup } from '$lib/stores/modelGroups';
 	import { loadPickerPolicy, pickerAccounts, policyFor, vendorRows, type PickerAccount } from '$lib/stores/accountPicker';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
@@ -15,27 +16,43 @@
 	import { openProjectSettings, requestProviderCard, requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import PickerLocalStatus from './PickerLocalStatus.svelte';
-	import { localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
+	import LocalOnlySwitchRow from './LocalOnlySwitchRow.svelte';
+	import PickerLocalOnlyNote from './PickerLocalOnlyNote.svelte';
+	import AddLocalModelSheet from './v7/AddLocalModelSheet.svelte';
+	import { inlineSlot } from '$lib/slotMotion';
+	import SwitchingIcon from './ui/SwitchingIcon.svelte';
+	import { canAddLocalModel, canSetUpLocalModel, localStatus, retryLocalSetup, watchLocalStatus } from '$lib/stores/localPickerStatus';
+	import type { LocalPickerRetry } from '$lib/conductorSources';
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
 
-	const groups = $derived(groupModels($models, $activeModelId));
+	let { threadId = undefined, onclose = () => {}, focusLocalOnly = false, onfocusconsumed = () => {} }: { threadId?: string | null; onclose?: () => void; focusLocalOnly?: boolean; onfocusconsumed?: () => void } = $props();
+	const sel = $derived($composerSelectionFor(threadId)); // the thread this composer is bound to: a worker's own in its pane
+	const activeThread = $derived(sel.thread);
+	// The project switch and a thread's Local only hide cloud rows through this one filter (the causes in LOCALITY_REFUSALS).
+	const localityOff = (model: Model) => model.status_reason === 'project_cloud_off' || model.status_reason === 'thread_local_only';
+	const cloudModelsOff = $derived(sel.models.some(localityOff));
+	const threadPolicy = $derived(threadLocalOnly(activeThread));
+	// A new chat has no thread payload yet, so its scope's catalog is the only source for the project switch.
+	const projectCloudOff = $derived(activeThread ? threadPolicy.cause === 'project' : sel.models.some((model) => model.status_reason === 'project_cloud_off'));
+	const inheritedLocalOnly = $derived(threadPolicy.cause === 'inherited');
+	const openProjectPolicy = () => activeThread?.project_id && openProjectSettings(activeThread.project_id, 'project-provider-policy');
+	const pickerModels = $derived(cloudModelsOff ? sel.models.filter((model) => !localityOff(model)) : sel.models);
+	const groups = $derived(groupModels(pickerModels, sel.modelId));
 	// Ready groups start open, unusable ones stay collapsed until tapped; account-backed model rows
 	// stay visible, while their account list opens only on demand, the same for every vendor and state.
 	let opened = $state<Record<string, boolean>>({});
 	let accountOpened = $state<Record<string, boolean>>({});
 	let accountChoiceBusy = false;
 	let usageShown = $state<Record<string, boolean>>({});
-	let { onclose = () => {} }: { onclose?: () => void } = $props();
+	let showAddLocal = $state(false);
+	let settingsRetrying = $state(false);
 	const isOpen = (group: ModelGroup, hasAccounts: boolean) => opened[group.key] ?? (group.state === 'ready' || hasAccounts);
 	// A collapsed group nobody can pick from still shows the thread's current model, disabled.
 	const rowsShown = (group: ModelGroup, open: boolean) =>
 		group.state === 'ready'
 			? open ? group.rows : []
-			: open ? group.blocked : group.blocked.filter((model) => modelMatchesId(model, $activeModelId));
-	const activeThread = $derived(
-		$threads.find((thread) => thread.id === $activeThreadId),
-	);
+			: open ? group.blocked : group.blocked.filter((model) => modelMatchesId(model, sel.modelId));
 	const pendingModelId = $derived(activeThread?.pending_model ?? null);
 	const pendingStatus = $derived(activeThread?.switch_status ?? null);
 
@@ -43,35 +60,41 @@
 	// over a catalog with account-run rows; a catalog of local or external models has none.
 	let accountsRequested = false;
 	$effect(() => {
-		if (accountsRequested || !$models.some((model) => model.runs_on?.length)) return;
+		if (accountsRequested || !sel.models.some((model) => model.runs_on?.length)) return;
 		accountsRequested = true;
 		void loadVendorAccounts();
 		void loadPickerPolicy(activeThread?.project_id);
 	});
 
-	// A starter download, or a failed setup, shows in the Local group while the picker is open.
-	const isLocalGroup = (group: ModelGroup) => group.rows.some((model) => getModelDispatchId(model).startsWith('omlx@'));
-	const hasLocalGroup = $derived(groups.some(isLocalGroup));
+	// Starter, setup, and Settings download states show in the Local group while the picker is open.
+	// The group that hosts this computer's oMLX setup status is keyed on the oMLX row, not on `is_local`: a trusted device's group says "Local" but is not this computer.
+	const hostsLocalSetup = (group: ModelGroup) => group.rows.some((model) => getModelDispatchId(model).startsWith('omlx@'));
+	const hasLocalSetupGroup = $derived(groups.some(hostsLocalSetup));
+	const hasReadyGroup = $derived(groups.some((group) => group.state === 'ready'));
+	// The Local section is the one place to add a local model; the Local only row and note link only when it is absent.
+	const showsLocalSection = $derived((!hasLocalSetupGroup && (!!$localStatus || $canAddLocalModel)) || $canSetUpLocalModel);
+	const setUpLocalElsewhere = $derived(showsLocalSection ? undefined : () => { showAddLocal = true; });
+	// The note links only when the Local only row is not already showing that link.
+	let rowOffersSetup = $state(false);
+	const noteSetUpLocal = $derived(sel.isOpen && rowOffersSetup ? undefined : setUpLocalElsewhere);
 	$effect(() => watchLocalStatus());
-	async function retryLocal(kind: 'starter' | 'setup') {
+	async function retryLocal(kind: LocalPickerRetry) {
 		const result = await retryLocalSetup(kind);
-		if (result.code === 'consent_required') {
-			toasts.showAction(
-				'CORSIA can read the existing oMLX version, settings, and local server to adopt it without changing its settings.',
-				{ label: 'Use existing oMLX', run: async () => {
-					const consented = await retryLocalSetup('setup', true);
-					if (!consented.ok) toasts.show("Couldn't set up the local model.", 'error');
-				} },
-			);
-		} else if (!result.ok) {
-			toasts.show("Couldn't set up the local model.", 'error');
+		if (!result.ok) {
+			toasts.show(kind === 'settings' ? result.message ?? "Couldn't retry the local model download. Try again." : "Couldn't set up the local model.", 'error');
 		}
+	}
+
+	async function retrySettingsDownload() {
+		if (settingsRetrying) return;
+		settingsRetrying = true;
+		try { await retryLocal('settings'); } finally { settingsRetrying = false; }
 	}
 
 	async function chooseAccount(row: PickerAccount) {
 		if (accountChoiceBusy) return;
 		accountChoiceBusy = true;
-		const result = await choosePickerAccount($activeThreadId, $activeModelId, $corsiaAgentId, row);
+		const result = await choosePickerAccount(sel.threadId, sel.modelId, $corsiaAgentId, row);
 		accountChoiceBusy = false;
 		if (!result.ok) toasts.show(result.message, 'error');
 	}
@@ -86,39 +109,39 @@
 	// Picking a model is one action. The server folds on the model being left
 	// and carries the switch through without another user decision.
 	async function chooseModel(model: Model) {
-		const threadId = $activeThreadId;
-		const previousId = $activeModelId;
+		const target = sel.threadId;
+		const previousId = sel.modelId;
 		const dispatchId = getModelDispatchId(model);
 		if (modelMatchesId(model, previousId)) return;
-		if (threadId && !beginThreadModelSwitch(threadId)) return;
+		if (target && !beginThreadModelSwitch(target)) return;
 		try {
-			if (!threadId) {
+			if (!target) {
 				setActiveModel(dispatchId);
-				emitSwitchEvent(model, dispatchId, threadId, previousId);
+				emitSwitchEvent(model, dispatchId, target, previousId);
 				return;
 			}
 			const t = $token;
 			if (!t) throw new Error('Not authenticated');
-			const result = await saveThreadModel(threadId, dispatchId, t);
+			const result = await saveThreadModel(target, dispatchId, t);
 			if (result.kind === 'pending') {
 				if (result.checkpointRequired) {
-					void loadCheckpoints(threadId, t).catch(() => {
+					void loadCheckpoints(target, t).catch(() => {
 						toasts.show('Checkpoint status will refresh on the next update.', 'info');
 					});
 				}
 				return;
 			}
 			if (result.warning) toasts.show(result.warning, 'info', 6000);
-			if ($activeThreadId !== threadId) return;
+			if (sel.threadId !== target) return;
 			if (!result.accepted || !modelMatchesId(model, result.model)) return;
-			emitSwitchEvent(model, dispatchId, threadId, previousId);
+			emitSwitchEvent(model, dispatchId, target, previousId);
 		} catch (error) {
 			toasts.show(
 				error instanceof Error ? error.message : "Couldn't switch model",
 				'error',
 			);
 		} finally {
-			if (threadId) finishThreadModelSwitch(threadId);
+			if (target) finishThreadModelSwitch(target);
 		}
 	}
 
@@ -139,18 +162,19 @@
 	}
 </script>
 
-
 <div class="action-sheet model-sheet">
+	{#if sel.isOpen}<LocalOnlySwitchRow onsetuplocal={setUpLocalElsewhere} bind:offerssetup={rowOffersSetup} onleave={onclose} focusOnMount={focusLocalOnly} onfocusconsumed={onfocusconsumed} />{/if}
 	<div class="sheet-section">
 		<div class="sheet-section-label">Model</div>
 		<div class="model-list">
-			{#if groups.length === 0 && !$localStatus}
+			{#if cloudModelsOff && !hasReadyGroup}<PickerLocalOnlyNote kind="empty" {projectCloudOff} onsetuplocal={noteSetUpLocal} onprojectsettings={openProjectPolicy} />{/if}
+			{#if groups.length === 0 && !cloudModelsOff && !$localStatus && !$canAddLocalModel && !$canSetUpLocalModel}
 				<div class="model-list-empty">No available models</div>
 			{:else}
 				{#each groups as group (group.key)}
-					{@const vendor = vendorRows(group.key, $models, $vendorAccounts)}
+					{@const vendor = vendorRows(group.key, sel.models, $vendorAccounts)}
 					{@const policy = $policyFor(activeThread?.project_id, group.key)}
-					{@const accountRows = pickerAccounts(group.key, $models, $vendorAccounts, policy, $activeModelId)}
+					{@const accountRows = pickerAccounts(group.key, sel.models, $vendorAccounts, policy, sel.modelId)}
 					{@const accountBacked = group.rows.some((model) => model.runs_on !== undefined)}
 					{@const open = isOpen(group, accountRows.length > 0)}
 					{@const usable = group.state === 'ready'}
@@ -178,8 +202,9 @@
 									chooser={accountRows.length > 0}
 									open={accountOpen}
 									rollover={policy?.rollover === true}
+									switching={accountRows.some((row) => row.pending)}
 									recovery={recovery?.account}
-									onchoose={$activeThreadId && recovery ? () => chooseAccount(recovery) : undefined}
+									onchoose={sel.threadId && recovery ? () => chooseAccount(recovery) : undefined}
 									breakdown={breakdown}
 									usageId={`picker-account-usage-${group.key}`}
 									usageOpen={usageOpen}
@@ -189,7 +214,7 @@
 									ontoggle={() => (accountOpened = { ...accountOpened, [group.key]: !accountOpen })}
 								/>
 								{#if accountOpen && accountRows.length > 0}
-									<AccountPickerRows rows={accountRows} />
+									<AccountPickerRows threadId={sel.threadId} rows={accountRows} />
 									{#if policy?.rollover === true}
 										<div class="rollover-settings"><button type="button" onclick={openRolloverSettings}>Rollover settings</button></div>
 									{/if}
@@ -199,7 +224,7 @@
 							name={group.name}
 							groupKey={group.key}
 							count={group.rows.length}
-							local={isLocalGroup(group) && usable}
+							local={group.rows.some((model) => model.is_local === true) && usable}
 							open={open}
 							status={headStatus}
 							subtitle={subtitle}
@@ -208,11 +233,16 @@
 							onToggle={() => (opened = { ...opened, [group.key]: !open })}
 							onToggleUsage={() => (usageShown = { ...usageShown, [group.key]: !usageOpen })}
 						/>
-						{#if open && accountRows.length > 0}<AccountPickerRows rows={accountRows} />{/if}
-
+						{#if open && accountRows.length > 0}<AccountPickerRows threadId={sel.threadId} rows={accountRows} />{/if}
 
 							{/if}
-						{#if $localStatus && isLocalGroup(group)}<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />{/if}
+						{#if $localStatus && hostsLocalSetup(group)}
+								{#if $localStatus.retry === 'settings'}
+									<div class="local-settings-status"><span class="text" aria-live="polite">{$localStatus.line}</span><button type="button" disabled={settingsRetrying} onclick={retrySettingsDownload}>{settingsRetrying ? 'Trying again…' : 'Try again'}</button></div>
+								{:else}
+									<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />
+								{/if}
+							{/if}
 						{#if shown.length > 0}
 							<div class="model-group-rows" id={`model-group-${group.key}`}>
 								{#each shown as model (model.id)}
@@ -221,7 +251,7 @@
 												{@const blocked = modelAvailability(model).status !== 'ready' || !usable}
 									<button
 										class="model-list-item press-tint"
-										class:active={modelMatchesId(model, $activeModelId)}
+										class:active={modelMatchesId(model, sel.modelId)}
 										class:pending={modelMatchesId(model, pendingModelId)}
 										class:blocked
 										disabled={blocked}
@@ -233,13 +263,11 @@
 											<span class="row-note" class:usage-amber={note.level === 'amber'} class:usage-red={note.level === 'red'} aria-label={note.label}>{note.text}</span>
 										{/if}
 										{#if modelMatchesId(model, pendingModelId)}
-											<span
-												class="switch-marker"
-												class:failed={pendingStatus === 'failed'}
-												title={activeThread?.switch_error ?? undefined}
-											>
-												{pendingStatus === 'failed' ? 'Switch failed' : 'Switching…'}
-											</span>
+											{#if pendingStatus === 'failed'}
+												<span class="switch-marker failed" title={activeThread?.switch_error ?? undefined}>Switch failed</span>
+											{:else}
+												<span class="switching-slot" in:inlineSlot out:inlineSlot><SwitchingIcon ariaLabel="Switching model" /></span>
+											{/if}
 										{/if}
 										{#if model.cache_marker === 'Cached'}
 											<span class="cached-marker">Cached</span>
@@ -255,7 +283,7 @@
 												<svg class="cap-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Tools"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
 											{/if}
 										</span>
-										{#if modelMatchesId(model, $activeModelId)}
+										{#if modelMatchesId(model, sel.modelId)}
 											<CurrentCheck />
 										{/if}
 									</button>
@@ -264,16 +292,28 @@
 						{/if}
 					</section>
 				{/each}
-				{#if $localStatus && !hasLocalGroup}
+				{#if cloudModelsOff && hasReadyGroup}<PickerLocalOnlyNote kind="quiet" {projectCloudOff} inherited={inheritedLocalOnly} onprojectsettings={openProjectPolicy} />{/if}
+				{#if showsLocalSection}
 					<section class="model-group" aria-label="Local">
 						<PickerModelGroupHeader name="Local" groupKey="local" count={0} fallback />
-						<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />
+						{#if $localStatus}
+								{#if $localStatus.retry === 'settings'}
+									<div class="local-settings-status"><span class="text" aria-live="polite">{$localStatus.line}</span><button type="button" disabled={settingsRetrying} onclick={retrySettingsDownload}>{settingsRetrying ? 'Trying again…' : 'Try again'}</button></div>
+								{:else}
+									<PickerLocalStatus line={$localStatus.line} retry={$localStatus.retry} onretry={retryLocal} />
+								{/if}
+							{:else if $canAddLocalModel}<button type="button" class="add-local-link" onclick={() => showAddLocal = true}>Add a local model</button>
+							{:else}<button type="button" class="add-local-link" onclick={() => retryLocal('setup')}>Set up</button>{/if}
 					</section>
 				{/if}
 			{/if}
 		</div>
 	</div>
 </div>
+
+{#if showAddLocal}
+	<AddLocalModelSheet onClose={() => showAddLocal = false} />
+{/if}
 
 <style>
 	.cached-marker {
@@ -284,12 +324,10 @@
 		padding: 1px 6px;
 	}
 
-	.switch-marker {
-		font-size: var(--text-caption);
-		color: var(--accent-text);
-	}
-
+	.switching-slot { display: inline-flex; flex: 0 0 auto; align-items: center; }
+	/* Only a failed switch keeps words; a pending one is the SwitchingIcon. */
 	.switch-marker.failed {
+		font-size: var(--text-caption);
 		color: var(--red);
 	}
 
@@ -302,10 +340,14 @@
 		max-width: 100%;
 	}
 
+	.add-local-link { padding: var(--space-2) var(--space-3); color: var(--accent-text); background: transparent; border: 0; font: inherit; cursor: pointer; }
+	.local-settings-status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) var(--space-3) var(--space-2) var(--space-8); color: var(--text-tertiary); font-size: var(--text-caption); }
+	.local-settings-status .text { min-width: 0; overflow-wrap: anywhere; }
+	.local-settings-status button { border: 0; border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); color: var(--text-primary); background: var(--bg-secondary); font: inherit; cursor: pointer; }
+	.local-settings-status button:disabled { cursor: default; opacity: .6; }
 	.model-group + .model-group {
 		margin-top: 4px;
 	}
-
 
 	.model-group.signed-out .model-group-rows {
 		opacity: .52;

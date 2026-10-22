@@ -2,7 +2,8 @@
 
 A recorded correction journals one passive note for the thread it was aimed at,
 inside the transaction that writes the fact, so the note exists exactly when the
-fact does. The note rides the thread's next passive digest and never starts a
+fact does: one note per flagged fact, whether the person corrected the agent in
+chat, in a document comment or in a free-text decision answer. The note rides the thread's next passive digest and never starts a
 turn; the digest's own delivery state records whether a turn received it.
 """
 
@@ -26,6 +27,11 @@ from core.corrections_recording import (
 
 NOTE_KIND = "correction_note"
 QUOTE_CHARS = 160
+# Several comment or answer notes can arrive in one digest (a round of review); each of those asks for one triage.
+TRIAGE_TOGETHER = (
+    "If several correction notes reach you together, triage them as one: look for one general cause "
+    "and re-check the whole artifact or decision, not each comment separately."
+)
 
 
 def _quote(content: str) -> str:
@@ -45,17 +51,31 @@ def _local_clock(created_at: str) -> str:
     return f"{sent.astimezone():%Y-%m-%d %H:%M %Z}"
 
 
-def note_text(message_id: str, content: str, created_at: str) -> str:
-    """The note one correction puts in its target's next turn."""
+def _note(where: str, words: str, arrived_as: str) -> str:
     return (
-        f"Correction recorded on your work (message {message_id}, sent "
-        f'{_local_clock(created_at)}): "{_quote(content)}"\n'
+        f'Correction recorded on your {where}: "{_quote(words)}"\n'
         "Proposed tier: none yet; you set it.\n"
         "Fix the work first. Then triage it with skill `memory-placement` section 4: "
         "set the tier, and for a Miss or Serious answer why it was missed, then watch or act. "
         "The triage is working state, not part of your reply. "
-        "If you already fixed and triaged it when the message arrived, do nothing more."
+        f"If you already fixed and triaged it when the {arrived_as} arrived, do nothing more."
     )
+
+
+def note_text(message_id: str, content: str, created_at: str) -> str:
+    """The note one chat correction puts in its target's next turn."""
+    return _note(f"work (message {message_id}, sent {_local_clock(created_at)})", content, "message")
+
+
+def _source_note_text(candidate: CorrectionCandidate) -> str:
+    """The note for a comment (its artifact) or a decision answer (its decision title)."""
+    clock = _local_clock(candidate.created_at)
+    if candidate.source_kind == "doc_comment":
+        where = f"artifact {candidate.about} (comment {candidate.source_id}, sent {clock})"
+        note = _note(where, candidate.quote or "", "comment")
+    else:
+        note = _note(f'plan decision "{candidate.about}" (answered {clock})', candidate.quote or "", "answer")
+    return note + "\n" + TRIAGE_TOGETHER
 
 
 def _has_target(db: sqlite3.Connection, thread_id: str) -> bool:
@@ -68,11 +88,11 @@ def _has_target(db: sqlite3.Connection, thread_id: str) -> bool:
     return row is not None and thread_is_available(row)
 
 
-def _first_record(db: sqlite3.Connection, message_id: str, event_id: str) -> bool:
-    """No other fact names this message, under any classifier version or label."""
+def _first_record(db: sqlite3.Connection, subject: str, event_id: str) -> bool:
+    """No other fact names this source, under any classifier version or label."""
     return db.execute(
         "SELECT 1 FROM outcome_events WHERE event_name=? AND subject_key=? AND id<>? LIMIT 1",
-        (CORRECTION_EVENT, subject_key(message_id), event_id),
+        (CORRECTION_EVENT, subject, event_id),
     ).fetchone() is None
 
 
@@ -92,7 +112,7 @@ def _newer_owner_message(db: sqlite3.Connection, candidate: CorrectionCandidate)
               AND (m.created_at > :created OR (m.created_at=:created AND m.id > :message))
             ORDER BY m.created_at,m.id""",
         {**params, "thread": candidate.thread_id, "created": candidate.created_at,
-         "message": candidate.message_id},
+         "message": candidate.source_id},
     )
     return any(
         is_owner_authored_message(role=row[0], content=row[1], metadata=row[2]) for row in rows
@@ -107,33 +127,37 @@ def queue_correction_note(
 ) -> int | None:
     """Journal the note for a newly recorded correction, inside the fact's transaction.
 
-    A live arrival always notes. A scan's catch-up notes only for the active
-    version and only when the person has not written in that thread since, so a
-    backfill never floods an agent with old corrections. Returns the journal seq,
-    or None when a gate refuses.
+    A live arrival always notes. A scan's catch-up notes only a chat message,
+    only for the active version and only when the person has not written in that
+    thread since, so a backfill never floods an agent with old corrections; a
+    scan never notes a comment or a decision answer. Returns the journal seq, or
+    None when a gate refuses.
     """
     if not _has_target(db, candidate.thread_id):
         return None
-    if not _first_record(db, candidate.message_id, event_id):
+    subject = subject_key(candidate.source_kind, candidate.source_id)
+    if not _first_record(db, subject, event_id):
         return None
     if not candidate.arrived and (
-        not _is_active(db, version) or _newer_owner_message(db, candidate)
+        candidate.source_kind != "message" or not _is_active(db, version) or _newer_owner_message(db, candidate)
     ):
         return None
-    row = db.execute("SELECT content FROM messages WHERE id=?", (candidate.message_id,)).fetchone()
+    if candidate.source_kind == "message":
+        row = db.execute("SELECT content FROM messages WHERE id=?", (candidate.source_id,)).fetchone()
+        summary = note_text(candidate.source_id, str(row[0] if row else candidate.content), candidate.created_at)
+    else:
+        summary = _source_note_text(candidate)
     from infra.passive_changes import REOFFER_UNWRITTEN, append_thread_context_note
 
     return append_thread_context_note(
         db,
         thread_id=candidate.thread_id,
-        summary=note_text(
-            candidate.message_id, str(row[0] if row else candidate.content), candidate.created_at,
-        ),
+        summary=summary,
         # Agent-only: no chip, so the person's transcript shows nothing for it.
         details={
             "chip": None,
             "kind": NOTE_KIND,
-            "correction_subject": subject_key(candidate.message_id),
+            "correction_subject": subject,
             REOFFER_UNWRITTEN: True,
         },
     )

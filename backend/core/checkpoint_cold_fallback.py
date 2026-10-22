@@ -16,25 +16,23 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 
-from core.checkpoint_warm_request import warm_capture_refused
+from core.fork_capture import warm_capture_refused
 
-from core.checkpoint_types import (
-    ProviderCheckpointRequest,
-    WarmForkUnusable,
-)
+from core.checkpoint_types import CheckpointProviderForkRequest
+from core.fork_types import WarmForkUnusable
 from infra.checkpoints import adopt_cold
 from infra.db_async import run_in_db
 
 
-def cold_correction_available(request: ProviderCheckpointRequest) -> bool:
+def cold_correction_available(request: CheckpointProviderForkRequest) -> bool:
     """Whether this exact request may correct itself once to cold."""
     return request.warm_source is not None and request.same_model_cold is not None
 
 
 async def build_cold_request(
-    request: ProviderCheckpointRequest,
+    request: CheckpointProviderForkRequest,
     reason: str = "warm_fork_over_window",
-) -> ProviderCheckpointRequest:
+) -> CheckpointProviderForkRequest:
     """Build the cold request this caller would have built with no warm source.
 
     ``reason`` is the refused warm fork's own token, logged as the cause.
@@ -47,14 +45,14 @@ async def build_cold_request(
     if hasattr(admission, "__await__"):
         admission = await admission
     cold = admission.provider_request
-    if cold.checkpoint_id != request.checkpoint_id or cold.thread_id != request.thread_id:
+    if cold.fork_id != request.fork_id or cold.thread_id != request.thread_id:
         raise ValueError("cold correction must stay on the same checkpoint row")
     if (cold.target.harness, cold.target.catalog_id, cold.target.transport_model) != (
             request.target.harness, request.target.catalog_id, request.target.transport_model):
         raise ValueError('cold correction must keep the exact checkpoint model')
     if cold.warm_source is not None or cold.cold_source is None:
         raise ValueError("cold correction did not produce a cold source")
-    await run_in_db(adopt_cold, request.checkpoint_id)
+    await run_in_db(adopt_cold, request.fork_id)
     warm_capture_refused(request.thread_id, request.target.harness, reason)
     # The usage callback is already frozen against this checkpoint id; keep the
     # single-owner binding rather than rebinding a second one.

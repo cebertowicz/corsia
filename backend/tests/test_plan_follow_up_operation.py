@@ -71,13 +71,14 @@ def _events(db, node_id: str, event: str) -> int:
 
 
 def _follow_up(db, plan_id, node_id, *, actor=OWNER, title="Residual work",
-               acceptance_criteria="Residual DOD", revision=None, mutation_id=None):
+               acceptance_criteria="Residual DOD", size="unknown", revision=None, mutation_id=None):
     return mutate(
         plan_id, "add_follow_up",
         {
             "node_id": node_id,
             "title": title,
             "acceptance_criteria": acceptance_criteria,
+            "size": size,
             "expected_revision": (
                 revision if revision is not None else _row(db, node_id)["revision"]
             ),
@@ -354,7 +355,7 @@ def test_the_generic_http_route_accepts_the_operation(db, monkeypatch):
             "params": {
                 "node_id": source.id,
                 "title": "Residual work",
-                "acceptance_criteria": "Residual DOD",
+                "acceptance_criteria": "Residual DOD", "size": "unknown",
                 "expected_revision": _row(db, source.id)["revision"],
             },
         },

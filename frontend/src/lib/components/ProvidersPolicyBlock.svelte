@@ -6,8 +6,10 @@
 	import type { ProviderEntry } from '$lib/api/providerPolicy';
 	import { createProviderPolicyState } from '$lib/stores/providerPolicyState.svelte';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
-	import { HARNESSES } from '$lib/stores/harnessMembership';
+	import CloudModelsOffSetting from './CloudModelsOffSetting.svelte';
 	import { requestSettingsSection, settingsAnchor } from '$lib/stores/settingsNavigation';
+	import { HARNESSES } from '$lib/stores/harnessMembership';
+	import { loadThreads } from '$lib/stores/threadsLoad';
 
 	const { projectId, onSignIn }: { projectId: string; onSignIn?: (provider: string) => void } = $props();
 	const policyState = createProviderPolicyState(() => projectId);
@@ -17,7 +19,13 @@
 	const hasControlFailure = $derived(policyState.hasControlFailure());
 	const scopeTarget = 'scope';
 	let accountsError = $state('');
+	// `null` stays loading until the project's persisted Local models only setting settles.
+	let cloudModelsOff = $state<boolean | null>(null);
 	const accountProviders = $derived(policy?.providers?.filter((provider) => provider.capabilities.units === 'accounts') ?? []);
+	// Every account provider the policy lists, named by the harness owner.
+	const cloudOffLine = $derived(accountProviders.length
+		? `${new Intl.ListFormat('en', { type: 'conjunction' }).format(accountProviders.map(providerName))} ${accountProviders.length === 1 ? "isn't" : "aren't"} used while Local models only is on.`
+		: '');
 
 	$effect(() => { void load(); });
 	async function load() {
@@ -42,8 +50,14 @@
 </script>
 
 <section class="providers-policy" aria-label="Project providers" data-settings-anchor="project-provider-policy" use:settingsAnchor={'project-provider-policy'}>
+	{#if projectId}
+		<h2>Models</h2>
+		<CloudModelsOffSetting {projectId} onCloudModelsOffState={(value) => { cloudModelsOff = value; }} onCloudModelsOffSaved={() => { void loadThreads(); }} />
+	{/if}
 	<h2>Accounts and rollover</h2>
-	{#if loading}<p role="status">Loading providers…</p>
+	{#if loading || (projectId && cloudModelsOff === null)}<p role="status">Loading providers…</p>
+	{:else if projectId && cloudModelsOff === true && policy}
+		{#if cloudOffLine}<p>{cloudOffLine}</p>{/if}
 	{:else if error && !hasControlFailure}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
 	{:else if policy}
 		{#if accountsError}<p class="error" role="alert">{accountsError}</p><Button size="sm" onclick={load}>Reload providers</Button>{/if}

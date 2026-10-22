@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { token } from './auth';
 import { modelAvailability, type Model } from './models';
-import { activeModelId, getModelDispatchId, models, workspaceModels } from './modelsState';
+import { activeModelId, getModelDispatchId, models, threadCatalogs, workspaceModels } from './modelsState';
 import { activeThreadId } from './threads';
 
 // The thread the catalog was last read for: its harness rows read that
@@ -28,7 +28,7 @@ async function readCatalog(scope: string | null, refreshUsage: boolean): Promise
 
 // An unread account's status is unknown, never the last thread's: no row
 // reads ready, so nothing sends on another account's verdict.
-function unknownStatus(rows: Model[]): Model[] {
+export function unknownStatus(rows: Model[]): Model[] {
 	return rows.map((row) => ({ ...row, status: 'unavailable', status_reason: 'status_unknown', runs_on: undefined, runnable: undefined }));
 }
 
@@ -74,6 +74,35 @@ async function loadWorkspace() {
 export async function loadModels({ refreshUsage = false }: { refreshUsage?: boolean } = {}) {
 	const scope = catalogScope();
 	await Promise.all([loadScoped(scope, refreshUsage), scope ? loadWorkspace() : null]);
+}
+
+const threadLoadSeq = new Map<string, number>();
+
+/**
+ * Reads the catalog on another thread's account (a worker's) into `threadCatalogs`, so its composer
+ * shows that thread's availability and accounts, not the open thread's.
+ */
+export async function loadThreadCatalog(threadId: string, refreshUsage = false): Promise<void> {
+	if (!get(token)) return;
+	const seq = (threadLoadSeq.get(threadId) ?? 0) + 1;
+	threadLoadSeq.set(threadId, seq);
+	let rows: Model[];
+	try {
+		rows = await readCatalog(threadId, refreshUsage);
+	} catch (err) {
+		if (threadLoadSeq.get(threadId) !== seq) return;
+		console.warn('[models] thread catalog read failed; its statuses are unknown', err);
+		rows = unknownStatus(get(workspaceModels));
+	}
+	if (threadLoadSeq.get(threadId) !== seq) return;
+	threadCatalogs.update((all) => new Map(all).set(threadId, rows));
+}
+
+/** Reads the catalog a composer shows: the open thread's, or its own thread's when it is bound to another. */
+export function loadComposerModels(threadId: string | null | undefined, opts: { refreshUsage?: boolean } = {}): Promise<void> {
+	return threadId && threadId !== get(activeThreadId)
+		? loadThreadCatalog(threadId, opts.refreshUsage)
+		: loadModels(opts);
 }
 
 // Opening another thread re-reads the catalog on that thread's account.

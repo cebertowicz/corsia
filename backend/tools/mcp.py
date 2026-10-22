@@ -14,7 +14,6 @@ from tools.mcp_config import (
     timeout_seconds, url_origin,
 )
 from tools.mcp_local_transport import (
-    _mcp_cache_dir,
     _mcp_denial_guidance,
     _mcp_denied_paths_in,
     mcp_oserror_detail as _mcp_oserror_detail,
@@ -79,10 +78,14 @@ class MCPConnectionFailure(str):
 
 def mcp_failure_class(error: BaseException, config: dict) -> str:
     """Classify one launch failure before its safe text loses the machine cause."""
+    from tools.managed_runtime import ManagedRuntimeDownloadError
+
     if isinstance(error, BaseExceptionGroup):
         return mcp_failure_class(error.exceptions[0], config)
     if isinstance(error, MCPConnectionError):
         return error.failure_class
+    if isinstance(error, ManagedRuntimeDownloadError):
+        return "runtime_download_failed"
     if getattr(_active_auth.get(), "challenged", False):
         return "needs_sign_in"  # the server asked for an OAuth sign-in this connection did not have
     if isinstance(error, (TimeoutError, httpx.TimeoutException)):

@@ -24,7 +24,8 @@ from infra import config
 from infra.auth import owns_thread
 from infra.database import get_db
 from infra.db_async import run_in_db, run_off_db
-from infra.guidance_git import GuidanceTarget, guidance_target, save_guidance
+from infra.guidance_git import save_guidance
+from infra.guidance_targets import GuidanceTarget, guidance_target
 from infra.guidance_messages import saver_author
 from registry import service as registry_service
 from registry.durable_writes import write_text
@@ -269,9 +270,9 @@ def _write_document(
         else:
             artifact = registry_service.resolve_file_identity(str(resolved), db=db)
             if artifact is not None:
-                from registry.review_edit_journal import journal_reviewed_edit
+                from registry.review_edit_journal import note_content_edit
 
-                journal_reviewed_edit(
+                note_content_edit(
                     db, artifact, previous_sha256=prior_sha256,
                     new_sha256=new_sha256, actor_thread_id=UI_THREAD,
                 )

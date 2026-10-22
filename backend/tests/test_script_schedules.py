@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -204,6 +205,30 @@ async def test_in_bounds_reading_is_a_passive_note_not_a_wake(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_run_without_settled_measures_keeps_the_prior_measure_summary(tmp_path, monkeypatch):
+    db = _db()
+    schedule = _register(db, tmp_path)
+    db.execute("UPDATE automation_schedules SET last_measures='measures: 2 recorded, 0 refused (measure_status)'")
+    _use_run(monkeypatch, _run())
+
+    await _settle_all(db, T0)
+
+    assert schedules.get(schedule.id, db=db).last_measures == "measures: 2 recorded, 0 refused (measure_status)"
+
+
+@pytest.mark.asyncio
+async def test_run_whose_measure_lines_were_all_refused_replaces_the_prior_summary(tmp_path, monkeypatch):
+    db = _db()
+    schedule = _register(db, tmp_path)
+    db.execute("UPDATE automation_schedules SET last_measures='measures: 2 recorded, 0 refused (measure_status)'")
+    _use_run(monkeypatch, _run(json.dumps({"measure": {"attributes": {}}}) + "\n"))  # malformed: refused
+
+    await _settle_all(db, T0)
+
+    assert schedules.get(schedule.id, db=db).last_measures == "measures: 0 recorded, 1 refused (measure_status)"
+
+
+@pytest.mark.asyncio
 async def test_unbounded_series_never_wakes_or_notes(tmp_path, monkeypatch):
     db = _db()
     _register(db, tmp_path, series=[store.Series("calls", "")])
@@ -396,7 +421,7 @@ def test_oversized_output_is_an_error_not_a_reading(tmp_path):
     schedule = _register(db, tmp_path)
     big = _run('{"series":"cost","value":1}\n' * 5000)
     assert big.over_cap
-    report = build_report(schedule, big)
+    report = build_report(schedule, big, run_id="run-1")
     assert report.status == "error" and report.readings == []
 
 
@@ -423,7 +448,7 @@ def test_deleting_the_owner_removes_its_schedules_and_the_thread(tmp_path):
 def test_run_settling_after_owner_deletion_is_dropped(tmp_path):
     db = _db()
     schedule = _register(db, tmp_path)
-    report = build_report(schedule, _run('{"series":"cost","value":1}\n'))
+    report = build_report(schedule, _run('{"series":"cost","value":1}\n'), run_id="run-1")
     db.execute("DELETE FROM automation_schedules")
     assert script_runner.settle(schedule, report, T0, db) is False
 

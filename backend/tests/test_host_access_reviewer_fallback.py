@@ -26,15 +26,17 @@ def _configure(*, fallback: bool, reviewer: str | None = OUT) -> None:
     set_setting("agents", {"defaults": defaults})
 
 
-def _insert_thread(thread_id: str, model: str | None = REQUESTER) -> None:
+def _insert_thread(
+    thread_id: str, model: str | None = REQUESTER, project: str | None = None,
+) -> None:
     from infra.database import get_db
 
     db = get_db()
     try:
         db.execute(
-            "INSERT INTO threads (id,user_id,title,model,created_at,updated_at) "
-            "VALUES (?,?,?,?,'t','t')",
-            (thread_id, "steve", thread_id, model),
+            "INSERT INTO threads (id,user_id,title,model,project_id,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,'t','t')",
+            (thread_id, "steve", thread_id, model, project),
         )
         db.commit()
     finally:
@@ -345,10 +347,12 @@ async def test_the_completed_review_event_says_whether_the_fallback_reviewed(out
 @pytest.mark.asyncio
 @pytest.mark.parametrize("out", [True, False])
 async def test_usage_row_carries_the_account_of_the_target_that_ran_the_review(outage, monkeypatch, out):
+    from connections.claude_unlisted import base_identity
     from host_access import review_telemetry
     from llm.isolated_structured import IsolatedStructuredTelemetry
 
     rows: list[tuple[tuple, dict]] = []
+    reported: dict[str, str] = {}
     monkeypatch.setattr(
         review_telemetry, "record_llm_usage", lambda *a, **k: rows.append((a, k))
     )
@@ -360,6 +364,7 @@ async def test_usage_row_carries_the_account_of_the_target_that_ran_the_review(o
         outage.models[OUT] = ("usage_limited", RESET)
 
     async def fake(target, **kwargs):
+        reported[target.catalog_id] = target.expected_reported_model
         kwargs["telemetry_sink"](IsolatedStructuredTelemetry(
             catalog_id=target.catalog_id, harness=target.harness, transport_model=target.transport_model,
             reported_model=target.expected_reported_model, prompt_tokens=5, completion_tokens=2,
@@ -378,8 +383,11 @@ async def test_usage_row_carries_the_account_of_the_target_that_ran_the_review(o
 
     await _request()
 
+    # The row names the concrete model the reviewer reported, on the account
+    # of the target that ran it.
+    ran, account = (REQUESTER, "account-sonnet") if out else (OUT, "account-opus")
     assert [(args[1], kwargs["vendor_account_id"]) for args, kwargs in rows] == [
-        (REQUESTER, "account-sonnet") if out else (OUT, "account-opus"),
+        (f"claude-code/{base_identity(reported[ran])}", account),
     ]
 
 
@@ -551,3 +559,223 @@ def test_the_reviewer_unavailable_reason_is_holder_safe():
     from host_access.failure_reasons import is_holder_safe
 
     assert is_holder_safe("reviewer_unavailable")
+
+
+# --- locality policy: the lease never leaves to a model the person ruled out ----
+
+CLOUD_OFF = "local-project"
+ORDINARY = "ordinary-project"
+LOCAL_MODEL = "omlx@loop/local"
+
+
+def _project(project_id: str, *, cloud_models_off: bool = False) -> None:
+    from infra.database import get_db
+    from llm.locality import set_project_cloud_models_off
+
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO projects(id,name,path,created_at,updated_at) VALUES (?,?,?,'t','t')",
+            (project_id, project_id, "/tmp/" + project_id),
+        )
+        db.commit()
+    finally:
+        db.close()
+    if cloud_models_off:
+        set_project_cloud_models_off(project_id, cloud_models_off=True)
+
+
+def _local_model() -> None:
+    """One model on a loopback oMLX server: the only kind a cloud-off project may run."""
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO network_servers(id,provider,kind,instance_id,instance_name,port,status,"
+            "metadata_json,last_seen_at,created_at,updated_at) "
+            "VALUES ('loop','omlx','managed','loop','loop',8000,'online','{}','t','t','t')"
+        )
+        db.execute(
+            "INSERT INTO network_server_endpoints(id,server_id,host,kind,created_at,updated_at) "
+            "VALUES ('ep-loop','loop','127.0.0.1','local','t','t')"
+        )
+        db.execute(
+            "INSERT INTO models(id,display_name,litellm_model,provider,provider_model_id,harness,"
+            "backend,source,enabled,available,context_window,metadata_json,created_at,updated_at) "
+            "VALUES (?,?,'omlx@loop/local','omlx','local','native','network','test',1,1,32768,'{}',"
+            "'t','t')",
+            (LOCAL_MODEL, "Local Reviewer"),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _set_requester_model(model: str) -> None:
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        db.execute("UPDATE threads SET model=? WHERE id='root'", (model,))
+        db.commit()
+    finally:
+        db.close()
+
+
+@pytest.fixture
+def cloud_off(isolated_db, monkeypatch) -> _Outage:
+    """The requester's chat is in a project that turned cloud models off.
+
+    Both reviewer candidates start as cloud models, and one local model is ready.
+    """
+    _project(CLOUD_OFF, cloud_models_off=True)
+    _local_model()
+    _insert_thread("root", project=CLOUD_OFF)
+    return _Outage(monkeypatch)
+
+
+@pytest.fixture
+def ordinary(isolated_db, monkeypatch) -> _Outage:
+    """The same reviewer in a project with no locality policy in force."""
+    _project(ORDINARY)
+    _insert_thread("root", project=ORDINARY)
+    return _Outage(monkeypatch)
+
+
+@pytest.mark.asyncio
+async def test_a_cloud_reviewer_in_a_cloud_off_project_is_refused_by_that_policy(cloud_off):
+    from host_access.errors import ReviewerUnavailableError
+
+    _configure(fallback=False)
+
+    with pytest.raises(ReviewerUnavailableError) as refused:
+        await _resolve()
+
+    error = refused.value
+    assert error.outage.reason == "project_cloud_off"
+    assert error.outage.model_name == _display_name(OUT)
+    assert (error.pinned, error.fallback) == (False, None)
+    # The policy refusal is the whole answer: not even the reviewer's account is
+    # resolved for a model this thread may never send to.
+    assert cloud_off.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_refused_cloud_reviewer_is_never_invoked(cloud_off, monkeypatch):
+    _configure(fallback=True)  # the requester's own model is a cloud model too
+    calls = _verdict_capture(monkeypatch)
+
+    result = await _tool_call()
+
+    assert result["reason"] == "reviewer_unavailable"
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_locality_refusal_names_the_local_reviewer_as_the_fix(cloud_off, monkeypatch):
+    _configure(fallback=False)
+    _verdict_capture(monkeypatch)
+
+    result = await _tool_call()
+
+    assert result["guidance"] == (
+        "The host-access reviewer chosen in Settings can't run right now "
+        "(it's a cloud model and this project uses local models only). Your "
+        "application was not reviewed. Tell the person once to choose a local "
+        "reviewer model in Settings > System > Host Access Review or turn on "
+        "reviewer fallback."
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_locality_refusal_does_not_tell_the_agent_to_wait_for_the_reviewer(cloud_off, monkeypatch):
+    _configure(fallback=True)  # fallback is on and both models are refused
+    _verdict_capture(monkeypatch)
+
+    result = await _tool_call()
+
+    assert result["guidance"].endswith(
+        "Tell the person once to choose a local reviewer model in "
+        "Settings > System > Host Access Review."
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_pinned_locality_refusal_says_apply_again_not_change_settings(cloud_off):
+    """A pinned review never re-resolves, so a Settings change can't help this lease."""
+    _configure(fallback=False)
+
+    assert await _action_refusal() == (
+        "This lease's reviewer can't run (it's a cloud model and this project "
+        "uses local models only). Your action was not reviewed. Apply again; if "
+        "the new application is refused too, its refusal names the fix."
+    )
+    assert cloud_off.calls == []
+
+
+def test_every_locality_refusal_has_its_own_words():
+    """A new refusal must bring its phrase, or the agent would read a bare code."""
+    from llm.locality import LOCALITY_REFUSALS
+    from prompts.cloud_off import LOCALITY_PHRASES
+
+    assert set(LOCALITY_PHRASES) == set(LOCALITY_REFUSALS)
+
+
+@pytest.mark.asyncio
+async def test_a_thread_locality_refusal_travels_as_the_chats_own_cause(outage, monkeypatch):
+    """Threads don't carry the local-only flag at this head, so the refusal is stubbed:
+    what this pins is that the cause reaches both candidates and no account is read."""
+    from llm import locality
+    from host_access.errors import ReviewerUnavailableError
+
+    monkeypatch.setattr(locality, "locality_refusal", lambda *_a, **_k: "thread_local_only")
+    _configure(fallback=True)
+
+    with pytest.raises(ReviewerUnavailableError) as refused:
+        await _resolve()
+
+    assert refused.value.outage.reason == "thread_local_only"
+    assert refused.value.fallback.reason == "thread_local_only"
+    assert outage.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_local_requester_model_reviews_a_cloud_off_project(cloud_off, monkeypatch):
+    async def healthy(_model):
+        return True, ""
+
+    _configure(fallback=True)
+    _set_requester_model(LOCAL_MODEL)
+    monkeypatch.setattr("llm.resolution._check_local_model_health", healthy)
+    calls = _verdict_capture(monkeypatch)
+
+    lease = await _request()
+
+    assert [call["target"].catalog_id for call in calls] == [LOCAL_MODEL]
+    assert lease["reviewer_model"] == LOCAL_MODEL
+    assert lease["application_review_result"]["reviewer_fallback"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_pinned_cloud_reviewer_in_a_cloud_off_project_is_refused_not_resent(cloud_off):
+    from host_access.errors import ReviewerUnavailableError
+
+    _configure(fallback=True)
+
+    with pytest.raises(ReviewerUnavailableError) as refused:
+        await _resolve(OUT)
+
+    assert (refused.value.outage.reason, refused.value.pinned) == ("project_cloud_off", True)
+    assert refused.value.fallback is None
+    assert cloud_off.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_cloud_reviewer_in_an_ordinary_project_still_reviews(ordinary):
+    _configure(fallback=False)
+
+    target = await _resolve()
+
+    assert target.catalog_id == OUT
+    assert ordinary.calls == [OUT]

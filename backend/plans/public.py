@@ -108,6 +108,7 @@ from plans.user_ask import (
     user_ask_hold_sql,
 )
 from plans.user_ask_cards import ask_holds
+from plans.decision_projection import DECISION_TYPE, identity_row as decision_identity_row
 from plans.node_states import blocked_on_user_sql, failure_asks_user_sql, open_user_block_sql
 from plans.folded_reads import read_folded, read_path as read_folded_path
 from plans.operator_node_read import read_node as read_operator_node
@@ -160,6 +161,7 @@ from plans.watch_resolution import resolve_delivered_event
 from plans.artifact_links import link as link_node_artifact
 from plans.feedback_nodes import (
     create_feedback_node, create_review_node, feedback_display, feedback_item_counts, load_feedback_items,
+    settle_feedback_node,
 )
 from plans.review_requests import (
     append_review_note, close_review_node, review_is_open, settle_review_node,

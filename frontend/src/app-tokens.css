@@ -24,6 +24,7 @@
   --focus-ring: 0 0 0 3px var(--accent-wash);
 
   --space-1: 4px;
+  --chip-inline-padding: 6px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
@@ -106,6 +107,7 @@
   --radius-circle: 50%;
   --sidebar-width: 280px;
   --header-height: 60px;
+  --header-badge-slot: 86px;
   --list-row-min-height: 38px;
   --button-pad-x-sm: 10px;
   --project-mark-size: 9px;
@@ -145,6 +147,7 @@
   --accent-line: color-mix(in srgb, #007faa 30%, transparent);
   --accent-fill: var(--accent);
   --accent-on-fill: #ffffff;
+  --accent-selection: color-mix(in srgb, #007faa 45%, transparent);
   --violet-brand: #8b5cf6;
   --teal: #2dd4bf;
   --teal-bg: rgba(45, 212, 191, 0.10);
@@ -235,6 +238,7 @@
   --accent-line: color-mix(in srgb, #007faa 30%, transparent);
   --accent-fill: var(--accent);
   --accent-on-fill: #ffffff;
+  --accent-selection: color-mix(in srgb, #007faa 35%, transparent);
   --teal: #0d9488;
   --teal-bg: rgba(13, 148, 136, 0.08);
   --teal-line: rgba(13, 148, 136, 0.32);

@@ -10,6 +10,7 @@ from app_lifecycle import lifespan
 
 from infra import config  # noqa: F401
 from infra.access_log import install_access_log_redaction
+from infra.json_gzip import JsonGZipMiddleware
 from infra.config import FRONTEND_DIR
 from infra.product_events import emit_product_event
 from infra.request_timing import RequestTimingMiddleware
@@ -37,6 +38,7 @@ from api import (
     project_repos_router,
     fs_browse_router,
     provider_sources_router,
+    provider_local_models_router,
     provider_cli_link_router,
     providers_router,
     provider_policy_router,
@@ -72,6 +74,7 @@ from api.registry_ownership import router as registry_ownership_router
 from api.doc_reviews import router as doc_reviews_router
 from api.cli_install import router as cli_install_router
 from api.google import router as google_router
+from api.microsoft import router as microsoft_router
 from api.keys import router as keys_router
 
 
@@ -85,6 +88,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(JsonGZipMiddleware)
 app.add_middleware(RequestTimingMiddleware)
 
 
@@ -113,6 +117,7 @@ app.include_router(system_router)
 app.include_router(system_perf_router)
 app.include_router(keys_router)
 app.include_router(google_router)
+app.include_router(microsoft_router)
 app.include_router(uploads_router)
 app.include_router(turns_router)
 app.include_router(drain_router)
@@ -138,6 +143,7 @@ app.include_router(providers_router)
 app.include_router(vendor_accounts_router)
 app.include_router(provider_policy_router)
 app.include_router(provider_sources_router)
+app.include_router(provider_local_models_router)
 app.include_router(provider_cli_link_router)
 app.include_router(cli_install_router)
 app.include_router(discovered_models_router)

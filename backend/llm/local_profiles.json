@@ -1,5 +1,5 @@
 {
-  "omlx_global_settings": {
+  "managed_global_settings": {
     "max_concurrent_requests": 1,
     "prefill_priority": "context"
   },

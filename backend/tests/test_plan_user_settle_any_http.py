@@ -254,7 +254,7 @@ def test_the_user_drops_a_question_with_won_t_do(client, db):
     plan_id = decision["plan_id"]
     question = _node(db, decision["node_id"])
 
-    assert _row_in_pane(db, question.id)["user_actions"] == ["close_node"]
+    assert _row_in_pane(db, question.id)["user_actions"] == ["pause_node", "close_node"]
     response = _post(client, plan_id, "close_node", question)
 
     assert response.status_code == 200, response.text

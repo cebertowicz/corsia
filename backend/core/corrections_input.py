@@ -90,6 +90,17 @@ def shape_context(rows: Iterable[tuple[str, str, str, Any]]) -> tuple[tuple[str,
     return tuple(reversed(kept))
 
 
+def agent_context(text: str) -> tuple[tuple[str, str], ...]:
+    """What the agent put to the person (a commented excerpt, a decision's question) as one ``Agent`` row.
+
+    A comment or decision answer has no chat turn before it; this row stands in
+    for it, cut and masked as a context message is, so the input keeps the
+    trained shape: the agent's turn first, the person's words last.
+    """
+    kept = mask(text.strip()[-CONTEXT_MESSAGE_CHARS:])
+    return (("Agent", kept),) if kept else ()
+
+
 def owner_text(owner: str) -> str:
     """The masked owner message, cut to the tail the token window can hold."""
     return mask(owner[-OWNER_MESSAGE_CHARS:])

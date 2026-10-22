@@ -23,7 +23,7 @@ use serde::Serialize;
 use crate::adoption;
 
 pub const SERVICE_FILE: &str = "service.json";
-const WORKSPACE_FOLDER: &str = "corsia";
+const WORKSPACE_FOLDER: &str = "CORSIA";
 const LEGACY_STATE_FOLDER: &str = "com.cebertowicz.corsia";
 // Finder's view settings do not make a folder someone's data. A `.git`
 // directory is ignored only when it has no branch refs or packed branch refs.
@@ -486,12 +486,12 @@ mod tests {
         assert_eq!(
             plan(&home.0, &home.app_dir()).unwrap(),
             FirstRun::Fresh {
-                workspace: home.0.join("corsia")
+                workspace: home.0.join("CORSIA")
             }
         );
         assert!(home.listing().is_empty(), "planning writes nothing");
 
-        let workspace = home.0.join("corsia");
+        let workspace = home.0.join("CORSIA");
         let mut initialised = None;
         apply(&workspace, &home.app_dir(), 47_895, |path| {
             initialised = Some(path.to_path_buf());
@@ -527,7 +527,7 @@ mod tests {
     #[test]
     fn a_failed_git_init_still_records_the_workspace() {
         let home = Home::new("nogit");
-        let workspace = home.0.join("corsia");
+        let workspace = home.0.join("CORSIA");
 
         apply(&workspace, &home.app_dir(), 47_895, |_| {
             Err("git is not installed".into())
@@ -540,7 +540,7 @@ mod tests {
     #[test]
     fn git_is_not_spawned_without_a_bundled_git_or_command_line_tools() {
         let home = Home::new("nogit-skip");
-        let workspace = home.0.join("corsia");
+        let workspace = home.0.join("CORSIA");
         fs::create_dir_all(&workspace).unwrap();
         let resources = home.0.join("Resources");
         fs::create_dir_all(resources.join("bin")).unwrap();

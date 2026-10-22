@@ -47,4 +47,14 @@ describe('peerFade', () => {
 		expect(peerFade(node(), undefined, { direction: 'out' }).duration).toBeCloseTo(84);
 		expect(animate.mock.calls[0][0]).toEqual([{ opacity: 0 }, { opacity: 1 }]);
 	});
+
+	it('cancels a finished exit when the leaving node comes back, so it is not left at opacity 0', () => {
+		const cancel = vi.fn();
+		const element = node();
+		element.getAnimations = (() => [{ cancel }]) as unknown as typeof element.getAnimations;
+		peerFade(element, undefined, { direction: 'out' });
+		expect(cancel).not.toHaveBeenCalled();
+		peerFade(element, undefined, { direction: 'in' });
+		expect(cancel).toHaveBeenCalledTimes(1);
+	});
 });

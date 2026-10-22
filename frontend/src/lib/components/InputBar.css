@@ -101,7 +101,7 @@
 .action-spacer { flex: 1; }
 .row-chip {
 	display: inline-flex; align-items: center; gap: 3px;
-	padding: 4px 6px;
+	padding: var(--space-1) var(--chip-inline-padding);
 	font-family: inherit;
 	background: none;
 	border: none;
@@ -126,7 +126,7 @@
 .model-chip.unloaded:hover, .model-chip.unloaded.open { color: var(--amber); background: var(--amber-bg); }
 .effort-chip { font-size: var(--text-caption); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent-text); }
 .effort-chip:hover, .effort-chip.open { color: var(--accent-text); background: var(--accent-wash); }
-.context-chip, .cc-model-chip { font-size: var(--text-footnote); font-weight: 500; color: var(--text-secondary); }
+.context-chip { font-size: var(--text-footnote); font-weight: 500; color: var(--text-secondary); }
 .context-chip:hover, .context-chip.open { color: var(--text-primary); }
 .context-chip { font-variant-numeric: tabular-nums; }
 .context-chip.warn { color: var(--amber); }
@@ -138,12 +138,6 @@
 .model-chip .chevron {
 	flex-shrink: 0; opacity: 0.7;
 }
-.cc-model-chip {
-	max-width: 180px; min-width: 0;
-	cursor: default;
-}
-.cc-model-chip:hover { background: none; }
-.cc-glyph { flex-shrink: 0; font-size: var(--text-footnote); }
 /* The context chip gives way before the model name does (#2965). Flex shrinks in proportion to
    flex-shrink times width, so the name chip's share must be near zero, not merely smaller, or it
    takes a sliver of the deficit while the context chip still has room. The context chip takes

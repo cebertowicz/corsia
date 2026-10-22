@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Anti-pattern catalog
-    url: https://github.com/cebertowicz/corsia/blob/main/docs/contributing/bootstrap/starter-kit/shared/standards/llm-anti-patterns.md
+    url: https://github.com/cebertowicz/corsia/blob/main/docs/standards/llm-anti-patterns.md
     about: Before filing a bug that's actually a known LLM-coding-agent shape, check the catalog.

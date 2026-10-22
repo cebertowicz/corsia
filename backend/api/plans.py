@@ -254,9 +254,7 @@ async def answer_plan_decision(
     if not isinstance(mutation_id, str) or not mutation_id.strip():
         raise HTTPException(422, "mutation_id is required")
     if "actor_session_id" in body:
-        raise HTTPException(
-            422, "HTTP decision answers record the authenticated human",
-        )
+        raise HTTPException(422, "HTTP decision answers record the authenticated human")
     try:
         result = await run_in_db(partial(
             _intake_operation,
@@ -274,6 +272,8 @@ async def answer_plan_decision(
     except SendRejected as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
     response = _check_result(public.deliver_deferred(result))
+    from jobs.corrections_recording import notify_decision_answer  # best effort; never fails the answer
+    notify_decision_answer(decision_id, body.get("other_text"))
     public.drive_after_response(result)
     return response
 

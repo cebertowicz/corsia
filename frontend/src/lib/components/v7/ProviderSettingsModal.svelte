@@ -12,7 +12,7 @@
 	import CostPanel from './CostPanel.svelte';
 	import ExternalProviderSettings from './ExternalProviderSettings.svelte';
 	import OmlxServerInfoPanel from './OmlxServerInfoPanel.svelte';
-	import OwnOmlxManagement from './OwnOmlxManagement.svelte';
+
 	import ProviderEndpointsTab from './ProviderEndpointsTab.svelte';
 	import ProviderSettingsHeader from './ProviderSettingsHeader.svelte';
 	import ProviderStatusCard from './ProviderStatusCard.svelte';
@@ -21,10 +21,11 @@
 
 	interface Props {
 		provider: HostProvider;
+		initialTab?: ProviderSettingsTab;
 		onClose: () => void;
 	}
 
-	const { provider: providerProp, onClose }: Props = $props();
+	const { provider: providerProp, initialTab, onClose }: Props = $props();
 
 	const providerIndex = $derived.by((): Map<string, HostProvider> => {
 		const m = new Map<string, HostProvider>();
@@ -40,7 +41,7 @@
 		providerIndex.get(`${providerProp.name}|${providerProp.server?.id ?? ''}`) ?? providerProp,
 	);
 
-	let activeTab = $state<ProviderSettingsTab>('overview');
+	let activeTab = $state<ProviderSettingsTab>(initialTab ?? 'overview');
 	onMount(() => { if (providerProp.type === 'harness') activeTab = 'accounts'; });
 	let actionError = $state('');
 	let actionMessage = $state('');
@@ -241,15 +242,13 @@
 			{:else if hasServer}
 				{#if isLocalhostDaemon}
 					{#if daemonRunning}
-						<Button disabled={busy} onclick={() => handleDaemonAction('stop')}>Stop daemon</Button>
+						<Button disabled={busy} onclick={() => handleDaemonAction('stop')}>Stop</Button>
 						<Button disabled={busy} onclick={() => handleDaemonAction('reload')}>Reload models</Button>
 					{:else}
-						<Button variant="primary" disabled={busy} onclick={() => handleDaemonAction('start')}>Start daemon</Button>
+						<Button variant="primary" disabled={busy} onclick={() => handleDaemonAction('start')}>Start</Button>
 					{/if}
 					<Button disabled={busy} onclick={handleTestLocal}>{busy ? 'Testing…' : 'Test connection'}</Button>
-					{#if provider.name === 'omlx'}
-						<OwnOmlxManagement onResult={(message, error) => { clearMessages(); if (error) actionError = message; else actionMessage = message; }} />
-					{/if}
+
 				{:else}
 					<Button disabled={busy} onclick={handleTestLocal}>{busy ? 'Testing…' : 'Test connection'}</Button>
 				{/if}
@@ -282,7 +281,7 @@
 		{:else if hasServer && provider.name === 'omlx' && provider.server}
 			<OmlxServerInfoPanel serverId={provider.server.id} />
 		{:else if hasServer}
-			<p class="hint">{provider.label} is added manually by host:port. Server-level settings are owned by the daemon itself.</p>
+			<p class="hint">{provider.label} is added manually by host:port. Its settings are changed on that server, not here.</p>
 		{/if}
 	{/if}
 </Modal>

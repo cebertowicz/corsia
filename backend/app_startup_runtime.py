@@ -5,11 +5,12 @@ import sys
 
 from events.connectors.github_notifications import notifications_poll_loop
 from events.connectors.github_pr_quiet_watch import pr_quiet_watch_loop
-from events.connectors.gmail_poller import gmail_poll_loop
+from events.connectors.mail_poller import mail_poll_loop
 from infra import state
 from infra.cpu_sampler import apply_cpu_profiler, stop_cpu_sampler
 from infra.otel_logs.lifecycle import start_corsia_logs, stop_corsia_logs
 from jobs.nightly import nightly_job_loop
+from library.producer import library_refresh_loop
 from subagents.cc_idle_retirement import idle_retirement_loop
 from thread.idle_checkpoint import rearm_idle_checkpoints
 
@@ -35,11 +36,41 @@ RUNTIME_LOOP_TASKS: tuple[tuple[str, str], ...] = (
     ("presence sweep", "_presence_sweep_task"),
     ("cc idle retirement", "_cc_idle_retirement_task"),
     ("github notifications", "_github_notifications_task"),
-    ("gmail poller", "_gmail_poller_task"),
+    ("mail poller", "_mail_poller_task"),
+    ("library refresh", "_library_refresh_task"),
     ("pr quiet watch", "_pr_quiet_watch_task"),
     ("request timing flush", "_request_timing_flush_task"),
     ("live bulletin feed", "_live_bulletin_task"),
 )
+
+
+async def resume_local_setup() -> None:
+    """Restore managed-model state and resume durable setup work after a restart.
+
+    Each step is independent and none can stop the app: a failure is logged and
+    local inference reports its own state.
+    """
+    import logging
+
+    from infra.failure_reference import new_reference
+    from llm.local_setup import record_resume_failure
+    from llm.local_model import backfill_legacy_record
+    from llm.local_setup_flow import resume_pending_setup
+    from onboarding.local_download_wake import resume_pending_local_download
+
+    steps = (
+        ("record an earlier setup's model", lambda: asyncio.to_thread(backfill_legacy_record)),
+        ("resume local setup", resume_pending_setup),
+        ("resume local download notice", resume_pending_local_download),
+    )
+    for label, step in steps:
+        try:
+            await step()
+        except Exception:
+            ref = new_reference("local")
+            logging.getLogger(__name__).warning("Local setup startup step failed (%s) reference=%s", label, ref, exc_info=True)
+            if label in {"record an earlier setup's model", "resume local setup", "resume local download notice"}:
+                record_resume_failure(ref)
 
 
 async def _startup_harness_discovery() -> list[dict]:
@@ -162,6 +193,9 @@ async def _start_runtime_services() -> None:
     from core.checkpoint_runtime import reconcile_startup_checkpoints
 
     await reconcile_startup_checkpoints()
+    from core.artifact_review_capture import reconcile_startup_reviews
+
+    await reconcile_startup_reviews()
     from core import placement_worker
 
     placement_worker.poke()
@@ -183,7 +217,8 @@ async def _start_runtime_services() -> None:
     state._presence_sweep_task = asyncio.create_task(presence_sweep_loop())
     state._cc_idle_retirement_task = asyncio.create_task(idle_retirement_loop())
     state._github_notifications_task = asyncio.create_task(notifications_poll_loop())
-    state._gmail_poller_task = asyncio.create_task(gmail_poll_loop())
+    state._mail_poller_task = asyncio.create_task(mail_poll_loop())
+    state._library_refresh_task = asyncio.create_task(library_refresh_loop())
     state._pr_quiet_watch_task = asyncio.create_task(pr_quiet_watch_loop())
     from infra.request_timing import start_flush_loop
 

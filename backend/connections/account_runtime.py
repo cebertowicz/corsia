@@ -69,7 +69,7 @@ def thread_claude_dir(thread_id: str, *, turn_id: str | None = None, db) -> str:
     return resolve_claude_dir(thread_launch_homes(thread_id, 'claude-code', turn_id=turn_id, db=db).claude_dir)
 
 
-OPERATION_KINDS = ('checkpoint', 'detached')
+OPERATION_KINDS = ('checkpoint', 'artifact_review', 'detached')
 
 
 def is_operation_session(session) -> bool:

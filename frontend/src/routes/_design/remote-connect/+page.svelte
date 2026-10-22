@@ -9,7 +9,7 @@
 	 * Frames for corsia#638 PR 2. The real screens run on their own code path; only the outside is faked, the way a test
 	 * fakes it: the desktop shell (`window.__CORSIA_SHELL__` and its commands) and the server answers (`fetch`). The
 	 * frame script reaches each state by using the screens (click, type), never by editing the page.
-	 *   ?kind=setup&discover=found|empty|denied&pair=ok|wrong_code|expired|too_many_tries|paused|busy|server|network|incompatible|too_old
+	 *   ?kind=setup&discover=looking|found|empty|denied&pair=ok|wrong_code|expired|too_many_tries|paused|busy|server|network|incompatible|too_old
 	 *   ?kind=devices&state=off|on|code|ending|not-announced|paused|starting|ports-taken|load-failed|loading|read-only|consumed|long-name|long-name-read-only
 	 *   &theme=light|dark
 	 */
@@ -23,7 +23,7 @@
 	const LONG = 'Alex’s Mac mini (2)';
 	const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 	const server = (patch: Record<string, unknown> = {}, name: string | null = 'Studio') => ({
-		enabled: true, listening: { port: 47901 }, announced_name: name, local_hostname: 'studio.local', computer_name: name,
+		enabled: true, listening: { port: 47901 }, announced_name: name, local_hostname: 'studio.local', computer_name: name ?? 'Studio', // the API always names the computer; only the announced name is null
 		lan_addresses: ['192.168.1.20'], code: { state: 'none' }, ...patch,
 	});
 	const active = (seconds: number) => ({ state: 'active', value: 'K7QX', expires_in_seconds: seconds });
@@ -40,7 +40,7 @@
 			'not-announced': () => json(server({}, null)),
 			paused: () => json(server({ code: { state: 'paused' } }, name)),
 			starting: () => json(server({ enabled: false }, null)),
-			'ports-taken': () => json(server({ enabled: false, listening: { error: 'No approved Devices port is available' } }, null)),
+			'ports-taken': () => json(server({ enabled: false, listening: { error: 'No approved Devices port is available', reason: 'ports_taken' } }, null)),
 			'load-failed': () => json({}, 500),
 			loading: () => new Promise<Response>(() => {}),
 			'read-only': () => json(server({ code: { state: 'active', expires_in_seconds: 300 } }, name)),
@@ -65,6 +65,7 @@
 		const names = discover === 'found' ? ['Alex’s Mac mini', 'Living room mini'] : [];
 		(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
 			invoke: async (command: string) => {
+				if (command === 'remote_discovered' && discover === 'looking') return new Promise(() => {});
 				if (command === 'remote_discovered') return { names, denied: discover === 'denied' };
 				if (command === 'remote_pair') {
 					return pair === 'ok' ? { ok: true, name: 'Alex’s Mac mini' }

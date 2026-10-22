@@ -132,13 +132,13 @@ xychart-beta
 
 <sub>Work pull requests merged into the development branch or a team's integration branch, each counted once. * Monday to Friday.</sub>
 
-Review at this volume is automated, so the reviewer is itself audited. From October 1 to 9, about a third of pull requests failed CI or review on their first push and were corrected before merging. Nightly audits of 14 days in September confirmed 95.0% of 462 audited reviewer findings correct. They also confirmed that defects reach the development branch. That is partly by design: agents are allowed to make mistakes so that recurring failure modes surface. Sixteen are now catalogued as [LLM anti-patterns](docs/contributing/bootstrap/starter-kit/shared/standards/llm-anti-patterns.md) that the reviewer checks for, and the mechanically detectable ones also have blocking CI rules. The rest is tracked as debt ([method](docs/readme-evidence.md#review-and-quality)).
+Review at this volume is automated, so the reviewer is itself audited. From October 1 to 9, about a third of pull requests failed CI or review on their first push and were corrected before merging. Nightly audits of 14 days in September confirmed 95.0% of 462 audited reviewer findings correct. They also confirmed that defects reach the development branch. That is partly by design: agents are allowed to make mistakes so that recurring failure modes surface. Sixteen are now catalogued as [LLM anti-patterns](docs/standards/llm-anti-patterns.md) that the reviewer checks for, and the mechanically detectable ones also have blocking CI rules. The rest is tracked as debt ([method](docs/readme-evidence.md#review-and-quality)).
 
 ## Getting started
 
 ### Know before you start
 
-- **macOS on Apple Silicon only.** Agent Safehouse, which sandboxes agent shell commands, is built on macOS `sandbox-exec`. Local models need macOS 15 or later.
+- **A Mac with Apple Silicon (M1 or later) and macOS 15 or later.** Agent Safehouse, which sandboxes agent shell commands, is built on macOS `sandbox-exec`.
 - **16 GB Macs currently need a cloud model provider for agent work.** Connect Claude Code, Codex or an API provider until a suitable local agent model is available. The corrections classifier still needs to run locally.
 - **Corrections are recorded only once the local corrections classifier is installed.** Until then CORSIA records none. Installing the classifier during setup is tracked in [#704](https://github.com/cebertowicz/corsia/issues/704).
 - **Agents run as your macOS user, with unrestricted network access.** Read [Security](#security) first.
@@ -245,7 +245,7 @@ All three patches passed, and CORSIA's loop used the fewest model calls: 42% few
 
 <br/>Write each instruction once, at the [scope](#scopes) it applies to: **Workspace settings → Create new context file** for everything, **Project settings → Create new context file** for one project. Each agent keeps its own file current. Every harness receives the same files. You rarely write them yourself: on the install that builds CORSIA, the team maintains almost all of its own context files.
 
-**Skills** are procedures an agent loads when its task matches. Add one as `skills/<name>/SKILL.md` at any level.
+**Skills** are procedures an agent loads when its task matches. Add one as `skills/<name>/SKILL.md` at any level. When none of its skills fits, an agent can install a reviewed one from the public [skill library](docs/skill-library.md) and keep it up to date.
 
 Every turn shows what the agent loaded, by source and size. A context file in that list opens straight from it, so you can read or change what an agent works from.
 

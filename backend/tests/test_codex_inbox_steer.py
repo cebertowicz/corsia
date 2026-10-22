@@ -86,9 +86,9 @@ def _enqueue(
 
 def _install_live(thread_id: str, identity, session):
     from subagents import codex_runtime
-    from core.checkpoint_codex_context import CodexCheckpointContext
+    from core.fork_codex_context import CodexForkContext
 
-    session.tool_context = CodexCheckpointContext(None, 0)
+    session.tool_context = CodexForkContext(None, 0)
     peek = getattr(session, "peek_active_usage", None)
     usage = peek() if callable(peek) else None
     if usage is not None:

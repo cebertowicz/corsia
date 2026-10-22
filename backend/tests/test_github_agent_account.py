@@ -138,6 +138,29 @@ def _set_person(login: str | None) -> None:
 # -- add ------------------------------------------------------------------------------------------------
 
 
+def test_person_github_lookup_never_uses_the_corsia_runtime(monkeypatch):
+    from connections import _BINARY_CANDIDATES, binary_from_config
+    from tools import managed_runtime
+
+    monkeypatch.setitem(_BINARY_CANDIDATES, "github", ("gh", []))
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    monkeypatch.setattr(managed_runtime, "installed_command_path", lambda _command: "/corsia/gh")
+
+    assert binary_from_config("github", {}) is None
+
+
+def test_agent_github_lookup_uses_only_the_corsia_runtime_fallback(monkeypatch):
+    from connections import _BINARY_CANDIDATES, agent_binary_from_config
+    from tools import managed_runtime
+
+    monkeypatch.setitem(_BINARY_CANDIDATES, "github", ("gh", []))
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    monkeypatch.setattr(managed_runtime, "installed_command_path", lambda _command: "/corsia/gh")
+
+    assert agent_binary_from_config({}) == "/corsia/gh"
+    assert github_agent._agent_binary({}) == "/corsia/gh"
+
+
 def test_add_reads_needs_auth_and_locks_shell(agent):
     account = _add()
     view = github_agent.view()
@@ -214,6 +237,34 @@ def test_signin_prompt_accepts_gh_291_colored_stderr_bytes():
 
 
 @pytest.mark.asyncio
+async def test_install_returns_the_pinned_corsia_binary(agent, monkeypatch):
+    from tools import github_agent_account, managed_runtime
+
+    monkeypatch.setattr(managed_runtime, "ensure_runtime", lambda _kind: agent.gh)
+
+    result = json.loads(await github_agent_account.GitHubAgentAccountTool().execute(action="install"))
+
+    assert result == {
+        "state": "installed", "binary": str(agent.gh),
+        "notice": "CORSIA installed GitHub CLI from GitHub; only CORSIA's agents use this copy.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_install_reports_managed_runtime_failure(agent, monkeypatch):
+    from tools import github_agent_account, managed_runtime
+
+    def unavailable(_kind):
+        raise managed_runtime.ManagedRuntimeError("download failed")
+
+    monkeypatch.setattr(managed_runtime, "ensure_runtime", unavailable)
+
+    result = json.loads(await github_agent_account.GitHubAgentAccountTool().execute(action="install"))
+
+    assert result == {"state": "failed", "reason": "download failed"}
+
+
+@pytest.mark.asyncio
 async def test_connect_reads_gh_291_colored_stderr_prompt(agent, monkeypatch):
     from connections import account_controls
     from tools.github_agent_account import GitHubAgentAccountTool
@@ -260,7 +311,9 @@ async def test_connect_and_check_name_early_login_exit(agent, monkeypatch):
     assert connected["signin"] == {
         "account_id": account_id, "route": "browser", "status": "failed",
         "cause": "vendor_login_failed", "next": github_agent_account._LOGIN_FAILURE_NEXT,
+        "ref": connected["signin"]["ref"],  # the failure's log reference
     }
+    assert connected["signin"]["ref"].startswith("signin-")
     checked = json.loads(await tool.execute(action="check"))
     assert checked["signin"] == connected["signin"]
 

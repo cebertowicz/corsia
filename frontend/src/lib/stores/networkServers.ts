@@ -61,8 +61,14 @@ export interface NetworkServer {
 	last_seen_at?: string | null;
 	discovered_at?: string | null;
 	metadata?: NetworkServerMetadata;
+	/** The backend's fact that the endpoint is on this computer; it supplies the address caption only. */
+	on_this_mac?: boolean;
+	/** The person marked this machine as theirs, so its models count as local. */
+	private?: boolean;
 	has_key?: boolean;
 	masked_key?: string;
+	/** True only for CORSIA's own oMLX, online or not: identity, never status (read ``status`` for that). */
+	corsia_omlx?: boolean;
 	/** How the endpoint is billed; null when unset. */
 	billing?: ServerBilling | null;
 	/** Fences billing writes; sent back unchanged. */
@@ -93,9 +99,9 @@ export async function addNetworkServer(
 	hostname: string,
 	port: number,
 	// A cloud endpoint is identified by a full URL rather than host+port, and
-	// carries its own auth and cache-warm declaration. Optional so the existing
-	// oMLX-by-IP call stays exactly as it was.
-	extra?: { base_url?: string; dialect?: string; api_key?: string; cache_warm_seconds?: number; model_ids?: string[] },
+	// carries its own auth. Optional so the existing oMLX-by-IP call stays exactly
+	// as it was.
+	extra?: { base_url?: string; dialect?: string; api_key?: string; model_ids?: string[] },
 ): Promise<{ ok: boolean; server_id?: string; status?: string; message?: string }> {
 	try {
 		const res = await fetch(`${BASE}/api/settings/network-servers?token=${t()}`, {
@@ -120,8 +126,7 @@ export async function addNetworkServer(
 export async function updateNetworkServer(
 	serverId: string,
 	extra: {
-		base_url: string; dialect: 'openai' | 'anthropic'; api_key?: string;
-		cache_warm_seconds?: number; model_ids?: string[];
+		base_url: string; dialect: 'openai' | 'anthropic'; api_key?: string; model_ids?: string[];
 	},
 ): Promise<{ ok: boolean; server_id?: string; status?: string; models?: number; message?: string }> {
 	try {
@@ -179,6 +184,28 @@ export async function setNetworkServerEnabled(
 		return { ok: false, message: typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}` };
 	} catch (e) {
 		return { ok: false, message: String(e) };
+	}
+}
+
+/** Mark a network server's machine as the person's own (private), or clear the mark. */
+export async function setNetworkServerPrivate(
+	serverId: string,
+	isPrivate: boolean,
+): Promise<{ ok: true } | { ok: false; detail?: unknown; reached: boolean }> {
+	try {
+		const res = await fetch(`${BASE}/api/settings/network-servers/${encodeURIComponent(serverId)}/private?token=${encodeURIComponent(t())}`, {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ private: isPrivate }),
+		});
+		if (res.ok) {
+			networkServers.update(servers => servers.map(row => row.id === serverId ? { ...row, private: isPrivate } : row));
+			return { ok: true };
+		}
+		const data = await res.json().catch(() => null);
+		return { ok: false, detail: data?.detail, reached: true };
+	} catch {
+		return { ok: false, reached: false };
 	}
 }
 

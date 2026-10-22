@@ -285,7 +285,7 @@ async def test_target_invalid_is_not_held_and_fails_visibly(
     ).fetchone())
     db.close()
 
-    async def invalid(_model):
+    async def invalid(_model, **_kwargs):
         raise TargetInvalid("ambiguous model transport identity: broken/model")
 
     monkeypatch.setattr("infra.send_target.resolve_target", invalid)

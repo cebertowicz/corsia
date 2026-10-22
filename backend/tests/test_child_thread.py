@@ -97,6 +97,7 @@ def child_db(tmp_path, monkeypatch):
             updated_at TEXT NOT NULL,
             parent_thread_id TEXT REFERENCES threads(id),
             spawned_by TEXT REFERENCES threads(id),
+            local_only INTEGER NOT NULL DEFAULT 0,
             history_epoch INTEGER NOT NULL DEFAULT 0,
             next_message_seq INTEGER NOT NULL DEFAULT 1,
             last_context_change_seq INTEGER NOT NULL DEFAULT 0
@@ -118,6 +119,10 @@ def child_db(tmp_path, monkeypatch):
             id TEXT PRIMARY KEY,
             name TEXT,
             path TEXT
+        );
+        CREATE TABLE IF NOT EXISTS project_inference_policies (
+            project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+            cloud_models_off INTEGER NOT NULL DEFAULT 0 CHECK (cloud_models_off IN (0,1))
         );
         CREATE TABLE IF NOT EXISTS connections (
             id TEXT PRIMARY KEY,

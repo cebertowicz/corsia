@@ -13,6 +13,9 @@
 		onSettings?: () => void;
 		onToggleExpand?: () => void;
 		body?: Snippet;
+		/** The local setup row replaces settings and enable controls with one existing setup action or its refusal. */
+		setupLabel?: string;
+		onSetup?: () => void;
 	}
 
 	const {
@@ -23,6 +26,8 @@
 		onSettings,
 		onToggleExpand,
 		body,
+		setupLabel,
+		onSetup,
 	}: Props = $props();
 
 	const enabled = $derived(providerEnabled(provider));
@@ -49,32 +54,47 @@
 	class:expanded
 	class:has-loaded={hasLoaded}
 >
-	<div class="pr-head">
-		<button
-			type="button"
-			class="pr-expand"
-			aria-expanded={expanded}
-			aria-label="{provider.label} — {expanded ? 'collapse' : 'expand'}"
-			onclick={() => onToggleExpand?.()}
-		>
-			<span class="dot-wrap"><span class="dot {provider.statusDot}"></span></span>
-			<span class="pr-info"><span class="name-row"><span class="name">{provider.label}</span></span><span class="meta">{provider.subline}</span></span>
-			<span class="ico-btn sm chev" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
-		</button>
+	<div class="pr-head" class:setup={Boolean(setupLabel)}>
+		{#if setupLabel}
+			<div class="pr-setup-summary">
+				<span class="dot-wrap"><span class="dot {provider.statusDot}"></span></span>
+				<span class="pr-info"><span class="name-row"><span class="name">{provider.label}</span></span><span class="meta">{provider.subline}</span></span>
+			</div>
+		{:else}
+			<button
+				type="button"
+				class="pr-expand"
+				aria-expanded={expanded}
+				aria-label="{provider.label} — {expanded ? 'collapse' : 'expand'}"
+				onclick={() => onToggleExpand?.()}
+			>
+				<span class="dot-wrap"><span class="dot {provider.statusDot}"></span></span>
+				<span class="pr-info"><span class="name-row"><span class="name">{provider.label}</span></span><span class="meta">{provider.subline}</span></span>
+				<span class="ico-btn sm chev" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
+			</button>
+		{/if}
 
-		<button
-			type="button"
-			class="ico-btn"
-			aria-label="Settings"
-			onclick={() => onSettings?.()}
-		>
-			<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-				<path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.4-3a7 7 0 0 0-.1-1.2l2.1-1.6-2-3.4-2.5.9a7 7 0 0 0-2-1.2L14.5 2h-5l-.5 2.5a7 7 0 0 0-2 1.2l-2.5-.9-2 3.4L4.6 9.8a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.5-.9a7 7 0 0 0 2 1.2L9.5 22h5l.5-2.5a7 7 0 0 0 2-1.2l2.5.9 2-3.4-2.1-1.6c0-.4.1-.8.1-1.2Z"/>
-			</svg>
-		</button>
+		{#if setupLabel}
+			{#if onSetup}
+				<button type="button" class="setup-action" onclick={onSetup}>{setupLabel}</button>
+			{:else}
+				<span class="setup-refusal">{setupLabel}</span>
+			{/if}
+		{:else}
+			<button
+				type="button"
+				class="ico-btn"
+				aria-label="Settings"
+				onclick={() => onSettings?.()}
+			>
+				<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.4-3a7 7 0 0 0-.1-1.2l2.1-1.6-2-3.4-2.5.9a7 7 0 0 0-2-1.2L14.5 2h-5l-.5 2.5a7 7 0 0 0-2 1.2l-2.5-.9-2 3.4L4.6 9.8a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.5-.9a7 7 0 0 0 2 1.2L9.5 22h5l.5-2.5a7 7 0 0 0 2-1.2l2.5.9 2-3.4-2.1-1.6c0-.4.1-.8.1-1.2Z"/>
+				</svg>
+			</button>
 
-		{#if configurable}
-			<Toggle checked={enabled} ariaLabel={enabled ? 'Disable' : 'Enable'} onchange={() => onToggleEnable?.()} />
+			{#if configurable}
+				<Toggle checked={enabled} ariaLabel={enabled ? 'Disable' : 'Enable'} onchange={() => onToggleEnable?.()} />
+			{/if}
 		{/if}
 	</div>
 
@@ -109,7 +129,8 @@
 	@media (hover: hover) {
 		.pr-head:hover { background: var(--bg-hover); }
 	}
-	.pr-expand {
+	.pr-head.setup { grid-template-columns: auto minmax(0, 1fr) auto; }
+	.pr-expand, .pr-setup-summary {
 		grid-column: 1 / -1;
 		grid-row: 1;
 		display: grid;
@@ -124,6 +145,7 @@
 		text-align: left;
 		cursor: pointer;
 	}
+	.pr-setup-summary { cursor: default; }
 	.pr-expand:focus { outline: none; }
 	.pr-expand:focus-visible {
 		outline: 2px solid var(--accent);
@@ -134,6 +156,15 @@
 	.pr-expand .ico-btn.chev { width: auto; justify-self: end; }
 	.pr-head > .ico-btn { grid-column: 3; grid-row: 1; z-index: 1; }
 	.pr-head > :global(.tg) { grid-column: 4; grid-row: 1; z-index: 1; }
+	.setup-action, .setup-refusal { grid-column: 3; grid-row: 1; z-index: 1; }
+	.setup-action {
+		padding: var(--space-2);
+		border: 0; background: transparent; color: var(--accent-text);
+		font: inherit; font-size: var(--text-footnote); cursor: pointer; white-space: nowrap;
+	}
+	.setup-action:hover { color: var(--text-primary); }
+	.setup-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
+	.setup-refusal { max-width: 16rem; color: var(--text-tertiary); font-size: var(--text-footnote); text-align: right; }
 
 	.dot-wrap { display: flex; justify-content: center; }
 	.dot {

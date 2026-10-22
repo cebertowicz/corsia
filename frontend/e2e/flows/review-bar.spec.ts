@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, test, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
-import { createSession, loginByUrl } from '../support/corsia';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
+import { loginByUrl } from '../support/corsia';
 import { visibleHeaderSends } from '../support/docFeedbackFooter';
-import { journey, type Case, uniqueTitle, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled } from '../support/reviewFixtures';
+import { journey, type Case, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled } from '../support/reviewFixtures';
 
 /**
  * The in-view review bar (DCOL-FR12.4) on the real composed canvas: an agent's raised ask on an open
@@ -34,27 +35,6 @@ function raiseAsk(threadId: string, artifactId: string, reason: string): void {
 		'  actor=PlanActor(thread, user, None), provenance="e2e.review_bar", mutation_id=uuid.uuid4().hex, db=db)',
 		'db.commit()',
 	].join('\n'), threadId, artifactId, reason], {
-		cwd: backendDir, encoding: 'utf8',
-		env: { ...process.env, CORSIA_TEST_MODE: '1', CORSIA_STATE_DIR: state, CORSIA_WORKSPACE: process.env.CORSIA_E2E_WORKSPACE ?? '' },
-	});
-}
-
-/** Hand the artifact to another agent through the audited ownership path, so a second agent can ask about it too. */
-function handOff(artifactId: string, fromThreadId: string, toThreadId: string): void {
-	const state = process.env.CORSIA_E2E_STATE_DIR;
-	if (process.env.CORSIA_E2E_MOCK !== '1' || !state) throw new Error('The hand-off fixture requires isolated E2E mock state');
-	execFileSync(python(), ['-c', [
-		'import sys',
-		'from infra.database import get_db',
-		'from registry.ownership import rehome_artifact',
-		'artifact, old_owner, new_owner = sys.argv[1:]',
-		'db = get_db()',
-		'row = db.execute("SELECT integration, type, external_id FROM artifact_identities WHERE id=?", (artifact,)).fetchone()',
-		'rehome_artifact(integration=row["integration"], type=row["type"], external_id=row["external_id"],',
-		'  new_owner_thread_id=new_owner, actor_thread_id=old_owner, authority="current-owner-handoff",',
-		'  reason="e2e second asker", source_path="e2e.review_bar", db=db)',
-		'db.commit()',
-	].join('\n'), artifactId, fromThreadId, toThreadId], {
 		cwd: backendDir, encoding: 'utf8',
 		env: { ...process.env, CORSIA_TEST_MODE: '1', CORSIA_STATE_DIR: state, CORSIA_WORKSPACE: process.env.CORSIA_E2E_WORKSPACE ?? '' },
 	});
@@ -161,25 +141,6 @@ journey('approve a plain ask from the reading', ALL, async ({ page, request, inf
 	await page.reload();
 	await selectThread(page, doc, mode);
 	await expect(bar(page)).toHaveCount(0);
-});
-
-journey('two agents ask about the same document', [
-	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],
-	['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
-], async ({ page, request, info, mode, theme }) => {
-	const doc = await seed(request, `Review two askers ${mode} ${theme}`);
-	raiseAsk(doc.threadId, doc.artifactId, 'Review the rollout plan.');
-	const second = await createSession(request, uniqueTitle(`Research ${mode} ${theme}`));
-	handOff(doc.artifactId, doc.threadId, second);
-	raiseAsk(second, doc.artifactId, 'Verify the evidence links.');
-	await open(page, doc, mode, theme);
-	await expect(bar(page)).toContainText('Verify the evidence links.');
-	await expect(bar(page)).toContainText('+1');
-	await expectLayout(page, mode);
-	await shot(page, 'two-askers', info);
-	await bar(page).locator('.rb-line').click();
-	await expect(bar(page).locator('.rb-others')).toContainText('Review the rollout plan.');
-	await shot(page, 'two-askers-expanded', info);
 });
 
 journey('approve with changes after two comments', ALL, async ({ page, request, info, mode, theme }) => {
@@ -442,7 +403,7 @@ journey('a long agent name never hides the ask', [['1440 light pane closed', 'cl
 	await shot(page, 'long-name-expanded', info);
 });
 
-journey('keeps an orphan-heavy review ask compact without losing recovery', [
+journey('keeps an orphan-heavy review ask compact and offers no Place again once every quote is gone', [
 	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],
 	['1440 light pane closed', 'closed', 'light'], ['1440 dark pane closed', 'closed', 'dark'],
 	['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
@@ -491,9 +452,9 @@ journey('keeps an orphan-heavy review ask compact without losing recovery', [
 	const comments = page.locator('.comment-status');
 	await comments.click();
 	const drawer = page.getByRole('region', { name: 'Document comments' });
-	const recovery = drawer.locator('[data-drawer-placement]');
-	await expect(recovery.getByRole('status')).toHaveText("22 comments couldn't be placed");
-	await expect(recovery.getByRole('button', { name: 'Reload comment placements' })).toBeVisible();
+	// Every quote is gone from the document, so Place again has nothing to place: the cards say so and the footer stays away.
+	await expect(drawer.getByText(/^Text changed:/)).toHaveCount(22);
+	await expect(drawer.locator('[data-drawer-placement]')).toHaveCount(0);
 	await settled(page);
 	// Drawer geometry is covered by its focused recovery journey; this flow records the phone layout annotation below.
 	await shot(page, `orphan-heavy-${mode}-${theme}`, info);

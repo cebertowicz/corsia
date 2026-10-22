@@ -68,7 +68,7 @@ async def prepare_native_agent_checkpoint():
         raise CheckpointNotReady(
             "native checkpoint context is unavailable", reason_key="no_sealed_boundary",
         )
-    from core.checkpoint_fit import foldable_tail_tokens
+    from core.fork_fit import foldable_tail_tokens
     from core.checkpoint_native_admission import prepare_native_checkpoint
     from core.turn_iteration_context import _read_native_checkpoint_context
     from infra.db_async import run_in_db

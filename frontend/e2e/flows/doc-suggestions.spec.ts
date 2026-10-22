@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { replyField, showAllThreads } from '../support/commentDrawer';
-import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { expectContrast, GRAPHIC, TEXT } from '../support/contrast';
 import { openSuggestionDocument, setEvidenceViewport } from '../support/docSuggestions';

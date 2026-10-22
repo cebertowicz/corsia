@@ -1,9 +1,9 @@
 <script lang="ts">
+	import { reviewContinuationText, reviewStatus } from '$lib/reviewCopy';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { agentColor } from '$lib/docPresence';
 	import type { DocumentReviewState } from '$lib/docReviewState.svelte';
 	let { model }: { model: DocumentReviewState } = $props();
-	const timeLabel = (value: string) => new Date(value).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 </script>
 
 {#if model.requests.length}
@@ -13,7 +13,7 @@
 				<Avatar name={request.reviewer_name} color={agentColor(request.reviewer_thread_id)} hidden size="md" />
 				<span class="who">
 					<span class="name">{request.reviewer_name}</span>
-					<span class="status">{request.outcome === 'ended_without_comments' ? 'Ended without comments' : `Requested ${timeLabel(request.created_at)}`}</span>
+					<span class="status" title={request.outcome === 'open' && request.state === 'failed' ? reviewContinuationText(request.reviewer_name, request.reason) : undefined}>{reviewStatus(request.outcome, request.state, request.reviewer_name, request.created_at, request.reason)}</span>
 					{#if model.cancelErrors[request.id]}<span class="error" role="alert">{model.cancelErrors[request.id]}</span>{/if}
 				</span>
 				{#if request.may_cancel}

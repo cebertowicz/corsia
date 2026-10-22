@@ -82,7 +82,7 @@ def test_failed_switch_returns_unstarted_inputs_to_the_source(failed_switch):
     """Every wholly unstarted input goes back, with its FIFO order untouched."""
     db = failed_switch
 
-    fail_switch("switch-1", error="minimum meaningful cold checkpoint input does not fit", db=db)
+    fail_switch("switch-1", error="minimum meaningful cold fork input does not fit", db=db)
 
     assert _rows(db) == [
         ("input-1", 1, 0, SOURCE),

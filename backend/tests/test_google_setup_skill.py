@@ -74,9 +74,9 @@ def test_person_browser_steps_have_one_rule_and_no_url_wait():
 
 
 def test_email_and_calendar_route_to_google_setup_and_setup_hands_off_no_agent():
-    """Step 6 loads google-setup without creating an agent, and the hand-off offers none."""
+    """Step 5 loads google-setup without creating an agent, and the hand-off offers none."""
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
-    assert "follow skill `google-setup` from its step 1" in app and "it creates no agent" in app
+    assert "follow skill `google-setup` from its step 2" in app and "it creates no agent" in app
     hand_off = app.split("## The hand-off", 1)[1]
     assert "Setup offers no agent" in hand_off
     assert "only when they ask you to take that work off them (skill `time-to-agent`)" in hand_off
@@ -98,11 +98,40 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "Never make a second project or client." in steps
     assert "shows the client secret, so take no snapshot or screenshot of it" in steps
     assert "Read the client ID from the Clients list" in steps and "never open it" in steps
-    assert steps.index("`google_connect` with no `client_file`") < steps.index("an error that says to install agent-browser")
+    assert steps.index("`google_connect` with no `client_file`") < steps.index("If the error says to reinstall or update CORSIA")
     assert steps.count("console.cloud.google.com/projectcreate") == 1
     assert "5. In the window step 4 opened" in steps
-    assert "whatever the cause it names" in steps
-    assert "exactly the install commands that error names" in steps
+    assert "report it the way you report any problem with CORSIA, and stop" in steps
+    assert "If it names install commands instead (CORSIA run from source)" in steps
     assert "then call `browser_open` again" in steps
     assert "@0." not in steps
     assert "Connected as <address>. If that's the wrong account, say so and I'll switch it." in steps
+    assert "If the person means an account listed there, ask which one first when more than one could be meant" in steps
+    assert "if that account shows `needs_action`, follow that instead of this skill" in steps
+    assert "Otherwise call `google_connect` with that `account_id`" in steps
+    assert "post its `reply` verbatim with `post_update` followed by `[Open it in Connected apps](<link>)`" in steps
+    assert "To connect a new account, including the first, go on to step 2." in steps
+
+
+def test_setup_skills_tell_a_packaged_apps_browser_error_from_a_source_install(tmp_path, monkeypatch):
+    from host_access import browser_cli
+
+    monkeypatch.setattr(browser_cli, "app_bundle_root", lambda: tmp_path)
+    packaged = browser_cli.install_hint()
+    monkeypatch.setattr(browser_cli, "app_bundle_root", lambda: None)
+    source = browser_cli.install_hint()
+    assert "reinstall or update CORSIA" in packaged and "reinstall or update CORSIA" not in source
+    for skill in (SKILL, SKILLS / "microsoft-setup/SKILL.md"):
+        text = skill.read_text(encoding="utf-8")
+        assert "If the error says to reinstall or update CORSIA, the app's own browser is broken, a gap in CORSIA" in text
+        assert "report it the way you report any problem with CORSIA, and stop" in text
+
+
+def test_a_missing_gh_on_post_as_me_is_installed_by_the_agent_account_tool():
+    from tools.github_agent_account import ACTIONS
+    from tools.managed_runtime import COMMAND_RUNTIME
+
+    text = (SKILLS / "github/references/agent-account.md").read_text(encoding="utf-8")
+    assert "- **`gh` missing:** call `github_agent_account` with `action: \"install\"`" in text
+    assert "install" in ACTIONS and COMMAND_RUNTIME["gh"] == "gh"
+    assert "with `gh` written as the full path `command -v gh` prints in your shell" in text

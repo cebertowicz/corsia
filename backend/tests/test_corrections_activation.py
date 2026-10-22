@@ -115,7 +115,7 @@ def test_conductor_figure_is_rounded_for_people(isolated_db, monkeypatch):
     asyncio.run(corrections_activation.tell_conductor_about_activation(version))
 
     assert sent[0].startswith("Corrections classifier version v1 was installed and activated.")
-    assert "moved from 3.4 to 4.0" in sent[0]
+    assert "moved from 3.4 to 4.0" in sent[0] and "compares chat messages only" in sent[0]
     assert sent[0].count("v1") == 1  # the version reads once, in the prefix
 
 

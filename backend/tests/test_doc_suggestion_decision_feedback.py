@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
-from doceditor import comment_actions, feedback_batches, feedback_state
+from doceditor import comment_actions, comment_batch_actions, feedback_batches, feedback_state, feedback_suggestion_decisions
 from doceditor.comment_action_errors import decision_only_error
+from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
 from infra.database import get_db, write_transaction
 from infra.database_migrations import migrate_to_current
 from infra.schema import SCHEMA_VERSION
@@ -41,6 +44,48 @@ def _notes(db, thread_id: str) -> list[str]:
             "SELECT summary FROM context_change_journal "
             "WHERE object_kind='thread_context' AND object_id=? ORDER BY seq", (thread_id,))
     ]
+
+
+def _accepted_note(suggestion: dict) -> str:
+    """Names the accepted suggestion and quotes the one resolve rule, never a second wording of it."""
+    return f"Robin accepted your suggestion on Design: “quoted source” ({suggestion['id']}). {PERSON_COMMENT_RESOLVE_RULE}"
+
+
+def test_an_accepted_suggestion_is_named_by_its_quote_clipped_to_one_line():
+    from doceditor.feedback_suggestion_decisions import QUOTE_CHARS, _named
+
+    named = _named({"id": "s1", "anchor_text": "word " * 30 + "\nend"})
+    quote = named[1:named.index("”")]
+    assert "\n" not in quote and len(quote) == QUOTE_CHARS and quote.endswith("…")
+    assert named.endswith(" (s1)")
+    assert _named({"id": "s2", "anchor_text": "  \n"}) == "s2"
+
+
+def test_an_accept_all_note_names_every_suggestion_and_keeps_the_persons_line_short(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner", title="Documents")
+        seed_thread(db, "author", title="Reviewer")
+        artifact_id = seed_document(db, "owner", name="Design.md")
+        suggestions = [add_comment(db, artifact_id, replacement=f"New {n}")[0] for n in range(7)]
+
+        feedback_suggestion_decisions.record_suggestion_decisions(
+            db, suggestions, decision="accepted", decided_by="Robin", decided_by_thread_id=None,
+            decision_event_id="event-1", reason=None,
+        )
+
+        note = db.execute(
+            "SELECT summary, details_json FROM context_change_journal "
+            "WHERE object_kind='thread_context' AND object_id='author'"
+        ).fetchone()
+        named = ", ".join(f"“quoted source” ({s['id']})" for s in suggestions)
+        assert note["summary"] == (
+            f"Robin accepted 7 of your suggestions on Design: {named}. {PERSON_COMMENT_RESOLVE_RULE}"
+        )
+        details = json.loads(note["details_json"])
+        assert details["chip"] == "Robin accepted 7 suggestions on Design."
+    finally:
+        db.close()
 
 
 def _plan_nodes(db, thread_id: str) -> int:
@@ -90,6 +135,10 @@ def test_rejection_note_carries_the_deciders_reason_verbatim(isolated_db):
             "Robin rejected your suggestion on Design. "
             "Reason from the decider (verbatim): Out of scope: see section 2."
         ]
+        details = json.loads(db.execute(
+            "SELECT details_json FROM context_change_journal "
+            "WHERE object_kind='thread_context' AND object_id='author'").fetchone()[0])
+        assert details["chip"] == "Robin rejected a suggestion on Design."
         assert _plan_nodes(db, "author") == 0
     finally:
         db.close()
@@ -181,7 +230,7 @@ async def test_bulk_rejection_sends_one_note_for_all_suggestions_without_a_node_
         async def unused_writer(*_args):
             raise AssertionError("reject must not write the document")
 
-        await comment_actions.decide_all_from_author(
+        await comment_batch_actions.decide_all_from_author(
             first["id"], "reject", user_id="owner-token", decided_by="Robin",
             actor_thread_id=None, write=unused_writer,
         )
@@ -229,7 +278,7 @@ def test_acceptance_writes_one_passive_note_without_creating_or_waking_plan_work
         note = db.execute(
             "SELECT summary FROM context_change_journal WHERE object_kind='thread_context' AND object_id='author'"
         ).fetchone()
-        assert note["summary"] == "Robin accepted your suggestion on Design; nothing to do."
+        assert note["summary"] == _accepted_note(suggestion)
         plan = service.ensure_plan("thread", "author", db=db)
         assert plan.state == "paused"
         assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE plan_id=?", (plan.id,)).fetchone()[0] == 0
@@ -343,7 +392,7 @@ def test_acceptance_is_immediately_passive_and_does_not_wake_a_paused_suggester(
         note = db.execute(
             "SELECT summary FROM context_change_journal WHERE object_kind='thread_context' AND object_id='author'"
         ).fetchone()
-        assert note["summary"] == "Robin accepted your suggestion on Design; nothing to do."
+        assert note["summary"] == _accepted_note(suggestion)
         assert service.ensure_plan("thread", "author", db=db).state == "paused"
         assert db.execute("SELECT COUNT(*) FROM plan_nodes WHERE plan_id=?", (plan.id,)).fetchone()[0] == 0
     finally:
@@ -408,7 +457,7 @@ def test_migration_preserves_reopened_rows_and_admits_rejected_rows(isolated_db)
         db.commit()
 
         assert migrate_to_current(db, SCHEMA_VERSION).migrated
-        assert SCHEMA_VERSION == 126
+        assert SCHEMA_VERSION == 135
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert db.execute(
             "SELECT event FROM doc_feedback_batch_items WHERE comment_id=?", (comment["id"],)
@@ -439,7 +488,7 @@ async def test_the_decide_path_wakes_nobody_for_a_rejection(isolated_db, monkeyp
         async def unused_writer(*_args):
             raise AssertionError("reject must not write the document")
 
-        decide = comment_actions.decide_all_from_author if bulk else comment_actions.decide_suggestion
+        decide = comment_batch_actions.decide_all_from_author if bulk else comment_actions.decide_suggestion
         result = await decide(
             suggestion["id"], "reject", user_id="owner-token", decided_by="Robin",
             actor_thread_id=None, write=unused_writer,

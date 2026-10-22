@@ -1,7 +1,6 @@
 import { get } from 'svelte/store';
 import {
 	messages,
-	threads,
 	upsertVisibleThread,
 	mergeMessageDelivery,
 } from '../stores/threads';
@@ -29,11 +28,8 @@ import {
 	upsertMessageByServerOrder,
 } from './handlersTurns';
 import { recoverInput } from './turnState';
-import { acceptThreadModelTruth } from '../stores/models';
 import { handleCheckpointChanged } from './checkpointInvalidation';
-import { acceptsThreadAccountFrame, threadAccountFields } from '../stores/threadVendorAccounts';
-
-import { threadFrameFields } from './threadFrameFields';
+import { handleSessionUpdated, handleSubagentMeta } from './handlersSession';
 import { FORWARDED_TYPES } from './forwardedTypes';
 
 function reconcileCorrelatedMessage(
@@ -137,14 +133,11 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			break;
 
 		case 'subagent_init':
-			if (data.thread_id) setSubagentInit(data.thread_id, { model: data.model, cwd: data.cwd });
+			if (data.thread_id) setSubagentInit(data.thread_id, { cwd: data.cwd });
 			break;
 
 		case 'subagent_meta':
-			if (data.thread_id) {
-				registerSubagent(data.parent_thread_id, data.thread_id, data.name || 'subagent', data.provider || 'cc', data.live ? 'running' : 'idle');
-				if (data.model) setSubagentInit(data.thread_id, { model: data.model });
-			}
+			handleSubagentMeta(data);
 			break;
 
 		case 'subagent_closed':
@@ -273,50 +266,9 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			break;
 		}
 
-		case 'session_updated': {
-			if (!acceptsThreadAccountFrame(data)) break;
-			const carriesModelTruth = data.model !== undefined;
-			if (carriesModelTruth) {
-				if (
-					typeof data.model !== 'string'
-					|| !data.model
-					|| typeof data.updated_at !== 'string'
-					|| !data.updated_at
-				) {
-					console.warn('Ignoring session_updated without complete model truth');
-					break;
-				}
-				if (!acceptThreadModelTruth(
-					data.thread_id,
-					data.model,
-					data.updated_at,
-				)) break;
-			}
-			threads.update(ss => {
-				const updated = ss.map(s => {
-					if (s.id !== data.thread_id) return s;
-					return {
-						...s,
-						...(data.title !== undefined ? { title: data.title } : {}),
-						...(data.last_message !== undefined ? { last_message: data.last_message } : {}),
-						...threadFrameFields(data),
-						...threadAccountFields(data),
-						...(!carriesModelTruth && data.updated_at !== undefined
-							? { updated_at: data.updated_at }
-							: {}),
-					};
-				});
-				if (!carriesModelTruth && data.updated_at !== undefined) {
-					updated.sort((a, b) => {
-						const ta = a.updated_at ? new Date(a.updated_at.endsWith('Z') ? a.updated_at : a.updated_at + 'Z').getTime() : 0;
-						const tb = b.updated_at ? new Date(b.updated_at.endsWith('Z') ? b.updated_at : b.updated_at + 'Z').getTime() : 0;
-						return tb - ta;
-					});
-				}
-				return updated;
-			});
+		case 'session_updated':
+			handleSessionUpdated(data);
 			break;
-		}
 
 		case 'models_updated': case 'classifier_updated': {
 			if (data.type === 'models_updated') import('../stores/models').then(m => m.loadModels());

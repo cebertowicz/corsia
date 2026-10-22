@@ -28,9 +28,9 @@ def _fields(card=CARD):
 
 def test_the_card_is_appendix_a1_word_for_word():
     card = setup.agent_import(CARD)
-    assert card["title"] == "Bring over what your other AI tools know"
+    assert card["title"] == "Bring over what your other tools know"
     assert card["context"] == (
-        "Claude Code and Codex are on this Mac. I can read what they remember about you and how "
+        "Claude Code and Codex are on this computer. I can read what they remember about you and how "
         "you like to work, the skills you keep in them, and the connected apps that "
         "Claude Code and Codex use, so you don't have to set them up again. I only read: nothing "
         "changes in them, and you choose what I keep. I never read your chats with them, their "
@@ -43,25 +43,25 @@ def test_the_card_is_appendix_a1_word_for_word():
 
 def test_openclaw_alone_promises_no_connections_and_a_local_model_keeps_it_here():
     context = setup.agent_import(ImportCard(("OpenClaw",), (), ""))["context"]
-    assert context.startswith("OpenClaw is on this Mac. ")
+    assert context.startswith("OpenClaw is on this computer. ")
     assert "connected apps" not in context
     # With no connections clause nothing is read from settings, so none are excepted.
     assert "with them, their settings, or any key" in context
-    assert context.endswith("What I read stays on this Mac: I run on a local model.")
-    one = setup.agent_import(ImportCard(("Codex", "Hermes"), ("Codex",), "GPT, by OpenAI"))["context"]
+    assert context.endswith("What I read stays on this computer: I run on a local model.")
+    one = setup.agent_import(ImportCard(("Codex", "Hermes Agent"), ("Codex",), "GPT, by OpenAI"))["context"]
     assert "the connected apps that Codex uses," in one
     assert "their other settings" in one
 
 
 def test_a_model_with_no_known_provider_says_the_read_may_leave_this_mac():
     context = setup.agent_import(ImportCard(("Codex",), (), "Some Model"))["context"]
-    assert context.endswith("What I read goes to Some Model, the model I run on, and may leave this Mac.")
+    assert context.endswith("What I read goes to Some Model, the model I run on, and may leave this computer.")
 
 
 def test_no_tool_found_means_no_card_and_the_card_goes_first(monkeypatch):
     assert setup.agent_import(None) is None
     decisions = setup.build_decisions(setup.Facts(agent_import=CARD))
-    assert decisions[0]["title"] == "Bring over what your other AI tools know"
+    assert decisions[0]["title"] == "Bring over what your other tools know"
     assert setup.build_decisions(setup.Facts())[0]["title"] != decisions[0]["title"]
 
 
@@ -218,6 +218,7 @@ def test_answer_a_allows_one_read_with_a_content_free_receipt(wired):
     assert result["result"] == "read"
     assert "Maya Chen" in result["excerpts"][0]["text"]
     assert [row["name"] for row in result["skills"]] == ["rfc-writer"]
+    assert result["skipped_files"] == []
     consumed = _receipt(wired, tool_module.CONSENT_OPERATION)
     assert set(consumed) == {"consumed", "read_at"}
     read = _receipt(wired, tool_module.READ_OPERATION)
@@ -227,6 +228,45 @@ def test_answer_a_allows_one_read_with_a_content_free_receipt(wired):
     assert "Maya" not in json.dumps(read)
     again = asyncio.run(_execute(consent_decision_id=decision_id))
     assert again.startswith("❌") and "already used" in again
+
+
+def test_read_reports_skipped_display_names_without_their_content(wired, monkeypatch):
+    from onboarding import agent_import
+
+    monkeypatch.setattr(
+        agent_import,
+        "read_memory",
+        lambda *_args, **_kwargs: agent_import.MemoryRead(
+            skipped=[
+                {"path": "~/.claude/CLAUDE.md", "reason": "couldn't read: Permission denied", "unread": True},
+                {"path": "~/.codex/auth.md", "reason": "a protected path"},
+            ],
+            failed=True,
+        ),
+    )
+    result = json.loads(asyncio.run(_execute(consent_decision_id=_consent(wired))))
+
+    assert result["result"] == "read"
+    # A file that could not be opened can be retried; one skipped on purpose cannot.
+    assert result["unread_files"] == ["~/.claude/CLAUDE.md"]
+    assert result["skipped_files"] == ["~/.codex/auth.md"]
+    assert "Permission denied" not in json.dumps(result)
+
+
+def test_import_events_expose_only_counts_and_outcomes(wired, monkeypatch):
+    events = []
+    monkeypatch.setattr(tool_module, "_emit_event", lambda _thread, event, **properties: events.append((event, properties)))
+
+    assert "consent_decision" in json.loads(asyncio.run(_execute()))
+    decision_id = _consent(wired)
+    item_id = json.loads(asyncio.run(_execute(consent_decision_id=decision_id)))["skills"][0]["item_id"]
+    asyncio.run(_execute(consent_decision_id=decision_id, mode="install", item_ids=[item_id]))
+
+    assert events == [
+        ("consent_card", {"tools_count": 2}),
+        ("read", {"excerpts_count": 1, "skills_count": 1, "skipped_count": 0, "unread_count": 0}),
+        ("install", {"outcome": "installed", "count": 1}),
+    ]
 
 
 def test_installs_from_that_read_for_one_hour_only(wired, monkeypatch):
@@ -252,7 +292,7 @@ def test_install_needs_a_finished_read(wired):
 
 @pytest.mark.parametrize(("kwargs", "message"), [
     ({"thread_id": "worker"}, "not in your plan"),
-    ({"option": "B"}, "did not choose to have their other AI tools read"),
+    ({"option": "B"}, "did not choose to have their other tools read"),
     ({"facts": ImportCard(("Codex",), ("Codex",), "Claude, by Anthropic")}, "does not carry the fixed import consent wording"),
 ])
 def test_a_consent_that_cannot_authorize_refuses_and_reads_nothing(wired, monkeypatch, kwargs, message):
@@ -282,7 +322,7 @@ def test_the_app_wake_builds_the_card_for_the_conductors_model(monkeypatch):
     monkeypatch.setattr(setup, "read_facts", read_facts)
     built = asyncio.run(first_run_wake._app_setup("claude-code/sonnet"))
     assert seen["agent_model"] == "claude-code/sonnet"
-    assert built["setup_decisions"][0]["title"] == "Bring over what your other AI tools know"
+    assert built["setup_decisions"][0]["title"] == "Bring over what your other tools know"
 
 
 def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
@@ -291,11 +331,12 @@ def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
     skill = Path(__file__).parents[1] / "prompts/system/v1/skills/conductor-bootstrap"
     app = (skill / "references/first-run-app.md").read_text(encoding="utf-8")
     steps = app.split("## The steps, in this order", 1)
-    assert "raise it first" in steps[0] and "`references/agent-import.md`" in steps[0]
-    assert "or what the person confirmed earlier in this conversation" in steps[1]
-    assert "already said yes for the tools its connections clause named" in steps[1]
-    assert "OpenClaw and Hermes Agent included" in steps[1]
-    assert 'On "not now" to that shorter question, list only the card\'s tools.' in steps[1]
+    assert "`references/agent-import.md`" in steps[1].split("3. **Where your work lives,**", 1)[0]
+    assert "Raise it unchanged" in steps[1]
+    connected = (skill / "references/agent-import.md").read_text(encoding="utf-8").split("## Their connected apps", 1)[1]
+    assert "only for the tools whose connected apps the consent card named" in connected
+    assert "OpenClaw and Hermes Agent can be among them" in connected
+    assert "Read nothing until a yes; on \"not now\"" in connected
     guide = (skill / "references/agent-import.md").read_text(encoding="utf-8")
     for line in (
         "Kept [N] things about you and how you work.",

@@ -7,19 +7,20 @@ from types import SimpleNamespace
 import pytest
 
 from codex_runtime_fixtures import declare_codex_tool_step
-from core.checkpoint_codex_context import CodexCheckpointContext
+from core.fork_codex_context import CodexForkContext
 from subagents.codex_app_server import CodexAppServerSession
 from test_checkpoint_codex_capacity import target
 
 
 @pytest.mark.asyncio
 async def test_checkpoint_capture_propagates_completed_tool_failure():
-    from core.checkpoint_codex_result import CodexCheckpointCapture
+    from core.fork_codex_result import CodexForkCapture
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
     from tools.recorded_call import CompletedToolCall, CompletedToolFailure
 
-    capture = CodexCheckpointCapture()
+    capture = CodexForkCapture(kind=CHECKPOINT_KIND)
     failure = CompletedToolFailure((CompletedToolCall(
-        name="edit", result="private completed result", checkpoint_id="checkpoint",
+        name="edit", result="private completed result", fork_id="checkpoint",
     ),))
 
     await capture.on_exit(-9, failure)
@@ -36,7 +37,7 @@ async def test_stock_receipt_precedes_tool_execution_and_replayed_rpc_runs_once(
     monkeypatch, tmp_path, output, expected_calls, ordinary,
 ):
     writes, executed, raw, observed_usage = asyncio.Queue(), [], [], []
-    context = CodexCheckpointContext(target(100), 1)
+    context = CodexForkContext(target(100), 1)
 
     class Pipe:
         def write(self, payload):
@@ -62,9 +63,9 @@ async def test_stock_receipt_precedes_tool_execution_and_replayed_rpc_runs_once(
     monkeypatch.setattr("subagents.harness_tool_bridge.execute_tool", execute)
     session = CodexAppServerSession(
         binary="unused", task=None, codex_thread_id="provider",
-        checkpoint_id=None if ordinary else "checkpoint",
+        fork_id=None if ordinary else "checkpoint",
         corsia_thread_id="thread", tool_registry=object(),
-        checkpoint_tool_result_fits=None if ordinary else boundary, on_raw_message=observe,
+        fork_tool_result_fits=None if ordinary else boundary, on_raw_message=observe,
     )
     declare_codex_tool_step(session, "edit", persist=False)
     session._active_turn_id = "current-turn"
@@ -111,7 +112,7 @@ async def test_stock_receipt_precedes_tool_execution_and_replayed_rpc_runs_once(
 
 
 def test_same_receipt_keeps_aggregate_tools_but_new_response_resets_it():
-    context = CodexCheckpointContext(target(1000), 0)
+    context = CodexForkContext(target(1000), 0)
     first = {"last": {"inputTokens": 100, "outputTokens": 10},
              "total": {"inputTokens": 19000100, "outputTokens": 1000}}
     context.record_receipt(first)
@@ -140,8 +141,8 @@ async def test_missing_usage_or_stop_closes_control_wait_without_a_tool_reply(tm
         events.append(frame)
 
     session = CodexAppServerSession(
-        binary="unused", task=None, codex_thread_id="provider", checkpoint_id="checkpoint",
-        checkpoint_tool_result_fits=lambda *_args: True, on_event=on_event,
+        binary="unused", task=None, codex_thread_id="provider", fork_id="checkpoint",
+        fork_tool_result_fits=lambda *_args: True, on_event=on_event,
     )
     session._active_turn_id = "turn"
     session._proc = SimpleNamespace(stdin=Pipe(), returncode=None)

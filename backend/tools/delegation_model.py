@@ -41,6 +41,7 @@ class DelegateSetModelTool(Tool):
         }, ["thread_id", "model"])
 
     async def execute(self, thread_id: str, model: str, reason: str | None = None, **kwargs: Any) -> str:
+        from infra.local_only import LocalityRefused
         from tools import delegation
         from thread.model import switch_model
         from thread.model_state import ModelSwitchConflict, ModelSwitchOutcome, ModelSwitchPreparationError
@@ -73,7 +74,7 @@ class DelegateSetModelTool(Tool):
             )
         except ModelSwitchConflict as exc:
             return f"Error: model switch conflict: {exc}"
-        except ModelSwitchPreparationError as exc:
+        except (LocalityRefused, ModelSwitchPreparationError) as exc:
             return f"Error: model switch rejected: {exc}"
         if not isinstance(result, ModelSwitchOutcome):
             return delegation._delegate_pending_switch(thread_id, new_model, checkpoint_override, result)

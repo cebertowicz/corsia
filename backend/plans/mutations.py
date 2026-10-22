@@ -134,6 +134,10 @@ def edit_node(
         size = validate_size(size)
     with service._connection(db) as connection, service._write(connection):
         node = service._live_node_row(connection, node_id)
+        if node["kind"] == "task" and size is None:
+            from plans.size_fields import TASK_SIZE_REQUIRED
+
+            raise service.PlanInputError(TASK_SIZE_REQUIRED)
         _assert_revision(node, expected_revision)
         if node["assignee"] == "user" and description is not None:
             from plans.boundary_fields import _user_step_description
@@ -244,6 +248,7 @@ def split_node(
     title: str,
     acceptance_criteria: str,
     description: str | None = None,
+    size: str | None = None,
     expected_revision: int | None = None,
     actor_id: str | None = None,
     provenance: str = "plan_mutation",
@@ -265,7 +270,7 @@ def split_node(
             order_key=source["order_key"] + 1, description=description,
             workflow_ref=source["workflow_ref"],
             workflow_version=source["workflow_version"],
-            workflow_step=source["workflow_step"], difficulty=source["difficulty"], size=None,
+            workflow_step=source["workflow_step"], difficulty=source["difficulty"], size=size,
             checkpoint_exception=False, assignee=source["assignee"],
             spawn_kind=source["spawn_kind"],
             watchdog_budget_seconds=source["watchdog_budget_seconds"],

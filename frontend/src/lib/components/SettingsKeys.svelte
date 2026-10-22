@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { Button, Field } from '$lib/components/ui';
 	import SettingsGroup from './SettingsGroup.svelte';
 	import SettingsRow from './SettingsRow.svelte';
@@ -18,7 +18,9 @@
 		type ProviderKeyRow,
 		type ServerKeyRow,
 	} from '$lib/stores/keys';
-	import { requestProviderCard, requestServerCard } from '$lib/stores/settingsNavigation';
+	import { requestProviderCard, requestServerCard, settingsAnchor, settingsNavigation } from '$lib/stores/settingsNavigation';
+	import { connectedAppStateLine, loadConnectedAppsList } from '$lib/api/connectedApps';
+	import { ms } from '$lib/popoverMotion';
 
 	type Action = 'set' | 'clear' | 'remove';
 
@@ -34,6 +36,12 @@
 	let formError = $state('');
 	let checking = $state<string | null>(null);
 	let checkResults = $state<Record<string, { ok: boolean; text: string }>>({});
+	let reconnectStatus = $state('');
+	let arrivedFor: string | null = null;
+	let arrivalEntry = $state<string | null>(null);
+	const connectedAppKey = $derived($settingsNavigation.connectedAppKey);
+	const RECONNECT_TIMEOUT_MS = 30_000;
+	const RECONNECT_RETRY_MS = 1_000;
 
 	const FAILURE_REASONS: Record<string, string> = {
 		network: "couldn't reach the search service",
@@ -55,6 +63,38 @@
 	}
 
 	onMount(load);
+
+	/** The target action pulses for two hero-plus tokens (1.2s with the current token), then retains keyboard focus in its normal state. */
+	$effect(() => {
+		const target = connectedAppKey;
+		if (!target) {
+			arrivedFor = null;
+			arrivalEntry = null;
+			return;
+		}
+		if (!entries.some((entry) => entry.name === target.entry) || arrivedFor === target.entry || open?.name === target.entry) return;
+		let cancelled = false;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		arrivedFor = target.entry;
+		arrivalEntry = target.entry;
+		void tick().then(() => {
+			if (cancelled) return;
+			const card = document.querySelector<HTMLElement>(`[data-key-entry="${target.entry}"]`);
+			const action = card?.querySelector<HTMLButtonElement>('.actions .btn');
+			if (!action) return;
+			action.focus({ preventScroll: true });
+			timer = setTimeout(() => {
+				if (arrivalEntry === target.entry) arrivalEntry = null;
+			}, ms('--dur-hero-plus') * 2);
+		});
+		return () => { cancelled = true; if (timer) clearTimeout(timer); if (arrivalEntry === target.entry) arrivalEntry = null; };
+	});
+
+	function cardLabel(entry: KeyEntry): string {
+		const ref = connectedAppKey?.refs.find((candidate) => candidate.entry === entry.name);
+		if (!connectedAppKey || !ref) return entry.label;
+		return connectedAppKey.refs.length > 1 ? `${connectedAppKey.app} key: ${ref.name}` : `${connectedAppKey.app} key`;
+	}
 
 	function status(entry: KeyEntry): string {
 		if (!entry.is_set) return 'Not set';
@@ -86,6 +126,33 @@
 		formError = '';
 	}
 
+	async function reconnectAfterKeySave(appName: string) {
+		const deadline = Date.now() + RECONNECT_TIMEOUT_MS;
+		try {
+			while (true) {
+				const app = (await loadConnectedAppsList()).servers.find((candidate) => candidate.name === appName);
+				if (!app) break;
+				if (app.state === 'working') {
+					reconnectStatus = `${appName} is connected.`;
+					return;
+				}
+				if (app.state === 'token_rejected') {
+					reconnectStatus = `${appName} didn't accept this key. Create a new one in your ${appName} settings, then press Replace.`;
+					return;
+				}
+				if (app.state !== 'connecting' && app.state !== 'awaiting_approval') {
+					reconnectStatus = connectedAppStateLine(app);
+					return;
+				}
+				if (Date.now() >= deadline) break;
+				await new Promise<void>((resolve) => setTimeout(resolve, RECONNECT_RETRY_MS));
+			}
+		} catch {
+			// The key already saved; do not turn a reconnect lookup failure into a failed save.
+		}
+		reconnectStatus = 'Saved.';
+	}
+
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();
 		if (!open || busy) return;
@@ -108,12 +175,21 @@
 			if (action === 'set') await saveKeyValue(name, value, typed);
 			else if (action === 'clear') await clearKeyValue(name, typed);
 			else await removeKey(name, typed);
-			open = null;
-			delete checkResults[name];
-			await load();
 		} catch (error) {
 			formError = error instanceof KeyWriteError ? error.message : KEYS_NOT_SAVED;
+			busy = false;
+			return;
+		}
+		open = null;
+		delete checkResults[name];
+		try {
+			if (action === 'set' && connectedAppKey?.entry === name) {
+				reconnectStatus = `Saved. Reconnecting ${connectedAppKey.app}…`;
+				await tick();
+				await reconnectAfterKeySave(connectedAppKey.app);
+			}
 		} finally {
+			await load();
 			busy = false;
 		}
 	}
@@ -183,8 +259,8 @@
 {#if entries.length}
 	<SettingsGroup label="Service keys" hint="Agents can use these keys but can never see them. They're stored on this Mac, and a backup of CORSIA's state folder includes them.">
 		{#each entries as entry (entry.name)}
-			<div class="entry" data-key-entry={entry.name}>
-				<SettingsRow name={entry.label} sub={entryLine(entry)} note={entry.ignored_env_var ? ignoredEnvironmentNote(entry.ignored_env_var) : ''} wrap stackActions>
+			<div class="entry" class:arrival={arrivalEntry === entry.name} data-key-entry={entry.name} data-settings-anchor={`key-${entry.name}`} use:settingsAnchor={`key-${entry.name}`}>
+				<SettingsRow name={cardLabel(entry)} sub={entryLine(entry)} note={entry.ignored_env_var ? ignoredEnvironmentNote(entry.ignored_env_var) : ''} wrap stackActions>
 					{#snippet actions()}
 						{#if open?.name !== entry.name}
 							<Button variant="ghost" size="sm" onclick={() => openForm(entry.name, 'set')}>
@@ -202,6 +278,7 @@
 						{/if}
 					{/snippet}
 				</SettingsRow>
+				{#if connectedAppKey?.entry === entry.name && reconnectStatus}<p class="note" role="status">{reconnectStatus}</p>{/if}
 				{#if open?.name === entry.name}
 					{@render keyForm()}
 				{:else if checkResults[entry.name]}
@@ -254,4 +331,11 @@
 	.note.failed { color: var(--red-text); }
 	.key-form { padding: 0 var(--space-2) var(--space-2); }
 	.form-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); }
+	.entry.arrival :global(.actions .btn:first-child) { animation: key-action-arrival calc(var(--dur-hero-plus) * 2) var(--ease-entrance); }
+	@keyframes key-action-arrival {
+		0% { opacity: 0.72; transform: scale(0.96); }
+		20% { opacity: 1; transform: scale(1.04); }
+		45%, 100% { opacity: 1; transform: scale(1); }
+	}
+	@media (prefers-reduced-motion: reduce) { .entry.arrival :global(.actions .btn:first-child) { animation: none; } }
 </style>

@@ -18,6 +18,7 @@ _STALLED = {
     "model": "Stalled: its model is unavailable",
     "account": "Stalled: its input is held for its account",
     "error": "Stalled: its last Turn failed",
+    "locality": "Stalled: local models only; its model can't run",
 }
 
 

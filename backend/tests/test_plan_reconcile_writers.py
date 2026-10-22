@@ -149,7 +149,7 @@ def test_accept_with_follow_up_releases_and_selects_the_queued_task(db):
     accepted = plan_update(
         db, plan.id, "accept_with_follow_up",
         {"node_id": task_a, "title": "Harden the edge case",
-         "acceptance_criteria": "The edge case is covered",
+         "acceptance_criteria": "The edge case is covered", "size": "unknown",
          "verification_result": "passed", "expected_revision": revision(db, task_a)},
     )
 
@@ -168,7 +168,7 @@ def test_split_and_follow_up_leave_the_selection_unchanged(db, operation):
     created = plan_update(
         db, plan.id, operation,
         {"node_id": task_a, "title": "Split-off work",
-         "acceptance_criteria": "The split-off work is verified",
+         "acceptance_criteria": "The split-off work is verified", "size": "unknown",
          "expected_revision": revision(db, task_a)},
     )
 

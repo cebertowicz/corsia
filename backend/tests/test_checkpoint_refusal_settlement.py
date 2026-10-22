@@ -45,7 +45,7 @@ def _refuse(db, *, installed=None, window=100_000, attempt="held-attempt"):
     settle_batch_write(
         attempt, outcome="proved_no_write", db=db,
         error=CheckpointUnavailable(
-            "minimum meaningful cold checkpoint input does not fit",
+            "minimum meaningful cold fork input does not fit",
             context_window=window, installed_checkpoint_id=installed,
         ),
     )

@@ -200,7 +200,7 @@ def test_keyed_omlx_discovery_and_model_list_send_the_stored_key(isolated_db, mo
     """Both pass no key and name only the server id; the stored key still authenticates every public call."""
     import httpx
 
-    from api.network_server_helpers import list_daemon_models
+    from api.network_daemon_models import list_daemon_models
     from infra.key_store_servers import set_server_key
     from llm import network_discovery as nd
     from llm.catalog_network_models import discover_network_models

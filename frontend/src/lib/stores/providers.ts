@@ -21,6 +21,8 @@ export interface ProviderEntry {
 }
 
 export const providers = writable<ProviderEntry[]>([]);
+/** Successful sheet tests in this session; setup combines these with catalog readiness. */
+export const testedProviders = writable<string[]>([]);
 
 const BASE = '';
 function t() { return get(token) || ''; }
@@ -82,7 +84,9 @@ export async function deleteProvider(name: string): Promise<{ ok: boolean }> {
 export async function testProvider(name: string): Promise<{ ok: boolean; message?: string; error?: string }> {
 	try {
 		const res = await fetch(`${BASE}/api/settings/providers/${name}/test?token=${t()}`, { method: 'POST' });
-		return await res.json();
+		const result = await res.json();
+		testedProviders.update((names) => result.ok ? [...new Set([...names, name])] : names.filter((candidate) => candidate !== name));
+		return result;
 	} catch (e) {
 		return { ok: false, error: String(e) };
 	}

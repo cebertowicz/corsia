@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
 	makeGuardedPort,
+	supersedingRead,
 	PAGER_ABORT,
 	type MessagePage,
 	type PagerPort,
@@ -63,5 +64,16 @@ describe('makeGuardedPort', () => {
 		let gen = 2;
 		const guarded = makeGuardedPort(() => gen, 1, makeBase());
 		expect(guarded.getScrollEl()).toBeNull();
+	});
+});
+
+describe('supersedingRead', () => {
+	it('aborts the read it supersedes and, on abort, the one in flight', () => {
+		const reads = supersedingRead();
+		const first = reads.start();
+		const second = reads.start();
+		expect([first.aborted, second.aborted]).toEqual([true, false]);
+		reads.abort();
+		expect(second.aborted).toBe(true);
 	});
 });

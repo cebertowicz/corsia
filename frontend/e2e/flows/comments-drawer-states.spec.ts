@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
 import { isolatedDb } from '../support/imageRegionComments';
 import { comment, deleteSeededThreads, journey, open, seed, settled, shot, type Case, type Doc } from '../support/reviewFixtures';
@@ -112,7 +113,15 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	await expect(drawer).toBeVisible();
 	// Every writable open thread keeps its reply field available; the selected thread stays in view.
 	await expect.poll(() => drawer.locator('.ct-input').count()).toBe(2);
-	await expect(drawer.locator('.ct-input').last()).toBeInViewport({ ratio: 1 });
+	// The drawer owns scrolling, so the reply must be fully contained in its scrollport;
+	// browser-viewport containment is unrelated once the document has scrolled underneath it.
+	const replyField = drawer.locator('.ct-input').last();
+	await expect.poll(() => replyField.evaluate((input) => {
+		const list = input.closest<HTMLElement>('.drawer-comments')!;
+		const replyRect = input.getBoundingClientRect();
+		const listRect = list.getBoundingClientRect();
+		return replyRect.top >= listRect.top - 1 && replyRect.bottom <= listRect.bottom + 1;
+	})).toBe(true);
 	await shot(page, 'rs-17-quote-jump-near-document-end', info);
 });
 

@@ -6,9 +6,14 @@ import json
 from dataclasses import replace
 
 from core.checkpoint_render import carry_partial_narrative, usable_result
+from core.fork_types import (
+    FORK_CONTEXT_TRUNCATED,
+    ProviderForkRejected,
+    ProviderForkResult,
+)
 from core.checkpoint_types import (
-    CHECKPOINT_CONTEXT_TRUNCATED, CheckpointRecord,
-    ProviderCheckpointRejected, ProviderCheckpointResult,
+
+    CheckpointRecord,
 )
 from infra import checkpoint_queries
 from infra import checkpoints as checkpoint_store
@@ -40,7 +45,7 @@ async def terminal_failure(checkpoint_id: str, error: BaseException) -> Checkpoi
         return await read_checkpoint(checkpoint_id)
 
 
-async def capture_and_install(checkpoint_id: str, result: ProviderCheckpointResult) -> CheckpointRecord:
+async def capture_and_install(checkpoint_id: str, result: ProviderForkResult) -> CheckpointRecord:
     # Gate on the provider's own output, before any carry-forward: a call
     # that produced no narrative text is a failed attempt, whether or not a
     # previous generation or staged edits exist. Staged edits alone no longer
@@ -56,9 +61,9 @@ async def capture_and_install(checkpoint_id: str, result: ProviderCheckpointResu
             checkpoint_id, result.diagnostic,
         )
         return await terminal_failure(
-            checkpoint_id, ProviderCheckpointRejected("checkpoint provider produced no content"),
+            checkpoint_id, ProviderForkRejected("checkpoint provider produced no content"),
         )
-    truncated = result.diagnostic == CHECKPOINT_CONTEXT_TRUNCATED
+    truncated = result.diagnostic == FORK_CONTEXT_TRUNCATED
     if truncated:
         current = await read_checkpoint(checkpoint_id)
         if current.previous_generation_id:

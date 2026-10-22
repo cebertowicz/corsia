@@ -15,14 +15,9 @@ from fastapi import FastAPI, WebSocket
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from infra import devices_listener, devices_server
-from infra.devices_listener import (
-    DevicesApp,
-    DevicesListener,
-    DevicesServer,
-    ensure_host_key,
-    lan_addresses,
-)
+from infra import devices_identity, devices_listener, devices_server
+from infra.devices_identity import ensure_host_key
+from infra.devices_listener import DevicesApp, DevicesListener, DevicesServer, lan_addresses
 
 
 def test_host_key_is_created_under_state_root_with_private_modes(tmp_path):
@@ -82,6 +77,69 @@ def test_key_only_recovery_preserves_its_spki(tmp_path):
 
     assert key_path.exists()
     assert recovered_spki == previous_spki
+
+
+def _verifies(key_path, signature, nonce, authority):
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    public = serialization.load_pem_private_key(key_path.read_bytes(), password=None).public_key()
+    payload = b"corsia-identity-v1\0" + nonce + b"\0" + authority.encode("ascii")
+    try:
+        public.verify(signature, payload, ec.ECDSA(hashes.SHA256()))
+    except InvalidSignature:
+        return False
+    return True
+
+
+def test_identity_proof_parses_the_key_once_and_again_after_it_changes(tmp_path, monkeypatch):
+    devices_identity._parsed_files.clear()
+    parsed = []
+    original = serialization.load_pem_private_key
+
+    def _counting(*args, **kwargs):
+        parsed.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(devices_identity.serialization, "load_pem_private_key", _counting)
+    nonce, authority = b"n" * 16, "home.example.com:47901"
+    key_path, _ = ensure_host_key(tmp_path)
+    first = devices_identity.sign_identity_proof(nonce, authority, tmp_path)
+    devices_identity.sign_identity_proof(nonce, authority, tmp_path)
+    assert len(parsed) == 1
+
+    key_path.unlink()
+    ensure_host_key(tmp_path)
+    second = devices_identity.sign_identity_proof(nonce, authority, tmp_path)
+    monkeypatch.setattr(devices_identity.serialization, "load_pem_private_key", original)
+
+    assert _verifies(key_path, second, nonce, authority)
+    assert not _verifies(key_path, first, nonce, authority)
+    devices_identity._parsed_files.clear()
+
+
+def test_host_spki_is_read_once_and_follows_a_replaced_certificate(tmp_path, monkeypatch):
+    devices_identity._parsed_files.clear()
+    key_path, cert_path = ensure_host_key(tmp_path)
+    first = devices_identity.host_spki_der(tmp_path)
+    reads = []
+    original = devices_identity.x509.load_pem_x509_certificate
+
+    def _counting(*args, **kwargs):
+        reads.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(devices_identity.x509, "load_pem_x509_certificate", _counting)
+    assert devices_identity.host_spki_der(tmp_path) == first
+    assert reads == []
+
+    key_path.unlink()
+    cert_path.unlink()
+    ensure_host_key(tmp_path)
+    assert devices_identity.host_spki_der(tmp_path) != first
+    assert reads == [1]
+    devices_identity._parsed_files.clear()
 
 
 def test_address_hints_include_only_listener_reachable_lan_addresses():
@@ -287,6 +345,23 @@ def _stub_app():
         await websocket.close()
 
     return stub
+
+
+
+@pytest.mark.parametrize("path", ["/api/devices/pair/start", "/api/devices/pair/finish"])
+def test_devices_app_counts_pairing_refusals_outside_the_pairing_network(monkeypatch, path):
+    emitted = []
+    monkeypatch.setattr(devices_listener, "emit_pairing_failure", lambda *, reason: emitted.append(reason))
+    client = TestClient(
+        DevicesApp(_stub_app(), outside_enabled=lambda: True),
+        client=("198.51.100.20", 50000),
+    )
+
+    response = client.post(path, json={})
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": {"reason": "not_on_this_network"}}
+    assert emitted == ["not_on_this_network"]
 
 
 def test_devices_app_accepts_a_person_session_from_the_token_query_parameter(token_users):

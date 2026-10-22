@@ -4,6 +4,9 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+# Appended to a file's last commit when its working copy differs: two drafts can share it.
+LOCAL_EDIT_MARK = "·dirty"
+
 
 def digest(text: str | None) -> str | None:
     return None if text is None else hashlib.sha256(text.encode()).hexdigest()
@@ -23,4 +26,4 @@ def file_version(repo: Path, path: Path) -> str | None:
     commit = _git(repo, "log", "-1", "--format=%H", "--", f":(literal){rel}").strip()
     if not commit:
         return None
-    return commit + ("·dirty" if _changed(repo, [f":(literal){rel}"]) else "")
+    return commit + (LOCAL_EDIT_MARK if _changed(repo, [f":(literal){rel}"]) else "")

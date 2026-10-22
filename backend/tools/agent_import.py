@@ -1,4 +1,4 @@
-"""``agent_import``: bring over what the person's other AI tools know, by consent."""
+"""``agent_import``: bring over what the person's other tools know, by consent."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ NONE_NAMED_FOUND = (
 )
 NOT_HERE = (
     "agent_import is only for the CORSIA agent; tell the person to ask CORSIA to "
-    "bring things over from their other AI tools"
+    "bring things over from their other tools"
 )
 
 
@@ -54,7 +54,7 @@ def _texts():
             "this Mac now; " + RAISE_FIRST
         ),
         declined=(
-            "the user did not choose to have their other AI tools read; do not read "
+            "the user did not choose to have their other tools read; do not read "
             "them and do not ask again unasked"
         ),
         used=(
@@ -65,7 +65,7 @@ def _texts():
 
 
 class AgentImportTool(Tool):
-    """Read the person's other AI tools once per consent, then install picked skills."""
+    """Read the person's other tools once per consent, then install picked skills."""
 
     @property
     def name(self) -> str:
@@ -80,7 +80,7 @@ class AgentImportTool(Tool):
             "an offer state. Never their chats, settings, keys or passwords, and "
             "never a skill's body.\n\n"
             "USE THIS when the person asks to bring their things over from another "
-            "AI tool, and in first run when setup.setup_decisions holds the import "
+            "tool, and in first run when setup.setup_decisions holds the import "
             f"decision. Follow {REFERENCE} for what to post.\n\n"
             "It needs the person's consent first: call it with no "
             "consent_decision_id for the exact consent_decision fields (pass tools "
@@ -131,7 +131,7 @@ class AgentImportTool(Tool):
             return json.dumps({"error": facts})
         decision_id = str(kwargs.get("consent_decision_id") or "").strip()
         if not decision_id:
-            return json.dumps(_consent_fields(facts, kwargs.get("tools")), sort_keys=True)
+            return json.dumps(_consent_fields(facts, kwargs.get("tools"), thread_id=thread_id), sort_keys=True)
         from onboarding.consent import ConsentRefused
 
         try:
@@ -170,7 +170,7 @@ def _card_facts(thread_id: str):
     return card if card is not None else NO_MODEL
 
 
-def _consent_fields(card, tools) -> dict[str, Any]:
+def _consent_fields(card, tools, *, thread_id: str) -> dict[str, Any]:
     from dataclasses import replace
 
     from onboarding import setup_decisions
@@ -189,7 +189,15 @@ def _consent_fields(card, tools) -> dict[str, Any]:
     fields = {"error": RAISE_FIRST, "consent_decision": consent}
     if missing:
         fields["not_found"] = missing
+    _emit_event(thread_id, "consent_card", tools_count=len(card.tools))
     return fields
+
+
+def _emit_event(thread_id: str, event: str, **counts: int | str) -> None:
+    """Emit aggregate import evidence without exposing imported paths or content."""
+    from infra.product_events import emit_product_event
+
+    emit_product_event("agent_import", event, thread_id=thread_id, properties=counts)
 
 
 def _actor(thread_id: str, thread: dict[str, Any]):
@@ -242,7 +250,12 @@ async def _read(thread_id, thread, decision_id, card) -> dict[str, Any]:
         result = "read"
     else:
         result = "read_failed" if memory.failed else "nothing_found"
-    return {"result": result, "excerpts": memory.excerpts, "skills": skills,
+    skipped = sorted({str(row["path"]) for row in memory.skipped if not row.get("unread")})
+    unread = sorted({str(row["path"]) for row in memory.skipped if row.get("unread")})
+    _emit_event(thread_id, result, excerpts_count=len(memory.excerpts), skills_count=len(skills),
+                skipped_count=len(skipped), unread_count=len(unread))
+    return {"result": result, "excerpts": memory.excerpts, "skills": skills, "skipped_files": skipped,
+            "unread_files": unread,
             "install_by": (datetime.datetime.fromisoformat(read_at) + INSTALL_WINDOW).isoformat()}
 
 
@@ -286,9 +299,12 @@ async def _install(thread_id, thread, decision_id, card, item_ids) -> dict[str, 
 
     used, tools = await _in_plan(authorize)
     results = await run_off_db(agent_import_skills.install_skills, Roots.for_user(), tools,
-                               _workspace(), item_ids, now=now)
+                               _workspace(), item_ids, now=now, author_thread_id=thread_id,
+                               consent_decision_id=decision_id)
     await _in_plan(lambda db: consent.record_receipt(db, used, INSTALL_OPERATION, {
         "items": [{key: row[key] for key in ("item_id", "sha256", "outcome") if key in row} for row in results],
     }, {"item_ids": sorted(item_ids)}))
+    for row in results:
+        _emit_event(thread_id, "install", outcome=str(row["outcome"]), count=1)
     installed = sum(1 for row in results if row["outcome"] == "installed")
     return {"installed": installed, "results": results}

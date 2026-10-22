@@ -196,7 +196,7 @@ def test_inserting_an_earlier_node_keeps_the_selected_attempt(db):
         {
             "kind": "task",
             "title": "Inserted earlier work",
-            "acceptance_criteria": "The inserted work is verified",
+            "acceptance_criteria": "The inserted work is verified", "size": "unknown",
             "before_node_id": task_a,
         },
     )["node"]

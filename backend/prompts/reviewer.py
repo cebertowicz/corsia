@@ -5,6 +5,17 @@ from __future__ import annotations
 from reviewer.reviewer_categories import VALID_CATEGORIES, VALID_SEVERITIES
 
 
+def reviewer_prompt_version_text() -> str:
+    """Render the reviewer template with stable markers for per-review inputs."""
+    return build_reviewer_prompt(
+        "",
+        "{context_text}",
+        model_label="{model_label}",
+        change_source="{change_source}",
+        review_history="{review_history}",
+    )
+
+
 def build_reviewer_prompt(
     diff: str,
     context_text: str,

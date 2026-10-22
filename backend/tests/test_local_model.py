@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from llm import local_model, local_setup, local_setup_operation, local_sources
-from llm import local_setup_prepare as prepare
+from llm import local_setup_prepare as prepare, local_setup_flow as flow, local_setup_runtime as runtime
 from llm.local_model import LocalModel
 from llm.local_profiles import MODEL_SETTINGS, STARTER_MODEL
 from omlx_recommender_fixtures import FIXTURE, THINKING, best_rows as _best, mac_with as _mac
@@ -23,8 +23,8 @@ from omlx_recommender_fixtures import fresh_local_setup  # noqa: F401
 _REPO = Path(__file__).resolve().parents[2]
 SAMPLING = {"temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty", "chat_template_kwargs"}
 
-# What the recorded recommender picks at each memory size (GiB), stated here so a
-# re-recorded fixture shows its change. Under 24 GiB there is no local model.
+# What setup picks at each memory size (GiB) from the recorded recommender: oMLX's own
+# ranking, first that fits. Stated here so a re-recorded fixture shows its change. Under 24 GiB there is no local model.
 PICKS = {
     16: None,
     24: ("Jundot/gemma-4-26B-A4B-it-oQ3.5e-mtp", 90_890, "Gemma 4 26B A4B"),
@@ -51,7 +51,7 @@ async def _prepared() -> dict:
 
 async def _flown(**kwargs) -> dict:
     """Get started: run the setup flight to its result."""
-    first = await local_setup.begin_local_setup(**kwargs)
+    first = await flow.begin_local_setup(**kwargs)
     task = local_setup._flight.task
     return await task if task is not None else first
 
@@ -81,11 +81,11 @@ def test_welcome_shows_the_recommenders_pick_for_each_memory_size(monkeypatch, g
         assert mac.started == [] and mac.omlx.calls == []
         return
     repository, window, name = PICKS[gib]
-    size = next(row["download_bytes"] for row in _best(gib) if row["repo_id"] == repository)
-    assert view == {"state": "picked", "message": None, "model": {
-        "name": name, "repository": repository, "download_size_bytes": size,
-        "download_size_gb": round(size / 1000**3, 1), "context_window": window,
-    }}
+    row = next(row for row in _best(gib) if row["repo_id"] == repository)
+    model = local_model.from_recommendation(row)
+    assert model is not None
+    assert (model.repository, model.context_window, model.display_name) == (repository, window, name)
+    assert view == {"state": "picked", "message": None, "model": model.view()}
     # Welcome only picks: it asks once and downloads nothing.
     assert mac.omlx.asks() == 1 and mac.downloads == [] and mac.omlx.puts() == []
 
@@ -106,7 +106,8 @@ def test_get_started_downloads_the_pick_and_every_reader_sees_that_model(monkeyp
     assert path == f"/models/{repository.split('/')[1]}/settings" and settings["max_context_window"] == window
     recorded = local_model.set_up_model()
     assert (recorded.repository, recorded.context_window) == (repository, window)
-    assert local_setup_operation.read() is None
+    operation = local_setup_operation.read()
+    assert operation.repository == repository and operation.result == result and operation.downloaded
     # A later server process has no prepare state; it reads the same model from the record.
     monkeypatch.setattr(prepare, "_prepare", prepare._Prepare())
     assert asyncio.run(prepare.pick_view())["model"]["repository"] == repository
@@ -123,16 +124,46 @@ def test_the_flight_asks_the_recommender_itself_when_welcome_did_not(monkeypatch
     assert [model.repository for model in mac.downloads] == ["Jundot/Qwen3.8-27B-oQ4e-mtp"]
 
 
-def test_the_pick_skips_rows_below_32k_and_caps_the_window_at_256k():
+def test_recommender_metadata_survives_in_the_structured_settings_view():
+    row = next(row for row in _best(24) if row["repo_id"] == "Jundot/gemma-4-26B-A4B-it-oQ3.5e-mtp")
+
+    model = local_model.from_recommendation(row)
+
+    assert model is not None
+    assert model.level == row["level"] and model.fp16 is row["fp16"]
+    assert model.relative_speed == row["relative_speed"]
+    assert model.view() == {
+        "name": model.display_name, "repository": row["repo_id"], "model": model.model,
+        "download_size_bytes": row["download_bytes"],
+        "download_size_gb": round(row["download_bytes"] / 1000**3, 1),
+        "context_window": row["max_context"], "quantization_bits": row["level"],
+        "relative_speed": row["relative_speed"], "resident_bytes": row["resident_bytes"],
+        "smarts_level": row["smarts_level"], "tokens_per_second": row["tokens_per_second"],
+    }
+    restored = local_model.from_recommendation(local_model.to_record(model))
+    assert restored == model and restored.view() == model.view()
+    assert local_setup_operation.Operation.for_model(model, "settings").model.view() == model.view()
+
+
+def test_resident_bytes_is_kept_only_when_oMLX_gives_a_positive_number():
+    row = {"repo_id": "org/big-oQ4e", "download_bytes": 10, "max_context": 65_536}
+
+    assert local_model.from_recommendation(row).resident_bytes is None
+    assert "resident_bytes" not in local_model.from_recommendation(row).view()
+    assert local_model.from_recommendation({**row, "resident_bytes": 0}).resident_bytes is None
+    assert local_model.from_recommendation({**row, "resident_bytes": True}).resident_bytes is None
+    assert local_model.from_recommendation({**row, "resident_bytes": 42}).view()["resident_bytes"] == 42
+
+
+def test_recommendation_rows_below_32k_are_unusable_and_the_window_caps_at_256k():
     rows = [
         {"repo_id": "org/short-oQ4e", "download_bytes": 10, "max_context": 32_767},
         {"repo_id": "org/broken", "download_bytes": True, "max_context": 65_536},
         {"repo_id": "no-owner", "download_bytes": 10, "max_context": 65_536},
         {"repo_id": "org/Long-Model-oQ4e-mtp", "download_bytes": 10, "max_context": 1_048_576},
     ]
-    assert local_model.pick({"sections": {"best": rows}}) == LocalModel("org/Long-Model-oQ4e-mtp", 10, 262_144)
-    assert local_model.pick({"sections": {"best": rows[:3]}}) is None
-    assert local_model.pick({"sections": {}}) is None and local_model.pick([]) is None
+    usable = [model for row in rows if (model := local_model.from_recommendation(row)) is not None]
+    assert usable == [LocalModel("org/Long-Model-oQ4e-mtp", 10, 262_144)]
 
 
 def _no_row_reaches_32k(monkeypatch):
@@ -155,7 +186,7 @@ def test_the_starter_names_itself_from_its_profile_and_keeps_the_name_through_it
     # The name is the profile's, never the repository id's, and the records that carry the model keep it.
     assert LocalModel(STARTER_MODEL.repository, 1, 32_768).display_name == "Ternary Bonsai 2 27B"
     assert local_model.from_recommendation(local_model.to_record(STARTER_MODEL)).display_name == "Ternary Bonsai 2"
-    operation = local_setup_operation.Operation.for_model(STARTER_MODEL, "starter")
+    operation = local_setup_operation.Operation.for_model(STARTER_MODEL, "setup")
     assert operation.model.display_name == "Ternary Bonsai 2"
 
 
@@ -222,7 +253,7 @@ def test_a_second_failure_shows_cant_check_then_try_again_picks(monkeypatch):
     view = asyncio.run(_prepared())
 
     assert view["state"] == "failed" and view["model"] is None
-    assert "HTTP 504" in view["message"] and mac.downloads == []
+    assert "Couldn't get model recommendations from oMLX" in view["message"] and mac.downloads == []
     # Try again starts the pick afresh.
     assert asyncio.run(_prepared())["state"] == "picked" and mac.omlx.asks() == 3
 
@@ -242,8 +273,10 @@ def test_a_flight_whose_recommender_never_answers_fails_without_downloading(monk
 
     result = asyncio.run(_flown())
 
-    assert result["ok"] is False and "HTTP 502" in result["message"]
-    assert mac.downloads == [] and local_setup_operation.read() is None
+    assert result["ok"] is False and "Couldn't get model recommendations from oMLX" in result["message"]
+    assert mac.downloads == []
+    operation = local_setup_operation.read()
+    assert operation.repository is None and operation.result == result and not operation.downloaded
 
 
 def test_an_omlx_without_the_recommender_cannot_check(monkeypatch):
@@ -251,7 +284,7 @@ def test_an_omlx_without_the_recommender_cannot_check(monkeypatch):
 
     view = asyncio.run(_prepared())
 
-    assert view["state"] == "failed" and "HTTP 404" in view["message"]
+    assert view["state"] == "failed" and "Couldn't get model recommendations from oMLX" in view["message"]
 
 
 def test_overlapping_prepare_requests_start_one_task(monkeypatch):
@@ -288,8 +321,8 @@ def test_turning_the_switch_off_while_checking_stops_the_pick_and_downloads_noth
 
     # Welcome's waiting request answers too, so nothing is left hanging on a stopped pick.
     assert view == answered == {"state": "not_checked", "model": None, "message": None}
-    # Prepare started that oMLX, so it stops it; nothing was downloaded or written.
-    assert mac.commands == [["omlx", "stop"]]
+    # Prepare owns this private managed server, so it stops that exact server id.
+    assert mac.stopped == ["srv"]
     assert mac.downloads == [] and mac.omlx.puts() == [] and local_setup_operation.read() is None
 
 
@@ -299,30 +332,17 @@ def test_turning_the_switch_off_after_the_pick_forgets_it(monkeypatch):
 
     view = asyncio.run(prepare.stop_prepare())
 
-    assert view["state"] == "not_checked" and mac.commands == [["omlx", "stop"]] and mac.downloads == []
+    assert view["state"] == "not_checked" and mac.stopped == ["srv"] and mac.downloads == []
 
 
-def test_the_switch_leaves_an_omlx_that_was_already_answering_running(monkeypatch):
+def test_the_switch_stops_only_its_private_managed_server(monkeypatch):
     mac = _mac(monkeypatch, 64)
 
-    async def answering(_port):
-        return True
-
-    monkeypatch.setattr(local_setup, "_omlx_answers", answering)
     asyncio.run(_prepared())
     asyncio.run(prepare.stop_prepare())
 
-    assert mac.commands == []
+    assert mac.stopped == ["srv"]
 
-
-def test_welcome_never_starts_a_second_omlx_beside_the_persons_own(monkeypatch):
-    mac = _mac(monkeypatch, 64)
-    monkeypatch.setattr(local_setup, "existing_install_is_foreign", lambda: True)
-
-    view = asyncio.run(_prepared())
-
-    assert view == {"state": "own_omlx", "model": None, "message": None}
-    assert mac.started == [] and mac.omlx.calls == []
 
 
 @pytest.mark.parametrize("gib, allowed", [(23.9, False), (24, True)])
@@ -345,7 +365,7 @@ def test_each_picked_family_thinks_on_an_agent_turn_with_its_own_sampling(monkey
     mac = _mac(monkeypatch, 64)
     model = LocalModel(f"Jundot/{model_id}", 1, 65_536)
 
-    asyncio.run(local_setup._configure_model_settings("srv", model))
+    asyncio.run(runtime.configure_model_settings("srv", model))
 
     [(path, settings)] = mac.omlx.puts()
     assert path == f"/models/{model_id}/settings"
@@ -364,12 +384,12 @@ def test_a_model_with_no_thinking_toggle_gets_none_and_a_missing_model_fails(mon
     mac = _mac(monkeypatch, 64)
     monkeypatch.setitem(THINKING, "plain-oQ4e", None)
 
-    asyncio.run(local_setup._configure_model_settings("srv", LocalModel("org/plain-oQ4e", 1, 40_960)))
+    asyncio.run(runtime.configure_model_settings("srv", LocalModel("org/plain-oQ4e", 1, 40_960)))
 
     [(_path, settings)] = mac.omlx.puts()
     assert "enable_thinking" not in settings and "mtp_enabled" not in settings
     with pytest.raises(RuntimeError, match="does not list Absent"):
-        asyncio.run(local_setup._configure_model_settings("srv", LocalModel("org/absent-oQ4e", 1, 40_960)))
+        asyncio.run(runtime.configure_model_settings("srv", LocalModel("org/absent-oQ4e", 1, 40_960)))
 
 
 def test_the_set_up_record_round_trips_and_a_bad_one_reads_as_absent():

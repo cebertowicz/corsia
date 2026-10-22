@@ -14,6 +14,7 @@ import json
 from dataclasses import replace
 
 import pytest
+from core import fork_runtime
 
 from core.turn_core import TurnIdentity
 from codex_process_fixtures import bind_process_group
@@ -100,7 +101,8 @@ async def test_codex_tool_boundary_swap_survives_its_callers_reader_cleanup(
         if not caller.done():
             caller.cancel()
         await asyncio.gather(caller, return_exceptions=True)
-        await runtime.shutdown_checkpoint_tasks()
+        await fork_runtime.shutdown_forks()
+        await runtime.shutdown_checkpoint_wakes()
         for session in {old_session, _APP_SESSIONS.get("held-thread")} - {None}:
             session.set_callbacks(on_event=None, on_exit=None)
             await session.terminate()

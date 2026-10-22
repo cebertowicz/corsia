@@ -52,7 +52,7 @@ def _migrated() -> sqlite3.Connection:
 def test_fresh_schema_is_current_version() -> None:
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 126
+    assert SCHEMA_VERSION == 135
 
 
 def test_an_already_queued_input_keeps_its_row_and_gains_no_condition() -> None:

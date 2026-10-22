@@ -36,6 +36,9 @@ HUMAN = PlanActor(None, "user", None, kind="user")
 
 
 def _mutate(db, plan_id, operation, params, key, *, actor=None):
+    params = dict(params)
+    if operation in {"add", "insert", "split", "add_follow_up", "accept_with_follow_up"}:
+        params.setdefault("size", "unknown")
     return mutate(
         plan_id,
         operation,

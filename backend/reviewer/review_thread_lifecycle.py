@@ -29,6 +29,14 @@ class ReviewThreadAction:
     reply_needed: bool = True
 
 
+@dataclass(frozen=True)
+class StillRaisedFinding:
+    """A current finding carried by an existing visible comment."""
+
+    finding: dict[str, Any]
+    carrier_comment: dict[str, Any]
+
+
 def exact_head_thread_states(
     pr_number: int,
     repo: str,
@@ -80,7 +88,9 @@ def classify_with_thread_states(
     new_findings: list[dict[str, Any]],
     existing_comments: list[dict[str, Any]],
     thread_states: dict[int, ReviewThreadState],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+) -> tuple[
+    list[dict[str, Any]], list[dict[str, Any]], list[StillRaisedFinding],
+]:
     """Plan lifecycle transitions using GitHub's complete thread-state snapshot."""
     new_by_fingerprint = _group_by_fingerprint(new_findings)
     roots_by_fingerprint, pr_resolutions, replies_by_parent = _index_comments(
@@ -88,10 +98,10 @@ def classify_with_thread_states(
     )
     new_threads: list[dict[str, Any]] = []
     resolve_replies: list[dict[str, Any]] = []
-    unchanged_count = 0
+    still_raised: list[StillRaisedFinding] = []
 
     for fingerprint, roots in roots_by_fingerprint.items():
-        unchanged_count += _classify_one_fingerprint(
+        _classify_one_fingerprint(
             fingerprint=fingerprint,
             roots=roots,
             new_by_fingerprint=new_by_fingerprint,
@@ -100,13 +110,14 @@ def classify_with_thread_states(
             thread_states=thread_states,
             new_threads=new_threads,
             resolve_replies=resolve_replies,
+            still_raised=still_raised,
         )
 
     new_threads.extend(
         finding for fingerprint, finding in new_by_fingerprint.items()
         if fingerprint not in roots_by_fingerprint
     )
-    return new_threads, resolve_replies, unchanged_count
+    return new_threads, resolve_replies, still_raised
 
 
 def _index_comments(
@@ -147,8 +158,9 @@ def _classify_one_fingerprint(
     thread_states: dict[int, ReviewThreadState],
     new_threads: list[dict[str, Any]],
     resolve_replies: list[dict[str, Any]],
-) -> int:
-    """Add one fingerprint's publication or resolution actions; return unchanged count."""
+    still_raised: list[StillRaisedFinding],
+) -> None:
+    """Add one fingerprint's publication, resolution, or carried-finding action."""
     review_roots = [root for root in roots if not root.get("issue_url")]
     pr_roots = [root for root in roots if root.get("issue_url")]
     pr_active = _newest_active_comment(
@@ -174,15 +186,15 @@ def _classify_one_fingerprint(
             reopenable.append((root, state, event))
 
     if fingerprint in new_by_fingerprint:
-        return _classify_present_finding(
+        _classify_present_finding(
             fingerprint, open_active, reopenable, human_resolved, pr_active,
-            new_by_fingerprint, new_threads,
+            new_by_fingerprint, new_threads, still_raised,
         )
+        return
     _classify_absent_finding(
         fingerprint, open_active, reopenable, pr_active,
         replies_by_parent, thread_states, resolve_replies,
     )
-    return 0
 
 
 def _classify_present_finding(
@@ -193,13 +205,16 @@ def _classify_present_finding(
     pr_active: dict[str, Any] | None,
     new_by_fingerprint: dict[str, dict[str, Any]],
     new_threads: list[dict[str, Any]],
-) -> int:
+    still_raised: list[StillRaisedFinding],
+) -> None:
     """Keep a current finding unchanged or attach its prior thread for reopening."""
-    candidates = [root for root, _ in open_active]
-    if pr_active is not None:
-        candidates.append(pr_active)
-    if candidates or human_resolved:
-        return 1
+    roots = [root for root, _ in open_active] + human_resolved
+    carrier = max(roots, key=_comment_order) if roots else pr_active
+    if carrier is not None:
+        still_raised.append(StillRaisedFinding(
+            new_by_fingerprint[fingerprint], carrier,
+        ))
+        return
     if reopenable:
         root, state, _ = max(
             reopenable, key=lambda item: _comment_order(item[0]),
@@ -213,7 +228,7 @@ def _classify_present_finding(
         new_threads.append(finding)
     else:
         new_threads.append(new_by_fingerprint[fingerprint])
-    return 0
+
 
 
 def _classify_absent_finding(

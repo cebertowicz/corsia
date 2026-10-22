@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-import core.checkpoint_codex_fork as fork
+import core.fork_codex as fork
 from infra.vendor_login import stamp_initial_claim
 from vendor_account_fixtures import accounts  # noqa: F401
 

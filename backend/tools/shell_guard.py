@@ -38,7 +38,7 @@ from tools.sandbox_config import (
 from tools.sandbox_git import sandbox_literal
 from tools.shell_environment import safehouse_subprocess_env as safehouse_subprocess_env
 from tools.unix_socket_policy import unix_socket_sandbox_rules
-from tools.shell_environment import agent_account_deny_rule, agent_account_ro_dirs, shell_env_pass_names
+from tools.shell_environment import agent_account_deny_rule, agent_account_ro_dirs, agent_tool_ro_dirs, shell_env_pass_names
 
 _WORKTREE_FLAGS_WITH_VALUE = {
     "-b",
@@ -1007,7 +1007,7 @@ def safehouse_argv(
     else:
         if rw := ":".join(map(str, _canonical_paths(get_sandbox_add_dirs_rw(thread_id, policies=policies)))):
             argv.append(f"--add-dirs={rw}")
-        read_only = [*get_allowed_dirs_ro(policies=policies), *agent_account_ro_dirs(agent_account)]
+        read_only = [*get_allowed_dirs_ro(policies=policies), *agent_account_ro_dirs(agent_account), *agent_tool_ro_dirs()]
         if ro := ":".join(map(str, _canonical_paths(read_only))):
             argv.append(f"--add-dirs-ro={ro}")
     argv.extend(

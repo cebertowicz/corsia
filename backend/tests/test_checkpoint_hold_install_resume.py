@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.checkpoint_types import CheckpointProviderForkRequest
+
 import asyncio
 import json
 from dataclasses import replace
@@ -9,8 +11,13 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from core import fork_runtime
 
-from core.checkpoint_types import CheckpointRequest, ProviderCheckpointRequest, ProviderCheckpointResult
+from core.fork_types import (
+    ProviderForkRequest,
+    ProviderForkResult,
+)
+from core.checkpoint_types import CheckpointRequest
 from core.turn_core import TurnIdentity
 from codex_process_fixtures import bind_process_group
 
@@ -98,7 +105,7 @@ async def _start_checkpoint(monkeypatch, target, tmp_path, identity, *, owned=Tr
 
     async def invoke(_request, _cancel):
         await release.wait()
-        return ProviderCheckpointResult("NEW_CHECKPOINT_BODY", None)
+        return ProviderForkResult("NEW_CHECKPOINT_BODY", None)
 
     await_original = runtime.await_checkpoint
 
@@ -119,8 +126,8 @@ async def _start_checkpoint(monkeypatch, target, tmp_path, identity, *, owned=Tr
         writer_model=target.catalog_id,
         originating_turn_id=identity.turn_id if owned else None,
         first_included_seq=2, started_at="t2",
-    ), ProviderCheckpointRequest(
-        checkpoint_id="new-checkpoint", thread_id="held-thread", target=target,
+    ), CheckpointProviderForkRequest(
+        fork_id="new-checkpoint", thread_id="held-thread", target=target,
         instruction="checkpoint", reasoning_effort=None, working_dir=str(tmp_path),
     ))
     return release, waiting, await_original
@@ -238,7 +245,8 @@ async def test_cc_held_turn_installs_checkpoint_and_resumes_or_stops_independent
         if not task.done():
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-        await runtime.shutdown_checkpoint_tasks()
+        await fork_runtime.shutdown_forks()
+        await runtime.shutdown_checkpoint_wakes()
         for session in [old_session, *launches]:
             await session.terminate()
         _LIVE.reset()
@@ -380,7 +388,8 @@ async def test_codex_held_turn_installs_checkpoint_and_resumes_or_stops_independ
         if not task.done():
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-        await runtime.shutdown_checkpoint_tasks()
+        await fork_runtime.shutdown_forks()
+        await runtime.shutdown_checkpoint_wakes()
         for session in {old_session, _APP_SESSIONS.get("held-thread")} - {None}:
             session.set_callbacks(on_event=None, on_exit=None)
             await session.terminate()

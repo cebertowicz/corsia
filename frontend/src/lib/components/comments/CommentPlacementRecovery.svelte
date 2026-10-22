@@ -9,12 +9,15 @@
 		reloadError?: boolean;
 		unavailable?: boolean;
 		connectionDescriptionId?: string;
-		orphanedCount: number;
+		/** Every unresolved comment that couldn't be placed: the number the header pill reports, so the footer never disagrees with it. */
+		unplacedCount: number;
+		/** The unplaced comments Place again could place; detached ones (their text is gone) are not counted. Offers the action. */
+		replaceableCount: number;
 	};
-	let { orphanedCount, onReload, reloading = false, reloadError = false, unavailable = false, connectionDescriptionId, onFocusHome }: PlacementRecoveryProps & {
+	let { unplacedCount, replaceableCount, onReload, reloading = false, reloadError = false, unavailable = false, connectionDescriptionId, onFocusHome }: PlacementRecoveryProps & {
 		onFocusHome: () => HTMLElement | undefined;
 	} = $props();
-	const unplacedPhrase = $derived(`${orphanedCount} comment${orphanedCount === 1 ? '' : 's'} couldn't be placed`);
+	const unplacedPhrase = $derived(`${unplacedCount} comment${unplacedCount === 1 ? '' : 's'} couldn't be placed`);
 	// A refusal is stored with the comments, so it remains visible when the drawer is closed and reopened.
 	const recoveryText = $derived(reloadError ? "Couldn't reload comment placements" : announcement || unplacedPhrase);
 	let requested = $state(false);
@@ -24,7 +27,7 @@
 	let announcedCount = $state<number | null>(null);
 	let placementFooter = $state<HTMLElement>();
 	$effect(() => {
-		if (announcement && announcedCount !== orphanedCount) {
+		if (announcement && announcedCount !== unplacedCount) {
 			announcement = '';
 			announcedCount = null;
 		}
@@ -36,11 +39,11 @@
 		if (!sawBusy) return;
 		requested = false;
 		sawBusy = false;
-		announcement = reloadError ? "Couldn't reload comment placements" : orphanedCount ? `${orphanedCount} comment${orphanedCount === 1 ? '' : 's'} still couldn't be placed` : 'Comments placed';
+		announcement = reloadError ? "Couldn't reload comment placements" : unplacedCount ? `${unplacedCount} comment${unplacedCount === 1 ? '' : 's'} still couldn't be placed` : 'Comments placed';
 		announcementVersion += 1;
-		announcedCount = orphanedCount;
+		announcedCount = unplacedCount;
 		// The loading button may be replaced while its request settles; restore focus to the surviving recovery action.
-		if (orphanedCount) void tick().then(() => placementFooter?.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')?.focus());
+		if (replaceableCount) void tick().then(() => placementFooter?.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')?.focus());
 		else void tick().then(() => onFocusHome()?.focus());
 	});
 
@@ -50,10 +53,10 @@
 	}
 </script>
 
-{#if (orphanedCount || announcement) && onReload}
+{#if (replaceableCount || announcement) && onReload}
 	<div class="drawer-placement" data-drawer-placement bind:this={placementFooter} use:footerFocusHome={onFocusHome}>
 		{#key `${announcementVersion}:${reloadError}`}<p role="status">{recoveryText}</p>{/key}
-		{#if orphanedCount}<Button size="sm" variant="secondary" ariaLabel="Reload comment placements" ariaDisabled={unavailable || reloading} describedby={unavailable ? connectionDescriptionId : undefined} onclick={reload} loading={reloading}>Place again</Button>{/if}
+		{#if replaceableCount}<Button size="sm" variant="secondary" ariaLabel="Reload comment placements" ariaDisabled={unavailable || reloading} describedby={unavailable ? connectionDescriptionId : undefined} onclick={reload} loading={reloading}>Place again</Button>{/if}
 	</div>
 {/if}
 

@@ -1,4 +1,4 @@
-"""The person's own skills in their other AI tools: offers and installs.
+"""The person's own skills in their other tools: offers and installs.
 
 Only the person's own skill folders are scanned (plugin, bundled and ``.system``
 skills never are). Each skill is bounded by lstat before anything is hashed, and
@@ -15,7 +15,6 @@ import datetime
 import hashlib
 import os
 import re
-import shutil
 import stat
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,8 +29,6 @@ MAX_BYTES = 512 * 1024
 DESCRIPTION_CHARS = 500
 HERMES_DEPTH = 3
 SCRIPT_SUFFIXES = frozenset({".py", ".sh", ".bash", ".zsh", ".js", ".mjs", ".cjs", ".ts", ".rb", ".pl", ".ps1"})
-#: Frontmatter an installed copy keeps; every other key (``allowed-tools``, ``hooks``) is dropped.
-KEPT_KEYS = ("license", "compatibility")
 
 NEW = "new"
 ALREADY_HERE = "already_here"
@@ -208,9 +205,17 @@ def _parse(candidate: Candidate) -> str:
         if "\x00" in texts[name]:
             return _unreadable(candidate, NOT_TEXT)
         candidate.files[name] = data
+    from core.skill_sidecar import installed_digest_part
+
     digest = hashlib.sha256()
     for name in sorted(candidate.files):
-        digest.update(name.encode("utf-8") + b"\0" + hashlib.sha256(candidate.files[name]).digest())
+        try:
+            part = installed_digest_part(name, candidate.files[name])
+        except (UnicodeDecodeError, ValueError):
+            # A malformed sidecar is still part of the offered bundle identity.
+            part = candidate.files[name]
+        if part is not None:
+            digest.update(name.encode("utf-8") + b"\0" + hashlib.sha256(part).digest())
     candidate.content_sha = digest.hexdigest()
     # A key is reported before any layout problem, so fixing the layout never comes first.
     if any(contains_credential(text) for text in texts.values()):
@@ -308,72 +313,26 @@ def skill_offers(roots: Roots, tools: list[str], workspace: Path) -> list[dict]:
     return [offer(row) for row in scan(roots, tools, workspace)]
 
 
-def _nested(value: object) -> bool:
-    return isinstance(value, dict) or (isinstance(value, list) and any(isinstance(item, dict) for item in value))
+def _install(row: Candidate, workspace: Path, now: datetime.datetime, *, author_thread_id: str,
+             consent_decision_id: str | None) -> dict[str, str]:
+    """Install one offered skill through the shared guidance-history writer."""
+    from infra.skill_install import install_skill_bundle, origin_metadata
 
-
-def installed_text(row: Candidate, now: datetime.datetime) -> tuple[str, str]:
-    """The ``SKILL.md`` and ``corsia.yaml`` an install writes for ``row``."""
-    import yaml
-
-    from core.skill_sidecar import FORMAT_KEY, POINTER_KEY, SIDECAR_FILE, SIDECAR_FORMAT
-    from core.skill_validation import parse_frontmatter
-
-    meta, body = parse_frontmatter(row.skill_md.decode("utf-8"))
-    source_metadata = meta.get("metadata") if isinstance(meta.get("metadata"), dict) else {}
-    # Nested blocks are another tool's own settings (``openclaw: {install, requires}``):
-    # dropped like ``allowed-tools``, so none can grant anything if a projection loads it.
-    metadata = {key: value for key, value in source_metadata.items()
-                if key not in (POINTER_KEY, FORMAT_KEY) and not _nested(value)}
-    metadata.update({POINTER_KEY: SIDECAR_FILE, FORMAT_KEY: SIDECAR_FORMAT})
-    front = {"name": row.name, "description": row.description,
-             **{key: meta[key] for key in KEPT_KEYS if key in meta}, "metadata": metadata}
-    skill_md = "---\n" + yaml.safe_dump(front, sort_keys=False, allow_unicode=True) + "---\n" + body
-    origin = {"source": row.source, "sha256": hashlib.sha256(row.skill_md).hexdigest(),
-              "adopted_at": now.isoformat(timespec="seconds")}
-    return skill_md, yaml.safe_dump({"origin": origin}, sort_keys=False)
-
-
-def _write(target: Path, name: str, data: bytes) -> None:
-    path = target / name
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-    with os.fdopen(descriptor, "wb") as handle:
-        handle.write(data)
-    os.chmod(path, 0o644)
-
-
-def _install(row: Candidate, skills: Path, now: datetime.datetime) -> str:
-    from core.skill_sidecar import SIDECAR_FILE
-    from core.skill_validation import validate_skill_bundle, validate_skill_file
-
-    skill_md, sidecar = installed_text(row, now)
-    if not validate_skill_bundle(skill_md, {SIDECAR_FILE: sidecar}).ok:
-        return "failed"
-    skills.mkdir(parents=True, exist_ok=True)
-    target = skills / row.name
-    if Path(os.path.realpath(target.parent)) != Path(os.path.realpath(skills)):
-        return "failed"
-    try:
-        target.mkdir()
-    except FileExistsError:
-        return ALREADY_HERE
-    try:
-        _write(target, "SKILL.md", skill_md.encode("utf-8"))
-        _write(target, SIDECAR_FILE, sidecar.encode("utf-8"))
-        for name, data in sorted(row.files.items()):
-            if name not in ("SKILL.md", SIDECAR_FILE):
-                _write(target, name, data)
-        if validate_skill_file(target / "SKILL.md").ok:
-            return "installed"
-    except OSError:
-        pass
-    shutil.rmtree(target, ignore_errors=True)
-    return "failed"
+    return install_skill_bundle(
+        workspace,
+        row.name,
+        row.skill_md,
+        {name: data for name, data in row.files.items() if name != "SKILL.md"},
+        row.description,
+        origin_metadata(row.source, row.skill_md, now.isoformat(timespec="seconds")),
+        author_thread_id=author_thread_id,
+        consent_decision_id=consent_decision_id,
+    )
 
 
 def install_skills(roots: Roots, tools: list[str], workspace: Path, item_ids: list[str], *,
-                   now: datetime.datetime | None = None) -> list[dict]:
+                   now: datetime.datetime | None = None, author_thread_id: str = "",
+                   consent_decision_id: str | None = None) -> list[dict]:
     """Install each picked item that is still ``new`` with the content that was shown."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     scanned = scan(roots, tools, workspace)
@@ -381,7 +340,6 @@ def install_skills(roots: Roots, tools: list[str], workspace: Path, item_ids: li
     # Only rows whose bytes passed the key and parse checks are compared with an offered hash;
     # comparing any other row's would confirm a guess at bytes the agent was never shown.
     held = {row.source: row for row in scanned if row.state in (ALREADY_HERE, NAME_RESERVED, NAME_CLASH)}
-    skills = _installed(workspace)[2]
     results = []
     for item_id in dict.fromkeys(item_ids):
         # An offered id is ``<source>:<hash>``; a row held back since with that content is
@@ -395,5 +353,6 @@ def install_skills(roots: Roots, tools: list[str], workspace: Path, item_ids: li
             results.append({"item_id": item_id, "name": row.name if row else "", "outcome": outcome})
             continue
         results.append({"item_id": item_id, "name": row.name, "sha256": row.content_sha,
-                        "outcome": _install(row, skills, now)})
+                        **_install(row, workspace, now, author_thread_id=author_thread_id,
+                                   consent_decision_id=consent_decision_id)})
     return results

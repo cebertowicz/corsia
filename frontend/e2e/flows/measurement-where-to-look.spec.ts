@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page, type APIRequestContext, type TestInfo } from '@playwright/test';
+import { test } from '../support/test';
+import { expect, type Locator, type Page, type APIRequestContext, type TestInfo } from '@playwright/test';
 import { loginByUrl } from '../support/corsia';
 import { agentsBody, createAgent, createProject, kpiBody, mockAveragePeriods, mockCostBody, mockPeriod, mockWindows, selectProjectScope } from '../support/measurement-fixture';
 

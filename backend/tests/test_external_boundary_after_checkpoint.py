@@ -28,7 +28,7 @@ def _prepare(monkeypatch, harness: str, *, adopted: bool = True) -> None:
     monkeypatch.setattr(
         "subagents.codex_runtime_support.resolve_working_dir", lambda *_a, **_k: "/tmp",
     )
-    monkeypatch.setattr("core.checkpoint_render.checkpoint_binary", lambda *_a, **_k: None)
+    monkeypatch.setattr("core.fork_render.fork_binary", lambda *_a, **_k: None)
     if not adopted:
         monkeypatch.setattr(slice_reads, "_register_adopted_handle", lambda *_a: None)
     _seed(LARGE, target.catalog_id, harness)
@@ -48,7 +48,7 @@ def _move_floor_to_live_input(thread_id: str) -> None:
 
 
 async def _capture(monkeypatch, harness, measured, *, seq0: bool, must_adopt=False):
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
     from core.checkpoint_resume import CheckpointWaitScope, ProviderContinuation
     from core.turn_core import TurnIdentity
     from subagents import harness_checkpoint_resume as bridge
@@ -89,7 +89,7 @@ def _inputs(boundary) -> tuple:
 
 
 def _decision(boundary):
-    from core.checkpoint_fit import evaluate_boundary
+    from core.fork_fit import evaluate_boundary
     from core.checkpoint_resume import InstalledContinuation, _payload
 
     installed = (
@@ -124,7 +124,7 @@ async def test_newer_legal_cut_keeps_inputs_and_decisions_identical(
 async def test_without_newer_cut_occupancy_counts_only_history_after_the_checkpoint(
     isolated_db, monkeypatch, harness,
 ):
-    from core.checkpoint_fit import BoundaryDecision
+    from core.fork_fit import BoundaryDecision
 
     _prepare(monkeypatch, harness)
     _move_floor_to_live_input(LARGE)

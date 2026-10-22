@@ -19,9 +19,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from api.provider_sources import recheck_sources_once
+import infra.build_info as build_info
 from cli_location import login_shell_binary, package_manager_for, path_shadowed_binary, service_binary, service_path
 from connections.vendor_accounts import VENDORS
 from infra.auth import require_user
+from infra.failure_reference import new_reference
 from infra.state.ws import schedule_models_changed
 
 router = APIRouter(prefix="/api/providers/cli", tags=["providers"])
@@ -44,7 +46,8 @@ _SECRET_VALUE = re.compile(
 )
 
 NO_INTERNET = "no internet connection"
-DOWNLOAD_UNAVAILABLE = "the download service didn't answer"
+DOWNLOAD_UNAVAILABLE = "the download service cannot answer"
+DOWNLOAD_REFUSED = "the download site refused the request"
 DOWNLOAD_UNVERIFIED = "the download didn't verify"
 TIMED_OUT = "it took too long"
 INSTALLER_STOPPED = "the installer stopped"
@@ -60,6 +63,7 @@ class InstallJob:
 
     state: str = "running"
     reason: str | None = None
+    ref: str = field(default_factory=new_reference)
     path_shadowed_by: str | None = None
     task: asyncio.Task | None = None
     # Cancel: the installer runs in its own process group so the whole tree can be stopped. `lock` orders
@@ -74,23 +78,55 @@ class InstallJob:
 _jobs: dict[str, InstallJob] = {}
 
 
+def install_cause(reason: str | None) -> str | None:
+    """The stable install failure code; UI behavior must not depend on English copy."""
+    if reason is None:
+        return None
+    if reason == NO_INTERNET:
+        return "connection"
+    if reason == DOWNLOAD_REFUSED:
+        return "site_refused"
+    if reason == DOWNLOAD_UNVERIFIED:
+        return "download_unverified"
+    return "installer_failed"
+
+
 def _status(vendor: str) -> dict[str, str | None]:
     """Return the public state shape for one vendor's installation job."""
     job = _jobs.get(vendor)
-    return ({"state": job.state, "reason": job.reason, "path_shadowed_by": job.path_shadowed_by}
-            if job else {"state": "idle", "reason": None, "path_shadowed_by": None})
+    if job is None:
+        return {"state": "idle", "reason": None, "ref": None, "path_shadowed_by": None}
+    result = {
+        "state": job.state, "reason": job.reason,
+        "ref": job.ref if job.state == "failed" else None, "path_shadowed_by": job.path_shadowed_by,
+    }
+    if job.state == "failed":
+        result["cause"] = install_cause(job.reason)
+    return result
+
+
+def _installer_request(vendor: str) -> urllib.request.Request:
+    """Build the official installer request with CORSIA's running app version."""
+    version = build_info.app_version() or "unknown"
+    return urllib.request.Request(
+        INSTALL_URLS[vendor], headers={"Accept": "text/plain", "User-Agent": f"CORSIA/{version}"}
+    )
 
 
 def _download_script(vendor: str) -> Path:
     """Download and minimally verify an official shell installer into a temp file."""
-    request = urllib.request.Request(INSTALL_URLS[vendor], headers={"Accept": "text/plain"})
+    request = _installer_request(vendor)
     try:
         with urllib.request.urlopen(request, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as response:
             script = response.read(_MAX_SCRIPT_BYTES + 1)
     except TimeoutError as exc:
         raise InstallerFailure(TIMED_OUT) from exc
     except urllib.error.HTTPError as exc:
-        raise InstallerFailure(DOWNLOAD_UNAVAILABLE) from exc
+        if exc.code in (403, 404):
+            reason = DOWNLOAD_REFUSED
+        else:
+            reason = DOWNLOAD_UNAVAILABLE
+        raise InstallerFailure(reason) from exc
     except (urllib.error.URLError, OSError) as exc:
         raise InstallerFailure(NO_INTERNET) from exc
     if len(script) > _MAX_SCRIPT_BYTES or not script.startswith(b"#!"):
@@ -206,6 +242,9 @@ async def _complete_job(vendor: str, job: InstallJob) -> None:
         job.reason = INSTALLER_STOPPED
     job.state = "cancelled" if job.cancelled else "failed" if job.reason else "done"
     job.settled.set()
+    if job.state == "failed":
+        # The reference ties a setup report's row to this line.
+        log.warning("CLI install for %s failed reference=%s cause=%s", vendor, job.ref, install_cause(job.reason))
     if job.state == "done":
         try:
             job.path_shadowed_by = await asyncio.to_thread(path_shadowed_binary, vendor)

@@ -62,14 +62,14 @@ def _projection(*turns: PortableTurn) -> PortableHistoryProjection:
 
 
 def _decision(payload) -> str:
-    from core.checkpoint_fit import evaluate_boundary
+    from core.fork_fit import evaluate_boundary
 
     result = evaluate_boundary(payload)
     return getattr(result, "value", result)
 
 
 def test_correlated_live_usage_wins_over_the_canonical_upper_bound() -> None:
-    from core.checkpoint_fit import ProviderPayload
+    from core.fork_fit import ProviderPayload
 
     payload = ProviderPayload(
         context_window=262_144,
@@ -85,7 +85,7 @@ def test_correlated_live_usage_wins_over_the_canonical_upper_bound() -> None:
 
 
 def test_missing_usage_uses_the_canonical_rendered_upper_bound() -> None:
-    from core.checkpoint_fit import ProviderPayload
+    from core.fork_fit import ProviderPayload
 
     payload = ProviderPayload(
         context_window=262_144,
@@ -101,7 +101,7 @@ def test_missing_usage_uses_the_canonical_rendered_upper_bound() -> None:
 
 
 def test_canonical_rendered_count_is_a_required_programmer_contract() -> None:
-    from core.checkpoint_fit import ProviderPayload
+    from core.fork_fit import ProviderPayload
 
     with pytest.raises(TypeError):
         ProviderPayload(
@@ -115,7 +115,7 @@ def test_canonical_rendered_count_is_a_required_programmer_contract() -> None:
 
 
 def test_full_cold_input_uses_the_exact_ordinary_projection() -> None:
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
 
     source = _projection(
         _turn(1, (_message(1, "user", "first ask"), _message(2, "assistant", "first answer"))),
@@ -133,7 +133,7 @@ def test_full_cold_input_uses_the_exact_ordinary_projection() -> None:
 
 
 def test_large_old_tool_arguments_and_results_project_once_without_omission() -> None:
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
 
     arguments = "ARG-HEAD-" + ("a" * 40_000) + "-ARG-TAIL"
     result = "RESULT-HEAD-" + ("r" * 40_000) + "-RESULT-TAIL"
@@ -369,7 +369,7 @@ def test_codex_projects_arguments_only_for_checkpoint_tail(monkeypatch, mode) ->
 
 
 def test_trimming_drops_only_whole_oldest_steps() -> None:
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
 
     source = _projection(
         _turn(1, (_message(1, "user", "OLD-A" * 2_000), _message(2, "assistant", "A-END"))),
@@ -388,7 +388,7 @@ def test_trimming_drops_only_whole_oldest_steps() -> None:
 
 
 def test_mid_turn_resume_keeps_the_initiating_input_and_newest_exchange() -> None:
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
 
     first_call = {
         "id": "call-old",
@@ -439,7 +439,7 @@ def test_mid_turn_resume_keeps_the_initiating_input_and_newest_exchange() -> Non
 
 
 def test_existing_mid_turn_projection_gets_the_same_portable_resume_envelope() -> None:
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
 
     whole = _turn(
         1,
@@ -469,7 +469,7 @@ def test_existing_mid_turn_projection_gets_the_same_portable_resume_envelope() -
 
 
 def test_installed_checkpoint_and_continuity_blocks_are_protected() -> None:
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
 
     source = _projection(
         _turn(1, (_message(1, "user", "OLD" * 5_000), _message(2, "assistant", "old"))),
@@ -494,7 +494,7 @@ def test_installed_checkpoint_and_continuity_blocks_are_protected() -> None:
 
 def test_fit_does_not_skip_a_turn_start_before_mid_turn_resume_overhead() -> None:
     """A larger mid-Turn suffix cannot hide an older fitting Turn boundary."""
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
 
     source = _projection(
         _turn(
@@ -523,7 +523,7 @@ def test_fit_does_not_skip_a_turn_start_before_mid_turn_resume_overhead() -> Non
 
 def test_fit_does_not_skip_an_older_interior_cut_for_boundary_label_size() -> None:
     """Durable boundary identity must not distort cold-fold fit selection."""
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
 
     source = _projection(
         _turn(
@@ -549,7 +549,7 @@ def test_large_cold_fit_uses_bounded_candidate_counts_and_keeps_oldest_fit(
     fixed_envelope_tokens,
 ) -> None:
     """A 10K-message fold selects five newest exchanges in bounded work."""
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
 
     turns = tuple(
         _turn(
@@ -587,7 +587,7 @@ def test_large_cold_fit_uses_bounded_candidate_counts_and_keeps_oldest_fit(
 
 
 def test_impossible_protected_minimum_fails_visibly() -> None:
-    from core.checkpoint_fit import ColdFoldInputTooLarge, render_cold_fold_input
+    from core.fork_fit import ColdFoldInputTooLarge, render_cold_fold_input
 
     source = _projection(
         _turn(
@@ -604,7 +604,7 @@ def test_impossible_protected_minimum_fails_visibly() -> None:
 
 
 def test_newest_tool_unit_retries_with_a_reduced_projection_budget() -> None:
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
 
     call = {
         "id": "call-newest",
@@ -637,7 +637,7 @@ def test_newest_tool_unit_retries_with_a_reduced_projection_budget() -> None:
 
 @pytest.mark.parametrize("shape", ("px", "governance"))
 def test_cold_fold_fits_large_tool_runs_with_reference_projection(shape: str) -> None:
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
 
     counts = (297,) if shape == "px" else (11,) * 4 + (10,) * 14 + (30,)
     body_size = 1_780 if shape == "px" else 3_835
@@ -691,7 +691,7 @@ def test_cold_fold_fits_large_tool_runs_with_reference_projection(shape: str) ->
 
 
 def test_cold_fold_stubs_old_results_when_even_references_exceed_writer_room() -> None:
-    from core.checkpoint_fit import render_cold_fold_input
+    from core.fork_fit import render_cold_fold_input
 
     calls = tuple({
         "id": f"call-{index}", "type": "function",
@@ -718,7 +718,7 @@ def test_cold_fold_stubs_old_results_when_even_references_exceed_writer_room() -
 
 
 def test_protected_blocks_alone_over_budget_still_fail_visibly() -> None:
-    from core.checkpoint_fit import ColdFoldInputTooLarge, render_cold_fold_input
+    from core.fork_fit import ColdFoldInputTooLarge, render_cold_fold_input
 
     source = _projection(_turn(1, (_message(1, "user", "small"),)))
 
@@ -731,24 +731,24 @@ def test_protected_blocks_alone_over_budget_still_fail_visibly() -> None:
 
 
 def test_already_fitting_input_remains_the_exact_first_candidate() -> None:
-    from core import checkpoint_fit
+    from core import fork_fit
     from history.folds import checkpoint_fold_units
 
     source = _projection(
         _turn(1, (_message(1, "user", "first ask"), _message(2, "assistant", "first answer")))
     )
     units = checkpoint_fold_units(source)
-    expected = checkpoint_fit._candidate(
+    expected = fork_fit._candidate(
         source,
         units,
         skipped=0,
         project_tools=False,
-        newest_tool_budget_tokens=checkpoint_fit.HARNESS_TOOL_RESULT_BUDGET_TOKENS,
+        newest_tool_budget_tokens=fork_fit.HARNESS_TOOL_RESULT_BUDGET_TOKENS,
         protected_blocks=(),
-        count_tokens=checkpoint_fit._estimate_messages_tokens,
+        count_tokens=fork_fit._estimate_messages_tokens,
     )
 
-    rendered = checkpoint_fit.render_cold_fold_input(source, max_input_tokens=10_000)
+    rendered = fork_fit.render_cold_fold_input(source, max_input_tokens=10_000)
 
     assert expected is not None
     assert rendered.messages == expected.messages
@@ -759,7 +759,7 @@ def test_complete_final_turn_beats_a_harder_truncated_fallback() -> None:
     """Cutting into the final turn re-adds its initiating input untruncated, so
     candidate size does not fall monotonically with the cut point. The complete
     final turn must still be evaluated at the first reduced newest-unit budget."""
-    from core import checkpoint_fit
+    from core import fork_fit
     from core.checkpoint_fold_blocks import COLD_FOLD_OLD_TOOL_BUDGET_TOKENS
     from history.folds import checkpoint_fold_units
 
@@ -788,18 +788,18 @@ def test_complete_final_turn_beats_a_harder_truncated_fallback() -> None:
         )
     )
     units = checkpoint_fold_units(source)
-    complete = checkpoint_fit._candidate(
+    complete = fork_fit._candidate(
         source,
         units,
         skipped=0,
         project_tools=True,
         newest_tool_budget_tokens=COLD_FOLD_OLD_TOOL_BUDGET_TOKENS,
         protected_blocks=(),
-        count_tokens=checkpoint_fit._estimate_messages_tokens,
+        count_tokens=fork_fit._estimate_messages_tokens,
     )
     assert complete is not None and complete.input_tokens <= 2_600
 
-    rendered = checkpoint_fit.render_cold_fold_input(source, max_input_tokens=2_600)
+    rendered = fork_fit.render_cold_fold_input(source, max_input_tokens=2_600)
 
     assert rendered.first_included_seq == 1
     assert rendered.messages == complete.messages

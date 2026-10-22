@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import { createClassComponent } from 'svelte/legacy';
 import CommentList from './CommentList.svelte';
@@ -42,4 +42,33 @@ it('names a comment on a diagram or table by its label in the jump button, not b
 	flushSync();
 	const jumps = [...host.querySelectorAll('[data-comment-jump]')].map((button) => button.getAttribute('aria-label'));
 	expect(jumps).toEqual(['Go to text: The whole diagram', 'Go to text: plain words']);
+});
+
+it("goes to a text comment's text when its card is pressed, but not from a control, the reply field, a body link, a selection or an unplaced card", () => {
+	host = document.createElement('div'); document.body.appendChild(host);
+	const comment = (id: string, extra: Record<string, unknown> = {}) => ({ id, anchor: id, author: 'you', text: `body of ${id}`, at: 'now', resolved: false, replies: [], ...extra });
+	const onFocus = vi.fn();
+	component = createClassComponent({ target: host, component: CommentList, props: { documentOrder: true, onFocus, comments: [comment('a', { text: 'See [the spec](#spec)' }), comment('o', { orphaned: true }), comment('u', { drawn: false, placement: 'not_placed' }), comment('r', { regionNumber: 1 })] } });
+	flushSync();
+	const card = (id: string) => host.querySelector<HTMLElement>(`[data-comment-id="${id}"]`)!;
+	card('a').querySelector<HTMLElement>('.ct')!.click();
+	expect(onFocus).toHaveBeenCalledTimes(1);
+	expect(onFocus).toHaveBeenLastCalledWith('a');
+	card('o').querySelector<HTMLElement>('.ct')!.click();
+	expect(onFocus).toHaveBeenCalledTimes(2);
+	expect(onFocus).toHaveBeenLastCalledWith('o');
+	card('r').querySelector<HTMLElement>('.ct')!.click();
+	expect(onFocus).toHaveBeenCalledTimes(3);
+	expect(onFocus).toHaveBeenLastCalledWith('r');
+	onFocus.mockClear();
+	card('a').querySelector<HTMLButtonElement>('.ct-act.resolve')!.click();
+	card('a').querySelector<HTMLTextAreaElement>('.ct-input')!.click();
+	card('a').querySelector<HTMLAnchorElement>('.ct a[href="#spec"]')!.click();
+	card('u').querySelector<HTMLElement>('.ct')!.click();
+	expect(onFocus).not.toHaveBeenCalled();
+	const selection = vi.spyOn(window, 'getSelection').mockReturnValue({ isCollapsed: false } as Selection);
+	card('a').querySelector<HTMLElement>('.ct')!.click();
+	card('r').querySelector<HTMLElement>('.ct')!.click();
+	expect(onFocus).not.toHaveBeenCalled();
+	selection.mockRestore();
 });

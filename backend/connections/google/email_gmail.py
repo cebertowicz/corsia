@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 from connections.google import client as google_client
 from connections.google.client import GoogleError, GoogleRequestFailed
-from connections.google.email_document import DraftRefused, reply_target_label, signature_text
+from connections.mail.email_document import DraftRefused, reply_target_label, signature_text
 
 GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
 SEND_AS_URL = f"{GMAIL}/settings/sendAs"
@@ -21,14 +21,15 @@ def message_url(message_id: str) -> str:
     return f"{GMAIL}/messages/{quote(message_id, safe='')}"
 
 
-async def reply_target(message_id: str) -> tuple[dict, str]:
-    """Threading facts and the line the person sees, from the message's headers only.
+async def reply_target(account_id: str, message_id: str) -> tuple[dict, str]:
+    """Threading facts and the line the person sees, from one account's message headers only.
 
-    No body is requested. The line is display; the dict is what the send threads with.
+    No body is requested. The line is display; the dict is what the send threads with,
+    and its ``thread_id`` stays Gmail's own id, local to this account's mailbox.
     """
     try:
         found = await google_client.request_json(
-            "GET", message_url(message_id),
+            "GET", message_url(message_id), account_id=account_id,
             params={
                 "format": "metadata",
                 "metadataHeaders": ["Message-ID", "References", "From", "Subject"],
@@ -55,7 +56,7 @@ async def reply_target(message_id: str) -> tuple[dict, str]:
     return target, reply_target_label(headers.get("from"), headers.get("subject"))
 
 
-async def kept_reply_label(existing: dict | None) -> str | None:
+async def kept_reply_label(account_id: str, existing: dict | None) -> str | None:
     """The line for an update that names no new reply target but still threads under the old.
 
     A message that can no longer be read must not block the person's edit.
@@ -67,13 +68,13 @@ async def kept_reply_label(existing: dict | None) -> str | None:
     if not kept:
         return None
     try:
-        return (await reply_target(str(kept)))[1]
+        return (await reply_target(account_id, str(kept)))[1]
     except (DraftRefused, GoogleError):
         return reply_target_label(None, None)
 
 
-async def fetch_signature() -> str:
-    found = await google_client.get_json(SEND_AS_URL)
+async def fetch_signature(account_id: str) -> str:
+    found = await google_client.get_json(account_id, SEND_AS_URL)
     aliases = found.get("sendAs") if isinstance(found, dict) else None
     if not isinstance(aliases, list):
         return ""

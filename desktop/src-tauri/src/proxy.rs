@@ -4,7 +4,7 @@ use std::{
     future::Future,
     net::SocketAddr,
     pin::Pin,
-    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -17,12 +17,17 @@ use hyper::{
     Request, Response, StatusCode, Uri,
 };
 use hyper_util::rt::TokioIo;
-use tokio::{net::{TcpListener, TcpStream}, sync::oneshot};
-use tokio_rustls::TlsConnector;
+use tokio::{net::TcpListener, sync::oneshot};
 
-use crate::{pairing::RemoteHost, remote_config::Locator, trust::{self, Trust}};
+use crate::{
+    remote_config::{Locator, RemoteRecord},
+    routes::{self, Dialed, LocalDial, RouteConfig, RouteConfigError, Routes, Upstream},
+};
 
-type ProxyBody = BoxBody<Bytes, Box<dyn Error + Send + Sync>>;
+pub(crate) type ProxyBody = BoxBody<Bytes, Box<dyn Error + Send + Sync>>;
+/// Marks the synthetic response emitted when neither saved route reaches the paired host.
+/// Upstream responses never carry this header, so callers can distinguish them from a real server reply.
+pub(crate) const ROUTE_UNREACHABLE_HEADER: &str = "x-corsia-proxy-route-unreachable";
 type ResolveFuture = Pin<Box<dyn Future<Output = Result<(String, u16), ProxyError>> + Send>>;
 type Resolver = Arc<dyn Fn(Locator) -> ResolveFuture + Send + Sync>;
 type SharedResolve = Shared<Pin<Box<dyn Future<Output = Result<Target, ProxyError>> + Send>>>;
@@ -38,9 +43,15 @@ pub enum ProxyError {
 pub struct ProxyHandle {
     pub port: u16,
     shutdown: Option<oneshot::Sender<()>>,
+    routes: Arc<Routes>,
 }
 
 impl ProxyHandle {
+    /// Whether a route refused the paired identity, which ended forwarding.
+    pub fn key_changed(&self) -> bool {
+        self.routes.key_changed()
+    }
+
     pub fn stop(mut self) {
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
@@ -56,41 +67,35 @@ impl Drop for ProxyHandle {
     }
 }
 
-pub async fn start(
-    locator: Locator,
-    trust: Trust,
+/// The proxy for a saved record: its local route, and its outside route when one is saved.
+pub async fn start_record(
+    record: &RemoteRecord,
     preferred_port: u16,
     on_key_changed: impl Fn() + Send + Sync + 'static,
 ) -> Result<ProxyHandle, ProxyError> {
-    start_with_resolver(
-        locator,
-        trust,
-        preferred_port,
-        on_key_changed,
-        Arc::new(|locator| Box::pin(default_resolve(locator))),
-    )
-    .await
+    let config = RouteConfig::from_record(record, on_key_changed).map_err(|error| match error {
+        RouteConfigError::SavedTrust => ProxyError::Unreachable(crate::classify::ConnectFailure::KeyChanged),
+        RouteConfigError::SavedIdentity(error) => ProxyError::Transport(error),
+    })?;
+    start_routes(record.locator.clone(), config, preferred_port, Arc::new(|locator| Box::pin(default_resolve(locator)))).await
 }
 
-pub async fn start_with_resolver(
+pub(crate) async fn start_routes(
     locator: Locator,
-    trust: Trust,
+    config: RouteConfig,
     preferred_port: u16,
-    on_key_changed: impl Fn() + Send + Sync + 'static,
     resolver: Resolver,
 ) -> Result<ProxyHandle, ProxyError> {
+    let local = Arc::new(LocalTarget { locator, resolver, resolved: Mutex::new(ResolveCache::default()) });
+    let dial: LocalDial = Arc::new(move || {
+        let local = Arc::clone(&local);
+        Box::pin(async move { connect(&local).await })
+    });
+    let routes = Arc::new(Routes::new(config, dial).map_err(ProxyError::Transport)?);
     let listener = bind_loopback(preferred_port).await?;
     let port = listener.local_addr().map_err(|error| ProxyError::Bind(error.to_string()))?.port();
     let (shutdown_send, mut shutdown_receive) = oneshot::channel();
-    let state = Arc::new(ProxyState {
-        locator,
-        trust,
-        local_port: port,
-        on_key_changed: Arc::new(on_key_changed),
-        key_changed: AtomicBool::new(false),
-        resolver,
-        resolved: Mutex::new(ResolveCache::default()),
-    });
+    let state = Arc::new(ProxyState { local_port: port, routes: Arc::clone(&routes) });
     tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -111,16 +116,17 @@ pub async fn start_with_resolver(
             }
         }
     });
-    Ok(ProxyHandle { port, shutdown: Some(shutdown_send) })
+    Ok(ProxyHandle { port, shutdown: Some(shutdown_send), routes })
 }
 
 struct ProxyState {
-    locator: Locator,
-    trust: Trust,
     local_port: u16,
-    on_key_changed: Arc<dyn Fn() + Send + Sync>,
-    /// Set when the host presents a key other than the pinned one; from then on nothing is forwarded.
-    key_changed: AtomicBool,
+    routes: Arc<Routes>,
+}
+
+/// The saved locator and what it last resolved to: the local route.
+struct LocalTarget {
+    locator: Locator,
     resolver: Resolver,
     resolved: Mutex<ResolveCache>,
 }
@@ -144,7 +150,7 @@ struct ResolveCache {
 /// The cached target. With `stale` set, the caller found that target
 /// unreachable: it is dropped and resolved again, unless another request has
 /// already replaced it. Concurrent callers share one resolve.
-async fn resolve_target(state: &ProxyState, stale: Option<&Target>) -> Result<Target, ProxyError> {
+async fn resolve_target(state: &LocalTarget, stale: Option<&Target>) -> Result<Target, ProxyError> {
     let (id, flight) = {
         let mut cache = state.resolved.lock().expect("resolve cache mutex is not poisoned");
         if let Some(current) = &cache.current {
@@ -188,29 +194,18 @@ fn describe(error: ProxyError) -> String {
     }
 }
 
-async fn dial(target: &Target) -> Result<(RemoteHost, TcpStream), String> {
-    let remote = RemoteHost::parse(&target.host)?;
-    let stream = match remote.socket_addr(target.port) {
-        Some(address) => TcpStream::connect(address).await,
-        None => TcpStream::connect((target.host.as_str(), target.port)).await,
-    }
-    .map_err(|error| error.to_string())?;
-    Ok((remote, stream))
-}
-
 /// Open a connection to the remote host. A failed connection drops the cached
 /// address and resolves once more: a DHCP change moves a saved DNS-SD host.
-async fn connect(state: &ProxyState) -> Result<(Target, RemoteHost, TcpStream), String> {
+async fn connect(state: &LocalTarget) -> Result<Dialed, String> {
     let target = resolve_target(state, None).await.map_err(describe)?;
-    match dial(&target).await {
-        Ok((remote, stream)) => Ok((target, remote, stream)),
+    match routes::dial(&target.host, target.port).await {
+        Ok(dialed) => Ok(dialed),
         Err(first) => {
             let fresh = resolve_target(state, Some(&target)).await.map_err(describe)?;
             if fresh == target {
                 return Err(first);
             }
-            let (remote, stream) = dial(&fresh).await?;
-            Ok((fresh, remote, stream))
+            routes::dial(&fresh.host, fresh.port).await
         }
     }
 }
@@ -231,7 +226,7 @@ async fn forward(request: Request<Incoming>, state: Arc<ProxyState>) -> Result<R
     }
     match forward_trusted(request, state).await {
         Ok(response) => Ok(response),
-        Err(error) => Ok(failure(StatusCode::BAD_GATEWAY, &error)),
+        Err(error) => Ok(route_unreachable(&error)),
     }
 }
 
@@ -249,35 +244,17 @@ fn is_upgrade_request<B>(request: &Request<B>) -> bool {
             .is_some_and(|value| value.split(',').any(|token| token.trim().eq_ignore_ascii_case("upgrade")))
 }
 
-const KEY_CHANGED_MESSAGE: &str = "the host's key changed, so nothing is forwarded to it";
-
+/// Forward one request over a connection `Routes` has proven reaches the paired host.
 async fn forward_trusted(
     mut request: Request<Incoming>,
     state: Arc<ProxyState>,
 ) -> Result<Response<ProxyBody>, String> {
-    if state.key_changed.load(Ordering::SeqCst) {
-        return Err(KEY_CHANGED_MESSAGE.to_owned());
-    }
-    let (target, remote, stream) = connect(&state).await?;
-    let config = trust::client_config(&state.trust).map_err(|error| error.to_string())?;
-    let name = remote.server_name()?;
-    let tls = TlsConnector::from(Arc::new(config)).connect(name, stream).await.map_err(|error| {
-        if matches!(state.trust, Trust::Pinned { .. }) && trust::is_pin_mismatch(&error) {
-            // Fail closed: the first mismatch ends forwarding, and the owner hears of it once.
-            if !state.key_changed.swap(true, Ordering::SeqCst) {
-                (state.on_key_changed)();
-            }
-        }
-        error.to_string()
-    })?;
-    let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(tls))
-        .await
-        .map_err(|error| error.to_string())?;
-    tokio::spawn(async move { let _ = connection.with_upgrades().await; });
-
+    let Upstream { mut sender, authority, .. } = state.routes.connect().await.map_err(routes::RouteError::into_message)?;
     let client_upgrade = is_upgrade_request(&request).then(|| hyper::upgrade::on(&mut request));
-    rewrite_request(&mut request, &remote.authority(target.port))?;
+    rewrite_request(&mut request, &authority)?;
+    let request = request.map(|body| body.map_err(|error| Box::new(error) as Box<dyn Error + Send + Sync>).boxed());
     let mut response = sender.send_request(request).await.map_err(|error| error.to_string())?;
+    response.headers_mut().remove(ROUTE_UNREACHABLE_HEADER);
     if response.status() == StatusCode::SWITCHING_PROTOCOLS {
         if let Some(client_upgrade) = client_upgrade {
             let upstream_upgrade = hyper::upgrade::on(&mut response);
@@ -332,6 +309,16 @@ fn failure(status: StatusCode, message: &str) -> Response<ProxyBody> {
         .expect("static response is valid")
 }
 
+fn route_unreachable(message: &str) -> Response<ProxyBody> {
+    Response::builder()
+        .status(StatusCode::BAD_GATEWAY)
+        .header(ROUTE_UNREACHABLE_HEADER, "1")
+        .body(Full::new(Bytes::copy_from_slice(message.as_bytes()))
+            .map_err(|never| match never {})
+            .boxed())
+        .expect("static response is valid")
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -342,8 +329,9 @@ mod tests {
     };
 
     use super::*;
+    use crate::{remote_host::RemoteHost, routes::KEY_CHANGED_MESSAGE, trust::Trust};
     use hyper::{body::Frame, header::{CONNECTION, UPGRADE}, upgrade};
-    use tokio::{io::{AsyncReadExt, AsyncWriteExt}, task::JoinHandle};
+    use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, task::JoinHandle};
 
     fn test_body(body: impl Into<Bytes>) -> ProxyBody {
         Full::new(body.into()).map_err(|never| match never {}).boxed()
@@ -375,11 +363,10 @@ mod tests {
     }
 
     async fn proxy_for(port: u16, pin: [u8; 32], on_key_changed: impl Fn() + Send + Sync + 'static) -> ProxyHandle {
-        start_with_resolver(
+        start_routes(
             Locator::Address { host: "127.0.0.1".into(), port },
-            Trust::Pinned { spki_sha256: pin },
+            RouteConfig::single(Trust::Pinned { spki_sha256: pin }, on_key_changed),
             0,
-            on_key_changed,
             Arc::new(move |_| Box::pin(async move { Ok(("127.0.0.1".into(), port)) })),
         )
         .await
@@ -619,11 +606,10 @@ mod tests {
     }
 
     async fn proxy_with(resolver: Resolver, pin: [u8; 32]) -> ProxyHandle {
-        start_with_resolver(
+        start_routes(
             Locator::DnsSd { instance: "Studio".into() },
-            Trust::Pinned { spki_sha256: pin },
+            RouteConfig::single(Trust::Pinned { spki_sha256: pin }, || {}),
             0,
-            || {},
             resolver,
         )
         .await

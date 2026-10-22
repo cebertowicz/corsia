@@ -23,7 +23,7 @@ const data = (overrides: Partial<CostData> = {}): CostData => ({
 	period: { grain: 'weeks', timezone: 'America/Los_Angeles', current: '2026-10-05', range: { from: '2026-07-13', to: '2026-10-04' }, latest: { from: '2026-09-28', to: '2026-10-04' }, previous: { from: '2026-09-21', to: '2026-09-27' } },
 	averagePeriods: 4, series: [first, second], latest: pooled(second), previous: pooled(first),
 	coverage: { priced_records: 160, usage_records: 200 }, not_api_priced_records: 7,
-	excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 40 }],
+	excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 40, models: [] }],
 	actual: { subscription_records: 12, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 4.2, complete: true, workspace_subscription: workspace() }, ...overrides,
 });
 const state = (overrides: Partial<CostState> = {}): CostState => ({ loading: false, error: null, scopeKey: 'project:none', grain: 'days', data: data(), ...overrides });
@@ -41,6 +41,20 @@ describe('MeasurementCost', () => {
 		expect(content).toContain('160 of 200 usage records in Sep 28 to Oct 4 are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.');
 		expect(content).not.toContain('Not priced:');
 		expect(content).not.toContain('Not API-priced:');
+	});
+	it('names up to three models in API order in one sentence per unpriced reason', () => {
+		const markup = render({ data: data({ excluded: [{
+			kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 18,
+			models: [
+				{ label: 'Opus 5.5', records: 12 },
+				{ label: 'GPT-5.6 Terra', records: 3 },
+				{ label: 'Sonnet 5.5', records: 2 },
+				{ label: 'External model', records: 1 },
+			],
+		}] }) });
+		const content = text(markup);
+		expect(content).toContain('Usage records whose token counting format is not proven: Opus 5.5 (12), GPT-5.6 Terra (3), Sonnet 5.5 (2) and 1 more.');
+		expect(content).not.toContain('External model (1)');
 	});
 	const showActual = (actual: Partial<CostData['actual']> & { workspace_subscription?: WorkspaceSubscriptionContext } = {}) => {
 		const markup = render({ data: data({ actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: true, workspace_subscription: workspace(), ...actual } }) });
