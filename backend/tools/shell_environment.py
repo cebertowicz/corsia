@@ -15,6 +15,7 @@ from typing import Any, Callable
 from connections import github_agent
 from connections.github_agent import AgentAccountView
 from connections.github_agent_home import BOT_ENV_NAMES, is_host_identity_name
+from events.trace_env import TRACE_ENV
 from infra.db_async import run_in_db
 import tools.agent_shell_tools as agent_shell_tools
 
@@ -25,8 +26,9 @@ _SENSITIVE_ENV_NAME_RE = re.compile(
 )
 _ENV_CONTROL_NAMES = frozenset({"BASH_ENV", "ENV", "CDPATH"})
 # The backend's own identities Safehouse may pass into a child, in argv order.
+# TRACE_ENV is set only by the script runner for a run an event rule started.
 _SHELL_PASS_NAMES = ("CORSIA_THREAD_ID", "CORSIA_PROCESS_OWNER_MARKER", "CORSIA_TOOL_INVOCATION_ID",
-                     "AGENT_BROWSER_ARGS", *agent_shell_tools.ENV_NAMES)
+                     "AGENT_BROWSER_ARGS", *agent_shell_tools.ENV_NAMES, TRACE_ENV)
 
 
 def shell_env_pass_names() -> str:
@@ -86,7 +88,7 @@ def safehouse_subprocess_env(
             and not is_host_identity_name(name)
             and name not in {
                 "CORSIA_THREAD_ID", "CORSIA_PROCESS_OWNER_MARKER",
-                "CORSIA_TOOL_INVOCATION_ID",
+                "CORSIA_TOOL_INVOCATION_ID", TRACE_ENV,
             }
         )
     }
