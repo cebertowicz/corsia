@@ -56,7 +56,7 @@ async function serveReadySetup(page: Page, sources: readonly Record<string, unkn
 	const isClaude = sources[0]?.source === 'claude-code';
 	const selectedModel = 'mock/test-model';
 	await page.route((url) => url.pathname === '/api/models', (route) => route.request().method() === 'GET' ? route.fulfill({ json: { models: [isClaude
-		? { id: selectedModel, litellm_model: selectedModel, name: 'Vendor default', connection: 'claude-code', provider: 'claude-code', backend: 'api', status: 'ready', is_default: true, runs_on: [{ account_id: 'disposable-account', selected: true, status: 'ready' }] }
+		? { id: selectedModel, litellm_model: selectedModel, name: 'Vendor default', connection: 'claude-code', provider: 'claude-code', backend: 'api', status: 'ready', available: true, is_default: true, runs_on: [{ account_id: 'disposable-account', selected: true, status: 'ready' }] }
 		: { id: selectedModel, litellm_model: selectedModel, name: 'Vendor default', connection: 'omlx', provider: 'omlx', backend: 'network', status: 'ready', is_default: true }], active_local_threads: 0 } }) : route.continue());
 	await page.route('**/api/setup/local-model', (route) => route.fulfill({ json: { state: 'picked', model: { name: 'Qwen 3.8', repository: 'example/qwen', download_size_bytes: 30_000_000_000, download_size_gb: 30, context_window: 65536 }, message: null } }));
 	await page.route('**/api/setup/local-download', (route) => route.fulfill({ json: { ok: true, in_progress: true } }));
