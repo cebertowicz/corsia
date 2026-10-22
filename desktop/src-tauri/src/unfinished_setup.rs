@@ -6,10 +6,15 @@
 // finished setup (`backend/infra/setup_marker.py`), so a finished install has no marker.
 //
 // While the marker exists, the next launch, before it starts the service, removes the recorded files whose
-// bytes still match, the state folder, `service.json` and last the marker, then plans a first run again. An
+// bytes still match, the state folder and `service.json`, then plans a first run again in the folder the first
+// run made. The marker itself stays until that new first run is applied and `mark` replaces it, so a launch
+// that stops anywhere in between finds the marker again and finishes the job; every step is safe to repeat. An
 // install the shell did not mark (adopted, existing, scripted, or already finished) is never touched. A file
-// that cannot be removed stops the launch with the reason and leaves the marker for the next try; a marker the
-// shell cannot trust is left alone.
+// that cannot be removed stops the launch and leaves the marker for the next try; a marker the shell cannot
+// trust is left alone.
+//
+// Two writers share the file: the shell owns `state_dir` and `workspace`, the backend owns `files_root` and
+// `files` (see `backend/infra/setup_marker.py`).
 
 use std::{
     collections::BTreeMap,
@@ -31,11 +36,20 @@ const STATE_DIRECTORY: &str = "state";
 pub struct Marker {
     /// The state folder this marker may wipe: always the app folder's own `state` child.
     pub state_dir: String,
-    /// The work folder the recorded files are relative to.
+    /// The work folder the first run made, and the one a new first run may reuse after the wipe.
     pub workspace: String,
-    /// Files the backend's setup created in the work folder, by path relative to it, with their SHA-256.
+    /// The folder the recorded files are relative to: the work folder the person chose, when it is not `workspace`.
+    #[serde(default)]
+    pub files_root: Option<String>,
+    /// Files the backend's setup created in that folder, by path relative to it, with their SHA-256.
     #[serde(default)]
     pub files: BTreeMap<String, String>,
+}
+
+impl Marker {
+    fn files_folder(&self) -> &Path {
+        Path::new(self.files_root.as_deref().unwrap_or(&self.workspace))
+    }
 }
 
 /// What a launch does about an unfinished setup.
@@ -89,6 +103,7 @@ pub fn mark(app_dir: &Path, workspace: &Path) -> Result<bool, String> {
             .to_str()
             .ok_or("the workspace path is not valid UTF-8")?
             .to_owned(),
+        files_root: None,
         files: BTreeMap::new(),
     };
     let body = serde_json::to_vec_pretty(&marker).map_err(|error| error.to_string())?;
@@ -142,7 +157,7 @@ pub fn at_launch(app_dir: &Path) -> Launch {
         }
         Err(reason) => return Launch::Untrusted(reason),
     }
-    if !Path::new(&marker.workspace).is_absolute() {
+    if !Path::new(&marker.workspace).is_absolute() || !marker.files_folder().is_absolute() {
         return Launch::Untrusted(format!("{} names a work folder that is not an absolute path", path.display()));
     }
     Launch::Wipe(marker)
@@ -190,11 +205,12 @@ fn remove_empty_parents(file: &Path, workspace: &Path) {
 
 /// Wipe the unfinished setup `marker` names. The service must not be running.
 ///
-/// Order matters for a retry: the work-folder files first (a failure stops everything and leaves the marker),
-/// then the state folder, `service.json`, and the marker last. A file the person changed, or one that is
-/// no longer a plain file, stays.
+/// Order matters for a retry: the work-folder files first (a failure stops everything), then the state folder
+/// and `service.json`. The marker stays: it is replaced when the new first run is marked, and until then it is
+/// what lets a launch that stopped halfway finish the wipe. A file the person changed, or one that is no
+/// longer a plain file, stays. Errors are details for the log, not text for the person.
 pub fn wipe(app_dir: &Path, marker: &Marker) -> Result<(), String> {
-    let workspace = Path::new(&marker.workspace);
+    let workspace = marker.files_folder();
     let mut failures = Vec::new();
     for (relative, digest) in &marker.files {
         let Some(path) = removable(workspace, relative) else { continue };
@@ -208,23 +224,19 @@ pub fn wipe(app_dir: &Path, marker: &Marker) -> Result<(), String> {
         }
     }
     if !failures.is_empty() {
-        return Err(format!(
-            "CORSIA could not start setup over: {}. Nothing else was removed.",
-            failures.join("; ")
-        ));
+        return Err(failures.join("; "));
     }
     let state_dir = state_dir_in(app_dir);
     if exists(&state_dir)? {
         let metadata = fs::symlink_metadata(&state_dir)
             .map_err(|error| format!("could not check {}: {error}", state_dir.display()))?;
         if !metadata.is_dir() {
-            return Err(format!("{} is not a plain folder, so setup was not started over.", state_dir.display()));
+            return Err(format!("{} is not a plain folder", state_dir.display()));
         }
         fs::remove_dir_all(&state_dir)
-            .map_err(|error| format!("CORSIA could not start setup over: could not remove {}: {error}", state_dir.display()))?;
+            .map_err(|error| format!("could not remove {}: {error}", state_dir.display()))?;
     }
-    remove_if_present(&app_dir.join(SERVICE_FILE))?;
-    remove_if_present(&app_dir.join(MARKER_FILE))
+    remove_if_present(&app_dir.join(SERVICE_FILE))
 }
 
 #[cfg(test)]
@@ -295,10 +307,32 @@ mod tests {
         wipe_it(&app_dir).unwrap();
         assert!(!app_dir.join("state").exists());
         assert!(!app_dir.join(SERVICE_FILE).exists());
-        assert!(!app_dir.join(MARKER_FILE).exists());
         assert!(!workspace.join(PROFILE).exists());
         assert!(workspace.is_dir(), "the work folder itself stays");
-        assert_eq!(at_launch(&app_dir), Launch::Nothing, "and the next launch has nothing left to do");
+        assert!(
+            app_dir.join(MARKER_FILE).exists(),
+            "the marker stays until the new first run replaces it, so a launch that stops now finishes the job"
+        );
+        assert!(matches!(at_launch(&app_dir), Launch::Wipe(_)), "and that launch finds it again");
+        wipe_it(&app_dir).unwrap();
+    }
+
+    #[test]
+    fn files_in_a_chosen_work_folder_go_while_the_first_runs_own_folder_is_still_the_one_trusted() {
+        let home = Home::new("chosen");
+        let (app_dir, workspace) = unfinished(&home);
+        let chosen = home.0.join("chosen-folder");
+        fs::create_dir_all(chosen.join("context")).unwrap();
+        fs::write(chosen.join(PROFILE), b"# Profile\n").unwrap();
+        let mut marker: Marker = serde_json::from_slice(&fs::read(app_dir.join(MARKER_FILE)).unwrap()).unwrap();
+        marker.files_root = Some(chosen.to_string_lossy().into_owned());
+        fs::write(app_dir.join(MARKER_FILE), serde_json::to_vec(&marker).unwrap()).unwrap();
+        fs::remove_file(workspace.join(PROFILE)).unwrap();
+        let Launch::Wipe(found) = at_launch(&app_dir) else { panic!("expected a wipe") };
+        assert_eq!(found.workspace, workspace.to_string_lossy(), "the shell's own folder is not rewritten");
+        wipe(&app_dir, &found).unwrap();
+        assert!(!chosen.join(PROFILE).exists(), "the recorded file goes from the folder it was written in");
+        assert!(chosen.is_dir());
     }
 
     #[test]
@@ -325,6 +359,7 @@ mod tests {
 
         wipe_it(&app_dir).unwrap();
         assert!(!workspace.join("context").exists(), "the folder the profile left empty goes too");
+        assert!(matches!(at_launch(&app_dir), Launch::Wipe(_)), "a stop before the new first run is applied is retried");
         assert!(matches!(plan(&home.0, &app_dir).unwrap(), FirstRun::ExistingInstall { .. }), "plain planning refuses a folder with files");
         assert_eq!(
             plan_trusting(&home.0, &app_dir, Some(&workspace)).unwrap(),
@@ -336,6 +371,11 @@ mod tests {
             plan_trusting(&home.0, &app_dir, Some(&other)).unwrap(),
             FirstRun::ExistingInstall { .. }
         ), "trust names one folder only");
+        // The new first run is applied and marks again: the stale marker is replaced by a clean one.
+        apply(&workspace, &app_dir, 47_895, |path| fs::create_dir_all(path.join(".git")).map_err(|e| e.to_string())).unwrap();
+        assert!(mark(&app_dir, &workspace).unwrap());
+        let Launch::Wipe(fresh) = at_launch(&app_dir) else { panic!("the new first run is marked") };
+        assert!(fresh.files.is_empty() && fresh.files_root.is_none());
     }
 
     #[test]

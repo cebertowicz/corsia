@@ -14,6 +14,17 @@ The backend has two jobs, both on that one file:
 
 Only a marker naming this backend's own state root is touched. Any other install, or one the shell never marked,
 has no marker and every function here does nothing.
+
+One file, two writers, each with its own fields:
+
+| Field | Written by | Meaning |
+|---|---|---|
+| ``state_dir``, ``workspace`` | the shell, when its first run makes the state root | the one state folder it may wipe, and the folder that first run made |
+| ``files_root``, ``files`` | this module | the folder setup's files are relative to (the chosen work folder), and each file with its digest |
+
+The backend deletes the marker when setup finishes. The shell replaces it only when it marks the new first run
+it plans after a wipe. A marker this module cannot read is an error, never "no marker": finishing must not
+commit while a wipe marker might still be on disk.
 """
 
 from __future__ import annotations
@@ -36,13 +47,17 @@ def marker_path() -> Path:
 
 
 def _own_marker() -> dict | None:
-    """The marker this install's shell wrote for this state root, else ``None``."""
+    """The marker this install's shell wrote for this state root, else ``None``.
+
+    Raises ``OSError`` when a marker may exist but cannot be read. A marker that is not valid JSON is one the
+    shell will not trust either, so it counts as not ours.
+    """
     try:
         data = json.loads(marker_path().read_bytes())
     except FileNotFoundError:
         return None
-    except (OSError, ValueError):
-        logger.warning("The unfinished-setup marker could not be read; it is left as it is", exc_info=True)
+    except ValueError:
+        logger.warning("The unfinished-setup marker is damaged; it is left as it is", exc_info=True)
         return None
     state_dir = data.get("state_dir") if isinstance(data, dict) else None
     if not isinstance(state_dir, str) or Path(state_dir).resolve() != config.STATE_ROOT.resolve():
@@ -53,7 +68,7 @@ def _own_marker() -> dict | None:
 def record_created_file(relative: str, sha256: str) -> None:
     """Add a work-folder file this setup created, with the digest the shell checks before removing it.
 
-    Does nothing when this install has no marker. Raises ``OSError`` when the marker cannot be rewritten,
+    Does nothing when this install has no marker. Raises ``OSError`` when the marker cannot be read or rewritten,
     so the caller can refuse to create the file.
     """
     data = _own_marker()
@@ -61,7 +76,10 @@ def record_created_file(relative: str, sha256: str) -> None:
         return
     recorded = data.get("files")
     files = recorded if isinstance(recorded, dict) else {}
-    data = {**data, "workspace": str(config.WORKSPACE), "files": {**files, relative: sha256}}
+    root = str(config.WORKSPACE)
+    if files and data.get("files_root") != root:
+        raise OSError("setup files are recorded for another work folder, so this one cannot be added")
+    data = {**data, "files_root": root, "files": {**files, relative: sha256}}
     path = marker_path()
     staged = path.with_name(f"{MARKER_FILE}.tmp")
     staged.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -69,6 +87,6 @@ def record_created_file(relative: str, sha256: str) -> None:
 
 
 def remove() -> None:
-    """Delete this install's marker, so the shell never wipes it. Raises ``OSError`` if it cannot be deleted."""
+    """Delete this install's marker, so the shell never wipes it. Raises ``OSError`` if it cannot be read or deleted."""
     if _own_marker() is not None:
         marker_path().unlink()

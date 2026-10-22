@@ -63,7 +63,8 @@ def test_the_app_setup_records_the_profile_it_created_with_its_digest(app):
     profile = (config.WORKSPACE / PROFILE).read_bytes()
     marker = _marker(app)
     assert marker["files"] == {PROFILE: hashlib.sha256(profile).hexdigest()}
-    assert marker["workspace"] == str(config.WORKSPACE)
+    assert marker["files_root"] == str(config.WORKSPACE)
+    assert marker["workspace"] == str(app.parent / "default"), "the folder the shell's first run made is never rewritten"
 
 
 def test_a_profile_the_person_already_had_is_not_recorded(app):
@@ -136,6 +137,43 @@ def test_a_marker_that_will_not_go_refuses_the_finish_and_setup_stays_unfinished
     setup_progress.update(completed=True)
     assert _completed()
     assert not (app / setup_marker.MARKER_FILE).exists()
+
+
+def test_a_marker_that_cannot_be_read_refuses_the_finish_instead_of_passing_for_none(app, monkeypatch):
+    _first_account()
+    real = Path.read_bytes
+
+    def refuse(self):
+        if self.name == setup_marker.MARKER_FILE:
+            raise PermissionError("busy")
+        return real(self)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(Path, "read_bytes", refuse)
+        with pytest.raises(setup_progress.SetupProgressError):
+            setup_progress.update(completed=True)
+    assert not _completed()
+    assert (app / setup_marker.MARKER_FILE).exists()
+    setup_progress.update(completed=True)
+    assert _completed()
+
+
+def test_a_damaged_marker_is_left_alone_because_the_shell_will_not_wipe_on_it_either(app):
+    _first_account()
+    (app / setup_marker.MARKER_FILE).write_text("{not json", encoding="utf-8")
+    setup_progress.update(completed=True)
+    assert _completed()
+    assert (app / setup_marker.MARKER_FILE).read_text(encoding="utf-8") == "{not json"
+
+
+def test_files_recorded_for_one_folder_are_never_mixed_with_another(app, monkeypatch, tmp_path):
+    _first_account()
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.setattr(config, "WORKSPACE", other)
+    with pytest.raises(OSError):
+        setup_marker.record_created_file("context/x.md", "0" * 64)
+    assert list(_marker(app)["files"]) == [PROFILE]
 
 
 def test_steps_before_the_finish_keep_the_marker(app):

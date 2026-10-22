@@ -69,8 +69,9 @@ struct AppServiceState {
     app_dir: Mutex<Option<PathBuf>>,
     /// The local service ports already granted their commands; a capability can't be removed, so each is added once.
     granted_local_ports: Mutex<std::collections::BTreeSet<u16>>,
-    /// Set once this process has answered a launch with a running service: after that, nothing is started over.
-    launched: AtomicBool,
+    /// Set once this process has settled whether an unfinished setup is wiped. A retry in the same process (after an
+    /// approval prompt or a slow start) never checks again, so it can't wipe what this process just started.
+    setup_checked: AtomicBool,
     quitting: AtomicBool,
     exit_cleanup_attempted: AtomicBool,
     adoption_in_progress: AtomicBool,
@@ -352,10 +353,12 @@ fn unregister_service() -> Result<(), String> {
 /// An unfinished first-run setup leaves nothing: before anything is planned or started, a marker the first run
 /// left (and the backend deletes when setup finishes) makes this launch wipe the state folder and what setup
 /// created, so first run begins again at step 1. Without a marker, or with one that cannot be trusted, nothing
-/// is touched. A failure stops the launch with its reason, and the marker stays for the next try.
+/// is touched. A failure stops the launch, and the marker stays for the next try.
 ///
 /// Returns the work folder that setup made, so planning the new first run reuses it.
 fn start_over_if_unfinished(app_dir: &Path) -> Result<Option<PathBuf>, String> {
+    const COULDNT_START_OVER: &str =
+        "Couldn’t start setup over. Quit CORSIA and open it again. If that doesn’t help, restart your computer.";
     match unfinished_setup::at_launch(app_dir) {
         unfinished_setup::Launch::Nothing => Ok(None),
         unfinished_setup::Launch::Untrusted(reason) => {
@@ -365,8 +368,14 @@ fn start_over_if_unfinished(app_dir: &Path) -> Result<Option<PathBuf>, String> {
         unfinished_setup::Launch::Wipe(marker) => {
             log::info!("setup was never finished: starting it over");
             // The service holds the state folder open, so it stops first.
-            unregister_service()?;
-            unfinished_setup::wipe(app_dir, &marker).inspect_err(|error| log::error!("{error}"))?;
+            unregister_service().map_err(|error| {
+                log::error!("could not stop the service to start setup over: {error}");
+                COULDNT_START_OVER.to_owned()
+            })?;
+            unfinished_setup::wipe(app_dir, &marker).map_err(|error| {
+                log::error!("could not start setup over: {error}");
+                COULDNT_START_OVER.to_owned()
+            })?;
             Ok(Some(PathBuf::from(marker.workspace)))
         }
     }
@@ -564,8 +573,10 @@ fn start_service<R: tauri::Runtime>(
         log::error!("interrupted adoption could not be undone: {}", failure.message);
         return Ok(ServiceStartup::AdoptionFailed { failure });
     }
-    let started_over = if !service.launched.load(Ordering::SeqCst) && !first_run::environment_names_the_roots() {
-        start_over_if_unfinished(&app_dir)?
+    let started_over = if !service.setup_checked.load(Ordering::SeqCst) && !first_run::environment_names_the_roots() {
+        let started_over = start_over_if_unfinished(&app_dir)?;
+        service.setup_checked.store(true, Ordering::SeqCst);
+        started_over
     } else {
         None
     };
@@ -614,7 +625,6 @@ fn start_service<R: tauri::Runtime>(
         service_management::ServiceStatus::Enabled => {
             wait_for_service(port, &app_dir)?;
             grant_local_service_origin(app, service, port)?;
-            service.launched.store(true, Ordering::SeqCst);
             Ok(ServiceStartup::Ready {
                 url: service_url(port),
             })

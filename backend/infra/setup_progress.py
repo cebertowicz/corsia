@@ -15,11 +15,14 @@ on the next launch, and finishing removes the marker first.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 
 import infra.setup_marker as setup_marker  # mypy resolves a new submodule only this way
 from infra.database import write_transaction
 from infra.settings import get_setting, set_setting
+
+logger = logging.getLogger(__name__)
 
 KEY = "setup_progress"
 #: Steps after the account exists: Connect an AI, and the existing-oMLX question inside it.
@@ -86,6 +89,7 @@ def update(
             try:
                 setup_marker.remove()
             except OSError as error:
+                logger.error("The unfinished-setup marker could not be removed, so setup was not finished", exc_info=True)
                 raise SetupProgressError("setup could not be finished: the unfinished-setup marker stays") from error
             record["setup_completed"] = True
         set_setting(KEY, record, db=connection)
