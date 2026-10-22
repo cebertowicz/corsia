@@ -232,3 +232,29 @@ async def test_a_name_that_is_not_a_mail_host_key_starts_nothing(conductor, serv
     await check.start_after_key_write("web-search")
     await check.start_after_key_write(f"{key_store.MAILHOST_PREFIX}not-an-account-id")
     await check.wait_for_checks()
+
+
+async def test_a_check_a_dead_process_left_running_ends_as_server_unreachable_and_can_be_retried(conductor, servers) -> None:
+    built = servers()
+    stuck = add_account(built, conductor)["account_id"]
+    waiting = add_account(built, conductor, address="other@example.com")["account_id"]
+    assert await run_check(stuck) == store.OK
+    assert store.begin_check(stuck) is not None
+    assert row(stuck)["check"]["status"] == store.CHECKING
+
+    assert await check.settle_after_restart() == 1
+
+    settled = row(stuck)
+    assert (settled["check"]["status"], settled["check"]["host"], settled["state"]) == (
+        store.UNREACHABLE, "127.0.0.1", "needs_sign_in")
+    assert row(waiting)["check"]["status"] == store.WAITING
+    assert await check.settle_after_restart() == 0
+    assert await run_check(stuck) == store.OK
+
+
+async def test_startup_settles_stuck_checks_after_it_reviews_reconcile() -> None:
+    import inspect
+
+    import app_startup_runtime
+
+    assert "await settle_after_restart()" in inspect.getsource(app_startup_runtime._start_runtime_services)

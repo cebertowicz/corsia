@@ -199,6 +199,9 @@ async def _start_runtime_services() -> None:
     from core.artifact_review_capture import reconcile_startup_reviews
 
     await reconcile_startup_reviews()
+    from connections.mailhost.check import settle_after_restart
+
+    await settle_after_restart()
     from core import placement_worker
 
     placement_worker.poke()

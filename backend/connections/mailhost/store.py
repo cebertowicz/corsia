@@ -104,6 +104,23 @@ def begin_check(account_id: str, *, db: sqlite3.Connection | None = None) -> tup
         return endpoints, token
 
 
+def settle_orphaned_checks(*, db: sqlite3.Connection | None = None) -> int:
+    """End every row still Checking as Server unreachable, which the person can retry; returns how many.
+
+    Only for a process that has just started: no check can be running then, so a row still
+    Checking is one whose process died mid-check.
+    """
+    with write_transaction(db, scope="mail_host_settle") as conn:
+        stuck = [str(r["id"]) for r in conn.execute(
+            "SELECT id FROM connected_accounts WHERE provider='mailhost' AND endpoints_json IS NOT NULL"
+        ) if read(str(r["id"]), db=conn)[1].get("status") == CHECKING]
+        for account_id in stuck:
+            endpoints = read(account_id, db=conn)[0]
+            if endpoints is not None:
+                write(account_id, endpoints, status=UNREACHABLE, host=endpoints.imap.host, db=conn)
+        return len(stuck)
+
+
 def reset_to_waiting(account_id: str, *, db: sqlite3.Connection | None = None) -> None:
     """After Clear: the row waits for an app password again, with no capability and no check pending."""
     with write_transaction(db, scope="mail_host_waiting") as conn:

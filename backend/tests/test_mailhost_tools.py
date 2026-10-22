@@ -20,7 +20,7 @@ from mailhost_helpers import (  # noqa: F401  (fixtures)
 
 from api import key_write_guard
 from api import keys as keys_api
-from connections import mail_accounts
+from connections import account_actions, mail_accounts
 from connections.google import accounts as google_accounts
 from connections.google.client import GoogleError
 from connections.mail import email_screen
@@ -175,6 +175,19 @@ async def test_clearing_the_key_through_keys_returns_the_account_to_waiting(conn
     assert cleared.status_code == 200, cleared.text
     found = row(connected.account_id)
     assert found["state"] == "needs_sign_in" and found["capabilities"] == [] and found["check"]["status"] == store.WAITING
+
+
+async def test_keys_will_not_remove_a_mail_accounts_entry_but_removing_the_account_takes_it(connected) -> None:
+    url = f"/api/keys/{connected.key}/remove"
+    removed = await connected.client.post(url, headers=_auth(), json={"password": TEST_PASSWORD})
+    assert removed.status_code == 400 and "cleared but not removed" in removed.text
+    assert key_store.entry_metadata(connected.key)["label"] and count_rows() == 1
+    with pytest.raises(key_store.KeyStoreError, match="cleared but not removed"):
+        key_store.remove_entry(connected.key)
+    await account_actions.remove_account(connected.account_id, actor=("person", "test"))
+    assert count_rows() == 0
+    with pytest.raises(key_store.KeyStoreError):
+        key_store.entry_metadata(connected.key)
 
 
 async def test_a_known_hosts_pasted_password_loses_all_whitespace_and_a_typed_hosts_is_kept_or_refused(conductor, servers) -> None:

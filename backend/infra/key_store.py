@@ -258,6 +258,8 @@ def remove_entry(name: str, *, db: sqlite3.Connection | None = None) -> None:
     """Remove an added entry and its value. A built-in entry cannot be removed."""
     if name in BUILTINS:
         raise KeyStoreError("A built-in key can be cleared but not removed.")
+    if name.startswith(MAILHOST_PREFIX):
+        raise KeyStoreError("A mail account's app password can be cleared but not removed. It goes when you remove the account.")
     if is_managed_name(name):
         drop_managed_entry(name, db=db)
         return

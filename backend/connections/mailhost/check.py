@@ -106,6 +106,11 @@ async def reset_after_key_clear(name: str) -> None:
         await run_in_db(store.reset_to_waiting, account_id)
 
 
+async def settle_after_restart() -> int:
+    """At startup, end every check a dead process left Checking as Server unreachable, so Try again shows."""
+    return await run_in_db(store.settle_orphaned_checks)
+
+
 async def wait_for_checks() -> None:
     """Wait for every check started in this process; for tests and the demo."""
     await asyncio.gather(*list(_pending), return_exceptions=True)
