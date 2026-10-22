@@ -25,8 +25,8 @@ const fixtures: Fixture[] = [
 	{ name: 'account-short-password', screen: 'short-password', element: 'Use at least 8 characters.' },
 	{ name: 'account-mismatch', screen: 'mismatch', element: 'Passwords don’t match.' },
 	{ name: 'account-fixed-username', screen: 'account', requiredUsername: 'alex-morgan', element: 'Username fixed by this install' },
-	{ name: 'account-classifier-downloading', screen: 'account', classifier: 'downloading', element: 'Finishing setup: Downloading · 60%' },
-	{ name: 'account-classifier-failed', screen: 'account', classifier: 'failed', element: 'Finishing setup: Couldn’t download · Try again' },
+	{ name: 'account-classifier-downloading', screen: 'account', classifier: 'downloading', element: 'No classifier download line while it downloads' },
+	{ name: 'account-classifier-failed', screen: 'account', classifier: 'failed', element: 'No classifier download line when it fails' },
 	{ name: 'account-exists', screen: 'account-exists', element: 'This computer already has a CORSIA account. Sign in instead.' },
 	{ name: 'folder-protected', screen: 'protected', element: 'Choose Allow when it does.' },
 	{ name: 'folder-unwritable', screen: 'unwritable', element: 'CORSIA can’t write to this folder. Choose another one.' },
@@ -283,8 +283,8 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.screen === 'creating') { await expect(text('Starting CORSIA')).toBeVisible(); return; }
 	if (fixture.screen === 'create-failed') { await expect(text('Couldn’t create your account. Try again.')).toBeVisible(); await expect(page.getByRole('button', { name: 'Save a report', exact: true })).toBeVisible(); return; }
 	if (fixture.requiredUsername) { await expect(page.getByLabel('Username', { exact: true })).toHaveAttribute('readonly'); }
-	if (fixture.classifier === 'downloading') { await expect(text('Finishing setup')).toBeVisible(); await expect(text('Downloading · 60%')).toBeVisible(); }
-	if (fixture.classifier === 'failed') { await expect(text('Finishing setup')).toBeVisible(); await expect(page.getByRole('button', { name: /^Retry: Finishing setup/ })).toBeVisible(); }
+	// The classifier downloads unseen: setup shows no line for it, whether it runs or fails.
+	if (fixture.classifier) await expect(text('Finishing setup')).toHaveCount(0);
 	if (fixture.screen === 'account') { await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible(); if (fixture.local === 'connection') await expect(text(localSetupFix('connection'))).toBeVisible(); return; }
 	if (fixture.api === 'menu') { await expect(page.getByText('Cloud', { exact: true })).toBeVisible(); await expect(page.getByText('Other ways to connect', { exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: /^oMLX on another Mac/ })).toBeVisible(); return; }
 	if (fixture.api === 'address') { await expect(page.getByRole('dialog').getByText('Other provider by address', { exact: true })).toBeVisible(); await expect(page.getByPlaceholder('https://host.example.com/compatible-mode/v1', { exact: true })).toBeVisible(); await expect(page.getByPlaceholder('(leave empty when the web address needs no key)', { exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: 'More options', exact: true })).toBeVisible(); await expect(page.getByText('Connection type', { exact: true })).toHaveCount(0); return; }

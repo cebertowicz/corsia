@@ -115,6 +115,14 @@ async def resume_pending_setup() -> bool:
     return True
 
 
+def _in_progress_or_blocked() -> dict:
+    """The running flight, or the reason none could start: a press never ends silently with nothing running."""
+    if ls._running():
+        return ls._in_progress_result()
+    return {**local_setup_error("Another CORSIA process still holds the local model setup."), "reason": "operation_held",
+            "fix": "Another CORSIA process is still setting up the local model. Quit CORSIA completely, reopen it, then press Retry."}
+
+
 async def begin_local_setup(*, no_subscription_only: bool = False,
                             automatic: bool = False, onboarding: bool = False) -> dict:
     """Start setup, or report its existing operation and eligibility decision."""
@@ -131,7 +139,7 @@ async def begin_local_setup(*, no_subscription_only: bool = False,
     if existing is not None:
         server_id, _port, _is_existing = existing
         if not ls._claim_operation("setup"):
-            return ls._in_progress_result()
+            return _in_progress_or_blocked()
         return ls.finish_flight({"ok": True, "existing": True, "server_id": server_id,
                                  "message": "A local model is already connected. Its settings are unchanged."})
     memory_ok = await asyncio.to_thread(local_memory_ok)
@@ -155,7 +163,7 @@ async def begin_local_setup(*, no_subscription_only: bool = False,
         return ls._in_progress_result()
     if not ls._claim_operation("setup", onboarding=onboarding):
         await resume_pending_setup()
-        return ls._in_progress_result()
+        return _in_progress_or_blocked()
     ls.start_flight(_run_flight(), "Installing")
     ls._emit("started")
     return ls._in_progress_result(notice=notice)

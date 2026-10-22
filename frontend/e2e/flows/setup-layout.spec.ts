@@ -16,7 +16,7 @@ async function serve(page: Page, sources: readonly Record<string, unknown>[], sh
 	await page.route('**/api/setup/status', (route) => route.fulfill({ json: { apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' } }));
 	await page.route('**/api/setup/progress', (route) => route.fulfill({ json: { setup_completed: false, step: 'models', local_ai: false } }));
 	await page.route('**/api/setup/local-model', (route) => route.fulfill({ json: { state: 'picked', model: { name: 'Qwen 3.8', repository: 'example/qwen', download_size_bytes: 30_000_000_000, download_size_gb: 30, context_window: 65536 }, message: null } }));
-	await page.route('**/api/setup/local-download', (route) => route.fulfill({ json: { ok: true, in_progress: false } }));
+	await page.route('**/api/setup/local-download', (route) => route.fulfill({ json: { ok: true, in_progress: true } }));
 	await page.route('**/api/setup/first-account', (route) => route.fulfill({ json: { token: TEST_SESSION_TOKEN, user: { id: 'e2e', name: 'First Person' } } }));
 	await page.route('**/api/providers/sources/recheck**', (route) => route.fulfill({ json: { sources } }));
 	await page.route('**/api/providers/sources**', (route) => route.fulfill({ json: { sources } }));
