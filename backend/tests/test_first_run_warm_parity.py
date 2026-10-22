@@ -139,6 +139,13 @@ def _normalized_input(request: dict) -> dict:
     return {"messages": request["messages"], "tools": request["tools"]}
 
 
+def _input_bytes(request: dict) -> bytes:
+    """Preserve captured key and list order when checking reusable input bytes."""
+    return json.dumps(
+        _normalized_input(request), ensure_ascii=False, separators=(",", ":"),
+    ).encode("utf-8")
+
+
 def _input_tokens(request: dict) -> int:
     """Estimate a normalized boundary input with cl100k_base, not oMLX's tokenizer."""
     import tiktoken
@@ -252,6 +259,9 @@ async def test_app_first_run_warm_is_the_first_selected_turn_prefix(app_first_ru
     print(f"first-run aggregate inputs: first={first_summary}; second={second_summary}")
     assert len(turn["messages"]) == len(warm["messages"]) + 1
     assert turn["tools"] == warm["tools"]
+    assert _input_bytes({
+        "messages": turn["messages"][:-1], "tools": turn["tools"],
+    }) == _input_bytes(warm)
     assert {key: value for key, value in turn["extra_body"].items() if key != "session_id"} == {
         key: value for key, value in warm.items() if key not in ("model_id", "messages", "tools")
     }

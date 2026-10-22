@@ -1,6 +1,6 @@
 # Looking up the person, then asking what's left
 
-For the CORSIA agent: step 5 of `references/first-run-app.md` sends you here. Do the steps in order. Post only the lines in backticks, word for word. Never show how sure you are.
+For the CORSIA agent: step 5 of `references/first-run-app.md`. Follow in order. Post only the lines in backticks, word for word. Never show how sure you are.
 
 ## Before anything: ask when search was already set up
 
@@ -58,9 +58,9 @@ Post these in one message. Question 1 stays whole: when part of it is already kn
 
 1. `What should I call you, what do you do, and where are you based?`
 2. `What are you working toward right now, at work or outside it?`
-3. `Here's how I'll work unless you tell me otherwise. Before I send anything as you, spend money or delete something, I'll check with you first. Everything else, like research, drafts, organizing files in your projects, or setting up a tool you asked for, I'll just do and show you. You can change either side any time. Tell me what you'd like me to check first, or pre-approve something, like 'you can accept meeting invites without asking.' Anything you'd change now? And do you like answers short, or with the reasoning?`
+3. `Here's how I'll work unless you tell me otherwise. I'll check with you first about sending or posting as you, spending money, and opening files outside your work folder. Everything else, like research, drafts, organizing files in your projects, or setting up a tool you asked for, I'll just do and show you. You can change either side any time. Tell me what you'd like me to check first, or pre-approve something, like 'you can accept meeting invites without asking.' Anything you'd change now? And do you like answers short, or with the reasoning?`
 
-Question 3 states defaults, not fixed rules. When `references/about-you-doc.md` says to write the profile, write to the workspace `context/50-USER-PROFILE.md` the line `- **Check first by default:** sending anything as them, spending money, deleting anything` and the line `- **Just do and show by default:** research, drafts, organizing files in their projects, setting up a tool they asked for`, replacing lines with those labels. Write each change they name as `- **Check first:** [their words]` and each pre-approval as `- **Pre-approved:** [their words]`. A pre-approval overrides the default for exactly what they named, and a later answer updates the lines. On "check everything", reply `I'll check first on changes to your files and projects, and show you the rest as I go. Tell me when you'd rather I just do it.` and write `- **Check first:** changes to their files and projects`.
+Question 3 states defaults, not fixed rules. When `references/about-you-doc.md` says to write the profile, write to the workspace `context/50-USER-PROFILE.md` the line `- **Check first by default:** sending or posting as them, spending money, opening files outside their work folder` and the line `- **Just do and show by default:** research, drafts, organizing files in their projects, setting up a tool they asked for`, replacing lines with those labels. Write each change they name as `- **Check first:** [their words]` and each pre-approval as `- **Pre-approved:** [their words]`. A pre-approval overrides the default for exactly what they named, and a later answer updates the lines. On "check everything", reply `I'll check first on changes to your files and projects, and show you the rest as I go. Tell me when you'd rather I just do it.` and write `- **Check first:** changes to their files and projects`.
 
 Follow up once on anything vague. On "not now", carry on and learn as you go.
 

@@ -231,13 +231,13 @@ def test_applicable_steps_and_completion_cache_reconcile_conditionals(
     }
     steps = applicable_steps(facts)
     assert [(step["step_number"], step["title"], step.get("vendor")) for step in steps] == [
-        (1, "The other subscription", "claude_code"),
-        (2, "Bring over from your other tools", None),
+        (1, "Add your second subscription", "claude_code"),
+        (2, "Bring over what your other tools know", None),
         (4, "Web search", None),
         (5, "About you", None),
         (7, "How CORSIA gets better", None),
         (8, "Your files, and when agents ask first", None),
-        (9, "The hand-off", None),
+        (9, "Hand over to your agents", None),
     ]
 
     accounts.create_first_account("newcomer", PASSWORD, full_name="New Comer", first_run_path="app")
@@ -300,4 +300,4 @@ def test_named_apps_are_children_and_preserve_visible_onboarding_steps(fresh_ins
     assert {node["title"] for node in children} == {"Connect Slack", "Connect Notes"}
     top_level = {node["title"] for node in final["nodes"] if node["parent_id"] is None}
     assert top_level == {step["title"] for step in applicable_steps(facts)}
-    assert "The hand-off" in top_level
+    assert "Hand over to your agents" in top_level

@@ -19,7 +19,7 @@ def test_first_step_explains_unfinished_signin_and_points_to_actual_card_action(
     text = first_run_wake.first_app_step(facts(
         sources_missing={"codex": "needs_auth"}, pays_for=["codex"],
     ))
-    assert "1. **The other subscription" in text
+    assert "1. **Add your second subscription" in text
     assert "Setup's sign-in to [Claude Code | Codex] didn't finish." in text
     assert "[Settings › Providers](/settings/providers), press Sign in on its card" in text
     assert "POST /api/vendor-accounts/{id}/signin" not in text
@@ -31,7 +31,7 @@ def test_import_with_consent_is_first_but_missing_consent_skips_it():
     assert "3. **Where your work lives" in first_run_wake.first_app_step(base)
     base["setup"]["setup_decisions"] = [{"title": "Bring over what your other tools know"}]
     text = first_run_wake.first_app_step(base)
-    assert "2. **Bring over from your other tools" in text
+    assert "2. **Bring over what your other tools know" in text
     assert "3. **Where your work lives" not in text
 
 
@@ -61,7 +61,7 @@ async def test_completed_setup_silently_skips_import_when_no_eligible_tool_remai
     wake = await first_run_wake.render_for("test-local", "app", thread_id="test-conductor")
 
     assert "3. **Where your work lives" in wake
-    assert "2. **Bring over from your other tools" not in wake
+    assert "2. **Bring over what your other tools know" not in wake
     assert '"setup_decisions": []' in wake
     assert "skip that step silently" in wake
 
@@ -80,7 +80,7 @@ async def test_completed_setup_reuses_snapshot_but_builds_provider_specific_impo
     wake = await first_run_wake.render_for("test-local", "app", thread_id="test-conductor")
 
     read.assert_not_awaited()
-    assert "2. **Bring over from your other tools" in wake
+    assert "2. **Bring over what your other tools know" in wake
     assert "Bring over what your other tools know" in wake
     assert snapshot["setup"]["setup_decisions"] == []  # keep committed snapshot immutable
     assert "Never write the opening or create the setup plan" in wake

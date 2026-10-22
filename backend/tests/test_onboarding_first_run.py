@@ -268,7 +268,7 @@ class TestWakeAndSetupPlan:
         )] == SETUP_TITLES
         started.assert_called_once()
 
-    def test_served_app_path_seeds_no_setup_tasks_or_start(self, fresh_install, monkeypatch):
+    def test_served_app_path_seeds_visible_plan_without_starting_model_work(self, fresh_install, monkeypatch):
         from infra import accounts, onboarding_events
 
         started = Mock()
@@ -278,7 +278,21 @@ class TestWakeAndSetupPlan:
 
         [wake] = _first_run_rows()
         assert json.loads(wake["metadata"])["first_run_path"] == "app"
-        assert _rows("SELECT n.title FROM plan_nodes n JOIN plans p ON p.id = n.plan_id WHERE p.owner_id=?", _conductor()) == []
+        nodes = _rows(
+            "SELECT n.title,n.state FROM plan_nodes n JOIN plans p ON p.id=n.plan_id WHERE p.owner_id=?",
+            _conductor(),
+        )
+        titles = {node["title"] for node in nodes}
+        assert {"Where your work lives", "About you", "Hand over to your agents"} <= titles
+        assert "Getting started" not in titles
+        assert all(node["state"] == "pending" for node in nodes)
+        [opening] = _rows(
+            "SELECT role,metadata FROM messages WHERE id=?",
+            f"first-run-opening:{_conductor()}",
+        )
+        assert opening["role"] == "assistant"
+        assert json.loads(opening["metadata"])["turn_unbound_reason"] == "server_scripted"
+        assert _rows("SELECT model FROM threads WHERE id=?", _conductor()) == [{"model": None}]
         started.assert_not_called()
 
     def test_the_seeded_tasks_do_not_depend_on_what_the_install_finds(

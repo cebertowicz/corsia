@@ -185,7 +185,8 @@ def _install_preflight_shell(monkeypatch, *, ws, on_delivery):
 
 
 @pytest.mark.asyncio
-async def test_pending_progress_probe_never_delays_warm_outcome(monkeypatch) -> None:
+@pytest.mark.parametrize("scheduled", [False, True])
+async def test_pending_progress_probe_never_delays_warm_outcome(monkeypatch, scheduled) -> None:
     from core import thread_warm
     from infra import state
 
@@ -207,8 +208,10 @@ async def test_pending_progress_probe_never_delays_warm_outcome(monkeypatch) -> 
             raise
 
     task, started, suppression = await thread_warm.start_thread_warm(
-        "thread-native", "progress-pending", warm, model="omlx@srv-1/model-1",
-        admission_check=lambda: None, progress_probe=progress_probe,
+        "thread-native", "progress-pending",
+        lambda: asyncio.ensure_future(warm()) if scheduled else warm(),
+        model="omlx@srv-1/model-1", admission_check=lambda: None,
+        progress_probe=lambda: asyncio.ensure_future(progress_probe()) if scheduled else progress_probe(),
         progress_callback=lambda _progress: None,
     )
     assert task is not None and started and suppression is None

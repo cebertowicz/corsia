@@ -190,16 +190,16 @@
       "sha256": "e7dab36e3d55d8b9eb8c06ac3bb155057e87906567c199c9c800a82e48009939"
     },
     {
-      "bytes": 22976,
+      "bytes": 22937,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "043f8207725c555338a7077d8208deb18d9c3c14d0869f83d97e7bca4bcd7124"
+      "sha256": "bc4763e1bedc1f9769e912d2b275c090ea542396fc07d358d20ea347d6c8e58b"
     },
     {
-      "bytes": 1188,
+      "bytes": 1225,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-opening.md",
-      "sha256": "f2ae09728d7ef963203756fd75098236f38497773ffb82378414d233b520feda"
+      "sha256": "0e0a32220ede6443efafefe958d0db9e531582050586ce86827a97491d12b30f"
     },
     {
       "bytes": 1366,
@@ -226,10 +226,10 @@
       "sha256": "582fe0631a98012f88d545e7b4d4e82a78d9d13d812d6e32a42ca8d40ec2b3b6"
     },
     {
-      "bytes": 11981,
+      "bytes": 12012,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/look-up-the-person.md",
-      "sha256": "c91cedf1a7bb4c05967bd0c1107d5ee729d127a36e5e45323f256ddbaf0e4552"
+      "sha256": "cc21aa897be8a235955ecd06df70e25a143fed7db02541f8c056d6954dfb7812"
     },
     {
       "bytes": 5753,
@@ -250,10 +250,10 @@
       "sha256": "586b814c75cde6491212911ba8c4af4c9131e726585fb2e587a639e000c3a566"
     },
     {
-      "bytes": 5561,
+      "bytes": 5566,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/web-search.md",
-      "sha256": "d95b13bd411d28748b25d17fbb3fc384abcf624ad5c038698454f8e88ef38ea7"
+      "sha256": "9eaab3d4da407df83f32ef60a3c6db49ef7a7cd4ff7e61eac4798b45518470d8"
     },
     {
       "bytes": 6569,

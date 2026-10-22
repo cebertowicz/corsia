@@ -88,13 +88,13 @@ def applicable_steps(
     for vendor in _paid_missing_sources(facts):
         product = "Claude" if vendor == "claude_code" else "ChatGPT"
         steps.append(_step(
-            1, "The other subscription",
+            1, "Add your second subscription",
             f"the {product} subscription is connected, or the user chose not now",
             vendor=vendor,
         ))
     if _has_import_step(facts):
         steps.append(_step(
-            2, "Bring over from your other tools",
+            2, "Bring over what your other tools know",
             "the user chose whether to bring over context from their other tools",
         ))
     if connected_app_count < 2:
@@ -125,7 +125,7 @@ def applicable_steps(
             "the user has been told how file access and approval work",
         ),
         _step(
-            9, "The hand-off",
+            9, "Hand over to your agents",
             "the user has the final setup question and knows what CORSIA can take off their plate",
         ),
     ))

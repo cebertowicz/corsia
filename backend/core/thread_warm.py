@@ -30,7 +30,7 @@ def _publish_warm_progress(
     try:
         callback(progress)
     except Exception as error:
-        logger.debug("Native cache warm progress callback failed: {}", error)
+        logger.warning("Native cache warm progress callback failed: {}", error)
 
 
 def make_provider_warm_operations(
@@ -210,8 +210,8 @@ async def _run_warm_with_progress(
     progress_callback: WarmProgressCallback | None,
 ) -> dict[str, Any]:
     """Run one provider warm without letting progress work delay or fail it."""
-    warm = asyncio.create_task(factory())
-    probe: asyncio.Task[dict[str, Any] | None] | None = None
+    warm = asyncio.ensure_future(factory())
+    probe: asyncio.Future[dict[str, Any] | None] | None = None
     try:
         while not warm.done():
             if progress_probe is None or progress_callback is None:
@@ -221,7 +221,7 @@ async def _run_warm_with_progress(
                 done, _ = await asyncio.wait({warm}, timeout=WARM_PROGRESS_PROBE_SECONDS)
                 if warm in done:
                     break
-                probe = asyncio.create_task(progress_probe())
+                probe = asyncio.ensure_future(progress_probe())
             done, _ = await asyncio.wait({warm, probe}, return_when=asyncio.FIRST_COMPLETED)
             if warm in done:
                 break
@@ -232,7 +232,7 @@ async def _run_warm_with_progress(
             try:
                 progress = probe.result()
             except Exception as error:
-                logger.debug("Native cache warm progress probe failed: {}", error)
+                logger.warning("Native cache warm progress probe failed: {}", error)
             else:
                 if progress is not None:
                     _publish_warm_progress(progress_callback, progress)

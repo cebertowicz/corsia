@@ -327,7 +327,7 @@ def first_app_step(facts: dict[str, Any]) -> str:
     number = steps[0]["step_number"] if steps else 9
     reference = system_resource_source(APP_REFERENCE).read_text(encoding="utf-8")
     if number == 9:
-        return reference[reference.index("## The hand-off"):].strip()
+        return reference[reference.index("## Hand over to your agents"):].strip()
     match = re.search(rf"(?ms)^{number}\. \*\*.*?(?=^\d+\. \*\*|^Silently,|\Z)", reference)
     if match is None:
         raise ValueError(f"The first-run app reference has no step {number}")
