@@ -159,9 +159,13 @@ from plans.watch_resolution import resolve_delivered_event
 
 # Document feedback and shared-document ownership tasks (doceditor/, registry/).
 from plans.artifact_links import link as link_node_artifact
+from plans.feedback_delivery import (
+    recipient_turn_is_active,
+    settle_feedback_node,
+    unstarted_feedback_batch_id,
+)
 from plans.feedback_nodes import (
     create_feedback_node, create_review_node, feedback_display, feedback_item_counts, load_feedback_items,
-    settle_feedback_node,
 )
 from plans.review_requests import (
     append_review_note, close_review_node, review_is_open, settle_review_node,

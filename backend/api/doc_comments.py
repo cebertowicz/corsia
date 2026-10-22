@@ -143,6 +143,10 @@ async def create_comment(artifact_id: str, token: str, body: CommentCreate):
             409,
             "client_id collides with another artifact's comment — re-mint and retry",
         ) from exc
+    if feedback["woken"]:
+        from plans import public
+
+        await public.drive_threads(feedback["woken"])
     return {"comment": row, **feedback}
 
 
