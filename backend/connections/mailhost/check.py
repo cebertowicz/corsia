@@ -23,7 +23,7 @@ from infra.db_async import run_in_db
 log = logging.getLogger(__name__)
 
 _STATUS_OF_CAUSE = {PASSWORD_REFUSED: store.REFUSED, IMAP_OFF: store.IMAP_OFF}
-_pending: set[asyncio.Task[None]] = set()
+_pending: set[asyncio.Task[str]] = set()
 
 
 def _mail_login(account_id: str, endpoints: Endpoints, password: str) -> Endpoints:

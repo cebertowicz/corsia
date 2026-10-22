@@ -8,6 +8,7 @@ import json
 import logging
 import uuid
 from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import pytest
@@ -41,7 +42,7 @@ def _no_leak(*texts: str) -> None:
         assert PASSWORD not in text and HOST_REPLY_MARKER not in text and TEST_PASSWORD not in text
 
 
-async def _connect(conductor_thread: str, **arguments) -> dict | str:
+async def _connect(conductor_thread: str, **arguments) -> Any:
     out = await MailHostConnectTool().execute(_thread_id=conductor_thread, **arguments)
     return out if out.startswith("Error") else json.loads(out)
 
