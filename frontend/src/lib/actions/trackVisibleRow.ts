@@ -3,19 +3,19 @@ import { setVisibleRows } from '$lib/stores/replyContextCapture';
 /**
  * Reports which transcript rows are on screen, for the reply context a message
  * carries. One observer serves every row; a row with no seq yet (not delivered)
- * is not tracked until it has one.
+ * is not tracked until it has one. Each row reports the thread it belongs to.
  */
-const rowSeqs = new WeakMap<Element, number>();
+const rowSeqs = new WeakMap<Element, { seq: number; threadId: string | null }>();
 const visible = new Set<Element>();
 let observer: IntersectionObserver | null = null;
 
 function report(): void {
-	const seqs: number[] = [];
-	for (const row of visible) {
-		const seq = rowSeqs.get(row);
-		if (seq !== undefined) seqs.push(seq);
+	const rows: Array<{ threadId: string; seq: number }> = [];
+	for (const node of visible) {
+		const row = rowSeqs.get(node);
+		if (row?.threadId) rows.push({ threadId: row.threadId, seq: row.seq });
 	}
-	setVisibleRows(seqs);
+	setVisibleRows(rows);
 }
 
 function sharedObserver(): IntersectionObserver | null {
@@ -30,20 +30,22 @@ function sharedObserver(): IntersectionObserver | null {
 	return observer;
 }
 
-export function trackVisibleRow(node: HTMLElement, seq: number | null | undefined) {
-	const apply = (value: number | null | undefined) => {
+type RowReport = { seq: number | null | undefined; threadId: string | null };
+
+export function trackVisibleRow(node: HTMLElement, row: RowReport) {
+	const apply = (value: RowReport) => {
 		const watcher = sharedObserver();
-		if (typeof value !== 'number') {
+		if (typeof value.seq !== 'number') {
 			rowSeqs.delete(node);
 			watcher?.unobserve(node);
 			if (visible.delete(node)) report();
 			return;
 		}
-		rowSeqs.set(node, value);
+		rowSeqs.set(node, { seq: value.seq, threadId: value.threadId });
 		watcher?.observe(node);
 		if (visible.has(node)) report();
 	};
-	apply(seq);
+	apply(row);
 	return {
 		update: apply,
 		destroy() {

@@ -5,6 +5,10 @@ import { visitDividers } from '../stores/threadUpdateCards';
 import { setWs } from '../ws/state';
 import { sendMessage } from '../ws/send';
 
+function rows(threadId: string, ...seqs: number[]) {
+	return seqs.map((seq) => ({ threadId, seq }));
+}
+
 let sent: Record<string, unknown>[];
 beforeEach(() => {
 	subagentMeta.set(new Map());
@@ -15,14 +19,14 @@ beforeEach(() => {
 
 afterEach(() => {
 	cancelComposing();
-	setVisibleRows([]);
+	setVisibleRows(rows('main'));
 	visitDividers.set({});
 });
 
 describe('reply context send payload', () => {
 	it('sends what was in view while composing and the first unread message', () => {
 		visitDividers.set({ main: { divider: { since: 's', first_seq: 4 }, failed: false } });
-		setVisibleRows([3, 4, 5]);
+		setVisibleRows(rows('main', 3, 4, 5));
 		beginComposing('main');
 		sendMessage('main', 'Do the second one');
 		expect(sent.at(-1)).toMatchObject({
@@ -32,7 +36,7 @@ describe('reply context send payload', () => {
 	});
 
 	it('sends the window once: the next message starts from nothing', () => {
-		setVisibleRows([3]);
+		setVisibleRows(rows('main', 3));
 		beginComposing('main');
 		sendMessage('main', 'first');
 		sendMessage('main', 'second');

@@ -3,15 +3,19 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { beginComposing, cancelComposing, mergeInView, noteComposerText, setVisibleRows, takeReplyContext } from './replyContextCapture';
 import { visitDividers } from './threadUpdateCards';
 
+function rows(threadId: string, ...seqs: number[]) {
+	return seqs.map((seq) => ({ threadId, seq }));
+}
+
 beforeEach(() => {
 	cancelComposing();
-	setVisibleRows([]);
+	setVisibleRows(rows('t1'));
 	visitDividers.set({});
 });
 
 afterEach(() => {
 	cancelComposing();
-	setVisibleRows([]);
+	setVisibleRows(rows('t1'));
 	visitDividers.set({});
 });
 
@@ -32,57 +36,66 @@ describe('mergeInView', () => {
 
 describe('reply context capture', () => {
 	it('accumulates every row that was on screen at any moment while composing', () => {
-		setVisibleRows([40, 41, 42]);
+		setVisibleRows(rows('t1', 40, 41, 42));
 		beginComposing('t1');
-		setVisibleRows([20, 21]);
-		setVisibleRows([21, 22, 23]);
+		setVisibleRows(rows('t1', 20, 21));
+		setVisibleRows(rows('t1', 21, 22, 23));
 		expect(takeReplyContext('t1')).toEqual({ in_view: [[20, 23, 4], [40, 42, 3]] });
 	});
 
 	it('counts the rows already on screen when the first input arrives', () => {
-		setVisibleRows([7, 8]);
+		setVisibleRows(rows('t1', 7, 8));
 		beginComposing('t1');
 		expect(takeReplyContext('t1')).toEqual({ in_view: [[7, 8, 2]] });
 	});
 
 	it('ignores rows seen before composing began', () => {
-		setVisibleRows([1, 2]);
-		setVisibleRows([30]);
+		setVisibleRows(rows('t1', 1, 2));
+		setVisibleRows(rows('t1', 30));
 		beginComposing('t1');
-		setVisibleRows([31]);
+		setVisibleRows(rows('t1', 31));
 		expect(takeReplyContext('t1')).toEqual({ in_view: [[30, 31, 2]] });
 	});
 
 	it('starts a fresh window after a send', () => {
 		beginComposing('t1');
-		setVisibleRows([5]);
+		setVisibleRows(rows('t1', 5));
 		expect(takeReplyContext('t1')).toEqual({ in_view: [[5, 5, 1]] });
-		setVisibleRows([9]);
+		setVisibleRows(rows('t1', 9));
 		expect(takeReplyContext('t1')).toBeNull();
 	});
 
 	it('does not carry a window into another thread', () => {
 		beginComposing('t1');
-		setVisibleRows([5]);
+		setVisibleRows(rows('t1', 5));
 		expect(takeReplyContext('t2')).toBeNull();
 		expect(takeReplyContext('t1')).toBeNull();
 	});
 
+	it('never counts rows of another thread, whether seen before or during composing', () => {
+		setVisibleRows(rows('t2', 90, 91));
+		beginComposing('t1');
+		setVisibleRows([...rows('t1', 5), ...rows('t2', 92)]);
+		// Another thread's composer is empty, so it never cancels this window.
+		noteComposerText('t2', '');
+		expect(takeReplyContext('t1')).toEqual({ in_view: [[5, 5, 1]] });
+	});
+
 	it('forgets a draft that was emptied without sending', () => {
 		beginComposing('t1');
-		setVisibleRows([5]);
+		setVisibleRows(rows('t1', 5));
 		cancelComposing();
-		setVisibleRows([]);
+		setVisibleRows(rows('t1'));
 		beginComposing('t1');
-		setVisibleRows([9]);
+		setVisibleRows(rows('t1', 9));
 		expect(takeReplyContext('t1')).toEqual({ in_view: [[9, 9, 1]] });
 	});
 
 	it('opens on the first typed character and closes when its own composer is emptied', () => {
-		setVisibleRows([5]);
+		setVisibleRows(rows('t1', 5));
 		noteComposerText('t1', '   ');
 		noteComposerText('t1', 'y');
-		setVisibleRows([6]);
+		setVisibleRows(rows('t1', 6));
 		noteComposerText('t2', '');
 		noteComposerText('t1', '');
 		noteComposerText('t1', 'yes');
@@ -90,7 +103,7 @@ describe('reply context capture', () => {
 	});
 
 	it('an empty composer for another thread does not end this window', () => {
-		setVisibleRows([5]);
+		setVisibleRows(rows('t1', 5));
 		noteComposerText('t1', 'y');
 		noteComposerText('t2', '');
 		expect(takeReplyContext('t1')).toEqual({ in_view: [[5, 5, 1]] });
@@ -98,7 +111,7 @@ describe('reply context capture', () => {
 
 	it('beginning twice for one thread keeps the window', () => {
 		beginComposing('t1');
-		setVisibleRows([5]);
+		setVisibleRows(rows('t1', 5));
 		beginComposing('t1');
 		expect(takeReplyContext('t1')).toEqual({ in_view: [[5, 5, 1]] });
 	});
@@ -120,7 +133,7 @@ describe('reply context capture', () => {
 	it('carries both when both exist', () => {
 		visitDividers.set({ t1: { divider: { since: 's', first_seq: 2 }, failed: false } });
 		beginComposing('t1');
-		setVisibleRows([6]);
+		setVisibleRows(rows('t1', 6));
 		expect(takeReplyContext('t1')).toEqual({
 			in_view: [[6, 6, 1]], first_unread: { seq: 2, truncated: false },
 		});

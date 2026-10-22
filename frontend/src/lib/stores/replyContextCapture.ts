@@ -45,9 +45,11 @@ let composingThread: string | null = null;
 let spans: Array<[number, number]> = [];
 let seen = new Set<number>();
 /** The rows on screen right now, whether or not anyone is composing. */
-let visibleSeqs: number[] = [];
+let visibleRows: Array<{ threadId: string; seq: number }> = [];
 
-function record(seqs: readonly number[]): void {
+/** Only rows of the thread being composed in count: another thread's rows were not what was answered. */
+function record(rows: ReadonlyArray<{ threadId: string; seq: number }>): void {
+	const seqs = rows.filter((row) => row.threadId === composingThread).map((row) => row.seq);
 	if (seqs.length === 0) return;
 	spans.push([Math.min(...seqs), Math.max(...seqs)]);
 	for (const seq of seqs) seen.add(seq);
@@ -55,10 +57,10 @@ function record(seqs: readonly number[]): void {
 	spans = mergeSpans(spans);
 }
 
-/** The observer reports the seqs of every row on screen after each change. */
-export function setVisibleRows(seqs: readonly number[]): void {
-	visibleSeqs = [...seqs];
-	if (composingThread) record(visibleSeqs);
+/** The observer reports every row on screen, with its thread, after each change. */
+export function setVisibleRows(rows: ReadonlyArray<{ threadId: string; seq: number }>): void {
+	visibleRows = [...rows];
+	if (composingThread) record(visibleRows);
 }
 
 /** The first input in the composer starts the window; the rows already on screen count. */
@@ -67,7 +69,7 @@ export function beginComposing(threadId: string): void {
 	composingThread = threadId;
 	spans = [];
 	seen = new Set();
-	record(visibleSeqs);
+	record(visibleRows);
 }
 
 /** A send or an emptied composer ends the window; the next first input starts a fresh one. */

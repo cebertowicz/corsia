@@ -27,19 +27,9 @@ _PRIVATE_METADATA_KEYS = (
     VIEWING_DOCUMENT_KEY,
     VIEWING_DOCUMENT_TARGET_KEY,
     INSTALLED_SOURCES,
+    # The sender's own context for the agent; no client reads it back.
+    REPLY_CONTEXT_KEY,
 )
-
-
-def _public_reply_context(value: object) -> dict | None:
-    """Keep only the comments: in-view ranges, first unread and drops are the sender's.
-
-    The caller's dict still holds what the client sent, so the comments are
-    checked here for shape only; other windows need them to keep the highlight.
-    """
-    comments = value.get("comments") if isinstance(value, dict) else None
-    if not isinstance(comments, list) or not comments:
-        return None
-    return {"comments": comments}
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,10 +114,6 @@ def project_input_message(row: InputBroadcastRow) -> dict:
     if isinstance(metadata, dict):
         for key in _PRIVATE_METADATA_KEYS:
             metadata.pop(key, None)
-        if REPLY_CONTEXT_KEY in metadata:
-            public = _public_reply_context(metadata.pop(REPLY_CONTEXT_KEY))
-            if public is not None:
-                metadata[REPLY_CONTEXT_KEY] = public
     return {
         "id": row.message_id,
         "role": row.role,

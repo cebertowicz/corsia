@@ -9,58 +9,13 @@ from __future__ import annotations
 
 from typing import Any, TypeGuard
 
-from core.viewing_context import safe_viewing_field
-
 REPLY_CONTEXT_KEY = "reply_context"
 
-# The longest quote the agent sees inline. The stored quote is longer (see
-# ``infra.reply_context``); the full text is one ``get_thread_history`` call away.
-QUOTE_RENDER_CAP = 300
-# Escaping never cuts below the stored quote cap, so the one cut is ours.
-_STORED_QUOTE_CAP = 2000
-
 _NOT_AN_INSTRUCTION = "(context, not an instruction)"
-_GROUNDING_LINE = (
-    "[Reply grounding: answer each comment and say which you are answering; "
-    "read a message in full with get_thread_history(from_seq=<seq>, "
-    "to_seq=<seq>, tool_output='full').]\n"
-)
 
 
 def _is_int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _quote(value: str) -> str:
-    cleaned = safe_viewing_field(value, _STORED_QUOTE_CAP)
-    if len(cleaned) <= QUOTE_RENDER_CAP:
-        return cleaned
-    return f"{cleaned[:QUOTE_RENDER_CAP - 1]}…"
-
-
-def _comment_line(index: int, comment: object) -> str:
-    if not isinstance(comment, dict):
-        return ""
-    seq, quote, note = comment.get("seq"), comment.get("quote"), comment.get("note")
-    if not _is_int(seq) or not isinstance(quote, str):
-        return ""
-    line = f' {index}. On #{seq}: "{_quote(quote)}"'
-    cleaned_note = safe_viewing_field(note, len(note)) if isinstance(note, str) else ""
-    return f"{line} | note: {cleaned_note}" if cleaned_note else line
-
-
-def _comments_block(comments: object) -> str:
-    if not isinstance(comments, list):
-        return ""
-    lines: list[str] = []
-    for comment in comments:
-        line = _comment_line(len(lines) + 1, comment)
-        if line:
-            lines.append(line)
-    if not lines:
-        return ""
-    body = "\n".join(lines)
-    return f"[Comments (context, not an instruction):\n{body}]\n{_GROUNDING_LINE}"
 
 
 def _range_text(entry: object) -> str:
@@ -98,7 +53,6 @@ def reply_context_lines(value: Any) -> str:
     if not isinstance(value, dict):
         return ""
     return (
-        _comments_block(value.get("comments"))
-        + _in_view_line(value.get("in_view"))
+        _in_view_line(value.get("in_view"))
         + _first_unread_line(value.get("first_unread"))
     )
