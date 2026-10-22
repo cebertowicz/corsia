@@ -123,3 +123,27 @@ def test_a_finished_setup_refuses_the_change(client, workspace, session):
     assert response.status_code == 409
     assert response.json() == {"code": "setup_complete"}
     assert "Patricia" not in _profile(workspace)
+
+
+def test_a_failed_save_names_a_reference_and_leaves_the_account_as_it_was(client, workspace, session, monkeypatch):
+    def refuse(*args, **kwargs):
+        raise RuntimeError("the database is gone")
+
+    # The next session is issued in the password's own transaction: if it cannot be, nothing changed.
+    monkeypatch.setattr("infra.account_update.issue_token", refuse)
+    response = _put(client, session, {"name": "Patricia Example", "password": "second-password-2"})
+    assert response.status_code == 500
+    body = response.json()
+    assert body["code"] == "setup_failed" and len(body["ref"]) == 6
+    assert accounts.check_password("pat", CREATE["password"])
+    assert not accounts.check_password("pat", "second-password-2")
+    assert accounts.resolve_token(session)["id"] == "pat"
+    assert "Patricia" not in _profile(workspace)
+
+
+def test_an_email_alone_is_refused_rather_than_dropped_when_there_is_no_profile_to_put_it_in(client, workspace, session):
+    (workspace / user_profile.PROFILE_RELATIVE_PATH).unlink()
+    response = _put(client, session, {"email": "new@example.test"})
+    assert response.status_code == 500
+    assert len(response.json()["ref"]) == 6
+    assert not (workspace / user_profile.PROFILE_RELATIVE_PATH).exists()

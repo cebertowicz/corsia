@@ -306,6 +306,8 @@ export function createLivingLogo(host, options = {}) {
 
 	if (!still) {
 		const playing = (options.entry ?? 'play') === 'play';
+		// With no entry to wait for the mark is settled at once, so a hidden window or tab resumes its pulse when it shows again.
+		if (!playing) entryDone = true;
 		startFlow(playing ? (options.delay ?? 0) + MOTION.spreadMs + MOTION.landMs : 0);
 		if (playing) playEntry();
 		else schedulePulse(MOTION.pulseFirstMs);

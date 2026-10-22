@@ -7,10 +7,10 @@ import sqlite3
 from infra import user_profile
 from infra.accounts import (
     AccountError,
-    hash_password,
+    issue_token,
     normalize_username,
     require_password,
-    utc_now_iso,
+    set_password,
     write_transaction,
 )
 
@@ -18,37 +18,37 @@ from infra.accounts import (
 def update_account(
     username: str, *, full_name: str | None = None, email: str | None = None,
     password: str | None = None, db: sqlite3.Connection | None = None,
-) -> bool:
+) -> tuple[str, str | None] | None:
     """Change what a person gave setup's account screen: their name and email, and their password.
 
     ``None`` leaves a field alone; an empty ``email`` removes it. The username is the data owner id and never changes.
     The profile write is staged first and published as the transaction's last step, undone if it does not commit.
-    Returns True when the password changed, which revokes every session: the caller issues the next one.
+    A new password goes through ``set_password``, which owns what a password change revokes (every session), and the
+    next session is issued in the same transaction, so a failure leaves the old password and session as they were.
+    Returns that new session as ``(token, expires_at)`` when the password changed, else ``None``.
     """
     from infra import config
 
     name = normalize_username(username)
     if full_name is not None and not user_profile.one_line(full_name):
         raise AccountError("A name is required.")
-    encoded = None
     if password is not None:
         require_password(password)
-        encoded = hash_password(password)
     staged = None
     if full_name is not None or email is not None:
         staged = user_profile.stage_profile_update(config.WORKSPACE, full_name=full_name, email=email)
-    now = utc_now_iso()
+    session = None
     try:
         with write_transaction(db, scope="update_account") as conn:
             if not conn.execute("SELECT 1 FROM users WHERE id = ?", (name,)).fetchone():
                 raise AccountError(f"no account named '{name}'")
-            if encoded is not None:
-                conn.execute("UPDATE users SET password_hash = ?, password_changed_at = ? WHERE id = ?", (encoded, now, name))
-                conn.execute("DELETE FROM auth_tokens WHERE user_id = ? AND kind = 'session'", (name,))
+            if password is not None:
+                set_password(name, password, db=conn)
+                session = issue_token(name, kind="session", label="browser", db=conn)
             if staged:
                 staged.publish()
     except BaseException:
         if staged:
             staged.undo()
         raise
-    return encoded is not None
+    return session

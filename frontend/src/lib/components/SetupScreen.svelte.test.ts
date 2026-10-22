@@ -402,10 +402,12 @@ describe('SetupScreen', () => {
 			button('Continue')?.click(); await settle();
 			expect(host.querySelector('h1')?.textContent).toBe('Your account');
 			expect(getByRole('alert').textContent).toContain('Use a password of at least 8 characters.');
-			vi.mocked(fetch).mockImplementation(async (input, init) => String(input) === '/api/setup/account' ? json({}, 500) : answer(input, init));
+			vi.mocked(fetch).mockImplementation(async (input, init) => String(input) === '/api/setup/account' ? json({ code: 'setup_failed', ref: 'K7QM2X' }, 500) : answer(input, init));
 			button('Continue')?.click(); await settle();
 			expect(host.querySelector('h1')?.textContent).toBe('Your account');
 			expect(getByRole('alert').textContent).toContain('Couldn’t save your account. Try again.');
+			// A system failure carries the reference that finds its log entry.
+			expect(getByRole('alert').textContent).toContain('Reference: K7QM2X');
 			// What was typed stays, and the next press tries the same change again.
 			expect((host.querySelector('#setup-name') as HTMLInputElement).value).toBe('Ada King');
 		});

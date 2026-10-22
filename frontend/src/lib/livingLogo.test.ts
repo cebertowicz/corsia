@@ -81,6 +81,24 @@ describe('livingLogo', () => {
 		logo.destroy();
 	});
 
+	it('keeps pulsing after a hidden window shows again, even with no entry to play (the sign-in mark)', () => {
+		vi.useFakeTimers();
+		let hidden = true;
+		Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+		try {
+			const logo = createLivingLogo(host, { entry: 'none' });
+			vi.advanceTimersByTime(60_000);
+			const before = played.length;
+			hidden = false;
+			document.dispatchEvent(new Event('visibilitychange'));
+			vi.advanceTimersByTime(60_000);
+			expect(played.length).toBeGreaterThan(before);
+			logo.destroy();
+		} finally {
+			delete (document as { hidden?: unknown }).hidden;
+		}
+	});
+
 	it('removes itself on destroy', () => {
 		const logo = createLivingLogo(host, { entry: 'none' });
 		expect(host.querySelector('svg')).toBeTruthy();
