@@ -10,6 +10,7 @@ concurrency cap. A claim moves the row to its next slot before the run starts,
 so a restart or a slow run never replays and a missed period never piles up.
 The runs themselves are tasks, so a 5-minute script never holds the sweep.
 Runs ``run_script`` event rules queued share the same cap, after due ones,
+take the same per-script claim, so one run of a script is in flight at a time,
 and settle the same way (``automation.script_rule_runs``).
 """
 
@@ -46,6 +47,8 @@ SCRIPT_RUN_CAP = 2
 WORKSPACE_SCOPE = "__workspace__"
 
 _in_flight: dict[str, asyncio.Task] = {}
+#: The script schedule each in-flight rule run holds the claim of, by its key.
+_holds: dict[str, str] = {}
 
 #: The runner builds a line's event id from the run, so the owner can't resend it: a new run sends every line again.
 _RERUN_FIX = "Run the script again to send it; its other event lines are sent again too."
@@ -53,30 +56,38 @@ _RERUN_FIX = "Run the script again to send it; its other event lines are sent ag
 
 def _forget(key: str, _task: asyncio.Task) -> None:
     _in_flight.pop(key, None)
+    _holds.pop(key, None)
 
 
-def _start(key: str, run) -> None:
+def _start(key: str, run, holds: str | None = None) -> None:
     task = asyncio.create_task(run)
     _in_flight[key] = task
+    if holds is not None:
+        _holds[key] = holds
     task.add_done_callback(partial(_forget, key))
+
+
+def _live() -> set[str]:
+    """The keys of the runs this process holds, and every script schedule whose claim they hold."""
+    return {*_in_flight, *(_holds[key] for key in _in_flight if key in _holds)}
 
 
 async def drive(now: str, *, db=None) -> int:
     """Recover interrupted runs and start due ones, then queued rule runs; return how many started."""
     for key, task in tuple(_in_flight.items()):
         if task.done():
-            _in_flight.pop(key, None)
+            _forget(key, task)
     capacity = SCRIPT_RUN_CAP - len(_in_flight)
     claims = await run_in_db_unless_owned(
-        db, claim_due, now, capacity, set(_in_flight), db,
+        db, claim_due, now, capacity, _live(), db,
     )
     for schedule in claims:
         _start(schedule.id, run_claimed(schedule, now))
     rule_claims = await run_in_db_unless_owned(
-        db, script_rule_runs.claim, now, SCRIPT_RUN_CAP - len(_in_flight), set(_in_flight), db,
+        db, script_rule_runs.claim, now, SCRIPT_RUN_CAP - len(_in_flight), _live(), db,
     )
     for schedule, rule_run in rule_claims:
-        _start(rule_run.key, run_claimed(schedule, now, rule_run=rule_run))
+        _start(rule_run.key, run_claimed(schedule, now, rule_run=rule_run), holds=schedule.id)
     return len(claims) + len(rule_claims)
 
 
@@ -167,7 +178,7 @@ async def run_claimed(
     finish time, so ``last_run_at`` and the hourly note gate are real clocks.
     """
     try:
-        report = await (_execute(schedule) if rule_run is None else _execute(schedule, rule_run.stdin))
+        report = await _execute(schedule, rule_run)
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - a run's failure is its report
@@ -276,7 +287,6 @@ def _record_settle_failure(
             ran_at=now,
             status="error",
             error=f"could not record script run: {cause}",
-            clear_claim=rule_run is None,
             db=connection,
         )
         if rule_run is not None:
@@ -292,7 +302,7 @@ def _error_report(schedule: Schedule, message: str) -> RunReport:
     )
 
 
-async def _execute(schedule: Schedule, stdin: bytes | None = None) -> RunReport:
+async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None = None) -> RunReport:
     path = Path(schedule.script_path or "")
     try:
         current = await asyncio.to_thread(store.file_sha256, path)
@@ -306,7 +316,7 @@ async def _execute(schedule: Schedule, stdin: bytes | None = None) -> RunReport:
         run = await run_script(
             schedule.thread_id, project, path,
             run_id=run_id, timeout_seconds=int(schedule.timeout_seconds or 0),
-            **({"stdin": stdin} if stdin is not None else {}),
+            **({"stdin": rule_run.stdin, "trace": rule_run.trace} if rule_run is not None else {}),
         )
     except (ScriptSandboxError, ProcessOwnerError) as exc:
         return _error_report(schedule, f"could not start: {exc}")
@@ -330,8 +340,7 @@ def settle(
         except KeyError:
             return False  # the owner was deleted while the run was in flight
         if current.state == "cancelled":
-            if rule_run is None:
-                store.finish_run(schedule.id, ran_at=now, status="cancelled", db=connection)
+            store.finish_run(schedule.id, ran_at=now, status="cancelled", db=connection)
             return False
         if report.status == "hash_mismatch":
             store.stop_runs(

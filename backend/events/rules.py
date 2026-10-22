@@ -308,7 +308,7 @@ def evaluate(
     dropped_by = _apply_drops(plan, rules, by_thread, recipients)
     from events.rule_runs import queue  # it imports this module
 
-    plan.settled += queue(event, rules, dropped_by)
+    plan.settled += queue(db, event, rules, dropped_by)
     delivering: list[tuple[Rule, str, Target | None]] = []
     answers: dict[str, tuple[bool, str | None, int]] = {}
     asking: dict[str, list[str]] = {}

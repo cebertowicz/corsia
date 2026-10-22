@@ -344,8 +344,7 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
             envelope, resolved.declaration,
             (lambda db: _registered_owner_targets(owner, envelope, db)) if owner
             else (lambda db: resolve_targets(envelope, db=db)),
-            # A declared type's owner is the thread that sent it, so routing's echo is skipped.
-            repository_projects=projects, producer=owner, db=conn,
+            repository_projects=projects, db=conn,
         )
         matched = _rules_matched(plan)
         _record_acceptance(
@@ -362,8 +361,9 @@ async def admit_event(*, event_type: str, facts: dict, origin: Literal["connecto
     """Validate, deduplicate, evaluate and deliver one declared event without trusting producer input.
 
     A use: both type is also recorded as a measure in the same transaction, before routing.
-    ``trace`` is set only by the script runner for a run a rule started: the rules in
-    the event's causal chain, which the loop guard reads (``events.rule_runs``).
+    ``trace`` is set only for a run a rule started, by the script runner or by
+    ``corsia event emit`` from the run's ``events.trace_env``: the rules in the event's
+    causal chain, which the loop guard reads (``events.rule_runs``).
     An emitter or agent refusal is retained here, the one owner of that receipt; failing to
     retain it only logs and never changes the result.
     """

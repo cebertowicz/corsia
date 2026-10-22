@@ -66,14 +66,13 @@ def _check_workflow(thread_id: str, project_id: str | None, workflow: Any) -> No
 def _listed(thread_id: str, project_id: str | None, items: list) -> list[dict]:
     """Each schedule as a dict; a script schedule naming a workflow also shows workflow_stale,
     true when that workflow is no longer one the owner may use (read live, never stored).
-    A script with no cadence shows no next run and says only event rules start it."""
+    A script with no cadence (stored with no next run) says only event rules start it."""
     from infra.measure_registry import workflow_problem
     from tools.workflow_owners import workflow_owners
 
     listed = [asdict(item) for item in items]
     for entry in listed:
         if entry["kind"] == script_schedules.SCRIPT_KIND and entry["spec"] == script_schedules.RULES_ONLY:
-            entry["next_run_at"] = None
             entry["runs_from"] = "event rules only: it has no cadence and runs when a run_script rule matches"
     named = [entry for entry in listed if (entry.get("payload") or {}).get("workflow") and entry["kind"] == script_schedules.SCRIPT_KIND]
     if named:

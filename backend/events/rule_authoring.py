@@ -275,8 +275,8 @@ def _shape(rule: rules.Rule) -> dict[str, Any]:
 
 
 def list_rules(db: sqlite3.Connection, *, project_id: str | None, now: str) -> list[dict[str, Any]]:
-    """The project's rules (disabled ones only within retention), last action, and 24h wakes
-    and script starts."""
+    """The project's rules (disabled ones only within retention), last action, and 24h wakes,
+    script starts and skipped runs."""
     if not project_id:
         return []
     cutoff = (datetime.fromisoformat(now) - rules.RETENTION).isoformat()
@@ -293,16 +293,18 @@ def list_rules(db: sqlite3.Connection, *, project_id: str | None, now: str) -> l
         row["rule_id"]: row for row in db.execute(
             "SELECT rule_id, MAX(CASE WHEN outcome IN ('woke','digested','dropped','queued','running',"
             "'ran','failed') THEN at END) AS last_fired, SUM(outcome='woke' AND via='rule' AND at>=?) "
-            "AS wakes, SUM(outcome IN ('queued','running','ran','failed') AND at>=?) AS starts "
+            "AS wakes, SUM(outcome IN ('queued','running','ran','failed') AND at>=?) AS starts, "
+            "SUM(outcome='skipped' AND at>=?) AS skips "
             f"FROM event_route_decisions WHERE rule_id IN ({marks}) GROUP BY rule_id",
-            (since, since, *(rule.id for rule in found)),
+            (since, since, since, *(rule.id for rule in found)),
         ).fetchall()
     }
     return [
         {**_shape(rule),
          "last_fired": stats[rule.id]["last_fired"] if rule.id in stats else None,
          "wakes_24h": int(stats[rule.id]["wakes"] or 0) if rule.id in stats else 0,
-         "starts_24h": int(stats[rule.id]["starts"] or 0) if rule.id in stats else 0}
+         "starts_24h": int(stats[rule.id]["starts"] or 0) if rule.id in stats else 0,
+         "skips_24h": int(stats[rule.id]["skips"] or 0) if rule.id in stats else 0}
         for rule in found
     ]
 

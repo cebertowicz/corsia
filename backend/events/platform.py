@@ -42,7 +42,6 @@ DIGESTED = "digested"
 DEAD_LETTERED = "dead_lettered"
 DUPLICATE = "duplicate"
 FILTERED = "filtered"
-OWN_EMIT = "its own event"  # why routing's echo to the event's sender was skipped
 
 _NOTE_LINE_LIMIT = 2000
 
@@ -306,7 +305,6 @@ def deliver_envelope_sync(
     resolve: Callable[[sqlite3.Connection], list[Target]], *,
     target_filter: Filter | None = None,
     repository_projects: frozenset[str] | None = frozenset(),
-    producer: str | None = None,
     db: sqlite3.Connection | None = None,
 ) -> tuple[list[PlatformDelivery], rules.RulePlan | None]:
     """Deliver one normalized event to the targets ``resolve`` picks, then apply rules.
@@ -315,8 +313,6 @@ def deliver_envelope_sync(
     ``repository_projects`` (``rule_reads.unrouted_projects``, read before the
     transaction) scope the rules when ``resolve`` routes the event to no thread;
     ``None``, that lookup failed, and no rule fires there (``rules.lookup_failed``).
-    ``producer`` is the thread that sent the event: routing's delivery back to it
-    is skipped unless a rule of its own rides or drops that delivery.
     """
     with write_transaction(db, scope="deliver_platform_event") as conn:
         targets = resolve(conn)
@@ -332,9 +328,6 @@ def deliver_envelope_sync(
         else:
             event = replace(event, repository_projects=repository_projects or frozenset())
             plan = rules.evaluate(conn, event, targets, skipped=skipped)
-        if producer is not None and not (plan and (producer in plan.rides or producer in plan.drops)):
-            filtered = [OWN_EMIT if reason is None and target.thread == producer else reason
-                        for target, reason in zip(targets, filtered)]
         deliveries = [
             PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
             if reason is not None

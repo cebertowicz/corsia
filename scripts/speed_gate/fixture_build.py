@@ -62,6 +62,9 @@ def _overrides(table: str) -> dict:
     if table == "plan_node_dependencies":
         found["depends_on_node_id"] = lambda i, r, p: p.ids["node"][(i * 13 + 5) % len(p.ids["node"])]
         found["node_id"] = lambda i, r, p: p.ids["node"][(i * 7 + 1) % len(p.ids["node"])]
+    if table == "automation_schedules":
+        # Nullable only for a script started solely by event rules; a clock or cadence row needs it.
+        found["next_run_at"] = lambda i, r, p: rows.timestamp(r)
     return found
 
 

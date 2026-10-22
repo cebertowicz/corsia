@@ -57,15 +57,16 @@ def world(isolated_db, tmp_path: Path, monkeypatch):
         driven.append(thread_id)
 
     monkeypatch.setattr(script_runner, "_drive_owner", drive_owner)
-    return {"tmp": tmp_path, "driven": driven, "outputs": {}, "calls": []}
+    return {"tmp": tmp_path, "driven": driven, "outputs": {}, "calls": [], "traces": []}
 
 
 @pytest.fixture
 def runs(world, monkeypatch):
     """The sandboxed process: each script's stdout by file name, and every call's stdin."""
 
-    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, stdin=None):
+    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, stdin=None, trace=()):
         world["calls"].append((path.name, json.loads(stdin) if stdin is not None else None))
+        world["traces"].append(trace)
         return world["outputs"].get(path.name, ScriptRun(0, b"", b"", False))
 
     monkeypatch.setattr(script_runner, "run_script", fake)
@@ -125,14 +126,9 @@ def _outcomes(rule_id: str) -> list[tuple]:
         db.close()
 
 
-def _digested(thread: str, event_id: str) -> int:
-    db = get_db()
-    try:
-        return db.execute(
-            "SELECT COUNT(*) FROM context_change_journal WHERE object_kind='thread_context' AND object_id=? "
-            "AND json_extract(details_json,'$.event_id')=?", (thread, event_id)).fetchone()[0]
-    finally:
-        db.close()
+def _explained(event_id: str) -> list[tuple[str, str]]:
+    decisions = json.loads(_tool(OWNER, operation="explain", event_id=event_id))["decisions"]
+    return [(d["outcome"], d["explanation"]) for d in decisions]
 
 
 # 1, 3, 4 -- one run with the event's facts, shown by explain and counted by list.
@@ -151,7 +147,6 @@ def test_a_matching_rule_runs_the_script_once_with_the_event_and_explain_and_lis
     [listed] = json.loads(_tool(OWNER, operation="list"))["rules"]
     assert (listed["script_id"], listed["starts_24h"], listed["wakes_24h"]) == (rule["script_id"], 1, 0)
     assert listed["last_fired"] is not None
-    assert _digested(OWNER, event_id) == 0  # a run_script rule doesn't bring the sender's echo back
 
 
 # 2 -- the run's event lines go through the intake.
@@ -271,15 +266,6 @@ def test_create_refuses_an_unknown_or_foreign_script_and_other_actions_fields(ru
     assert json.loads(_tool(OWNER, operation="list"))["rules"] == []
 
 
-# 10 -- F6: an own emit doesn't echo into its sender's digest unless a deliver rule asks for it.
-def test_an_own_emit_skips_the_senders_digest_unless_its_deliver_rule_matches(runs):
-    unmatched = _emit(code="before")
-    _tool(OWNER, operation="create", connector="qa", event_type="route", mode="digest",
-          match=[{"field": "code", "op": "eq", "value": "wanted"}])
-    matched = _emit(code="wanted")
-    assert (_digested(OWNER, unmatched), _digested(OWNER, matched)) == (0, 1)
-
-
 # 11 -- the writer's own drop stops its run.
 def test_a_drop_rule_stops_a_run_script_rule(runs):
     rule = _rule(_script(runs, "dropped.sh"))
@@ -288,3 +274,197 @@ def test_a_drop_rule_stops_a_run_script_rule(runs):
     _sweep()
     assert runs["calls"] == []
     assert _outcomes(rule["id"]) == [("dropped", f"dropped by rule {drop['id']}")]
+
+
+# The guards around a run: the loop guard through the CLI (A), the bounded queue (B), one run
+# of a script at a time (C), no stored next run for a rules-only script (D) and truthful skips (E).
+
+def _cli_emit(capsys, monkeypatch, trace: str | None, code: str = "cli") -> tuple[int, str]:
+    import cli as corsia_cli
+
+    if trace is not None:
+        monkeypatch.setenv("CORSIA_EVENT_TRACE", trace)
+    try:
+        rc = corsia_cli.main(["event", "emit", "qa.route", "--facts", json.dumps({"code": code}),
+                              "--as-session", OWNER])
+    except SystemExit as exc:
+        rc = exc.code
+    return rc, capsys.readouterr().err
+
+
+def _write(sql: str, *args) -> None:
+    db = get_db()
+    try:
+        db.execute(sql, args)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_a_rule_run_hands_its_chain_to_the_script_and_a_cli_emit_with_it_is_skipped_loop(
+        runs, capsys, monkeypatch):
+    from events.trace_env import encode
+
+    rule = _rule(_script(runs, "cli-loop.sh"))
+    _emit()
+    _sweep()
+    assert runs["traces"] == [(rule["id"],)]  # the runner passes the run's chain to the sandbox
+    rc, err = _cli_emit(capsys, monkeypatch, encode(runs["traces"][0]))
+    _sweep()
+    assert (rc, err) == (0, "")
+    assert len(runs["calls"]) == 1 and _outcomes(rule["id"]) == [("ran", None), ("skipped", "loop")]
+
+
+@pytest.mark.parametrize("raw", ['{"not": "a list"}', "[1]", json.dumps(["r" * 65]), "not json",
+                                 json.dumps(["r"] * 101)])
+def test_a_malformed_chain_is_a_usage_error_and_nothing_is_admitted(runs, capsys, monkeypatch, raw):
+    rule = _rule(_script(runs, "bad-trace.sh"))
+    rc, err = _cli_emit(capsys, monkeypatch, raw)
+    assert rc == 2 and err.count("\n") == 1
+    assert err.startswith("error: usage: CORSIA_EVENT_TRACE must be a JSON list")
+    assert _outcomes(rule["id"]) == []
+
+
+def test_the_sandbox_sets_the_chain_only_for_a_rule_run_and_never_inherits_one(monkeypatch, tmp_path):
+    from automation import script_sandbox
+    from host_access.processes import ForegroundProcessResult
+
+    envs: list[dict] = []
+
+    async def nothing(*_a, **_k):
+        return None
+
+    async def cwd(*_a, **_k):
+        return str(tmp_path), None
+
+    async def prepare(*_a):
+        (tmp_path / "profile").write_text("")
+        return tmp_path / "profile", ["true"]
+
+    async def spawn(_argv, **kwargs):
+        envs.append(kwargs["env"])
+        return ForegroundProcessResult(None, b"", b"", 0)
+
+    monkeypatch.setenv("CORSIA_EVENT_TRACE", '["inherited"]')
+    monkeypatch.setattr(script_sandbox, "_checked_environment", nothing)
+    monkeypatch.setattr(script_sandbox, "load_shell_repo_policies", lambda *_a: ([], []))
+    monkeypatch.setattr(script_sandbox, "_resolve_execution_cwd", cwd)
+    monkeypatch.setattr(script_sandbox, "execution_envelope_for_consumed_action", lambda *_a, **_k: None)
+    monkeypatch.setattr(script_sandbox, "prepare_execution_envelope", prepare)
+    monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda _thread: tmp_path)
+    monkeypatch.setattr(script_sandbox.PROCESS_OWNER, "spawn", spawn)
+    script = tmp_path / "s.sh"
+    for kwargs in ({}, {"stdin": b"{}", "trace": ("rule_a", "rule_b")}):
+        asyncio.run(script_sandbox.run_script(OWNER, None, script, run_id="r", timeout_seconds=5, **kwargs))
+    assert [env.get("CORSIA_EVENT_TRACE") for env in envs] == [None, '["rule_a", "rule_b"]']
+
+
+def test_a_rules_queue_is_capped_and_a_skip_shows_in_explain_and_list(runs, monkeypatch):
+    from events import rule_runs
+
+    monkeypatch.setattr(rule_runs, "QUEUE_CAP", 2)
+    rule = _rule(_script(runs, "capped.sh"))
+    events = [_emit(code=f"c{i}") for i in range(3)]
+    assert _outcomes(rule["id"]) == [("queued", None), ("queued", None), ("skipped", "queue full")]
+    assert _explained(events[2]) == [("skipped", f"rule {rule['id']} did not run {OWNER}'s script: queue full")]
+    [listed] = json.loads(_tool(OWNER, operation="list"))["rules"]
+    assert (listed["starts_24h"], listed["skips_24h"]) == (2, 1)
+
+
+def test_a_sweep_reads_only_its_free_capacity_of_the_queue(runs, monkeypatch):
+    from events import rule_runs
+
+    rules = [_rule(_script(runs, f"many-{i}.sh")) for i in range(6)]
+    _emit()  # one event, six rules: six runs queued
+    reads: list[tuple[int, list[str]]] = []
+    real = rule_runs.queued
+
+    def spy(db, limit):
+        rows = real(db, limit)
+        reads.append((limit, sorted(rows[0].keys()) if rows else []))
+        return rows
+
+    monkeypatch.setattr(rule_runs, "queued", spy)
+
+    async def once():
+        started = await script_runner.drive(datetime.now(timezone.utc).isoformat())
+        await asyncio.gather(*script_runner._in_flight.values())
+        return started
+
+    assert asyncio.run(once()) == script_runner.SCRIPT_RUN_CAP == 2
+    assert reads == [(2, ["enabled", "id", "rule_id", "script_id", "thread_id"])]  # no run's input
+    assert sorted(_outcomes(rule["id"])[0][0] for rule in rules) == ["queued"] * 4 + ["ran"] * 2
+
+
+def test_a_scheduled_run_in_flight_keeps_a_rule_run_queued_and_the_other_way_round(runs):
+    from automation import script_rule_runs
+
+    script_id = _script(runs, "shared.sh", cadence=3600)
+    rule = _rule(script_id)
+    due = (_START + timedelta(minutes=1)).isoformat()
+    db = get_db()
+    try:
+        [scheduled] = script_runner.claim_due(due, 2, set(), db)
+        _emit()
+        assert script_rule_runs.claim(due, 2, {script_id}, db) == []
+        assert _outcomes(rule["id"]) == [("queued", None)]
+        script_runner.settle(scheduled, script_runner._error_report(scheduled, "done"), due, db)
+        [(_, rule_run)] = script_rule_runs.claim(due, 2, set(), db)
+        later = (_START + timedelta(hours=2)).isoformat()  # the next slot is due, the script is busy
+        assert script_runner.claim_due(later, 2, {rule_run.key, script_id}, db) == []
+        script_runner.settle(scheduled, script_runner._error_report(scheduled, "done"), later, db,
+                             rule_run=rule_run)
+        assert [s.id for s in script_runner.claim_due(later, 2, set(), db)] == [script_id]
+    finally:
+        db.close()
+    assert runs["calls"] == []  # claims only; nothing was spawned
+
+
+def test_a_rules_only_script_stores_no_next_run_and_only_a_script_may(runs):
+    import sqlite3
+
+    rules_only = _script(runs, "stored.sh")
+    db = get_db()
+    try:
+        assert db.execute("SELECT next_run_at FROM automation_schedules WHERE id=?",
+                          (rules_only,)).fetchone()[0] is None
+        assert script_schedules.due_scripts("9999-01-01T00:00:00+00:00", db=db) == []
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(
+                "INSERT INTO automation_schedules (id,thread_id,scope_id,kind,spec,next_run_at,max_runs,"
+                "created_by_actor,created_at,updated_at) VALUES ('c',?,'p','cadence','60',NULL,1,?,'t','t')",
+                (OWNER, OWNER))
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("refusal", ["turned off", "cancelled", "paused", "deleted", "owner gone",
+                                     "owner paused"])
+def test_a_run_refused_before_it_starts_is_skipped_and_explain_says_it_did_not_run(
+        runs, monkeypatch, refusal):
+    from automation import script_rule_runs
+    from events import rule_runs
+
+    script_id = _script(runs, "refused.sh")
+    rule = _rule(script_id)
+    event_id = _emit()
+    reason = {
+        "turned off": rule_runs.TURNED_OFF, "cancelled": "its script schedule is cancelled",
+        "paused": "its script schedule is paused", "deleted": "its script schedule no longer exists",
+        "owner gone": "its owner is no longer available", "owner paused": rule_runs.OWNER_PAUSED,
+    }[refusal]
+    if refusal == "turned off":
+        _tool(OWNER, operation="disable", rule_id=rule["id"])
+    elif refusal in ("cancelled", "paused"):
+        _write("UPDATE automation_schedules SET state=? WHERE id=?", refusal, script_id)
+    elif refusal == "deleted":
+        _write("DELETE FROM automation_schedules WHERE id=?", script_id)
+    elif refusal == "owner gone":
+        monkeypatch.setattr(script_rule_runs, "thread_is_available", lambda _row: False)
+    else:
+        import plans.public
+
+        monkeypatch.setattr(plans.public, "thread_paused_since", lambda _db, _thread: "2026-01-01")
+    _sweep()
+    assert runs["calls"] == [] and _outcomes(rule["id"]) == [("skipped", reason)]
+    assert _explained(event_id) == [("skipped", f"rule {rule['id']} did not run {OWNER}'s script: {reason}")]

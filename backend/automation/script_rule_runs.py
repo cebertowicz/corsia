@@ -1,10 +1,12 @@
 """Claim the script runs ``run_script`` rules queued, for the script runner's sweep.
 
-A queued run is checked when it would start, the time of its effect: a paused
-owner's run is skipped, and a run whose rule was turned off, whose script
-schedule is no longer active or whose owner is gone fails with the reason. None
-of these wakes anyone; ``explain`` and ``list`` show them. The queue itself is
-``events.rule_runs``.
+A queued run is checked when it would start, the time of its effect: a run whose
+owner is paused, whose rule was turned off, or whose script schedule or owner is
+gone is skipped with the reason, since it never started. None of these wakes
+anyone; ``explain`` and ``list`` show them. A rule run takes its script's own
+in-flight claim, the one a scheduled run takes, so at most one run of a script
+is in flight; a run whose script is busy stays queued for a later sweep. The
+queue itself is ``events.rule_runs``.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from automation import script_schedules as store
 from automation.schedules import Schedule, get
 from events import rule_runs
 from infra.database import write_transaction
@@ -62,20 +65,18 @@ def claim(now: str, capacity: int, live_keys: set[str], db) -> list[tuple[Schedu
     claimed: list[tuple[Schedule, RuleRun]] = []
     with write_transaction(db, scope="script_rule_runs_claim") as connection:
         rule_runs.interrupt(connection, live_decisions(live_keys))
-        if capacity <= 0:
-            return claimed
-        for row in rule_runs.queued(connection):
-            if len(claimed) >= capacity:
-                break
-            schedule, failed = _refusal(connection, row)
-            if failed is not None:
-                rule_runs.finish(connection, row["id"], failed=failed)
+        for row in rule_runs.queued(connection, capacity):
+            schedule, refused = _refusal(connection, row)
+            if refused is None and thread_paused_since(connection, row["thread_id"]) is not None:
+                refused = rule_runs.OWNER_PAUSED
+            if schedule is None or refused is not None:
+                rule_runs.finish(connection, row["id"], skipped=refused)
                 continue
-            if thread_paused_since(connection, row["thread_id"]) is not None:
-                rule_runs.finish(connection, row["id"], skipped=rule_runs.OWNER_PAUSED)
-                continue
-            run_input = json.loads(row["run_input"] or "{}")
-            if rule_runs.start(connection, row["id"]):
+            if not store.claim_for_rule(schedule.id, now, db=connection):
+                continue  # an earlier row of this sweep took the script: this one waits its turn
+            # Still queued under this write lock; were it not, the next sweep frees the claim.
+            run_input = rule_runs.start(connection, row["id"])
+            if run_input is not None:
                 claimed.append((schedule, RuleRun(
                     row["id"], row["rule_id"],
                     json.dumps(run_input.get("event", {}), ensure_ascii=False).encode(),

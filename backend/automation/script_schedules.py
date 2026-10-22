@@ -158,8 +158,9 @@ def create_script(
 ) -> Schedule:
     """Register one script schedule, due at once, under the per-agent and instance caps.
 
-    ``cadence_seconds=None`` registers a script only event rules start: the sweep never
-    claims it, so it never runs without an event and never reports no data.
+    ``cadence_seconds=None`` registers a script only event rules start: it has no next
+    run, so the sweep never claims it, it never runs without an event and never reports
+    no data.
     """
     if cadence_seconds is not None and (isinstance(cadence_seconds, bool) or not (
         MIN_CADENCE_SECONDS <= cadence_seconds <= MAX_CADENCE_SECONDS
@@ -184,8 +185,8 @@ def create_script(
                VALUES (?,?,?,'script',?,?,?,'active',?,?,?,?,?,?,?)""",
             (
                 schedule_id, thread_id, scope_id,
-                RULES_ONLY if cadence_seconds is None else str(cadence_seconds), now,
-                UNBOUNDED_RUNS, payload, thread_id, now, now,
+                RULES_ONLY if cadence_seconds is None else str(cadence_seconds),
+                None if cadence_seconds is None else now, UNBOUNDED_RUNS, payload, thread_id, now, now,
                 str(script_path), script_sha256, timeout_seconds,
             ),
         )
@@ -226,6 +227,8 @@ def next_slot(due_at: str, cadence_seconds: int, now: str) -> str:
 
 def claim(schedule: Schedule, now: str, *, db) -> bool:
     """Mark one due run in flight and move the row to its next slot, exactly once."""
+    if schedule.next_run_at is None:
+        return False  # only event rules start it (claim_for_rule)
     cursor = db.execute(
         """UPDATE automation_schedules
            SET running_since=?, next_run_at=?, updated_at=?
@@ -242,14 +245,27 @@ def claim(schedule: Schedule, now: str, *, db) -> bool:
     return cursor.rowcount == 1
 
 
+def claim_for_rule(schedule_id: str, now: str, *, db) -> bool:
+    """Mark a rule-started run in flight on the script's own claim, leaving its next slot.
+
+    Scheduled and rule-started runs take the same claim, so at most one run of a
+    script is in flight; False while another run holds it.
+    """
+    return db.execute(
+        """UPDATE automation_schedules SET running_since=?, updated_at=?
+           WHERE id=? AND kind='script' AND state='active' AND running_since IS NULL""",
+        (now, now, schedule_id),
+    ).rowcount == 1
+
+
 def due_scripts(now: str, *, db) -> list[Schedule]:
-    """Active script schedules due and not in flight, oldest first; never a rules-only one."""
+    """Active script schedules due and not in flight, oldest first (a rules-only one has no next run)."""
     rows = db.execute(
         """SELECT * FROM automation_schedules
            WHERE kind='script' AND state='active' AND running_since IS NULL
-             AND next_run_at<=? AND spec!=?
+             AND next_run_at<=?
            ORDER BY next_run_at,id""",
-        (now, RULES_ONLY),
+        (now,),
     ).fetchall()
     return [_row(row) for row in rows]
 
@@ -273,26 +289,22 @@ def finish_run(
     error: str | None = None,
     noted: bool = False,
     last_measures: str | None = None,
-    clear_claim: bool = True,
     db,
 ) -> None:
     """Record one settled run on the schedule row and clear its in-flight mark.
 
     ``last_measures`` is this run's measure line for ``automation_list``; a run that settled
-    no measures keeps the previous one. A rule-started run passes ``clear_claim=False``: it
-    never held the schedule's claim, so a scheduled run in flight keeps it.
+    no measures keeps the previous one.
     """
     if error is not None:
         error = sanitize_credential_text(error)[:MAX_ERROR_CHARS]
     db.execute(
         """UPDATE automation_schedules
-           SET runs=runs+1, last_run_at=?,
-               running_since=CASE WHEN ? THEN NULL ELSE running_since END, last_status=?,
+           SET runs=runs+1, last_run_at=?, running_since=NULL, last_status=?,
                last_error=?, noted_at=CASE WHEN ? THEN ? ELSE noted_at END,
                last_measures=coalesce(?, last_measures), updated_at=?
            WHERE id=? AND kind='script'""",
-        (ran_at, int(clear_claim), status, error, int(noted), ran_at, last_measures, ran_at,
-         schedule_id),
+        (ran_at, status, error, int(noted), ran_at, last_measures, ran_at, schedule_id),
     )
 
 

@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from events import rule_authoring, rules
+from events import rule_authoring, rule_runs, rules
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.product_events import emit_product_event
@@ -106,14 +106,16 @@ class EventRulesTool(Tool):
             "with the event as JSON on its stdin, within about a minute; it takes no `to`, `mode` "
             "or `note`, and the event still reaches whoever it reaches today. An event the run "
             "emits carries the rule, so a rule already in that chain is skipped, not run again; "
-            "a run while you are paused is skipped and not replayed. "
+            "a run while you are paused is skipped and not replayed. A script runs once at a time, "
+            f"so runs wait their turn; a match while {rule_runs.QUEUE_CAP} of its rule's runs wait "
+            "is skipped. "
             "Your rules cover your own project and deliver only to you (`to: self`, the default) or "
             "to the event's file's registered owner (`to: registered_owner`); that owner is woken "
             "only when it is you or one of your temporary workers, otherwise the event goes to "
             "its digest. A rule wakes a chat "
             "at most once an hour; more go to its digest. A paused chat gets a digest instead. "
             "disable: turn off a rule you wrote or receive. list: the project's rules, with when "
-            "each last acted and its wakes and script starts in the last 24 hours. test: which rules a set of `facts` "
+            "each last acted and its wakes, script starts and skipped runs in the last 24 hours. test: which rules a set of `facts` "
             "would match. explain: why an event (`event_id`, or `artifact`, the file's external id "
             "such as owner/repo#7) did or didn't reach a chat through a rule, or, given `event_type`, "
             "the recent refusals of that declared type. emit: send one event of a declared "

@@ -16,6 +16,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from events.trace_env import TRACE_ENV
+from events.trace_env import encode as encode_trace
 from host_access.processes import PROCESS_OWNER, ForegroundProcessResult
 from host_access.refusal_messages import safehouse_unavailable_refusal
 from infra.project_repo_policy import (
@@ -97,15 +99,17 @@ async def run_script(
     run_id: str,
     timeout_seconds: int,
     stdin: bytes | None = None,
+    trace: tuple[str, ...] = (),
 ) -> ScriptRun:
     """Run ``script`` in the owner's protected envelope and return its capped output.
 
     ``stdin`` is written to a private file in the thread's own temp root, which
-    the envelope grants read-write, and removed once the run ends.
+    the envelope grants read-write, and removed once the run ends. ``trace`` is a
+    rule-started run's rule chain, handed to ``corsia event emit`` (``events.trace_env``).
     """
     await _checked_environment()
     if stdin is None:
-        return await _run(thread_id, project_id, script, run_id, timeout_seconds, None)
+        return await _run(thread_id, project_id, script, run_id, timeout_seconds, None, trace)
     try:
         fd, name = tempfile.mkstemp(prefix="rule-input-", suffix=".json",
                                     dir=corsia_temp_root_for_bind(thread_id))
@@ -114,16 +118,18 @@ async def run_script(
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(stdin)
-        return await _run(thread_id, project_id, script, run_id, timeout_seconds, Path(name))
+        return await _run(thread_id, project_id, script, run_id, timeout_seconds, Path(name), trace)
     finally:
         Path(name).unlink(missing_ok=True)
 
 
 async def _run(
     thread_id: str, project_id: str | None, script: Path, run_id: str, timeout_seconds: int,
-    stdin: Path | None,
+    stdin: Path | None, trace: tuple[str, ...],
 ) -> ScriptRun:
     env = safehouse_subprocess_env(thread_id)
+    if trace:
+        env[TRACE_ENV] = encode_trace(trace)
     try:
         policies, grant_policies = await asyncio.to_thread(
             load_shell_repo_policies, list_registered_repo_policies, False, project_id,

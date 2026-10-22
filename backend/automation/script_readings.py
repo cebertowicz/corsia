@@ -275,8 +275,7 @@ def emit_report(
 ) -> bool:
     """Write a run's events, notes and wakes and settle it; True if the owner was woken.
 
-    A run an event rule started may print nothing, so it never reports ``no_data``, and
-    it leaves the schedule's own claim in place.
+    A run an event rule started may print nothing, so it never reports ``no_data``.
     """
     registered = {s.key: s for s in store.series_of(schedule)}
     # Measure refusals are intake data, counted for measure_status: never run errors or wakes.
@@ -293,7 +292,7 @@ def emit_report(
     store.finish_run(
         schedule.id, ran_at=now, status=status, error=report.error,
         noted=noted, last_measures=measures.line if (measures.accepted or measures.refused) else None,
-        clear_claim=not rule_run, db=db,
+        db=db,
     )
     return woken
 

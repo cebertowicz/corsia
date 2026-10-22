@@ -52,7 +52,7 @@ EVENT_RULE_SCHEMA_SQL = f"""
         -- run_script: the writer's own script schedule, which it runs with the event's facts.
         script_id TEXT CHECK ((action = 'run_script') = (script_id IS NOT NULL)),
         -- A drop removes only its writer's own deliveries, and a script run is the writer's own.
-        -- (No semicolon in these comments: migration 138 runs this text statement by statement.)
+        -- (No semicolon in these comments: migration 139 runs this text statement by statement.)
         CHECK (action = 'deliver' OR "to" = 'thread:' || created_by)
     );
     CREATE INDEX IF NOT EXISTS idx_event_rules_type
@@ -89,6 +89,8 @@ EVENT_RULE_SCHEMA_SQL = f"""
         ON event_route_decisions(artifact_external_id, at);
     CREATE INDEX IF NOT EXISTS idx_event_route_decisions_at
         ON event_route_decisions(at);
+    -- The run queue in order (outcome = 'queued' ORDER BY id) and the runs in flight. Not partial:
+    -- SQLite uses a partial index only when the query repeats its WHERE term, and these bind the outcome.
     CREATE INDEX IF NOT EXISTS idx_event_route_decisions_runs
-        ON event_route_decisions(outcome, id) WHERE outcome IN ('queued', 'running');
+        ON event_route_decisions(outcome, id);
 """

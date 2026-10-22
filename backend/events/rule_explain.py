@@ -19,7 +19,7 @@ _TEXT = {
     outcomes.QUEUED: "rule {rule} will run {thread}'s script with it",
     outcomes.RUNNING: "rule {rule} is running {thread}'s script with it",
     outcomes.RAN: "rule {rule} ran {thread}'s script with it",
-    outcomes.FAILED: "rule {rule} ran {thread}'s script with it, and the run failed",
+    outcomes.FAILED: "rule {rule}'s run of {thread}'s script with it failed",
     outcomes.SKIPPED: "rule {rule} did not run {thread}'s script",
 }
 
