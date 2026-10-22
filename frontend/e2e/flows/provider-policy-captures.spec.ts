@@ -376,7 +376,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			modal = await openWorkspace(surface);
 			const savedToggle = modal.getByRole('button', { name: 'Use Personal Max · sam@example.com', exact: true });
 			await savedToggle.click();
-			await expect(modal.getByText("Couldn’t save this change. Could not save subscriptions.")).toBeVisible();
+			await expect(modal.getByText('Couldn’t save this change. Try again.')).toBeVisible();
 			await expect(savedToggle).toHaveAttribute('aria-pressed', 'true');
 			await page.screenshot({ path: testInfo.outputPath(`save-error-${surface}.png`), animations: 'disabled', scale: 'css' });
 
@@ -397,7 +397,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			modal = await openWorkspace(surface);
 			const failedRollover = modal.getByRole('button', { name: 'Roll over when an account hits its limit' });
 			await failedRollover.click();
-			await expect(modal.getByText("Couldn’t save this change. Could not save subscriptions.")).toBeVisible();
+			await expect(modal.getByText('Couldn’t save this change. Try again.')).toBeVisible();
 			await page.screenshot({ path: testInfo.outputPath(`rollover-save-error-${surface}.png`), animations: 'disabled', scale: 'css' });
 
 			modal = await openWorkspace(surface);
@@ -455,7 +455,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			failNext = true;
 			let region = await openProject(surface, 'account-error');
 			await region.getByRole('button', { name: 'Use Personal Max', exact: true }).click();
-			await expect(region.getByText("Couldn’t save this change. Could not save subscriptions.")).toBeVisible();
+			await expect(region.getByText('Couldn’t save this change. Try again.')).toBeVisible();
 			await page.screenshot({ path: testInfo.outputPath(`project-account-save-error-${surface}.png`), animations: 'disabled', scale: 'css' });
 
 			failNext = false;
@@ -472,7 +472,7 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			failNext = true;
 			region = await openProject(surface, 'scope-error');
 			await region.getByRole('button', { name: 'Use workspace settings', exact: true }).click();
-			await expect(region.getByText("Couldn’t save this change. Could not save subscriptions.")).toBeVisible();
+			await expect(region.getByText('Couldn’t save this change. Try again.')).toBeVisible();
 			await page.screenshot({ path: testInfo.outputPath(`project-scope-save-error-${surface}.png`), animations: 'disabled', scale: 'css' });
 
 			failNext = false;
