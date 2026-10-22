@@ -172,15 +172,26 @@ fetch_verified "$OMLX_URL" "$BUILD_ROOT/downloads/$OMLX_WHEEL" "$OMLX_SHA256"
 PYTHONPATH="$BUNDLE_ROOT/python/backend-packages" "$PYTHON" -m pip check
 PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 
-# All packaged bytecode is produced after every source is staged below.
-
 build_git_runtime
 fetch_agent_browser
 fetch_safehouse
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
+(
+  cd "$ROOT/frontend"
+  npm ci
+  CORSIA_APP_VERSION="$app_version" CORSIA_BUILD_OUTPUT="$BUNDLE_ROOT/frontend/dist" npm run build
+)
+install -m 0755 "$ROOT/desktop/scripts/corsia" "$BUNDLE_ROOT/bin/corsia"
+install -m 0755 "$ROOT/desktop/scripts/corsia-service" "$BUNDLE_ROOT/bin/corsia-service"
+install -m 0755 "$ROOT/desktop/scripts/omlx" "$BUNDLE_ROOT/bin/omlx"
+# The lifecycle script and its parts, beside backend/, so scripts/corsia runs in
+# app mode (corsia.d/app_mode.sh) and Update stages and swaps this app.
+mkdir -p "$BUNDLE_ROOT/scripts"
+install -m 0755 "$ROOT/scripts/corsia" "$BUNDLE_ROOT/scripts/corsia"
+rsync -a --delete "$ROOT/scripts/corsia.d/" "$BUNDLE_ROOT/scripts/corsia.d/"
 # Nothing may write bytecode into the signed bundle: an added __pycache__ breaks
-# its seal. Compile every packaged source, including the backend,
-# with unchecked hashes so a later mtime change cannot make a cache stale.
+# its seal. Compile every packaged source only after every resource is staged,
+# using unchecked hashes so a later mtime change cannot make a cache stale.
 "$PYTHON" -m compileall -q -f --invalidation-mode unchecked-hash "$BUNDLE_ROOT"
 "$PYTHON" - "$BUNDLE_ROOT" <<'PY'
 from importlib.util import cache_from_source
@@ -197,19 +208,6 @@ if missing:
 print(f"bundled-python-py={len(sources)}")
 print(f"bundled-python-pyc={sum(1 for _ in root.rglob('*.pyc'))}")
 PY
-(
-  cd "$ROOT/frontend"
-  npm ci
-  CORSIA_APP_VERSION="$app_version" CORSIA_BUILD_OUTPUT="$BUNDLE_ROOT/frontend/dist" npm run build
-)
-install -m 0755 "$ROOT/desktop/scripts/corsia" "$BUNDLE_ROOT/bin/corsia"
-install -m 0755 "$ROOT/desktop/scripts/corsia-service" "$BUNDLE_ROOT/bin/corsia-service"
-install -m 0755 "$ROOT/desktop/scripts/omlx" "$BUNDLE_ROOT/bin/omlx"
-# The lifecycle script and its parts, beside backend/, so scripts/corsia runs in
-# app mode (corsia.d/app_mode.sh) and Update stages and swaps this app.
-mkdir -p "$BUNDLE_ROOT/scripts"
-install -m 0755 "$ROOT/scripts/corsia" "$BUNDLE_ROOT/scripts/corsia"
-rsync -a --delete "$ROOT/scripts/corsia.d/" "$BUNDLE_ROOT/scripts/corsia.d/"
 
 node "$ROOT/desktop/scripts/gen-shell-tokens.mjs"
 (

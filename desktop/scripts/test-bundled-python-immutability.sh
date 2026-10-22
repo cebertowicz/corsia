@@ -47,6 +47,18 @@ python_sources="$(find "$RESOURCES" -type f -name '*.py' | wc -l | tr -d ' ')"
 python_bytecode="$(find "$RESOURCES" -type f -name '*.pyc' | wc -l | tr -d ' ')"
 printf 'bundled-python-py=%s\n' "$python_sources"
 printf 'bundled-python-pyc=%s\n' "$python_bytecode"
+"$PYTHON" -I -B - "$RESOURCES" <<'PY'
+from importlib.util import cache_from_source
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+missing = [source for source in root.rglob("*.py") if not Path(cache_from_source(str(source))).is_file()]
+if missing:
+    for source in missing:
+        print(f"missing bytecode: {source}", file=sys.stderr)
+    raise SystemExit(1)
+PY
 
 env -i PATH="/usr/bin:/bin:/usr/sbin:/sbin" "$PYTHON" -I -c '
 import sys
