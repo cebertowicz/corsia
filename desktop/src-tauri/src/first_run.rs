@@ -8,8 +8,8 @@
 //
 // An existing install (a source install's bootstrap, the legacy state folder,
 // or a folder already holding files at the default workspace path) is never
-// touched: setup refuses before writing anything, and adopting it is a
-// separate journey.
+// touched here: setup refuses before writing anything. Adopting it and
+// setting it aside (`start_fresh`) are separate journeys the person chooses.
 
 use std::{
     fs,
@@ -23,8 +23,8 @@ use serde::Serialize;
 use crate::adoption;
 
 pub const SERVICE_FILE: &str = "service.json";
-const WORKSPACE_FOLDER: &str = "CORSIA";
-const LEGACY_STATE_FOLDER: &str = "com.cebertowicz.corsia";
+pub(crate) const WORKSPACE_FOLDER: &str = "CORSIA";
+pub(crate) const LEGACY_STATE_FOLDER: &str = "com.cebertowicz.corsia";
 // Finder's view settings do not make a folder someone's data. A `.git`
 // directory is ignored only when it has no branch refs or packed branch refs.
 const IGNORED_ENTRIES: [&str; 1] = [".DS_Store"];
@@ -36,8 +36,9 @@ pub enum FirstRun {
     /// Nothing from an earlier install: create this workspace and record it.
     Fresh { workspace: PathBuf },
     /// An earlier install is present but does not meet the source-service
-    /// contract required for adoption: write nothing and show this reason.
-    ExistingInstall { reason: String },
+    /// contract required for adoption: write nothing and offer Start fresh with this reason.
+    /// `details` carries the runtime cause, shown only behind Details.
+    ExistingInstall { reason: String, details: String },
     /// A rendered source service plist identifies a moveable source install.
     Adoptable { source: adoption::SourceInstall },
 }
@@ -133,7 +134,7 @@ fn git_has_no_commits(git_dir: &Path) -> Result<bool, String> {
         .any(|reference| reference.starts_with("refs/heads/")))
 }
 
-fn workspace_is_fresh(path: &Path) -> Result<bool, String> {
+pub(crate) fn workspace_is_fresh(path: &Path) -> Result<bool, String> {
     for entry in fs::read_dir(path)
         .map_err(|error| format!("could not read {}: {error}", path.display()))?
     {
@@ -188,7 +189,7 @@ pub fn environment_names_the_roots() -> bool {
         .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()))
 }
 
-fn present(path: &Path) -> Result<bool, String> {
+pub(crate) fn present(path: &Path) -> Result<bool, String> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
@@ -204,9 +205,7 @@ pub fn default_workspace(home: &Path) -> PathBuf {
 }
 
 fn existing_install(reason: String) -> Result<FirstRun, String> {
-    Ok(FirstRun::ExistingInstall {
-        reason: format!("{reason} Nothing was changed."),
-    })
+    Ok(FirstRun::ExistingInstall { reason, details: String::new() })
 }
 
 /// Decide what a launch must do about the workspace, reading only.
@@ -220,16 +219,17 @@ pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
         // A plist this app cannot trust is not adopted, and no other path is tried.
         return match adoption::source_from_plist(home, &source_plist) {
             Ok(source) => Ok(FirstRun::Adoptable { source }),
-            Err(reason) => existing_install(format!(
-                "CORSIA found an existing install on this computer, and this app can’t take it over yet ({reason})."
-            )),
+            Err(details) => Ok(FirstRun::ExistingInstall {
+                reason: "CORSIA found an existing install on this computer, and this app can’t take it over.".into(),
+                details,
+            }),
         };
     }
 
     if present(&home.join(".corsia").join("config.json"))? {
         return existing_install(
-            "CORSIA found an existing install on this computer (~/.corsia). \
-             This app can't open it yet."
+            "CORSIA found an existing install on this computer (~/.corsia), \
+             and this app can’t open it."
                 .into(),
         );
     }
@@ -239,8 +239,8 @@ pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
         .join(LEGACY_STATE_FOLDER);
     if present(&legacy)? {
         return existing_install(format!(
-            "CORSIA found data from an earlier version (~/Library/Application Support/{LEGACY_STATE_FOLDER}). \
-             This app can't open it yet."
+            "CORSIA found data from an earlier version (~/Library/Application Support/{LEGACY_STATE_FOLDER}), \
+             and this app can’t open it."
         ));
     }
 
@@ -471,9 +471,9 @@ mod tests {
     fn assert_refused(home: &Home, marker: &str) {
         let before = home.listing();
         match plan(&home.0, &home.app_dir()).expect("plan") {
-            FirstRun::ExistingInstall { reason } => {
+            FirstRun::ExistingInstall { reason, .. } => {
                 assert!(reason.contains(marker), "reason names the marker: {reason}");
-                assert!(reason.ends_with("Nothing was changed."));
+                assert!(reason.ends_with('.') && !reason.contains("Nothing was changed"), "{reason}");
             }
             other => panic!("expected a refusal, got {other:?}"),
         }
@@ -597,7 +597,13 @@ mod tests {
         let plist = home.0.join("Library/LaunchAgents/com.corsia.prod.plist");
         fs::create_dir_all(plist.parent().unwrap()).unwrap();
         fs::write(&plist, "not a plist").unwrap();
-        assert_refused(&home, "can’t take it over yet");
+        assert_refused(&home, "can’t take it over");
+        // The parser's own words stay behind Details, never in the line.
+        let FirstRun::ExistingInstall { reason, details } = plan(&home.0, &home.app_dir()).unwrap() else {
+            panic!("expected a refusal");
+        };
+        assert!(!reason.contains('(') && !reason.contains("plist"), "{reason}");
+        assert!(details.contains("plist"), "{details}");
 
         // A readable plist whose checkout has no lifecycle owner is refused the same way.
         fs::write(
@@ -608,7 +614,11 @@ mod tests {
             ),
         )
         .unwrap();
-        assert_refused(&home, "scripts/corsia");
+        assert_refused(&home, "can’t take it over");
+        let FirstRun::ExistingInstall { details, .. } = plan(&home.0, &home.app_dir()).unwrap() else {
+            panic!("expected a refusal");
+        };
+        assert!(details.contains("scripts/corsia"), "{details}");
     }
 
     #[test]
