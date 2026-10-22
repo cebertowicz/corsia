@@ -52,6 +52,8 @@ def _project_local_flight(result: dict[str, Any], flight: dict[str, Any] | None)
     """Project the local setup flight as the row's only lifecycle vocabulary."""
     if flight is None or flight["state"] == "stopped":
         result["local_state"] = "stopped"
+        if flight is not None and flight.get("cancelled"):
+            result["local_cancelled"] = True  # the person stopped it; a screen must not start it again
         return
     result.update(
         local_state=flight["state"],

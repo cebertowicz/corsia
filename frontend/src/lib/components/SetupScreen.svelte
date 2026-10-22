@@ -78,7 +78,7 @@
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
 	let localStartError = $state<'other' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
 	// The pre-start (pick, then start) is under way; the person turned the download off, so setup does not restart it by itself.
-	let localPreparing = $state(false), localStopped = $state(false), modelsAutoStarted = false;
+	let localPreparing = $state(false), modelsAutoStarted = false;
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	// The subscriptions answer; null until answered (or skipped, or a resumed setup), when every CLI row shows.
 	let picks = $state<SetupPicks | null>(null), confirmLocalStop = $state(false), localOffFailed = $state<{ reference?: string } | undefined>();
@@ -219,7 +219,7 @@
 	}
 	async function startLocal() {
 		if (!eligible || localBusy) return;
-		localBusy = true; localStopped = false; localStartError = ''; localStartReference = ''; startFix = undefined;
+		localBusy = true; localStartError = ''; localStartReference = ''; startFix = undefined;
 		try {
 			const current = get(token);
 			const { result, reference, fix } = await requestLocalStart(current);
@@ -230,7 +230,6 @@
 		finally { localBusy = false; }
 	}
 	async function stopLocal() {
-		localStopped = true;
 		const current = get(token);
 		if (current) { await cancelLocalDownload(current); await refreshSources(); }
 		else await fetch('/api/setup/local-download/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
@@ -238,7 +237,6 @@
 	async function turnOffLocal() {
 		const current = get(token);
 		if (!current) return;
-		localStopped = true;
 		const stopped = await stopLocalServer(current).catch(() => ({ ok: false, ref: undefined }));
 		localOffFailed = stopped.ok ? undefined : { reference: stopped.ref };
 		await refreshSources();
@@ -314,8 +312,8 @@
 	// Providers & models opening with nothing running or in flight starts the download itself, once per opening.
 	$effect(() => {
 		if (page !== 'models') { modelsAutoStarted = false; return; }
-		if (modelsAutoStarted || !$token || !eligible || localPreparing || localBusy || localStopped || localStartError) return;
-		if (!local || local.local_state !== 'stopped' || local.reason_code === 'not_running') return;
+		if (modelsAutoStarted || !$token || !eligible || localPreparing || localBusy || localStartError) return;
+		if (!local || local.local_state !== 'stopped' || local.local_cancelled || local.reason_code === 'not_running') return;
 		modelsAutoStarted = true; void startLocal();
 	});
 	onMount(() => {

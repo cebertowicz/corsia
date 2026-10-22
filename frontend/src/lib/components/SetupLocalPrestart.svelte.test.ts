@@ -25,7 +25,7 @@ function setInput(id: string, value: string) {
 }
 
 /** A Mac that can run a local model, with the pick and the pre-account start answered by the given handlers. */
-function mountSetup(handlers: { pick: () => Promise<Response>; preStart: () => Response }) {
+function mountSetup(handlers: { pick: () => Promise<Response>; preStart: () => Response; cancelled?: boolean }) {
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input); const method = init?.method ?? 'GET'; calls.push(`${method} ${url}`);
 		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, work_folder: '~/CORSIA' });
@@ -38,7 +38,7 @@ function mountSetup(handlers: { pick: () => Promise<Response>; preStart: () => R
 		if (url.includes('/sources')) {
 			const running = signedInStarts > 0;
 			return json({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', prior_state: null, reason: null, fix: null, checked_at: null, eligible: true,
-				local_state: running ? 'downloading' : 'stopped', download_percent: running ? 0 : undefined }] });
+				local_state: running ? 'downloading' : 'stopped', local_cancelled: handlers.cancelled || undefined, download_percent: running ? 0 : undefined }] });
 		}
 		if (url.includes('/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
 		if (url.includes('/models')) return json({ models: [] });
@@ -76,6 +76,8 @@ describe('the local model starts itself during setup', () => {
 
 		release(json(PICKED)); await settle();
 		await vi.waitFor(() => expect(signedInStarts).toBe(1));
+		await settle();
+		expect(signedInStarts).toBe(1);
 		expect(button('Download')).toBeUndefined();
 	});
 
@@ -84,7 +86,17 @@ describe('the local model starts itself during setup', () => {
 		await toModels();
 
 		await vi.waitFor(() => expect(signedInStarts).toBe(1));
+		await settle();
+		expect(signedInStarts).toBe(1);
 		expect(button('Download')).toBeUndefined();
+	});
+
+	it('does not start a download the person stopped', async () => {
+		mountSetup({ pick: async () => json(PICKED), preStart: () => json({ ok: true, in_progress: true }), cancelled: true });
+		await toModels(); await settle();
+
+		expect(signedInStarts).toBe(0);
+		expect(button('Download')).toBeTruthy();
 	});
 
 	it('shows a failed pre-start with Retry and does not start it behind the failure', async () => {

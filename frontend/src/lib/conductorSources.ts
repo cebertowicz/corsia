@@ -38,6 +38,8 @@ export interface ModelSource {
 	download_eta_seconds?: number | null;
 	/** True only when measured bytes have stopped advancing. */
 	download_stalled?: boolean;
+	/** Set on a stopped local source when the person cancelled the download, so no screen starts it again. */
+	local_cancelled?: boolean;
 	/** Why the local server isn't ready, as a code; `reason` is only its wording. */
 	reason_code?: 'not_running' | 'no_models' | null;
 	/** Set when an unusable CLI belongs to Homebrew or npm; setup leaves it to that manager. */

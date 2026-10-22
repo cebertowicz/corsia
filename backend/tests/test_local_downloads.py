@@ -310,3 +310,22 @@ def test_a_finished_setup_whose_server_was_turned_off_reads_stopped(monkeypatch)
 
 def test_a_failed_setup_on_a_stopped_server_still_reads_failed(monkeypatch) -> None:
     assert _stopped_server_with_flight(monkeypatch, "start_failed")["local_state"] == "start_failed"
+
+
+def test_a_download_the_person_stopped_reads_cancelled_but_one_never_started_does_not(monkeypatch) -> None:
+    """The backend flight, not a screen, says which stopped state is the person's choice."""
+    from onboarding import local_download_state
+
+    monkeypatch.setattr(local_setup._flight, "result", {"ok": True, "cancelled": True})
+    cancelled = local_download_state.current()
+    projected: dict = {}
+    local_sources._project_local_flight(projected, cancelled)
+
+    assert cancelled == {"state": "stopped", "cancelled": True}
+    assert projected == {"local_state": "stopped", "local_cancelled": True}
+
+    monkeypatch.setattr(local_setup._flight, "result", None)
+    never_started: dict = {}
+    local_sources._project_local_flight(never_started, local_download_state.current())
+
+    assert never_started == {"local_state": "stopped"}
