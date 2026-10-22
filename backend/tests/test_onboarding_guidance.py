@@ -251,7 +251,8 @@ def test_local_model_offer_reads_omlx_s_pick_and_never_sends_a_profile():
 
 
 FIRST_RUN_APP = BOOTSTRAP_SKILL.parent / "references/first-run-app.md"
-HANDOFF = "That's everything. So, what's taking up your time this week?"
+HANDOFF = ("That's everything. What's taking up your time this week? And what's one thing you keep meaning to get to "
+           "and never do? Those are often the quickest to take off your plate.")
 
 
 def test_first_run_routes_the_app_path_to_its_own_reference():
@@ -384,8 +385,13 @@ def test_hand_off_names_a_match_for_question_2_and_keeps_the_fallback_line():
     ref = (FIRST_RUN_APP.parent / "look-up-the-person.md").read_text(encoding="utf-8")
     hand_off = app.split("## The hand-off", 1)[1]
 
-    assert ("`That's everything. You said you're working toward [their words], and I can see [the repository or project] "
-            "in [where it came from]. Want me to get up to speed on it, or is something else taking up your time this week?`") in hand_off
+    assert ("`That's everything. You said you're working toward [their words], and I can see [X] in [where]. "
+            "Want me to get up to speed on it? And what's one thing you keep meaning to get to and never do? "
+            "Those are often the quickest to take off your plate.`") in hand_off
+    assert "finish the thing they never get to first" in hand_off
+    assert "check with you before anything that leaves this computer or can't be undone" in ref
+    assert "never sets a blanket rule" in ref
+    assert "You asked me to check with you before [what they named]" in _step(8)
     assert HANDOFF in hand_off
     assert "name up to three and ask which one" in hand_off
     assert "goes through an access application" in hand_off
@@ -425,7 +431,7 @@ def test_the_look_up_reference_carries_the_rules_outcomes_questions_and_examples
         "`None of these`",
         "What should I call you, what do you do, and where are you based?",
         "What are you working toward right now, at work or outside it?",
-        "When I do something for you, should I check with you first or just do it and tell you after? And do you like answers short, or with the reasoning?",
+        "Is there anything you'd want me to check with you on before I do it, like sending email as you or spending money? Everything else, I'll do and tell you what I did. And do you like answers short, or with the reasoning?",
         "Which city are you in?",
     ):
         assert line in ref, line
