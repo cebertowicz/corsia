@@ -12,6 +12,14 @@ from infra.schema import SCHEMA_VERSION
 _LEGACY_TABLES = ("activity_sessions", "session_summaries")
 
 
+def _historical_guidance_loads(db: sqlite3.Connection) -> None:
+    """Add the v47 table that a real v64 database already contains."""
+    from infra.migration_46_to_47_guidance_manifests import _GUIDANCE_47_DDL
+
+    for statement in _GUIDANCE_47_DDL:
+        db.execute(statement)
+
+
 def _table_names(db: sqlite3.Connection) -> set[str]:
     """Return any legacy session table still present in this database."""
     placeholders = ",".join("?" for _ in _LEGACY_TABLES)
@@ -32,11 +40,12 @@ def test_startup_migration_removes_legacy_session_tables_idempotently() -> None:
             CREATE TABLE session_summaries (id TEXT PRIMARY KEY);
             PRAGMA user_version=64;
         """)
+        _historical_guidance_loads(db)
         assert _table_names(db) == set(_LEGACY_TABLES)
 
         result = migrate_to_current(db, SCHEMA_VERSION)
 
-        assert SCHEMA_VERSION == 141
+        assert SCHEMA_VERSION == 142
         assert (result.migrated, result.from_version, result.to_version) == (True, 64, SCHEMA_VERSION)
         assert _table_names(db) == set()
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated

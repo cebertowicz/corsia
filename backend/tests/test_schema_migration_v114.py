@@ -8,6 +8,15 @@ from infra.database_migrations import migrate_to_current
 from infra.schema import SCHEMA_VERSION
 
 
+def _historical_c1_prerequisites(db: sqlite3.Connection) -> None:
+    """Add tables a real v113 database acquired at v47 and v77."""
+    from infra.migration_46_to_47_guidance_manifests import _GUIDANCE_47_DDL
+    from infra.migration_76_to_77_outcome_events import _OUTCOME_EVENTS_77_DDL
+
+    for statement in (*_GUIDANCE_47_DDL, *_OUTCOME_EVENTS_77_DDL):
+        db.execute(statement)
+
+
 def test_v114_adds_update_operation_columns_to_existing_database(tmp_path) -> None:
     path = tmp_path / "restart.db"
     with sqlite3.connect(path) as connection:
@@ -18,6 +27,7 @@ def test_v114_adds_update_operation_columns_to_existing_database(tmp_path) -> No
             INSERT INTO self_restart_requests VALUES ('operation', 'complete', 'now');
             PRAGMA user_version=113;
         """)
+        _historical_c1_prerequisites(connection)
     with sqlite3.connect(path) as connection:
         result = migrate_to_current(connection, SCHEMA_VERSION)
         columns = {row[1] for row in connection.execute("PRAGMA table_info(self_restart_requests)")}
