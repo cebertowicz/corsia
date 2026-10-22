@@ -72,7 +72,7 @@
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	// The subscriptions answer; null until answered (or skipped, or a resumed setup), when every CLI row shows.
 	let picks = $state<SetupPicks | null>(null), confirmLocalStop = $state(false), localOffFailed = $state<{ reference?: string } | undefined>();
-	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources, turnOff: withdrawPick });
+	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources });
 	const canConnect = shellInfo() !== null;
 	let preauthLocal = $state<LocalRowState | undefined>();
 	const local = $derived(($token ? sources.find((source) => source.source === 'omlx') : preauthLocal) as LocalRowState | undefined);
@@ -162,12 +162,6 @@
 			else void connectFlow.stop(vendor);
 		}
 		page = 'models';
-	}
-	/** Turn a tool off from its failed sign-in row: the same answer as unpicking it on the subscriptions screen. */
-	function withdrawPick(vendor: string) {
-		const next = { claude: vendor === 'claude-code' ? false : picks?.claude ?? true, chatgpt: vendor === 'codex' ? false : picks?.chatgpt ?? true };
-		picks = next;
-		void recordSetupProgress({ picks: next }, get(token));
 	}
 	function leaveConnect() { if (startConnect) onLeaveConnect?.(); else page = 'account'; }
 	async function readStatus() {

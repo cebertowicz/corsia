@@ -11,8 +11,6 @@ type ConnectPhase = {
 	signInQueued?: boolean;
 	/** A failed sign-in's stable cause, from the service or `unreachable` when no answer came; absent when unknown. */
 	signinCause?: string;
-	/** When the sign-in began waiting, so polling for it is bounded. */
-	startedAt?: number;
 };
 export type SetupAttempt = { attempt: 'none' | 'installed' | 'install_failed' | 'signin_failed'; cause?: string; ref?: string };
 export type RowView = {
@@ -21,20 +19,12 @@ export type RowView = {
 	confirm?: { label: string; run: () => void }[];
 	more?: { label: string; run: () => void }[];
 };
-export interface ConnectDeps {
-	token: () => string | null; sources: () => ModelSource[]; refreshSources: (strict?: boolean) => Promise<void>;
-	/** The person turned a tool off from its failed sign-in row: its pick is withdrawn. */
-	turnOff?: (vendor: string) => void;
-}
+export interface ConnectDeps { token: () => string | null; sources: () => ModelSource[]; refreshSources: (strict?: boolean) => Promise<void> }
 export const VENDOR_COPY: Record<string, { cli: string; uses: string; maker: string; account: string }> = {
 	'claude-code': { cli: 'Claude Code', uses: 'Uses your Claude subscription.', maker: 'Anthropic', account: 'Claude' },
 	codex: { cli: 'Codex', uses: 'Uses your ChatGPT subscription.', maker: 'OpenAI', account: 'ChatGPT' },
 };
 export const POLL_MS = 3000;
-/** Longer than the service's own five-minute wait, so only a service that stopped answering reaches it. */
-export const SIGNIN_WAIT_MS = 6 * 60 * 1000;
-/** Failures where signing in with a different account is the fix. */
-const ACCOUNT_CAUSES = ['signin_timed_out', 'no_access'];
 
 /** Keep the API's stable failure code across the setup handoff. */
 export function installCause(cause?: InstallFailureCause | null): InstallFailureCause {
@@ -67,9 +57,8 @@ export function signinFailureCopy(vendor: string, cause?: string | null, ref?: s
 	if (cause === 'agent_unavailable') return { meta: `CORSIA couldn’t reach its agent to start signing in. ${again}`, reportable: true };
 	if (cause?.endsWith('_executable_missing')) return { meta: `CORSIA couldn’t find ${cli} on this computer. Sign in again to install it.`, reportable: true };
 	if (cause?.endsWith('_signin_in_progress')) return { meta: `Another ${cli} sign-in is already open. Finish it in your browser, or sign in again.`, reportable: false };
+	if (cause === 'signin_timed_out') return { meta: `Your browser never came back to CORSIA to finish signing in to ${cli}. Sign in again.`, reportable: false };
 	if (cause === 'vendor_login_failed') return { meta: `Signing in to ${cli} didn’t finish in the browser. Sign in again.`, reportable: false };
-	if (cause === 'signin_timed_out') return { meta: `Couldn’t finish signing in to ${cli}. Try another account, or turn it off and use another option.`, reportable: false };
-	if (cause === 'no_access') return { meta: `${cli} has no model it can use with this ${account} account. Try another account, or turn it off and use another option.`, reportable: false };
 	if (cause === 'vendor_not_signed_in') return { meta: `${cli} didn’t report a signed-in ${account} account. Sign in again.`, reportable: false };
 	if (cause === 'same_account') return { meta: `That ${account} account is already signed in here. To add another, sign in again with a different ${account} account.`, reportable: false };
 	if (cause === 'signin_check_failed' || cause === 'vendor_status_failed') return { meta: `CORSIA couldn’t check the ${cli} sign-in. ${again}`, reportable: true };
@@ -112,7 +101,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 			result = await startSignin(current, accountId, lookup.target.thread_id);
 			if (stopped()) { await cancelSignin(current, accountId).catch(() => undefined); return; }
 			if (['failed', 'unavailable', 'refused'].includes(result.status)) { signinFailed(source.source, result, installed); return; }
-			setConnect(source.source, { phase: 'signing-in', installed, accountId, startedAt: Date.now() });
+			setConnect(source.source, { phase: 'signing-in', installed, accountId });
 			await tickConnect();
 		} catch (error) {
 			// An unpicked tool stays cleared: its failure is never written back over the row stop() cleared.
@@ -202,27 +191,11 @@ export function createSetupConnect(deps: ConnectDeps) {
 					if (source && sourceIsReady(source)) setConnect(vendor, undefined);
 				} else if (entry?.phase === 'signing-in' && entry.accountId) {
 					const signin = await checkSignin(current, entry.accountId).catch(() => null);
-					const expired = entry.startedAt !== undefined && Date.now() - entry.startedAt > SIGNIN_WAIT_MS;
-					if (signin?.status === 'completed') {
-						// An outcome of null means the first read of the account's models is still running.
-						if (signin.outcome === null && !expired) continue;
-						await deps.refreshSources();
-						if (signin.outcome === 'no_usable_model') signinFailed(vendor, null, entry.installed, 'no_access');
-						else setConnect(vendor, undefined);
-					} else if (signin && signin.status !== 'waiting') signinFailed(vendor, signin, entry.installed);
-					else if (expired) {
-						// The browser never came back: stop the vendor's login and stop asking about it.
-						await cancelSignin(current, entry.accountId).catch(() => undefined);
-						// No answer at all is the service's doing, not the account's.
-						signinFailed(vendor, null, entry.installed, signin ? 'signin_timed_out' : 'unreachable');
-					}
+					if (signin?.status === 'completed') { await deps.refreshSources(); setConnect(vendor, undefined); }
+					else if (signin && signin.status !== 'waiting') signinFailed(vendor, signin, entry.installed);
 				}
 			}
 		} finally { ticking = false; }
-	}
-	function turnOff(vendor: string) {
-		setConnect(vendor, undefined);
-		deps.turnOff?.(vendor);
 	}
 	function connectRow(source: ModelSource): RowView {
 		const copy = VENDOR_COPY[source.source], entry = flow[source.source];
@@ -233,9 +206,6 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (entry?.phase === 'signing-in') return { meta: 'Finish signing in in your browser.', busy: true, action: { label: 'Open sign-in again', run: () => void openSignInAgain(source) } };
 		if (entry?.phase === 'failed' && entry.failed === 'signin') {
 			const failure = signinFailureCopy(source.source, entry.signinCause, entry.ref);
-			if (entry.signinCause && ACCOUNT_CAUSES.includes(entry.signinCause)) {
-				return { meta: failure.meta, error: true, action: { label: 'Try another account', run: () => void beginSignIn(source, entry.installed) }, more: [{ label: 'Turn off', run: () => turnOff(source.source) }] };
-			}
 			return { meta: failure.meta, reference: entry.ref ?? undefined, error: true, reportable: failure.reportable, action: signInAction };
 		}
 		if (entry?.phase === 'failed') {
@@ -255,5 +225,5 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (source.state === 'unverified') return { meta: source.reason ?? '', busy: !source.checked_at, action: source.checked_at ? { label: 'Check again', run: () => void deps.refreshSources(true) } : undefined };
 		return { meta: copy.uses, action: signInAction };
 	}
-	return { get active() { return active; }, get attempts() { return attempts; }, tick: tickConnect, row: connectRow, install, signIn, stop, turnOff };
+	return { get active() { return active; }, get attempts() { return attempts; }, tick: tickConnect, row: connectRow, install, signIn, stop };
 }
