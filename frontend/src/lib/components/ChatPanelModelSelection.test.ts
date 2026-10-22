@@ -232,10 +232,6 @@ describe('ChatPanel session model hydration', () => {
 					json: async () => ({ messages: page, has_more: true, oldest_id: 'message-052' }),
 				} as Response;
 			}
-			// An open-time read with no `items` fails and retries on a timer that outlives this test.
-			if (String(input).includes('/api/open-time')) {
-				return { ok: true, json: async () => ({ items: {} }) } as Response;
-			}
 			return { ok: true, json: async () => ({ leases: [] }) } as Response;
 		}) as typeof fetch;
 		vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
