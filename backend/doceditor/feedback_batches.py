@@ -8,7 +8,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from automation.continuation import wake
 from doceditor import comment_notifications, feedback_comments, feedback_delivery, feedback_edits
 from doceditor.review_lifecycle import settle_for_batch
 from doceditor.feedback_state import (
@@ -17,9 +16,9 @@ from doceditor.feedback_state import (
     reply_waiting_ids,
     take_unreported_undelivered,
     undelivered_for_document,
-    unstarted_batch_id,
     user_feedback_for_document,
 )
+from infra import sweep_wake
 from infra.database import write_transaction
 from infra.write_effects import after_commit
 
@@ -70,6 +69,8 @@ def _open_batch(
             now, now, _new_deadline(author_kind, now), now, now,
         ),
     )
+    # A new deadline can be earlier than the one the continuation loop is sleeping toward.
+    after_commit(db, sweep_wake.sweep_soon)
     return batch_id
 
 
@@ -87,7 +88,6 @@ def _touch_batch(
                item_count=item_count+?,updated_at=? WHERE id=?""",
         (now, _new_deadline(author_kind, now), item_delta, now, batch_id),
     )
-    after_commit(db, wake.sweep_soon)
 
 
 def _add_comment_item(
@@ -99,9 +99,8 @@ def _add_comment_item(
     now: str,
     event: str | None = None,
     event_by: str | None = None,
-    rearm_deadline: bool = True,
 ) -> bool:
-    """Add one comment item once and keep the batch count in sync; rearm_deadline also resets its close deadline."""
+    """Add one comment item once and keep the batch deadline/count in sync."""
     inserted = db.execute(
         """INSERT OR IGNORE INTO doc_feedback_batch_items
            (batch_id,comment_id,event,event_at,event_by) VALUES (?,?,?,?,?)""",
@@ -109,47 +108,29 @@ def _add_comment_item(
     )
     if not inserted.rowcount:
         return False
-    if rearm_deadline:
-        _touch_batch(db, batch_id, author_kind=author_kind, now=now, item_delta=1)
-    else:
-        db.execute("UPDATE doc_feedback_batches SET last_item_at=?,item_count=item_count+1,updated_at=? WHERE id=?",
-                   (now, now, batch_id))
+    _touch_batch(db, batch_id, author_kind=author_kind, now=now, item_delta=1)
     return True
 
 
-def join_unstarted_batch(
-    db,
-    comment: dict[str, Any],
-    recipient_id: str,
-) -> tuple[str, bool]:
-    """Add a comment to a person-comment task its recipient has not started, or open a batch.
-
-    Another author kind keeps its own quiet-close batch.
-    """
+def _join_open_batch(db, comment: dict[str, Any], recipient_id: str) -> str:
     author_kind = str(comment["author_kind"])
-    author_id = feedback_comments.author_id(comment)
-    artifact_id = str(comment["artifact_id"])
     now = str(comment["created_at"])
-    batch_id = unstarted_batch_id(db, recipient_id, author_kind, author_id, artifact_id) if author_kind == "user" else None
-    delivered = batch_id is not None
-    if batch_id is None:
-        batch_id = _open_batch(
-            db,
-            author_kind=author_kind,
-            author_id=author_id,
-            artifact_id=artifact_id,
-            recipient_id=recipient_id,
-            now=now,
-        )
+    batch_id = _open_batch(
+        db,
+        author_kind=author_kind,
+        author_id=feedback_comments.author_id(comment),
+        artifact_id=str(comment["artifact_id"]),
+        recipient_id=recipient_id,
+        now=now,
+    )
     _add_comment_item(
         db,
         batch_id=batch_id,
         comment_id=str(comment["id"]),
         author_kind=author_kind,
         now=now,
-        rearm_deadline=not delivered,
     )
-    return batch_id, delivered
+    return batch_id
 
 
 def record_reopen(
@@ -244,15 +225,7 @@ def record_comment(
     if created:
         feedback_comments.make_user_document_durable(db, comment)
         feedback_comments.emit_comment_created(db, comment)
-        joins = [join_unstarted_batch(db, comment, recipient)
-                 for recipient in feedback_comments.recipients(db, comment)]
-        batch_ids = [batch_id for batch_id, _delivered in joins]
-        for batch_id, delivered in joins:
-            if delivered:
-                batch = db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
-                feedback_delivery.refresh_unstarted_node(db, batch)
-            elif comment["author_kind"] == "user":
-                woken.extend(_claim_and_deliver(db, batch_id, from_state="open", reason="send")[1])
+        batch_ids = [_join_open_batch(db, comment, recipient) for recipient in feedback_comments.recipients(db, comment)]
         if submit and comment["author_kind"] == "agent":
             woken = close_for_document(
                 db,
@@ -271,6 +244,21 @@ def record_comment(
         known = {row["id"] for row in notices}
         notices.extend(row for row in current_failures if row["id"] not in known)
     return {"batch_ids": batch_ids, "undelivered_batches": notices, "woken": woken}
+
+
+def deliver_person_comment(db, batch_ids: list[str]) -> list[str]:
+    """Deliver a person's just-saved comment now, each batch in its own write.
+
+    The comment is already committed. A batch that fails here stays open with its
+    deadline a few seconds out, so the continuation loop retries it.
+    """
+    woken: list[str] = []
+    for batch_id in batch_ids:
+        try:
+            woken.extend(close_batch(db, batch_id, "send")[1])
+        except Exception:
+            log.exception("immediate delivery of document feedback batch %s failed; it stays open to retry", batch_id)
+    return woken
 
 
 def _claim_and_deliver(db, batch_id: str, *, from_state: str, reason: str | None) -> tuple[bool, tuple[str, ...]]:

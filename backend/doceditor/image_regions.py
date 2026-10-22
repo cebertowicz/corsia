@@ -316,9 +316,9 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
     A copy shows only this batch's boxes on its image, so its numbers match the
     lines. Delivery holds the SQLite writer, so here only the marks and the
     image's header are read; the copy is drawn once the delivery commits, and a
-    rolled-back delivery draws none. It is named for the batch and its comment
-    count, so a task taking more comments before it starts gets a fresh one. A
-    copy that cannot be made, or an unresolved reader tray, leaves the reason.
+    rolled-back delivery draws none. It is named for the batch, which delivers
+    once. A copy that cannot be made, or a reader tray that cannot be
+    resolved, leaves the reason in its place; the text still goes.
     """
     by_image = _by_image((item for item in items if item["kind"] == "comment"), path)
     if not by_image:
@@ -342,8 +342,7 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
         else:
             # Images in one document can share a file name, so each one's copy also carries its path's hash.
             tag = "" if image_path == path else f"-{hashlib.sha256(str(image_path).encode()).hexdigest()[:8]}"
-            more = f"-{len(group)}" if len(group) > 1 else ""
-            target = tray / f"{Path(str(image_path)).stem}-feedback-{batch_id}{tag}{more}.png"
+            target = tray / f"{Path(str(image_path)).stem}-feedback-{batch_id}{tag}.png"
             after_commit(db, partial(_draw_copy, image, marks_for(db, group), target, reader_thread_id))
             line = f"Marked-up image (numbered boxes): {target} (open it with read_file to see each region)"
         for item in group:

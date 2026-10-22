@@ -133,6 +133,8 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 feedback["undelivered_batches"].extend(
                     batch for batch in undelivered if batch["id"] not in known
                 )
+        if created and request.author_kind == "user":
+            feedback["woken"].extend(feedback_batches.deliver_person_comment(db, feedback["batch_ids"]))
         return row, registered, feedback
     except BaseException:
         receipt.failed(identifier, db, artifact_id=request.artifact_id, author=request.author)

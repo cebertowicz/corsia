@@ -7,7 +7,6 @@ from typing import Any
 
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
 from plans import admission, artifact_links, intent_words, review_requests, service
-from plans.feedback_unstarted import feedback_node_has_started
 from plans.feedback_items import (
     artifact_name, artifact_row, batch_value, feedback_display, feedback_item_counts, feedback_kind_counts,
     load_feedback_items,
@@ -201,13 +200,11 @@ def create_feedback_node(
     *,
     items: list[dict[str, Any]] | None = None,
 ) -> FeedbackNodeResult:
-    """Create one queued recipient-plan task, refreshing it only before admission starts it."""
+    """Create one queued recipient-plan task, idempotently keyed by batch id."""
     batch_id = str(batch_value(batch, "id"))
     artifact_id = str(batch_value(batch, "artifact_id"))
     existing = _existing(db, recipient_thread_id, batch_id)
     if existing is not None:
-        if not feedback_node_has_started(db, existing):
-            _refresh_unstarted(db, existing, batch, items)
         return FeedbackNodeResult(existing, (), False)
     loaded = items if items is not None else load_feedback_items(db, batch)
     if not loaded:
@@ -224,33 +221,6 @@ def create_feedback_node(
         description=_description(batch, loaded),
         intent=intent_words.document_comment_intent(loaded) if words else None, words=words,
     )
-
-
-def _refresh_unstarted(db, node_id: str, batch: Any, items: list[dict[str, Any]] | None) -> None:
-    """Re-render a never-started task from its batch, adding person words it has not recorded."""
-    loaded = items if items is not None else load_feedback_items(db, batch)
-    if not loaded:
-        return
-    author, document = feedback_display(db, batch, loaded)
-    is_person = batch_value(batch, "author_kind") == "user"
-    columns = {}
-    if is_person:
-        columns["intent"] = intent_words.document_comment_intent(loaded)
-    service.touch_node(
-        db, node_id, title=_title(author, document, loaded),
-        acceptance_criteria=_acceptance(loaded), description=_description(batch, loaded), **columns,
-    )
-    if is_person:
-        recorded = {
-            row["source_id"] for row in db.execute(
-                "SELECT source_id FROM plan_node_intent_words WHERE node_id=?", (node_id,),
-            ).fetchall()
-        }
-        intent_words.append(
-            db, node_id,
-            [word for word in intent_words.document_comment_words(loaded) if word["source_id"] not in recorded],
-            revision=service.get_node(node_id, db=db).requirements_revision,
-        )
 
 
 def _create_linked_node(db, recipient_thread_id, artifact_id, source_id, provenance,

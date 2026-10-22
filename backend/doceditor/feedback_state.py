@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from plans.public import feedback_node_takes_more
 from registry import models as registry_models
 
 USER_AUTHOR_ID = "ui"
@@ -188,16 +187,3 @@ def seconds_until_next_due(now: datetime, *, db) -> float | None:
     """Seconds until the earliest open batch is due (negative when overdue), or None when none is open."""
     row = db.execute("SELECT MIN(closes_at) FROM doc_feedback_batches WHERE state='open'").fetchone()
     return None if row[0] is None else (datetime.fromisoformat(row[0]) - now).total_seconds()
-
-
-def unstarted_batch_id(db, recipient_id: str, author_kind: str, author_id: str, artifact_id: str) -> str | None:
-    """The author's newest delivered batch for this document and owner, if its task has not been started."""
-    row = db.execute(
-        """SELECT id,delivered_node_id FROM doc_feedback_batches
-           WHERE author_kind=? AND author_id=? AND artifact_id=? AND recipient_id=?
-             AND state='delivered' AND delivery_outcome='node'
-           ORDER BY updated_at DESC,id DESC LIMIT 1""",
-        (author_kind, author_id, artifact_id, recipient_id),
-    ).fetchone()
-    node_id = row["delivered_node_id"] if row is not None else None
-    return str(row["id"]) if node_id and feedback_node_takes_more(db, node_id, recipient_id) else None

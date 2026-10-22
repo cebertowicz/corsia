@@ -8,9 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from automation.continuation import loop, wake
+from automation.continuation import loop
 from doc_feedback_helpers import seed_document, seed_thread
 from doceditor.feedback_batches import record_edit
+from infra import sweep_wake
 from infra.database import get_db, write_transaction
 
 pytestmark = pytest.mark.asyncio
@@ -71,9 +72,36 @@ async def test_sweep_soon_wakes_a_sleeping_loop(isolated_db, monkeypatch):
             while not sweeps:
                 await asyncio.sleep(0.05)
             await asyncio.sleep(0.2)
-            wake.sweep_soon()
+            sweep_wake.sweep_soon()
             while len(sweeps) < 2:
                 await asyncio.sleep(0.05)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_a_failing_deadline_read_does_not_end_the_loop(isolated_db, monkeypatch):
+    sweeps: list[str] = []
+
+    async def fake_sweep(now, **_kwargs):
+        sweeps.append(now)
+
+    def broken(_now):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(loop, "sweep", fake_sweep)
+    monkeypatch.setattr(loop, "_seconds_to_next_feedback_deadline", broken)
+    monkeypatch.setattr(loop.admission, "RESTART_JITTER_SECONDS", 0)
+    task = asyncio.create_task(loop.continuation_sweep_loop())
+    try:
+        async with asyncio.timeout(3):
+            while not sweeps:
+                await asyncio.sleep(0.05)
+            await asyncio.sleep(0.2)
+            sweep_wake.sweep_soon()
+            while len(sweeps) < 2:
+                await asyncio.sleep(0.05)
+        assert not task.done()
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)

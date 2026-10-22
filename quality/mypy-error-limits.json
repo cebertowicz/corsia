@@ -71,11 +71,8 @@
     "narrowed to BaseException; the pinned local mypy 2.3.0 gate reports 221.",
     "2026-10-10: backend lowered 221 -> 217 after the streaming dispatchers",
     "imported LLMResponse and ToolCallRequest for type checking; the pinned",
-    "local mypy 2.3.0 gate reports 217.",
-    "2026-10-22: backend back to 215 from 214. #1280 lowered it to 214, but",
-    "dev reports 215: lint CI at PR #1250 head ecb380df5 counts 215 with none",
-    "of the errors in files that PR changes, so the extra error is already on dev."
+    "local mypy 2.3.0 gate reports 217."
   ],
-  "backend": 215,
+  "backend": 214,
   "tools": 4
 }
