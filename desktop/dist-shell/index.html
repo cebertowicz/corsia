@@ -759,6 +759,9 @@
 				spinner.hidden = state.kind !== 'connecting';
 				saveReport.hidden = true;
 				retry.hidden = false;
+				setUpLocal.textContent = window.__CORSIA_SHELL__?.localConfigured === true
+					? 'Use this computer instead'
+					: 'Set up this computer instead';
 				setUpLocal.hidden = !['unreachable', 'incompatible', 'too_old', 'key_changed'].includes(state.kind);
 				if (state.kind === 'connecting') {
 					status.textContent = `Connecting to ${state.name}…`;

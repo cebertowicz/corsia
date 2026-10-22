@@ -21,6 +21,7 @@ pub enum LaunchState {
 /// shell pages themselves.
 pub struct ShellState {
     state: LaunchState,
+    local_corsia_configured: bool,
 }
 
 impl Default for ShellState {
@@ -33,11 +34,19 @@ impl ShellState {
         let state = saved.map_or(LaunchState::Local, |remote| LaunchState::Connecting {
             name: remote.name.clone(),
         });
-        Self { state }
+        Self { state, local_corsia_configured: false }
     }
 
     pub fn state(&self) -> &LaunchState {
         &self.state
+    }
+
+    pub fn local_corsia_configured(&self) -> bool {
+        self.local_corsia_configured
+    }
+
+    pub fn set_local_corsia_configured(&mut self, configured: bool) {
+        self.local_corsia_configured = configured;
     }
 
     pub fn begin_pairing(&mut self) {

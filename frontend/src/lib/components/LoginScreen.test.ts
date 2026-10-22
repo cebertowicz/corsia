@@ -3,7 +3,12 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const wsMocks = vi.hoisted(() => ({ connect: vi.fn() }));
+const remoteShellMocks = vi.hoisted(() => ({
+	shellInfo: vi.fn(),
+	disconnectRemote: vi.fn(),
+}));
 vi.mock('$lib/ws', () => ({ connect: wsMocks.connect }));
+vi.mock('$lib/remoteShell', () => remoteShellMocks);
 
 import LoginScreen from './LoginScreen.svelte';
 import { token, user } from '$lib/stores/auth';
@@ -37,6 +42,8 @@ function mountScreen(props: { onNoAccount?: () => void } = {}) {
 
 beforeEach(() => {
 	wsMocks.connect.mockClear();
+	remoteShellMocks.shellInfo.mockReturnValue(null);
+	remoteShellMocks.disconnectRemote.mockReset();
 	token.set(null);
 	user.set(null);
 	connectionError.set(null);
@@ -136,6 +143,44 @@ describe('LoginScreen', () => {
 
 		await vi.waitFor(() => expect(get(token)).toBe('new-session-token'));
 		expect(wsMocks.connect).toHaveBeenCalled();
+	});
+
+	it('offers the configured computer return action only while connected remotely', async () => {
+		remoteShellMocks.shellInfo.mockReturnValue({ mode: 'remote', name: 'Studio', localConfigured: true });
+		remoteShellMocks.disconnectRemote.mockResolvedValue(undefined);
+		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(true)));
+		mountScreen();
+		await vi.waitFor(() => expect(usernameField()).not.toBeNull());
+
+		const returnButton = Array.from(host.querySelectorAll('button'))
+			.find((button) => button.textContent?.includes('Use this computer instead'));
+		expect(returnButton).toBeDefined();
+		returnButton!.click();
+		await vi.waitFor(() => expect(host.textContent).toContain('Disconnect from Studio?'));
+		expect(host.textContent).toContain('Your work stays on Studio. This app signs out and returns to setup.');
+
+		const disconnectButton = Array.from(host.querySelectorAll('button'))
+			.find((button) => button.textContent?.includes('Disconnect'));
+		disconnectButton!.click();
+		await vi.waitFor(() => expect(remoteShellMocks.disconnectRemote).toHaveBeenCalledOnce());
+	});
+
+	it('labels the remote return action as setup when this computer is not configured', async () => {
+		remoteShellMocks.shellInfo.mockReturnValue({ mode: 'remote', name: 'Studio', localConfigured: false });
+		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(true)));
+		mountScreen();
+		await vi.waitFor(() => expect(usernameField()).not.toBeNull());
+
+		expect(host.textContent).toContain('Set up this computer instead');
+		expect(host.textContent).not.toContain('Use this computer instead');
+	});
+
+	it('does not offer the remote return action outside the desktop remote shell', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(true)));
+		mountScreen();
+		await vi.waitFor(() => expect(usernameField()).not.toBeNull());
+
+		expect(host.textContent).not.toContain('this computer instead');
 	});
 
 	it('shows a plain message and clears only the password on 401, keeping the username', async () => {

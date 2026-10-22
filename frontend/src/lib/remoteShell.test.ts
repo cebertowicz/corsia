@@ -20,7 +20,9 @@ describe('shellInfo', () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'local' };
 		expect(shellInfo()).toEqual({ mode: 'local' });
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio' };
-		expect(shellInfo()).toEqual({ mode: 'remote', name: 'Studio' });
+		expect(shellInfo()).toEqual({ mode: 'remote', name: 'Studio', localConfigured: false });
+		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio', localConfigured: true };
+		expect(shellInfo()).toEqual({ mode: 'remote', name: 'Studio', localConfigured: true });
 	});
 	it('treats a remote object with no name as local, never a blank computer', () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote' };

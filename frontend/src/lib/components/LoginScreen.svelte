@@ -7,6 +7,7 @@
 	import { Button } from '$lib/components/ui';
 	import SetupShell from './SetupShell.svelte';
 	import { saveSetupReport } from '$lib/setupReport';
+	import { disconnectRemote, shellInfo } from '$lib/remoteShell';
 
 	interface Props { onNoAccount?: () => void; }
 	const { onNoAccount }: Props = $props();
@@ -19,6 +20,12 @@
 	let loginError = $state('');
 	let submitting = $state(false);
 	let checkingAgain = $state(false);
+	let returningToThisComputer = $state(false);
+	let returnConfirm = $state(false);
+	const shell = shellInfo();
+	const localReturnLabel = shell?.mode === 'remote'
+		? shell.localConfigured ? 'Use this computer instead' : 'Set up this computer instead'
+		: null;
 
 	// Setup is reachable only from the computer CORSIA runs on; the setup routes
 	// answer 403 to anyone else, who keeps the `corsia user add` guidance.
@@ -92,6 +99,17 @@
 		connect();
 	}
 
+	async function returnToThisComputer() {
+		if (returningToThisComputer) return;
+		returningToThisComputer = true;
+		try {
+			await disconnectRemote();
+		} catch {
+			loginError = `CORSIA couldn’t disconnect from ${shell?.mode === 'remote' ? shell.name : 'the other computer'}. Try again.`;
+			returningToThisComputer = false;
+		}
+	}
+
 	$effect(() => {
 		if ($connectionError === 'Invalid or expired session') {
 			loginError = 'Your session ended. Sign in again.';
@@ -148,7 +166,22 @@
 				<Button type="submit" variant="primary" loading={submitting} disabled={submitting}>
 					Sign in
 				</Button>
+				{#if localReturnLabel}
+					<Button variant="chip" onclick={() => returnConfirm = true} disabled={submitting || returnConfirm}>
+						{localReturnLabel}
+					</Button>
+				{/if}
 			</form>
+			{#if returnConfirm && shell?.mode === 'remote'}
+				<div class="return-confirm" role="group" aria-label="Disconnect from {shell.name}">
+					<span>Disconnect from {shell.name}?</span>
+					<span>Your work stays on {shell.name}. This app signs out and returns to setup.</span>
+					<div class="return-confirm-actions">
+						<Button variant="primary" onclick={returnToThisComputer} loading={returningToThisComputer} disabled={submitting || returningToThisComputer}>Disconnect</Button>
+						<Button variant="chip" onclick={() => returnConfirm = false} disabled={returningToThisComputer}>Cancel</Button>
+					</div>
+				</div>
+			{/if}
 		{/if}
 	</div>
 </div>
@@ -224,4 +257,10 @@
 	.login-error {
 		color: var(--red); font-size: var(--text-subhead); margin-bottom: 12px;
 	}
+	.return-confirm {
+		display: grid; gap: var(--space-2); margin: var(--space-3) auto 0; max-width: 100%;
+		font-size: var(--text-subhead); color: var(--text-secondary);
+	}
+	.return-confirm > span:first-child { color: var(--text-primary); }
+	.return-confirm-actions { display: flex; justify-content: center; gap: var(--space-2); }
 </style>
