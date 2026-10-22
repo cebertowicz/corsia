@@ -58,6 +58,8 @@ NEVER_WAKES = "this recipient never wakes for this artifact"
 OTHER_OWNER = "the registered owner is another agent"
 OUT_OF_PROJECT = "recipient outside the rule's project"
 LOOKUP_FAILED = "repository lookup failed"
+UNAVAILABLE = "recipient unavailable"
+WRITER_LEFT = "its writer left the rule's project; rule turned off"
 
 WAKES_PER_HOUR = 1
 RETENTION = timedelta(days=30)
@@ -229,12 +231,6 @@ def routed(
     return by_thread, state, owner or next(iter(by_thread), None)
 
 
-def _paused(db: sqlite3.Connection, thread: str) -> bool:
-    from plans.public import thread_paused_since
-
-    return thread_paused_since(db, thread) is not None
-
-
 def _apply_drops(
     plan: RulePlan, rules: list[Rule], by_thread: Mapping[str, Target],
     recipients: Mapping[str, str | None],
@@ -254,17 +250,25 @@ def _apply_drops(
 
 
 def _settle_unreachable(
-    plan: RulePlan, rules: list[Rule], recipients: Mapping[str, str | None],
-    threads: Mapping[str, Mapping[str, Any]],
+    db: sqlite3.Connection, plan: RulePlan, rules: list[Rule],
+    recipients: Mapping[str, str | None], threads: Mapping[str, Mapping[str, Any]],
 ) -> list[Rule]:
     """Settle each rule whose affected thread (a delivery's recipient, a drop's
-    writer) is unavailable or no longer in the rule's project; return the rest."""
+    writer) is unavailable or no longer in the rule's project; return the rest.
+    One whose writer left its project is turned off with ``disable``'s write."""
     current = []
     for rule in rules:
         thread = recipients[rule.id] if rule.action == DELIVER else rule.created_by
         row = threads.get(thread) if thread else None
-        if rule.action == DELIVER and (row is None or not row["available"]):
-            reason = "no registered owner" if thread is None else "recipient unavailable"
+        writer = threads.get(rule.created_by)
+        if writer is not None and writer["project_id"] != rule.scope.removeprefix(PROJECT_PREFIX):
+            from events.rule_authoring import turn_off
+
+            turn_off(db, rule.id, rule.scope, _iso(_now()))
+            plan.settled.append(Outcome(rule.id, rule.created_by, DEAD_LETTERED,
+                                        reason=WRITER_LEFT))
+        elif rule.action == DELIVER and (row is None or not row["available"]):
+            reason = "no registered owner" if thread is None else UNAVAILABLE
             plan.settled.append(Outcome(rule.id, thread, DEAD_LETTERED, reason=reason))
         elif row is not None and row["project_id"] != rule.scope.removeprefix(PROJECT_PREFIX):
             plan.settled.append(Outcome(rule.id, thread, HELD, reason=OUT_OF_PROJECT))
@@ -307,7 +311,7 @@ def _wakes(
     answers: dict[str, tuple[bool, str | None, int]] = {}
     since = _iso(_now() - timedelta(hours=1))
     for thread, rule_ids in asking.items():
-        if _paused(db, thread):
+        if rule_reads.paused(db, thread):
             answers.update({rule_id: (False, PAUSED, 0) for rule_id in rule_ids})
             continue
         budgets = rule_reads.wake_budgets(db, rule_ids, thread, cap=WAKE_CAP, since=since)
@@ -346,7 +350,7 @@ def evaluate(
         return plan
     threads = rule_reads.threads(
         db, [*recipients.values(), *(rule.created_by for rule in rules)])
-    rules = _settle_unreachable(plan, rules, recipients, threads)
+    rules = _settle_unreachable(db, plan, rules, recipients, threads)
     dropped_by = _apply_drops(plan, rules, by_thread, recipients)
     delivering: list[tuple[Rule, str, Target | None]] = []
     answers: dict[str, tuple[bool, str | None, int]] = {}

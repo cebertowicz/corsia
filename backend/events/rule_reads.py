@@ -1,4 +1,4 @@
-"""The reads rule evaluation makes: the rules for an event, then threads and wake budget.
+"""The reads rule evaluation makes: the rules for an event, then threads, pause and wake budget.
 
 Each is one indexed read. The rules read is the one every event pays; the
 others are made only after ``events.rules`` found a matching rule, so an event
@@ -95,6 +95,13 @@ def threads(db: sqlite3.Connection, ids: Iterable[str | None]) -> dict[str, Mapp
         wanted,
     ).fetchall()
     return {row["id"]: row for row in rows}
+
+
+def paused(db: sqlite3.Connection, thread: str) -> bool:
+    """R7: whether the thread's plan is paused (Plans owns the answer)."""
+    from plans.public import thread_paused_since
+
+    return thread_paused_since(db, thread) is not None
 
 
 def wake_budgets(

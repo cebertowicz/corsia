@@ -23,6 +23,8 @@ from dataclasses import dataclass, replace
 from collections.abc import Iterable
 from typing import Any, Callable
 
+from loguru import logger
+
 from events import dead_letter, rules
 from events.connectors import EventTypeDecl, get_manifest
 from events.delivery import enqueue_event_wake
@@ -33,6 +35,7 @@ from infra.database import write_transaction
 from infra.db_async import run_in_db_unless_owned
 from infra.passive_changes import append_thread_context_note
 from infra.product_events import emit_product_event
+from infra.send_types import SendRejected
 
 WOKE = "woke"
 DIGESTED = "digested"
@@ -231,7 +234,11 @@ def deliver_rule_adds(
     target_filter: Filter | None = None,
 ) -> tuple[list[PlatformDelivery], list[rules.Outcome]]:
     """Deliver each recipient a rule added, through the filter the caller applies
-    to routed recipients (the mail poller's is the account's reach, R30)."""
+    to routed recipients (the mail poller's is the account's reach, R30).
+
+    Rules only add: a recipient that refuses the delivery (being deleted, say)
+    is that rule's outcome, rolled back to its own savepoint, and never reaches
+    routing's deliveries in the caller's transaction."""
     deliveries, outcomes = [], []
     for thread, delivery in plan.adds.items():
         target = _rule_target(thread, delivery, None, plan, envelope.event_class)
@@ -241,8 +248,17 @@ def deliver_rule_adds(
             outcomes += [rules.Outcome(entry.rule_id, thread, rules.HELD, reason=reason)
                          for entry in delivery.entries]
             continue
-        made = _deliver_target(db, envelope, target, decl,
-                               tuple(delivery.notes), tuple(delivery.capped))
+        try:
+            with write_transaction(db, scope="deliver_rule_add"):
+                made = _deliver_target(db, envelope, target, decl,
+                                       tuple(delivery.notes), tuple(delivery.capped))
+        except SendRejected as exc:
+            logger.warning("event rules: {} refused {}: {}", thread, envelope.type, exc)
+            deliveries.append(PlatformDelivery(envelope.event_id, thread, DEAD_LETTERED,
+                                               rules.UNAVAILABLE))
+            outcomes += [rules.Outcome(entry.rule_id, thread, rules.DEAD_LETTERED,
+                                       reason=rules.UNAVAILABLE) for entry in delivery.entries]
+            continue
         deliveries.append(made)
         outcomes += settle_rule_delivery(db, plan, thread, delivery, made.outcome, ride=False)
     return deliveries, outcomes

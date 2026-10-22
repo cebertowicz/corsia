@@ -232,9 +232,15 @@ def disable(
     rule = rules.from_row(row)
     if caller not in (rule.created_by, rules.thread_target(rule.to)) and _conductor(db, project_id) != caller:
         raise RuleRefused("Only the rule's writer, its recipient or the project's conductor can turn it off.")
-    db.execute("UPDATE event_rules SET enabled=0, updated_at=? WHERE id=?", (now, rule.id))
-    _prune_disabled(db, rules.project_scope(project_id), now)
+    turn_off(db, rule.id, row["scope"], now)
     return {**_shape(rule), "enabled": False}
+
+
+def turn_off(db: sqlite3.Connection, rule_id: str, scope: str, now: str) -> None:
+    """Disable one rule and prune its scope's stale disabled rules: ``disable``'s
+    write, and evaluation's for a rule whose writer left its project."""
+    db.execute("UPDATE event_rules SET enabled=0, updated_at=? WHERE id=?", (now, rule_id))
+    _prune_disabled(db, scope, now)
 
 
 def _shape(rule: rules.Rule) -> dict[str, Any]:
