@@ -51,7 +51,7 @@ Say so plainly and work around it. Quote what the tool reported, never a limit y
 
 ## No connection exists yet
 
-No tool ends at "I can't" when the only thing missing is a connection. Tell the person `There's no ready way to connect [tool] yet. I'll build one after setup. It's on my list.` (outside setup, drop "after setup"), and add a task of your own to build it: a small connection or script, as the methods above say. It never holds up what the person is doing. When it works, offer to share it to the shared library, and only after they say yes: sharing is public, so strip every account detail, key and personal name from it first. A missing permission or a CORSIA change is the same: one line naming what is needed, handled after setup. A CORSIA change becomes an issue you write up and file once they say yes, as text only.
+No tool ends at "I can't" when the only thing missing is a connection. Tell the person `There's no ready way to connect [tool] yet. I'll build one after setup. It's on my list.` (outside setup, drop "after setup"), and add a task of your own to build it: a small connection or script, as the methods above say. It never holds up what the person is doing. When it works, offer to share it to the shared library, and only after they say yes: sharing is public, so strip every account detail, key and personal name from it first. A missing permission or a CORSIA change is the same: one line naming what is needed, handled after setup. A CORSIA change is reported the way "When it can't be done yet" says.
 
 ## A macOS permission only the person can grant
 
