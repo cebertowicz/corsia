@@ -38,7 +38,7 @@ vi.mock('$lib/openTime', async (importActual) => {
 			const now = Date.now();
 			actual.openTimes.update((readings) => {
 				const next = new Map(readings);
-				for (const query of queries) next.set(query.key, { seconds: (now - query.since) / 1000, openNow: true, receivedAt: now });
+				for (const query of queries) next.set(query.key, { seconds: (now - query.since) / 1000, openNow: true, receivedAt: now, floor: 0 });
 				return next;
 			});
 		},

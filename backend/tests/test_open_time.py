@@ -68,9 +68,9 @@ def waits(monkeypatch, per_thread: dict[str, list[tuple[str, str | None]]]) -> N
 
 
 def read(db, since: str, until: str | None, as_of: str, day: str = DAY) -> dict:
-    return open_time.open_time(
-        db, "lead", since=at(since, day), until=at(until, day) if until else None, as_of=at(as_of, day),
-    )
+    return open_time.open_times(
+        db, "lead", [(at(since, day), at(until, day) if until else None)], as_of=at(as_of, day),
+    )[0]
 
 
 def test_a_worker_returning_to_its_lead_never_drops_the_count(db) -> None:
@@ -139,6 +139,20 @@ def test_a_set_aside_stretch_is_not_open(db, monkeypatch) -> None:
 def test_a_range_clips_a_turn_that_straddles_it(db) -> None:
     turn(db, "lead", "09:50", "10:10")
     assert minutes(read(db, "10:00", "10:05", "11:00")) == 5
+
+
+def test_naive_and_offset_stamps_are_both_read_as_utc(db) -> None:
+    # Storage holds both forms; the range is compared as time, not text, so neither is dropped or mis-clipped.
+    db.execute(
+        "INSERT INTO active_turns VALUES (?,?,?,?,?)",
+        ("aware", "lead", "completed", "2026-10-21T03:00:00-07:00", "2026-10-21T10:04:00+00:00"),
+    )
+    db.execute(
+        "INSERT INTO active_turns VALUES (?,?,?,?,?)",
+        ("outside", "lead", "completed", "2026-10-21T02:00:00-07:00", "2026-10-21T02:30:00-07:00"),
+    )
+    turn(db, "worker", "10:06", "10:08")
+    assert minutes(read(db, "10:00", None, "10:10")) == 6
 
 
 def test_a_reload_answers_the_same_from_storage_alone(db, tmp_path) -> None:

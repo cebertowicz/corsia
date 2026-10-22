@@ -21,7 +21,6 @@
 	import { liveRunTimes, runLabels, runRanges, waitElapsed, waitRange, type RunRange, type TurnSummaries } from './transcriptRunLabel';
 	import { minuteClock } from '$lib/time';
 	import { trackVisibleRow } from '$lib/actions/trackVisibleRow';
-	import { untrack } from 'svelte';
 	import { openMilliseconds, openRangeKey, openTimes, requestOpenTime, type OpenTimeQuery } from '$lib/openTime';
 	import { attachPlanLimitPauses, stubPauseTurns, type PlanLimitPauseDescriptor } from './planLimitPause';
 	import { deliveryPresentation, isAwaitingDelivery } from '$lib/messageDelivery';

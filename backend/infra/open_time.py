@@ -13,6 +13,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from infra.time import utc_storage_datetime, utc_storage_iso_to_api
+
 Interval = tuple[float, float]
 
 _DESCENDANTS_SQL = """
@@ -29,16 +31,8 @@ _DESCENDANTS_SQL = """
 
 
 def epoch(value: str | datetime) -> float:
-    """One stored or API UTC timestamp (naive means UTC) as epoch seconds."""
-    parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.timestamp()
-
-
-def api_time(value: datetime) -> str:
-    """RFC 3339 UTC, the form every other API timestamp has."""
-    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    """One stored or API UTC timestamp as epoch seconds."""
+    return utc_storage_datetime(value).timestamp()
 
 
 def thread_and_descendants(db: Any, thread_id: str) -> list[str]:
@@ -49,15 +43,18 @@ def thread_and_descendants(db: Any, thread_id: str) -> list[str]:
 def turn_intervals(db: Any, thread_ids: list[str], *, since: float, until: float) -> list[Interval]:
     """Every stored Turn of ``thread_ids`` that touches [since, until]; a running Turn ends at ``until``.
 
-    The range is filtered here, not in SQL: ``started_at`` is stored both naive and offset-aware, so a text
-    comparison in SQL is not reliable across rows.
+    ``started_at`` is stored both naive and offset-aware, so the range is compared through ``julianday``,
+    which reads both forms as UTC, never as text.
     """
     if not thread_ids:
         return []
     marks = ",".join("?" for _ in thread_ids)
+    low = datetime.fromtimestamp(since, UTC).isoformat()
+    high = datetime.fromtimestamp(until, UTC).isoformat()
     rows = db.execute(
-        f"SELECT started_at, ended_at FROM active_turns WHERE thread_id IN ({marks})",
-        thread_ids,
+        f"SELECT started_at, ended_at FROM active_turns WHERE thread_id IN ({marks}) "
+        "AND julianday(started_at) < julianday(?) AND (ended_at IS NULL OR julianday(ended_at) > julianday(?))",
+        [*thread_ids, high, low],
     ).fetchall()
     found = []
     for row in rows:
@@ -116,18 +113,6 @@ def open_times(
             "seconds": sum(end - start for start, end in merged),
             # Something is running or waited on right now only for a range that reaches now.
             "open_now": high >= now and bool(merged) and merged[-1][1] >= now,
-            "as_of": api_time(as_of),
+            "as_of": utc_storage_iso_to_api(as_of),
         })
     return answers
-
-
-def open_time(
-    db: Any,
-    thread_id: str,
-    *,
-    since: datetime,
-    until: datetime | None,
-    as_of: datetime,
-) -> dict:
-    """``{seconds, open_now, as_of}`` for one lead thread over [since, until or now]."""
-    return open_times(db, thread_id, [(since, until)], as_of=as_of)[0]

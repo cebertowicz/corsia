@@ -128,6 +128,6 @@ export function seedOpenTime(
 	_resetOpenTimeForTests();
 	openTimes.set(new Map(runRanges(entries, summaries, historyComplete).map((range) => [
 		openRangeKey(threadId, range),
-		{ seconds: (open(range) ?? 0) / 1000, openNow: false, receivedAt: 0 },
+		{ seconds: (open(range) ?? 0) / 1000, openNow: false, receivedAt: 0, floor: 0 },
 	])));
 }

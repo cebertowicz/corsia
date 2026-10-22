@@ -27,7 +27,7 @@ def test_a_worker_turn_a_plan_wait_and_the_leads_own_turns_count_once(db):
     _turn(db, "owner", 30, 35)
     db.commit()
 
-    result = open_time.open_time(db, "owner", since=T0, until=T0 + timedelta(minutes=35), as_of=T0 + timedelta(minutes=60))
+    result = open_time.open_times(db, "owner", [(T0, T0 + timedelta(minutes=35))], as_of=T0 + timedelta(minutes=60))[0]
 
     assert result["seconds"] == 35 * 60
     assert result["open_now"] is False

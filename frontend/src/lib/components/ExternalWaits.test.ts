@@ -54,7 +54,7 @@ function render(entries: TranscriptEntry[], props: Record<string, unknown> = {})
 	if (range) {
 		openTimes.update((readings) => new Map(readings).set(
 			openRangeKey(THREAD, range),
-			{ seconds: WAITED_SECONDS, openNow: true, receivedAt: Date.now() },
+			{ seconds: WAITED_SECONDS, openNow: true, receivedAt: Date.now(), floor: 0 },
 		));
 	}
 	component = mount(TranscriptContent, {
