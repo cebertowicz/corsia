@@ -23,8 +23,8 @@ from infra.database import write_transaction
 log = logging.getLogger(__name__)
 
 AGENT_QUIET = 120
-USER_LEAVE_GRACE = 120
-USER_IDLE = 30 * 60
+USER_IDLE = 5
+USER_LEAVE_GRACE = USER_IDLE
 
 
 def _now() -> str:
@@ -96,6 +96,7 @@ def _add_comment_item(
     now: str,
     event: str | None = None,
     event_by: str | None = None,
+    touch: bool = True,
 ) -> bool:
     """Add one comment item once and keep the batch deadline/count in sync."""
     inserted = db.execute(
@@ -105,29 +106,16 @@ def _add_comment_item(
     )
     if not inserted.rowcount:
         return False
-    _touch_batch(db, batch_id, author_kind=author_kind, now=now, item_delta=1)
+    if touch:
+        _touch_batch(db, batch_id, author_kind=author_kind, now=now, item_delta=1)
+    else:
+        db.execute(
+            """UPDATE doc_feedback_batches SET last_item_at=?,item_count=item_count+?,updated_at=?
+               WHERE id=?""",
+            (now, 1, now, batch_id),
+        )
     return True
 
-
-def _join_open_batch(db, comment: dict[str, Any], recipient_id: str) -> str:
-    author_kind = str(comment["author_kind"])
-    now = str(comment["created_at"])
-    batch_id = _open_batch(
-        db,
-        author_kind=author_kind,
-        author_id=feedback_comments.author_id(comment),
-        artifact_id=str(comment["artifact_id"]),
-        recipient_id=recipient_id,
-        now=now,
-    )
-    _add_comment_item(
-        db,
-        batch_id=batch_id,
-        comment_id=str(comment["id"]),
-        author_kind=author_kind,
-        now=now,
-    )
-    return batch_id
 
 
 def record_reopen(
@@ -222,7 +210,21 @@ def record_comment(
     if created:
         feedback_comments.make_user_document_durable(db, comment)
         feedback_comments.emit_comment_created(db, comment)
-        batch_ids = [_join_open_batch(db, comment, recipient) for recipient in feedback_comments.recipients(db, comment)]
+        joins = [feedback_delivery.join_unstarted_batch(db, comment, recipient)
+                 for recipient in feedback_comments.recipients(db, comment)]
+        batch_ids = [batch_id for batch_id, _delivered in joins]
+        delivered_joins = [(batch_id, delivered) for batch_id, delivered in joins if delivered]
+        if delivered_joins:
+            from plans.public import create_feedback_node
+
+            for batch_id, _delivered in delivered_joins:
+                batch = db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
+                create_feedback_node(db, str(batch["recipient_id"]), batch)
+        if comment["author_kind"] == "user":
+            for batch_id, delivered in joins:
+                if not delivered:
+                    _closed, selected = _claim_and_deliver(db, batch_id, from_state="open", reason="send")
+                    woken.extend(selected)
         if submit and comment["author_kind"] == "agent":
             woken = close_for_document(
                 db,
