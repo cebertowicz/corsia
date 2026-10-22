@@ -1,6 +1,6 @@
 ---
 name: connect-tools
-description: Use when work needs a tool, service or account you can't reach yet, including one the person names, or the person asks to connect one. Not for a one-off lookup.
+description: Use when work needs a tool, service or account you can't reach yet, or the person asks to connect one. Not for one you already reach or a one-off lookup.
 ---
 
 # Connect your tools
@@ -41,7 +41,7 @@ For both lists, find out what is available from CORSIA's own tools at the time, 
 ## Permissions and reach
 
 - Reading access never permits sending. Ask the person before any send, post, change or purchase they have not asked for; a yes covers only the action it named.
-- A CLI acts as the person's whole account there. Before its first write, even one they asked for, read which account it is signed in as (its status or whoami command), name it to them and wait for their yes. Learn its commands from its help, never by running them. Never read its stored sign-in.
+- A CLI acts as the person's whole account there. Before its first write, even one they asked for, read which account it is signed in as (its status or whoami command), name it to them and wait for their yes. Learn its other commands from its help, never by trying them. Never read its stored sign-in.
 - A new connection reaches only where it is added: the whole workspace, or one project. One that would help every project goes through CORSIA, as skill `coordination-api` says; otherwise add it where it is needed.
 - The person types a key only into the field CORSIA names, never into chat. You never read it.
 

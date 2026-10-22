@@ -244,10 +244,10 @@
       "sha256": "179e93d9f73bbf5f841a5fbea5a2e91c7aab853e88d2aef661a2d9cf7058f673"
     },
     {
-      "bytes": 6571,
+      "bytes": 6569,
       "kind": "skill",
       "path": "skills/connect-tools/SKILL.md",
-      "sha256": "9647982e78d77f75bf33ba5c3db3da59c7976a703278c2bdc7d318bdb6d91ebe"
+      "sha256": "6cecbdf08dba3f7fa29740f884f6d3ec1ce004ae566eb27e33e8a12f75bbe154"
     },
     {
       "bytes": 4409,
@@ -298,10 +298,10 @@
       "sha256": "39d0a439a185d99fea0382d63737b64fdc849ba726a80ac643dbcd01053b7371"
     },
     {
-      "bytes": 6633,
+      "bytes": 6767,
       "kind": "skill",
       "path": "skills/github/references/agent-account.md",
-      "sha256": "a3098f6dde14ab4f82844605f4a07f0bc9c6a119d9e8f8d9254a307ebc942aaf"
+      "sha256": "b164d6d99f375a630a270017daf06ceb6648b7cb58a81c2b9f8cbb0b4fd6ace3"
     },
     {
       "bytes": 5243,
