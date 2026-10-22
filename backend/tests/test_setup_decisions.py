@@ -59,8 +59,8 @@ def _github(sign_up_with: str) -> dict:
         "title": "How should your agents post on GitHub?",
         "context": (
             "Agents use GitHub to report problems and send fixes to CORSIA, and to work on "
-            "your repositories. Reports to CORSIA are text only and go only with your OK, from "
-            "whichever you choose."
+            "your repositories. GitHub allows each person one extra machine account for this. "
+            "Reports to CORSIA are text only and go only with your OK, from whichever you choose."
         ),
         "tradeoff": (
             "Their own account takes a few minutes in a browser you can watch: I fill in the "
@@ -80,7 +80,7 @@ def _github_no_account(sign_up_with: str) -> dict:
         "title": "Make an account for your agents on GitHub?",
         "context": (
             "Agents use GitHub to report problems and send fixes to CORSIA, and to work on "
-            "your repositories."
+            "your repositories. GitHub allows each person one extra machine account for this."
         ),
         "tradeoff": (
             "It takes a few minutes in a browser you can watch: I fill in the sign-up with "
