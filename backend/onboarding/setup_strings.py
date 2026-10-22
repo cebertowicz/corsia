@@ -104,10 +104,9 @@ COMMUNITY = {
 GITHUB = {
     "title": "How should your agents post on GitHub?",
     "context": (
-        "Their own account is allowed: GitHub's terms let each person run one free "
-        "machine account besides their own. You accept GitHub's terms for it, and you're responsible "
-        "for what it does. It keeps their posts apart from yours. Reports to CORSIA are text only and "
-        "go only with your OK, from whichever you choose."
+        "Agents use GitHub to report problems and send fixes to CORSIA, and to work on your "
+        "repositories. Reports to CORSIA are text only and go only with your OK, from whichever "
+        "you choose."
     ),
     "tradeoff": (
         "Their own account takes a few minutes in a browser you can watch: I fill in the sign-up with "
@@ -129,8 +128,8 @@ GITHUB = {
 GITHUB_NO_ACCOUNT = {
     "title": "Make an account for your agents on GitHub?",
     "context": (
-        "Your agents can have their own account. You'd accept GitHub's terms, type "
-        "its password and enter a code from your email. I never see them."
+        "Agents use GitHub to report problems and send fixes to CORSIA, and to work on your "
+        "repositories."
     ),
     "tradeoff": (
         "It takes a few minutes in a browser you can watch: I fill in the sign-up with "

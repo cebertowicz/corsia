@@ -58,10 +58,9 @@ def _github(sign_up_with: str) -> dict:
         "task_title": GITHUB_TASK,
         "title": "How should your agents post on GitHub?",
         "context": (
-            "Their own account is allowed: GitHub's terms let each person run "
-            "one free machine account besides their own. You accept GitHub's terms for it, and "
-            "you're responsible for what it does. It keeps their posts apart from yours. Reports "
-            "to CORSIA are text only and go only with your OK, from whichever you choose."
+            "Agents use GitHub to report problems and send fixes to CORSIA, and to work on "
+            "your repositories. Reports to CORSIA are text only and go only with your OK, from "
+            "whichever you choose."
         ),
         "tradeoff": (
             "Their own account takes a few minutes in a browser you can watch: I fill in the "
@@ -80,8 +79,8 @@ def _github_no_account(sign_up_with: str) -> dict:
         "task_title": GITHUB_TASK,
         "title": "Make an account for your agents on GitHub?",
         "context": (
-            "Your agents can have their own account. You'd accept GitHub's "
-            "terms, type its password and enter a code from your email. I never see them."
+            "Agents use GitHub to report problems and send fixes to CORSIA, and to work on "
+            "your repositories."
         ),
         "tradeoff": (
             "It takes a few minutes in a browser you can watch: I fill in the sign-up with "
@@ -190,7 +189,7 @@ def test_the_community_decision_comes_first_and_the_github_cards_drop_the_reason
         "How should your agents post on GitHub?", "Make an account for your agents on GitHub?"]
     assert [o["label"] for o in decisions[0]["options"]] == ["Use and share", "Only use", "Neither"]
     assert decisions[0]["recommendation"] == "A"
-    assert "Their own account is allowed" in decisions[1]["context"]  # the bot-account answer
+    assert "Reports to CORSIA are text only" in decisions[1]["context"]
     text = " ".join(str(v) for d in decisions for v in d.values())
     assert "AI" not in text
 
