@@ -49,7 +49,6 @@ def bootstrap_state() -> None:
     import sqlite3
 
     from auth_fixtures import seed_test_accounts
-    from infra.schema import SCHEMA_SQL
 
     path = ROOT / "demo.db"
 
@@ -58,7 +57,7 @@ def bootstrap_state() -> None:
         database.DB_PATH = path
         conn = sqlite3.connect(str(path))
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.executescript(SCHEMA_SQL)
+        database.initialize_schema(conn)
         with conn:
             seed_test_accounts(conn)
         conn.close()
