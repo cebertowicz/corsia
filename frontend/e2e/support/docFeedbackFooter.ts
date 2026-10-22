@@ -6,20 +6,31 @@ import { TEST_TOKEN } from './corsia';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
-/** The server delivers an open person batch five seconds after its last item; push that out so a spec can read the unsent state. */
-function holdOpenBatches(): void {
+const HOLD_LATER = "strftime('%Y-%m-%dT%H:%M:%f+00:00','now','+1 hour')";
+
+/**
+ * The server delivers an open person batch five seconds after its last item. While the hold is on, database triggers
+ * push every person batch that is created or touched an hour out, so a spec reads the unsent state with no race
+ * against those five seconds.
+ */
+function holdPersonBatches(on: boolean): void {
 	const stateRoot = process.env.CORSIA_E2E_STATE_DIR;
 	if (process.env.CORSIA_E2E_MOCK !== '1' || !stateRoot) throw new Error('Holding a batch open requires isolated E2E mock state');
+	const touched = "NEW.author_kind='user' AND NEW.state='open' AND NEW.closes_at<strftime('%Y-%m-%dT%H:%M:%f+00:00','now','+30 minutes')";
+	const statements = on
+		? [
+			`CREATE TRIGGER IF NOT EXISTS e2e_hold_insert AFTER INSERT ON doc_feedback_batches WHEN NEW.author_kind='user' BEGIN UPDATE doc_feedback_batches SET closes_at=${HOLD_LATER} WHERE id=NEW.id; END`,
+			`CREATE TRIGGER IF NOT EXISTS e2e_hold_touch AFTER UPDATE OF closes_at ON doc_feedback_batches WHEN ${touched} BEGIN UPDATE doc_feedback_batches SET closes_at=${HOLD_LATER} WHERE id=NEW.id; END`,
+		]
+		: ['DROP TRIGGER IF EXISTS e2e_hold_insert', 'DROP TRIGGER IF EXISTS e2e_hold_touch'];
 	execFileSync(process.env.CORSIA_E2E_BACKEND_PYTHON ?? path.join(repoRoot, '.venv/bin/python'), [
 		'-c', [
 			'import sqlite3, sys',
-			'from datetime import datetime, timedelta, timezone',
 			'connection = sqlite3.connect(sys.argv[1])',
-			'later = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()',
-			'connection.execute("UPDATE doc_feedback_batches SET closes_at=? WHERE state=\'open\' AND author_kind=\'user\'", (later,))',
+			'for statement in sys.argv[2:]: connection.execute(statement)',
 			'connection.commit()',
 			'connection.close()',
-		].join('\n'), path.join(stateRoot, 'corsia.db'),
+		].join('\n'), path.join(stateRoot, 'corsia.db'), ...statements,
 	], { cwd: repoRoot, encoding: 'utf8' });
 }
 
@@ -28,11 +39,15 @@ function holdOpenBatches(): void {
  * person action that still waits for the person to stop: resolve then re-open a comment to leave one unsent message.
  */
 export async function leaveUnsent(request: APIRequestContext, commentId: string): Promise<void> {
-	for (const resolved of [true, false]) {
-		const patched = await request.patch(`/api/comments/${commentId}`, { params: { token: TEST_TOKEN }, data: { resolved } });
-		expect(patched.ok(), await patched.text()).toBeTruthy();
+	holdPersonBatches(true);
+	try {
+		for (const resolved of [true, false]) {
+			const patched = await request.patch(`/api/comments/${commentId}`, { params: { token: TEST_TOKEN }, data: { resolved } });
+			expect(patched.ok(), await patched.text()).toBeTruthy();
+		}
+	} finally {
+		holdPersonBatches(false);
 	}
-	holdOpenBatches();
 }
 
 /** Leave every top-level comment a person made on a document unsent, as `leaveUnsent` does for one. */

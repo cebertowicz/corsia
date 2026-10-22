@@ -184,6 +184,11 @@ def annotate_pane(pane: dict, user_id: str, *, db) -> dict:
 
 
 def seconds_until_next_due(now: datetime, *, db) -> float | None:
-    """Seconds until the earliest open batch is due (negative when overdue), or None when none is open."""
-    row = db.execute("SELECT MIN(closes_at) FROM doc_feedback_batches WHERE state='open'").fetchone()
+    """Seconds until the earliest open batch still ahead of its deadline, or None when there is none.
+
+    An already-overdue batch is left to the ordinary sweep, so one that keeps failing cannot hide the others.
+    """
+    row = db.execute(
+        "SELECT MIN(closes_at) FROM doc_feedback_batches WHERE state='open' AND closes_at>?", (now.isoformat(),),
+    ).fetchone()
     return None if row[0] is None else (datetime.fromisoformat(row[0]) - now).total_seconds()

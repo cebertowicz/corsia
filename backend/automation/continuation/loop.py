@@ -15,12 +15,12 @@ STARTUP_POLL_SECONDS = 1
 
 
 def _seconds_to_next_feedback_deadline(now: datetime) -> float | None:
-    from doceditor import feedback_state
+    from automation.continuation.sources.feedback_batches import FeedbackBatchSource
     from infra.database import get_db
 
     db = get_db()
     try:
-        return feedback_state.seconds_until_next_due(now, db=db)
+        return FeedbackBatchSource().seconds_until_next_deadline(now, db=db)
     finally:
         db.close()
 

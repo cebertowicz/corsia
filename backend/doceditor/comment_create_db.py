@@ -113,7 +113,8 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 author_thread_id=request.author_thread_id, parent_id=request.parent_id,
                 anchor_text=quote, from_off=start, to_off=end, anchor_prefix=prefix, anchor_suffix=suffix,
                 review=request.review, replacement=request.replacement, client_id=identifier,
-                region=request.region, image_rev=image_rev, image_src=image_src, db=connection,
+                region=request.region, image_rev=image_rev, image_src=image_src,
+                announce=request.author_kind != "user", db=connection,
             )
             if request.review_request_id is not None:
                 review_lifecycle.admit_feedback(
@@ -134,7 +135,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                     batch for batch in undelivered if batch["id"] not in known
                 )
         if created and request.author_kind == "user":
-            feedback["woken"].extend(feedback_batches.deliver_person_comment(db, feedback["batch_ids"]))
+            feedback["woken"].extend(feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id))
         return row, registered, feedback
     except BaseException:
         receipt.failed(identifier, db, artifact_id=request.artifact_id, author=request.author)

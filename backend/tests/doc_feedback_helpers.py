@@ -107,5 +107,5 @@ def add_person_comment(db, artifact_id: str, *, client_id: str | None = None) ->
         db, artifact_id, author_kind="user", author_id=None, author="Steve", client_id=client_id,
     )
     if feedback["batch_ids"]:
-        feedback["woken"].extend(feedback_batches.deliver_person_comment(db, feedback["batch_ids"]))
+        feedback["woken"].extend(feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id))
     return row, feedback

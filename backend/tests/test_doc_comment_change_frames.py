@@ -70,6 +70,34 @@ async def test_user_create_patch_and_decision_each_send_one_frame(
 
 
 @pytest.mark.asyncio
+async def test_a_person_comment_frame_goes_out_after_its_delivery(
+    integration_client, doc, _registrable_roots, monkeypatch,
+):
+    """A canvas reloading on the frame must already read the comment as delivered."""
+    from doceditor import comment_notifications
+    from infra.database import get_db
+
+    _owner, artifact_id = await _own(integration_client, doc)
+    unsent_at_frame: list[int] = []
+
+    def frame(frame_artifact_id, **_kwargs):
+        db = get_db()
+        try:
+            unsent_at_frame.append(
+                db.execute(
+                    "SELECT COUNT(*) FROM doc_feedback_batches WHERE artifact_id=? AND state='open'", (frame_artifact_id,),
+                ).fetchone()[0]
+            )
+        finally:
+            db.close()
+
+    monkeypatch.setattr(comment_notifications, "broadcast_doc_comment_changed", frame)
+    created = _user_comment(integration_client, artifact_id)
+    assert created.status_code == 200, created.text
+    assert unsent_at_frame == [0]
+
+
+@pytest.mark.asyncio
 async def test_refused_user_writes_send_no_frame(integration_client, doc, _registrable_roots, frames):
     _owner, artifact_id = await _own(integration_client, doc)
 

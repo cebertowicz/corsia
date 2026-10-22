@@ -246,11 +246,12 @@ def record_comment(
     return {"batch_ids": batch_ids, "undelivered_batches": notices, "woken": woken}
 
 
-def deliver_person_comment(db, batch_ids: list[str]) -> list[str]:
+def deliver_person_comment(db, batch_ids: list[str], artifact_id: str) -> list[str]:
     """Deliver a person's just-saved comment now, each batch in its own write.
 
     The comment is already committed. A batch that fails here stays open with its
-    deadline a few seconds out, so the continuation loop retries it.
+    deadline a few seconds out, so the continuation loop retries it. The comment's
+    one change frame goes out here, after delivery, whatever its outcome.
     """
     woken: list[str] = []
     for batch_id in batch_ids:
@@ -258,6 +259,7 @@ def deliver_person_comment(db, batch_ids: list[str]) -> list[str]:
             woken.extend(close_batch(db, batch_id, "send")[1])
         except Exception:
             log.exception("immediate delivery of document feedback batch %s failed; it stays open to retry", batch_id)
+    comment_notifications.publish_due_user_feedback([artifact_id])
     return woken
 
 

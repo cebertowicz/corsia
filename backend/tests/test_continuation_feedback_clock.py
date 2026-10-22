@@ -105,3 +105,29 @@ async def test_a_failing_deadline_read_does_not_end_the_loop(isolated_db, monkey
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_an_overdue_open_batch_does_not_hide_the_next_deadline(isolated_db):
+    from automation.continuation.sources.feedback_batches import FeedbackBatchSource
+
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        for artifact_id in (seed_document(db, "owner"), seed_document(db, "owner")):
+            with write_transaction(db, scope="test_clock") as connection:
+                record_edit(
+                    connection, artifact_id=artifact_id, recipient_id="owner", author_kind="agent", author_id="author",
+                    actor_display="Author", path=Path("/workspace/shared/x.md"), before=b"a\n", after=b"b\n",
+                )
+        now = datetime.now(timezone.utc)
+        rows = [row["id"] for row in db.execute("SELECT id FROM doc_feedback_batches WHERE state='open'").fetchall()]
+        db.execute("UPDATE doc_feedback_batches SET closes_at=? WHERE id=?", ((now - timedelta(seconds=30)).isoformat(), rows[0]))
+        if len(rows) > 1:
+            db.execute("UPDATE doc_feedback_batches SET closes_at=? WHERE id=?", ((now + timedelta(seconds=7)).isoformat(), rows[1]))
+        db.commit()
+        until = FeedbackBatchSource().seconds_until_next_deadline(now, db=db)
+    finally:
+        db.close()
+
+    assert len(rows) > 1
+    assert until is not None and 0 < until <= 7

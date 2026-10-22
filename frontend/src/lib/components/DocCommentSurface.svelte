@@ -140,7 +140,7 @@
 		return image ? [...shown].sort(byNumber) : shown;
 	});
 	const followed = $derived(surfaceState?.kind === 'thread' ? comments.find((item) => item.id === surfaceState.id) : undefined);
-	// Comments not yet sent say when they go; Send now delivers them at once.
+	// Comments not yet sent say they are on their way; Send delivers them at once.
 	const unsentText = $derived(feedback?.unsent ?? null);
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
