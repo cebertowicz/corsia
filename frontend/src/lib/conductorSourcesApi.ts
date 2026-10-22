@@ -116,7 +116,8 @@ export interface Signin {
 	account_id: string;
 	status: SigninStatus;
 	cause: string | null;
-	outcome: SigninOutcome | null;
+	/** null while the first read of the account's models runs; absent when no first-run bind follows this sign-in. */
+	outcome?: SigninOutcome | null;
 	bind_reason: string | null;
 	/** A failed sign-in's public reference, matching its service-log line. */
 	ref?: string | null;
@@ -127,7 +128,7 @@ function signinOf(body: Record<string, unknown> | null, accountId: string): Sign
 		account_id: String(body?.account_id ?? accountId),
 		status: (body?.status as SigninStatus) ?? 'failed',
 		cause: (body?.cause as string | null) ?? null,
-		outcome: (body?.outcome as SigninOutcome | null) ?? null,
+		...(body && 'outcome' in body ? { outcome: (body.outcome as SigninOutcome | null) ?? null } : {}),
 		bind_reason: (body?.bind_reason as string | null) ?? null,
 		ref: typeof body?.ref === 'string' ? body.ref : null,
 	};

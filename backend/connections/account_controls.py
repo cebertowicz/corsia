@@ -37,8 +37,13 @@ from infra.db_async import run_in_db
 from infra.time import utc_now_iso
 
 log = logging.getLogger(__name__)
-# Bounds the short status and logout commands only; a held sign-in has no timeout.
+# Bounds the short status and logout commands only; a held sign-in has its own, longer bound.
 _COMMAND_SECONDS = 30.0
+# The vendor CLIs wait on the browser callback with no limit of their own (Claude Code's
+# `auth login` waits on the callback or a pasted code; Codex's on its callback port), and a
+# browser that stops on a vendor page never calls back. A person who signs in finishes well
+# inside this.
+_SIGNIN_WAIT_SECONDS = 300.0
 _CLEANUP_STATUSES = ("done", "failed", "skipped", "pending")
 
 
@@ -116,7 +121,10 @@ async def _vendor_status(provider: str, home: str, binary: str) -> tuple[bool | 
 
 
 async def _hold(operation: SignIn, home: str, binary: str) -> None:
-    """Wait for the vendor login to exit by itself, then let the vendor's status decide."""
+    """Wait for the vendor login to exit by itself, then let the vendor's status decide.
+
+    A login still open after ``_SIGNIN_WAIT_SECONDS`` is killed and fails as ``signin_timed_out``.
+    """
     process = operation.process
     assert process is not None and process.stdout is not None
     try:
@@ -125,7 +133,11 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
         drain = asyncio.ensure_future(account_signin_prompt.discard(process.stdout, operation))
         async with killed_on_exit(process):
             try:
-                await process.wait()
+                async with asyncio.timeout(_SIGNIN_WAIT_SECONDS):
+                    await process.wait()
+            except TimeoutError:
+                operation.status, operation.cause = "failed", "signin_timed_out"
+                raise
             finally:
                 # Settle the reader before anything else reads the pipe to reap the process.
                 drain.cancel()
@@ -159,9 +171,10 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
         operation.status, operation.cause = "completed", None
         await finish_signin(operation, receipt, binary)
     except Exception as exc:  # noqa: BLE001 - nobody may be left waiting on a sign-in nothing is waiting on
-        log.warning("account %s sign-in check failed: %s", operation.account_id, type(exc).__name__)
-        if operation.status == "waiting":
-            operation.status, operation.cause = "failed", "signin_check_failed"
+        if operation.cause != "signin_timed_out":  # the wait's own bound, already recorded and not a check failure
+            log.warning("account %s sign-in check failed: %s", operation.account_id, type(exc).__name__)
+            if operation.status == "waiting":
+                operation.status, operation.cause = "failed", "signin_check_failed"
     finally:
         if operation.status == "failed":
             operation.ref = failure_reference(operation.provider, operation.cause)

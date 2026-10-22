@@ -623,6 +623,30 @@ async def test_held_login_waits_without_a_timeout_and_shows_no_vendor_output(scr
 @pytest.mark.real_harness_cli
 @pytest.mark.asyncio
 @both
+async def test_a_login_the_browser_never_returns_to_ends_failed_timed_out_and_the_vendor_is_killed(scripted_vendor_clis, provider, monkeypatch, tmp_path):
+    from connections import account_controls
+
+    account = scripted_vendor_clis[provider]
+    monkeypatch.setenv("LOGIN_HOLD", str(tmp_path / "never"))
+    monkeypatch.setattr(account_controls, "_SIGNIN_WAIT_SECONDS", 0.3)
+    await account_controls.start_signin(account["id"])
+    await _started(scripted_vendor_clis["log"])
+    process = account_controls._SIGNINS[account["id"]].process
+    ended = await _finished(account["id"])
+    assert ended == {"account_id": account["id"], "route": "browser", "status": "failed",
+                     "cause": "signin_timed_out", "ref": REF}
+    assert process.returncode is not None
+    # The status command never ran, the account stays signed out, and a new sign-in can start.
+    assert [args for _, args in _calls(scripted_vendor_clis["log"])] == [_ARGV[provider]["login"]]
+    assert _account(account["id"])["state"] == "signed_out"
+    monkeypatch.delenv("LOGIN_HOLD")
+    await account_controls.start_signin(account["id"])
+    assert (await _finished(account["id"]))["status"] == "completed"
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
+@both
 async def test_login_that_writes_to_standard_error_completes_and_shows_none_of_it(scripted_vendor_clis, provider, caplog, capfd):
     from connections import account_controls
 
