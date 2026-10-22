@@ -32,6 +32,23 @@ pub fn route(input: Input, quitting: bool) -> Action {
     }
 }
 
+/// What a person leaving CORSIA runs in place of a bare unregister: stop the local model CORSIA started, which
+/// outlives the service on purpose so restarts and updates keep it loaded, then unregister. A model that will not
+/// stop is logged and never keeps the person from quitting.
+fn stop_model_then_unregister(
+    stop_model: impl FnOnce() -> Result<(), String>,
+    unregister: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if let Err(error) = stop_model() {
+        log::warn!("could not stop the local model on quit: {error}");
+    }
+    unregister()
+}
+
+fn quit_unregister(port: u16) -> Result<(), String> {
+    stop_model_then_unregister(|| super::stop_local_model(port), super::unregister_service)
+}
+
 fn quit_if_unlocked(
     operation_state: impl FnOnce() -> Result<bool, String>,
     unregister: impl FnOnce() -> Result<(), String>,
@@ -166,7 +183,7 @@ pub fn on_exit(app: &tauri::AppHandle) {
     match native_exit_cleanup(
         &service.exit_cleanup_attempted,
         || super::operation_is_active(service_port(app, &service)),
-        super::unregister_service,
+        || quit_unregister(service_port(app, &service)),
     ) {
         Ok(ExitCleanup::OperationLocked) => log::info!("CORSIA is exiting with an active operation; background service remains registered and running."),
         Err(error) => log::error!("could not unregister background service during native Exit: {error}"),
@@ -195,7 +212,7 @@ fn quit_outcome(app: &tauri::AppHandle) -> Result<QuitOutcome, String> {
     resolve_quit(
         &service.exit_cleanup_attempted,
         || super::operation_is_active(port),
-        super::unregister_service,
+        || quit_unregister(port),
     )
 }
 
@@ -251,6 +268,51 @@ pub fn menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    #[test]
+    fn quit_stops_the_local_model_before_unregistering_even_if_it_will_not_stop() {
+        use std::cell::RefCell;
+        for stop_result in [Ok(()), Err("busy".to_string())] {
+            let calls = RefCell::new(Vec::new());
+            let result = stop_model_then_unregister(
+                || { calls.borrow_mut().push("stop"); stop_result.clone() },
+                || { calls.borrow_mut().push("unregister"); Ok(()) },
+            );
+            assert_eq!(result, Ok(()));
+            assert_eq!(*calls.borrow(), ["stop", "unregister"]);
+        }
+    }
+
+    #[test]
+    fn the_stop_request_is_a_json_post_the_backends_guard_accepts() {
+        let request = super::super::local_request("POST", 43123, "/api/system/stop-local-model");
+        assert!(request.starts_with("POST /api/system/stop-local-model HTTP/1.1\r\nHost: 127.0.0.1:43123\r\n"));
+        assert!(request.contains("Content-Type: application/json\r\nContent-Length: 2\r\n"));
+        assert!(request.ends_with("\r\n\r\n{}"));
+        assert!(!super::super::local_request("GET", 43123, "/api/health").contains("Content"));
+    }
+
+    #[test]
+    fn a_held_operation_lock_stops_nothing_on_quit() {
+        let stopped = AtomicBool::new(false);
+        let attempted = AtomicBool::new(false);
+        let outcome = resolve_quit(
+            &attempted,
+            || Ok(true),
+            || stop_model_then_unregister(|| { stopped.store(true, Ordering::Release); Ok(()) }, || Ok(())),
+        );
+        assert_eq!(outcome, Ok(QuitOutcome::KeepWindow));
+        assert!(!stopped.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn only_quit_paths_stop_the_local_model() {
+        let lib = include_str!("lib.rs");
+        let restart = lib.split("fn restart_service()").nth(1).and_then(|rest| rest.split("\n}\n").next()).unwrap();
+        assert!(!restart.contains("stop_local_model"));
+        assert!(!include_str!("update_swap.rs").contains("stop_local_model"));
+        assert!(!include_str!("update_stage.rs").contains("stop_local_model"));
+    }
 
     #[test]
     fn close_reopen_and_exit_have_distinct_routes() {

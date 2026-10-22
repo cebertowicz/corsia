@@ -227,13 +227,16 @@ fn port_for_startup(first_run: &first_run::FirstRun, recorded: Option<u16>) -> R
 /// The one request line the shell sends to its own service. The Host header
 /// carries the port: the backend's loopback guard refuses a Host without the
 /// port it is bound to.
-fn local_get_request(port: u16, path: &str) -> String {
-    format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")
+fn local_request(method: &str, port: u16, path: &str) -> String {
+    let body = if method == "POST" { "Content-Type: application/json\r\nContent-Length: 2\r\n" } else { "" };
+    let tail = if method == "POST" { "{}" } else { "" };
+    format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{body}Connection: close\r\n\r\n{tail}")
 }
 
-/// Send one GET to a service on this computer and read the whole reply.
+/// Send one request (a GET, or the quit-time POST) to a service on this computer and read the whole reply.
 /// The error names the step that failed, for callers that report it.
 fn local_exchange(
+    method: &str,
     port: u16,
     path: &str,
     connect_timeout: Duration,
@@ -245,7 +248,7 @@ fn local_exchange(
     stream
         .set_read_timeout(Some(io_timeout))
         .and_then(|_| stream.set_write_timeout(Some(io_timeout)))
-        .and_then(|_| stream.write_all(local_get_request(port, path).as_bytes()))
+        .and_then(|_| stream.write_all(local_request(method, port, path).as_bytes()))
         .map_err(|error| format!("could not send the request: {error}"))?;
     let mut response = Vec::new();
     stream
@@ -256,9 +259,20 @@ fn local_exchange(
 
 fn local_get(port: u16, path: &str) -> Result<String, String> {
     let unavailable = || "the CORSIA service is unavailable".to_string();
-    local_exchange(port, path, Duration::from_millis(250), Duration::from_millis(500))
+    local_exchange("GET", port, path, Duration::from_millis(250), Duration::from_millis(500))
         .map_err(|_| unavailable())
         .and_then(|response| String::from_utf8(response).map_err(|_| unavailable()))
+}
+
+/// Asks the service to stop the local model CORSIA started. Stopping takes up to its SIGTERM grace, so the read waits.
+fn stop_local_model(port: u16) -> Result<(), String> {
+    let response = local_exchange("POST", port, "/api/system/stop-local-model", Duration::from_millis(250), Duration::from_secs(15))
+        .and_then(|bytes| String::from_utf8(bytes).map_err(|error| error.to_string()))?;
+    if response.starts_with("HTTP/1.1 200") {
+        Ok(())
+    } else {
+        Err(format!("the service refused to stop the local model: {}", response.lines().next().unwrap_or("")))
+    }
 }
 
 fn probe_health(port: u16) -> bool {

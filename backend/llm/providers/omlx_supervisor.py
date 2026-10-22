@@ -346,6 +346,14 @@ async def stop_server(cfg: dict) -> dict[str, Any]:
     return {"ok": True, "pid": pid, "message": f"oMLX stopped (pid {pid})"}
 
 
+async def stop_all_servers() -> list[dict[str, Any]]:
+    """Stop every oMLX this supervisor spawned, found by its own pid records; a foreign oMLX has none."""
+    results = []
+    for path in sorted(RUNTIME_DIR.glob("omlx-*.pid")):
+        results.append(await stop_server({"server_id": path.stem.removeprefix("omlx-")}))
+    return results
+
+
 def reconcile(cfg: dict) -> dict[str, Any]:
     """Adopt or clear this server's pid file during backend startup."""
     sid = cfg.get("server_id")
