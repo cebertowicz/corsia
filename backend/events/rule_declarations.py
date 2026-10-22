@@ -49,13 +49,18 @@ def match_problem(entry: DeclaredEvent, event_type: str, tests: list[Mapping[str
 
 
 def intake_refusals(db: sqlite3.Connection, *, project_id: str | None, event_type: str, limit: int = 50) -> list[dict[str, Any]]:
-    """Recent refusals of ``event_type`` from this project's agents, newest first; never the facts."""
+    """Recent refusals of ``event_type`` from this project's agents, newest first; never the facts.
+
+    A producer is a thread, or ``script:<schedule id>``, which belongs to its schedule's owner thread.
+    """
     if not project_id:
         return []
     since = (datetime.now(timezone.utc) - rules.RETENTION).isoformat()
     rows = db.execute(
         "SELECT r.event_id, r.event_type, r.refusal_code, r.producer, r.origin, r.at "
-        "FROM event_intake_records r JOIN threads t ON t.id=r.producer "
+        "FROM event_intake_records r "
+        "LEFT JOIN automation_schedules s ON r.producer LIKE 'script:%' AND s.id=substr(r.producer, 8) "
+        "JOIN threads t ON t.id=COALESCE(s.thread_id, r.producer) "
         "WHERE r.outcome='refused' AND r.event_type=? AND r.at>=? AND t.project_id=? "
         "ORDER BY r.id DESC LIMIT ?",
         (event_type, since, project_id, limit),

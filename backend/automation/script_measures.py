@@ -12,11 +12,11 @@ from typing import TYPE_CHECKING
 
 from automation.schedules import Schedule
 from automation.script_lines import MAX_MEASURE_LINES
-from infra.measure_admission import UNNAMED_LINE, admit, refuse_line
-from infra.outcome_events import count_outcome_event
+from infra.measure_admission import UNNAMED_LINE, admit, count_unversioned, refuse_line
 
 if TYPE_CHECKING:
     from automation.script_readings import RunReport
+    from events.intake import MeasureStamps
 
 WORKSPACE_SCOPE = "__workspace__"
 
@@ -32,6 +32,22 @@ class MeasureOutcome:
         return f"measures: {self.recorded} recorded, {self.refused} refused (measure_status)"
 
 
+def run_stamps(schedule: Schedule, report: RunReport) -> MeasureStamps:
+    """The one derivation of a script run's record stamps, for its measure lines and its event lines alike.
+
+    A schedule that names a workflow but has no versioned stamp (no longer the owner's, or no
+    version) is ``unversioned``: its rows record without a stamp and are counted.
+    """
+    from events.intake import MeasureStamps
+
+    ref, version = report.workflow_stamp or (None, None)
+    return MeasureStamps(
+        run_id=f"script:{schedule.id}:{report.run_id}", workflow_ref=ref, workflow_version=version,
+        project_id=None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id,
+        unversioned=bool((schedule.payload or {}).get("workflow")) and version is None,
+    )
+
+
 def settle_measures(db: sqlite3.Connection, schedule: Schedule, report: RunReport) -> MeasureOutcome:
     """Admit the run's measure lines and count its refusals; never raises for a bad line.
 
@@ -39,25 +55,23 @@ def settle_measures(db: sqlite3.Connection, schedule: Schedule, report: RunRepor
     workflow but has no versioned stamp (no longer the owner's, or no version) records its rows
     without one and counts each as ``unversioned``.
     """
-    workflow = (schedule.payload or {}).get("workflow")
-    ref, version = report.workflow_stamp or (None, None)
     if report.measures and report.run_id is None:
         raise ValueError("a run report with measure lines needs the runner's run_id")
-    project = None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id
+    stamps = run_stamps(schedule, report)
     recorded = accepted = 0
     for measure in report.measures:
         admission = admit(
             db, owner_thread_id=schedule.thread_id, event_name=measure["event.name"],
-            attributes=measure.get("attributes", {}), project_id=project,
-            run_id=f"script:{schedule.id}:{report.run_id}", workflow_ref=ref, workflow_version=version,
+            attributes=measure.get("attributes", {}), project_id=stamps.project_id,
+            run_id=stamps.run_id, workflow_ref=stamps.workflow_ref, workflow_version=stamps.workflow_version,
             ts=measure.get("time"),
         )
         if admission.refusal is None:
             accepted += 1
             inserted = bool(admission.result and admission.result.inserted)
             recorded += int(inserted)
-            if inserted and workflow and version is None:
-                count_outcome_event(db, "unversioned", measure["event.name"], agent_thread_id=schedule.thread_id)
+            if stamps.unversioned:
+                count_unversioned(db, admission, measure["event.name"], schedule.thread_id)
     for refusal in report.measure_refusals:
         refuse_line(db, schedule.thread_id, refusal.text, event_name=refusal.event_name)
     if report.measures_over_cap:

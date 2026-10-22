@@ -18,7 +18,7 @@ from events.platform import deliver_envelope_sync
 from events.resolve import Target, resolve_targets
 from infra.database import get_db, write_transaction
 from infra.measure_admission import admit as admit_measure
-from infra.outcome_events import count_outcome_event
+from infra.measure_admission import count_unversioned
 
 _MAX_FACT_BYTES = 64 * 1024
 _UNAVAILABLE = ("database is locked", "database is busy", "unable to open database", "disk i/o error")
@@ -31,8 +31,9 @@ _ERROR_FIXES = {
     "undeclared_type": f"Check the type name, or {_DECLARE_IT}.",
     "undeclared_fact": "Use only facts declared for this event type.",
     "bad_fact_kind": "Match each declared fact kind.",
+    "record_only": f"To route it, {_DECLARE_IT}.",
     "not_your_namespace": f"Emit only a type you declared; to add one, {_DECLARE_IT}.",
-    "reserved_type": "worker.* events are produced by CORSIA only.",
+    "reserved_type": "Emit a type you declared instead.",
     "intake_unreachable": "Retry with the same event id.",
     "internal_error": "This is a CORSIA defect and was logged; report it instead of retrying.",
     "record_refused": "Fix the record as the text says; the event was not routed.",
@@ -141,7 +142,7 @@ def _facts_problem(facts: Any) -> IntakeResult | None:
     except (TypeError, ValueError):
         return _refusal("bad_fact_kind", "facts must contain JSON values of their declared kinds")
     if size > _MAX_FACT_BYTES:
-        return _refusal("too_large", "facts exceed the 64 KB event limit; send fewer or shorter facts")
+        return _refusal("too_large", "facts exceed the 64 KB event limit")
     return None
 
 
@@ -199,8 +200,7 @@ def _declared_event(conn, event_type: str, facts: dict[str, Any], producer: str,
         return _resolution_refusal("not_your_namespace", "producer does not own this event namespace")
     if entry.use == "record":
         return _resolution_refusal(
-            "undeclared_type",
-            f"{event_type} is declared use: record (measurement only); declare use: route or both to route it.",
+            "record_only", f"{event_type} is declared use: record (measurement only), so it is never routed",
         )
     if next((name for name in facts if name not in entry.declared), None) is not None:
         return _resolution_refusal("undeclared_fact", "facts include a name not declared for this event type")
@@ -302,8 +302,8 @@ def _store(conn, event_type: str, facts: dict[str, Any], owner: str, event_id: s
         return _refusal("record_refused", admission.refusal)
     # A record that dedupes (inserted False) under a fresh event_id still routes: routing
     # dedupes by event_id, the store by its declared keys, and each is right for its consumer.
-    if stamps.unversioned and admission.result is not None and admission.result.inserted:
-        count_outcome_event(conn, "unversioned", event_type, agent_thread_id=owner)
+    if stamps.unversioned:
+        count_unversioned(conn, admission, event_type, owner)
     return None
 
 
@@ -319,7 +319,7 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
         if row is not None:
             return IntakeResult(True, True, None, int(row["rules_matched"]))
         if event_type.startswith("worker.") and origin != "platform":
-            return _refusal("reserved_type", "worker events are produced by the platform only")
+            return _refusal("reserved_type", "worker events are produced by CORSIA only")
         resolved = (
             _connector_event(conn, event_type, facts, producer)
             if origin == "connector"

@@ -10,7 +10,7 @@ import pytest
 
 from automation import script_runner, script_schedules
 from automation.script_readings import RunReport
-from events import intake
+from events import intake, rule_authoring
 from events.intake import admit_event
 from infra.database import get_db
 from infra.measure_registry import REGISTRY, sync
@@ -39,6 +39,16 @@ events:
     dedupe: [code, run_id]
     use: both
 """
+
+
+def _schedule(db, tmp_path: Path):
+    path = tmp_path / "events.py"
+    path.write_text("print('event')")
+    return script_schedules.create_script(
+        OWNER, "project", script_path=path, script_sha256=script_schedules.file_sha256(path),
+        cadence_seconds=600, series=[], timeout_seconds=30,
+        now="2026-01-01T00:00:00+00:00", db=db,
+    )
 
 
 @pytest.fixture
@@ -117,10 +127,25 @@ def test_declared_intake_refusal_codes(intake_world, kwargs, code):
     assert result.accepted is False and result.refusal and result.refusal.code == code
 
 
-def test_record_only_type_is_refused_with_safe_fix(intake_world):
+def test_record_only_type_is_refused_with_its_own_code_and_fix(intake_world):
     result = _admit(event_type="qa.record")
-    assert result.refusal and result.refusal.code == "undeclared_type"
+    assert result.refusal and result.refusal.code == "record_only"
     assert "use: record" in result.refusal.text and "qa.record" in result.refusal.text
+    rendered = intake.format_event_error(result.refusal.code, result.refusal.text)
+    assert rendered.count("use: route or both") == 1 and "measure_sync" in rendered
+
+
+def test_refusal_messages_state_the_problem_once_then_one_next_step(intake_world):
+    big = _admit(facts={"code": "x" * (65 * 1024)}).refusal
+    too_large = intake.format_event_error(big.code, big.text)
+    worker = asyncio.run(admit_event(
+        event_id="worker-once", origin="agent", producer=OWNER, event_type="worker.result", facts={},
+    ))
+
+    assert too_large.count("fewer or shorter facts") == 1 and too_large.startswith("too_large: facts exceed")
+    assert intake.format_event_error(worker.refusal.code, worker.refusal.text) == (
+        "reserved_type: worker events are produced by CORSIA only. Emit a type you declared instead."
+    )
 
 
 @pytest.mark.parametrize("origin", ["connector", "emitter", "agent"])
@@ -463,6 +488,30 @@ def test_a_script_run_with_many_refusal_kinds_names_two_with_their_fixes_and_cou
     assert report.error.count("undeclared_fact:") == 1 and report.error.endswith(" and 1 more")
     assert "undeclared_type" not in report.error
     assert len(report.signals) == 1 and report.error in report.signals[0].summary
+
+
+def test_a_script_refusal_is_explainable_by_type_for_the_owners_project(intake_world, tmp_path, monkeypatch):
+    schedule = _schedule(intake_world, tmp_path)
+    events = [{"type": "qa.route", "facts": {"outside": "x"}}]
+    refused = asyncio.run(script_runner._admit_events(
+        schedule, RunReport("ok", [], [], events=events, run_id="run-explain"),
+    ))
+    found = rule_authoring.explain(intake_world, project_id="project-a", event_type="qa.route")
+    elsewhere = rule_authoring.explain(intake_world, project_id="project-b", event_type="qa.route")
+
+    assert [(row["refusal_code"], row["producer"], row["origin"], row["event_id"]) for row in found["refusals"]] == [
+        ("undeclared_fact", f"script:{schedule.id}", "emitter", f"script:{schedule.id}:run-explain:0"),
+    ]
+    assert elsewhere["refusals"] == []
+
+    def recording_failed(**_kwargs):
+        raise OSError("database unavailable")
+
+    monkeypatch.setattr("events.intake.record_refusal", recording_failed)
+    again = asyncio.run(script_runner._admit_events(
+        schedule, RunReport("ok", [], [], events=events, run_id="run-explain-2"),
+    ))
+    assert again.error == refused.error and again.status == "error"
 
 
 def test_a_both_row_from_a_workflow_without_a_version_is_counted_unversioned_once(intake_world, tmp_path):

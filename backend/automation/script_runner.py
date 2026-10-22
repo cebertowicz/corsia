@@ -44,6 +44,9 @@ WORKSPACE_SCOPE = "__workspace__"
 
 _in_flight: dict[str, asyncio.Task] = {}
 
+#: The runner builds a line's event id from the run, so the owner can't resend it: a new run sends every line again.
+_RERUN_FIX = "Run the script again to send it; its other event lines are sent again too."
+
 
 def _forget(schedule_id: str, _task: asyncio.Task) -> None:
     _in_flight.pop(schedule_id, None)
@@ -175,22 +178,18 @@ async def _admit_events(schedule: Schedule, report: RunReport) -> RunReport:
     """Route parsed event lines before synchronous settlement; one refusal wakes the owner once."""
     if not report.events:
         return report
-    from automation.script_measures import WORKSPACE_SCOPE
-    from events.intake import MeasureStamps, admit_event, failure_code, format_event_error
+    from automation.script_measures import run_stamps
+    from events.intake import admit_event, failure_code, format_event_error, record_refusal
 
-    ref, version = report.workflow_stamp or (None, None)
-    stamps = MeasureStamps(
-        run_id=f"script:{schedule.id}:{report.run_id}", workflow_ref=ref, workflow_version=version,
-        project_id=None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id,
-        unversioned=bool((schedule.payload or {}).get("workflow")) and version is None,
-    )
+    stamps = run_stamps(schedule, report)
+    producer = f"script:{schedule.id}"
     refusals: dict[str, str] = {}  # each distinct code, with the first text it came with
     for index, event in enumerate(report.events):
+        event_id = f"{producer}:{report.run_id}:{index}"
         try:
             result = await admit_event(
                 event_type=event["type"], facts=event["facts"], origin="emitter",
-                producer=f"script:{schedule.id}", event_id=f"script:{schedule.id}:{report.run_id}:{index}",
-                stamps=stamps,
+                producer=producer, event_id=event_id, stamps=stamps,
             )
         except asyncio.CancelledError:
             raise
@@ -203,9 +202,19 @@ async def _admit_events(schedule: Schedule, report: RunReport) -> RunReport:
             continue
         if result.refusal is not None:
             refusals.setdefault(result.refusal.code, result.refusal.text)
+            try:  # kept so `explain` by event type shows it; never changes the run's report
+                await run_off_db(
+                    record_refusal, event_id=event_id, event_type=event["type"], origin="emitter",
+                    producer=producer, refusal=result.refusal,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("script schedule {} could not record event line {} refusal", schedule.id, index)
     if not refusals:
         return report
-    shown = [format_event_error(code, refusals[code]) for code in sorted(refusals)[:2]]
+    shown = [
+        format_event_error(code, refusals[code], _RERUN_FIX if code == "intake_unreachable" else None)
+        for code in sorted(refusals)[:2]
+    ]
     more = f" and {len(refusals) - 2} more" if len(refusals) > 2 else ""
     message = f"event line refused: {' '.join(shown)}{more}"
     return dataclasses.replace(

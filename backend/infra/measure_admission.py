@@ -80,6 +80,12 @@ def admit(
     return Admission(result, None, notes)
 
 
+def count_unversioned(db: sqlite3.Connection, admission: Admission, event_name: str, owner: str) -> None:
+    """Count a newly inserted record whose schedule names a workflow it has no version stamp for."""
+    if admission.result is not None and admission.result.inserted:
+        count_outcome_event(db, "unversioned", event_name, agent_thread_id=owner)
+
+
 def refuse_line(db: sqlite3.Connection, owner: str, text: str, *, event_name: str, count: int = 1) -> None:
     """Count and note a measure line that was refused before it reached admission (a malformed line, or past the cap).
 

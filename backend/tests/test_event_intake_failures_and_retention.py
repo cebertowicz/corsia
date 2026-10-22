@@ -45,7 +45,10 @@ def test_an_intake_exception_on_an_event_line_settles_the_run_as_an_owner_error(
         schedule, RunReport("ok", [], [], events=[{"type": "qa.route", "facts": {"code": "ok"}}], run_id="r1"),
     ))
 
-    message = f"event line refused: {intake.format_event_error(code, text)}"
+    # A script can't resend a line by id (the runner builds it), so its outage says to run it again.
+    fix = script_runner._RERUN_FIX if code == "intake_unreachable" else None
+    message = f"event line refused: {intake.format_event_error(code, text, fix)}"
+    assert "same event id" not in message
     assert report.status == "error" and report.error == message
     assert [signal.kind for signal in report.signals] == ["error"] and message in report.signals[0].summary
 
