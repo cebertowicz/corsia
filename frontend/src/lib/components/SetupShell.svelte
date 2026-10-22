@@ -177,12 +177,12 @@
 		return { destroy() { node.removeEventListener('scroll', sync); resize?.disconnect(); mutate?.disconnect(); } };
 	}
 
-	/** The mark fills the brand column under any aside text and shows only while at least `--mark-min` of height is left there, so text never runs over it. */
+	/** The mark fills the brand column under any aside text and shows only while at least `--mark-min` rem of height is left there, so text never runs over it. */
 	function markRoom(node: HTMLElement) {
 		const sync = () => {
 			const text = node.querySelector<HTMLElement>(':scope > :not(.mark)');
 			const style = getComputedStyle(node);
-			const min = Number.parseFloat(style.getPropertyValue('--mark-min')) || 0;
+			const min = (Number.parseFloat(style.getPropertyValue('--mark-min')) || 0) * (Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16);
 			const gap = text ? Number.parseFloat(style.rowGap) || 0 : 0;
 			node.dataset.room = String(node.clientHeight - (text?.offsetHeight ?? 0) - gap >= min);
 		};
@@ -269,15 +269,16 @@
 	@media (min-width: 80em) {
 		.pane-scene header, .pane-scene .lede, .pane-scene .body { width: 50%; box-sizing: border-box; padding-right: var(--space-5); }
 		/* Level with the lede, which starts one header and --space-3 down (--space-2 at the setup floor). */
-		.brand { display: flex; flex-direction: column; gap: var(--space-5); --mark-min: 8rem; position: absolute; top: calc(var(--space-7) + var(--space-3)); right: 0; bottom: 0; width: 50%; box-sizing: border-box; padding-left: var(--space-5); overflow-y: auto; scrollbar-width: thin; }
+		.brand { display: flex; flex-direction: column; gap: var(--space-5); --mark-min: 8; /* in rem */ position: absolute; top: calc(var(--space-7) + var(--space-3)); right: 0; bottom: 0; width: 50%; box-sizing: border-box; padding-left: var(--space-5); overflow-y: auto; scrollbar-width: thin; }
 		.brand > :global(:not(.mark)) { flex: none; }
 		.brand > .mark { flex: 1 1 0; min-height: 0; width: 100%; object-fit: contain; pointer-events: none; }
-		.brand[data-room='false'] > .mark { display: none; }
+		/* data-room is set by the markRoom action, which Svelte cannot see: without :global it prunes the rule as unused. */
+		.brand:global([data-room='false']) > .mark { display: none; }
 	}
 	h1 { margin: 0; font-size: var(--text-title2); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }
 	.pane-scene h1:focus { outline: none; }
 	.lede { max-width: none; margin: var(--space-3) 0 0; color: var(--text-secondary); line-height: var(--lh-normal); }
-	.body { flex: 1; min-height: 0; margin-top: var(--space-5); padding-bottom: var(--space-6); /* a scene taller than the window scrolls here, so the dock stays in view */ overflow-y: auto; scrollbar-width: thin; }
+	.body { flex: 1; min-height: 0; margin-top: var(--space-5); padding-bottom: var(--space-6); /* a scene taller than the window scrolls here, so the dock stays in view */ overflow-y: auto; overflow-x: hidden; /* the connect code screen bleeds its focus-ring room outward, which must not scroll sideways */ scrollbar-width: thin; }
 	/* The attributes are set by the scrollCue action, which Svelte cannot see: without :global it prunes the rule as unused. */
 	.body:global([data-more='true']), .body:global([data-above='true']) { --cue-top: 0px; --cue-bottom: 0px; mask-image: linear-gradient(to bottom, transparent, black var(--cue-top), black calc(100% - var(--cue-bottom)), transparent); }
 	.body:global([data-above='true']) { --cue-top: var(--space-4); }
