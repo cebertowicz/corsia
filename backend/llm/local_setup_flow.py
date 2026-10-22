@@ -119,8 +119,10 @@ def _in_progress_or_blocked() -> dict:
     """The running flight, or the reason none could start: a press never ends silently with nothing running."""
     if ls._running():
         return ls._in_progress_result()
-    return {**local_setup_error("Another CORSIA process still holds the local model setup."), "reason": "operation_held",
-            "fix": "Another CORSIA process is still setting up the local model. Quit CORSIA completely, reopen it, then press Retry."}
+    ref = new_reference("local")
+    ls.log.warning("Local setup could not claim its operation reference=%s", ref)
+    return {**local_setup_error("Another CORSIA window still holds the local model setup."), "reason": "operation_held", "ref": ref,
+            "fix": "Another CORSIA window is still setting up the local model. Quit CORSIA completely, reopen it, then press Retry."}
 
 
 async def begin_local_setup(*, no_subscription_only: bool = False,
@@ -184,7 +186,7 @@ async def begin_settings_download(model: LocalModel) -> dict:
         return {"ok": False, "reason": "mac_cannot_run", "message": "This computer can't run a local model well."}
     if not ls._claim_operation("settings", model):
         await resume_pending_setup()
-        return ls._in_progress_result()
+        return _in_progress_or_blocked()
     ls.start_flight(settings_flight(model), "Preparing download")
     ls._emit("started", model=model.repository, kind="settings")
     return ls._in_progress_result()

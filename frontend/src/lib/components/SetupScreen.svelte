@@ -36,7 +36,7 @@
 	type LocalStartResponse = { result: LocalStartResult; reference?: string; fix?: string };
 	const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';
 	/** An answer that neither began a download nor joined one: say so and offer Retry, never go quiet. */
-	const LOCAL_START_NOT_STARTED = 'CORSIA couldn’t start the download. Press Retry. If it keeps failing, save a report.';
+	const LOCAL_START_NOT_STARTED = 'CORSIA couldn’t start the download. Press Retry. If it keeps failing, quit CORSIA and open it again.';
 	async function requestLocalStart(session: string | null): Promise<LocalStartResponse> {
 		const response = await fetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
 			method: 'POST',

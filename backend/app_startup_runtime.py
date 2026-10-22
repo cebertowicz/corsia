@@ -125,7 +125,7 @@ def _apply_saved_cpu_profiler() -> None:
     apply_cpu_profiler(bool(get_feature_flags().get("cpu_profiler", False)))
 
 
-def _report_classifier_download_failure(state: dict) -> None:
+def report_classifier_download_failure(state: dict) -> None:
     """Tell the owner, through the existing classifier failure notice, when a startup download ends with nothing installed.
 
     An installed version keeps serving and is noticed by the worker if it is damaged, so a failure then stays a warning.
@@ -161,9 +161,9 @@ def _start_current_corrections_classifier() -> None:
 
     if os.environ.get("CORSIA_TEST_MODE") == "1" and not os.environ.get(BASE_URL_ENV):
         return
-    classifier_download.resume(on_failure=_report_classifier_download_failure)
+    classifier_download.resume(on_failure=report_classifier_download_failure)
     if accounts.has_users() and not current_asset_verified():
-        classifier_download.start(on_failure=_report_classifier_download_failure)
+        classifier_download.start(on_failure=report_classifier_download_failure)
 
 
 def _schedule_current_corrections_classifier() -> None:

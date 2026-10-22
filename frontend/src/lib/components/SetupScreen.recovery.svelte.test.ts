@@ -102,9 +102,10 @@ describe('SetupScreen Download press is never silent', () => {
 	});
 
 	it('uses the service\'s own reason when it holds the press for another process', async () => {
-		const fix = 'Another CORSIA process is still setting up the local model. Quit CORSIA completely, reopen it, then press Retry.';
-		await openModels({ localEligible: true, localReplies: [json({ ok: false, reason: 'operation_held', fix })] });
+		const fix = 'Another CORSIA window is still setting up the local model. Quit CORSIA completely, reopen it, then press Retry.';
+		await openModels({ localEligible: true, localReplies: [json({ ok: false, reason: 'operation_held', fix, ref: 'local-0123456789abcdef' })] });
 		await vi.waitFor(() => expect(host.textContent).toContain(fix));
+		expect(host.textContent).toContain('local-0123456789abcdef');
 	});
 
 	it('moves the row to downloading when Retry is pressed and the service starts the flight', async () => {
