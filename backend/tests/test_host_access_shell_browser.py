@@ -1148,6 +1148,11 @@ async def test_browser_http_open_stages_navigation_before_waiting(monkeypatch) -
         ),
         (lambda _tmp: __import__(
             "tools.browser_actions",
+            fromlist=["BrowserPersonStepTool"],
+        ).BrowserPersonStepTool(), ("Sign in to Google",),
+        ),
+        (lambda _tmp: __import__(
+            "tools.browser_actions",
             fromlist=["BrowserWaitTool"],
         ).BrowserWaitTool(), ("10",),
         ),
@@ -1221,6 +1226,25 @@ async def test_browser_commands_forward_exact_backend_identity(
             ),
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_browser_person_step_forwards_the_authoritative_thread(monkeypatch) -> None:
+    from tools import browser_actions
+
+    calls: list[tuple[str, str]] = []
+
+    async def declare(thread_id, instruction):
+        calls.append((thread_id, instruction))
+        return "Person step opened; end your turn."
+
+    monkeypatch.setattr(browser_actions, "_declare_person_step", declare)
+    result = await browser_actions.BrowserPersonStepTool().execute(
+        "Sign in to Google", _thread_id="authoritative-thread", _thread_project_id="project-1",
+    )
+
+    assert result == "Person step opened; end your turn."
+    assert calls == [("authoritative-thread", "Sign in to Google")]
 
 
 @pytest.mark.asyncio

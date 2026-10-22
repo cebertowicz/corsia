@@ -352,7 +352,7 @@ async def test_the_reprobe_stops_without_probing_once_the_person_declines_the_st
 
 
 @pytest.mark.asyncio
-async def test_a_pane_on_another_tab_never_settles_the_agents_episode(steps, monkeypatch):
+async def test_a_reprobe_on_another_target_settles_the_agents_episode(steps, monkeypatch):
     monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
     page = SignInPage()
     _episode, loop = await _agent_meets_password_page(page)
@@ -364,11 +364,32 @@ async def test_a_pane_on_another_tab_never_settles_the_agents_episode(steps, mon
         return other_tab
 
     browser_control.pane_connected("thread", "pane", None, pane_probe)
-    await asyncio.wait_for(_probed(page, 3), 1)
-    assert not loop.done() and steps["settled"] == []
-    assert browser_control.password_page("thread")
-    browser_control.pane_disconnected("thread", "pane")
-    await asyncio.gather(loop, return_exceptions=True)
+    await asyncio.wait_for(loop, 1)
+    assert steps["settled"] == ["password-step"]
+    assert not browser_control.password_page("thread")
+
+
+@pytest.mark.asyncio
+async def test_a_person_sign_in_without_a_password_field_opens_a_step_and_settles_on_navigation(steps, monkeypatch):
+    """The agent can hand an account chooser to the person and is resumed after navigation."""
+    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
+    first = PasswordProbe("visit-one", "accounts.example.test", frozenset(), "page-one")
+    second = PasswordProbe("visit-two", "accounts.example.test", frozenset(), "page-one")
+    probes = iter((first, second))
+
+    async def probe(_visit, _known):
+        return next(probes)
+
+    browser_control.pane_connected("thread", "pane", None, probe)
+    with pytest.raises(BrowserSessionError, match="person's to complete"):
+        await browser_control.declare_person_step("thread", probe, "Sign in to your account")
+
+    episode = browser_control._episodes["thread"]
+    assert episode.node_id == "password-step"
+    assert episode.title == "Sign in to your account (example.test)"
+    await asyncio.wait_for(episode.reprobe, 1)
+    assert steps["settled"] == ["password-step"]
+    assert "thread" not in browser_control._episodes
 
 
 @pytest.mark.asyncio

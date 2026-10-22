@@ -135,6 +135,13 @@ def test_settle_marks_it_done_by_the_system_and_wakes_the_waiting_task(db):
     assert json.loads(transition["payload_json"])["verified_by"] == f"system:{PROVENANCE}"
     assert _pane_reason(db, step) == "Marked by CORSIA"
     assert open_attempt(db, mine.id) is not None
+    wake = db.execute(
+        "SELECT id, content FROM messages WHERE thread_id=? AND id LIKE 'plan-wake:work_selected:%'",
+        ("owner",),
+    ).fetchone()
+    assert wake is not None
+    assert wake["id"] == f"plan-wake:work_selected:{mine.id}:{row(db, mine.id)['revision']}"
+    assert "Read the page is now your current task" in wake["content"]
 
 
 def test_settle_on_a_paused_plan_settles_and_the_plan_stays_paused(db):

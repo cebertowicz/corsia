@@ -59,7 +59,7 @@
     "backend/api/project_repos.py::detach_repo": 87,
     "backend/api/project_scaffolding.py::_initialize_project": 93,
     "backend/connections/harness_models.py::store_success": 133,
-    "backend/core/agent.py::_register_tools": 92,
+    "backend/core/agent.py::_register_tools": 89,
     "backend/core/context_preview.py::build_next_turn_context_preview": 109,
     "backend/e2e_mock.py::seed_mock_catalog": 97,
     "backend/eval/endpoint.py::eval_turn": 81,
