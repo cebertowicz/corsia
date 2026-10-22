@@ -6,8 +6,8 @@ write path cannot leave a second open canvas stale. Two writes are outside it.
 Anchor position saves (``comments.update_positions``) follow a text change on
 every autosave and are not announced; a canvas picks up moved anchors when it
 loads the document. Feedback batch state (send, leave, return, retry) is
-announced only when a due batch closes, or when a person's comment is delivered
-as it is saved (``comment_create_db``).
+announced only when a due batch closes. A person's comment is delivered right
+after it is saved, under the comment's own frame.
 """
 
 from __future__ import annotations
