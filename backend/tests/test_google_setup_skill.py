@@ -98,11 +98,11 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "Never make a second project or client." in steps
     assert "shows the client secret, so take no snapshot or screenshot of it" in steps
     assert "Read the client ID from the Clients list" in steps and "never open it" in steps
-    assert steps.index("`google_connect` with no `client_file`") < steps.index("agent-browser is missing from this app")
+    assert steps.index("`google_connect` with no `client_file`") < steps.index("If the error says to reinstall or update CORSIA")
     assert steps.count("console.cloud.google.com/projectcreate") == 1
     assert "5. In the window step 4 opened" in steps
     assert "tell the person what it says and stop" in steps
-    assert "If it names install commands (CORSIA run from source)" in steps
+    assert "If it names install commands instead (CORSIA run from source)" in steps
     assert "then call `browser_open` again" in steps
     assert "@0." not in steps
     assert "Connected as <address>. If that's the wrong account, say so and I'll switch it." in steps
@@ -111,3 +111,16 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "Otherwise call `google_connect` with that `account_id`" in steps
     assert "post its `reply` verbatim with `post_update` followed by `[Open it in Connected apps](<link>)`" in steps
     assert "To connect a new account, including the first, go on to step 2." in steps
+
+
+def test_setup_skills_tell_a_packaged_apps_browser_error_from_a_source_install(tmp_path, monkeypatch):
+    from host_access import browser_cli
+
+    monkeypatch.setattr(browser_cli, "app_bundle_root", lambda: tmp_path)
+    packaged = browser_cli.install_hint()
+    monkeypatch.setattr(browser_cli, "app_bundle_root", lambda: None)
+    source = browser_cli.install_hint()
+    assert "reinstall or update CORSIA" in packaged and "reinstall or update CORSIA" not in source
+    for skill in (SKILL, SKILLS / "microsoft-setup/SKILL.md"):
+        text = skill.read_text(encoding="utf-8")
+        assert "If the error says to reinstall or update CORSIA, the app's own browser is broken" in text
