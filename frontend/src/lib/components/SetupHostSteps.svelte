@@ -47,10 +47,10 @@
 	.n {
 		flex: none; width: var(--space-5); height: var(--space-5); display: grid; place-items: center;
 		border-radius: var(--radius-circle); background: var(--accent-wash); color: var(--accent-text);
-		font-size: var(--text-footnote); font-weight: var(--fw-semibold);
+		font-size: var(--text-subhead); font-weight: var(--fw-semibold);
 	}
 	.pic { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
-	.label { color: var(--text-secondary); font-size: var(--text-footnote); line-height: var(--lh-normal); }
+	.label { color: var(--text-secondary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.crop { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-primary); overflow: hidden; }
 	/* The row is laid out at the width Settings gives it, then the whole crop is scaled by one factor. */
 	.row { zoom: 0.55; padding: var(--space-3) var(--space-3) 0; }
@@ -58,6 +58,6 @@
 	/* The only picture on its screen (nothing found), so it is drawn larger. */
 	.large .row { zoom: 0.85; }
 	.head { zoom: 0.8; padding: var(--space-3) var(--space-4); display: flex; flex-direction: column; gap: var(--space-1); }
-	.head b { font-size: var(--text-title2); font-weight: var(--fw-semibold); color: var(--text-primary); }
+	.head b { font-size: var(--text-title1); font-weight: var(--fw-semibold); color: var(--text-primary); }
 	.head span { font-size: var(--text-subhead); color: var(--text-muted); }
 </style>

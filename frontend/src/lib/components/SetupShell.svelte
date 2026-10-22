@@ -275,7 +275,7 @@
 		/* data-room is set by the markRoom action, which Svelte cannot see: without :global it prunes the rule as unused. */
 		.brand:global([data-room='false']) > .mark { display: none; }
 	}
-	h1 { margin: 0; font-size: var(--text-title2); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }
+	h1 { margin: 0; font-size: var(--text-title1); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }
 	.pane-scene h1:focus { outline: none; }
 	.lede { max-width: none; margin: var(--space-3) 0 0; color: var(--text-secondary); line-height: var(--lh-normal); }
 	.body { flex: 1; min-height: 0; margin-top: var(--space-5); padding-bottom: var(--space-6); /* a scene taller than the window scrolls here, so the dock stays in view */ overflow-y: auto; overflow-x: hidden; /* the connect code screen bleeds its focus-ring room outward, which must not scroll sideways */ scrollbar-width: thin; }
@@ -291,7 +291,7 @@
 	/* The pill clips the exiting label while it shrinks; scoped here so the shared pill keeps its touch-target ::after. */
 	:global(.primary-action .btn.pill) { overflow: hidden; }
 	:global(.primary-action .btn.pill) { interpolate-size: allow-keywords; transition: width var(--dur-tight) var(--ease-snap), min-width var(--dur-tight) var(--ease-snap), background var(--dur-tight) var(--ease-snap), border-color var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap), opacity var(--dur-tight) var(--ease-snap), transform var(--dur-tight) var(--ease-snap); }
-	.footer-note { max-width: calc(var(--space-8) * 6); color: var(--text-tertiary); font-size: var(--text-footnote); text-align: right; }
+	.footer-note { max-width: calc(var(--space-8) * 6); color: var(--text-tertiary); font-size: var(--text-subhead); text-align: right; }
 	/* The setup floor (800 x 600): tighten the spacing before anything scrolls. */
 	@media (max-height: 43.75em) {
 		.pane { padding-top: var(--space-8); }

@@ -340,7 +340,7 @@
 {#if openProvider}<ProviderSettingsModal provider={openProvider} initialTab="advanced" onClose={() => { openProvider = null; void refreshSources(); }} />{/if}
 
 <style>
-	p { font-size: var(--text-footnote); line-height: var(--lh-normal); }
+	p { font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	.error-text { margin: var(--space-2) var(--space-4); }
-	.settled { margin: 0; font-size: var(--text-body); color: var(--text-primary); }
+	.settled { margin: 0; font-size: var(--text-title3); color: var(--text-primary); }
 </style>

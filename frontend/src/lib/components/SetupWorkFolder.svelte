@@ -24,5 +24,5 @@
 
 <style>
 	.error-text { margin: var(--space-2) 0 0; }
-	.why { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-footnote); }
+	.why { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-subhead); }
 </style>
