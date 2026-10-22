@@ -189,6 +189,25 @@ async def test_only_an_outage_or_throttle_keeps_the_account_connected(isolated_d
     assert facts(account)[0]["state"] == "connected" and facts(account)[0]["state_cause"] is None
 
 
+class NotJson(Response):
+    def json(self):
+        raise ValueError("captive portal page")
+
+
+@pytest.mark.parametrize("response", [
+    NotJson(302, None), NotJson(403, None), NotJson(407, None), NotJson(400, None),
+    Response(403, {"error": "access_denied"}), Response(400, {"message": "proxy refused"}),
+])
+async def test_a_response_that_never_reached_microsoft_keeps_the_account_connected(isolated_db, monkeypatch, response):
+    """A captive portal or proxy answering the refresh must not make the person sign in again."""
+    account = connect()
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_: Http(response, []))
+    with pytest.raises(MicrosoftError) as error:
+        await client.access_token(account)
+    assert error.value.cause == SERVICE_UNAVAILABLE
+    assert facts(account)[0]["state"] == "connected" and facts(account)[0]["state_cause"] is None
+
+
 def test_a_retry_tells_the_person_not_to_start_a_sign_in():
     """The retry text is the only thing standing between a throttled account and a needless sign-in."""
     text = message(SERVICE_UNAVAILABLE)

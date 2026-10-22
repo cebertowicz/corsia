@@ -145,7 +145,11 @@ def token_error_cause(status: int, payload: object) -> str:
     agent retrying a row that can never work again.
     """
     error = payload.get("error") if isinstance(payload, dict) else None
-    if status in (408, 429) or status >= 500 or error == "temporarily_unavailable":
+    # Only an OAuth error body from the token endpoint is Microsoft's refusal; a captive
+    # portal's redirect or a proxy's 403 never reached Microsoft and must stay a retry.
+    if status not in (400, 401) or not isinstance(error, str) or not error:
+        return SERVICE_UNAVAILABLE
+    if error == "temporarily_unavailable":
         return SERVICE_UNAVAILABLE
     return REFRESH_TOKEN_INVALID
 
