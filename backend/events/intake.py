@@ -342,10 +342,15 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
             refused = _store(conn, event_type, facts, owner, event_id, stamps)
             if refused is not None:
                 return refused
+        target_filter = None
+        if origin in ("agent", "emitter") and not producer.startswith("script:"):
+            target_filter = lambda target, _db: (
+                "emitted by this thread" if target.thread == producer else None)
         deliveries, plan = deliver_envelope_sync(
             envelope, resolved.declaration,
             (lambda db: _registered_owner_targets(owner, envelope, db)) if owner
             else (lambda db: resolve_targets(envelope, db=db)),
+            target_filter=target_filter,
             repository_projects=projects, db=conn,
         )
         matched = _rules_matched(plan)
