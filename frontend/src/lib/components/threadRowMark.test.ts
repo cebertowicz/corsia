@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ThreadPlanStateEntry } from '$lib/api/plans';
 import { canMarkSeen, showsWaitingGlyph, slotThreeWord, waitMarkTitle } from './threadRowMark';
@@ -40,7 +40,11 @@ describe('slotThreeWord', () => {
 });
 
 describe('waiting', () => {
-	const wait = { label: 'CI on PR #1193', until: new Date(Date.now() + 40 * 60_000).toISOString(), more: 0 };
+	// Local noon: 40 minutes later is still "today", whatever time the suite runs.
+	const noon = new Date(2026, 0, 15, 12, 0).getTime();
+	const wait = { label: 'CI on PR #1193', until: new Date(noon + 40 * 60_000).toISOString(), more: 0 };
+	beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(noon); });
+	afterEach(() => { vi.useRealTimers(); });
 
 	it('is a glyph, never a word in slot 3', () => {
 		expect(slotThreeWord({ ...idle, state: 'waiting', wait })).toBe('');
