@@ -56,7 +56,7 @@ RUNTIME_PINS: dict[str, dict[str, RuntimePin]] = {
         "x86_64": RuntimePin(_GH_VERSION, f"https://github.com/cli/cli/releases/download/v{_GH_VERSION}/gh_{_GH_VERSION}_macOS_amd64.zip", "b245f24eb2bf5f75b426b4c26da3651a107f8d5b6f4fddfbfccc5679041378b3", "zip", f"gh_{_GH_VERSION}_macOS_amd64/bin/gh"),
     },
 }
-_COMMAND_RUNTIME = {"node": "node", "npx": "node", "uv": "uv", "uvx": "uv", "gh": "gh"}
+COMMAND_RUNTIME = {"node": "node", "npm": "node", "npx": "node", "uv": "uv", "uvx": "uv", "gh": "gh"}
 # The largest pinned archive is far below this cap; the cap bounds a compromised or
 # malformed response before it can hold the connected-app lifecycle lock indefinitely.
 _MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
@@ -120,7 +120,7 @@ def runtime_is_installed(kind: str, *, root: Path | None = None, arch: str | Non
 
 def runtime_fetch_plan(command: str, *, path: str | None = None, root: Path | None = None) -> tuple[str, RuntimePin] | None:
     """Describe a missing pinned download without downloading it."""
-    kind = _COMMAND_RUNTIME.get(command)
+    kind = COMMAND_RUNTIME.get(command)
     if kind is None or shutil.which(command, path=path) is not None:
         return None
     selected, pin = _pin(kind)
@@ -258,7 +258,7 @@ def command_path(command: str, *, path: str | None = None, root: Path | None = N
     """Resolve a person install first, then only a matching CORSIA pin."""
     if found := shutil.which(command, path=path):
         return found
-    kind = _COMMAND_RUNTIME.get(command)
+    kind = COMMAND_RUNTIME.get(command)
     if kind is None:
         return None
     executable = ensure_runtime(kind, root=root)
@@ -275,13 +275,13 @@ def runtime_bin_dir(kind: str, *, root: Path | None = None) -> Path | None:
 
 
 def command_bin_dir(command: str, *, root: Path | None = None) -> Path | None:
-    kind = _COMMAND_RUNTIME.get(command)
+    kind = COMMAND_RUNTIME.get(command)
     return ensure_runtime(kind, root=root).parent if kind else None
 
 
 def installed_command_path(command: str, *, root: Path | None = None) -> str | None:
     """Return a previously verified CORSIA command without fetching anything."""
-    kind = _COMMAND_RUNTIME.get(command)
+    kind = COMMAND_RUNTIME.get(command)
     if kind is None or not runtime_is_installed(kind, root=root):
         return None
     _arch, pin = _pin(kind)

@@ -80,7 +80,8 @@ async def test_a_failed_fetch_refuses_the_command_with_the_reason(home, monkeypa
         raise ManagedRuntimeDownloadError("download failed: URLError")
     monkeypatch.setattr(agent_shell_tools, "ensure_runtime", fail)
     message = await agent_shell_tools.prepare_for_command("gh --version")
-    assert message.startswith("Error: CORSIA could not install gh") and "download failed" in message
+    assert message.startswith("Error: CORSIA could not install gh") and "URLError" not in message
+    assert "internet" not in message  # the cause is not known, so none is named
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,8 @@ readonly GIT_SOURCE="$BUILD_ROOT/git-${GIT_VERSION}"
 readonly AGENT_BROWSER_VERSION="0.31.2"
 readonly AGENT_BROWSER_URL="https://github.com/vercel-labs/agent-browser/releases/download/v${AGENT_BROWSER_VERSION}/agent-browser-darwin-arm64"
 readonly AGENT_BROWSER_SHA256="98042bcfee9afdf6119d6817a04ef5897f519f290491664911779b084ae1b82a"
+readonly AGENT_BROWSER_LICENSE_URL="https://raw.githubusercontent.com/vercel-labs/agent-browser/v${AGENT_BROWSER_VERSION}/LICENSE"
+readonly AGENT_BROWSER_LICENSE_SHA256="014bb31e83d5c2e76aea1cc6e82217346ab41362f32cb355ad0f5c10aa0aeaff"
 # The sandbox every agent shell runs inside: one self-contained bash script. Its floor is
 # _MIN_SAFEHOUSE_VERSION in backend/tools/shell_guard.py; without it every shell command is refused.
 readonly SAFEHOUSE_VERSION="0.11.1"
@@ -52,6 +54,10 @@ fetch_agent_browser() {
   local download="$BUILD_ROOT/downloads/agent-browser-darwin-arm64"
   fetch_verified "$AGENT_BROWSER_URL" "$download" "$AGENT_BROWSER_SHA256"
   install -m 0755 "$download" "$BUNDLE_ROOT/bin/agent-browser"
+  fetch_verified "$AGENT_BROWSER_LICENSE_URL" "$BUILD_ROOT/downloads/agent-browser-LICENSE" "$AGENT_BROWSER_LICENSE_SHA256"
+  mkdir -p "$BUNDLE_ROOT/licenses/agent-browser"
+  install -m 0644 "$BUILD_ROOT/downloads/agent-browser-LICENSE" "$BUNDLE_ROOT/licenses/agent-browser/LICENSE"
+  printf 'agent-browser %s\n%s\nsha256 %s\n' "$AGENT_BROWSER_VERSION" "$AGENT_BROWSER_URL" "$AGENT_BROWSER_SHA256" > "$BUNDLE_ROOT/licenses/agent-browser/SOURCE"
   [ "$("$BUNDLE_ROOT/bin/agent-browser" --version)" = "agent-browser $AGENT_BROWSER_VERSION" ] \
     || fail "bundled agent-browser does not report version $AGENT_BROWSER_VERSION"
 }

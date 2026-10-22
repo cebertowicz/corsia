@@ -7,6 +7,7 @@ the backend, before the shell starts; installs and caches land in places a shell
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from pathlib import Path
 import re
@@ -14,14 +15,15 @@ import tempfile
 
 from infra.platform_paths import app_bundle_root
 from tools.managed_runtime import (
-    ManagedRuntimeError, ensure_runtime, runtime_bin_dir, runtime_cache_root, runtime_is_installed,
+    COMMAND_RUNTIME, ManagedRuntimeError, ensure_runtime, runtime_bin_dir, runtime_cache_root, runtime_is_installed,
 )
 
-# The runtime each command comes from; node's folder also holds npm and npx, uv's holds uvx.
-_RUNTIME_OF = {"node": "node", "npm": "node", "npx": "node", "uv": "uv", "uvx": "uv", "gh": "gh"}
+logger = logging.getLogger(__name__)
+# The commands CORSIA manages are managed_runtime's: the same set the connected-app launcher fetches for.
+_MANAGED = "|".join(sorted(COMMAND_RUNTIME, key=len, reverse=True))
 # A managed command used as a command: at the start of the line or after ; & | ( or `, past any VAR=value.
-_COMMAND_USED = re.compile(r"(?:^|[;&|(\n`])\s*(?:\w+=\S*\s+)*(node|npm|npx|uvx?|gh)(?=[\s;&|)`]|$)")
-_NOT_FOUND = re.compile(r"(?:^|[\s:])(node|npm|npx|uvx?|gh): (?:command )?not found")
+_COMMAND_USED = re.compile(rf"(?:^|[;&|(\n`])\s*(?:\w+=\S*\s+)*({_MANAGED})(?=[\s;&|)`]|$)")
+_NOT_FOUND = re.compile(rf"(?:^|[\s:])({_MANAGED}): (?:command )?not found")
 # Environment names a shell child needs from CORSIA, passed through the sandbox by name.
 ENV_NAMES = ("npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "UV_NO_MANAGED_PYTHON", "UV_PYTHON")
 
@@ -64,7 +66,7 @@ def shell_environment(path: str) -> dict[str, str]:
 
 def _missing(commands: set[str]) -> set[str]:
     try:
-        return {kind for command in commands if not runtime_is_installed(kind := _RUNTIME_OF[command])}
+        return {kind for command in commands if not runtime_is_installed(kind := COMMAND_RUNTIME[command])}
     except ManagedRuntimeError:
         return set()  # No pinned runtime for this Mac: the command resolves from the person's PATH or not at all.
 
@@ -95,6 +97,7 @@ async def _fetch(commands: set[str]) -> str | None:
         try:
             await asyncio.to_thread(ensure_runtime, kind)
         except ManagedRuntimeError as exc:
-            return (f"Error: CORSIA could not install {kind}, which this command needs ({exc}). "
-                    "Check the internet connection and run the command again.")
+            logger.warning("could not install the %s runtime for an agent shell: %s", kind, exc)
+            return (f"Error: CORSIA could not install {kind}, which this command needs, so it did not run. "
+                    "Do not retry in a loop; tell the person if it keeps failing.")
     return None

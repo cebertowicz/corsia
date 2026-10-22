@@ -185,9 +185,12 @@ class BrowserSessionOwner:
                     # into the person's home, with no admin step.
                     install = await self._invoke((path, "install"), timeout=browser_cli.CHROME_INSTALL_TIMEOUT)
                     if install.completion != "exited" or install.timed_out or install.returncode:
+                        logger.warning("agent-browser install failed: completion=%s timed_out=%s exit=%s stderr=%s",
+                                       install.completion, install.timed_out, install.returncode,
+                                       (install.stderr or "")[-500:])
                         raise identity.BrowserIdentityError(
                             "agent-browser could not download its browser (Chrome for Testing); "
-                            "check the internet connection, then try again")
+                            "try again, and tell the person if it keeps failing")
                 self._native = browser_cli.NativeExecutable(path, fingerprint, version)
                 self._chrome = chrome
                 logger.info("agent-browser launches Chrome from %s (%s)", self._chrome or "its default", source)

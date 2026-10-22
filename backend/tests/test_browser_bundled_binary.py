@@ -61,7 +61,7 @@ def test_a_packaged_app_is_never_told_to_use_npm(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_first_use_without_any_chrome_installs_it_once_and_a_failure_retries(synthetic_browser, monkeypatch):
+async def test_first_use_without_any_chrome_installs_it_once_and_a_failure_retries(synthetic_browser, monkeypatch, caplog):
     fake = synthetic_browser
     installs = []
     outcomes = [sessions.CommandResult(1, "", "offline"), sessions.CommandResult(0, "", "")]
@@ -78,6 +78,7 @@ async def test_first_use_without_any_chrome_installs_it_once_and_a_failure_retri
     with pytest.raises(sessions.BrowserSetupError, match="could not download its browser") as caught:
         await fake.owner.run("thread", ["snapshot"])
     assert "npm" not in str(caught.value) and fake.owner.live_count() == 0
+    assert "internet" not in str(caught.value) and "exit=1 stderr=offline" in caplog.text  # the real cause is recorded
     assert await fake.owner.run("thread", ["snapshot"]) == "ok"
     assert await fake.owner.run("thread", ["snapshot"]) == "ok"
     assert [argv[1:] for argv, _ in installs] == [("install",), ("install",)] and not outcomes
@@ -120,4 +121,6 @@ def test_the_build_ships_the_pinned_binary_inside_a_verified_family():
     assert "fetch_verified \"$AGENT_BROWSER_URL\"" in script and "\nfetch_agent_browser\n" in script
     resources = json.loads((_REPO / "desktop" / "src-tauri" / "tauri.conf.json").read_text())["bundle"]["resources"]
     assert resources["../bundle/bin/agent-browser"] == "bin/agent-browser"
+    assert re.search(r'^readonly AGENT_BROWSER_LICENSE_SHA256="[0-9a-f]{64}"$', script, re.MULTILINE)
+    assert '"$BUNDLE_ROOT/licenses/agent-browser/LICENSE"' in script
     assert '"$RESOURCES/bin/agent-browser" --version' in (_REPO / "desktop" / "scripts" / "smoke-macos-bundle.sh").read_text()
