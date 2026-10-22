@@ -15,6 +15,7 @@ from loguru import logger
 from api.thread_paging import finish_display
 from infra.turn_errors import (
     _LAST_TURN_ERROR_SQL,
+    _LATEST_TURN_SQL,
     apply_error_next_steps,
     insert_turn_error,
     last_turn_error_id,
@@ -334,14 +335,87 @@ async def test_cancelling_the_queued_input_re_broadcasts_the_newest_error(monkey
     rebroadcast.assert_awaited_once_with("t")
 
 
-def test_last_turn_error_query_walks_the_thread_sequence_index_without_sorting():
+@pytest.mark.asyncio
+async def test_a_failing_cancel_re_broadcast_still_drives_the_thread(monkeypatch):
+    """A display projection never moves delivery: the next head is still driven."""
+    from unittest.mock import AsyncMock
+
+    import api.thread_inbox_actions as actions
+    import infra.send_broadcast as send_broadcast
+    import infra.thread_execution as thread_execution
+
+    async def inline(fn, *args):
+        if fn is actions._owned_input:
+            return {}, {"delivery_revision": 1}
+        return {"id": "queued"}
+
+    async def locked(*_args):
+        raise sqlite3.OperationalError("database is locked")
+
+    drive = AsyncMock()
+    monkeypatch.setattr(actions, "run_in_db", inline)
+    monkeypatch.setattr(actions, "_broadcast", lambda _projected: None)
+    monkeypatch.setattr(send_broadcast, "run_in_db", locked)
+    monkeypatch.setattr(thread_execution, "drive_thread", drive)
+
+    await actions.run_inbox_message_action("t", "queued", "u", action="cancel")
+
+    drive.assert_awaited_once_with("t")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("probe_outcome", "successor", "expected"),
+    [("error", None, ["t"]), ("limited", None, ["t"]), ("completed", None, []), ("error", object(), [])],
+)
+async def test_a_failed_turn_settling_with_nothing_claimed_re_broadcasts_its_error(
+    monkeypatch, probe_outcome, successor, expected,
+):
+    """The live frame went out while the Turn ran; settlement makes a queued input hold it."""
+    import infra.thread_execution as thread_execution
+    from infra.thread_driver import TerminalResult, TerminalSettlement
+
+    rebroadcast: list[str] = []
+
+    async def record(thread_id):
+        rebroadcast.append(thread_id)
+
+    async def admit(_successor):
+        return None
+
+    monkeypatch.setattr(thread_execution, "broadcast_newest_error", record)
+    monkeypatch.setattr(thread_execution, "drive_turn_admission", admit)
+
+    await thread_execution.drive_terminal_settlement(TerminalSettlement(
+        TerminalResult.APPLIED, "t", successor=successor, probe_outcome=probe_outcome,
+    ))
+
+    assert rebroadcast == expected
+
+
+def test_a_thread_whose_latest_turn_did_not_fail_reads_no_messages():
+    with closing(_db()) as db:
+        _turn(db, "turn-1")
+        _error(db, "error", "llm_error")
+        _turn(db, "turn-2", status="completed")
+        statements: list[str] = []
+        db.set_trace_callback(statements.append)
+
+        assert last_turn_error_id(db, "t") is None
+
+        assert len(statements) == 1
+        assert "messages" not in statements[0]
+
+
+def test_last_turn_error_queries_seek_their_indexes_without_sorting():
     with closing(_db()) as db:
         placeholders = ",".join("?" for _ in ERROR_TYPES)
-        plan = db.execute(
-            "EXPLAIN QUERY PLAN " + _LAST_TURN_ERROR_SQL.format(placeholders=placeholders),
-            ("t", *ERROR_TYPES),
-        ).fetchall()
-
-        detail = " ".join(str(row[3]) for row in plan)
-        assert "idx_messages_session_seq" in detail
-        assert "TEMP B-TREE" not in detail
+        for sql, params, index in (
+            (_LATEST_TURN_SQL, ("t",), "idx_active_turns_session"),
+            (_LAST_TURN_ERROR_SQL.format(placeholders=placeholders), ("t", *ERROR_TYPES),
+             "idx_messages_session_seq"),
+        ):
+            plan = db.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()
+            detail = " ".join(str(row[3]) for row in plan)
+            assert index in detail
+            assert "TEMP B-TREE" not in detail

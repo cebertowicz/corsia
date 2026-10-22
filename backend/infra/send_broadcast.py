@@ -7,6 +7,8 @@ import json
 import sqlite3
 from typing import Any, Callable
 
+from loguru import logger
+
 from core.installed_context import INSTALLED_SOURCES
 from core.reply_context import REPLY_CONTEXT_KEY
 from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY
@@ -251,10 +253,14 @@ async def broadcast_newest_error(thread_id: str) -> None:
 
     Its next step is projected from the queue, so a stored row the client
     already shows as 'failed' becomes 'held' only through this re-broadcast.
+    A display projection never moves delivery: a failure is logged, not raised.
     """
-    error_id = await run_in_db(_read_last_turn_error, thread_id)
-    if error_id is not None:
-        await broadcast_message_rows(thread_id, (error_id,))
+    try:
+        error_id = await run_in_db(_read_last_turn_error, thread_id)
+        if error_id is not None:
+            await broadcast_message_rows(thread_id, (error_id,))
+    except Exception:
+        logger.exception("newest-error re-broadcast failed for thread {}", thread_id)
 
 
 async def broadcast_claimed_batch(batch) -> None:

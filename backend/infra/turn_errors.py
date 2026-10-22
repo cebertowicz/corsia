@@ -20,15 +20,17 @@ from loguru import logger
 from infra.failure_reference import new_error_reference
 from infra.focus_rows import ERROR_SYSTEM_TYPES
 
-# The newest error row, only while it is the outcome of the thread's latest Turn.
+# The thread's latest Turn: one index seek, so a thread whose latest Turn did
+# not fail never reads its messages.
+_LATEST_TURN_SQL = (
+    "SELECT id, status FROM active_turns WHERE thread_id=? ORDER BY rowid DESC LIMIT 1"
+)
+# The newest error row, read only once that Turn failed; it ended the Turn, so
+# it sits at the tail of the sequence walk.
 _LAST_TURN_ERROR_SQL = (
-    "SELECT newest.id FROM (SELECT id, thread_id, metadata FROM messages WHERE thread_id=? "
-    "AND role='system' AND seq IS NOT NULL AND json_valid(metadata) "
-    "AND json_extract(metadata, '$.type') IN ({placeholders}) ORDER BY seq DESC LIMIT 1) AS newest "
-    "JOIN active_turns AS turn ON turn.id=json_extract(newest.metadata, '$.turn_id') "
-    "AND turn.thread_id=newest.thread_id AND turn.status='error' "
-    "WHERE NOT EXISTS (SELECT 1 FROM active_turns AS later "
-    "WHERE later.thread_id=turn.thread_id AND later.rowid>turn.rowid)"
+    "SELECT id, json_extract(metadata, '$.turn_id') AS turn_id FROM messages "
+    "WHERE thread_id=? AND role='system' AND seq IS NOT NULL AND json_valid(metadata) "
+    "AND json_extract(metadata, '$.type') IN ({placeholders}) ORDER BY seq DESC LIMIT 1"
 )
 
 
@@ -86,9 +88,12 @@ def apply_error_next_steps(db, thread_id: str, messages: list[dict]) -> None:
 
 def last_turn_error_id(db, thread_id: str) -> str | None:
     """The error that ended the thread's latest, failed Turn; the only row 'held' can apply to."""
+    turn = db.execute(_LATEST_TURN_SQL, (thread_id,)).fetchone()
+    if turn is None or turn[1] != "error":
+        return None
     placeholders = ",".join("?" for _ in ERROR_SYSTEM_TYPES)
     row = db.execute(
         _LAST_TURN_ERROR_SQL.format(placeholders=placeholders),
         (thread_id, *ERROR_SYSTEM_TYPES),
     ).fetchone()
-    return None if row is None else str(row[0])
+    return None if row is None or row[1] != turn[0] else str(row[0])
