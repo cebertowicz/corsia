@@ -1,6 +1,6 @@
 ---
 name: connect-tools
-description: Use when work needs a tool, service or account, connected or not yet, or the person asks to connect or use one. Not for a one-off lookup.
+description: Use when work needs a tool, service or account that isn't connected yet, when the person names one to use, or asks to connect one. Not for a one-off lookup.
 ---
 
 # Connect your tools

@@ -98,11 +98,11 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "Never make a second project or client." in steps
     assert "shows the client secret, so take no snapshot or screenshot of it" in steps
     assert "Read the client ID from the Clients list" in steps and "never open it" in steps
-    assert steps.index("`google_connect` with no `client_file`") < steps.index("an error that says to install agent-browser")
+    assert steps.index("`google_connect` with no `client_file`") < steps.index("agent-browser is missing from this app")
     assert steps.count("console.cloud.google.com/projectcreate") == 1
     assert "5. In the window step 4 opened" in steps
-    assert "whatever the cause it names" in steps
-    assert "exactly the install commands that error names" in steps
+    assert "tell the person what it says and stop" in steps
+    assert "If it names install commands (CORSIA run from source)" in steps
     assert "then call `browser_open` again" in steps
     assert "@0." not in steps
     assert "Connected as <address>. If that's the wrong account, say so and I'll switch it." in steps
