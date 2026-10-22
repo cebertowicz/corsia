@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ToolAttempt(BaseModel):
@@ -34,19 +34,10 @@ class SetupHandoff(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tools: dict[str, ToolAttempt]
-    #: Which subscriptions the person said they pay for; absent when the question was not asked.
-    subscriptions: dict[str, StrictBool] | None = None
 
     @field_validator("tools")
     @classmethod
     def _both_tool_attempts_are_present(cls, value: dict[str, ToolAttempt]) -> dict[str, ToolAttempt]:
         if set(value) != {"claude-code", "codex"}:
             raise ValueError("tools must include exactly claude-code and codex")
-        return value
-
-    @field_validator("subscriptions")
-    @classmethod
-    def _both_subscription_answers_are_present(cls, value: dict[str, bool] | None) -> dict[str, bool] | None:
-        if value is not None and set(value) != {"claude-code", "codex"}:
-            raise ValueError("subscriptions must include exactly claude-code and codex")
         return value

@@ -289,8 +289,8 @@ class TestAppPath:
         monkeypatch.setattr("llm.local_setup.setup_status", lambda: status)
         monkeypatch.setattr(first_run_wake, "_app_setup_handoff", lambda: {
             "tools": {"claude-code": {"attempt": "none"}, "codex": {"attempt": "install_failed", "cause": "download_unavailable"}},
-            "subscriptions": {"claude-code": False, "codex": True},
         })
+        monkeypatch.setattr(first_run_wake, "_app_setup_picks", lambda: {"claude": False, "chatgpt": True, "key": False})
         monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
         monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
         monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=False))
@@ -408,7 +408,8 @@ class TestAppPath:
     @pytest.mark.parametrize("failed, expected", [
         ("model_sources", ("harness_ready", "sources_missing", "github_ready")),
         ("local_download", ("local_download",)),
-        ("setup_handoff", ("tool_attempts", "pays_for")),
+        ("setup_handoff", ("tool_attempts",)),
+        ("setup_picks", ("pays_for",)),
         ("web_search_ready", ("web_search_ready",)),
         ("setup", ("setup",)),
         ("user_profile", ("user_profile",)),
@@ -424,6 +425,7 @@ class TestAppPath:
             "sources": [], "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
         monkeypatch.setattr(first_run_wake, "_app_setup_handoff", lambda: None)
+        monkeypatch.setattr(first_run_wake, "_app_setup_picks", lambda: None)
         monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
         monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
         monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=False))
@@ -435,6 +437,8 @@ class TestAppPath:
             monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(side_effect=OSError("unavailable")))
         elif failed == "setup_handoff":
             monkeypatch.setattr(first_run_wake, "_app_setup_handoff", fail)
+        elif failed == "setup_picks":
+            monkeypatch.setattr(first_run_wake, "_app_setup_picks", fail)
         elif failed == "setup":
             monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(side_effect=OSError("unavailable")))
         elif failed == "agents_found":
@@ -446,6 +450,49 @@ class TestAppPath:
 
         for name in expected:
             assert facts[name] == {"unavailable": first_run_wake.UNAVAILABLE_READS[name]}
+
+    @pytest.mark.parametrize(("record", "expected"), [
+        ({"step": "models", "picks": {"claude": True, "chatgpt": True, "key": False}}, ["claude_code", "codex"]),
+        ({"step": "models", "picks": {"claude": True, "chatgpt": False, "key": False}}, ["claude_code"]),
+        ({"step": "models", "picks": {"claude": False, "chatgpt": True, "key": False}}, ["codex"]),
+        ({"step": "models", "picks": {"claude": False, "chatgpt": False, "key": False}}, []),
+        ({"step": "models", "picks": None}, []),
+        ({"step": "models"}, []),
+        (None, []),
+    ])
+    def test_pays_for_comes_from_the_subscriptions_screens_saved_picks(self, monkeypatch, record, expected):
+        from infra import setup_progress
+        from onboarding import first_run_wake
+
+        monkeypatch.setattr(setup_progress, "read", lambda **_: record)
+
+        assert first_run_wake._pays_for(first_run_wake._app_setup_picks()) == expected
+
+    @pytest.mark.asyncio
+    async def test_a_person_who_pays_for_both_with_only_claude_signed_in_is_offered_codex(self, monkeypatch):
+        from infra import setup_progress
+        from onboarding import first_run_wake
+
+        monkeypatch.setattr(setup_progress, "read", lambda **_: {
+            "step": "models", "picks": {"claude": True, "chatgpt": True, "key": False},
+            "handoff": {"tools": {"claude-code": {"attempt": "none"}, "codex": {"attempt": "none"}}},
+        })
+        monkeypatch.setattr(first_run_wake, "_model_sources", lambda: {
+            "sources": [{"source": "claude-code", "state": "ready"}, {"source": "codex", "state": "not_installed"}],
+            "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
+        })
+        monkeypatch.setattr("llm.local_setup.setup_status", lambda: {"state": "idle", "stage": None, "result": None})
+        monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
+        monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
+        monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=False))
+        monkeypatch.setattr(first_run_wake, "_app_agents_found", lambda: [])
+
+        facts = await first_run_wake.setup_facts("codex/gpt-5.6-terra", "app")
+
+        assert facts["sources_missing"] == {"codex": "not_installed"}
+        assert facts["pays_for"] == ["claude_code", "codex"]
+        offered = [tool for tool in facts["sources_missing"] if tool in facts["pays_for"]]
+        assert offered == ["codex"]
 
     async def test_app_setup_decisions_omit_projects_consent_and_address(self, monkeypatch):
         from onboarding import first_run_wake, setup_decisions

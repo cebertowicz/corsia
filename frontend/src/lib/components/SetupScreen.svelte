@@ -166,6 +166,8 @@
 	/** One answer: picked tools start installing now, an unpicked one stops what it started. */
 	function answerSubscriptions(next: SetupPicks) {
 		picks = next;
+		// Kept so the first chat knows which subscriptions the person said they pay for.
+		void recordSetupProgress({ picks: { ...next, key: false } }, get(token));
 		for (const vendor of CLI_VENDORS) {
 			if (cliSignedIn(vendor)) continue;
 			const source = sources.find((row) => row.source === vendor);
