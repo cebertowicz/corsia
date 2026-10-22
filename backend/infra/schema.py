@@ -2,6 +2,7 @@
 from infra.accounts_schema import ACCOUNTS_SCHEMA_SQL
 from infra.action_drafts_schema import ACTION_DRAFTS_SCHEMA_SQL
 from infra.email_screens_schema import EMAIL_SCREENS_SCHEMA_SQL
+from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
 from infra.event_watch_schema import EXPECTED_EVENT_WATCH_SCHEMA_SQL
 from infra.artifact_identity_schema import ARTIFACT_IDENTITY_SCHEMA_SQL
 from infra.bulletin_schema import BULLETIN_SCHEMA_SQL
@@ -35,7 +36,7 @@ from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-SCHEMA_VERSION = 134
+SCHEMA_VERSION = 138
 SCHEMA_SQL = f"""
     {SETTINGS_SCHEMA_SQL}
     {BULLETIN_SCHEMA_SQL}
@@ -328,11 +329,10 @@ SCHEMA_SQL = f"""
     );
     CREATE INDEX IF NOT EXISTS idx_dead_letter_status
         ON dead_letter_events(status, created_at);
-
     {CONNECTION_SCHEMA_SQL}
     {VENDOR_SUBSCRIPTION_SCHEMA_SQL}
-
     {EXPECTED_EVENT_WATCH_SCHEMA_SQL}
+    {EVENT_RULE_SCHEMA_SQL}
 
     -- Restart drain registrations (coordination MVP S7). Active work registers
     -- for a post-restart wake; the drain wakes each once or surfaces it loud.

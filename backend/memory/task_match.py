@@ -111,9 +111,22 @@ def _windows(words: str) -> list[str]:
     return windows
 
 
+def first_term_at(terms: frozenset[str], text: str) -> int:
+    """Offset of the first word in ``text`` that ``match()`` counts for one of ``terms``, else 0."""
+    for token in _TOKEN.finditer(text.lower()):
+        if any(token.group().startswith(term) for term in terms):
+            return token.start()
+    return 0
+
+
 def match(terms: TaskTerms, words: str) -> Match | None:
     """Return the highest-coverage matching window, or ``None`` below today's floor."""
     if len(terms.terms) < 2 or not terms.title_terms:
+        return None
+    # A window's matched terms all appear somewhere in the text, so this skips most rows cheaply.
+    lowered = words.lower()
+    present = {term for term in terms.terms if term in lowered}
+    if len(present) < floor(len(terms.terms)) or terms.title_terms.isdisjoint(present):
         return None
     best: Match | None = None
     for window in _windows(words):

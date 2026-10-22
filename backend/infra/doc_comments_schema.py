@@ -46,7 +46,11 @@ DOC_COMMENTS_SCHEMA_SQL = """
         region_h REAL,
         region_number INTEGER,
         image_rev TEXT,
-        image_src TEXT
+        image_src TEXT,
+        -- When the suggestion's author was told its text was changed; NULL while it can be applied.
+        stranded_notified_at TEXT,
+        -- 1 when the decision settled several suggestions at once, 0 for a single decision; NULL until decided.
+        decided_in_bulk INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_doc_comments_artifact
         ON doc_comments(artifact_id, created_at);

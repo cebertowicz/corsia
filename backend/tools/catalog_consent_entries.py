@@ -1,4 +1,4 @@
-"""Catalog metadata for the consent-gated reads of the person's other AI tools."""
+"""Catalog metadata for the consent-gated reads of the person's other tools."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ CONSENT_CATALOG_ENTRIES: dict[str, ToolCatalogEntry] = {
     "agent_import": _Entry(
         "memory", authority="consented-history-read",
         summary=(
-            "CORSIA agent: bring over what the person's other AI tools know, "
+            "CORSIA agent: bring over what the person's other tools know, "
             "and their skills, after their consent decision"
         ),
         activity="Bringing things over",

@@ -1,17 +1,22 @@
 """Structured-plan schema: plans, nodes, admission, review, and cost.
 
-One module per durable domain, composed into `SCHEMA_SQL` by the schema owner; Plans' DDL lives here and in the three Plans modules this one composes.
+One module per durable domain, composed into `SCHEMA_SQL` by the schema owner;
+Plans' DDL lives here and in the three Plans modules this one composes.
 """
+
 from __future__ import annotations
+
 from infra.plan_aggregates_schema import (
     NODE_AGGREGATE_COLUMNS, NODE_AGGREGATE_INDEXES_SQL, NODE_UPDATE_TRIGGER_SQL,
     PLAN_AGGREGATE_COLUMNS, TOUCH_INDEXES_SQL, column_ddl,
 )
 from infra.plan_events_schema import PLAN_EVENTS_SCHEMA_SQL
 from infra.plan_intent_schema import PLAN_INTENT_SCHEMA_SQL
+from infra.plan_markdown_import_schema import PLAN_MARKDOWN_IMPORT_SCHEMA_SQL
 from infra.plan_pane_views_schema import PLAN_PANE_VIEWS_SCHEMA_SQL
 from infra.plan_status_schema import PLAN_STATUS_DIRTY_SCHEMA_SQL
 from infra.unattributed_dispatch_schema import UNATTRIBUTED_DISPATCH_SCHEMA_SQL
+
 #: A hold's identity never changes and it is cleared once. Its own constant so
 #: a schema step that must rewrite one recorded fact re-creates this guard
 #: from the one definition (migration_58_to_59).
@@ -36,6 +41,7 @@ HOLD_UPDATE_GUARD_SQL = """
         SELECT RAISE(ABORT, 'plan hold identity and clearance are immutable');
     END;
 """
+
 STRUCTURED_PLAN_SCHEMA_SQL = f"""
     CREATE TABLE IF NOT EXISTS plans (
         id TEXT PRIMARY KEY,
@@ -52,6 +58,7 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
         UNIQUE(owner_kind, owner_id)
     );
     CREATE INDEX IF NOT EXISTS idx_plans_parent ON plans(parent_plan_id);
+
     CREATE TABLE IF NOT EXISTS plan_nodes (
         id TEXT PRIMARY KEY,
         plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
@@ -344,57 +351,5 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
         SELECT RAISE(ABORT, 'plan mutation receipts are immutable and append-only');
     END;
 
-    CREATE TABLE IF NOT EXISTS plan_markdown_imports (
-        id TEXT PRIMARY KEY,
-        artifact_id TEXT NOT NULL UNIQUE REFERENCES artifact_identities(id),
-        observed_owner_thread_id TEXT,
-        owner_thread_id TEXT REFERENCES threads(id),
-        registration_id TEXT,
-        plan_id TEXT UNIQUE,
-        integration TEXT NOT NULL,
-        artifact_type TEXT NOT NULL,
-        external_id TEXT NOT NULL,
-        source_path TEXT NOT NULL,
-        artifact_updated_at TEXT NOT NULL,
-        registration_updated_at TEXT,
-        registration_state TEXT,
-        source_sha256 TEXT CHECK (
-            source_sha256 IS NULL OR length(source_sha256) = 64
-        ),
-        parser_version TEXT,
-        manifest_json TEXT,
-        source_map_json TEXT,
-        status TEXT NOT NULL CHECK (
-            status IN (
-                'discovered', 'repair_required', 'ready',
-                'imported', 'rolled_back'
-            )
-        ),
-        applied_plan_hash TEXT,
-        wake_snapshot_json TEXT,
-        discovered_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        imported_at TEXT,
-        rolled_back_at TEXT
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_markdown_imports_owner
-        ON plan_markdown_imports(owner_thread_id)
-        WHERE owner_thread_id IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_plan_markdown_imports_status
-        ON plan_markdown_imports(status);
-
-    CREATE TABLE IF NOT EXISTS plan_markdown_import_issues (
-        id TEXT PRIMARY KEY,
-        import_id TEXT NOT NULL
-            REFERENCES plan_markdown_imports(id) ON DELETE CASCADE,
-        issue_order INTEGER NOT NULL CHECK (issue_order >= 0),
-        code TEXT NOT NULL CHECK (length(trim(code)) > 0),
-        message TEXT NOT NULL CHECK (length(trim(message)) > 0),
-        source_line INTEGER CHECK (source_line IS NULL OR source_line > 0),
-        detail_json TEXT,
-        created_at TEXT NOT NULL,
-        UNIQUE(import_id, issue_order)
-    );
-    CREATE INDEX IF NOT EXISTS idx_plan_markdown_import_issues_import
-        ON plan_markdown_import_issues(import_id, issue_order);
+    {PLAN_MARKDOWN_IMPORT_SCHEMA_SQL}
 """ + PLAN_EVENTS_SCHEMA_SQL + UNATTRIBUTED_DISPATCH_SCHEMA_SQL + PLAN_PANE_VIEWS_SCHEMA_SQL + TOUCH_INDEXES_SQL

@@ -6,9 +6,9 @@ Use this for first-run task `Connect web search` and any time later the person a
 
 ## 1. Explain, then ask
 
-One `post_update`, word for word:
+One `post_update`, word for word. Keep the two bracketed parts only when step 5 of `references/first-run-app.md` will run the lookup (the app path); on any other path leave both out.
 
-> Web search lets me look things up on the web for you. It uses Brave Search. Brave's free plan still asks for a credit card; search costs $5 per 1,000 searches and includes $5 of free credit every month, so about 1,000 searches a month cost nothing. Do you already have a Brave Search API account (the developer one, separate from the Brave browser)?
+> Web search lets me look things up on the web for you[, starting with you, so you don't have to tell me everything yourself]. It uses Brave Search. Brave's free plan still asks for a credit card; search costs $5 per 1,000 searches, and every month includes $5 of free credit, about 1,000 searches. That's usually enough for most people, so search usually costs nothing. Your searches go to Brave. Do you already have a Brave Search API account? It's the account apps use to search, separate from the Brave browser. [If you'd rather I didn't look you up, just say so.]
 
 End your turn. Not now: `OK. Settings › Keys has it whenever you want it.` Close their task and task `Connect web search` with `You chose not now. Settings › Keys has it.`
 

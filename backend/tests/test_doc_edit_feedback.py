@@ -18,8 +18,8 @@ from plans.feedback_nodes import (
     EDIT_ACCEPTANCE,
     EmptyFeedbackBatchError,
     create_feedback_node,
-    load_feedback_items,
 )
+from plans.feedback_items import load_feedback_items
 from registry import models as registry_models
 from registry.identity_metadata import merge_identity_metadata
 from registry.shared_document_events import record_post_write_events

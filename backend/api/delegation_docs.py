@@ -14,9 +14,10 @@ from api.doc_comments import comment_action_status, decision_refusal
 from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSaveError, agent_document_writer
 from doceditor.comment_actions import (
-    SUGGESTION_REASON_MAX_CHARS, CommentActionError, check_agent_update, decide_all_from_author,
+    SUGGESTION_REASON_MAX_CHARS, CommentActionError, check_agent_update,
     decide_suggestion, reopen_fields, validate_create,
 )
+from doceditor.comment_batch_actions import decide_all_from_author
 from doceditor.comment_action_errors import decision_only_error
 from doceditor.comment_state_updates import update_comment
 from doceditor.comments import CrossArtifactIdError, validate_client_id
@@ -167,6 +168,8 @@ async def create_agent_comment(token: str, body: AgentCommentCreate):
         raise HTTPException(
             409, "client_id collides with another artifact's comment — re-mint and retry"
         ) from exc
+    except CommentActionError as exc:
+        raise HTTPException(comment_action_status(exc), exc.message) from exc
     except ValueError as exc:
         detail = str(exc)
         status = 413 if "too large" in detail else 415 if "binary" in detail else 422

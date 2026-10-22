@@ -35,7 +35,7 @@ def for_plans(db, plan_ids) -> dict[str, dict]:
     """Each listed plan's wait (EW4: a parent's waiting child plans), in two reads."""
     found = {}
     for plan_id, rows in node_waits.armed_in_plans(db, plan_ids).items():
-        if wait := _earliest((node_waits.named_watch_cause(row), {}) for row in rows):
+        if wait := _earliest((node_waits.named_watch_cause(row), {"title": title}) for row, title in rows):
             found[plan_id] = wait
     return found
 
@@ -67,7 +67,8 @@ def _label(cause: dict, node: dict) -> str:
         return _url_label(reason)
     if cause.get("child_thread_id"):
         return f"an agent working on {node.get('title') or 'a task'}"
-    return "something outside"
+    # Surfaces read "Waiting for {label}": with nothing named, the wait is the item it opens or the check it ends in.
+    return "the linked item" if cause.get("artifact_id") else "a scheduled check"
 
 
 def _stripped_reason(value: object) -> str:

@@ -39,6 +39,23 @@ describe('SetupScreen resume', () => {
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.includes('Start using CORSIA'))).toBe(true);
 	});
 
+	it('goes Back from a resumed Providers & models to the subscriptions question, then the account', async () => {
+		mountResume(); await settle();
+		const click = (label: string) => Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === label)?.click();
+		click('Back'); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		expect(host.textContent).toContain('Do you pay for Claude or ChatGPT?');
+		// The explainer under the question says the install starts at once; no note sits on the question itself.
+		expect(host.querySelector('.question .note')).toBeNull();
+		click('Back'); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your account');
+		// The account exists, so the folder reads back with it: no picker that the service would refuse.
+		expect(host.querySelector('[data-testid="setup-folder-made"]')?.textContent).toContain('CORSIA keeps your work in');
+		expect(host.textContent).not.toContain('Choose a different folder');
+		click('Continue'); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+	});
+
 	it('opens the app directly when the backend records completed setup', async () => {
 		const onFinished = vi.fn();
 		token.set('setup-token'); user.set({ id: 'user', name: 'Ada' });

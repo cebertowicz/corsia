@@ -71,7 +71,7 @@ def _size_before_migration(db, scene):
 
 
 def _intent_before_migration(db, scene):
-    """A pre-v134 plan-node table cannot persist a task's intent yet."""
+    """A pre-v138 plan-node table cannot persist a task's intent yet."""
     db.execute("DROP INDEX idx_plan_nodes_intent_node")
     for column in ("intent_node_id", "intent"):
         db.execute(f"ALTER TABLE plan_nodes DROP COLUMN {column}")
@@ -487,6 +487,15 @@ def _missing_intent_word(_db, _scene):
     return partial(intent_words.validate_intent, "")
 
 
+def _too_many_intent_words(db, scene):
+    words = [{"quote": f"Word {index}", "author": "agent"} for index in range(intent_words.MAX_WORDS_PER_CALL + 1)]
+    return partial(intent_words.resolve_words, db, words, actor_id=None)
+
+
+def _person_quote_without_thread(db, _scene):
+    return partial(intent_words.resolve_words, db, [{"quote": "Build it", "role": "authority"}], actor_id=None)
+
+
 def _oversized_intent_word(_db, _scene):
     return partial(intent_words.validate_intent, "x" * (intent_words.MAX_INTENT_BYTES + 1))
 
@@ -575,10 +584,12 @@ _CASES = {
     ("intent_words.py", 'f"{field} is required"'): _missing_intent_word,
     ("intent_words.py", 'f"{field} exceeds the {limit}-byte limit"'): _oversized_intent_word,
     ("intent_words.py", '"intent_words must be a nonempty array"'): _missing_intent_word,
+    ("intent_words.py", 'f"intent_words takes at most {MAX_WORDS_PER_CALL} quotes per call; keep the strongest {MAX_WORDS_PER_CALL}"'): _too_many_intent_words,
     ("intent_words.py", '"intent_words items require quote, author?, and role?"'): _missing_intent_word,
     ("intent_words.py", '"intent word author must be person or agent"'): _missing_intent_word,
     ("intent_words.py", '"intent word role must be origin, bears_on, or authority"'): _missing_intent_word,
-    ("intent_words.py", '"quote was not found; quote exactly, or pass it as your own words with author: agent"'): _missing_intent_word,
+    ("intent_words.py", "QUOTE_NOT_FOUND"): _missing_intent_word,
+    ("intent_words.py", '"person quotes must be recorded from the agent\'s own thread"'): _person_quote_without_thread,
     # --- plans/boundary_dispatch.py ---
     ("intent_creation.py", '"task creation needs intent_words with an exact person quote and role: authority"'): _missing_authority_quote,
     # --- plans/boundary_fields.py ---
@@ -665,7 +676,7 @@ _CASES = {
         }),
     ("node_creation.py", '"workflow fields require schema version 51"'):
         _workflow_fields_before_migration,
-    ("node_creation.py", '"task intent requires schema version 134"'): _intent_before_migration,
+    ("node_creation.py", '"task intent requires schema version 138"'): _intent_before_migration,
     # --- plans/workflow_fields.py ---
     ("workflow_fields.py", 'f"{field} must be a non-empty string or null"'):
         _operation("add", {

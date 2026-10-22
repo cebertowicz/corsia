@@ -40,6 +40,9 @@ class EventTypeDecl:
     # Facts a digest note's line shows the agent, in this order. Never a fact
     # carrying outside text (a subject, a sender): undeclared facts stay out.
     digest_line_facts: tuple[str, ...] = ()
+    # The name the platform's own router gives this event (a webhook's internal
+    # event), when one routes it; agent-written rules on that path read this type.
+    routed_event: str | None = None
 
 
 @dataclass(frozen=True)
@@ -74,12 +77,26 @@ class ConnectorManifest:
     version: str
     event_types: Mapping[str, EventTypeDecl]
     classify: Callable[[dict], str]                    # raw payload -> event_type
-    extract_facts: Callable[[dict], dict]              # raw payload -> normalized flat facts
+    # raw payload + what routing already resolved for it (or None) -> flat facts
+    extract_facts: Callable[[dict, Mapping[str, Any] | None], dict]
     build_artifact_ref: Callable[[str, dict, dict], dict | None]
     command_triggers: tuple[CommandTriggerDecl, ...] = ()
     resolve_relationships: Callable[[str, dict, dict], tuple[dict, ...]] = (
         lambda event_type, facts, raw: ()
     )
+    # The fact naming the repository an event comes from, the repositories a
+    # project tracks, and its inverse, the projects tracking one repository
+    # (``None`` when they can't be read). Declared together: a rule's test on
+    # that fact must name one the writer's project tracks, and an event routing
+    # gave no thread reaches the self-rules of the projects tracking its repository.
+    repository_fact: str | None = None
+    project_repositories: Callable[[str], frozenset[str] | None] | None = None
+    repository_projects: Callable[[str], frozenset[str] | None] | None = None
+
+    def routed_type(self, routed_event: str) -> str | None:
+        """The declared type the router's ``routed_event`` is, if one declares it."""
+        return next((decl.event_type for decl in self.event_types.values()
+                     if decl.routed_event == routed_event), None)
 
     def decl(self, event_type: str) -> EventTypeDecl:
         """Return a declared event type or reject loudly (EM7)."""

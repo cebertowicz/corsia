@@ -1,4 +1,4 @@
-"""The person's own skills in their other AI tools: offers and installs.
+"""The person's own skills in their other tools: offers and installs.
 
 Only the person's own skill folders are scanned (plugin, bundled and ``.system``
 skills never are). Each skill is bounded by lstat before anything is hashed, and

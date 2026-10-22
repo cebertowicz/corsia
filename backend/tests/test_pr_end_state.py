@@ -19,6 +19,7 @@ from events.connectors.github import MANIFEST, PR_MERGED_KEY, pr_end_state
 from events.github_mapper import map_github_event, pr_terminal_state
 from events.identity import PR_TYPE
 from events.identity_formula import MalformedEventError
+from reviewer.reviewer_categories import LABEL_REVIEW
 
 _REPO_FULL_NAME = "o/r"
 _PR_NUMBER = 7
@@ -207,6 +208,21 @@ class TestConnectorClassifier:
         if state is None:
             pytest.skip("an unclassified close reaches no declaration")
         assert github_event_class(payload) == "informational", case
+
+    def test_every_declared_routed_event_is_emittable_by_the_mapper(self):
+        mapped = {
+            map_github_event("pull_request", _close(True, action="opened")),
+            map_github_event("pull_request", _close(True, action="synchronize")),
+            map_github_event("pull_request", _close(True, action="ready_for_review")),
+            map_github_event("pull_request", _close(True, action="labeled") | {
+                "label": {"name": LABEL_REVIEW}}),
+            map_github_event("pull_request", _close(True)),
+            map_github_event("pull_request", _close(False)),
+            map_github_event("check_suite", {"action": "completed"}),
+        }
+
+        declared = {decl.routed_event for decl in MANIFEST.event_types.values() if decl.routed_event}
+        assert declared <= mapped
 
 
 class _Identity:

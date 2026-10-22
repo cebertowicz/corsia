@@ -6,7 +6,7 @@ import { formatMoment } from '$lib/time';
 /** Hover text of a row's hourglass (EW6): what it waits for and when it checks back; empty for any other state. */
 export function waitMarkTitle(entry: ThreadPlanStateEntry | undefined, now: Date = new Date()): string {
 	if (entry?.state !== 'waiting' || !entry.wait) return '';
-	return `Waiting for ${entry.wait.label} · ${waitChecksBack(entry.wait.until, now)}`;
+	return [`Waiting for ${entry.wait.label}`, waitChecksBack(entry.wait.until, now)].filter(Boolean).join(' · ');
 }
 
 /** Whether the row's trailing slot draws the hourglass: waiting, and neither spinner showing (EW6). */

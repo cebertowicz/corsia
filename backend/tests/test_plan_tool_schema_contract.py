@@ -389,7 +389,7 @@ def test_intent_words_publish_the_minimal_authority_quote_shape():
 # fields and add/insert wording; bounds and item shape remain enforced server-side.
 # 9,152 -> 9,372 (+220, AL1 AX): publish the minimal quote item shape and add/insert
 # wording so an agent can supply a prior person's authority without a blind retry.
-_PUBLISHED_BYTES = {"plan_update": 9_498, "plan_decision": 3_100}
+_PUBLISHED_BYTES = {"plan_update": 9_481, "plan_decision": 3_100}
 
 
 def test_the_operation_text_names_each_neighboring_settlement_choice():

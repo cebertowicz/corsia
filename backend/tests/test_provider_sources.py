@@ -223,6 +223,11 @@ def claude_session(monkeypatch):
     monkeypatch.setattr(harness_models, "binary_version", version)
     monkeypatch.setattr("connections.resolve_builtin_binary",
                         lambda provider, *, db=None: ({}, f"/bin/{provider}"))
+    # The account-label read after Ready finds the same binary; it is not the sign-in check counted here.
+    async def no_identity(_provider):
+        return {}
+
+    monkeypatch.setattr("connections.account_identity.default_identity", no_identity)
     # The suite's startup stub is lifted here: the only session is the faked one.
     monkeypatch.setattr("connections.startup.check_harness_source",
                         source_state.check_harness_source)

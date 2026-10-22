@@ -1,4 +1,4 @@
-"""Bring over what the person's other AI tools know: the bounded read.
+"""Bring over what the person's other tools know: the bounded read.
 
 The roots are the person's own Claude Code, Codex, OpenClaw and Hermes folders
 (``project_discovery.Roots``), each realpath-checked before use (``checked_root``).

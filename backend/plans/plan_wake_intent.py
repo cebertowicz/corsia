@@ -87,7 +87,7 @@ def _words_since_last_wake(db, node, recipient: str) -> list[dict[str, object]]:
     rows = db.execute(
         """SELECT author,role,quote,added_at,requirements_revision
            FROM plan_node_intent_words
-           WHERE node_id=? AND removed_at IS NULL AND requirements_revision>?
+           WHERE node_id=? AND requirements_revision>?
            ORDER BY requirements_revision,added_at,rowid""",
         (node["id"], last_revision),
     ).fetchall()
@@ -95,7 +95,7 @@ def _words_since_last_wake(db, node, recipient: str) -> list[dict[str, object]]:
         rows = db.execute(
             """SELECT author,role,quote,added_at,requirements_revision
                FROM plan_node_intent_words
-               WHERE node_id=? AND removed_at IS NULL AND requirements_revision=?
+               WHERE node_id=? AND requirements_revision=?
                ORDER BY added_at,rowid""",
             (node["id"], revision),
         ).fetchall()
@@ -110,11 +110,15 @@ def _words_since_last_wake(db, node, recipient: str) -> list[dict[str, object]]:
 
 
 def _last_wake_revision(db, node_id: str, recipient: str) -> int:
+    """The revision this node's last intent wake to ``recipient`` carried, or 0.
+
+    The wake ids share one prefix, read as an id range so the message id index
+    bounds it to this node's wakes, never the thread's history.
+    """
     prefix = f"plan-wake:intent_revised:{node_id}:"
     rows = db.execute(
-        """SELECT id FROM messages WHERE thread_id=? AND id LIKE ?
-           ORDER BY input_order,id""",
-        (recipient, f"{prefix}%"),
+        """SELECT id FROM messages WHERE id >= ? AND id < ? AND thread_id=?""",
+        (prefix, prefix[:-1] + ";", recipient),
     ).fetchall()
     revisions = []
     for row in rows:

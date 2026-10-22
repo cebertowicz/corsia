@@ -10,7 +10,7 @@ import pytest
 from connections.account_actions import sign_out_account
 from connections.connected_accounts import ConnectedAccountError, create_account, get_account, resolve_credentials, store_credentials
 from connections.microsoft import client
-from connections.microsoft.errors import MicrosoftError, REFRESH_TOKEN_INVALID, SERVICE_UNAVAILABLE
+from connections.microsoft.errors import MicrosoftError, REFRESH_TOKEN_INVALID, SERVICE_UNAVAILABLE, message
 from connections.microsoft.provider import MICROSOFT
 from infra.database import get_db
 from tools import microsoft_actions
@@ -159,6 +159,60 @@ async def test_transient_refresh_failure_keeps_connected_state(isolated_db, monk
     with pytest.raises(MicrosoftError, match=SERVICE_UNAVAILABLE):
         await client.access_token(account)
     assert facts(account)[0]["state"] == "connected"
+
+
+@pytest.mark.parametrize("error_name", ["invalid_scope", "invalid_request"])
+async def test_a_permanent_refresh_refusal_offers_sign_in(isolated_db, monkeypatch, error_name):
+    """A refusal Microsoft will keep giving is the account's state, not a wait-a-minute retry."""
+    account, other = connect(), connect()
+    http = Http(Response(400, {"error": error_name, "error_description": "private provider text"}), [])
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_: http)
+    with pytest.raises(MicrosoftError) as error:
+        await client.access_token(account)
+    assert error.value.cause == REFRESH_TOKEN_INVALID
+    assert "private provider text" not in str(error.value)
+    assert facts(account)[0]["state"] == "needs_sign_in"
+    assert facts(account)[0]["state_cause"] == REFRESH_TOKEN_INVALID
+    assert facts(other)[0]["state"] == "connected" and facts(other)[0]["state_cause"] is None
+
+
+@pytest.mark.parametrize("status, error_name", [
+    (503, "server_error"), (429, "server_busy"), (400, "temporarily_unavailable"),
+])
+async def test_only_an_outage_or_throttle_keeps_the_account_connected(isolated_db, monkeypatch, status, error_name):
+    account = connect()
+    http = Http(Response(status, {"error": error_name, "error_description": "private provider text"}), [])
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_: http)
+    with pytest.raises(MicrosoftError) as error:
+        await client.access_token(account)
+    assert error.value.cause == SERVICE_UNAVAILABLE
+    assert facts(account)[0]["state"] == "connected" and facts(account)[0]["state_cause"] is None
+
+
+class NotJson(Response):
+    def json(self):
+        raise ValueError("captive portal page")
+
+
+@pytest.mark.parametrize("response", [
+    NotJson(302, None), NotJson(403, None), NotJson(407, None), NotJson(400, None),
+    Response(403, {"error": "access_denied"}), Response(400, {"message": "proxy refused"}),
+])
+async def test_a_response_that_never_reached_microsoft_keeps_the_account_connected(isolated_db, monkeypatch, response):
+    """A captive portal or proxy answering the refresh must not make the person sign in again."""
+    account = connect()
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_: Http(response, []))
+    with pytest.raises(MicrosoftError) as error:
+        await client.access_token(account)
+    assert error.value.cause == SERVICE_UNAVAILABLE
+    assert facts(account)[0]["state"] == "connected" and facts(account)[0]["state_cause"] is None
+
+
+def test_a_retry_tells_the_person_not_to_start_a_sign_in():
+    """The retry text is the only thing standing between a throttled account and a needless sign-in."""
+    text = message(SERVICE_UNAVAILABLE)
+    assert "Microsoft didn’t complete this request" in text and "Don’t start a new sign-in" in text
+    assert "didn't" not in text and "Don't" not in text
 
 
 def test_microsoft_account_resolution_refuses_google_unknown_and_unreached_alike(isolated_db):

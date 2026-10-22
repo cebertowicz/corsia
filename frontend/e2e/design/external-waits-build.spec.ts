@@ -69,7 +69,7 @@ function asideAt(now: number): number {
 const iso = (ms: number) => new Date(ms).toISOString();
 
 function waitOf(m: Made) {
-	return { label: m.label ?? 'something outside', until: iso(m.until), more: m.more ?? 0, ...(m.artifact ? { artifact_id: m.artifact } : {}) };
+	return { label: m.label ?? 'a scheduled check', until: iso(m.until), more: m.more ?? 0, ...(m.artifact ? { artifact_id: m.artifact } : {}) };
 }
 
 /** What the chat list reads for a thread: the server's waiting state, or the set-aside time of a plan that waits on nothing outside. */

@@ -54,11 +54,16 @@ describe('Local only switch row states', () => {
 		expect(text()).toContain('Switch this chat to a local model first.');
 		expect(toggle().disabled).toBe(true);
 	});
-	it('off, no local model ready: disabled, with the setup link', () => {
-		models.set([cloud]); mountRow();
+	it('off, no local model ready: disabled, with the setup link when the sheet has no other', () => {
+		models.set([cloud]); mountRow({ onsetuplocal: () => {} });
 		expect(text()).toContain('No local model is ready.');
 		expect(toggle().disabled).toBe(true);
 		expect(link('Set up a local model')).toBeTruthy();
+	});
+	it('off, no local model ready: no setup link when the sheet already offers one', () => {
+		models.set([cloud]); mountRow();
+		expect(text()).toContain('No local model is ready.');
+		expect(link('Set up a local model')).toBeFalsy();
 	});
 	it('on (own): enabled, switch on, the promise as its second line', () => {
 		thread({ local_only: 1, local_only_effective: true, local_only_cause: 'own' }); models.set([local, marked('thread_local_only')]); mountRow();

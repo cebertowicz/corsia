@@ -29,7 +29,7 @@ def dispatch(
             acceptance_criteria=fields.text(params, "acceptance_criteria"),
             size=fields.require_task_size(params.get("size")), intent=params.get("intent"),
             intent_words=intent_words.resolve_words(
-                db, plan_id, params.get("intent_words"),
+                db, params.get("intent_words"),
                 actor_id=actor.thread_id if actor.kind == "thread" else None,
             ),
             **fields.expected(params), **common,

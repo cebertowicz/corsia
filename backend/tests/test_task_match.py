@@ -1,4 +1,4 @@
-from memory.task_match import MAX_TERMS, NodeText, match, task_terms
+from memory.task_match import MAX_TERMS, NodeText, first_term_at, match, task_terms
 
 
 def test_terms_put_title_first_and_drop_boilerplate():
@@ -13,11 +13,11 @@ def test_terms_put_title_first_and_drop_boilerplate():
     assert "2283" in terms.terms and len(terms.terms) <= MAX_TERMS
 
 
-def test_node_text_has_no_description_and_uses_person_words():
-    text = NodeText("Export format", words="Use CSV columns for date and account.")
+def test_person_words_add_terms_after_the_title():
+    terms = task_terms(NodeText("Export format", words="Use CSV columns for date and account."))
 
-    assert not hasattr(text, "description")
-    assert "export" in task_terms(text).terms
+    assert terms.terms[:2] == ("export", "format")
+    assert "csv" in terms.terms and "csv" not in terms.title_terms
 
 
 def test_long_multi_topic_message_scores_its_matching_sentence_run_only():
@@ -38,3 +38,9 @@ def test_match_returns_counts_and_rejects_scattered_topics():
     words = "Export policy discussion.\n\nAccount settings discussion.\n\nLedger retention discussion."
 
     assert match(terms, words) is None
+
+
+def test_first_term_at_skips_a_term_inside_a_longer_word():
+    text = "The catalog stays. Log rotation runs nightly."
+
+    assert first_term_at(frozenset({"log"}), text) == text.index("Log")

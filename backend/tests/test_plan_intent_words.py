@@ -227,7 +227,7 @@ def test_doc_comment_quote_resolves_and_agent_words_skip_lookup(db):
     ).fetchall()
     assert [tuple(row) for row in rows] == [
         ("person", "doc_comment", "intent-comment", "Keep the release scope narrow.", "authority"),
-        ("agent", "message", "root", "I will verify the narrow path.", "bears_on"),
+        ("agent", "plan_edit", "root", "I will verify the narrow path.", "bears_on"),
     ]
 
 
@@ -306,16 +306,9 @@ def test_a_long_person_origin_is_kept_within_the_quote_limit(db):
     db.execute("UPDATE messages SET active_turn_id='long-turn' WHERE id='long-row'")
     node = service.add_node(plan.id, kind="task", title="Long", acceptance_criteria="Kept", intent="Keep it", db=db)
 
-    assert intent_words.capture_origin(db, plan.id, node.id, turn_id="long-turn", actor_id=None, revision=1)
+    assert intent_words.capture_origin(db, node.id, turn_id="long-turn", revision=1)
     quote = db.execute("SELECT quote FROM plan_node_intent_words WHERE node_id=?", (node.id,)).fetchone()["quote"]
     assert quote == "é" * (intent_words.MAX_QUOTE_BYTES // 2)
-
-
-def test_a_project_scope_plan_resolves_quotes_in_its_own_project(db):
-    db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('proj-1','P','t','t')")
-    plan = service.ensure_plan("project_scope", "proj-1", db=db)
-
-    assert intent_words._project_id(db, plan.id) == "proj-1"
 
 
 def test_editing_intent_or_words_bumps_the_revision_but_description_does_not(db):
