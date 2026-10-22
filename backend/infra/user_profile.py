@@ -63,10 +63,10 @@ def one_line(value: str) -> str:
     return " ".join(value.split())
 
 
-def profile_text(name: str, timezone: str, email: str = "") -> str:
+def profile_text(full_name: str, timezone: str, email: str = "") -> str:
     """The profile body: the preferred name (the full name's first word), the full name, the email when
     known, and the timezone when the Mac reports one."""
-    full_name = one_line(name)
+    full_name = one_line(full_name)
     lines = ["# User profile", "", f"{_NAME_LABEL} {full_name.split(' ', 1)[0]}", f"{_FULL_NAME_LABEL} {full_name}"]
     if one_line(email):
         lines.append(f"{_EMAIL_LABEL} {one_line(email)}")
@@ -154,7 +154,7 @@ class StagedProfile:
             logger.exception("Could not restore the user profile")
 
 
-def stage_user_profile(workspace: Path, name: str, timezone: str, email: str = "") -> StagedProfile | None:
+def stage_user_profile(workspace: Path, full_name: str, timezone: str, email: str = "") -> StagedProfile | None:
     """Prepare the profile write for a new install, or ``None`` when there is nothing to write.
 
     A missing profile is created from the full name, timezone and email. An existing
@@ -162,7 +162,7 @@ def stage_user_profile(workspace: Path, name: str, timezone: str, email: str = "
     ``ValueError`` when the name is empty and ``OSError`` when the folder cannot
     be written.
     """
-    if not one_line(name):
+    if not one_line(full_name):
         raise ValueError("a name is required")
     path = Path(workspace) / PROFILE_RELATIVE_PATH
     email = one_line(email)
@@ -177,7 +177,7 @@ def stage_user_profile(workspace: Path, name: str, timezone: str, email: str = "
         mode = stat.S_IMODE(path.stat().st_mode)
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        text = profile_text(name, timezone, email)
+        text = profile_text(full_name, timezone, email)
     temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     descriptor = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
     try:

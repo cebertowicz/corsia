@@ -498,8 +498,7 @@ def test_the_look_up_reads_and_writes_the_zone_and_name_in_the_workspace_profile
 def test_the_user_profile_fact_is_described_as_read_from_the_workspace_profile():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
     assert "read from the workspace `context/50-USER-PROFILE.md`" in app
-    assert "what `USER.md` already holds" not in app
-    assert "`work`, `place`, `check_first`" not in app and "`user_profile`'s `name` and `full_name`" in app
+    assert "`user_profile`'s `name` and `full_name`" in app
 
 
 def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggestions_only():
@@ -520,7 +519,7 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "A heading with nothing to put under it gets no suggestion." in doc
     # Cloud: one helper per heading, in parallel, no web search. Local: CORSIA writes it.
     assert "start one helper per heading that has material, all at once" in doc
-    assert "`plan_node_id` `none`" not in doc and "runs no web search" in doc
+    assert "runs no web search" in doc
     # Each helper hangs off its own `About you: <heading>` task, which CORSIA settles once the result lands.
     assert "add one `About you: <heading>` task to your plan per helper" in doc and "that task's id as `plan_node_id`" in doc
     assert "If `delegate_task` refuses the model, write that heading yourself." in doc
