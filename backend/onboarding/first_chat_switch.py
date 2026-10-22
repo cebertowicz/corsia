@@ -103,8 +103,21 @@ def release_claim(operation_id: str, *, db: sqlite3.Connection) -> None:
             set_setting(SETTINGS_KEY, {**marker, "claimed": None}, db=connection)
 
 
-async def switch_when_ready(provider: str, operation_id: str, *, user_id: str, account_id: str) -> bool:
-    """Switch the first chat to ``provider``'s model if the three guards hold; whether a switch was asked for."""
+def _owner(thread_id: str) -> str:
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return str(db.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()["user_id"])
+    finally:
+        db.close()
+
+
+async def switch_when_ready(provider: str, operation_id: str, *, user_id: str | None, account_id: str) -> bool:
+    """Switch the first chat to ``provider``'s model if the three guards hold; whether a switch was asked for.
+
+    A sign-in started from Settings has no first-run bind and so no ``user_id``: the chat's owner stands in.
+    """
     from infra.db_async import run_in_db
     from infra.database import get_db
     from thread.model import switch_model
@@ -128,6 +141,8 @@ async def switch_when_ready(provider: str, operation_id: str, *, user_id: str, a
         return False
     thread_id, destination = claimed
     try:
+        if user_id is None:
+            user_id = await run_in_db(_owner, thread_id)
         await switch_model(
             thread_id, destination, user_id=user_id, actor_kind="system", actor_id=None,
             reason=REASON, checkpoint_override="target", account_id=account_id,

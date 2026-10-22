@@ -208,6 +208,16 @@ class TestSwitch:
         assert door.await_args.kwargs["checkpoint_override"] == "target"
         assert door.await_args.kwargs["account_id"] == _account_id()
 
+    async def test_a_settings_sign_in_switches_as_the_chats_owner(self, agent, monkeypatch):
+        hook.record_first_model(agent, LOCAL)
+        door = AsyncMock()
+        monkeypatch.setattr("thread.model.switch_model", door)
+
+        asked = await hook.switch_when_ready("claude-code", "account-1:1", user_id=None, account_id=_account_id())
+
+        assert asked is True
+        assert door.await_args.kwargs["user_id"] == "u1"
+
     async def test_a_later_completion_after_success_is_a_no_op(self, agent, monkeypatch):
         hook.record_first_model(agent, LOCAL)
         door = AsyncMock()
@@ -270,9 +280,15 @@ class TestSigninSeam:
         asked = await self._finish(monkeypatch, "failed", self._operation())
         asked.assert_not_awaited()
 
-    async def test_a_sign_in_that_is_not_a_first_run_bind_does_not_ask(self, agent, monkeypatch):
+    async def test_a_settings_sign_in_without_a_bind_asks_with_no_user(self, agent, monkeypatch):
         operation = self._operation()
         operation.bind = None
+        asked = await self._finish(monkeypatch, "ready", operation)
+        asked.assert_awaited_once_with("claude-code", "a1:3", user_id=None, account_id="a1")
+
+    async def test_a_sign_in_that_reads_nothing_does_not_ask(self, agent, monkeypatch):
+        operation = self._operation()
+        operation.duplicate_of = "other"
         asked = await self._finish(monkeypatch, "ready", operation)
         asked.assert_not_awaited()
 
