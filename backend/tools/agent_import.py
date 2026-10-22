@@ -1,4 +1,4 @@
-"""``agent_import``: bring over what the person's other AI tools know, by consent."""
+"""``agent_import``: bring over what the person's other tools know, by consent."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ NONE_NAMED_FOUND = (
 )
 NOT_HERE = (
     "agent_import is only for the CORSIA agent; tell the person to ask CORSIA to "
-    "bring things over from their other AI tools"
+    "bring things over from their other tools"
 )
 
 
@@ -54,7 +54,7 @@ def _texts():
             "this Mac now; " + RAISE_FIRST
         ),
         declined=(
-            "the user did not choose to have their other AI tools read; do not read "
+            "the user did not choose to have their other tools read; do not read "
             "them and do not ask again unasked"
         ),
         used=(
@@ -65,7 +65,7 @@ def _texts():
 
 
 class AgentImportTool(Tool):
-    """Read the person's other AI tools once per consent, then install picked skills."""
+    """Read the person's other tools once per consent, then install picked skills."""
 
     @property
     def name(self) -> str:
@@ -80,7 +80,7 @@ class AgentImportTool(Tool):
             "an offer state. Never their chats, settings, keys or passwords, and "
             "never a skill's body.\n\n"
             "USE THIS when the person asks to bring their things over from another "
-            "AI tool, and in first run when setup.setup_decisions holds the import "
+            "tool, and in first run when setup.setup_decisions holds the import "
             f"decision. Follow {REFERENCE} for what to post.\n\n"
             "It needs the person's consent first: call it with no "
             "consent_decision_id for the exact consent_decision fields (pass tools "
