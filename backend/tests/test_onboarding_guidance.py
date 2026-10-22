@@ -346,7 +346,7 @@ def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_li
     assert step.startswith("Learning from the community.** Always.")
     assert "Here's how CORSIA gets better: it learns from you." in step
     assert "sharing it means everyone using CORSIA gets better, and you get what others prove." in step
-    assert "After about a week of work, the chart button at the top of this chat shows what's changing: the time CORSIA saves you and the attention each result takes." in step
+    assert "After about a week of work, the chart button at the top of this chat shows what's changing: how much work gets done per hour of your attention, and how many of your minutes each result takes." in step
     assert "Use and share community improvements?" in step
     assert "**Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No" in step
     assert "would only share, write No and Yes" in step
