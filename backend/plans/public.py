@@ -13,6 +13,8 @@ is where the caller looks it up.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 # Errors and node vocabulary.
 from plans.decision_authz import DecisionClosed
 from plans.decision_fields import DecisionInputError
@@ -159,6 +161,23 @@ def node_owner_thread(node_id: str, *, db) -> str | None:
             (node_id,),
         ).fetchone()
     return row["owner_id"] if row is not None and row["owner_kind"] == "thread" else None
+
+
+def open_wait_intervals(
+    thread_ids: list[str], *, since: datetime, until: datetime, db,
+) -> dict[str, list[tuple[float, float]]]:
+    """Each thread's waiting on something outside, as epoch-second intervals in ``[since, until]``.
+
+    The union over the thread's own plan nodes of armed watches (a task set
+    aside excluded), unmet dependencies and review on a linked pull request,
+    with the user's holds and plan pauses cut out (``plans.node_waiting``).
+    Open intervals end at ``until``; a thread with none maps to ``[]``. No
+    delegation walk: pass descendant threads to include them.
+    """
+    from plans import node_cost, node_waiting, service
+
+    with service._connection(db) as connection:
+        return node_waiting.thread_intervals(connection, thread_ids, since, until, node_cost._rows_in)
 
 
 # Notifications raised by a plan write, driven after its commit.
