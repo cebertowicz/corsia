@@ -52,7 +52,7 @@ it('says what host access is before the request details', () => {
 	lease.requested_policy_exceptions = [];
 	show(lease);
 	const explainer = host.querySelector('.decision-body > .explainer')!;
-	expect(explainer.textContent).toBe('This agent is asking for temporary access to parts of this computer outside its project. It cannot use that access unless you approve, and you can revoke it at any time.');
+	expect(explainer.textContent).toBe("This agent is asking for temporary access to parts of this computer it can't normally reach. It cannot use that access unless you approve, and you can revoke it at any time.");
 	expect(explainer.nextElementSibling).toBe(host.querySelector('.purpose'));
 });
 
