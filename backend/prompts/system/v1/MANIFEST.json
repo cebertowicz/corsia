@@ -172,10 +172,10 @@
       "sha256": "3f9c8e7ac9201a0cd75729fdd130f42c4e2f46039cc144dd1dbbbca0176e6abb"
     },
     {
-      "bytes": 4753,
+      "bytes": 4757,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/about-you-doc.md",
-      "sha256": "b77dd8ee4f1ec7097937f80fe4ae4b3a70d9fd61d805d62b1f6d71bafe0f21ed"
+      "sha256": "4e28819d5e30ce3d7b00a5b070989894ed142159a9e26b390e00a011bfbc178e"
     },
     {
       "bytes": 7475,
@@ -190,10 +190,10 @@
       "sha256": "e7dab36e3d55d8b9eb8c06ac3bb155057e87906567c199c9c800a82e48009939"
     },
     {
-      "bytes": 22228,
+      "bytes": 22178,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "3279c590783fd68fc2d743d4a79122ebd8bd68012a02cc56ec806ecc0f4a4d23"
+      "sha256": "ceae2e8cc536527ae6d70d934271bc4053dab94081b51f222a2e9f0be832e8a7"
     },
     {
       "bytes": 17525,
@@ -214,10 +214,10 @@
       "sha256": "582fe0631a98012f88d545e7b4d4e82a78d9d13d812d6e32a42ca8d40ec2b3b6"
     },
     {
-      "bytes": 11415,
+      "bytes": 11691,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/look-up-the-person.md",
-      "sha256": "6b0a3ac3190657e03838123177b775337ecdb681e17a9713731b473ec4817076"
+      "sha256": "3f9cee81cd3ec4b5b6d9b0dd2720c1dc4640d051627b880a281e013b4ddb81eb"
     },
     {
       "bytes": 5753,
@@ -244,10 +244,10 @@
       "sha256": "179e93d9f73bbf5f841a5fbea5a2e91c7aab853e88d2aef661a2d9cf7058f673"
     },
     {
-      "bytes": 6123,
+      "bytes": 6311,
       "kind": "skill",
       "path": "skills/connect-tools/SKILL.md",
-      "sha256": "ad906d2176feaf8fc887dad61472f0acdc92809b297929b63164d81e3d85a2b8"
+      "sha256": "0d4c85d0311adc757f0a8c5c652f2b3e4cd845aa9ecb939b62a2425ae5c71f6f"
     },
     {
       "bytes": 4409,

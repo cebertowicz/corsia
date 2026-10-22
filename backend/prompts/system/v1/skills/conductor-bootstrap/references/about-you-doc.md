@@ -44,7 +44,7 @@ When every suggestion is in, add the task `Review your About you doc` to your pl
 
 ## 4. When they approve
 
-First, when any suggestion is still open: accept nothing, remove nothing and write no profile. Post `[N] of my suggestions are still open, so nothing's saved yet. Accept the ones that are right, reject the rest, then tell me here when you're done.` with N the number open. When they reply, read the document again: while any is still open, post the same line with the new count; when none is open, go on. With none open: accept nothing yourself. Read the document's final text. Remove any heading left with nothing under it, so no placeholder ever stays in their document. Then post `Saved. I'll work from this, and you can change it any time.` and go on to step 6 of `references/first-run-app.md`, after writing the profile (section 5).
+First, when any suggestion is still open: accept nothing, remove nothing and write no profile. Post `[N] of my suggestions are still open, so nothing's saved yet. Accept the ones that are right, reject the rest, then tell me here when you're done.` with N the number open. When they reply, read the document again: while any is still open, post the same line with the new count; when none is open, go on. With none open: accept nothing yourself. Read the document's final text. Remove any heading left with nothing under it, so no placeholder ever stays in their document. Then post `Saved. I'll work from this. Tell me any time something changes.` and go on to step 6 of `references/first-run-app.md`, after writing the profile (section 5).
 
 ## 5. Write the profile
 

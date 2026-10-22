@@ -1,5 +1,5 @@
 import type { SetupAttempt } from './setupConnect.svelte';
-export type SetupPicks = { claude: boolean; chatgpt: boolean; key?: boolean };
+export type SetupPicks = { claude: boolean; chatgpt: boolean };
 export type SetupHandoff = { tools: Record<string, SetupAttempt> };
 
 /** First-run setup progress, which the backend owns: the app reads it to resume and reports changes to it. */
@@ -8,7 +8,7 @@ export type SetupProgress = {
 	/** Where to reopen an unfinished setup: Connect an AI, or the oMLX question inside it. */
 	step: 'models' | 'local-consent' | null;
 	local_ai: boolean | null;
-	/** What they said they pay for (Claude, ChatGPT, a pay-as-you-go key when asked), or null when nothing was recorded. */
+	/** What they said they pay for (Claude, ChatGPT), or null when nothing was recorded. */
 	picks?: SetupPicks | null;
 	/** Eligibility facts, read fresh by the backend each time; present only while setup is unfinished. */
 	status?: Record<string, unknown>;

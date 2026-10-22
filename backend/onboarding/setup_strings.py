@@ -85,13 +85,13 @@ FIND_PROJECTS = {
 # Gmail: on option A the conductor then asks in chat for an address.
 ASK_FOR_ADDRESS = "the address you give me in chat"
 
-# The two questions that come before GitHub: whether agents use and offer the community's proven
-# improvements. Both sit under the GitHub task; GitHub comes up only on a yes to sharing.
+# The community card comes first: whether agents use and offer the community's proven improvements.
+# It sits under the GitHub task; GitHub comes up only on a yes to sharing, as whichever GitHub card fits.
 COMMUNITY = {
     "title": "Use and share community improvements?",
     "context": ("You can always turn down a change and keep your own version, and nothing private ever goes "
                 "into what's shared."),
-    "tradeoff": "Sharing goes through GitHub, so use and share leads to one question about your account.",
+    "tradeoff": "Sharing goes through GitHub, so choosing Use and share leads to one question about your account.",
     "options": (
         ("Use and share", "Agents take improvements other people proved and offer the ones proven here."),
         ("Only use", "Agents take proven improvements and share nothing."),

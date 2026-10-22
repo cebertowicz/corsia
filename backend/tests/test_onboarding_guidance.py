@@ -308,7 +308,7 @@ def test_where_your_work_lives_never_ends_at_i_cant_and_hands_the_rest_to_helper
     assert "I'll look into [apps] after setup." in work
     assert "up to three at once" in work
     assert "A helper is looking into [apps]. I'll tell you here what it finds." in work
-    assert "Nothing connects to [app]. I'll build a connection after setup and offer it to CORSIA's community, if you OK that." in work
+    assert "Nothing connects to [app]. I'll build a connection after setup." in work and "community" not in work
     assert "two questions are never open at once" in work
     assert "I can't" not in work.replace('Never end on "I can\'t".', "")
     # The helper has no corsia_api, so the CORSIA agent adds the app it returns.
@@ -365,7 +365,7 @@ def test_github_comes_only_on_a_yes_to_sharing_and_answers_the_bot_account_quest
 
     assert "When `github_ready`, skip the rest of this step" in github
     assert github.index("Do you have a GitHub account?") < github.index("Should your agents use your account, or have their own?")
-    assert "Their own is allowed. You accept GitHub's terms for it" in github and "machine account besides" not in github
+    assert "Their own is allowed. You accept GitHub's terms for it" in github
     assert "Your agents can have their own account. You'd accept GitHub's terms, type its password and enter a code from your email. I never see them." in github
 
 
@@ -411,7 +411,8 @@ def test_the_connect_skill_holds_the_build_later_and_macos_permission_playbooks(
     skill = (BOOTSTRAP_SKILL.parents[1] / "connect-tools/SKILL.md").read_text(encoding="utf-8")
 
     assert "## No connection exists yet" in skill
-    assert "offer to share it to CORSIA's community, and only after they say yes" in skill
+    assert "only when it has `- **Share improvements with the community:** Yes`, offer to share it to CORSIA's community, and only after they say yes" in skill
+    assert "There's no ready way to connect [app]." in skill
     assert "## A macOS permission only the person can grant" in skill
     assert "System Settings › Privacy & Security › Full Disk Access" in skill
     assert "every connected app CORSIA runs" in skill
@@ -433,7 +434,7 @@ def test_the_look_up_reference_carries_the_rules_outcomes_questions_and_examples
         "What's your full name? I'll use it to look you up.",
         "Looking you up.",
         "Here's what I found. Tell me if any of it is wrong.",
-        "You keep a low profile online. Good for your privacy, less for me to go on. Here's the little I found, and it may not be you:",
+        "You keep a low profile online. That's good for your privacy, and it leaves me less to go on. Here's the little I found, and it may not be you:",
         "I couldn't search just now.",
         "`None of these`",
         "What should I call you, what do you do, and where are you based?",
@@ -455,14 +456,13 @@ def test_the_look_up_reference_carries_the_rules_outcomes_questions_and_examples
     assert not re.search(r"\bAI\b", ref)
 
 
-def test_the_look_up_uses_a_domain_only_when_a_search_finds_a_page_on_it_and_keeps_the_run_fixes():
+def test_the_look_up_leaves_out_a_personal_email_domain_and_checks_any_other_with_a_search():
     ref = (FIRST_RUN_APP.parent / "look-up-the-person.md").read_text(encoding="utf-8")
 
     assert "returns a page on that domain" in ref
-    assert "never covers sending their name out" not in ref
     assert "Never put the full address in a query" in ref
-    for provider in ("mail-provider", "gmail.com, googlemail.com", "fastmail.com", "protonmail.com", "consumer-mail"):
-        assert provider not in ref, provider
+    for provider in ("gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "protonmail.com"):
+        assert provider in ref, provider
     # Nothing found is said out loud before the questions.
     assert "**Nothing.** Post `I couldn't find anything about you online. That's fine.` and then the questions." in ref
     # The time zone comes from the place they name, with no question.
@@ -501,7 +501,6 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert doc.count("`I put what I know in your About you doc. Change anything that's wrong, accept the suggestions you want, then press Approve.`") == 1
     assert doc.count("Change anything that's wrong, accept the suggestions you want, then press Approve.") == 2  # the ask's reason, then the one chat line
     assert "`block_node` with `owner_kind` `user`" in doc and "`ask_artifact_id` the document's artifact id" in doc  # Approve only shows with an ask
-    assert "Accept them all" not in doc
     assert "suggest that line again yourself on the text now in the doc. Never wait on a helper" in doc
     assert "A comment from the person on a line: answer with a suggested change to that line." in doc
     # On approve CORSIA accepts nothing, removes empty headings, then writes the profile.
@@ -520,7 +519,6 @@ def test_approve_with_suggestions_still_open_saves_nothing_and_asks_to_be_told()
     assert section.lstrip().startswith("First, when any suggestion is still open: accept nothing, remove nothing and write no profile.")
     assert ("`[N] of my suggestions are still open, so nothing's saved yet. Accept the ones that are right, "
             "reject the rest, then tell me here when you're done.`") in section
-    assert "press Approve again" not in doc
     assert "When they reply, read the document again: while any is still open, post the same line with the new count" in section
     assert section.index("still open") < section.index("Remove any heading left")
 

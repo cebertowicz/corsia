@@ -1,7 +1,9 @@
 """The setup decisions of a new install's first run, built by CORSIA.
 
-The conductor raises each decision unchanged and in order; the model never
-writes or edits one. Every payload is computed from facts read here: which apps
+The conductor raises a decision unchanged; the model never writes or edits one.
+The GitHub cards are alternatives: the person's chat answer about having an
+account (or, on the script path, the install's own question) picks which one
+is raised, so the list holds every card a path may raise, not a sequence. Every payload is computed from facts read here: which apps
 have a session folder (a stat, never a read), the email saved at install, and
 whether web search works. Strings live in ``setup_strings``.
 
@@ -174,7 +176,7 @@ def _github(email: str, strings: dict[str, Any] = text.GITHUB) -> dict[str, Any]
 
 
 def build_decisions(facts: Facts) -> list[dict[str, Any]]:
-    """The complete decisions to raise, in setup-task order, each as-is."""
+    """Every decision a path may raise, in setup-task order, each as-is. The GitHub cards are alternatives: raise the one that fits."""
     projects = find_projects(facts.session_apps)
     imported = agent_import(facts.agent_import)
     return [

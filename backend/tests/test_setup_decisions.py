@@ -40,7 +40,7 @@ EXPECTED_COMMUNITY = {
     "title": "Use and share community improvements?",
     "context": ("You can always turn down a change and keep your own version, and nothing private ever goes "
                 "into what's shared."),
-    "tradeoff": "Sharing goes through GitHub, so use and share leads to one question about your account.",
+    "tradeoff": "Sharing goes through GitHub, so choosing Use and share leads to one question about your account.",
     "recommendation": "A",
     "rationale": "You get what others prove, and a proven change helps everyone using CORSIA.",
     "options": [
