@@ -16,7 +16,7 @@ const flightShapes = [
 	{ state: 'failed', cause: 'other', ref: 'setup-report-123', fix: 'CORSIA couldn’t set up the local model.' },
 	{ state: 'setup_failed', cause: 'other', ref: 'setup-report-456', fix: 'CORSIA couldn’t set up the local model.' },
 	{ state: 'start_failed', cause: 'connection', ref: 'setup-report-789', fix: 'Check your internet connection, then try again.' },
-	{ state: 'setup_failed', cause: 'own_omlx_upgrade_required', ref: 'setup-report-999', fix: 'The oMLX on this computer is out of date or broken. Update it, then try again.' }
+	{ state: 'setup_failed', cause: 'own_omlx_upgrade_required', ref: 'setup-report-999', fix: 'The oMLX app already on this computer is out of date or broken. Update it, then press Retry.' }
 ] as const;
 
 function sourceFromFlight(flight: typeof flightShapes[number]) {
@@ -82,7 +82,7 @@ describe('setup provider rows', () => {
 	it('shows the actionable oMLX update when preparing a pick fails for that cause', () => {
 		const row = setupLocalRow({ ...actions(), pick: { state: 'failed', model: null, message: null, cause: 'own_omlx_upgrade_required', ref: 'pick-123' }, eligible: true, downloading: false, ready: false, startError: '' });
 
-		expect(row).toMatchObject({ meta: 'The oMLX on this computer is out of date or broken. Update it, then try again.', reference: 'pick-123', reportable: true, action: { label: 'Retry' } });
+		expect(row).toMatchObject({ meta: 'The oMLX app already on this computer is out of date or broken. Update it, then press Retry.', reference: 'pick-123', reportable: true, action: { label: 'Retry' } });
 	});
 
 	it.each(['other', 'connection', 'disk_full', undefined])('keeps the pick failure reference for %s without claiming a fit failure', (cause) => {
@@ -156,7 +156,7 @@ describe('setup local row switch', () => {
 		expect(stop).not.toHaveBeenCalled();
 
 		const asking = downloadingRow({ cloudReady: true, confirmingStop: true, confirmStop, stop });
-		expect(asking.detail).toBe('Stop downloading the local chat model? The 5 GB downloaded so far is deleted.');
+		expect(asking.detail).toBe('Stop downloading the local model? The 5 GB downloaded so far is deleted.');
 		expect(asking.confirm?.map((item) => item.label)).toEqual(['Stop download', 'Keep downloading']);
 		asking.confirm![1].run();
 		expect(stop).not.toHaveBeenCalled();

@@ -44,7 +44,7 @@ describe('SetupScreen resume', () => {
 		const click = (label: string) => Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === label)?.click();
 		click('Back'); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
-		expect(host.textContent).toContain('Do you pay for Claude or ChatGPT?');
+		expect(host.textContent).toContain('Which do you pay for?');
 		// The explainer under the question says the install starts at once; no note sits on the question itself.
 		expect(host.querySelector('.question .note')).toBeNull();
 		click('Back'); await settle();

@@ -5,11 +5,12 @@
 export const WELCOME_TITLE = 'Welcome to CORSIA';
 export const WELCOME_LINES = [
 	'Your agents learn how you like things done and keep their own instructions and skills up to date, so you don’t have to.',
-	'You can check that yourself. CORSIA measures how much of your time their work takes, and you can see it any time.',
+	'You can check that yourself: CORSIA measures the time you spend on work here, including keeping an eye on your agents.',
 ] as const;
 export const WELCOME_ROWS = [
 	{ label: 'CORSIA handles:', text: 'the setup steps for connecting your tools, and checking work against what you asked before it reaches you.' },
 	{ label: 'You decide:', text: 'what gets done. When a choice is yours to make, agents bring it to you with a recommendation.' },
-	{ label: 'Asks you first:', text: 'sending messages or posting anything for you, making purchases, or opening files outside your work folder. You can let agents go ahead on things you approve often.' },
+	{ label: 'Asks you first:', text: 'sending or posting as you, spending money, and opening files outside your work folder.' },
 ] as const;
-export const WELCOME_ACCOUNT_LINE = 'Create your account. It stays on this computer.';
+export const ACCOUNT_LEDE = 'Your account and password stay on this computer.';
+export const EMAIL_HINT = 'Used only to sign you up for services you choose, such as web search.';

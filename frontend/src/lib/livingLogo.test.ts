@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -111,5 +112,14 @@ describe('the launch shell page’s copy of the mark', () => {
 	it('is the app’s module, regenerated (run node desktop/scripts/gen-shell-logo.mjs after changing livingLogo.js)', () => {
 		const root = resolve(__dirname, '../../..');
 		expect(() => execFileSync('node', [resolve(root, 'desktop/scripts/gen-shell-logo.mjs'), '--check'], { stdio: 'pipe' })).not.toThrow();
+	});
+});
+
+describe('the mark’s two sources', () => {
+	it('keeps the animated circles identical to the static corsia-mark.svg the empty chat shows', () => {
+		const svg = readFileSync(resolve(__dirname, '../../static/icons/corsia-mark.svg'), 'utf8');
+		const fromSvg = [...svg.matchAll(/<circle cx="([\d.]+)" cy="([\d.]+)" r="([\d.]+)" fill="(#[0-9A-Fa-f]{6})"/g)]
+			.map((match) => [Number(match[1]), Number(match[2]), Number(match[3]), match[4].toUpperCase()]);
+		expect(DOTS.map(([cx, cy, r, fill]) => [cx, cy, r, fill.toUpperCase()])).toEqual(fromSvg);
 	});
 });

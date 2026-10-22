@@ -5,6 +5,7 @@
 	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
 	import SetupAiRows, { type AiRow } from './SetupAiRows.svelte';
 	import SetupAccountForm from './SetupAccountForm.svelte';
+	import ConfirmDialog from './ConfirmDialog.svelte';
 	import SetupWelcome from './SetupWelcome.svelte';
 	import SetupWorkFolder, { type FolderNotice } from './SetupWorkFolder.svelte';
 	import SetupConnect from './SetupConnect.svelte';
@@ -29,7 +30,7 @@
 	import { applyWorkFolder, shellInfo } from '$lib/remoteShell';
 	import { setupLocalRow, setupStartNote, type LocalRowState } from '$lib/setupProviderRows';
 	import { measuredDownloadTime } from '$lib/setupLocalPresentation';
-	import { WELCOME_TITLE } from '$lib/setupWelcome';
+	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
 	type LocalStartResult = 'started' | 'failed';
 	type LocalStartResponse = { result: LocalStartResult; reference?: string; fix?: string };
@@ -70,7 +71,7 @@
 	let localPreparing = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	// The subscriptions answer; null until answered (or skipped, or a resumed setup), when every CLI row shows.
-	let picks = $state<SetupPicks | null>(null), confirmLocalStop = $state(false), localOffFailed = $state<{ reference?: string } | undefined>();
+	let picks = $state<SetupPicks | null>(null), confirmLocalStop = $state(false), confirmConnect = $state(false), localOffFailed = $state<{ reference?: string } | undefined>();
 	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources });
 	const canConnect = shellInfo() !== null;
 	let preauthLocal = $state<LocalRowState | undefined>();
@@ -144,8 +145,8 @@
 		if (page === 'welcome') return { title: WELCOME_TITLE, primary: { label: 'Continue' }, onPrimary: () => { page = 'account'; } };
 		// A resumed setup has no account details to show, so it reads back what is set.
 		if (page === 'account' && $token && !accountKnown) return { title: 'Your account', primary: { label: 'Continue' }, onPrimary: afterAccount };
-		if (page === 'account') return { title: editing ? 'Your account' : 'Create your account', primary: { label: 'Continue', loading: accountBusy, disabled: !accountValid || accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'picker_failed' }, onPrimary: submitAccount };
-		if (page === 'subscriptions') return { title: 'Your subscriptions', lede: 'CORSIA’s agents can work through a Claude or ChatGPT plan you already pay for.' };
+		if (page === 'account') return { title: editing ? 'Your account' : 'Create your account', lede: ACCOUNT_LEDE, primary: { label: 'Continue', loading: accountBusy, disabled: !accountValid || accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'picker_failed' }, onPrimary: submitAccount };
+		if (page === 'subscriptions') return { title: 'Your subscriptions', lede: 'CORSIA’s agents can work through a Claude or ChatGPT subscription you already pay for.' };
 		return { title: 'Providers & models', lede: 'CORSIA needs one working model to continue setup.', primary: { label: 'Start using CORSIA', disabled: !canFinish || finishing, loading: finishing, note: finishNote, noteAlways: true }, onPrimary: finishSetup };
 	});
 	function validateConfirmation() { confirmationError = confirmation && password !== confirmation ? 'Passwords don’t match.' : ''; }
@@ -268,8 +269,15 @@
 		if (Object.keys(changes).length === 0) { afterAccount(); return; }
 		accountBusy = true; accountError = '';
 		try {
-			const response = await fetch('/api/setup/account', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${get(token)}` }, body: JSON.stringify(changes) });
-			const result = await response.json().catch(() => null);
+			const send = () => fetch('/api/setup/account', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${get(token)}` }, body: JSON.stringify(changes) });
+			let response = await send();
+			let result = await response.json().catch(() => null);
+			// An email has nowhere to go until the profile exists, and the name on screen is what builds it.
+			if (response.status === 422 && result?.code === 'profile_missing' && changes.name === undefined) {
+				changes.name = name.trim();
+				response = await send();
+				result = await response.json().catch(() => null);
+			}
 			// Setup finished elsewhere: the account step is over, and trying again would only loop.
 			if (response.status === 409) { onFinished(); return; }
 			if (!response.ok) {
@@ -345,7 +353,7 @@
 <SetupShell bind:this={shell} {steps} section={page === 'connect' ? 'Connect' : 'Setup'} {jobs} page={page === 'connect' ? `connect-${remote.stage}` : page} title={view.title} lede={view.lede} primary={view.primary} onPrimary={view.onPrimary}>
 	{#snippet secondary()}
 		{#if page === 'connect'}<SetupConnectBack onclick={() => remote.stage === 'code' ? remote.toChoose() : leaveConnect()} />
-		{:else if page === 'welcome' && canConnect && !$token}<Button variant="chip" onclick={() => void connectToAnotherComputer()}>Connect to CORSIA on another computer</Button>
+		{:else if page === 'welcome' && canConnect && !$token}<Button variant="chip" onclick={() => downloading ? (confirmConnect = true) : void connectToAnotherComputer()}>Connect to CORSIA on another computer</Button>
 		{:else if page === 'account'}<Button variant="chip" disabled={accountBusy} onclick={() => { page = 'welcome'; }}>Back</Button>{#if accountError}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>{/if}
 		{:else if page === 'subscriptions'}<Button variant="chip" onclick={() => { page = 'account'; }}>Back</Button>
 		{:else if page === 'models'}<Button variant="chip" disabled={finishing} onclick={() => { page = subscriptionsSkipped ? 'account' : 'subscriptions'; }}>Back</Button>
@@ -369,6 +377,7 @@
 		{#if sourceError}<p class="error-text" role="alert">{sourceError}</p><Button variant="chip" onclick={() => void refreshSources(true)}>Retry</Button>{/if}
 	{/if}
 </SetupShell>
+<ConfirmDialog open={confirmConnect} title="Connect to another computer instead?" description="This stops the download on this computer." confirmLabel="Stop and connect" cancelLabel="Keep downloading" onConfirm={() => { confirmConnect = false; void connectToAnotherComputer(); }} onCancel={() => { confirmConnect = false; }} />
 {#if showAdd}<AddProviderModal onClose={() => { showAdd = false; void refreshSources(); }} onSelectCloud={selectProvider} />{/if}
 {#if openProvider}<ProviderSettingsModal provider={openProvider} initialTab="advanced" onClose={() => { openProvider = null; void refreshSources(); }} />{/if}
 

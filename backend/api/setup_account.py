@@ -38,6 +38,9 @@ async def apply_update(user_id: str, request: Request) -> dict | Response:
             password=body.password if "password" in fields else None))
     except account_validation.AccountError as error:
         return JSONResponse(status_code=422, content={"detail": str(error)})
+    except FileNotFoundError:
+        # A known cause with a known fix: the name on screen rebuilds the profile, so the client sends it along.
+        return JSONResponse(status_code=422, content={"code": "profile_missing"})
     except Exception:
         ref = new_error_reference()
         logger.exception("Account update failed reference=%s", ref)

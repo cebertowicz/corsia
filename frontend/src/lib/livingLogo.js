@@ -134,8 +134,8 @@ export function createLivingLogo(host, options = {}) {
 	const random = options.random ?? Math.random;
 	const motionQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
 	let still = options.reducedMotion ?? motionQuery?.matches ?? false;
-	let sheen = options.sheen ?? SHEEN;
-	let origin = options.origin ?? ORIGIN;
+	const sheen = options.sheen ?? SHEEN;
+	const origin = options.origin ?? ORIGIN;
 	let destroyed = false, exited = false, entryDone = false, frozen = false, lastPulse = -1, pulseTimer = 0;
 	/** @type {Animation[]} */ let stageAnims = [];
 	/** @type {Animation[]} */ let flowAnims = [];
@@ -183,9 +183,7 @@ export function createLivingLogo(host, options = {}) {
 	}
 
 	/** @param {number} i */
-	function setSheenState(i) { parts[i].hi.style.opacity = sheen ? String(MOTION.sheenHighlight) : '0'; }
-	function applySheen() { parts.forEach((_, i) => setSheenState(i)); }
-	applySheen();
+	parts.forEach((part) => { part.hi.style.opacity = sheen ? String(MOTION.sheenHighlight) : '0'; });
 
 	/** The flow starts as the entry settles, from each dot's own colour, so the mark lands as designed and then begins to move. */
 	function startFlow(/** @type {number} */ after) {
@@ -320,10 +318,6 @@ export function createLivingLogo(host, options = {}) {
 		get entered() { return entered; },
 		/** Plays the exit and resolves when it is done. Call once, when setup hands over to the first chat. */
 		exit,
-		/** @param {boolean} on */
-		setSheen(on) { sheen = on; applySheen(); },
-		/** @param {keyof typeof ORIGINS} next The ripple's centre for the next entry or exit. */
-		setOrigin(next) { origin = next; },
 		pulse,
 		seek,
 		/** What is animating now, for tests and the prototype's readout. */

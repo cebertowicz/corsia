@@ -52,7 +52,7 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 		if (!cloudReady) return { ...row, meta, detail: LOCAL_HELD_DOWNLOADING, toggle };
 		if (confirmingStop) {
 			const gb = downloadedGb(pick?.model ? pick.model.download_size_gb : source?.download_size ? Number.parseFloat(source.download_size) : null, source?.download_percent);
-			return { ...row, meta, toggle, detail: `Stop downloading the local chat model? ${gb === null ? 'Everything' : `The ${gb} GB`} downloaded so far is deleted.`,
+			return { ...row, meta, toggle, detail: `Stop downloading the local model? ${gb === null ? 'Everything' : `The ${gb} GB`} downloaded so far is deleted.`,
 				confirm: [{ label: 'Stop download', run: () => { confirmStop?.(false); stop(); } }, { label: 'Keep downloading', run: () => confirmStop?.(false) }] };
 		}
 		return { ...row, meta, toggle };
@@ -73,7 +73,7 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 	}
 	if (pick?.state === 'failed') {
 		const message = pick.cause === 'memory' ? 'Couldn’t find a local model that fits this computer. Try again.'
-			: pick.cause === 'own_omlx_upgrade_required' ? 'The oMLX on this computer is out of date or broken. Update it, then try again.'
+			: pick.cause === 'own_omlx_upgrade_required' ? 'The oMLX app already on this computer is out of date or broken. Update it, then press Retry.'
 			: 'CORSIA couldn’t set up the local model.';
 		return { ...row, meta: message, reference: pick.ref, error: true, reportable: true, action: { label: 'Retry', run: check } };
 	}

@@ -141,9 +141,19 @@ def test_a_failed_save_names_a_reference_and_leaves_the_account_as_it_was(client
     assert "Patricia" not in _profile(workspace)
 
 
-def test_an_email_alone_is_refused_rather_than_dropped_when_there_is_no_profile_to_put_it_in(client, workspace, session):
+def test_an_email_alone_names_its_known_cause_when_there_is_no_profile_and_the_name_rebuilds_it(client, workspace, session):
     (workspace / user_profile.PROFILE_RELATIVE_PATH).unlink()
     response = _put(client, session, {"email": "new@example.test"})
-    assert response.status_code == 500
-    assert len(response.json()["ref"]) == 6
+    assert response.status_code == 422
+    assert response.json() == {"code": "profile_missing"}
     assert not (workspace / user_profile.PROFILE_RELATIVE_PATH).exists()
+    assert _put(client, session, {"name": "Pat Example", "email": "new@example.test"}).status_code == 200
+    assert "new@example.test" in _profile(workspace)
+
+
+def test_a_machine_credential_cannot_change_the_account_or_take_a_session(client, workspace, session):
+    machine, _ = accounts.issue_token("pat", kind="api", label="tooling")
+    response = _put(client, machine, {"name": "Someone Else", "password": "another-long-password"})
+    assert response.status_code == 403
+    assert "Someone Else" not in _profile(workspace)
+    assert accounts.get_user("pat") is not None and _put(client, session, {"name": "Pat Example"}).status_code == 200
