@@ -28,6 +28,7 @@ PROFILE_RELATIVE_PATH = Path("context") / "50-USER-PROFILE.md"
 _LOCALTIME = Path("/etc/localtime")
 _EMAIL_LABEL = "- **Email:**"
 _NAME_LABEL = "- **Preferred name:**"
+_FULL_NAME_LABEL = "- **Full name:**"
 
 
 def mac_full_name() -> str:
@@ -61,8 +62,10 @@ def one_line(value: str) -> str:
 
 
 def profile_text(name: str, timezone: str, email: str = "") -> str:
-    """The profile body: the name, the email when known, and the timezone when the Mac reports one."""
-    lines = ["# User profile", "", f"- **Preferred name:** {one_line(name)}"]
+    """The profile body: the preferred name (the full name's first word), the full name, the email when
+    known, and the timezone when the Mac reports one."""
+    full_name = one_line(name)
+    lines = ["# User profile", "", f"{_NAME_LABEL} {full_name.split(' ', 1)[0]}", f"{_FULL_NAME_LABEL} {full_name}"]
     if one_line(email):
         lines.append(f"{_EMAIL_LABEL} {one_line(email)}")
     if timezone:
@@ -85,17 +88,27 @@ def profile_email(workspace: Path) -> str:
         return ""
 
 
-def profile_name(workspace: Path) -> str:
-    """The existing profile's preferred name, without control characters, or empty."""
+def _printable_value(workspace: Path, label: str) -> str:
+    """The existing profile's value after ``label``, without control characters, or empty."""
     try:
         text = (Path(workspace) / PROFILE_RELATIVE_PATH).read_text(encoding="utf-8")
     except OSError:
         return ""
     for line in text.splitlines():
-        if line.startswith(_NAME_LABEL):
-            name = "".join(char for char in line.removeprefix(_NAME_LABEL) if char.isprintable())
-            return one_line(name)[:120]
+        if line.startswith(label):
+            value = "".join(char for char in line.removeprefix(label) if char.isprintable())
+            return one_line(value)[:120]
     return ""
+
+
+def profile_name(workspace: Path) -> str:
+    """The existing profile's preferred name, without control characters, or empty."""
+    return _printable_value(workspace, _NAME_LABEL)
+
+
+def profile_full_name(workspace: Path) -> str:
+    """The existing profile's full name, without control characters, or empty."""
+    return _printable_value(workspace, _FULL_NAME_LABEL)
 
 
 class StagedProfile:
@@ -134,7 +147,7 @@ class StagedProfile:
 def stage_user_profile(workspace: Path, name: str, timezone: str, email: str = "") -> StagedProfile | None:
     """Prepare the profile write for a new install, or ``None`` when there is nothing to write.
 
-    A missing profile is created from the name, timezone and email. An existing
+    A missing profile is created from the full name, timezone and email. An existing
     one is never rewritten; it only gains the email it names none of. Raises
     ``ValueError`` when the name is empty and ``OSError`` when the folder cannot
     be written.

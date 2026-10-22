@@ -144,6 +144,15 @@ describe('SetupScreen', () => {
 		expect(calls[0]).toEqual({ url: '/api/setup/status', method: 'GET' });
 	});
 
+	it('asks for the full name and prefills the username from its first word', async () => {
+		await settle(); button('Continue')?.click(); await settle();
+		expect(host.querySelector('label[for="setup-name"]')?.textContent?.trim()).toBe('Full name');
+		setInput('setup-name', 'Ada Lovelace'); await settle();
+		expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('ada');
+		setInput('setup-username', 'countess'); setInput('setup-name', 'Ada King'); await settle();
+		expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('countess');
+	});
+
 	it('keeps account fields when Back returns from the work-folder screen', async () => {
 		await settle(); button('Continue')?.click(); await settle(); fillAccount(); await settle();
 		button('Continue')?.click(); await settle();
