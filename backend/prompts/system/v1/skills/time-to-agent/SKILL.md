@@ -32,7 +32,7 @@ Run it when the ledger's last review is seven or more days old, on the first wak
 
    Then suggest in the person's words: name the kind, what you would do on a yes (work out how they handle it, show a plan, change nothing until they approve), and let them answer yes or no. Example: "You spend a lot of your week on supplier invoices. Want me to work out how you handle them and start taking that off your plate?" Record it, with the share, before sending. Counts are shown only on request.
 3. **Investigate.** On a yes, do your homework before any question, in order:
-   1. Build the workflow with skill `workflow-design`.
+   1. Build the workflow with skill `workflow-design` and save it as a skill.
    2. Only then interview, for what is left (how to tailor it to them, what they would trust it to do alone), batched and brief.
 
    Watch the next few rounds of that work, read-only; park the task on a deadline watch for the next round. Then draft a one-page charter: the workflow from step 3.1; where the context lives and how to retrieve it; how fresh it must be and how often to check it; the person's approach and rules; the steps to automate; how handing over authority could go wrong for an agent in particular; and the safeguards (what needs the person's word, limits, checks). Start from what they said and did, not from what would be tidy.
