@@ -15,7 +15,6 @@ const PICKED = { state: 'picked', model: { name: 'Qwen3.8 27B', repository: 'Jun
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 let calls: string[];
-let signedInStarts: number;
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
 function button(label: string) { return Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.trim() === label); }
 function setInput(id: string, value: string) {
@@ -25,7 +24,7 @@ function setInput(id: string, value: string) {
 }
 
 /** A Mac that can run a local model, with the pick and the pre-account start answered by the given handlers. */
-function mountSetup(handlers: { pick: () => Promise<Response>; preStart: () => Response; cancelled?: boolean; eligible?: boolean }) {
+function mountSetup(handlers: { pick: () => Promise<Response>; preStart: () => Response; eligible?: boolean }) {
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input); const method = init?.method ?? 'GET'; calls.push(`${method} ${url}`);
 		const eligible = handlers.eligible !== false;
@@ -33,13 +32,12 @@ function mountSetup(handlers: { pick: () => Promise<Response>; preStart: () => R
 		if (url === '/api/setup/local-model' && method === 'POST') return handlers.pick();
 		if (url === '/api/setup/local-download' && method === 'POST') return handlers.preStart();
 		if (url === '/api/setup/local-download') return json({ state: 'stopped' });
-		if (url === '/api/providers/local/setup') { signedInStarts += 1; return json({ ok: true, in_progress: true }); }
+		if (url === '/api/providers/local/setup') return json({ ok: true, in_progress: true });
 		if (url === '/api/setup/first-account') return json({ token: 'setup-token', user: { id: 'user', name: 'Ada Lovelace' } });
 		if (url === '/api/setup/progress') return json({ setup_completed: false, status: { local_eligible: true, work_folder: '~/CORSIA' } });
 		if (url.includes('/sources')) {
-			const running = signedInStarts > 0;
 			return json({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', prior_state: null, reason: null, fix: null, checked_at: null, eligible,
-				local_state: running ? 'downloading' : 'stopped', local_cancelled: handlers.cancelled || undefined, download_percent: running ? 0 : undefined }] });
+				local_state: 'stopped' }] });
 		}
 		if (url.includes('/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
 		if (url.includes('/models')) return json({ models: [] });
@@ -60,7 +58,7 @@ async function toModels() {
 	if (button('Neither')) { button('Neither')?.click(); await settle(); }
 }
 
-beforeEach(() => { token.set(null); user.set(null); calls = []; signedInStarts = 0; });
+beforeEach(() => { token.set(null); user.set(null); calls = []; });
 afterEach(async () => {
 	if (component) await unmount(component);
 	host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); token.set(null); user.set(null);
@@ -76,28 +74,10 @@ describe('the local model starts itself during setup', () => {
 		expect(host.textContent).toContain('Getting the local model ready');
 
 		release(json(PICKED)); await settle();
-		await vi.waitFor(() => expect(signedInStarts).toBe(1));
+		await vi.waitFor(() => expect(calls.filter((call) => call === 'POST /api/providers/local/setup')).toHaveLength(1));
 		await settle();
-		expect(signedInStarts).toBe(1);
-		expect(button('Download')).toBeUndefined();
-	});
-
-	it('starts the download when Providers & models opens and nothing is running', async () => {
-		mountSetup({ pick: async () => json(PICKED), preStart: () => json({ ok: true, in_progress: true }) });
-		await toModels();
-
-		await vi.waitFor(() => expect(signedInStarts).toBe(1));
-		await settle();
-		expect(signedInStarts).toBe(1);
-		expect(button('Download')).toBeUndefined();
-	});
-
-	it('does not start a download the person stopped', async () => {
-		mountSetup({ pick: async () => json(PICKED), preStart: () => json({ ok: true, in_progress: true }), cancelled: true });
-		await toModels(); await settle();
-
-		expect(signedInStarts).toBe(0);
-		expect(button('Download')).toBeTruthy();
+		expect(calls.filter((call) => call === 'POST /api/providers/local/setup')).toHaveLength(1);
+		expect(host.textContent).not.toContain('Getting the local model ready');
 	});
 
 	it('starts nothing and shows no preparing line on a Mac that cannot run the local model', async () => {
@@ -106,7 +86,6 @@ describe('the local model starts itself during setup', () => {
 
 		expect(host.textContent).not.toContain('Getting the local model ready');
 		expect(button('Download')).toBeUndefined();
-		expect(signedInStarts).toBe(0);
 		expect(calls.filter((call) => call.startsWith('POST') && call.includes('local'))).toEqual([]);
 	});
 
@@ -117,6 +96,6 @@ describe('the local model starts itself during setup', () => {
 		expect(host.textContent).toContain('Free up 5 GB, then try again.');
 		expect(button('Retry')).toBeTruthy();
 		expect(button('Download')).toBeUndefined();
-		expect(signedInStarts).toBe(0);
+		expect(calls.filter((call) => call === 'POST /api/providers/local/setup')).toEqual([]);
 	});
 });

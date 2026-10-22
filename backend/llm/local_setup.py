@@ -262,7 +262,7 @@ def setup_status() -> dict[str, Any]:
     )
     failed = result or {}
     return {
-        "state": state, "cancelled": bool(failed.get("cancelled")), "model": model.repository if model else None,
+        "state": state, "model": model.repository if model else None,
         "percent": _flight.download_percent,
         "eta_seconds": _flight.download_eta_seconds,
         "download_size": model.download_size_bytes if model else None,

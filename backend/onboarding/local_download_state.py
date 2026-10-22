@@ -40,7 +40,7 @@ def normalize(status: dict[str, Any]) -> dict[str, Any]:
         if isinstance(fix, str) and fix:
             detail["fix"] = fix[:512]
         return detail
-    return {"state": "stopped", "cancelled": True} if status.get("cancelled") is True else {"state": "stopped"}
+    return {"state": "stopped"}
 
 
 def current() -> dict[str, Any]:

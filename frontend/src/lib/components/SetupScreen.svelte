@@ -77,8 +77,8 @@
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
 	let localStartError = $state<'other' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
-	// The pre-start (pick, then start) is under way; the person turned the download off, so setup does not restart it by itself.
-	let localPreparing = $state(false), modelsAutoStarted = false;
+	// The pre-start (pick, then start) is under way, so the local row shows progress instead of a Download button.
+	let localPreparing = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	// The subscriptions answer; null until answered (or skipped, or a resumed setup), when every CLI row shows.
 	let picks = $state<SetupPicks | null>(null), confirmLocalStop = $state(false), localOffFailed = $state<{ reference?: string } | undefined>();
@@ -305,13 +305,6 @@
 		return () => clearInterval(timer);
 	});
 	$effect(() => (page === 'connect' ? remote.start() : undefined));
-	// Providers & models opening with nothing running or in flight starts the download itself, once per opening.
-	$effect(() => {
-		if (page !== 'models') { modelsAutoStarted = false; return; }
-		if (modelsAutoStarted || !$token || !eligible || localPreparing || localBusy || localStartError) return;
-		if (!local || local.local_state !== 'stopped' || local.local_cancelled || local.reason_code === 'not_running') return;
-		modelsAutoStarted = true; void startLocal();
-	});
 	onMount(() => {
 		if (!startConnect) void (resume ? resumeSetup() : readStatus());
 		const offModels = on('models_updated', () => { if (page === 'models') void refreshSources(); });
