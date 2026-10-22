@@ -195,10 +195,21 @@ fn default_app_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathB
 /// Whether this desktop app has already configured its own local CORSIA. The existing first-run plan owns this
 /// distinction; remote surfaces consume it only to choose their return-action label.
 fn local_corsia_configured<R: tauri::Runtime>(app: &tauri::AppHandle<R>, app_dir: &Path) -> bool {
+    if first_run::environment_names_the_roots() {
+        return true;
+    }
     let Ok(home) = app.path().home_dir() else {
+        log::warn!("could not resolve the home folder while checking local CORSIA setup");
         return false;
     };
-    matches!(first_run::plan(&home, app_dir), Ok(first_run::FirstRun::Configured))
+    match first_run::plan(&home, app_dir) {
+        Ok(first_run::FirstRun::Configured) => true,
+        Ok(_) => false,
+        Err(error) => {
+            log::warn!("could not determine whether local CORSIA is configured: {error}");
+            false
+        }
+    }
 }
 
 fn service_log_path(app_dir: &Path) -> Result<PathBuf, String> {
@@ -1273,6 +1284,24 @@ fn return_to_shell<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+/// A remote page cannot draw a local-start answer after its proxy is stopped. Keep that answer in the startup shell
+/// and return there unless the local service is already ready to replace the page directly.
+fn show_disconnected_startup<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    called_from_shell: bool,
+    startup: &ServiceStartup,
+) -> Result<(), String> {
+    report_shell_state(app, |connection| connection.local());
+    if let ServiceStartup::Ready { url } = startup {
+        let window = app.get_webview_window("main").ok_or("the CORSIA window is unavailable")?;
+        window.eval(format!("window.location.replace('{url}');")).map_err(|error| error.to_string())?;
+    } else if !called_from_shell {
+        show_launch_outcome(app, &Ok(startup.clone()));
+        return_to_shell(app);
+    }
+    Ok(())
+}
+
 /// Forgets the saved remote and brings the local service back. Called by the remote page's Disconnect and by the
 /// startup shell's launch-failure actions; it answers like `start_local_service`.
 #[tauri::command]
@@ -1300,11 +1329,7 @@ fn disconnect_remote(
     );
     match outcome {
         Ok(startup) => {
-            report_shell_state(&app, |connection| connection.local());
-            if let ServiceStartup::Ready { url } = &startup {
-                let window = app.get_webview_window("main").ok_or("the CORSIA window is unavailable")?;
-                window.eval(format!("window.location.replace('{url}');")).map_err(|error| error.to_string())?;
-            }
+            show_disconnected_startup(&app, is_shell_origin(actual.as_str()), &startup)?;
             Ok(startup)
         }
         Err(remote_lifecycle::DisconnectError::NotForgotten(error)) => Err(error),
@@ -2435,6 +2460,14 @@ mod tests {
             shell_state_script(&connection).as_deref(),
             Some("window.__corsiaShowServiceFailure?.(\"CORSIA service registration did not persist\");")
         );
+        assert!(is_shell_origin(app.get_webview_window("main").unwrap().url().unwrap().as_str()), "the window did not return to the startup shell");
+    }
+
+    #[test]
+    fn a_remote_disconnect_keeps_a_non_ready_startup_answer_for_the_startup_shell() {
+        let app = launch_app();
+        show_disconnected_startup(app.handle(), false, &ServiceStartup::RequiresApproval).unwrap();
+        assert_eq!(launch_state(&app), shell_state::LaunchState::LocalStartup { startup: ServiceStartup::RequiresApproval });
         assert!(is_shell_origin(app.get_webview_window("main").unwrap().url().unwrap().as_str()), "the window did not return to the startup shell");
     }
 

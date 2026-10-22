@@ -156,6 +156,12 @@ describe('LoginScreen', () => {
 			.find((button) => button.textContent?.includes('Use this computer instead'));
 		expect(returnButton).toBeDefined();
 		returnButton!.click();
+		await vi.waitFor(() => expect(host.textContent).toContain('Disconnect from Studio?'));
+		expect(host.textContent).toContain('Your work stays on Studio. This app signs out and returns to setup.');
+
+		const disconnectButton = Array.from(host.querySelectorAll('button'))
+			.find((button) => button.textContent?.includes('Disconnect'));
+		disconnectButton!.click();
 		await vi.waitFor(() => expect(remoteShellMocks.disconnectRemote).toHaveBeenCalledOnce());
 	});
 
