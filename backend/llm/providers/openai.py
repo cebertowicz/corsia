@@ -11,7 +11,7 @@ from loguru import logger
 
 from infra.constants import LLM_MAX_RETRIES as _MAX_RETRIES, LLM_RETRY_DELAYS as _RETRY_DELAYS
 from llm.providers.openai_streaming import _streaming_responses_completion
-from llm.stream_idle import PROVIDER_CUT_OFF_ERRORS, error_kind_of
+from llm.stream_idle import PROVIDER_CUT_OFF_ERRORS
 from llm.providers.openai_translation import (
     _ARESPONSES_KWARGS,
     _messages_to_responses_input,
@@ -165,6 +165,7 @@ async def _responses_with_retries(
             return result
         except Exception as e:
             from llm.base import _humanize_error
+            from llm.router import provider_error_response
             from llm.provider_overflow import (
                 OverflowDisposition,
                 context_overflow_response,
@@ -192,8 +193,6 @@ async def _responses_with_retries(
                 "OpenAI Responses API failed (attempt {}/{}): {}",
                 attempt, transient_attempts, e,
             )
-            return LLMResponse(
-                content=f"Error calling LLM: {_humanize_error(e, model)}",
-                finish_reason="error",
-                error_kind=error_kind_of(e),
+            return provider_error_response(
+                e, f"Error calling LLM: {_humanize_error(e, model)}",
             )

@@ -20,7 +20,7 @@
 	import { loadProviders, testedProviders, type ProviderEntry } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
-	import { bestSetupModel, setupModelWorks, setupCatalog, bindSetupFirstModel, SetupFirstModelError, type SetupModel } from '$lib/setupFirstModel';
+	import { hasReadySetupModel, setupModelWorks, setupCatalog, type SetupModel } from '$lib/setupModels';
 	import { fetchSetupProgress, recordSetupProgress } from '$lib/setupProgress';
 	import { saveSetupReport, type SetupReportRow } from '$lib/setupReport';
 	import { createSetupClassifier, type ClassifierState } from '$lib/setupClassifier.svelte';
@@ -48,24 +48,14 @@
 		if (!fix) throw new Error('local start response omitted recovery');
 		return { result: 'failed', reference, fix };
 	}
-	function setupFinishRecovery(error: unknown): string {
-		const code = error instanceof SetupFirstModelError ? error.code : undefined;
-		if (code === 'no_model') return 'CORSIA couldn’t find a working model. Connect a provider or choose one that is ready, then try again.';
-		if (code === 'binding_incomplete') return 'CORSIA couldn’t save the selected model. Try again.';
-		if (code === 'catalog_refused') return 'CORSIA couldn’t save the selected model. Check the provider setup, then try again.';
-		if (code === 'catalog_unavailable') return 'CORSIA couldn’t check your available models. Try again.';
-		if (code === 'agent_unavailable') return 'CORSIA couldn’t reach its agent. Try again.';
-		if (code === 'progress_save') return 'CORSIA couldn’t save setup progress. Try again.';
-		return 'CORSIA couldn’t finish model setup. Try again.';
-	}
 	/** The backend's own account refusal names the cause; a validation 422 has no string detail. */
 	function accountRefusal(detail: unknown): string | null {
 		return typeof detail === 'string' && detail.trim() ? detail.trim() : null;
 	}
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
-	type Page = 'checking' | 'account' | 'folder' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
+	type Page = 'checking' | 'account' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
 	const CLI_VENDORS = ['claude-code', 'codex'] as const;
-	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
+	type Status = { apple_silicon?: boolean; macos_supported?: boolean; free_disk_gb?: number; local_eligible?: boolean; local_started?: boolean; work_folder?: string; required_username?: string | null; classifier?: ClassifierState };
 	const classifier = createSetupClassifier(), localPick = createSetupLocalPick(), remote = createSetupRemote();
 	let page = $state<Page>(untrack(() => startConnect) ? 'connect' : 'checking');
 	// Below 1280 wide, Welcome is its own screen before the account form; from 1280 it sits beside the form instead.
@@ -77,6 +67,8 @@
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state('');
 	let localStartError = $state<'other' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
+	// The pre-start (pick, then start) is under way, so the local row shows progress instead of a Download button.
+	let localPreparing = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	// The subscriptions answer; null until answered (or skipped, or a resumed setup), when every CLI row shows.
 	let picks = $state<SetupPicks | null>(null), confirmLocalStop = $state(false), localOffFailed = $state<{ reference?: string } | undefined>();
@@ -88,8 +80,7 @@
 	const downloading = $derived(['downloading', 'paused', 'starting'].includes(local?.local_state ?? ''));
 	const localFailed = $derived(['failed', 'setup_failed', 'start_failed'].includes(local?.local_state ?? '') || Boolean(localStartError));
 	const tested = $derived($testedProviders.map((source) => ({ source })));
-	const best = $derived(bestSetupModel(catalog, tested));
-	const canFinish = $derived(Boolean(best));
+	const canFinish = $derived(hasReadySetupModel(catalog, tested));
 	const cliSignedIn = (vendor: string) => { const source = sources.find((row) => row.source === vendor); return Boolean(source && (sourceIsReady(source) || source.limited)); };
 	const cliPicked = (vendor: string) => picks === null || (vendor === 'codex' ? picks.chatgpt : picks.claude);
 	const subscriptionsSkipped = $derived(subscriptionQuestion(cliSignedIn('claude-code'), cliSignedIn('codex')) === null);
@@ -100,7 +91,6 @@
 	const accountValid = $derived(Boolean(name.trim() && username.trim() && !usernameError && password.length >= 8 && confirmation === password));
 	const steps = $derived<SetupStep[]>(page === 'connect' ? remote.steps : [
 		{ label: 'Your account', icon: 'person', state: ['checking', 'account', 'hard-stop'].includes(page) || (page === 'error' && !$token) ? 'current' : 'done' },
-		{ label: 'Work folder', icon: 'computer', state: page === 'folder' ? 'current' : ['subscriptions', 'models'].includes(page) ? 'done' : 'todo' },
 		{ label: 'Your subscriptions', icon: 'sparkle', state: page === 'subscriptions' ? 'current' : page === 'models' ? 'done' : 'todo' },
 		{ label: 'Providers & models', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
 	]);
@@ -132,37 +122,34 @@
 			const works = catalog.some((row) => row.connection === vendor && setupModelWorks(row));
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, pill: works ? { state: 'success', label: 'Ready' } : undefined });
 		});
-		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
+		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, preparing: localPreparing || localPick.pick?.state === 'checking', ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
 			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed,
 			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
 			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() })));
-		const provider = tested.find((test) => bestSetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
+		const provider = tested.find((test) => hasReadySetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
 		rows.push({ key: 'api', name: 'API provider', meta: provider ? `${provider.source} · passed a test call` : 'Pay as you go, with a key from Anthropic, OpenAI or another provider.',
 			pill: provider ? { state: 'success', label: 'Ready' } : undefined, action: provider ? undefined : { label: 'Add provider', run: () => { showAdd = true; } } });
 		return rows;
 	});
-	const finishNote = $derived(setupStartNote(canFinish, eligible, downloading, local?.download_eta_seconds));
-	type View = { title: string; lede?: string; mark?: boolean; primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean }; onPrimary?: () => void };
+	const finishNote = $derived(setupStartNote(canFinish, eligible, downloading || localPreparing, local?.download_eta_seconds));
+	type View = { title: string; lede?: string; primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean }; onPrimary?: () => void };
 	const view = $derived.by((): View => {
 		if (page === 'connect') return remote.view;
 		if (page === 'checking') return { title: 'Checking this computer' };
 		if (page === 'error') return { title: 'CORSIA couldn’t start', lede: reportError || statusError || 'Something went wrong while starting. Try again, or save a report to send.', primary: { label: 'Retry' }, onPrimary: resume ? resumeSetup : readStatus };
 		if (page === 'hard-stop') return { title: 'Update macOS to open CORSIA', lede: 'CORSIA needs macOS 15 or later. Update in System Settings › General › Software Update, then open CORSIA again.' };
-		if (screen === 'welcome') return { title: WELCOME_TITLE, mark: true, primary: { label: 'Continue' }, onPrimary: () => { welcomeSeen = true; } };
-		// Once the account exists, its two screens read back what was set: neither can change after it.
-		if (page === 'account' && $token) return { title: 'Your account', primary: { label: 'Continue' }, onPrimary: () => { page = 'folder'; } };
-		if (page === 'folder' && $token) return { title: 'Your work folder', primary: { label: 'Continue', loading: accountBusy, disabled: accountBusy }, onPrimary: afterFolder };
-		if (page === 'account') return { title: $isSetupWide ? WELCOME_TITLE : 'Create your account', lede: $isSetupWide ? WELCOME_ACCOUNT_LINE : undefined, mark: $isSetupWide, primary: { label: 'Continue', disabled: !accountValid }, onPrimary: toFolder };
-		if (page === 'folder') return { title: 'Choose your work folder', lede: 'Your projects and files live here.', primary: { label: 'Continue', loading: accountBusy, disabled: accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'picker_failed' }, onPrimary: folderContinue };
-		if (page === 'subscriptions') return { title: 'Your subscriptions' };
+		if (screen === 'welcome') return { title: WELCOME_TITLE, primary: { label: 'Continue' }, onPrimary: () => { welcomeSeen = true; } };
+		// Once the account exists, the screen reads back what was set: neither the account nor its folder can change after it.
+		if (page === 'account' && $token) return { title: 'Your account', primary: { label: 'Continue' }, onPrimary: afterAccount };
+		if (page === 'account') return { title: $isSetupWide ? WELCOME_TITLE : 'Create your account', lede: $isSetupWide ? WELCOME_ACCOUNT_LINE : undefined, primary: { label: 'Continue', loading: accountBusy, disabled: !accountValid || accountBusy || folderChanging || folderNotice?.kind === 'unwritable' || folderNotice?.kind === 'picker_failed' }, onPrimary: createFromForm };
+		if (page === 'subscriptions') return { title: 'Your subscriptions', lede: 'CORSIA’s agents can work through a Claude or ChatGPT plan you already pay for.' };
 		return { title: 'Providers & models', lede: 'CORSIA needs one working model to continue setup.', primary: { label: 'Start using CORSIA', disabled: !canFinish || finishing, loading: finishing, note: finishNote, noteAlways: true }, onPrimary: finishSetup };
 	});
 	function validateConfirmation() { confirmationError = confirmation && password !== confirmation ? 'Passwords don’t match.' : ''; }
-	function toFolder() { validateConfirmation(); if (accountValid) page = 'folder'; }
-	/** Screen 3 is asked only while a CLI is still not signed in. */
-	function afterFolder() { page = subscriptionsSkipped ? 'models' : 'subscriptions'; }
-	/** Before the account exists, Continue on the folder screen creates it with the chosen folder. */
-	async function folderContinue() { if (!get(token)) await createAccount(); }
+	/** Continue on the account screen creates the account, applying the chosen folder first. */
+	async function createFromForm() { validateConfirmation(); if (accountValid && !get(token)) await createAccount(); }
+	/** The subscriptions screen is asked only while a CLI is still not signed in. */
+	function afterAccount() { page = subscriptionsSkipped ? 'models' : 'subscriptions'; }
 	/** One answer: picked tools start installing now, an unpicked one stops what it started. */
 	function answerSubscriptions(next: SetupPicks) {
 		picks = next;
@@ -188,7 +175,10 @@
 			if (status.classifier) classifier.accept(status.classifier);
 			if (status.macos_supported === false) { page = 'hard-stop'; return; }
 			page = 'account'; void classifier.start();
-			if (eligible) { await localPick.start(); await startLocal(); await readLocalProgress(); }
+			if (eligible) {
+				localPreparing = true;
+				try { await localPick.start(); await startLocal(); await readLocalProgress(); } finally { localPreparing = false; }
+			}
 		} catch { statusError = 'Something went wrong while starting. Try again, or save a report to send.'; page = 'error'; }
 	}
 	async function checkLocal() {
@@ -256,7 +246,7 @@
 			onAccountCreated(); token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() }); connect();
 			password = ''; confirmation = '';
 			await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
-			afterFolder();
+			afterAccount();
 		} catch { accountError = 'Couldn’t create your account. Try again.'; }
 		finally { accountBusy = false; }
 	}
@@ -264,25 +254,21 @@
 		const current = get(token); if (!current) return;
 		try {
 			sources = await (strict ? recheckSources(current) : fetchSources(current));
-			catalog = (await setupCatalog(current)).models;
+			catalog = await setupCatalog(current);
 			sourceError = '';
 		} catch { catalog = []; sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
 	}
+	/** Setup never chooses a model: the person picks the CORSIA agent's on its first chat. */
 	async function finishSetup() {
 		const current = get(token); if (!current || finishing) return;
 		finishing = true; sourceError = '';
 		try {
-			await bindSetupFirstModel(current, tested, async () => {
-				if (!await recordSetupProgress({ handoff: { tools: connectFlow.attempts } }, current)) throw new SetupFirstModelError('progress_save');
-			});
-			// The answer rides the completion write too, so a failed earlier save is repaired before the first chat reads it.
-			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts }, ...(picks ? { picks } : {}) }, current)) throw new SetupFirstModelError('progress_save');
+			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts }, ...(picks ? { picks } : {}) }, current)) {
+				sourceError = 'CORSIA couldn’t save setup progress. Try again.';
+				return;
+			}
 			onFinished();
-		} catch (error) {
-			await refreshSources(true);
-			sourceError = setupFinishRecovery(error);
-		}
-		finally { finishing = false; }
+		} finally { finishing = false; }
 	}
 	async function resumeSetup() {
 		const progress = await fetchSetupProgress(get(token));
@@ -290,7 +276,13 @@
 		if (progress.setup_completed) { onFinished(); return; }
 		status = (progress.status ?? {}) as Status; folder = status.work_folder || folder; page = 'models';
 		if (status.classifier) classifier.accept(status.classifier);
-		await Promise.all([refreshSources(true), classifier.read(), loadProviders()]);
+		// A relaunch after the account step has no screen-1 start to rerun, so a local download that was never claimed starts here.
+		const unstarted = eligible && status.local_started === false;
+		if (unstarted) localPreparing = true;
+		try {
+			await Promise.all([refreshSources(true), classifier.read(), loadProviders()]);
+			if (unstarted) await startLocal();
+		} finally { localPreparing = false; }
 	}
 	function selectProvider(provider: ProviderEntry) { showAdd = false; openProvider = { name: provider.name, label: provider.label, type: provider.type, statusDot: 'disabled', subline: '', raw: provider }; }
 	$effect(() => {
@@ -315,13 +307,13 @@
 </script>
 
 {#snippet welcomeAside()}<SetupWelcome accountLine={false} />{/snippet}
-<SetupShell {steps} section={page === 'connect' ? 'Connect' : 'Setup'} {jobs} page={page === 'connect' ? `connect-${remote.stage}` : screen} title={view.title} lede={view.lede} primary={view.primary} mark={view.mark} aside={page === 'account' && $isSetupWide && !$token ? welcomeAside : undefined} onPrimary={view.onPrimary}>
+<SetupShell {steps} section={page === 'connect' ? 'Connect' : 'Setup'} {jobs} page={page === 'connect' ? `connect-${remote.stage}` : screen} title={view.title} lede={view.lede} primary={view.primary} aside={page === 'account' && $isSetupWide && !$token ? welcomeAside : undefined} onPrimary={view.onPrimary}>
 	{#snippet secondary()}
 		{#if page === 'connect'}<SetupConnectBack onclick={() => remote.stage === 'code' ? remote.toChoose() : leaveConnect()} />
-		{:else if (screen === 'welcome' || page === 'account') && canConnect && !$token}<Button variant="chip" onclick={() => void connectToAnotherComputer()}>Connect to CORSIA on another computer</Button>
-		{:else if page === 'folder'}<Button variant="chip" disabled={accountBusy} onclick={() => { page = 'account'; }}>Back</Button>{#if accountError}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>{/if}
-		{:else if page === 'subscriptions'}<Button variant="chip" onclick={() => { page = 'folder'; }}>Back</Button>
-		{:else if page === 'models'}<Button variant="chip" disabled={finishing} onclick={() => { page = subscriptionsSkipped ? 'folder' : 'subscriptions'; }}>Back</Button>
+		{:else if (screen === 'welcome' || page === 'account') && canConnect && !$token}<Button variant="chip" onclick={() => void connectToAnotherComputer()}>Connect to CORSIA on another computer</Button>{#if accountError && page === 'account'}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>{/if}
+		{:else if page === 'account' && accountError}<Button variant="chip" onclick={async () => { accountError = await saveSetupReport(); }}>Save a report</Button>
+		{:else if page === 'subscriptions'}<Button variant="chip" onclick={() => { page = 'account'; }}>Back</Button>
+		{:else if page === 'models'}<Button variant="chip" disabled={finishing} onclick={() => { page = subscriptionsSkipped ? 'account' : 'subscriptions'; }}>Back</Button>
 		{:else if page === 'hard-stop'}<Button variant="chip" onclick={readStatus}>Check again</Button>
 		{:else if page === 'error'}<Button variant="chip" onclick={async () => { reportError = await saveSetupReport(); }}>Save a report</Button>{/if}
 	{/snippet}
@@ -329,12 +321,12 @@
 	{:else if screen === 'welcome'}<SetupWelcome />
 	{:else if page === 'account' && $token}
 		<p class="settled" data-testid="setup-account-made">{accountName ? `Your account is set up as ${accountName}.` : 'Your account is set up.'}</p>
+		<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
 	{:else if page === 'account'}
-		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} onSubmit={toFolder} onValidateConfirmation={validateConfirmation} />
+		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {accountError} onSubmit={createFromForm} onValidateConfirmation={validateConfirmation} />
+		<SetupWorkFolder bind:folder bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} />
 		{#if accountExists}<Button variant="chip" onclick={onExistingAccount}>Sign in</Button>{/if}
-	{:else if page === 'folder' && $token}<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
-	{:else if page === 'folder'}<SetupWorkFolder bind:folder bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} error={accountError} />
-	{:else if page === 'subscriptions'}<SetupSubscriptions claudeReady={cliSignedIn('claude-code')} codexReady={cliSignedIn('codex')} answer={picks} onAnswer={answerSubscriptions} />
+	{:else if page === 'subscriptions'}<SetupSubscriptions claudeReady={cliSignedIn('claude-code')} codexReady={cliSignedIn('codex')} {eligible} answer={picks} onAnswer={answerSubscriptions} />
 	{:else if page === 'models'}
 		<SetupAiRows rows={aiRows} />
 		{#if sourceError}<p class="error-text" role="alert">{sourceError}</p><Button variant="chip" onclick={() => void refreshSources(true)}>Retry</Button>{/if}
@@ -344,7 +336,7 @@
 {#if openProvider}<ProviderSettingsModal provider={openProvider} initialTab="advanced" onClose={() => { openProvider = null; void refreshSources(); }} />{/if}
 
 <style>
-	p { font-size: var(--text-footnote); line-height: var(--lh-normal); }
-	.error-text { margin: var(--space-2) var(--space-4); }
-	.settled { margin: 0; font-size: var(--text-body); color: var(--text-primary); }
+	p { font-size: var(--text-subhead); line-height: var(--lh-normal); }
+	.error-text { margin: var(--space-2) var(--space-4); font-size: var(--text-subhead); }
+	.settled { margin: 0; font-size: var(--text-title3); color: var(--text-primary); }
 </style>

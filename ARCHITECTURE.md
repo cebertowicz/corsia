@@ -327,13 +327,17 @@ node's `own` figure holds tokens, model cost, usage-recording failures,
 child plan, folding each plan exactly once. Waiting is wall clock, never spend:
 it rolls up beside execution and is never added to tokens or cost.
 `plans/node_waiting.py` derives it on read with no stored column. A node waits
-while it is open and has an armed watch, an unmet dependency (edge events
-intersected with the prerequisite's not-accepted state stretches), or is in
-`review_requested` with a linked GitHub pull-request artifact. Overlaps count
-once. User-owned holds, whole-plan pauses (from `plan_events`) and time after
-settling are cut out. Every read is a
+while it is open and has an armed watch (other than a task its agent set
+aside, whose `watch_armed` event carries `scheduled.reason`), an unmet
+dependency (edge events intersected with the prerequisite's not-accepted
+state stretches), or is in `review_requested` with a linked GitHub
+pull-request artifact. Overlaps count once. User-owned holds, whole-plan
+pauses (from `plan_events`) and time after settling are cut out. Every read is a
 chunked `IN (...)` batch, a fixed count per call. The status read shows a
 node's own `waited_seconds` in the ages of running, review and waiting rows.
+`plans.public.open_wait_intervals` returns the same intervals per thread,
+unioned over that thread's own plan nodes and clipped to a window, for a run's
+open time (the caller passes descendant threads; there is no delegation walk).
 
 ### User presence
 

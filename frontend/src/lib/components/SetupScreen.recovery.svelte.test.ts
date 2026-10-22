@@ -1,14 +1,7 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const bindSetupFirstModel = vi.hoisted(() => vi.fn());
-vi.mock('$lib/setupFirstModel', async (importOriginal) => ({
-	...await importOriginal<typeof import('$lib/setupFirstModel')>(),
-	bindSetupFirstModel,
-}));
-
 import SetupScreen from './SetupScreen.svelte';
-import { SetupFirstModelError } from '$lib/setupFirstModel';
 import { token, user } from '$lib/stores/auth';
 
 vi.mock('$lib/ws', () => ({ connect: vi.fn() }));
@@ -17,6 +10,7 @@ vi.mock('$lib/linkTargetResolver', () => ({ openExternalUrl: vi.fn(async () => u
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
+let onFinished = vi.fn();
 
 async function settle() { await tick(); await Promise.resolve(); await tick(); }
 function click(label: string) {
@@ -50,10 +44,11 @@ async function openModels({ localEligible = false, localReplies = [], progressFa
 		return json({});
 	}));
 	host = document.createElement('div'); document.body.appendChild(host);
-	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+	onFinished = vi.fn();
+	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished } });
 	flushSync(); await settle(); click('Continue'); await settle(); // past the Welcome screen of a narrow window
 	fill('#setup-name', 'Ada'); fill('#setup-username', 'ada'); fill('#setup-password', 'password1'); fill('#setup-confirm-password', 'password1');
-	await settle(); click('Continue'); await settle(); click('Continue'); await settle();
+	await settle(); click('Continue'); await settle();
 	await vi.waitFor(() => expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions'));
 	click('Neither'); await settle();
 	expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
@@ -75,7 +70,6 @@ describe('SetupScreen account recovery', () => {
 		flushSync(); await settle(); click('Continue'); await settle();
 		fill('#setup-name', 'Ada'); fill('#setup-username', 'ada'); fill('#setup-password', 'password1'); fill('#setup-confirm-password', 'password1');
 		await settle(); click('Continue'); await settle();
-		click('Continue'); await settle();
 		expect(host.textContent).toContain('Couldn’t create your account. Try again.');
 		click('Save a report'); await settle();
 		// No provider row failed, so the report adds no row details that would claim nothing went wrong.
@@ -95,29 +89,23 @@ describe('SetupScreen local-start recovery', () => {
 	});
 });
 
-describe('SetupScreen completion recovery', () => {
-	it('uses the progress-save code when the actual completion write fails', async () => {
-		bindSetupFirstModel.mockReset();
-		bindSetupFirstModel.mockResolvedValueOnce({ model: 'claude-code/sonnet', source: 'claude-code' });
+describe('SetupScreen completion', () => {
+	it('shows the progress-save recovery when the completion write fails', async () => {
 		await openModels({ progressFails: true });
 		click('Start using CORSIA');
 		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t save setup progress. Try again.'));
+		expect(onFinished).not.toHaveBeenCalled();
 	});
 
-	it.each([
-		['no model', 'no_model', 'CORSIA couldn’t find a working model. Connect a provider or choose one that is ready, then try again.'],
-		['incomplete model binding', 'binding_incomplete', 'CORSIA couldn’t save the selected model. Try again.'],
-		['catalog refusal', 'catalog_refused', 'CORSIA couldn’t save the selected model. Check the provider setup, then try again.'],
-		['catalog unavailable', 'catalog_unavailable', 'CORSIA couldn’t check your available models. Try again.'],
-		['agent unavailable', 'agent_unavailable', 'CORSIA couldn’t reach its agent. Try again.'],
-		['progress save', 'progress_save', 'CORSIA couldn’t save setup progress. Try again.'],
-	] as const)('shows named recovery copy for %s', async (_name, code, expected) => {
-		bindSetupFirstModel.mockReset();
-		bindSetupFirstModel.mockRejectedValueOnce(new SetupFirstModelError(code));
+	it('finishes by recording setup complete and never chooses a model for the CORSIA agent', async () => {
 		await openModels();
 		click('Start using CORSIA');
-		await vi.waitFor(() => expect(bindSetupFirstModel).toHaveBeenCalledOnce());
-		await vi.waitFor(() => expect(host.textContent).toContain(expected));
-		expect(host.textContent).not.toContain(code);
+		await vi.waitFor(() => expect(onFinished).toHaveBeenCalledOnce());
+
+		const calls = vi.mocked(fetch).mock.calls.map(([url, init]) => ({ url: String(url), method: init?.method ?? 'GET', body: init?.body }));
+		// The agent's model stays unset: the person picks it on the first chat.
+		expect(calls.filter((call) => call.url.startsWith('/api/threads') && call.method !== 'GET')).toEqual([]);
+		const progress = calls.filter((call) => call.url === '/api/setup/progress' && call.method === 'PUT').map((call) => JSON.parse(String(call.body)));
+		expect(progress.at(-1)).toMatchObject({ completed: true });
 	});
 });

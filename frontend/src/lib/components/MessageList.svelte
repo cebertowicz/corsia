@@ -5,6 +5,7 @@
 	import { loadDeferredToolResult } from '$lib/toolResultLoader';
 	import { messages, activeThreadId, isThreadTurnActive } from '$lib/stores/threads';
 	import { turnStates } from '$lib/ws/turnState';
+	import { threadPlanStates, waitsOutside } from '$lib/stores/threadPlanStates';
 	import EmptyChatState from './EmptyChatState.svelte';
 	import MessageListBody from './MessageListBody.svelte';
 	import { LOAD_OLDER_TRIGGER_PX, requestOlderForVisibleEntry, requestOlderIfTop } from '$lib/messagePager';
@@ -303,7 +304,7 @@
 			<svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 			<span>Loading this thread…</span>
 		</div>
-	{:else if messageRows.length === 0 && !focusLive.current.active}
+	{:else if messageRows.length === 0 && !focusLive.current.active && !waitsOutside($threadPlanStates, renderedThreadId)}
 		<EmptyChatState />
 	{/if}
 	<OlderHistoryRow loading={loadingOlderMessages} failed={olderLoadFailed} hasMore={hasMoreMessages} hasRows={messageRows.length > 0} onLoadOlder={loadOlderForVisibleEntry} />

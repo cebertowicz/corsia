@@ -28,6 +28,8 @@ class PlanNode:
     kind: str
     title: str
     description: str | None
+    intent: str | None
+    intent_node_id: str | None
     workflow_ref: str | None
     workflow_version: str | None
     workflow_step: str | None

@@ -10,7 +10,9 @@ import pytest
 
 from connections.connected_accounts import ConnectedAccountError
 from connections.microsoft import calendar, client, files, mail
-from connections.microsoft.errors import MicrosoftError, SERVICE_UNAVAILABLE
+from connections.microsoft.errors import MicrosoftError, REQUEST_REFUSED, SERVICE_UNAVAILABLE
+from connections.microsoft.provider import MICROSOFT
+from connections.mail import email_screen
 from events.connectors import mail_poller as poller
 from tools import microsoft_actions as actions
 
@@ -197,6 +199,46 @@ async def test_connected_data_failures_are_retryable_without_starting_sign_in(mo
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", [405, 409, 413, 422])
+async def test_a_refused_graph_request_is_refused_not_deferred(monkeypatch: pytest.MonkeyPatch, status: int) -> None:
+    """Microsoft refusing the request itself cannot clear by waiting a minute on a connected row."""
+    FakeHttp.calls, FakeHttp.responses = [], [Response(status, {"error": {"message": "provider-canary"}})]
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
+    async def token(_account: str) -> str: return "token"
+    monkeypatch.setattr(client, "access_token", token)
+    with pytest.raises(MicrosoftError) as raised:
+        await client.graph_json("GET", "item", account_id="m")
+    assert raised.value.cause == REQUEST_REFUSED and raised.value.never_sent
+    assert raised.value.state_cause is None and "provider-canary" not in raised.value.message
+
+
+@pytest.mark.asyncio
+async def test_graph_timeout_stays_a_retry_on_a_connected_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeHttp.calls, FakeHttp.responses = [], [Response(408, {"error": {"message": "provider-canary"}})]
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
+    async def token(_account: str) -> str: return "token"
+    monkeypatch.setattr(client, "access_token", token)
+    with pytest.raises(MicrosoftError) as raised:
+        await client.graph_json("GET", "item", account_id="m")
+    assert raised.value.cause == SERVICE_UNAVAILABLE and raised.value.never_sent
+    assert raised.value.state_cause is None
+
+
+@pytest.mark.asyncio
+async def test_a_second_429_stays_a_retry_on_a_connected_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeHttp.calls, FakeHttp.responses = [], [
+        Response(429, {}, {"Retry-After": "0"}), Response(429, {}, {"Retry-After": "0"}),
+    ]
+    monkeypatch.setattr(client.httpx, "AsyncClient", lambda **_kwargs: FakeHttp())
+    async def token(_account: str) -> str: return "token"
+    monkeypatch.setattr(client, "access_token", token)
+    with pytest.raises(MicrosoftError) as raised:
+        await client.graph_json("GET", "item", account_id="m")
+    assert raised.value.cause == SERVICE_UNAVAILABLE and raised.value.never_sent
+    assert len(FakeHttp.calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_tools_check_reach_before_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     async def refused(_kwargs: dict[str, Any]) -> str: raise ConnectedAccountError("Microsoft account is unavailable to this thread")
     monkeypatch.setattr(actions, "_account", refused)
@@ -212,6 +254,60 @@ async def test_actions_use_their_adapters(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(actions, "_account", account); monkeypatch.setattr(actions.mail, "search", search)
     output = json.loads(await actions.MicrosoftMailSearchTool().execute(_thread_id="t", account_id="m", query="x"))
     assert output["messages"][0]["thread_id"] == "microsoft:m:thread:thread"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message_id", "stored", "expected_screen", "has_subject"),
+    [
+        (
+            "clean",
+            email_screen.Screen(email_screen.STATUS_SCREENED, kind="invoice", needs_person="today"),
+            {"state": "clean", "kind": "invoice", "needs_person": "today"},
+            True,
+        ),
+        (
+            "flagged",
+            email_screen.Screen(email_screen.STATUS_SCREENED, injection=True, rule="R1"),
+            {"state": "flagged", "rule": "R1"},
+            False,
+        ),
+        ("unscreened", None, {"state": "unscreened"}, False),
+    ],
+)
+async def test_microsoft_search_uses_persisted_screen_to_limit_headers(
+    isolated_db, monkeypatch: pytest.MonkeyPatch, message_id: str,
+    stored: email_screen.Screen | None, expected_screen: dict[str, object], has_subject: bool,
+) -> None:
+    from connections.connected_accounts import create_account
+
+    account = str(create_account(
+        MICROSOFT.name, "m@example.test",
+        reach={"mode": "all", "project_ids": [], "outside_projects": False},
+        created_by=("system", "test"), account_kind="personal", provider_subject="tenant:object",
+    )["id"])
+    if stored is not None:
+        email_screen._record(account, message_id, stored)
+        assert email_screen.stored_screens(account, [message_id]) == {message_id: stored}
+
+    async def selected_account(_kwargs: dict[str, Any]) -> str:
+        return account
+
+    async def search(_account: str, _query: str, _maximum: int) -> list[mail.Message]:
+        return [mail.Message(message_id, "thread", {
+            "from": "sender@example.test", "to": "person@example.test", "date": "2026-10-20", "subject": "private subject",
+        }, "body")]
+
+    monkeypatch.setattr(actions, "_account", selected_account)
+    monkeypatch.setattr(actions.mail, "search", search)
+    result = json.loads(await actions.MicrosoftMailSearchTool().execute(
+        _thread_id="t", account_id=account, query="x",
+    ))["messages"][0]
+    assert result["screen"] == expected_screen
+    assert ("subject" in result) is has_subject
+    assert set(result) == {"message_id", "thread_id", "from", "date", "screen"} | (
+        {"subject"} if has_subject else set()
+    )
 
 
 @pytest.mark.asyncio

@@ -83,6 +83,7 @@ def shaped(plan_row, presented, nodes, durable, clock: str, parent_ids) -> dict[
         "next_ids": presented["next_node_ids"] if presented is not None else [],
         # Agent-continuation facts, present only when no open leaf can move.
         "stuck": presented["display"].get("not_moving") if presented is not None else None,
+        "display": presented["display"] if presented is not None else {},
         "clock": clock,
         "path": lambda node_id: _path(node_id, parents, titles),
     }

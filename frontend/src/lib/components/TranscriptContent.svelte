@@ -7,16 +7,21 @@
 	import PassiveOutcomeList from './PassiveOutcomeList.svelte';
 	import VisitDivider from './VisitDivider.svelte';
 	import WorkBlock from './WorkBlock.svelte';
-	import { activeToolsByThread } from '$lib/stores/threads';
+	import WaitCapsule from './WaitCapsule.svelte';
+	import WaitLine from './WaitLine.svelte';
+	import { waitFace } from './waitFace';
+	import { threadPlanStates } from '$lib/stores/threadPlanStates';
+	import { coreSettings } from '$lib/stores/settings';
+	import { activeToolsByThread, messages } from '$lib/stores/threads';
 	import { INITIAL_TURN_STATE, turnStates } from '$lib/ws/turnState';
 	import { threadLiveStep, UNKNOWN_STEP } from './plans/planLiveStep';
 	import { createLiveLine } from './plans/liveLine.svelte';
 	import type { TranscriptEntry } from './messageListModel';
 	import { isRunExpanded, runTokens, toggleRun } from './transcriptFocusModel';
-	import { liveRunTimes, runLabels, type TurnSummaries } from './transcriptRunLabel';
+	import { liveRunTimes, runLabels, waitElapsed, type TurnSummaries } from './transcriptRunLabel';
 	import { minuteClock } from '$lib/time';
 	import { attachPlanLimitPauses, stubPauseTurns, type PlanLimitPauseDescriptor } from './planLimitPause';
-	import { deliveryPresentation } from '$lib/messageDelivery';
+	import { deliveryPresentation, isAwaitingDelivery } from '$lib/messageDelivery';
 	import type { TranscriptMessage } from './messageListModel';
 	import type { PauseAnnotation } from './transcriptFocusModel';
 	import EventChip from './EventChip.svelte';
@@ -41,6 +46,7 @@
 		runLoads = {},
 		onLoadRun,
 		liveRollup = null,
+		showWait = true,
 	}: {
 		entries: TranscriptEntry[];
 		expandedTools: Set<string>;
@@ -61,6 +67,8 @@
 		onLoadRun?: (stub: RunStub) => void;
 		/** Parent + descendant activity derived once at the MessageList boundary. */
 		liveRollup?: WorkBlockLive | null;
+		/** False for the pending-input copy, so the outside-wait face shows once. */
+		showWait?: boolean;
 	} = $props();
 
 	const uid = $props.id();
@@ -119,6 +127,25 @@
 	// A descendant can keep this Focus block live after the visible parent's turn settles.
 	const liveLine = createLiveLine(() => liveNow, () => !(liveRollup?.active ?? renderedStreaming), () => liveSegment);
 	const labels = $derived(runLabels(renderedEntries, turnSummaries, historyComplete));
+	// An outside wait with nothing running and no sent input waiting to start a turn (EW8). One predicate
+	// gates both the Focus chip and the non-Focus face, so a turn starting swaps it out in the same render.
+	// pendingInputIds covers only this tab's send before its first receipt; the transcript row is the server's
+	// truth for an input it still holds (queued, or Queue-after-turn), after a reload or from another tab too.
+	const inputAwaiting = $derived($messages.some((msg) => msg.thread_id === boundThreadId && isAwaitingDelivery(msg, false)));
+	const focusMode = $derived($coreSettings?.features?.focus_mode === true);
+	const waitState = $derived(boundThreadId ? $threadPlanStates[boundThreadId] : undefined);
+	const wait = $derived(
+		showWait && waitState?.state === 'waiting' && waitState.wait
+			&& (boundTurn?.phase === 'idle' || boundTurn?.phase === 'terminal') && boundTurn.pendingInputIds.length === 0 && !inputAwaiting
+			&& !renderedStreaming && !hasLiveFold
+			? waitFace(waitState.wait, waitElapsed(turnSummaries, $minuteClock.getTime()), $minuteClock)
+			: null,
+	);
+	// The open run is the trailing block; after a reply there is none, and the chip stands alone in its place.
+	const waitRunId = $derived.by(() => {
+		const last = renderedEntries.at(-1);
+		return last?.kind === 'fold' ? last.id : null;
+	});
 	// A block a descendant keeps live counts its last Turn on to now, so the worker's time is included.
 	const liveTimes = $derived(hasLiveFold ? liveRunTimes(renderedEntries, turnSummaries, historyComplete, $minuteClock.getTime()) : new Map<string, string | null>());
 	// An open run whose rows were never read starts reading them, however it was opened.
@@ -205,6 +232,8 @@
 			row={messageRow}
 			pause={historicalPause}
 			warning={deliveryWarning}
+			wait={focusMode && entry.id === waitRunId ? wait : null}
+			waitThreadId={boundThreadId}
 		>
 			{#snippet liveActivity()}
 				<LiveToolActivity {threadId} {expandedTools} onToggleToolBlock={onToggleToolBlock} />
@@ -220,11 +249,19 @@
 
 {#if renderedStreaming && !hasLiveFold}
 	<LiveToolActivity {threadId} {expandedTools} onToggleToolBlock={onToggleToolBlock} />
+{:else if wait && !(focusMode && waitRunId !== null)}
+	{#if focusMode}
+		<!-- No run to open: a static capsule, no toggle or chevron, keeping the label link. -->
+		<section class="wait-standalone" data-work-block><WaitCapsule face={wait} threadId={boundThreadId} /></section>
+	{:else}
+		<WaitLine face={wait} threadId={boundThreadId} />
+	{/if}
 {/if}
 
 <style>
+	.wait-standalone { display: flex; max-width: var(--transcript-max-width); margin: 0 auto 14px; min-width: 0; }
 	.message {
-		max-width: 760px;
+		max-width: var(--transcript-max-width);
 		margin: 0 auto 20px;
 		overflow-x: hidden;
 	}
@@ -242,6 +279,6 @@
 		from { opacity: 0; transform: translateY(8px); }
 		to { opacity: 1; transform: translateY(0); }
 	}
-	.plan-limit-paused { max-width: 760px; margin: -6px auto 20px; color: var(--text-secondary); font-size: var(--text-footnote); }
-	.historical-anchor { max-width: 760px; margin: 0 auto 8px; color: var(--text-secondary); font-size: var(--text-footnote); }
+	.plan-limit-paused { max-width: var(--transcript-max-width); margin: -6px auto 20px; color: var(--text-secondary); font-size: var(--text-footnote); }
+	.historical-anchor { max-width: var(--transcript-max-width); margin: 0 auto 8px; color: var(--text-secondary); font-size: var(--text-footnote); }
 </style>

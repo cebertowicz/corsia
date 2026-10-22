@@ -210,15 +210,15 @@ def test_task_creators_refuse_an_omitted_size(db, scene, operation):
     with pytest.raises(service.PlanInputError) as refusal:
         _mutate(db, scene.plan_id, operation, params)
 
-    assert str(refusal.value) == TASK_SIZE_REQUIRED
+    expected = "task creation requires size and intent" if operation in {"add", "insert"} else TASK_SIZE_REQUIRED
+    assert str(refusal.value) == expected
 
 
-def test_unknown_size_is_accepted_for_a_boundary_task(db, scene):
-    result = _mutate(db, scene.plan_id, "add", {
-        "title": "Unsized task", "acceptance_criteria": "It is recorded", "size": "unknown",
-    })
-
-    assert service.get_node(result["node"]["id"], db=db).size == "unknown"
+def test_boundary_task_names_missing_intent_after_its_size_is_declared(db, scene):
+    with pytest.raises(service.PlanInputError, match="^task creation requires intent$"):
+        _mutate(db, scene.plan_id, "add", {
+            "title": "Unsized task", "acceptance_criteria": "It is recorded", "size": "unknown",
+        })
 
 
 def test_phase_add_remains_size_optional_at_the_boundary(db, scene):

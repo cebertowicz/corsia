@@ -350,6 +350,7 @@ def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_li
     assert step.startswith("Learning from the community.** Always.")
     assert "Here's how CORSIA gets better: it learns from you." in step
     assert "sharing it means everyone using CORSIA gets better, and you get what others prove." in step
+    assert "After about a week of work, the chart button at the top of this chat shows what's changing: how much work gets done per hour of your attention, and how many of your minutes each outcome takes." in step
     assert "Use and share community improvements?" in step
     assert "**Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No" in step
     assert "would only share, write No and Yes" in step
@@ -456,7 +457,7 @@ def test_the_look_up_reference_carries_the_rules_outcomes_questions_and_examples
     examples = ref.split("## Worked examples", 1)[1]
     assert re.findall(r"^\*\*(\d)\. ([^.]+)\.\*\*", examples, flags=re.MULTILINE) == [
         ("1", "One clear match"), ("2", "Two people with the same name"), ("3", "A famous namesake"), ("4", "Nothing found")]
-    assert len(ref.split()) < 2100
+    assert len(ref.split()) < 2140
     assert not re.search(r"\bAI\b", ref)
 
 
@@ -480,6 +481,31 @@ def test_the_look_up_leaves_out_a_personal_email_domain_and_checks_any_other_wit
     assert ref.count("`references/about-you-doc.md` says to write the profile") == 2
 
 
+def test_the_look_up_reads_and_writes_the_zone_and_name_in_the_workspace_profile():
+    from infra import user_profile
+
+    ref = (FIRST_RUN_APP.parent / "look-up-the-person.md").read_text(encoding="utf-8")
+    start = ref.index("4. This computer's time zone")
+    start_line = ref[start:ref.index("\n", start)]
+    assert "- **Timezone:**" in start_line and "context/50-USER-PROFILE.md" in start_line
+    assert "else `date +%Z`" in start_line and "This Mac" not in ref
+    write = ref[ref.index("## F. Write it down"):ref.index("## G.")]
+    # The zone is written in the exact line the profile seeds, and the name replaces the preferred-name line.
+    seeded = user_profile.profile_text("Ada", "ZONE").splitlines()[-1].replace("ZONE", "<IANA zone>")
+    assert seeded in write
+    assert "replacing the profile's `- **Timezone:**` line, or adding it when there is none, with" in write
+    assert "over the profile's `- **Preferred name:**` line" in write
+    assert "`USER.md`" in write and "(work, place, background)" in write
+    doc = (FIRST_RUN_APP.parent / "about-you-doc.md").read_text(encoding="utf-8")
+    assert "`context/50-USER-PROFILE.md` for their time zone, the name they go by" in doc
+
+
+def test_the_user_profile_fact_is_described_as_read_from_the_workspace_profile():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    assert "read from the workspace `context/50-USER-PROFILE.md`" in app
+    assert "`user_profile`'s `name` and `full_name`" in app
+
+
 def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggestions_only():
     doc = (FIRST_RUN_APP.parent / "about-you-doc.md").read_text(encoding="utf-8")
 
@@ -498,14 +524,22 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "A heading with nothing to put under it gets no suggestion." in doc
     # Cloud: one helper per heading, in parallel, no web search. Local: CORSIA writes it.
     assert "start one helper per heading that has material, all at once" in doc
-    assert "`plan_node_id` `none`" in doc and "runs no web search" in doc
-    assert "A helper that fails or returns nothing: write that heading's suggestion yourself." in doc
+    assert "runs no web search" in doc
+    # Each helper hangs off its own `About you: <heading>` task, which CORSIA settles once the result lands.
+    assert "add one `About you: <heading>` task to your plan per helper" in doc and "that task's id as `plan_node_id`" in doc
+    assert ("If `delegate_task` refuses the model, keep that task as your own: write that heading yourself, "
+            "then `mark_done` the task.") in doc
+    # A returned helper's task waits for review (accept); a failed or empty one stays active (mark_done).
+    assert "puts its `About you: <heading>` task up for your review: `accept` it once that heading's suggestion is in" in doc
+    assert "write that heading's suggestion yourself, then settle its task: `accept` it if it is awaiting your review, else `mark_done`" in doc
+    assert "When every `About you: <heading>` task is settled and every suggestion is in" in doc
     assert "`bound_model` `source` is `omlx`): start no helper. Write the suggestions yourself, one heading at a time." in doc
     # One review ask, worded for the review bar with or without the accept-all button.
     assert doc.count("`I put what I know in your About you doc. Change anything that's wrong and reject any suggestion that isn't right, then press Approve. It accepts the rest for you.`") == 1
     assert doc.count("Change anything that's wrong and reject any suggestion that isn't right, then press Approve. It accepts the rest for you.") == 2  # the ask's reason, then the one chat line
     assert "`block_node` with `owner_kind` `user`" in doc and "`ask_artifact_id` the document's artifact id" in doc  # Approve only shows with an ask
-    assert "suggest that line again yourself on the text now in the doc. Never wait on a helper" in doc
+    assert "Whenever you read the document (on Approve in section 4, or on the person's reply), suggest again yourself" in doc
+    assert "any suggestion that can no longer apply to it. Never wait on a helper" in doc
     assert "A comment from the person on a line: answer with a suggested change to that line." in doc
     # On approve CORSIA accepts nothing, removes empty headings, then writes the profile.
     assert "With none open: accept nothing yourself." in doc
@@ -513,7 +547,7 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     # Failure paths.
     assert "ask `Keep these?`" in doc
     assert "\"Not now\", or they carry on with something else: close that task with the reason that they chose not now, skip to section 5 and write the profile from the chat answers." in doc
-    assert len(doc.split()) < 900
+    assert len(doc.split()) < 930
 
 
 def test_approve_with_suggestions_still_open_saves_nothing_and_asks_to_be_told():

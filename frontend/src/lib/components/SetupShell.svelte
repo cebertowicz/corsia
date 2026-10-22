@@ -17,15 +17,14 @@
 		title: string;
 		lede?: string;
 		primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string; noteAlways?: boolean };
-		mark?: boolean;
-		/** Fills the right half beside the body, where the mark would sit. Comes after the body in reading order. */
+		/** Sits at the top of the brand column beside the body (from 1280 wide), with the mark filling the space beneath it. Comes after the body in reading order. */
 		aside?: Snippet;
 		onPrimary?: () => void;
 		secondary?: Snippet;
 		children?: Snippet;
 	}
 
-	const { steps, section = 'Setup', jobs = [], page, title, lede, primary, mark = false, aside, onPrimary, secondary, children }: Props = $props();
+	const { steps, section = 'Setup', jobs = [], page, title, lede, primary, aside, onPrimary, secondary, children }: Props = $props();
 	let shownJobs = $state<SetupJob[]>(untrack(() => jobs));
 	let jobRegionOpen = $state(untrack(() => jobs.length > 0));
 	let sceneHeading = $state<HTMLHeadingElement | null>(null);
@@ -178,6 +177,25 @@
 		return { destroy() { node.removeEventListener('scroll', sync); resize?.disconnect(); mutate?.disconnect(); } };
 	}
 
+	/** The mark fills the brand column under any aside text and shows only while at least `--mark-min` rem of height is left there, so text never runs over it. */
+	function markRoom(node: HTMLElement) {
+		const sync = () => {
+			const text = node.querySelector<HTMLElement>(':scope > :not(.mark)');
+			const style = getComputedStyle(node);
+			const min = (Number.parseFloat(style.getPropertyValue('--mark-min')) || 0) * (Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16);
+			const gap = text ? Number.parseFloat(style.rowGap) || 0 : 0;
+			node.dataset.room = String(node.clientHeight - (text?.offsetHeight ?? 0) - gap >= min);
+		};
+		const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(sync);
+		resize?.observe(node);
+		const mutate = typeof MutationObserver === 'undefined' ? null : new MutationObserver(() => { sync(); const text = node.querySelector(':scope > :not(.mark)'); if (text) resize?.observe(text); });
+		mutate?.observe(node, { childList: true, subtree: true });
+		const text = node.querySelector(':scope > :not(.mark)');
+		if (text) resize?.observe(text);
+		sync();
+		return { destroy() { resize?.disconnect(); mutate?.disconnect(); } };
+	}
+
 	function sceneMotion(node: HTMLElement, params: undefined, options: { direction: 'in' | 'out' | 'both' }) {
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
 			const tight = Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0;
@@ -211,11 +229,11 @@
 		<div class="drag" data-tauri-drag-region></div>
 		<div class="pane-scenes">
 			{#key page}
-				<section class="pane-scene" class:hero={mark || !!aside} data-setup-page={page} in:sceneMotion out:sceneMotion onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
-					{#if mark}<img class="mark" src="/icons/corsia-mark.svg" alt="" />{/if}<header><h1 bind:this={sceneHeading} tabindex="-1">{title}</h1></header>
+				<section class="pane-scene" data-setup-page={page} in:sceneMotion out:sceneMotion onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
+					<header><h1 bind:this={sceneHeading} tabindex="-1">{title}</h1></header>
 					{#if lede}<p class="lede">{lede}</p>{/if}
 					<div class="body" use:scrollCue>{@render children?.()}</div>
-					{#if aside}<div class="aside">{@render aside()}</div>{/if}
+					<div class="brand" use:markRoom>{#if aside}{@render aside()}{/if}<img class="mark" src="/icons/corsia-mark.svg" alt="" /></div>
 				</section>
 			{/key}
 		</div>
@@ -241,19 +259,26 @@
 	.setup-shell { min-height: 100dvh; display: flex; background: var(--bg-primary); color: var(--text-primary); }
 	.rail { width: var(--sidebar-width); flex: none; border-right: 1px solid var(--border-subtle); background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
 	.traffic-space { height: calc(var(--space-7) + var(--space-5)); }
-	.pane { position: relative; flex: 1; min-width: 0; height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; padding: calc(var(--space-8) + var(--space-4)) var(--space-4) var(--space-6); }
+	.pane { position: relative; flex: 1; min-width: 0; height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; padding: calc(var(--space-8) + var(--space-4)) var(--space-4) var(--space-6) var(--space-7); }
 	.drag { position: absolute; inset: 0 0 auto; height: var(--space-8); }
 	.pane-scenes { display: grid; flex: 1; min-height: 0; }
 	.pane-scene { position: relative; grid-area: 1 / 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 	header { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); }
-	.mark { position: absolute; width: 44%; height: 70%; object-fit: contain; right: 0; top: 12%; }
-	.hero .body, .hero .lede, .hero header { width: 50%; box-sizing: border-box; padding-right: var(--space-5); }
-	/* Level with the lede, which starts one header and --space-3 down (--space-2 at the setup floor). */
-	.aside { position: absolute; top: calc(var(--space-7) + var(--space-3)); right: 0; bottom: 0; width: 50%; box-sizing: border-box; padding-left: var(--space-5); overflow-y: auto; scrollbar-width: thin; }
-	h1 { margin: 0; font-size: var(--text-title2); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }
+	/* From 1280 wide every scene is two columns: content on the left, the brand column on the right. Below that there is no brand column. */
+	.brand { display: none; }
+	@media (min-width: 80em) {
+		.pane-scene header, .pane-scene .lede, .pane-scene .body { width: 50%; box-sizing: border-box; padding-right: var(--space-5); }
+		/* Level with the lede, which starts one header and --space-3 down (--space-2 at the setup floor). */
+		.brand { display: flex; flex-direction: column; gap: var(--space-5); --mark-min: 8; /* in rem */ position: absolute; top: calc(var(--space-7) + var(--space-3)); right: 0; bottom: 0; width: 50%; box-sizing: border-box; padding-left: var(--space-5); overflow-y: auto; scrollbar-width: thin; }
+		.brand > :global(:not(.mark)) { flex: none; }
+		.brand > .mark { flex: 1 1 0; min-height: 0; width: 100%; object-fit: contain; pointer-events: none; }
+		/* data-room is set by the markRoom action, which Svelte cannot see: without :global it prunes the rule as unused. */
+		.brand:global([data-room='false']) > .mark { display: none; }
+	}
+	h1 { margin: 0; font-size: var(--text-title1); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }
 	.pane-scene h1:focus { outline: none; }
-	.lede { max-width: none; margin: var(--space-3) 0 0; color: var(--text-secondary); line-height: var(--lh-normal); }
-	.body { flex: 1; min-height: 0; margin-top: var(--space-5); padding-bottom: var(--space-6); /* a scene taller than the window scrolls here, so the dock stays in view */ overflow-y: auto; scrollbar-width: thin; }
+	.lede { max-width: none; margin: var(--space-3) 0 0; color: var(--text-secondary); font-size: var(--text-title3); line-height: var(--lh-normal); }
+	.body { flex: 1; min-height: 0; margin-top: var(--space-5); padding-bottom: var(--space-6); /* a scene taller than the window scrolls here, so the dock stays in view */ overflow-y: auto; overflow-x: hidden; /* the connect code screen bleeds its focus-ring room outward, which must not scroll sideways */ scrollbar-width: thin; }
 	/* The attributes are set by the scrollCue action, which Svelte cannot see: without :global it prunes the rule as unused. */
 	.body:global([data-more='true']), .body:global([data-above='true']) { --cue-top: 0px; --cue-bottom: 0px; mask-image: linear-gradient(to bottom, transparent, black var(--cue-top), black calc(100% - var(--cue-bottom)), transparent); }
 	.body:global([data-above='true']) { --cue-top: var(--space-4); }
@@ -266,17 +291,13 @@
 	/* The pill clips the exiting label while it shrinks; scoped here so the shared pill keeps its touch-target ::after. */
 	:global(.primary-action .btn.pill) { overflow: hidden; }
 	:global(.primary-action .btn.pill) { interpolate-size: allow-keywords; transition: width var(--dur-tight) var(--ease-snap), min-width var(--dur-tight) var(--ease-snap), background var(--dur-tight) var(--ease-snap), border-color var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap), opacity var(--dur-tight) var(--ease-snap), transform var(--dur-tight) var(--ease-snap); }
-	.footer-note { max-width: calc(var(--space-8) * 6); color: var(--text-tertiary); font-size: var(--text-footnote); text-align: right; }
+	.footer-note { max-width: calc(var(--space-8) * 6); color: var(--text-tertiary); font-size: var(--text-subhead); text-align: right; }
 	/* The setup floor (800 x 600): tighten the spacing before anything scrolls. */
 	@media (max-height: 43.75em) {
 		.pane { padding-top: var(--space-8); }
 		.lede { margin-top: var(--space-2); }
-		.aside { top: calc(var(--space-7) + var(--space-2)); }
+		.brand { top: calc(var(--space-7) + var(--space-2)); }
 		.body { margin-top: var(--space-3); padding-bottom: var(--space-2); }
-	}
-	@media (max-width: 60em) {
-		.mark { display: none; }
-		.hero .body, .hero .lede, .hero header { width: 100%; padding-right: 0; }
 	}
 	@media (max-width: 40em) {
 		.rail { display: none; }

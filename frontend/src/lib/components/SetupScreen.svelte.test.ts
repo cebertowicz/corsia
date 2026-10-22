@@ -16,6 +16,7 @@ let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 let calls: Array<{ url: string; method: string }>;
 let progressBodies: string[];
+let localEligible = false;
 let sources: Array<{ source: string; name: string; state: string }>;
 
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
@@ -38,11 +39,11 @@ function fillAccount() {
 }
 
 beforeEach(() => {
-	token.set(null); user.set(null); calls = []; progressBodies = []; sources = [];
+	token.set(null); user.set(null); localEligible = false; calls = []; progressBodies = []; sources = [];
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input); const method = init?.method ?? 'GET'; calls.push({ url, method });
 		if (url === '/api/setup/progress' && method === 'PUT') progressBodies.push(String(init?.body));
-		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, work_folder: '~/CORSIA' });
+		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: localEligible, work_folder: '~/CORSIA' });
 		if (url === '/api/setup/first-account') return json({ token: 'setup-token', user: { id: 'user', name: 'Ada Lovelace' } });
 		if (url.includes('/sources')) return json({ sources });
 		if (url.includes('/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
@@ -55,10 +56,9 @@ beforeEach(() => {
 	flushSync();
 });
 
-/** Welcome, the account form and the work folder, ending wherever the folder's Continue leads. */
+/** Welcome, then the account form with its work folder, ending wherever Continue leads once the account exists. */
 async function passFolder() {
 	await settle(); button('Continue')?.click(); await settle(); fillAccount(); await settle();
-	button('Continue')?.click(); await settle();
 	button('Continue')?.click(); await settle();
 }
 const rowNames = () => Array.from(host.querySelectorAll('section.item')).map((row) => row.getAttribute('aria-label'));
@@ -105,10 +105,13 @@ describe('SetupScreen', () => {
 		expectWelcomeCopy();
 		expect(host.querySelector('#setup-name')).toBeNull();
 		expect(host.textContent).toContain('Your account');
-		expect(host.textContent).toContain('Work folder');
+		expect(host.textContent).not.toContain('Your work folder');
 		expect(host.textContent).toContain('Providers & models');
 		button('Continue')?.click(); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Create your account');
+		// The work folder row rides with the form, so Welcome's Continue reaches both.
+		expect(host.textContent).toContain('Work folder');
+		expect(host.textContent).toContain('~/CORSIA');
 		expect(host.querySelector('.welcome')).toBeNull();
 		expect(host.querySelector('#setup-name')).toBeTruthy();
 		expect(calls[0]).toEqual({ url: '/api/setup/status', method: 'GET' });
@@ -118,44 +121,38 @@ describe('SetupScreen', () => {
 		await remountWide();
 		expect(host.querySelector('h1')?.textContent).toBe(APPROVED_WELCOME.title);
 		expectWelcomeCopy(false);
-		expect(host.querySelector('.aside .welcome')).toBeTruthy();
+		expect(host.querySelector('.brand .welcome')).toBeTruthy();
 		const lede = host.querySelector('.lede')!;
 		expect(flat(lede.textContent)).toBe(APPROVED_WELCOME.account);
-		expect(host.querySelector('.aside')!.contains(lede)).toBe(false);
+		expect(host.querySelector('.brand')!.contains(lede)).toBe(false);
 		const form = host.querySelector('#setup-name')!;
 		expect(form).toBeTruthy();
 		// Reading order: title, lede, fields, then the Welcome column.
 		const follows = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 		expect(follows(host.querySelector('h1')!, lede)).toBe(true);
 		expect(follows(lede, form)).toBe(true);
-		expect(follows(form, host.querySelector('.aside')!)).toBe(true);
-		fillAccount(); await settle();
-		button('Continue')?.click(); await settle();
-		expect(host.querySelector('h1')?.textContent).toBe('Choose your work folder');
-		button('Back')?.click(); await settle();
-		expect(host.querySelector('.aside .welcome')).toBeTruthy();
+		expect(follows(form, host.querySelector('.brand')!)).toBe(true);
+		expect(host.textContent).toContain('Work folder');
+		expect(host.querySelector('.brand .mark')).toBeTruthy();
+		expect(host.querySelector('.brand')!.firstElementChild).toBe(host.querySelector('.brand .welcome'));
 	});
 
 	it('keeps the account screen and its step names after Welcome', async () => {
 		await settle(); button('Continue')?.click(); await settle();
 		expect(host.textContent).toContain('Your account');
-		expect(host.textContent).toContain('Work folder');
 		expect(host.textContent).toContain('Providers & models');
 		expect(calls[0]).toEqual({ url: '/api/setup/status', method: 'GET' });
 	});
 
-	it('keeps account fields when Back returns from the work-folder screen', async () => {
-		await settle(); button('Continue')?.click(); await settle(); fillAccount(); await settle();
-		button('Continue')?.click(); await settle();
-		expect(host.querySelector('h1')?.textContent).toBe('Choose your work folder');
-		button('Back')?.click(); await settle();
-		expect((host.querySelector('#setup-name') as HTMLInputElement).value).toBe('Ada Lovelace');
-		expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('ada');
+	it('labels the name field Full name and still prefills the username from the whole name', async () => {
+		await settle(); button('Continue')?.click(); await settle();
+		expect(host.querySelector('label[for="setup-name"]')?.textContent?.trim()).toBe('Full name');
+		setInput('setup-name', 'Ada Lovelace'); await settle();
+		expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('ada-lovelace');
 	});
 
-	it('creates the account only when Continue is pressed on Work folder, then opens provider rows', async () => {
+	it('creates the account when Continue is pressed on the form with its work folder, then opens provider rows', async () => {
 		await settle(); button('Continue')?.click(); await settle(); fillAccount(); await settle();
-		button('Continue')?.click(); await settle();
 		expect(calls.some((call) => call.url === '/api/setup/first-account')).toBe(false);
 		button('Continue')?.click(); await settle();
 		expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(1);
@@ -183,6 +180,49 @@ describe('SetupScreen', () => {
 		expect(button('Sign in')).toBeTruthy();
 	});
 
+	it('explains the subscriptions screen: a lede, and under neither-signed-in the plan and the free-model line this Mac can honor', async () => {
+		const plans = 'Claude plans use Claude Code; ChatGPT plans use Codex. Pick one you pay for and CORSIA installs it now. You sign in on the next screen.';
+		const lede = 'CORSIA’s agents can work through a Claude or ChatGPT plan you already pay for.';
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		await passFolder();
+		expect(host.querySelector('.lede')?.textContent).toBe(lede);
+		expect(host.textContent).toContain(plans);
+		expect(host.textContent).toContain('No plan? Add an API key on the next screen.');
+		expect(host.textContent).not.toContain('The free model downloading to this Mac');
+		expect(host.querySelector('.explain')?.compareDocumentPosition(host.querySelector('.choices')!)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
+	});
+
+	it('offers the free model as the no-plan option when this Mac can run it', async () => {
+		localEligible = true;
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		// The status is read when the screen mounts, so mount it again now that this Mac is eligible.
+		await unmount(component!); component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } }); flushSync();
+		await passFolder();
+		expect(host.textContent).toContain('Pick one you pay for and CORSIA installs it now. You sign in on the next screen.');
+		expect(host.textContent).toContain('No plan? The free model downloading to this Mac works too, or add an API key.');
+		expect(host.textContent).not.toContain('Add an API key on the next screen.');
+	});
+
+	it('explains the ChatGPT question when Claude Code is signed in, and the Claude question when Codex is', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		await passFolder();
+		expect(host.querySelector('.lede')?.textContent).toBe('CORSIA’s agents can work through a Claude or ChatGPT plan you already pay for.');
+		expect(host.textContent).toContain('ChatGPT plans use Codex (Claude plans use Claude Code). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Claude Code is enough to continue.');
+		expect(host.textContent).not.toContain('No plan?');
+	});
+
+	it('explains the Claude question when Codex is signed in', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'ready' }];
+		await passFolder();
+		expect(host.textContent).toContain('Claude plans use Claude Code (ChatGPT plans use Codex). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Codex is enough to continue.');
+		expect(host.textContent).not.toContain('No plan?');
+	});
+
+	it('says what the work folder is for beside its row on the account form', async () => {
+		await settle(); button('Continue')?.click(); await settle();
+		expect(host.textContent).toContain('Your projects and files live here.');
+	});
+
 	it('asks only about the other subscription when one tool is signed in', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
 		await passFolder();
@@ -192,28 +232,27 @@ describe('SetupScreen', () => {
 		expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
 	});
 
-	it('skips the subscriptions screen when both tools are signed in, and Back returns to the work folder', async () => {
+	it('skips the subscriptions screen when both tools are signed in, and Back returns to the account', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'ready' }];
 		await passFolder();
 		expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
 		button('Back')?.click(); await settle();
-		expect(host.querySelector('h1')?.textContent).toBe('Your work folder');
+		expect(host.querySelector('h1')?.textContent).toBe('Your account');
+		expect(host.querySelector('[data-testid="setup-folder-made"]')?.textContent).toContain('CORSIA keeps your work in');
 	});
 
-	it('goes Back from models to subscriptions to the folder, and the folder never creates a second account', async () => {
+	it('goes Back from models to subscriptions to the account, and it never creates a second account', async () => {
 		await passFolder();
 		button('Neither')?.click(); await settle();
 		button('Back')?.click(); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
 		button('Back')?.click(); await settle();
-		expect(host.querySelector('h1')?.textContent).toBe('Your work folder');
-		button('Back')?.click(); await settle();
 		// The account exists, so it reads back without an editable form whose changes would be dropped.
+		expect(host.querySelector('h1')?.textContent).toBe('Your account');
 		expect(host.querySelector('[data-testid="setup-account-made"]')?.textContent).toContain('Your account is set up');
+		expect(host.querySelector('[data-testid="setup-folder-made"]')?.textContent).toContain('CORSIA keeps your work in');
 		expect(host.querySelector('#setup-password')).toBeNull();
 		expect(button('Continue')?.disabled).toBe(false);
-		button('Continue')?.click(); await settle();
-		expect(host.querySelector('h1')?.textContent).toBe('Your work folder');
 		button('Continue')?.click(); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
 		expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(1);
@@ -221,7 +260,6 @@ describe('SetupScreen', () => {
 
 	it('returns an existing-account response to the account form with Sign in', async () => {
 		await remountWide(); fillAccount(); await settle();
-		button('Continue')?.click(); await settle();
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input) === '/api/setup/first-account' ? json({}, 409) : json({})));
 		button('Continue')?.click(); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Welcome to CORSIA');
@@ -237,7 +275,6 @@ describe('SetupScreen', () => {
 		['no detail', {}, 'Couldn’t create your account. Try again.'],
 	] as const)('returns a 422 with %s to an editable account form', async (_case, body, expected) => {
 		await remountWide(); fillAccount(); await settle();
-		button('Continue')?.click(); await settle();
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input) === '/api/setup/first-account' ? json(body, 422) : json({})));
 		button('Continue')?.click(); await settle();
 		expect(host.textContent).toContain(expected);
@@ -263,7 +300,7 @@ describe('SetupScreen', () => {
 		}));
 		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
 		flushSync(); await settle(); button('Continue')?.click(); await settle(); fillAccount(); await settle();
-		button('Continue')?.click(); await settle(); button('Continue')?.click(); await settle();
+		button('Continue')?.click(); await settle();
 		await vi.waitFor(() => expect(button('Neither')).toBeTruthy()); button('Neither')?.click(); await settle();
 		await vi.waitFor(() => expect(button('Retry')).toBeTruthy());
 		button('Retry')?.click();

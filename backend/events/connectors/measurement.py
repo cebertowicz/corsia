@@ -27,7 +27,7 @@ def _classify(raw: dict[str, Any]) -> str:
     return MOVEMENT_DIGEST_EVENT
 
 
-def _extract_facts(raw: dict[str, Any]) -> dict[str, Any]:
+def _extract_facts(raw: dict[str, Any], _resolved: Any = None) -> dict[str, Any]:
     keys = ("scope", "report_date", "report_key", "breach", "moves")
     return {k: raw[k] for k in keys if raw.get(k) is not None}
 

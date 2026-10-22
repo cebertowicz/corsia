@@ -246,7 +246,7 @@ class TestAppPath:
             "pays_for": [],
             "bound_model": None,
             "web_search_ready": False, "github_ready": False, "setup": {"setup_decisions": []},
-            "user_profile": {"name": "Pat", "work": None, "place": None, "check_first": None, "answer_style": None},
+            "user_profile": {"name": "Pat"},
         }
         monkeypatch.setattr(first_run_wake, "app_reference_served", lambda: True)
         monkeypatch.setattr(first_run_wake, "setup_facts", AsyncMock(return_value=app_facts))
@@ -337,6 +337,20 @@ class TestAppPath:
         assert found == expected
         assert not [path for path in opened if str(tmp_path) in path]
 
+    def test_app_user_profile_carries_the_full_name_beside_the_preferred_name(self, monkeypatch, tmp_path):
+        from infra import config, user_profile
+        from onboarding import first_run_wake
+
+        monkeypatch.setattr(config, "WORKSPACE", tmp_path)
+        (tmp_path / "context").mkdir()
+        (tmp_path / user_profile.PROFILE_RELATIVE_PATH).write_text(
+            user_profile.profile_text("Ada Lovelace", ""), encoding="utf-8",
+        )
+
+        profile = first_run_wake._app_user_profile()
+
+        assert profile["name"] == "Ada" and profile["full_name"] == "Ada Lovelace"
+
     def test_f8_instructed_routes_remain_open_in_conductor_policy(self):
         from tools.conductor_api_policy import off_limits
 
@@ -396,7 +410,7 @@ class TestAppPath:
 
         assert facts["tool_attempts"] is None
         assert facts["bound_model"] is None
-        assert facts["user_profile"] == {"name": "Pat " + "n" * 116, "work": None, "place": None, "check_first": None, "answer_style": None}
+        assert facts["user_profile"] == {"name": "Pat " + "n" * 116, "full_name": None}
         assert "the address you give me in chat" in wake
         assert not any(
             value in wake

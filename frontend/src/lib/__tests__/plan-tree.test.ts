@@ -114,6 +114,35 @@ describe('PlanTree — same renderer contract', () => {
 		expect(rowTitled('Review brief')!.querySelector('.node-details')).toBeNull();
 	});
 
+	it('opens a person step instructions document from its row instead of details', async () => {
+		const instructions: OperatorArtifactLink = {
+			id: 'instructions-1', role: 'input', integration: 'workspace', type: 'document',
+			external_id: 'how-to.md', title: 'How to set up', path: '/how-to.md', state: 'active', attention_state: null,
+		};
+		const onOpenArtifact = vi.fn();
+		component = mount(PlanTree, {
+			target: host,
+			props: withFolds({
+				nodes: [node({ id: 'person-step', title: 'Set up workspace', assignee: 'user', artifacts: [instructions], user_actions: ['mark_done', 'close_node'] })],
+				onOpenArtifact,
+				onUserAction: vi.fn(),
+			}),
+		});
+		flushSync();
+
+		const rowButton = rowTitled('Set up workspace')!.querySelector('.row-body') as HTMLButtonElement;
+		expect(rowButton.title).toBe('Open instructions');
+		expect(rowButton.hasAttribute('aria-controls')).toBe(false);
+		expect(rowButton.hasAttribute('aria-expanded')).toBe(false);
+		// Done and Won't do stay one menu away on the row.
+		expect(rowButton.getAttribute('aria-haspopup')).toBe('menu');
+		rowButton.click();
+		await settle();
+
+		expect(onOpenArtifact).toHaveBeenCalledWith(instructions, 'Set up workspace');
+		expect(rowTitled('Set up workspace')!.querySelector('.node-details')).toBeNull();
+	});
+
 	it('still offers Open on a paused ask that left Needs you', () => {
 		const artifact: OperatorArtifactLink = {
 			id: 'ask-1', role: 'attention', integration: 'workspace', type: 'document',
@@ -479,7 +508,7 @@ describe('PlanTree — same renderer contract', () => {
 		expect(row?.getAttribute('aria-level')).toBe('2');
 		// The child's finished work folds into its own level's count, like the host's.
 		const fold = nested?.querySelector('[data-fold-level="child-plan:"]');
-		expect(fold?.textContent).toContain('1 completed');
+		expect(fold?.textContent).toContain('1 done');
 		expect(host.textContent).not.toContain('Child finished step');
 	});
 

@@ -58,8 +58,8 @@ def read_from_facts(
     deadlines = [
         (earliest, latest)
         for first, last in wait_deadlines
-        if (earliest := _deadline(first)) is not None
-        if (latest := _deadline(last)) is not None
+        if (earliest := parse_deadline(first)) is not None
+        if (latest := parse_deadline(last)) is not None
     ]
     cutoff = _utcnow() - OVERDUE_GRACE
     overdue = sum(latest[0] < cutoff for _earliest, latest in deadlines)
@@ -182,12 +182,28 @@ def _user_pause(causes: list[dict]) -> bool:
     return pause is not None and user_steering.is_user_pause(pause)
 
 
-def _deadline(value: str) -> tuple[datetime, str] | None:
+def parse_deadline(value: str) -> tuple[datetime, str] | None:
     try:
         moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc), value
+
+
+def late_wake(deadline: str | None, now: str) -> str | None:
+    """A late watch's wake text (EW2/EW5), or None when it fires on time.
+
+    A watch fires within ``OVERDUE_GRACE`` of its deadline in normal delivery;
+    one that fires later missed its time, so the agent is told to settle it.
+    """
+    due, fired = parse_deadline(str(deadline or "")), parse_deadline(now)
+    if due is None or fired is None or fired[0] - due[0] <= OVERDUE_GRACE:
+        return None
+    return (
+        f"This wait was due at {due[1]} and its wake came late. Resolve it if "
+        "what you waited for arrived; otherwise arm_watch it again with a new "
+        "deadline and reason."
+    )
 
 
 def deadline_range(causes: list[dict]) -> tuple[str, str] | None:
@@ -201,5 +217,5 @@ def _deadlines(causes: list[dict]) -> list[tuple[datetime, str]]:
         parsed
         for cause in causes
         if cause.get("kind") == "waiting" and cause.get("ends_at")
-        if (parsed := _deadline(str(cause["ends_at"]))) is not None
+        if (parsed := parse_deadline(str(cause["ends_at"]))) is not None
     ]

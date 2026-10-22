@@ -32,6 +32,12 @@ WAKE_CHILD_NEEDS_INPUT = (
 WAKE_REVISION_REQUESTED = (
     "[CORSIA plan] Your returned work on {title} was rejected; the revision is now yours."
 )
+WAKE_INTENT_REVISED = (
+    "[CORSIA plan] Intent on {title} is now revision {requirements_revision}. "
+    "Re-check your work against this revision before continuing."
+)
+WAKE_INTENT_INPUT = ("[CORSIA plan] New words from the person may bear on {title} (revision {requirements_revision}). "
+                     "If they change the task, revise its intent and add these words; if not, carry on.")
 #: The revision_requested text for a delegated worker, which works a step seeded in its own plan.
 REVISION_WORKER_STEP = (
     "[CORSIA plan] Your returned work on {title} was rejected. Work step {worker_step_id} "
@@ -272,6 +278,8 @@ WAKE_CHIPS = {
     "plan.ask_released": "Artifact ask released work",
     "plan.child_returned": "Delegated work returned for your review",
     "plan.revision_requested": "Returned work was rejected",
+    "plan.intent_revised": "A task’s goal changed",
+    "plan.intent_input": "What you said may affect a running task",
     "plan.prerequisite_settled": "A task you depend on settled",
     "plan.conductor_task_settled": "A task you added settled",
     "plan.child_returned_nothing": "Delegated worker returned nothing",

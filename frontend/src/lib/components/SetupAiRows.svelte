@@ -54,11 +54,11 @@
 
 <style>
 	/* Rows keep the narrow window's width in a wide one, so an action stays beside its text. */
-	.rows { display: flex; flex-direction: column; gap: var(--space-4); width: 100%; }
+	.rows { display: flex; flex-direction: column; gap: var(--space-4); width: 100%; max-width: calc(var(--space-8) * 10); }
 	.item :global(.row-actions) { width: calc(var(--space-8) * 3); justify-content: flex-end; }
 	.disclosure { display: grid; grid-template-rows: 1fr; overflow: hidden; }
 	.detail { margin: var(--space-2) 0 0; font-size: var(--text-subhead); color: var(--text-secondary); line-height: var(--lh-normal); text-wrap: pretty; }
 	.detail.err { color: var(--red-text); }
-	.reference { margin: var(--space-1) 0 0; font-size: var(--text-caption); color: var(--text-secondary); }
+	.reference { margin: var(--space-1) 0 0; font-size: var(--text-subhead); color: var(--text-secondary); }
 	.inrow { display: flex; gap: var(--space-2); margin: var(--space-1) 0 0 calc(var(--space-2) * -1); }
 </style>

@@ -203,10 +203,15 @@ def test_a_blocker_nobody_asks_the_user_to_clear_reads_as_a_wait(owner_kind):
                 ).isoformat(),
                 "overdue_waits": 0, "paused_by_you": 0, "set_aside": 0,
             },
+            # EW3: what it waits on and when its agent checks back.
+            "wait": {
+                "label": "production to serve the fix", "until": watch.condition["value"], "more": 0,
+            },
         }
         assert entry["progress"]["liveness"] == "waiting"
         read = status.read(db, service._plan_row(db, plan.id), actor=OWNER)
-        assert read["severity"] == "not_moving"
+        # EW5: an outside wait that owes the user nothing reads waiting, not not_moving.
+        assert read["severity"] == "waiting"
         row = next(row for row in read["current"]["rows"] if row["id"] == ship.id)
         assert (row["condition"], row["reason"]) == ("waiting", reason)
     finally:

@@ -167,6 +167,30 @@ def _plain_step(db):
     return plan, step
 
 
+def test_rejection_revision_uses_the_source_canonical_intent_without_an_attachment(monkeypatch):
+    db = _db(monkeypatch)
+    try:
+        plan = service.ensure_plan("thread", "parent", db=db)
+        canonical = service.add_node(
+            plan.id, kind="task", title="Canonical task", intent="Keep the agreed outcome",
+            acceptance_criteria="The outcome is verified", db=db,
+        )
+        step = service.add_node(
+            plan.id, kind="task", title="Inherited task", intent_node_id=canonical.id,
+            acceptance_criteria="The inherited task is verified", db=db,
+        )
+        service.transition_node(step.id, "active", actor_id="parent", db=db)
+        submit_review_evidence(step.id, db=db, actor_id="parent")
+        db.commit()
+
+        _reject(db, plan.id, step.id)
+
+        revision = _revision_of(db, step.id)
+        assert revision["intent_node_id"] == canonical.id
+    finally:
+        db.close()
+
+
 def test_rejecting_a_step_creates_its_one_linked_revision(monkeypatch):
     db = _db(monkeypatch)
     try:
@@ -317,6 +341,12 @@ def test_rejecting_the_delegated_step_hands_the_worker_its_revision(monkeypatch)
         assert (revision["spawned_thread_id"], revision["spawn_kind"]) == ("worker", "claude-code")
         assert revision["commitment_id"] == delegated.commitment_id
         assert len(_events(db, revision["id"], "spawned_thread_attached")) == 1
+        worker_step = db.execute(
+            "SELECT * FROM plan_nodes WHERE plan_id=? AND title=?",
+            (plan.id, "Revise: Delegate work"),
+        ).fetchone()
+        assert worker_step is not None
+        assert worker_step["intent_node_id"] == delegated.id
         # The worker is woken once, with the revision and its feedback in hand.
         wakes = _wakes(db, "worker")
         assert len(wakes) == 1

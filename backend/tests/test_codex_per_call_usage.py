@@ -26,6 +26,7 @@ from subagents import codex_runtime_events, codex_runtime_terminal, codex_usage_
 def _live() -> SimpleNamespace:
     return SimpleNamespace(
         provider_reported_model="gpt-5-codex",
+        model=None,
         harness="codex",
         corsia_turn=SimpleNamespace(turn_id="codex-turn"),
         turn_has_assistant_row=False,

@@ -184,7 +184,8 @@ export async function readOperatorChild(
 }
 
 /** The chat list's word for a thread (#2220); the server derives it from canonical plan and lease state. */
-export type ThreadPlanState = 'moving' | 'needs_input' | 'blocked_on_you' | 'failed' | 'paused' | 'idle';
+export type ThreadPlanState = 'moving' | 'needs_input' | 'blocked_on_you' | 'failed' | 'waiting' | 'paused' | 'idle';
+export type { OperatorWait as ThreadPlanWait } from './plansTypes';
 export type ThreadAttentionKind = 'decision' | 'review' | 'access' | 'hold' | 'failed';
 export interface ThreadAttentionItem {
 	kind: ThreadAttentionKind;
@@ -212,6 +213,10 @@ export interface ThreadPlanStateEntry {
 	opened?: boolean;
 	/** Plan fact: finished work, nothing open, not paused (AS16). The row also checks activity and higher marks. */
 	settled?: boolean;
+	/** The earliest outside wait while `state` is 'waiting' (EW3); absent otherwise. */
+	wait?: import('./plansTypes').OperatorWait | null;
+	/** When the earliest set-aside work comes back, while every wait is set aside (EW7); absent otherwise. */
+	set_aside_until?: string | null;
 }
 
 /** Mark a thread read (seen through now) or unread on every device. False when the server refused it. */

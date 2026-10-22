@@ -104,18 +104,20 @@ def test_migrating_admits_closed_and_preserves_every_row() -> None:
         fresh.executescript(SCHEMA_SQL)
         result = migrate_to_current(migrated, 27)
 
-        assert SCHEMA_VERSION == 135
+        assert SCHEMA_VERSION == 138
         assert result.migrated is True
         assert (result.from_version, result.to_version) == (26, 27)
 
         # The indexes and triggers match a fresh schema, except the objects schema 101
-        # added or narrowed (#731), which a migration to 27 cannot carry. The table
-        # itself gained later workflow fields, so this v27 regression checks its own
-        # state transition without pinning later columns out of the current schema.
+        # added or narrowed (#731), and the schema-134 intent index adds, which a
+        # migration to 27 cannot carry. The table itself gained later workflow fields,
+        # so this v27 regression checks its own state transition without pinning later
+        # columns out of the current schema.
         from infra.plan_aggregates_schema import NODE_AGGREGATE_INDEXES, TOUCH_INDEXES
 
         skipped = {
-            "plan_nodes", "bump_plan_revision_node_update", *NODE_AGGREGATE_INDEXES, *TOUCH_INDEXES,
+            "plan_nodes", "bump_plan_revision_node_update", "idx_plan_nodes_intent_node",
+            *NODE_AGGREGATE_INDEXES, *TOUCH_INDEXES,
         }
         fresh_objects = _plan_nodes_objects(fresh)
         migrated_objects = _plan_nodes_objects(migrated)

@@ -2216,17 +2216,16 @@ async def _force_shutdown_unsettled_app_server(
 
 
 def _record_backend_shutdown_marker(thread_id: str) -> None:
+    from llm.error_cause import cause_fields
+
     try:
         insert_message(
             thread_id,
             "system",
             "Terminated by backend shutdown.",
             {
-                "codex": True,
-                "type": "cc_error",
-                "event_type": "harness.error",
-                "harness": "codex",
-                "cause": "backend_shutdown",
+                "codex": True, "type": "cc_error", "event_type": "harness.error",
+                "harness": "codex", **cause_fields("codex", "backend_shutdown"),
                 "shutdown": True,
             },
             msg_id=str(uuid.uuid4()),

@@ -175,6 +175,8 @@ def _project(db, plan_row, *, actor, clock: str) -> dict[str, Any]:
         "as_of": clock,
         "status_read": "plan_read()",
     }
+    if overview.get("wait"):
+        thin["wait"] = overview["wait"]
     if plan_row["parent_plan_id"] is not None:
         from plans import projections
 
@@ -185,7 +187,7 @@ def _project(db, plan_row, *, actor, clock: str) -> dict[str, Any]:
     oversize = operator_nodes.oversize(facts["nodes"])
     if oversize is not None:
         thin["oversize"] = oversize
-    if overview["severity"] == "not_moving":
+    if overview["severity"] in {"not_moving", "waiting"} and facts["stuck"] is not None:
         thin.update(_nothing_ready(facts, overview["severity"], str(plan_row["owner_id"])))
         thin["note"] = not_moving.note(facts["stuck"])
     elif plan_row["state"] == "paused":

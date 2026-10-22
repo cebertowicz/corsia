@@ -65,7 +65,10 @@ def _error(exc: Exception) -> str:
 class MicrosoftMailSearchTool(Tool):
     self_describing_errors = True
     name = "microsoft_mail_search"
-    description = "Search Microsoft mail in the required account_id; returns headers only."
+    description = (
+        "Search Microsoft mail in the required account_id. Returns message_id, thread_id, from, date "
+        "and a screen state; subject is included only for a stored clean screen. No body text is returned."
+    )
     parameters = {"type": "object", "additionalProperties": False, "required": ["account_id", "query"], "properties": {"account_id": ACCOUNT_PARAM, "query": {"type": "string"}, "max": {"type": "integer", "minimum": 1, "maximum": 25}}}
     async def execute(self, **kwargs: Any) -> str:
         try:
@@ -74,7 +77,19 @@ class MicrosoftMailSearchTool(Tool):
             if not isinstance(query, str) or not query.strip():
                 return "Error: query is required."
             messages = await mail.search(account, query, kwargs.get("max", 10))
-            return json.dumps({"messages": [{"message_id": item.message_id, "thread_id": thread_key(account, item.thread_id), **item.headers} for item in messages]})
+            screens = await run_in_db(email_screen.stored_screens, account, [item.message_id for item in messages])
+            results = []
+            for item in messages:
+                screen = screens.get(item.message_id)
+                entry: dict[str, Any] = {
+                    "message_id": item.message_id, "thread_id": thread_key(account, item.thread_id),
+                    "from": item.headers.get("from", ""), "date": item.headers.get("date", ""),
+                }
+                if screen is not None and screen.clean:
+                    entry["subject"] = item.headers.get("subject", "")
+                entry["screen"] = email_screen.search_screen(screen)
+                results.append(entry)
+            return json.dumps({"messages": results})
         except (MicrosoftError, ConnectedAccountError) as exc:
             return _error(exc)
 

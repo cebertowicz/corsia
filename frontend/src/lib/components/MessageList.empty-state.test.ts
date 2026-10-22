@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { activeThreadId, activeToolsByThread, messages } from '$lib/stores/threads';
-import { _resetTurnStateForTests } from '$lib/ws/turnState';
+import { _resetTurnStateForTests, applyLifecycle, applyTerminal } from '$lib/ws/turnState';
+import { coreSettings, type CoreSettings } from '$lib/stores/settings';
+import { threadPlanStates } from '$lib/stores/threadPlanStates';
 import MessageList from './MessageList.svelte';
 
 /**
@@ -50,6 +52,8 @@ afterEach(() => {
 	activeThreadId.set(null);
 	activeToolsByThread.set(new Map());
 	messages.set([]);
+	coreSettings.set(null);
+	threadPlanStates.set({});
 	_resetTurnStateForTests();
 });
 
@@ -102,5 +106,57 @@ describe('the empty canvas is a three-way, not a default', () => {
 		retry!.click();
 		flushSync();
 		expect(onRetryFirstLoad).toHaveBeenCalledOnce();
+	});
+});
+
+describe('an empty thread whose plan waits outside', () => {
+	it('shows the waiting chip where the first run would sit, not the greeting (EW8)', () => {
+		coreSettings.set({ features: { focus_mode: true } } as unknown as CoreSettings);
+		threadPlanStates.set({
+			[THREAD_ID]: {
+				state: 'waiting', label_key: null, paused: false, attention_items: [],
+				wait: { label: 'CI on PR #1193', until: new Date(Date.now() + 40 * 60_000).toISOString(), more: 0 },
+			},
+		});
+		renderList();
+
+		expect(greeting()).toBeNull();
+		expect(host.querySelector('.fold-toggle')?.textContent).toContain('Waiting');
+		expect(host.textContent).toContain('CI on PR #1193');
+	});
+});
+
+describe('a sent input the server holds hides the wait face (EW8)', () => {
+	const reply = {
+		id: 'm1', thread_id: THREAD_ID, role: 'assistant', content: 'I opened the PR.',
+		created_at: '2026-10-21T18:00:00Z', seq: 1, turn_id: 'turn-1',
+	};
+	const queued = {
+		id: 'm2', thread_id: THREAD_ID, role: 'user', content: 'Also check the docs.',
+		created_at: '2026-10-21T18:01:00Z', delivery_state: 'queued',
+	};
+
+	function waitingAfterTerminalTurn(rows: unknown[]): void {
+		coreSettings.set({ features: { focus_mode: true } } as unknown as CoreSettings);
+		applyLifecycle(THREAD_ID, { turnId: 'turn-1', turnOrder: 1 });
+		applyTerminal(THREAD_ID, { turnId: 'turn-1', turnOrder: 1 });
+		threadPlanStates.set({
+			[THREAD_ID]: {
+				state: 'waiting', label_key: null, paused: false, attention_items: [],
+				wait: { label: 'CI on PR #1193', until: new Date(Date.now() + 40 * 60_000).toISOString(), more: 0 },
+			},
+		});
+		messages.set(rows as never);
+		renderList();
+	}
+
+	it('shows the chip after a terminal turn with no input waiting', () => {
+		waitingAfterTerminalTurn([reply]);
+		expect(host.textContent).toContain('CI on PR #1193');
+	});
+
+	it('shows no chip while a queued input waits, though this tab holds no pending id', () => {
+		waitingAfterTerminalTurn([reply, queued]);
+		expect(host.textContent).not.toContain('CI on PR #1193');
 	});
 });

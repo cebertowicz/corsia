@@ -21,7 +21,7 @@ def _has_index(db) -> bool:
 def test_fresh_schema_does_not_create_the_removed_index():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 135
+        assert SCHEMA_VERSION == 138
         assert not _has_index(db)
 
 
