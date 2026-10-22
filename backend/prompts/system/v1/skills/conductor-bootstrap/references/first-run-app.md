@@ -53,7 +53,7 @@ This message asks nothing, so don't end your turn on it: post the first step tha
    - **Gmail or Google:** follow skill `google-setup` from its step 2.
    - **Outlook:** when your skills list includes `microsoft-setup`, follow it from its step 1. Otherwise post `There's no ready way to connect Outlook. I'll build one after setup. It's on my list.` and add your own task to build it, as skill `connect-tools` says under "No connection exists yet".
    - **Both:** Gmail first, as above. Once it is connected or they say "not now" to it, go on as for Outlook.
-   - **Something else:** post `There's no ready way to connect that email. I'll build one after setup. It's on my list.` and add your own task to build it after setup, as skill `connect-tools` says under "No connection exists yet". Never end on "I can't".
+   - **Something else:** follow skill `mail-host-setup` from its step 1.
 
    On "not now" to the question: `Ask me any time to connect your email.` This is CORSIA's own platform sign-in; it creates no agent.
 7. **Learning from the community.** Always. Post, word for word:
