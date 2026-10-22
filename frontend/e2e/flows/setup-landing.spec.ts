@@ -72,6 +72,8 @@ async function shot(page: Page, name: string) {
 test.describe('@surface:first-run setup landing', () => {
 	// Each test ends the first run this screen is for, so each starts from the seed, with it pending.
 	test.use({ seedPerTest: true });
+	// Backend reset, Python seeding, setup and two turns share the test budget.
+	test.slow();
 	for (const [label, sources] of readySources) {
 		test(`${label} ready: Start using CORSIA lands in a usable chat and a turn renders with attribution`, async ({ page, request }) => {
 			await seedAppOpening();
