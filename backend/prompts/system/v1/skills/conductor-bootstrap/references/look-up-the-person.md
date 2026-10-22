@@ -9,7 +9,7 @@ For the CORSIA agent: step 5 of `references/first-run-app.md` sends you here. Do
 3. What the import kept: their work, their city, a GitHub handle or website.
 4. This Mac's time zone: the `Timezone` line of the workspace `USER.md` if it has one, else `date +%Z`.
 5. Too little to go on means: you have only a name, or only a name and a consumer-mail address, and the import kept nothing. Then go to section E, post the parts of question 1 you still lack, in one message, and use the answer as your detail. Then continue at section B.
-6. When search does not work (`web_search_ready` is false and they haven't just saved a key) or they said not to look them up: go to section E. Say nothing about searching or about skipping it, anywhere in this step: not in what you post, not in what you write.
+6. When they did not save a search key a moment ago in step 4 (a key saved earlier never covers sending their name out) or they said not to look them up: go to section E. Say nothing about searching or about skipping it, anywhere in this step: not in what you post, not in what you write.
 
 ## B. Search
 

@@ -59,8 +59,17 @@ pub fn saved_place_is_visible(saved: Option<Rect>, screens: &[Rect]) -> bool {
 
 /// Fill the usable area of the main window's screen when there is no saved place to restore.
 pub fn place_main_window(app: &tauri::App, state_dir: &Path) {
-    let Some(window) = app.get_webview_window(MAIN) else { return };
-    let Ok(monitors) = window.available_monitors() else { return };
+    let Some(window) = app.get_webview_window(MAIN) else {
+        log::warn!("main window not found; leaving its placement to the OS");
+        return;
+    };
+    let monitors = match window.available_monitors() {
+        Ok(monitors) => monitors,
+        Err(error) => {
+            log::warn!("could not list the connected screens; leaving the main window's placement to the OS: {error}");
+            return;
+        }
+    };
     let screens: Vec<Rect> = monitors
         .iter()
         .map(|monitor| {
