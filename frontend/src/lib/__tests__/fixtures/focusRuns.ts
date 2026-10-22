@@ -1,6 +1,8 @@
 import type { UpdateCard } from '$lib/api/threadUpdates';
 import { buildTranscriptPresentation, type TranscriptEntry, type TranscriptMessage } from '$lib/components/messageListModel';
-import type { TurnSummary } from '$lib/components/transcriptRunLabel';
+import { runRanges, type RunRange, type TurnSummary } from '$lib/components/transcriptRunLabel';
+import { _resetOpenTimeForTests, openRangeKey, openTimes } from '$lib/openTime';
+import { parseWsTimestamp } from '$lib/time';
 import { mergeTranscriptUpdates } from '$lib/components/transcriptUpdates';
 
 export const THREAD = 'thread-1';
@@ -89,4 +91,43 @@ export function inZone<T>(zone: string, body: () => T): T {
 		if (previous === undefined) delete process.env.TZ;
 		else process.env.TZ = previous;
 	}
+}
+
+/**
+ * What the server's open time answers when only the lead thread's Turns count (no subagent, no wait): the union of
+ * its Turns' intervals clipped to the range, in ms. A range still open runs to a running Turn's end of `now`.
+ */
+export function leadOpenMs(summaries: Record<string, TurnSummary>, now = Number.NaN): (range: RunRange) => number | null {
+	return (range) => {
+		const until = range.until ?? now;
+		const clipped = Object.values(summaries)
+			.map((summary) => [
+				Math.max(parseWsTimestamp(summary.started_at), range.since),
+				Math.min(summary.ended_at === null ? until : parseWsTimestamp(summary.ended_at), until),
+			] as const)
+			.filter(([start, end]) => end > start)
+			.sort((a, b) => a[0] - b[0]);
+		let total = 0;
+		let reached = -Infinity;
+		for (const [start, end] of clipped) {
+			total += Math.max(0, end - Math.max(start, reached));
+			reached = Math.max(reached, end);
+		}
+		return total;
+	};
+}
+
+/** Seeds the open-time store with what the server would answer for every run these entries show (lead Turns only). */
+export function seedOpenTime(
+	entries: TranscriptEntry[],
+	summaries: Record<string, TurnSummary>,
+	options: { threadId?: string; historyComplete?: boolean; now?: number } = {},
+): void {
+	const { threadId = THREAD, historyComplete = true, now = Number.NaN } = options;
+	const open = leadOpenMs(summaries, now);
+	_resetOpenTimeForTests();
+	openTimes.set(new Map(runRanges(entries, summaries, historyComplete).map((range) => [
+		openRangeKey(threadId, range),
+		{ seconds: (open(range) ?? 0) / 1000, openNow: false, receivedAt: 0, floor: 0 },
+	])));
 }

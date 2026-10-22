@@ -16,6 +16,7 @@ import { get } from 'svelte/store';
 import { activeToolsByThread } from '$lib/stores/threads';
 import { _resetTurnStateForTests } from '$lib/ws/turnState';
 import { FADE_MS, LINGER_MS, PHRASE_HOLD_MS, _resetLiveStepForTests } from '$lib/components/plans/planLiveStep';
+import { _resetOpenTimeForTests } from '$lib/openTime';
 import { operatorNode } from './fixtures/operatorPlan';
 import { withLiveFolds } from './fixtures/planFolds';
 import { childState } from './fixtures/planFolds';
@@ -26,6 +27,23 @@ import { childState } from './fixtures/planFolds';
  * and nothing once the work stops. Frames go through the real handlers, so
  * the live path and the reload path meet in the same stores.
  */
+
+// The server's answer for a running step is the time since its first try; answered in the same tick so these
+// synchronous tests read it the way a reload with the answer already in hand does.
+vi.mock('$lib/openTime', async (importActual) => {
+	const actual = await importActual<typeof import('$lib/openTime')>();
+	return {
+		...actual,
+		requestOpenTime: (queries: readonly { key: string; since: number }[]) => {
+			const now = Date.now();
+			actual.openTimes.update((readings) => {
+				const next = new Map(readings);
+				for (const query of queries) next.set(query.key, { seconds: (now - query.since) / 1000, openNow: true, receivedAt: now, floor: 0 });
+				return next;
+			});
+		},
+	};
+});
 
 const NOW = Date.parse('2026-09-26T18:00:00Z');
 const THREE_MIN_AGO = '2026-09-26T17:57:00+00:00';
@@ -40,6 +58,7 @@ beforeEach(() => {
 	vi.setSystemTime(NOW);
 	// The shared per-Turn phrase memory outlives a mount; each test starts clean.
 	_resetLiveStepForTests();
+	_resetOpenTimeForTests();
 	sent = [];
 	setWs({ readyState: 1, send: (raw: string) => sent.push(JSON.parse(raw)) } as unknown as WebSocket);
 	host = document.createElement('div');
@@ -58,12 +77,15 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
+/** The step's first try, three minutes before the tests' clock: what the server counts its open time from. */
+const firstTry = { id: 'try-1', ordinal: 1, executor: { thread_id: 'worker', label: 'Worker' }, requirements_revision: 1, selected_at: THREE_MIN_AGO, released_at: null, release_reason: null };
+
 function delegated(): OperatorNode {
 	const base = operatorNode({ id: 'delegated', title: 'Delegated step' });
 	return {
 		...base,
 		display: { label_key: 'waiting', tone_key: 'waiting' },
-		execution: { ...base.execution, condition: 'waiting' },
+		execution: { ...base.execution, condition: 'waiting', attempts: [firstTry] },
 		child: {
 			available: true, plan_id: 'child-plan', thread_id: 'worker',
 			progress: { done: 0, total: 1, open: 1, liveness: 'advancing' },
@@ -77,6 +99,7 @@ function ownTask(): OperatorNode {
 		...base,
 		execution: {
 			...base.execution,
+			attempts: [firstTry],
 			selection: {
 				attempt_id: 'a1', attempt_ordinal: 1, executor_thread_id: 'owner',
 				requirements_revision: 1, turn_active: true, in_flight_dispatch_count: 0,
@@ -254,7 +277,7 @@ describe('plan item live step (AS14)', () => {
 		flushSync();
 		vi.advanceTimersByTime(PHRASE_HOLD_MS + FADE_MS + 10);
 		flushSync();
-		expect(subline('Delegated step')).toBe('Working');
+		expect(subline('Delegated step')).toBe('Working 3 min');
 	});
 
 	it('respects reduced motion: no fade, the minimum hold stays', () => {
@@ -524,11 +547,11 @@ describe('plan item live step (AS14)', () => {
 		flushSync();
 		vi.advanceTimersByTime(PHRASE_HOLD_MS + FADE_MS + 10);
 		flushSync();
-		expect(subline('Group')).toBe('Working under 1 min');
+		expect(subline('Group')).toBe('Working 3 min');
 
 		host.querySelector<HTMLButtonElement>('.branch-toggle')!.click();
 		flushSync();
-		expect(subline('Bound step')).toBe('Working under 1 min');
+		expect(subline('Bound step')).toBe('Working 3 min');
 		expect(liveStepElement('Bound step')?.classList.contains('dimmed')).toBe(false);
 		expect(subline('Group')).toBeNull();
 		expect(subline('Delegated step')).toBeNull();
@@ -567,7 +590,7 @@ describe('plan item live step (AS14)', () => {
 		flushSync();
 		vi.advanceTimersByTime(PHRASE_HOLD_MS + FADE_MS + 10);
 		flushSync();
-		expect(subline('Delegated step')).toBe('Working under 1 min');
+		expect(subline('Delegated step')).toBe('Working 3 min');
 	});
 
 	it('keeps a parent\'s line when its subagent\'s plan has not loaded, or is collapsed', () => {
@@ -582,7 +605,7 @@ describe('plan item live step (AS14)', () => {
 		handleTurnActivity({ type: 'turn_activity', ...turn('owner'), started_at: '2026-09-26T17:59:40+00:00' });
 		flushSync();
 
-		expect(subline('Own step')).toBe('Working under 1 min');
+		expect(subline('Own step')).toBe('Working 3 min');
 	});
 
 	it('shows nothing when no work runs for the item', () => {

@@ -22,7 +22,7 @@
 
 	// A branch row in the tree carries its count on its expand control instead.
 	// threads, moves: this row's rolled work (`rolledLive`); carriedBelow: what rows rendered under it already show.
-	let { node, isNext = false, showProgress = true, detailsOpen = false, threads = [], moves = false, carriedBelow = [], scheduledView }: { node: OperatorNode; isNext?: boolean; showProgress?: boolean; detailsOpen?: boolean; threads?: readonly string[]; moves?: boolean; carriedBelow?: readonly string[]; scheduledView?: ScheduledView } = $props();
+	let { node, isNext = false, showProgress = true, detailsOpen = false, threads = [], moves = false, owners, carriedBelow = [], scheduledView }: { node: OperatorNode; isNext?: boolean; showProgress?: boolean; detailsOpen?: boolean; threads?: readonly string[]; moves?: boolean; owners?: ReadonlyMap<string, OperatorNode>; carriedBelow?: readonly string[]; scheduledView?: ScheduledView } = $props();
 
 	const state = $derived(nodeDisplayState(node));
 	const tone = $derived(nodeStateTone(node));
@@ -69,7 +69,7 @@
 		<span class="row-status sr-only">{label}</span>
 	</span>
 	{#if liveStep}
-		<span class="row-subline {state} {tone}"><PlanLiveStep step={liveStep} />{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}</span>
+		<span class="row-subline {state} {tone}"><PlanLiveStep step={liveStep} node={owners?.get(liveStep.threadId) ?? node} />{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}</span>
 	{:else if subline.lead || subline.moment}<span class="row-subline {state} {tone}">{#if subline.lead}<span class="subline-text">{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{subline.lead ? ' · ' : ''}{subline.moment}</span>{/if}</span>{/if}
 </span>
 

@@ -210,7 +210,7 @@
 			>
 				<PlanRowFace
 					{node} isNext={nextNodeIds.includes(node.id)} showProgress={!branchParents.has(node.id)} detailsOpen={detailsExpanded(node.id)}
-					scheduledView={view} threads={live.threads.get(node.id)} moves={live.moving.has(node.id)} carriedBelow={carriedUnder(node.id)}
+					scheduledView={view} threads={live.threads.get(node.id)} moves={live.moving.has(node.id)} owners={live.owners} carriedBelow={carriedUnder(node.id)}
 				/>
 			</button>
 			<PlanRowActions

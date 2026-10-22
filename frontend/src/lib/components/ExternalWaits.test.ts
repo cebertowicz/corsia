@@ -2,7 +2,9 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { OperatorNode, ThreadPlanStateEntry } from '$lib/api/plans';
-import { THREAD, said, turn, work } from '$lib/__tests__/fixtures/focusRuns';
+import { THREAD, said, seedOpenTime, turn, work } from '$lib/__tests__/fixtures/focusRuns';
+import { openRangeKey, openTimes } from '$lib/openTime';
+import { waitRange } from './transcriptRunLabel';
 import { coreSettings, type CoreSettings } from '$lib/stores/settings';
 import { threadPlanStates } from '$lib/stores/threadPlanStates';
 import { activeToolsByThread } from '$lib/stores/threads';
@@ -42,11 +44,23 @@ function focus(on: boolean): void {
 	coreSettings.set({ features: { focus_mode: on } } as unknown as CoreSettings);
 }
 
+/** What the server answers for the wait: it has been open this long when the chat renders. */
+const WAITED_SECONDS = 30 * 60;
+
 function render(entries: TranscriptEntry[], props: Record<string, unknown> = {}): void {
+	const turnSummaries = { t1: { ...turn('09:00:00', '10:00:00', 2), ended_at: at(-30) } };
+	seedOpenTime(entries, turnSummaries, { now: Date.now() });
+	const range = waitRange(entries, turnSummaries, true);
+	if (range) {
+		openTimes.update((readings) => new Map(readings).set(
+			openRangeKey(THREAD, range),
+			{ seconds: WAITED_SECONDS, openNow: true, receivedAt: Date.now(), floor: 0 },
+		));
+	}
 	component = mount(TranscriptContent, {
 		target: host,
 		props: {
-			entries, turnSummaries: { t1: { ...turn('09:00:00', '10:00:00', 2), ended_at: at(-30) } }, renderedStreaming: false, historyComplete: true,
+			entries, turnSummaries, renderedStreaming: false, historyComplete: true,
 			expandedTools: new Set<string>(), expandedReasoning: new Set<string>(),
 			onToggleToolBlock: () => {}, onToggleReasoning: () => {}, onOpenLightbox: () => {},
 			threadId: THREAD, ...props,
