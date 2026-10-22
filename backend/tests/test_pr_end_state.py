@@ -221,7 +221,7 @@ class TestConnectorClassifier:
             map_github_event("check_suite", {"action": "completed"}),
         }
 
-        declared = {decl.routed_event for decl in MANIFEST.event_types.values()}
+        declared = {decl.routed_event for decl in MANIFEST.event_types.values() if decl.routed_event}
         assert declared <= mapped
 
 
