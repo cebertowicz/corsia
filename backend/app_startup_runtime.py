@@ -52,13 +52,16 @@ async def resume_local_setup() -> None:
     """
     import logging
 
+    from infra.db_async import run_in_db
     from infra.failure_reference import new_reference
     from llm.local_setup import record_resume_failure
     from llm.local_model import backfill_legacy_record
     from llm.local_setup_flow import resume_pending_setup
+    from llm.local_setup_runtime import rename_managed_server
     from onboarding.local_download_wake import resume_pending_local_download
 
     steps = (
+        ("name the managed server", lambda: run_in_db(rename_managed_server)),
         ("record an earlier setup's model", lambda: asyncio.to_thread(backfill_legacy_record)),
         ("resume local setup", resume_pending_setup),
         ("resume local download notice", resume_pending_local_download),
