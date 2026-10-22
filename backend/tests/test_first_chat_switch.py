@@ -1,4 +1,4 @@
-"""Setup's first chat moves to Claude Code or Codex when the person's sign-in finishes.
+"""Setup's first chat moves to Claude Code or Codex when a new sign-in, from setup or Settings, is ready.
 
 Three guards keep it narrow: only the first chat setup created, only if the person has not
 picked a model in it since, and only while no first-chat switch is in flight.
@@ -250,7 +250,7 @@ class TestSwitch:
 
 
 class TestSigninSeam:
-    """finish_signin asks for the switch only when a first-run sign-in's own read came back ready."""
+    """finish_signin asks for the switch only when a new login's own read came back ready, bound or not."""
 
     @staticmethod
     def _operation(**fields):

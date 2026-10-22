@@ -1,9 +1,11 @@
-"""Move the first chat from the local model to Claude Code or Codex once setup's sign-in finishes.
+"""Move the first chat from the model setup gave it to Claude Code or Codex once a new sign-in is ready.
 
-A person who picked a subscription in setup can start using CORSIA on the local model
-while that tool is still installing. When their sign-in completes, the first chat
-switches to the tool, with the conversation carried over, through the one model-switch
-door (``thread.model.switch_model``). Three guards keep it narrow:
+A person can start using CORSIA on the local model or an API key while a subscription is
+still installing, or sign in to one later from Settings. The first time such a sign-in
+reads ready, the first chat switches to the tool, with the conversation carried over, through
+the one model-switch door (``thread.model.switch_model``). The CORSIA agent is the
+instance's one agent, so a Settings sign-in has no first-run bind and the chat's owner
+stands in as the user. Three guards keep it narrow:
 
 1. only the first chat setup created: the CORSIA agent, whose first model setup recorded;
 2. only if the person has not picked a model in it since: the thread still holds that
