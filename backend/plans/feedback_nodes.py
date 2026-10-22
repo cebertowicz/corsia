@@ -7,12 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
-from plans import admission, artifact_links, boundary_after, review_evidence, review_requests, service
-from plans.plan_write import transaction
+from plans import admission, artifact_links, service
+from plans.feedback_delivery import PROVENANCE, _existing
 from registry.identity_metadata import last_written_sha256, sha256_file
 from registry.shared_edit_classification import combine_capped_diffs, capped_unified_diff
 
-PROVENANCE = "document.feedback_batch"
+
 COMMENT_ACCEPTANCE = "Every item is acknowledged, resolved, or replied to."
 EDIT_ACCEPTANCE = (
     "The edit is checked against current intent and kept, adjusted, or reverted "
@@ -295,82 +295,6 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
     return "\n\n".join(blocks)
 
 
-def _existing(db, recipient_thread_id: str, batch_id: str, provenance: str = PROVENANCE) -> str | None:
-    row = db.execute(
-        """SELECT l.node_id FROM plan_node_artifact_links l
-           JOIN plan_nodes n ON n.id=l.node_id
-           JOIN plans p ON p.id=n.plan_id
-           WHERE p.owner_kind='thread' AND p.owner_id=?
-             AND l.provenance=? AND l.source_event_id=?
-           ORDER BY l.created_at LIMIT 1""",
-        (recipient_thread_id, provenance, batch_id),
-    ).fetchone()
-    return str(row["node_id"]) if row else None
-
-
-def settle_feedback_node(db, recipient_thread_id: str, batch_id: str, *, evidence: str) -> None:
-    """Record the evidence and accept a batch's task once, atomically; a finished task stays as it is and a stopped one gets a note."""
-    node_id = _existing(db, recipient_thread_id, batch_id)
-    if node_id is None:
-        return
-    with transaction(db) as connection:
-        node = service._node_row(connection, node_id)
-        if node["state"] in service._TERMINAL_STATES:
-            return
-        if review_evidence.stop_reason(connection, node) is not None:
-            # A paused plan or held step stays as the user left it (pause contract S26); raising would undo the person's decision.
-            service.touch_node(connection, node_id, description=f"{node['description']}\n\n{STOPPED_NOTE.format(evidence=evidence)}")
-            service._event(connection, node_id, "feedback_settled_while_stopped", actor_id=None, provenance=PROVENANCE, payload={"evidence": evidence})
-            review_requests._notify(connection, node["plan_id"])
-            return
-        if node["state"] == "pending":
-            # Attempt-less, not admitted (that would push out the owner's current task); approved for review and feedback-batch settlement only.
-            service._transition(connection, node_id, "active", actor_id=None, provenance=PROVENANCE,
-                                verification_result=None, verified_by=None)
-        review_evidence.submit(node_id, evidence=evidence, expected_revision=None,
-                               actor_id=None, provenance=PROVENANCE, db=connection)
-        service._transition(connection, node_id, "accepted", actor_id=None, provenance=PROVENANCE,
-                            verification_result="passed", verified_by="system:document.feedback_batch")
-        boundary_after.after_transition(node_id, "accepted", {
-            "db": connection, "actor_id": None, "provenance": PROVENANCE,
-        })
-        review_requests._notify(connection, node["plan_id"])
-
-
-def unstarted_feedback_batch_id(
-    db,
-    *,
-    recipient_thread_id: str,
-    author_kind: str,
-    author_id: str,
-    artifact_id: str,
-) -> str | None:
-    """Return the most recent delivered batch whose recipient has not started its task.
-
-    The task and its active turn are plan-owned state, so this is deliberately
-    the sole feedback-batch query that decides whether new feedback may update
-    an already-delivered task.
-    """
-    row = db.execute(
-        """SELECT batch.id FROM doc_feedback_batches batch
-           JOIN plan_nodes node ON node.id=batch.delivered_node_id AND node.state='active'
-           JOIN plans plan ON plan.id=node.plan_id
-           WHERE batch.author_kind=? AND batch.author_id=? AND batch.artifact_id=?
-             AND batch.recipient_id=? AND batch.state='delivered'
-             AND batch.delivery_outcome='node'
-             AND plan.owner_kind='thread' AND plan.owner_id=?
-             AND NOT EXISTS (
-                 SELECT 1 FROM active_turns turn
-                 WHERE turn.thread_id=? AND turn.plan_node_id=node.id
-                   AND turn.status IN ('running','waiting_retry')
-             )
-           ORDER BY batch.updated_at DESC,batch.id DESC LIMIT 1""",
-        (
-            author_kind, author_id, artifact_id, recipient_thread_id,
-            recipient_thread_id, recipient_thread_id,
-        ),
-    ).fetchone()
-    return str(row["id"]) if row is not None else None
 
 
 def _node_has_started(db, recipient_thread_id: str, node_id: str) -> bool:
