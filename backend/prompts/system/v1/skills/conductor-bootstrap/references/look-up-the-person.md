@@ -71,7 +71,7 @@ Follow up once on anything vague. On "not now", carry on and learn as you go.
 
 Do this quietly after they answer question 2, and say nothing about it here.
 
-1. Compare their words with what the import brought over (`GET /api/mcp/sources` apps, skills, projects) and what step 3 connected (`GET /api/mcp/servers`): a repository, a project, a folder or a tracker that matches what they are working toward.
+1. Compare their words with what the import already read under the person's consent (its apps, skills and projects) and what step 3 connected (`GET /api/mcp/servers`); never make a new read of `GET /api/mcp/sources` or of another tool's settings here: a repository, a project, a folder or a tracker that matches what they are working toward.
 2. Keep what matches and its source (where it came from). Keep nothing that only shares a common word.
 3. Hold it for the hand-off in `references/first-run-app.md`: one match is named there, several are named up to three, none means the fallback line.
 

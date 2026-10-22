@@ -404,6 +404,7 @@ def test_hand_off_names_a_match_for_question_2_and_keeps_the_fallback_line():
     assert "no summary" in hand_off
     assert "Say nothing about the check" in _step(5)
     assert "## G. Check question 2 against what is connected" in ref and "say nothing about it here" in ref
+    assert "never make a new read of `GET /api/mcp/sources`" in ref
 
 
 def test_the_connect_skill_holds_the_build_later_and_macos_permission_playbooks():
