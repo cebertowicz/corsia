@@ -316,6 +316,7 @@ def github_routing_envelope(
         provenance={},
         event_class=github_event_class(payload),
         ownerless_ok=False,
+        origin="connector",
     )
 
 

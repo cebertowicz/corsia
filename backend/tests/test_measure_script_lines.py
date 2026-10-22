@@ -78,7 +78,7 @@ def test_lines_past_the_cap_get_one_counted_note_with_the_number_dropped(tmp_pat
     report = emit(db, schedule(db, tmp_path), stdout.encode())
     assert report.measures_over_cap == 5 and len(rows(db)) == 200
     assert counter(db, "record_refused") == 5
-    assert status(db, QG)["recent_refusals"] == ["5 measure line(s) past the 200-line cap were dropped; print fewer per run."]
+    assert status(db, QG)["recent_refusals"] == ["5 measure or event line(s) past the 200-line cap were dropped; print fewer per run."]
 
 
 def test_the_run_result_line_that_automation_list_shows_is_its_own_column(tmp_path: Path) -> None:

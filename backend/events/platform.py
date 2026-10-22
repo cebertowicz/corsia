@@ -10,9 +10,9 @@ sink. Everything is keyed on ``event_id`` (per target), so a repeat is a no-op.
 It names no connector (the no-bespoke-router guard keeps it that way).
 
 Rules agents wrote (``events.rules``) add to that decision after it is made, on
-this path and on the webhook router's (``events.webhook_rules``): each recipient
-a rule adds passes the caller's own target filter and is delivered here,
-whatever the event's source.
+this path, intake's (``deliver_envelope_sync``) and the webhook router's
+(``events.webhook_rules``): each recipient a rule adds passes the caller's own
+target filter and is delivered here, whatever the event's source.
 """
 
 from __future__ import annotations
@@ -25,12 +25,13 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from events import dead_letter, rules
+from events import dead_letter, rule_reads, rules
 from events.connectors import EventTypeDecl, get_manifest
 from events.delivery import enqueue_event_wake
 from events.disposition import delivery_disposition
 from events.envelope import EventEnvelope, normalize
 from events.resolve import Target, lifecycle, resolve_targets
+from events.rule_match import matches, repository_fact
 from infra.database import write_transaction
 from infra.db_async import run_in_db_unless_owned
 from infra.passive_changes import append_thread_context_note
@@ -233,12 +234,10 @@ def deliver_rule_adds(
     db: sqlite3.Connection, envelope: EventEnvelope, decl: EventTypeDecl, plan: rules.RulePlan,
     target_filter: Filter | None = None,
 ) -> tuple[list[PlatformDelivery], list[rules.Outcome]]:
-    """Deliver each recipient a rule added, through the filter the caller applies
-    to routed recipients (the mail poller's is the account's reach, R30).
-
-    Rules only add: a recipient that refuses the delivery (being deleted, say)
-    is that rule's outcome, rolled back to its own savepoint, and never reaches
-    routing's deliveries in the caller's transaction."""
+    """Deliver each recipient a rule added, through the filter the caller applies to
+    routed recipients (the mail poller's is the account's reach, R30). Rules only add:
+    a recipient refusing it (being deleted, say) rolls back only its own savepoint
+    and is its rules' outcome, never a cost to routing's deliveries."""
     deliveries, outcomes = [], []
     for thread, delivery in plan.adds.items():
         target = _rule_target(thread, delivery, None, plan, envelope.event_class)
@@ -287,21 +286,48 @@ def deliver_platform_event_sync(
     target_filter: Filter | None = None,
     db: sqlite3.Connection | None = None,
 ) -> list[PlatformDelivery]:
-    """Normalize, resolve and deliver one event in one write transaction.
+    """Normalize, resolve and deliver one connector event in one write transaction.
 
     ``target_filter`` names why a recipient may not get this event (``None``: it
     may); it applies alike to routed recipients and to those a rule adds.
     """
     envelope = normalize(connector, raw_payload, event_type)
-    decl = get_manifest(connector).decl(envelope.type)
+    deliveries, _ = deliver_envelope_sync(
+        envelope, get_manifest(connector).decl(envelope.type),
+        lambda conn: resolve_targets(envelope, repair_owner=repair_owner, db=conn),
+        target_filter=target_filter, db=db,
+    )
+    return deliveries
+
+
+def deliver_envelope_sync(
+    envelope: EventEnvelope, decl: EventTypeDecl,
+    resolve: Callable[[sqlite3.Connection], list[Target]], *,
+    target_filter: Filter | None = None,
+    repository_projects: frozenset[str] | None = frozenset(),
+    db: sqlite3.Connection | None = None,
+) -> tuple[list[PlatformDelivery], rules.RulePlan | None]:
+    """Deliver one normalized event to the targets ``resolve`` picks, then apply rules.
+
+    One write transaction; the plan is returned so intake can say which rules acted.
+    ``repository_projects`` (``rule_reads.unrouted_projects``, read before the
+    transaction) scope the rules when ``resolve`` routes the event to no thread;
+    ``None``, that lookup failed, and no rule fires there (:func:`lookup_failed`).
+    """
     with write_transaction(db, scope="deliver_platform_event") as conn:
-        targets = resolve_targets(envelope, repair_owner=repair_owner, db=conn)
+        targets = resolve(conn)
         filtered = [
             target_filter(target, conn) if target_filter is not None else None
             for target in targets
         ]
-        plan = rules.evaluate(conn, rule_event(envelope), targets, skipped=[
-            target.thread for target, reason in zip(targets, filtered) if reason is not None])
+        skipped = [target.thread for target, reason in zip(targets, filtered) if reason is not None]
+        event = rule_event(envelope)
+        plan = None
+        if repository_projects is None and rules.routed(targets, skipped)[2] is None:
+            rules.record(conn, event, lookup_failed(conn, event))
+        else:
+            event = replace(event, repository_projects=repository_projects or frozenset())
+            plan = rules.evaluate(conn, event, targets, skipped=skipped)
         deliveries = [
             PlatformDelivery(envelope.event_id, target.thread, FILTERED, reason)
             if reason is not None
@@ -320,7 +346,21 @@ def deliver_platform_event_sync(
             deliveries += added
             rules.record(conn, plan.event, [*outcomes, *added_outcomes])
         emit_route_events(envelope, deliveries)
-        return deliveries
+        return deliveries, plan
+
+
+def lookup_failed(db: sqlite3.Connection, event: rules.RuleEvent) -> list[rules.Outcome]:
+    """Fail closed, as ``create`` does: no self-rule fires on an event routing gave no
+    thread when the projects tracking its repository can't be read; each that matched
+    is dead-lettered with the reason."""
+    repository = event.facts.get(repository_fact(event.connector) or "")
+    logger.warning("event rules: repository lookup failed for {} {} on {}; no self-rule fired",
+                   event.connector, event.event_type, repository)
+    return [
+        rules.Outcome(rule.id, rule.created_by, rules.DEAD_LETTERED, reason=rules.LOOKUP_FAILED)
+        for rule in map(rules.from_row, rule_reads.self_rules(db, event.connector, event.event_type))
+        if matches(rule, event.facts) and rules.self_on_repository(rule)
+    ]
 
 
 def _deliver_routed(

@@ -25,7 +25,7 @@ def _fresh() -> sqlite3.Connection:
     return db
 
 
-def _dev_133() -> sqlite3.Connection:
+def _dev_135() -> sqlite3.Connection:
     db = _fresh()
     for table in _TABLES:
         db.execute(f"DROP TABLE {table}")
@@ -34,11 +34,11 @@ def _dev_133() -> sqlite3.Connection:
     return db
 
 
-def test_upgrade_from_133_matches_a_fresh_install_and_seeds_nothing(tmp_path):
+def test_upgrade_from_135_matches_a_fresh_install_and_seeds_nothing(tmp_path):
     fresh = _fresh()
-    upgraded = _dev_133()
+    upgraded = _dev_135()
     result = migrate_to_current(upgraded, SCHEMA_VERSION)
-    assert (result.migrated, result.from_version, result.to_version) == (True, 135, 136)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 135, 137)
     assert [tuple(r) for r in upgraded.execute(_OBJECTS)] == [tuple(r) for r in fresh.execute(_OBJECTS)]
     for table in _TABLES:
         assert upgraded.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
