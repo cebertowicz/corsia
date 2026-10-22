@@ -340,7 +340,29 @@ def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
         db.close()
 
 
-def accounts_without_usable_model(provider: str) -> set[str]:
-    """The ids of this vendor's accounts whose first-run line reads ``no_usable_model``."""
-    lines, _ = source_account_view(provider)
-    return {line["account_id"] for line in lines if line["state"] == NO_USABLE_MODEL}
+def accounts_without_usable_model(providers) -> set[str]:
+    """The ids of these vendors' accounts whose first-run line reads ``no_usable_model``.
+
+    The same states as ``source_account_view``, without its labels or binding reads: the account
+    list asks on every Settings load, so it reads the conductor's scope once for all vendors.
+    """
+    from connections.account_policy import permitted_accounts, thread_scope
+    from infra.corsia_agent import get_corsia_agent
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        conductor = get_corsia_agent(db=db)
+        project = thread_scope(conductor, db=db)["project_id"] if conductor else None
+        found: set[str] = set()
+        for provider in sorted(set(providers)):
+            rows = _vendor_rows(provider, db=db)
+            if not rows:
+                continue
+            for account in permitted_accounts(provider, project_ids=[project], db=db):
+                if account["state"] != "removed" and account_state(
+                        account, project_ids=[project], db=db, rows=rows)[0] == NO_USABLE_MODEL:
+                    found.add(account["id"])
+        return found
+    finally:
+        db.close()

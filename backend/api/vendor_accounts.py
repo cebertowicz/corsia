@@ -120,10 +120,8 @@ def _billing_views() -> dict[str, dict]:
 
 async def _no_usable_model(providers) -> set[str]:
     """The accounts, across these vendors, that signed in but have no model CORSIA can run."""
-    found: set[str] = set()
-    for provider in sorted({provider for provider in providers if provider in accounts.VENDORS}):
-        found |= await run_read(accounts_without_usable_model, provider)
-    return found
+    wanted = {provider for provider in providers if provider in accounts.VENDORS}
+    return await run_read(accounts_without_usable_model, wanted) if wanted else set()
 
 
 async def _shown(account, rows=None, numbered_rows=None, billing_views=None, no_model=None):
