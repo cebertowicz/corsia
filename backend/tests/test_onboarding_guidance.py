@@ -274,7 +274,8 @@ def test_app_path_sends_the_message_then_eight_steps_and_ends_on_the_handoff():
     assert "skill `connect-tools`" in steps
     work_step = steps.split("3. **Where your work lives,**", 1)[1].split("4. **", 1)[0]
     assert not re.search(r"\bsteps? \d", work_step)
-    assert app.split("## The hand-off", 1)[1].strip().startswith("After the last step that applies, post exactly `" + HANDOFF + "`")
+    assert app.split("## The hand-off", 1)[1].strip().startswith("After the last step that applies, post one line")
+    assert "post exactly `" + HANDOFF + "`" in app
     assert "follow skill `google-setup`" in steps
     assert "no setup task list" in app
     assert "agent-import.md" in steps
@@ -376,6 +377,21 @@ def test_files_step_carries_the_sandbox_auto_approve_recommendation_and_off_the_
     assert "no safeguard is perfect" in step and "its own macOS user account" in step
     assert "Its helpers follow it, and it checks with you before passing anything to an agent on a cloud model." in step
     assert "Claim no safeguard beyond these four parts" in step
+
+
+def test_hand_off_names_a_match_for_question_2_and_keeps_the_fallback_line():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    ref = (FIRST_RUN_APP.parent / "look-up-the-person.md").read_text(encoding="utf-8")
+    hand_off = app.split("## The hand-off", 1)[1]
+
+    assert ("`That's everything. You said you're working toward [their words], and I can see [the repository or project] "
+            "in [where it came from]. Want me to get up to speed on it, or is something else taking up your time this week?`") in hand_off
+    assert HANDOFF in hand_off
+    assert "name up to three and ask which one" in hand_off
+    assert "goes through an access application" in hand_off
+    assert "no summary" in hand_off
+    assert "Say nothing about the check" in _step(5)
+    assert "## G. Check question 2 against what is connected" in ref and "say nothing about it here" in ref
 
 
 def test_the_connect_skill_holds_the_build_later_and_macos_permission_playbooks():
