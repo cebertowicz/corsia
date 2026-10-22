@@ -173,9 +173,27 @@ PYTHONPATH="$BUNDLE_ROOT/python/backend-packages" "$PYTHON" -m pip check
 PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 
 # Nothing may write bytecode into the signed bundle: an added __pycache__ breaks
-# its seal, and Update refuses to stage from an app whose seal is broken.
+# its seal, and Update refuses to stage from an app whose seal is broken. Python
+# imports sitecustomize before it can set dont_write_bytecode, so precompile every
+# source in the runtime (including sitecustomize) before the app is signed.
 printf 'import sys\nsys.dont_write_bytecode = True\n' \
   >"$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/sitecustomize.py"
+"$PYTHON" -m compileall -q -f "$BUNDLE_ROOT/python"
+"$PYTHON" - "$BUNDLE_ROOT/python" <<'PY'
+from importlib.util import cache_from_source
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+sources = sorted(root.rglob("*.py"))
+missing = [source for source in sources if not Path(cache_from_source(str(source))).is_file()]
+if missing:
+    for source in missing:
+        print(f"missing bytecode: {source}", file=sys.stderr)
+    raise SystemExit(1)
+print(f"bundled-python-py={len(sources)}")
+print(f"bundled-python-pyc={sum(1 for _ in root.rglob('*.pyc'))}")
+PY
 
 build_git_runtime
 fetch_agent_browser
@@ -214,6 +232,7 @@ install -d "$APP/Contents/Library/LaunchAgents"
 install -m 0644 "$ROOT/desktop/launchd/ai.corsia.service.plist" \
   "$APP/Contents/Library/LaunchAgents/ai.corsia.service.plist"
 "$ROOT/desktop/scripts/check-bundle-launch-agent.sh" "$APP"
+"$ROOT/desktop/scripts/test-bundled-python-immutability.sh" "$APP"
 if ! "$skip_dmg"; then
   mkdir -p "$DMG_DIR"
   rm -f "$DMG"

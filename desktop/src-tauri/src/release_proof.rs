@@ -55,7 +55,7 @@ pub fn port_refuses(port: u16) -> bool {
 pub fn database_released(python: &Path, database: &Path) -> Result<(), String> {
     let program = "import sqlite3, sys; c = sqlite3.connect(sys.argv[1], timeout=0, isolation_level=None); c.execute('BEGIN EXCLUSIVE'); c.execute('ROLLBACK'); busy, _, _ = c.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone(); sys.exit(1 if busy else 0)";
     let status = Command::new(python)
-        .args(["-I", "-c", program])
+        .args(["-I", "-B", "-c", program])
         .arg(database)
         .status()
         .map_err(|error| format!("could not check the database lock: {error}"))?;
