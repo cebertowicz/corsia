@@ -277,17 +277,19 @@
 				offerLine: (reason) => `${reason} Start fresh moves it into a backup folder and sets up CORSIA as new. Nothing is deleted.`,
 				insteadButton: 'Start fresh instead',
 				offerButton: 'Start fresh',
-				confirmTitle: 'Move your earlier CORSIA into a backup?',
+				confirmTitle: 'Move your earlier install into a backup?',
 				confirmLine: (preview) => `CORSIA stops it, then moves ${preview.moves.length === 1 ? 'this' : 'these'} into a new folder in ${preview.backups}. Nothing is deleted.`,
 				confirmCode: (folders) => `Its code folder stays where it is: ${folders.join(', ')}.`,
 				confirmWork: (folders) => `${folders.length === 1 ? 'Its work folder stays' : 'Its work folders stay'} where ${folders.length === 1 ? 'it is' : 'they are'}: ${folders.join(', ')}.`,
 				confirmButton: 'Move and start fresh',
-				movingTitle: 'Moving your earlier CORSIA into a backup…',
+				movingTitle: 'Moving your earlier install into a backup…',
 				quitPending: 'CORSIA will close once everything is in one place.',
-				doneTitle: 'Your earlier CORSIA is in a backup',
+				doneTitle: 'Your earlier install is in a backup',
 				doneLine: (backup) => `It’s in ${backup}. Nothing was deleted.`,
 				doneButton: 'Set up CORSIA',
 				failureTitle: 'CORSIA couldn’t start fresh',
+				// The earlier install's pieces went away before Start fresh could move them.
+				goneTitle: 'CORSIA is ready to set up',
 				// Only when the app's own call failed and the backend's account of it never arrived.
 				unknownFailure: 'CORSIA stopped partway. Quit and open CORSIA again, and it will put everything back.',
 				againButton: 'Retry',
@@ -687,19 +689,19 @@
 				}
 			}
 
-			// A Start fresh failure: the backend's line, its reason under Details, and the one next step. With every
-			// file where it was, Retry starts over from the confirmation; otherwise reopening finishes the undo.
+			// A Start fresh failure: the backend's line, its reason under Details, and the one next step. With nothing
+			// left to move, setup goes on; with every file where it was, Retry starts over from the confirmation;
+			// otherwise reopening finishes the undo.
 			function showFreshFailure(error) {
 				const given = error && typeof error === 'object'
 					? error
 					: { message: FRESH_COPY.unknownFailure, details: String(error ?? ''), restored: false };
-				showFreshCard({
-					title: FRESH_COPY.failureTitle,
-					text: given.message,
-					why: given.details ?? '',
-					button: given.restored ? FRESH_COPY.againButton : FRESH_COPY.reopenButton,
-					action: given.restored ? confirmFresh : () => invoke('reopen_app'),
-				});
+				const gone = given.nothing_to_move === true;
+				const [button, action] = gone
+					? [FRESH_COPY.doneButton, start]
+					: given.restored ? [FRESH_COPY.againButton, confirmFresh] : [FRESH_COPY.reopenButton, () => invoke('reopen_app')];
+				const title = gone ? FRESH_COPY.goneTitle : FRESH_COPY.failureTitle;
+				showFreshCard({ title, text: given.message, why: given.details ?? '', button, action });
 			}
 
 			// Set up this computer instead, and Pair again: the saved remote is forgotten, then this computer's own

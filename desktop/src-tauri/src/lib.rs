@@ -1469,9 +1469,10 @@ fn start_fresh_blocking(app: &tauri::AppHandle) -> Result<String, start_fresh::S
     );
     service.adoption_in_progress.store(false, Ordering::Release);
     set_adoption_phase(&service, None);
-    // A Quit asked for meanwhile waited for everything to be in one known place.
-    let settled = result.as_ref().map_or_else(|error| error.restored, |_| true);
-    if settled && service.adoption_cancel_requested.load(Ordering::Acquire) {
+    if let Err(error) = &result {
+        log::warn!("Start fresh did not finish: {} ({})", error.message, error.details);
+    }
+    if start_fresh::quit_after(service.adoption_cancel_requested.load(Ordering::Acquire), &result) {
         lifecycle::request_quit(app);
     }
     result.map(|backup| start_fresh::shown(&home, &backup))

@@ -132,7 +132,7 @@ for (const theme of ['dark', 'light']) {
 		});
 		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
 		await page.click('#retry');
-		await page.waitForFunction(() => document.getElementById('status').textContent === 'Move your earlier CORSIA into a backup?');
+		await page.waitForFunction(() => document.getElementById('status').textContent === 'Move your earlier install into a backup?');
 		compare(`${theme} confirm`, await read(page), {
 			line: 'CORSIA stops it, then moves these into a new folder in ~/CORSIA backups. Nothing is deleted.',
 			note: 'Its code folder stays where it is: ~/.corsia.',
@@ -143,7 +143,7 @@ for (const theme of ['dark', 'light']) {
 		});
 		await shot(page, theme, '2-confirm');
 		await page.click('#retry');
-		await page.waitForFunction(() => document.getElementById('status').textContent === 'Your earlier CORSIA is in a backup');
+		await page.waitForFunction(() => document.getElementById('status').textContent === 'Your earlier install is in a backup');
 		compare(`${theme} done`, await read(page), {
 			line: `It’s in ${backup}. Nothing was deleted.`,
 			note: null,
@@ -169,7 +169,7 @@ for (const theme of ['dark', 'light']) {
 		compare(`${theme} takeover`, await read(page), { button: 'Use it', instead: 'Start fresh instead', quit: true });
 		await shot(page, theme, '0-takeover');
 		await page.click('#start-fresh');
-		await page.waitForFunction(() => document.getElementById('status').textContent === 'Move your earlier CORSIA into a backup?');
+		await page.waitForFunction(() => document.getElementById('status').textContent === 'Move your earlier install into a backup?');
 		compare(`${theme} takeover confirm`, await read(page), { instead: null, button: 'Move and start fresh' });
 		if (JSON.stringify(await made(page)) !== JSON.stringify(['start_fresh_preview'])) fail(`${theme} takeover: ran ${JSON.stringify(await made(page))}`);
 		await page.evaluate(() => window.__corsiaShowStartup({ state: 'adoption_offered', workspace: '~/Corsia' }));
@@ -195,7 +195,7 @@ for (const theme of ['dark', 'light']) {
 		await page.waitForFunction(() => window.__calls.includes('adoption_progress'), null, { timeout: 4000 });
 		await page.waitForTimeout(100);
 		compare(`${theme} moving`, await read(page), {
-			title: 'Moving your earlier CORSIA into a backup…',
+			title: 'Moving your earlier install into a backup…',
 			note: 'CORSIA will close once everything is in one place.',
 			list: null,
 			actions: false,
@@ -237,12 +237,13 @@ for (const theme of ['dark', 'light']) {
 		await page.close();
 	}
 
-	// An unfinished Start fresh put back at launch: the earlier install didn't start, so the card says it's stopped.
+	// An unfinished Start fresh put back at launch: the earlier install didn't start, so the card says it isn't running.
 	{
 		const failure = {
-			message: 'CORSIA put back everything Start fresh had moved. CORSIA couldn’t start your earlier install again, so it isn’t running. Choose Retry to try Start fresh again.',
+			message: 'Everything is back where it was, but CORSIA couldn’t start your earlier install again, so it isn’t running. Choose Retry to try Start fresh again.',
 			details: '`corsia start` exited 1',
 			restored: true,
+			left_stopped: true,
 		};
 		const page = await open(theme, { start_fresh_preview: preview });
 		const before = failed;
@@ -256,7 +257,8 @@ for (const theme of ['dark', 'light']) {
 	}
 
 	// A failure that put everything back offers Retry, which reads the computer again.
-	for (const { name, error, line, details, button, next } of [
+	const failureTitle = 'CORSIA couldn’t start fresh';
+	for (const { name, error, title = failureTitle, line, details, button, next } of [
 		{
 			name: 'restored',
 			error: { message: 'CORSIA couldn’t move everything into the backup folder, so it put it all back where it was.', details: 'could not move ~/Corsia: Permission denied', restored: true },
@@ -267,21 +269,31 @@ for (const theme of ['dark', 'light']) {
 		},
 		{
 			name: 'not-restored',
-			error: { message: 'CORSIA couldn’t put everything back. Nothing was deleted: what it moved is in ~/CORSIA backups/2026-10-22 13-05.', details: 'could not move ~/Corsia back', restored: false },
-			line: 'CORSIA couldn’t put everything back. Nothing was deleted: what it moved is in ~/CORSIA backups/2026-10-22 13-05.',
+			error: { message: 'CORSIA couldn’t put everything back, but nothing was deleted: what it moved is in ~/CORSIA backups/2026-10-22 13-05. Reopen CORSIA to try again.', details: 'could not move ~/Corsia back', restored: false },
+			line: 'CORSIA couldn’t put everything back, but nothing was deleted: what it moved is in ~/CORSIA backups/2026-10-22 13-05. Reopen CORSIA to try again.',
 			details: 'could not move ~/Corsia back',
 			button: 'Reopen CORSIA',
 			next: 'reopen_app',
 		},
+		// The earlier install went away before the move: setup goes on instead of a Retry that fails the same way.
+		{
+			name: 'nothing-to-move',
+			error: { message: 'Your earlier install is no longer on this computer, so there’s nothing to move. Choose Set up CORSIA to go on.', details: 'first run finds no earlier install', restored: true, nothing_to_move: true },
+			title: 'CORSIA is ready to set up',
+			line: 'Your earlier install is no longer on this computer, so there’s nothing to move. Choose Set up CORSIA to go on.',
+			details: 'first run finds no earlier install',
+			button: 'Set up CORSIA',
+			next: 'start_local_service',
+		},
 	]) {
-		const page = await open(theme, { start_fresh_preview: preview, start_fresh: { throws: error } });
+		const page = await open(theme, { start_fresh_preview: preview, start_fresh: { throws: error }, start_local_service: { pending: true } });
 		const before = failed;
 		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
 		await page.click('#retry');
 		await page.waitForFunction(() => document.getElementById('retry').textContent === 'Move and start fresh');
 		await page.click('#retry');
-		await page.waitForFunction(() => document.getElementById('status').textContent === 'CORSIA couldn’t start fresh');
-		compare(`${theme} failure ${name}`, await read(page), { line, details, button, list: null, quit: true });
+		await page.waitForFunction((expected) => document.getElementById('status').textContent === expected, title);
+		compare(`${theme} failure ${name}`, await read(page), { title, line, details, button, list: null, quit: true });
 		await shot(page, theme, `5-failure-${name}`);
 		await page.click('#retry');
 		await page.waitForTimeout(150);

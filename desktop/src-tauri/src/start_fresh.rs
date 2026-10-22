@@ -83,52 +83,69 @@ pub struct StartFreshError {
     pub message: String,
     /// The technical reason, shown under Details.
     pub details: String,
-    /// Every file is where it was before Start fresh ran, so Retry starts over. The message
-    /// says when the earlier install did not start again.
+    /// Every file is where it was before Start fresh ran, so Retry starts over.
     pub restored: bool,
+    /// The earlier install ran before Start fresh and isn't running now. The window must
+    /// say so, so the app stays open even when Quit was asked meanwhile.
+    pub left_stopped: bool,
+    /// No earlier install is left to set aside, so setup goes on instead of Retry.
+    pub nothing_to_move: bool,
 }
 
 impl StartFreshError {
+    fn new(message: impl Into<String>, details: impl Into<String>, restored: bool) -> Self {
+        Self { message: message.into(), details: details.into(), restored, left_stopped: false, nothing_to_move: false }
+    }
+
     pub(crate) fn untouched(details: impl Into<String>) -> Self {
+        Self::new("CORSIA couldn’t set your earlier install aside. Nothing was changed.", details, true)
+    }
+
+    /// Start fresh can't run on this computer as it is: `message` says why and what the person
+    /// can do, and `details` how, when that takes more than the line can say.
+    fn refused(message: String, details: String) -> Self {
+        Self::new(message, details, true)
+    }
+
+    /// The earlier install's pieces are gone, or this app is already set up.
+    fn nothing_to_move(details: impl Into<String>) -> Self {
         Self {
-            message: "CORSIA couldn’t set your earlier install aside. Nothing was changed.".into(),
-            details: details.into(),
-            restored: true,
+            nothing_to_move: true,
+            ..Self::new(
+                "Your earlier install is no longer on this computer, so there’s nothing to move. \
+                 Choose Set up CORSIA to go on.",
+                details,
+                true,
+            )
         }
     }
 
-    /// Start fresh can't run on this computer as it is: `message` says why and what the person can do.
-    fn refused(message: String) -> Self {
-        Self { message, details: String::new(), restored: true }
+    /// Every file is back, but the earlier install that ran before did not start again.
+    fn not_started(details: String) -> Self {
+        Self { left_stopped: true, ..Self::new(NOT_STARTED, details, true) }
     }
 
     /// The step stopped partway for a reason that says nothing about the files. The journal
     /// decides what the next launch puts back, so quitting and opening CORSIA again is safe.
     pub(crate) fn unfinished(details: impl Into<String>) -> Self {
-        Self {
-            message: "CORSIA stopped partway. Quit and open CORSIA again, and it will put everything back.".into(),
-            details: details.into(),
-            restored: false,
-        }
+        Self::new("CORSIA stopped partway. Quit and open CORSIA again, and it will put everything back.", details, false)
     }
 
     /// Some moves could not be put back. The journal stays, so the next launch tries again.
     fn not_put_back(journal: &Journal, details: String) -> Self {
-        Self {
-            message: format!(
-                "CORSIA couldn’t put everything back. Nothing was deleted: what it moved is in {}. \
-                 Reopen CORSIA to try again.",
-                backup_shown(&journal.backup)
-            ),
-            details,
-            restored: false,
-        }
+        let message = format!(
+            "CORSIA couldn’t put everything back, but nothing was deleted: what it moved is in {}. \
+             Reopen CORSIA to try again.",
+            backup_shown(&journal.backup)
+        );
+        Self::new(message, details, false)
     }
 }
 
-/// Said after the files are back when the earlier install did not start again.
-const NOT_STARTED: &str = "CORSIA couldn’t start your earlier install again, so it isn’t running. \
-                           Choose Retry to try Start fresh again.";
+/// Said after the files are back when the earlier install did not start again, whatever
+/// failed first; Details says what that was.
+const NOT_STARTED: &str = "Everything is back where it was, but CORSIA couldn’t start your earlier install \
+                           again, so it isn’t running. Choose Retry to try Start fresh again.";
 
 /// The earlier install's service. Production asks launchd and the checkout's own
 /// script; unit tests use a fake, so no test reaches launchd.
@@ -205,6 +222,12 @@ fn is_checkout(path: &Path) -> bool {
 
 /// Everything Start fresh would move, or why it must not run. Reads only.
 pub fn inventory(home: &Path, app_dir: &Path) -> Result<Inventory, StartFreshError> {
+    match first_run::plan(home, app_dir).map_err(StartFreshError::untouched)? {
+        FirstRun::ExistingInstall { .. } | FirstRun::Adoptable { .. } => {}
+        FirstRun::Configured | FirstRun::Fresh { .. } => {
+            return Err(StartFreshError::nothing_to_move("first run finds no earlier install"))
+        }
+    }
     let unreadable = |path: &Path, error: std::io::Error| {
         StartFreshError::untouched(format!("could not read {}: {error}", path.display()))
     };
@@ -254,18 +277,21 @@ pub fn inventory(home: &Path, app_dir: &Path) -> Result<Inventory, StartFreshErr
             return Err(StartFreshError::refused(format!(
                 "{name} is on another disk, so CORSIA can’t move it into the backup folder. \
                  Rename it or move it off that disk yourself, then choose Retry."
-            )));
+            ), String::new()));
         }
         let resolved = resolved(marker).unwrap_or_else(|| marker.clone());
         for checkout in &checkouts {
             let holds = checkout.starts_with(&resolved);
             if holds || (resolved.starts_with(checkout) && resolved != config) {
                 let code = shown(&home, checkout);
-                return Err(StartFreshError::refused(format!(
-                    "{name} is {} CORSIA’s code folder, {code}, and Start fresh never moves code. \
-                     To set it aside yourself, run {code}/scripts/corsia stop, rename {name}, then choose Retry.",
-                    if holds { "holding" } else { "inside" }
-                )));
+                return Err(StartFreshError::refused(
+                    format!(
+                        "{name} is {} CORSIA’s code folder, {code}, and Start fresh never moves code. \
+                         Stop your earlier install and move {name} yourself, then choose Retry.",
+                        if holds { "holding" } else { "inside" }
+                    ),
+                    format!("To stop it, run {code}/scripts/corsia stop in Terminal."),
+                ));
             }
         }
     }
@@ -312,6 +338,9 @@ pub fn inventory(home: &Path, app_dir: &Path) -> Result<Inventory, StartFreshErr
         if !kept.iter().any(|outer| item.starts_with(outer)) {
             kept.push(item);
         }
+    }
+    if kept.is_empty() {
+        return Err(StartFreshError::nothing_to_move("none of the earlier install's pieces are left"));
     }
     let mut work: Vec<PathBuf> = workspaces
         .iter()
@@ -465,12 +494,8 @@ fn remove_empty_folders(folder: &Path) {
 /// where it was and the earlier install runs again.
 fn undo(app_dir: &Path, journal: &Journal, old: &mut dyn OldService, back: &str, details: String) -> StartFreshError {
     match put_back(app_dir, journal, |stop| old.start(stop)) {
-        PutBack::Done => StartFreshError { message: back.into(), details, restored: true },
-        PutBack::NotStarted(error) => StartFreshError {
-            message: format!("{back} {NOT_STARTED}"),
-            details: format!("{details}; then {error}"),
-            restored: true,
-        },
+        PutBack::Done => StartFreshError::new(back, details, true),
+        PutBack::NotStarted(error) => StartFreshError::not_started(format!("{details}; then {error}")),
         PutBack::Files(error) => StartFreshError::not_put_back(journal, format!("{details}; then {error}")),
     }
 }
@@ -484,12 +509,6 @@ pub fn start_fresh(
     progress: &mut dyn FnMut(Phase),
     now: SystemTime,
 ) -> Result<PathBuf, StartFreshError> {
-    match first_run::plan(home, app_dir).map_err(StartFreshError::untouched)? {
-        FirstRun::ExistingInstall { .. } | FirstRun::Adoptable { .. } => {}
-        FirstRun::Configured | FirstRun::Fresh { .. } => {
-            return Err(StartFreshError::untouched("there is no earlier install to set aside"))
-        }
-    }
     if first_run::present(&journal_path(app_dir)).map_err(StartFreshError::untouched)? {
         return Err(StartFreshError::untouched("an earlier Start fresh has not been undone yet"));
     }
@@ -562,6 +581,13 @@ pub fn start_fresh(
     Ok(backup)
 }
 
+/// Whether a Quit asked for during Start fresh can now be carried out: once everything is
+/// in one known place, and never while the earlier install it stopped isn't running, which
+/// the person has to see first.
+pub fn quit_after(quit_asked: bool, result: &Result<PathBuf, StartFreshError>) -> bool {
+    quit_asked && result.as_ref().map_or_else(|error| error.restored && !error.left_stopped, |_| true)
+}
+
 /// A Start fresh the app did not finish (it quit or crashed partway) is undone
 /// before launch decides anything, so the earlier install is found whole again.
 /// `start_old` starts the earlier install once its files are back.
@@ -582,37 +608,28 @@ pub fn recover_on_launch(
         Err(error) => {
             let details = format!("could not read the Start fresh journal: {error}");
             let (details, kept) = set_journal_aside(app_dir, details);
-            let left = format!("Nothing was deleted: anything it moved is in ~/{BACKUPS_FOLDER}.");
-            return Err(StartFreshError {
-                message: format!("CORSIA couldn’t read its record of what Start fresh moved. {left} {}", next_launch(kept)),
-                details,
-                restored: false,
-            });
+            let message = format!(
+                "CORSIA couldn’t read its record of what Start fresh moved, but nothing was deleted: \
+                 anything it moved is in ~/{BACKUPS_FOLDER}. {}",
+                next_launch(kept)
+            );
+            return Err(StartFreshError::new(message, details, false));
         }
         Ok(journal) => match put_back(app_dir, &journal, start_old) {
             PutBack::Done => return Ok(()),
-            PutBack::NotStarted(details) => {
-                return Err(StartFreshError {
-                    message: format!("CORSIA put back everything Start fresh had moved. {NOT_STARTED}"),
-                    details,
-                    restored: true,
-                })
-            }
+            PutBack::NotStarted(details) => return Err(StartFreshError::not_started(details)),
             PutBack::Files(details) => {
                 let (details, kept) = set_journal_aside(app_dir, details);
                 (journal, details, kept)
             }
         },
     };
-    Err(StartFreshError {
-        message: format!(
-            "CORSIA couldn’t put everything back. Nothing was deleted: what it moved is still in {}. {}",
-            backup_shown(&journal.backup),
-            next_launch(kept)
-        ),
-        details,
-        restored: false,
-    })
+    let message = format!(
+        "CORSIA couldn’t put everything back, but nothing was deleted: what it moved is still in {}. {}",
+        backup_shown(&journal.backup),
+        next_launch(kept)
+    );
+    Err(StartFreshError::new(message, details, false))
 }
 
 /// What the person does after a launch-time undo that couldn't finish.
@@ -635,15 +652,91 @@ fn set_journal_aside(app_dir: &Path, details: String) -> (String, bool) {
     }
 }
 
-/// The earlier install's service as launchd runs it. Its own `scripts/corsia stop`
-/// drains it when the install is one this app could adopt, and a stop that refuses is
-/// the answer; launchd boots out only an install this app can't adopt.
-pub struct LaunchdService {
-    source: Option<SourceLifecycle>,
+/// What `LaunchdService` asks of launchd, the earlier install's port and its databases.
+/// Production asks the real ones (`SystemLaunchd`); unit tests script the answers.
+pub trait Launchd {
+    /// launchd lists the earlier install's job.
+    fn loaded(&mut self) -> Result<bool, String>;
+    /// Something answers on the earlier install's backend port.
+    fn port_answers(&mut self) -> bool;
+    /// Ask launchd to stop the job. Only for an install this app can't adopt.
+    fn bootout(&mut self) -> Result<(), String>;
+    /// Ask launchd to run the job from its plist again, when the plist is still there.
+    fn bootstrap(&mut self) -> Result<(), String>;
+    /// Every existing `corsia.db` of the earlier install opens exclusively.
+    fn databases_released(&mut self) -> Result<(), String>;
+}
+
+/// launchd and the earlier install's files as this computer has them.
+pub struct SystemLaunchd {
     plist: PathBuf,
     port: Option<u16>,
     databases: Vec<PathBuf>,
     python: PathBuf,
+}
+
+impl SystemLaunchd {
+    fn target() -> String {
+        format!("gui/{}/{}", unsafe { libc::geteuid() }, adoption::SOURCE_LABEL)
+    }
+}
+
+impl Launchd for SystemLaunchd {
+    fn loaded(&mut self) -> Result<bool, String> {
+        Command::new("/bin/launchctl")
+            .args(["print", &Self::target()])
+            .output()
+            .map(|output| output.status.success())
+            .map_err(|error| format!("could not ask launchd about the earlier install: {error}"))
+    }
+
+    fn port_answers(&mut self) -> bool {
+        self.port.is_some_and(|port| !release_proof::port_refuses(port))
+    }
+
+    fn bootout(&mut self) -> Result<(), String> {
+        let status = Command::new("/bin/launchctl")
+            .args(["bootout", &Self::target()])
+            .status()
+            .map_err(|error| format!("could not ask launchd to stop the earlier install: {error}"))?;
+        if !status.success() {
+            log::warn!("`launchctl bootout` exited {status}; checking whether the earlier install stopped");
+        }
+        Ok(())
+    }
+
+    fn bootstrap(&mut self) -> Result<(), String> {
+        if !self.plist.is_file() {
+            return Ok(());
+        }
+        let status = Command::new("/bin/launchctl")
+            .arg("bootstrap")
+            .arg(format!("gui/{}", unsafe { libc::geteuid() }))
+            .arg(&self.plist)
+            .status()
+            .map_err(|error| format!("could not ask launchd to start the earlier install: {error}"))?;
+        status
+            .success()
+            .then_some(())
+            .ok_or_else(|| format!("`launchctl bootstrap` exited {status}"))
+    }
+
+    fn databases_released(&mut self) -> Result<(), String> {
+        for database in self.databases.iter().filter(|database| database.is_file()) {
+            release_proof::database_released(&self.python, database)
+                .map_err(|error| format!("{}: {error}", database.display()))?;
+        }
+        Ok(())
+    }
+}
+
+/// The earlier install's service as launchd runs it. Its own `scripts/corsia stop`
+/// drains it when the install is one this app could adopt, and a stop that refuses is
+/// the answer; launchd boots out only an install this app can't adopt.
+pub struct LaunchdService<L = SourceLifecycle, D = SystemLaunchd> {
+    source: Option<L>,
+    launchd: D,
+    timeout: Duration,
 }
 
 impl LaunchdService {
@@ -660,45 +753,23 @@ impl LaunchdService {
                 .join(first_run::LEGACY_STATE_FOLDER)
                 .join("state"),
         );
-        Self {
-            source,
-            plist,
-            port: roots.port,
-            databases: states.into_iter().map(|state| state.join("corsia.db")).collect(),
-            python,
-        }
+        let databases = states.into_iter().map(|state| state.join("corsia.db")).collect();
+        let launchd = SystemLaunchd { plist, port: roots.port, databases, python };
+        Self { source, launchd, timeout: STOP_TIMEOUT }
     }
+}
 
-    fn target() -> String {
-        format!("gui/{}/{}", unsafe { libc::geteuid() }, adoption::SOURCE_LABEL)
-    }
-
-    fn loaded(&self) -> Result<bool, String> {
-        Command::new("/bin/launchctl")
-            .args(["print", &Self::target()])
-            .output()
-            .map(|output| output.status.success())
-            .map_err(|error| format!("could not ask launchd about the earlier install: {error}"))
-    }
-
+impl<L: adoption::Lifecycle, D: Launchd> LaunchdService<L, D> {
     fn released(&mut self) -> Result<(), String> {
         if self.running()? {
             return Err("the earlier install is still running".into());
         }
-        self.databases_released()
-    }
-
-    fn databases_released(&self) -> Result<(), String> {
-        for database in self.databases.iter().filter(|database| database.is_file()) {
-            release_proof::database_released(&self.python, database)
-                .map_err(|error| format!("{}: {error}", database.display()))?;
-        }
-        Ok(())
+        self.launchd.databases_released()
     }
 
     /// Wait until `check` passes, or say why it never did.
     fn wait_for(&mut self, mut check: impl FnMut(&mut Self) -> Result<(), String>) -> Result<(), String> {
-        let deadline = Instant::now() + STOP_TIMEOUT;
+        let deadline = Instant::now() + self.timeout;
         loop {
             match check(self) {
                 Ok(()) => return Ok(()),
@@ -711,7 +782,7 @@ impl LaunchdService {
     }
 }
 
-impl OldService for LaunchdService {
+impl<L: adoption::Lifecycle, D: Launchd> OldService for LaunchdService<L, D> {
     fn stop(
         &mut self,
         progress: &mut dyn FnMut(Option<u32>),
@@ -719,32 +790,24 @@ impl OldService for LaunchdService {
     ) -> Result<(), String> {
         if self.running()? {
             if let Some(source) = self.source.as_mut() {
-                use adoption::Lifecycle;
                 source.stop_old(progress, spawned)?;
             } else {
                 progress(None);
-                let status = Command::new("/bin/launchctl")
-                    .args(["bootout", &Self::target()])
-                    .status()
-                    .map_err(|error| format!("could not ask launchd to stop the earlier install: {error}"))?;
-                if !status.success() {
-                    log::warn!("`launchctl bootout` exited {status}; checking whether the earlier install stopped");
-                }
+                self.launchd.bootout()?;
                 return self.wait_for(Self::released);
             }
         }
         // Whatever stopped it, and even when launchd never ran it, a backend still holding a
         // database (one started by hand, say) means its folders must not move.
-        self.wait_for(|service| service.databases_released())
+        self.wait_for(|service| service.launchd.databases_released())
     }
 
     fn running(&mut self) -> Result<bool, String> {
-        Ok(self.loaded()? || self.port.is_some_and(|port| !release_proof::port_refuses(port)))
+        Ok(self.launchd.loaded()? || self.launchd.port_answers())
     }
 
     fn start(&mut self, stop: Option<&StopProcess>) -> Result<(), String> {
         if let Some(source) = self.source.as_mut() {
-            use adoption::Lifecycle;
             // Until a stop left draining exits, starting would do nothing. It is never killed.
             if let Some(stop) = stop {
                 while source.stop_is_running(stop) {
@@ -753,19 +816,10 @@ impl OldService for LaunchdService {
             }
             return source.start_old();
         }
-        if self.loaded()? || !self.plist.is_file() {
+        if self.launchd.loaded()? {
             return Ok(());
         }
-        let status = Command::new("/bin/launchctl")
-            .arg("bootstrap")
-            .arg(format!("gui/{}", unsafe { libc::geteuid() }))
-            .arg(&self.plist)
-            .status()
-            .map_err(|error| format!("could not ask launchd to start the earlier install: {error}"))?;
-        status
-            .success()
-            .then_some(())
-            .ok_or_else(|| format!("`launchctl bootstrap` exited {status}"))
+        self.launchd.bootstrap()
     }
 }
 
@@ -1060,6 +1114,7 @@ mod tests {
         let error = run(&home, &mut service).unwrap_err();
 
         assert!(error.restored);
+        assert!(!error.left_stopped, "it runs again");
         assert!(error.message.contains("couldn’t finish stopping"));
         assert_eq!(home.files(), before);
         assert!(home.backups().is_empty());
@@ -1091,11 +1146,29 @@ mod tests {
         let error = run(&home, &mut service).unwrap_err();
 
         assert!(error.restored, "the files are where they were");
-        assert!(error.message.contains("couldn’t finish stopping"), "{}", error.message);
-        assert!(error.message.contains("isn’t running"), "{}", error.message);
+        assert!(error.left_stopped, "the app stays open to say so, even after Quit");
+        assert_eq!(error.message, NOT_STARTED, "one line, whatever failed first");
+        assert!(error.details.contains("it would not stop"), "{}", error.details);
         assert!(error.details.contains("it would not start"), "{}", error.details);
         assert_eq!(home.files(), before);
         assert!(!journal_path(&home.app_dir()).exists(), "Retry starts over instead of undoing again");
+    }
+
+    #[test]
+    fn quit_during_start_fresh_waits_until_the_person_can_see_the_earlier_install_is_down() {
+        let outcome = |service: &mut FakeService| {
+            let home = Home::new("quit");
+            source_install(&home);
+            run(&home, service)
+        };
+        let done = outcome(&mut FakeService { running: true, ..Default::default() });
+        let put_back = outcome(&mut FakeService { running: true, refuse_stop: true, ..Default::default() });
+        let down = outcome(&mut FakeService { running: true, refuse_stop: true, start_fails: true, ..Default::default() });
+        assert!(quit_after(true, &done));
+        assert!(!quit_after(false, &done));
+        assert!(quit_after(true, &put_back));
+        assert!(!quit_after(true, &down), "{down:?}");
+        assert!(!quit_after(true, &Err(StartFreshError::unfinished("x"))));
     }
 
     #[test]
@@ -1148,7 +1221,8 @@ mod tests {
         let error = recover_on_launch(&home.app_dir(), |_| Err("it would not start".into())).unwrap_err();
 
         assert!(error.restored);
-        assert!(error.message.contains("isn’t running"), "{}", error.message);
+        assert!(error.left_stopped);
+        assert_eq!(error.message, NOT_STARTED);
         assert_eq!(error.details, "it would not start");
         assert_eq!(home.files(), before);
         assert!(!journal_path(&home.app_dir()).exists(), "the next launch goes on as usual");
@@ -1224,8 +1298,9 @@ mod tests {
         assert_eq!(
             error.message,
             "~/Corsia is holding CORSIA’s code folder, ~/Corsia/source/corsia, and Start fresh never moves code. \
-             To set it aside yourself, run ~/Corsia/source/corsia/scripts/corsia stop, rename ~/Corsia, then choose Retry."
+             Stop your earlier install and move ~/Corsia yourself, then choose Retry."
         );
+        assert_eq!(error.details, "To stop it, run ~/Corsia/source/corsia/scripts/corsia stop in Terminal.");
         assert_eq!(preview(&home.0, &home.app_dir()).unwrap_err(), error, "the confirmation says the same");
         assert_eq!(service.stops, 0);
         assert_eq!(home.files(), before);
@@ -1277,6 +1352,8 @@ mod tests {
         let home = Home::new("nothing");
         let error = run(&home, &mut FakeService::default()).unwrap_err();
         assert!(error.restored);
+        assert!(error.nothing_to_move, "setup goes on instead of a Retry that fails the same way");
+        assert_eq!(preview(&home.0, &home.app_dir()).unwrap_err(), error, "the confirmation says the same");
         assert!(home.files().is_empty());
         assert!(home.backups().is_empty());
     }
@@ -1312,5 +1389,176 @@ mod tests {
         assert_eq!(stamp.len(), "2026-10-22 13-05".len());
         assert_eq!(&stamp[4..5], "-");
         assert_eq!(&stamp[10..11], " ");
+    }
+
+    /// launchd, the port and the databases as a test scripts them.
+    #[derive(Default)]
+    struct FakeLaunchd {
+        loaded: bool,
+        port: bool,
+        databases_held: bool,
+        bootouts: u32,
+        bootstraps: u32,
+    }
+
+    impl Launchd for FakeLaunchd {
+        fn loaded(&mut self) -> Result<bool, String> {
+            Ok(self.loaded)
+        }
+
+        fn port_answers(&mut self) -> bool {
+            self.port
+        }
+
+        fn bootout(&mut self) -> Result<(), String> {
+            self.bootouts += 1;
+            self.loaded = false;
+            self.port = false;
+            Ok(())
+        }
+
+        fn bootstrap(&mut self) -> Result<(), String> {
+            self.bootstraps += 1;
+            self.loaded = true;
+            Ok(())
+        }
+
+        fn databases_released(&mut self) -> Result<(), String> {
+            if self.databases_held {
+                return Err("database is locked".into());
+            }
+            Ok(())
+        }
+    }
+
+    /// The adoptable install's own lifecycle: only the stop and start Start fresh uses.
+    #[derive(Default)]
+    struct FakeSource {
+        refuse: bool,
+        stops: u32,
+        starts: u32,
+        /// Looks for which a stop left by an earlier run is still draining.
+        draining: u32,
+    }
+
+    impl adoption::Lifecycle for FakeSource {
+        fn check_ready(&mut self, _state: &Path, _names: &BTreeSet<String>) -> Result<(), adoption::ReadyError> {
+            unreachable!("Start fresh never adopts")
+        }
+
+        fn stop_old(
+            &mut self,
+            _progress: &mut dyn FnMut(Option<u32>),
+            spawned: &mut dyn FnMut(StopProcess) -> Result<(), String>,
+        ) -> Result<(), String> {
+            self.stops += 1;
+            spawned(a_stop())?;
+            if self.refuse {
+                return Err("`corsia stop` refused: work is still running".into());
+            }
+            Ok(())
+        }
+
+        fn stop_is_running(&mut self, _stop: &StopProcess) -> bool {
+            let draining = self.draining > 0;
+            self.draining = self.draining.saturating_sub(1);
+            draining
+        }
+
+        fn orphan_poll(&self) -> Duration {
+            Duration::ZERO
+        }
+
+        fn old_is_down(&mut self) -> Result<(), String> {
+            unreachable!("Start fresh never adopts")
+        }
+
+        fn backup(&mut self, _state: &Path) -> Result<PathBuf, String> {
+            unreachable!("Start fresh never adopts")
+        }
+
+        fn start_new(&mut self, _state: &Path, _port: u16, _app_dir: &Path) -> Result<(), String> {
+            unreachable!("Start fresh never adopts")
+        }
+
+        fn stop_new(&mut self, _state: &Path, _port: u16) -> Result<(), String> {
+            unreachable!("Start fresh never adopts")
+        }
+
+        fn restore_backup(&mut self, _state: &Path, _snapshot: &Path) -> Result<(), String> {
+            unreachable!("Start fresh never adopts")
+        }
+
+        fn start_old(&mut self) -> Result<(), String> {
+            assert_eq!(self.draining, 0, "started while a stop was still draining");
+            self.starts += 1;
+            Ok(())
+        }
+    }
+
+    fn launchd_service(source: Option<FakeSource>, launchd: FakeLaunchd) -> LaunchdService<FakeSource, FakeLaunchd> {
+        LaunchdService { source, launchd, timeout: Duration::from_millis(300) }
+    }
+
+    fn stop(service: &mut LaunchdService<FakeSource, FakeLaunchd>) -> Result<(), String> {
+        service.stop(&mut |_| {}, &mut |_| Ok(()))
+    }
+
+    #[test]
+    fn an_adoptable_install_is_stopped_only_by_its_own_stop() {
+        let mut service = launchd_service(Some(FakeSource::default()), FakeLaunchd { loaded: true, ..Default::default() });
+        stop(&mut service).unwrap();
+        assert_eq!(service.source.as_ref().unwrap().stops, 1);
+        assert_eq!(service.launchd.bootouts, 0, "running work is drained, never killed");
+    }
+
+    #[test]
+    fn a_refused_stop_is_the_answer_and_nothing_is_booted_out() {
+        let source = FakeSource { refuse: true, ..Default::default() };
+        let mut service = launchd_service(Some(source), FakeLaunchd { loaded: true, ..Default::default() });
+        let error = stop(&mut service).unwrap_err();
+        assert!(error.contains("refused"), "{error}");
+        assert_eq!(service.launchd.bootouts, 0);
+    }
+
+    #[test]
+    fn an_install_this_app_cannot_adopt_is_booted_out_and_proven_released() {
+        let mut service = launchd_service(None, FakeLaunchd { loaded: true, port: true, ..Default::default() });
+        stop(&mut service).unwrap();
+        assert_eq!(service.launchd.bootouts, 1);
+        assert!(!service.running().unwrap());
+    }
+
+    #[test]
+    fn a_held_database_keeps_everything_in_place_even_when_nothing_looks_running() {
+        for source in [None, Some(FakeSource::default())] {
+            let adoptable = source.is_some();
+            let mut service = launchd_service(source, FakeLaunchd { databases_held: true, ..Default::default() });
+            let error = stop(&mut service).unwrap_err();
+            assert!(error.contains("did not stop") && error.contains("locked"), "{error}");
+            assert_eq!(service.launchd.bootouts, 0);
+            assert_eq!(service.source.as_ref().map_or(0, |source| source.stops), 0, "adoptable {adoptable}");
+        }
+        // Stopped by its own stop, but something else still holds the database.
+        let source = FakeSource::default();
+        let mut service = launchd_service(Some(source), FakeLaunchd { loaded: true, databases_held: true, ..Default::default() });
+        assert!(stop(&mut service).is_err());
+    }
+
+    #[test]
+    fn the_earlier_install_starts_only_after_a_left_stop_drains() {
+        let source = FakeSource { draining: 3, ..Default::default() };
+        let mut service = launchd_service(Some(source), FakeLaunchd::default());
+        service.start(Some(&a_stop())).unwrap();
+        assert_eq!(service.source.as_ref().unwrap().starts, 1);
+        assert_eq!(service.launchd.bootstraps, 0, "an adoptable install starts through its own checkout");
+    }
+
+    #[test]
+    fn an_install_this_app_cannot_adopt_is_started_by_launchd_only_when_not_loaded() {
+        let mut service = launchd_service(None, FakeLaunchd::default());
+        service.start(None).unwrap();
+        service.start(None).unwrap();
+        assert_eq!(service.launchd.bootstraps, 1);
     }
 }
