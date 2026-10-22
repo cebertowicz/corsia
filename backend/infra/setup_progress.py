@@ -1,8 +1,9 @@
 """Where first-run setup stands, kept by the backend: one record per install.
 
 The record is the only owner of "did this person finish setup". It holds the
-step reached after the account exists, the person's local-AI choice, what they
-checked on Welcome (``picks``), the setup-to-chat handoff, and
+step reached after the account exists, the person's local-AI choice, which
+subscriptions they said they pay for (``picks``; ``key``, a pay-as-you-go key,
+only when they were asked), the setup-to-chat handoff, and
 ``setup_completed``, which is written only when they finish. Eligibility facts
 (memory, disk, sources) are never stored here: a resumed setup re-reads them.
 
@@ -21,7 +22,7 @@ from infra.settings import get_setting, set_setting
 KEY = "setup_progress"
 #: Steps after the account exists: Connect an AI, and the existing-oMLX question inside it.
 STEPS = frozenset({"models", "local-consent"})
-#: What Welcome asks the person to check: the two subscriptions and a pay-as-you-go key.
+#: What the person says they pay for: the two subscriptions and, only when asked, a pay-as-you-go key.
 PICKS = ("claude", "chatgpt", "key")
 
 
@@ -44,7 +45,7 @@ def view(*, db: sqlite3.Connection | None = None) -> dict:
         "setup_completed": not incomplete,
         "step": record["step"] if incomplete else None,
         "local_ai": local_ai if isinstance(local_ai, bool) else None,
-        "picks": {key: picks.get(key) is True for key in PICKS} if isinstance(picks, dict) else None,
+        "picks": {key: picks[key] is True for key in PICKS if key in picks} if isinstance(picks, dict) else None,
     }
 
 
@@ -62,8 +63,8 @@ def update(
     """Record setup state and the validated setup-to-chat handoff; a completed setup never reopens."""
     if step is not None and step not in STEPS:
         raise SetupProgressError("unknown setup step")
-    if picks is not None and (set(picks) != set(PICKS) or not all(isinstance(on, bool) for on in picks.values())):
-        raise SetupProgressError("picks must say yes or no for each of claude, chatgpt and key")
+    if picks is not None and (not {"claude", "chatgpt"} <= set(picks) <= set(PICKS) or not all(isinstance(on, bool) for on in picks.values())):
+        raise SetupProgressError("picks must say yes or no for claude and chatgpt, and for key when asked")
     # One write transaction around the read and the write: overlapping changes queue, so a step
     # written late can never overwrite a completion that landed first.
     with write_transaction(db, scope="setup_progress_update") as connection:
@@ -75,7 +76,7 @@ def update(
         if local_ai is not None:
             record["local_ai"] = local_ai
         if picks is not None:
-            record["picks"] = {key: picks[key] for key in PICKS}
+            record["picks"] = {key: picks[key] for key in PICKS if key in picks}
         if handoff is not None:
             record["handoff"] = handoff
         if completed:

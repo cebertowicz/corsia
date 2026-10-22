@@ -498,7 +498,9 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "A helper that fails or returns nothing: write that heading's suggestion yourself." in doc
     assert "`bound_model` `source` is `omlx`): start no helper. Write the suggestions yourself, one heading at a time." in doc
     # One review ask, worded for the review bar with or without the accept-all button.
-    assert doc.count("I put what I know in your About you doc. Change anything that's wrong, accept the suggestions you want, then press Approve.") == 1
+    assert doc.count("`I put what I know in your About you doc. Change anything that's wrong, accept the suggestions you want, then press Approve.`") == 1
+    assert doc.count("Change anything that's wrong, accept the suggestions you want, then press Approve.") == 2  # the ask's reason, then the one chat line
+    assert "`block_node` with `owner_kind` `user`" in doc and "`ask_artifact_id` the document's artifact id" in doc  # Approve only shows with an ask
     assert "Accept them all" not in doc
     assert "suggest that line again yourself on the text now in the doc. Never wait on a helper" in doc
     assert "A comment from the person on a line: answer with a suggested change to that line." in doc
@@ -507,7 +509,7 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "Remove any heading left with nothing under it, so no placeholder ever stays" in doc
     # Failure paths.
     assert "ask `Keep these?`" in doc
-    assert "\"Not now\", or they carry on with something else: skip to section 5 and write the profile from the chat answers." in doc
+    assert "\"Not now\", or they carry on with something else: close that task with the reason that they chose not now, skip to section 5 and write the profile from the chat answers." in doc
     assert len(doc.split()) < 900
 
 

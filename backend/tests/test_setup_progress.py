@@ -314,6 +314,14 @@ def test_picks_change_after_the_account_and_a_later_write_keeps_the_rest(client)
     assert progress["local_ai"] is False
 
 
+def test_a_subscriptions_answer_stores_no_answer_for_the_key_it_never_asked_about(client):
+    token = _create_account(client)
+
+    assert _put(client, {"picks": {"claude": True, "chatgpt": False}}, token).status_code == 200
+
+    assert _progress(client, token)["picks"] == {"claude": True, "chatgpt": False}
+
+
 def test_no_picks_reads_as_none_not_as_all_unchecked(client):
     assert _progress(client, _create_account(client))["picks"] is None
 
@@ -323,7 +331,7 @@ def test_no_picks_reads_as_none_not_as_all_unchecked(client):
     {"claude": True, "chatgpt": True, "key": True, "other": True},
     {"claude": "yes", "chatgpt": False, "key": False},
 ])
-def test_picks_must_say_yes_or_no_for_exactly_the_three_choices(client, picks):
+def test_picks_must_say_yes_or_no_for_both_subscriptions_and_name_nothing_else(client, picks):
     token = _create_account(client)
 
     assert _put(client, {"picks": picks}, token).status_code == 422

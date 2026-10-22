@@ -167,7 +167,7 @@
 	function answerSubscriptions(next: SetupPicks) {
 		picks = next;
 		// Kept so the first chat knows which subscriptions the person said they pay for.
-		void recordSetupProgress({ picks: { ...next, key: false } }, get(token));
+		void recordSetupProgress({ picks: next }, get(token));
 		for (const vendor of CLI_VENDORS) {
 			if (cliSignedIn(vendor)) continue;
 			const source = sources.find((row) => row.source === vendor);
@@ -275,7 +275,8 @@
 			await bindSetupFirstModel(current, tested, async () => {
 				if (!await recordSetupProgress({ handoff: { tools: connectFlow.attempts } }, current)) throw new SetupFirstModelError('progress_save');
 			});
-			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts } }, current)) throw new SetupFirstModelError('progress_save');
+			// The answer rides the completion write too, so a failed earlier save is repaired before the first chat reads it.
+			if (!await recordSetupProgress({ completed: true, handoff: { tools: connectFlow.attempts }, ...(picks ? { picks } : {}) }, current)) throw new SetupFirstModelError('progress_save');
 			onFinished();
 		} catch (error) {
 			await refreshSources(true);

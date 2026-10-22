@@ -172,10 +172,10 @@
       "sha256": "3f9c8e7ac9201a0cd75729fdd130f42c4e2f46039cc144dd1dbbbca0176e6abb"
     },
     {
-      "bytes": 4250,
+      "bytes": 4753,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/about-you-doc.md",
-      "sha256": "54d65e64e2d2d5b32f61a607efe71baf29dccf872ab7ec8d27080ae54abe31b0"
+      "sha256": "b77dd8ee4f1ec7097937f80fe4ae4b3a70d9fd61d805d62b1f6d71bafe0f21ed"
     },
     {
       "bytes": 7475,
@@ -196,16 +196,16 @@
       "sha256": "b9980691426d554efedb2390ed5d5a52cbfa187f58be6df969ce7b8c9b802cc2"
     },
     {
-      "bytes": 17519,
+      "bytes": 17525,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run.md",
-      "sha256": "c5c00a5c8fe1cc91132db225533f30b36f96162ee6fc8bb8db16a97f1bea2914"
+      "sha256": "41082a30e221bc04e0aa288a5aa6cad1dea243270d61ae7849d587d9ac3b0986"
     },
     {
-      "bytes": 906,
+      "bytes": 991,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/import-result-lines.md",
-      "sha256": "26983466a27c18f441c5d82482388f5776fdbd6e381e20898fa5a7809d89df35"
+      "sha256": "63b5eed3014fc27d9906f6635c4e4b90541732fa28bf2c1829a4584234c3a980"
     },
     {
       "bytes": 3838,

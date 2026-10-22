@@ -36,11 +36,11 @@ A heading with nothing to put under it gets no suggestion.
 
 ## 3. Ask for the review, once
 
-When every suggestion is in, post once `I put what I know in your About you doc. Change anything that's wrong, accept the suggestions you want, then press Approve.`
+When every suggestion is in, add the task `Review your About you doc` to your plan and hold it on the person: `plan_update` `block_node` with `owner_kind` `user`, `reason_key` `review_about_you`, `ask_artifact_id` the document's artifact id (`artifact_resolve` on `shared/about-you.md`) and `reason` `Change anything that's wrong, accept the suggestions you want, then press Approve.` That ask is what puts Approve in the document; without it the person sees no button. Then post once `I put what I know in your About you doc. Change anything that's wrong, accept the suggestions you want, then press Approve.`
 
 - When the person's edit leaves a suggestion with nothing to attach to, suggest that line again yourself on the text now in the doc. Never wait on a helper that is still running.
 - A comment from the person on a line: answer with a suggested change to that line.
-- "Not now", or they carry on with something else: skip to section 5 and write the profile from the chat answers.
+- "Not now", or they carry on with something else: close that task with the reason that they chose not now, skip to section 5 and write the profile from the chat answers.
 
 ## 4. When they approve
 

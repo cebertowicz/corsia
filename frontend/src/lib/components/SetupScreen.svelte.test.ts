@@ -178,7 +178,7 @@ describe('SetupScreen', () => {
 		expect(calls).toContainEqual({ url: '/api/providers/cli/claude-code/install', method: 'POST' });
 		expect(calls.some((call) => call.url === '/api/providers/cli/codex/install')).toBe(false);
 		// The answer is kept in setup progress, where the first chat reads which subscriptions they pay for.
-		expect(progressBodies.map((body) => JSON.parse(body))).toContainEqual({ picks: { claude: true, chatgpt: false, key: false } });
+		expect(progressBodies.map((body) => JSON.parse(body))).toContainEqual({ picks: { claude: true, chatgpt: false } });
 		expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
 		expect(button('Sign in')).toBeTruthy();
 	});
