@@ -257,3 +257,81 @@ async def test_a_lost_screencast_reconnects_without_ending_the_pane(monkeypatch)
     finally:
         relay.cancel()
         await asyncio.gather(relay, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_screencast_frame_between_drops_resets_the_retry_budget(monkeypatch):
+    monkeypatch.setattr(browser_stream, "PANE_RETRY_DELAYS", (0, 0, 0))
+    attempts, reconnected, cleared = [], asyncio.Event(), []
+
+    async def screencast(_thread_id, _connection_token, deliver):
+        attempts.append(len(attempts))
+        if len(attempts) == 1:
+            raise OSError("connection reset")
+        if len(attempts) == 2:
+            deliver("frame")
+            raise OSError("connection reset")
+        reconnected.set()
+        await asyncio.Future()
+
+    async def watch_page_metadata(*_args):
+        await asyncio.Future()
+
+    def clear_page_endpoint(*args):
+        cleared.append(args)
+
+    class Pane(FakePane):
+        async def receive_text(self):
+            await asyncio.Future()
+
+    monkeypatch.setattr(browser_stream.browser_pane, "screencast", screencast)
+    monkeypatch.setattr(browser_stream.browser_pane, "watch_page_metadata", watch_page_metadata)
+    monkeypatch.setattr(browser_stream.browser_pane, "clear_page_endpoint", clear_page_endpoint)
+    relay = asyncio.create_task(browser_stream._relay(Pane(), "thread", "user"))
+    try:
+        await asyncio.wait_for(reconnected.wait(), 1)
+        assert attempts == [0, 1, 2]
+        assert len(cleared) == 2
+        assert not relay.done()
+    finally:
+        relay.cancel()
+        await asyncio.gather(relay, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_metadata_report_between_drops_resets_the_retry_budget(monkeypatch):
+    monkeypatch.setattr(browser_stream, "PANE_RETRY_DELAYS", (0, 0, 0))
+    attempts, reconnected, cleared = [], asyncio.Event(), []
+
+    async def screencast(*_args):
+        await asyncio.Future()
+
+    async def watch_page_metadata(_thread_id, _connection_token, report):
+        attempts.append(len(attempts))
+        if len(attempts) == 1:
+            raise OSError("connection reset")
+        if len(attempts) == 2:
+            await report({"type": "browser_metadata", "url": "https://example.test", "title": "Example"})
+            raise OSError("connection reset")
+        reconnected.set()
+        await asyncio.Future()
+
+    def clear_page_endpoint(*args):
+        cleared.append(args)
+
+    class Pane(FakePane):
+        async def receive_text(self):
+            await asyncio.Future()
+
+    monkeypatch.setattr(browser_stream.browser_pane, "screencast", screencast)
+    monkeypatch.setattr(browser_stream.browser_pane, "watch_page_metadata", watch_page_metadata)
+    monkeypatch.setattr(browser_stream.browser_pane, "clear_page_endpoint", clear_page_endpoint)
+    relay = asyncio.create_task(browser_stream._relay(Pane(), "thread", "user"))
+    try:
+        await asyncio.wait_for(reconnected.wait(), 1)
+        assert attempts == [0, 1, 2]
+        assert len(cleared) == 2
+        assert not relay.done()
+    finally:
+        relay.cancel()
+        await asyncio.gather(relay, return_exceptions=True)
