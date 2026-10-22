@@ -124,3 +124,12 @@ def test_setup_skills_tell_a_packaged_apps_browser_error_from_a_source_install(t
     for skill in (SKILL, SKILLS / "microsoft-setup/SKILL.md"):
         text = skill.read_text(encoding="utf-8")
         assert "If the error says to reinstall or update CORSIA, the app's own browser is broken" in text
+
+
+def test_a_missing_gh_on_post_as_me_is_installed_by_the_agent_account_tool():
+    from tools.github_agent_account import ACTIONS
+    from tools.managed_runtime import COMMAND_RUNTIME
+
+    text = (SKILLS / "github/references/agent-account.md").read_text(encoding="utf-8")
+    assert "- **`gh` missing:** call `github_agent_account` with `action: \"install\"`" in text
+    assert "install" in ACTIONS and COMMAND_RUNTIME["gh"] == "gh"
