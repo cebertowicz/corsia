@@ -36,7 +36,62 @@ _subscriptions: dict[object, dict[str, Subscription]] = {}
 _commits: dict[str, asyncio.Task] = {}
 _tasks: dict[object, set[asyncio.Task]] = {}
 _openings: dict[object, set[asyncio.Task]] = {}
+_user_feedback_generations: dict[str, int] = {}
+_user_feedback_tasks: dict[str, asyncio.Task] = {}
+USER_FEEDBACK_IDLE_SECONDS = 5
 log = logging.getLogger(__name__)
+
+
+def _close_user_feedback(artifact_id: str) -> list[str]:
+    """Close one person's persisted document feedback after their typing goes quiet."""
+    from doceditor import feedback_batches
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return feedback_batches.close_for_document(
+            db,
+            author_kind="user",
+            author_id=feedback_batches.USER_AUTHOR_ID,
+            artifact_id=artifact_id,
+            reason="idle",
+        )
+    finally:
+        db.close()
+
+
+async def _deliver_user_feedback(artifact_id: str) -> None:
+    """Drive recipients only after the feedback close has committed."""
+    woken = await run_in_db(_close_user_feedback, artifact_id)
+    if woken:
+        from plans import public
+
+        await public.drive_threads(woken)
+
+
+def _cancel_user_feedback(artifact_id: str) -> None:
+    task = _user_feedback_tasks.pop(artifact_id, None)
+    if task is not None:
+        task.cancel()
+
+
+def _schedule_user_feedback(artifact_id: str) -> None:
+    """Deliver persisted user edits five seconds after their last accepted live update."""
+    generation = _user_feedback_generations.get(artifact_id, 0) + 1
+    _user_feedback_generations[artifact_id] = generation
+    _cancel_user_feedback(artifact_id)
+
+    async def deliver() -> None:
+        try:
+            await asyncio.sleep(USER_FEEDBACK_IDLE_SECONDS)
+            if _user_feedback_generations.get(artifact_id) == generation:
+                await _deliver_user_feedback(artifact_id)
+        finally:
+            if _user_feedback_tasks.get(artifact_id) is task:
+                _user_feedback_tasks.pop(artifact_id, None)
+
+    task = asyncio.create_task(deliver())
+    _user_feedback_tasks[artifact_id] = task
 
 
 def _encoded(data: bytes) -> str:
@@ -287,6 +342,8 @@ async def _operate(socket, user: dict, data: dict) -> None:
         await send_to_client(socket, {"type": "doc_received", "artifact_id": artifact_id,
                                     "store_id": live.store.store_id, "message_ids": [identifier]})
         _schedule_commit(artifact_id, entry)
+        if subscription.actor.direct_user:
+            _schedule_user_feedback(artifact_id)
         return
     if kind == "doc_flush" and data.get("retry") is True:
         await entry.lane.retry.retry_blocked()
@@ -356,6 +413,7 @@ async def _leave(socket, artifact_id: str) -> None:
         subscription.entry.live.release_holder(socket)
     if subscription is None or any(artifact_id in rows for rows in _subscriptions.values()):
         return
+    _cancel_user_feedback(artifact_id)
     async def flush():
         task = _commits.get(artifact_id)
         if task:
@@ -368,6 +426,8 @@ async def _leave(socket, artifact_id: str) -> None:
     if manager is not None:
         await manager.evict(artifact_id, subscription.entry, before_close=flush,
                             can_evict=lambda: not any(artifact_id in rows for rows in _subscriptions.values()))
+    if subscription.actor.direct_user:
+        await _deliver_user_feedback(artifact_id)
 
 
 async def disconnect(socket) -> None:

@@ -182,7 +182,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(sendIn(shown.target.querySelector('.bar')!), 'the bar has no Send (RSR-5)').toBeNull();
 		await openDrawer(shown.target);
 		const footer = footerIn(shown.target)!;
-		expect(footer.querySelector('[role="status"]')!.textContent).toBe('1 message not sent yet · it goes to Design when you leave.');
+		expect(footer.querySelector('[role="status"]')!.textContent).toBe('1 message not sent yet · sending to Design shortly.');
 		const send = [...footer.querySelectorAll('button')].find((button) => button.textContent!.trim() === 'Send now')!;
 		send.click();
 		await settle();
@@ -237,7 +237,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		shown.component.reload();
 		await drawn(shown.target);
 
-		expect(mocks.leave).not.toHaveBeenCalled();
+		expect(mocks.send).not.toHaveBeenCalled();
 		// The reload redraws the viewer with its drawer closed; reopened, it still names the pending batch.
 		await openDrawer(shown.target);
 		expect(footerIn(shown.target)!.textContent).toContain('1 message not sent yet');
@@ -245,7 +245,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		unmount(shown.component as unknown as Record<string, unknown>);
 		mounted = mounted.filter((component) => component !== (shown.component as unknown));
 		await settle();
-		expect(mocks.leave).toHaveBeenCalledWith('art-img');
+		expect(mocks.send).toHaveBeenCalledWith('art-img');
 	});
 
 	it('on a phone, keeps the in-document lightbox bar free of review controls', async () => {

@@ -14,7 +14,22 @@ from doceditor import comment_notifications, feedback_batches
 from infra.database import get_db, write_transaction
 
 
-def test_agent_comments_coalesce_then_a_later_comment_opens_a_new_batch(isolated_db):
+def add_user_edit(db, artifact_id: str, recipient_id: str = "owner") -> None:
+    with write_transaction(db, scope="test_add_user_feedback_edit") as connection:
+        feedback_batches.record_edit(
+            connection,
+            artifact_id=artifact_id,
+            recipient_id=recipient_id,
+            author_kind="user",
+            author_id=feedback_batches.USER_AUTHOR_ID,
+            actor_display="Steve",
+            path=Path(f"/workspace/shared/{artifact_id}.md"),
+            before=b"before",
+            after=b"after",
+        )
+
+
+def test_comments_join_an_unstarted_delivered_task_without_a_second_batch(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner", title="Documents")
@@ -32,11 +47,72 @@ def test_agent_comments_coalesce_then_a_later_comment_opens_a_new_batch(isolated
         ).total_seconds() == feedback_batches.AGENT_QUIET
 
         assert feedback_batches.close_batch(db, open_rows[0]["id"], "quiet")[0]
-        fourth, _ = add_comment(db, artifact_id)
+        fourth, feedback = add_comment(db, artifact_id)
         all_rows = batches(db)
-        assert [row["state"] for row in all_rows] == ["delivered", "open"]
+        assert [row["state"] for row in all_rows] == ["delivered"]
         assert all_rows[0]["closed_reason"] == "quiet"
-        assert linked_comment_ids(db, all_rows[1]["id"]) == [fourth["id"]]
+        assert linked_comment_ids(db, all_rows[0]["id"]) == sorted(row["id"] for row in [*comments, fourth])
+        node = db.execute(
+            "SELECT title,description FROM plan_nodes WHERE id=?", (all_rows[0]["delivered_node_id"],),
+        ).fetchone()
+        assert "4 comments" in node["title"]
+        assert f"Comment {fourth['id']}" in node["description"]
+        assert feedback["woken"] == []
+    finally:
+        db.close()
+
+
+def test_user_comment_delivers_immediately_and_client_replay_is_a_noop(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner")
+
+        comment, feedback = add_comment(
+            db, artifact_id, author_kind="user", author_id=None, author="Steve", client_id="first",
+        )
+        replay, replay_feedback = add_comment(
+            db, artifact_id, author_kind="user", author_id=None, author="Steve", client_id="first",
+        )
+
+        [batch] = batches(db)
+        assert replay["id"] == comment["id"]
+        assert (batch["state"], batch["closed_reason"], batch["attempts"]) == ("delivered", "send", 1)
+        assert linked_comment_ids(db, batch["id"]) == [comment["id"]]
+        assert feedback["woken"] == ["owner"]
+        assert replay_feedback["woken"] == []
+    finally:
+        db.close()
+
+
+def test_comment_after_recipient_turn_starts_opens_a_new_batch(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner")
+        first, _ = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
+        [delivered] = batches(db)
+        node = db.execute(
+            """SELECT node.id,node.plan_id,node.commitment_id FROM plan_nodes node
+               WHERE node.id=?""",
+            (delivered["delivered_node_id"],),
+        ).fetchone()
+        db.execute(
+            """INSERT INTO active_turns
+               (id,thread_id,execution_epoch,model,status,started_at,boot_epoch,
+                plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role)
+               VALUES ('owner-turn','owner',0,'native/test','running','t0','boot',?,?,?,?,'execution')""",
+            (node["plan_id"], node["id"], "owner-attempt", node["commitment_id"]),
+        )
+        db.commit()
+
+        second, _ = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
+
+        rows = batches(db)
+        assert len(rows) == 2
+        assert linked_comment_ids(db, rows[0]["id"]) == [first["id"]]
+        assert linked_comment_ids(db, rows[1]["id"]) == [second["id"]]
+        assert rows[0]["delivered_node_id"] != rows[1]["delivered_node_id"]
     finally:
         db.close()
 
@@ -92,13 +168,13 @@ async def test_record_turn_end_closes_agent_author_batch_through_turn_end_effect
         db.close()
 
 
-def test_user_leave_return_restores_idle_and_due_rows_record_leave_or_idle(isolated_db):
+def test_user_edit_leave_return_restores_idle_and_due_rows_record_leave_or_idle(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner")
         first_doc = seed_document(db, "owner", name="leave.md")
         second_doc = seed_document(db, "owner", name="idle.md")
-        add_comment(db, first_doc, author_kind="user", author_id=None, author="Steve")
+        add_user_edit(db, first_doc)
 
         with write_transaction(db, scope="test_leave") as connection:
             assert feedback_batches.mark_user_left(connection, first_doc) == 1
@@ -119,8 +195,8 @@ def test_user_leave_return_restores_idle_and_due_rows_record_leave_or_idle(isola
         feedback_batches.close_due(leaving["closes_at"], db=db)
         assert batches(db)[0]["closed_reason"] == "leave"
 
-        add_comment(db, second_doc, author_kind="user", author_id=None, author="Steve")
-        idle = batches(db, state="open")[0]
+        add_user_edit(db, second_doc)
+        idle = next(row for row in batches(db, state="open") if row["artifact_id"] == second_doc)
         feedback_batches.close_due(idle["closes_at"], db=db)
         assert batches(db)[1]["closed_reason"] == "idle"
     finally:
@@ -204,8 +280,7 @@ def test_due_user_feedback_for_thread_document_broadcasts_to_owner(isolated_db, 
     try:
         seed_thread(db, "owner")
         artifact_id = seed_document(db, "owner")
-        add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
-        del calls[:]  # the comment's own frame; this test is about the due batch
+        add_user_edit(db, artifact_id)
         with write_transaction(db, scope="test_thread_leave") as connection:
             feedback_batches.mark_user_left(connection, artifact_id)
         deadline = batches(db, state="open")[0]["closes_at"]
@@ -216,7 +291,7 @@ def test_due_user_feedback_for_thread_document_broadcasts_to_owner(isolated_db, 
         db.close()
 
 
-def test_user_feedback_projection_tracks_open_count_owner_and_undelivered(isolated_db):
+def test_user_feedback_projection_has_no_open_comment_after_immediate_delivery(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner", title="Documents & Artifacts")
@@ -224,36 +299,13 @@ def test_user_feedback_projection_tracks_open_count_owner_and_undelivered(isolat
         add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
         add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
 
-        open_feedback = feedback_batches.user_feedback_for_document(db, artifact_id)
-        assert open_feedback == {
-            "open_count": 2,
+        assert feedback_batches.user_feedback_for_document(db, artifact_id) == {
+            "open_count": 0,
             "owner_label": "Documents & Artifacts",
             "grace_closes_at": None,
             "undelivered_batches": [],
         }
-        with write_transaction(db, scope="test_projection_leave") as connection:
-            feedback_batches.mark_user_left(connection, artifact_id)
-        grace_deadline = batches(db, state="open")[0]["closes_at"]
-        assert feedback_batches.user_feedback_for_document(db, artifact_id)["grace_closes_at"] == grace_deadline
-        with write_transaction(db, scope="test_projection_return") as connection:
-            feedback_batches.mark_user_returned(connection, artifact_id)
-        assert feedback_batches.user_feedback_for_document(db, artifact_id)["grace_closes_at"] is None
-
-        feedback_batches.close_for_document(
-            db,
-            author_kind="user",
-            author_id=feedback_batches.USER_AUTHOR_ID,
-            artifact_id=artifact_id,
-            reason="send",
-        )
-        assert feedback_batches.user_feedback_for_document(db, artifact_id)["open_count"] == 0
-
-        add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
-        batch = batches(db, state="open")[0]
-        db.execute("UPDATE doc_feedback_batches SET recipient_id='' WHERE id=?", (batch["id"],))
-        db.commit()
-        feedback_batches.close_batch(db, batch["id"], "send")
-        undelivered = feedback_batches.user_feedback_for_document(db, artifact_id)["undelivered_batches"]
-        assert [(row["item_count"], row["undelivered_reason"]) for row in undelivered] == [(1, "no_owner")]
+        [batch] = batches(db)
+        assert batch["state"] == "delivered" and batch["item_count"] == 2
     finally:
         db.close()
