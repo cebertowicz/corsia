@@ -10,7 +10,13 @@ import yaml
 from infra.outcome_event_attributes import ATTRIBUTE_ALLOWLISTS
 
 _NAMESPACE = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
-_RESERVED = {"corsia", "github", "measurement", "test", "script", "agent", "otel"}
+# Namespaces an agent never declares: every registered connector, ``worker`` (CORSIA produces it
+# only) and the generic names. Static because infra must not import events; a test fails when a
+# registered connector is missing here.
+_RESERVED = {
+    "corsia", "test", "script", "agent", "otel", "worker",
+    "document", "github", "gmail", "library", "measurement", "microsoft", "plan",
+}
 # The one definition of what the server stamps on every declared event: a file can't declare these,
 # the registry adds them to each event's specs, and admission removes them from an emitter's attributes.
 STAMPED_ATTRIBUTES = ("run_id", "workflow_ref", "workflow_version")

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from events import rules
-from events.connectors import EventTypeDecl
+from events.connectors import EventTypeDecl, registered_connectors
 from infra.measure_registry import REGISTRY, DeclaredEvent
 
 UNMATCHABLE_KIND = "num"
@@ -24,8 +24,11 @@ def declared_event(db: sqlite3.Connection, connector: str, event_type: str) -> t
     """The declaration of ``connector.event_type`` when an agent declared it, else ``None``.
 
     The one place a declared type becomes an ``EventTypeDecl``: rules match on its fields and
-    intake delivers by it (``intake.resolve_event_type``).
+    intake delivers by it (``intake.resolve_event_type``). A connector's namespace, and ``worker``,
+    is never an agent's, so a row synced under one can't shadow its manifest.
     """
+    if connector == "worker" or connector in registered_connectors():
+        return None
     entry = REGISTRY.ensure_loaded(db).events.get(f"{connector}.{event_type}")
     if entry is None:
         return None

@@ -57,6 +57,20 @@ def intake_world(isolated_db, tmp_path: Path):
     return db
 
 
+@pytest.fixture
+def github_checks_type(monkeypatch):
+    """A test-local github manifest type for the connector-origin branch; no github type is emitted that way yet."""
+    from events.connectors import EventTypeDecl
+    from events.connectors.github import MANIFEST
+
+    monkeypatch.setitem(MANIFEST.event_types, "head.checks_completed", EventTypeDecl(
+        "head.checks_completed", ("repo", "head_sha"),
+        ("repo", "head_sha", "head_branch", "pr_number", "conclusion"),
+        artifact_type=MANIFEST.event_types["check.completed"].artifact_type,
+        artifact_integration=MANIFEST.event_types["check.completed"].artifact_integration,
+        event_class="informational"))
+
+
 def _admit(**kwargs):
     values = {
         "event_id": "event-1", "origin": "emitter", "producer": OWNER,
@@ -167,7 +181,7 @@ def test_refused_id_can_retry_after_fix_without_persisting_facts(intake_world):
     assert tuple(stored) == ("event-1", "accepted", 0)
 
 
-def test_connector_manifest_accepts_nullable_pr_number_and_refuses_unknown_fact(intake_world):
+def test_connector_manifest_accepts_nullable_pr_number_and_refuses_unknown_fact(intake_world, github_checks_type):
     accepted = asyncio.run(admit_event(
         event_id="github-ok", origin="connector", producer="github",
         event_type="github.head.checks_completed",
@@ -229,7 +243,7 @@ def test_a_rule_fires_when_intake_dead_letters_for_an_inactive_owner(intake_worl
 
 
 @pytest.fixture
-def tracking(monkeypatch):
+def tracking(monkeypatch, github_checks_type):
     """Projects tracking each repository; records whether each lookup ran inside a transaction."""
     calls: list[bool] = []
 
@@ -280,7 +294,7 @@ def test_an_unrouted_connector_event_with_no_self_rule_never_looks_up_its_reposi
 
 
 def test_an_unrouted_connector_event_fails_closed_when_its_repository_lookup_fails(
-        intake_world, monkeypatch):
+        intake_world, monkeypatch, github_checks_type):
     from events.connectors.github_notifications_feed import FeedError
 
     def _unreadable(_repository):
@@ -452,3 +466,56 @@ def test_event_lines_share_the_measure_line_cap(intake_world):
 
     assert len(parsed.measures) + len(parsed.events) == MAX_MEASURE_LINES
     assert len(parsed.events) == 50 and parsed.over_cap == 5 and parsed.problems == []
+
+
+def test_every_registered_connector_namespace_is_reserved_against_declaration():
+    from events.connectors import registered_connectors
+    from infra.measure_validation import _RESERVED
+
+    assert set(registered_connectors()) | {"worker"} <= _RESERVED
+
+
+@pytest.mark.parametrize("namespace", ["gmail", "plan", "worker"])
+def test_sync_refuses_a_connector_or_worker_namespace(intake_world, tmp_path, namespace):
+    folder = tmp_path / ".threads" / OWNER
+    path = folder / "measures.yaml"
+    text = f"schema: corsia.measures/1\nnamespace: {namespace}\nevents:\n  {namespace}.spoof:\n    attributes: {{code: id}}\n    dedupe: [code]\n    use: route\n"
+    path.write_text(text)
+
+    with pytest.raises(ValueError, match="non-reserved"):
+        sync(intake_world, owner_thread_id=OWNER, path=str(path), text=text)
+
+
+def _synced_row(db, name: str) -> None:
+    """An already-synced declaration row, as one from before the namespace was reserved."""
+    from infra.measure_registry import _INSERT
+
+    spec = json.dumps({"attributes": {"code": "id"}, "dedupe": ["code"], "use": "route"})
+    db.execute(_INSERT, (OWNER, "event", name, 1, spec, "measures.yaml", "sha", "2026-01-01T00:00:00+00:00", 0))
+    db.commit()
+    REGISTRY.reset()
+
+
+def test_a_declared_row_in_a_connector_namespace_never_shadows_the_manifest(intake_world):
+    from events import rule_declarations
+
+    _synced_row(intake_world, "gmail.email.received")
+    _synced_row(intake_world, "worker.result")
+
+    assert REGISTRY.ensure_loaded(intake_world).events["gmail.email.received"].owner == OWNER
+    assert rule_declarations.declared_event(intake_world, "gmail", "email.received") is None
+    assert rule_declarations.declared_event(intake_world, "worker", "result") is None
+    declaration, entry = intake.resolve_event_type(intake_world, "gmail.email.received")
+    assert entry is None and declaration.identity_facts == ("account_id", "message_id")
+
+
+def test_an_emitter_cannot_emit_a_connector_manifest_type_and_no_rule_fires(intake_world, monkeypatch):
+    wakes = []
+    monkeypatch.setattr("events.platform.enqueue_event_wake", lambda *args, **kwargs: wakes.append(args[0]))
+    _synced_row(intake_world, "gmail.email.received")
+    _rule(intake_world, "gmail-self", OTHER, connector="gmail", event_type="email.received")
+
+    result = _admit(event_id="spoofed", event_type="gmail.email.received")
+
+    assert result.refusal and result.refusal.code == "not_your_namespace"
+    assert wakes == [] and _decisions(intake_world, "spoofed") == set()

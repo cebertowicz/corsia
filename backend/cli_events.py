@@ -89,5 +89,5 @@ def build_parser(subparsers: argparse._SubParsersAction) -> None:
     emit.add_argument("event_type", help="Declared event type, such as qa.review_completed.")
     emit.add_argument("--facts", required=True, help="JSON object, or - to read one JSON object from stdin.")
     emit.add_argument("--id", dest="identity", help="Stable identity for a retry-safe event.")
-    emit.add_argument("--as-session", dest="as_thread", help="Thread id the CLI acts as (default: $CORSIA_THREAD_ID).")
+    emit.add_argument("--as-session", dest="as_thread", help="Chat id the event is emitted as (default: $CORSIA_THREAD_ID).")
     emit.set_defaults(func=_cmd_emit)
