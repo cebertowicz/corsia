@@ -65,6 +65,11 @@
 	</section>
 {/snippet}
 
+<!-- A first request can arrive before anything else has explained host access. -->
+{#snippet explainer()}
+	<p class="explainer">This agent is asking for temporary access to parts of this computer outside its project. It cannot use that access unless you approve, and you can revoke it at any time.</p>
+{/snippet}
+
 <div class="pending-drawer">
 	<header class="decision-head">
 		<div>
@@ -75,13 +80,19 @@
 	</header>
 
 	<div class="decision-body">
+		{#if !external}
+			{@render explainer()}
+		{/if}
+
 		<section class="purpose">
 			<span class="label">Purpose</span>
 			<p>{text(lease.purpose) ? lease.purpose : 'Unavailable'}</p>
 		</section>
 
 		{#if external}
+			<!-- The external warning and exact launch must stay above the footer on a phone. -->
 			{@render policyExceptions()}
+			{@render explainer()}
 		{/if}
 
 		<section class="plan">
@@ -237,6 +248,7 @@
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
 	}
+	.decision-body .explainer { margin: 0; }
 	.purpose p { color: var(--text-primary); font-size: var(--text-body); }
 	ol {
 		margin: 7px 0 0;
