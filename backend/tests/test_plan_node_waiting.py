@@ -8,13 +8,14 @@ interval is exact; the facts are the rows the plan writers leave behind.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 import sqlite3
 import uuid
 
 import pytest
 
 from infra.schema import SCHEMA_SQL
-from plans import mutations, node_cost, service
+from plans import mutations, node_cost, public, scheduled_wait, service
 from tests.plan_writer_authorizer import raw_plan_seed
 
 T0 = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
@@ -68,18 +69,26 @@ def _move(db, node_id, prior, new, minutes):
         db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (new, node_id))
 
 
-def _watch(db, node, armed, *, resolved=None):
+def _watch(db, node, armed, *, resolved=None, armed_payload=None):
+    watch_id = uuid.uuid4().hex
     db.execute(
         """INSERT INTO expected_event_watches
            (id,plan_id,plan_node_id,condition_type,condition_value,status,armed_at,resolved_at,
             created_at,updated_at)
            VALUES (?,?,?,'deadline','x',?,?,?,?,?)""",
         (
-            uuid.uuid4().hex, node.plan_id, node.id,
+            watch_id, node.plan_id, node.id,
             "armed" if resolved is None else "resolved", _at(armed),
             None if resolved is None else _at(resolved), _at(armed), _at(armed),
         ),
     )
+    if armed_payload is not None:
+        db.execute(
+            """INSERT INTO plan_node_events
+               (id,node_id,provenance,event,payload_json,created_at)
+               VALUES (?,?,'test.waiting','watch_armed',?,?)""",
+            (uuid.uuid4().hex, node.id, json.dumps({"watch_id": watch_id, **armed_payload}), _at(armed)),
+        )
 
 
 def _depend(db, node, prerequisite, minutes):
@@ -294,5 +303,95 @@ def test_waiting_adds_a_fixed_number_of_queries_whatever_the_node_count(db):
 
     small_count = _select_statements(db, lambda: node_cost.project_many([small.id], db=db))
     large_count = _select_statements(db, lambda: node_cost.project_many([large.id], db=db))
+
+    assert large_count == small_count
+
+
+def test_a_task_its_agent_set_aside_is_not_waiting_but_a_blocker_watch_is(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(db, plan.id)
+    _move(db, node.id, "pending", "active", 0)
+    _watch(db, node, 0, resolved=20, armed_payload={"blocked": {"owner_kind": "external"}})
+    # The real producer, so the test reads the payload the set-aside writer leaves.
+    scheduled_wait.schedule_task(
+        db, node.id, reason="after the cut", deadline=_at(200), provenance="test.waiting",
+    )
+    db.execute(
+        "UPDATE expected_event_watches SET armed_at=? WHERE plan_node_id=? AND status='armed'",
+        (_at(30), node.id),
+    )
+
+    assert _waited(db, node, 90) == 20 * 60
+
+
+# Open time (decision 114e0dca): each thread's outside-wait intervals for a run.
+
+
+def _open(db, threads, since, until):
+    return public.open_wait_intervals(
+        threads, since=T0 + timedelta(minutes=since), until=T0 + timedelta(minutes=until), db=db,
+    )
+
+
+def _minutes(intervals):
+    return [((start - T0.timestamp()) / 60, (end - T0.timestamp()) / 60) for start, end in intervals]
+
+
+def test_open_waits_clip_to_the_window_and_an_open_one_ends_at_until(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(db, plan.id)
+    _move(db, node.id, "pending", "active", 0)
+    _watch(db, node, 5, resolved=15)
+    _watch(db, node, 30)
+
+    assert _minutes(_open(db, ["owner"], 10, 60)["owner"]) == [(10, 15), (30, 60)]
+
+
+def test_open_waits_union_across_the_threads_own_nodes(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    prerequisite = _task(db, plan.id, "First")
+    second = _task(db, plan.id, "Second")
+    third = _task(db, plan.id, "Third")
+    _watch(db, second, 0, resolved=30)
+    _depend(db, third, prerequisite, 20)
+    _move(db, prerequisite.id, "pending", "accepted", 50)
+
+    assert _minutes(_open(db, ["owner"], 0, 90)["owner"]) == [(0, 50)]
+
+
+def test_open_waits_cut_the_users_pause_and_drop_a_set_aside_task(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = _task(db, plan.id)
+    aside = _task(db, plan.id, "Aside")
+    _watch(db, node, 0, resolved=60)
+    _watch(db, aside, 0, armed_payload={"scheduled": {"reason": "later"}})
+    _plan_move(db, plan.id, "active", "paused", 20)
+    _plan_move(db, plan.id, "paused", "active", 40)
+
+    assert _minutes(_open(db, ["owner"], 0, 90)["owner"]) == [(0, 20), (40, 60)]
+
+
+def test_open_waits_answer_each_thread_alone_and_none_reads_empty(db):
+    owner_plan = service.ensure_plan("thread", "owner", db=db)
+    other_plan = service.ensure_plan("thread", "owner2", db=db)
+    child_plan = service.ensure_plan("thread", "child", db=db)
+    _watch(db, _task(db, owner_plan.id), 0, resolved=10)
+    _watch(db, _task(db, other_plan.id), 20, resolved=30)
+    _watch(db, _task(db, child_plan.id), 40, resolved=50)
+
+    found = _open(db, ["owner", "owner2", "nobody"], 0, 90)
+
+    assert {thread: _minutes(spans) for thread, spans in found.items()} == {
+        "owner": [(0, 10)], "owner2": [(20, 30)], "nobody": [],
+    }
+    assert _open(db, [], 0, 90) == {}
+
+
+def test_open_waits_read_a_fixed_number_of_queries_whatever_the_node_count(db):
+    _waiting_plan(db, "owner", 3)
+    _waiting_plan(db, "owner2", 150)
+
+    small_count = _select_statements(db, lambda: _open(db, ["owner"], 0, 200))
+    large_count = _select_statements(db, lambda: _open(db, ["owner2"], 0, 200))
 
     assert large_count == small_count
