@@ -228,11 +228,12 @@ fn port_for_startup(first_run: &first_run::FirstRun, recorded: Option<u16>) -> R
 /// carries the port: the backend's loopback guard refuses a Host without the
 /// port it is bound to.
 fn local_request(method: &str, port: u16, path: &str) -> String {
-    let body = if method == "POST" { "Content-Length: 0\r\n" } else { "" };
-    format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{body}Connection: close\r\n\r\n")
+    let body = if method == "POST" { "Content-Type: application/json\r\nContent-Length: 2\r\n" } else { "" };
+    let tail = if method == "POST" { "{}" } else { "" };
+    format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{body}Connection: close\r\n\r\n{tail}")
 }
 
-/// Send one GET to a service on this computer and read the whole reply.
+/// Send one request (a GET, or the quit-time POST) to a service on this computer and read the whole reply.
 /// The error names the step that failed, for callers that report it.
 fn local_exchange(
     method: &str,

@@ -284,6 +284,15 @@ mod tests {
     }
 
     #[test]
+    fn the_stop_request_is_a_json_post_the_backends_guard_accepts() {
+        let request = super::super::local_request("POST", 43123, "/api/system/stop-local-model");
+        assert!(request.starts_with("POST /api/system/stop-local-model HTTP/1.1\r\nHost: 127.0.0.1:43123\r\n"));
+        assert!(request.contains("Content-Type: application/json\r\nContent-Length: 2\r\n"));
+        assert!(request.ends_with("\r\n\r\n{}"));
+        assert!(!super::super::local_request("GET", 43123, "/api/health").contains("Content"));
+    }
+
+    #[test]
     fn a_held_operation_lock_stops_nothing_on_quit() {
         let stopped = AtomicBool::new(false);
         let attempted = AtomicBool::new(false);
