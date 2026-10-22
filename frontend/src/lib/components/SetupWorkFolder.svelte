@@ -23,6 +23,6 @@
 {#if error}<p class="error-text" role="alert">{error}</p>{/if}
 
 <style>
-	.error-text { margin: var(--space-2) 0 0; }
+	.error-text { margin: var(--space-2) 0 0; font-size: var(--text-subhead); }
 	.why { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-subhead); }
 </style>

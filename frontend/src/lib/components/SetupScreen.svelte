@@ -341,6 +341,6 @@
 
 <style>
 	p { font-size: var(--text-subhead); line-height: var(--lh-normal); }
-	.error-text { margin: var(--space-2) var(--space-4); }
+	.error-text { margin: var(--space-2) var(--space-4); font-size: var(--text-subhead); }
 	.settled { margin: 0; font-size: var(--text-title3); color: var(--text-primary); }
 </style>

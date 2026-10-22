@@ -58,6 +58,6 @@
 	/* The only picture on its screen (nothing found), so it is drawn larger. */
 	.large .row { zoom: 0.85; }
 	.head { zoom: 0.8; padding: var(--space-3) var(--space-4); display: flex; flex-direction: column; gap: var(--space-1); }
-	.head b { font-size: var(--text-title1); font-weight: var(--fw-semibold); color: var(--text-primary); }
+	.head b { font-size: var(--text-title2); font-weight: var(--fw-semibold); color: var(--text-primary); }
 	.head span { font-size: var(--text-subhead); color: var(--text-muted); }
 </style>
