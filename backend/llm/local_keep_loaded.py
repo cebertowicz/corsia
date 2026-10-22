@@ -90,17 +90,18 @@ async def annotate_download_will_pin(sources: list[dict]) -> None:
         download["will_pin"] = pin_fits(int(size), _pinned_bytes(rows), pin_room_bytes())
 
 
-async def keep_loaded(server_id: str, model: LocalModel) -> None:
-    """Pin a completed download when it fits the room for pins, then load it when it fits now.
+async def keep_loaded(server_id: str, model: LocalModel, *, force_pin: bool = False) -> None:
+    """Pin a completed download, then load it when it fits now.
 
-    Every outcome is a row state, never a failure: a pin that doesn't fit leaves the
-    model downloaded and unpinned, and the row's live verdict says why; a step that
-    failed is recorded for the row (see the module table). A completed download is
-    never undone here.
+    Setup uses ``force_pin`` for its one managed model. Settings downloads retain
+    the capacity guard so adding another model does not displace that setup model.
+    Every outcome is a row state: a guarded pin that does not fit leaves the model
+    downloaded and unpinned, while a failed forced pin is visible on the row. A
+    completed download is never undone here.
     """
     from llm.network_discovery import discover_and_notify, notify_cached_model_loaded
     from llm.providers.omlx_lifecycle import load_model
-    from llm.providers.omlx_settings import update_model_settings
+    from llm.providers.omlx_settings import get_model_settings, update_model_settings
 
     key = (server_id, model.model)
     _FAILED.pop(key, None)
@@ -119,12 +120,18 @@ async def keep_loaded(server_id: str, model: LocalModel) -> None:
     if not isinstance(size, (int, float)) or size <= 0:
         log.warning("Not keeping the downloaded local model loaded: oMLX gave no usable size")
         return
-    pinned = pin_fits(int(size), _pinned_bytes(rows, skip=model.model), pin_room_bytes())
+    pinned = force_pin or pin_fits(int(size), _pinned_bytes(rows, skip=model.model), pin_room_bytes())
     if pinned:
         pin = await update_model_settings({"server_id": server_id}, model.model, {"pinned": True})
         if not pin.get("ok"):
             log.warning("Couldn't pin the downloaded local model")
             emit("pin", pin.get("message") or "Pin refused")
+            _FAILED[key] = NOT_KEPT
+            return
+        read_back = await get_model_settings({"server_id": server_id}, model.model)
+        if not read_back.get("ok") or read_back.get("settings", {}).get("pinned") is not True:
+            log.warning("oMLX did not read back the downloaded local model as pinned")
+            emit("pin", read_back.get("message") or "Pin did not persist")
             _FAILED[key] = NOT_KEPT
             return
         emit("pin")
