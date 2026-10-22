@@ -468,14 +468,35 @@ def test_two_overdue_waits_keep_plan_order_and_name_each_task():
     facts = display["not_moving"]
     assert facts["overdue_waits"] == 2
     assert facts["overdue_wait_entries"] == [
-        {"title": "First overdue task", "node_id": "12345678"},
-        {"title": "Second overdue task", "node_id": "87654321"},
+        {"title": "First overdue task", "node_id": "12345678-first"},
+        {"title": "Second overdue task", "node_id": "87654321-second"},
     ]
     assert not_moving.note(facts).endswith(
-        "First overdue task (12345678), Second overdue task (87654321). Check each: "
+        "First overdue task (12345678-first), Second overdue task (87654321-second). Check each: "
         "resolve it if it cleared, wait again with a new deadline and a reason, raise a "
         "decision, or close the task."
     )
+
+
+def test_many_overdue_waits_name_the_first_few_by_full_id_and_count_the_rest():
+    """Full ids the agent can pass back; the line stays inside the checkpoint budget."""
+    late = _ago(timedelta(days=1))
+    nodes = []
+    for index in range(operator_nodes.OPEN_NODE_BUDGET):
+        leaf = _leaf(f"{index:032x}", "waiting", _wait(late))
+        leaf["title"] = "T" * 60
+        nodes.append(leaf)
+
+    facts = _header(nodes)[1]["not_moving"]
+    text = not_moving.note(facts)
+
+    assert facts["overdue_waits"] == operator_nodes.OPEN_NODE_BUDGET
+    named = [f"({index:032x})" for index in range(not_moving.NAMED_OVERDUE)]
+    assert all(full_id in text for full_id in named)
+    assert f"({not_moving.NAMED_OVERDUE:032x})" not in text
+    hidden = operator_nodes.OPEN_NODE_BUDGET - not_moving.NAMED_OVERDUE
+    assert f" and {hidden} more. Check each:" in text
+    assert len(status_context.render({"note": text}).encode()) < status_context.CHECKPOINT_BYTES // 3
 
 
 def test_unnamed_facts_count_overdue_waits_without_an_empty_list():

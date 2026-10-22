@@ -32,6 +32,11 @@ STILL_KEYS = ("review_human", "waiting", "blocked", "paused")
 #: deadline at the median and 637s at the 90th percentile, so 11 minutes clears
 #: normal delivery and leaves a wait the sweep has not retired reading overdue.
 OVERDUE_GRACE = timedelta(minutes=11)
+#: Overdue waits the note names, in plan order; the rest are counted. The agent
+#: settles a few a turn and the next note names the next, and three full ids
+#: with 60-character titles keep the line near 300 bytes of the 2 KiB
+#: checkpoint projection (``status_context.CHECKPOINT_BYTES``).
+NAMED_OVERDUE = 3
 
 
 def _utcnow() -> datetime:
@@ -125,7 +130,7 @@ def read(
             set_aside += operator_scheduled.only_set_aside(causes)
             found = deadline_range(causes)
             if found is not None:
-                leaf = {"title": str(node["title"]), "node_id": str(node["id"])[:8]}
+                leaf = {"title": str(node["title"]), "node_id": str(node["id"])}
                 deadlines.append((*found, leaf))
     return read_from_facts(
         counts,
@@ -156,10 +161,12 @@ def note(facts: dict[str, Any]) -> str:
     head = "not moving: " + " · ".join(said) if said else "not moving"
     if overdue:
         plural = "waits are" if overdue > 1 else "wait is"
+        entries = facts.get("overdue_wait_entries", [])
         named = ", ".join(
-            f"{entry['title']} ({entry['node_id']})"
-            for entry in facts.get("overdue_wait_entries", [])
+            f"{entry['title']} ({entry['node_id']})" for entry in entries[:NAMED_OVERDUE]
         )
+        if len(entries) > NAMED_OVERDUE:
+            named += f" and {len(entries) - NAMED_OVERDUE} more"
         return (
             f"{head} · {overdue} {plural} past the deadline{': ' + named if named else ''}. "
             "Check each: resolve it if it cleared, wait again with a new deadline and a reason, "
