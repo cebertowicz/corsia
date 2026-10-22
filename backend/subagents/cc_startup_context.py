@@ -8,6 +8,12 @@ from typing import Any
 from core.effective_context import provider_source_artifact
 from core.installed_context import persist_installed_delivery
 from llm.resolution import ExecutionTarget
+from subagents.cc_confinement import (
+    ConfinementRefused,
+    registered_confinement,
+    require_readable_dirs,
+)
+from subagents.cc_invocation import CONFINEMENT_NONE
 from subagents.cc_replay_authority import require_cc_replay_authority
 from subagents.cc_runtime_errors import CCPreparedDestinationStale
 from subagents.cc_runtime_helpers import _artifact_cc_session_id, _write_seed_file
@@ -34,6 +40,8 @@ class CCStartupContext:
     launch_identity: Any
     checkpoint_generation_id: str | None = None
     target_discovered_context_window: int | None = None
+    confinement: str = CONFINEMENT_NONE
+    add_dirs: tuple[str, ...] = ()
 
 
 def _install_prepared_transcript(destination: Any) -> Any | None:
@@ -46,6 +54,20 @@ def _install_prepared_transcript(destination: Any) -> Any | None:
     from subagents.cc_context_reconstruction import install_cc_prepared_transcript
 
     return install_cc_prepared_transcript(destination.transcript)
+
+
+def _launch_confinement(
+    session_id: str, working_dir: str, db: Any,
+) -> tuple[str, tuple[str, ...]]:
+    """Carry the registered confinement into this launch, rechecking its reads."""
+    confinement, add_dirs, confined_dir = registered_confinement(session_id, db)
+    if confinement == CONFINEMENT_NONE:
+        return confinement, add_dirs
+    if confined_dir != working_dir:
+        raise ConfinementRefused(
+            "confined Claude Code child lost its own working directory"
+        )
+    return confinement, require_readable_dirs(list(add_dirs), None)
 
 
 def build_cc_startup_context(
@@ -83,6 +105,7 @@ def build_cc_startup_context(
         if authority.source == "provider_resume"
         else (destination.cc_session_id if transcript is not None else None)
     )
+    confinement, add_dirs = _launch_confinement(session_id, destination.working_dir, db)
     reconstruction = destination.seed_reconstruction
     if reconstruction is None:
         raise CCPreparedDestinationStale(
@@ -112,6 +135,8 @@ def build_cc_startup_context(
         synthetic_resume=transcript is not None,
         launch_identity=destination.launch_identity,
         checkpoint_generation_id=checkpoint_generation_id,
+        confinement=confinement,
+        add_dirs=add_dirs,
     )
 
 
