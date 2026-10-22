@@ -91,7 +91,7 @@ pub struct StartFreshError {
 impl StartFreshError {
     pub(crate) fn untouched(details: impl Into<String>) -> Self {
         Self {
-            message: "CORSIA didn’t set your earlier install aside. Nothing was changed.".into(),
+            message: "CORSIA couldn’t set your earlier install aside. Nothing was changed.".into(),
             details: details.into(),
             restored: true,
         }
@@ -127,7 +127,7 @@ impl StartFreshError {
 }
 
 /// Said after the files are back when the earlier install did not start again.
-const NOT_STARTED: &str = "Your earlier install didn’t start again, so it’s stopped now. \
+const NOT_STARTED: &str = "CORSIA couldn’t start your earlier install again, so it’s stopped now. \
                            Choose Retry to move it into a backup again.";
 
 /// The earlier install's service. Production asks launchd and the checkout's own
@@ -685,10 +685,29 @@ impl LaunchdService {
         if self.running()? {
             return Err("the earlier install is still running".into());
         }
+        self.databases_released()
+    }
+
+    fn databases_released(&self) -> Result<(), String> {
         for database in self.databases.iter().filter(|database| database.is_file()) {
-            release_proof::database_released(&self.python, database)?;
+            release_proof::database_released(&self.python, database)
+                .map_err(|error| format!("{}: {error}", database.display()))?;
         }
         Ok(())
+    }
+
+    /// Wait until `check` passes, or say why it never did.
+    fn wait_for(&mut self, mut check: impl FnMut(&mut Self) -> Result<(), String>) -> Result<(), String> {
+        let deadline = Instant::now() + STOP_TIMEOUT;
+        loop {
+            match check(self) {
+                Ok(()) => return Ok(()),
+                Err(error) if Instant::now() >= deadline => {
+                    return Err(format!("the earlier install did not stop: {error}"))
+                }
+                Err(_) => thread::sleep(STOP_POLL),
+            }
+        }
     }
 }
 
@@ -698,31 +717,25 @@ impl OldService for LaunchdService {
         progress: &mut dyn FnMut(Option<u32>),
         spawned: &mut dyn FnMut(StopProcess) -> Result<(), String>,
     ) -> Result<(), String> {
-        if !self.running()? {
-            return Ok(());
-        }
-        if let Some(source) = self.source.as_mut() {
-            use adoption::Lifecycle;
-            return source.stop_old(progress, spawned);
-        }
-        progress(None);
-        let status = Command::new("/bin/launchctl")
-            .args(["bootout", &Self::target()])
-            .status()
-            .map_err(|error| format!("could not ask launchd to stop the earlier install: {error}"))?;
-        if !status.success() {
-            log::warn!("`launchctl bootout` exited {status}; checking whether the earlier install stopped");
-        }
-        let deadline = Instant::now() + STOP_TIMEOUT;
-        loop {
-            match self.released() {
-                Ok(()) => return Ok(()),
-                Err(error) if Instant::now() >= deadline => {
-                    return Err(format!("the earlier install did not stop: {error}"))
+        if self.running()? {
+            if let Some(source) = self.source.as_mut() {
+                use adoption::Lifecycle;
+                source.stop_old(progress, spawned)?;
+            } else {
+                progress(None);
+                let status = Command::new("/bin/launchctl")
+                    .args(["bootout", &Self::target()])
+                    .status()
+                    .map_err(|error| format!("could not ask launchd to stop the earlier install: {error}"))?;
+                if !status.success() {
+                    log::warn!("`launchctl bootout` exited {status}; checking whether the earlier install stopped");
                 }
-                Err(_) => thread::sleep(STOP_POLL),
+                return self.wait_for(Self::released);
             }
         }
+        // Whatever stopped it, and even when launchd never ran it, a backend still holding a
+        // database (one started by hand, say) means its folders must not move.
+        self.wait_for(|service| service.databases_released())
     }
 
     fn running(&mut self) -> Result<bool, String> {

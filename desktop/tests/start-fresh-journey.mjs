@@ -115,11 +115,22 @@ for (const theme of ['dark', 'light']) {
 			line: 'CORSIA found an existing install on this computer (~/.corsia), and this app can’t open it. Start fresh moves it into a backup folder and sets up CORSIA as new. Nothing is deleted.',
 			note: null,
 			list: null,
+			details: null,
 			button: 'Start fresh',
 			instead: null,
 			quit: true,
 		});
 		await shot(page, theme, '1-offer');
+		// A cause in the earlier install's own terms stays behind Details, never in the line.
+		const cause = 'source service plist has no valid port';
+		const plistReason = 'CORSIA found an existing install on this computer, and this app can’t take it over.';
+		await page.evaluate(([said, why]) => window.__corsiaShowStartup({ state: 'existing_install', reason: said, details: why }), [plistReason, cause]);
+		compare(`${theme} offer with a cause`, await read(page), {
+			line: `${plistReason} Start fresh moves it into a backup folder and sets up CORSIA as new. Nothing is deleted.`,
+			details: cause,
+			button: 'Start fresh',
+		});
+		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
 		await page.click('#retry');
 		await page.waitForFunction(() => document.getElementById('status').textContent === 'Move your earlier CORSIA into a backup?');
 		compare(`${theme} confirm`, await read(page), {
@@ -229,7 +240,7 @@ for (const theme of ['dark', 'light']) {
 	// An unfinished Start fresh put back at launch: the earlier install didn't start, so the card says it's stopped.
 	{
 		const failure = {
-			message: 'CORSIA put back everything Start fresh had moved. Your earlier install didn’t start again, so it’s stopped now. Choose Retry to move it into a backup again.',
+			message: 'CORSIA put back everything Start fresh had moved. CORSIA couldn’t start your earlier install again, so it’s stopped now. Choose Retry to move it into a backup again.',
 			details: '`corsia start` exited 1',
 			restored: true,
 		};

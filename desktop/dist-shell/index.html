@@ -569,7 +569,7 @@
 				} else if (startup.state === 'adoption_failed') {
 					await showAdoptionFailure(startup.failure);
 				} else if (startup.state === 'existing_install') {
-					showFreshOffer(startup.reason);
+					showFreshOffer(startup.reason, startup.details);
 				} else if (startup.state === 'start_fresh_failed') {
 					showFreshFailure(startup.failure);
 				} else if (startup.state === 'disk_image') {
@@ -640,10 +640,11 @@
 			}
 
 			// An earlier install this app can't open: offer to set it aside.
-			function showFreshOffer(reason) {
+			function showFreshOffer(reason, details) {
 				clearInterval(approvalPoll);
 				const said = typeof reason === 'string' ? reason : '';
-				showFreshCard({ title: FRESH_COPY.offerTitle, text: FRESH_COPY.offerLine(said), button: FRESH_COPY.offerButton, action: confirmFresh });
+				const why = typeof details === 'string' ? details : '';
+				showFreshCard({ title: FRESH_COPY.offerTitle, text: FRESH_COPY.offerLine(said), button: FRESH_COPY.offerButton, action: confirmFresh, why });
 			}
 
 			// The confirmation lists every item that moves and the code folder that stays, read from the computer now.

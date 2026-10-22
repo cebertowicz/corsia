@@ -131,7 +131,7 @@ enum ServiceStartup {
     /// An earlier adoption's undo could not finish; the window offers the recovery the backend chose.
     AdoptionFailed { failure: adoption::AdoptionError },
     /// An earlier install this app can't open: the window offers to set it aside and start fresh.
-    ExistingInstall { reason: String },
+    ExistingInstall { reason: String, details: String },
     /// Putting back a Start fresh the app did not finish went wrong; the window says what and offers the next step.
     StartFreshFailed { failure: start_fresh::StartFreshError },
 }
@@ -583,8 +583,8 @@ fn start_service<R: tauri::Runtime>(
     } else {
         first_run::plan(&home, &app_dir)?
     };
-    if let first_run::FirstRun::ExistingInstall { reason } = first_run {
-        return Ok(ServiceStartup::ExistingInstall { reason });
+    if let first_run::FirstRun::ExistingInstall { reason, details } = first_run {
+        return Ok(ServiceStartup::ExistingInstall { reason, details });
     }
     if let first_run::FirstRun::Adoptable { source } = &first_run {
         return Ok(ServiceStartup::AdoptionOffered {

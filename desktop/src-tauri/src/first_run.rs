@@ -37,7 +37,8 @@ pub enum FirstRun {
     Fresh { workspace: PathBuf },
     /// An earlier install is present but does not meet the source-service
     /// contract required for adoption: write nothing and offer Start fresh with this reason.
-    ExistingInstall { reason: String },
+    /// `details` carries the runtime cause, shown only behind Details.
+    ExistingInstall { reason: String, details: String },
     /// A rendered source service plist identifies a moveable source install.
     Adoptable { source: adoption::SourceInstall },
 }
@@ -204,9 +205,7 @@ pub fn default_workspace(home: &Path) -> PathBuf {
 }
 
 fn existing_install(reason: String) -> Result<FirstRun, String> {
-    Ok(FirstRun::ExistingInstall {
-        reason,
-    })
+    Ok(FirstRun::ExistingInstall { reason, details: String::new() })
 }
 
 /// Decide what a launch must do about the workspace, reading only.
@@ -220,9 +219,10 @@ pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
         // A plist this app cannot trust is not adopted, and no other path is tried.
         return match adoption::source_from_plist(home, &source_plist) {
             Ok(source) => Ok(FirstRun::Adoptable { source }),
-            Err(reason) => existing_install(format!(
-                "CORSIA found an existing install on this computer, and this app can’t take it over ({reason})."
-            )),
+            Err(details) => Ok(FirstRun::ExistingInstall {
+                reason: "CORSIA found an existing install on this computer, and this app can’t take it over.".into(),
+                details,
+            }),
         };
     }
 
@@ -471,7 +471,7 @@ mod tests {
     fn assert_refused(home: &Home, marker: &str) {
         let before = home.listing();
         match plan(&home.0, &home.app_dir()).expect("plan") {
-            FirstRun::ExistingInstall { reason } => {
+            FirstRun::ExistingInstall { reason, .. } => {
                 assert!(reason.contains(marker), "reason names the marker: {reason}");
                 assert!(reason.ends_with('.') && !reason.contains("Nothing was changed"), "{reason}");
             }
@@ -598,6 +598,12 @@ mod tests {
         fs::create_dir_all(plist.parent().unwrap()).unwrap();
         fs::write(&plist, "not a plist").unwrap();
         assert_refused(&home, "can’t take it over");
+        // The parser's own words stay behind Details, never in the line.
+        let FirstRun::ExistingInstall { reason, details } = plan(&home.0, &home.app_dir()).unwrap() else {
+            panic!("expected a refusal");
+        };
+        assert!(!reason.contains('(') && !reason.contains("plist"), "{reason}");
+        assert!(details.contains("plist"), "{details}");
 
         // A readable plist whose checkout has no lifecycle owner is refused the same way.
         fs::write(
@@ -608,7 +614,11 @@ mod tests {
             ),
         )
         .unwrap();
-        assert_refused(&home, "scripts/corsia");
+        assert_refused(&home, "can’t take it over");
+        let FirstRun::ExistingInstall { details, .. } = plan(&home.0, &home.app_dir()).unwrap() else {
+            panic!("expected a refusal");
+        };
+        assert!(details.contains("scripts/corsia"), "{details}");
     }
 
     #[test]
