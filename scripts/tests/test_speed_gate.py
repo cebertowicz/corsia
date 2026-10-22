@@ -439,6 +439,28 @@ def background(tmp_path, monkeypatch):
     return harness.Background(tmp_path), namespace
 
 
+def test_background_ignores_venv_tasks_but_tracks_application_tasks(tmp_path, monkeypatch):
+    """Interpreter internals live under the backend root but are not application work."""
+    monkeypatch.setattr(asyncio.BaseEventLoop, "create_task", asyncio.BaseEventLoop.create_task)
+    venv_code: dict = {}
+    app_code: dict = {}
+    exec(
+        compile("async def internal():\n    return None\n", str(tmp_path / ".venv/lib/python3.11/site-packages/anyio/_backends/_asyncio.py"), "exec"),
+        venv_code,
+    )
+    exec(compile("async def refresh():\n    return None\n", str(tmp_path / "api/usage_rollup.py"), "exec"), app_code)
+    background = harness.Background(tmp_path)
+
+    async def scenario():
+        await asyncio.gather(
+            asyncio.get_running_loop().create_task(venv_code["internal"]()),
+            asyncio.get_running_loop().create_task(app_code["refresh"]()),
+        )
+
+    asyncio.run(scenario())
+    assert [name for name, _ in background._live] == ["api/usage_rollup.py:refresh"]
+
+
 def test_drain_waits_for_a_task_the_request_started_and_names_it(background):
     bg, app = background
 
