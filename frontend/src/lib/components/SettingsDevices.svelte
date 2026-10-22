@@ -14,7 +14,8 @@
 	// The code ran out: ask the host once what is true now (a new code, or none).
 	$effect(() => { if (devices.view.endsInSeconds === 0) void devices.read(); });
 	// Settings owns the mutually exclusive "Connect to another computer" entry point.
-	$effect(() => { onConnectionState(devices.view.load === 'ready' ? devices.view.enabled : null); });
+	// Keep it hidden while the host state is loading, but restore this independent path if the read fails.
+	$effect(() => { onConnectionState(devices.view.load === 'ready' ? devices.view.enabled : devices.view.load === 'failed' ? false : null); });
 </script>
 
 <SettingsDevicesView view={devices.view} onToggle={(next) => void devices.setEnabled(next)} onNewCode={() => void devices.newCode()} onRetry={() => void devices.retry()} onOutside={(text) => devices.setOutside(text)} />

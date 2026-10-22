@@ -82,6 +82,7 @@ describe('Settings › System with a shell', () => {
 	});
 	it('seen from a connected computer, the Devices row is read-only and says where to manage it', async () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio' };
+		vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...devicesBody, read_only: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
 		await show();
 		expect(flat(host.querySelector('[data-testid="devices-row"]')?.textContent)).toContain('Manage connections on Studio itself.');
 		expect(host.querySelector('button[aria-label="Let other devices connect"]')).toBeNull();
@@ -102,6 +103,14 @@ describe('Settings › System with a shell', () => {
 		button('Connect to another computer')?.click();
 		expect(get(connectOpen)).toBe(true);
 		expect(button('Disconnect')).toBeUndefined();
+	});
+	it('keeps Connect to another computer available when the host device read fails', async () => {
+		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'local' };
+		vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ detail: 'unavailable' }), { status: 500, headers: { 'Content-Type': 'application/json' } })));
+		await show();
+		expect(flat(host.querySelector('[data-settings-row="Computer"]')?.textContent)).toContain('This computer');
+		button('Connect to another computer')?.click();
+		expect(get(connectOpen)).toBe(true);
 	});
 	it('in a browser or the phone app there is no shell, so no Computer row', async () => {
 		await show();
