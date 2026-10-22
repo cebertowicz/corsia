@@ -1,9 +1,9 @@
-"""Journal a content edit for the reviewers still waiting on the document (DCOL-FR10.2).
+"""Tell everyone waiting on a document's text that a content edit landed (DCOL-FR10.2).
 
 Every route that stores a document's bytes passes the digest before and after
-the write, so a re-save of identical bytes is not an edit. Only a document with
-an unsettled review request is journaled, so owners of other documents see no
-new rows.
+the write, so a re-save of identical bytes is not an edit. Reviewers still
+waiting on the document are journaled, and an agent whose pending suggestion
+the edit stranded is told. A document with neither sees no new rows.
 """
 
 from __future__ import annotations
@@ -31,7 +31,9 @@ def journal_reviewed_edit(
     if not new_sha256 or new_sha256 == previous_sha256:
         return False
     from doceditor.review_lifecycle import is_open
+    from doceditor.suggestion_stranding import note_stranded_suggestions
 
+    note_stranded_suggestions(db, artifact, actor_thread_id=actor_thread_id)
     artifact_id = str(artifact["id"])
     unsettled = db.execute(
         "SELECT request.* FROM doc_review_requests AS request WHERE request.artifact_id=? "
