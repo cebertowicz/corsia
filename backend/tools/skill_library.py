@@ -225,7 +225,8 @@ def _install(name: str, owner_id: str, project_id: str | None, db) -> dict[str, 
     if item["withdrawn"]:
         return _error("withdrawn", f"{item['withdrawn_reason']}; remove takes out a copy you already hold")
     effective, local_rows = _effective(owner_id, project_id, _workspace(), db)
-    conflict = next((row for row in effective if row.name == name), None)
+    # Names are held case-insensitively: on a case-insensitive disk `GitHub/` and `github/` are one folder.
+    conflict = next((row for row in effective if row.name.casefold() == name.casefold()), None)
     if conflict is not None:
         origin = _library_origin(conflict)
         if origin and _same_library_item(origin, item):

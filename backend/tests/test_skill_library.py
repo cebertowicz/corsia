@@ -159,6 +159,22 @@ def test_install_repairs_registration_for_an_existing_local_library_copy(monkeyp
     assert repaired == [("owner", "pdf", None, db)]
 
 
+@pytest.mark.parametrize("held_as", ["pdf", "PDF"])
+def test_install_refuses_a_name_another_skill_holds_and_writes_nothing(monkeypatch, held_as):
+    from library import items
+    from tools import skill_library
+
+    holder = SimpleNamespace(name=held_as, path=f"/tmp/{held_as}/SKILL.md", scope="project", corsia={})
+    monkeypatch.setattr(skill_library, "_index", lambda: SimpleNamespace(skills=(_item(),)))
+    monkeypatch.setattr(skill_library, "_effective", lambda *_args: ([holder], []))
+    monkeypatch.setattr(items, "fetch_bundle", lambda _item: pytest.fail("a held name must not fetch or write"))
+
+    result = skill_library._install("pdf", "owner", None, object())
+
+    assert result["error"] == "name_taken"
+    assert holder.path in result["message"]
+
+
 def test_completed_skill_library_action_emits_a_privacy_safe_outcome(isolated_db, monkeypatch, community_workspace):
     from infra import product_events
     from tools import skill_library
