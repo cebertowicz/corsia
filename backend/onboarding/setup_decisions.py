@@ -162,6 +162,10 @@ def consent_wordings(session_apps: tuple[str, ...]) -> list[tuple[str, str, str]
     return [(rendered["title"], rendered["context"], rendered["options"][0]["label"])]
 
 
+def _community(strings: dict[str, Any]) -> dict[str, Any]:
+    return _decision(tasks.TASK_GITHUB, strings, options=_lettered(strings), recommendation="A")
+
+
 def _github(email: str, strings: dict[str, Any] = text.GITHUB) -> dict[str, Any]:
     return _decision(tasks.TASK_GITHUB, strings, options=_lettered(strings),
                      recommendation="A",
@@ -175,6 +179,8 @@ def build_decisions(facts: Facts) -> list[dict[str, Any]]:
     imported = agent_import(facts.agent_import)
     return [
         *([imported] if imported else []),
+        _community(text.COMMUNITY_USE),
+        _community(text.COMMUNITY_SHARE),
         _github(facts.email),
         _github(facts.email, text.GITHUB_NO_ACCOUNT),
         *([projects] if projects else []),
