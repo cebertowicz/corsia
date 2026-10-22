@@ -95,11 +95,11 @@ describe('rendering and actions', () => {
 			await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')).not.toBeNull());
 			const toggle = document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')!;
 			toggle.click();
-			await vi.waitFor(() => expect(document.body.textContent).toContain("Couldn’t save this change. Try again."));
+			await vi.waitFor(() => expect(document.body.textContent).toContain("Couldn’t save this change. Could not save subscriptions."));
 			expect(toggle.getAttribute('aria-pressed')).toBe('true');
 			expect(document.getElementById('account-policy-Plus-account-1')?.closest('.account-usage-row')).not.toBeNull();
-			expect(document.querySelector('.account-usage-row .policy-status')?.textContent).toBe("Couldn’t save this change. Try again.");
-			expect(document.body.textContent).not.toContain('Could not save subscriptions.');
+			expect(document.querySelector('.account-usage-row .policy-status')?.textContent).toBe("Couldn’t save this change. Could not save subscriptions.");
+			expect(document.querySelectorAll('.policy-status.error')).toHaveLength(1);
 			unmount(component);
 		});
 

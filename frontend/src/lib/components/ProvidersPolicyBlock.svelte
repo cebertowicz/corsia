@@ -63,10 +63,14 @@
 		<div class="scope-setting">
 				<div>
 					<span class="scope-label">Use workspace settings</span>
-					<p>Use the workspace's account order and rollover.</p>
+					{#if policy.use_workspace ?? true}
+						<p>Use the workspace's account order and rollover.</p>
+					{:else}
+						<p>Turning this on replaces this project's settings with the workspace's. Turning it off again starts from the workspace values.</p>
+					{/if}
 					<span class="workspace-link"><Button variant="ghost" size="sm" onclick={openWorkspaceProviders}>Open workspace providers</Button></span>
 				</div>
-				<span class="policy-control"><Toggle checked={policy.use_workspace ?? true} disabled={policyState.isPending(scopeTarget)} ariaLabel="Use workspace settings" describedBy={policyState.isPending(scopeTarget) || policyState.hasFailure(scopeTarget) ? 'scope-policy-status' : undefined} onchange={toggleScope} /><PolicySaveStatus id="scope-policy-status" pending={policyState.isPending(scopeTarget)} failed={policyState.hasFailure(scopeTarget)} /></span>
+				<span class="policy-control"><Toggle checked={policy.use_workspace ?? true} disabled={policyState.isPending(scopeTarget)} ariaLabel="Use workspace settings" describedBy={policyState.isPending(scopeTarget) || policyState.hasFailure(scopeTarget) ? 'scope-policy-status' : undefined} onchange={toggleScope} /><PolicySaveStatus id="scope-policy-status" pending={policyState.isPending(scopeTarget)} failure={policyState.failureText(scopeTarget)} /></span>
 			</div>
 		{#if !policy.use_workspace}
 			{#each accountProviders as provider (provider.provider_key)}
@@ -79,14 +83,14 @@
 						{@const unit = provider.units[0]}
 						{#if accountFor(unit.id)}
 							<AccountUsageRow account={accountFor(unit.id)!} compact>
-								<ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} failed={policyState.hasFailure(`unit:${provider.provider_key}:${unit.id}`)} ontoggle={(value) => setEnabled(provider, unit.id, value)} />
+								<ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} failure={policyState.failureText(`unit:${provider.provider_key}:${unit.id}`)} ontoggle={(value) => setEnabled(provider, unit.id, value)} />
 							</AccountUsageRow>
 						{:else}
-							<div class="account-row"><span>{unit.label}</span><ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} failed={policyState.hasFailure(`unit:${provider.provider_key}:${unit.id}`)} ontoggle={(value) => setEnabled(provider, unit.id, value)} /></div>
+							<div class="account-row"><span>{unit.label}</span><ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} failure={policyState.failureText(`unit:${provider.provider_key}:${unit.id}`)} ontoggle={(value) => setEnabled(provider, unit.id, value)} /></div>
 						{/if}
 					{:else}
 						{#if provider.capabilities.rollover}
-							<div class="line"><span>Roll over when an account hits its limit</span><span class="policy-control"><Toggle checked={provider.rollover} disabled={policyState.isPending(`rollover:${provider.provider_key}`)} ariaLabel="Roll over when an account hits its limit" describedBy={policyState.isPending(`rollover:${provider.provider_key}`) || policyState.hasFailure(`rollover:${provider.provider_key}`) ? `rollover-${provider.provider_key}-policy-status` : undefined} onchange={(value) => save(provider, { rollover: value }, `rollover:${provider.provider_key}`)} /><PolicySaveStatus id={`rollover-${provider.provider_key}-policy-status`} pending={policyState.isPending(`rollover:${provider.provider_key}`)} failed={policyState.hasFailure(`rollover:${provider.provider_key}`)} /></span></div>
+							<div class="line"><span>Roll over when an account hits its limit</span><span class="policy-control"><Toggle checked={provider.rollover} disabled={policyState.isPending(`rollover:${provider.provider_key}`)} ariaLabel="Roll over when an account hits its limit" describedBy={policyState.isPending(`rollover:${provider.provider_key}`) || policyState.hasFailure(`rollover:${provider.provider_key}`) ? `rollover-${provider.provider_key}-policy-status` : undefined} onchange={(value) => save(provider, { rollover: value }, `rollover:${provider.provider_key}`)} /><PolicySaveStatus id={`rollover-${provider.provider_key}-policy-status`} pending={policyState.isPending(`rollover:${provider.provider_key}`)} failure={policyState.failureText(`rollover:${provider.provider_key}`)} /></span></div>
 						{/if}
 						{#each provider.units as unit, index (unit.id)}
 							{#if accountFor(unit.id)}
@@ -97,7 +101,7 @@
 										toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)}
 										moveDisabled={policyState.isPending(`order:${provider.provider_key}:${unit.id}`)}
 										pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`) || policyState.isPending(`order:${provider.provider_key}:${unit.id}`)}
-										failed={policyState.hasFailure(`unit:${provider.provider_key}:${unit.id}`) || policyState.hasFailure(`order:${provider.provider_key}:${unit.id}`)}
+										failure={policyState.failureText(`unit:${provider.provider_key}:${unit.id}`) ?? policyState.failureText(`order:${provider.provider_key}:${unit.id}`)}
 										position={provider.rollover ? index : null}
 										total={provider.units.length}
 										onmove={(direction) => move(provider, unit.id, direction)}
@@ -105,7 +109,7 @@
 									/>
 								</AccountUsageRow>
 							{:else}
-								<div class="account-row"><span>{unit.label}</span><ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} failed={policyState.hasFailure(`unit:${provider.provider_key}:${unit.id}`)} ontoggle={(value) => setEnabled(provider, unit.id, value)} /></div>
+								<div class="account-row"><span>{unit.label}</span><ProviderAccountPolicyControls accountName={unit.label} enabled={unit.enabled} toggleDisabled={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} pending={policyState.isPending(`unit:${provider.provider_key}:${unit.id}`)} failure={policyState.failureText(`unit:${provider.provider_key}:${unit.id}`)} ontoggle={(value) => setEnabled(provider, unit.id, value)} /></div>
 							{/if}
 						{/each}
 					{/if}

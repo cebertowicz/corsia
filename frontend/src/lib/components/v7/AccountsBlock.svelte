@@ -274,7 +274,7 @@
 		</div>
 	{:else}
 		{#if policyProvider && policyProvider.units.length >= 2 && policyProvider.capabilities.rollover}
-			<div class="rollover-row"><span>Roll over when an account hits its limit</span><span class="policy-control"><Toggle checked={policyProvider.rollover} disabled={policyState.isPending(rolloverTarget)} ariaLabel="Roll over when an account hits its limit" describedBy={policyState.isPending(rolloverTarget) || policyState.hasFailure(rolloverTarget) ? 'rollover-policy-status' : undefined} onchange={(value) => policyState.save(policyProvider, { rollover: value }, rolloverTarget)} /><PolicySaveStatus id="rollover-policy-status" pending={policyState.isPending(rolloverTarget)} failed={policyState.hasFailure(rolloverTarget)} /></span></div>
+			<div class="rollover-row"><span>Roll over when an account hits its limit</span><span class="policy-control"><Toggle checked={policyProvider.rollover} disabled={policyState.isPending(rolloverTarget)} ariaLabel="Roll over when an account hits its limit" describedBy={policyState.isPending(rolloverTarget) || policyState.hasFailure(rolloverTarget) ? 'rollover-policy-status' : undefined} onchange={(value) => policyState.save(policyProvider, { rollover: value }, rolloverTarget)} /><PolicySaveStatus id="rollover-policy-status" pending={policyState.isPending(rolloverTarget)} failure={policyState.failureText(rolloverTarget)} /></span></div>
 		{/if}
 		{#each rows as { account, unit, position } (account.id)}
 			{@const unitTarget = `unit:${provider.name}:${account.id}`}
@@ -307,7 +307,7 @@
 										toggleDisabled={policyState.isPending(unitTarget)}
 										moveDisabled={policyState.isPending(`order:${provider.name}:${account.id}`)}
 										pending={policyState.isPending(unitTarget) || policyState.isPending(`order:${provider.name}:${account.id}`)}
-										failed={policyState.hasFailure(unitTarget) || policyState.hasFailure(`order:${provider.name}:${account.id}`)}
+										failure={policyState.failureText(unitTarget) ?? policyState.failureText(`order:${provider.name}:${account.id}`)}
 										position={rolloverActive ? position : null}
 										total={policyProvider?.units.length ?? 0}
 										onmove={(direction) => policyState.move(policyProvider!, account.id, direction)}

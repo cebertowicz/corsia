@@ -64,9 +64,8 @@ describe('ProvidersPolicyBlock', () => {
 		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project', onSignIn: openProviders } });
 		flushSync();
 
-		await vi.waitFor(() => expect(host.textContent).toContain("Use the workspace's account order and rollover."));
+		await vi.waitFor(() => expect(host.textContent).toContain("Turning this on replaces this project's settings with the workspace's."));
 		expect(host.textContent).toContain('No Claude Code account signed in');
-		expect(host.textContent).not.toContain('Turning this on replaces');
 		const signIn = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Sign in') as HTMLButtonElement;
 		signIn.click();
 		expect(openProviders).toHaveBeenCalledWith('claude-code');
@@ -81,6 +80,33 @@ describe('ProvidersPolicyBlock', () => {
 
 		await vi.waitFor(() => expect(host.textContent).toContain("Use the workspace's account order and rollover."));
 		expect(host.textContent).not.toContain('Turning this on replaces');
+	});
+
+	it('explains what turning workspace settings back on replaces, only while the project has its own', async () => {
+		stubPolicy({ scope: 'project', use_workspace: false, override_revision: 1, providers: [] });
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.textContent).toContain("Turning this on replaces this project's settings with the workspace's. Turning it off again starts from the workspace values."));
+		expect(host.textContent).not.toContain("Use the workspace's account order and rollover.");
+	});
+
+	it('tells the person to check the connection when an account switch cannot reach the server', async () => {
+		const provider = { provider_key: 'claude-code', capabilities: { units: 'accounts' as const, rollover: true }, rollover: true, order: null, disabled: [], revision: 1,
+			units: [{ id: 'account-a', label: 'Account A', enabled: true }, { id: 'account-b', label: 'Account B', enabled: true }] };
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const path = input.toString();
+			if (init?.method === 'PUT') throw new TypeError('Failed to fetch');
+			if (path.startsWith('/api/vendor-accounts')) return { ok: true, json: async () => ({ accounts: [] }) };
+			if (path.startsWith('/api/projects/project/cloud-models-off')) return { ok: true, json: async () => ({ cloud_models_off: false }) };
+			return { ok: true, json: async () => ({ scope: 'project', use_workspace: false, override_revision: 1, providers: [provider] }) };
+		}));
+		component = mount(ProvidersPolicyBlock, { target: host, props: { projectId: 'project' } });
+		flushSync();
+
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')).not.toBeNull());
+		host.querySelector<HTMLButtonElement>('[aria-label="Use Account A"]')!.click();
+		await vi.waitFor(() => expect(host.querySelector('.policy-status.error')?.textContent).toBe('Couldn’t save this change. Check your connection and try again.'));
 	});
 
 	it('lets a one-account Claude provider be disabled without rollover or order controls', async () => {

@@ -1,12 +1,10 @@
 <script lang="ts">
-	import { saveFailureText } from '$lib/saveFailure';
-
-	interface Props { id?: string; pending?: boolean; failed?: boolean; }
-	const { id, pending = false, failed = false }: Props = $props();
+		interface Props { id?: string; pending?: boolean; failure?: string | null; }
+	const { id, pending = false, failure = null }: Props = $props();
 </script>
 
 {#if pending}<span class="policy-status" {id} role="status">Saving…</span>{/if}
-{#if failed}<span class="policy-status error" {id} role="status">{saveFailureText(undefined, true)}</span>{/if}
+{#if failure}<span class="policy-status error" {id} role="status">{failure}</span>{/if}
 
 <style>
 	/* Each host places the line in its own grid; this owns only how it reads. */
