@@ -1,4 +1,4 @@
-"""Bringing over what other AI tools know: the bounded memory read (IMP-12, IMP-14)."""
+"""Bringing over what other tools know: the bounded memory read (IMP-12, IMP-14)."""
 
 from __future__ import annotations
 
