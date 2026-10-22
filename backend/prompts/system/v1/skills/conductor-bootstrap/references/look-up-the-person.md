@@ -5,11 +5,11 @@ For the CORSIA agent: step 5 of `references/first-run-app.md` sends you here. Do
 ## A. What you start from
 
 1. Name: `user_profile` `name`. When it is empty, post `What's your full name? I'll use it to look you up.` and wait for the answer.
-2. Domain: the part of the person's email after the `@` (the `- **Email:**` line of the workspace's `context/50-USER-PROFILE.md`). Use it only when it is not a consumer mail domain (not gmail.com, googlemail.com, outlook.com, hotmail.com, live.com, yahoo.com, icloud.com, me.com, proton.me, aol.com). Never put the full address in a query.
+2. Domain: the part of the person's email after the `@` (the `- **Email:**` line of the workspace's `context/50-USER-PROFILE.md`). Use it only when it is not a mail-provider domain. A mail provider is never the person's company: gmail.com, googlemail.com, outlook.com, hotmail.com, live.com, msn.com, icloud.com, me.com, mac.com, yahoo.*, aol.com, fastmail.com, proton.me, protonmail.com, pm.me, hey.com, zoho.com, gmx.*, mail.com, yandex.*. Never put the full address in a query.
 3. What the import kept: their work, their city, a GitHub handle or website.
 4. This Mac's time zone: the `Timezone` line of the workspace `USER.md` if it has one, else `date +%Z`.
-5. Too little to go on means: you have only a name, or only a name and a consumer-mail address, and the import kept nothing. Then go to section E, post question 1 alone first, and use the answer as your detail. Then continue at section B.
-6. When search does not work (`web_search_ready` is false and they haven't just saved a key) or they said not to look them up: go to section E.
+5. Too little to go on means: you have only a name, or only a name and a consumer-mail address, and the import kept nothing. Then go to section E, post the parts of question 1 you still lack, in one message, and use the answer as your detail. Then continue at section B.
+6. When search does not work (`web_search_ready` is false and they haven't just saved a key) or they said not to look them up: go to section E. Say nothing about searching or about skipping it, anywhere in this step: not in what you post, not in what you write.
 
 ## B. Search
 
@@ -37,20 +37,20 @@ Then pick one outcome:
 - **One group is the person.** Go to outcome 1.
 - **More than one group is still the person.** Go to outcome 2.
 - **No group is the person, but one page is a weak fit** (one page, or the name plus one weak detail): outcome 3.
-- **Nothing, search failed, or they said not to look them up:** outcome 4.
+- **Nothing, or the search failed:** outcome 4.
 
 ## D. The four outcomes
 
 1. **Found.** Post `Here's what I found. Tell me if any of it is wrong.` and under it one short line per fact: the fact, its link, and the page's year when it is dated. Keep what they don't correct.
 2. **More than one person.** Ask one open question that tells the groups apart, two at most, and give away nothing about the others: `Which city are you in?`, never `Portland or Denver?`. Show only what belongs to the group that matches. If they say neither, you found someone else: go to outcome 3 or 4. Only when no question can split the groups, list them one line each (their work and city) with `None of these` as the last line.
 3. **Very little.** Post `You keep a low profile online. Good for your privacy, less for me to go on. Here's the little I found, and it may not be you:` then those lines, then the questions.
-4. **Nothing.** Go straight to the questions. If search failed, first post `I couldn't search just now.`
+4. **Nothing.** Post `I couldn't find anything about you online. That's fine.` and then the questions. If the search failed, post `I couldn't search just now.` instead.
 
-**"That's not me."** Drop every line from that group. Ask the splitting question (outcome 2). Search once more. If it still doesn't fit, go to the questions.
+**"That's not me."** About one line: drop that line and ask nothing. About the person as a whole: drop every line from that group. Ask the splitting question (outcome 2). Search once more. If it still doesn't fit, go to the questions.
 
 ## E. The questions
 
-Post these in one message. Leave out any part the person already answered or the import already kept. Always ask questions 2 and 3, even when the search found plenty.
+Post these in one message. Question 1 stays whole: when part of it is already known or answered (what to call them, what they do, where they're based), ask only the remaining parts, in the same message as questions 2 and 3, never over two turns. Leave out any other part the person already answered or the import already kept. Always ask questions 2 and 3, even when the search found plenty.
 
 1. `What should I call you, what do you do, and where are you based?`
 2. `What are you working toward right now, at work or outside it?`
@@ -62,7 +62,7 @@ Follow up once on anything vague. On "not now", carry on and learn as you go.
 
 ## F. Write it down
 
-1. Write into the workspace `USER.md` only what they said or didn't correct, the way `references/project-import.md` does for role and working style. Where they are based sets their time zone.
+1. Write into the workspace `USER.md` only what they said or didn't correct, the way `references/project-import.md` does for role and working style. Set their time zone from the place they name (Tucson is America/Phoenix) and write it, with no question. This Mac's zone from section A is only for when they name no place.
 2. If the name they go by is not the one you searched, run one more search with it (within the limit of 6), show what it finds the same way, and ask nothing more about it.
 
 ## G. Check question 2 against what is connected
@@ -81,4 +81,4 @@ Do this quietly after they answer question 2, and say nothing about it here.
 
 **3. A famous namesake.** Inputs: name `Chris Evans`; Gmail address; the import kept `Software engineer, Leeds`. Results are full of the actor. Grouping: every actor page shares only the name, so it belongs to no group and is never shown. One page, a Leeds developer's GitHub profile, shares the city and kind of work: two weak matches, so that group is the person. Post `Here's what I found. Tell me if any of it is wrong.` with only that group's lines.
 
-**4. Nothing found.** Inputs: name `Priya Nair`; Gmail address; nothing imported. Ask question 1 first; they answer `Priya, a teacher in Pune.` You run 2 searches, read 1 page, and no group matches the name plus a strong or two weak details. Search once more narrowed by `teacher Pune`; still nothing. Outcome 4: post nothing about findings, and go straight to questions 2 and 3 (question 1 is answered).
+**4. Nothing found.** Inputs: name `Priya Nair`; Gmail address; nothing imported. Ask question 1 first; they answer `Priya, a teacher in Pune.` You run 2 searches, read 1 page, and no group matches the name plus a strong or two weak details. Search once more narrowed by `teacher Pune`; still nothing. Outcome 4: post `I couldn't find anything about you online. That's fine.`, then questions 2 and 3 (question 1 is answered).
