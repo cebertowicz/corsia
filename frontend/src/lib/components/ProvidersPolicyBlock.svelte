@@ -56,11 +56,11 @@
 	{#if loading || cloudModelsOff === null}<p role="status">Loading providers…</p>
 	{:else if cloudModelsOff === true && policy}
 		{#if cloudOffLine}<p>{cloudOffLine}</p>{/if}
-	{:else if error && !policy}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Reload providers</Button>
+	{:else if error && !policy}<p class="error" role="alert">{error}</p><Button size="sm" onclick={load}>Retry</Button>
 	{:else if policy}
 		{#if error}<p class="error" role="alert">{error}</p>{/if}
 		{#if accountsError}<p class="error" role="alert">{accountsError}</p>{/if}
-		{#if error || accountsError}<Button size="sm" onclick={load}>Reload providers</Button>{/if}
+		{#if error || accountsError}<Button size="sm" onclick={load}>Retry</Button>{/if}
 		<div class="scope-setting">
 				<div>
 					<span class="scope-label">Use workspace settings</span>

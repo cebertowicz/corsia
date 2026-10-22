@@ -104,7 +104,7 @@ describe('rendering and actions', () => {
 			unmount(component);
 		});
 
-		it('keeps the error and offers a Reload when the policy cannot be re-read after a failed save', async () => {
+		it('keeps the error and offers Retry when the policy cannot be re-read after a failed save', async () => {
 			token.set('test-token');
 			let policyReads = 0;
 			const policy = { providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }] }] };
@@ -119,8 +119,8 @@ describe('rendering and actions', () => {
 			document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')!.click();
 			await vi.waitFor(() => expect(document.querySelector('.account-usage-row .policy-status')?.textContent).toBe('Couldn’t save this change. Check your connection and try again.'));
 			await settle();
-			expect(button('Reload')).toBeDefined();
-			button('Reload').click();
+			expect(button('Retry')).toBeDefined();
+			button('Retry').click();
 			await vi.waitFor(() => expect(document.querySelector('.msg.err')).toBeNull());
 			unmount(component);
 		});
