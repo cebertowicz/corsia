@@ -15,6 +15,7 @@ from infra.time import utc_now_iso
 from llm.resolution import ExecutionTarget
 from registry.cc_session import notify_cc_session, persist_cc_session
 from subagents.cc_accept import require_owned_accept_db
+from subagents.cc_invocation import CONFINEMENT_NONE, permission_mode_for
 from subagents.cc_runtime_events import _make_on_event
 from subagents.cc_runtime_helpers import (
     _validate_working_dir,
@@ -92,7 +93,8 @@ async def _start_process(prepared: PreparedCCSpawn) -> None:
     _validate_working_dir(prepared.working_dir, request.project_id)
     from subagents.harness_tool_bridge import configure_cc_tool_bridge
 
-    mcp_config = configure_cc_tool_bridge(
+    confined = request.confinement != CONFINEMENT_NONE
+    mcp_config = None if confined else configure_cc_tool_bridge(
         live,
         thread_id=prepared.child_id,
         working_dir=prepared.working_dir,
@@ -111,6 +113,9 @@ async def _start_process(prepared: PreparedCCSpawn) -> None:
         session_id=prepared.child_id,
         seed_file=live.seed_file,
         mcp_config=mcp_config,
+        permission_mode=permission_mode_for(request.confinement),
+        confinement=request.confinement,
+        add_dirs=request.add_dirs,
         working_dir=prepared.working_dir,
         claude_dir=prepared.resolved_claude_dir,
         model=prepared.cc_alias,
@@ -202,15 +207,22 @@ async def spawn(
     claude_dir: str | None = None,
     broadcast: Broadcast | None = None,
     account_id: str | None = None,
+    confinement: str = CONFINEMENT_NONE,
+    add_dirs: tuple[str, ...] = (),
     db=None,
 ) -> str:
-    """Spawn one Claude Code subagent child thread."""
+    """Spawn one Claude Code subagent child thread.
+
+    A ``review`` confinement runs it read-only over ``add_dirs`` from its own
+    empty working directory; the caller has already checked those reads.
+    """
     require_owned_accept_db(db)
     if not task:
         raise ValueError("spawn requires a task")
     request = CCSpawnRequest(
         parent_thread_id, task, binary, target, working_dir, effort, title,
         project_id, claude_dir, broadcast, account_id,
+        confinement=confinement, add_dirs=add_dirs,
     )
     prepared = await prepare_spawn(request, get_db())
     try:

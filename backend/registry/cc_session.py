@@ -1,12 +1,39 @@
-"""Atomic ownership of one Claude Code provider identity per CORSIA thread."""
+"""Atomic ownership of one Claude Code provider identity per CORSIA thread.
+
+Each launch stores its description (``claude_invocation``) on the session
+record it registers. ``registered_confinement`` is the one reader of a
+thread's confinement from those records, and the rule is sticky: a thread is
+``review`` if ANY session record it ever registered says so, in any identity
+or relationship state, with the add-dirs and working directory of the newest
+such record. Every launch reads it once, at its start.
+
+| Records the thread registered | Reads as |
+|---|---|
+| none | none |
+| records without a ``claude_invocation`` | none |
+| newest without an invocation, an older review record | review |
+| the review record's session retired | review |
+| the review record's registration left the owner states | review |
+| a damaged review record (unknown mode, bad add-dirs, no working dir) | refused |
+| any record whose metadata is not JSON | refused |
+
+Refused fails the launch: a record that cannot be read could be the one that
+said review, so it never reads as none.
+"""
 
 from __future__ import annotations
+
+import json
 
 from loguru import logger
 
 from infra.database import write_transaction
 from registry import models
+from registry.listing import metadata_ever_for_thread
 from registry.notifications import notify_changed
+
+#: Where a session record keeps its launch's confinement.
+CONFINEMENT_PATH = "$.claude_invocation.confinement"
 
 
 class CCRegistrationChanged(RuntimeError):
@@ -76,3 +103,29 @@ def notify_cc_session(
     except Exception as error:
         logger.warning(
             f"registry cc session notify failed for {thread_id}: {error}")
+
+
+def registered_confinement(thread_id: str, db=None):
+    """The thread's launch confinement by the sticky rule above, or refused.
+
+    Raises ``ConfinementRefused`` for a damaged or unreadable record.
+    """
+    from subagents.cc_confinement import ConfinementRefused
+    from subagents.cc_invocation import (
+        CONFINEMENT_REVIEW, UNCONFINED, LaunchConfinement, stored_confinement,
+    )
+
+    newest = None
+    for raw in metadata_ever_for_thread(thread_id, "claude-code", "session", CONFINEMENT_PATH, db=db):
+        try:
+            invocation = json.loads(raw)["claude_invocation"]
+            mode, add_dirs = stored_confinement(invocation)
+        except (TypeError, KeyError, AttributeError, ValueError) as error:
+            raise ConfinementRefused("Claude Code launch record is damaged or unreadable") from error
+        if mode != CONFINEMENT_REVIEW or newest is not None:
+            continue
+        working_dir = invocation.get("working_dir")
+        if not isinstance(working_dir, str) or not working_dir:
+            raise ConfinementRefused("Claude Code review launch record is damaged: no working dir")
+        newest = LaunchConfinement(mode, add_dirs, working_dir)
+    return newest or UNCONFINED
