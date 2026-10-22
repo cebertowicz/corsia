@@ -54,7 +54,9 @@ Post these in one message. Leave out any part the person already answered or the
 
 1. `What should I call you, what do you do, and where are you based?`
 2. `What are you working toward right now, at work or outside it?`
-3. `When I do something for you, should I check with you first or just do it and tell you after? And do you like answers short, or with the reasoning?`
+3. `Is there anything you'd want me to check with you on before I do it, like sending email as you or spending money? Everything else, I'll do and tell you what I did. And do you like answers short, or with the reasoning?`
+
+Question 3 finds where they want a say; it never sets a blanket rule. On "check everything", reply `I'll check with you before anything that leaves this computer or can't be undone, and show you the rest as I go. As we work, tell me where else you want a say.` Write what they named to the profile (section F).
 
 Follow up once on anything vague. On "not now", carry on and learn as you go.
 
