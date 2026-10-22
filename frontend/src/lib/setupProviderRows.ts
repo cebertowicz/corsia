@@ -11,6 +11,8 @@ export type LocalRowInput = {
 	cloudReady?: boolean;
 	/** The person turned the switch off mid-download and is being asked to confirm. */
 	confirmingStop?: boolean;
+	/** Turning the Ready model off failed; the reference the service logged it under, if any. */
+	turnOffFailed?: { reference?: string };
 	start: () => void; stop: () => void; check: () => void;
 	confirmStop?: (asking: boolean) => void; turnOff?: () => void;
 };
@@ -18,6 +20,7 @@ export type LocalRowInput = {
 const LOCAL_FAILURE_STATES = new Set(['failed', 'setup_failed', 'start_failed']);
 export const LOCAL_HELD_DOWNLOADING = 'CORSIA is downloading this so setup can continue. To turn it off, connect a cloud provider first.';
 export const LOCAL_HELD_READY = 'CORSIA needs this to continue setup. To turn it off, connect a cloud provider first.';
+export const LOCAL_TURN_OFF_FAILED = 'CORSIA couldn’t turn off the local model. Turn it off again, or save a report.';
 
 /** How much of the download is on disk, in GB, or null when the size or progress is unknown. */
 function downloadedGb(sizeGb: number | null, percent?: number | null): number | null {
@@ -27,13 +30,15 @@ function downloadedGb(sizeGb: number | null, percent?: number | null): number | 
 
 /** Present one local lifecycle and one cause-specific recovery action. */
 export function setupLocalRow(input: LocalRowInput): AiRow {
-	const { source, pick, eligible, downloading, ready, startError, startFix, startReference, freeDisk, cloudReady = false, confirmingStop = false, start, stop, check, confirmStop, turnOff } = input;
+	const { source, pick, eligible, downloading, ready, startError, startFix, startReference, freeDisk, cloudReady = false, confirmingStop = false, turnOffFailed, start, stop, check, confirmStop, turnOff } = input;
 	const row = { key: 'omlx', name: 'Local model' };
 	const model = pick?.model?.name ?? source?.settings_download?.name ?? 'Local model';
 	const size = pick?.model ? `${pick.model.download_size_gb} GB` : source?.download_size ?? '';
 	if (!eligible || pick?.state === 'low_memory') return { ...row, meta: LOW_MEMORY_LOCAL_MODEL_MESSAGE };
 	if (ready) {
-		return { ...row, meta: `${model} · runs on this computer`, pill: { state: 'success', label: 'Ready' }, detail: cloudReady ? undefined : LOCAL_HELD_READY,
+		const failed = cloudReady && turnOffFailed;
+		return { ...row, meta: `${model} · runs on this computer`, pill: { state: 'success', label: 'Ready' },
+			detail: failed ? LOCAL_TURN_OFF_FAILED : cloudReady ? undefined : LOCAL_HELD_READY, error: Boolean(failed), reference: failed ? turnOffFailed.reference : undefined, reportable: Boolean(failed),
 			toggle: { on: true, held: !cloudReady, run: (next) => { if (!next) turnOff?.(); } } };
 	}
 	if (downloading) {
@@ -48,6 +53,10 @@ export function setupLocalRow(input: LocalRowInput): AiRow {
 				confirm: [{ label: 'Stop download', run: () => { confirmStop?.(false); stop(); } }, { label: 'Keep downloading', run: () => confirmStop?.(false) }] };
 		}
 		return { ...row, meta, toggle };
+	}
+	// Downloaded, and its server was turned off: the switch turns it back on.
+	if (source?.reason_code === 'not_running' && source.local_state === 'stopped') {
+		return { ...row, meta: `${model} · Off`, toggle: { on: false, run: (next) => { if (next) start(); } } };
 	}
 	// The download finished: the model is being listed and loaded, never offered for download again;
 	// Check again asks the service now rather than waiting on the next refresh.

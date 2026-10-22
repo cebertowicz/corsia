@@ -79,7 +79,7 @@
 	let localStartError = $state<'other' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
 	let finishing = $state(false), showAdd = $state(false), openProvider = $state<HostProvider | null>(null);
 	// The subscriptions answer; null until answered (or skipped, or a resumed setup), when every CLI row shows.
-	let picks = $state<SetupPicks | null>(null), confirmLocalStop = $state(false);
+	let picks = $state<SetupPicks | null>(null), confirmLocalStop = $state(false), localOffFailed = $state<{ reference?: string } | undefined>();
 	const connectFlow = createSetupConnect({ token: () => get(token), sources: () => sources, refreshSources });
 	const canConnect = shellInfo() !== null;
 	let preauthLocal = $state<LocalRowState | undefined>();
@@ -108,7 +108,7 @@
 	function reportRows(): SetupReportRow[] {
 		return aiRows.filter((row) => row.error).map((row) => ({
 			key: row.key as SetupReportRow['key'], name: row.name, reference: row.reference,
-			cause: row.key === 'omlx' ? local?.setup_error_code ?? (localStartError || undefined) : connectFlow.attempts[row.key]?.cause,
+			cause: row.key === 'omlx' ? (localOffFailed ? 'turn_off_failed' : local?.setup_error_code ?? (localStartError || undefined)) : connectFlow.attempts[row.key]?.cause,
 		}));
 	}
 	function withReportAction(row: AiRow): AiRow {
@@ -132,7 +132,7 @@
 			return withReportAction({ key: vendor, name: vendor === 'codex' ? 'Codex' : 'Claude Code', ...view, pill: works ? { state: 'success', label: 'Ready' } : undefined });
 		});
 		rows.push(withReportAction(setupLocalRow({ source: local, pick: localPick.pick, eligible, downloading, ready: catalog.some((row) => row.connection === 'omlx' && setupModelWorks(row)), startError: localStartError, startFix, startReference: localStartReference, freeDisk: status.free_disk_gb,
-			cloudReady, confirmingStop: confirmLocalStop,
+			cloudReady, confirmingStop: confirmLocalStop, turnOffFailed: localOffFailed,
 			start: () => void startLocal(), stop: () => void stopLocal(), check: () => void checkLocal(),
 			confirmStop: (next) => { confirmLocalStop = next; }, turnOff: () => void turnOffLocal() })));
 		const provider = tested.find((test) => bestSetupModel(catalog.filter((row) => row.connection !== 'omlx' && row.connection !== 'claude-code' && row.connection !== 'codex'), [test]));
@@ -229,10 +229,9 @@
 	async function turnOffLocal() {
 		const current = get(token);
 		if (!current) return;
-		const stopped = await stopLocalServer(current).catch(() => false);
+		const stopped = await stopLocalServer(current).catch(() => ({ ok: false, ref: undefined }));
+		localOffFailed = stopped.ok ? undefined : { reference: stopped.ref };
 		await refreshSources();
-		// After the refresh, which clears sourceError, so a failed stop stays shown.
-		if (!stopped) sourceError = 'CORSIA couldn’t turn off the local model. Try again.';
 	}
 	async function connectToAnotherComputer() {
 		await stopLocal();

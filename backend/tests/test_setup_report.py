@@ -44,7 +44,11 @@ def test_a_line_with_a_credential_word_is_withheld_whole(line):
 def test_only_the_last_lines_are_kept_and_a_missing_log_is_said(tmp_path):
     lines = [f"step {index} reference={ROWS[0]['reference']}" for index in range(MAX_LINES + 10)]
     assert relevant_lines(lines, ROWS[:1]) == lines[-MAX_LINES:]
-    assert "none found" in report_details(ROWS, tmp_path / "absent.log")
+    # A log that couldn't be read is never reported as one with nothing relevant in it.
+    unread = report_details(ROWS, tmp_path / "absent.log")
+    assert "couldn’t read the service log" in unread and "none found" not in unread
+    (tmp_path / "quiet.log").write_text("nothing about these rows\n")
+    assert "none found" in report_details(ROWS, tmp_path / "quiet.log")
 
 
 def test_report_route_returns_the_body_before_the_first_account(monkeypatch, tmp_path):

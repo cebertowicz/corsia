@@ -9,7 +9,7 @@ type ConnectPhase = {
 	reason?: string | null; cause?: InstallFailureCause; ref?: string | null; shadowedBinary?: string;
 	/** Sign in was pressed while installing: the sign-in starts the moment the install is done. */
 	signInQueued?: boolean;
-	/** A failed sign-in's stable cause, from the service or `unreachable` when it couldn't be asked. */
+	/** A failed sign-in's stable cause, from the service or `unreachable` when no answer came; absent when unknown. */
 	signinCause?: string;
 };
 export type SetupAttempt = { attempt: 'none' | 'installed' | 'install_failed' | 'signin_failed'; cause?: string; ref?: string };
@@ -45,7 +45,7 @@ export function installFailureCopy(cli: string, cause?: InstallFailureCause | nu
 /** The sign-in's real cause in words, and whether a report would help diagnose it. */
 export function signinFailureCopy(vendor: string, cause?: string | null): { meta: string; reportable: boolean } {
 	const { cli, account } = VENDOR_COPY[vendor] ?? { cli: vendor, account: vendor };
-	if (cause === 'unreachable') return { meta: `CORSIA couldn’t reach its service to start signing in. Sign in again.`, reportable: true };
+	if (cause === 'unreachable') return { meta: `CORSIA didn’t answer while starting the ${cli} sign-in. Sign in again.`, reportable: true };
 	if (cause === 'agent_unavailable') return { meta: `CORSIA couldn’t reach its agent to start signing in. Sign in again, or save a report.`, reportable: true };
 	if (cause?.endsWith('_executable_missing')) return { meta: `CORSIA couldn’t find ${cli} on this computer. Sign in again to install it.`, reportable: true };
 	if (cause?.endsWith('_signin_in_progress')) return { meta: `Another ${cli} sign-in is already open. Finish it in your browser, or sign in again.`, reportable: false };
@@ -73,7 +73,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		flow = { ...flow, [vendor]: next };
 		if (next?.phase === 'failed') attempts = { ...attempts, [vendor]: { attempt: next.failed === 'signin' ? 'signin_failed' : 'install_failed', cause: next.failed === 'signin' ? next.signinCause ?? 'signin_failed' : installCause(next.cause), ref: next.ref ?? undefined } };
 	}
-	function signinFailed(vendor: string, result?: Signin | null, installed?: boolean, cause = 'unreachable') {
+	function signinFailed(vendor: string, result?: Signin | null, installed?: boolean, cause?: string) {
 		setConnect(vendor, { phase: 'failed', failed: 'signin', installed, signinCause: result ? result.cause ?? result.status : cause, ref: result?.ref ?? null });
 	}
 	async function beginSignIn(source: ModelSource, installed = false) {
@@ -93,7 +93,10 @@ export function createSetupConnect(deps: ConnectDeps) {
 			if (['failed', 'unavailable', 'refused'].includes(result.status)) { signinFailed(source.source, result, installed); return; }
 			setConnect(source.source, { phase: 'signing-in', installed, accountId });
 			await tickConnect();
-		} catch { signinFailed(source.source, result, installed); }
+		} catch (error) {
+			// Only a request that got no answer is unreachable; a refusal's cause is unknown here.
+			signinFailed(source.source, result, installed, error instanceof TypeError ? 'unreachable' : undefined);
+		}
 	}
 	async function openSignInAgain(source: ModelSource) {
 		const current = deps.token(), accountId = flow[source.source]?.accountId;
@@ -188,7 +191,7 @@ export function createSetupConnect(deps: ConnectDeps) {
 		if (entry?.phase === 'installing') {
 			return { meta: `Installing ${copy.cli}…`, busy: true, spinning: true, action: entry.signInQueued ? { label: 'Installing…', run: () => undefined, loading: true } : signInAction };
 		}
-		if (entry?.phase === 'signing-in') return { meta: 'Finish signing in in your browser', busy: true, action: { label: 'Open sign-in again', run: () => void openSignInAgain(source) } };
+		if (entry?.phase === 'signing-in') return { meta: 'Finish signing in in your browser.', busy: true, action: { label: 'Open sign-in again', run: () => void openSignInAgain(source) } };
 		if (entry?.phase === 'failed' && entry.failed === 'signin') {
 			const failure = signinFailureCopy(source.source, entry.signinCause);
 			return { meta: failure.meta, reference: entry.ref ?? undefined, error: true, reportable: failure.reportable, action: signInAction };

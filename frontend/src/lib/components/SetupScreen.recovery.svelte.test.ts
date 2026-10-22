@@ -78,7 +78,8 @@ describe('SetupScreen account recovery', () => {
 		click('Continue'); await settle();
 		expect(host.textContent).toContain('Couldn’t create your account. Try again.');
 		click('Save a report'); await settle();
-		expect(invoke).toHaveBeenCalledWith('save_setup_report', { details: expect.stringContaining('couldn’t read the setup details') });
+		// No provider row failed, so the report adds no row details that would claim nothing went wrong.
+		expect(invoke).toHaveBeenCalledWith('save_setup_report', { details: '' });
 	});
 });
 

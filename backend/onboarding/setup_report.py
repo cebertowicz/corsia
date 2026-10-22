@@ -28,7 +28,8 @@ _CREDENTIAL = re.compile(
 REFERENCE = re.compile(r"^(?:cli|local|signin)-[0-9a-f]{16}$")
 
 
-def _tail(path: Path) -> list[str]:
+def _tail(path: Path) -> list[str] | None:
+    """The log's last lines, or None when it couldn't be read."""
     try:
         with path.open("rb") as log:
             log.seek(0, 2)
@@ -36,7 +37,7 @@ def _tail(path: Path) -> list[str]:
             log.seek(max(0, size - TAIL_BYTES))
             text = log.read().decode("utf-8", errors="replace")
     except OSError:
-        return []
+        return None
     lines = text.splitlines()
     return lines[1:] if size > TAIL_BYTES else lines
 
@@ -55,14 +56,15 @@ def relevant_lines(lines: Iterable[str], rows: list[dict]) -> list[str]:
 def report_details(rows: list[dict], log_path: Path) -> str:
     """Each failed row's cause and reference, then the relevant service-log lines."""
     parts = ["Failed rows:"]
-    if not rows:
-        parts.append("  none")
     for row in rows:
         line = f"  {row.get('name') or row.get('key')}: {row.get('cause') or 'no cause recorded'}"
         if row.get("reference"):
             line += f" (reference {row['reference']})"
         parts.append(line)
-    found = relevant_lines(_tail(log_path), rows) if rows else []
+    lines = _tail(log_path)
     parts += ["", f"Service log lines about these rows ({log_path}):"]
-    parts += [f"  {line}" for line in found] or ["  none found"]
+    if lines is None:
+        parts.append("  CORSIA couldn’t read the service log")
+    else:
+        parts += [f"  {line}" for line in relevant_lines(lines, rows)] or ["  none found"]
     return "\n".join(parts) + "\n"

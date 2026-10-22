@@ -123,6 +123,22 @@ describe('setup local row switch', () => {
 		expect(row.meta).toContain('Finishing setup');
 	});
 
+	it('shows a turned-off local model as off, and its switch turns it back on', () => {
+		const start = vi.fn();
+		const row = setupLocalRow({ ...actions(), start, source: { source: 'omlx', name: 'Local model', state: 'needs_setup', reason_code: 'not_running', local_state: 'stopped' }, pick: null, eligible: true, downloading: false, ready: false, startError: '', cloudReady: true });
+		expect(row).toMatchObject({ meta: 'Local model · Off', toggle: { on: false } });
+		expect(row.busy).toBeUndefined();
+		expect(row.action).toBeUndefined();
+		row.toggle?.run(true);
+		expect(start).toHaveBeenCalledOnce();
+	});
+
+	it('keeps a failed turn-off on the Ready row, with its reference and a report', () => {
+		const row = setupLocalRow({ ...actions(), source: undefined, pick: null, eligible: true, downloading: false, ready: true, startError: '', cloudReady: true, turnOffFailed: { reference: 'local-0123456789abcdef' } });
+		expect(row).toMatchObject({ error: true, reportable: true, reference: 'local-0123456789abcdef', toggle: { on: true, held: false } });
+		expect(row.detail).toBe('CORSIA couldn’t turn off the local model. Turn it off again, or save a report.');
+	});
+
 	it('holds the switch on while the local model is the only way through setup', () => {
 		const row = downloadingRow();
 		expect(row.action).toBeUndefined();

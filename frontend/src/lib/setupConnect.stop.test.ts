@@ -31,4 +31,24 @@ describe('setup connect stop', () => {
 		expect(calls.some((call) => call.endsWith('/signin/check'))).toBe(false);
 		expect(flow.active).toBe(false);
 	});
+
+	it.each([
+		['a refusal the service sent', () => Promise.resolve(new Response('{}', { status: 409 })), 'Couldn’t finish signing in to Codex. Sign in again, or save a report.'],
+		['no answer at all', () => Promise.reject(new TypeError('Failed to fetch')), 'CORSIA didn’t answer while starting the Codex sign-in. Sign in again.'],
+	])('names the sign-in start failure only as far as it is known: %s', async (_case, answer, line) => {
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input), method = init?.method ?? 'GET';
+			if (url.startsWith('/api/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
+			if (url.startsWith('/api/vendor-accounts?')) return json({ accounts: [] });
+			if (url === '/api/vendor-accounts' && method === 'POST') return json({ id: 'account-1' });
+			if (url === '/api/vendor-accounts/account-1/signin' && method === 'POST') return answer();
+			return json({});
+		}));
+		const source = { source: 'codex', name: 'Codex', state: 'needs_auth' as const };
+		const flow = createSetupConnect({ token: () => 'session', sources: () => [source], refreshSources: async () => undefined });
+
+		await flow.signIn(source);
+
+		expect(flow.row(source).meta).toBe(line);
+	});
 });

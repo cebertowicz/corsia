@@ -27,12 +27,13 @@ export async function setupReportDetails(rows: SetupReportRow[]): Promise<string
 	}
 }
 
-/** Save the report; the error to show, or '' when it saved or there is nothing to save with. */
+/** Save the report; the error to show, or '' when it saved or there is nothing to save with.
+ * With no failed rows (an account or start-up failure) there are no row details to add. */
 export async function saveSetupReport(rows: SetupReportRow[] = []): Promise<string> {
 	const invoke = setupReportInvoke();
 	if (!invoke) return '';
 	try {
-		await invoke('save_setup_report', { details: await setupReportDetails(rows) });
+		await invoke('save_setup_report', { details: rows.length ? await setupReportDetails(rows) : '' });
 		return '';
 	} catch {
 		return 'CORSIA couldn’t save the report. Try again.';

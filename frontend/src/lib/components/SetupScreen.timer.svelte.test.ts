@@ -192,7 +192,8 @@ describe('SetupScreen owned-job polling', () => {
 		mountResume(); await settle();
 		(host.querySelector('button[aria-label="Local model"]') as HTMLButtonElement | null)?.click(); await settle();
 		expect(calls).toContain('GET /api/settings/network-servers');
-		expect(host.textContent).toContain('CORSIA couldn’t turn off the local model. Try again.');
+		// On the row whose switch retries it, never in the sources slot whose Retry only rechecks.
+		expect(host.querySelector('#setup-row-detail-omlx')?.textContent).toBe('CORSIA couldn’t turn off the local model. Turn it off again, or save a report.');
 	});
 
 	it('cleans up a pre-account local download timer when the screen unmounts', async () => {
