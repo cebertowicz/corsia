@@ -17,7 +17,7 @@
 </script>
 
 <form class="form" onsubmit={(event) => { event.preventDefault(); onSubmit(); }}>
-	<Field variant="chip" layout="stacked" label="Name" labelFor="setup-name"><input id="setup-name" autocomplete="name" bind:value={name} /></Field>
+	<Field variant="chip" layout="stacked" label="Full name" labelFor="setup-name"><input id="setup-name" autocomplete="name" bind:value={name} /></Field>
 	<Field variant="chip" layout="stacked" label="Username" labelFor="setup-username" error={usernameError || undefined}><input id="setup-username" autocomplete="username" autocapitalize="off" bind:value={username} readonly={!!requiredUsername} /></Field>
 	<div class="passwords">
 		<Field variant="chip" layout="stacked" label="Password" labelFor="setup-password" error={password && password.length < 8 ? 'Use at least 8 characters.' : undefined}><input id="setup-password" type="password" autocomplete="new-password" bind:value={password} /></Field>
@@ -30,6 +30,6 @@
 <style>
 	.form { display: flex; flex-direction: column; gap: var(--space-3); width: 100%; }
 	.passwords { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
-	.error-text { margin: 0; }
+	.error-text { margin: 0; font-size: var(--text-subhead); }
 	@media (max-width: 40em) { .passwords { grid-template-columns: 1fr; } }
 </style>

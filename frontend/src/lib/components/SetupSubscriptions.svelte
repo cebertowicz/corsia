@@ -66,9 +66,9 @@
 
 <style>
 	.question { display: flex; flex-direction: column; gap: var(--space-3); }
-	.ask { color: var(--text-primary); font-size: var(--text-body); font-weight: var(--fw-medium); }
-	.explain { margin: 0; color: var(--text-secondary); font-size: var(--text-body); line-height: var(--lh-normal); }
+	.ask { color: var(--text-primary); font-size: var(--text-title3); font-weight: var(--fw-medium); }
+	.explain { margin: 0; color: var(--text-secondary); font-size: var(--text-title3); line-height: var(--lh-normal); }
 	.choices { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-	.ready { margin: 0 0 var(--space-4); display: flex; align-items: center; gap: var(--space-2); color: var(--text-primary); font-size: var(--text-body); }
+	.ready { margin: 0 0 var(--space-4); display: flex; align-items: center; gap: var(--space-2); color: var(--text-primary); font-size: var(--text-title3); }
 	.ready svg { flex: none; color: var(--accent-text); }
 </style>

@@ -96,7 +96,7 @@ _TEXT: dict[str, tuple[str, str]] = {
         _BROWSER_RETRY,
     ),
     SERVICE_UNAVAILABLE: (
-        "Microsoft didn't complete this request. The account is still connected; try again in a minute. Don't start a new sign-in.",
+        "Microsoft didn’t complete this request. The account is still connected; try again in a minute. Don’t start a new sign-in.",
         _BROWSER_RETRY,
     ),
 }
@@ -137,11 +137,21 @@ def person_message(cause: str) -> str:
 
 
 def token_error_cause(status: int, payload: object) -> str:
-    """Map a refresh refusal to fixed causes without exposing provider text."""
+    """Map a refresh refusal to fixed causes without exposing provider text.
+
+    Only a throttle or a Microsoft outage can clear on its own, so those alone stay
+    retryable. Every other refusal is permanent for the saved refresh token: the caller
+    marks the account as needing sign-in, so a person is offered Sign in instead of an
+    agent retrying a row that can never work again.
+    """
     error = payload.get("error") if isinstance(payload, dict) else None
-    if status in (400, 401) and error in ("invalid_grant", "interaction_required", "invalid_client", "unauthorized_client"):
-        return REFRESH_TOKEN_INVALID
-    return SERVICE_UNAVAILABLE
+    # Only an OAuth error body from the token endpoint is Microsoft's refusal; a captive
+    # portal's redirect or a proxy's 403 never reached Microsoft and must stay a retry.
+    if status not in (400, 401) or not isinstance(error, str) or not error:
+        return SERVICE_UNAVAILABLE
+    if error == "temporarily_unavailable":
+        return SERVICE_UNAVAILABLE
+    return REFRESH_TOKEN_INVALID
 
 
 _REGISTRATION_AADSTS_CODES = frozenset((50011, 700016, 7000218))

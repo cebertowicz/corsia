@@ -356,7 +356,7 @@ async def first_account(request: Request) -> dict | Response:
     try:
         user_id = await run_in_db(
             accounts.create_first_account, body.username, body.password,
-            call_name=body.name, email=body.email or "", first_run_path="app",
+            full_name=body.name, email=body.email or "", first_run_path="app",
         )
     except account_validation.FirstAccountExists:
         return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
