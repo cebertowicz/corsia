@@ -117,6 +117,41 @@ def test_comment_after_recipient_turn_starts_opens_a_new_batch(isolated_db):
         db.close()
 
 
+@pytest.mark.asyncio
+async def test_comment_after_recipient_turn_completes_opens_and_delivers_a_new_batch(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner")
+        first, _ = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
+        [delivered] = batches(db)
+        node = db.execute(
+            """SELECT node.id,node.plan_id,node.commitment_id FROM plan_nodes node
+               WHERE node.id=?""",
+            (delivered["delivered_node_id"],),
+        ).fetchone()
+        db.execute(
+            """INSERT INTO active_turns
+               (id,thread_id,execution_epoch,model,status,started_at,boot_epoch,
+                plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role)
+               VALUES ('completed-owner-turn','owner',0,'native/test','completed','t0','boot',?,?,?,?,'execution')""",
+            (node["plan_id"], node["id"], "owner-attempt", node["commitment_id"]),
+        )
+        db.commit()
+        await record_turn_end(on_thread_turn_complete, "owner")
+
+        second, feedback = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
+
+        rows = batches(db)
+        assert len(rows) == 2
+        assert linked_comment_ids(db, rows[0]["id"]) == [first["id"]]
+        assert linked_comment_ids(db, rows[1]["id"]) == [second["id"]]
+        assert rows[0]["delivered_node_id"] != rows[1]["delivered_node_id"]
+        assert feedback["woken"] == ["owner"]
+    finally:
+        db.close()
+
+
 def test_submit_and_turn_end_close_agent_batches_with_their_exact_reasons(isolated_db):
     db = get_db()
     try:

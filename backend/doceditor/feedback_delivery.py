@@ -15,6 +15,7 @@ from plans.public import (
     feedback_display,
     feedback_item_counts,
     load_feedback_items,
+    recipient_turn_is_active,
     unstarted_feedback_batch_id,
 )
 from registry import models as registry_models
@@ -70,6 +71,15 @@ def join_unstarted_batch(db, comment: dict[str, Any], recipient_id: str) -> tupl
         touch=not delivered,
     )
     return batch_id, delivered
+
+
+def wake_after_unselected_person_delivery(db, batch_id: str, selected: tuple[str, ...]) -> tuple[str, ...]:
+    """Drive a newly delivered person comment when a completed turn leaves its old task selected."""
+    if selected:
+        return selected
+    row = db.execute("SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
+    recipient_id = str(row["recipient_id"])
+    return () if recipient_turn_is_active(db, recipient_id) else (recipient_id,)
 
 
 def recipient_problem(db, recipient_id: str) -> str | None:
