@@ -113,7 +113,7 @@ def _script_schedule(thread_id: str, scope_id: str, params: dict, project_id: st
         now=datetime.now(timezone.utc).isoformat(),
         db=None,
     )
-    return {"schedule": asdict(schedule)}
+    return {"schedule": _listed(thread_id, project_id, [schedule])[0]}
 
 
 def _operate(thread_id, actor_row, operation: str, params: dict):

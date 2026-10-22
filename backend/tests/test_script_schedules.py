@@ -515,7 +515,8 @@ def test_tool_registers_script_and_lists_its_status(isolated_db, tmp_path, monke
     rules_only = automations._operate(
         "owner", actor, "schedule", {"kind": "script", "script_path": str(path)},
     )["schedule"]
-    assert (rules_only["state"], rules_only["spec"]) == ("active", "rules")
+    assert (rules_only["state"], rules_only["spec"], rules_only["next_run_at"]) == ("active", "rules", None)
+    assert rules_only["runs_from"].startswith("event rules only")
     shown = {item["id"]: item for item in automations._operate("owner", actor, "list", {})["schedules"]}
     assert shown[rules_only["id"]]["next_run_at"] is None and "runs_from" not in shown[created["id"]]
     assert shown[rules_only["id"]]["runs_from"].startswith("event rules only")
