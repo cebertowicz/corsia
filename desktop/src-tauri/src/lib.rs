@@ -1672,6 +1672,34 @@ fn generated_context<R: tauri::Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
 }
 
+/// The shell's own log file in the app log folder (`~/Library/Logs/<identifier>/desktop-shell.log`). The background
+/// service logs to its own `service.log` under the state folder.
+const SHELL_LOG_FILE: &str = "desktop-shell";
+
+/// Everything goes to stdout, as it always has. The shell's own lines (not its libraries') also go to `file`, so a
+/// pairing or launch failure's cause outlives a packaged app's lost stdout. A log file that cannot be opened is
+/// skipped rather than stopping the app from starting.
+fn shell_logger<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    file: tauri_plugin_log::TargetKind,
+) -> Result<(tauri::plugin::TauriPlugin<R>, log::LevelFilter, Box<dyn log::Log>), tauri_plugin_log::Error> {
+    let stdout = || tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout);
+    let shell_lines = tauri_plugin_log::Target::new(file).filter(|metadata| is_shell_log_target(metadata.target()));
+    tauri_plugin_log::Builder::default()
+        .clear_targets()
+        .targets([stdout(), shell_lines])
+        .split(app)
+        .or_else(|error| {
+            eprintln!("the shell log file could not be opened, so the shell logs to stdout only: {error}");
+            tauri_plugin_log::Builder::default().clear_targets().target(stdout()).split(app)
+        })
+}
+
+fn is_shell_log_target(target: &str) -> bool {
+    let shell = module_path!();
+    target == shell || target.strip_prefix(shell).is_some_and(|rest| rest.starts_with("::"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Every command-line mode is dispatched here, before any window exists.
@@ -1700,17 +1728,6 @@ pub fn run() {
     }
 
     tauri::Builder::default()
-        // The backend owns persistent service logs under CORSIA_STATE_DIR. Keep
-        // native diagnostics on stdout so an existing macOS app-log path cannot
-        // prevent the packaged app from starting before the service does.
-        .plugin(
-            tauri_plugin_log::Builder::default()
-                .clear_targets()
-                .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Stdout,
-                ))
-                .build(),
-        )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         // Remembers the window's size and position; `window_placement` covers what it leaves to the OS.
@@ -1790,6 +1807,10 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            let log_file = tauri_plugin_log::TargetKind::LogDir { file_name: Some(SHELL_LOG_FILE.into()) };
+            let (log_plugin, level, logger) = shell_logger(app.handle(), log_file)?;
+            app.handle().plugin(log_plugin)?;
+            tauri_plugin_log::attach_logger(level, logger)?;
             app.manage(AppServiceState::default());
             app.manage(RemoteRuntime::default());
             watch_for_swapped_app(app.handle().clone());
@@ -2167,6 +2188,46 @@ mod tests {
             assert_eq!(response["ok"], false, "{response}");
             assert_ne!(response["reason"], "local", "{response}");
         }
+    }
+
+    /// The only test that installs the process-wide logger: the real failure path's line lands in the shell log file,
+    /// and a library's line stays on stdout.
+    #[test]
+    fn the_shell_log_file_keeps_a_pairing_failure_cause() {
+        let app = tauri::test::mock_builder().build(generated_context()).unwrap();
+        let logs = tempfile::tempdir().unwrap();
+        let file = tauri_plugin_log::TargetKind::Folder { path: logs.path().into(), file_name: Some(SHELL_LOG_FILE.into()) };
+        let (_, level, logger) = shell_logger(app.handle(), file).unwrap();
+        tauri_plugin_log::attach_logger(level, logger).unwrap();
+
+        pairing_failed("pair", pairing::PairError::WrongCode, remote_pair_error(pairing::PairError::WrongCode)).unwrap();
+        log::warn!(target: "rustls::client", "a library line");
+        log::logger().flush();
+
+        let text = fs::read_to_string(logs.path().join("desktop-shell.log")).unwrap();
+        assert!(text.contains("pairing failed at pair: WrongCode"), "{text}");
+        assert!(!text.contains("a library line"), "{text}");
+        // On an installed app the LogDir target resolves here.
+        let installed = app.path().app_log_dir().unwrap();
+        assert!(installed.ends_with("Library/Logs/ai.corsia.app"), "{}", installed.display());
+    }
+
+    #[test]
+    fn an_unopenable_shell_log_file_leaves_stdout_logging() {
+        let app = tauri::test::mock_builder().build(generated_context()).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let not_a_folder = root.path().join("logs");
+        fs::write(&not_a_folder, "a file where the log folder belongs").unwrap();
+        let file = tauri_plugin_log::TargetKind::Folder { path: not_a_folder, file_name: Some(SHELL_LOG_FILE.into()) };
+        assert!(shell_logger(app.handle(), file).is_ok());
+    }
+
+    #[test]
+    fn only_the_shells_own_lines_go_to_its_log_file() {
+        assert!(is_shell_log_target("app_lib"));
+        assert!(is_shell_log_target("app_lib::window_placement"));
+        assert!(!is_shell_log_target("app_lib_other"));
+        assert!(!is_shell_log_target("tauri::app"));
     }
 
     #[test]
