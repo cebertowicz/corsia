@@ -18,6 +18,10 @@ from typing import Any
 from infra.database import get_db
 from infra.queries import thread_available_sql
 
+# The one outcome row for an event whose rules could not be read: no rule is known to name.
+UNREADABLE_RULE = "(rules unreadable)"
+RULES_UNREADABLE = "rules could not be read"
+
 
 def enabled_rules(
     db: sqlite3.Connection, connector: str, event_type: str, prefix: str,
@@ -41,6 +45,16 @@ def enabled_rules(
 
 _TYPE_RULES = "FROM event_rules WHERE connector=? AND event_type=? AND enabled=1"
 _SELF_RULES = f"{_TYPE_RULES} AND action='deliver' AND \"to\"='thread:' || created_by"
+
+
+def _manifest(connector: str) -> Any:
+    """The connector's manifest; ``None`` for a namespace an agent declared."""
+    from events.connectors import get_manifest
+
+    try:
+        return get_manifest(connector)
+    except KeyError:
+        return None
 
 
 def self_rules(db: sqlite3.Connection, connector: str, event_type: str) -> list[sqlite3.Row]:
@@ -73,11 +87,9 @@ def unrouted_projects(
     failed, which is not the same as an untracked repository. Runs git, so call
     it outside any write transaction and the preparation gate.
     """
-    from events.connectors import get_manifest
-
-    manifest = get_manifest(connector)
-    repository = facts.get(manifest.repository_fact or "")
-    if manifest.repository_projects is None or not repository:
+    manifest = _manifest(connector)
+    repository = facts.get(manifest.repository_fact or "") if manifest is not None else None
+    if not repository or manifest.repository_projects is None:
         return frozenset()
     if not (type_rules(connector, event_type)[1] if self_rule is None else self_rule):
         return frozenset()
@@ -126,3 +138,14 @@ def wake_budgets(
         params,
     ).fetchall()
     return {row["rule_id"]: (int(row["spent"]), int(row["capped"])) for row in rows}
+
+
+def explain_summary(db: sqlite3.Connection, event_id: Any, found: int) -> str:
+    """The one-line answer to "why did this event go where it did", rule outcomes counted."""
+    counted = f"{found} rule outcome(s), newest first."
+    if event_id and db.execute(
+            "SELECT 1 FROM event_route_decisions WHERE event_id=? AND rule_id=? LIMIT 1",
+            (event_id, UNREADABLE_RULE)).fetchone():
+        return "Rules could not be read for this event, so none was applied." + (
+            f" {counted}" if found else " Routing alone decided where it went.")
+    return counted if found else "No rule acted on this event; routing alone decided where it went."

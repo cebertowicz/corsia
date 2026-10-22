@@ -267,6 +267,11 @@ MANIFEST = register(ConnectorManifest(
             artifact_integration=GITHUB_INTEGRATION,
             relationships=(_CHECK_TO_PR,), event_class="actionable",
             routed_event=GITHUB_ROUTED_EVENTS["check.completed"]),
+        "head.checks_completed": EventTypeDecl(
+            "head.checks_completed", ("repo", "head_sha"),
+            ("repo", "head_sha", "head_branch", "pr_number", "conclusion"),
+            artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
+            event_class="informational"),
     },
     classify=_classify,
     extract_facts=_extract_facts,
@@ -316,6 +321,7 @@ def github_routing_envelope(
         provenance={},
         event_class=github_event_class(payload),
         ownerless_ok=False,
+        origin="connector",
     )
 
 

@@ -21,7 +21,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
-from events import rules
+from events import rule_declarations, rule_reads, rules
 from events.connectors import EventTypeDecl, get_manifest
 from events.rule_match import matches
 from infra.queries import thread_available_sql, thread_is_temporary
@@ -57,9 +57,12 @@ def _conductor(db: sqlite3.Connection, project_id: str) -> str | None:
     return get_project_conductor(project_id, db=db)
 
 
-def _decl(connector: Any, event_type: Any) -> EventTypeDecl:
+def _decl(db: sqlite3.Connection, connector: Any, event_type: Any) -> EventTypeDecl:
     if not isinstance(connector, str) or not isinstance(event_type, str):
         raise RuleRefused("connector and event_type are required")
+    declared = rule_declarations.declared_event(db, connector, event_type)
+    if declared is not None:
+        return declared[0]
     try:
         return get_manifest(connector).decl(event_type)
     except KeyError as exc:
@@ -119,7 +122,10 @@ def tracked_repositories(connector: Any, match: Any, project_id: str | None) -> 
 
 def _repositories(connector: str, tests: list[dict[str, Any]], tracked: frozenset[str] | None) -> None:
     """A test naming the event's repository must name one this project tracks."""
-    manifest = get_manifest(connector)
+    try:
+        manifest = get_manifest(connector)
+    except KeyError:
+        return  # a declared namespace has no repository
     fact = manifest.repository_fact if manifest.project_repositories else None
     named = [value for test in tests if test["field"] == fact and test["op"] in rules.NAMING
              for value in (test["value"] if test["op"] == "in" else [test["value"]])]
@@ -192,8 +198,12 @@ def create(
         raise RuleRefused(
             f"You can only write rules about events you can already read: those in your own "
             f"project ({own_scope}). {_who_sets_it_up(db, project_id)}")
-    decl = _decl(connector, event_type)
+    decl = _decl(db, connector, event_type)
     tests = _match(match, decl)
+    declared = rule_declarations.declared_event(db, connector, event_type)
+    problem = rule_declarations.match_problem(declared[1], event_type, tests) if declared else None
+    if problem:
+        raise RuleRefused(problem)
     _repositories(connector, tests, tracked)
     if action not in (rules.DELIVER, rules.DROP):
         raise RuleRefused("action is deliver or drop")
@@ -295,7 +305,7 @@ def dry_run(
     Matching only: it reads no thread, owner or tag, so it reveals nothing the
     caller could not already see in ``list``.
     """
-    decl = _decl(connector, event_type)
+    decl = _decl(db, connector, event_type)
     if not isinstance(facts, Mapping):
         raise RuleRefused("facts is an object of the event's fields")
     if not project_id:
@@ -316,15 +326,20 @@ def _would(rule: rules.Rule) -> str:
 
 def explain(
     db: sqlite3.Connection, *, project_id: str | None, event_id: Any = None, artifact: Any = None,
-    thread: Any = None,
+    thread: Any = None, event_type: Any = None,
 ) -> dict[str, Any]:
     """Why an event did or didn't reach a chat through a rule: the rule, hold or budget.
+
+    ``event_type`` instead lists that type's recent intake refusals.
 
     A drop also names any armed watch it left waiting, since a dropped event
     doesn't end a wait.
     """
+    if event_type:
+        found = rule_declarations.intake_refusals(db, project_id=project_id, event_type=event_type)
+        return {"refusals": found, "summary": f"{len(found)} recent refusal(s) of {event_type}, newest first."}
     if not event_id and not artifact:
-        raise RuleRefused("give event_id, or artifact (the file's external id)")
+        raise RuleRefused("give event_id, event_type, or artifact (the file's external id)")
     if not project_id:
         return {"decisions": [], "summary": "Rules cover a project's events; this chat is in no project."}
     where = ["r.scope=?"]
@@ -344,11 +359,7 @@ def explain(
         (*args, _EXPLAIN_LIMIT),
     ).fetchall()
     decisions = [_decision(db, row) for row in rows]
-    summary = (
-        "No rule acted on this event; routing alone decided where it went."
-        if not decisions else f"{len(decisions)} rule outcome(s), newest first."
-    )
-    return {"decisions": decisions, "summary": summary}
+    return {"decisions": decisions, "summary": rule_reads.explain_summary(db, event_id, len(decisions))}
 
 
 def _decision(db: sqlite3.Connection, row: Mapping[str, Any]) -> dict[str, Any]:

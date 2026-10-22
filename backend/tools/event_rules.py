@@ -1,7 +1,9 @@
-"""The ``event_rules`` agent tool: write, turn off, list, test and explain event rules."""
+"""The ``event_rules`` agent tool: write, turn off, list, test and explain event rules, and emit an event."""
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,7 +13,9 @@ from infra.db_async import run_in_db
 from infra.product_events import emit_product_event
 from tools.base import Tool
 
-_OPERATIONS = ("create", "disable", "list", "test", "explain")
+logger = logging.getLogger(__name__)
+
+_OPERATIONS = ("create", "disable", "list", "test", "explain", "emit")
 
 
 def _context(kwargs: dict[str, Any]):
@@ -52,9 +56,38 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
                 event_type=kwargs.get("event_type"), facts=kwargs.get("facts"))}
         return rule_authoring.explain(
             db, project_id=project_id, event_id=kwargs.get("event_id"),
-            artifact=kwargs.get("artifact"), thread=kwargs.get("thread"))
+            artifact=kwargs.get("artifact"), thread=kwargs.get("thread"),
+            event_type=kwargs.get("event_type"))
     finally:
         db.close()
+
+
+async def _emit(thread_id: str, kwargs: dict[str, Any]) -> str:
+    """Send one declared event as this chat; the receipt, or the refusal with its fix."""
+    from events.intake import admit_event, emitted_event_id, format_event_error, record_refusal
+
+    event_type = kwargs.get("event_type")
+    if not isinstance(event_type, str) or not event_type:
+        return "Error: emit needs event_type, the declared name such as qa.review_completed."
+    event_id = emitted_event_id(event_type, kwargs.get("event_id"))
+    try:
+        result = await admit_event(
+            event_type=event_type, facts=kwargs.get("facts"), origin="agent",
+            producer=thread_id, event_id=event_id,
+        )
+    except Exception:  # noqa: BLE001 - the intake or database is unreachable; a retry is safe with event_id
+        logger.exception("event_rules emit failed inside the intake")
+        return f"Error: {format_event_error('intake_unreachable', 'event intake is unavailable')}"
+    if result.refusal is None:
+        return json.dumps({"event_id": event_id, "duplicate": result.duplicate,
+                           "rules_matched": result.rules_matched}, ensure_ascii=False)
+    try:
+        await asyncio.to_thread(
+            record_refusal, event_id=event_id, event_type=event_type, origin="agent",
+            producer=thread_id, refusal=result.refusal)
+    except Exception:  # noqa: BLE001
+        logger.exception("could not record agent event refusal")
+    return f"Error: {format_event_error(result.refusal.code, result.refusal.text)}"
 
 
 class EventRulesTool(Tool):
@@ -79,7 +112,11 @@ class EventRulesTool(Tool):
             "disable: turn off a rule you wrote or receive. list: the project's rules, with when "
             "each last acted and its wakes in the last 24 hours. test: which rules a set of `facts` "
             "would match. explain: why an event (`event_id`, or `artifact`, the file's external id "
-            "such as owner/repo#7) did or didn't reach a chat through a rule."
+            "such as owner/repo#7) did or didn't reach a chat through a rule, or, given `event_type`, "
+            "the recent refusals of that declared type. emit: send one event of a declared "
+            "`event_type` (its full name, such as qa.review_completed, declared use: route or "
+            "both) with `facts` as you; `event_id` makes a retry safe. The receipt says how "
+            "many rules matched."
         )
 
     @property
@@ -89,7 +126,6 @@ class EventRulesTool(Tool):
             "properties": {
                 "operation": {"type": "string", "enum": list(_OPERATIONS)},
                 "connector": {"type": "string", "description": "create/test: the connected app, e.g. github"},
-                "event_type": {"type": "string", "description": "create/test: a declared type, e.g. pr.merged"},
                 "match": {
                     "type": "array", "maxItems": rules.MAX_TESTS,
                     "items": {"type": "object", "properties": {
@@ -107,8 +143,10 @@ class EventRulesTool(Tool):
                 "note": {"type": "string", "maxLength": rules.NOTE_LIMIT},
                 "scope": {"type": "string", "description": "create: project:<id>; only your own"},
                 "rule_id": {"type": "string", "description": "disable: the rule to turn off"},
-                "facts": {"type": "object", "description": "test: the event's fields"},
-                "event_id": {"type": "string", "description": "explain: the event's id"},
+                "facts": {"type": "object", "description": "test or emit: the event's fields"},
+                "event_id": {"type": "string", "description": "explain: the event's id; emit: a retry identity"},
+                "event_type": {"type": "string", "description": "create/test: a declared type, e.g. pr.merged; "
+                               "emit and explain: the full declared name, e.g. qa.review_completed"},
                 "artifact": {"type": "string", "description": "explain: the file's external id"},
                 "thread": {"type": "string", "description": "explain: only this chat"},
             },
@@ -123,6 +161,8 @@ class EventRulesTool(Tool):
         operation = kwargs.get("operation")
         if operation not in _OPERATIONS:
             return f"Error: operation is one of {', '.join(_OPERATIONS)}"
+        if operation == "emit":
+            return await _emit(thread_id, kwargs)
         try:
             result = await run_in_db(_run, operation, thread_id, actor_row.get("project_id"), kwargs)
         except rule_authoring.RuleRefused as exc:

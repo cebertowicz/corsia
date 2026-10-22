@@ -11,10 +11,10 @@ from loguru import logger
 
 from events.connectors import library
 from events.platform import deliver_platform_event_sync
-from tests.event_routing_helpers import register_pr, route
+from tests.event_routing_helpers import register_pr, route, statements
 from tests.test_event_rules_2a import (  # noqa: F401 (fixtures)
     MERGED, P, REPO, _agent, _decisions, _library_changed, _library_owner, _merged, _no_analytics,
-    _project, _rows, _statements, _tool, _wakes, _write, resolved, sent,
+    _project, _rows, _tool, _wakes, _write, resolved, sent,
 )
 
 FEED = "events.connectors.github_notifications_feed"
@@ -199,7 +199,7 @@ def _reads_per_thread(monkeypatch, rule_count: int, manifest: str) -> tuple[int,
     for _ in range(rule_count):
         asyncio.run(_tool("owner", operation="create", connector=library.LIBRARY_CONNECTOR,
                           event_type=library.ITEM_CHANGED_EVENT))
-    with _statements() as seen:
+    with statements() as seen:
         deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed(manifest))
     budget = [s for s in seen if s.lstrip().upper().startswith("SELECT")
               and "FROM event_route_decisions" in s]
@@ -217,3 +217,32 @@ def test_two_wake_rules_for_one_thread_read_pause_and_budget_once(isolated_db, m
     two = _reads_per_thread(monkeypatch, 2, "m-2")
 
     assert one == two == (1, 1)
+
+
+# -- 7. A rule failure never costs routing its delivery, and explain says rules were unread ----
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing", ["events.rule_reads.type_rules",
+                                     "events.connectors.github_rules.apply_webhook_rules_sync"])
+async def test_a_rule_failure_keeps_the_routed_delivery_and_explain_says_rules_were_unread(
+        isolated_db, sent, monkeypatch, failing):
+    _project(P)
+    _agent("owner")
+    register_pr(REPO, 88, "owner")
+    await _tool("owner", operation="create", connector="github", event_type="pr.merged",
+                match=[{"field": "repo", "op": "eq", "value": REPO}], note="Merged.")
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("rules database unreadable")
+
+    monkeypatch.setattr(failing, _boom)
+
+    await route(MERGED, _merged(88))
+
+    assert [thread for thread, _ in sent] == ["owner"]
+    [decision] = _decisions()
+    assert (decision["thread_id"], decision["outcome"], decision["reason"]) == (
+        "owner", "dead_lettered", "rules could not be read")
+    explained = await _tool("owner", operation="explain", event_id=decision["event_id"])
+    assert explained["summary"].startswith("Rules could not be read for this event")
+    assert "No rule acted" not in explained["summary"]

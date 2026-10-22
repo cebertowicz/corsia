@@ -39,6 +39,7 @@ EXCLUDED: dict[str, str] = {
     "network_servers": _small(7),
     "vendor_accounts": _small(7),
     "connections": _small(3),
+    "event_intake_records": "new declared-event dedupe receipt; no production volume yet; primary-key lookups covered by intake tests",
     "provider_policies": _small(2),
     "project_policy_overrides": _small(1),
     "system_bulletin_identity": _small(1),

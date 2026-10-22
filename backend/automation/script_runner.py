@@ -156,6 +156,7 @@ async def run_claimed(schedule: Schedule, started_at: str, *, db=None) -> None:
         logger.exception("script schedule {} failed unexpectedly", schedule.id)
         report = _error_report(schedule, f"the runner failed: {exc}")
     report = await _stamped(schedule, report)
+    report = await _admit_events(schedule, report)
     try:
         woken = await run_in_db_unless_owned(
             db, settle, schedule, report, finished_at(), db,
@@ -170,13 +171,47 @@ async def run_claimed(schedule: Schedule, started_at: str, *, db=None) -> None:
         await _drive_owner(schedule.thread_id)
 
 
+async def _admit_events(schedule: Schedule, report: RunReport) -> RunReport:
+    """Route parsed event lines before synchronous settlement; one refusal wakes the owner once."""
+    if not report.events:
+        return report
+    from automation.script_measures import WORKSPACE_SCOPE
+    from events.intake import MeasureStamps, admit_event
+
+    ref, version = report.workflow_stamp or (None, None)
+    stamps = MeasureStamps(
+        run_id=f"script:{schedule.id}:{report.run_id}", workflow_ref=ref, workflow_version=version,
+        project_id=None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id,
+        unversioned=bool((schedule.payload or {}).get("workflow")) and version is None,
+    )
+    refusals: list[str] = []
+    for index, event in enumerate(report.events):
+        result = await admit_event(
+            event_type=event["type"], facts=event["facts"], origin="emitter",
+            producer=f"script:{schedule.id}", event_id=f"script:{schedule.id}:{report.run_id}:{index}",
+            stamps=stamps,
+        )
+        if result.refusal is not None:
+            refusals.append(result.refusal.code)
+    if not refusals:
+        return report
+    message = f"event line refused: {', '.join(sorted(set(refusals)))}"
+    return dataclasses.replace(
+        report, status="error", error=message,
+        signals=[*report.signals, Signal(
+            "error", None, f'Script "{(schedule.script_path or "script").rsplit("/", 1)[-1]}": {message}',
+            {"message": message},
+        )],
+    )
+
+
 async def _stamped(schedule: Schedule, report: RunReport) -> RunReport:
     """Resolve the workflow stamp before settling, off the database pool (it reads Git).
 
     The owner rule is read live; a failure to resolve records the rows unversioned.
     """
     workflow = (schedule.payload or {}).get("workflow")
-    if not workflow or not report.measures:
+    if not workflow or not (report.measures or report.events):
         return report
 
     def resolve():
