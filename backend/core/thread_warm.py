@@ -222,7 +222,8 @@ async def _run_warm_with_progress(
                 if warm in warm_done:
                     break
                 probe = asyncio.ensure_future(progress_probe())
-            done, _ = await asyncio.wait({warm, probe}, return_when=asyncio.FIRST_COMPLETED)
+            waiting: set[asyncio.Future[Any]] = {warm, probe}
+            done, _ = await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
             if warm in done:
                 break
             assert probe in done
