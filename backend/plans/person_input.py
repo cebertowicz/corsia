@@ -11,6 +11,7 @@ through ``plan_wake``.
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from dataclasses import dataclass
 
 from loguru import logger
@@ -244,7 +245,7 @@ def running(db, nodes) -> list[tuple]:
     """Keep the tasks that are selected, delegated or awaiting review, with their plans."""
     from plans import admission, delegation
 
-    plans: dict[str, object] = {}
+    plans: dict[str, sqlite3.Row] = {}
     pairs = []
     for node in nodes:
         if node_states.retired(node) or node["state"] not in ("active", "review_requested"):
