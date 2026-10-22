@@ -102,7 +102,7 @@ async function screenshot(page: Page, name: string, within?: Locator): Promise<v
 	await (within ?? page).screenshot({ path: path.join(directory, `${name}.png`), animations: 'disabled' });
 }
 
-const reopen = (page: Page, host: string) => page.getByRole('button', { name: 'Reopen the shared browser' }).filter({ hasText: host });
+const reopen = (page: Page, host: string) => page.getByRole('button', { name: host, exact: true });
 
 // Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
 test.afterEach(async ({ request }) => {

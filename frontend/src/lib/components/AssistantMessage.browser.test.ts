@@ -43,7 +43,7 @@ describe('AssistantMessage browser chip', () => {
 	it('shows the chip on a message with no cards whose tool call carries one', () => {
 		const chips = render([opened()]).querySelectorAll('button.tile.chip');
 		expect(chips).toHaveLength(1);
-		expect(chips[0].getAttribute('aria-label')).toBe('Reopen the shared browser');
+		expect(chips[0].getAttribute('title')).toBe('Reopen the shared browser');
 		expect(chips[0].querySelector('.title')?.textContent).toBe('github.com');
 	});
 

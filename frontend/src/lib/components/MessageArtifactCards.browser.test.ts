@@ -41,7 +41,7 @@ describe('MessageArtifactCards browser chip', () => {
 
 		const chips = [...host.querySelectorAll<HTMLElement>('ul.chips button.tile.chip')];
 		expect(chips.map((chip) => chip.querySelector('.title')?.textContent)).toEqual(['notes.md', 'github.com']);
-		expect(chips[1].getAttribute('aria-label')).toBe('Reopen the shared browser');
+		expect(chips[1].getAttribute('title')).toBe('Reopen the shared browser');
 		expect(host.querySelectorAll('[data-artifact-id]')).toHaveLength(1);
 		expect(host.querySelector('ul.chips')?.getAttribute('aria-label')).toBe('Files and shared browser');
 	});

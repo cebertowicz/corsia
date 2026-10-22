@@ -5,9 +5,10 @@ newest N rows Focus shows on their own, and reduces the hidden rows between
 them to run stubs. A run's rows load only when it is expanded, through the
 inclusive range read in `read_authorized_run_range`.
 
-The walk reads only the columns it needs (never a hidden row's body), runs in
-one read snapshot, and stops after `scan_cap` rows so a thread with very few
-visible rows cannot make one page unbounded.
+The walk reads only the columns it needs, runs in one read snapshot, and stops
+after `scan_cap` rows so a thread with very few visible rows cannot make one
+page unbounded. The one hidden-row body it reads is a run's rows that mention
+`browser_open`, to find the stub's browser chip.
 """
 
 from __future__ import annotations

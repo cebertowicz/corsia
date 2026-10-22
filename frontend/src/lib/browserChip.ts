@@ -9,7 +9,7 @@ export interface BrowserChip {
 	host: string | null;
 }
 
-/** The chip's accessible name and tooltip: it reopens the one browser view, it does not navigate. */
+/** The chip's tooltip and accessible description: it reopens the one browser view, it does not navigate. */
 export const BROWSER_CHIP_NAME = 'Reopen the shared browser';
 
 /** What the chip says: the host the agent opened, or `Shared browser` when there is none. */

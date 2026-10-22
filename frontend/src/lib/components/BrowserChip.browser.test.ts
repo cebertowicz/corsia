@@ -36,7 +36,7 @@ describe('BrowserChip', () => {
 		expect(button.tagName).toBe('BUTTON');
 		expect(button.type).toBe('button');
 		expect(button.querySelector('.title')?.textContent).toBe('github.com');
-		expect(button.getAttribute('aria-label')).toBe('Reopen the shared browser');
+		expect(button.hasAttribute('aria-label')).toBe(false);
 		expect(button.getAttribute('title')).toBe('Reopen the shared browser');
 		expect(button.querySelector('.ic svg')).not.toBeNull();
 	});
