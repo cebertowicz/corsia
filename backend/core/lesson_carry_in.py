@@ -12,13 +12,14 @@ from loguru import logger
 
 from core.lesson_carry_in_contract import (
     ACTIONS_FIELDS, ACTION_FIELDS, SAMPLE_COUNT, Action, CarryInRun, LocalTraceAdapter, TraceAdapter, TraceScore, action_matches,
-    canonical_calls, is_discriminating, rotated_cases, run_three, scenario_for_case, score_trace, validate_actions,
+    canonical_calls, rotated_cases, run_three, scenario_for_case, score_trace, validate_actions,
 )
 from core.lesson_carry_in_history import (
     case_sha as _case_sha,
     recorded_target_blob as _recorded_target_blob,
     target_snapshot as _target_snapshot,
 )
+from core.lesson_carry_in_result_queries import baseline_result, prior_case_status, result_event
 
 PENDING_EVENT = "learning_loop.carry_in_pending"
 RESULT_EVENT = "learning_loop.carry_in_result"
@@ -80,10 +81,11 @@ def _record(db, *, event_name: str, fact: CarryInFact, dedupe_suffix: str, attri
     specs = {
         "lesson_id": id_attr(), "owner_thread_id": id_attr(), "target_commit": id_attr(),
         "target_path": id_attr(), "case_ref": id_attr(), "case_sha": id_attr(),
+        "case_status": enum_attr("proven", "unproven"),
         "verdict": enum_attr("pass", "fail"), "owner_resolution": enum_attr("resolved", "owner_unresolved"),
         "sample_count": count_attr(), "passed_samples": count_attr(), "target_hash": id_attr(),
         "model_selector": id_attr(), "model_identity": text_attr(500), "blob_sha": id_attr(),
-        "commit": id_attr(), "role": enum_attr("promotion_old", "promotion_new", "edit", "rebaseline"),
+        "commit": id_attr(), "role": enum_attr("edit", "rebaseline"),
         "target_fixture_sha": id_attr(), "delivered_blob_sha": id_attr(),
         "delivered_neighbour_shas": text_attr(4000), "reason": text_attr(500),
     }
@@ -127,7 +129,7 @@ def _is_thread_skill_target(target_path: str) -> bool:
 
 def record_result(
     db, fact: CarryInFact, run: CarryInRun, *, owner_unresolved: bool = False,
-    case_sha: str | None = None,
+    case_sha: str | None = None, case_status: str | None = None,
 ) -> bool:
     """Persist a settled three-sample result; callers keep pending results pending."""
     if run.state != "settled" or run.verdict is None or len(run.scores) != SAMPLE_COUNT:
@@ -140,6 +142,7 @@ def record_result(
             "sample_count": SAMPLE_COUNT, "passed_samples": passed, "target_hash": run.target_hash,
             "model_selector": run.selector, "model_identity": _model_identity(run),
             "blob_sha": run.delivered_blob_sha or run.target_hash, "case_sha": case_sha,
+            "case_status": case_status,
             "commit": fact.target_commit, "role": fact.role, "target_fixture_sha": run.fixture_sha,
             "delivered_blob_sha": run.delivered_blob_sha,
             "delivered_neighbour_shas": json.dumps(run.neighbour_shas),
@@ -152,40 +155,6 @@ def _model_identity(run: CarryInRun) -> str | None:
         return None
     return json.dumps({"resolved_identity": run.identity, "selector": run.selector}, sort_keys=True)
 
-
-def _result_event(db, fact: CarryInFact):
-    return db.execute(
-        "SELECT id,ts FROM outcome_events WHERE dedupe_key=? AND retracted_at IS NULL",
-        (f"{fact.subject_key}:result",),
-    ).fetchone()
-
-
-def baseline_result(db, fact: CarryInFact) -> tuple[CarryInFact, str] | None:
-    """Return the newest promotion/edit fact used to compare the current model."""
-    rows = db.execute(
-        "SELECT attributes FROM outcome_events WHERE event_name=? AND retracted_at IS NULL ORDER BY ts DESC",
-        (RESULT_EVENT,),
-    ).fetchall()
-    fallback = None
-    for row in rows:
-        try:
-            attrs = json.loads(row["attributes"])
-            if attrs.get("lesson_id") != fact.lesson_id or attrs.get("target_path") != fact.target_path:
-                continue
-            identity = attrs.get("model_identity")
-            if not isinstance(identity, str) or not identity:
-                continue
-            previous = CarryInFact(
-                fact.lesson_id, fact.owner_thread_id, str(attrs["commit"]), fact.target_path,
-                fact.case_ref, str(attrs.get("role", "edit")),
-            )
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-            continue
-        if previous.role in {"promotion_old", "promotion_new"}:
-            return previous, identity
-        if previous.role == "edit" and fallback is None:
-            fallback = previous, identity
-    return fallback
 
 
 from core.lesson_carry_in_coverage import coverage_counts
@@ -373,14 +342,20 @@ def drain_facts(db, workspace: Path, facts: Sequence[CarryInFact], adapter: Trac
                     record_pending(transaction, fact, reason=run.reason)
                 elif run.state == "settled":
                     owner = target_scope_owner(transaction, workspace, fact.target_path)
+                    case_sha = _case_sha(case)
+                    case_status = "proven" if run.verdict == "pass" else prior_case_status(transaction, fact, case_sha)
                     record_result(
-                        transaction, fact, run, owner_unresolved=owner is None, case_sha=_case_sha(case),
+                        transaction, fact, run, owner_unresolved=owner is None,
+                        case_sha=case_sha, case_status=case_status,
                     )
-                    if run.verdict == "fail" and (event := _result_event(transaction, fact)) is not None:
+                    if (
+                        run.verdict == "fail" and case_status == "proven"
+                        and (event := result_event(transaction, fact)) is not None
+                    ):
                         from core.self_caught_corrections import record_carry_in_regression
 
                         record_carry_in_regression(
-                            transaction, result_event_id=str(event[0]), thread_id=None, created_at=str(event[1]),
+                            transaction, result_event_id=str(event[0]), thread_id=owner, created_at=str(event[1]),
                         )
             runs.append(run)
         finally:

@@ -322,7 +322,7 @@ def test_three_samples_settle_by_two_of_three():
 
 
 def test_promotion_requires_pre_lesson_failure_and_post_lesson_pass():
-    from core.lesson_carry_in import is_discriminating, run_three
+    from core.lesson_carry_in_contract import is_discriminating, run_three
 
     passed = [_call("read_file", {"path": "context/rule.md"}), _call("plan_update", {"operation": "mark_done"})]
     failed = [_call("read_file", {"path": "context/rule.md"})]
@@ -366,19 +366,20 @@ def test_fixture_hash_mismatch_refuses_scoring_before_a_decisive_call():
     assert (result.state, result.reason, result.scores) == ("pending", "fixture_blob_mismatch", ())
 
 
-def test_promotion_result_is_preferred_as_the_model_baseline():
-    from core.lesson_carry_in import CarryInFact, CarryInRun, TraceScore, baseline_result, record_result
+def test_newest_result_is_used_as_the_model_baseline():
+    from core.lesson_carry_in import CarryInFact, CarryInRun, TraceScore, record_result
+    from core.lesson_carry_in_result_queries import baseline_result
 
     db = _event_db()
     score = TraceScore("pass", "required decisive action", 1)
-    edit = CarryInFact("lesson", "owner", "a" * 40, "context/rule.md", "case", "edit")
-    promotion = CarryInFact("lesson", "owner", "b" * 40, "context/rule.md", "case", "promotion_new")
+    first = CarryInFact("lesson", "owner", "a" * 40, "context/rule.md", "case", "edit")
+    newest = CarryInFact("lesson", "owner", "b" * 40, "context/rule.md", "case", "rebaseline")
     run = CarryInRun("settled", (score,) * 3, "omlx@server/model", "resolved-model", "blob-sha")
-    assert record_result(db, edit, run)
-    assert record_result(db, promotion, run)
+    assert record_result(db, first, run)
+    assert record_result(db, newest, run)
 
-    assert baseline_result(db, edit) == (
-        promotion,
+    assert baseline_result(db, first) == (
+        newest,
         '{"resolved_identity": "resolved-model", "selector": "omlx@server/model"}',
     )
 
@@ -1081,3 +1082,82 @@ def test_refuses_a_decisive_action_that_is_not_required():
     invalid = {**ACTIONS, "decisive_action": {"tool": "write_file", "params": {"path": "x"}}}
     with pytest.raises(ValueError, match="must be one declared required action"):
         validate_actions(invalid)
+
+
+def _carry_in_run(verdict: str):
+    from core.lesson_carry_in import CarryInRun, TraceScore
+
+    return CarryInRun("settled", (TraceScore(verdict, "test", None),) * 3)
+
+
+def _drain_edit_after_prior(
+    db, monkeypatch: pytest.MonkeyPatch, prior_verdict: str, *, prior_role: str = "edit", changed_case: bool = False,
+):
+    from core.lesson_carry_in import CarryInFact, _case_sha, drain_facts, record_result
+
+    prior_case = {"what_happened": "Missed.", "right_call": "Read it.", "does_not_apply": "Draft.", "actions": ACTIONS}
+    edit_case = {**prior_case, "right_call": "Read the changed rule."} if changed_case else prior_case
+    prior = CarryInFact("lesson", "owner", "a" * 40, "context/rule.md", "case", prior_role)
+    edit = CarryInFact("lesson", "owner", "b" * 40, "context/rule.md", "case", "edit")
+    assert record_result(
+        db, prior, _carry_in_run(prior_verdict), case_sha=_case_sha(prior_case),
+        case_status="proven" if prior_verdict == "pass" else "unproven",
+    )
+    monkeypatch.setattr("core.lesson_carry_in._case_for_fact", lambda *_args: edit_case)
+    monkeypatch.setattr("core.lesson_carry_in._target_snapshot", lambda *_args: ("target", None))
+    monkeypatch.setattr("core.lesson_carry_in.target_scope_owner", lambda *_args: "owner")
+    failed = [_call("read_file", {"path": "context/rule.md"})]
+
+    assert [run.verdict for run in drain_facts(db, Path("workspace"), [edit], Adapter([failed, failed, failed]))] == ["fail"]
+    return edit
+
+
+def _corrections(db):
+    return db.execute(
+        "SELECT agent_thread_id,attributes FROM outcome_events WHERE event_name='measurement.correction'"
+    ).fetchall()
+
+
+def test_fail_then_fail_marks_a_case_unproven_without_a_correction(monkeypatch: pytest.MonkeyPatch):
+    db = _event_db()
+
+    edit = _drain_edit_after_prior(db, monkeypatch, "fail")
+
+    attrs = json.loads(db.execute(
+        "SELECT attributes FROM outcome_events WHERE subject_key=? AND event_name='learning_loop.carry_in_result'",
+        (edit.subject_key,),
+    ).fetchone()["attributes"])
+    assert attrs["case_status"] == "unproven"
+    assert _corrections(db) == []
+
+
+def test_pass_then_fail_records_one_correction_for_the_target_owner(monkeypatch: pytest.MonkeyPatch):
+    db = _event_db()
+
+    _drain_edit_after_prior(db, monkeypatch, "pass")
+
+    rows = _corrections(db)
+    assert len(rows) == 1
+    assert rows[0]["agent_thread_id"] == "owner"
+    assert json.loads(rows[0]["attributes"])["source_id"].startswith("carry_in_regression:")
+
+
+def test_changed_case_sha_resets_a_prior_pass_to_unproven(monkeypatch: pytest.MonkeyPatch):
+    db = _event_db()
+
+    edit = _drain_edit_after_prior(db, monkeypatch, "pass", changed_case=True)
+
+    attrs = json.loads(db.execute(
+        "SELECT attributes FROM outcome_events WHERE subject_key=? AND event_name='learning_loop.carry_in_result'",
+        (edit.subject_key,),
+    ).fetchone()["attributes"])
+    assert attrs["case_status"] == "unproven"
+    assert _corrections(db) == []
+
+
+def test_rebaseline_pass_then_edit_fail_records_one_correction(monkeypatch: pytest.MonkeyPatch):
+    db = _event_db()
+
+    _drain_edit_after_prior(db, monkeypatch, "pass", prior_role="rebaseline")
+
+    assert len(_corrections(db)) == 1
