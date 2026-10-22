@@ -99,3 +99,16 @@ def linked_comment_ids(db, batch_id: str) -> list[str]:
             (batch_id,),
         ).fetchall()
     ]
+
+
+def occupy_owner(db, thread_id: str) -> str:
+    """Give the thread an active, selected task so a feedback task delivered to it stays queued, unstarted."""
+    from plans import admission, service
+
+    plan = service.ensure_plan("thread", thread_id, db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Current work", acceptance_criteria="Current work is complete.", db=db,
+    )
+    service.transition_node(node.id, "active", db=db)
+    admission.reconcile_plan(plan.id, actor_id=None, provenance="test", db=db)
+    return node.id

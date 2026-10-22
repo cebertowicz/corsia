@@ -79,7 +79,7 @@ test('@surface:doc-send-on-close sends an unsent user batch exactly once before 
 	await page.getByText(title, { exact: true }).first().click();
 	// Send now is in the comments drawer's footer, which says when the batch goes; the header has none.
 	const footer = await openUnsentFooter(page);
-	await expect(footer).toContainText(`1 message not sent yet · it goes to ${title} once you stop typing.`);
+	await expect(footer).toContainText(`1 message not sent yet · it goes to ${title} in a few seconds.`);
 	await expect(footer.getByRole('button', { name: 'Send now', exact: true })).toBeVisible();
 	expect(await visibleHeaderSends(page), 'no Send shows in the header').toEqual([]);
 
@@ -114,7 +114,7 @@ test('@surface:doc-send-on-close keeps its unsent footer whole beside a long own
 	await expect(page.getByRole('button', { name: /^1 open thread, 1 message not sent yet$/ })).toBeVisible();
 
 	const footer = await openUnsentFooter(page);
-	await expect(footer.getByRole('status')).toContainText(`1 message not sent yet · it goes to ${title} once you stop typing.`);
+	await expect(footer.getByRole('status')).toContainText(`1 message not sent yet · it goes to ${title} in a few seconds.`);
 	const sendNow = footer.getByRole('button', { name: 'Send now', exact: true });
 	await expect(sendNow).toBeVisible();
 	expect(await visibleHeaderSends(page), 'neither Send nor its countdown shows in the header').toEqual([]);
@@ -196,7 +196,7 @@ test('@surface:doc-send-on-close at 393 px the pinned header with a pending send
 
 	// The phone drawer ends in the footer: inside the canvas, a 44 px Send now under a coarse pointer.
 	const footer = await openUnsentFooter(page);
-	await expect(footer).toContainText(`2 messages not sent yet · they go to ${title} once you stop typing.`);
+	await expect(footer).toContainText(`2 messages not sent yet · they go to ${title} in a few seconds.`);
 	const send = footer.getByRole('button', { name: 'Send now', exact: true });
 	const footerBox = (await footer.boundingBox())!, sendBox = (await send.boundingBox())!;
 	expect(footerBox.x).toBeGreaterThanOrEqual(0);

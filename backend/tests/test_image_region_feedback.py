@@ -12,7 +12,7 @@ import pytest
 from PIL import Image
 
 import infra.database as db_mod
-from doc_feedback_helpers import batches, seed_thread
+from doc_feedback_helpers import batches, occupy_owner, seed_thread
 from doceditor import comments, feedback_batches, image_regions
 from infra.database import get_db, write_transaction
 from plans.feedback_nodes import PROVENANCE
@@ -296,6 +296,7 @@ def test_a_second_person_region_comment_joins_the_unstarted_task_with_both_regio
     db = get_db()
     try:
         seed_thread(db, "owner")
+        occupy_owner(db, "owner")
         artifact_id, _path = _image_artifact(db, "owner", tmp_path)
         for x, body in ((0.1, "The header wraps."), (0.6, "The icon reads as disabled.")):
             with write_transaction(db, scope="test_person_region_comment") as connection:

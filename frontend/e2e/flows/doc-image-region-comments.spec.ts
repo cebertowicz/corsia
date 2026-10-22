@@ -450,7 +450,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(bar(page).locator('.sending-now')).toHaveCount(0);
 		await expectBarFits(page);
 		await backToDocumentDrawer(page);
-		await expect(footer(page)).toContainText(/1 message not sent yet · it goes to .+ once you stop typing\./);
+		await expect(footer(page)).toContainText(/1 message not sent yet · it goes to .+ in a few seconds\./);
 		await expect(footerSend(page)).toBeInViewport({ ratio: 1 });
 		await shoot(page, testInfo, `doc-${width}-09-drawer-unsent`, true);
 

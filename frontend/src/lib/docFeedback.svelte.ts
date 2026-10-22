@@ -31,7 +31,6 @@ export class DocFeedback {
 	undelivered = $state<UndeliveredBatch[]>([]);
 	sending = $state(false);
 	retrying = $state(false);
-
 	feedback = $state<CommentFeedback | null>(null);
 	/** How many comments the last Send delivered, while it says so; 0 otherwise. */
 	sent = $state(0);
@@ -53,13 +52,12 @@ export class DocFeedback {
 	readonly sendLabel = $derived(
 		`Send ${this.pendingCount} comment${this.pendingCount === 1 ? '' : 's'}${this.ownerName ? ` to ${this.ownerName}` : ''}`,
 	);
-
 	readonly sentText = $derived(`${this.sent} comment${this.sent === 1 ? '' : 's'} sent${this.ownerName ? ` to ${this.ownerName}` : ''}`);
 	/** The drawer's line for comments typed but not yet sent, or null when none wait. */
 	readonly unsent = $derived.by(() => {
 		if (!this.pendingCount) return null;
 		const count = `${this.pendingCount} message${this.pendingCount === 1 ? '' : 's'} not sent yet`;
-		return { before: `${count} · ${this.pendingCount === 1 ? 'it goes' : 'they go'} to `, owner: this.ownerName ?? 'the owner', after: ' once you stop typing.' };
+		return { before: `${count} · ${this.pendingCount === 1 ? 'it goes' : 'they go'} to `, owner: this.ownerName ?? 'the owner', after: ' in a few seconds.' };
 	});
 
 	/** Another document (or tab) is shown: start afresh. */
@@ -155,6 +153,5 @@ export function holdDocFeedback(
 		window.addEventListener('visibilitychange', visibility);
 		return () => window.removeEventListener('visibilitychange', visibility);
 	});
-
 	return feedback;
 }

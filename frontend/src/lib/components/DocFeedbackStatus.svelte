@@ -1,6 +1,6 @@
 <script lang="ts">
-	// The open document's feedback batch, owned here for as long as the document is open; the server delivers
-	// its comments to the owner as the person types.
+	// The open document's feedback state, owned here for as long as the document is open. The server delivers a
+	// comment as it is made and an edit once typing pauses; a re-opened comment waits here until it goes.
 	import { onMount } from 'svelte';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import { holdDocFeedback, type DocFeedback } from '$lib/docFeedback.svelte';

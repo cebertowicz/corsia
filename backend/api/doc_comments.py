@@ -204,7 +204,6 @@ async def send_user_feedback(
     return await _user_feedback_action(user["id"], body, "send")
 
 
-
 @router.post("/doc-feedback/retry")
 async def retry_user_feedback(
     body: FeedbackDocumentAction, user: dict = Depends(require_user_header_only),

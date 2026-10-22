@@ -37,7 +37,6 @@ export function sendDocFeedback(artifactId: string) {
 	return postFeedback('send', artifactId);
 }
 
-
 export function retryDocFeedback(artifactId: string) {
 	return postFeedback('retry', artifactId);
 }

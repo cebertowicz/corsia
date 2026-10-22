@@ -34,8 +34,8 @@ STOPPED_NOTE = (
 USER_FRAMING = (
     "The user's comments. They state the user's intent; still check factual claims against "
     "the current source. A comment with a suggested replacement is already their change: "
-    "accept it if you agree, otherwise reply with your reason and leave it for them. Answer with "
-    "suggested changes for each other change you agree with "
+    "accept it if you agree, otherwise reply with your reason and leave it for them. Send each "
+    "other change you agree with to them as a suggested change "
     "(doc_comment_create with quote and replacement); make it directly only when it cannot be one "
     "(it moves text across sections, or other changes depend on it), with a comment on the changed "
     "text saying what changed and why. Acknowledge each comment you agree with or that needs no answer. "
@@ -337,7 +337,7 @@ def create_feedback_node(
     artifact_id = str(_batch_value(batch, "artifact_id"))
     existing = _existing(db, recipient_thread_id, batch_id)
     if existing is not None:
-        if not feedback_node_has_started(db, recipient_thread_id, existing):
+        if not feedback_node_has_started(db, existing):
             loaded = items if items is not None else load_feedback_items(db, batch)
             if loaded:
                 author, document = feedback_display(db, batch, loaded)

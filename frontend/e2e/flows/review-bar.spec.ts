@@ -320,7 +320,7 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 	await page.getByRole('button', { name: /^6 open threads, 6 messages not sent yet$/ }).click();
 	const drawer = page.getByRole('region', { name: 'Document comments' });
 	const footer = drawer.locator('[data-drawer-unsent]');
-	await expect(footer.getByRole('status')).toHaveText(`6 messages not sent yet · they go to ${doc.title} once you stop typing.`);
+	await expect(footer.getByRole('status')).toHaveText(`6 messages not sent yet · they go to ${doc.title} in a few seconds.`);
 	const send = footer.getByRole('button', { name: 'Send now', exact: true });
 	await expect(send).toBeVisible();
 	await settled(page);

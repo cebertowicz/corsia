@@ -163,7 +163,7 @@ from plans.feedback_nodes import (
     create_feedback_node, create_review_node, feedback_display, feedback_item_counts, load_feedback_items,
     settle_feedback_node,
 )
-from plans.feedback_unstarted import recipient_turn_is_active, unstarted_feedback_batch_id
+from plans.feedback_unstarted import feedback_node_takes_more
 from plans.review_requests import (
     append_review_note, close_review_node, review_is_open, settle_review_node,
 )

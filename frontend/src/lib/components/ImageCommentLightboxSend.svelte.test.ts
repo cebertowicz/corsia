@@ -178,7 +178,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(sendIn(shown.target.querySelector('.bar')!), 'the bar has no Send (RSR-5)').toBeNull();
 		await openDrawer(shown.target);
 		const footer = footerIn(shown.target)!;
-		expect(footer.querySelector('[role="status"]')!.textContent).toBe('1 message not sent yet · it goes to Design once you stop typing.');
+		expect(footer.querySelector('[role="status"]')!.textContent).toBe('1 message not sent yet · it goes to Design in a few seconds.');
 		const send = [...footer.querySelectorAll('button')].find((button) => button.textContent!.trim() === 'Send now')!;
 		send.click();
 		await settle();

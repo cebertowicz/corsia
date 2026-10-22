@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from automation.continuation import wake
 from doceditor import comment_notifications, feedback_comments, feedback_delivery, feedback_edits
 from doceditor.review_lifecycle import settle_for_batch
 from doceditor.feedback_state import (
@@ -19,7 +20,8 @@ from doceditor.feedback_state import (
     user_feedback_for_document,
 )
 from infra.database import write_transaction
-from plans.public import unstarted_feedback_batch_id
+from infra.write_effects import after_commit
+from plans.public import feedback_node_takes_more
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +39,12 @@ def _after(value: str, seconds: int) -> str:
 
 def _new_deadline(author_kind: str, now: str) -> str:
     return _after(now, AGENT_QUIET if author_kind == "agent" else USER_IDLE)
+
+
+def seconds_until_next_due(now: datetime, *, db) -> float | None:
+    """Seconds until the earliest open batch is due (negative when overdue), or None when none is open."""
+    row = db.execute("SELECT MIN(closes_at) FROM doc_feedback_batches WHERE state='open'").fetchone()
+    return None if row[0] is None else (datetime.fromisoformat(row[0]) - now).total_seconds()
 
 
 def _open_batch(
@@ -85,6 +93,7 @@ def _touch_batch(
                item_count=item_count+?,updated_at=? WHERE id=?""",
         (now, _new_deadline(author_kind, now), item_delta, now, batch_id),
     )
+    after_commit(db, wake.sweep_soon)
 
 
 def _add_comment_item(
@@ -114,6 +123,19 @@ def _add_comment_item(
     return True
 
 
+def _unstarted_batch_id(db, recipient_id: str, author_kind: str, author_id: str, artifact_id: str) -> str | None:
+    """The author's newest delivered batch for this document and owner, if its task has not been started."""
+    row = db.execute(
+        """SELECT id,delivered_node_id FROM doc_feedback_batches
+           WHERE author_kind=? AND author_id=? AND artifact_id=? AND recipient_id=?
+             AND state='delivered' AND delivery_outcome='node'
+           ORDER BY updated_at DESC,id DESC LIMIT 1""",
+        (author_kind, author_id, artifact_id, recipient_id),
+    ).fetchone()
+    node_id = row["delivered_node_id"] if row is not None else None
+    return str(row["id"]) if node_id and feedback_node_takes_more(db, node_id, recipient_id) else None
+
+
 def join_unstarted_batch(
     db,
     comment: dict[str, Any],
@@ -127,11 +149,7 @@ def join_unstarted_batch(
     author_id = feedback_comments.author_id(comment)
     artifact_id = str(comment["artifact_id"])
     now = str(comment["created_at"])
-    batch_id = None
-    if author_kind == "user":
-        batch_id = unstarted_feedback_batch_id(
-            db, recipient_thread_id=recipient_id, author_kind=author_kind, author_id=author_id, artifact_id=artifact_id,
-        )
+    batch_id = _unstarted_batch_id(db, recipient_id, author_kind, author_id, artifact_id) if author_kind == "user" else None
     delivered = batch_id is not None
     if batch_id is None:
         batch_id = _open_batch(
@@ -253,8 +271,7 @@ def record_comment(
                 batch = db.execute("SELECT * FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
                 feedback_delivery.refresh_unstarted_node(db, batch)
             elif comment["author_kind"] == "user":
-                _closed, selected = _claim_and_deliver(db, batch_id, from_state="open", reason="send")
-                woken.extend(feedback_delivery.wake_after_unselected_person_delivery(db, batch_id, selected))
+                woken.extend(_claim_and_deliver(db, batch_id, from_state="open", reason="send")[1])
         if submit and comment["author_kind"] == "agent":
             woken = close_for_document(
                 db,
@@ -361,16 +378,14 @@ def close_for_turn_end(db, thread_id: str) -> list[str]:
     return woken
 
 
-def close_due(now: str, *, db=None, artifact_id: str | None = None) -> list[str]:
-    """Deliver due batches, optionally for one document, through their persisted deadline."""
+def close_due(now: str, *, db=None) -> list[str]:
+    """Deliver every due batch; one that raises rolls back alone, is logged, and retries next pass."""
     deliveries: list[tuple[str, str]] = []
-    artifact_clause = " AND artifact_id=?" if artifact_id is not None else ""
-    params: tuple[str, ...] = (now,) if artifact_id is None else (now, artifact_id)
     with write_transaction(db, scope="close_due_doc_feedback") as connection:
         rows = connection.execute(
             """SELECT id,artifact_id,author_kind,closed_reason FROM doc_feedback_batches
-               WHERE state='open' AND closes_at<=?""" + artifact_clause + " ORDER BY closes_at,id",
-            params,
+               WHERE state='open' AND closes_at<=? ORDER BY closes_at,id""",
+            (now,),
         ).fetchall()
         woken: list[str] = []
         for row in rows:
