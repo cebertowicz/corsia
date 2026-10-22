@@ -9,12 +9,20 @@ export interface BrowserChip {
 	host: string | null;
 }
 
-/** The chip's tooltip and accessible description: it reopens the one browser view, it does not navigate. */
+/** The chip's tooltip: it reopens the one browser view, it does not navigate. */
 export const BROWSER_CHIP_NAME = 'Reopen the shared browser';
 
 /** What the chip says: the host the agent opened, or `Shared browser` when there is none. */
 export function browserChipLabel(chip: BrowserChip): string {
 	return chip.host ?? 'Shared browser';
+}
+
+/**
+ * The chip's accessible name: what it says, then what a click does, as a file chip names itself then its type. Starting
+ * with the visible host lets voice control say it and tells one chip from another.
+ */
+export function browserChipAccessibleName(chip: BrowserChip): string {
+	return chip.host ? `${chip.host}, reopen the shared browser` : BROWSER_CHIP_NAME;
 }
 
 /** A `browser_chip` field as it arrives from the server. */

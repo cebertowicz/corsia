@@ -120,7 +120,8 @@ async function screenshot(page: Page, name: string, within?: Locator): Promise<v
 	await (within ?? page).screenshot({ path: path.join(directory, `${name}.png`), animations: 'disabled' });
 }
 
-const reopen = (page: Page, host: string) => page.getByRole('button', { name: host, exact: true });
+const chipName = (host: string) => `${host}, reopen the shared browser`;
+const reopen = (page: Page, host: string) => page.getByRole('button', { name: chipName(host), exact: true });
 
 // Focus is a persisted server setting shared by every later spec, so restore it even when a test fails.
 test.afterEach(async ({ request }) => {
@@ -164,7 +165,7 @@ for (const width of [1440, 393] as const) {
 		});
 
 		const block = (page: Page) => page.locator('[data-work-block]');
-		const blockChip = (page: Page, host: string) => block(page).locator('.fold-browser').getByRole('button', { name: host, exact: true });
+		const blockChip = (page: Page, host: string) => block(page).locator('.fold-browser').getByRole('button', { name: chipName(host), exact: true });
 
 		test(`@surface:browser-chip Focus on: the collapsed block that holds the opens shows the newest one, each opening row shows its own once open (${width})`, async ({ page, request }, info) => {
 			test.skip(width !== 393 && info.project.name === 'chromium-mobile', 'desktop is proved by the desktop project');

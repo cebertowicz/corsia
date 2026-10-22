@@ -105,6 +105,18 @@ def test_native_settle_stores_the_chip_on_the_step_and_the_finalized_frame_carri
     assert final["metadata"]["browser_chip"] == _step_metadata(step_id)["browser_chip"]
 
 
+def test_the_finalized_frame_carries_the_later_of_two_opens_like_the_row(isolated_db):
+    handler, frames = _native_step([("c1", _open_args()), ("c2", _open_args(url="https://other.example/x"))])
+    step_id = handler.tool_step_id
+    asyncio.run(handler.handle("tool_complete", {"id": "c1", "name": "browser_open", "result": "opened"}))
+    asyncio.run(handler.handle("tool_complete", {"id": "c2", "name": "browser_open", "result": "opened"}))
+    asyncio.run(handler.handle("tool_calls_done", {"tool_ids": ["c1", "c2"]}))
+
+    final = next(frame for frame in frames if frame["type"] == "step_text")
+    assert final["metadata"]["browser_chip"] == {"host": "other.example"}
+    assert final["metadata"]["browser_chip"] == _step_metadata(step_id)["browser_chip"]
+
+
 def test_a_failed_or_headless_open_stores_nothing(isolated_db):
     handler, frames = _native_step([("c1", _open_args()), ("c2", {"url": "https://a.example"})])
     step_id = handler.tool_step_id

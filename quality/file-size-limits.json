@@ -23,7 +23,7 @@
     "backend/api/project_repos.py": 792,
     "backend/api/project_scaffolding.py": 447,
     "backend/connections/harness_models.py": 599,
-    "backend/core/step_handler.py": 422,
+    "backend/core/step_handler.py": 424,
     "backend/core/thread_lifecycle.py": 498,
     "backend/e2e_mock.py": 410,
     "backend/host_access/processes.py": 1426,

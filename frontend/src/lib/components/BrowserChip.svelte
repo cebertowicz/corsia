@@ -2,7 +2,7 @@
 	// The chip a message carries when its tool call opened the shared browser in front of the person. It sits in the
 	// file chip strip and looks like a file chip, but it is not an artifact: it shows the thread's one live browser
 	// view again, whatever page that view is on now.
-	import { BROWSER_CHIP_NAME, browserChipLabel, type BrowserChip } from '$lib/browserChip';
+	import { BROWSER_CHIP_NAME, browserChipAccessibleName, browserChipLabel, type BrowserChip } from '$lib/browserChip';
 	import { emitProductEvent } from '$lib/product_events';
 	import { openBrowserPane } from '$lib/stores/artifactWorkspace';
 	import ArtifactGlyph from './ArtifactGlyph.svelte';
@@ -18,8 +18,13 @@
 	}
 </script>
 
-<!-- The visible host is the accessible name, so voice control can say it and each chip is told apart; the title is its description. -->
-<button type="button" class="tile chip press-tint" title={BROWSER_CHIP_NAME} onclick={open}>
+<button
+	type="button"
+	class="tile chip press-tint"
+	title={BROWSER_CHIP_NAME}
+	aria-label={browserChipAccessibleName(chip)}
+	onclick={open}
+>
 	<ArtifactGlyph icon="globe" />
 	<span class="text"><span class="head"><span class="title">{browserChipLabel(chip)}</span></span></span>
 </button>

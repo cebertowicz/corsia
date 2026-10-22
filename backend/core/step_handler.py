@@ -16,7 +16,7 @@ from infra.context_receipts import (
     context_usage_summary, live_context_usage_payload,
 )
 from core.turn_error_surface import persist_llm_error
-from infra.queries import insert_message, stored_browser_chip
+from infra.queries import insert_message
 from llm.error_cause import error_fields
 from core.plan_turn_end import record_turn_end_logged
 from core.turn_core import TurnIdentity
@@ -62,6 +62,7 @@ class StepHandler:
         self.tool_step_content = ""
         self.tool_step_reasoning: str | None = None
         self.tool_step_reasoning_provenance: dict[str, Any] | None = None
+        self.tool_step_browser_chip: dict = {}
         self.reasoning_parts: list[str] = []
         self.reasoning_provenance: dict[str, Any] | None = None
 
@@ -256,6 +257,7 @@ class StepHandler:
         self.tool_step_content = tc_content
         self.tool_step_reasoning = meta.get("reasoning")
         self.tool_step_reasoning_provenance = meta.get("reasoning_provenance")
+        self.tool_step_browser_chip = {}
 
         if not payload.get("skip_broadcast", False):
             for tool in payload["tools"]:
@@ -280,7 +282,7 @@ class StepHandler:
         if any(call.get("result") is None for call in self.tool_calls):
             raise RuntimeError("Assistant Step finalized before every tool result settled")
 
-        metadata = {**self._base_meta(), **await run_in_db(stored_browser_chip, self.thread_id, self.tool_step_id)}
+        metadata = {**self._base_meta(), **self.tool_step_browser_chip}
         metadata["tool_hints"] = self.tool_hints[:]
         metadata["tool_calls"] = [dict(call) for call in self.tool_calls]
         if self.tool_step_reasoning:
