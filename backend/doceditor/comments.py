@@ -184,14 +184,14 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
 
     Resolving drops any unsent re-opened item for the comment, whichever route resolved it.
     """
-    allowed = {"resolved", "acked", "body", "from_off", "to_off", "anchor_text", "decision", "decided_by", "decided_by_thread_id", "decided_at", "decision_event_id",
+    allowed = {"resolved", "acked", "body", "from_off", "to_off", "anchor_text", "decision", "decided_by", "decided_by_thread_id", "decided_at", "decision_event_id", "decided_in_bulk",
                "region_x", "region_y", "region_w", "region_h", "image_rev"}
     sets, params = [], []
     for k, v in fields.items():
         if k not in allowed:
             continue
         sets.append(f"{k}=?")
-        params.append(int(v) if k in ("resolved", "acked") and isinstance(v, bool) else v)
+        params.append(int(v) if k in ("resolved", "acked", "decided_in_bulk") and isinstance(v, bool) else v)
     if not sets:
         return None
     now = _now()

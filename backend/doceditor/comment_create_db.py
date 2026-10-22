@@ -7,6 +7,7 @@ from doceditor import comments, doc_images, feedback_batches, image_regions, rev
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
+from doceditor.suggestion_overlap import check_agent_suggestion_fits
 from infra.auth import may_access_artifact
 from infra.database import get_db, write_transaction
 from registry import models as registry_models, service as registry_service
@@ -97,6 +98,10 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
             image_src, image_rev = _image(db, request, quote)
         artifact_id = request.artifact_id
         registered = request.registration is not None
+        if (request.author_kind == "agent" and request.replacement is not None and not request.parent_id
+                and duplicate is None and artifact_id is not None):
+            # Creates of one live document are already serialized by its comment mutex.
+            check_agent_suggestion_fits(db, artifact_id, request.path, start, end)
         with write_transaction(db, scope="create_document_comment") as connection:
             receipt.bind(connection)
             if request.registration is not None:

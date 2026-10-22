@@ -176,6 +176,15 @@ def _register_measure_tools(agent: CORSIAAgent) -> None:
     agent.tools.register(MeasureStatusTool())
 
 
+def _register_automation_tools(agent: CORSIAAgent) -> None:
+    """Register this thread's schedules and the event rules it writes."""
+    from tools.automations import AutomationCancelTool, AutomationListTool, AutomationScheduleTool
+    from tools.event_rules import EventRulesTool
+
+    for tool in (AutomationScheduleTool(), AutomationCancelTool(), AutomationListTool(), EventRulesTool()):
+        agent.tools.register(tool)
+
+
 def _register_agent_roster_tools(agent: CORSIAAgent) -> None:
     """Register scope-aware roster reads and conductor-only tools."""
     from tools.bulletins import BulletinDispositionTool
@@ -331,11 +340,6 @@ def _register_tools(agent: CORSIAAgent, tool_cfg: dict, workspace: Path):
     agent.tools.register(SetConversationProjectTool())
     _register_agent_roster_tools(agent)
 
-    from tools.automations import (
-        AutomationCancelTool,
-        AutomationListTool,
-        AutomationScheduleTool,
-    )
     from tools.plans import (
         PlanDecisionTool,
         PlanEnsureTool,
@@ -352,9 +356,7 @@ def _register_tools(agent: CORSIAAgent, tool_cfg: dict, workspace: Path):
     agent.tools.register(PlanEnsureTool())
     agent.tools.register(PlanUpdateTool())
     agent.tools.register(PlanDecisionTool())
-    agent.tools.register(AutomationScheduleTool())
-    agent.tools.register(AutomationCancelTool())
-    agent.tools.register(AutomationListTool())
+    _register_automation_tools(agent)
 
     _register_access_tools(agent)
     _register_measure_tools(agent)

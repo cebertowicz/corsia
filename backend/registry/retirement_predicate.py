@@ -16,9 +16,12 @@ files, uploads -- is task-scoped and still retires.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
 
@@ -59,6 +62,21 @@ ENDED_PULL_REQUEST = f"""(i.integration='{GITHUB_INTEGRATION}'
                AND i.type='{PR_TYPE}'
                AND COALESCE(json_extract(i.metadata, '$.pr_state'), '')
                    IN ({_TERMINAL_STATES_SQL}))"""
+
+def identity_ended(identity: Mapping[str, Any] | None) -> bool:
+    """``ENDED_PULL_REQUEST`` for an identity row already read, e.g. the one
+    ``routing_registrations`` returns; a test holds the two to one answer."""
+    if not identity or (identity.get("integration"), identity.get("type")) != (
+            GITHUB_INTEGRATION, PR_TYPE):
+        return False
+    metadata = identity.get("metadata") or {}
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except ValueError:
+            return False
+    return isinstance(metadata, dict) and metadata.get("pr_state") in PR_TERMINAL_STATES
+
 
 #: A GitHub pull request that has not ended yet.
 PULL_REQUEST_EXEMPT = f"""(i.integration='{GITHUB_INTEGRATION}'

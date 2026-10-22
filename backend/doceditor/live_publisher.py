@@ -7,6 +7,7 @@ from dataclasses import replace
 import logging
 
 from doceditor import comments, comment_anchoring
+from doceditor.feedback_edit_discard import discard_new_edit_item
 from doceditor.live_publication_record import OwedPublication, Publication
 from doceditor.live_store import LiveStore, StoreRefused
 from doceditor.live_failure_budget import FailureBudget
@@ -87,6 +88,8 @@ def register_publication(publication: Publication, text: str, result_hash: str, 
             else:
                 report_owner_write(authority, artifact, path=path, before=before, after=after,
                                    thread_id=publication.actor, db=db, prepared=payload)
+            if publication.suggestion_accept:
+                discard_new_edit_item(db, artifact["id"], text)
     notification = service.find_file_identity(prepared.identity, db=db)
     if notification is not None:
         service.notify_changed(notification)

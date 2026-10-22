@@ -384,7 +384,7 @@ fn grant_local_service_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, serv
     Ok(())
 }
 
-fn bundled_resource_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn bundled_resource_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
     match app.path().resource_dir() {
         Ok(path) => Ok(path),
         Err(path_error) => {
@@ -518,8 +518,8 @@ fn register_or_report_status(port: u16) -> Result<service_management::ServiceSta
     service_management::ensure_registered_from_app(|| operation_is_active(port))
 }
 
-fn start_service(
-    app: &tauri::AppHandle,
+fn start_service<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     service: &AppServiceState,
 ) -> Result<ServiceStartup, String> {
     if running_from_disk_image()? {
@@ -835,7 +835,7 @@ fn proxy_failure(error: proxy::ProxyError) -> classify::ConnectFailure {
 
 /// Brings this computer's own service back after a connect failed past the point that stopped it. When it cannot,
 /// the window is left on a page whose service is gone, so the startup shell takes over with a card and its action.
-fn restore_local_service(app: &tauri::AppHandle) {
+fn restore_local_service<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let service = app.state::<AppServiceState>();
     let restored = run_service_command("register").and_then(|()| start_service(app, &service).map(drop));
     if let Err(error) = restored {
@@ -1016,12 +1016,6 @@ enum RemoteTarget {
     Address { host: String, port: Option<u16> },
 }
 
-#[derive(Deserialize)]
-struct RemotePairRequest {
-    target: RemoteTarget,
-    code: String,
-}
-
 #[derive(Serialize)]
 struct RemoteNames {
     names: Vec<String>,
@@ -1086,22 +1080,34 @@ fn leave_pairing_unless_connected<R: tauri::Runtime>(app: &tauri::AppHandle<R>, 
     }
 }
 
+// The page calls this with `{ target, code }` (`remoteShell.ts`); Tauri matches each top-level key to the parameter of
+// the same name, so these names are the IPC contract.
 #[tauri::command]
-async fn remote_pair(
-    request: RemotePairRequest,
-    app: tauri::AppHandle,
+async fn remote_pair<R: tauri::Runtime>(
+    target: RemoteTarget,
+    code: String,
+    app: tauri::AppHandle<R>,
     remote: tauri::State<'_, RemoteRuntime>,
 ) -> Result<RemotePairResponse, String> {
-    let outcome = pair_remote(request, &app, &remote).await;
+    let outcome = pair_remote(target, &code, &app, &remote).await;
+    if let Err(error) = &outcome {
+        log::warn!("pairing failed on this computer: {error}");
+    }
     leave_pairing_unless_connected(&app, &outcome);
     outcome
 }
 
-async fn pair_remote(request: RemotePairRequest, app: &tauri::AppHandle, remote: &RemoteRuntime) -> Result<RemotePairResponse, String> {
+/// The page shows only the reason, so every failed pairing logs its cause here (never the code or key material).
+fn pairing_failed(step: &str, cause: impl std::fmt::Debug, response: RemotePairResponse) -> Result<RemotePairResponse, String> {
+    log::warn!("pairing failed at {step}: {cause:?}");
+    Ok(response)
+}
+
+async fn pair_remote<R: tauri::Runtime>(target: RemoteTarget, code: &str, app: &tauri::AppHandle<R>, remote: &RemoteRuntime) -> Result<RemotePairResponse, String> {
     use classify::ConnectFailure;
     update_shell_state(app, |connection| connection.begin_pairing())?;
     let app_dir = default_app_dir(app)?;
-    let locator = match request.target {
+    let locator = match target {
         RemoteTarget::DnsSd { instance } => remote_config::Locator::DnsSd { instance },
         RemoteTarget::Address { host, port } => {
             let (host, parsed_port) = remote_host::parse_pairing_address(&host, port.unwrap_or(47_901))
@@ -1113,18 +1119,21 @@ async fn pair_remote(request: RemotePairRequest, app: &tauri::AppHandle, remote:
         remote_config::Locator::Address { host, port } => (host.clone(), *port),
         remote_config::Locator::DnsSd { instance } => match discovery::resolve(instance, Duration::from_secs(15)).await {
             Ok(address) => address,
-            Err(_) => return Ok(failure_response(ConnectFailure::Network)),
+            Err(error) => return pairing_failed("discovery", error, failure_response(ConnectFailure::Network)),
         },
     };
-    let paired = match pairing::pair(&host, port, &request.code).await {
+    let paired = match pairing::pair(&host, port, code).await {
         Ok(paired) => paired,
-        Err(error) => return Ok(remote_pair_error(error)),
+        Err(error) => return pairing_failed("pair", &error, remote_pair_error(error.clone())),
     };
     match version_check::check(&paired.host, paired.port, &paired.trust, &version_check::app_version(app)).await {
         Ok(version_check::Compat::Ok) => {}
-        Ok(version_check::Compat::Incompatible { app: app_version, host }) => return Ok(failure_response(ConnectFailure::Incompatible { app: app_version, host })),
-        Ok(version_check::Compat::TooOld) => return Ok(failure_response(ConnectFailure::TooOld)),
-        Err(error) => return Ok(remote_pair_error(error)),
+        Ok(version_check::Compat::Incompatible { app: app_version, host }) => {
+            let failure = ConnectFailure::Incompatible { app: app_version, host };
+            return pairing_failed("version check", &failure, failure_response(failure.clone()));
+        }
+        Ok(version_check::Compat::TooOld) => return pairing_failed("version check", ConnectFailure::TooOld, failure_response(ConnectFailure::TooOld)),
+        Err(error) => return pairing_failed("version check", &error, remote_pair_error(error.clone())),
     }
     let record = remote_config::RemoteRecord {
         locator,
@@ -1136,7 +1145,7 @@ async fn pair_remote(request: RemotePairRequest, app: &tauri::AppHandle, remote:
     };
     let started = match proxy::start_record(&record, 0, key_changed_callback(app, &paired.name)).await {
         Ok(started) => started,
-        Err(error) => return Ok(failure_response(proxy_failure(error))),
+        Err(error) => return pairing_failed("proxy start", &error, failure_response(proxy_failure(error.clone()))),
     };
     let mut entry = RemoteEntry {
         app,
@@ -1151,7 +1160,7 @@ async fn pair_remote(request: RemotePairRequest, app: &tauri::AppHandle, remote:
             replace_proxy(remote, Some(proxy));
             Ok(RemotePairResponse::Success { ok: true, name: paired.name })
         }
-        Err(failure) => Ok(failure_response(failure)),
+        Err(failure) => pairing_failed("entering the remote", &failure, failure_response(failure.clone())),
     }
 }
 
@@ -1663,6 +1672,34 @@ fn generated_context<R: tauri::Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
 }
 
+/// The shell's own log file in the app log folder (`~/Library/Logs/<identifier>/desktop-shell.log`). The background
+/// service logs to its own `service.log` under the state folder.
+const SHELL_LOG_FILE: &str = "desktop-shell";
+
+/// Everything goes to stdout, as it always has. The shell's own lines (not its libraries') also go to `file`, so a
+/// pairing or launch failure's cause outlives a packaged app's lost stdout. A log file that cannot be opened is
+/// skipped rather than stopping the app from starting.
+fn shell_logger<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    file: tauri_plugin_log::TargetKind,
+) -> Result<(tauri::plugin::TauriPlugin<R>, log::LevelFilter, Box<dyn log::Log>), tauri_plugin_log::Error> {
+    let stdout = || tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout);
+    let shell_lines = tauri_plugin_log::Target::new(file).filter(|metadata| is_shell_log_target(metadata.target()));
+    tauri_plugin_log::Builder::default()
+        .clear_targets()
+        .targets([stdout(), shell_lines])
+        .split(app)
+        .or_else(|error| {
+            eprintln!("the shell log file could not be opened, so the shell logs to stdout only: {error}");
+            tauri_plugin_log::Builder::default().clear_targets().target(stdout()).split(app)
+        })
+}
+
+fn is_shell_log_target(target: &str) -> bool {
+    let shell = module_path!();
+    target == shell || target.strip_prefix(shell).is_some_and(|rest| rest.starts_with("::"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Every command-line mode is dispatched here, before any window exists.
@@ -1691,17 +1728,6 @@ pub fn run() {
     }
 
     tauri::Builder::default()
-        // The backend owns persistent service logs under CORSIA_STATE_DIR. Keep
-        // native diagnostics on stdout so an existing macOS app-log path cannot
-        // prevent the packaged app from starting before the service does.
-        .plugin(
-            tauri_plugin_log::Builder::default()
-                .clear_targets()
-                .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Stdout,
-                ))
-                .build(),
-        )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         // Remembers the window's size and position; `window_placement` covers what it leaves to the OS.
@@ -1781,6 +1807,10 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            let log_file = tauri_plugin_log::TargetKind::LogDir { file_name: Some(SHELL_LOG_FILE.into()) };
+            let (log_plugin, level, logger) = shell_logger(app.handle(), log_file)?;
+            app.handle().plugin(log_plugin)?;
+            tauri_plugin_log::attach_logger(level, logger)?;
             app.manage(AppServiceState::default());
             app.manage(RemoteRuntime::default());
             watch_for_swapped_app(app.handle().clone());
@@ -2121,6 +2151,83 @@ mod tests {
             let allowed = invoke_from(&webview, command, "http://127.0.0.1:47911").is_ok();
             assert_eq!(allowed, ["disconnect_remote", "start_window_drag"].contains(command), "{command} from the proxy origin");
         }
+    }
+
+    /// The arguments the page sends `remote_pair` (`remoteShell.ts`; the frontend test pins the same file).
+    fn remote_pair_requests() -> Vec<serde_json::Value> {
+        serde_json::from_str(include_str!("../../../testdata/remote-pair-requests.json")).unwrap()
+    }
+
+    /// The real command, invoked over IPC with the page's own arguments: a refused argument shape rejects the call
+    /// before any pairing runs, which the page can only show as a local failure.
+    #[test]
+    fn remote_pair_accepts_the_arguments_the_page_sends() {
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![remote_pair])
+            .build(generated_context())
+            .unwrap();
+        app.manage(RemoteRuntime::default());
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        for request in remote_pair_requests() {
+            serde_json::from_value::<RemoteTarget>(request["target"].clone()).unwrap();
+            if request["target"]["kind"] != "address" {
+                continue;
+            }
+            let response = tauri::test::get_ipc_response(&webview, tauri::webview::InvokeRequest {
+                cmd: "remote_pair".into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: "tauri://localhost".parse().unwrap(),
+                body: tauri::ipc::InvokeBody::Json(request.clone()),
+                headers: Default::default(),
+                invoke_key: tauri::test::INVOKE_KEY.to_string(),
+            })
+            .unwrap_or_else(|error| panic!("remote_pair refused {request}: {error}"));
+            // Nothing listens on port 1, so the pairing itself ran and answered with a connection failure.
+            let response: serde_json::Value = response.deserialize().unwrap();
+            assert_eq!(response["ok"], false, "{response}");
+            assert_ne!(response["reason"], "local", "{response}");
+        }
+    }
+
+    /// The only test that installs the process-wide logger: the real failure path's line lands in the shell log file,
+    /// and a library's line stays on stdout.
+    #[test]
+    fn the_shell_log_file_keeps_a_pairing_failure_cause() {
+        let app = tauri::test::mock_builder().build(generated_context()).unwrap();
+        let logs = tempfile::tempdir().unwrap();
+        let file = tauri_plugin_log::TargetKind::Folder { path: logs.path().into(), file_name: Some(SHELL_LOG_FILE.into()) };
+        let (_, level, logger) = shell_logger(app.handle(), file).unwrap();
+        tauri_plugin_log::attach_logger(level, logger).unwrap();
+
+        pairing_failed("pair", pairing::PairError::WrongCode, remote_pair_error(pairing::PairError::WrongCode)).unwrap();
+        log::warn!(target: "rustls::client", "a library line");
+        log::logger().flush();
+
+        let text = fs::read_to_string(logs.path().join("desktop-shell.log")).unwrap();
+        assert!(text.contains("pairing failed at pair: WrongCode"), "{text}");
+        assert!(!text.contains("a library line"), "{text}");
+        // On an installed app the LogDir target resolves here.
+        let installed = app.path().app_log_dir().unwrap();
+        assert!(installed.ends_with("Library/Logs/ai.corsia.app"), "{}", installed.display());
+    }
+
+    #[test]
+    fn an_unopenable_shell_log_file_leaves_stdout_logging() {
+        let app = tauri::test::mock_builder().build(generated_context()).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let not_a_folder = root.path().join("logs");
+        fs::write(&not_a_folder, "a file where the log folder belongs").unwrap();
+        let file = tauri_plugin_log::TargetKind::Folder { path: not_a_folder, file_name: Some(SHELL_LOG_FILE.into()) };
+        assert!(shell_logger(app.handle(), file).is_ok());
+    }
+
+    #[test]
+    fn only_the_shells_own_lines_go_to_its_log_file() {
+        assert!(is_shell_log_target("app_lib"));
+        assert!(is_shell_log_target("app_lib::window_placement"));
+        assert!(!is_shell_log_target("app_lib_other"));
+        assert!(!is_shell_log_target("tauri::app"));
     }
 
     #[test]

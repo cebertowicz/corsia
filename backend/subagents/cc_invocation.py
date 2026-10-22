@@ -7,7 +7,22 @@ import os
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 
+from claude_controls import confined_claude_controls
 from subagents.managed_launch import claude_project_discovery_args
+
+
+def claude_review_profile_args() -> list[str]:
+    """Return the fixed Claude Code tool profile for a confined review child.
+
+    The caller supplies the reviewed paths with ``--add-dir``. Keeping this
+    profile separate from normal managed-session construction prevents a review
+    child from inheriting CORSIA MCP access, local settings, or any tool other
+    than Read, Grep, and Glob.
+    """
+    return [
+        *confined_claude_controls(),
+        "--tools", "Read,Grep,Glob",
+    ]
 
 
 @dataclass(frozen=True, slots=True)

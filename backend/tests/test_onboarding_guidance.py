@@ -346,6 +346,7 @@ def test_the_community_step_explains_asks_one_decision_and_writes_the_profile_li
     assert step.startswith("Learning from the community.** Always.")
     assert "Here's how CORSIA gets better: it learns from you." in step
     assert "sharing it means everyone using CORSIA gets better, and you get what others prove." in step
+    assert "After about a week of work, the chart button at the top of this chat shows what's changing: how much work gets done per hour of your attention, and how many of your minutes each outcome takes." in step
     assert "Use and share community improvements?" in step
     assert "**Use and share** writes Yes and Yes; **Only use** writes Yes and No; **Neither** writes No and No" in step
     assert "would only share, write No and Yes" in step
@@ -530,8 +531,8 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "When every `About you: <heading>` task is settled and every suggestion is in" in doc
     assert "`bound_model` `source` is `omlx`): start no helper. Write the suggestions yourself, one heading at a time." in doc
     # One review ask, worded for the review bar with or without the accept-all button.
-    assert doc.count("`I put what I know in your About you doc. Change anything that's wrong, accept the suggestions you want, then press Approve.`") == 1
-    assert doc.count("Change anything that's wrong, accept the suggestions you want, then press Approve.") == 2  # the ask's reason, then the one chat line
+    assert doc.count("`I put what I know in your About you doc. Change anything that's wrong and reject any suggestion that isn't right, then press Approve. It accepts the rest for you.`") == 1
+    assert doc.count("Change anything that's wrong and reject any suggestion that isn't right, then press Approve. It accepts the rest for you.") == 2  # the ask's reason, then the one chat line
     assert "`block_node` with `owner_kind` `user`" in doc and "`ask_artifact_id` the document's artifact id" in doc  # Approve only shows with an ask
     assert "Whenever you read the document (on Approve in section 4, or on the person's reply), suggest again yourself" in doc
     assert "any suggestion that can no longer apply to it. Never wait on a helper" in doc
@@ -542,7 +543,7 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     # Failure paths.
     assert "ask `Keep these?`" in doc
     assert "\"Not now\", or they carry on with something else: close that task with the reason that they chose not now, skip to section 5 and write the profile from the chat answers." in doc
-    assert len(doc.split()) < 900
+    assert len(doc.split()) < 930
 
 
 def test_approve_with_suggestions_still_open_saves_nothing_and_asks_to_be_told():
