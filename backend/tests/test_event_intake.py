@@ -190,9 +190,9 @@ def test_declared_event_uses_the_live_every_evaluator_and_platform_path(intake_w
 
     assert result.accepted and result.rules_matched == 1
     assert len(wakes) == 1
-    # 2.A records only rules' outcomes; the owner's own delivery is today's routing, seen in its digest.
+    # Only rules' outcomes are recorded, and the owner sent it, so routing's echo to it is skipped.
     assert {(row[0], row[1], row[2]) for row in decisions} == {("intake-every", OTHER, "woke")}
-    assert _digested(intake_world, OWNER, "every-event") == 1
+    assert _digested(intake_world, OWNER, "every-event") == 0
 
 
 def test_refused_id_can_retry_after_fix_without_persisting_facts(intake_world):
@@ -422,7 +422,7 @@ def test_a_both_event_is_stored_once_and_routed(intake_world):
     retry = _admit(event_type="qa.both", event_id="both-1")
     assert result.accepted and not result.duplicate and retry.duplicate
     assert _stored(intake_world, "qa.both") == [(OWNER, "project-a", "ok", "both-1")]
-    assert _digested(intake_world, OWNER, "both-1") == 1
+    assert _digested(intake_world, OWNER, "both-1") == 0  # its own event: no echo to its digest
     assert _admit(event_id="route-1").accepted and _stored(intake_world, "qa.route") == []
 
 
@@ -538,7 +538,8 @@ def test_a_both_row_from_a_workflow_without_a_version_is_counted_unversioned_onc
     routed = _digested(intake_world, OWNER, f"script:{schedule.id}:run-1:%")
 
     assert report.status == "ok" and len(_stored(intake_world, "qa.both")) == 1
-    assert [tuple(row) for row in counted] == [(OWNER, 1)] and routed == 2
+    # Both lines route; neither echoes to the owner whose script sent them.
+    assert [tuple(row) for row in counted] == [(OWNER, 1)] and routed == 0
 
 
 def test_event_lines_share_the_measure_line_cap(intake_world):

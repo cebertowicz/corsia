@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,6 +35,7 @@ from tools.shell_guard import (
     safehouse_version_error,
 )
 from tools.shell_policy import load_shell_repo_policies
+from tools.unix_socket_policy import corsia_temp_root_for_bind
 
 #: Stdout the runner will read. One extra byte is kept so a longer stream is seen.
 STDOUT_CAP_BYTES = 64 * 1024
@@ -61,8 +63,8 @@ class ScriptRun:
         return len(self.stdout) > STDOUT_CAP_BYTES
 
 
-def script_command(path: Path) -> str:
-    """The one bash command line for a script: no stdin, capped stdout and stderr.
+def script_command(path: Path, stdin: Path | None = None) -> str:
+    """The one bash command line for a script: ``stdin`` or none, capped stdout and stderr.
 
     ``head`` ends a runaway script with SIGPIPE instead of letting the process
     owner hold its whole output in memory, and ``pipefail`` keeps the script's
@@ -71,8 +73,9 @@ def script_command(path: Path) -> str:
     quoted = shlex.quote(str(path))
     interpreter = _INTERPRETERS.get(path.suffix)
     run = f"{interpreter} {quoted}" if interpreter else quoted
+    source = shlex.quote(str(stdin)) if stdin is not None else "/dev/null"
     return (
-        f"set -o pipefail; {run} </dev/null "
+        f"set -o pipefail; {run} <{source} "
         f"2> >(head -c {STDERR_CAP_BYTES} >&2) | head -c {STDOUT_CAP_BYTES + 1}"
     )
 
@@ -93,9 +96,33 @@ async def run_script(
     *,
     run_id: str,
     timeout_seconds: int,
+    stdin: bytes | None = None,
 ) -> ScriptRun:
-    """Run ``script`` in the owner's protected envelope and return its capped output."""
+    """Run ``script`` in the owner's protected envelope and return its capped output.
+
+    ``stdin`` is written to a private file in the thread's own temp root, which
+    the envelope grants read-write, and removed once the run ends.
+    """
     await _checked_environment()
+    if stdin is None:
+        return await _run(thread_id, project_id, script, run_id, timeout_seconds, None)
+    try:
+        fd, name = tempfile.mkstemp(prefix="rule-input-", suffix=".json",
+                                    dir=corsia_temp_root_for_bind(thread_id))
+    except (OSError, RuntimeError) as exc:
+        raise ScriptSandboxError(f"the event input could not be staged: {exc}") from exc
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(stdin)
+        return await _run(thread_id, project_id, script, run_id, timeout_seconds, Path(name))
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
+async def _run(
+    thread_id: str, project_id: str | None, script: Path, run_id: str, timeout_seconds: int,
+    stdin: Path | None,
+) -> ScriptRun:
     env = safehouse_subprocess_env(thread_id)
     try:
         policies, grant_policies = await asyncio.to_thread(
@@ -118,7 +145,7 @@ async def run_script(
         build_profile=execution_envelope_profile, build_argv=safehouse_argv,
     )
     profile_path, argv = await prepare_execution_envelope(
-        script_command(script), cwd, envelope,
+        script_command(script, stdin), cwd, envelope,
     )
     try:
         owned = await PROCESS_OWNER.spawn(

@@ -83,8 +83,11 @@ def test_cli_accepted_event_delivers_to_its_session_and_retries(emit_world, caps
     assert json.loads(repeat_out) == {**receipt, "duplicate": True}
     db = get_db()
     delivered = _digested(db, receipt["event_id"])
+    accepted = db.execute("SELECT COUNT(*) FROM event_intake_records WHERE event_id=? AND outcome='accepted'",
+                          (receipt["event_id"],)).fetchone()[0]
     db.close()
-    assert delivered == [OWNER]
+    # Accepted once; its sender is its owner, so no copy echoes back into its own digest.
+    assert delivered == [] and accepted == 1
 
 
 def test_cli_stdin_and_error_exit_contracts(emit_world, capsys, monkeypatch):
@@ -211,12 +214,15 @@ def test_agent_emit_identity_is_scoped_to_declared_event_type(emit_world):
     )))
     db = get_db()
     delivered = _digested(db, first["event_id"], second["event_id"])
+    accepted = db.execute(
+        "SELECT COUNT(*) FROM event_intake_records WHERE event_id IN (?,?) AND outcome='accepted'",
+        (first["event_id"], second["event_id"])).fetchone()[0]
     db.close()
 
     assert first["duplicate"] is False and second["duplicate"] is False
     assert first["event_id"] != second["event_id"]
     assert retry == {**first, "duplicate": True}
-    assert delivered == [OWNER, OWNER]
+    assert delivered == [] and accepted == 2  # both accepted, neither echoed to their sender
 
 
 def test_explain_takes_the_receipts_event_id_and_never_blames_routing_for_a_raw_identity(emit_world):

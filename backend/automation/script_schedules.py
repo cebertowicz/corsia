@@ -266,22 +266,26 @@ def finish_run(
     error: str | None = None,
     noted: bool = False,
     last_measures: str | None = None,
+    clear_claim: bool = True,
     db,
 ) -> None:
     """Record one settled run on the schedule row and clear its in-flight mark.
 
     ``last_measures`` is this run's measure line for ``automation_list``; a run that settled
-    no measures keeps the previous one.
+    no measures keeps the previous one. A rule-started run passes ``clear_claim=False``: it
+    never held the schedule's claim, so a scheduled run in flight keeps it.
     """
     if error is not None:
         error = sanitize_credential_text(error)[:MAX_ERROR_CHARS]
     db.execute(
         """UPDATE automation_schedules
-           SET runs=runs+1, last_run_at=?, running_since=NULL, last_status=?,
+           SET runs=runs+1, last_run_at=?,
+               running_since=CASE WHEN ? THEN NULL ELSE running_since END, last_status=?,
                last_error=?, noted_at=CASE WHEN ? THEN ? ELSE noted_at END,
                last_measures=coalesce(?, last_measures), updated_at=?
            WHERE id=? AND kind='script'""",
-        (ran_at, status, error, int(noted), ran_at, last_measures, ran_at, schedule_id),
+        (ran_at, int(clear_claim), status, error, int(noted), ran_at, last_measures, ran_at,
+         schedule_id),
     )
 
 

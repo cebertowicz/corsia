@@ -198,7 +198,10 @@ class AutomationScheduleTool(Tool):
             "woken once per series per day when a reading leaves its min/max, "
             "the script fails or times out, or the file changes after "
             "registration; readings inside bounds reach you as a passive "
-            "update. A script schedule has no expiry: cancel it with "
+            "update. A scheduled run reads nothing on stdin; a run an event_rules "
+            "run_script rule starts reads the event as one JSON object, {\"type\", "
+            "\"id\", \"rule_id\", \"facts\"}, and may print nothing. A script schedule "
+            "has no expiry: cancel it with "
             "automation_cancel. Check its last_status with automation_list."
         )
 

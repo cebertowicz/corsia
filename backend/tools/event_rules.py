@@ -37,6 +37,7 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
                     match=kwargs.get("match"), action=kwargs.get("action", "deliver"),
                     to=kwargs.get("to"), mode=kwargs.get("mode"), note=kwargs.get("note"),
                     scope=kwargs.get("scope"), now=now, tracked=tracked,
+                    script_id=kwargs.get("script_id"),
                 )
             else:
                 result = rule_authoring.disable(
@@ -100,13 +101,18 @@ class EventRulesTool(Tool):
             f"of `connector`/`event_type` matches up to {rules.MAX_TESTS} `match` tests (op "
             f"{', '.join(rules.OPERATORS)}) on that type's declared fields; your `note` "
             f"({rules.NOTE_LIMIT} characters) comes with the wake, so write what to do then. `drop` stops deliveries of matching events to you. "
+            "`run_script` runs one of your script schedules (`script_id`, from automation_list) "
+            "with the event as JSON on its stdin, within about a minute; it takes no `to`, `mode` "
+            "or `note`, and the event still reaches whoever it reaches today. An event the run "
+            "emits carries the rule, so a rule already in that chain is skipped, not run again; "
+            "a run while you are paused is skipped and not replayed. "
             "Your rules cover your own project and deliver only to you (`to: self`, the default) or "
             "to the event's file's registered owner (`to: registered_owner`); that owner is woken "
             "only when it is you or one of your temporary workers, otherwise the event goes to "
             "its digest. A rule wakes a chat "
             "at most once an hour; more go to its digest. A paused chat gets a digest instead. "
             "disable: turn off a rule you wrote or receive. list: the project's rules, with when "
-            "each last acted and its wakes in the last 24 hours. test: which rules a set of `facts` "
+            "each last acted and its wakes and script starts in the last 24 hours. test: which rules a set of `facts` "
             "would match. explain: why an event (`event_id`, or `artifact`, the file's external id "
             "such as owner/repo#7) did or didn't reach a chat through a rule, or, given `event_type`, "
             "the recent refusals of that declared type. emit: send one event of a declared "
@@ -131,7 +137,9 @@ class EventRulesTool(Tool):
                     }, "required": ["field"]},
                     "description": "create: tests that must all pass",
                 },
-                "action": {"type": "string", "enum": [rules.DELIVER, rules.DROP]},
+                "action": {"type": "string", "enum": [rules.DELIVER, rules.DROP, rules.RUN_SCRIPT]},
+                "script_id": {"type": "string",
+                              "description": "create with run_script: your script schedule's id"},
                 "to": {"type": "string",
                        "description": "create: self (default) or registered_owner; a conductor may "
                                       "name thread:<agent id> for a digest"},

@@ -13,8 +13,7 @@ from events import rules
 from events.connectors import get_manifest
 from events.envelope import EventEnvelope
 from events.platform import (
-    DEAD_LETTERED, WOKE, deliver_rule_adds, emit_route_events, lookup_failed, rule_event,
-    settle_rule_delivery,
+    DEAD_LETTERED, WOKE, deliver_rule_adds, emit_route_events, rule_event, settle_rule_delivery,
 )
 from events.resolve import Target
 from events.rule_match import matches
@@ -40,7 +39,7 @@ def apply_webhook_rules_sync(
     if anchor is None:
         if repository_projects is None:
             with write_transaction(None, scope="apply_webhook_rules") as conn:
-                rules.record(conn, event, lookup_failed(conn, event))
+                rules.record(conn, event, rules.lookup_failed(conn, event))
             return None
         if not repository_projects:
             return None
