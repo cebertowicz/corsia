@@ -172,7 +172,8 @@ fetch_verified "$OMLX_URL" "$BUILD_ROOT/downloads/$OMLX_WHEEL" "$OMLX_SHA256"
 PYTHONPATH="$BUNDLE_ROOT/python/backend-packages" "$PYTHON" -m pip check
 PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 
-# sitecustomize is a runtime guard for code that is not Python source.
+# sitecustomize guards imports that occur after Python starts; precompilation
+# covers packaged source imports that can happen before the guard loads.
 printf 'import sys\nsys.dont_write_bytecode = True\n' \
   >"$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/sitecustomize.py"
 
