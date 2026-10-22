@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from connections import account_controls, harness_models
+from connections import account_controls, account_signin, harness_models
 from connections.account_receipts import account_receipt, receipt_is_current
 from connections.vendor_accounts import get_account, set_account_state
 from test_claude_catalog_usage_ownership import (  # noqa: F401
@@ -51,12 +51,12 @@ REF = "signin-0123456789abcdef"
 @pytest.fixture(autouse=True)
 def fixed_failure_reference(monkeypatch):
     """A failed sign-in's reference is random; pin it so results compare whole."""
-    monkeypatch.setattr(account_controls, "new_reference", lambda prefix: REF)
+    monkeypatch.setattr(account_signin, "new_reference", lambda prefix: REF)
 
 
 def test_a_failed_sign_in_logs_the_reference_its_row_shows(caplog):
-    with caplog.at_level("WARNING", logger="connections.account_controls"):
-        assert account_controls._failure_reference("codex", "vendor_login_failed") == REF
+    with caplog.at_level("WARNING", logger="connections.account_signin"):
+        assert account_signin.failure_reference("codex", "vendor_login_failed") == REF
     assert f"codex sign-in failed reference={REF} cause=vendor_login_failed" in caplog.text
 
 

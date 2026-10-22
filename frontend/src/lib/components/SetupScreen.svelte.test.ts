@@ -193,7 +193,7 @@ describe('SetupScreen', () => {
 		await passFolder();
 		expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
 		button('Back')?.click(); await settle();
-		expect(host.querySelector('h1')?.textContent).toBe('Choose your work folder');
+		expect(host.querySelector('h1')?.textContent).toBe('Your work folder');
 	});
 
 	it('goes Back from models to subscriptions to the folder, and the folder never creates a second account', async () => {
@@ -202,14 +202,14 @@ describe('SetupScreen', () => {
 		button('Back')?.click(); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
 		button('Back')?.click(); await settle();
-		expect(host.querySelector('h1')?.textContent).toBe('Choose your work folder');
+		expect(host.querySelector('h1')?.textContent).toBe('Your work folder');
 		button('Back')?.click(); await settle();
 		// The account exists, so it reads back without an editable form whose changes would be dropped.
-		expect(host.querySelector('[data-testid="setup-account-made"]')?.textContent).toContain('is created');
+		expect(host.querySelector('[data-testid="setup-account-made"]')?.textContent).toContain('Your account is set up');
 		expect(host.querySelector('#setup-password')).toBeNull();
 		expect(button('Continue')?.disabled).toBe(false);
 		button('Continue')?.click(); await settle();
-		expect(host.querySelector('h1')?.textContent).toBe('Choose your work folder');
+		expect(host.querySelector('h1')?.textContent).toBe('Your work folder');
 		button('Continue')?.click(); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
 		expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(1);

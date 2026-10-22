@@ -52,6 +52,8 @@
 				<Button variant={chosen(choice.picks) ? 'primary' : 'secondary'} description={chosen(choice.picks) ? 'Your earlier answer' : undefined} onclick={() => onAnswer(choice.picks)}>{choice.label}</Button>
 			{/each}
 		</div>
+		<!-- Answering installs software on this computer, so the screen says so before the click. -->
+		<p class="note">{question === 'both' ? 'CORSIA installs Claude Code from Anthropic or Codex from OpenAI for each one you pay for.' : `If yes, CORSIA installs ${question === 'chatgpt' ? 'Codex from OpenAI' : 'Claude Code from Anthropic'}.`}</p>
 	</div>
 {/if}
 
@@ -59,6 +61,7 @@
 	.question { display: flex; flex-direction: column; gap: var(--space-3); }
 	.ask { color: var(--text-primary); font-size: var(--text-body); font-weight: var(--fw-medium); }
 	.choices { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+	.note { margin: 0; font-size: var(--text-footnote); color: var(--text-secondary); line-height: var(--lh-normal); }
 	.ready { margin: 0 0 var(--space-4); display: flex; align-items: center; gap: var(--space-2); color: var(--text-primary); font-size: var(--text-body); }
 	.ready svg { flex: none; color: var(--accent-text); }
 </style>

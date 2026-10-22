@@ -80,12 +80,16 @@ export function createSetupConnect(deps: ConnectDeps) {
 		const current = deps.token();
 		if (!current) return;
 		setConnect(source.source, { phase: 'signing-in', installed });
+		// stop() clears the row when the tool is unpicked, even before the sign-in has an account.
+		const stopped = () => flow[source.source]?.phase !== 'signing-in';
 		let result: Signin | null = null;
 		try {
 			const lookup = await fetchCorsiaAgent(current);
 			if (lookup.kind !== 'target') { signinFailed(source.source, null, installed, 'agent_unavailable'); return; }
 			const accountId = await accountToSignIn(current, source.source, source.name);
+			if (stopped()) return;
 			result = await startSignin(current, accountId, lookup.target.thread_id);
+			if (stopped()) { await cancelSignin(current, accountId).catch(() => undefined); return; }
 			if (['failed', 'unavailable', 'refused'].includes(result.status)) { signinFailed(source.source, result, installed); return; }
 			setConnect(source.source, { phase: 'signing-in', installed, accountId });
 			await tickConnect();
@@ -146,11 +150,13 @@ export function createSetupConnect(deps: ConnectDeps) {
 	async function stop(vendor: string) {
 		const entry = flow[vendor], current = deps.token();
 		if (entry?.phase === 'installing') {
+			// A sign-in queued behind this install must not start if the install finishes anyway.
+			setConnect(vendor, { ...entry, signInQueued: false });
 			const source = deps.sources().find((candidate) => candidate.source === vendor);
 			if (source) await cancelInstall(source);
-		} else if (entry?.phase === 'signing-in' && entry.accountId && current) {
-			await cancelSignin(current, entry.accountId).catch(() => undefined);
+		} else if (entry?.phase === 'signing-in') {
 			setConnect(vendor, undefined);
+			if (entry.accountId && current) await cancelSignin(current, entry.accountId).catch(() => undefined);
 		}
 	}
 	let ticking = false;

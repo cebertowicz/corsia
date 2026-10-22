@@ -25,8 +25,9 @@ def test_report_names_each_failed_row_and_its_log_lines(tmp_path):
     assert "Local model: CORSIA couldn’t set up the local model. (reference local-9f8e7d6c5b4a3f2e)" in text
     assert "CLI install for claude-code failed reference=cli-0a1b2c3d4e5f6a7b" in text
     assert "Local setup failed reference=local-9f8e7d6c5b4a3f2e" in text
-    # Lines about rows that did not fail, and unrelated lines, stay out.
+    # Lines without a failed row's reference stay out, even when they name its tool.
     assert "codex sign-in failed" not in text and "startup complete" not in text
+    assert relevant_lines(["claude-code wrote its login"], ROWS) == []
 
 
 @pytest.mark.parametrize("line", [
@@ -37,11 +38,11 @@ def test_report_names_each_failed_row_and_its_log_lines(tmp_path):
     "claude-code session cookie set",
 ])
 def test_a_line_with_a_credential_word_is_withheld_whole(line):
-    assert relevant_lines([line], ROWS[:1]) == [WITHHELD]
+    assert relevant_lines([f"{line} reference={ROWS[0]['reference']}"], ROWS[:1]) == [WITHHELD]
 
 
 def test_only_the_last_lines_are_kept_and_a_missing_log_is_said(tmp_path):
-    lines = [f"claude-code step {index}" for index in range(MAX_LINES + 10)]
+    lines = [f"step {index} reference={ROWS[0]['reference']}" for index in range(MAX_LINES + 10)]
     assert relevant_lines(lines, ROWS[:1]) == lines[-MAX_LINES:]
     assert "none found" in report_details(ROWS, tmp_path / "absent.log")
 
@@ -56,14 +57,15 @@ def test_report_route_returns_the_body_before_the_first_account(monkeypatch, tmp
     monkeypatch.setattr(accounts, "has_users", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(setup, "_trusted_json_post", lambda _request: True)
     monkeypatch.setattr(config, "LOGS_DIR", tmp_path)
-    (tmp_path / "service.log").write_text("codex sign-in failed cause=vendor_login_failed\n")
+    (tmp_path / "service.log").write_text("codex sign-in failed reference=signin-0123456789abcdef cause=vendor_login_failed\n")
     app = FastAPI()
     app.include_router(setup.router)
     client = TestClient(app)
-    response = client.post("/api/setup/report", json={"rows": [{"key": "codex", "name": "Codex", "cause": "Sign-in didn’t finish."}]})
+    row = {"key": "codex", "name": "Codex", "cause": "Sign-in didn’t finish.", "reference": "signin-0123456789abcdef"}
+    response = client.post("/api/setup/report", json={"rows": [row]})
     assert response.status_code == 200
     assert "Codex: Sign-in didn’t finish." in response.json()["text"]
-    assert "codex sign-in failed cause=vendor_login_failed" in response.json()["text"]
+    assert "codex sign-in failed reference=signin-0123456789abcdef" in response.json()["text"]
     assert client.post("/api/setup/report", json={"rows": [{"key": "shell", "name": "x"}]}).status_code == 422
     # Only a minted reference is accepted, so a one-letter "reference" cannot select log lines.
     loose = {"key": "api", "name": "API", "reference": "e"}
@@ -85,5 +87,4 @@ def test_a_reference_selects_only_its_whole_log_token():
     "claude-code signed in as person@example.test",
 ])
 def test_sign_in_codes_and_emails_are_withheld_whole(line):
-    rows = [{"key": "claude-code"}, {"key": "codex"}]
-    assert relevant_lines([line], rows) == [WITHHELD]
+    assert relevant_lines([f"{line} reference={ROWS[0]['reference']}"], ROWS[:1]) == [WITHHELD]

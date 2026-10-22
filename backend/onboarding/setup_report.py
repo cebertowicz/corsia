@@ -1,8 +1,9 @@
 """The body of a saved setup report: each failed row's cause and the service-log lines about it.
 
 The service log can hold anything a vendor tool printed, so a line is copied only when it
-names a failed row (its exact `reference=<ref>` token or its tool) and carries nothing
-credential-shaped: no credential word, sign-in code, OAuth value or email address.
+carries a failed row's reference as a whole `reference=<ref>` token, which CORSIA writes only
+into its own fixed-format failure lines. A copied line that still looks credential-shaped
+(a credential word, sign-in code, OAuth value or email address) is withheld whole.
 """
 
 from __future__ import annotations
@@ -25,12 +26,6 @@ _CREDENTIAL = re.compile(
 )
 # Only a reference CORSIA minted (see infra.failure_reference) selects lines, and only as its whole log token.
 REFERENCE = re.compile(r"^(?:cli|local|signin)-[0-9a-f]{16}$")
-# What a row's tool is called in the log, beside its reference.
-_ROW_TERMS = {
-    "claude-code": ("claude-code", "claude code"),
-    "codex": ("codex",),
-    "omlx": ("local setup", "omlx", "local model"),
-}
 
 
 def _tail(path: Path) -> list[str]:
@@ -47,13 +42,11 @@ def _tail(path: Path) -> list[str]:
 
 
 def relevant_lines(lines: Iterable[str], rows: list[dict]) -> list[str]:
-    """The last log lines naming a failed row, with credential-shaped lines withheld."""
-    terms = {term for row in rows for term in _ROW_TERMS.get(str(row.get("key")), ())}
+    """The last log lines carrying a failed row's reference, with credential-shaped lines withheld."""
     refs = {f"reference={row['reference']}" for row in rows if REFERENCE.match(str(row.get("reference") or ""))}
     picked = []
     for line in lines:
-        lowered = line.lower()
-        if not (any(term in lowered for term in terms) or refs.intersection(line.split())):
+        if not refs.intersection(line.split()):
             continue
         picked.append(WITHHELD if _CREDENTIAL.search(line) else line[:MAX_LINE_CHARS])
     return picked[-MAX_LINES:]
