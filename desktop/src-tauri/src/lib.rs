@@ -47,6 +47,7 @@ mod test_tls;
 use startup_failure::StartupFailure;
 mod trust;
 mod version_check;
+mod window_placement;
 mod update_stage;
 mod update_swap;
 
@@ -1703,6 +1704,8 @@ pub fn run() {
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
+        // Remembers the window's size and position; `window_placement` covers what it leaves to the OS.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             start_local_service,
             adopt_existing_install,
@@ -1781,6 +1784,9 @@ pub fn run() {
             app.manage(AppServiceState::default());
             app.manage(RemoteRuntime::default());
             watch_for_swapped_app(app.handle().clone());
+            if let Ok(config_dir) = app.path().app_config_dir() {
+                window_placement::place_main_window(app, &config_dir);
+            }
             #[cfg(target_os = "macos")]
             app.set_menu(lifecycle::menu(app.handle())?)?;
             // Apply traffic-light position once the main window is up.
