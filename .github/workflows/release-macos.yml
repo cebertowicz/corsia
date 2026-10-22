@@ -133,6 +133,7 @@ jobs:
           set -euo pipefail
           release_version="${RELEASE_TAG#v}"
           desktop/scripts/test-stamp-release-version.sh
+          desktop/scripts/test-stamp-bundle-version.sh
           desktop/scripts/stamp-release-version.sh "$RELEASE_TAG"
           if [ "$CHANNEL" = dev ]; then
             desktop/scripts/test-stamp-updater-endpoint.sh "$DEV_UPDATER_ENDPOINT"
@@ -149,6 +150,7 @@ jobs:
           test -d "$app"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" | grep -Fx "$macos_short_version"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist" | grep -Fx "$macos_bundle_version"
+          /usr/libexec/PlistBuddy -c 'Print :CORSIAVersion' "$app/Contents/Info.plist" | grep -Fx "$release_version"
           ditto -c -k --keepParent "$app" CORSIA.app.zip
       - name: Upload unsigned app
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
