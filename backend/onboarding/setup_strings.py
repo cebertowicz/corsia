@@ -105,8 +105,8 @@ GITHUB = {
     "title": "How should your agents post on GitHub?",
     "context": (
         "Agents use GitHub to report problems and send fixes to CORSIA, and to work on your "
-        "repositories. Reports to CORSIA are text only and go only with your OK, from whichever "
-        "you choose."
+        "repositories. GitHub allows each person one extra machine account for this. "
+        "Reports to CORSIA are text only and go only with your OK, from whichever you choose."
     ),
     "tradeoff": (
         "Their own account takes a few minutes in a browser you can watch: I fill in the sign-up with "
@@ -129,7 +129,7 @@ GITHUB_NO_ACCOUNT = {
     "title": "Make an account for your agents on GitHub?",
     "context": (
         "Agents use GitHub to report problems and send fixes to CORSIA, and to work on your "
-        "repositories."
+        "repositories. GitHub allows each person one extra machine account for this."
     ),
     "tradeoff": (
         "It takes a few minutes in a browser you can watch: I fill in the sign-up with "
