@@ -13,11 +13,6 @@ from infra.queries import insert_message
 from tools.tool_display import SettledResult, project_tool_display
 from tools.tool_surface import dispatch_metadata
 
-UNDISPATCHED_TOOL_REASON = "undispatched_tool"
-USER_INTERRUPTION_REASON = "user_interruption"
-PROVIDER_MISSING_RESULT_REASON = "provider_missing_result"
-TURN_ENDED_WITHOUT_RESULT_REASON = "turn_ended_without_result"
-
 
 def synthetic_result_identity(
     *, tool_use_id: str, reason: str | None,

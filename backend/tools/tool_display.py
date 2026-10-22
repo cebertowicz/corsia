@@ -14,6 +14,12 @@ from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import urlsplit
 
+from infra.delivery_states import (
+    PROVIDER_MISSING_RESULT_REASON,
+    TURN_ENDED_WITHOUT_RESULT_REASON,
+    UNDISPATCHED_TOOL_REASON,
+    USER_INTERRUPTION_REASON,
+)
 from infra.tool_result_errors import is_error_result
 from tools.catalog import normalize_tool_name
 from tools.tool_activity import resolve_display_call, tool_activity
@@ -82,13 +88,6 @@ def _outcome(settled: SettledResult) -> ToolOutcome | None:
     happened through their synthetic reason: a stub standing in for a result
     nobody saw is ``unknown``, never ``failed``, since the call may have run.
     """
-    from core.tool_result_delivery import (
-        PROVIDER_MISSING_RESULT_REASON,
-        TURN_ENDED_WITHOUT_RESULT_REASON,
-        UNDISPATCHED_TOOL_REASON,
-        USER_INTERRUPTION_REASON,
-    )
-
     if settled.synthetic_reason in (
         USER_INTERRUPTION_REASON,
         PROVIDER_MISSING_RESULT_REASON,

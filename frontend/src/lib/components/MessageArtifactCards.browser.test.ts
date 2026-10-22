@@ -68,6 +68,6 @@ describe('MessageArtifactCards browser chip', () => {
 
 		render({ cards: [file], browser: null });
 		expect(host.querySelectorAll('.tile')).toHaveLength(1);
-		expect(host.querySelector('ul.chips')?.getAttribute('aria-label')).toBe('Artifacts');
+		expect(host.querySelector('ul.chips')?.getAttribute('aria-label')).toBe('Files');
 	});
 });

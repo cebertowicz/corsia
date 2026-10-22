@@ -37,7 +37,7 @@
 	const stripLabel = $derived(
 		browserChip
 			? (files.length > 0 || more > 0 ? 'Files and shared browser' : 'Shared browser')
-			: asks.length > 0 ? 'Files' : 'Artifacts',
+			: 'Files',
 	);
 
 	/** The least of the next chip that must show past the last whole chip for the scroll cue to read. */
@@ -101,7 +101,7 @@
 {#if shown.length > 0 || more > 0 || browserChip}
 	<div class="cards">
 		{#if asks.length > 0}
-			<ul class="asks" aria-label="Artifacts">
+			<ul class="asks" aria-label="Files to review">
 				{#each asks as card (card.hold_id ?? card.artifact_id)}
 					<li><AttachmentRow {card} {threadId} /></li>
 				{/each}
