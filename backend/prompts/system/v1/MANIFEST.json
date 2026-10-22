@@ -172,10 +172,10 @@
       "sha256": "3f9c8e7ac9201a0cd75729fdd130f42c4e2f46039cc144dd1dbbbca0176e6abb"
     },
     {
-      "bytes": 4757,
+      "bytes": 4835,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/about-you-doc.md",
-      "sha256": "4e28819d5e30ce3d7b00a5b070989894ed142159a9e26b390e00a011bfbc178e"
+      "sha256": "206adbd1f5ea2f454149550614792e44054645992339e2543dba4a34885beb97"
     },
     {
       "bytes": 7475,
@@ -244,10 +244,10 @@
       "sha256": "179e93d9f73bbf5f841a5fbea5a2e91c7aab853e88d2aef661a2d9cf7058f673"
     },
     {
-      "bytes": 6311,
+      "bytes": 6569,
       "kind": "skill",
       "path": "skills/connect-tools/SKILL.md",
-      "sha256": "0d4c85d0311adc757f0a8c5c652f2b3e4cd845aa9ecb939b62a2425ae5c71f6f"
+      "sha256": "6cecbdf08dba3f7fa29740f884f6d3ec1ce004ae566eb27e33e8a12f75bbe154"
     },
     {
       "bytes": 4409,
@@ -268,10 +268,10 @@
       "sha256": "09150443b712dcccd43cb76a8786629d9f80f36d0d14b48d773fb86834bc4d46"
     },
     {
-      "bytes": 2976,
+      "bytes": 3266,
       "kind": "skill",
       "path": "skills/decision-brief/SKILL.md",
-      "sha256": "437ebbc92573a717e40c3d2aeaf4f1f5e2f4544a4ed1ee3453b5d3284322f304"
+      "sha256": "22965355e58b4c34ca81d1234874563b6a5609d18163ba501bf7112e47f61fb1"
     },
     {
       "bytes": 1529,
@@ -298,16 +298,16 @@
       "sha256": "39d0a439a185d99fea0382d63737b64fdc849ba726a80ac643dbcd01053b7371"
     },
     {
-      "bytes": 6548,
+      "bytes": 6881,
       "kind": "skill",
       "path": "skills/github/references/agent-account.md",
-      "sha256": "eb4d36a083dfcd4a8c10d9f54d1e96f2216ca51d43e25229a7220a183cede3b3"
+      "sha256": "dfb7e2a0b7160bace5485ed7898463385cda62bd58d094f1b08922703b0caf8a"
     },
     {
-      "bytes": 5173,
+      "bytes": 5347,
       "kind": "skill",
       "path": "skills/google-setup/SKILL.md",
-      "sha256": "2161c85e00f9d2bc4dd732323a166f548e797cb50d252ffc1e5c718061302f17"
+      "sha256": "8c90f92817d7b4a8ebdbd81c2ba2997720dda133fcf0ebc064a60887cfd7d252"
     },
     {
       "bytes": 9080,
@@ -316,10 +316,10 @@
       "sha256": "b6e513e6b01040266b7eaa974c751e819f5fb5da7e9c966951e2c35c61d0df9a"
     },
     {
-      "bytes": 5639,
+      "bytes": 5874,
       "kind": "skill",
       "path": "skills/microsoft-setup/SKILL.md",
-      "sha256": "c7238069a8c2505cefadd5a8da0d1c366a94e9e2fa226998f7e8ad3679d1c036"
+      "sha256": "d88b7c0d051b1b75a197a2fb22ef47afc56304f5e37fc1df495228822a50fcdd"
     },
     {
       "bytes": 2063,
@@ -358,10 +358,10 @@
       "sha256": "9162e61c3918bed45f65cec1ee1cd3fe622c740d86f051745977fe6fce7b1783"
     },
     {
-      "bytes": 10195,
+      "bytes": 10411,
       "kind": "skill",
       "path": "skills/time-to-agent/SKILL.md",
-      "sha256": "20869524e45c70a48cd04340e879af5f28bd5b989ed5e5f37ca99c5cf5f594ac"
+      "sha256": "7c6dde6ae6c70cfcf18255fbf4df5b5eb9b519f7e1f688b680c74c7f3c6dd740"
     },
     {
       "bytes": 3928,

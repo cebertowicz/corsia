@@ -30,9 +30,9 @@ Only when no agents' account exists and the person chose to create one, never on
 Only when the person chose to post as themselves and no agents' account exists (`not_installed`, the table's last row): shells then use the person's own `gh` setup, so this is not a fallback from an agents' account. If one exists, it stays in charge; removing it is the person's choice. Never `connect` here: CORSIA's device-code sign-in is for the agents' account and refuses the person's own login on purpose. Check with `gh auth status`.
 
 - **Signed in:** post `Your agents will post as [login].` Done.
-- **`gh` missing:** install it: post `I'll install the GitHub CLI. You'll see one request to approve.`, then `request_host_access` for exactly `brew install gh` and run it once approved.
+- **`gh` missing:** call `github_agent_account` with `action: "install"`, which puts CORSIA's pinned `gh` in every agent shell, then check `gh auth status` again. If it returns `failed`, call it once more. If that fails too, tell the person in plain words what failed (its `reason`), report it as a gap in CORSIA the way you report any problem with CORSIA, then stop. Never install it with Homebrew.
 - **Signed out:** post `I'll sign the GitHub CLI in to your account. You'll see one request to approve, then a GitHub page where you approve the sign-in.` Then `request_host_access` for exactly `gh auth login --hostname github.com --web --git-protocol https </dev/null` and, once approved, run it in the background: it prints `First copy your one-time code: XXXX-XXXX` and the link `https://github.com/login/device`, then waits until the person approves. Post `Open [github.com/login/device](https://github.com/login/device), enter [code], and approve. I'll continue when it's done.` Then check `gh auth status` every few seconds until it succeeds (stop after about 5 minutes and ask them to tell you when it's done). Never type the code into the page yourself.
-- **A request refused:** give the person that one command to run in their own Terminal and wait for their word.
+- **A request refused:** give the person that one command to run in their own Terminal, with `gh` written as the full path `command -v gh` prints in your shell (CORSIA's copy is on agent shells' PATH only), and wait for their word.
 
 Done when `gh auth status` succeeds.
 

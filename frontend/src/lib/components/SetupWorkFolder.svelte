@@ -19,8 +19,10 @@
 	}
 </script>
 <FolderRow {folder} {notice} {changing} onChange={changeFolder} />
+<p class="why">Your projects and files live here.</p>
 {#if error}<p class="error-text" role="alert">{error}</p>{/if}
 
 <style>
 	.error-text { margin: var(--space-2) 0 0; }
+	.why { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-footnote); }
 </style>
