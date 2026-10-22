@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from connections.account_profiles import profile_for
 
 if TYPE_CHECKING:
-    from connections.account_controls import SignIn
+    from connections.account_signin import SignIn
 
 # Only this much of a sign-in's output is ever held, to find a prompt split across reads.
 _WINDOW = 4096

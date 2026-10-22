@@ -1507,10 +1507,14 @@ fn get_service_log_path(
     Ok(service_log_path(&app_dir)?.display().to_string())
 }
 
+/// The most a setup report's details may hold; the service already bounds them far below this.
+const SETUP_REPORT_DETAILS_CHARS: usize = 64 * 1024;
+
 #[tauri::command]
 fn save_setup_report(
     app: tauri::AppHandle,
     service: tauri::State<'_, AppServiceState>,
+    details: Option<String>,
 ) -> Result<String, String> {
     let app_dir = service
         .app_dir
@@ -1524,12 +1528,14 @@ fn save_setup_report(
         .as_secs();
     let report = app_dir.join(format!("corsia-setup-report-{stamp}.txt"));
     let log_path = service_log_path(&app_dir)?;
-    // This is deliberately an allowlisted report: setup may have handled
-    // credentials, so the service log is referenced but never copied.
+    // Setup may have handled credentials, so the log is never copied whole: the details
+    // are the service's own allowlisted lines about the failed rows (POST /api/setup/report).
+    let details = details.unwrap_or_default();
+    let details: String = details.chars().take(SETUP_REPORT_DETAILS_CHARS).collect();
     std::fs::write(
         &report,
         format!(
-            "CORSIA setup report\n\nGenerated: {stamp}\nApp version: {}\nSetup did not complete.\n\nService log (not copied here): {}\n",
+            "CORSIA setup report\n\nGenerated: {stamp}\nApp version: {}\nSetup did not complete.\n\n{details}\nFull service log: {}\n",
             app.package_info().version,
             log_path.display(),
         ),

@@ -242,6 +242,9 @@ async def _complete_job(vendor: str, job: InstallJob) -> None:
         job.reason = INSTALLER_STOPPED
     job.state = "cancelled" if job.cancelled else "failed" if job.reason else "done"
     job.settled.set()
+    if job.state == "failed":
+        # The reference ties a setup report's row to this line.
+        log.warning("CLI install for %s failed reference=%s cause=%s", vendor, job.ref, install_cause(job.reason))
     if job.state == "done":
         try:
             job.path_shadowed_by = await asyncio.to_thread(path_shadowed_binary, vendor)
