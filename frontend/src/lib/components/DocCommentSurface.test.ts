@@ -96,10 +96,10 @@ describe('DocCommentSurface suggestions', () => {
 		const send = vi.fn(async () => {});
 		feedback.send = send;
 		feedback.pendingCount = 2;
-		feedback.feedback = { open_count: 2, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] };
+		feedback.feedback = { open_count: 2, owner_label: 'Style', undelivered_batches: [] };
 		render({ state: { kind: 'list' }, comments: [suggestion], feedback });
 		const footer = () => document.body.querySelector<HTMLElement>('[data-doc-comments-drawer] [data-drawer-unsent]');
-		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('2 messages not sent yet · they go to Style when you leave.');
+		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('2 messages not sent yet · they go to Style in a few seconds.');
 		const owner = footer()!.querySelector<HTMLElement>('.drawer-footer-owner')!;
 		expect(owner.textContent).toBe('Style');
 		expect(owner.title).toBe('Style');
@@ -110,11 +110,10 @@ describe('DocCommentSurface suggestions', () => {
 		// The measured footer wrapper is last, after the scrolling list, so the list scrolls and either footer stays pinned.
 		expect(document.body.querySelector('[data-doc-comments-drawer]')!.lastElementChild).toBe(footer()!.parentElement);
 
-		feedback.countdownNow = Date.parse('2026-10-11T22:00:00Z');
-		feedback.feedback = { open_count: 1, owner_label: null, grace_closes_at: '2026-10-11T22:04:00Z', undelivered_batches: [] };
+		feedback.feedback = { open_count: 1, owner_label: null, undelivered_batches: [] };
 		feedback.pendingCount = 1;
 		feedback.sending = true; flushSync();
-		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('1 message not sent yet · sending to the owner in 4 min');
+		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('1 message not sent yet · it goes to the owner in a few seconds.');
 		expect(footer()!.querySelector('button')!.disabled).toBe(true);
 
 		// Sending from the keyboard: the footer leaves with focus in it, which lands on the drawer's heading, not the page.

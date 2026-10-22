@@ -71,8 +71,7 @@ def _fan_out(db):
 
 async def _sweep(db):
     await runner.sweep(
-        NOW, db=db, sources=[HarvestSource()],
-        is_idle=lambda _thread: True, deliver=AsyncMock(return_value=True),
+        NOW, db=db, sources=[HarvestSource()], deliver=AsyncMock(return_value=True),
     )
     await asyncio.sleep(0)
 

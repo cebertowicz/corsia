@@ -5,6 +5,7 @@ import { expect, type APIRequestContext, type Page, type TestInfo } from '@playw
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { syntheticPng } from '../support/syntheticImages';
 import { drag, sendFromDrawerByKeyboard, settled, shoot } from '../support/imageRegionComments';
+import { leaveUserCommentsUnsent } from '../support/docFeedbackFooter';
 import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedFrames';
 
 // Comments on parts of an image inside a document (DCOL-FR13.3, 13.5, 13.6, 13.12): the viewer over the document,
@@ -252,8 +253,12 @@ function expectGlide(seen: Sample[], what: string) {
 	const total = Math.abs(tops[tops.length - 1] - tops[0]);
 	expect(total, `${what}: the drawer's height changed`).toBeGreaterThan(8);
 	expect(new Set(tops).size, `${what}: in-between places ${JSON.stringify(tops)}`).toBeGreaterThanOrEqual(4);
-	const jump = Math.max(...tops.slice(1).map((top, index) => Math.abs(top - tops[index])));
-	expect(jump, `${what}: largest move in one frame of ${total}`).toBeLessThanOrEqual(total / 2);
+	// A frame the browser dropped under load (several times the usual gap) covers the motion of the frames it skipped, so
+	// only frames at the usual pace count as one frame's move.
+	const gaps = seen.slice(1).map(([at], index) => at - seen[index][0]);
+	const usual = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
+	const moves = tops.slice(1).map((top, index) => (gaps[index] > usual * 3 ? 0 : Math.abs(top - tops[index])));
+	expect(Math.max(...moves), `${what}: largest move in one frame of ${total}`).toBeLessThanOrEqual(total / 2);
 }
 const mockOnly = (testInfo: TestInfo) => {
 	test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
@@ -276,6 +281,9 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await shoot(page, testInfo, 'doc-1440-02-viewer-open', true);
 		await commentOnRegion(page, 'The header crowds the logo');
 		await expect(tag(page, 1)).toBeVisible();
+		// A person's comment is delivered as it is made: nothing waits to be sent until a re-opened comment does.
+		await expect(bar(page).locator('[data-image-comments-pill]')).not.toHaveAttribute('aria-label', /not sent yet/);
+		await leaveUserCommentsUnsent(request, seeded.artifactId);
 		// RSR-10: the viewer over a document has no Send; its pill marks the document's unsent message.
 		await expect(viewerSend(page)).toHaveCount(0);
 		await expect(bar(page).locator('[data-image-comments-pill]')).toHaveAttribute('aria-label', unsentName(1));
@@ -339,6 +347,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await shoot(page, testInfo, 'doc-393-02-viewer-open', true);
 
 		await commentOnRegion(page, 'Tap target too small');
+		await leaveUserCommentsUnsent(request, seeded.artifactId);
 		// RSR-10: no Send in the viewer while a message is pending; the pill marks it.
 		await expect(viewerSend(page)).toHaveCount(0);
 		await expect(bar(page).locator('[data-image-comments-pill]')).toHaveAttribute('aria-label', unsentName(1));
@@ -399,6 +408,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(overlay(page)).toHaveCount(0);
 		// A marker beside each image, and the document's row counting all six.
 		await expect(page.locator('.cm-comment-marker')).toHaveCount(2);
+		await leaveUserCommentsUnsent(request, seeded.artifactId);
 		await expect(docComments(page)).toHaveAttribute('aria-label', unsentName(6));
 		await expectMarkersBesideImages(page, testInfo, `doc-${width}-many-02-document-two-markers`);
 
@@ -416,36 +426,34 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await cardOpensViewerAndReturns(page, testInfo, 'Save should be primary', width > 768 ? 'escape' : 'back', `doc-${width}-many-05-scrolled-card`);
 	});
 
-	for (const width of [1440, 393]) test(`the document drawer's footer shows the sending countdown, and a batch not delivered with Retry (${width})`, async ({ page, request }, testInfo) => {
+	for (const width of [1440, 393]) test(`the document drawer's footer says when unsent messages go, and a batch not delivered with Retry (${width})`, async ({ page, request }, testInfo) => {
 		mockOnly(testInfo);
 		test.setTimeout(180_000);
 		await page.setViewportSize({ width, height: width > 768 ? 900 : 852 });
 		const seeded = await seedDocument(page, request, `doc-image-regions-states-${width}`, null);
-		// The server sets these on its own clock or on a failed delivery; the frames rewrite its answers to show them.
-		const inject: { grace?: string; undelivered?: unknown[] } = {};
+		// A failed delivery sets this; the frames rewrite the server's answer to show it.
+		const inject: { undelivered?: unknown[] } = {};
 		await page.route('**/api/artifacts/*/comments*', async (route) => {
 			if (route.request().method() !== 'GET') return route.fallback();
 			const response = await route.fetch();
 			const json = await response.json();
-			if (json.feedback && inject.grace) json.feedback.grace_closes_at = inject.grace;
 			if (json.feedback && inject.undelivered) json.feedback.undelivered_batches = inject.undelivered;
 			await route.fulfill({ response, json });
 		});
 		await openDocument(page, seeded, width);
-		inject.grace = new Date(Date.now() + 3 * 60_000).toISOString();
 		await openImage(page);
 		await commentOnRegion(page, 'The header crowds the logo');
+		await leaveUserCommentsUnsent(request, seeded.artifactId);
 		await page.keyboard.press('Escape');
-		// RSR-10: the viewer shows no countdown and no Send; the document's drawer footer does.
+		// RSR-10: the viewer shows no Send; the document's drawer footer does.
 		await expect(viewerSend(page)).toHaveCount(0);
 		await expect(bar(page).locator('.sending-now')).toHaveCount(0);
 		await expectBarFits(page);
 		await backToDocumentDrawer(page);
-		await expect(footer(page)).toContainText(/1 message not sent yet · sending to .+ in \d+ min/);
+		await expect(footer(page)).toContainText(/1 message not sent yet · it goes to .+ in a few seconds\./);
 		await expect(footerSend(page)).toBeInViewport({ ratio: 1 });
-		await shoot(page, testInfo, `doc-${width}-09-drawer-sending-grace`, true);
+		await shoot(page, testInfo, `doc-${width}-09-drawer-unsent`, true);
 
-		inject.grace = undefined;
 		inject.undelivered = [{ id: 'batch-1', item_count: 1, undelivered_reason: 'owner_unavailable', attempts: 1 }];
 		await page.route('**/api/doc-feedback/send', (route) => route.fulfill({ json: { woken: [], undelivered_batches: inject.undelivered } }));
 		await footerSend(page).click();
@@ -481,6 +489,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 				await openDocument(page, seeded, width);
 				await openImage(page);
 				await commentOnRegion(page, 'The header crowds the logo');
+				await leaveUserCommentsUnsent(request, seeded.artifactId);
 				await putSheetAway(page);
 				if (width > 768) await page.keyboard.press('Escape');
 				// RSR-10: nothing to send from the viewer; the document drawer's footer is where it goes.

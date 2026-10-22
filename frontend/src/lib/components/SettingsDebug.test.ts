@@ -8,21 +8,23 @@ import { coreSettings } from '$lib/stores/settings';
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 
-function toggleInCard(title: string): HTMLInputElement {
-	const card = [...host.querySelectorAll('.settings-card')].find(
-		(el) => el.querySelector('h3')?.textContent === title,
+function toggleInGroup(title: string): HTMLButtonElement {
+	const group = [...host.querySelectorAll('.settings-group')].find(
+		(el) => el.querySelector('h3')?.textContent?.trim() === title,
 	);
-	const input = card?.querySelector('input[type="checkbox"]');
-	if (!(input instanceof HTMLInputElement)) throw new Error(`${title} toggle not rendered`);
-	return input;
+	const toggle = group?.querySelector('button[aria-pressed]');
+	if (!(toggle instanceof HTMLButtonElement)) throw new Error(`${title} toggle not rendered`);
+	return toggle;
 }
 
-function profilerToggle(): HTMLInputElement {
-	return toggleInCard('CPU profiler');
+const isOn = (toggle: HTMLButtonElement) => toggle.getAttribute('aria-pressed') === 'true';
+
+function profilerToggle(): HTMLButtonElement {
+	return toggleInGroup('CPU profiler');
 }
 
-function overlayToggle(): HTMLInputElement {
-	return toggleInCard('On-screen overlay');
+function overlayToggle(): HTMLButtonElement {
+	return toggleInGroup('On-screen overlay');
 }
 
 beforeEach(() => {
@@ -45,11 +47,11 @@ describe('SettingsDebug overlay toggle', () => {
 		coreSettings.set({ features: {} } as never);
 		component = mount(SettingsDebug, { target: host });
 		flushSync();
-		expect(overlayToggle().checked).toBe(false);
+		expect(isOn(overlayToggle())).toBe(false);
 
 		coreSettings.set({ features: { debug_version_overlay: true } } as never);
 		await tick();
-		expect(overlayToggle().checked).toBe(true);
+		expect(isOn(overlayToggle())).toBe(true);
 	});
 });
 
@@ -61,11 +63,11 @@ describe('SettingsDebug CPU profiler toggle', () => {
 		expect(host.textContent).toContain(
 			'Samples CPU use ten times a second and logs a summary each minute. Leave off unless diagnosing slowness.',
 		);
-		expect(profilerToggle().checked).toBe(false);
+		expect(isOn(profilerToggle())).toBe(false);
 
 		coreSettings.set({ features: { cpu_profiler: true } } as never);
 		await tick();
-		expect(profilerToggle().checked).toBe(true);
+		expect(isOn(profilerToggle())).toBe(true);
 	});
 
 	it('saves cpu_profiler through updateSettings when toggled', async () => {
@@ -78,9 +80,7 @@ describe('SettingsDebug CPU profiler toggle', () => {
 		component = mount(SettingsDebug, { target: host });
 		flushSync();
 
-		const toggle = profilerToggle();
-		toggle.checked = true;
-		toggle.dispatchEvent(new Event('change', { bubbles: true }));
+		profilerToggle().click();
 		await vi.waitFor(() => {
 			const patch = fetchMock.mock.calls.find(
 				([, init]) => (init as RequestInit | undefined)?.method === 'PATCH',

@@ -19,6 +19,8 @@ from subagents.cc_context_reconstruction import (
     cc_snapshot_history,
     prepare_cc_transcript_from_corsia,
 )
+from subagents.cc_confinement import launch_confinement, launch_tools
+from subagents.cc_invocation import LaunchConfinement
 from subagents.cc_destination_consume import build_cc_user_frame as build_cc_user_frame
 from subagents.cc_handle import live_handle_fingerprint, validate_prepared_live_handle
 from subagents.cc_replay_authority import require_cc_replay_authority
@@ -46,6 +48,7 @@ class _ColdMaterial:
     checkpoint_text: str | None
     tool_registry: object
     tool_definitions: tuple | list
+    confinement: LaunchConfinement
 
 
 def prepared_destination_from_context(
@@ -92,13 +95,10 @@ def _fit_sections(*, seed, transcript, frame, tool_definitions, checkpoint_text,
     return sections, fit, input_tokens
 
 
-def _provider_resume_tools(working_dir: str, live: _Live | None):
+def _provider_resume_tools(working_dir: str, live: _Live | None, confinement: LaunchConfinement):
     if live is not None and live.tool_registry is not None:
         return live.tool_registry, tuple(live.tool_definitions or ())
-    from subagents.harness_tool_bridge import build_tool_registry, dynamic_tool_definitions
-
-    registry = build_tool_registry(working_dir)
-    return registry, dynamic_tool_definitions(registry)
+    return launch_tools(working_dir, confinement.confined)
 
 
 def _require_session_in_root(live, provider_session_id: str, claude_dir: str) -> None:
@@ -146,10 +146,9 @@ def _provider_resume_destination(
     if not provider_session_id:
         raise CCPreparedDestinationStale("Claude Code provider session is not registered")
     _require_session_in_root(live, provider_session_id, claude_dir)
-    working_dir = (getattr(live.session, "working_dir", None)
-                   if live is not None else None) or registered_cwd_or_default(
-        session_id, db, default_working_dir
-    )
+    confinement = launch_confinement(session_id, live, db)
+    working_dir = ((getattr(live.session, "working_dir", None) if live is not None else None)
+                   or registered_cwd_or_default(session_id, db, default_working_dir, confinement))
     base_seed = _build_seed(working_dir) if is_subagent else _build_main_seed(working_dir)
     seed = build_cc_context_reconstruction(
         thread_id=session_id,
@@ -176,7 +175,7 @@ def _provider_resume_destination(
         seed=None, transcript=None, frame=frame,
         tool_definitions=(), checkpoint_text=None,
     )
-    registry, tool_definitions = _provider_resume_tools(working_dir, live)
+    registry, tool_definitions = _provider_resume_tools(working_dir, live, confinement)
     return CCPreparedDestination(
         thread_id=session_id, mode="provider_resume",
         target_catalog_id=target.catalog_id, current_user_text=current_user_text,
@@ -187,6 +186,7 @@ def _provider_resume_destination(
         tool_registry=registry, tool_definitions=tool_definitions,
         live_handle_fingerprint=fingerprint, input_tokens=input_tokens,
         source_tokens=0, source_section_tokens=sections, fit_section_tokens=fit,
+        confinement=confinement,
     )
 
 
@@ -200,15 +200,14 @@ def _cold_material(
     db,
 ) -> _ColdMaterial:
     from core.context_replay import checkpoint_prompt
-    from subagents.harness_tool_bridge import build_tool_registry, dynamic_tool_definitions
 
+    confinement = launch_confinement(session_id, None, db)
     working_dir = registered_cwd_or_default(
-        session_id, db, _main_working_dir(project_id, db)
+        session_id, db, _main_working_dir(project_id, db), confinement
     )
     prior_cc_session_id = _artifact_cc_session_id(session_id, db)
     cc_session_id = str(uuid.uuid4())
-    tool_registry = build_tool_registry(working_dir)
-    tool_definitions = dynamic_tool_definitions(tool_registry)
+    tool_registry, tool_definitions = launch_tools(working_dir, confinement.confined)
     allowed_tools = frozenset(
         definition["function"]["name"] for definition in tool_definitions
     )
@@ -249,6 +248,7 @@ def _cold_material(
         checkpoint_text=checkpoint_text,
         tool_registry=tool_registry,
         tool_definitions=tool_definitions,
+        confinement=confinement,
     )
 
 
@@ -314,6 +314,7 @@ def _cold_destination(
         live_handle_fingerprint=None, input_tokens=input_tokens,
         source_tokens=sections["seed"] + sections["tools"],
         source_section_tokens=sections, fit_section_tokens=fit,
+        confinement=material.confinement,
     )
 
 

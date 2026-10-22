@@ -8,20 +8,11 @@ import {
 	_resetLiveStepForTests,
 	advanceLiveLine,
 	carriedByParent,
-	liveStepLabel,
 	rolledLive,
 } from './planLiveStep';
 
 const concrete = { threadId: 't1', phrase: 'Reading plan', between: false, unknown: false, startedAt: 100 };
 const unknown = { threadId: 't1', phrase: UNKNOWN_STEP, between: false, unknown: true, startedAt: 100 };
-
-describe('liveStepLabel', () => {
-	it('puts elapsed time first without repeating an unknown step', () => {
-		expect(liveStepLabel(concrete, 60_100)).toBe('Working 1 min · Reading plan');
-		expect(liveStepLabel(unknown, 60_100)).toBe('Working 1 min');
-		expect(liveStepLabel({ ...concrete, startedAt: null }, 60_100)).toBe('Reading plan');
-	});
-});
 
 describe('advanceLiveLine', () => {
 	it('drops a thread phrase when its running turn ends', () => {

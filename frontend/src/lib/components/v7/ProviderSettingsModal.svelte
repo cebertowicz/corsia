@@ -7,7 +7,6 @@
 	} from '$lib/stores/providers';
 	import { removeNetworkServer, testNetworkServer } from '$lib/stores/networkServers';
 	import { hostGroups, loadHostGroups, type HostProvider } from '$lib/stores/providersV7';
-	import { requestSettingsSection } from '$lib/stores/settingsNavigation';
 	import { Button, Field, Message, Modal } from '$lib/components/ui';
 	import ConfirmDialog from '../ConfirmDialog.svelte';
 	import CostPanel from './CostPanel.svelte';
@@ -80,11 +79,6 @@
 	});
 
 	function clearMessages() { actionError = ''; actionMessage = ''; }
-
-	function openAccountOrder() {
-		onClose();
-		requestSettingsSection('providers', 'workspace-provider-policy');
-	}
 
 	async function handleTest() {
 		clearMessages(); busy = true;
@@ -237,7 +231,6 @@
 
 	{#if activeTab === 'accounts' && provider.type === 'harness'}
 		<AccountsBlock {provider} />
-		<p class="policy-pointer">Rollover and account order are set in <button class="policy-link" onclick={openAccountOrder}>Accounts and rollover</button>.</p>
 	{:else if activeTab === 'overview'}
 		<ProviderStatusCard {provider} />
 
@@ -307,20 +300,6 @@
 		align-items: center;
 	}
 
-	.policy-pointer {
-		margin: 12px 0 0;
-		font-size: var(--text-footnote);
-		color: var(--text-secondary);
-	}
-	.policy-link {
-		padding: 0;
-		border: 0;
-		background: none;
-		color: inherit;
-		font: inherit;
-		text-decoration: underline;
-		cursor: pointer;
-	}
 	.hint {
 		font-size: var(--text-subhead); color: var(--text-tertiary);
 		line-height: 1.6;

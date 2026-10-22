@@ -52,8 +52,10 @@ def chat_state(
     return _CHAT_WORD.get(operator_node_state.leading(counts), "idle")
 
 
-def _still_word(counts: dict[str, int], stuck: dict) -> str:
-    return "paused" if stuck["paused_by_you"] == not_moving.still_count(counts) else "idle"
+def _still_word(counts: dict[str, int], stuck: dict, wait: dict | None = None) -> str:
+    if stuck["paused_by_you"] == not_moving.still_count(counts):
+        return "paused"
+    return "waiting" if wait is not None else "idle"
 
 
 def _thread_items(rows, kind: str) -> dict[str, list[dict]]:
@@ -160,6 +162,10 @@ def _plan_word(plan_row: dict, plan: dict | None, *, owed: bool) -> tuple[str, s
     state = chat_state(
         plan["plan"], plan["progress"]["distribution"], owed=owed, stuck=display.get("not_moving"),
     )
+    if state == "idle" and display.get("not_moving") is not None:
+        state = _still_word(
+            plan["progress"]["distribution"], display["not_moving"], display.get("wait"),
+        )
     return state, display["label_key"]
 
 
@@ -243,6 +249,10 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
         states[plan_row["owner_id"]] = {
             "state": state,
             "label_key": label_key,
+            **{
+                key: plan["display"][key] for key in ("wait", "set_aside_until")
+                if plan and plan["display"].get(key)
+            },
             "paused": plan_row["state"] == "paused",
             "attention_items": attention_items,
             "settled": bool(

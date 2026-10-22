@@ -77,5 +77,10 @@
 {#if error}<div class="error">{error}</div>{/if}
 
 <style>
-	.error { color: var(--red); margin: var(--space-2) var(--space-3); font-size: var(--text-footnote); }
+	.error {
+		margin-left: calc(var(--space-2) + var(--project-mark-size) + var(--space-3));
+		margin-right: var(--space-2);
+		padding: var(--space-1) 0;
+		color: var(--red-text); font-size: var(--text-caption);
+	}
 </style>

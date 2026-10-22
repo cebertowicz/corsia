@@ -80,31 +80,3 @@ def settle_existing(
         event = source.settle(trigger, trigger.state, trigger.reason, db=connection)
     _emit_source_event(event, db)
     return trigger
-
-
-def defer_with_source(
-    trigger: triggers.Trigger,
-    reason: str,
-    next_attempt_at: str,
-    source: SettlementSource,
-    *,
-    db,
-    now: str,
-    count_deferral: bool = True,
-) -> bool:
-    """Commit one bounded deferral and its source effects together."""
-
-    with write_transaction(db, scope="continuation_settlement") as connection:
-        changed = triggers.defer(
-            trigger.id,
-            reason=reason,
-            next_attempt_at=next_attempt_at,
-            db=connection,
-            now=now,
-            count_deferral=count_deferral,
-        )
-        if not changed:
-            return False
-        event = source.settle(trigger, "deferred", reason, db=connection)
-    _emit_source_event(event, db)
-    return True

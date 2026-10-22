@@ -138,8 +138,15 @@ def _artifact_cc_session_cwd(thread_session_id: str, db) -> str | None:
     return cwd if isinstance(cwd, str) and cwd else None
 
 
-def registered_cwd_or_default(session_id: str, db, default: str) -> str:
-    """Use a current-scope registered cwd, otherwise the current default."""
+def registered_cwd_or_default(session_id: str, db, default: str, confinement) -> str:
+    """Use a current-scope registered cwd, otherwise the current default.
+
+    A confined child always runs in its own directory, the one the launch's
+    ``confinement`` (read once by the caller) names, even after its provider
+    session was retired.
+    """
+    if confinement.confined:
+        return confinement.working_dir
     registered = _artifact_cc_session_cwd(session_id, db)
     if not registered:
         return default

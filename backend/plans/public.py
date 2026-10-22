@@ -13,6 +13,8 @@ is where the caller looks it up.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 # Errors and node vocabulary.
 from plans.decision_authz import DecisionClosed
 from plans.decision_fields import DecisionInputError
@@ -32,6 +34,7 @@ from plans.scheduled_wait import PAUSE_OPERATIONS, pause_refusal
 # Continuation sources (automation/continuation/sources/*).
 from plans.scheduled_wait import wake_summary as scheduled_wake
 from plans.event_wait import wake_summary as event_wake
+from plans.not_moving import late_wake
 from plans.decision_fields import (
     PICK_ANY, PICK_ONE, answer_note, chosen_ids, pick_of, recommended_ids,
     MAX_CONTEXT as DECISION_MAX_CONTEXT,
@@ -130,6 +133,53 @@ from plans.status_context import render as render_status
 # The status a plan write left owed: drained before a digest (infra/passive_changes)
 # and swept at startup (app_lifecycle).
 from plans.status_drain import drain_for_digest as drain_status_for_digest, sweep as sweep_owed_status
+# The person's new words, matched against running tasks off-path (jobs/corrections_recording).
+from plans.person_input import arrived as person_words_arrived
+
+
+def intent_of(node_id: str, *, db) -> dict:
+    """Read a node's canonical intent for an authorized Agent Substrate fork."""
+    from plans import intent_words, service
+
+    with service._connection(db) as connection:
+        source = intent_words.canonical(connection, node_id)
+        return {
+            "node_id": source["id"], "title": source["title"],
+            "requirements_revision": source["requirements_revision"],
+            "intent": source["intent"], "acceptance_criteria": source["acceptance_criteria"],
+            "intent_words": intent_words.newest(connection, source["id"]),
+        }
+
+
+def node_owner_thread(node_id: str, *, db) -> str | None:
+    """The thread whose plan holds this node, or None for an unknown node or a non-thread plan."""
+    from plans import service
+
+    with service._connection(db) as connection:
+        row = connection.execute(
+            "SELECT p.owner_kind, p.owner_id FROM plan_nodes n JOIN plans p ON p.id = n.plan_id WHERE n.id = ?",
+            (node_id,),
+        ).fetchone()
+    return row["owner_id"] if row is not None and row["owner_kind"] == "thread" else None
+
+
+def open_wait_intervals(
+    thread_ids: list[str], *, since: datetime, until: datetime, db,
+) -> dict[str, list[tuple[float, float]]]:
+    """Each thread's waiting on something outside, as epoch-second intervals in ``[since, until]``.
+
+    The union over the thread's own plan nodes of armed watches (a task set
+    aside excluded), unmet dependencies and review on a linked pull request,
+    with the user's holds and plan pauses cut out (``plans.node_waiting``).
+    Open intervals end at ``until``; a thread with none maps to ``[]``. No
+    delegation walk: pass descendant threads to include them.
+    """
+    from plans import node_cost, node_waiting, service
+
+    with service._connection(db) as connection:
+        return node_waiting.thread_intervals(connection, thread_ids, since, until, node_cost._rows_in)
+
+
 # Notifications raised by a plan write, driven after its commit.
 from plans.notifications import (
     collect_touched, collect_wake_recipients, deliver as deliver_notifications, deliver_deferred, drive_after,
@@ -159,10 +209,9 @@ from plans.watch_resolution import resolve_delivered_event
 
 # Document feedback and shared-document ownership tasks (doceditor/, registry/).
 from plans.artifact_links import link as link_node_artifact
-from plans.feedback_nodes import (
-    create_feedback_node, create_review_node, feedback_display, feedback_item_counts, load_feedback_items,
-    settle_feedback_node,
-)
+from plans.user_step_instructions import read_for_artifact as person_step_instructions
+from plans.feedback_items import feedback_display, feedback_item_counts, load_feedback_items
+from plans.feedback_nodes import create_feedback_node, create_review_node, settle_feedback_node
 from plans.review_requests import (
     append_review_note, close_review_node, review_is_open, settle_review_node,
 )

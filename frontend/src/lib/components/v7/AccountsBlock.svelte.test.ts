@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import AccountsBlock from './AccountsBlock.svelte';
 import { checkVendorSignin, loadVendorAccounts, removeVendorAccount, renameVendorAccount, signOutVendorAccount, type VendorAccount, vendorAccounts } from '$lib/stores/vendorAccounts';
 import { get } from 'svelte/store';
+import { token } from '$lib/stores/auth';
 
 describe('rendering and actions', () => {
 	const provider = {
@@ -34,7 +35,15 @@ describe('rendering and actions', () => {
 		flushSync();
 	}
 
+	async function openAccountMenu(label: string): Promise<void> {
+		const row = [...document.querySelectorAll<HTMLElement>('[id^="vendor-account-"]')].find((candidate) => candidate.textContent?.includes(label));
+		if (!row) throw new Error(`No account row for ${label}`);
+		row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 8, clientY: 8 }));
+		await settle();
+	}
+
 	afterEach(() => {
+		token.set(null);
 		vendorAccounts.set([]);
 		vi.unstubAllGlobals();
 		document.body.innerHTML = '';
@@ -45,11 +54,156 @@ describe('rendering and actions', () => {
 			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [defaultAccount] })));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
-			expect(document.body.textContent).toContain('Accounts');
+			expect(document.body.textContent).not.toContain('Accounts');
 			expect(document.body.textContent).toContain('Plus account 1');
 			expect(document.body.textContent).not.toContain('Default');
 			expect(document.body.textContent).toContain('Add account');
 			unmount(component);
+		});
+
+		it('keeps the account row a plain menu trigger while exposing its policy toggle by account name', async () => {
+			token.set('test-token');
+			vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+				const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+				return path.startsWith('/api/provider-policy')
+					? Promise.resolve(response({ providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }] }] }))
+					: Promise.resolve(response({ accounts: [defaultAccount] }));
+			}));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await settle();
+			const row = document.querySelector<HTMLElement>('#vendor-account-default')!;
+			expect(row.getAttribute('role')).toBeNull();
+			expect(row.getAttribute('aria-label')).toBeNull();
+			await vi.waitFor(() => expect(document.querySelector('[aria-label="Use Plus account 1"]')).not.toBeNull());
+			row.focus();
+			row.dispatchEvent(new KeyboardEvent('keydown', { key: 'ContextMenu', bubbles: true }));
+			await settle();
+			expect(document.querySelector('[role="menu"]')?.textContent).toContain('Rename');
+			unmount(component);
+		});
+
+		it('keeps a failed workspace policy control at its saved value and reports the next action below the account row', async () => {
+			token.set('test-token');
+			vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+				const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+				if (init?.method === 'PUT') return Promise.resolve(response({ detail: 'Could not save subscriptions.' }, 500));
+				return path.startsWith('/api/provider-policy')
+					? Promise.resolve(response({ providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }] }] }))
+					: Promise.resolve(response({ accounts: [defaultAccount] }));
+			}));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')).not.toBeNull());
+			const toggle = document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')!;
+			toggle.click();
+			await vi.waitFor(() => expect(document.body.textContent).toContain('Couldn’t save this change. Try again.'));
+			expect(document.body.textContent).not.toContain('Could not save subscriptions.');
+			expect(toggle.getAttribute('aria-pressed')).toBe('true');
+			expect(document.getElementById(toggle.getAttribute('aria-describedby')!)?.closest('.account-usage-row')).not.toBeNull();
+			expect(document.querySelector('.account-usage-row .policy-status')?.textContent).toBe('Couldn’t save this change. Try again.');
+			expect(document.querySelectorAll('.policy-status.error')).toHaveLength(1);
+			unmount(component);
+		});
+
+		it('keeps the error and offers a Reload when the policy cannot be re-read after a failed save', async () => {
+			token.set('test-token');
+			let policyReads = 0;
+			const policy = { providers: [{ provider_key: 'codex', capabilities: { units: 'accounts', rollover: false }, rollover: false, order: null, disabled: [], revision: 1, units: [{ id: 'default', label: 'Plus account 1', enabled: true }] }] };
+			vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+				const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+				if (init?.method === 'PUT') return Promise.resolve(response({ detail: 'provider policy revision changed', code: 'policy_changed' }, 409));
+				if (!path.startsWith('/api/provider-policy')) return Promise.resolve(response({ accounts: [defaultAccount] }));
+				return policyReads++ === 1 ? Promise.reject(new TypeError('Failed to fetch')) : Promise.resolve(response(policy));
+			}));
+			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+			await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')).not.toBeNull());
+			document.querySelector<HTMLButtonElement>('[aria-label="Use Plus account 1"]')!.click();
+			await vi.waitFor(() => expect(document.querySelector('.account-usage-row .policy-status')?.textContent).toBe('Couldn’t save this change. Check your connection and try again.'));
+			await settle();
+			expect(button('Reload')).toBeDefined();
+			button('Reload').click();
+			await vi.waitFor(() => expect(document.querySelector('.msg.err')).toBeNull());
+			unmount(component);
+		});
+
+		describe('workspace account policy', () => {
+			const signedIn = (id: string, name: string) => ({ ...workAccount, id, name, state: 'signed_in' as const, label: { name, email: null, text: name, custom: name } });
+			const entry = (ids: string[], order: string[] | null = null) => ({
+				provider_key: 'codex', capabilities: { units: 'accounts', rollover: true }, rollover: true, order, disabled: [], revision: 1,
+				units: ids.map((id) => ({ id, label: id, enabled: true })),
+			});
+			const rowIds = () => [...document.querySelectorAll('[id^="vendor-account-"]')].map((row) => row.id.replace('vendor-account-', ''));
+			const numbers = () => [...document.querySelectorAll('.account-usage-row .order')].map((node) => node.textContent);
+			const moveButton = (name: string, direction: 'up' | 'down') => document.querySelector<HTMLButtonElement>(`[aria-label="Move ${name} ${direction}"]`)!;
+
+			it('shows the saved rollover order, and a move visibly swaps the rows it acts on', async () => {
+				token.set('test-token');
+				// The accounts list order differs from the saved order: c, a, b.
+				let units = ['c', 'a', 'b'];
+				let puts: unknown[] = [];
+				vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+					const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+					if (init?.method === 'PUT') {
+						const body = JSON.parse(String(init.body));
+						puts.push(body);
+						units = body.order;
+						return Promise.resolve(response(entry(units, units)));
+					}
+					return path.startsWith('/api/provider-policy')
+						? Promise.resolve(response({ providers: [entry(units, units)] }))
+						: Promise.resolve(response({ accounts: [signedIn('a', 'Alpha'), signedIn('b', 'Bravo'), signedIn('c', 'Charlie')] }));
+				}));
+				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+				await vi.waitFor(() => expect(rowIds()).toEqual(['c', 'a', 'b']));
+				await vi.waitFor(() => expect(numbers()).toEqual(['1', '2', '3']));
+				expect(moveButton('Charlie', 'up').disabled).toBe(true);
+				expect(moveButton('Charlie', 'down').disabled).toBe(false);
+				expect(moveButton('Bravo', 'up').disabled).toBe(false);
+				expect(moveButton('Bravo', 'down').disabled).toBe(true);
+
+				moveButton('Charlie', 'down').click();
+				await vi.waitFor(() => expect(rowIds()).toEqual(['a', 'c', 'b']));
+				expect(puts).toEqual([expect.objectContaining({ order: ['a', 'c', 'b'] })]);
+				expect(moveButton('Alpha', 'up').disabled).toBe(true);
+				expect(moveButton('Charlie', 'up').disabled).toBe(false);
+				unmount(component);
+			});
+
+			it('numbers only the units and puts an account with no unit after them', async () => {
+				token.set('test-token');
+				const removed = { ...signedIn('gone', 'Removed one'), state: 'removed' as const };
+				vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+					const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+					if (path.startsWith('/api/provider-policy')) return Promise.resolve(response({ providers: [entry(['b', 'a'], ['b', 'a'])] }));
+					return Promise.resolve(response({ accounts: [removed, signedIn('a', 'Alpha'), signedIn('b', 'Bravo')] }));
+				}));
+				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+				await vi.waitFor(() => expect(numbers()).toEqual(['1', '2']));
+				expect(rowIds()).toEqual(['b', 'a']);
+				unmount(component);
+			});
+
+			it('reloads the policy when the vendor accounts change, so a new account gets its switch and rollover appears', async () => {
+				token.set('test-token');
+				let accounts = [signedIn('a', 'Alpha')];
+				let units = ['a'];
+				vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+					const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+					return path.startsWith('/api/provider-policy')
+						? Promise.resolve(response({ providers: [entry(units)] }))
+						: Promise.resolve(response({ accounts }));
+				}));
+				const component = mount(AccountsBlock, { target: document.body, props: { provider } });
+				await vi.waitFor(() => expect(document.querySelector('[aria-label="Use Alpha"]')).not.toBeNull());
+				expect(document.body.textContent).not.toContain('Roll over when an account hits its limit');
+
+				accounts = [signedIn('a', 'Alpha'), signedIn('b', 'Bravo')];
+				units = ['a', 'b'];
+				await loadVendorAccounts();
+				await vi.waitFor(() => expect(document.querySelector('[aria-label="Use Bravo"]')).not.toBeNull());
+				expect(document.body.textContent).toContain('Roll over when an account hits its limit');
+				expect(numbers()).toEqual(['1', '2']);
+				unmount(component);
+			});
 		});
 
 		it('renders limit, checking, and verification messages independently for every usage state', async () => {
@@ -72,8 +226,7 @@ describe('rendering and actions', () => {
 			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [defaultAccount, workAccount] })));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
-			(document.querySelector('[aria-label="More actions for Work · work@example.test"]') as HTMLButtonElement).click();
-			await settle();
+			await openAccountMenu('Work · work@example.test');
 			button('Rename').click();
 			await settle();
 			const input = document.querySelector('[aria-label="Rename Work · work@example.test"]') as HTMLInputElement;
@@ -86,8 +239,7 @@ describe('rendering and actions', () => {
 			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ accounts: [defaultAccount] })));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
-			(document.querySelector('[aria-label="More actions for Plus account 1"]') as HTMLButtonElement).click();
-			await settle();
+			await openAccountMenu('Plus account 1');
 			button('Rename').click();
 			await settle();
 			const input = document.querySelector('[aria-label="Rename Plus account 1"]') as HTMLInputElement;
@@ -123,7 +275,8 @@ describe('rendering and actions', () => {
 			] })));
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
-			expect(document.body.textContent).toContain('Personal · person@example.test');
+			expect(document.querySelector('.account-usage-row .name')?.textContent).toBe('Personal');
+			expect(document.querySelector('.account-usage-row .email')?.textContent).toBe('person@example.test');
 			expect(document.body.textContent).toContain('Plus account 2');
 			unmount(component);
 		});
@@ -206,8 +359,7 @@ describe('rendering and actions', () => {
 			vi.stubGlobal('fetch', fetch);
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
-			(document.querySelector('[aria-label="More actions for Plus account 1"]') as HTMLButtonElement).click();
-			await settle();
+			await openAccountMenu('Plus account 1');
 			const menu = document.querySelector('[role="menu"]')?.textContent;
 			expect(menu).toContain('Rename');
 			expect(menu).not.toContain('Sign out');
@@ -224,8 +376,7 @@ describe('rendering and actions', () => {
 			vi.stubGlobal('fetch', fetch);
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle();
-			(document.querySelector('[aria-label="More actions for Work · work@example.test"]') as HTMLButtonElement).click();
-			await settle();
+			await openAccountMenu('Work · work@example.test');
 			button('Sign out').click();
 			await settle();
 			expect(document.body.textContent).toContain('The account was signed out. The account list could not be reloaded.');
@@ -246,7 +397,7 @@ describe('rendering and actions', () => {
 			vi.stubGlobal('fetch', fetch);
 			const component = mount(AccountsBlock, { target: document.body, props: { provider } });
 			await settle(); button('Sign in').click(); await settle(); button('Check').click(); await settle();
-			(document.querySelector('[aria-label="More actions for Work · work@example.test"]') as HTMLButtonElement).click(); await settle();
+			await openAccountMenu('Work · work@example.test');
 			button('Rename').click(); await settle();
 			const input = document.querySelector('[aria-label="Rename Work · work@example.test"]') as HTMLInputElement;
 			input.value = 'Renamed'; input.dispatchEvent(new Event('input', { bubbles: true })); await settle();
@@ -295,7 +446,7 @@ describe('lifecycle', () => {
 	function list(account = out) { return res({ accounts: [ambient, account] }); }
 	function button(name: string) { const el = [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === name); if (!el) throw new Error(`Missing ${name}`); return el; }
 	async function settle() { await new Promise((r) => setTimeout(r, 0)); flushSync(); }
-	async function more() { (document.querySelector('[aria-label="More actions for Work"]') as HTMLButtonElement).click(); await settle(); }
+	async function more() { const row = document.querySelector<HTMLElement>('#vendor-account-work')!; row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 8, clientY: 8 })); await settle(); }
 	afterEach(() => { vendorAccounts.set([]); vi.unstubAllGlobals(); document.body.innerHTML = ''; });
 
 	describe('account lifecycle truth', () => {
@@ -320,7 +471,7 @@ describe('lifecycle', () => {
 			expect(get(vendorAccounts).find((a) => a.id === 'work')).toMatchObject({ state: 'signed_in', revision: 1 });
 			expect(document.querySelector('#vendor-account-work')?.textContent).not.toContain('Signed out');
 			expect(document.querySelector('#vendor-account-work .signin-state[role="status"]')).toBeNull();
-			expect(document.querySelector('#vendor-account-work .account-meta')?.textContent?.trim()).toBe('Signed in');
+			expect(document.querySelector('#vendor-account-work .account-meta')).toBeNull();
 			await more(); button('Rename').click(); await settle();
 			const input = document.querySelector('[aria-label="Rename Work"]') as HTMLInputElement;
 			input.value = 'Renamed'; input.dispatchEvent(new Event('input', { bubbles: true })); await settle();
@@ -341,7 +492,7 @@ describe('lifecycle', () => {
 			expect(document.body.textContent).toContain('Signed in, but the account list could not be reloaded.');
 			expect(document.querySelector('#vendor-account-work')?.textContent).not.toContain('Signed out');
 			expect(document.querySelector('#vendor-account-work .signin-state[role="status"]')).toBeNull();
-			expect(document.querySelector('#vendor-account-work .account-meta')?.textContent?.trim()).toBe('Signed in');
+			expect(document.querySelector('#vendor-account-work .account-meta')).toBeNull();
 			expect(get(vendorAccounts).find((a) => a.id === 'work')).toMatchObject({ state: 'signed_in', revision: 0, details_stale: true });
 			await more(); expect(button('Sign out').disabled).toBe(true); expect(button('Rename').disabled).toBe(true); expect(button('Remove').disabled).toBe(true);
 			button('Reload').click(); await settle();
@@ -386,7 +537,7 @@ describe('recovery', () => {
 	const button = (name:string,scope:Element|Document=document) => [...scope.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent?.trim()===name)!;
 	const key = (input:HTMLInputElement,k:string) => input.dispatchEvent(new KeyboardEvent('keydown',{key:k,bubbles:true}));
 	async function settle(){await new Promise(r=>setTimeout(r,0));flushSync();}
-	async function edit(id='work'){row(id).querySelector<HTMLButtonElement>('.more')!.click();await settle();button('Rename',row(id)).click();await settle();}
+	async function edit(id='work'){row(id).dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:8,clientY:8}));await settle();button('Rename').click();await settle();}
 	function type(text:string,scope:Element|Document=document){const input=scope.querySelector<HTMLInputElement>('input')!;input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));return input;}
 	function deferred(){let resolve!:(r:Response)=>void;const promise=new Promise<Response>(r=>resolve=r);return {promise,resolve};}
 	let clearBoundary = () => {};
@@ -473,7 +624,7 @@ describe('billing in the account row', () => {
 		await settle();
 		expect(document.body.textContent).toContain('Billing Price not recorded');
 		expect(document.body.textContent).not.toContain('Billing history');
-		(document.querySelector('[aria-label="More actions for Work"]') as HTMLButtonElement).click(); await settle();
+		(document.querySelector<HTMLElement>('#vendor-account-work')!).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 8, clientY: 8 })); await settle();
 		expect(document.body.textContent).not.toContain('Billing history');
 		button('Set price').click(); flushSync();
 		const price = document.querySelector('input[inputmode="decimal"]') as HTMLInputElement;

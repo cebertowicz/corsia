@@ -7,6 +7,7 @@ sessions-table column list.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 
@@ -84,3 +85,36 @@ def check_suite_payload(repo: str, pr_number: int, *,
         },
         "sender": {"login": "alice", "type": "User"},
     }
+
+
+@contextmanager
+def statements():
+    """Every statement any pooled connection runs inside the block."""
+    import infra.database as database
+
+    seen: list[str] = []
+    original = database._make_connection
+
+    def _traced(path):
+        conn = original(path)
+        conn.set_trace_callback(seen.append)
+        return conn
+
+    with database._pool_lock:
+        existing = list(database._all_connections)
+    for conn in existing:
+        conn.set_trace_callback(seen.append)
+    database._make_connection = _traced
+    try:
+        yield seen
+    finally:
+        database._make_connection = original
+        with database._pool_lock:
+            current = list(database._all_connections)
+        for conn in current:
+            conn.set_trace_callback(None)
+
+
+def read_statements(seen: list[str]) -> list[str]:
+    """The reads among the statements ``statements`` captured."""
+    return [s for s in seen if s.lstrip().upper().startswith(("SELECT", "WITH"))]

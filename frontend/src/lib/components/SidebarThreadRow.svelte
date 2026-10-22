@@ -7,7 +7,9 @@
 	import { threadPlanStates } from '$lib/stores/threadPlanStates';
 	import { descendantRunning } from '$lib/stores/activity';
 	import ThreadPlanStateMark from './ThreadPlanStateMark.svelte';
-	import { isYourMove } from './threadRowMark';
+	import { isYourMove, showsWaitingGlyph, waitMarkTitle } from './threadRowMark';
+	import ThreadWaitingMark from './ThreadWaitingMark.svelte';
+	import { minuteClock } from '$lib/time';
 	import ThreadPausedMark from './ThreadPausedMark.svelte';
 	import ThreadDoneMark from './ThreadDoneMark.svelte';
 
@@ -195,6 +197,8 @@
 			<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--status-in-progress)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 		{:else if !renaming && $descendantRunning.has(thread.id)}
 			<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="3" role="img" aria-label="Subagent working"><title>Subagent working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+		{:else if !renaming && showsWaitingGlyph(planState, false)}
+			<span class="waiting-slot"><ThreadWaitingMark size={12} title={waitMarkTitle(planState, $minuteClock)} /></span>
 		{/if}
 		<div class="thread-hover-actions">
 			<button
@@ -283,7 +287,7 @@
 		.thread-item:hover .thread-hover-actions { opacity: 1; pointer-events: auto; }
 		/* On hover the action takes the trailing slot: the text stops short of it and the spinner steps aside. */
 		.thread-item:hover .thread-content { padding-right: 28px; }
-		.thread-item:hover > .spinner { display: none; }
+		.thread-item:hover > .spinner, .thread-item:hover > .waiting-slot { display: none; }
 	}
 	.thread-action-btn {
 		width: 24px; height: 24px; border-radius: var(--radius-2xs);
@@ -330,6 +334,8 @@
 		animation: spin 1s linear infinite;
 		flex-shrink: 0;
 	}
+	/* Waiting is neutral and static: the hourglass sits where the spinners do. */
+	.waiting-slot { display: inline-flex; flex-shrink: 0; color: var(--text-tertiary); }
 	@media (prefers-reduced-motion: reduce) {
 		/* The arc stays, still titled, so reduced motion reads the same truth. */
 		.spinner { animation: none; }

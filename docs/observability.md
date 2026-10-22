@@ -509,9 +509,7 @@ corrections; `verification_result` is non-null on the accepting transition.
 #### stalled duration
 
 From `fired_at`, which `plan_liveness._claim_fire` writes at the moment of the
-stall. Not `window_started_at`: that is the rate-limit window start, is reset
-when the window rolls over, and is NULL for a wake that stalled through
-`deferral_exhausted` without ever delivering.
+stall. Only a failed delivery stalls a wake: no cycle or rate cap ends one.
 
 ```sql
 SELECT thread_id,
@@ -545,8 +543,9 @@ SELECT kind,
 incremented `attempt`, and a wake that was admitted and then failed to land was
 still admitted. Read delivery success as
 `delivered / (delivered + failed WHERE reason='delivery_failed')`.
-`deferred` with `deferrals` is deferral; `stalled` with `cycle_cap_reached`,
-`wake_budget_exhausted` or `deferral_exhausted` is a stall.
+Only a failed delivery stalls a trigger now, and nothing defers one; rows
+written before 2026-10-22 may still carry `deferred`, `deferrals`, or the
+reasons `cycle_cap_reached`, `wake_budget_exhausted` and `deferral_exhausted`.
 
 #### wake cost
 

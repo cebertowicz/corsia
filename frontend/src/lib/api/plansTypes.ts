@@ -85,11 +85,24 @@ export interface OperatorProgress {
 	distribution?: OperatorDistribution;
 }
 
+/** What a plan waits on outside itself and when its agent checks back (EW3). */
+export interface OperatorWait {
+	label: string;
+	/** When the watch's deadline passes; the agent is woken then. */
+	until: string;
+	/** How many other waits there are. */
+	more: number;
+	/** The watched artifact, when the wait watches one. */
+	artifact_id?: string | null;
+}
+
 export interface OperatorChildSummary {
 	available: true;
 	plan_id: string;
 	thread_id: string;
 	progress: OperatorProgress;
+	/** What a waiting child plan waits for (EW4). Its state stays `progress.liveness`. */
+	wait?: OperatorWait | null;
 }
 
 export interface OperatorReviewActor {
@@ -143,6 +156,8 @@ export type UserActionHandler = (
 ) => Promise<string | null> | void;
 
 export interface OperatorNode {
+	/** What this row waits on outside the plan and when its agent checks back (EW11); the thread state's value. */
+	wait?: OperatorWait | null;
 	id: string;
 	parent_id: string | null;
 	depth: number;
@@ -199,7 +214,7 @@ export interface OperatorPlanEntry {
 	plan: OperatorPlanMeta;
 	owner: OperatorOwner;
 	progress: OperatorProgress & { distribution: OperatorDistribution };
-	display: OperatorDisplay<OperatorPlanLabelKey> & { not_moving?: OperatorNotMoving };
+	display: OperatorDisplay<OperatorPlanLabelKey> & { not_moving?: OperatorNotMoving; wait?: OperatorWait; set_aside_until?: string };
 	/** Present only when open nodes exceed the server's soft budget. */
 	oversize: { open: number; budget: number } | null;
 	current_node_ids: string[];

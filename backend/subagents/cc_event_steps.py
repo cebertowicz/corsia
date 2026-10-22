@@ -142,11 +142,22 @@ async def on_assistant_step(ctx: CCEventContext, ev: dict) -> None:
             "capability": "malformed_tool",
             "native_tools": _non_corsia_tool_names(raw_uses),
         })
+    admitted = tool_boundary.admitted_native_tools(ctx.live)
+    if admitted:
+        foreign = tool_boundary.unadmitted_tool_names(raw_uses, admitted)
+        if foreign:
+            await on_tool_boundary_violation(ctx, {
+                "kind": "tool_boundary_violation",
+                "capability": "native_tool", "native_tools": foreign,
+            })
+        raw_uses = []
     identity = event_identity(ctx, ev)
     uses = _project_tool_uses(raw_uses)
     text = ev.get("text", "")
     reasoning = ev.get("reasoning") or ctx.live.thinking_buf or None
     provenance = _reasoning_provenance(ctx, ev)
+    if admitted and not (text or reasoning or provenance):
+        return
     message_id, step = await run_in_db_unless_owned(ctx.db, partial(
         _persist_and_load_assistant_step,
         ctx.child_id, turn_id=identity.turn_id, content=text,
@@ -221,6 +232,8 @@ async def _recover_result_owner(ctx: CCEventContext, tool_id: str):
 
 
 async def on_tool_result(ctx: CCEventContext, ev: dict) -> None:
+    if tool_boundary.admitted_native_tools(ctx.live):
+        return  # a confined launch's results are its provider's own reads
     tool_id = cast(str, ev.get("tool_use_id"))
     step_id, name = await _recover_result_owner(ctx, tool_id)
     if step_id is None:

@@ -149,10 +149,14 @@ def test_operator_contract_v2_projects_canonical_execution_evidence_and_cost():
             "paused": 0,
             "failed": 0,
         }
+        wait = projected["display"].pop("wait")
         assert projected["display"] == {
             "label_key": "working",
             "tone_key": "active",
         }
+        # EW3: an untitled watched artifact is named as the item it opens; its id lets the surface open it.
+        assert wait["label"] == "the linked item"
+        assert wait["artifact_id"] and wait["more"] == 0
     finally:
         db.close()
 

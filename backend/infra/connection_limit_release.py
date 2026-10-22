@@ -15,6 +15,10 @@ from connections.usage_verdicts import LimitSubject
 
 _CANDIDATE_PAGE = 128
 
+#: Probe attempts and the base backoff between them for a stored limit release.
+LIMIT_RELEASE_MAX_ATTEMPTS = 5
+LIMIT_RELEASE_BACKOFF_SECONDS = 180
+
 _QUEUED_HEADS = """FROM threads AS t JOIN messages AS m ON m.thread_id=t.id
            WHERE t.lifecycle_state='active' AND t.model IS NOT NULL AND trim(t.model)<>''
              AND m.delivery_state='queued' AND m.active_turn_id IS NULL
@@ -281,7 +285,6 @@ def startup_expired_admission(thread_id: str, model: str, *, db):
     Only a window still due is held; the sweep phase then drives its probe. A
     window already settled (no eligible head, exhausted) admits normally.
     """
-    from automation.continuation.admission import DEFERRAL_BASE_SECONDS, MAX_DEFERRALS
     from connections.harness_usage import stored_usage
     from connections.usage_verdicts import ACCOUNT_SCOPE, release_due, scope_matches
     from infra.thread_input_types import HeldAdmission
@@ -298,7 +301,7 @@ def startup_expired_admission(thread_id: str, model: str, *, db):
     due = [
         item for item in release_due(
             usage, datetime.now(timezone.utc), account=LimitSubject(connection, ACCOUNT_SCOPE, identity),
-            max_attempts=MAX_DEFERRALS, backoff_seconds=DEFERRAL_BASE_SECONDS,
+            max_attempts=LIMIT_RELEASE_MAX_ATTEMPTS, backoff_seconds=LIMIT_RELEASE_BACKOFF_SECONDS,
         )
         if not item.exhausted and scope_matches(model, item.subject.scope_key)
     ]

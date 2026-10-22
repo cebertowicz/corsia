@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { enterProjectScope } from '$lib/stores/projects';
-	import type { ActivityGroupSummary, ActivityPlanGroup } from '$lib/activityHome';
+	import type { ActivityGroupSummary, ActivityPlanGroup, ActivityPlanRow as ActivityRowModel } from '$lib/activityHome';
+	import { threadPlanStates } from '$lib/stores/threadPlanStates';
+	import { parseWsTimestamp } from '$lib/time';
 	import ActivityPlanRow from './ActivityPlanRow.svelte';
 
 	/** One project's rows in one of the In progress, Waiting or Complete sections. */
@@ -36,9 +38,19 @@
 
 	const MAX_VISIBLE_ROWS = 4;
 
-	const rows = $derived(
-		kind === 'current' ? group.current : kind === 'waiting' ? group.waiting : group.complete,
-	);
+	// Waiting rows read soonest check-back first (EW7); a set-aside row follows them, then any row with no wait.
+	const rows = $derived.by(() => {
+		if (kind === 'current') return group.current;
+		if (kind === 'complete') return group.complete;
+		// Sorted on (group, time): outside waits, then set-aside rows, then any row with no wait.
+		const key = (row: ActivityRowModel): [number, number] => {
+			const entry = $threadPlanStates[row.entry.owner.thread_id ?? ''];
+			if (entry?.state === 'waiting' && entry.wait) return [0, parseWsTimestamp(entry.wait.until)];
+			return entry?.set_aside_until ? [1, parseWsTimestamp(entry.set_aside_until)] : [2, 0];
+		};
+		return group.waiting.map((row, index) => ({ row, index, at: key(row) }))
+			.sort((a, b) => (a.at[0] - b.at[0]) || (a.at[1] - b.at[1]) || (a.index - b.index)).map(({ row }) => row);
+	});
 	let expanded = $state(false);
 	const visible = $derived(expanded ? rows : rows.slice(0, MAX_VISIBLE_ROWS));
 

@@ -246,7 +246,7 @@ describe("ThreadPlanPane", () => {
     await settle();
     expect(host.textContent).toContain("Nothing open");
     expect(host.textContent).not.toContain("No plan steps yet");
-    expect(host.querySelector(".fold-row")?.textContent).toContain("2 completed");
+    expect(host.querySelector(".fold-row")?.textContent).toContain("2 done");
     expect(host.querySelector(".progress")).toBeNull();
     expect(treeRow("Finished a")).toBeUndefined();
   });
@@ -258,7 +258,7 @@ describe("ThreadPlanPane", () => {
     mockFetch(200, flat, { ETag: '"r1"' });
     component = mountWithHead("t1");
     await settle();
-    expect(host.querySelector(".fold-row")?.textContent).toContain("2 completed");
+    expect(host.querySelector(".fold-row")?.textContent).toContain("2 done");
     expect(host.querySelector(".progress")?.textContent).toBe("1 left");
     expect(host.textContent).not.toContain("0/1");
   });

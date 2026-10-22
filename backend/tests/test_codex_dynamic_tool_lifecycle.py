@@ -184,7 +184,7 @@ async def test_destructive_callers_share_request_result_terminal_fence(
     monkeypatch.setattr(
         codex_runtime, "_retire_registered_thread_artifacts", lambda *_a, **_k: False,
     )
-    monkeypatch.setattr(codex_runtime, "insert_message", lambda *_a, **_k: None)
+    monkeypatch.setattr("subagents.codex_shutdown_error.insert_message", lambda *_a, **_k: None)
 
     task = asyncio.create_task(_invoke_destructive(path, thread_id, live))
     try:
@@ -1551,8 +1551,7 @@ async def test_shutdown_isolates_one_live_failure_and_cleans_later_live(
         session = _Session(thread_id)
         _active_live(thread_id, session, pending_tool=False)
     monkeypatch.setattr(
-        codex_runtime,
-        "insert_message",
+        "subagents.codex_shutdown_error.insert_message",
         lambda thread_id, *_a, **_k: events.append(f"marker:{thread_id}"),
     )
 
@@ -1609,7 +1608,7 @@ async def test_shutdown_force_kills_resistant_tool_and_synthesizes_result(
         "subagents.codex_runtime_events.run_in_db", fake_run_in_db,
     )
     monkeypatch.setattr(codex_runtime, "commit_turn_terminal", commit)
-    monkeypatch.setattr(codex_runtime, "insert_message", lambda *_a, **_k: None)
+    monkeypatch.setattr("subagents.codex_shutdown_error.insert_message", lambda *_a, **_k: None)
 
     await asyncio.wait_for(
         codex_runtime.shutdown_all(), timeout=_TEST_HANG_TIMEOUT_S,
@@ -1659,7 +1658,7 @@ async def test_shutdown_raises_when_successor_appears_after_live_snapshot(
         codex_runtime._LIVE.put(thread_id, successor)
         codex_runtime._APP_SESSIONS[thread_id] = successor_session
 
-    monkeypatch.setattr(codex_runtime, "insert_message", insert_successor)
+    monkeypatch.setattr("subagents.codex_shutdown_error.insert_message", insert_successor)
 
     with pytest.raises(RuntimeError, match="surviving owners"):
         await codex_runtime.shutdown_all()
@@ -1702,7 +1701,7 @@ async def test_shutdown_snapshot_never_terminates_later_successor(
         parent_thread_id=None,
         name="codex",
     )
-    monkeypatch.setattr(codex_runtime, "insert_message", lambda *_a, **_k: None)
+    monkeypatch.setattr("subagents.codex_shutdown_error.insert_message", lambda *_a, **_k: None)
 
     shutdown = asyncio.create_task(codex_runtime.shutdown_all())
     try:
@@ -1762,7 +1761,7 @@ async def test_shutdown_snapshot_routes_naturally_finalized_live_to_idle_cleanup
     second_live = _active_live(
         "codex-natural-second", second_session, pending_tool=False,
     )
-    monkeypatch.setattr(codex_runtime, "insert_message", lambda *_a, **_k: None)
+    monkeypatch.setattr("subagents.codex_shutdown_error.insert_message", lambda *_a, **_k: None)
 
     shutdown = asyncio.create_task(codex_runtime.shutdown_all())
     try:

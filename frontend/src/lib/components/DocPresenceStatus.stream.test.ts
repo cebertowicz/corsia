@@ -17,7 +17,7 @@ const wire = vi.hoisted(() => ({ rows: [] as unknown[] }));
 vi.mock('$lib/api/docs', async (original) => ({
 	...await original<typeof import('$lib/api/docs')>(),
 	fetchComments: async () => ({
-		comments: wire.rows, feedback: { open_count: 0, owner_label: null, grace_closes_at: null, undelivered_batches: [] },
+		comments: wire.rows, feedback: { open_count: 0, owner_label: null, undelivered_batches: [] },
 	}),
 }));
 

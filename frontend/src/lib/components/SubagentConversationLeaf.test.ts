@@ -35,6 +35,7 @@ import { isDisplayedThread } from '$lib/stores/displayedThreads';
 import { activeModelId, models } from '$lib/stores/models';
 import { connectionState } from '$lib/stores/connection';
 import { coreSettings } from '$lib/stores/settings';
+import { withOpenTime } from '$lib/__tests__/fixtures/openTimeServer';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -55,7 +56,7 @@ const STATUS_PATH = '/api/delegation/threads/';
 const CATALOG_PATH = '/api/models';
 
 function isHistoryRead(url: unknown): boolean {
-	return ![PREVIEW_PATH, STATUS_PATH, CATALOG_PATH].some((path) => String(url).includes(path));
+	return ![PREVIEW_PATH, STATUS_PATH, CATALOG_PATH, '/api/open-time'].some((path) => String(url).includes(path));
 }
 
 function historyCalls(mock: unknown): number {
@@ -97,10 +98,10 @@ afterEach(async () => {
 describe('SubagentConversationLeaf', () => {
 	it('claims the child, loads it into the shared store once, and reloads on reconnect', async () => {
 		activeThreadId.set('parent-thread');
-		vi.stubGlobal('fetch', vi.fn(async () => response([{
+		vi.stubGlobal('fetch', withOpenTime(vi.fn(async () => response([{
 			id: 'child-row', thread_id: 'child-1', role: 'assistant', content: 'child says hi',
 			created_at: '2026-09-23T10:00:00Z',
-		}])));
+		}])) as unknown as typeof fetch));
 		component = mount(SubagentConversationLeaf, {
 			target: host,
 			props: { threadId: 'child-1' },
@@ -131,16 +132,17 @@ describe('SubagentConversationLeaf', () => {
 
 	it('passes completed-turn summaries to its Focus transcript', async () => {
 		coreSettings.set({ features: { focus_mode: true } } as never);
-		vi.stubGlobal('fetch', vi.fn(async () => response([{
-			id: 'child-work', thread_id: 'child-summary', role: 'assistant', content: '',
-			metadata: { turn_id: 'turn-summary', tool_calls: [{ id: 'call-1' }] },
-			created_at: '2026-09-30T12:00:00Z', activity_weight: 1,
-		}], {
+		const summaries = {
 			'turn-summary': {
 				started_at: '2026-09-30T12:00:00Z', ended_at: '2026-09-30T12:04:00Z',
 				status: 'completed', activity_count: 1,
 			},
-		})));
+		};
+		vi.stubGlobal('fetch', withOpenTime(vi.fn(async () => response([{
+			id: 'child-work', thread_id: 'child-summary', role: 'assistant', content: '',
+			metadata: { turn_id: 'turn-summary', tool_calls: [{ id: 'call-1' }] },
+			created_at: '2026-09-30T12:00:00Z', activity_weight: 1,
+		}], summaries)) as unknown as typeof fetch, () => summaries));
 		component = mount(SubagentConversationLeaf, {
 			target: host,
 			props: { threadId: 'child-summary' },
@@ -188,7 +190,7 @@ describe('SubagentConversationLeaf', () => {
 		const fetchMock = vi.fn(async (url: string) => (
 			isHistoryRead(url) ? history(url) : response()
 		));
-		vi.stubGlobal('fetch', fetchMock);
+		vi.stubGlobal('fetch', withOpenTime(fetchMock as unknown as typeof fetch));
 		component = mount(SubagentConversationLeaf, {
 			target: host,
 			props: { threadId: 'child-fail-open' },

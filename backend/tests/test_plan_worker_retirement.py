@@ -17,7 +17,6 @@ import os
 import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -90,8 +89,7 @@ def _returned(db, *titles: str):
     )
     db.commit()
     asyncio.run(runner.sweep(
-        NOW, db=db, sources=[HarvestSource()],
-        is_idle=lambda _thread: True, deliver=AsyncMock(return_value=True),
+        NOW, db=db, sources=[HarvestSource()], deliver=AsyncMock(return_value=True),
     ))
     return parent_plan, delegated, plan, leaves, watch, schedule
 
@@ -359,8 +357,7 @@ def test_a_nested_delegation_among_the_returned_steps_still_retires_its_own_work
         submit_review_evidence(nested.id, db=db, evidence="Nested done", actor_id="worker")
         db.commit()
         asyncio.run(runner.sweep(
-            NOW, db=db, sources=[HarvestSource()],
-            is_idle=lambda _thread: True, deliver=AsyncMock(return_value=True),
+            NOW, db=db, sources=[HarvestSource()], deliver=AsyncMock(return_value=True),
         ))
         assert service.get_node(delegated.id, db=db).state == "review_requested"
 
@@ -423,8 +420,7 @@ def _accept_delegated_step_with_notes(db, *, parent_selects: bool) -> dict[str, 
     assert (parent_start is not None and parent_start[0] == "parent") == parent_selects
     submit_review_evidence(leaf.id, db=db, evidence="done", actor_id="worker")
     asyncio.run(runner.sweep(
-        NOW, db=db, sources=[HarvestSource()],
-        is_idle=lambda _thread: True, deliver=AsyncMock(return_value=True),
+        NOW, db=db, sources=[HarvestSource()], deliver=AsyncMock(return_value=True),
     ))
     submit_review_evidence(delegated.id, db=db, actor_id="parent")
 

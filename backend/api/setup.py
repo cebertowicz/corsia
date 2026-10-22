@@ -181,8 +181,13 @@ async def setup_progress_view(_user: dict = Depends(require_user)) -> dict:
     """Where setup stands for a signed-in person; while unfinished, the eligibility facts are read fresh."""
 
     def _read() -> dict:
+        from llm.local_setup import ever_started
+
         progress = setup_progress.view()
-        return progress if progress["setup_completed"] else {**progress, "status": _setup_status()}
+        if progress["setup_completed"]:
+            return progress
+        # Only a resumed setup asks whether local setup ever began; the pre-auth status never does.
+        return {**progress, "status": {**_setup_status(), "local_started": ever_started()}}
 
     return await run_in_db(_read)
 
@@ -356,7 +361,7 @@ async def first_account(request: Request) -> dict | Response:
     try:
         user_id = await run_in_db(
             accounts.create_first_account, body.username, body.password,
-            call_name=body.name, email=body.email or "", first_run_path="app",
+            full_name=body.name, email=body.email or "", first_run_path="app",
         )
     except account_validation.FirstAccountExists:
         return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")

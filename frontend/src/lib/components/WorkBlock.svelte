@@ -2,6 +2,8 @@
 	import { tick, type Snippet } from 'svelte';
 	import VisitDivider from './VisitDivider.svelte';
 	import BlockLine from './BlockLine.svelte';
+	import WaitCapsule from './WaitCapsule.svelte';
+	import type { WaitFace } from './waitFace';
 	import { createPhraseSwap } from './plans/phraseSwap.svelte';
 	import { FADE_MS, UNKNOWN_STEP } from './plans/planLiveStep';
 	import { blockEntries } from './transcriptBlockEntries';
@@ -29,6 +31,8 @@
 		warning,
 		liveActivity,
 		notes,
+		wait = null,
+		waitThreadId = null,
 	}: {
 		entry: TranscriptFoldEntry;
 		label: string;
@@ -57,10 +61,13 @@
 		liveActivity?: Snippet;
 		/** Plan-limit pause notes for a stub run, shown open or closed. */
 		notes?: Snippet;
+		/** The plan waits on something outside and nothing runs: the chip says so in place of its settled face (EW8). */
+		wait?: WaitFace | null;
+		waitThreadId?: string | null;
 	} = $props();
 
 	let section: HTMLElement | undefined = $state();
-	let toggleButton: HTMLButtonElement | undefined = $state();
+	let toggleButton: HTMLElement | undefined = $state();
 
 	// A stub-backed block reads newest rows first: its rows only start at its start once the read is whole.
 	const complete = $derived(!entry.stub || (load !== undefined && !load.loading && !load.error && !runHasMore(entry.stub, load)));
@@ -78,6 +85,7 @@
 	const liveLead = $derived(liveLabel(liveTime, null));
 	const liveText = $derived(liveLabel(liveTime, shownPhrase && shownActor ? `${shownActor}: ${shownPhrase}` : shownPhrase));
 	const ariaLabel = $derived.by(() => {
+		if (wait) return `${expanded ? 'Collapse' : 'Expand'} run. ${wait.title}`;
 		if (!entry.live) return runToggleName(entry, label, expanded);
 		const phrase = hideUnidentifiedDescendant ? UNKNOWN_STEP : `${liveActorName ? `${liveActorName}: ` : ''}${livePhrase}`;
 		return `${expanded ? 'Collapse' : 'Expand'} current work: ${phrase}${liveTime ? ` · ${liveTime}` : ''}`;
@@ -100,25 +108,34 @@
 	}
 </script>
 
-<section class="transcript-fold" class:live-work={entry.live} class:expanded bind:this={section} data-work-block data-new={entry.new ? '' : undefined}>
-	<button
-		type="button"
-		class="fold-toggle"
-		bind:this={toggleButton}
-		aria-expanded={expanded}
-		aria-controls={expanded ? bodyId : undefined}
-		aria-label={ariaLabel}
-		onclick={() => { void toggle(); }}
-	>
-		{#if entry.live}
-			<svg class="live-spinner" class:subagent-only={!liveOwnThread} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-			<span class="live-step" class:dimmed={liveDimmed} class:fading={swap.fading} style="--fade-ms: {FADE_MS}ms" title={liveText}>{liveLead}{#if shownPhrase}{' · '}{#if shownActor}<span class="live-actor">{shownActor}:</span>{' '}{/if}{shownPhrase}{/if}</span>
-		{:else}
-			<span class="fold-label">{plainLabel}</span>
-			{#if entry.new}<span class="fold-new" data-new-capsule><span class="fold-new-sep">·</span> <i aria-hidden="true"></i><span class="fold-new-word">new</span></span>{/if}
-		{/if}
-		<svg class="fold-chevron" class:expanded width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
-	</button>
+<section class="transcript-fold" class:live-work={entry.live || wait !== null} class:expanded bind:this={section} data-work-block data-new={entry.new ? '' : undefined}>
+	{#if wait}
+		<WaitCapsule
+			face={wait}
+			threadId={waitThreadId}
+			toggle={{ expanded, controls: expanded ? bodyId : undefined, name: ariaLabel, onToggle: () => { void toggle(); } }}
+			bind:element={toggleButton}
+		/>
+	{:else}
+		<button
+			type="button"
+			class="fold-toggle"
+			bind:this={toggleButton}
+			aria-expanded={expanded}
+			aria-controls={expanded ? bodyId : undefined}
+			aria-label={ariaLabel}
+			onclick={() => { void toggle(); }}
+		>
+			{#if entry.live}
+				<svg class="live-spinner" class:subagent-only={!liveOwnThread} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+				<span class="live-step" class:dimmed={liveDimmed} class:fading={swap.fading} style="--fade-ms: {FADE_MS}ms" title={liveText}>{liveLead}{#if shownPhrase}{' · '}{#if shownActor}<span class="live-actor">{shownActor}:</span>{' '}{/if}{shownPhrase}{/if}</span>
+			{:else}
+				<span class="fold-label">{plainLabel}</span>
+				{#if entry.new}<span class="fold-new" data-new-capsule><span class="fold-new-sep">·</span> <i aria-hidden="true"></i><span class="fold-new-word">new</span></span>{/if}
+			{/if}
+			<svg class="fold-chevron" class:expanded width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
+		</button>
+	{/if}
 	{#if expanded}
 		<div class="fold-details" id={bodyId}>
 			{#if entry.stub}

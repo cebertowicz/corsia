@@ -24,8 +24,6 @@ const mocks = vi.hoisted(() => {
 			},
 		},
 		sendDocFeedback: vi.fn(),
-		leaveDocFeedback: vi.fn(),
-		returnDocFeedback: vi.fn(),
 		retryDocFeedback: vi.fn(),
 		restoreDocumentPlace: vi.fn(),
 		setComments(value: Record<string, unknown[]>) {
@@ -46,8 +44,6 @@ vi.mock('$lib/api/docFeedback', () => ({
 			constructor(readonly status: number) { super(`HTTP ${status}`); }
 		},
 		sendDocFeedback: mocks.sendDocFeedback,
-		leaveDocFeedback: mocks.leaveDocFeedback,
-		returnDocFeedback: mocks.returnDocFeedback,
 		retryDocFeedback: mocks.retryDocFeedback,
 	}));
 
@@ -179,7 +175,6 @@ beforeEach(() => {
 	mocks.loadComments.mockReset().mockResolvedValue({
 		open_count: 0,
 		owner_label: null,
-		grace_closes_at: null,
 		undelivered_batches: [],
 	});
 	mocks.prepareCommentArrival.mockReset();
@@ -189,8 +184,6 @@ beforeEach(() => {
 	mocks.ackComment.mockReset();
 	mocks.rangeFor.mockReset().mockReturnValue(null);
 	mocks.sendDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
-	mocks.leaveDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
-	mocks.returnDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
 	mocks.retryDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
 	mocks.restoreDocumentPlace.mockReset().mockResolvedValue(undefined);
 	mocks.setComments({});
@@ -830,12 +823,12 @@ describe('ArtifactLeaf load-status ownership', () => {
 		show.mockRestore();
 	});
 
-	it('uses leave, not send, when switching away from or navigating off a document', async () => {
+	it('does not send feedback when switching away from or navigating off a document', async () => {
 		mocks.fetchContent.mockResolvedValue({
 			text: '# doc', revision: 'r1', writable: true, artifact: { id: 'art-leave' },
 		});
 		mocks.loadComments.mockResolvedValue({
-			open_count: 1, owner_label: 'Documents & Artifacts', grace_closes_at: null, undelivered_batches: [],
+			open_count: 1, owner_label: 'Documents & Artifacts', undelivered_batches: [],
 		});
 		openArtifactTab(THREAD, { artifactId: 'art-leave', path: '/leave.md', title: 'leave.md' });
 		openArtifactTab(THREAD, { artifactId: 'art-other', path: '/other.md', title: 'other.md' });
@@ -843,15 +836,8 @@ describe('ArtifactLeaf load-status ownership', () => {
 		setActiveTab(THREAD, leaveTab.instanceId);
 		render();
 		await vi.waitFor(() => expect(tabsOf().find((tab) => tab.instanceId === leaveTab.instanceId)?.status).toBe('ready'));
-		mocks.leaveDocFeedback.mockClear();
 		setActiveTab(THREAD, tabsOf()[1].instanceId);
-		await vi.waitFor(() => expect(mocks.leaveDocFeedback).toHaveBeenCalledWith('art-leave'));
-		expect(mocks.sendDocFeedback).not.toHaveBeenCalled();
-
-		mocks.leaveDocFeedback.mockClear();
-		unmount(component as never);
-		component = null;
-		await vi.waitFor(() => expect(mocks.leaveDocFeedback).toHaveBeenCalled());
+		await Promise.resolve();
 		expect(mocks.sendDocFeedback).not.toHaveBeenCalled();
 	});
 

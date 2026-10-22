@@ -173,7 +173,7 @@ describe('who gathers into the Scheduled row', () => {
 
 	it('sits after the open rows and before finished work', async () => {
 		await mountTree([finished('Old'), waiting('A', 48), waiting('B', 72), node({ id: 'plain', title: 'Plain' }), waiting('Imminent', 3)]);
-		expect(titles()).toEqual(['Plain', 'Imminent', '{Scheduled}', '[1 completed]']);
+		expect(titles()).toEqual(['Plain', 'Imminent', '{Scheduled}', '[1 done]']);
 	});
 
 	it('gathers a single qualifying row into the same group, toggle "Show 1"', async () => {
@@ -291,6 +291,6 @@ describe('the finished-work row adopts the shared toggle', () => {
 
 	it('never takes a scheduled task behind its check', async () => {
 		await mountTree([...many(3), waiting('A', 48), waiting('B', 72)]);
-		expect(titles()).toEqual(['{Scheduled}', '[3 completed]']);
+		expect(titles()).toEqual(['{Scheduled}', '[3 done]']);
 	});
 });

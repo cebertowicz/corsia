@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import urlsplit
 
 from infra.db_async import run_in_db
@@ -139,29 +139,43 @@ def startup_discovery_targets() -> list[dict]:
 def endpoint_failure_of(error: BaseException) -> str | None:
     """``auth`` when ``error`` proves the endpoint refuses this key, else None.
 
-    Read from the exception's HTTP status only, never its message. A provider
-    SDK wraps the HTTP error, so the chain is walked the way a traceback shows
-    it: ``__cause__``, then ``__context__`` unless ``raise ... from None``
-    suppressed it. The first status found decides: 401/403 is ``auth``; any
-    other (404, 429, 5xx) is not an endpoint failure, nor is a connection loss,
-    a timeout or a stream stall.
+    Read from the exception's HTTP status only, never its message (see
+    :func:`http_status_of`). 401/403 is ``auth``; any other (404, 429, 5xx) is
+    not an endpoint failure, nor is a connection loss, a timeout or a stream
+    stall.
     """
+    return "auth" if http_status_of(error) in (401, 403) else None
+
+
+def http_status_of(error: BaseException) -> int | None:
+    """The first HTTP status on ``error``'s :func:`exception_chain`, else None."""
     import anthropic
     import httpx
     import litellm
     import openai
 
+    for current in exception_chain(error):
+        status = _http_status(current, httpx, openai, anthropic, litellm)
+        if status is not None:
+            return status
+    return None
+
+
+def exception_chain(error: BaseException) -> Iterator[BaseException]:
+    """``error`` and what it wraps, in traceback order.
+
+    A provider SDK wraps the HTTP or transport error, so the chain is walked
+    the way a traceback shows it: ``__cause__``, then ``__context__`` unless
+    ``raise ... from None`` suppressed it.
+    """
     seen: set[int] = set()
     current: BaseException | None = error
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        status = _http_status(current, httpx, openai, anthropic, litellm)
-        if status is not None:
-            return "auth" if status in (401, 403) else None
+        yield current
         current = current.__cause__ or (
             None if current.__suppress_context__ else current.__context__
         )
-    return None
 
 
 def _http_status(error, httpx, openai, anthropic, litellm) -> int | None:

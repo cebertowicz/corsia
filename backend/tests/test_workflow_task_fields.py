@@ -10,6 +10,8 @@ import subprocess
 import pytest
 
 from core.skills_registry import SkillResolution, SkillRow
+from infra.db_fts import _init_messages_fts
+from infra.input_admission import accept_thread_input
 from infra.schema import SCHEMA_SQL
 from infra.system_package import system_package_dir
 from plans import service
@@ -24,6 +26,10 @@ from tools.workflow_task_fields import (
 
 
 _MUTATION_IDS = itertools.count()
+_WORKFLOW_TASK_INTENT = {
+    "intent": "Build the requested workflow task.",
+    "intent_words": [{"quote": "Build the requested workflow task.", "role": "authority"}],
+}
 
 
 @pytest.fixture
@@ -35,6 +41,11 @@ def db():
     connection.execute(
         "INSERT INTO threads (id,user_id,created_at,updated_at) VALUES ('owner','user','t','t')"
     )
+    _init_messages_fts(connection)
+    accept_thread_input(
+        "owner", role="user", content="Build the requested workflow task.", intent="apply_now",
+        message_id="workflow-authority", db=connection,
+    )
     connection.commit()
     yield connection
     connection.close()
@@ -45,6 +56,15 @@ def _actor() -> PlanActor:
 
 
 def _mutate(db, plan_id, operation, params, workflow_version=None):
+    if operation in {"add", "insert"} and params.get("kind", "task") == "task":
+        params = {
+            **params,
+            "intent": params.get("intent", "Build the requested workflow task."),
+            "intent_words": params.get(
+                "intent_words",
+                [{"quote": "Build the requested workflow task.", "role": "authority"}],
+            ),
+        }
     return mutate(
         plan_id,
         operation,
@@ -365,6 +385,11 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
     db = get_db()
     try:
         plan = service.ensure_plan("thread", thread_id, db=db)
+        _init_messages_fts(db)
+        accept_thread_input(
+            thread_id, role="user", content="Build the requested workflow task.", intent="apply_now",
+            message_id="workflow-tool-authority", db=db,
+        )
         identity = open_turn(db, thread_id)
     finally:
         db.close()
@@ -387,6 +412,7 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
             "params": {
                 "kind": "task", "title": "Missing rating", "acceptance_criteria": "Never", "size": "S",
                 "parent_id": phase["id"], "workflow_ref": "sample", "workflow_step": "build",
+                **_WORKFLOW_TASK_INTENT,
             },
         },
     )
@@ -398,6 +424,7 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
                 "kind": "task", "title": "Build", "acceptance_criteria": "Build passes", "size": "S",
                 "parent_id": phase["id"], "workflow_ref": "sample",
                 "workflow_step": "build", "difficulty": "standard",
+                **_WORKFLOW_TASK_INTENT,
             },
         },
     ))
@@ -412,6 +439,7 @@ async def test_registered_plan_tools_round_trip_effective_workflow_fields(
             "params": {
                 "kind": "task", "title": "Caller version", "acceptance_criteria": "Never", "size": "S",
                 "workflow_ref": "sample", "workflow_version": "invented",
+                **_WORKFLOW_TASK_INTENT,
             },
         },
     )

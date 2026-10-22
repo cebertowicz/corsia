@@ -1,0 +1,32 @@
+.account-manager { display: contents; }
+.account-manager .field .err,
+.account-manager .msg.err,
+.account-manager .btn.danger { color: var(--red-text); }
+.account-manager .btn.ghost { color: var(--text-secondary); }
+.account-manager .btn.primary:hover:not(:disabled) { background: var(--accent-wash); }
+.account-manager .accounts { display: grid; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
+.account-manager .empty-row,
+.account-manager .account-actions { display: flex; align-items: center; gap: var(--space-2); min-height: var(--list-row-min-height); }
+.account-manager .empty-row { justify-content: space-between; color: var(--text-secondary); font-size: var(--text-caption); }
+.account-manager .account-actions { flex-wrap: wrap; }
+/* As on the project page: the switch keeps its column; a save state spans its own row below. */
+.account-manager .rollover-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--space-2); row-gap: var(--space-1); min-height: var(--list-row-min-height); font-size: var(--text-subhead); color: var(--text-primary); }
+.account-manager .rollover-row > span:first-child { min-width: 0; }
+.account-manager .policy-control { display: contents; }
+.account-manager .rollover-row .policy-status { grid-column: 1 / -1; justify-self: end; text-align: right; }
+.account-manager .override-summary { margin: 0; font-size: var(--text-caption); color: var(--text-tertiary); }
+.account-manager .project-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
+.account-manager .account { position: relative; padding: var(--space-1) 0; outline: none; }
+.account-manager .account:focus { outline: var(--space-1) solid var(--accent-wash); outline-offset: calc(-1 * var(--space-1)); border-radius: var(--radius-xs); }
+.account-manager .account-main { display: flex; align-items: start; justify-content: space-between; gap: var(--space-3); }
+.account-manager .account-copy { flex: 1; min-width: 0; }
+.account-manager .account-meta { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); margin-top: var(--space-1); color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
+/* The ordinal hangs in its own gutter; account detail rows align with the name column. */
+.account-manager .account.ordered .account-meta,
+.account-manager .account.ordered > .overage-row,
+.account-manager .account.ordered > .account-billing,
+.account-manager .account.ordered > .signin-state { margin-inline-start: calc(var(--space-3) + var(--space-2)); }
+.account-manager .inline-actions,
+.account-manager .signin-actions { display: flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; }
+.account-manager .accounts .btn.ghost { padding-inline: 0; }
+.account-manager .signin-state { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); color: var(--text-secondary); font-size: var(--text-footnote); min-width: 0; }

@@ -76,14 +76,14 @@ describe('groupByHost', () => {
 			[p({ name: 'omlx', type: 'network' })],
 			[
 				s({ id: 'legacy', instance_id: '127.0.0.1:8000', instance_name: 'This Mac', endpoints: [endpoint('legacy')] }),
-				s({ id: 'managed', instance_id: 'corsia-managed', instance_name: "CORSIA's own oMLX", endpoints: [endpoint('managed')] }),
+				s({ id: 'managed', instance_id: 'corsia-managed', instance_name: 'Local', endpoints: [endpoint('managed')] }),
 			],
 			null,
 		);
 
 		expect(groups).toHaveLength(1);
 		expect(groups[0].name).toBe('This computer');
-		expect(groups[0].providers.map(provider => provider.label)).toEqual(['This Mac', "CORSIA's own oMLX"]);
+		expect(groups[0].providers.map(provider => provider.label)).toEqual(['This Mac', 'Local']);
 	});
 
 	it('groups remote daemons sharing machine_id under one host', () => {

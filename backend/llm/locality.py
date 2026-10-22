@@ -143,12 +143,12 @@ def set_project_cloud_models_off(project_id: str, *, cloud_models_off: bool, db=
     compare-and-set revision: two writers can only agree on the last value, never lose an update.
     Held inputs are re-offered by the caller's catalog notification, whose claim re-resolves them.
     """
-    from connections.vendor_accounts import AccountError
+    from connections.provider_policy import ProjectNotFound
     from infra.database import write_transaction
 
     with write_transaction(db, scope="project_cloud_models_off") as connection:
         if not connection.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone():
-            raise AccountError("project does not exist")
+            raise ProjectNotFound("project does not exist")
         connection.execute(
             """INSERT INTO project_inference_policies(project_id, cloud_models_off)
                VALUES (?, ?)

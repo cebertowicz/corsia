@@ -66,10 +66,15 @@ def open_user_step(
             str(row["node_id"])
             for row in admission_attempts.current_for_executor(connection, thread_id)
         ]
+        intent_node_id = None
+        if len(selected) == 1:
+            from plans import intent_words
+
+            intent_node_id = str(intent_words.canonical(connection, selected[0])["id"])
         node = service.add_node(
             plan.id, kind="task", title=title, acceptance_criteria=title,
             description=description, assignee="user", actor_id=None,
-            provenance=provenance, db=connection,
+            provenance=provenance, intent_node_id=intent_node_id, db=connection,
         )
         receipts.record(connection, plan_id=plan.id, result={"node_id": node.id}, **receipt)
         for waiting in selected:

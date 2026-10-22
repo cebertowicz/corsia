@@ -17,6 +17,7 @@ import { checkpointsByThread } from '$lib/stores/checkpoints';
 import { _resetTurnStateForTests, applyLifecycle } from '$lib/ws/turnState';
 import { _resetLiveStepForTests } from './plans/planLiveStep';
 import FocusProofSurface from '$lib/__tests__/fixtures/FocusProofSurface.svelte';
+import { leadOpenMs, seedOpenTime } from '$lib/__tests__/fixtures/focusRuns';
 import { reactiveProps } from '$lib/__tests__/fixtures/reactiveProps.svelte';
 import { needsWakeRetry } from './pendingWakeRetry';
 import { THREAD, CAUSE, cases, settledCases, unavailableCases, timingRows, summary, work, input, said, card, tool, auto, type Case } from '$lib/__tests__/fixtures/focusPauseProof';
@@ -192,7 +193,8 @@ describe('G3/G5 current-API CHARACTERIZATION, not writer/reachability/resolution
     const c: Case = { name: 'timing', rows: timingRows(type, stamp, replyAt), cards: [], summaries: { t: summary('completed', 2) }, live: null, groups: [['a2'], ['b4']], shown: [], anchors: [] };
     assertPositiveGround(c); expect(c.rows.map(r => r.seq)).toEqual([1, 2, 3, 4, 5]); const built = chain(c);
     expect(built.entries.map(e => e.kind)).toEqual(['message', 'fold', 'message', 'fold', 'message']); expect(groups(built.entries)).toEqual(c.groups);
-    const labels = runLabels(built.entries, c.summaries, true);
+    const labels = runLabels(built.entries, c.summaries, true, leadOpenMs(c.summaries));
+    seedOpenTime(built.entries, c.summaries, { threadId: THREAD });
     expect(built.entries.flatMap(e => e.kind === 'fold' ? [labels.get(e.id)] : [])).toEqual(expected);
     await render(c); expect([...host.querySelectorAll('.fold-toggle')].map(b => b.textContent?.replace('▸', '').trim())).toEqual(expected);
   });

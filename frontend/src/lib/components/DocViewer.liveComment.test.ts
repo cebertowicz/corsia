@@ -36,7 +36,7 @@ beforeEach(() => {
 	connectionState.set('connected'); stop = startLiveDocuments();
 	api.fetchContent.mockResolvedValue({ text: 'disk copy', writable: true, artifact: { id: 'artifact' }, freshness: null });
 	api.fetchRevision.mockResolvedValue({ exists: true, writable: true, artifact_id: 'artifact', freshness: null });
-	api.fetchComments.mockResolvedValue({ comments: [], feedback: { open_count: 0, owner_label: null, grace_closes_at: null, undelivered_batches: [] } });
+	api.fetchComments.mockResolvedValue({ comments: [], feedback: { open_count: 0, owner_label: null, undelivered_batches: [] } });
 	api.postComment.mockImplementation(async (_artifact, fields) => ({ id: fields.client_id, artifact_id: 'artifact',
 		body: fields.body, anchor_text: fields.anchor_text, from_off: fields.from_off, to_off: fields.to_off,
 		author: 'you', author_kind: 'user', created_at: '2026-10-07T00:00:00Z', parent_id: null, review: false, resolved: false, acked: false, replies: [] }));

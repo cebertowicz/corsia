@@ -42,9 +42,14 @@ class WatchExpirySource:
             if watch.owner_thread is None:
                 continue
             # A scheduled task's wake names the task and why it was set aside
-            # (W2), an event wait's says the event did not arrive (W4); every
-            # other watch keeps the one fixed summary.
-            summary = public.scheduled_wake(db, watch) or public.event_wake(db, watch)
+            # (W2), an event wait's says the event did not arrive (W4), a late
+            # one says its time was missed (EW2); every other watch keeps the
+            # one fixed summary.
+            summary = (
+                public.scheduled_wake(db, watch)
+                or public.event_wake(db, watch)
+                or public.late_wake(watch.condition.get("value"), now)
+            )
             requests.append(
                 TriggerRequest(
                     kind=self.kind,
@@ -108,7 +113,7 @@ class WatchExpirySource:
     ) -> tuple[str, str, dict] | None:
         """Expire once, append a node audit, and re-arm T0 after settlement."""
 
-        if trigger.subject_id is None or outcome == "deferred":
+        if trigger.subject_id is None:
             return None
         watch = watches.get_watch(trigger.subject_id, db=db)
         expired = watches.expire_watch(trigger.subject_id, db=db)

@@ -124,6 +124,23 @@ def test_a_namespace_another_live_agent_holds_is_refused() -> None:
         sync(connection, owner_thread_id="agent-b", path=own("agent-b"), text=MEASURES)
 
 
+def test_event_declarations_stay_in_their_namespace_and_use_a_known_mode(tmp_path: Path) -> None:
+    outside_namespace = MEASURES.replace("mail.triaged", "other.triaged")
+    assert "event other.triaged is outside namespace mail" in refused(tmp_path, outside_namespace)
+    invalid_use = MEASURES.replace("    dedupe: [message_ref, run_id]", "    dedupe: [message_ref, run_id]\n    use: wake")
+    assert "event mail.triaged use must be record, route or both" in refused(tmp_path, invalid_use)
+
+
+@pytest.mark.parametrize("use", ["route", "both"])
+def test_a_routed_event_refuses_a_login_and_carries_a_num(use: str) -> None:
+    routed = MEASURES.replace("    dedupe: [message_ref, run_id]", f"    dedupe: [message_ref, run_id]\n    use: {use}")
+    with_num = routed.replace("      message_ref: id\n", "      message_ref: id\n      cost_usd: num\n")
+    sync(db(), owner_thread_id="agent-a", path=own("agent-a"), text=with_num)
+    with_login = routed.replace("      message_ref: id\n", "      message_ref: id\n      sender: login\n")
+    with pytest.raises(ValueError, match=f'is use: {use}, so attribute sender cannot be "login"'):
+        sync(db(), owner_thread_id="agent-a", path=own("agent-a"), text=with_login)
+
+
 def test_qg_declaration_copy_syncs_with_version_attr_can_decide_and_decides_as(tmp_path: Path) -> None:
     text = (FIXTURES / "qg_measures.yaml").read_text()
     path = skill_file(tmp_path, text)

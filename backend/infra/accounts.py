@@ -213,25 +213,25 @@ def create_user(
 
 
 def create_first_account(
-    username: str, password: str, *, call_name: str | None = None, email: str = "",
+    username: str, password: str, *, full_name: str | None = None, email: str = "",
     first_run_wake: bool = True, first_run_path: str = "script",
 ) -> str:
     """Create the install's first account: the one owner behind ``corsia user add`` and setup.
 
     Refuses atomically (:class:`FirstAccountExists`) once any account exists, and
-    refuses a name outside the existing data owners. With ``call_name`` it also
+    refuses a name outside the existing data owners. With ``full_name`` it also
     writes the workspace profile: staged before the transaction, published as
-    its last step, undone if the commit fails. A blank ``call_name`` is refused
+    its last step, undone if the commit fails. A blank ``full_name`` is refused
     first; an unwritable profile folder raises ``OSError`` with no account made.
     """
     from infra import config
-    if call_name is not None and not user_profile.one_line(call_name):
+    if full_name is not None and not user_profile.one_line(full_name):
         raise AccountError("A name is required.")
     name, encoded = _credentials(username, password)
     staged = None
-    if call_name is not None:
+    if full_name is not None:
         staged = user_profile.stage_user_profile(
-            config.WORKSPACE, call_name, user_profile.mac_timezone(), email,
+            config.WORKSPACE, full_name, user_profile.mac_timezone(), email,
         )
     try:
         announce = _create_account(
