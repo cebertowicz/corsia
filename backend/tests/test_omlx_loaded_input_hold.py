@@ -1,12 +1,26 @@
 """Disk availability cannot release an input the oMLX provider cannot run."""
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 
+async def _publish_loaded(source):
+    from llm import network_discovery, server_observation
+
+    if source == 'sweep':
+        await server_observation.record_reachable(
+            {'id': 'loaded-test-server', 'status': 'online'}, loaded={'model'},
+        )
+    else:
+        network_discovery.notify_cached_model_loaded('loaded-test-server', 'model')
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('supplied_target', [False, True], ids=['resolved', 'supplied'])
-async def test_unloaded_input_holds_until_catalog_load_notification(isolated_db, monkeypatch, supplied_target):
+@pytest.mark.parametrize('load_source', ['notification', 'sweep'])
+async def test_unloaded_input_holds_until_catalog_load_notification(
+    isolated_db, monkeypatch, supplied_target, load_source,
+):
     from infra import app_loop, thread_execution
     from infra import unavailable_model_recovery as recovery
     from infra.send_types import InboxQueuedInput
@@ -29,6 +43,8 @@ async def test_unloaded_input_holds_until_catalog_load_notification(isolated_db,
     thread = dict(db.execute("SELECT * FROM threads WHERE id='loaded-thread'").fetchone())
     db.close()
     monkeypatch.setattr(network_discovery, '_LOADED_BY_SERVER', {})
+    notify = Mock(wraps=network_discovery._notify_models_changed_safe)
+    monkeypatch.setattr(network_discovery, '_notify_models_changed_safe', notify)
     monkeypatch.setattr(model_status, '_network_server_status', lambda *_args: {'loaded-test-server': 'online'})
     monkeypatch.setattr(model_status, '_loaded_model_ids_fn', lambda: network_discovery.get_loaded_model_ids)
     monkeypatch.setattr(app_loop, 'submit', lambda coro: asyncio.create_task(coro))
@@ -48,17 +64,21 @@ async def test_unloaded_input_holds_until_catalog_load_notification(isolated_db,
         assert model in error and 'model_not_loaded' in error
         await recovery._resume_held_heads()
         driven.assert_not_awaited()
-        network_discovery.notify_cached_model_loaded('loaded-test-server', 'model')
+        await _publish_loaded(load_source)
         # Join the existing coalescing mechanism; no provider or timer is involved.
         await asyncio.sleep(0)
         if recovery._TASK is not None:
             await recovery._TASK
-        await recovery._resume_held_heads()
-        network_discovery.notify_cached_model_loaded('loaded-test-server', 'model')
+        driven.assert_awaited_once()
+        if load_source == 'notification':
+            await recovery._resume_held_heads()
+        await _publish_loaded(load_source)
         await asyncio.sleep(0)
         if recovery._TASK is not None:
             await recovery._TASK
         driven.assert_awaited_once()
+        if load_source == 'sweep':
+            notify.assert_called_once_with()
         claimed = driven.await_args.args[0]
         assert [item.message_id for item in claimed.items][-1] == 'loaded-input'
     finally:

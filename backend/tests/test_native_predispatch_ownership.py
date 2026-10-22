@@ -73,8 +73,13 @@ def _assert_stopped_before_warm_release(db, turn_id, runtime_task):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('stop', [False, True], ids=['prefix-reuse', 'stop'])
-async def test_native_warm_wait_has_one_turn_owner(isolated_db, monkeypatch, tmp_path, stop):
+@pytest.mark.parametrize(
+    "interruption", [None, "user-stop", "runtime-boundary"],
+    ids=["prefix-reuse", "user-stop", "runtime-boundary"],
+)
+async def test_native_warm_wait_has_one_turn_owner(
+    isolated_db, monkeypatch, tmp_path, interruption,
+):
     """No provider write precedes the warm; Stop cancels without a send error."""
     from core import native_turn_runtime, thread_warm
     from infra import state, thread_execution as execution
@@ -94,25 +99,40 @@ async def test_native_warm_wait_has_one_turn_owner(isolated_db, monkeypatch, tmp
     context = await _render_matching_prefix(monkeypatch, tmp_path, target)
     frames = _capture_frames(monkeypatch, target)
     release_warm, joined_warm = asyncio.Event(), asyncio.Event()
+    warm_cancelled, warm_joined = asyncio.Event(), asyncio.Event()
     writes = []
+    cancelled_loop_payloads = []
 
     async def warm():
-        await release_warm.wait()
+        try:
+            await release_warm.wait()
+        except asyncio.CancelledError:
+            warm_cancelled.set()
+            warm_joined.set()
+            raise
         return {'ok': True}
 
     warm_task, _, _ = await thread_warm.start_thread_warm(
         'warm-thread', 'prefix', warm, model=target.catalog_id, admission_check=lambda: None)
     original_join = thread_warm.join_requested_warm_for_delivery
 
-    async def join(*args):
+    async def join(*args, **kwargs):
         joined_warm.set()
-        return await original_join(*args)
+        return await original_join(*args, **kwargs)
 
     async def prepare(batch, **kwargs):
         return PreparedBatch(thread, target, 'native', False, 'hello', None, [], None,
                              context, None, {}, batch=batch)
 
     async def provider(**kwargs):
+        # The canonical Native loop still runs on a pre-set cancellation so it
+        # emits its terminal payload and validates pending tool call IDs, but it
+        # cannot make a provider write before its matching warm finishes.
+        if kwargs['cancel_event'].is_set():
+            payload = {'terminal_owner': 'native-loop'}
+            cancelled_loop_payloads.append(payload)
+            await kwargs['on_step']('turn_cancelled', payload)
+            return
         assert warm_task.done()
         assert kwargs['prepared_context'].messages == context.messages
         writes.append(kwargs['prepared_context'].messages)
@@ -135,21 +155,50 @@ async def test_native_warm_wait_has_one_turn_owner(isolated_db, monkeypatch, tmp
         assert any(frame['type'] == 'turn_activity' for frame in frames), frames
         turn = db.execute("SELECT id FROM active_turns WHERE thread_id='warm-thread' AND status='running'").fetchone()[0]
         runtime_task = state._active_turn_tasks.get('warm-thread')
-        if stop:
+        if interruption == 'user-stop':
+            # The user Stop returns after its bounded owner chance, so a stuck
+            # pre-dispatch runtime fails this assertion without waiting 10s.
+            from subagents import live_registry
+
+            monkeypatch.setattr(live_registry, 'STOP_LOCK_TIMEOUT_S', 1.0)
             receipt = await do_stop(
                 {'id': 'user-1'}, 'warm-thread', state._active_turns.get('warm-thread'),
                 state._active_llm_tasks.get('warm-thread'), turn,
                 owns_thread_fn=AsyncMock(return_value=True))
             assert receipt.outcome == 'stopped'
+        elif interruption == 'runtime-boundary':
+            from subagents import cc_runtime, codex_runtime
+            from thread import runtime_boundary
+
+            monkeypatch.setattr(runtime_boundary, '_DESTRUCTIVE_QUIESCE_TIMEOUT_S', 0.05)
+            monkeypatch.setattr(cc_runtime, 'stop', AsyncMock(return_value=False))
+            monkeypatch.setattr(codex_runtime, 'stop', AsyncMock(return_value=False))
+            effects = await runtime_boundary.quiesce_exact_turn_owner(
+                'warm-thread',
+                expected_turn=state._active_turns['warm-thread'].turn_identity,
+                user_id='user-1',
+            )
+            assert effects['native_cancelled'] is True
+        if interruption is not None:
+            assert cancelled_loop_payloads == [{'terminal_owner': 'native-loop'}]
             _assert_stopped_before_warm_release(db, turn, runtime_task)
+            if interruption == 'user-stop':
+                assert warm_cancelled.is_set()
+                assert warm_joined.is_set()
+                assert warm_task.done() and warm_task.cancelled()
+                assert 'warm-thread' not in state._active_warm_tasks
+            else:
+                assert not warm_task.done()
+                assert not warm_task.cancelled()
         release_warm.set()
         await asyncio.gather(task, return_exceptions=True)
         if runtime_task is not None:
             await asyncio.gather(runtime_task, return_exceptions=True)
         assert not [frame for frame in frames if frame['type'] == 'error'], frames
         delivery = db.execute("SELECT delivery_state,write_outcome FROM messages WHERE id='warm-input'").fetchone()
-        assert tuple(delivery) == (('cancelled', 'proved_no_write') if stop else ('delivered', 'accepted'))
-        assert len(writes) == (0 if stop else 1)
+        cancelled = interruption is not None
+        assert tuple(delivery) == (('cancelled', 'proved_no_write') if cancelled else ('delivered', 'accepted'))
+        assert len(writes) == (0 if cancelled else 1)
     finally:
         release_warm.set()
         await asyncio.gather(task, warm_task, *([runtime_task] if runtime_task else []), return_exceptions=True)
@@ -174,3 +223,47 @@ async def test_preset_cancellation_bypasses_warm_and_keeps_provider_loop_validat
     assert await native_turn_runtime._run_native_turn(turn, {}) == 'cancelled'
     join.assert_not_awaited()
     runner.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_await_thread_warm_distinguishes_warm_and_waiter_cancellation(monkeypatch):
+    """A replacement can cancel its warm; cancelling delivery cannot."""
+    from core import thread_warm
+    from infra import state
+
+    shielded = asyncio.Event()
+    original_shield = thread_warm.asyncio.shield
+
+    def shield(awaitable):
+        shielded.set()
+        return original_shield(awaitable)
+
+    monkeypatch.setattr(thread_warm.asyncio, 'shield', shield)
+    state._active_warm_tasks.clear()
+    try:
+        release = asyncio.Event()
+        warm = asyncio.create_task(release.wait())
+        state._active_warm_tasks['replacement'] = warm
+        waiter = asyncio.create_task(thread_warm.await_thread_warm('replacement'))
+        await shielded.wait()
+        warm.cancel()
+        assert await waiter is False
+
+        shielded.clear()
+        release = asyncio.Event()
+        warm = asyncio.create_task(release.wait())
+        state._active_warm_tasks['delivery'] = warm
+        waiter = asyncio.create_task(thread_warm.await_thread_warm('delivery'))
+        await shielded.wait()
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert not warm.cancelled()
+        release.set()
+        await warm
+    finally:
+        for task in tuple(state._active_warm_tasks.values()):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*state._active_warm_tasks.values(), return_exceptions=True)
+        state._active_warm_tasks.clear()

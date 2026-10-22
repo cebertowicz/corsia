@@ -141,14 +141,15 @@ async def _run_native_turn(
 
     from core.thread_warm import join_requested_warm_for_delivery
 
-    # Wait only after the runtime and activity frame belong to this Turn.
-    # Stop then cancels this waiter through the same terminal owner as a call.
+    # Wait only after the runtime and activity frame belong to this Turn. A
+    # cancellation wins the wait without taking ownership of the warm, then
+    # proceeds through the loop's canonical pre-set cancellation path.
     if not turn.cancel_event.is_set():
         await join_requested_warm_for_delivery(
-            turn.thread_id, turn.catalog_id or turn.model,
+            turn.thread_id,
+            turn.catalog_id or turn.model,
+            cancel_event=turn.cancel_event,
         )
-        if turn.cancel_event.is_set():
-            return "cancelled"
     # Pre-set cancellation still runs the loop's pending tool-result validation.
     await run_turn_with_steps(
         agent=turn.agent,
