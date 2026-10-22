@@ -1,0 +1,4 @@
+[
+  { "target": { "kind": "dns_sd", "instance": "Studio" }, "code": "K7QX" },
+  { "target": { "kind": "address", "host": "127.0.0.1", "port": 1 }, "code": "K7QX" }
+]

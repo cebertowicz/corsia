@@ -3,6 +3,7 @@ import {
 	SETTINGS_PATH, codeRefusalLine, disconnectRemote, parseAddress, refusesOnCodeScreen, remoteDiscovered, remotePair, shellInfo,
 	unreachableLine, type PairReason,
 } from './remoteShell';
+import pairRequests from '../../../testdata/remote-pair-requests.json';
 
 afterEach(() => {
 	delete (window as unknown as Record<string, unknown>).__CORSIA_SHELL__;
@@ -36,6 +37,13 @@ describe('the shell commands', () => {
 		await disconnectRemote();
 		expect(invoke).toHaveBeenCalledWith('remote_pair', { target: { kind: 'dns_sd', instance: 'Studio' }, code: 'K7QX' });
 		expect(invoke).toHaveBeenCalledWith('disconnect_remote');
+	});
+	// The shell's `remote_pair_accepts_the_arguments_the_page_sends` invokes the real command with these same arguments.
+	it.each(pairRequests)('sends remote_pair the arguments the shell accepts: %j', async (request) => {
+		const invoke = vi.fn(async () => ({ ok: true, name: 'Studio' }));
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
+		await remotePair(request.target as Parameters<typeof remotePair>[0], request.code);
+		expect(invoke).toHaveBeenCalledWith('remote_pair', request);
 	});
 	it.each(REASONS)('passes the %s refusal through unchanged, with versions', async (reason) => {
 		vi.stubGlobal('__TAURI_INTERNALS__', { invoke: vi.fn(async () => ({ ok: false, reason, app_version: '1.4', host_version: '1.2' })) });
