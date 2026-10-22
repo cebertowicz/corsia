@@ -527,7 +527,7 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
             "then `mark_done` the task.") in doc
     # A returned helper's task waits for review (accept); a failed or empty one stays active (mark_done).
     assert "puts its `About you: <heading>` task up for your review: `accept` it once that heading's suggestion is in" in doc
-    assert "leaves its task active: write that heading's suggestion yourself, then `mark_done` the task" in doc
+    assert "write that heading's suggestion yourself, then settle its task: `accept` it if it is awaiting your review, else `mark_done`" in doc
     assert "When every `About you: <heading>` task is settled and every suggestion is in" in doc
     assert "`bound_model` `source` is `omlx`): start no helper. Write the suggestions yourself, one heading at a time." in doc
     # One review ask, worded for the review bar with or without the accept-all button.
