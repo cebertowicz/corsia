@@ -44,6 +44,11 @@ class AccountProvider:
     registration: Callable[[dict[str, str]], tuple[str | None, str | None]] | None = None
     #: The stable scope names a row may display; configured by the provider rather than duplicated in a UI.
     display_scopes: tuple[str, ...] = ()
+    #: Set when the credential is the account's key entry value as typed, not a JSON bundle: it is
+    #: exposed as a one-field bundle under this name (an app password).
+    raw_credential_field: str | None = None
+    #: The key-store name prefix of this provider's accounts; None keeps the shared one.
+    credential_prefix: str | None = None
 
     @property
     def required_fields(self) -> frozenset[str]:

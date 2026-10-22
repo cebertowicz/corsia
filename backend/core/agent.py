@@ -265,9 +265,10 @@ def _register_google_tools(agent: CORSIAAgent) -> None:
     from tools.google_calendar import CalendarDraftInviteTool, CalendarListTool, CalendarSendInviteTool
     from tools.google_email import EmailDraftTool, EmailSendTool
     from tools.google_email_read import EmailReadTool, EmailSearchTool
+    from tools.mail_host_connect import MailHostConnectTool
 
-    agent.tools.register(EmailSearchTool())
-    agent.tools.register(EmailReadTool())
+    for tool in (MailHostConnectTool(), EmailSearchTool(), EmailReadTool()):
+        agent.tools.register(tool)
     agent.tools.register(GoogleConnectTool())
     agent.tools.register(GoogleStatusTool())
     agent.tools.register(EmailDraftTool())

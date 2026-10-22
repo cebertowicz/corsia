@@ -52,7 +52,10 @@ PROVIDER_PREFIX = "provider-"
 SERVER_PREFIX = "server-"
 GOOGLE_PREFIX = "google-"
 CONNECTED_ACCOUNT_PREFIX = "connected-account--google--"
-RESERVED_PREFIXES = (PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX, GOOGLE_PREFIX, CONNECTED_ACCOUNT_PREFIX)
+#: A mail-host account's app password; the suffix is the account's id.
+MAILHOST_PREFIX = "connected-account--mailhost--"
+RESERVED_PREFIXES = (PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX, GOOGLE_PREFIX, CONNECTED_ACCOUNT_PREFIX, MAILHOST_PREFIX)
+ACCOUNT_ID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 #: The platform-held Google sign-in: the person's OAuth client and the refresh token it earned.
 GOOGLE_CLIENT_ID = f"{GOOGLE_PREFIX}client-id"
 GOOGLE_CLIENT_SECRET = f"{GOOGLE_PREFIX}client-secret"
@@ -102,6 +105,7 @@ def is_managed_name(name: str) -> bool:
         name in BUILTINS
         or name in GOOGLE_ENTRIES
         or (name.startswith(CONNECTED_ACCOUNT_PREFIX) and bool(name[len(CONNECTED_ACCOUNT_PREFIX):]))
+        or (name.startswith(MAILHOST_PREFIX) and bool(ACCOUNT_ID_PATTERN.match(name[len(MAILHOST_PREFIX):])))
         or (name.startswith(PROVIDER_PREFIX) and name[len(PROVIDER_PREFIX):] in PROVIDER_NAMES)
         or (name.startswith(SERVER_PREFIX) and bool(SERVER_ID_PATTERN.match(name[len(SERVER_PREFIX):])))
         or is_mcp_entry_name(name)
@@ -203,6 +207,10 @@ def set_value(name: str, value: object, *, db: sqlite3.Connection | None = None)
     The settings table is never read or written.
     """
     _require_entry(name, _db(db))
+    if name.startswith(MAILHOST_PREFIX):
+        from connections.mailhost.store import normalize_pasted  # Imported here: the store reads this module.
+
+        value = normalize_pasted(name, value, _db(db))
     _store(name, validated_value(value), db)
 
 
@@ -250,6 +258,8 @@ def remove_entry(name: str, *, db: sqlite3.Connection | None = None) -> None:
     """Remove an added entry and its value. A built-in entry cannot be removed."""
     if name in BUILTINS:
         raise KeyStoreError("A built-in key can be cleared but not removed.")
+    if name.startswith(MAILHOST_PREFIX):
+        raise KeyStoreError("A mail account's app password can be cleared but not removed. It goes when you remove the account.")
     if is_managed_name(name):
         drop_managed_entry(name, db=db)
         return

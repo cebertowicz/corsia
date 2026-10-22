@@ -1,0 +1,291 @@
+"""Mail hosts through the surfaces agents and people use: ``mail_host_connect``, Settings › Keys,
+``email_search``, ``email_read`` and ``calendar_list``. Servers are local TLS fakes (``mailhost_fakes``)."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import uuid
+from types import SimpleNamespace
+from typing import Any
+
+import httpx
+import pytest
+from auth_fixtures import OWNER_SESSION_TOKEN, OWNER_USER, TEST_PASSWORD, seed_account
+from fastapi import FastAPI
+from mailhost_fakes import HOST_REPLY_MARKER
+from mailhost_helpers import (  # noqa: F401  (fixtures)
+    ADDRESS, BODY_CANARY, PASSWORD, add_account, authority, conductor, count_rows, env, row, run_check, servers,
+)
+
+from api import key_write_guard
+from api import keys as keys_api
+from connections import account_actions, mail_accounts
+from connections.google import accounts as google_accounts
+from connections.google.client import GoogleError
+from connections.mail import email_screen
+from connections.mailhost import check, store
+from infra import key_store
+from infra.database import get_db
+from tests.registry_helpers import make_session
+from tools.google_calendar import CalendarListTool
+from tools.google_email_read import EmailReadTool, EmailSearchTool
+from tools.mail_host_connect import MailHostConnectTool
+
+pytestmark = pytest.mark.asyncio
+WINDOW = {"time_min": "2026-10-22T00:00:00-07:00", "time_max": "2026-10-28T00:00:00-07:00"}
+
+
+def _no_leak(*texts: str) -> None:
+    for text in texts:
+        assert PASSWORD not in text and HOST_REPLY_MARKER not in text and TEST_PASSWORD not in text
+
+
+async def _connect(conductor_thread: str, **arguments) -> Any:
+    out = await MailHostConnectTool().execute(_thread_id=conductor_thread, **arguments)
+    return out if out.startswith("Error") else json.loads(out)
+
+
+def _typed(built, **extra) -> dict:
+    return {"imap": f"127.0.0.1:{built.imap.port}", "smtp": f"127.0.0.1:{built.smtp.port}", "caldav": built.caldav.url, **extra}
+
+
+@pytest.fixture
+def client(env, monkeypatch):
+    seed_account(OWNER_USER, "second-session-credential-for-mailhost-tests", kind="session")
+    monkeypatch.setattr(key_write_guard, "_key_write_lock", asyncio.Lock())
+    monkeypatch.setattr(key_write_guard, "_pending", {})
+    app = FastAPI()
+    app.include_router(keys_api.router)
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+def _auth() -> dict:
+    return {"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"}
+
+
+async def _put(client, name: str, value: str = PASSWORD):
+    return await client.put(f"/api/keys/{name}/value", headers=_auth(), json={"value": value, "password": TEST_PASSWORD})
+
+
+@pytest.fixture
+def connected(conductor, servers, client):
+    """A connected account, set through the real Keys route."""
+    built = servers()
+    account_id = add_account(built, conductor)["account_id"]
+    return SimpleNamespace(built=built, account_id=account_id, thread=conductor, client=client,
+                           key=key_store.MAILHOST_PREFIX + account_id)
+
+
+async def _set_through_keys(found) -> None:
+    saved = await _put(found.client, found.key)
+    assert saved.status_code == 200, saved.text
+    _no_leak(saved.text)
+    await check.wait_for_checks()
+    assert row(found.account_id)["state"] == "connected"
+
+
+@pytest.fixture
+def clean_screen(monkeypatch):
+    async def screened(*_args, **_kwargs):
+        return email_screen.Screen(status=email_screen.STATUS_SCREENED, kind="invoice", needs_person="today")
+
+    monkeypatch.setattr(email_screen, "screen_message", screened)
+
+
+# -- mail_host_connect ----------------------------------------------------------------------------
+
+
+async def test_connect_adds_one_waiting_row_and_its_key_and_never_asks_for_a_password(conductor, servers) -> None:
+    built = servers()
+    result = await _connect(conductor, address=ADDRESS, **_typed(built))
+    assert result["status"] == "waiting" and result["already_existed"] is False
+    assert result["key_name"].startswith(key_store.MAILHOST_PREFIX) and result["link"].endswith(result["account_id"])
+    assert sorted(result["password_goes_to"]) == ["127.0.0.1"]
+    assert "never ask for, read or repeat the password" in result["next"]
+    entry = key_store.entry_metadata(result["key_name"])
+    assert entry["is_set"] is False and entry["label"] == f"mail.test key: {ADDRESS}"
+    assert row(result["account_id"])["state"] == "needs_sign_in" and count_rows() == 1
+    _no_leak(json.dumps(result))
+
+
+async def test_a_second_call_for_the_same_address_changes_no_server_and_adds_no_row(conductor, servers) -> None:
+    built = servers()
+    first = await _connect(conductor, address=ADDRESS, **_typed(built))
+    before = row(first["account_id"])["endpoints"]
+    again = await _connect(conductor, address=ADDRESS.upper(), imap="attacker.example:993", smtp="attacker.example:465",
+                           caldav="https://attacker.example/")
+    assert again["account_id"] == first["account_id"] and again["already_existed"] is True
+    assert row(first["account_id"])["endpoints"] == before and count_rows() == 1
+    assert "attacker" not in json.dumps(again)
+
+
+async def test_a_known_host_takes_its_servers_from_the_table_and_ignores_typed_ones(conductor) -> None:
+    result = await _connect(conductor, address="pat@icloud.com", imap="attacker.example", smtp="attacker.example")
+    stored = row(result["account_id"])["endpoints"]
+    assert (stored["imap"]["host"], stored["smtp"]["host"]) == ("imap.mail.me.com", "smtp.mail.me.com")
+    assert result["host"] == "iCloud" and result["app_password_url"].startswith("https://account.apple.com")
+    assert "password_goes_to" not in result
+
+
+async def test_zoho_says_to_turn_imap_on_before_the_password(conductor) -> None:
+    result = await _connect(conductor, address="pat@zoho.com")
+    assert "IMAP" in result["first_turn_on_imap"] and "IMAP" in result["next"]
+
+
+async def test_gmail_microsoft_and_unknown_hosts_are_refused_without_adding_a_row(conductor) -> None:
+    assert "google_connect" in await _connect(conductor, address="pat@gmail.com")
+    assert "microsoft_connect" in await _connect(conductor, address="pat@Outlook.com")
+    assert "doesn't know this address's mail servers" in await _connect(conductor, address="pat@unknown.example")
+    refused = await _connect(conductor, address="pat@unknown.example", imap="https://evil.example/x", smtp="smtp.unknown.example")
+    assert refused.startswith("Error") and "evil" not in refused
+    assert (await _connect(conductor, address="not an address")).startswith("Error")
+    assert count_rows() == 0
+
+
+async def test_only_the_corsia_thread_may_connect(conductor, servers) -> None:
+    other = make_session(get_db(), prefix="worker")
+    refused = await _connect(other, address=ADDRESS, **_typed(servers()))
+    assert refused == "Error: Only the designated CORSIA thread can use mail host tools."
+    assert (await MailHostConnectTool().execute(address=ADDRESS)).startswith("Error: current thread identity")
+    assert count_rows() == 0
+
+
+# -- Settings › Keys --------------------------------------------------------------------------------
+
+
+async def test_keys_cannot_create_an_entry_under_the_managed_prefix(client) -> None:
+    for name in (f"{key_store.MAILHOST_PREFIX}{uuid.uuid4()}", f"{key_store.MAILHOST_PREFIX}x"):
+        made = await client.post("/api/keys", headers=_auth(), json={"name": name, "label": "x", "description": ""})
+        assert made.status_code == 400, made.text
+
+
+async def test_pasting_the_password_runs_the_check_and_the_account_connects(connected, caplog) -> None:
+    with caplog.at_level(logging.DEBUG):
+        await _set_through_keys(connected)
+    found = row(connected.account_id)
+    assert found["capabilities"] == ["mail", "calendar"] and found["check"]["status"] == store.OK
+    listed = await connected.client.get("/api/keys", headers=_auth())
+    _no_leak(listed.text, caplog.text, found["raw"])
+
+
+async def test_clearing_the_key_through_keys_returns_the_account_to_waiting(connected) -> None:
+    await _set_through_keys(connected)
+    cleared = await connected.client.post(f"/api/keys/{connected.key}/clear", headers=_auth(), json={"password": TEST_PASSWORD})
+    assert cleared.status_code == 200, cleared.text
+    found = row(connected.account_id)
+    assert found["state"] == "needs_sign_in" and found["capabilities"] == [] and found["check"]["status"] == store.WAITING
+
+
+async def test_keys_will_not_remove_a_mail_accounts_entry_but_removing_the_account_takes_it(connected) -> None:
+    url = f"/api/keys/{connected.key}/remove"
+    removed = await connected.client.post(url, headers=_auth(), json={"password": TEST_PASSWORD})
+    assert removed.status_code == 400 and "cleared but not removed" in removed.text
+    assert key_store.entry_metadata(connected.key)["label"] and count_rows() == 1
+    with pytest.raises(key_store.KeyStoreError, match="cleared but not removed"):
+        key_store.remove_entry(connected.key)
+    await account_actions.remove_account(connected.account_id, actor=("person", "test"))
+    assert count_rows() == 0
+    with pytest.raises(key_store.KeyStoreError):
+        key_store.entry_metadata(connected.key)
+
+
+async def test_a_known_hosts_pasted_password_loses_all_whitespace_and_a_typed_hosts_is_kept_or_refused(conductor, servers) -> None:
+    icloud = (await _connect(conductor, address="pat@icloud.com"))["key_name"]
+    key_store.set_value(icloud, " abcd efgh\tijkl\nmnop ")
+    assert key_store.resolve_names([icloud])[icloud] == "abcdefghijklmnop"
+    typed = (await _connect(conductor, address=ADDRESS, **_typed(servers())))["key_name"]
+    key_store.set_value(typed, "  no-spaces-here  ")
+    assert key_store.resolve_names([typed])[typed] == "no-spaces-here"
+    with pytest.raises(key_store.KeyStoreError) as refused:
+        key_store.set_value(typed, "secret word")
+    assert "mail.test" in str(refused.value) and "secret" not in str(refused.value)
+
+
+# -- reading mail and calendar --------------------------------------------------------------------
+
+
+async def test_search_and_read_work_on_a_connected_mail_host_account(connected, clean_screen) -> None:
+    await _set_through_keys(connected)
+    found = json.loads(await EmailSearchTool().execute(_thread_id=connected.thread, query="from:sam", max=5))
+    assert connected.built.imap.searches[-1] == 'FROM "sam"'
+    ids = [item["message_id"] for item in found["messages"]]
+    assert ids == ["7-2", "7-1"] and found["messages"][0]["from"].endswith("<billing@example.com>")
+    assert all("body" not in item for item in found["messages"])
+    read = json.loads(await EmailReadTool().execute(_thread_id=connected.thread, message_id="7-2"))
+    assert read["subject"] == "Invoice 42" and BODY_CANARY in read["body"] and read["body"].startswith("<untrusted-email>")
+    _no_leak(json.dumps(found), json.dumps(read))
+
+
+async def test_a_message_from_before_the_mailbox_was_rebuilt_reads_as_not_found(connected, clean_screen) -> None:
+    await _set_through_keys(connected)
+    for stale in ("8-2", "7-99", "7-2; DELETE", "abc"):
+        out = await EmailReadTool().execute(_thread_id=connected.thread, message_id=stale)
+        assert out.startswith("Error") and "can't be found" in out and "DELETE" not in out.split("found")[-1]
+
+
+async def test_search_refuses_what_imap_cannot_do_without_touching_the_host(connected) -> None:
+    await _set_through_keys(connected)
+    before = len(connected.built.imap.searches)
+    out = await EmailSearchTool().execute(_thread_id=connected.thread, query="a OR b")
+    assert out.startswith("Error: This account searches") and len(connected.built.imap.searches) == before
+
+
+async def test_calendar_list_returns_the_hosts_events_in_the_google_shape(connected) -> None:
+    await _set_through_keys(connected)
+    found = json.loads(await CalendarListTool().execute(_thread_id=connected.thread, **WINDOW))
+    assert [event["title"] for event in found["events"]] == ["Standup", "Holiday", "Weekly sync"]
+    assert set(found["events"][0]) == {"id", "start", "end", "title", "attendees", "free/busy"}
+    refused = await CalendarListTool().execute(_thread_id=connected.thread, calendar_id="work", **WINDOW)
+    assert refused.startswith("Error: This account lists all its calendars together")
+
+
+async def test_a_mail_only_account_says_so_for_the_calendar(conductor, servers) -> None:
+    built = servers(with_caldav=False)
+    account_id = add_account(built, conductor)["account_id"]
+    assert await run_check(account_id) == store.MAIL_ONLY
+    out = await CalendarListTool().execute(_thread_id=conductor, **WINDOW)
+    assert out == "Error: This account's host didn't offer a calendar to CORSIA, so only its email can be used."
+    assert json.loads(await EmailSearchTool().execute(_thread_id=conductor, query="lunch"))["messages"]
+
+
+async def test_a_waiting_or_refused_account_is_not_used_and_says_what_to_do(conductor, servers) -> None:
+    built = servers(password="the-hosts-real-password")
+    account_id = add_account(built, conductor)["account_id"]
+    waiting = await EmailSearchTool().execute(_thread_id=conductor, query="x")
+    assert "waiting for an app password" in waiting and built.imap.commands == []
+    assert await run_check(account_id) == store.REFUSED
+    refused = await EmailSearchTool().execute(_thread_id=conductor, query="x")
+    assert "didn't accept its app password" in refused
+    _no_leak(waiting, refused)
+
+
+async def test_a_password_the_host_stops_accepting_turns_the_account_to_refused(connected) -> None:
+    await _set_through_keys(connected)
+    connected.built.imap.password = "revoked-at-the-host"
+    out = await EmailSearchTool().execute(_thread_id=connected.thread, query="x")
+    assert out.startswith("Error: mail.test didn’t accept this app password")
+    found = row(connected.account_id)
+    assert found["check"]["status"] == store.REFUSED and found["state"] == "needs_sign_in" and found["capabilities"] == []
+    _no_leak(out, found["raw"])
+    assert "didn't accept its app password" in await EmailSearchTool().execute(_thread_id=connected.thread, query="x")
+
+
+async def test_two_accounts_need_an_account_id_and_it_names_the_choices(conductor, servers) -> None:
+    first = add_account(servers(), conductor)["account_id"]
+    second = add_account(servers(), conductor, address="pat@other.test")["account_id"]
+    await run_check(first)
+    out = await EmailSearchTool().execute(_thread_id=conductor, query="x")
+    assert "Pass account_id" in out and first in out and second in out
+    named = json.loads(await EmailSearchTool().execute(_thread_id=conductor, query="x", account_id=ADDRESS.upper()))
+    assert named["messages"]
+
+
+async def test_with_no_mail_host_account_the_resolver_is_the_google_one_unchanged(env, conductor) -> None:
+    with pytest.raises(GoogleError) as ours:
+        mail_accounts.resolve_for_thread(None, conductor)
+    with pytest.raises(GoogleError) as google:
+        google_accounts.resolve_for_thread(None, conductor)
+    assert str(ours.value) == str(google.value)
+    assert (await EmailSearchTool().execute(_thread_id=conductor, query="x")).startswith("Error: ")

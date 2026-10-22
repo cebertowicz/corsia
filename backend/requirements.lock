@@ -38,6 +38,7 @@ httptools==0.8.0
 httpx==0.28.1
 httpx-sse==0.4.3
 huggingface_hub==1.16.1
+icalendar==7.3.0
 idna==3.16
 ijson==3.5.0
 importlib_metadata==8.9.0
@@ -125,6 +126,7 @@ tqdm==4.67.3
 typer==0.26.2
 typing-inspection==0.4.2
 typing_extensions==4.15.0
+tzdata==2026.5
 uc-micro-py==2.0.0
 universal_pathlib==0.3.10
 urllib3==2.7.0

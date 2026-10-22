@@ -17,6 +17,7 @@ def _v131() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     initialize_schema(db)
+    db.execute("ALTER TABLE connected_accounts DROP COLUMN endpoints_json")  # added at 140; a v131 database has none
     db.execute("ALTER TABLE connected_accounts DROP COLUMN account_kind")
     db.execute("ALTER TABLE connected_accounts DROP COLUMN state_cause")
     db.execute("DROP TABLE connected_account_audit")
