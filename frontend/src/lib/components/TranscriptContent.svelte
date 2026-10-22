@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import UserMessageBubble from './UserMessageBubble.svelte';
 	import AssistantMessage from './AssistantMessage.svelte';
 	import SystemMessageRow from './SystemMessageRow.svelte';
@@ -162,13 +163,15 @@
 		const ranges = outsideWaitRange ? [...runRangeList, outsideWaitRange] : runRangeList;
 		return ranges.map((range) => ({ key: openKey(range), threadId: boundThreadId, since: range.since, until: range.until }));
 	});
+	// A string, so a recompute that changes none of these (any tool or phase frame re-derives the entries) asks nothing.
 	const openTimeEvents = $derived(JSON.stringify([
+		openQueries.map((query) => query.key),
 		boundTurn?.phase, boundTurn?.turnId, liveRollup?.active ?? null, waitState?.state, waitState?.wait?.until ?? null,
 		Object.entries(turnSummaries).map(([id, summary]) => `${id}:${summary.status}:${summary.ended_at}`),
 	]));
 	$effect(() => {
 		void openTimeEvents;
-		requestOpenTime(openQueries);
+		requestOpenTime(untrack(() => openQueries));
 	});
 	// An open run whose rows were never read starts reading them, however it was opened.
 	$effect(() => {

@@ -1,7 +1,9 @@
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { UpdateCard } from '$lib/api/threadUpdates';
+import { _resetOpenTimeForTests } from '$lib/openTime';
+import { token } from '$lib/stores/auth';
 import { activeToolsByThread } from '$lib/stores/threads';
 import { parseUTC } from '$lib/time';
 import { _resetTurnStateForTests, applyLifecycle } from '$lib/ws/turnState';
@@ -66,6 +68,44 @@ afterEach(() => {
 	component = null;
 	host.remove();
 	activeToolsByThread.set(new Map());
+	token.set(null);
+	vi.unstubAllGlobals();
+});
+
+describe('Focus runs: open time is asked for on its events only', () => {
+	it('re-renders with the same runs ask nothing; a Turn ending asks again', async () => {
+		const asked: string[][] = [];
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input).includes('/api/open-time')) {
+				asked.push((JSON.parse(String(init?.body)) as { items: { id: string }[] }).items.map((item) => item.id));
+			}
+			return { ok: true, status: 200, json: async () => ({ items: {} }) } as Response;
+		}));
+		_resetOpenTimeForTests();
+		token.set('test-token');
+		const settle = async () => { flushSync(); await Promise.resolve(); await Promise.resolve(); };
+		const { rows, summaries } = splitTurn();
+		const props = reactiveProps({
+			entries: present(rows), turnSummaries: summaries as Record<string, Summary>,
+			renderedStreaming: false, historyComplete: true,
+			expandedTools: new Set<string>(), expandedReasoning: new Set<string>(),
+			onToggleToolBlock: () => {}, onToggleReasoning: () => {}, onOpenLightbox: () => {}, threadId: THREAD,
+		});
+		component = mount(TranscriptContent, { target: host, props });
+		await settle();
+		expect(asked).toHaveLength(1);
+
+		// What any tool or phase frame does upstream: the same runs, in a fresh array.
+		props.entries = present(rows);
+		await settle();
+		props.entries = present(rows);
+		await settle();
+		expect(asked).toHaveLength(1);
+
+		props.turnSummaries = { t1: turn('10:00:00', '10:12:00', 3) };
+		await settle();
+		expect(asked).toHaveLength(2);
+	});
 });
 
 describe('Focus runs: each chip is its own run', () => {
