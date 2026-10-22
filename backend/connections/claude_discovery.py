@@ -20,6 +20,7 @@ from typing import Any, NoReturn
 
 from connections import claude_usage, source_state
 from connections.claude_context_probe import read_context_usage
+from connections.claude_control_turns import converse
 from connections.harness_process import killed_on_exit
 from infra.db_async import run_in_db
 from subagents.cc_env import clean_claude_env
@@ -50,8 +51,17 @@ def claude_control_command(binary: str) -> list[str]:
 
 async def run_claude_control(
     binary: str, frames: list[dict[str, Any]], *, operation: str, context=None,
+    in_turn: bool = False,
 ) -> bytes:
-    """Run one bounded Claude control session and return its stream output."""
+    """Run one bounded Claude control session and return its stream output.
+
+    The frames go in together by default, which is right for reads that do not
+    depend on each other. ``in_turn`` sends each request only after the one
+    before it was answered, for a request that needs the earlier one to have
+    taken effect: nothing promises the CLI answers in send order, and a usage
+    read ahead of ``set_model`` would describe the previously selected model
+    (a 2.1.306 install failed every selector this way).
+    """
     env = clean_claude_env()
     if context is not None:
         from subagents.cc_env import apply_claude_config_dir
@@ -66,7 +76,10 @@ async def run_claude_control(
     )
     try:
         async with killed_on_exit(process):
-            stdout, stderr = await asyncio.wait_for(process.communicate(payload), timeout=30)
+            if in_turn:
+                stdout, stderr = await asyncio.wait_for(converse(process, frames), timeout=30)
+            else:
+                stdout, stderr = await asyncio.wait_for(process.communicate(payload), timeout=30)
     except asyncio.TimeoutError:
         raise RuntimeError(f"Claude Code {operation} timed out") from None
     if process.returncode:
@@ -365,6 +378,6 @@ async def _discover_claude_context(binary: str, selector: str, *, context=None) 
     ]
     stdout = await run_claude_control(
         binary, frames, operation=f"context discovery for {selector}",
-        **({'context': context} if context is not None else {}),
+        in_turn=True, **({'context': context} if context is not None else {}),
     )
     return read_context_usage(stdout, selector)
