@@ -81,11 +81,14 @@ async def test_frames_open_merge_ack_and_flush_without_whole_text_save(ownership
         client = clone(base64.b64decode(opened["update"]))
         vector = client.get_state()
         client["text"].insert(3, " typed")
+        scheduled = []
+        monkeypatch.setattr(document_control, "_schedule_user_feedback", scheduled.append)
         await document_control.handle_frame(socket, {"id": user_id}, {
             "type": "doc_update", "artifact_id": opened["artifact_id"], "store_id": opened["store_id"],
             "message_id": "typing", "update": base64.b64encode(client.get_update(vector)).decode()})
         received = await socket.next("doc_received")
         assert received["message_ids"] == ["typing"]
+        assert scheduled == [opened["artifact_id"]]
         ack = await socket.next("doc_ack")
         assert ack["message_ids"] == ["typing"]
         await document_control.handle_frame(socket, {"id": user_id}, {
@@ -97,6 +100,31 @@ async def test_frames_open_merge_ack_and_flush_without_whole_text_save(ownership
     finally:
         await document_control.disconnect(socket)
         await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_user_feedback_debounce_resets_and_can_be_cancelled(monkeypatch):
+    from ws import document_control
+
+    deliveries = []
+    monkeypatch.setattr(document_control, "_user_feedback_generations", {})
+    monkeypatch.setattr(document_control, "_user_feedback_tasks", {})
+    monkeypatch.setattr(document_control, "USER_FEEDBACK_IDLE_SECONDS", 0.01)
+
+    async def deliver(artifact_id):
+        deliveries.append(artifact_id)
+
+    monkeypatch.setattr(document_control, "_deliver_user_feedback", deliver)
+    document_control._schedule_user_feedback("artifact")
+    await asyncio.sleep(0.005)
+    document_control._schedule_user_feedback("artifact")
+    await asyncio.sleep(0.02)
+    assert deliveries == ["artifact"]
+
+    document_control._schedule_user_feedback("artifact")
+    document_control._cancel_user_feedback("artifact")
+    await asyncio.sleep(0.02)
+    assert deliveries == ["artifact"]
 
 
 @pytest.mark.asyncio

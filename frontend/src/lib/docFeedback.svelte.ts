@@ -1,8 +1,6 @@
 import { onDestroy, untrack } from 'svelte';
 import {
-	leaveDocFeedback,
 	retryDocFeedback,
-	returnDocFeedback,
 	sendDocFeedback,
 	type DocFeedbackResult,
 	type UndeliveredBatch,
@@ -35,7 +33,7 @@ export class DocFeedback {
 	retrying = $state(false);
 	leaveSent = $state(false);
 	feedback = $state<CommentFeedback | null>(null);
-	countdownNow = $state(Date.now());
+	// Delivery timing is owned by the live editor; this state only reflects durable feedback.
 	/** How many comments the last Send delivered, while it says so; 0 otherwise. */
 	sent = $state(0);
 	/** The last Send ended in a batch not delivered: Retry takes Send's place at once, so Send does not close beside it. */
@@ -56,21 +54,14 @@ export class DocFeedback {
 	readonly sendLabel = $derived(
 		`Send ${this.pendingCount} comment${this.pendingCount === 1 ? '' : 's'}${this.ownerName ? ` to ${this.ownerName}` : ''}`,
 	);
-	readonly graceDeadline = $derived(this.feedback?.grace_closes_at ?? null);
-	readonly graceMinutes = $derived.by(() => {
-		if (!this.graceDeadline) return null;
-		return Math.max(0, Math.ceil((Date.parse(this.graceDeadline) - this.countdownNow) / 60_000));
-	});
-	readonly sendingGrace = $derived(this.pendingCount > 0 && this.graceMinutes !== null);
-	readonly graceText = $derived(`Sending to ${this.ownerName ?? 'the owner'} in ${this.graceMinutes} min`);
+	// The server still exposes its durable fallback deadline, but it is neither shown nor used as a UI timer.
 	readonly sentText = $derived(`${this.sent} comment${this.sent === 1 ? '' : 's'} sent${this.ownerName ? ` to ${this.ownerName}` : ''}`);
 	/** The drawer's line for comments typed but not yet sent, or null when none wait. */
 	readonly unsent = $derived.by(() => {
 		if (!this.pendingCount) return null;
 		const count = `${this.pendingCount} message${this.pendingCount === 1 ? '' : 's'} not sent yet`;
 		const owner = this.ownerName ?? 'the owner';
-		if (this.sendingGrace) return { before: `${count} · sending to `, owner, after: ` in ${this.graceMinutes} min` };
-		return { before: `${count} · ${this.pendingCount === 1 ? 'it goes' : 'they go'} to `, owner, after: ' when you leave.' };
+		return { before: `${count} · sending to `, owner, after: ' shortly.' };
 	});
 
 	/** Another document (or tab) is shown: leave the one before, and start afresh. */
@@ -101,10 +92,7 @@ export class DocFeedback {
 			this.leaveSent = false;
 			this.confirmSent(0);
 		}
-		// Only a visible document counts as the user returning; a refresh in a hidden tab must not.
-		if (document.visibilityState === 'visible' && !current.grace_closes_at) {
-			void returnDocFeedback(id).catch((error) => console.error('feedback return failed', error));
-		}
+		// Feedback is delivered from the live editor's idle boundary, not tab visibility.
 	}
 
 	private applyResult(id: string, result: DocFeedbackResult) {
@@ -154,13 +142,10 @@ export class DocFeedback {
 	};
 
 	leave = () => {
-		const id = this.artifactId;
-		if (!id || this.pendingCount === 0 || this.leaveSent) return;
+		if (this.leaveSent) return;
 		this.leaveSent = true;
-		this.pendingCount = 0;
-		void leaveDocFeedback(id).then((result) => this.applyResult(id, result)).catch((error) => {
-			this.leaveSent = false;
-			console.error('feedback leave failed', error);
+		void this.send().finally(() => {
+			if (this.pendingCount > 0) this.leaveSent = false;
 		});
 	};
 }
@@ -179,11 +164,7 @@ export function holdDocFeedback(
 		const { artifactId, targetInstanceId } = of();
 		untrack(() => feedback.show(artifactId, targetInstanceId));
 	});
-	$effect(() => {
-		if (!feedback.graceDeadline) return;
-		const timer = setInterval(() => { feedback.countdownNow = Date.now(); }, 30_000);
-		return () => clearInterval(timer);
-	});
+	// No client countdown: the live editor schedules delivery from typing activity.
 	$effect(() => {
 		const visibility = () => {
 			if (document.visibilityState === 'hidden') feedback.leave();
