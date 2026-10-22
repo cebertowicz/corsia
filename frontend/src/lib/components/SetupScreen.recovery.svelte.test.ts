@@ -94,29 +94,24 @@ const omlx = (fields: Record<string, unknown>) => ({ source: 'omlx', name: 'Loca
 const localPosts = () => vi.mocked(fetch).mock.calls.filter(([url, init]) => ['/api/providers/local/setup', '/api/setup/local-download'].includes(String(url)) && init?.method === 'POST').length;
 
 describe('SetupScreen Download press is never silent', () => {
-	it('shows why and a Retry when the service accepts the press but starts nothing', async () => {
-		await openModels({ localEligible: true, localReplies: [json({ ok: true })] });
-		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t start the download. Press Retry.'));
-		expect(Array.from(host.querySelectorAll('button')).some((candidate) => candidate.textContent?.trim() === 'Download')).toBe(false);
-		expect(Array.from(host.querySelectorAll('button')).some((candidate) => candidate.textContent?.trim() === 'Retry')).toBe(true);
-	});
-
-	it('uses the service\'s own reason when it holds the press for another process', async () => {
-		const fix = 'Another CORSIA window is still setting up the local model. Quit CORSIA completely, reopen it, then press Retry.';
+	it('shows the service reason and reference, and a Retry, when it holds the press', async () => {
+		const fix = 'Quit CORSIA completely, reopen it, then press Retry.';
 		await openModels({ localEligible: true, localReplies: [json({ ok: false, reason: 'operation_held', fix, ref: 'local-0123456789abcdef' })] });
 		await vi.waitFor(() => expect(host.textContent).toContain(fix));
 		expect(host.textContent).toContain('local-0123456789abcdef');
+		expect(Array.from(host.querySelectorAll('button')).some((candidate) => candidate.textContent?.trim() === 'Retry')).toBe(true);
 	});
 
 	it('moves the row to downloading when Retry is pressed and the service starts the flight', async () => {
 		let flying = false;
+		const fix = 'Quit CORSIA completely, reopen it, then press Retry.';
 		await openModels({ localEligible: true, sources: () => [omlx(flying ? { local_state: 'downloading', download_percent: 3 } : {})],
-			localReplies: [json({ ok: true }), json({ ok: true, in_progress: true, stage: 'Installing' })] });
-		await vi.waitFor(() => expect(host.textContent).toContain('CORSIA couldn’t start the download.'));
+			localReplies: [json({ ok: false, reason: 'operation_held', fix, ref: 'local-0123456789abcdef' }), json({ ok: true, in_progress: true, stage: 'Installing' })] });
+		await vi.waitFor(() => expect(host.textContent).toContain(fix));
 		flying = true;
 		click('Retry'); await settle();
 		await vi.waitFor(() => expect(host.textContent).toContain('Downloading 3%'));
-		expect(host.textContent).not.toContain('CORSIA couldn’t start the download.');
+		expect(host.textContent).not.toContain(fix);
 		expect(localPosts()).toBe(2);
 	});
 

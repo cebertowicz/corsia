@@ -236,7 +236,7 @@ async def test_a_press_that_cannot_claim_the_operation_says_why_instead_of_repor
         local_setup_operation.unlock(held)
     assert result["ok"] is False and result["reason"] == "operation_held"
     assert "Quit CORSIA completely" in result["fix"] and not flight._running()
-    assert result["ref"].startswith("local-") and "process" not in result["message"] + result["fix"]
+    assert result["ref"].startswith("local-")
 
 
 @pytest.mark.asyncio

@@ -35,8 +35,6 @@
 	type LocalStartResult = 'started' | 'failed';
 	type LocalStartResponse = { result: LocalStartResult; reference?: string; fix?: string };
 	const LOCAL_START_NETWORK_FAILURE = 'CORSIA couldn’t start local setup.';
-	/** An answer that neither began a download nor joined one: say so and offer Retry, never go quiet. */
-	const LOCAL_START_NOT_STARTED = 'CORSIA couldn’t start the download. Press Retry. If it keeps failing, quit CORSIA and open it again.';
 	async function requestLocalStart(session: string | null): Promise<LocalStartResponse> {
 		const response = await fetch(session ? '/api/providers/local/setup' : '/api/setup/local-download', {
 			method: 'POST',
@@ -46,10 +44,7 @@
 		const body = await response.json().catch(() => null);
 		const reference = typeof body?.detail?.ref === 'string' ? body.detail.ref : typeof body?.ref === 'string' ? body.ref : undefined;
 		const fix = typeof body?.detail?.fix === 'string' ? body.detail.fix : typeof body?.fix === 'string' ? body.fix : undefined;
-		if (response.ok && body?.ok !== false) {
-			// Only a running flight, or CORSIA's own model already connected, is a start.
-			return body?.in_progress === true || body?.existing === true ? { result: 'started', reference } : { result: 'failed', reference, fix: fix ?? LOCAL_START_NOT_STARTED };
-		}
+		if (response.ok && body?.ok !== false) return { result: 'started', reference };
 		if (!fix) throw new Error('local start response omitted recovery');
 		return { result: 'failed', reference, fix };
 	}

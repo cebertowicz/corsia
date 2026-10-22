@@ -121,8 +121,8 @@ def _in_progress_or_blocked() -> dict:
         return ls._in_progress_result()
     ref = new_reference("local")
     ls.log.warning("Local setup could not claim its operation reference=%s", ref)
-    return {**local_setup_error("Another CORSIA window still holds the local model setup."), "reason": "operation_held", "ref": ref,
-            "fix": "Another CORSIA window is still setting up the local model. Quit CORSIA completely, reopen it, then press Retry."}
+    return {**local_setup_error("CORSIA couldn't start the download."), "reason": "operation_held", "ref": ref,
+            "fix": "Quit CORSIA completely, reopen it, then press Retry."}
 
 
 async def begin_local_setup(*, no_subscription_only: bool = False,
