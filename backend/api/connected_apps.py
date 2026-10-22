@@ -11,6 +11,7 @@ from api.connected_app_rows import _agent_next_step, app_reaches_project, local_
 from api.connected_app_errors import app_error as _app_error
 from api.connected_account_rows import accounts_router, list_account_rows
 from api.connected_app_signin import sign_in_here, signin_router
+from api.mail_host_accounts import mail_host_router
 from infra.auth import is_person_session, require_user
 from infra.db_async import run_in_db
 from tools.mcp_oauth_listener import oauth_settings
@@ -19,6 +20,7 @@ from tools.mcp_oauth_signout import delete_with_sign_in, remove_app
 connected_apps_router = APIRouter()
 connected_apps_router.include_router(signin_router)
 connected_apps_router.include_router(accounts_router)
+connected_apps_router.include_router(mail_host_router)
 log = logging.getLogger(__name__)
 BODY_SHAPE = (
     'Send {"name": "GitHub", "config": {"command": "npx", "args": ["-y", "<package>"]}, '

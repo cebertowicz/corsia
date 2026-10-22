@@ -254,12 +254,20 @@ def clear_value(name: str, *, db: sqlite3.Connection | None = None) -> None:
         key_store_values.sweep_after_commit(conn)
 
 
+def removal_refusal(name: str) -> str | None:
+    """Why this entry can only be cleared, or None when it can be removed."""
+    if name in BUILTINS:
+        return "A built-in key can be cleared but not removed."
+    if name.startswith(MAILHOST_PREFIX):
+        return "A mail account's app password can be cleared but not removed. It goes when you remove the account."
+    return None
+
+
 def remove_entry(name: str, *, db: sqlite3.Connection | None = None) -> None:
     """Remove an added entry and its value. A built-in entry cannot be removed."""
-    if name in BUILTINS:
-        raise KeyStoreError("A built-in key can be cleared but not removed.")
-    if name.startswith(MAILHOST_PREFIX):
-        raise KeyStoreError("A mail account's app password can be cleared but not removed. It goes when you remove the account.")
+    refusal = removal_refusal(name)
+    if refusal is not None:
+        raise KeyStoreError(refusal)
     if is_managed_name(name):
         drop_managed_entry(name, db=db)
         return
@@ -312,6 +320,7 @@ def _metadata(name: str, row: sqlite3.Row | None, is_set: bool) -> dict:
         "is_set": is_set,
         "set_at": row["set_at"] if row is not None and is_set else None,
         "checkable": builtin is not None and builtin.checkable,
+        "removable": removal_refusal(name) is None,
     }
 
 

@@ -1,7 +1,8 @@
 """The check that runs when the person sets or replaces a mail-host app password.
 
-It starts only from the Keys write path (``api.keys``), behind the person's session and
-password; no agent-callable route reaches it (H7, H17). IMAP login first (a refused password
+It starts only from the Keys write path (``api.keys``) and the row's own Try again and Edit
+server (``api.mail_host_accounts``), all behind the person's session and password; no
+agent-callable route reaches it (H7, H17). IMAP login first (a refused password
 stops there, so one wrong password is one login attempt at the host), then SMTP, then CalDAV
 discovery. A calendar the host doesn't offer leaves the row mail only. Every failure becomes
 one named status; the host's own text never reaches the row, a log or an agent (H15).
@@ -88,15 +89,25 @@ def _credentials(account_id: str) -> str | None:
     return str(bundle[PASSWORD]) if bundle else None
 
 
-async def start_after_key_write(name: str) -> None:
-    """After the person saved a key: for a mail-host key, mark its row Checking and check in the background."""
-    account_id = store.account_id_for_key(name)
-    begun = await run_in_db(store.begin_check, account_id) if account_id else None
-    if account_id is None or begun is None:
-        return
+async def start_check(account_id: str, replacement: Endpoints | None = None) -> bool:
+    """Mark the row Checking and check it in the background; False when it is no mail-host row.
+
+    ``replacement`` runs the check against new settings (Edit server), saved with the Checking mark.
+    """
+    begun = await run_in_db(lambda: store.begin_check(account_id, replacement=replacement))
+    if begun is None:
+        return False
     task = asyncio.create_task(run_check(account_id, *begun))
     _pending.add(task)
     task.add_done_callback(_pending.discard)
+    return True
+
+
+async def start_after_key_write(name: str) -> None:
+    """After the person saved a key: for a mail-host key, mark its row Checking and check in the background."""
+    account_id = store.account_id_for_key(name)
+    if account_id is not None:
+        await start_check(account_id)
 
 
 async def reset_after_key_clear(name: str) -> None:

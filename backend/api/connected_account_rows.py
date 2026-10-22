@@ -46,6 +46,7 @@ def account_row(account: dict[str, object], *, db: sqlite3.Connection) -> dict[s
         "capabilities": account["capabilities"], "state": state, "reach": account["reach"],
         "account_kind": account["account_kind"], "cause": account["state_cause"], "scopes": list(provider.display_scopes),
         **account_registration(str(account["id"]), db=db),
+        **(provider.row_detail(str(account["id"]), db) if provider.row_detail else {}),
     }
 
 

@@ -93,12 +93,18 @@ def write(
         ).rowcount == 1
 
 
-def begin_check(account_id: str, *, db: sqlite3.Connection | None = None) -> tuple[Endpoints, str] | None:
-    """Mark the row Checking; returns its settings and the new check's token, or None for no such row."""
+def begin_check(
+    account_id: str, *, replacement: Endpoints | None = None, db: sqlite3.Connection | None = None,
+) -> tuple[Endpoints, str] | None:
+    """Mark the row Checking; returns its settings and the new check's token, or None for no such row.
+
+    With ``replacement`` the check runs against those settings, which are saved in the same write.
+    """
     with write_transaction(db, scope="mail_host_check_begin") as conn:
         endpoints = read(account_id, db=conn)[0]
         if endpoints is None:
             return None
+        endpoints = replacement or endpoints
         token = uuid.uuid4().hex
         write(account_id, endpoints, status=CHECKING, token=token, db=conn)
         return endpoints, token
