@@ -8,7 +8,7 @@ from typing import Any
 
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
 from plans import admission, artifact_links, service
-from plans.feedback_delivery import PROVENANCE, _existing
+from plans.feedback_delivery import PROVENANCE, _existing, settle_feedback_node
 from registry.identity_metadata import last_written_sha256, sha256_file
 from registry.shared_edit_classification import combine_capped_diffs, capped_unified_diff
 
