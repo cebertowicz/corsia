@@ -1,5 +1,6 @@
 """Web tools: web_search and web_fetch."""
 
+import asyncio
 import html
 import json
 import re
@@ -9,10 +10,15 @@ from urllib.parse import urlparse
 import httpx
 
 from tools.base import Tool
+from tools.web_omlx_search import run_omlx_search
 from tools.web_search_outcome import WORKS, outcome_line, run_search
 
-#: What an agent reads when no key is set anywhere search looks.
-NO_KEY_TEXT = "Web search has no key. The person adds it in Settings › Keys."
+#: What an agent reads when no key and no managed local search are available.
+NO_KEY_TEXT = "Web search needs a Brave key in Settings › Keys or a local model set up."
+EMPTY_OMLX_TEXT = (
+    "Keyless web search came back empty. Try rewording the query; "
+    "a Brave key in Settings › Keys makes search dependable."
+)
 
 # Shared constants
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
@@ -47,11 +53,11 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 class WebSearchTool(Tool):
-    """Search the web using Brave Search API.
+    """Search the web using Brave or an already-running managed local model server.
 
-    The key is resolved on every call (Settings › Keys only), so a newly saved key works with no restart.
+    The Brave key is resolved on every call (Settings › Keys only), so a newly saved key works with no restart.
     It goes only into this request's header; no text this tool returns
-    carries it or the provider's error text.
+    carries it or either provider's error text.
     """
 
     name = "web_search"
@@ -76,12 +82,28 @@ class WebSearchTool(Tool):
             resolved = await run_in_db(resolve_builtin, WEB_SEARCH)
         except KeyStoreError as exc:
             return f"Error: {exc}"
-        if resolved is None:
-            return NO_KEY_TEXT
         n = min(max(count or self.max_results, 1), 10)
-        outcome = await run_search(resolved[0], query, n)
-        if outcome.kind != WORKS:
-            return outcome_line(outcome)
+        if resolved is not None:
+            outcome = await run_search(resolved[0], query, n)
+            if outcome.kind != WORKS:
+                return outcome_line(outcome)
+        else:
+            outcome = await run_omlx_search(query)
+            if outcome is None:
+                return NO_KEY_TEXT
+            for attempt in range(2):
+                if outcome.kind != WORKS:
+                    return outcome_line(outcome)
+                if outcome.results:
+                    break
+                await asyncio.sleep(1)
+                outcome = await run_omlx_search(query)
+                if outcome is None:
+                    return NO_KEY_TEXT
+            if outcome.kind != WORKS:
+                return outcome_line(outcome)
+            if not outcome.results:
+                return EMPTY_OMLX_TEXT
         if not outcome.results:
             return f"No results for: {query}"
 

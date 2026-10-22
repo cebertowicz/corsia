@@ -14,6 +14,8 @@ import httpx
 import pytest
 
 from infra import key_store
+from tools import web as web_mod
+from tools import web_omlx_search as omlx_mod
 from tools import web_search_outcome as outcome_mod
 from tools.web import NO_KEY_TEXT, WebSearchTool
 from tools.web_search_outcome import (
@@ -151,3 +153,109 @@ async def test_a_newly_saved_key_is_used_on_the_next_call(store, monkeypatch):
     assert "1. Hit" in text and VALUE not in text
     assert seen[-1].headers["X-Subscription-Token"] == VALUE
     assert json.dumps(dict(seen[-1].url.params)).find(VALUE) == -1
+
+
+@pytest.mark.asyncio
+async def test_brave_key_precedes_managed_omlx(store, monkeypatch):
+    key = "brave-key"
+    brave = pytest.importorskip("unittest.mock").AsyncMock(
+        return_value=outcome_mod.SearchOutcome(WORKS, results=[{"title": "Brave", "url": "https://brave.test"}]),
+    )
+    omlx = pytest.importorskip("unittest.mock").AsyncMock()
+    key_store.set_value("web-search", key)
+    monkeypatch.setattr(web_mod, "run_search", brave)
+    monkeypatch.setattr(web_mod, "run_omlx_search", omlx)
+
+    text = await WebSearchTool().execute("q")
+
+    assert "Brave" in text
+    brave.assert_awaited_once_with(key, "q", 5)
+    omlx.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_web_search_uses_managed_omlx_without_brave_key(store, monkeypatch):
+    omlx = pytest.importorskip("unittest.mock").AsyncMock(
+        return_value=outcome_mod.SearchOutcome(WORKS, results=[{
+            "title": "oMLX", "url": "https://omlx.test/result", "description": "Snippet",
+        }]),
+    )
+    monkeypatch.setattr(web_mod, "run_omlx_search", omlx)
+
+    text = await WebSearchTool().execute("q")
+
+    assert "1. oMLX" in text
+    assert "https://omlx.test/result" in text
+    omlx.assert_awaited_once_with("q")
+
+
+@pytest.mark.asyncio
+async def test_web_search_retries_empty_managed_omlx_results(store, monkeypatch):
+    omlx = pytest.importorskip("unittest.mock").AsyncMock(side_effect=[
+        outcome_mod.SearchOutcome(WORKS),
+        outcome_mod.SearchOutcome(WORKS, results=[{"title": "Recovered", "url": "https://recovered.test"}]),
+    ])
+    sleep = pytest.importorskip("unittest.mock").AsyncMock()
+    monkeypatch.setattr(web_mod, "run_omlx_search", omlx)
+    monkeypatch.setattr(web_mod.asyncio, "sleep", sleep)
+
+    text = await WebSearchTool().execute("q")
+
+    assert "Recovered" in text
+    assert omlx.await_count == 2
+    sleep.assert_awaited_once_with(1)
+
+
+@pytest.mark.asyncio
+async def test_web_search_explains_three_empty_managed_omlx_results(store, monkeypatch):
+    omlx = pytest.importorskip("unittest.mock").AsyncMock(return_value=outcome_mod.SearchOutcome(WORKS))
+    monkeypatch.setattr(web_mod, "run_omlx_search", omlx)
+    monkeypatch.setattr(web_mod.asyncio, "sleep", pytest.importorskip("unittest.mock").AsyncMock())
+
+    text = await WebSearchTool().execute("q")
+
+    assert text == (
+        "Keyless web search came back empty. Try rewording the query; "
+        "a Brave key in Settings › Keys makes search dependable."
+    )
+    assert omlx.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_web_search_names_both_ways_to_enable_search_without_server(store, monkeypatch):
+    monkeypatch.setattr(web_mod, "run_omlx_search", pytest.importorskip("unittest.mock").AsyncMock(return_value=None))
+
+    text = await WebSearchTool().execute("q")
+
+    assert text == (
+        "Web search needs a Brave key in Settings › Keys or a local model set up."
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response,expected", [
+    ({"ok": False}, (FAILED, REASON_PROVIDER)),
+    (httpx.ConnectError("refused"), (FAILED, REASON_NETWORK)),
+])
+async def test_managed_omlx_failures_use_search_outcome_classes(monkeypatch, response, expected):
+    async def target():
+        return "http://omlx.test/v1/web/search", {"Authorization": "Bearer safe"}
+
+    monkeypatch.setattr(omlx_mod, "omlx_search_target", target)
+    if isinstance(response, Exception):
+        def handler(_request):
+            raise response
+    else:
+        def handler(request):
+            return httpx.Response(200, json=response, request=request)
+    original_client = httpx.AsyncClient
+
+    class Client(original_client):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(omlx_mod.httpx, "AsyncClient", Client)
+    result = await omlx_mod.run_omlx_search("q")
+
+    assert (result.kind, result.reason) == expected
