@@ -101,7 +101,7 @@ async def keep_loaded(server_id: str, model: LocalModel, *, force_pin: bool = Fa
     """
     from llm.network_discovery import discover_and_notify, notify_cached_model_loaded
     from llm.providers.omlx_lifecycle import load_model
-    from llm.providers.omlx_settings import get_model_settings, update_model_settings
+    from llm.providers.omlx_settings import update_model_settings
 
     key = (server_id, model.model)
     _FAILED.pop(key, None)
@@ -117,28 +117,31 @@ async def keep_loaded(server_id: str, model: LocalModel, *, force_pin: bool = Fa
         _FAILED[key] = NOT_KEPT
         return
     size = row.get("estimated_size")
-    if not isinstance(size, (int, float)) or size <= 0:
+    size_bytes: float | None = (
+        float(size) if isinstance(size, (int, float)) and size > 0 else None
+    )
+    if size_bytes is None and not force_pin:
         log.warning("Not keeping the downloaded local model loaded: oMLX gave no usable size")
         return
-    pinned = force_pin or pin_fits(int(size), _pinned_bytes(rows, skip=model.model), pin_room_bytes())
+    pinned = force_pin or (
+        size_bytes is not None
+        and pin_fits(int(size_bytes), _pinned_bytes(rows, skip=model.model), pin_room_bytes())
+    )
     if pinned:
         pin = await update_model_settings({"server_id": server_id}, model.model, {"pinned": True})
-        if not pin.get("ok"):
-            log.warning("Couldn't pin the downloaded local model")
-            emit("pin", pin.get("message") or "Pin refused")
-            _FAILED[key] = NOT_KEPT
-            return
-        read_back = await get_model_settings({"server_id": server_id}, model.model)
-        if not read_back.get("ok") or read_back.get("settings", {}).get("pinned") is not True:
-            log.warning("oMLX did not read back the downloaded local model as pinned")
-            emit("pin", read_back.get("message") or "Pin did not persist")
+        if not pin.get("ok") or pin.get("settings", {}).get("pinned") is not True:
+            log.warning("oMLX did not confirm the downloaded local model as pinned")
+            emit("pin", pin.get("message") or "Pin did not persist")
             _FAILED[key] = NOT_KEPT
             return
         emit("pin")
     not_loaded = NOT_LOADED if pinned else NOT_LOADED_UNPINNED
+    if size_bytes is None:
+        log.warning("Not loading the downloaded local model now: oMLX gave no usable size")
+        return
     step = "memory check"
     try:
-        decision = await check_can_load(float(size) / GIB, "omlx")
+        decision = await check_can_load(size_bytes / GIB, "omlx")
         if not decision.get("ok"):
             log.warning("Not loading the downloaded local model now: not enough free memory")
             return

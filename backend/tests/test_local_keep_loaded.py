@@ -14,9 +14,9 @@ MODEL = LocalModel("Jundot/new-model", 1_000_000, 32_768)
 @pytest.fixture
 def calls(monkeypatch):
     seen = {
-        "pins": [], "read_backs": [], "loads": [], "events": [],
-        "can_load": {"ok": True}, "pin": {"ok": True},
-        "read_back": {"ok": True, "settings": {"pinned": True}}, "load": {"ok": True},
+        "pins": [], "loads": [], "events": [],
+        "can_load": {"ok": True}, "pin": {"ok": True, "settings": {"pinned": True}},
+        "load": {"ok": True},
     }
 
     def set_rows(rows, room_gib):
@@ -33,10 +33,6 @@ def calls(monkeypatch):
         seen["pins"].append((model, body))
         return seen["pin"]
 
-    async def get_model_settings(_cfg, model):
-        seen["read_backs"].append(model)
-        return seen["read_back"]
-
     async def load_model(_cfg, model):
         seen["loads"].append(model)
         return seen["load"]
@@ -47,7 +43,6 @@ def calls(monkeypatch):
 
     monkeypatch.setattr(local_keep_loaded, "check_can_load", check_can_load)
     monkeypatch.setattr(local_keep_loaded, "emit_product_event", emit_product_event)
-    monkeypatch.setattr("llm.providers.omlx_settings.get_model_settings", get_model_settings)
     monkeypatch.setattr("llm.providers.omlx_settings.update_model_settings", update_model_settings)
     monkeypatch.setattr("llm.providers.omlx_lifecycle.load_model", load_model)
     monkeypatch.setattr("llm.network_discovery.notify_cached_model_loaded", lambda *_a: None)
@@ -72,7 +67,6 @@ async def test_a_model_that_fits_the_pin_room_is_pinned_then_loaded(calls) -> No
     await local_keep_loaded.keep_loaded("server", MODEL)
 
     assert calls["pins"] == [("new-model", {"pinned": True})]
-    assert calls["read_backs"] == ["new-model"]
     assert calls["loads"] == ["new-model"] and local_keep_loaded.failures("server") == {}
     # The pin route's own event names, marked automatic: CORSIA pinned and loaded it, not the person.
     common = {"provider": "omlx", "model_id": "new-model", "server_id": "server", "automatic": True}
@@ -86,13 +80,13 @@ async def test_setup_forces_its_managed_model_to_pin_even_when_the_room_is_full(
     await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
 
     assert calls["pins"] == [("new-model", {"pinned": True})]
-    assert calls["read_backs"] == ["new-model"] and calls["loads"] == ["new-model"]
+    assert calls["loads"] == ["new-model"]
 
 
 @pytest.mark.asyncio
-async def test_a_pin_that_does_not_read_back_stops_with_its_line(calls) -> None:
+async def test_a_pin_that_is_not_confirmed_by_the_put_stops_with_its_line(calls) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
-    calls["read_back"] = {"ok": True, "settings": {"pinned": False}}
+    calls["pin"] = {"ok": True, "settings": {"pinned": False}}
 
     await local_keep_loaded.keep_loaded("server", MODEL)
 
@@ -115,7 +109,7 @@ async def test_pins_already_using_the_room_leave_it_unpinned_and_the_row_says_wh
 @pytest.mark.asyncio
 async def test_a_pin_that_cannot_be_written_stops_with_its_line(calls) -> None:
     calls["set_rows"]([_row("new-model", 10)], room_gib=20)
-    calls["pin"] = {"ok": False}
+    calls["pin"] = {"ok": False, "message": "Pin refused"}
 
     await local_keep_loaded.keep_loaded("server", MODEL)
 
@@ -166,6 +160,16 @@ async def test_a_refused_load_on_an_unpinned_row_says_turn_it_on(calls) -> None:
     assert local_keep_loaded.failures("server") == {
         "new-model": "Not loaded: oMLX couldn’t load it. Turn it on to try again.",
     }
+
+
+@pytest.mark.asyncio
+async def test_setup_pins_without_a_size_but_skips_the_load_memory_check(calls) -> None:
+    calls["set_rows"]([{"id": "new-model"}], room_gib=20)
+
+    await local_keep_loaded.keep_loaded("server", MODEL, force_pin=True)
+
+    assert calls["pins"] == [("new-model", {"pinned": True})]
+    assert calls["loads"] == [] and local_keep_loaded.failures("server") == {}
 
 
 @pytest.mark.asyncio
