@@ -67,8 +67,16 @@ async def _until(condition, seconds: float = 10.0) -> None:
 
 
 @pytest.fixture
-def omlx_models(fresh_install):
+def omlx_models(fresh_install, monkeypatch):
+    from unavailable_model_support import mark_model_loaded
+    from llm import network_discovery
+
     _seed_omlx(STARTER, OTHER)
+    # Disk catalog availability is distinct from the admission seam's cached
+    # online-server/loaded-model facts. Both models are loaded so this fixture
+    # tests warm-prefix behavior rather than unavailable-model holding.
+    mark_model_loaded(monkeypatch, STARTER)
+    network_discovery._LOADED_BY_SERVER["srv-1"].add("model-2")
 
 
 @pytest.fixture

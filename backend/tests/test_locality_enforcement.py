@@ -41,13 +41,15 @@ def _model(db, model_id, *, provider, backend):
 
 
 @pytest.fixture
-def world(accounts):  # noqa: F811
+def world(accounts, monkeypatch):  # noqa: F811
     from llm.locality import set_project_cloud_models_off
+    from unavailable_model_support import mark_model_loaded
 
     db = accounts[0]
     _server(db, "loop", LOOPBACK)
     _model(db, LOCAL, provider="omlx", backend="network")
     _model(db, CLOUD, provider="openai", backend="api")
+    mark_model_loaded(monkeypatch, LOCAL)
     db.execute("INSERT INTO threads(id,user_id,model,project_id,created_at,updated_at) "
                "VALUES ('noproject','user',?,NULL,'t','t')", (CLOUD,))
     db.commit()
