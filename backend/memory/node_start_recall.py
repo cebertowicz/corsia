@@ -96,7 +96,7 @@ def attach_to_result(
             checkpoint_generation_id=checkpoint_generation_id,
         )
     except Exception as exc:  # noqa: BLE001 - advisory sibling never fails a plan mutation
-        _log_error("trial_delivery", exc)
+        _log_error("trial_delivery", exc, perf_counter(), caller_thread_id)
 
 
 def related_for_next(

@@ -10,7 +10,7 @@ from typing import Any
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.state.context import _current_checkpoint_generation_id, running_call_ids
-from memory import node_start_opened, node_start_recall
+from memory import node_start_recall
 from plans import public
 from plans.public import (
     read_current_status, PlanActor, ensure_current_plan, mutate, read_current_plan,
