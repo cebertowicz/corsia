@@ -13,6 +13,8 @@ Only when no Google account exists at all does it say to connect one.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
+from typing import NamedTuple
 
 from connections.connected_accounts import GOOGLE_PROVIDER, list_accounts, visible_accounts
 from connections.google.client import (
@@ -35,6 +37,18 @@ SIGNED_OUT = (
     "[Open it in Connected apps](<link>)."
 )
 UNAVAILABLE = "{address} isn't available right now. Try again later."
+
+
+class Refusals(NamedTuple):
+    """The fixed texts one resolver answers with; none echoes the name the caller passed."""
+
+    none_connected: str
+    none_available: str
+    choose: str
+    unknown: str
+
+
+GOOGLE_REFUSALS = Refusals(NOT_CONNECTED, NONE_AVAILABLE, CHOOSE, UNKNOWN)
 ACCOUNT_PARAM = {
     "type": "string",
     "description": (
@@ -52,7 +66,7 @@ def thread_key(account_id: str, gmail_thread_id: object) -> str | None:
     return f"google:{account_id}:thread:{gmail_thread_id}"
 
 
-def choices(accounts: list[dict]) -> str:
+def _choices(accounts: list[dict]) -> str:
     return ", ".join(f"{account['address']} (account_id {account['id']})" for account in accounts)
 
 
@@ -67,31 +81,51 @@ def usable(account: dict) -> dict:
     raise GoogleError(UNAVAILABLE.format(address=account["address"]))
 
 
-def resolve_for_thread(selector: object, thread_id: object, *, db: sqlite3.Connection | None = None) -> dict:
-    """The one reachable connected account ``selector`` names; else a fixed refusal."""
+def _google_usable(account: dict, db: sqlite3.Connection) -> dict:
+    return usable(account)
+
+
+def resolve(
+    selector: object, thread_id: object, *, providers: tuple[str, ...],
+    usable_for: Callable[[dict, sqlite3.Connection], dict], refusals: Refusals, db: sqlite3.Connection | None = None,
+) -> dict:
+    """The one reachable connected account of ``providers`` that ``selector`` names; else a fixed refusal."""
     if db is None:
         from infra.database import get_db
 
         connection = get_db()
         try:
-            return resolve_for_thread(selector, thread_id, db=connection)
+            return resolve(
+                selector, thread_id, providers=providers, usable_for=usable_for, refusals=refusals, db=connection,
+            )
         finally:
             connection.close()
-    if not list_accounts(GOOGLE_PROVIDER, db=db):
-        raise GoogleError(NOT_CONNECTED)
+    if not any(list_accounts(provider, db=db) for provider in providers):
+        raise GoogleError(refusals.none_connected)
     caller = thread_id if isinstance(thread_id, str) and thread_id else None
-    reachable = visible_accounts(caller, db=db, provider=GOOGLE_PROVIDER) if caller is not None else []
+    reachable = [
+        account for provider in providers if caller is not None
+        for account in visible_accounts(caller, db=db, provider=provider)
+    ]
     if not reachable:
-        raise GoogleError(NONE_AVAILABLE)
-    listed = choices(reachable)
+        raise GoogleError(refusals.none_available)
+    listed = _choices(reachable)
     if selector is None or (isinstance(selector, str) and not selector.strip()):
         if len(reachable) == 1:
-            return usable(reachable[0])
-        raise GoogleError(CHOOSE.format(choices=listed))
+            return usable_for(reachable[0], db)
+        raise GoogleError(refusals.choose.format(choices=listed))
     wanted = selector.strip() if isinstance(selector, str) else ""
     named = [account for account in reachable if account["id"] == wanted] or [
         account for account in reachable if str(account["address"]).strip().lower() == wanted.lower()
     ]
     if len(named) != 1:
-        raise GoogleError(CHOOSE.format(choices=listed) if named else UNKNOWN.format(choices=listed))
-    return usable(named[0])
+        raise GoogleError((refusals.choose if named else refusals.unknown).format(choices=listed))
+    return usable_for(named[0], db)
+
+
+def resolve_for_thread(selector: object, thread_id: object, *, db: sqlite3.Connection | None = None) -> dict:
+    """The one reachable connected Google account ``selector`` names; else a fixed refusal."""
+    return resolve(
+        selector, thread_id, providers=(GOOGLE_PROVIDER,), usable_for=_google_usable,
+        refusals=GOOGLE_REFUSALS, db=db,
+    )

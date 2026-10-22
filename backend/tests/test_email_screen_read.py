@@ -16,7 +16,7 @@ import httpx
 import pytest
 
 from connections.connected_accounts import store_credentials
-from connections.google.accounts import NONE_AVAILABLE
+from connections.mail_accounts import NONE_AVAILABLE
 from google_account_helpers import only_corsia_account
 from connections.google import client as google_client
 from connections.google import gmail_read
@@ -453,7 +453,7 @@ async def test_no_account_named_returns_the_clarification_never_a_default(mail, 
     for tool, args in ((EmailSearchTool(), {"query": "x"}), (EmailReadTool(), {"message_id": "m1"})):
         out = await tool.execute(_thread_id=conductor, **args)
         assert out == (
-            f"Error: Pass account_id to say which Google account to use: {ACCOUNT} (account_id "
+            f"Error: Pass account_id to say which account to use: {ACCOUNT} (account_id "
             f"{mail.account}), work@example.com (account_id {second['id']}). If the person hasn't said "
             "which account, ask them; never pick one for them."
         )

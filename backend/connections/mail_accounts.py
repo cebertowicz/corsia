@@ -2,17 +2,17 @@
 
 The same rules as ``connections.google.accounts``: the caller names the account by ``account_id``
 or by address, only accounts that reach the caller are searched, a caller with one reachable
-account may omit the name, and every refusal is a fixed text that echoes no input. With no
-mail-host account on this install it is that Google resolver, unchanged.
+account may omit the name, and every refusal is a fixed text that echoes no input. It is that
+resolver, run over Gmail and mail-host accounts.
 """
 
 from __future__ import annotations
 
 import sqlite3
 
-from connections.connected_accounts import GOOGLE_PROVIDER, MAILHOST_PROVIDER, list_accounts, visible_accounts
+from connections.connected_accounts import GOOGLE_PROVIDER, MAILHOST_PROVIDER
 from connections.google import accounts as google_accounts
-from connections.google.client import GoogleError
+from connections.google.client import NOT_CONNECTED, GoogleError
 from connections.mailhost import store
 
 NONE_AVAILABLE = (
@@ -45,34 +45,13 @@ def _usable(account: dict, db: sqlite3.Connection) -> dict:
     return _mail_host_usable(account, db) if account["provider"] == MAILHOST_PROVIDER else google_accounts.usable(account)
 
 
+# No account at all still says to connect Google: the only account the person can connect themselves.
+REFUSALS = google_accounts.Refusals(NOT_CONNECTED, NONE_AVAILABLE, CHOOSE, UNKNOWN)
+
+
 def resolve_for_thread(selector: object, thread_id: object, *, db: sqlite3.Connection | None = None) -> dict:
     """The one reachable connected email account ``selector`` names; else a fixed refusal."""
-    if db is None:
-        from infra.database import get_db
-
-        connection = get_db()
-        try:
-            return resolve_for_thread(selector, thread_id, db=connection)
-        finally:
-            connection.close()
-    if not list_accounts(MAILHOST_PROVIDER, db=db):
-        return google_accounts.resolve_for_thread(selector, thread_id, db=db)
-    caller = thread_id if isinstance(thread_id, str) and thread_id else None
-    reachable = [
-        account for provider in (GOOGLE_PROVIDER, MAILHOST_PROVIDER) if caller is not None
-        for account in visible_accounts(caller, db=db, provider=provider)
-    ]
-    if not reachable:
-        raise GoogleError(NONE_AVAILABLE)
-    listed = google_accounts.choices(reachable)
-    if selector is None or (isinstance(selector, str) and not selector.strip()):
-        if len(reachable) == 1:
-            return _usable(reachable[0], db)
-        raise GoogleError(CHOOSE.format(choices=listed))
-    wanted = selector.strip() if isinstance(selector, str) else ""
-    named = [account for account in reachable if account["id"] == wanted] or [
-        account for account in reachable if str(account["address"]).strip().lower() == wanted.lower()
-    ]
-    if len(named) != 1:
-        raise GoogleError(CHOOSE.format(choices=listed) if named else UNKNOWN.format(choices=listed))
-    return _usable(named[0], db)
+    return google_accounts.resolve(
+        selector, thread_id, providers=(GOOGLE_PROVIDER, MAILHOST_PROVIDER), usable_for=_usable,
+        refusals=REFUSALS, db=db,
+    )
