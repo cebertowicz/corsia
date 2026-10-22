@@ -1,7 +1,7 @@
 // Walks Start fresh in the real launch shell: the offer for an install this app can't open, the
 // "Start fresh instead" choice beside a takeover, the confirmation listing what moves and the code
-// folder that stays, the move itself, and the done and failure cards. Each button must run the right
-// command and nothing else.
+// and work folders that stay, the move itself, the done card, and every failure card: a refusal, a
+// failed move, and an undo finished at launch. Each button must run the right command and nothing else.
 //
 // usage: node desktop/tests/start-fresh-journey.mjs [--screenshots <dir>]
 import { createRequire } from 'node:module';
@@ -43,7 +43,8 @@ const fail = (message) => {
 const reason = 'CORSIA found an existing install on this computer (~/.corsia), and this app can’t open it. Nothing was changed.';
 const preview = {
 	moves: ['~/Corsia', '~/.corsia/config.json', '~/Library/LaunchAgents/com.corsia.prod.plist'],
-	stays: ['~/.corsia'],
+	code: ['~/.corsia'],
+	work: [],
 	backups: '~/CORSIA backups',
 };
 const backup = '~/CORSIA backups/2026-10-22 13-05';
@@ -193,14 +194,64 @@ for (const theme of ['dark', 'light']) {
 		await page.close();
 	}
 
-	// A failure that put everything back offers Try again, which reads the computer again.
+	// A work folder named in the settings stays, and the confirmation says so after the code folder.
+	{
+		const page = await open(theme, { start_fresh_preview: { ...preview, work: ['~/Developer'] } });
+		const before = failed;
+		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
+		await page.click('#retry');
+		await page.waitForFunction(() => document.getElementById('retry').textContent === 'Move and start fresh');
+		compare(`${theme} work folder`, await read(page), {
+			note: 'Its code folder stays where it is: ~/.corsia. Its work folder stays where it is: ~/Developer.',
+		});
+		if (failed === before) console.log(`ok   ${theme} work folder stays`);
+		await page.close();
+	}
+
+	// A refusal says what the person can do; Retry reads the computer again.
+	{
+		const refusal = 'CORSIA can’t move ~/Corsia because it’s on another disk.';
+		const page = await open(theme, { start_fresh_preview: { throws: { message: refusal, details: '', restored: true } } });
+		const before = failed;
+		await page.evaluate((said) => window.__corsiaShowStartup({ state: 'existing_install', reason: said }), reason);
+		await page.click('#retry');
+		await page.waitForFunction(() => document.getElementById('status').textContent === 'CORSIA couldn’t start fresh');
+		compare(`${theme} refusal`, await read(page), { line: refusal, details: null, button: 'Retry', list: null, quit: true });
+		await shot(page, theme, '5-refusal');
+		await page.click('#retry');
+		await page.waitForTimeout(150);
+		const calls = await made(page);
+		if (JSON.stringify(calls) !== JSON.stringify(['start_fresh_preview', 'start_fresh_preview'])) fail(`${theme} refusal: ran ${JSON.stringify(calls)}`);
+		if (failed === before) console.log(`ok   ${theme} refusal`);
+		await page.close();
+	}
+
+	// An unfinished Start fresh put back at launch: the earlier install didn't start, so the card says it's stopped.
+	{
+		const failure = {
+			message: 'CORSIA put back everything Start fresh had moved. Your earlier install didn’t start again, so it’s stopped now. Choose Retry to move it into a backup again.',
+			details: '`corsia start` exited 1',
+			restored: true,
+		};
+		const page = await open(theme, { start_fresh_preview: preview });
+		const before = failed;
+		await page.evaluate((given) => window.__corsiaShowStartup({ state: 'start_fresh_failed', failure: given }), failure);
+		compare(`${theme} launch undo`, await read(page), { title: 'CORSIA couldn’t start fresh', line: failure.message, details: failure.details, button: 'Retry', quit: true });
+		await shot(page, theme, '6-launch-undo');
+		await page.click('#retry');
+		await page.waitForFunction(() => document.getElementById('retry').textContent === 'Move and start fresh');
+		if (failed === before) console.log(`ok   ${theme} launch undo`);
+		await page.close();
+	}
+
+	// A failure that put everything back offers Retry, which reads the computer again.
 	for (const { name, error, line, details, button, next } of [
 		{
 			name: 'restored',
 			error: { message: 'CORSIA couldn’t move everything into the backup folder, so it put it all back where it was.', details: 'could not move ~/Corsia: Permission denied', restored: true },
 			line: 'CORSIA couldn’t move everything into the backup folder, so it put it all back where it was.',
 			details: 'could not move ~/Corsia: Permission denied',
-			button: 'Try again',
+			button: 'Retry',
 			next: 'start_fresh_preview',
 		},
 		{

@@ -1,14 +1,15 @@
 //! "Start fresh": set an earlier install aside so first run can begin again.
 //!
-//! Every piece of the earlier install that first run detects (and the folders its
-//! settings name, where that is safe) is renamed into
-//! `~/CORSIA backups/<YYYY-MM-DD HH-MM>/`, keeping its place relative to the home
-//! folder. Nothing is copied or deleted, so each move is undone by renaming it
-//! back. A journal in the app folder lists every move before the first one, and
-//! any failure, including the app closing partway, puts everything back.
+//! Every piece of the earlier install that first run detects (and the state folders
+//! its settings name) is renamed into `~/CORSIA backups/<YYYY-MM-DD HH-MM>/`,
+//! keeping its place relative to the home folder. Nothing is copied or deleted, so
+//! each move is undone by renaming it back. A journal in the app folder lists every
+//! move before the earlier install is stopped, and any failure, including the app
+//! closing partway, puts everything back and starts the earlier install again.
 //!
 //! A source install's code folder is never moved: when `~/.corsia` is a Git
-//! checkout only its `config.json` is set aside.
+//! checkout only its `config.json` is set aside. A work folder the settings name
+//! somewhere else stays where it is: it may hold the person's other work.
 
 use std::{
     collections::BTreeSet,
@@ -24,7 +25,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    adoption::{self, Phase},
+    adoption::{self, Phase, StopProcess},
     first_run::{self, FirstRun},
     release_proof,
     source_lifecycle::SourceLifecycle,
@@ -35,11 +36,6 @@ pub const BACKUPS_FOLDER: &str = "CORSIA backups";
 const PLIST: &str = "Library/LaunchAgents/com.corsia.prod.plist";
 const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_POLL: Duration = Duration::from_millis(100);
-/// Top-level home folders that hold far more than CORSIA. A folder an earlier
-/// install's settings name is moved only when it is none of these.
-const HOME_FOLDERS: [&str; 9] = [
-    "Applications", "Desktop", "Documents", "Downloads", "Library", "Movies", "Music", "Pictures", "Public",
-];
 
 /// One rename, from where the earlier install had it to its place in the backup.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -52,8 +48,12 @@ struct Move {
 struct Journal {
     backup: PathBuf,
     moves: Vec<Move>,
-    /// The earlier install's service was stopped by this run, so undoing it starts it again.
+    /// The earlier install's service ran when this run began, so undoing it starts it again.
     restart_old: bool,
+    /// The checkout's own `corsia stop`, recorded as soon as it exists: a relaunch after
+    /// Force Quit waits for it to finish draining before starting the earlier install.
+    #[serde(default)]
+    stop: Option<StopProcess>,
 }
 
 /// What Start fresh would move, decided by reading only.
@@ -64,13 +64,16 @@ pub struct Inventory {
     items: Vec<PathBuf>,
     /// Code folders that stay where they are.
     checkouts: Vec<PathBuf>,
+    /// Work folders the settings name outside the detected pieces, which stay too.
+    work: Vec<PathBuf>,
 }
 
-/// What the confirmation shows: every item that moves and the code folder that stays.
+/// What the confirmation shows: every item that moves and the folders that stay.
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct Preview {
     pub moves: Vec<String>,
-    pub stays: Vec<String>,
+    pub code: Vec<String>,
+    pub work: Vec<String>,
     pub backups: String,
 }
 
@@ -80,7 +83,8 @@ pub struct StartFreshError {
     pub message: String,
     /// The technical reason, shown under Details.
     pub details: String,
-    /// Everything is where it was before Start fresh ran.
+    /// Every file is where it was before Start fresh ran, so Retry starts over. The message
+    /// says when the earlier install did not start again.
     pub restored: bool,
 }
 
@@ -93,6 +97,11 @@ impl StartFreshError {
         }
     }
 
+    /// Start fresh can't run on this computer as it is: `message` says why and what the person can do.
+    fn refused(message: String) -> Self {
+        Self { message, details: String::new(), restored: true }
+    }
+
     /// The step stopped partway for a reason that says nothing about the files. The journal
     /// decides what the next launch puts back, so quitting and opening CORSIA again is safe.
     pub(crate) fn unfinished(details: impl Into<String>) -> Self {
@@ -102,18 +111,40 @@ impl StartFreshError {
             restored: false,
         }
     }
+
+    /// Some moves could not be put back. The journal stays, so the next launch tries again.
+    fn not_put_back(journal: &Journal, details: String) -> Self {
+        Self {
+            message: format!(
+                "CORSIA couldn’t put everything back. Nothing was deleted: what it moved is in {}. \
+                 Reopen CORSIA to try again.",
+                backup_shown(&journal.backup)
+            ),
+            details,
+            restored: false,
+        }
+    }
 }
+
+/// Said after the files are back when the earlier install did not start again.
+const NOT_STARTED: &str = "Your earlier install didn’t start again, so it’s stopped now. \
+                           Choose Retry to move it into a backup again.";
 
 /// The earlier install's service. Production asks launchd and the checkout's own
 /// script; unit tests use a fake, so no test reaches launchd.
 pub trait OldService {
-    /// Stop the service if it runs and prove it let go. `true` when this call stopped it,
-    /// so undoing Start fresh starts it again. `progress` receives the running-work count.
-    fn stop(&mut self, progress: &mut dyn FnMut(Option<u32>)) -> Result<bool, String>;
+    /// Stop the service if it runs and prove it let go. `progress` receives the running-work
+    /// count; `spawned` receives the checkout's own `corsia stop` process as soon as it exists.
+    fn stop(
+        &mut self,
+        progress: &mut dyn FnMut(Option<u32>),
+        spawned: &mut dyn FnMut(StopProcess) -> Result<(), String>,
+    ) -> Result<(), String>;
     /// Whether the service runs now.
     fn running(&mut self) -> Result<bool, String>;
-    /// Start the service again. Safe when it already runs.
-    fn start(&mut self) -> Result<(), String>;
+    /// Start the service again once `stop`, a `corsia stop` an earlier run left, has exited.
+    /// Safe when it already runs.
+    fn start(&mut self, stop: Option<&StopProcess>) -> Result<(), String>;
 }
 
 /// A path as the window shows it, with the home folder as `~`.
@@ -173,12 +204,13 @@ fn is_checkout(path: &Path) -> bool {
 }
 
 /// Everything Start fresh would move, or why it must not run. Reads only.
-pub fn inventory(home: &Path, app_dir: &Path) -> Result<Inventory, String> {
-    let home = fs::canonicalize(home).map_err(|error| format!("could not read {}: {error}", home.display()))?;
-    let home_device = fs::metadata(&home)
-        .map_err(|error| format!("could not read {}: {error}", home.display()))?
-        .dev();
-    let present = |path: &Path| first_run::present(path);
+pub fn inventory(home: &Path, app_dir: &Path) -> Result<Inventory, StartFreshError> {
+    let unreadable = |path: &Path, error: std::io::Error| {
+        StartFreshError::untouched(format!("could not read {}: {error}", path.display()))
+    };
+    let home = fs::canonicalize(home).map_err(|error| unreadable(home, error))?;
+    let home_device = fs::metadata(&home).map_err(|error| unreadable(&home, error))?.dev();
+    let present = |path: &Path| first_run::present(path).map_err(StartFreshError::untouched);
 
     let plist = home.join(PLIST);
     let plist_roots = if present(&plist)? { Some(plist_roots(&plist)) } else { None };
@@ -205,68 +237,66 @@ pub fn inventory(home: &Path, app_dir: &Path) -> Result<Inventory, String> {
     if present(&legacy)? {
         markers.push(legacy);
     }
-    for entry in fs::read_dir(&home).map_err(|error| format!("could not read {}: {error}", home.display()))? {
-        let entry = entry.map_err(|error| format!("could not read {}: {error}", home.display()))?;
+    for entry in fs::read_dir(&home).map_err(|error| unreadable(&home, error))? {
+        let entry = entry.map_err(|error| unreadable(&home, error))?;
         if !entry.file_name().to_string_lossy().eq_ignore_ascii_case(first_run::WORKSPACE_FOLDER) {
             continue;
         }
         let path = entry.path();
-        if !path.is_dir() || !first_run::workspace_is_fresh(&path)? {
+        if !path.is_dir() || !first_run::workspace_is_fresh(&path).map_err(StartFreshError::untouched)? {
             markers.push(path);
         }
     }
     for marker in &markers {
-        let metadata = fs::symlink_metadata(marker)
-            .map_err(|error| format!("could not read {}: {error}", marker.display()))?;
+        let metadata = fs::symlink_metadata(marker).map_err(|error| unreadable(marker, error))?;
+        let name = shown(&home, marker);
         if metadata.dev() != home_device {
-            return Err(format!(
-                "{} is on another disk, so it can’t be moved into the backup folder",
-                shown(&home, marker)
-            ));
+            return Err(StartFreshError::refused(format!(
+                "{name} is on another disk, so CORSIA can’t move it into the backup folder. \
+                 Rename it or move it off that disk yourself, then choose Retry."
+            )));
         }
         let resolved = resolved(marker).unwrap_or_else(|| marker.clone());
         for checkout in &checkouts {
-            if checkout.starts_with(&resolved) || (resolved.starts_with(checkout) && resolved != config) {
-                return Err(format!(
-                    "{} holds the code folder {}, which Start fresh never moves",
-                    shown(&home, marker),
-                    shown(&home, checkout)
-                ));
+            let holds = checkout.starts_with(&resolved);
+            if holds || (resolved.starts_with(checkout) && resolved != config) {
+                let code = shown(&home, checkout);
+                return Err(StartFreshError::refused(format!(
+                    "{name} is {} CORSIA’s code folder, {code}, and Start fresh never moves code. \
+                     To set it aside yourself, run {code}/scripts/corsia stop, rename {name}, then choose Retry.",
+                    if holds { "holding" } else { "inside" }
+                )));
             }
         }
     }
 
-    // The folders the earlier install's settings name, where moving them is safe.
-    // Anything else stays where it is: first run does not look at it.
-    let mut extras = Vec::new();
+    // A state folder the earlier install's settings name moves when it holds that install's
+    // database. A work folder named there stays: it may hold the person's other work, and
+    // first run does not look at it.
+    let mut states = Vec::new();
+    let mut workspaces = Vec::new();
     if let Some(roots) = &plist_roots {
-        extras.extend(roots.workspace.iter().chain(roots.state.iter()).cloned());
+        states.extend(roots.state.iter().cloned());
+        workspaces.extend(roots.workspace.iter().cloned());
     }
     if let Some((workspace, state)) = adoption::bootstrap_roots(&config) {
-        extras.extend([workspace, state]);
+        states.push(state);
+        workspaces.push(workspace);
     }
     let app_dir = fs::canonicalize(app_dir).unwrap_or_else(|_| app_dir.to_path_buf());
     let backups = home.join(BACKUPS_FOLDER);
     let mut items = markers;
-    for extra in extras {
-        let Some(path) = resolved(&extra) else { continue };
+    for state in states {
+        let Some(path) = resolved(&state) else { continue };
         let Ok(metadata) = fs::symlink_metadata(&path) else { continue };
-        let Ok(relative) = path.strip_prefix(&home) else { continue };
-        let top = relative.components().next().map(|part| part.as_os_str().to_string_lossy().into_owned());
-        let depth = relative.components().count();
-        // `~/Library/<folder>` is the system's (Preferences, Caches); only an app's own folder
-        // inside one of those, such as `~/Library/Application Support/<app>`, can be CORSIA's.
-        let deep_enough = match top.as_deref() {
-            Some("Library") => depth >= 3,
-            Some(top) if HOME_FOLDERS.contains(&top) => depth >= 2,
-            _ => depth >= 1,
-        };
-        let safe = deep_enough
+        let movable = metadata.is_dir()
+            && path.join("corsia.db").is_file()
+            && path.starts_with(&home)
             && metadata.dev() == home_device
-            && !app_dir.starts_with(&path)
+            && !overlaps(&path, &app_dir)
             && !overlaps(&path, &backups)
             && !checkouts.iter().any(|checkout| overlaps(&path, checkout));
-        if safe {
+        if movable {
             items.push(path);
         }
     }
@@ -283,14 +313,23 @@ pub fn inventory(home: &Path, app_dir: &Path) -> Result<Inventory, String> {
             kept.push(item);
         }
     }
-    Ok(Inventory { home, items: kept, checkouts: checkouts.into_iter().collect() })
+    let mut work: Vec<PathBuf> = workspaces
+        .iter()
+        .filter_map(|workspace| resolved(workspace))
+        .filter(|workspace| workspace.is_dir() && !kept.iter().any(|item| workspace.starts_with(item)))
+        .collect();
+    work.sort();
+    work.dedup();
+    Ok(Inventory { home, items: kept, checkouts: checkouts.into_iter().collect(), work })
 }
 
-pub fn preview(home: &Path, app_dir: &Path) -> Result<Preview, String> {
+pub fn preview(home: &Path, app_dir: &Path) -> Result<Preview, StartFreshError> {
     let inventory = inventory(home, app_dir)?;
+    let shown_all = |paths: &[PathBuf]| paths.iter().map(|path| shown(&inventory.home, path)).collect();
     Ok(Preview {
-        moves: inventory.items.iter().map(|item| shown(&inventory.home, item)).collect(),
-        stays: inventory.checkouts.iter().map(|checkout| shown(&inventory.home, checkout)).collect(),
+        moves: shown_all(&inventory.items),
+        code: shown_all(&inventory.checkouts),
+        work: shown_all(&inventory.work),
         backups: shown(&inventory.home, &inventory.home.join(BACKUPS_FOLDER)),
     })
 }
@@ -339,8 +378,8 @@ fn write_journal(app_dir: &Path, journal: &Journal) -> Result<(), String> {
 }
 
 /// Put every move back, last first. Safe to repeat: a move already back is skipped.
-/// The journal is removed only once everything is back.
-fn roll_back(app_dir: &Path, journal: &Journal) -> Result<(), String> {
+/// The journal stays: `put_back` removes it once the earlier install is started too.
+fn roll_back(journal: &Journal) -> Result<(), String> {
     let mut failures = Vec::new();
     for step in journal.moves.iter().rev() {
         let at_backup = first_run::present(&step.to);
@@ -363,13 +402,42 @@ fn roll_back(app_dir: &Path, journal: &Journal) -> Result<(), String> {
     if let Some(backups) = journal.backup.parent() {
         let _ = fs::remove_dir(backups);
     }
-    if !failures.is_empty() {
-        return Err(failures.join("; "));
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
     }
+}
+
+/// How putting an unfinished Start fresh back went.
+enum PutBack {
+    /// Every file is back and the earlier install runs again if it ran before.
+    Done,
+    /// Every file is back, but the earlier install did not start again.
+    NotStarted(String),
+    /// Some files are still in the backup; the journal stays for the next launch.
+    Files(String),
+}
+
+/// Put every move back, then start the earlier install again if it ran before. The journal
+/// is removed last, so the app closing partway repeats both on the next launch.
+fn put_back(
+    app_dir: &Path,
+    journal: &Journal,
+    start_old: impl FnOnce(Option<&StopProcess>) -> Result<(), String>,
+) -> PutBack {
+    if let Err(error) = roll_back(journal) {
+        return PutBack::Files(error);
+    }
+    let started = if journal.restart_old { start_old(journal.stop.as_ref()) } else { Ok(()) };
     match fs::remove_file(journal_path(app_dir)) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!("could not remove the Start fresh journal: {error}")),
+        Err(error) if error.kind() != ErrorKind::NotFound => {
+            PutBack::Files(format!("could not remove the Start fresh journal: {error}"))
+        }
+        _ => match started {
+            Ok(()) => PutBack::Done,
+            Err(error) => PutBack::NotStarted(error),
+        },
     }
 }
 
@@ -393,29 +461,17 @@ fn remove_empty_folders(folder: &Path) {
     let _ = fs::remove_dir(folder);
 }
 
-fn undo(app_dir: &Path, journal: &Journal, old: &mut dyn OldService, details: String) -> StartFreshError {
-    match roll_back(app_dir, journal) {
-        Ok(()) => {
-            if journal.restart_old {
-                if let Err(error) = old.start() {
-                    log::warn!("the earlier install did not start again after Start fresh was undone: {error}");
-                }
-            }
-            StartFreshError {
-                message: "CORSIA couldn’t move everything into the backup folder, so it put it all back where it was."
-                    .into(),
-                details,
-                restored: true,
-            }
-        }
-        Err(error) => StartFreshError {
-            message: format!(
-                "CORSIA couldn’t put everything back. Nothing was deleted: what it moved is in {}.",
-                backup_shown(&journal.backup)
-            ),
+/// Undo this run's moves and say what happened. `back` is the line for when everything is
+/// where it was and the earlier install runs again.
+fn undo(app_dir: &Path, journal: &Journal, old: &mut dyn OldService, back: &str, details: String) -> StartFreshError {
+    match put_back(app_dir, journal, |stop| old.start(stop)) {
+        PutBack::Done => StartFreshError { message: back.into(), details, restored: true },
+        PutBack::NotStarted(error) => StartFreshError {
+            message: format!("{back} {NOT_STARTED}"),
             details: format!("{details}; then {error}"),
-            restored: false,
+            restored: true,
         },
+        PutBack::Files(error) => StartFreshError::not_put_back(journal, format!("{details}; then {error}")),
     }
 }
 
@@ -437,39 +493,12 @@ pub fn start_fresh(
     if first_run::present(&journal_path(app_dir)).map_err(StartFreshError::untouched)? {
         return Err(StartFreshError::untouched("an earlier Start fresh has not been undone yet"));
     }
-    let inventory = inventory(home, app_dir).map_err(StartFreshError::untouched)?;
+    let inventory = inventory(home, app_dir)?;
+    let restart_old = old.running().map_err(StartFreshError::untouched)?;
 
-    progress(Phase::Waiting { running: None });
-    let restart_old = match old.stop(&mut |running| progress(Phase::Waiting { running })) {
-        Ok(stopped) => stopped,
-        Err(error) => {
-            // A stop that failed partway may have left it down; starting it is safe either way.
-            if let Err(start) = old.start() {
-                log::warn!("the earlier install did not start again after its stop failed: {start}");
-            }
-            return Err(StartFreshError {
-                message: "CORSIA couldn’t stop your earlier install, so it left everything where it was.".into(),
-                details: error,
-                restored: true,
-            });
-        }
-    };
-
-    progress(Phase::MovingToBackup);
-    let restart = |old: &mut dyn OldService| {
-        if restart_old {
-            if let Err(error) = old.start() {
-                log::warn!("the earlier install did not start again: {error}");
-            }
-        }
-    };
-    let backup = match create_backup(&inventory.home, now) {
-        Ok(backup) => backup,
-        Err(error) => {
-            restart(old);
-            return Err(StartFreshError::untouched(error));
-        }
-    };
+    // The journal is written before the stop, so a relaunch after the app closes at any
+    // point from here puts the files back and starts the earlier install again.
+    let backup = create_backup(&inventory.home, now).map_err(StartFreshError::untouched)?;
     let moves: Vec<Move> = inventory
         .items
         .iter()
@@ -478,14 +507,26 @@ pub fn start_fresh(
             from: from.clone(),
         })
         .collect();
-    let journal = Journal { backup: backup.clone(), moves, restart_old };
+    let mut journal = Journal { backup: backup.clone(), moves, restart_old, stop: None };
     if let Err(error) = write_journal(app_dir, &journal) {
         let _ = fs::remove_dir(&backup);
         let _ = fs::remove_dir(inventory.home.join(BACKUPS_FOLDER));
-        restart(old);
         return Err(StartFreshError::untouched(error));
     }
 
+    progress(Phase::Waiting { running: None });
+    let stopped = old.stop(&mut |running| progress(Phase::Waiting { running }), &mut |stop| {
+        journal.stop = Some(stop);
+        write_journal(app_dir, &journal)
+    });
+    if let Err(error) = stopped {
+        progress(Phase::StartingExisting);
+        let back = "CORSIA couldn’t stop your earlier install, so it left everything where it was.";
+        return Err(undo(app_dir, &journal, old, back, error));
+    }
+
+    progress(Phase::MovingToBackup);
+    let not_moved = "CORSIA couldn’t move everything into the backup folder, so it put it all back where it was.";
     for step in &journal.moves {
         let moved = step
             .to
@@ -495,7 +536,7 @@ pub fn start_fresh(
         if let Err(error) = moved {
             progress(Phase::StartingExisting);
             let details = format!("could not move {}: {error}", shown(&inventory.home, &step.from));
-            return Err(undo(app_dir, &journal, old, details));
+            return Err(undo(app_dir, &journal, old, not_moved, details));
         }
     }
 
@@ -511,44 +552,53 @@ pub fn start_fresh(
     };
     if let Err(details) = finished {
         progress(Phase::StartingExisting);
-        return Err(undo(app_dir, &journal, old, details));
+        return Err(undo(app_dir, &journal, old, not_moved, details));
     }
     if let Err(error) = fs::remove_file(journal_path(app_dir)) {
         // A journal left behind would undo the finished move on the next launch.
         progress(Phase::StartingExisting);
-        return Err(undo(app_dir, &journal, old, format!("could not finish: {error}")));
+        return Err(undo(app_dir, &journal, old, not_moved, format!("could not finish: {error}")));
     }
     Ok(backup)
 }
 
 /// A Start fresh the app did not finish (it quit or crashed partway) is undone
 /// before launch decides anything, so the earlier install is found whole again.
-pub fn recover_on_launch(app_dir: &Path, start_old: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
+/// `start_old` starts the earlier install once its files are back.
+pub fn recover_on_launch(
+    app_dir: &Path,
+    start_old: impl FnOnce(Option<&StopProcess>) -> Result<(), String>,
+) -> Result<(), StartFreshError> {
+    let unreadable = |details: String| StartFreshError {
+        message: format!(
+            "CORSIA couldn’t read its record of what Start fresh moved. Nothing was deleted: anything it \
+             moved is in ~/{BACKUPS_FOLDER}."
+        ),
+        details,
+        restored: false,
+    };
     let path = journal_path(app_dir);
     let contents = match fs::read(&path) {
         Ok(contents) => contents,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(format!("could not read the Start fresh journal: {error}")),
+        Err(error) => return Err(unreadable(format!("could not read the Start fresh journal: {error}"))),
     };
     let journal: Journal = serde_json::from_slice(&contents)
-        .map_err(|error| format!("could not read the Start fresh journal: {error}"))?;
-    roll_back(app_dir, &journal).map_err(|error| {
-        format!(
-            "CORSIA couldn’t finish putting your earlier install back ({error}). Nothing was deleted: \
-             what it moved is in {}.",
-            backup_shown(&journal.backup)
-        )
-    })?;
-    if journal.restart_old {
-        if let Err(error) = start_old() {
-            log::warn!("the earlier install did not start again after an unfinished Start fresh: {error}");
-        }
+        .map_err(|error| unreadable(format!("could not read the Start fresh journal: {error}")))?;
+    match put_back(app_dir, &journal, start_old) {
+        PutBack::Done => Ok(()),
+        PutBack::NotStarted(details) => Err(StartFreshError {
+            message: format!("CORSIA put back everything Start fresh had moved. {NOT_STARTED}"),
+            details,
+            restored: true,
+        }),
+        PutBack::Files(details) => Err(StartFreshError::not_put_back(&journal, details)),
     }
-    Ok(())
 }
 
 /// The earlier install's service as launchd runs it. Its own `scripts/corsia stop`
-/// drains it when the install is one this app could adopt; otherwise launchd boots it out.
+/// drains it when the install is one this app could adopt, and a stop that refuses is
+/// the answer; launchd boots out only an install this app can't adopt.
 pub struct LaunchdService {
     source: Option<SourceLifecycle>,
     plist: PathBuf,
@@ -604,16 +654,17 @@ impl LaunchdService {
 }
 
 impl OldService for LaunchdService {
-    fn stop(&mut self, progress: &mut dyn FnMut(Option<u32>)) -> Result<bool, String> {
+    fn stop(
+        &mut self,
+        progress: &mut dyn FnMut(Option<u32>),
+        spawned: &mut dyn FnMut(StopProcess) -> Result<(), String>,
+    ) -> Result<(), String> {
         if !self.running()? {
-            return Ok(false);
+            return Ok(());
         }
         if let Some(source) = self.source.as_mut() {
             use adoption::Lifecycle;
-            match source.stop_old(progress, &mut |_| Ok(())) {
-                Ok(()) => return Ok(true),
-                Err(error) => log::warn!("`corsia stop` did not stop the earlier install, so launchd stops it: {error}"),
-            }
+            return source.stop_old(progress, spawned);
         }
         progress(None);
         let status = Command::new("/bin/launchctl")
@@ -626,7 +677,7 @@ impl OldService for LaunchdService {
         let deadline = Instant::now() + STOP_TIMEOUT;
         loop {
             match self.released() {
-                Ok(()) => return Ok(true),
+                Ok(()) => return Ok(()),
                 Err(error) if Instant::now() >= deadline => {
                     return Err(format!("the earlier install did not stop: {error}"))
                 }
@@ -639,9 +690,15 @@ impl OldService for LaunchdService {
         Ok(self.loaded()? || self.port.is_some_and(|port| !release_proof::port_refuses(port)))
     }
 
-    fn start(&mut self) -> Result<(), String> {
+    fn start(&mut self, stop: Option<&StopProcess>) -> Result<(), String> {
         if let Some(source) = self.source.as_mut() {
             use adoption::Lifecycle;
+            // Until a stop left draining exits, starting would do nothing. It is never killed.
+            if let Some(stop) = stop {
+                while source.stop_is_running(stop) {
+                    thread::sleep(source.orphan_poll());
+                }
+            }
             return source.start_old();
         }
         if self.loaded()? || !self.plist.is_file() {
@@ -729,28 +786,47 @@ mod tests {
         refuse_stop: bool,
         /// Starts again on its own once stopped, as a job someone restarts would.
         comes_back: bool,
+        /// Starting it again fails.
+        start_fails: bool,
         stops: u32,
         starts: u32,
+        /// Where the journal is read while the stop drains.
+        app_dir: Option<PathBuf>,
+        journal_during_stop: Option<String>,
+    }
+
+    fn a_stop() -> StopProcess {
+        StopProcess { pid: 4242, started: "Thu Oct 22 13:05:00 2026".into() }
     }
 
     impl OldService for FakeService {
-        fn stop(&mut self, progress: &mut dyn FnMut(Option<u32>)) -> Result<bool, String> {
+        fn stop(
+            &mut self,
+            progress: &mut dyn FnMut(Option<u32>),
+            spawned: &mut dyn FnMut(StopProcess) -> Result<(), String>,
+        ) -> Result<(), String> {
+            spawned(a_stop())?;
+            if let Some(app_dir) = &self.app_dir {
+                self.journal_during_stop = fs::read_to_string(journal_path(app_dir)).ok();
+            }
             if self.refuse_stop {
                 return Err("it would not stop".into());
             }
             progress(Some(2));
-            let was_running = self.running;
             self.running = self.comes_back;
             self.stops += 1;
-            Ok(was_running)
+            Ok(())
         }
 
         fn running(&mut self) -> Result<bool, String> {
             Ok(self.running)
         }
 
-        fn start(&mut self) -> Result<(), String> {
+        fn start(&mut self, _stop: Option<&StopProcess>) -> Result<(), String> {
             self.starts += 1;
+            if self.start_fails {
+                return Err("it would not start".into());
+            }
             self.running = true;
             Ok(())
         }
@@ -899,6 +975,7 @@ mod tests {
         let error = result.unwrap_err();
         assert!(error.restored, "{error:?}");
         assert!(error.message.contains("put it all back"));
+        assert!(!error.message.contains("stopped now"), "{}", error.message);
         assert!(error.details.contains("com.cebertowicz.corsia"), "{}", error.details);
         assert_eq!(home.files(), before, "the earlier install is whole again");
         assert!(home.backups().is_empty(), "the empty backup folder is removed");
@@ -935,6 +1012,38 @@ mod tests {
         assert_eq!(home.files(), before);
         assert!(home.backups().is_empty());
         assert!(!journal_path(&home.app_dir()).exists());
+        assert_eq!(service.starts, 1, "a stop that failed partway may have left it down");
+    }
+
+    #[test]
+    fn the_journal_and_the_stop_are_recorded_before_the_stop_drains() {
+        let home = Home::new("recorded");
+        source_install(&home);
+        let mut service = FakeService { running: true, app_dir: Some(home.app_dir()), ..Default::default() };
+
+        run(&home, &mut service).unwrap();
+
+        let journal: Journal = serde_json::from_str(service.journal_during_stop.as_deref().unwrap()).unwrap();
+        assert!(journal.restart_old);
+        assert_eq!(journal.stop, Some(a_stop()));
+        assert_eq!(journal.moves.len(), 4);
+    }
+
+    #[test]
+    fn an_install_that_does_not_start_again_is_reported_stopped() {
+        let home = Home::new("not-started");
+        source_install(&home);
+        let before = home.files();
+        let mut service = FakeService { running: true, refuse_stop: true, start_fails: true, ..Default::default() };
+
+        let error = run(&home, &mut service).unwrap_err();
+
+        assert!(error.restored, "the files are where they were");
+        assert!(error.message.contains("couldn’t stop"), "{}", error.message);
+        assert!(error.message.contains("stopped now"), "{}", error.message);
+        assert!(error.details.contains("it would not start"), "{}", error.details);
+        assert_eq!(home.files(), before);
+        assert!(!journal_path(&home.app_dir()).exists(), "Retry starts over instead of undoing again");
     }
 
     #[test]
@@ -943,6 +1052,27 @@ mod tests {
         source_install(&home);
         let before = home.files();
         // The app closed after the first of its moves: the journal lists them all.
+        let (backup, moves) = journal_for(&home, Some(a_stop()));
+        fs::create_dir_all(moves[0].to.parent().unwrap()).unwrap();
+        fs::rename(&moves[0].from, &moves[0].to).unwrap();
+
+        let mut waited_for = None;
+        recover_on_launch(&home.app_dir(), |stop| {
+            waited_for = stop.cloned();
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(waited_for, Some(a_stop()), "the stop left draining is waited for before the start");
+        assert_eq!(home.files(), before);
+        assert!(!backup.exists() && home.backups().is_empty());
+        assert!(matches!(first_run::plan(&home.0, &home.app_dir()).unwrap(), FirstRun::Adoptable { .. }));
+        // Nothing left to undo: a second launch changes nothing.
+        recover_on_launch(&home.app_dir(), |_| panic!("no journal, no start")).unwrap();
+    }
+
+    /// A journal listing every move of a source install, as `start_fresh` writes it before the stop.
+    fn journal_for(home: &Home, stop: Option<StopProcess>) -> (PathBuf, Vec<Move>) {
         let inventory = inventory(&home.0, &home.app_dir()).unwrap();
         let backup = create_backup(&inventory.home, SystemTime::now()).unwrap();
         let moves: Vec<Move> = inventory
@@ -950,24 +1080,47 @@ mod tests {
             .iter()
             .map(|from| Move { to: backup.join(from.strip_prefix(&inventory.home).unwrap()), from: from.clone() })
             .collect();
-        write_journal(&home.app_dir(), &Journal { backup: backup.clone(), moves: moves.clone(), restart_old: true })
-            .unwrap();
+        let journal = Journal { backup: backup.clone(), moves: moves.clone(), restart_old: true, stop };
+        write_journal(&home.app_dir(), &journal).unwrap();
+        (backup, moves)
+    }
+
+    #[test]
+    fn a_launch_that_cannot_start_the_earlier_install_says_so() {
+        let home = Home::new("relaunch-not-started");
+        source_install(&home);
+        let before = home.files();
+        // The app closed while the stop was draining: nothing had moved yet.
+        journal_for(&home, Some(a_stop()));
+
+        let error = recover_on_launch(&home.app_dir(), |_| Err("it would not start".into())).unwrap_err();
+
+        assert!(error.restored);
+        assert!(error.message.contains("stopped now"), "{}", error.message);
+        assert_eq!(error.details, "it would not start");
+        assert_eq!(home.files(), before);
+        assert!(!journal_path(&home.app_dir()).exists(), "the next launch goes on as usual");
+    }
+
+    #[test]
+    fn a_launch_that_cannot_put_everything_back_keeps_the_journal() {
+        let home = Home::new("relaunch-stuck");
+        source_install(&home);
+        let (backup, moves) = journal_for(&home, None);
+        // Moved, and something new now sits where it was.
         fs::create_dir_all(moves[0].to.parent().unwrap()).unwrap();
         fs::rename(&moves[0].from, &moves[0].to).unwrap();
+        home.write(moves[0].from.strip_prefix(&home.0).unwrap().join("new.md").to_str().unwrap(), "new");
 
-        let mut started = false;
-        recover_on_launch(&home.app_dir(), || {
-            started = true;
-            Ok(())
-        })
-        .unwrap();
+        let error = recover_on_launch(&home.app_dir(), |_| panic!("files first")).unwrap_err();
 
-        assert!(started);
-        assert_eq!(home.files(), before);
-        assert!(home.backups().is_empty());
-        assert!(matches!(first_run::plan(&home.0, &home.app_dir()).unwrap(), FirstRun::Adoptable { .. }));
-        // Nothing left to undo: a second launch changes nothing.
-        recover_on_launch(&home.app_dir(), || panic!("no journal, no start")).unwrap();
+        assert!(!error.restored);
+        assert!(error.message.contains(&format!("~/{BACKUPS_FOLDER}/")), "{}", error.message);
+        assert!(error.message.contains("Reopen CORSIA"), "{}", error.message);
+        assert!(!error.message.contains(&home.0.display().to_string()), "no full path in the line");
+        assert!(error.details.contains("both back in place and in the backup"), "{}", error.details);
+        assert!(journal_path(&home.app_dir()).exists(), "the next launch tries again");
+        assert!(moves[0].to.exists() && backup.exists());
     }
 
     #[test]
@@ -975,7 +1128,7 @@ mod tests {
         let home = Home::new("finished");
         source_install(&home);
         run(&home, &mut FakeService { running: true, ..Default::default() }).unwrap();
-        recover_on_launch(&home.app_dir(), || panic!("nothing to undo")).unwrap();
+        recover_on_launch(&home.app_dir(), |_| panic!("nothing to undo")).unwrap();
         assert!(matches!(first_run::plan(&home.0, &home.app_dir()).unwrap(), FirstRun::Fresh { .. }));
     }
 
@@ -991,39 +1144,56 @@ mod tests {
 
         let error = run(&home, &mut service).unwrap_err();
 
-        assert!(error.details.contains("code folder"), "{}", error.details);
+        assert!(error.restored);
+        assert_eq!(
+            error.message,
+            "~/Corsia is holding CORSIA’s code folder, ~/Corsia/source/corsia, and Start fresh never moves code. \
+             To set it aside yourself, run ~/Corsia/source/corsia/scripts/corsia stop, rename ~/Corsia, then choose Retry."
+        );
+        assert_eq!(preview(&home.0, &home.app_dir()).unwrap_err(), error, "the confirmation says the same");
         assert_eq!(service.stops, 0);
         assert_eq!(home.files(), before);
         assert!(home.backups().is_empty());
     }
 
     #[test]
-    fn folders_the_settings_name_move_only_when_safe() {
+    fn settings_name_state_folders_that_move_and_work_folders_that_stay() {
         let home = Home::new("extras");
         home.write("work/notes.md", "mine");
-        home.write("Documents/keep.md", "theirs");
+        home.write("work/.corsia/corsia.db", "db");
+        home.write("Developer/app/main.rs", "theirs");
         home.write("Library/Preferences/keep.plist", "system");
+        home.write("Library/Mobile Documents/com~apple~CloudDocs/keep.md", "synced");
+        // A state folder holding the earlier install's database moves; the iCloud Drive root
+        // named as state holds none, so it stays, as does every work folder.
         home.write(
             PLIST,
             &format!(
-                r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Label</key><string>com.corsia.prod</string><key>EnvironmentVariables</key><dict><key>CORSIA_STATE_DIR</key><string>{}</string></dict></dict></plist>"#,
-                home.0.join("Library/Preferences").display()
+                r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Label</key><string>com.corsia.prod</string><key>EnvironmentVariables</key><dict><key>CORSIA_WORKSPACE</key><string>{}</string><key>CORSIA_STATE_DIR</key><string>{}</string></dict></dict></plist>"#,
+                home.0.join("Developer").display(),
+                home.0.join("Library/Mobile Documents/com~apple~CloudDocs").display()
             ),
         );
         home.write(
             ".corsia/config.json",
-            &format!(r#"{{"workspace":{{"root":"{}"}},"state_root":"{}"}}"#, home.0.join("work").display(), home.0.join("Documents").display()),
+            &format!(r#"{{"workspace":"{}"}}"#, home.0.join("work").display()),
         );
+
         let preview = preview(&home.0, &home.app_dir()).unwrap();
+
         assert_eq!(
             preview.moves,
-            vec!["~/.corsia".to_string(), "~/work".to_string(), "~/Library/LaunchAgents/com.corsia.prod.plist".to_string()]
+            vec!["~/.corsia".to_string(), "~/work/.corsia".to_string(), "~/Library/LaunchAgents/com.corsia.prod.plist".to_string()]
         );
-        assert!(preview.stays.is_empty());
+        assert!(preview.code.is_empty());
+        assert_eq!(preview.work, vec!["~/Developer".to_string(), "~/work".to_string()]);
         assert_eq!(preview.backups, format!("~/{BACKUPS_FOLDER}"));
         run(&home, &mut FakeService::default()).unwrap();
-        assert!(home.0.join("Documents/keep.md").is_file(), "a standard home folder never moves");
-        assert!(home.0.join("Library/Preferences/keep.plist").is_file(), "a system folder in Library never moves");
+        assert!(home.0.join("work/notes.md").is_file(), "a work folder stays");
+        assert!(!home.0.join("work/.corsia").exists(), "its state moves");
+        assert!(home.0.join("Developer/app/main.rs").is_file());
+        assert!(home.0.join("Library/Preferences/keep.plist").is_file());
+        assert!(home.0.join("Library/Mobile Documents/com~apple~CloudDocs/keep.md").is_file());
     }
 
     #[test]
@@ -1049,7 +1219,8 @@ mod tests {
                 "~/Library/Application Support/com.cebertowicz.corsia".to_string(),
             ]
         );
-        assert_eq!(preview.stays, vec!["~/.corsia".to_string()]);
+        assert_eq!(preview.code, vec!["~/.corsia".to_string()]);
+        assert!(preview.work.is_empty(), "the work folder is the detected ~/Corsia, which moves");
     }
 
     #[test]

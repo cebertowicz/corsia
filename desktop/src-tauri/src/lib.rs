@@ -132,6 +132,8 @@ enum ServiceStartup {
     AdoptionFailed { failure: adoption::AdoptionError },
     /// An earlier install this app can't open: the window offers to set it aside and start fresh.
     ExistingInstall { reason: String },
+    /// Putting back a Start fresh the app did not finish went wrong; the window says what and offers the next step.
+    StartFreshFailed { failure: start_fresh::StartFreshError },
 }
 
 /// Drag-region handler injected into every page (including external URLs
@@ -560,10 +562,20 @@ fn start_service<R: tauri::Runtime>(
         .home_dir()
         .map_err(|error| format!("could not resolve the home folder: {error}"))?;
     // A Start fresh the app did not finish is put back first, so the earlier install is found whole.
-    start_fresh::recover_on_launch(&app_dir, || {
+    let recovered = start_fresh::recover_on_launch(&app_dir, |stop| {
         use start_fresh::OldService;
-        earlier_install_service(&home, &app_dir, &resources).start()
-    })?;
+        // A stop the last run left draining is waited for; the window shows the wait.
+        if stop.is_some() {
+            set_adoption_phase(service, Some(adoption::Phase::Waiting { running: None }));
+        }
+        let started = earlier_install_service(&home, &app_dir, &resources).start(stop);
+        set_adoption_phase(service, None);
+        started
+    });
+    if let Err(failure) = recovered {
+        log::error!("an unfinished Start fresh could not be put back: {}", failure.details);
+        return Ok(ServiceStartup::StartFreshFailed { failure });
+    }
     // Decide about the workspace before anything is written: a refusal leaves
     // the computer exactly as it was.
     let first_run = if first_run::environment_names_the_roots() {
@@ -1421,11 +1433,12 @@ fn earlier_install_service(home: &Path, app_dir: &Path, resources: &Path) -> sta
     start_fresh::LaunchdService::new(home, source, Bundled::in_resources(resources).python)
 }
 
-/// What Start fresh would move and which code folder stays, for the confirmation.
+/// What Start fresh would move and which folders stay, for the confirmation, or why it can't run.
 #[tauri::command]
-fn start_fresh_preview(app: tauri::AppHandle) -> Result<start_fresh::Preview, String> {
-    let home = app.path().home_dir().map_err(|error| format!("could not resolve the home folder: {error}"))?;
-    start_fresh::preview(&home, &default_app_dir(&app)?)
+fn start_fresh_preview(app: tauri::AppHandle) -> Result<start_fresh::Preview, start_fresh::StartFreshError> {
+    let untouched = start_fresh::StartFreshError::untouched;
+    let home = app.path().home_dir().map_err(|error| untouched(format!("could not resolve the home folder: {error}")))?;
+    start_fresh::preview(&home, &default_app_dir(&app).map_err(untouched)?)
 }
 
 /// Set the earlier install aside in a backup folder. Answers that folder, as the window shows it.
