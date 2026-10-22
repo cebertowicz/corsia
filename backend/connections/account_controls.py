@@ -2,8 +2,8 @@
 
 CORSIA retains only a hash when comparing Codex logins; each vendor CLI writes and
 removes its own for the home it is given. Sign-in is the vendor's browser
-route, held in memory until the vendor process exits or the person cancels; a
-restart drops it and the account stays signed out. Only the vendor's status
+route, held in memory until the vendor process exits, the person cancels or the
+five-minute wait runs out; a restart drops it and the account stays signed out. Only the vendor's status
 command decides whether an account is signed in. Default identity is read only
 at completion and verify; its login is never changed here.
 """
@@ -45,6 +45,10 @@ _COMMAND_SECONDS = 30.0
 # inside this.
 _SIGNIN_WAIT_SECONDS = 300.0
 _CLEANUP_STATUSES = ("done", "failed", "skipped", "pending")
+
+
+class _SigninWaitExpired(Exception):
+    """The held vendor login stayed open past ``_SIGNIN_WAIT_SECONDS``."""
 
 
 _SIGNINS: dict[str, SignIn] = {}
@@ -136,8 +140,7 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
                 async with asyncio.timeout(_SIGNIN_WAIT_SECONDS):
                     await process.wait()
             except TimeoutError:
-                operation.status, operation.cause = "failed", "signin_timed_out"
-                raise
+                raise _SigninWaitExpired from None
             finally:
                 # Settle the reader before anything else reads the pipe to reap the process.
                 drain.cancel()
@@ -170,11 +173,12 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
             return
         operation.status, operation.cause = "completed", None
         await finish_signin(operation, receipt, binary)
+    except _SigninWaitExpired:  # the vendor process was killed on the way out
+        operation.status, operation.cause = "failed", "signin_timed_out"
     except Exception as exc:  # noqa: BLE001 - nobody may be left waiting on a sign-in nothing is waiting on
-        if operation.cause != "signin_timed_out":  # the wait's own bound, already recorded and not a check failure
-            log.warning("account %s sign-in check failed: %s", operation.account_id, type(exc).__name__)
-            if operation.status == "waiting":
-                operation.status, operation.cause = "failed", "signin_check_failed"
+        log.warning("account %s sign-in check failed: %s", operation.account_id, type(exc).__name__)
+        if operation.status == "waiting":
+            operation.status, operation.cause = "failed", "signin_check_failed"
     finally:
         if operation.status == "failed":
             operation.ref = failure_reference(operation.provider, operation.cause)

@@ -61,15 +61,15 @@ export function installFailureCopy(cli: string, cause?: InstallFailureCause | nu
 
 /** The sign-in's real cause in words, and whether a report would help diagnose it. */
 export function signinFailureCopy(vendor: string, cause?: string | null, ref?: string | null): { meta: string; reportable: boolean } {
-	const { cli, account, maker } = VENDOR_COPY[vendor] ?? { cli: vendor, account: vendor, maker: vendor };
+	const { cli, account } = VENDOR_COPY[vendor] ?? { cli: vendor, account: vendor };
 	const again = failureAction('Sign in again', ref);
 	if (cause === 'unreachable') return { meta: `CORSIA didn’t answer while starting the ${cli} sign-in. Sign in again.`, reportable: true };
 	if (cause === 'agent_unavailable') return { meta: `CORSIA couldn’t reach its agent to start signing in. ${again}`, reportable: true };
 	if (cause?.endsWith('_executable_missing')) return { meta: `CORSIA couldn’t find ${cli} on this computer. Sign in again to install it.`, reportable: true };
 	if (cause?.endsWith('_signin_in_progress')) return { meta: `Another ${cli} sign-in is already open. Finish it in your browser, or sign in again.`, reportable: false };
 	if (cause === 'vendor_login_failed') return { meta: `Signing in to ${cli} didn’t finish in the browser. Sign in again.`, reportable: false };
-	if (cause === 'signin_timed_out') return { meta: `Didn’t finish signing in to ${cli}. Usually the account doesn’t include ${cli}, and your browser stops on a page from ${maker} instead of returning here. Try another account, or turn it off and use another option.`, reportable: false };
-	if (cause === 'no_access') return { meta: `This ${account} account doesn’t include ${cli}. Try another account, or turn it off and use another option.`, reportable: false };
+	if (cause === 'signin_timed_out') return { meta: `Couldn’t finish signing in to ${cli}. Try another account, or turn it off and use another option.`, reportable: false };
+	if (cause === 'no_access') return { meta: `${cli} has no model it can use with this ${account} account. Try another account, or turn it off and use another option.`, reportable: false };
 	if (cause === 'vendor_not_signed_in') return { meta: `${cli} didn’t report a signed-in ${account} account. Sign in again.`, reportable: false };
 	if (cause === 'same_account') return { meta: `That ${account} account is already signed in here. To add another, sign in again with a different ${account} account.`, reportable: false };
 	if (cause === 'signin_check_failed' || cause === 'vendor_status_failed') return { meta: `CORSIA couldn’t check the ${cli} sign-in. ${again}`, reportable: true };
@@ -213,7 +213,8 @@ export function createSetupConnect(deps: ConnectDeps) {
 					else if (expired) {
 						// The browser never came back: stop the vendor's login and stop asking about it.
 						await cancelSignin(current, entry.accountId).catch(() => undefined);
-						signinFailed(vendor, null, entry.installed, 'signin_timed_out');
+						// No answer at all is the service's doing, not the account's.
+						signinFailed(vendor, null, entry.installed, signin ? 'signin_timed_out' : 'unreachable');
 					}
 				}
 			}

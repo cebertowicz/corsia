@@ -3,7 +3,7 @@ import type { SigninResult } from '$lib/stores/vendorAccounts';
 function readableCause(cause: string | null): string {
 	if (!cause) return 'Sign-in didn’t complete.';
 	if (cause === 'vendor_login_failed') return 'Sign-in didn’t complete.';
-	if (cause === 'signin_timed_out') return 'Sign-in didn’t finish in the browser. If it stopped on a page saying this account doesn’t include the tool, sign in with another account.';
+	if (cause === 'signin_timed_out') return 'Sign-in didn’t finish in the browser. Try another account.';
 	if (cause === 'vendor_not_signed_in') return 'The vendor did not report this account as signed in.';
 	if (cause === 'signin_check_failed') return 'CORSIA could not check the vendor sign-in.';
 	if (cause === 'vendor_login_unavailable') return 'Sign-in is unavailable.';

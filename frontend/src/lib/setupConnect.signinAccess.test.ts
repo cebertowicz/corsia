@@ -45,7 +45,7 @@ describe('signing in with an account that has no access', () => {
 		await flow.tick();
 
 		const row = flow.row(claude);
-		expect(row.meta).toBe('This Claude account doesn’t include Claude Code. Try another account, or turn it off and use another option.');
+		expect(row.meta).toBe('Claude Code has no model it can use with this Claude account. Try another account, or turn it off and use another option.');
 		expect(row.error).toBe(true);
 		expect(row.action?.label).toBe('Try another account');
 		expect(row.more?.map((item) => item.label)).toEqual(['Turn off']);
@@ -59,7 +59,7 @@ describe('signing in with an account that has no access', () => {
 		const codex = { source: 'codex', name: 'Codex', state: 'needs_auth' as const };
 		const flow = createSetupConnect({ token: () => 'session', sources: () => [codex], refreshSources: async () => undefined });
 		await flow.signIn(codex);
-		expect(flow.row(codex).meta).toBe('This ChatGPT account doesn’t include Codex. Try another account, or turn it off and use another option.');
+		expect(flow.row(codex).meta).toBe('Codex has no model it can use with this ChatGPT account. Try another account, or turn it off and use another option.');
 	});
 
 	it('clears the row for an account that works', async () => {
@@ -77,7 +77,7 @@ describe('a sign-in the browser never returns from', () => {
 		const { flow } = flowFor();
 		await flow.signIn(claude);
 		const row = flow.row(claude);
-		expect(row.meta).toBe('Didn’t finish signing in to Claude Code. Usually the account doesn’t include Claude Code, and your browser stops on a page from Anthropic instead of returning here. Try another account, or turn it off and use another option.');
+		expect(row.meta).toBe('Couldn’t finish signing in to Claude Code. Try another account, or turn it off and use another option.');
 		expect(row.action?.label).toBe('Try another account');
 		expect(row.more?.map((item) => item.label)).toEqual(['Turn off']);
 		expect(row.reportable).toBeUndefined();
@@ -95,20 +95,22 @@ describe('a sign-in the browser never returns from', () => {
 		await flow.tick();
 
 		expect(calls).toContain('DELETE /api/vendor-accounts/account-1/signin');
-		expect(flow.row(claude).meta).toContain('Didn’t finish signing in to Claude Code.');
+		expect(flow.row(claude).meta).toContain('Couldn’t finish signing in to Claude Code.');
 		await flow.tick();
 		await flow.tick();
 		expect(checks()).toBe(before + 1);
 		expect(flow.active).toBe(false);
 	});
 
-	it('never polls forever: a service that stops answering ends in the same row', async () => {
+	it('never polls forever: a service that stops answering ends in a row that does not blame the account', async () => {
 		serve(() => { throw new TypeError('Failed to fetch'); });
 		const { flow } = flowFor();
 		await flow.signIn(claude);
 		vi.setSystemTime(Date.now() + SIGNIN_WAIT_MS + 1000);
 		await flow.tick();
-		expect(flow.row(claude).meta).toContain('Didn’t finish signing in to Claude Code.');
+		// Nothing answered, so the account is not blamed.
+		expect(flow.row(claude).meta).toBe('CORSIA didn’t answer while starting the Claude Code sign-in. Sign in again.');
+		expect(flow.row(claude).action?.label).toBe('Sign in');
 	});
 });
 

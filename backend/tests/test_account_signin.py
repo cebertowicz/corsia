@@ -599,7 +599,7 @@ async def test_failed_vendor_login_never_reads_status(scripted_vendor_clis, prov
 @pytest.mark.real_harness_cli
 @pytest.mark.asyncio
 @both
-async def test_held_login_waits_without_a_timeout_and_shows_no_vendor_output(scripted_vendor_clis, provider, monkeypatch, tmp_path):
+async def test_held_login_waits_past_the_command_bound_and_shows_no_vendor_output(scripted_vendor_clis, provider, monkeypatch, tmp_path):
     from connections import account_controls
 
     account = scripted_vendor_clis[provider]
