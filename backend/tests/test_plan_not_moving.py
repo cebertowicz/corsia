@@ -499,6 +499,21 @@ def test_many_overdue_waits_name_the_first_few_by_full_id_and_count_the_rest():
     assert len(status_context.render({"note": text}).encode()) < status_context.CHECKPOINT_BYTES // 3
 
 
+def test_named_overdue_titles_are_cut_by_emitted_bytes_in_any_script():
+    """Non-ASCII titles escape to 6 or 12 bytes a character; the note still fits."""
+    late = _ago(timedelta(days=1))
+    nodes = []
+    for index, title in enumerate(("\U0001F600" * 60, "漢" * 60, "\U0001F680" * 60, "x")):
+        leaf = _leaf(f"{index:032x}", "waiting", _wait(late))
+        leaf["title"] = title
+        nodes.append(leaf)
+
+    text = not_moving.note(_header(nodes)[1]["not_moving"])
+
+    assert "漢" in text and "(00000000000000000000000000000002)" in text
+    assert len(status_context.render({"note": text}).encode()) < status_context.CHECKPOINT_BYTES // 3
+
+
 def test_unnamed_facts_count_overdue_waits_without_an_empty_list():
     """Aggregate facts (Activity) carry the count only; the note names no one."""
     counts = dict.fromkeys(operator_node_state.DISTRIBUTION_KEYS, 0)

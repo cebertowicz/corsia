@@ -34,8 +34,9 @@ STILL_KEYS = ("review_human", "waiting", "blocked", "paused")
 OVERDUE_GRACE = timedelta(minutes=11)
 #: Overdue waits the note names, in plan order; the rest are counted. The agent
 #: settles a few a turn and the next note names the next, and three full ids
-#: with 60-character titles keep the line near 300 bytes of the 2 KiB
-#: checkpoint projection (``status_context.CHECKPOINT_BYTES``).
+#: with titles cut to ``close_next_bounds.TITLE_MAX_BYTES`` as emitted keep the
+#: names near 450 bytes of the 2 KiB checkpoint projection
+#: (``status_context.CHECKPOINT_BYTES``), whatever script a title is in.
 NAMED_OVERDUE = 3
 
 
@@ -161,9 +162,12 @@ def note(facts: dict[str, Any]) -> str:
     head = "not moving: " + " · ".join(said) if said else "not moving"
     if overdue:
         plural = "waits are" if overdue > 1 else "wait is"
+        from plans.close_next_bounds import TITLE_MAX_BYTES, bounded
+
         entries = facts.get("overdue_wait_entries", [])
         named = ", ".join(
-            f"{entry['title']} ({entry['node_id']})" for entry in entries[:NAMED_OVERDUE]
+            f"{bounded(entry['title'], TITLE_MAX_BYTES)} ({entry['node_id']})"
+            for entry in entries[:NAMED_OVERDUE]
         )
         if len(entries) > NAMED_OVERDUE:
             named += f" and {len(entries) - NAMED_OVERDUE} more"
