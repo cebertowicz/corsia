@@ -74,26 +74,6 @@ function bookkeepingLabel(run: TranscriptFoldEntry): string {
 	return `${formatCount(events)} ${events === 1 ? 'event' : 'events'}`;
 }
 
-/**
- * Active time: each Turn's own working time in the run, so idle gaps between Turns
- * never count. Interior Turns count whole; only the first Turn's start (`lower`) and
- * the last Turn's end (`upper`) are clipped to what the shown items prove.
- */
-function activeTime(run: TranscriptFoldEntry, summaries: TurnSummaries, lower: number, upper: number): number {
-	const ids = run.turnIds;
-	if (ids.length === 0) return Number.NaN;
-	let total = 0;
-	for (const [index, id] of ids.entries()) {
-		const turn = turnOf(summaries[id]);
-		if (!turn) return Number.NaN;
-		const start = index === 0 ? lower : turn.start;
-		const end = index === ids.length - 1 ? upper : turn.end;
-		if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return Number.NaN;
-		total += end - start;
-	}
-	return total;
-}
-
 function label(
 	run: TranscriptFoldEntry,
 	startKnown: boolean,
@@ -163,59 +143,94 @@ function spansOf(
 }
 
 /**
+ * A run's range for the server's open time: from where it starts to where it ends, or to now while it is
+ * open (`until` null). `id` is the run's entry id.
+ */
+export type RunRange = { id: string; since: number; until: number | null };
+
+/** What the server says a range's open time is, in ms, or null before it has answered. */
+export type OpenMs = (range: RunRange) => number | null;
+
+/** Where each block's open time is read: only a run whose start and end the shown items prove has a range. */
+export function runRanges(
+	entries: TranscriptEntry[],
+	turnSummaries: TurnSummaries,
+	historyComplete: boolean,
+): RunRange[] {
+	return spansOf(entries, turnSummaries, historyComplete).flatMap((span): RunRange[] => {
+		if (!span.startKnown || span.fails() || !Number.isFinite(span.lower)) return [];
+		if (span.run.live) return [{ id: span.run.id, since: span.lower, until: null }];
+		return Number.isFinite(span.upper) ? [{ id: span.run.id, since: span.lower, until: span.upper }] : [];
+	});
+}
+
+/**
+ * The range of an outside wait's number: the open run it waits in, or, standing alone after a reply, from
+ * that reply. Null when the shown items prove no start, and the chip drops the number rather than guess (EW8).
+ */
+export function waitRange(
+	entries: TranscriptEntry[],
+	turnSummaries: TurnSummaries,
+	historyComplete: boolean,
+): RunRange | null {
+	const last = entries.at(-1);
+	if (last?.kind === 'fold') {
+		const range = runRanges(entries, turnSummaries, historyComplete).find(({ id }) => id === last.id);
+		return range ? { ...range, until: null } : null;
+	}
+	if (last?.kind !== 'message' || last.message.role !== 'assistant') return null;
+	const since = parseWsTimestamp(last.message.created_at);
+	return Number.isFinite(since) ? { id: last.message.id, since, until: null } : null;
+}
+
+/**
  * The label of every finished block in one loaded presentation, by entry id:
- * `Worked · <N> steps · <active time>`, or the part of it that is proven (A1-A16).
+ * `Worked · <N> steps · <open time>`, or the part of it that is proven (A1-A16).
  *
- * A block's steps are its rows' server weights. Its time is the sum of its Turns'
- * working time, the first start and last end clipped to the shown items around it.
- * One check per Turn guards the time: the proven bounds of the Turn's loaded blocks,
- * in transcript order and before any clamp, must not go backwards; a Turn that fails
- * shows no time on any of its loaded blocks. That covers only what this presentation holds.
+ * A block's steps are its rows' server weights. Its time is the server's open time for the
+ * block's range (`runRanges`); it shows none until the server has answered.
  */
 export function runLabels(
 	entries: TranscriptEntry[],
 	turnSummaries: TurnSummaries,
 	historyComplete: boolean,
+	openMs: OpenMs = () => null,
 ): Map<string, string> {
+	const ranges = new Map(runRanges(entries, turnSummaries, historyComplete).map((range) => [range.id, range]));
 	return new Map(spansOf(entries, turnSummaries, historyComplete)
 		.filter(({ run }) => !run.live)
 		.map((span) => {
-			const elapsed = span.startKnown && !span.fails()
-				? activeTime(span.run, turnSummaries, span.lower, span.upper) : Number.NaN;
-			return [span.run.id, `${label(span.run, span.startKnown, elapsed)}${span.run.new ? NEW_SUFFIX : ''}`];
+			const range = ranges.get(span.run.id);
+			const elapsed = range ? openMs(range) : null;
+			return [span.run.id, `${label(span.run, span.startKnown, elapsed ?? Number.NaN)}${span.run.new ? NEW_SUFFIX : ''}`];
 		}));
 }
 
 /**
- * The active time so far of every live block, by entry id, in the block's own form
- * (`3 min`), or null while its start is not proven (A9-A12). "Now" is the last bound,
- * so the number continues when the Turn ends instead of jumping. The surface joins
- * it with the current phrase through `liveLabel`.
+ * The open time so far of every live block, by entry id, in the block's own form (`3 min`), or null
+ * while its start is not proven or the server has not answered (A9-A12). The surface joins it with
+ * the current phrase through `liveLabel`.
  */
 export function liveRunTimes(
 	entries: TranscriptEntry[],
 	turnSummaries: TurnSummaries,
 	historyComplete: boolean,
-	now: number,
+	openMs: OpenMs = () => null,
 ): Map<string, string | null> {
-	return new Map(spansOf(entries, turnSummaries, historyComplete)
-		.filter(({ run }) => run.live)
-		.map((span) => {
-			const elapsed = span.startKnown ? activeTime(span.run, turnSummaries, span.lower, now) : Number.NaN;
-			return [span.run.id, Number.isFinite(elapsed) ? formatDuration(elapsed) : null];
-		}));
+	const times = new Map<string, string | null>();
+	for (const entry of entries) if (entry.kind === 'fold' && entry.live) times.set(entry.id, null);
+	for (const range of runRanges(entries, turnSummaries, historyComplete)) {
+		if (!times.has(range.id)) continue;
+		const elapsed = openMs(range);
+		times.set(range.id, elapsed === null ? null : formatDuration(elapsed));
+	}
+	return times;
 }
 
-/**
- * How long the thread has waited, in the run chip's own duration form: the time since its last Turn ended,
- * or null when no ended Turn is known (EW8 drops the number rather than guess).
- */
-export function waitElapsed(turnSummaries: TurnSummaries, now: number): string | null {
-	const ends = Object.values(turnSummaries)
-		.filter((summary) => summary.status !== 'running' && summary.status !== 'waiting_retry')
-		.map((summary) => parseWsTimestamp(summary.ended_at))
-		.filter(Number.isFinite);
-	return ends.length ? formatDuration(Math.max(0, now - Math.max(...ends))) : null;
+/** The wait chip's "so far" number in the run chip's own form, or null while unproven or unanswered. */
+export function waitElapsed(range: RunRange | null, openMs: OpenMs): string | null {
+	const elapsed = range ? openMs(range) : null;
+	return elapsed === null ? null : formatDuration(elapsed);
 }
 
 /** `Working · 3 min · Reading files`; whatever is unknown drops off the end (A9-A11). */

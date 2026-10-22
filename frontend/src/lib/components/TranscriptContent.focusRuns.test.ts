@@ -5,7 +5,7 @@ import type { UpdateCard } from '$lib/api/threadUpdates';
 import { activeToolsByThread } from '$lib/stores/threads';
 import { parseUTC } from '$lib/time';
 import { _resetTurnStateForTests, applyLifecycle } from '$lib/ws/turnState';
-import { DAY, THREAD, human, present, said, turn, work } from '$lib/__tests__/fixtures/focusRuns';
+import { DAY, THREAD, human, present, said, seedOpenTime, turn, work } from '$lib/__tests__/fixtures/focusRuns';
 import { reactiveProps } from '$lib/__tests__/fixtures/reactiveProps.svelte';
 import TranscriptContent from './TranscriptContent.svelte';
 import { buildTranscriptPresentation, type TranscriptMessage } from './messageListModel';
@@ -23,6 +23,7 @@ function render(
 	turnSummaries: Record<string, Summary>,
 	renderedStreaming = false,
 ): void {
+	seedOpenTime(entries, turnSummaries);
 	component = mount(TranscriptContent, {
 		target: host,
 		props: {
@@ -139,8 +140,11 @@ describe('Focus runs: each chip is its own run', () => {
 		props.entries = plain(rows);
 		flushSync();
 		expect(toggles()).toHaveLength(0);
-		props.entries = present([...rows, said('reply', 3, '10:02:00')]);
-		props.turnSummaries = { t1: turn('10:00:00', '10:02:00', 1) };
+		const closed = present([...rows, said('reply', 3, '10:02:00')]);
+		const summaries = { t1: turn('10:00:00', '10:02:00', 1) };
+		seedOpenTime(closed, summaries);
+		props.entries = closed;
+		props.turnSummaries = summaries;
 		flushSync();
 
 		expect(faces()).toEqual(['Worked · 1 step · 2 min']);

@@ -1,3 +1,4 @@
+import { withOpenTime } from '$lib/__tests__/fixtures/openTimeServer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { activeThreadId, activeToolsByThread, messages } from '$lib/stores/threads';
@@ -96,7 +97,7 @@ describe('MessageList persisted tool activity', () => {
 			ok: true,
 			json: async () => ({ result: 'lazy output' }),
 		});
-		vi.stubGlobal('fetch', fetchMock);
+		vi.stubGlobal('fetch', withOpenTime(fetchMock as unknown as typeof fetch));
 		messages.set([{
 			...toolStep('tool-1', 'turn-1', 'git status'),
 			metadata: { tool_calls: [{ id: 'call-1', name: 'mcp__corsia__bash', args: { command: 'git status' }, result_state: 'deferred' }] },
@@ -121,7 +122,7 @@ describe('MessageList persisted tool activity', () => {
 
 	it('shows a retryable error instead of an empty result when detail loading fails', async () => {
 		const fetchMock = vi.fn().mockRejectedValue(new Error('offline'));
-		vi.stubGlobal('fetch', fetchMock);
+		vi.stubGlobal('fetch', withOpenTime(fetchMock as unknown as typeof fetch));
 		messages.set([{
 			...toolStep('tool-1', 'turn-1', 'git status'),
 			metadata: { tool_calls: [{ id: 'call-1', name: 'mcp__corsia__bash', args: { command: 'git status' }, result_state: 'deferred' }] },
@@ -138,9 +139,9 @@ describe('MessageList persisted tool activity', () => {
 
 	it('shows loading while a deferred result is in flight', async () => {
 		let resolveFetch: ((value: unknown) => void) | undefined;
-		vi.stubGlobal('fetch', vi.fn().mockImplementation(() => new Promise((resolve) => {
+		vi.stubGlobal('fetch', withOpenTime(vi.fn().mockImplementation(() => new Promise((resolve) => {
 			resolveFetch = resolve;
-		})));
+		})) as unknown as typeof fetch));
 		messages.set([{
 			...toolStep('tool-1', 'turn-1', 'git status'),
 			metadata: { tool_calls: [{ id: 'call-1', name: 'mcp__corsia__bash', args: { command: 'git status' }, result_state: 'deferred' }] },
@@ -157,7 +158,7 @@ describe('MessageList persisted tool activity', () => {
 
 	it('shows absent output without a detail request', () => {
 		const fetchMock = vi.fn();
-		vi.stubGlobal('fetch', fetchMock);
+		vi.stubGlobal('fetch', withOpenTime(fetchMock as unknown as typeof fetch));
 		messages.set([{
 			...toolStep('tool-1', 'turn-1', 'git status'),
 			metadata: { tool_calls: [{ id: 'call-1', name: 'mcp__corsia__bash', args: { command: 'git status' }, result_state: 'absent' }] },
@@ -178,7 +179,7 @@ describe('MessageList persisted tool activity', () => {
 			ok: true,
 			json: async () => ({ result: 'leaf output' }),
 		});
-		vi.stubGlobal('fetch', fetchMock);
+		vi.stubGlobal('fetch', withOpenTime(fetchMock as unknown as typeof fetch));
 		messages.set([
 			toolStep('active-tool', 'turn-1', 'git status'),
 			{

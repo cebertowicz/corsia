@@ -18,9 +18,11 @@
 	import { createLiveLine } from './plans/liveLine.svelte';
 	import type { TranscriptEntry } from './messageListModel';
 	import { isRunExpanded, runTokens, toggleRun } from './transcriptFocusModel';
-	import { liveRunTimes, runLabels, waitElapsed, type TurnSummaries } from './transcriptRunLabel';
+	import { liveRunTimes, runLabels, runRanges, waitElapsed, waitRange, type RunRange, type TurnSummaries } from './transcriptRunLabel';
 	import { minuteClock } from '$lib/time';
 	import { trackVisibleRow } from '$lib/actions/trackVisibleRow';
+	import { untrack } from 'svelte';
+	import { openMilliseconds, openRangeKey, openTimes, requestOpenTime, type OpenTimeQuery } from '$lib/openTime';
 	import { attachPlanLimitPauses, stubPauseTurns, type PlanLimitPauseDescriptor } from './planLimitPause';
 	import { deliveryPresentation, isAwaitingDelivery } from '$lib/messageDelivery';
 	import type { TranscriptMessage } from './messageListModel';
@@ -127,7 +129,12 @@
 		: undefined);
 	// A descendant can keep this Focus block live after the visible parent's turn settles.
 	const liveLine = createLiveLine(() => liveNow, () => !(liveRollup?.active ?? renderedStreaming), () => liveSegment);
-	const labels = $derived(runLabels(renderedEntries, turnSummaries, historyComplete));
+	// One server number, open time, for every run and for the wait chip (it counts on locally while the work is open).
+	const runRangeList = $derived(runRanges(renderedEntries, turnSummaries, historyComplete));
+	const openKey = (range: RunRange) => openRangeKey(boundThreadId ?? '', range);
+	const openMs = (range: RunRange) => (boundThreadId ? openMilliseconds($openTimes, openKey(range), $minuteClock.getTime()) : null);
+	const outsideWaitRange = $derived(waitRange(renderedEntries, turnSummaries, historyComplete));
+	const labels = $derived(runLabels(renderedEntries, turnSummaries, historyComplete, openMs));
 	// An outside wait with nothing running and no sent input waiting to start a turn (EW8). One predicate
 	// gates both the Focus chip and the non-Focus face, so a turn starting swaps it out in the same render.
 	// pendingInputIds covers only this tab's send before its first receipt; the transcript row is the server's
@@ -139,7 +146,7 @@
 		showWait && waitState?.state === 'waiting' && waitState.wait
 			&& (boundTurn?.phase === 'idle' || boundTurn?.phase === 'terminal') && boundTurn.pendingInputIds.length === 0 && !inputAwaiting
 			&& !renderedStreaming && !hasLiveFold
-			? waitFace(waitState.wait, waitElapsed(turnSummaries, $minuteClock.getTime()), $minuteClock)
+			? waitFace(waitState.wait, waitElapsed(outsideWaitRange, openMs), $minuteClock)
 			: null,
 	);
 	// The open run is the trailing block; after a reply there is none, and the chip stands alone in its place.
@@ -148,7 +155,22 @@
 		return last?.kind === 'fold' ? last.id : null;
 	});
 	// A block a descendant keeps live counts its last Turn on to now, so the worker's time is included.
-	const liveTimes = $derived(hasLiveFold ? liveRunTimes(renderedEntries, turnSummaries, historyComplete, $minuteClock.getTime()) : new Map<string, string | null>());
+	const liveTimes = $derived(hasLiveFold ? liveRunTimes(renderedEntries, turnSummaries, historyComplete, openMs) : new Map<string, string | null>());
+	// Ask the server again only when something that changes the number happens: a range, a Turn starting or ending
+	// (this thread's or a descendant's), or the plan's wait. Never on a timer: the count between answers is local.
+	const openQueries = $derived.by((): OpenTimeQuery[] => {
+		if (!boundThreadId) return [];
+		const ranges = outsideWaitRange ? [...runRangeList, outsideWaitRange] : runRangeList;
+		return ranges.map((range) => ({ key: openKey(range), threadId: boundThreadId, since: range.since, until: range.until }));
+	});
+	const openTimeEvents = $derived(JSON.stringify([
+		boundTurn?.phase, boundTurn?.turnId, liveRollup?.active ?? null, waitState?.state, waitState?.wait?.until ?? null,
+		Object.entries(turnSummaries).map(([id, summary]) => `${id}:${summary.status}:${summary.ended_at}`),
+	]));
+	$effect(() => {
+		void openTimeEvents;
+		requestOpenTime(openQueries);
+	});
 	// An open run whose rows were never read starts reading them, however it was opened.
 	$effect(() => {
 		renderedEntries.forEach((entry, index) => {
