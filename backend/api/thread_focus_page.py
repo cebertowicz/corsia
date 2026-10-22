@@ -44,6 +44,7 @@ _VISIBLE_COLUMN = f"{FOCUS_VISIBLE_SQL} AS vis"
 _RUN_COLUMNS = (
     f"{_VISIBLE_COLUMN}, {ACTIVITY_WEIGHT_SQL} AS weight, "
     f"{focus_kind_sql(ACTIVITY_WEIGHT_SQL)} AS row_kind, "
+    "(role = 'assistant' AND instr(metadata, 'browser_open') > 0) AS opens, "
     "CASE WHEN json_valid(metadata) AND json_type(metadata, '$.turn_id') = 'text' "
     "AND json_extract(metadata, '$.turn_id') != '' "
     "THEN json_extract(metadata, '$.turn_id') END AS turn_id"
@@ -72,7 +73,8 @@ _VISIBLE_SQL = (
 # two consecutive rows with a known Turn disagree on whether it is live; a row with no
 # Turn stays with the run above it. `turn_ids` lists a run's Turns oldest-first, a
 # repeat of the Turn just above collapsed. `kinds` is the distinct `row_kind` of a
-# run's rows. One `meta` row reports how many anchors the
+# run's rows. `open_seqs` is the seq of each assistant row that mentions `browser_open`, found in the
+# same pass, for the run's browser chip. One `meta` row reports how many anchors the
 # CTE held (`count`, up to `:newest_n`) and the oldest one within the cap (`first_id`).
 _RUNS_SQL = f"""
 WITH {_anchors_cte(_RUN_COLUMNS)},
@@ -80,7 +82,7 @@ scanned AS (
     SELECT *, ROW_NUMBER() OVER (ORDER BY seq DESC) AS rn FROM anchors
 ),
 bounded AS (
-    SELECT id, seq, vis, weight, row_kind, turn_id, rn,
+    SELECT id, seq, vis, weight, row_kind, turn_id, opens, rn,
         COALESCE(SUM(vis) OVER (ORDER BY seq DESC
             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS seg,
         CASE WHEN turn_id IS NOT NULL
@@ -122,13 +124,14 @@ SELECT 'run' AS kind, MIN(ends.seq) AS first_seq, MAX(ends.seq) AS last_seq,
     COUNT(*) AS count, SUM(ends.weight) AS weight,
     MAX(ends.oldest_id) AS first_id, MAX(ends.newest_id) AS last_id,
     COALESCE(MAX(run_turns.turn_ids), '[]') AS turn_ids,
-    json_group_array(DISTINCT ends.row_kind) AS kinds
+    json_group_array(DISTINCT ends.row_kind) AS kinds,
+    json_group_array(ends.seq) FILTER (WHERE ends.opens) AS open_seqs
 FROM ends LEFT JOIN run_turns USING (seg, run_no)
 GROUP BY ends.seg, ends.run_no
 UNION ALL
 SELECT 'meta', NULL, NULL, (SELECT COUNT(*) FROM anchors), 0,
     (SELECT id FROM scanned WHERE rn = MIN((SELECT COUNT(*) FROM anchors), :cap)),
-    NULL, NULL, '[]'
+    NULL, NULL, '[]', NULL
 ORDER BY first_seq
 """
 
@@ -146,6 +149,8 @@ class InvertedRange(ValueError):
 class _Walk:
     visible_ids: list[str] = field(default_factory=list)
     runs: list[dict] = field(default_factory=list)
+    # Per run, parallel to `runs`: the seqs of its rows that may have opened the shared browser.
+    open_seqs: list[list[int]] = field(default_factory=list)
     oldest_id: str | None = None
     has_more: bool = False
     scanned: int = 0
@@ -187,10 +192,33 @@ def _walk(
             "kinds": sorted(json.loads(row["kinds"])),
             "continues_older": False,
         })
+        walk.open_seqs.append(json.loads(row["open_seqs"] or "[]"))
     # The oldest run is cut off by the cap or budget only if it holds the last row read.
     if walk.runs and walk.runs[0]["first_id"] == walk.oldest_id:
         walk.runs[0]["continues_older"] = walk.has_more
     return walk
+
+
+def _attach_browser_chips(db, thread_id: str, runs: list[dict], open_seqs: list[list[int]]) -> None:
+    """Set `browser_chip` on each run stub whose rows put the shared browser in front of the person.
+
+    The run query already named each run's rows that mention `browser_open`. Only those are read and
+    projected as the page projects any row, and the last call that carries the display projection's
+    `browser_chip` wins; the stub holds no row body.
+    """
+    owner = {seq: run for run, seqs in zip(runs, open_seqs) for seq in seqs}
+    if not owner:
+        return
+    marks = ",".join("?" for _ in owner)
+    rows = db.execute(
+        f"SELECT *, rowid FROM messages WHERE thread_id = ? AND seq IN ({marks}) ORDER BY seq",
+        [thread_id, *owner],
+    ).fetchall()
+    for row in project_anchors(db, thread_id, [dict(row) for row in rows]):
+        metadata = json.loads(row["metadata"]) if isinstance(row.get("metadata"), str) else row.get("metadata")
+        for call in (metadata or {}).get("tool_calls") or []:
+            if isinstance(call, dict) and call.get("browser_chip"):
+                owner[row["seq"]]["browser_chip"] = call["browser_chip"]
 
 
 def _unsequenced(db, thread_id: str) -> list[dict]:
@@ -263,6 +291,7 @@ def page_focus(
         db, thread_id, cursor_seq,
         max(limit - len(queued), 1), scan_cap,
     )
+    _attach_browser_chips(db, thread_id, walk.runs, walk.open_seqs)
     selected = _anchors_in_order(db, thread_id, walk.visible_ids)
     sequenced = project_anchors(db, thread_id, selected)
     queued_display = project_anchors(db, thread_id, queued)

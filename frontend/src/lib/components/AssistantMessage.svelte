@@ -4,6 +4,7 @@
 	import { externalModelDisplayName } from '$lib/modelDisplayName';
 	import { models, type Model } from '$lib/stores/models';
 	import { canonicalName } from '$lib/stores/modelGroups';
+	import { lastBrowserChip } from '$lib/browserChip';
 	import MessageArtifactCards from './MessageArtifactCards.svelte';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
 
@@ -53,6 +54,8 @@
 			status: 'done' as const,
 		}));
 	});
+	// Focus shows a said-to-you message without its tool calls, so a row that already read the chip carries it as `browserChip`.
+	const browserChip = $derived(msg.browserChip !== undefined ? msg.browserChip : lastBrowserChip(msg.metadata?.tool_calls));
 	const footerLabel = $derived(messageFooterLabel(msg.metadata, $models));
 
 	function modelTail(id: string): string {
@@ -151,8 +154,8 @@
 	</div>
 	{/if}
 
-	{#if msg.cards?.length || msg.cards_more}
-		<MessageArtifactCards cards={msg.cards ?? []} more={msg.cards_more ?? 0} threadId={msg.thread_id} {hiddenHolds} {renderedAsks} />
+	{#if msg.cards?.length || msg.cards_more || browserChip}
+		<MessageArtifactCards cards={msg.cards ?? []} more={msg.cards_more ?? 0} browser={browserChip} threadId={msg.thread_id} {hiddenHolds} {renderedAsks} />
 	{/if}
 
 		<div class="msg-footer">

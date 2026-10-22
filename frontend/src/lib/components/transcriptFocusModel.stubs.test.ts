@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import parity from '../../../../testdata/focus-visibility-parity.json';
 import { card, human, said, turn, work } from '$lib/__tests__/fixtures/focusRuns';
-import { combineStubs, type RunStub } from '$lib/focusRuns';
+import { combineStubs, parseRunStubs, type RunStub } from '$lib/focusRuns';
 import {
 	buildTranscriptPresentation, buildVisibleMessages, type TranscriptEntry, type TranscriptMessage,
 } from './messageListModel';
@@ -162,5 +162,58 @@ describe('a seed, which the transcript never draws', () => {
 		const [run] = folds(entries);
 		expect(run.items.map((item) => item.message.id)).toEqual(['ctx-2']);
 		expect(runLabels(entries, {}, true).get(run.id)).toBe('Context updated');
+	});
+});
+
+describe('the browser chip a stub carries', () => {
+	const github = { host: 'github.com' };
+	const shown = (entries: TranscriptEntry[]) => entries.flatMap((entry) => (
+		entry.kind === 'message' ? [entry.message.browserChip ?? null] : []
+	));
+
+	it('goes to the said-to-you row after the stub, and only that row', () => {
+		const entries = build(
+			[human('ask', 1, '10:00:00', 't1', '10:00:00'), said('reply', 6, '10:10:00')],
+			[stub(2, 5, { browserChip: github })],
+		);
+
+		expect(shown(entries)).toEqual([null, github]);
+		expect(folds(entries)[0].items).toEqual([]);
+	});
+
+	it('is not carried past a human message into the next run', () => {
+		const entries = build(
+			[human('ask', 1, '10:00:00', 't1', '10:00:00'), human('again', 6, '10:05:00', 't1', '10:05:00'), said('reply', 9, '10:10:00')],
+			[stub(2, 5, { browserChip: github })],
+		);
+
+		expect(shown(entries)).toEqual([null, null, null]);
+	});
+
+	it('goes to the first said-to-you row of its run, not a later one', () => {
+		const entries = build(
+			[said('first', 6, '10:10:00'), said('second', 7, '10:11:00')],
+			[stub(2, 5, { browserChip: github })],
+		);
+
+		expect(shown(entries)).toEqual([github, null]);
+	});
+
+	it('gives each run its own chip', () => {
+		const other = { host: 'example.org' };
+		const entries = build(
+			[said('one', 6, '10:10:00'), said('two', 12, '10:20:00')],
+			[stub(2, 5, { browserChip: github }), stub(8, 11, { browserChip: other })],
+		);
+
+		expect(shown(entries)).toEqual([github, other]);
+	});
+
+	it('is read from the page, dropped when malformed, and kept by the last stub of a joined run', () => {
+		const raw = (browser_chip: unknown) => ({ kind: 'run', first_id: 'a', last_id: 'b', first_seq: 2, last_seq: 5, browser_chip });
+		expect(parseRunStubs({ runs: [raw(github)] })[0].browserChip).toEqual(github);
+		expect(parseRunStubs({ runs: [raw({ label: 'x' })] })[0].browserChip).toBeUndefined();
+		expect(parseRunStubs({ runs: [raw(undefined)] })[0].browserChip).toBeUndefined();
+		expect(combineStubs([stub(2, 3, { browserChip: github }), stub(4, 5)]).browserChip).toEqual(github);
 	});
 });

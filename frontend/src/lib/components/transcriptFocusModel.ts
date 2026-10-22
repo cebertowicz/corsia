@@ -1,4 +1,5 @@
 import type { UpdateCard } from '$lib/api/threadUpdates';
+import { lastBrowserChip, type BrowserChip } from '$lib/browserChip';
 import type { TranscriptMessage } from './messageListModel';
 import { SOURCE_MEMBERS, sourceMembers, sourceRange } from './contextEventModel';
 import type { PlanLimitPauseDescriptor } from './planLimitPause';
@@ -173,12 +174,14 @@ function messageEntry(
 	return { kind: 'message', id, message, showActivity, showContent };
 }
 
-function contentOnly(message: TranscriptMessage): TranscriptMessage {
+function contentOnly(message: TranscriptMessage, browserChip: BrowserChip | null): TranscriptMessage {
 	return {
 		...message,
 		[SOURCE_MEMBERS]: sourceMembers(message),
 		toolHints: [],
 		reasoning: undefined,
+		// The chip that reopens the browser stays with the said-to-you message, the tool calls it came from being work.
+		browserChip,
 		metadata: { ...message.metadata, tool_calls: [] },
 	};
 }
@@ -186,7 +189,7 @@ function contentOnly(message: TranscriptMessage): TranscriptMessage {
 function activityOnly(message: TranscriptMessage): TranscriptMessage {
 	const metadata = { ...message.metadata };
 	delete metadata.for_user;
-	return { ...message, [SOURCE_MEMBERS]: sourceMembers(message), content: '', metadata };
+	return { ...message, [SOURCE_MEMBERS]: sourceMembers(message), content: '', browserChip: null, metadata };
 }
 
 /**
@@ -215,11 +218,18 @@ export function buildTranscriptPresentation(
 
 	const entries: TranscriptEntry[] = [];
 	const work: TranscriptMessageEntry[] = [];
+	// The last window the run opened in front of the person: the said-to-you row that closes the run carries it, since
+	// the agent opens the page in one step and tells them in a later one.
+	let runChip: BrowserChip | null = null;
 	// Stubs wait for the run that reaches their position; no visible row lies between two of one run.
 	const waiting = [...stubs].sort((a, b) => a.firstSeq - b.firstSeq);
 	const held: RunStub[] = [];
 	const holdThrough = (seq: number) => {
-		while (waiting.length && waiting[0].firstSeq <= seq) held.push(waiting.shift()!);
+		while (waiting.length && waiting[0].firstSeq <= seq) {
+			const stub = waiting.shift()!;
+			runChip = stub.browserChip ?? runChip;
+			held.push(stub);
+		}
 	};
 	const closeRun = (closingId: string | null) => {
 		if (work.length === 0 && held.length === 0) return;
@@ -238,9 +248,12 @@ export function buildTranscriptPresentation(
 		if (typeof at === 'number' && at > 0) holdThrough(at);
 		if (isHumanMessage(message) || isSystemNotice(message)) {
 			closeRun(message.id);
+			runChip = null;
 			entries.push(messageEntry(message, `message-${message.id}`));
 			continue;
 		}
+
+		runChip = lastBrowserChip(message.metadata?.tool_calls) ?? runChip;
 
 		const visibleText = message.role === 'assistant'
 			&& message.metadata?.for_user === true
@@ -254,7 +267,8 @@ export function buildTranscriptPresentation(
 			work.push(messageEntry(activityOnly(message), `work-${message.id}`, true, false));
 		}
 		closeRun(message.id);
-		entries.push(messageEntry(contentOnly(message), `message-${message.id}`, false, true));
+		entries.push(messageEntry(contentOnly(message, runChip), `message-${message.id}`, false, true));
+		runChip = null;
 	}
 	holdThrough(Infinity);
 	closeRun(null);

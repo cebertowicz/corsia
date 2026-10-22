@@ -2,13 +2,18 @@
 	// The artifacts a message carries. An ask is a flat row under the message; a file the message names is a
 	// chip in a wrapping strip (a scrolling one on a phone). Both open the artifact in the canvas; neither has
 	// answer buttons, because the review bar in the opened document is the one place to answer an ask.
+	// A message that opened the shared browser in front of the person adds its own chip to that strip; it is not an
+	// artifact and takes no part in the cards.
 	import { visibleCards, type MessageCard } from '$lib/api/messageCards';
+	import type { BrowserChip as BrowserChipData } from '$lib/browserChip';
 	import { paneOpen } from '$lib/stores/paneOpen';
 	import AttachmentRow from './AttachmentRow.svelte';
+	import BrowserChip from './BrowserChip.svelte';
 
 	let {
 		cards,
 		more = 0,
+		browser = null,
 		threadId,
 		hiddenHolds,
 		renderedAsks,
@@ -16,6 +21,8 @@
 		cards: MessageCard[];
 		/** Cards past the cap; the last chip opens the artifact pane. */
 		more?: number;
+		/** The message's shared-browser chip, if it opened one in front of the person. */
+		browser?: BrowserChipData | null;
 		threadId: string | null | undefined;
 		/** Holds whose card renders on their blocked update row instead. */
 		hiddenHolds?: ReadonlySet<string>;
@@ -26,6 +33,12 @@
 	const shown = $derived(visibleCards(cards, hiddenHolds, renderedAsks));
 	const asks = $derived(shown.filter((card) => card.kind === 'ask'));
 	const files = $derived(shown.filter((card) => card.kind !== 'ask'));
+	const browserChip = $derived(browser && threadId ? { chip: browser, threadId } : null);
+	const stripLabel = $derived(
+		browserChip
+			? (files.length > 0 || more > 0 ? 'Files and shared browser' : 'Shared browser')
+			: asks.length > 0 ? 'Files' : 'Artifacts',
+	);
 
 	/** The least of the next chip that must show past the last whole chip for the scroll cue to read. */
 	const PEEK = 12;
@@ -85,7 +98,7 @@
 	}
 </script>
 
-{#if shown.length > 0 || more > 0}
+{#if shown.length > 0 || more > 0 || browserChip}
 	<div class="cards">
 		{#if asks.length > 0}
 			<ul class="asks" aria-label="Artifacts">
@@ -94,11 +107,14 @@
 				{/each}
 			</ul>
 		{/if}
-		{#if files.length > 0 || more > 0}
-			<ul class="chips" aria-label={asks.length > 0 ? 'Files' : 'Artifacts'} use:peek={files.length + more}>
+		{#if files.length > 0 || more > 0 || browserChip}
+			<ul class="chips" aria-label={stripLabel} use:peek={files.length + more + (browserChip ? 1 : 0)}>
 				{#each files as card (card.hold_id ?? card.artifact_id)}
 					<li><AttachmentRow {card} {threadId} variant="chip" /></li>
 				{/each}
+				{#if browserChip}
+					<li><BrowserChip {...browserChip} /></li>
+				{/if}
 				{#if more > 0}
 					<li><button type="button" class="tile more press-tint" onclick={() => paneOpen.set(true)}>+{more} more</button></li>
 				{/if}

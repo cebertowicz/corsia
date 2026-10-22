@@ -102,6 +102,63 @@ describe('Focus transcript presentation', () => {
 		]);
 	});
 
+	it('carries the browser chip to the said-to-you row, and not to the folded activity row', () => {
+		const open = { id: 'c1', name: 'browser_open', args: { url: 'https://github.com', show_window: true }, browser_chip: { host: 'github.com' } };
+		const [fold, shown] = buildTranscriptPresentation([
+			assistant({ id: 'update', content: 'Your update', metadata: { turn_id: 'turn-2', for_user: true, tool_calls: [open] } }),
+		], true);
+
+		expect(fold).toMatchObject({ kind: 'fold', items: [{ message: { browserChip: null, metadata: { tool_calls: [open] } } }] });
+		expect(shown).toMatchObject({ kind: 'message', message: { browserChip: { host: 'github.com' }, metadata: { tool_calls: [] } } });
+	});
+
+	describe('browser chip across the run', () => {
+		const open = (url: string) => ({ id: `open-${url}`, name: 'browser_open', args: { url, show_window: true }, browser_chip: { host: new URL(url).hostname } });
+		const opener = (id: string, url: string) => assistant({ id, metadata: { turn_id: 'turn-2', tool_calls: [open(url)] } });
+		const update = (id: string, tool_calls: unknown[] = []) =>
+			assistant({ id, content: `Update ${id}`, metadata: { turn_id: 'turn-2', for_user: true, tool_calls } });
+		const shown = (entries: ReturnType<typeof buildTranscriptPresentation>) =>
+			entries.filter((entry) => entry.kind === 'message');
+
+		it('gives the later said-to-you row the chip of an open made in an earlier row of the run', () => {
+			const entries = buildTranscriptPresentation([opener('open', 'https://github.com'), update('tell')], true);
+
+			expect(shown(entries)).toMatchObject([{ message: { id: 'tell', browserChip: { host: 'github.com' } } }]);
+		});
+
+		it('keeps the last open of the run when it opened several', () => {
+			const entries = buildTranscriptPresentation([
+				opener('a', 'https://github.com'), opener('b', 'https://example.org'), update('tell'),
+			], true);
+
+			expect(shown(entries)).toMatchObject([{ message: { browserChip: { host: 'example.org' } } }]);
+		});
+
+		it('gives an update that came before the open no chip', () => {
+			const entries = buildTranscriptPresentation([update('early'), opener('open', 'https://github.com')], true);
+
+			expect(shown(entries)).toMatchObject([{ message: { id: 'early', browserChip: null } }]);
+		});
+
+		it('gives each said-to-you row only the chip of its own run', () => {
+			const entries = buildTranscriptPresentation([
+				opener('open-1', 'https://github.com'), update('tell-1'),
+				{ id: 'human', thread_id: 'thread', role: 'user', content: 'Thanks', metadata: {} },
+				update('tell-2'),
+				opener('open-2', 'https://example.org'), update('tell-3'),
+			], true);
+
+			expect(shown(entries).map((entry) => entry.message.browserChip?.host ?? null))
+				.toEqual(['github.com', null, null, 'example.org']);
+		});
+
+		it('does not repeat one open on a second update in the same run', () => {
+			const entries = buildTranscriptPresentation([opener('open', 'https://github.com'), update('one'), update('two')], true);
+
+			expect(shown(entries).map((entry) => entry.message.browserChip?.host ?? null)).toEqual(['github.com', null]);
+		});
+	});
+
 	it('keeps human messages and actionable system notices visible', () => {
 		const entries = buildTranscriptPresentation([
 			{ id: 'human', thread_id: 'thread', role: 'user', content: 'Please investigate.', metadata: {} },

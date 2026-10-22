@@ -8,6 +8,8 @@
  * the stub and the rows it holds, exactly as it does for a loaded run.
  */
 
+import { parseBrowserChip, type BrowserChip } from './browserChip';
+
 export interface RunStub {
 	firstId: string;
 	lastId: string;
@@ -23,6 +25,8 @@ export interface RunStub {
 	kinds: string[];
 	/** Older rows of this run may sit on a page not read yet: the server cut the run at its scan edge. */
 	continuesOlder: boolean;
+	/** The window the run's last visible `browser_open` put in front of the person, for the said-to-you row after it. */
+	browserChip?: BrowserChip;
 }
 
 /** Where a run's range read stands; keyed by the run's newest row id. */
@@ -63,6 +67,7 @@ export function parseRunStubs(page: FocusRunsPage | null | undefined): RunStub[]
 		kinds: Array.isArray(stub.kinds)
 			? [...new Set(stub.kinds.filter((kind: unknown): kind is string => typeof kind === 'string'))].sort() as string[] : [],
 		continuesOlder: stub.continues_older === true,
+		browserChip: parseBrowserChip(stub.browser_chip) ?? undefined,
 	})).sort((a, b) => a.firstSeq - b.firstSeq);
 }
 
@@ -78,6 +83,7 @@ export function combineStubs(stubs: readonly RunStub[]): RunStub {
 	for (const id of ordered.flatMap((stub) => stub.turnIds)) {
 		if (turnIds[turnIds.length - 1] !== id) turnIds.push(id);
 	}
+	const browserChip = [...ordered].reverse().find((stub) => stub.browserChip)?.browserChip;
 	return {
 		firstId: oldest.firstId,
 		lastId: newest.lastId,
@@ -88,6 +94,7 @@ export function combineStubs(stubs: readonly RunStub[]): RunStub {
 		weight: ordered.reduce((total, stub) => total + stub.weight, 0),
 		kinds: [...new Set(ordered.flatMap((stub) => stub.kinds))].sort(),
 		continuesOlder: oldest.continuesOlder,
+		...(browserChip && { browserChip }),
 	};
 }
 
