@@ -431,6 +431,7 @@ def test_the_look_up_reference_carries_the_rules_outcomes_questions_and_examples
     for line in (
         "What's your full name? I'll use it to look you up.",
         "Looking you up.",
+        "Next I'd like to look you up on the web, so you don't have to tell me everything yourself. I'll search Brave with your name and [what it will use, like your work or city]. Go ahead, or skip it?",
         "Here's what I found. Tell me if any of it is wrong.",
         "You keep a low profile online. Good for your privacy, less for me to go on. Here's the little I found, and it may not be you:",
         "I couldn't search just now.",
