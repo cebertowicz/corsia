@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
-from plans import admission, artifact_links, service
+from plans import admission, artifact_links, boundary_after, review_evidence, review_requests, service
+from plans.plan_write import transaction
 from registry.identity_metadata import last_written_sha256, sha256_file
 from registry.shared_edit_classification import combine_capped_diffs, capped_unified_diff
 
@@ -25,6 +26,7 @@ AGENT_FRAMING = (
     "it undecided only when the user will read the document again, replying on it where you "
     "disagree, so they decide it."
 )
+STOPPED_NOTE = "{evidence} This step was stopped then, so it did not settle by itself; mark it done once it resumes."
 USER_FRAMING = (
     "The user's comments. They state the user's intent; still check factual claims against "
     "the current source. A comment with a suggested replacement is already their change: "
@@ -304,6 +306,35 @@ def _existing(db, recipient_thread_id: str, batch_id: str, provenance: str = PRO
         (recipient_thread_id, provenance, batch_id),
     ).fetchone()
     return str(row["node_id"]) if row else None
+
+
+def settle_feedback_node(db, recipient_thread_id: str, batch_id: str, *, evidence: str) -> None:
+    """Record the evidence and accept a batch's task once, atomically; a finished task stays as it is and a stopped one gets a note."""
+    node_id = _existing(db, recipient_thread_id, batch_id)
+    if node_id is None:
+        return
+    with transaction(db) as connection:
+        node = service._node_row(connection, node_id)
+        if node["state"] in service._TERMINAL_STATES:
+            return
+        if review_evidence.stop_reason(connection, node) is not None:
+            # A paused plan or held step stays as the user left it (pause contract S26); raising would undo the person's decision.
+            service.touch_node(connection, node_id, description=f"{node['description']}\n\n{STOPPED_NOTE.format(evidence=evidence)}")
+            service._event(connection, node_id, "feedback_settled_while_stopped", actor_id=None, provenance=PROVENANCE, payload={"evidence": evidence})
+            review_requests._notify(connection, node["plan_id"])
+            return
+        if node["state"] == "pending":
+            # Attempt-less, not admitted (that would push out the owner's current task); approved for review and feedback-batch settlement only.
+            service._transition(connection, node_id, "active", actor_id=None, provenance=PROVENANCE,
+                                verification_result=None, verified_by=None)
+        review_evidence.submit(node_id, evidence=evidence, expected_revision=None,
+                               actor_id=None, provenance=PROVENANCE, db=connection)
+        service._transition(connection, node_id, "accepted", actor_id=None, provenance=PROVENANCE,
+                            verification_result="passed", verified_by="system:document.feedback_batch")
+        boundary_after.after_transition(node_id, "accepted", {
+            "db": connection, "actor_id": None, "provenance": PROVENANCE,
+        })
+        review_requests._notify(connection, node["plan_id"])
 
 
 def create_feedback_node(
