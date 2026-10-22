@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from connections import account_controls, harness_models
+from connections import account_controls, account_signin, harness_models
 from connections.account_receipts import account_receipt, receipt_is_current
 from connections.vendor_accounts import get_account, set_account_state
 from test_claude_catalog_usage_ownership import (  # noqa: F401
@@ -44,6 +44,20 @@ from vendor_account_fixtures import (  # noqa: F401
     receipt_of,
     seed_usage,
 )
+
+REF = "signin-0123456789abcdef"
+
+
+@pytest.fixture(autouse=True)
+def fixed_failure_reference(monkeypatch):
+    """A failed sign-in's reference is random; pin it so results compare whole."""
+    monkeypatch.setattr(account_signin, "new_reference", lambda prefix: REF)
+
+
+def test_a_failed_sign_in_logs_the_reference_its_row_shows(caplog):
+    with caplog.at_level("WARNING", logger="connections.account_signin"):
+        assert account_signin.failure_reference("codex", "vendor_login_failed") == REF
+    assert f"codex sign-in failed reference={REF} cause=vendor_login_failed" in caplog.text
 
 
 class ExitedLogin:
@@ -513,6 +527,24 @@ async def test_claude_signin_stores_identity_from_status_and_never_an_account_id
 
 @pytest.mark.real_harness_cli
 @pytest.mark.asyncio
+@both
+async def test_signin_starts_when_the_source_row_reads_needs_auth(scripted_vendor_clis, provider):
+    """A fresh install's CLI is signed out, so its row reads needs_auth: that is when Sign in must work."""
+    from connections import account_controls
+    from connections.models import get_connection
+    from infra.database import write_transaction
+
+    with write_transaction(None, scope="test") as conn:
+        conn.execute("UPDATE connections SET status = 'needs_auth' WHERE provider = ?", (provider,))
+    assert get_connection(provider)["status"] == "needs_auth"
+    account = scripted_vendor_clis[provider]
+    started = await account_controls.start_signin(account["id"])
+    assert started["status"] != "unavailable"
+    assert (await _finished(account["id"]))["status"] == "completed"
+
+
+@pytest.mark.real_harness_cli
+@pytest.mark.asyncio
 async def test_codex_signin_stores_only_the_private_identity_fingerprint(scripted_vendor_clis):
     from connections import account_controls
 
@@ -534,7 +566,7 @@ async def test_only_the_status_exit_decides_signed_in(scripted_vendor_clis, prov
     monkeypatch.setenv("STATUS_EXIT", code)
     await account_controls.start_signin(account["id"])
     assert await _finished(account["id"]) == {"account_id": account["id"], "route": "browser",
-                                              "status": "failed", "cause": expected}
+                                              "status": "failed", "cause": expected, "ref": REF}
     assert (_account(account["id"])["state"], _account(account["id"])["identity"]) == ("signed_out", {})
 
 
@@ -733,7 +765,8 @@ async def test_finished_sign_in_is_kept_until_the_next_start_sign_out_or_remove(
     monkeypatch.setenv("LOGIN_FAIL", "1")
     await account_controls.start_signin(codex["id"])
     failed = await _finished(codex["id"])
-    assert failed == {"account_id": codex["id"], "route": "browser", "status": "failed", "cause": "vendor_login_failed"}
+    assert failed == {"account_id": codex["id"], "route": "browser", "status": "failed", "cause": "vendor_login_failed",
+                      "ref": REF}
     kept = account_controls._SIGNINS[codex["id"]]
     assert [await account_controls.check_signin(codex["id"]) for _ in range(2)] == [failed, failed]
     assert account_controls._SIGNINS == {codex["id"]: kept}
@@ -801,7 +834,7 @@ async def test_a_repeated_account_is_refused_and_names_the_oldest_signed_in_matc
     await account_controls.start_signin(second["id"])
     assert await _finished(second["id"]) == {
         "account_id": second["id"], "route": "browser", "status": "failed", "cause": "same_account",
-        "duplicate_of": third["id"]}
+        "duplicate_of": third["id"], "ref": REF}
     assert (_account(second["id"])["state"], _account(second["id"])["revision"]) == ("signed_out", 0)
     assert _account(second["id"])["identity"] == {} and _account(second["id"])["auth_cleanup"] is not None
     renamed = await routes.rename_vendor_account(second["id"], routes.RenameAccount(name="Repeat", expected_revision=0))
@@ -827,7 +860,7 @@ async def test_codex_repeated_account_is_refused_by_its_fingerprint(scripted_ven
     await account_controls.start_signin(second["id"])
     assert await _finished(second["id"]) == {
         "account_id": second["id"], "route": "browser", "status": "failed", "cause": "same_account",
-        "duplicate_of": first["id"]}
+        "duplicate_of": first["id"], "ref": REF}
     rows = (await routes.list_vendor_accounts(provider="codex"))["accounts"]
     assert [row["duplicate_of"] for row in rows] == [None, None, None]
     assert rows[1]["identity"] == {} and rows[2]["identity"] == {}
@@ -882,7 +915,7 @@ async def test_a_sign_in_check_that_hit_an_unexpected_error_ends_failed_and_bloc
     first, second = scripted_vendor_clis[provider]["id"], add_account(provider, "Other")["id"]
     vendor_status = account_controls._vendor_status
     broken = [True]
-    failed = {"account_id": first, "route": "browser", "status": "failed", "cause": "signin_check_failed"}
+    failed = {"account_id": first, "route": "browser", "status": "failed", "cause": "signin_check_failed", "ref": REF}
 
     async def status(*args):
         if broken[0]:
@@ -1218,7 +1251,8 @@ def test_an_unmarked_test_starts_no_vendor_process(sign_in_api_client, provider,
     added = sign_in_api_client.post("/api/vendor-accounts", json={"provider": provider, "name": "Added"}).json()
     started = sign_in_api_client.post("/api/vendor-accounts/" + added["id"] + "/signin")
     missing = "codex_executable_missing" if provider == "codex" else "claude_executable_missing"
-    assert started.json() == {"account_id": added["id"], "route": None, "status": "unavailable", "cause": missing}
+    assert started.json() == {"account_id": added["id"], "route": None, "status": "unavailable", "cause": missing,
+                              "ref": REF}
     path = "/api/vendor-accounts/" + added["id"]
     left = (sign_in_api_client.post(path + "/signout", json={"expected_revision": 0}) if leave == "signout"
             else sign_in_api_client.request("DELETE", path, json={"expected_revision": 0}))
@@ -1293,7 +1327,7 @@ async def test_same_as_default_is_refused_only_after_the_held_login_finishes(scr
         release.touch()
         assert await _finished(account["id"]) == {
             "account_id": account["id"], "route": "browser", "status": "failed", "cause": "same_account",
-            "duplicate_of": scripted_vendor_clis["default"][provider]["id"]}
+            "duplicate_of": scripted_vendor_clis["default"][provider]["id"], "ref": REF}
     stored = _account(account["id"])
     assert (stored["state"], stored["revision"]) == ("signed_out", 0)
     assert stored["identity"] == before

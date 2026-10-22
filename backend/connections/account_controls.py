@@ -13,8 +13,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import shutil
-from dataclasses import dataclass, field
 from typing import Any
 
 from connections import account_signin_prompt, harness_models
@@ -22,6 +20,7 @@ from connections.account_identity import codex_identity, refresh_default_identit
 from connections.account_lifecycle import change_state
 from connections.account_profiles import profile_for, sign_out_account
 from connections.account_receipts import account_receipt
+from connections.account_signin import SignIn, failure_reference
 from connections.account_evidence import readiness_reason
 from connections.account_signin_commit import SameAccount, commit_signed_in
 from connections.corsia_agent_account import FirstRunBind, finish_signin
@@ -43,43 +42,6 @@ _COMMAND_SECONDS = 30.0
 _CLEANUP_STATUSES = ("done", "failed", "skipped", "pending")
 
 
-@dataclass
-class SignIn:
-    """One in-memory vendor sign-in, completed only against its starting revision.
-
-    A finished one is kept, one per account, until that account's next start,
-    sign-out or remove, or backend shutdown.
-    """
-
-    account_id: str
-    provider: str
-    revision: int
-    status: str = "waiting"
-    cause: str | None = None
-    duplicate_of: str | None = None
-    process: asyncio.subprocess.Process | None = None
-    task: asyncio.Task | None = None
-    prompt: dict[str, str] | None = None  # what the vendor asked the person to do, when its profile reads it
-    prompted: asyncio.Event = field(default_factory=asyncio.Event)
-    bind: FirstRunBind | None = None  # the first-run screen's conductor, bound once this login reads Ready
-
-    @property
-    def held(self) -> bool:
-        """Still waiting on the vendor; a hold that died without an answer is not."""
-        return self.status == "waiting" and not (self.task is not None and self.task.done())
-
-    def public(self) -> dict[str, Any]:
-        """The sign-in as shown to the user: never the vendor's output, only a prompt its profile matched."""
-        shown = {"account_id": self.account_id, "route": "browser", "status": self.status, "cause": self.cause}
-        if self.prompt is not None and self.status == "waiting":
-            shown |= self.prompt
-        if self.status == "completed" and self.bind is not None:
-            shown |= self.bind.public()
-        # Completed and same-account refused sign-ins name their match.
-        return (shown | {"duplicate_of": self.duplicate_of}
-                if self.status == "completed" or self.cause == "same_account" else shown)
-
-
 _SIGNINS: dict[str, SignIn] = {}
 
 
@@ -93,11 +55,10 @@ async def _custom(account_id: str) -> dict:
 
 
 async def _binary(provider: str) -> str | None:
-    if provider not in VENDORS:  # a non-inference CLI is found whatever the person's own sign-in says
-        from connections import resolve_builtin_binary
-        return (await run_in_db(resolve_builtin_binary, provider))[1]
-    binary, unavailable = await run_in_db(harness_models._provider_binary, provider)
-    return None if unavailable else shutil.which(binary or "")
+    # Found whatever the source row says: a signed-out CLI reads needs_auth, and that is
+    # exactly when its sign-in has to start.
+    from connections import resolve_builtin_binary
+    return (await run_in_db(resolve_builtin_binary, provider))[1]
 
 
 async def _spawn(provider: str, home: str, binary: str, action: str) -> asyncio.subprocess.Process:
@@ -201,6 +162,9 @@ async def _hold(operation: SignIn, home: str, binary: str) -> None:
         log.warning("account %s sign-in check failed: %s", operation.account_id, type(exc).__name__)
         if operation.status == "waiting":
             operation.status, operation.cause = "failed", "signin_check_failed"
+    finally:
+        if operation.status == "failed":
+            operation.ref = failure_reference(operation.provider, operation.cause)
 
 
 async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> dict[str, Any]:
@@ -211,7 +175,9 @@ async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> 
     provider = account["provider"]
     binary = await _binary(provider)
     if binary is None:
-        return {"account_id": account_id, "route": None, "status": "unavailable", "cause": profile_for(provider).missing_cause}
+        cause = profile_for(provider).missing_cause
+        return {"account_id": account_id, "route": None, "status": "unavailable", "cause": cause,
+                "ref": failure_reference(provider, cause)}
     # No await between these checks and the record, so two starts cannot both pass.
     current = _SIGNINS.get(account_id)
     if current is not None and current.held:
@@ -231,6 +197,7 @@ async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> 
             await _run(provider, account["source_home"], binary, "logout")
         except (OSError, TimeoutError):
             operation.status, operation.cause = "failed", "vendor_logout_unavailable"
+            operation.ref = failure_reference(provider, operation.cause)
             return operation.public()
     if operation.status != "waiting":  # cancelled while the stale login was removed
         return operation.public()
@@ -238,6 +205,7 @@ async def start_signin(account_id: str, *, bind: FirstRunBind | None = None) -> 
         operation.process = await _spawn(provider, account["source_home"], binary, "login")
     except OSError:
         operation.status, operation.cause = "failed", "vendor_login_unavailable"
+        operation.ref = failure_reference(provider, operation.cause)
         return operation.public()
     if operation.status != "waiting":  # cancelled while the vendor process was starting
         await _stop(operation)
@@ -314,8 +282,9 @@ async def stop_all_signins() -> None:
     # One login that will not stop must not leave the others running; only its record stays.
     results = await asyncio.gather(*(_stop(operation) for operation in operations), return_exceptions=True)
     for operation, result in zip(operations, results):
-        if not isinstance(result, BaseException) and _SIGNINS.get(operation.account_id) is operation:
-            del _SIGNINS[operation.account_id]
+        account_id = operation.account_id
+        if not isinstance(result, BaseException) and _SIGNINS.get(account_id) is operation:
+            del _SIGNINS[account_id]
     for result in results:
         if isinstance(result, BaseException):
             raise result

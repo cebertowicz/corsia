@@ -118,6 +118,8 @@ export interface Signin {
 	cause: string | null;
 	outcome: SigninOutcome | null;
 	bind_reason: string | null;
+	/** A failed sign-in's public reference, matching its service-log line. */
+	ref?: string | null;
 }
 
 function signinOf(body: Record<string, unknown> | null, accountId: string): Signin {
@@ -127,6 +129,7 @@ function signinOf(body: Record<string, unknown> | null, accountId: string): Sign
 		cause: (body?.cause as string | null) ?? null,
 		outcome: (body?.outcome as SigninOutcome | null) ?? null,
 		bind_reason: (body?.bind_reason as string | null) ?? null,
+		ref: typeof body?.ref === 'string' ? body.ref : null,
 	};
 }
 
@@ -174,17 +177,32 @@ export async function cancelSignin(t: string, accountId: string): Promise<Signin
 	return signinOf(await response.json().catch(() => null), accountId);
 }
 
-/** Start the person's stopped local server through the existing lifecycle route. */
-export async function startLocalServer(t: string): Promise<boolean> {
+/** A lifecycle action's outcome; a failure the service logged carries its reference. */
+export type LifecycleResult = { ok: boolean; ref?: string };
+
+/** Start or stop the person's own local server through the existing lifecycle route. */
+async function localServerLifecycle(t: string, action: 'start' | 'stop'): Promise<LifecycleResult> {
 	const listed = await fetch('/api/settings/network-servers', { headers: headers(t) });
-	if (!listed.ok) return false;
+	if (!listed.ok) return { ok: false };
 	const servers: { id: string; provider: string; kind?: string | null; status: string }[] = (await listed.json())?.servers ?? [];
 	const server = servers.find((row) => row.provider === 'omlx' && row.kind !== 'external' && row.status !== 'disabled');
-	if (!server) return false;
-	const response = await fetch(`/api/settings/network-servers/${encodeURIComponent(server.id)}/lifecycle/start`, {
+	if (!server) return { ok: false };
+	const response = await fetch(`/api/settings/network-servers/${encodeURIComponent(server.id)}/lifecycle/${action}`, {
 		method: 'POST', headers: headers(t),
 	});
-	return response.ok;
+	if (!response.ok) return { ok: false };
+	const body = await response.json().catch(() => null);
+	return { ok: body?.ok !== false, ref: typeof body?.ref === 'string' ? body.ref : undefined };
+}
+
+/** Start the person's stopped local server through the existing lifecycle route. */
+export async function startLocalServer(t: string): Promise<boolean> {
+	return (await localServerLifecycle(t, 'start')).ok;
+}
+
+/** Turn the person's local server off: the setup toggle's off once the local model is Ready. */
+export async function stopLocalServer(t: string): Promise<LifecycleResult> {
+	return localServerLifecycle(t, 'stop');
 }
 
 export interface StarterResult { ok: boolean; in_progress?: boolean; reason?: 'not_your_omlx' | 'mac_cannot_run'; message?: string }
