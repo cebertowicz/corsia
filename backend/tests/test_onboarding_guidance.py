@@ -522,7 +522,8 @@ def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggest
     assert "runs no web search" in doc
     # Each helper hangs off its own `About you: <heading>` task, which CORSIA settles once the result lands.
     assert "add one `About you: <heading>` task to your plan per helper" in doc and "that task's id as `plan_node_id`" in doc
-    assert "If `delegate_task` refuses the model, write that heading yourself." in doc
+    assert ("If `delegate_task` refuses the model, keep that task as your own: write that heading yourself, "
+            "then `mark_done` the task.") in doc
     # A returned helper's task waits for review (accept); a failed or empty one stays active (mark_done).
     assert "puts its `About you: <heading>` task up for your review: `accept` it once that heading's suggestion is in" in doc
     assert "leaves its task active: write that heading's suggestion yourself, then `mark_done` the task" in doc
