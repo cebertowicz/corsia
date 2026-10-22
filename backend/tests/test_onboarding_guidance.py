@@ -299,12 +299,13 @@ def test_where_your_work_lives_is_skipped_once_two_apps_are_connected_counting_t
 def test_where_your_work_lives_never_ends_at_i_cant_and_hands_the_rest_to_helpers():
     work = _step(3)
 
-    assert "I'll connect the quick ones now, and a helper looks into the rest in the background" in work
+    assert "I'll connect the quick ones now, and [a helper looks into the rest in the background" in work
     assert "Connect up to two quick apps now" in work
     assert "`delegate_task`" in work and "`Connect [app]` follow-up task" in work and "as `plan_node_id`" in work
     assert "If `delegate_task` refuses the model, post `It's on my list.`" in work
     assert "never a persistent agent" in work
-    assert "`bound_model` `source` is `omlx`), have one helper at a time" in work
+    assert "**On the local model** (`bound_model` `source` is `omlx`) start no helper" in work
+    assert "I'll look into [apps] after setup." in work
     assert "up to three at once" in work
     assert "A helper is looking into [apps]. I'll tell you here what it finds." in work
     assert "Nothing connects to [app]. I'll build a connection after setup and offer it to CORSIA's community, if you OK that." in work
