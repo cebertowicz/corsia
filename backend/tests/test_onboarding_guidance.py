@@ -366,6 +366,18 @@ def test_github_comes_only_on_a_yes_to_sharing_and_answers_the_bot_account_quest
     assert "Your agents can have their own account. You'd accept GitHub's terms, type its password and enter a code from your email. I never see them." in github
 
 
+def test_files_step_carries_the_sandbox_auto_approve_recommendation_and_off_the_cloud_parts():
+    step = _step(8)
+
+    assert "Auto-approve" in step and "Local only" in step and "local models only" in step
+    assert "for that one chat" in step and "checks every command the agent runs with it" in step
+    assert "the access ends when its time is up" in step or "the access still covers only that chat and still ends on time" in step
+    assert "anything that would change a repository's rules still asks you" in step
+    assert "no safeguard is perfect" in step and "its own macOS user account" in step
+    assert "Its helpers follow it, and it checks with you before passing anything to an agent on a cloud model." in step
+    assert "Claim no safeguard beyond these four parts" in step
+
+
 def test_the_connect_skill_holds_the_build_later_and_macos_permission_playbooks():
     skill = (BOOTSTRAP_SKILL.parents[1] / "connect-tools/SKILL.md").read_text(encoding="utf-8")
 
