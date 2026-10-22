@@ -244,10 +244,10 @@
       "sha256": "179e93d9f73bbf5f841a5fbea5a2e91c7aab853e88d2aef661a2d9cf7058f673"
     },
     {
-      "bytes": 6569,
+      "bytes": 6788,
       "kind": "skill",
       "path": "skills/connect-tools/SKILL.md",
-      "sha256": "6cecbdf08dba3f7fa29740f884f6d3ec1ce004ae566eb27e33e8a12f75bbe154"
+      "sha256": "40cc04d5b875d4eb5055f8927bc4f555a37e5f91285bdabdcc2526cc5abc2b45"
     },
     {
       "bytes": 4409,
