@@ -21,7 +21,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from connections.usage_verdicts import DueRelease, LimitSubject
-from infra.connection_limit_release import LimitProbe, candidate_rows
+from infra.connection_limit_release import (
+    LIMIT_RELEASE_BACKOFF_SECONDS,
+    LIMIT_RELEASE_MAX_ATTEMPTS,
+    LimitProbe,
+    candidate_rows,
+)
 from infra.db_async import run_in_db
 from infra.product_events import emit_product_event
 
@@ -237,7 +242,6 @@ async def settle_exhausted_release(due: DueRelease) -> None:
 
 
 def _due_releases(now: datetime) -> list[DueRelease]:
-    from automation.continuation.admission import DEFERRAL_BASE_SECONDS, MAX_DEFERRALS
     from connections.harness_usage import stored_usage
     from connections.usage_verdicts import release_due
     from connections.vendor_accounts import list_accounts
@@ -258,7 +262,7 @@ def _due_releases(now: datetime) -> list[DueRelease]:
             usage = stored_usage(provider=provider, account_id=account['id'], db=db)
             due.extend(release_due(
                 usage, now, account=limit_subject(provider, 'null', receipt=receipt),
-                max_attempts=MAX_DEFERRALS, backoff_seconds=DEFERRAL_BASE_SECONDS,
+                max_attempts=LIMIT_RELEASE_MAX_ATTEMPTS, backoff_seconds=LIMIT_RELEASE_BACKOFF_SECONDS,
             ))
     finally:
         db.close()

@@ -220,19 +220,6 @@ def test_nested_settlement_emits_nothing_before_caller_rollback(isolated_db, mon
     assert triggers.get(trigger.id, db=db).state == "dispatched"
 
 
-def test_deferred_watch_emits_no_expiry_metric(isolated_db, monkeypatch):
-    db = get_db()
-    _, watch, trigger = _seed(db)
-    observed = _capture_metrics(monkeypatch, db, isolated_db)
-    assert settlement.defer_with_source(
-        trigger, "thread_unavailable", "2026-09-15T00:00:00+00:00",
-        WatchExpirySource(), db=db, now=NOW,
-    )
-    assert observed == []
-    assert watches.get_watch(watch.id, db=db).status == "armed"
-    assert triggers.get(trigger.id, db=db).state == "deferred"
-
-
 def test_health_lookup_reads_named_owner_without_rollback(isolated_db):
     from events.health_sink import WORKSPACE_HEALTH_SINK, resolve_live_health_owner
 

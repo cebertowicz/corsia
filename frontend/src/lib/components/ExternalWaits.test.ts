@@ -162,19 +162,19 @@ describe('the waiting face in the chat', () => {
 		expect(host.querySelector('.wait-line')).toBeNull();
 	});
 
-	it('reads back now once the time has passed, never a past clock time', () => {
+	it('reads due now once the time has passed, never a past clock time', () => {
 		focus(true);
 		threadPlanStates.set({ [THREAD]: waiting(new Date(Date.now() - 26 * 60_000).toISOString()) });
 		render(trailingRun());
 
 		const chip = host.querySelector('.fold-toggle')!;
-		expect(chip.textContent).toMatch(/CI on PR #1193\s*·\s*back now/);
-		expect(chip.textContent).not.toMatch(/stalled|overdue|due back/i);
-		expect(chip.querySelector('button.capsule-hit')!.getAttribute('aria-label')).toContain('checks back now');
+		expect(chip.textContent).toMatch(/CI on PR #1193\s*·\s*due now/);
+		expect(chip.textContent).not.toMatch(/stalled|overdue|back now/i);
+		expect(chip.querySelector('button.capsule-hit')!.getAttribute('aria-label')).toContain('Due now.');
 	});
 });
 
-describe('no surface shows a past time as back {time}', () => {
+describe('no surface shows a past time as a clock time', () => {
 	const past = at(-26);
 
 	function outsideNode(until: string): OperatorNode {
@@ -190,25 +190,25 @@ describe('no surface shows a past time as back {time}', () => {
 		} as unknown as OperatorNode;
 	}
 
-	it('pane row: an outside wait reads the label and back now, then a future time once it has one', () => {
-		expect(nodeSubline(outsideNode(past), NOW)).toBe('CI on PR #1193 · back now');
+	it('pane row: an outside wait reads the label and due now, then a future time once it has one', () => {
+		expect(nodeSubline(outsideNode(past), NOW)).toBe('CI on PR #1193 · due now');
 		expect(nodeSubline(outsideNode(at(40)), NOW)).toMatch(/^CI on PR #1193 · back \d{1,2}:\d{2} [AP]M$/);
 	});
 
-	it('set-aside row: names its time in the short form, then reads back now', () => {
-		expect(setAsideLine(past, NOW)).toBe('Back now');
+	it('set-aside row: names its time in the short form, then reads due now', () => {
+		expect(setAsideLine(past, NOW)).toBe('Due now');
 		expect(setAsideLine(at(40), NOW)).toMatch(/^Set aside until \d{1,2}:\d{2} [AP]M$/);
 		expect(setAsideLine(at(40), NOW)).not.toMatch(/stalled|overdue|due back|wake/i);
 	});
 
 	it('sidebar title and the short and long forms agree', () => {
-		expect(waitBack(past, NOW)).toBe('back now');
-		expect(waitChecksBack(past, NOW)).toBe('checks back now');
-		expect(waitMarkTitle(waiting(past), NOW)).toBe('Waiting for CI on PR #1193 · checks back now');
+		expect(waitBack(past, NOW)).toBe('due now');
+		expect(waitChecksBack(past, NOW)).toBe('due now');
+		expect(waitMarkTitle(waiting(past), NOW)).toBe('Waiting for CI on PR #1193 · due now');
 		expect(waitMarkTitle(waiting(at(40)), NOW)).toMatch(/checks back today at/);
 	});
 
-	it('child chip: a late child wait reads back now in its text, title and name', () => {
+	it('child chip: a late child wait reads due now in its text, title and name', () => {
 		const node = {
 			id: 'n1', title: 'Check CI',
 			child: { available: true, plan_id: 'p', thread_id: 't', progress: { done: 0, total: 1, open: 1, liveness: 'waiting' }, wait: { label: 'CI on PR #1193', until: past, more: 0 } },
@@ -217,11 +217,11 @@ describe('no surface shows a past time as back {time}', () => {
 		flushSync();
 
 		const chip = host.querySelector<HTMLElement>('.spawn-chip')!;
-		expect(chip.textContent).toMatch(/CI on PR #1193\s*·\s*back now/);
-		expect(chip.title).toBe('Waiting for CI on PR #1193, checks back now');
+		expect(chip.textContent).toMatch(/CI on PR #1193\s*·\s*due now/);
+		expect(chip.title).toBe('Waiting for CI on PR #1193, due now');
 		expect(chip.getAttribute('aria-label')).toBe(chip.title);
 		expect(chip.querySelector('.waiting-mark')).not.toBeNull();
-		for (const text of [chip.textContent ?? '', chip.title]) expect(text).not.toMatch(/back \d|stalled|overdue|due back/i);
+		for (const text of [chip.textContent ?? '', chip.title]) expect(text).not.toMatch(/back \d|stalled|overdue|back now/i);
 	});
 });
 

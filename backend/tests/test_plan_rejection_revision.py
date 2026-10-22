@@ -57,8 +57,7 @@ def _db(monkeypatch) -> sqlite3.Connection:
 
 def _sweep(db) -> None:
     asyncio.run(runner.sweep(
-        NOW, db=db, sources=[HarvestSource()],
-        is_idle=lambda _thread: True, deliver=AsyncMock(return_value=True),
+        NOW, db=db, sources=[HarvestSource()], deliver=AsyncMock(return_value=True),
     ))
 
 

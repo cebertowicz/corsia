@@ -20,29 +20,29 @@ export function isScheduledTask(node: OperatorNode): boolean {
 	return !!timedWait(node)?.scheduled_reason && waitEndsAtMs(node) !== null;
 }
 
-/** Whether a watch's time has passed: the agent is being woken, so every surface reads "back now" (EW10). */
+/** Whether a watch's time has passed: the agent is being woken, so every surface reads "due now" (EW10). */
 export function waitPassed(until: string | null | undefined, now: Date = new Date()): boolean {
 	const ms = parseWsTimestamp(until);
 	return Number.isFinite(ms) && ms <= now.getTime();
 }
 
-/** The short form every surface shows: "back 11:46 PM", "back Thursday 9:00 AM", or "back now" once passed (EW10); empty when the moment cannot be formatted. */
+/** The short form every surface shows: "back 11:46 PM", "back Thursday 9:00 AM", or "due now" once passed (EW10); empty when the moment cannot be formatted. */
 export function waitBack(until: string, now: Date = new Date()): string {
-	if (waitPassed(until, now)) return 'back now';
+	if (waitPassed(until, now)) return 'due now';
 	const at = formatMoment(new Date(parseWsTimestamp(until)), now, { compact: true, plain: true, clock: true });
 	return at ? `back ${at}` : '';
 }
 
-/** The set-aside row's line: "Set aside until Thursday 9:00 AM", or "Back now" once the time has passed (EW7, EW10). */
+/** The set-aside row's line: "Set aside until Thursday 9:00 AM", or "Due now" once the time has passed (EW7, EW10). */
 export function setAsideLine(until: string, now: Date = new Date()): string {
-	if (waitPassed(until, now)) return 'Back now';
+	if (waitPassed(until, now)) return 'Due now';
 	const at = formatMoment(new Date(parseWsTimestamp(until)), now, { compact: true, plain: true, clock: true });
 	return at ? `Set aside until ${at}` : 'Set aside';
 }
 
-/** The long form for titles and accessible names: "checks back today at 11:46 PM", or "checks back now"; empty when the moment cannot be formatted. */
+/** The long form for titles and accessible names: "checks back today at 11:46 PM", or "due now"; empty when the moment cannot be formatted. */
 export function waitChecksBack(until: string, now: Date = new Date()): string {
-	if (waitPassed(until, now)) return 'checks back now';
+	if (waitPassed(until, now)) return 'due now';
 	const at = formatMoment(new Date(parseWsTimestamp(until)), now);
 	return at ? `checks back ${at}` : '';
 }
@@ -66,17 +66,18 @@ export function outsideWaitReason(node: OperatorNode, now: Date): string | null 
 const HOUR_MS = 3_600_000;
 const MINUTE_MS = 60_000;
 
-/** "ends in 12 min" for a wait ending within the hour; null otherwise. */
+/** "ends in 12 min" for a wait ending within the hour, "due now" once it has passed (EW10); null otherwise. */
 export function waitCountdown(node: OperatorNode, now: Date = new Date()): string | null {
 	const ends = waitEndsAtMs(node);
 	if (ends === null) return null;
 	const left = ends - now.getTime();
-	if (left <= 0 || left > HOUR_MS) return null;
+	if (left <= 0) return 'due now';
+	if (left > HOUR_MS) return null;
 	const minutes = Math.round(left / MINUTE_MS);
 	return minutes < 1 ? 'ends in under a minute' : `ends in ${minutes} min`;
 }
 
-/** When a timed wait ends, as a person says it: "tomorrow at 9:00 AM", or "ends in 12 min" inside the hour. */
+/** When a timed wait ends, as a person says it: "tomorrow at 9:00 AM", "ends in 12 min" inside the hour, or "due now" once passed. */
 function endMoment(node: OperatorNode, now: Date, clock = false): string | null {
 	const ends = waitEndsAtMs(node);
 	if (ends === null) return null;

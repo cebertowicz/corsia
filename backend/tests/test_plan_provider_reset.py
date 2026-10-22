@@ -128,7 +128,6 @@ async def test_known_provider_reset_waits_until_due_then_delivers_once(isolated_
     result = await pl.sweep_plan_wakes(
         _BEFORE_RESET,
         db=get_db(),
-        is_idle=lambda _thread_id: True,
         deliver=lambda *args: early.append(args),
     )
     assert result.get("woken", []) == []
@@ -143,7 +142,6 @@ async def test_known_provider_reset_waits_until_due_then_delivers_once(isolated_
     result = await pl.sweep_plan_wakes(
         _AFTER_RESET,
         db=get_db(),
-        is_idle=lambda _thread_id: True,
         deliver=deliver,
     )
     assert result["woken"] == [thread_id]
@@ -208,26 +206,6 @@ def test_terminal_reset_wait_rearms_generic_liveness(
     rearmed = pl.arm_plan_wake(thread_id, signal, db=db)
     assert rearmed is not None and rearmed.status == pl.ARMED
     assert rearmed.provider_reset_at is None
-
-
-@pytest.mark.asyncio
-async def test_busy_reset_wait_defers_to_generic_liveness(isolated_db):
-    thread_id = mk_session("provider-reset-deferred")
-    _start_selected_turn(thread_id, "deferred-turn")
-    _terminal_error(
-        thread_id, "deferred-turn", error=_PROVIDER_ERROR, clears_at=_RESET,
-    )
-    delivered = []
-    result = await pl.sweep_plan_wakes(
-        _AFTER_RESET, db=get_db(), is_idle=lambda _thread_id: False,
-        deliver=lambda *args: delivered.append(args),
-    )
-    assert result["skipped"] == [thread_id]
-    assert delivered == []
-    wake = _wake(thread_id)
-    assert wake["status"] == pl.ARMED
-    assert wake["provider_reset_at"] is None
-    assert wake["deadline"] != _RESET
 
 
 @pytest.mark.parametrize("state", ["queued", "running", "stale"])
@@ -435,7 +413,7 @@ def test_new_unknown_error_replaces_an_older_known_reset_with_generic_liveness(i
 
 
 @pytest.mark.asyncio
-async def test_unknown_provider_refusal_keeps_bounded_generic_cycle_cap(isolated_db):
+async def test_unknown_provider_refusal_keeps_waking_on_the_generic_backoff(isolated_db):
     thread_id = mk_session("provider-reset-unknown")
     _start_selected_turn(thread_id, "unknown-turn")
 
@@ -445,7 +423,7 @@ async def test_unknown_provider_refusal_keeps_bounded_generic_cycle_cap(isolated
     assert wake["provider_reset_at"] is None
     db.execute(
         "UPDATE plan_liveness_wakes SET deadline=?,cycle=? WHERE thread_id=?",
-        ("2000-01-01T00:00:00+00:00", pl.PLAN_WAKE_MAX_CYCLES - 1, thread_id),
+        ("2000-01-01T00:00:00+00:00", 6, thread_id),
     )
     db.commit()
 
@@ -458,11 +436,11 @@ async def test_unknown_provider_refusal_keeps_bounded_generic_cycle_cap(isolated
     result = await pl.sweep_plan_wakes(
         _AFTER_RESET,
         db=db,
-        is_idle=lambda _thread_id: True,
         deliver=deliver,
     )
-    assert result["stalled"] == [thread_id]
-    assert delivered == []
+    assert result["woken"] == [thread_id]
+    assert len(delivered) == 1
+    assert _wake(thread_id)["cycle"] == 7
 
 
 def test_stale_terminal_without_current_selection_cannot_install_reset(isolated_db):

@@ -35,8 +35,7 @@ def _armed_watch(parent: str | None = None):
 
 async def _sweep(db, deliver):
     return await runner.sweep(
-        NOW, db=db, sources=[WatchExpirySource()],
-        is_idle=lambda _thread: True, deliver=deliver,
+        NOW, db=db, sources=[WatchExpirySource()], deliver=deliver,
     )
 
 
