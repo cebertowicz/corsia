@@ -642,7 +642,7 @@
 			// An earlier install this app can't open: offer to set it aside.
 			function showFreshOffer(reason) {
 				clearInterval(approvalPoll);
-				const said = typeof reason === 'string' ? reason.replace(/\s*Nothing was changed\.$/, '') : '';
+				const said = typeof reason === 'string' ? reason : '';
 				showFreshCard({ title: FRESH_COPY.offerTitle, text: FRESH_COPY.offerLine(said), button: FRESH_COPY.offerButton, action: confirmFresh });
 			}
 

@@ -565,34 +565,73 @@ pub fn start_fresh(
 /// A Start fresh the app did not finish (it quit or crashed partway) is undone
 /// before launch decides anything, so the earlier install is found whole again.
 /// `start_old` starts the earlier install once its files are back.
+///
+/// An undo that can't finish here sets the journal aside, so the next launch goes on to
+/// first run with whatever is in place instead of failing the same way every time.
 pub fn recover_on_launch(
     app_dir: &Path,
     start_old: impl FnOnce(Option<&StopProcess>) -> Result<(), String>,
 ) -> Result<(), StartFreshError> {
-    let unreadable = |details: String| StartFreshError {
+    let path = journal_path(app_dir);
+    let read = match fs::read(&path) {
+        Ok(contents) => serde_json::from_slice::<Journal>(&contents).map_err(|error| error.to_string()),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(error) => Err(error.to_string()),
+    };
+    let (journal, details, kept) = match read {
+        Err(error) => {
+            let details = format!("could not read the Start fresh journal: {error}");
+            let (details, kept) = set_journal_aside(app_dir, details);
+            let left = format!("Nothing was deleted: anything it moved is in ~/{BACKUPS_FOLDER}.");
+            return Err(StartFreshError {
+                message: format!("CORSIA couldn’t read its record of what Start fresh moved. {left} {}", next_launch(kept)),
+                details,
+                restored: false,
+            });
+        }
+        Ok(journal) => match put_back(app_dir, &journal, start_old) {
+            PutBack::Done => return Ok(()),
+            PutBack::NotStarted(details) => {
+                return Err(StartFreshError {
+                    message: format!("CORSIA put back everything Start fresh had moved. {NOT_STARTED}"),
+                    details,
+                    restored: true,
+                })
+            }
+            PutBack::Files(details) => {
+                let (details, kept) = set_journal_aside(app_dir, details);
+                (journal, details, kept)
+            }
+        },
+    };
+    Err(StartFreshError {
         message: format!(
-            "CORSIA couldn’t read its record of what Start fresh moved. Nothing was deleted: anything it \
-             moved is in ~/{BACKUPS_FOLDER}."
+            "CORSIA couldn’t put everything back. Nothing was deleted: what it moved is still in {}. {}",
+            backup_shown(&journal.backup),
+            next_launch(kept)
         ),
         details,
         restored: false,
-    };
-    let path = journal_path(app_dir);
-    let contents = match fs::read(&path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(unreadable(format!("could not read the Start fresh journal: {error}"))),
-    };
-    let journal: Journal = serde_json::from_slice(&contents)
-        .map_err(|error| unreadable(format!("could not read the Start fresh journal: {error}")))?;
-    match put_back(app_dir, &journal, start_old) {
-        PutBack::Done => Ok(()),
-        PutBack::NotStarted(details) => Err(StartFreshError {
-            message: format!("CORSIA put back everything Start fresh had moved. {NOT_STARTED}"),
-            details,
-            restored: true,
-        }),
-        PutBack::Files(details) => Err(StartFreshError::not_put_back(&journal, details)),
+    })
+}
+
+/// What the person does after a launch-time undo that couldn't finish.
+fn next_launch(journal_kept: bool) -> &'static str {
+    if journal_kept {
+        "Reopen CORSIA to try again."
+    } else {
+        "Move back anything you need from there, then reopen CORSIA."
+    }
+}
+
+/// Rename the journal beside itself so the next launch stops undoing it, keeping it as a
+/// record. Returns the details to show and whether the journal is still in place.
+fn set_journal_aside(app_dir: &Path, details: String) -> (String, bool) {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_secs());
+    let aside = app_dir.join(format!("start-fresh-set-aside-{stamp}.json"));
+    match fs::rename(journal_path(app_dir), &aside) {
+        Ok(()) => (format!("{details}; the record of the moves is now {}", aside.display()), false),
+        Err(error) => (format!("{details}; could not set the Start fresh journal aside: {error}"), true),
     }
 }
 
@@ -1103,7 +1142,7 @@ mod tests {
     }
 
     #[test]
-    fn a_launch_that_cannot_put_everything_back_keeps_the_journal() {
+    fn a_launch_that_cannot_put_everything_back_sets_the_journal_aside() {
         let home = Home::new("relaunch-stuck");
         source_install(&home);
         let (backup, moves) = journal_for(&home, None);
@@ -1116,11 +1155,35 @@ mod tests {
 
         assert!(!error.restored);
         assert!(error.message.contains(&format!("~/{BACKUPS_FOLDER}/")), "{}", error.message);
-        assert!(error.message.contains("Reopen CORSIA"), "{}", error.message);
+        assert!(error.message.contains("then reopen CORSIA"), "{}", error.message);
         assert!(!error.message.contains(&home.0.display().to_string()), "no full path in the line");
         assert!(error.details.contains("both back in place and in the backup"), "{}", error.details);
-        assert!(journal_path(&home.app_dir()).exists(), "the next launch tries again");
-        assert!(moves[0].to.exists() && backup.exists());
+        assert!(moves[0].to.exists() && backup.exists(), "nothing is deleted");
+        // The record is kept beside the journal, and the next launch goes on to first run.
+        assert!(!journal_path(&home.app_dir()).exists());
+        assert!(error.details.contains("start-fresh-set-aside-"), "{}", error.details);
+        recover_on_launch(&home.app_dir(), |_| panic!("set aside, not undone again")).unwrap();
+    }
+
+    #[test]
+    fn an_unreadable_journal_is_set_aside_so_the_next_launch_goes_on() {
+        let home = Home::new("relaunch-unreadable");
+        fs::create_dir_all(home.app_dir()).unwrap();
+        fs::write(journal_path(&home.app_dir()), "{ not json").unwrap();
+
+        let error = recover_on_launch(&home.app_dir(), |_| panic!("nothing to start")).unwrap_err();
+
+        assert!(!error.restored);
+        assert!(error.message.contains("then reopen CORSIA"), "{}", error.message);
+        assert!(error.details.contains("could not read the Start fresh journal"), "{}", error.details);
+        assert!(!journal_path(&home.app_dir()).exists());
+        let aside: Vec<_> = fs::read_dir(home.app_dir())
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with("start-fresh-set-aside-"))
+            .collect();
+        assert_eq!(aside.len(), 1, "the record is kept");
+        recover_on_launch(&home.app_dir(), |_| panic!("set aside, not read again")).unwrap();
     }
 
     #[test]

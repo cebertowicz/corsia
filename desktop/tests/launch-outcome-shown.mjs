@@ -15,7 +15,7 @@ const flag = process.argv.indexOf('--shell');
 const shell = flag > -1 ? path.resolve(process.argv[flag + 1]) : path.join(repo, 'desktop/dist-shell');
 const shellUrl = pathToFileURL(path.join(shell, 'index.html')).href;
 
-const refusal = 'A file named ~/Corsia is in the way of CORSIA’s default workspace folder. Nothing was changed.';
+const refusal = 'A file named ~/Corsia is in the way of CORSIA’s default workspace folder.';
 let failed = 0;
 const fail = (message) => {
 	failed += 1;

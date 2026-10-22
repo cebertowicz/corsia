@@ -36,7 +36,7 @@ pub enum FirstRun {
     /// Nothing from an earlier install: create this workspace and record it.
     Fresh { workspace: PathBuf },
     /// An earlier install is present but does not meet the source-service
-    /// contract required for adoption: write nothing and show this reason.
+    /// contract required for adoption: write nothing and offer Start fresh with this reason.
     ExistingInstall { reason: String },
     /// A rendered source service plist identifies a moveable source install.
     Adoptable { source: adoption::SourceInstall },
@@ -205,7 +205,7 @@ pub fn default_workspace(home: &Path) -> PathBuf {
 
 fn existing_install(reason: String) -> Result<FirstRun, String> {
     Ok(FirstRun::ExistingInstall {
-        reason: format!("{reason} Nothing was changed."),
+        reason,
     })
 }
 
@@ -473,7 +473,7 @@ mod tests {
         match plan(&home.0, &home.app_dir()).expect("plan") {
             FirstRun::ExistingInstall { reason } => {
                 assert!(reason.contains(marker), "reason names the marker: {reason}");
-                assert!(reason.ends_with("Nothing was changed."));
+                assert!(reason.ends_with('.') && !reason.contains("Nothing was changed"), "{reason}");
             }
             other => panic!("expected a refusal, got {other:?}"),
         }

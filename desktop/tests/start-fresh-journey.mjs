@@ -40,7 +40,7 @@ const fail = (message) => {
 	console.error(`FAIL ${message}`);
 };
 
-const reason = 'CORSIA found an existing install on this computer (~/.corsia), and this app can’t open it. Nothing was changed.';
+const reason = 'CORSIA found an existing install on this computer (~/.corsia), and this app can’t open it.';
 const preview = {
 	moves: ['~/Corsia', '~/.corsia/config.json', '~/Library/LaunchAgents/com.corsia.prod.plist'],
 	code: ['~/.corsia'],
