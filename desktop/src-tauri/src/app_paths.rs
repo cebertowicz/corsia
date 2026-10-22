@@ -16,7 +16,7 @@ use std::{
 /// The app's folder under Application Support. Held equal to the backend's
 /// `APP_FOLDER` and the launcher's `CORSIA_APP_FOLDER` by a parity test.
 pub const APP_FOLDER: &str = "CORSIA";
-const STATE_DIRECTORY: &str = "state";
+pub(crate) const STATE_DIRECTORY: &str = "state";
 const UPDATE_LOCK_FILE: &str = "update.lock";
 
 pub fn app_dir_for_home(home: &Path) -> PathBuf {

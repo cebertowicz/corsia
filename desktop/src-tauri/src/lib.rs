@@ -69,8 +69,9 @@ struct AppServiceState {
     app_dir: Mutex<Option<PathBuf>>,
     /// The local service ports already granted their commands; a capability can't be removed, so each is added once.
     granted_local_ports: Mutex<std::collections::BTreeSet<u16>>,
-    /// Set once this process has settled whether an unfinished setup is wiped. A retry in the same process (after an
-    /// approval prompt or a slow start) never checks again, so it can't wipe what this process just started.
+    /// Set once this process has had its one chance to wipe an unfinished setup. A retry in the same process (after
+    /// an approval prompt or a slow start) never wipes, so it can't delete what this process just started; what a
+    /// retry may still do, planning a first run in the folder a finished wipe left, is read from disk.
     setup_checked: AtomicBool,
     quitting: AtomicBool,
     exit_cleanup_attempted: AtomicBool,
@@ -353,40 +354,45 @@ fn unregister_service() -> Result<(), String> {
 /// An unfinished first-run setup leaves nothing: before anything is planned or started, a marker the first run
 /// left (and the backend deletes when setup finishes) makes this launch wipe the state folder and what setup
 /// created, so first run begins again at step 1. Without a marker, or with one that cannot be trusted, nothing
-/// is touched. A failure stops the launch, and the marker stays for the next try.
+/// is touched. Starting over never stops a launch: whatever fails, the marker is dropped and the install
+/// resumes where it stopped, so the worst case is the old behavior, never a dead end.
 ///
 /// Returns the work folder that setup made, so planning the new first run reuses it.
-fn start_over_if_unfinished(app_dir: &Path) -> Result<Option<PathBuf>, String> {
-    const COULDNT_START_OVER: &str =
-        "Couldn’t start setup over. Quit and reopen CORSIA to try again.";
+fn start_over_if_unfinished(app_dir: &Path, may_wipe: bool) -> Option<PathBuf> {
     match unfinished_setup::at_launch(app_dir) {
-        unfinished_setup::Launch::Nothing => Ok(None),
+        unfinished_setup::Launch::Nothing => None,
+        unfinished_setup::Launch::Replan(workspace) => Some(workspace),
         unfinished_setup::Launch::Damaged(reason) => {
             // Nothing can trust it, so it only gets in the way: this install is simply not marked.
             log::error!("a damaged unfinished-setup marker was removed: {reason}");
-            unfinished_setup::discard_marker(app_dir).map_err(|error| {
-                log::error!("could not remove the damaged marker: {error}");
-                COULDNT_START_OVER.to_owned()
-            })?;
-            Ok(None)
+            drop_marker(app_dir);
+            None
         }
         unfinished_setup::Launch::Untrusted(reason) => {
             log::error!("an unfinished-setup marker was left alone: {reason}");
-            Ok(None)
+            None
         }
+        // This process has already started a service, so what is on disk is not an abandoned setup.
+        unfinished_setup::Launch::Wipe(_) if !may_wipe => None,
         unfinished_setup::Launch::Wipe(marker) => {
             log::info!("setup was never finished: starting it over");
             // The service holds the state folder open, so it stops first.
-            unregister_service().map_err(|error| {
-                log::error!("could not stop the service to start setup over: {error}");
-                COULDNT_START_OVER.to_owned()
-            })?;
-            unfinished_setup::wipe(app_dir, &marker).map_err(|error| {
-                log::error!("could not start setup over: {error}");
-                COULDNT_START_OVER.to_owned()
-            })?;
-            Ok(Some(PathBuf::from(marker.workspace)))
+            let wiped = unregister_service().and_then(|()| unfinished_setup::wipe(app_dir, &marker));
+            match wiped {
+                Ok(()) => Some(PathBuf::from(marker.workspace)),
+                Err(error) => {
+                    log::error!("could not start setup over, so it resumes where it stopped: {error}");
+                    drop_marker(app_dir);
+                    None
+                }
+            }
         }
+    }
+}
+
+fn drop_marker(app_dir: &Path) {
+    if let Err(error) = unfinished_setup::discard_marker(app_dir) {
+        log::error!("could not remove the unfinished-setup marker: {error}");
     }
 }
 
@@ -582,12 +588,11 @@ fn start_service<R: tauri::Runtime>(
         log::error!("interrupted adoption could not be undone: {}", failure.message);
         return Ok(ServiceStartup::AdoptionFailed { failure });
     }
-    let started_over = if !service.setup_checked.load(Ordering::SeqCst) && !first_run::environment_names_the_roots() {
-        let started_over = start_over_if_unfinished(&app_dir)?;
-        service.setup_checked.store(true, Ordering::SeqCst);
-        started_over
-    } else {
+    let started_over = if first_run::environment_names_the_roots() {
         None
+    } else {
+        let may_wipe = !service.setup_checked.swap(true, Ordering::SeqCst);
+        start_over_if_unfinished(&app_dir, may_wipe)
     };
     // Decide about the workspace before anything is written: a refusal leaves
     // the computer exactly as it was.

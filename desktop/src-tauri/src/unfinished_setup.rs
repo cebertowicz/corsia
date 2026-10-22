@@ -7,11 +7,11 @@
 //
 // While the marker exists, the next launch, before it starts the service, removes the recorded files whose
 // bytes still match, the state folder and `service.json`, then plans a first run again in the folder the first
-// run made. The marker itself stays until that new first run is applied and `mark` replaces it, so a launch
-// that stops anywhere in between finds the marker again and finishes the job; every step is safe to repeat. An
-// install the shell did not mark (adopted, existing, scripted, or already finished) is never touched. A file
-// that cannot be removed stops the launch and leaves the marker for the next try; a marker the shell cannot
-// trust is left alone.
+// run made. When the wipe finishes the marker is rewritten as `wiped`, which keeps that folder trusted on disk
+// until the new first run is applied and `mark` replaces it, so a launch that fails in between still plans the
+// first run there. An install the shell did not mark (adopted, existing, scripted, or already finished) is never
+// touched. A wipe that fails never stops the launch: the caller drops the marker and the install resumes where it
+// stopped. A marker the shell cannot trust is left alone.
 //
 // Two writers share the file: the shell owns `state_dir` and `workspace`, the backend owns `files_root` and
 // `files` (see `backend/infra/setup_marker.py`).
@@ -26,11 +26,15 @@ use std::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{app_paths, first_run::SERVICE_FILE};
+use crate::{
+    app_paths::{self, STATE_DIRECTORY},
+    first_run::SERVICE_FILE,
+};
 
 /// Held equal to `MARKER_FILE` in `backend/infra/setup_marker.py` by a parity test.
 pub const MARKER_FILE: &str = "setup-unfinished";
-const STATE_DIRECTORY: &str = "state";
+/// Where the state folder goes while it is deleted: one rename, so a state folder is never half there.
+const DISCARDED_STATE: &str = "state.discarded";
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Marker {
@@ -44,6 +48,11 @@ pub struct Marker {
     /// Files the backend's setup created in that folder, by path relative to it, with their SHA-256.
     #[serde(default)]
     pub files: BTreeMap<String, String>,
+    /// Set once the wipe has finished: the next first run is being planned in `workspace`, and nothing is left to
+    /// delete. Kept on disk, so a launch that fails after the wipe (in this process or the next) still plans the
+    /// first run in the folder the wiped setup made.
+    #[serde(default)]
+    pub wiped: bool,
 }
 
 impl Marker {
@@ -59,6 +68,8 @@ pub enum Launch {
     Nothing,
     /// Setup was never finished: wipe it, then start from step 1.
     Wipe(Marker),
+    /// The wipe already finished and the new first run is not marked yet: plan it in the folder the marker names.
+    Replan(PathBuf),
     /// A marker the shell cannot trust: nothing is wiped, and the reason belongs in the log.
     Untrusted(String),
     /// A marker that is not valid JSON: nothing can use it, so the launch removes it (`discard_marker`) and the
@@ -110,8 +121,14 @@ pub fn mark(app_dir: &Path, workspace: &Path) -> Result<bool, String> {
             .to_owned(),
         files_root: None,
         files: BTreeMap::new(),
+        wiped: false,
     };
-    let body = serde_json::to_vec_pretty(&marker).map_err(|error| error.to_string())?;
+    write_marker(app_dir, &marker)?;
+    Ok(true)
+}
+
+fn write_marker(app_dir: &Path, marker: &Marker) -> Result<(), String> {
+    let body = serde_json::to_vec_pretty(marker).map_err(|error| error.to_string())?;
     let target = app_dir.join(MARKER_FILE);
     let staged = app_dir.join(format!("{MARKER_FILE}.tmp"));
     let mut options = fs::OpenOptions::new();
@@ -128,8 +145,7 @@ pub fn mark(app_dir: &Path, workspace: &Path) -> Result<bool, String> {
         .and_then(|()| file.sync_all())
         .map_err(|error| format!("could not write {}: {error}", staged.display()))?;
     fs::rename(&staged, &target)
-        .map_err(|error| format!("could not write {}: {error}", target.display()))?;
-    Ok(true)
+        .map_err(|error| format!("could not write {}: {error}", target.display()))
 }
 
 /// Remove a marker nothing can use, so the backend never has to guess about it.
@@ -170,7 +186,21 @@ pub fn at_launch(app_dir: &Path) -> Launch {
     if !Path::new(&marker.workspace).is_absolute() || !marker.files_folder().is_absolute() {
         return Launch::Untrusted(format!("{} names a work folder that is not an absolute path", path.display()));
     }
+    if marker.wiped || nothing_to_wipe(app_dir, &marker) {
+        return Launch::Replan(PathBuf::from(marker.workspace));
+    }
     Launch::Wipe(marker)
+}
+
+/// Whether a marker has nothing behind it: no service file, no recorded file, a state folder that is absent or
+/// empty. That is a first run that stopped before it started anything, the same ground a finished wipe leaves.
+fn nothing_to_wipe(app_dir: &Path, marker: &Marker) -> bool {
+    let state_dir = state_dir_in(app_dir);
+    let state_is_empty = match fs::read_dir(&state_dir) {
+        Ok(mut entries) => entries.next().is_none(),
+        Err(error) => error.kind() == ErrorKind::NotFound,
+    };
+    marker.files.is_empty() && state_is_empty && !matches!(exists(&app_dir.join(SERVICE_FILE)), Ok(true) | Err(_))
 }
 
 /// The file at `relative` under the work folder, when it is a plain file the marker may remove: a relative
@@ -218,10 +248,11 @@ fn remove_empty_parents(file: &Path, workspace: &Path) {
 
 /// Wipe the unfinished setup `marker` names. The service must not be running.
 ///
-/// Order matters for a retry: the work-folder files first (a failure stops everything), then the state folder
-/// and `service.json`. The marker stays: it is replaced when the new first run is marked, and until then it is
-/// what lets a launch that stopped halfway finish the wipe. A file the person changed, or one that is no
-/// longer a plain file, stays. Errors are details for the log, not text for the person.
+/// The work-folder files go first (a failure stops here with the state folder untouched), then the state folder
+/// in one rename, so it is never left half deleted, then `service.json`, and last the marker is rewritten as
+/// wiped (`Launch::Replan`). A failure at any step is the caller's to turn into a resume: nothing here may leave a
+/// launch that cannot proceed. A file the person changed, or one that is no longer a plain file, stays. Errors
+/// are details for the log, not text for the person.
 pub fn wipe(app_dir: &Path, marker: &Marker) -> Result<(), String> {
     let workspace = marker.files_folder();
     let mut failures = Vec::new();
@@ -246,10 +277,31 @@ pub fn wipe(app_dir: &Path, marker: &Marker) -> Result<(), String> {
         if !metadata.is_dir() {
             return Err(format!("{} is not a plain folder", state_dir.display()));
         }
-        fs::remove_dir_all(&state_dir)
-            .map_err(|error| format!("could not remove {}: {error}", state_dir.display()))?;
+        let discarded = app_dir.join(DISCARDED_STATE);
+        // A leftover from an earlier wipe whose delete was cut short.
+        let _ = fs::remove_dir_all(&discarded);
+        fs::rename(&state_dir, &discarded)
+            .map_err(|error| format!("could not move {} aside: {error}", state_dir.display()))?;
+        if let Err(error) = fs::remove_dir_all(&discarded) {
+            log::warn!("could not finish deleting {}: {error}", discarded.display());
+        }
     }
-    remove_if_present(&app_dir.join(SERVICE_FILE))
+    remove_if_present(&app_dir.join(SERVICE_FILE))?;
+    // The wipe is done. If this note can't be written, the old marker still describes an install with nothing
+    // left, which `at_launch` also plans as a fresh first run.
+    if let Err(error) = write_marker(
+        app_dir,
+        &Marker {
+            state_dir: marker.state_dir.clone(),
+            workspace: marker.workspace.clone(),
+            files_root: None,
+            files: BTreeMap::new(),
+            wiped: true,
+        },
+    ) {
+        log::warn!("could not note that the wipe finished: {error}");
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -322,12 +374,35 @@ mod tests {
         assert!(!app_dir.join(SERVICE_FILE).exists());
         assert!(!workspace.join(PROFILE).exists());
         assert!(workspace.is_dir(), "the work folder itself stays");
+        assert!(!app_dir.join("state.discarded").exists(), "the state folder is gone, not left aside");
         assert!(
-            app_dir.join(MARKER_FILE).exists(),
-            "the marker stays until the new first run replaces it, so a launch that stops now finishes the job"
+            matches!(at_launch(&app_dir), Launch::Replan(ref folder) if *folder == workspace),
+            "the marker now says the wipe is done, and that the first run is planned in the folder it made"
         );
-        assert!(matches!(at_launch(&app_dir), Launch::Wipe(_)), "and that launch finds it again");
-        wipe_it(&app_dir).unwrap();
+    }
+
+    #[test]
+    fn the_state_folder_the_marker_names_is_the_one_the_app_uses() {
+        let home = Home::new("constant");
+        let app_dir = home.app_dir();
+        assert_eq!(state_dir_in(&app_dir), app_paths::state_dir_with_override(&app_dir, None).unwrap());
+        assert_eq!(STATE_DIRECTORY, "state", "the backend's default_state_root names the same folder");
+    }
+
+    #[test]
+    fn a_first_run_that_stopped_before_it_started_anything_is_planned_again_from_disk() {
+        let home = Home::new("retry");
+        let app_dir = home.app_dir();
+        let workspace = home.workspace();
+        assert!(mark(&app_dir, &workspace).unwrap());
+        assert!(
+            matches!(at_launch(&app_dir), Launch::Replan(ref folder) if *folder == workspace),
+            "no service file and no state: nothing to wipe, and the folder is the one this first run made"
+        );
+        fs::write(app_dir.join(SERVICE_FILE), b"{}").unwrap();
+        fs::create_dir_all(app_dir.join("state")).unwrap();
+        fs::write(app_dir.join("state").join("corsia.db"), b"db").unwrap();
+        assert!(matches!(at_launch(&app_dir), Launch::Wipe(_)), "once it has a service and state it is a setup to wipe");
     }
 
     #[test]
@@ -372,7 +447,7 @@ mod tests {
 
         wipe_it(&app_dir).unwrap();
         assert!(!workspace.join("context").exists(), "the folder the profile left empty goes too");
-        assert!(matches!(at_launch(&app_dir), Launch::Wipe(_)), "a stop before the new first run is applied is retried");
+        assert!(matches!(at_launch(&app_dir), Launch::Replan(_)), "a launch that fails after the wipe still plans the first run in that folder");
         assert!(matches!(plan(&home.0, &app_dir).unwrap(), FirstRun::ExistingInstall { .. }), "plain planning refuses a folder with files");
         assert_eq!(
             plan_trusting(&home.0, &app_dir, Some(&workspace)).unwrap(),
@@ -520,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn a_file_that_will_not_go_stops_the_wipe_and_keeps_the_marker_for_the_next_try() {
+    fn a_file_that_will_not_go_stops_the_wipe_before_the_state_folder_is_touched() {
         use std::os::unix::fs::PermissionsExt;
         let home = Home::new("stuck");
         let (app_dir, workspace) = unfinished(&home);
@@ -532,7 +607,19 @@ mod tests {
         assert!(reason.contains("50-USER-PROFILE.md"), "{reason}");
         assert!(app_dir.join("state").join("corsia.db").exists(), "nothing else was removed");
         assert!(app_dir.join(MARKER_FILE).exists());
-        wipe_it(&app_dir).unwrap();
-        assert!(!app_dir.join("state").exists());
+        discard_marker(&app_dir).unwrap();
+        assert_eq!(at_launch(&app_dir), Launch::Nothing, "the caller drops the marker and the install resumes");
+    }
+
+    #[test]
+    fn a_state_folder_that_cannot_be_moved_aside_is_left_whole() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = Home::new("stuck-state");
+        let (app_dir, _) = unfinished(&home);
+        fs::set_permissions(&app_dir, fs::Permissions::from_mode(0o500)).unwrap();
+        let result = wipe_it(&app_dir);
+        fs::set_permissions(&app_dir, fs::Permissions::from_mode(0o700)).unwrap();
+        result.expect_err("a state folder that cannot be renamed is reported");
+        assert!(app_dir.join("state").join("corsia.db").exists(), "never half deleted");
     }
 }

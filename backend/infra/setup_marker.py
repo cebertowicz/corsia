@@ -22,18 +22,22 @@ One file, two writers, each with its own fields:
 | ``state_dir``, ``workspace`` | the shell, when its first run makes the state root | the one state folder it may wipe, and the folder that first run made |
 | ``files_root``, ``files`` | this module | the folder setup's files are relative to (the chosen work folder), and each file with its digest |
 
-The backend deletes the marker when setup finishes. The shell replaces it only when it marks the new first run
-it plans after a wipe. A marker this module cannot read is an error, never "no marker": finishing must not
-commit while a wipe marker might still be on disk.
+The backend deletes the marker when setup finishes. The shell replaces it when it marks the new first run it plans
+after a wipe. A marker this module cannot read or parse is handled the way the shell handles it: it records
+nothing in it (the shell never wipes on it, and discards a damaged one at its next launch), but finishing deletes
+it, so a finished install never keeps a marker it could not verify.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 
 from infra import config
+
+logger = logging.getLogger(__name__)
 
 #: The marker's name in the app folder. Held equal to ``MARKER_FILE`` in the shell by a parity test.
 MARKER_FILE = "setup-unfinished"
@@ -43,32 +47,29 @@ def marker_path() -> Path:
     return config.STATE_ROOT.parent / MARKER_FILE
 
 
-def _own_marker() -> dict | None:
-    """The marker this install's shell wrote for this state root, else ``None``.
-
-    Raises ``OSError`` when a marker may exist but cannot be read or understood, so finishing can never commit
-    while a wipe marker might still be on disk. The shell removes a damaged marker at its next launch.
-    """
+def _read() -> tuple[str, dict | None]:
+    """What the marker file is to this install: ``none``, ``unusable`` (unreadable or damaged), ``other`` or ``ours``."""
     try:
         data = json.loads(marker_path().read_bytes())
     except FileNotFoundError:
-        return None
-    except ValueError as error:
-        raise OSError("the unfinished-setup marker is damaged") from error
+        return "none", None
+    except (OSError, ValueError):
+        logger.warning("The unfinished-setup marker cannot be read", exc_info=True)
+        return "unusable", None
     state_dir = data.get("state_dir") if isinstance(data, dict) else None
     if not isinstance(state_dir, str) or Path(state_dir).resolve() != config.STATE_ROOT.resolve():
-        return None
-    return data
+        return "other", None
+    return "ours", data
 
 
 def record_created_file(relative: str, sha256: str) -> None:
     """Add a work-folder file this setup created, with the digest the shell checks before removing it.
 
-    Does nothing when this install has no marker. Raises ``OSError`` when the marker cannot be read or rewritten,
-    so the caller can refuse to create the file.
+    Does nothing when this install has no usable marker of its own. Raises ``OSError`` when the marker cannot be
+    rewritten, so the caller can refuse to create the file.
     """
-    data = _own_marker()
-    if data is None:
+    _, data = _read()
+    if data is None or data.get("wiped") is True:
         return
     recorded = data.get("files")
     files = recorded if isinstance(recorded, dict) else {}
@@ -83,6 +84,11 @@ def record_created_file(relative: str, sha256: str) -> None:
 
 
 def remove() -> None:
-    """Delete this install's marker, so the shell never wipes it. Raises ``OSError`` if it cannot be read or deleted."""
-    if _own_marker() is not None:
-        marker_path().unlink()
+    """Delete this install's marker, so the shell never wipes it. Raises ``OSError`` if it cannot be deleted.
+
+    A marker that cannot be read or parsed is deleted too: it cannot be shown to be another install's, and a finished
+    install must not keep one. Another install's marker is left alone.
+    """
+    kind, _ = _read()
+    if kind in ("ours", "unusable"):
+        marker_path().unlink(missing_ok=True)

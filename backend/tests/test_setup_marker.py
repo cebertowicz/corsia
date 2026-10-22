@@ -139,7 +139,7 @@ def test_a_marker_that_will_not_go_refuses_the_finish_and_setup_stays_unfinished
     assert not (app / setup_marker.MARKER_FILE).exists()
 
 
-def test_a_marker_that_cannot_be_read_refuses_the_finish_instead_of_passing_for_none(app, monkeypatch):
+def test_an_unreadable_marker_never_blocks_the_install_from_finishing_setup(app, monkeypatch):
     _first_account()
     real = Path.read_bytes
 
@@ -150,23 +150,20 @@ def test_a_marker_that_cannot_be_read_refuses_the_finish_instead_of_passing_for_
 
     with monkeypatch.context() as patched:
         patched.setattr(Path, "read_bytes", refuse)
-        with pytest.raises(setup_progress.SetupProgressError):
-            setup_progress.update(completed=True)
-    assert not _completed()
-    assert (app / setup_marker.MARKER_FILE).exists()
-    setup_progress.update(completed=True)
+        setup_marker.record_created_file("context/x.md", "0" * 64)  # records nothing, refuses nothing
+        setup_progress.update(completed=True)
     assert _completed()
+    assert not (app / setup_marker.MARKER_FILE).exists(), "a finished install keeps no marker it could not verify"
 
 
-def test_a_damaged_marker_refuses_the_finish_and_the_next_account_instead_of_passing_for_none(app):
+def test_a_damaged_marker_never_blocks_the_install_from_finishing_setup(app):
     _first_account()
     (app / setup_marker.MARKER_FILE).write_text("{not json", encoding="utf-8")
-    with pytest.raises(setup_progress.SetupProgressError):
-        setup_progress.update(completed=True)
-    assert not _completed()
-    with pytest.raises(OSError):
-        setup_marker.record_created_file("context/x.md", "0" * 64)
+    setup_marker.record_created_file("context/x.md", "0" * 64)  # records nothing, refuses nothing
     assert (app / setup_marker.MARKER_FILE).read_text(encoding="utf-8") == "{not json"
+    setup_progress.update(completed=True)
+    assert _completed()
+    assert not (app / setup_marker.MARKER_FILE).exists()
 
 
 def test_files_recorded_for_one_folder_are_never_mixed_with_another(app, monkeypatch, tmp_path):
