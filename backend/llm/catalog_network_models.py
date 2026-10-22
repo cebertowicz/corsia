@@ -14,10 +14,6 @@ from llm.omlx_capabilities import apply_metadata, capture_configured, capture_re
 log = logging.getLogger(__name__)
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def _looks_like_vlm(model_id: str) -> bool:
     lowered = model_id.lower()
     return any(
@@ -330,11 +326,13 @@ def _reconcile_network_models(
     result: dict,
 ) -> dict:
     """Apply one authoritative oMLX snapshot in the DB worker pool."""
+    from llm.local_sources import corsia_omlx_server
     from llm.reasoning_config import reasoning_shape_from_discovery
 
     provider = server.get("provider", "omlx")
+    is_corsia_managed = corsia_omlx_server([server]) is not None
     reasoning_by_pmid = {
-        model["id"]: reasoning_shape_from_discovery(model)
+        model["id"]: reasoning_shape_from_discovery(model, applies_default=is_corsia_managed)
         for model in canonical_models
     }
     seen_pmids = {model["id"] for model in canonical_models}
@@ -391,7 +389,7 @@ async def discover_network_models(server_id: str) -> dict:
             server,
             canonical_models,
             status_data,
-            _now(),
+            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             result,
         )
     except Exception as exc:

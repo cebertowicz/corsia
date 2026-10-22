@@ -309,3 +309,38 @@ def test_alias_change_updates_display_name_not_pmid(monkeypatch, fresh_db):
     assert r2["provider_model_id"] == "MyModel-Canonical"
     assert r2["display_name"] == "Alias B"
     assert rows[0] == 1
+
+
+@pytest.mark.parametrize("managed", [True, False])
+def test_discovery_applies_medium_only_to_corsia_managed_omlx(
+    monkeypatch, fresh_db, managed,
+):
+    _stub_network_helpers(monkeypatch)
+    monkeypatch.setattr(
+        "llm.local_sources.corsia_omlx_server",
+        lambda servers=None: servers[0] if managed and servers else None,
+    )
+    router = _Router({
+        ("GET", "/v1/models/status"): _resp(200, {"models": [{
+            "id": "Qwen-Managed-Test",
+            "loaded": True,
+            "reasoning_efforts": ["low", "medium", "xhigh"],
+            "reasoning_effort_default": "low",
+        }]}),
+        ("GET", "/admin/api/status"): _resp(200, {}),
+    })
+    _patch_httpx(monkeypatch, router)
+
+    from llm.catalog import discover_network_models
+
+    result = asyncio.run(discover_network_models("srv-test"))
+
+    assert result["ok"], result
+    conn = sqlite3.connect(str(fresh_db))
+    row = conn.execute(
+        "SELECT metadata_json FROM models WHERE provider = 'omlx'"
+    ).fetchone()
+    conn.close()
+    shape = json.loads(row[0])["reasoning_shape"]
+    assert shape["default"] == ("medium" if managed else "low")
+    assert ("applies_default" in shape) is managed

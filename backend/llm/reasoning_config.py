@@ -22,7 +22,9 @@ import sqlite3
 from typing import Any
 
 
-def reasoning_shape_from_discovery(model: dict[str, Any]) -> dict[str, Any] | None:
+def reasoning_shape_from_discovery(
+    model: dict[str, Any], *, applies_default: bool = False,
+) -> dict[str, Any] | None:
     """Build a reasoning descriptor from what an oMLX server reported.
 
     Three outcomes, in order:
@@ -49,12 +51,19 @@ def reasoning_shape_from_discovery(model: dict[str, Any]) -> dict[str, Any] | No
         levels = [str(level) for level in efforts]
         configured = model.get("configured_reasoning_effort")
         declared = model.get("reasoning_effort_default")
-        default = configured if configured in levels else declared
-        return {
+        default = configured if configured in levels else None
+        if default is None and applies_default and "medium" in levels:
+            default = "medium"
+        if default is None:
+            default = declared if declared in levels else levels[0]
+        shape: dict[str, Any] = {
             "type": "effort_levels",
             "values": levels,
-            "default": default if default in levels else levels[0],
+            "default": default,
         }
+        if applies_default and "medium" in levels:
+            shape["applies_default"] = True
+        return shape
 
     thinking_default = model.get("thinking_default")
     if thinking_default is None:
@@ -126,7 +135,9 @@ def effective_reasoning_effort(raw: str | None, model: str) -> str | None:
     reconciles the two, and every reader of the saved value goes through it, so
     dispatch, cache warm, checkpoints and the picker agree by construction.
 
-    * ``None``, ``auto`` and ``none`` are returned as they are;
+    * an unset value resolves to the catalog default only when that shape marks
+      it as a CORSIA-managed default; otherwise ``None`` passes through;
+    * ``auto`` and ``none`` are returned as they are;
     * no reported vocabulary (older server, free-form template, toggle-only
       model): the value passes through and the server validates it;
     * a level the model's vocabulary contains: itself;
@@ -135,12 +146,16 @@ def effective_reasoning_effort(raw: str | None, model: str) -> str | None:
       (an External model's published levels), None, so the provider's own
       default runs.
     """
+    config = reasoning_config_for_model(model)
     if raw is None:
+        if config and config.get("applies_default"):
+            values = [str(v) for v in config.get("values") or []]
+            default = config.get("default")
+            return str(default) if default in values else None
         return None
     effort = str(raw).strip().lower()
     if effort in ("", "auto", "none"):
         return effort or None
-    config = reasoning_config_for_model(model)
     if config is None or config.get("type") != "effort_levels":
         return effort
     values = [str(v) for v in config.get("values") or []]
