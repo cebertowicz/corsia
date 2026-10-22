@@ -9,10 +9,7 @@ Core context defines the alignment, groundwork, and verification gates and their
 
 ## Alignment
 
-- Read before asking: the request, thread and plan history, named artifacts, prior decisions. Use bounded read-only discovery within existing access and privacy authority.
-- Put the aligned outcome, authority and effects, constraints, and acceptance evidence in the plan node in a few lines. Mark inferred items `ASSUMED:` with the source.
-- Ask only about an unknown that would change behavior, scope, cost, risk, audience, external effect, or reversibility. When the request already grants the authority, do not ask for a second confirmation.
-- Groundwork or new evidence may expose a material ambiguity. Return here, then resume.
+Core context's Alignment gate is the procedure. Mark an inferred part of `intent` `ASSUMED:` with its source.
 
 ## Groundwork by work type
 
