@@ -174,7 +174,7 @@ async def test_trial_delivery_failure_is_advisory_to_plan_operation(recall_db, m
     def fail(*_args, **_kwargs):
         raise RuntimeError("trial delivery failed")
 
-    monkeypatch.setattr("plans.public.attach_trial_lessons", fail)
+    monkeypatch.setattr("plans.trial_lessons.attach_trial_lessons", fail)
     result = await _activate(recall_db, mk_session("trial-advisory"), "Start new target work")
 
     assert result["admission"]["condition"] == "running"

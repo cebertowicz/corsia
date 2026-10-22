@@ -11,7 +11,7 @@ import plans.boundary_edges as boundary_edges
 import plans.boundary_fields as fields
 import plans.lifecycle as lifecycle
 import plans.user_settle as user_settle
-import plans.user_step_settle as user_step_settle
+
 import plans.mutations as mutations
 import plans.pause_authority as pause_authority
 import plans.rejection as rejection
@@ -19,14 +19,8 @@ import plans.service as service
 import plans.triage_lines as triage_lines
 import plans.user_steering as user_steering
 import plans.watch_operations as watch_operations
+from plans.boundary_settlement import FINISHED_WORK_NEEDS_EVIDENCE, MARK_DONE_REVIEW
 from prompts import plan_tools as text, plan_wakes as wakes
-
-#: The refusal for finishing active work with nothing to rest the verdict on.
-FINISHED_WORK_NEEDS_EVIDENCE = (
-    "finished active work needs evidence: use mark_done with evidence. "
-    "close_node is for work you are not doing."
-)
-MARK_DONE_REVIEW = "mark_done is for active self-completion; use accept for work awaiting review"
 
 
 def _dispatch_hold(operation: str, params: dict[str, Any], actor, common: dict):
@@ -198,49 +192,22 @@ def _replace_worker(node_id: str, params: dict, common: dict) -> dict:
     return reply
 
 
-def _mark_done(params: dict[str, Any], actor, common: dict, db) -> dict:
-    """Accept the agent's own active work through the existing evidence lifecycle."""
-    node_id = params["node_id"]
-    node = service._node_row(db, node_id)
-    state = node["state"]
-    if node["assignee"] == "user":
-        return user_step_settle.mark_done(params, actor, common, db)
-    if state == "pending":
-        holder = admission.selection_conflict(db, node)
-        if holder is not None:
-            raise service.PlanError(text.mark_done_slot_held(
-                holder["selected_node_title"], holder["selected_node_id"], node_id,
-            ))
-        admission.make_current(node_id, **fields.expected(params), **common)
-        node = service._node_row(db, node_id)
-        state = node["state"]
-        params = {**params, "expected_revision": node["revision"]}
-    if state == "review_requested":
-        raise service.PlanError(MARK_DONE_REVIEW)
-    if state != "active":
-        raise service.PlanError(
-            f"mark_done settles pending or active work; this task is {state}"
-        )
-    fields.require_passed_verification(params)
-    from plans import archival
-
-    archival.settle_watches(db, node_id)
-    expected = _submit_finished_work(node_id, params, common, actor.thread_id, db)
-    service.transition_node(
-        node_id, "accepted", verification_result="passed",
-        verified_by=actor.audit_id, **expected, **common,
-    )
-    return after.after_close(node_id, "accepted", params, common, executor=actor.thread_id)
-
 
 def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, db):
-    """Dispatch settlement after advisory reviewer-cost attribution."""
+    """Submit for review, reject, fail, attach a worker, or accept.
+
+    Acceptance first attributes a still-unbound reviewer Turn to the accepted
+    node's commitment, so verification cost lands on the work it judged rather
+    than on the reviewer's own plan. That attribution never refuses acceptance.
+    """
     node_id = params["node_id"]
     # Who is acting. A human actor executes nothing, so every executor this
     # settlement touches learns about it.
     acting = actor.thread_id if actor.kind == "thread" else None
     if operation == "mark_done":
-        return _mark_done(params, actor, common, db)
+        from plans import boundary_settlement
+
+        return boundary_settlement.mark_done(params, actor, common, db)
     if operation == "request_review":
         mutations.request_review(
             node_id,
@@ -256,7 +223,9 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
     if operation == "reject":
         return rejection.dispatch_reject(node_id, params, common, executor=acting)
     if operation == "fail":
-        return _fail_settlement(node_id, params, common, db, acting)
+        from plans import boundary_settlement
+
+        return boundary_settlement.fail(node_id, params, common, db, acting)
     if operation == "close_node":
         import plans.closure as closure
 
@@ -275,87 +244,28 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
     if operation == "replace_spawned_thread":
         return _replace_worker(node_id, params, common)
 
-    fields.require_passed_verification(params)
-    from plans import archival, review_usage
+    from plans import boundary_settlement
 
-    archival.settle_watches(db, node_id)
-
-    review_usage.bind(
-        node_id,
-        reviewer_thread_id=actor.thread_id,
-        turn_id=actor.turn_id,
-        db=db,
-    )
-    expected = _submit_finished_work(node_id, params, common, acting, db)
-    if operation == "accept":
-        service.transition_node(
-            node_id, "accepted", verification_result="passed",
-            verified_by=actor.audit_id, **expected, **common,
-        )
-        return after.after_close(node_id, "accepted", params, common, executor=acting)
-    from plans import intent_words
-
-    _node, follow_up = service.accept_with_follow_up(
-        node_id, title=fields.text(params, "title"),
-        acceptance_criteria=fields.text(params, "acceptance_criteria"),
-        size=fields.require_task_size(params.get("size")), intent=params.get("intent"),
-        intent_words=intent_words.resolve_words(db, params.get("intent_words"), actor_id=acting),
-        verification_result="passed", verified_by=actor.audit_id,
-        **expected, **common,
-    )
-    result = after.after_close(node_id, "accepted", params, common, executor=acting)
-    result["follow_up"] = asdict(follow_up)
-    return result
+    return boundary_settlement.accept(operation, node_id, params, actor, common, db, acting)
 
 
-def _fail_settlement(node_id: str, params: dict, common: dict, db, acting: str | None) -> dict:
-    _record_verdict(params, "Failed", common)
-    mutations.fail_node(node_id, **fields.expected(params), **common)
-    from core.self_caught_corrections import record_failed_plan_node
-
-    record_failed_plan_node(db, node_id)
-    return after.after_close(node_id, "failed", params, common, executor=acting)
+# Settlement evidence helpers live in plans.boundary_settlement.
 
 
-def _submit_finished_work(
-    node_id: str, params: dict[str, Any], common: dict, acting: str | None, db,
-) -> dict[str, Any]:
-    """Put finished active work up for review on the settler's evidence.
-
-    Accepting work you did yourself used to take request_review, then accept;
-    close_node took one call, so finished work was closed and never counted as
-    done. An accept on active work now submits its evidence first, through the
-    same writer request_review uses, and returns the revision the accept then
-    expects. Work already awaiting review records the evidence as the verdict.
-    """
-    if service._node_row(db, node_id)["state"] != "active":
-        _record_verdict(params, "Accepted", common)
-        return fields.expected(params)
-    if "evidence" not in params:
-        raise service.PlanInputError(FINISHED_WORK_NEEDS_EVIDENCE)
-    mutations.request_review(
-        node_id, evidence=fields.text(params, "evidence"),
-        artifact_ids=params.get("artifact_ids"),
-        owner_thread_id=acting, expected_revision=params["expected_revision"],
-        **common,
-    )
-    return {"expected_revision": service._node_row(db, node_id)["revision"]}
 
 
-def _record_verdict(params: dict[str, Any], verdict: str, common: dict) -> None:
-    """Record the settler's evidence first, so an accept can rest on it (#1977)."""
-    from plans import review_evidence
 
-    if "evidence" not in params:
-        return
-    review_evidence.record_verdict(
-        params["node_id"], fields.text(params, "evidence"), verdict=verdict,
-        **common,
-    )
+
 
 
 def dispatch(plan_id, operation, params, actor, provenance, db, *, workflow_version=None):
-    """Route a validated mutation through its sole plan-service owner."""
+    """Route one validated mutation without creating a second plan service.
+
+    The user's Mark done and Won't do settle through ``user_settle``. Their
+    pause or resume of a task takes the same path an agent's does;
+    ``user_steering`` only fills and checks it first, moves the worker's plan
+    instead for a delegated task, and tells the owner after.
+    """
     common = {"actor_id": actor.audit_id, "provenance": provenance, "db": db}
     if actor.kind != "user" or operation not in user_steering.STEERING_OPERATIONS:
         return _route(plan_id, operation, params, actor, common, db, workflow_version)
