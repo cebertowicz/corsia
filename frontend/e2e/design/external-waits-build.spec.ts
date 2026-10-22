@@ -433,14 +433,14 @@ test('frame 9: the static chip when the thread has no run to open', async ({ pag
 	await shot(page, '9-standalone-chip');
 });
 
-test('frame 6: plan pane rows, one outside wait and one back now', async ({ page, request }) => {
+test('frame 6: plan pane rows, one outside wait and one due now', async ({ page, request }) => {
 	test.setTimeout(150_000);
 	const { by } = await boot(page, request, [{ title: 'Plan pane states', agent: true, kind: 'waiting', label: 'CI on PR #1181', until: Date.now() - 18 * 60_000 }]);
 	await r2Chat(page, request, by('Plan pane states'));
 	// The chip names the earliest wait, which is the late one (the server picks the earliest).
-	await expect(page.locator('[data-work-block]').last()).toContainText('CI on PR #1181 · back now');
+	await expect(page.locator('[data-work-block]').last()).toContainText('CI on PR #1181 · due now');
 	await expect(page.locator('.row-subline').filter({ hasText: 'CI on PR #1193 · back 11:46 PM' })).toHaveCount(1);
-	await expect(page.locator('.row-subline').filter({ hasText: 'CI on PR #1181 · back now' })).toHaveCount(1);
+	await expect(page.locator('.row-subline').filter({ hasText: 'CI on PR #1181 · due now' })).toHaveCount(1);
 	await expect(page.locator('.row-subline').filter({ hasText: /due back|stalled|overdue/i })).toHaveCount(0);
 	await shot(page, '6-pane-rows-outside-and-back-now');
 });
