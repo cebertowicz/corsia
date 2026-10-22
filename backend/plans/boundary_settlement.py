@@ -18,6 +18,7 @@ import plans.service as service
 import plans.user_step_settle as user_step_settle
 from prompts import plan_tools as text
 
+#: The refusal for finishing active work with nothing to rest the verdict on.
 FINISHED_WORK_NEEDS_EVIDENCE = (
     "finished active work needs evidence: use mark_done with evidence. "
     "close_node is for work you are not doing."
