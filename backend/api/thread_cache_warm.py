@@ -32,9 +32,7 @@ def _has_positive_context_evidence(target: ExecutionTarget) -> bool:
 
 def _warm_suppressed(suppression: str) -> dict:
     return {
-        "ok": False,
-        "skipped": True,
-        "reason": suppression,
+        "ok": False, "skipped": True, "reason": suppression,
         "message": "Warm suppressed while the session has active delivery work",
     }
 
@@ -67,6 +65,8 @@ def _load_warm_target(thread_id: str, user_id: str, model: str | None = None):
             sess["reasoning_effort"] if "reasoning_effort" in sess.keys() else None,
             target.catalog_id,
         )
+        if effort and not target.supports_reasoning:
+            effort = None
         return target, sess["project_id"], effort
     finally:
         db.close()

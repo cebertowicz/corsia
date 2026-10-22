@@ -100,7 +100,7 @@ def applicable_steps(
     if connected_app_count < 2:
         steps.append(_step(
             3, "Where your work lives",
-            "the user named the apps where their work lives, or chose not now",
+            "the user named the apps where their work lives and every app child is settled, or chose not now",
         ))
     if facts.get("web_search_ready") is not True:
         steps.append(_step(

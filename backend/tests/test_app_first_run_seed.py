@@ -288,6 +288,7 @@ def test_named_apps_are_children_and_preserve_visible_onboarding_steps(fresh_ins
         cache_completed_facts(conductor_id, "newcomer", facts, db=db)
         listing = public.read_current_plan(actor=actor, include_folded=True, db=db)
         connect = next(node for node in listing["nodes"] if node["title"] == "Where your work lives")
+        assert "every app child is settled" in public.get_node(connect["id"], db=db).acceptance_criteria
         for app in ("Slack", "Notes"):
             public.add_node(
                 listing["plan"]["id"], kind="task", title=f"Connect {app}",

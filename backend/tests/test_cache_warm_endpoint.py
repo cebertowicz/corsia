@@ -619,19 +619,21 @@ async def test_warm_endpoint_passes_explicit_model_id_to_provider(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("effort", "expected_shape"),
+    ("effort", "supports_reasoning", "expected_shape"),
     [
-        ("auto", {}),
-        ("none", {"chat_template_kwargs": {"enable_thinking": False}}),
+        ("auto", False, {}),
+        ("none", True, {"chat_template_kwargs": {"enable_thinking": False}}),
         # The level travels as reasoning_effort, and warm must render with it:
         # the chat template injects it, so omitting it would warm a prefix the
         # turn never sends.
-        ("low", {"reasoning_effort": "low"}),
+        ("low", True, {"reasoning_effort": "low"}),
+        ("low", False, {}),
     ],
 )
 def test_warm_endpoint_uses_normal_turn_omlx_prompt_shape(
     monkeypatch,
     effort,
+    supports_reasoning,
     expected_shape,
 ):
     from api import thread_cache_warm as api_runtime
@@ -642,6 +644,7 @@ def test_warm_endpoint_uses_normal_turn_omlx_prompt_shape(
         api_runtime,
         "omlx@srv-1/model-1",
         reasoning_effort=effort,
+        supports_reasoning=supports_reasoning,
     )
     monkeypatch.setattr(
         "core.agent.get_agent",
