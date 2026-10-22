@@ -81,20 +81,27 @@ def test_codex_source_profile_allows_only_minimal_runtime_and_exact_source(tmp_p
 
 
 def test_claude_source_allowlist_is_pinned_to_exact_revisions(tmp_path):
-    from reviewer.reviewer_exact_source import claude_exact_source_controls
+    from reviewer.reviewer_exact_source import claude_exact_source_controls, reader_command
 
     base_sha = "b" * 40
     head_sha = "a" * 40
-    args, _ = claude_exact_source_controls(
-        str(tmp_path / "repo.git"), base_sha, head_sha,
-    )
-    rules = [arg for arg in args if arg.startswith("Bash(")]
-    reader = f"reviewer_read.py {tmp_path / 'repo.git'} {base_sha} {head_sha}"
+    git_dir = str(tmp_path / "repo.git")
+    args, _ = claude_exact_source_controls(git_dir, base_sha, head_sha)
+    reader = reader_command(git_dir, base_sha, head_sha)
 
-    assert len(rules) == 6
-    assert all(reader in rule for rule in rules)
+    assert args == [
+        "--restricted", "--safe-mode", "--setting-sources", "",
+        "--strict-mcp-config", "--permission-mode", "dontAsk", "--tools", "Bash",
+        "--allowedTools",
+        f"Bash({reader} stat)",
+        f"Bash({reader} names)",
+        f"Bash({reader} diff)",
+        f"Bash({reader} diff *)",
+        f"Bash({reader} show *)",
+        f"Bash({reader} grep *)",
+    ]
     # No rule lets the model run Git itself, so it can never add a Git option.
-    assert not any(rule.startswith("Bash(git") for rule in rules)
+    assert not any(rule.startswith("Bash(git") for rule in args)
     assert "--add-dir" not in args
 
 
