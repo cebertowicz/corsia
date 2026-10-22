@@ -15,6 +15,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 let calls: Array<{ url: string; method: string }>;
+let sources: Array<{ source: string; name: string; state: string }>;
 
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
 function button(label: string) { return Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.trim() === label); }
@@ -36,20 +37,29 @@ function fillAccount() {
 }
 
 beforeEach(() => {
-	token.set(null); user.set(null); calls = [];
+	token.set(null); user.set(null); calls = []; sources = [];
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input); const method = init?.method ?? 'GET'; calls.push({ url, method });
 		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, work_folder: '~/CORSIA' });
 		if (url === '/api/setup/first-account') return json({ token: 'setup-token', user: { id: 'user', name: 'Ada Lovelace' } });
-		if (url.includes('/sources')) return json({ sources: [] });
+		if (url.includes('/sources')) return json({ sources });
 		if (url.includes('/corsia-agent')) return json({ target: { thread_id: 'corsia-thread' } });
 		if (url.includes('/models')) return json({ models: [] });
+		if (url.includes('/install')) return json({ state: 'running', reason: null, ref: null, path_shadowed_by: null });
 		return json({});
 	}));
 	host = document.createElement('div'); document.body.appendChild(host);
 	component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
 	flushSync();
 });
+
+/** Welcome, the account form and the work folder, ending wherever the folder's Continue leads. */
+async function passFolder() {
+	await settle(); button('Continue')?.click(); await settle(); fillAccount(); await settle();
+	button('Continue')?.click(); await settle();
+	button('Continue')?.click(); await settle();
+}
+const rowNames = () => Array.from(host.querySelectorAll('section.item')).map((row) => row.getAttribute('aria-label'));
 
 afterEach(async () => {
 	if (component) await unmount(component);
@@ -148,9 +158,61 @@ describe('SetupScreen', () => {
 		button('Continue')?.click(); await settle();
 		expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(1);
 		expect(connect).toHaveBeenCalledOnce();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		button('Neither')?.click(); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
-		expect(host.textContent).toContain('Connect at least one to start chatting.');
+		expect(host.textContent).toContain('CORSIA needs one working model to continue setup.');
 		expect(button('Start using CORSIA')?.disabled).toBe(true);
+	});
+
+	it('asks which subscriptions they pay for, installs the picked tool at once and shows a row only for it', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		await passFolder();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		expect(host.textContent).toContain('Do you pay for Claude or ChatGPT?');
+		for (const label of ['Claude', 'ChatGPT', 'Both', 'Neither']) expect(button(label)).toBeTruthy();
+		button('Claude')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
+		expect(calls).toContainEqual({ url: '/api/providers/cli/claude-code/install', method: 'POST' });
+		expect(calls.some((call) => call.url === '/api/providers/cli/codex/install')).toBe(false);
+		expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
+		expect(button('Sign in')).toBeTruthy();
+	});
+
+	it('asks only about the other subscription when one tool is signed in', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		await passFolder();
+		expect(host.textContent).toContain('Claude Code is signed in.');
+		expect(host.textContent).toContain('Do you also pay for ChatGPT?');
+		button('No')?.click(); await settle();
+		expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
+	});
+
+	it('skips the subscriptions screen when both tools are signed in, and Back returns to the work folder', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'ready' }];
+		await passFolder();
+		expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
+		button('Back')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your work folder');
+	});
+
+	it('goes Back from models to subscriptions to the folder, and the folder never creates a second account', async () => {
+		await passFolder();
+		button('Neither')?.click(); await settle();
+		button('Back')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		button('Back')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your work folder');
+		button('Back')?.click(); await settle();
+		// The account exists, so it reads back without an editable form whose changes would be dropped.
+		expect(host.querySelector('[data-testid="setup-account-made"]')?.textContent).toContain('Your account is set up');
+		expect(host.querySelector('#setup-password')).toBeNull();
+		expect(button('Continue')?.disabled).toBe(false);
+		button('Continue')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your work folder');
+		button('Continue')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		expect(calls.filter((call) => call.url === '/api/setup/first-account')).toHaveLength(1);
 	});
 
 	it('returns an existing-account response to the account form with Sign in', async () => {
@@ -198,6 +260,7 @@ describe('SetupScreen', () => {
 		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
 		flushSync(); await settle(); button('Continue')?.click(); await settle(); fillAccount(); await settle();
 		button('Continue')?.click(); await settle(); button('Continue')?.click(); await settle();
+		await vi.waitFor(() => expect(button('Neither')).toBeTruthy()); button('Neither')?.click(); await settle();
 		await vi.waitFor(() => expect(button('Retry')).toBeTruthy());
 		button('Retry')?.click();
 		await vi.waitFor(() => expect(requests.some((request) => request.url === '/api/providers/local/setup')).toBe(true));

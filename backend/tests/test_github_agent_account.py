@@ -311,7 +311,9 @@ async def test_connect_and_check_name_early_login_exit(agent, monkeypatch):
     assert connected["signin"] == {
         "account_id": account_id, "route": "browser", "status": "failed",
         "cause": "vendor_login_failed", "next": github_agent_account._LOGIN_FAILURE_NEXT,
+        "ref": connected["signin"]["ref"],  # the failure's log reference
     }
+    assert connected["signin"]["ref"].startswith("signin-")
     checked = json.loads(await tool.execute(action="check"))
     assert checked["signin"] == connected["signin"]
 

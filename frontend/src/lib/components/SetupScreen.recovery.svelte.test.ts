@@ -54,6 +54,8 @@ async function openModels({ localEligible = false, localReplies = [], progressFa
 	flushSync(); await settle(); click('Continue'); await settle(); // past the Welcome screen of a narrow window
 	fill('#setup-name', 'Ada'); fill('#setup-username', 'ada'); fill('#setup-password', 'password1'); fill('#setup-confirm-password', 'password1');
 	await settle(); click('Continue'); await settle(); click('Continue'); await settle();
+	await vi.waitFor(() => expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions'));
+	click('Neither'); await settle();
 	expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
 	await vi.waitFor(() => expect(Array.from(host.querySelectorAll('button')).find((candidate) => candidate.textContent?.trim() === 'Start using CORSIA')?.disabled).toBe(false));
 }
@@ -76,7 +78,8 @@ describe('SetupScreen account recovery', () => {
 		click('Continue'); await settle();
 		expect(host.textContent).toContain('Couldn’t create your account. Try again.');
 		click('Save a report'); await settle();
-		expect(invoke).toHaveBeenCalledWith('save_setup_report');
+		// No provider row failed, so the report adds no row details that would claim nothing went wrong.
+		expect(invoke).toHaveBeenCalledWith('save_setup_report', { details: '' });
 	});
 });
 
