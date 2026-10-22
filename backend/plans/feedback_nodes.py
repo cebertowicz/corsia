@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
-from plans import admission, artifact_links, review_requests, service
+from plans import admission, artifact_links, intent_words, review_requests, service
+from plans.feedback_items import (
+    artifact_name, artifact_row, batch_value, feedback_display, feedback_item_counts, feedback_kind_counts,
+    load_feedback_items,
+)
 from plans.plan_write import transaction
-from registry.identity_metadata import last_written_sha256, sha256_file
-from registry.shared_edit_classification import combine_capped_diffs, capped_unified_diff
 
 PROVENANCE = "document.feedback_batch"
 COMMENT_ACCEPTANCE = "Every item is acknowledged, resolved, or replied to."
@@ -64,138 +65,6 @@ class FeedbackNodeResult:
     node_id: str
     selected_threads: tuple[str, ...]
     created: bool
-
-
-def _batch_value(batch: Any, key: str) -> Any:
-    return batch[key] if hasattr(batch, "keys") else getattr(batch, key)
-
-
-def _artifact(db, artifact_id: str):
-    return db.execute(
-        "SELECT title,path,external_id,metadata FROM artifact_identities WHERE id=?",
-        (artifact_id,),
-    ).fetchone()
-
-
-def _artifact_name(db, artifact_id: str) -> str:
-    from doceditor.note_names import document_name
-
-    return document_name(_artifact(db, artifact_id), fallback="document")
-
-
-def _current_artifact_hash(db, artifact_id: str) -> str | None:
-    row = _artifact(db, artifact_id)
-    if row is None:
-        return None
-    raw_path = row["path"] or row["external_id"]
-    if raw_path:
-        try:
-            return sha256_file(Path(str(raw_path)))
-        except OSError:
-            pass
-    return last_written_sha256(row["metadata"])
-
-
-def load_feedback_items(db, batch: Any) -> list[dict[str, Any]]:
-    """Load the stable chronological union of comments and a renderable edit."""
-    batch_id = str(_batch_value(batch, "id"))
-    artifact_id = str(_batch_value(batch, "artifact_id"))
-    comments = [
-        {
-            **dict(row),
-            "kind": "comment",
-            "sort_at": row["event_at"] if row["event"] == "reopened" else row["created_at"],
-            "sort_id": row["id"],
-        }
-        for row in db.execute(
-            """SELECT c.*,bi.event,bi.event_at,bi.event_by
-               FROM doc_feedback_batch_items bi
-               JOIN doc_comments c ON c.id=bi.comment_id
-               WHERE bi.batch_id=? ORDER BY c.created_at,c.id""",
-            (batch_id,),
-        ).fetchall()
-    ]
-    edit_row = db.execute(
-        "SELECT * FROM doc_feedback_edit_items WHERE batch_id=?", (batch_id,)
-    ).fetchone()
-    items: list[dict[str, Any]] = comments
-    if edit_row is not None:
-        edit = dict(edit_row)
-        net_empty = (
-            not edit["prior_segments_diff"]
-            and edit["latest_sha256"] == edit["baseline_sha256"]
-        )
-        if not net_empty:
-            artifact = _artifact(db, artifact_id)
-            raw_path = (
-                artifact["path"] or artifact["external_id"]
-                if artifact is not None else "document"
-            )
-            current_segment = capped_unified_diff(
-                Path(str(raw_path)),
-                str(edit["baseline_text"]).encode("utf-8"),
-                str(edit["latest_text"]).encode("utf-8"),
-            )
-            edit.update(
-                kind="edit",
-                sort_at=edit["first_at"],
-                sort_id=edit["batch_id"],
-                rendered_diff=combine_capped_diffs(
-                    str(edit["prior_segments_diff"]), current_segment,
-                ),
-                diverged=(
-                    (current := _current_artifact_hash(db, artifact_id)) is not None
-                    and current != edit["latest_sha256"]
-                ),
-            )
-            items.append(edit)
-    return sorted(
-        items,
-        key=lambda item: (str(item["sort_at"]), str(item["kind"]), str(item["sort_id"])),
-    )
-
-
-def feedback_display(
-    db,
-    batch: Any,
-    items: list[dict[str, Any]] | None = None,
-) -> tuple[str, str]:
-    """Resolve the shared author and document labels for nodes and notes."""
-    loaded = items if items is not None else load_feedback_items(db, batch)
-    if _batch_value(batch, "author_kind") == "user":
-        first = loaded[0] if loaded else None
-        author = (
-            str(first["event_by"] or "The user")
-            if first is not None and first["kind"] == "comment" and first.get("event") == "reopened"
-            else str(first["author"])
-            if first is not None and first["kind"] == "comment"
-            else str(first["actor_display"])
-            if first is not None
-            else "The user"
-        )
-    else:
-        row = db.execute(
-            "SELECT title FROM threads WHERE id=?", (_batch_value(batch, "author_id"),)
-        ).fetchone()
-        author = ((row["title"] if row else None) or _batch_value(batch, "author_id")).strip()
-    return author, _artifact_name(db, str(_batch_value(batch, "artifact_id")))
-
-
-def feedback_kind_counts(items: list[dict[str, Any]]) -> tuple[int, int]:
-    """Return the renderable edit and comment counts for note copy."""
-    return (
-        sum(item["kind"] == "edit" for item in items),
-        sum(item["kind"] == "comment" for item in items),
-    )
-
-
-def feedback_item_counts(items: list[dict[str, Any]]) -> tuple[int, int, int]:
-    """Return edit, ordinary-comment, and reopened-comment counts for one batch."""
-    edits, comments = feedback_kind_counts(items)
-    reopened = sum(
-        item["kind"] == "comment" and item.get("event") == "reopened" for item in items
-    )
-    return edits, comments - reopened, reopened
 
 
 def _comment_phrases(items: list[dict[str, Any]]) -> list[str]:
@@ -253,7 +122,7 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
     blocks = []
     if has_comments:
         blocks.append(
-            USER_FRAMING if _batch_value(batch, "author_kind") == "user" else AGENT_FRAMING
+            USER_FRAMING if batch_value(batch, "author_kind") == "user" else AGENT_FRAMING
         )
     # One marked-up copy per image, set by delivery on the batch's region comments.
     # It leads, so a handoff cap that cuts the tail never drops it.
@@ -284,7 +153,7 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
                 ),
                 (
                     USER_EDIT_FRAMING
-                    if _batch_value(batch, "author_kind") == "user"
+                    if batch_value(batch, "author_kind") == "user"
                     else AGENT_EDIT_FRAMING
                 ),
                 str(item["rendered_diff"]),
@@ -332,8 +201,8 @@ def create_feedback_node(
     items: list[dict[str, Any]] | None = None,
 ) -> FeedbackNodeResult:
     """Create one queued recipient-plan task, idempotently keyed by batch id."""
-    batch_id = str(_batch_value(batch, "id"))
-    artifact_id = str(_batch_value(batch, "artifact_id"))
+    batch_id = str(batch_value(batch, "id"))
+    artifact_id = str(batch_value(batch, "artifact_id"))
     existing = _existing(db, recipient_thread_id, batch_id)
     if existing is not None:
         return FeedbackNodeResult(existing, (), False)
@@ -341,20 +210,29 @@ def create_feedback_node(
     if not loaded:
         raise EmptyFeedbackBatchError(f"feedback batch {batch_id} has no renderable items")
     author, document = feedback_display(db, batch, loaded)
+    words = (
+        intent_words.document_comment_words(loaded)
+        if batch_value(batch, "author_kind") == "user"
+        else ()
+    )
     return _create_linked_node(
         db, recipient_thread_id, artifact_id, batch_id, PROVENANCE,
         title=_title(author, document, loaded), acceptance=_acceptance(loaded),
         description=_description(batch, loaded),
+        intent=intent_words.document_comment_intent(loaded) if words else None, words=words,
     )
 
 
 def _create_linked_node(db, recipient_thread_id, artifact_id, source_id, provenance,
-                        *, title, acceptance, description) -> FeedbackNodeResult:
+                        *, title, acceptance, description, intent=None, intent_node_id=None,
+                        words=()) -> FeedbackNodeResult:
     plan = service.ensure_plan("thread", recipient_thread_id, db=db)
     node = service.add_node(
         plan.id, kind="task", title=title, acceptance_criteria=acceptance,
-        description=description, actor_id=None, provenance=provenance, db=db,
+        description=description, intent=intent, intent_node_id=intent_node_id,
+        actor_id=None, provenance=provenance, db=db,
     )
+    intent_words.append(db, node.id, words, revision=node.requirements_revision)
     service.transition_node(
         node.id, "active", actor_id=None, provenance=provenance, db=db,
     )
@@ -377,11 +255,12 @@ def create_review_node(db, reviewer_thread_id: str, request: Any) -> FeedbackNod
     existing = _existing(db, reviewer_thread_id, request_id, REVIEW_PROVENANCE)
     if existing is not None:
         return FeedbackNodeResult(existing, (), False)
-    artifact = _artifact(db, artifact_id)
+    artifact = artifact_row(db, artifact_id)
     path = str(artifact["path"] or artifact["external_id"])
-    full = f"Review {_artifact_name(db, artifact_id)} for {request['requester_display']}"
+    full = f"Review {artifact_name(db, artifact_id)} for {request['requester_display']}"
     return _create_linked_node(
         db, reviewer_thread_id, artifact_id, request_id, REVIEW_PROVENANCE,
         title=_trim_title(full, ""), acceptance=REVIEW_ACCEPTANCE,
         description=description(path, request),
     )
+

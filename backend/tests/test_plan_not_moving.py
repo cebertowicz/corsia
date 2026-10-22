@@ -292,7 +292,7 @@ def test_the_chat_list_reads_the_header_parts(db):
 
     states = _states(db, ["held", "waits", "rests"])
     assert {key: value["state"] for key, value in states.items()} == {
-        "held": "blocked_on_you", "waits": "idle", "rests": "paused",
+        "held": "blocked_on_you", "waits": "waiting", "rests": "paused",
     }
     assert {value["label_key"] for value in states.values()} == {"needs_you", "waiting"}
 
@@ -329,7 +329,9 @@ def test_the_digest_says_not_moving_with_the_same_parts(db):
     )
     row = service._plan_row(db, plan.id)
 
+    # EW1 precedence: what the user owes outranks the outside wait on both reads.
     assert status.read(db, row, actor=actor)["severity"] == "not_moving"
+    assert _states(db, ["agent"])["agent"]["state"] == "blocked_on_you"
     thin = status_context.projection(db, row, actor=actor)
     assert thin["severity"] == "not_moving"
     assert thin["note"] == (

@@ -113,6 +113,20 @@ async def test_real_script_runs_in_the_sandbox_with_a_turnless_cwd(sandbox) -> N
 
 
 @pytest.mark.asyncio
+async def test_real_script_reads_a_rule_runs_event_on_stdin_and_the_input_is_removed(sandbox) -> None:
+    from tools.unix_socket_policy import corsia_temp_root_for_bind
+
+    path = _script(sandbox, "event.sh", "cat\n")
+    run = await run_script(
+        THREAD_ID, None, path, run_id=uuid.uuid4().hex, timeout_seconds=20,
+        stdin=b'{"type": "qa.route", "facts": {}}',
+    )
+    assert run.returncode == 0, run.stderr
+    assert run.stdout == b'{"type": "qa.route", "facts": {}}'
+    assert not list(corsia_temp_root_for_bind(THREAD_ID).glob("rule-input-*"))
+
+
+@pytest.mark.asyncio
 async def test_real_script_receives_no_agent_account_environment(sandbox) -> None:
     path = _script(
         sandbox,

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-	DAY, THREAD, card, human, inZone, notice, present, runFaces, runSeqs, said, turn, wake, work,
+	DAY, THREAD, card, human, inZone, leadOpenMs, notice, present, runFaces, runSeqs, said, turn, wake, work,
 } from '$lib/__tests__/fixtures/focusRuns';
 import type { TranscriptEntry } from './messageListModel';
 import { runLabels, runWeight, type TurnSummary } from './transcriptRunLabel';
 
 const faces = (entries: TranscriptEntry[], summaries: Record<string, TurnSummary>, historyComplete = true) => (
-	runFaces(entries, runLabels(entries, summaries, historyComplete))
+	runFaces(entries, runLabels(entries, summaries, historyComplete, leadOpenMs(summaries)))
 );
 
 describe('run time: the worked cases', () => {

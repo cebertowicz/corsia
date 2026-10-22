@@ -1,13 +1,13 @@
-"""Scale proof for global cap, scope fairness, dedupe, and no starvation."""
+"""Scale proof: no admission cap holds back a due wake, and dedupe holds."""
 
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 
-from automation.continuation import admission, runner
+from automation.continuation import runner
 from automation.continuation.triggers import TriggerRequest
 from infra.schema import SCHEMA_SQL
 
@@ -21,7 +21,7 @@ class ScaleSource:
 
     def due(self, _now, *, db):
         requests = []
-        for index in range(50):
+        for index in range(20):
             thread_id = f"thread-{index:02d}"
             if thread_id in self.settled:
                 continue
@@ -29,7 +29,7 @@ class ScaleSource:
                 TriggerRequest(
                     kind=self.kind,
                     thread_id=thread_id,
-                    scope_id=f"scope-{index % 5}",
+                    scope_id="scope-0" if index < 10 else f"scope-{index}",
                     subject_id=f"node-{index:02d}",
                     transition="stable-signal",
                     reason="progress_unchanged",
@@ -46,7 +46,7 @@ def _db() -> sqlite3.Connection:
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA_SQL)
-    for index in range(50):
+    for index in range(20):
         db.execute(
             """INSERT INTO threads
                (id,user_id,created_at,updated_at)
@@ -62,40 +62,24 @@ async def _land(*_args):
 
 
 @pytest.mark.asyncio
-async def test_fifty_threads_across_five_scopes_are_bounded_without_starvation(
-    monkeypatch,
-):
+async def test_ten_waits_for_one_scope_and_ten_for_others_all_land_in_one_sweep():
     db = _db()
     source = ScaleSource()
-    monkeypatch.setattr(admission, "MAX_GLOBAL_INFLIGHT", 4)
-    monkeypatch.setattr(admission, "MAX_PER_SCOPE_PER_SWEEP", 2)
-    monkeypatch.setattr(admission, "MAX_DEFERRALS", 20)
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    first_scope_round = {}
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc).isoformat()
 
-    for round_number in range(15):
-        now = start + timedelta(days=30 * round_number)
-        result = await runner.sweep(
-            now.isoformat(),
-            db=db,
-            sources=[source],
-            is_idle=lambda _thread_id: True,
-            deliver=_land,
-        )
-        assert len(result["woken"]) <= 4
-        for thread_id in result["woken"]:
-            scope = f"scope-{int(thread_id.removeprefix('thread-')) % 5}"
-            first_scope_round.setdefault(scope, round_number)
-        if len(source.settled) == 50:
-            break
+    result = await runner.sweep(now, db=db, sources=[source], deliver=_land)
 
-    assert len(source.settled) == 50
-    assert set(first_scope_round) == {f"scope-{index}" for index in range(5)}
-    assert max(first_scope_round.values()) <= 1
+    assert len(result["woken"]) == 20
+    assert result["skipped"] == [] and result["stalled"] == []
+    assert len(source.settled) == 20
+    assert dict(
+        db.execute(
+            "SELECT state, COUNT(*) FROM continuation_triggers GROUP BY state"
+        ).fetchall()
+    ) == {"delivered": 20}
     assert db.execute(
-        """SELECT COUNT(*) FROM continuation_triggers
-           WHERE state='delivered'"""
-    ).fetchone()[0] == 50
-    assert db.execute(
-        """SELECT COUNT(DISTINCT dedupe_key) FROM continuation_triggers"""
-    ).fetchone()[0] == 50
+        "SELECT SUM(deferrals) FROM continuation_triggers"
+    ).fetchone()[0] == 0
+
+    again = await runner.sweep(now, db=db, sources=[source], deliver=_land)
+    assert again["woken"] == []

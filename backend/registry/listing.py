@@ -147,23 +147,51 @@ def list_for_thread(
             conn.close()
 
 
+# Every record one thread registered for one integration and type.
+_THREAD_RECORDS = """FROM artifact_identities i
+                JOIN artifact_registrations r ON r.artifact_id=i.id
+                WHERE r.parent_thread_id=? AND i.integration=? AND i.type=?"""
+
+
 def find_for_thread(
     parent_thread_id: str, integration: str, type: str, db=None
 ) -> dict | None:
+    """The thread's current record of one kind: active and still owned, newest first."""
     conn = db or get_db()
     try:
         owner_states = ",".join("?" for _ in OWNER_REGISTRATION_STATES)
         row = conn.execute(
             f"""{_projection()}
-                FROM artifact_identities i
-                JOIN artifact_registrations r ON r.artifact_id=i.id
-                WHERE r.parent_thread_id=? AND i.integration=? AND i.type=?
+                {_THREAD_RECORDS}
                   AND i.state='active'
                   AND r.relationship_state IN ({owner_states})
                 ORDER BY i.updated_at DESC, i.id ASC LIMIT 1""",
             (parent_thread_id, integration, type, *OWNER_REGISTRATION_STATES),
         ).fetchone()
         return public_row_from_normalized(row) if row else None
+    finally:
+        if not db:
+            conn.close()
+
+
+def metadata_ever_for_thread(
+    parent_thread_id: str, integration: str, type: str, json_path: str, db=None
+) -> list[str]:
+    """The metadata of every record of one kind the thread ever registered, in any
+    identity or relationship state, that sets ``json_path`` or is not valid JSON,
+    newest first. For a fact that must outlive the record that first carried it."""
+    conn = db or get_db()
+    try:
+        rows = conn.execute(
+            f"""SELECT i.metadata
+                {_THREAD_RECORDS}
+                  AND CASE WHEN json_valid(i.metadata)
+                           THEN json_extract(i.metadata, ?) IS NOT NULL
+                           ELSE COALESCE(i.metadata, '') <> '' END
+                ORDER BY i.updated_at DESC, i.id ASC""",
+            (parent_thread_id, integration, type, json_path),
+        ).fetchall()
+        return [row["metadata"] for row in rows]
     finally:
         if not db:
             conn.close()

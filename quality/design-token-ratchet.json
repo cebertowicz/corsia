@@ -6,7 +6,7 @@
   "files": {
     "frontend/src/app.css": {
       "raw_colors": 22,
-      "raw_px": 73,
+      "raw_px": 57,
       "heavy_borders": 1,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1021,7 +1021,7 @@
     },
     "frontend/src/lib/components/FocusModeSetting.svelte": {
       "raw_colors": 0,
-      "raw_px": 7,
+      "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1091,7 +1091,7 @@
     },
     "frontend/src/lib/components/HostAccessReviewSetting.svelte": {
       "raw_colors": 0,
-      "raw_px": 17,
+      "raw_px": 3,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1476,7 +1476,7 @@
     },
     "frontend/src/lib/components/ProvidersPolicyBlock.svelte": {
       "raw_colors": 0,
-      "raw_px": 4,
+      "raw_px": 2,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1525,21 +1525,21 @@
     },
     "frontend/src/lib/components/SettingsDebug.svelte": {
       "raw_colors": 0,
-      "raw_px": 35,
+      "raw_px": 1,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/SettingsKeys.svelte": {
       "raw_colors": 0,
-      "raw_px": 21,
+      "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/SettingsSystem.svelte": {
       "raw_colors": 0,
-      "raw_px": 33,
+      "raw_px": 2,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -1679,7 +1679,7 @@
     },
     "frontend/src/lib/components/SystemBulletinsSetting.svelte": {
       "raw_colors": 0,
-      "raw_px": 13,
+      "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -2521,7 +2521,7 @@
       "raw_colors": 0,
       "raw_px": 18,
       "heavy_borders": 0,
-      "raw_shadows": 2,
+      "raw_shadows": 0,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/ui/IconButton.svelte": {
@@ -2638,7 +2638,7 @@
     },
     "frontend/src/lib/components/v7/AccountUsageRow.svelte": {
       "raw_colors": 0,
-      "raw_px": 18,
+      "raw_px": 16,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -2687,7 +2687,7 @@
     },
     "frontend/src/lib/components/v7/HostSection.svelte": {
       "raw_colors": 0,
-      "raw_px": 20,
+      "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0
@@ -2756,10 +2756,10 @@
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/v7/ProviderRow.svelte": {
-      "raw_colors": 9,
-      "raw_px": 33,
+      "raw_colors": 0,
+      "raw_px": 9,
       "heavy_borders": 0,
-      "raw_shadows": 7,
+      "raw_shadows": 0,
       "row_menu_buttons": 0
     },
     "frontend/src/lib/components/v7/ProviderSettingsHeader.svelte": {
@@ -2785,7 +2785,7 @@
     },
     "frontend/src/lib/components/v7/ProvidersV7View.svelte": {
       "raw_colors": 0,
-      "raw_px": 14,
+      "raw_px": 0,
       "heavy_borders": 0,
       "raw_shadows": 0,
       "row_menu_buttons": 0

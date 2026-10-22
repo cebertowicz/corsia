@@ -13,7 +13,7 @@ from uuid import uuid4
 from history.types import HistoryBoundary
 from llm.resolution import ExecutionTarget
 from core import fork_cc_commands
-from subagents.cc_invocation import ClaudeInvocation
+from subagents.cc_invocation import CONFINEMENT_NONE, ClaudeInvocation
 from subagents.cc_sessions import resolve_claude_dir
 from core.fork_runtime import ForkKind
 from core.fork_failures import ForkBinaryResolutionError
@@ -139,6 +139,10 @@ async def capture_warm_source(
         return warm_capture_refused(thread_id, "claude-code", "prefix_past_transcript")
     if not prefix:
         return warm_capture_refused(thread_id, "claude-code", "empty_prefix")
+    if invocation.confinement != CONFINEMENT_NONE:
+        # A confined launch has no CORSIA tools a fork could use, and resuming
+        # its session must never widen what it may read.
+        return warm_capture_refused(thread_id, "claude-code", "confined_launch")
     invocation = replace(invocation, binary=binary)
     launch_files = invocation.seed_file, invocation.mcp_config
     if not all(path and Path(path).is_file() for path in launch_files):

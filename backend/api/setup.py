@@ -181,8 +181,13 @@ async def setup_progress_view(_user: dict = Depends(require_user)) -> dict:
     """Where setup stands for a signed-in person; while unfinished, the eligibility facts are read fresh."""
 
     def _read() -> dict:
+        from llm.local_setup import ever_started
+
         progress = setup_progress.view()
-        return progress if progress["setup_completed"] else {**progress, "status": _setup_status()}
+        if progress["setup_completed"]:
+            return progress
+        # Only a resumed setup asks whether local setup ever began; the pre-auth status never does.
+        return {**progress, "status": {**_setup_status(), "local_started": ever_started()}}
 
     return await run_in_db(_read)
 

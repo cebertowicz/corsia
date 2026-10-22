@@ -74,18 +74,10 @@
 		state === 'error' ? 'error' :
 		'',
 	);
-	const rowClass = $derived(
-		downloading ? 'dl-row' :
-		state === 'loaded' ? 'loaded' :
-		state === 'loading' ? 'loading-row' :
-		state === 'cache_warming' ? 'warming-row' :
-		state === 'error' ? 'error-row' :
-		'',
-	);
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex: focused group exposes the row-menu keyboard handler for ContextMenu and Shift+F10. -->
-<div class="mr {rowClass}" class:has-warn={!!warning || !!note} style="--p: {progress}%" role={onDeleteDownload ? 'group' : undefined} aria-label={onDeleteDownload ? `Actions for ${name}` : undefined} tabindex={onDeleteDownload ? 0 : undefined} {...menu.rowHandlers(name)}>
+<div class="mr" class:dl-row={downloading} class:has-warn={!!warning || !!note} style="--p: {progress}%" role={onDeleteDownload ? 'group' : undefined} aria-label={onDeleteDownload ? `Actions for ${name}` : undefined} tabindex={onDeleteDownload ? 0 : undefined} {...menu.rowHandlers(name)}>
 	<span class="mr-toggle-wrap">
 		{#if downloading || loadingOn}
 			{@const on = downloading ? downloadingOn : loadingOn}
@@ -161,22 +153,28 @@
 {/if}
 
 <style>
+	/* A nested Settings list row under its provider: it starts on the provider's name column and ends
+	   on the content edge, flat on the pane, with space alone between rows. State is the switch, the
+	   status text (which carries load and warm progress) and the puck, never a fill or a bar; the one
+	   exception is a download's hairline. */
 	.mr {
 		display: grid;
 		/* The name keeps a floor, so a long status line wraps instead of squeezing it to nothing. */
 		grid-template-columns: 32px minmax(35%, 1fr) auto auto auto;
 		grid-template-areas: "toggle name meta caps action";
 		align-items: center;
-		gap: 12px;
-		padding: 10px 18px;
-		transition: all var(--dur-tight) var(--ease-snap);
+		gap: var(--space-3);
+		min-height: var(--list-row-min-height);
+		padding: var(--space-1) var(--space-2) var(--space-1) calc(var(--space-2) + var(--project-mark-size) + var(--space-3));
+		border-radius: var(--radius-sm);
+		transition: background var(--dur-tight) var(--ease-snap);
+		/* The download hairline is absolutely placed, so the row anchors it. */
 		position: relative;
 	}
 	.mr-toggle-wrap { grid-area: toggle; }
 	.mname { grid-area: name; }
 	.meta { grid-area: meta; }
 	.caps { grid-area: caps; }
-
 	.mr.has-warn {
 		grid-template-areas:
 			"toggle name meta caps action"
@@ -185,63 +183,12 @@
 	}
 	.warn {
 		grid-area: warn;
-		font-size: var(--text-footnote);
-		color: var(--amber);
+		font-size: var(--text-caption);
+		color: var(--amber-text);
 	}
-	.mr:hover { background: var(--bg-hover); }
-	.mr + :global(.mr) { box-shadow: inset 0 1px 0 var(--border-subtle); }
-
-	.mr.loaded { background: var(--accent-wash); }
-	.mr.loaded::before {
-		content: '';
-		position: absolute; left: 0; top: 4px; bottom: 4px;
-		width: 2px; border-radius: 0 2px 2px 0;
-		background: var(--accent);
-	}
-	.mr.loaded:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
-
-	.mr.loading-row { background: transparent; }
-	.mr.loading-row::before {
-		content: '';
-		position: absolute; left: 0; top: 4px; bottom: 4px;
-		width: 2px; border-radius: 0 2px 2px 0;
-		background: var(--text-tertiary);
-	}
-	.mr.loading-row::after {
-		content: '';
-		position: absolute; left: 14px; right: 14px; bottom: 0; height: 2px;
-		background: linear-gradient(90deg, var(--text-tertiary) 0%, var(--text-tertiary) var(--p, 0%), transparent var(--p, 0%));
-		border-radius: 1px;
-	}
-
-	/* A download is a standard row: its neutral bar spans the row, edge to edge. */
-	.mr.dl-row::after {
-		content: '';
-		position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
-		background: linear-gradient(90deg, var(--text-tertiary) 0%, var(--text-tertiary) var(--p, 0%), transparent var(--p, 0%));
-	}
-	.tg:disabled { opacity: 0.5; cursor: not-allowed; }
-
-	.mr.warming-row { background: var(--sky-bg); }
-	.mr.warming-row::before {
-		content: '';
-		position: absolute; left: 0; top: 4px; bottom: 4px;
-		width: 2px; border-radius: 0 2px 2px 0;
-		background: var(--sky);
-	}
-	.mr.warming-row::after {
-		content: '';
-		position: absolute; left: 14px; right: 14px; bottom: 0; height: 2px;
-		background: linear-gradient(90deg, var(--sky) 0%, var(--sky) var(--p, 0%), transparent var(--p, 0%));
-		border-radius: 1px;
-	}
-
-	.mr.error-row { background: var(--red-bg); }
-	.mr.error-row::before {
-		content: '';
-		position: absolute; left: 0; top: 4px; bottom: 4px;
-		width: 2px; border-radius: 0 2px 2px 0;
-		background: var(--red);
+	/* Hover colour is for a pointer: a tap on touch leaves :hover stuck on the last row tapped. */
+	@media (hover: hover) {
+		.mr:hover { background: var(--bg-hover); }
 	}
 
 	.mr-toggle-wrap { display: flex; justify-content: center; }
@@ -262,9 +209,9 @@
 		font-variant-numeric: tabular-nums;
 		flex-shrink: 0;
 	}
-	.meta.loading { color: var(--text-secondary); font-weight: 500; }
-	.meta.warming { color: var(--sky); font-weight: 500; }
-	.meta.error   { color: var(--red); font-weight: 500; }
+	.meta.loading { color: var(--text-secondary); }
+	.meta.warming { color: var(--sky); }
+	.meta.error   { color: var(--red-text); }
 	.link-btn { border: 0; background: transparent; padding: 0; margin-left: var(--space-1); color: var(--accent-text); font: inherit; cursor: pointer; }
 	.link-btn:hover { text-decoration: underline; }
 	.note { grid-area: warn; color: var(--text-tertiary); font-size: var(--text-footnote); }
@@ -282,6 +229,13 @@
 	.cap[data-cap="reasoning"] { background: var(--purple-bg); color: var(--purple-text); box-shadow: inset 0 0 0 1px var(--purple-line); }
 	.cap[data-cap="tools"]     { background: var(--teal-bg);   color: var(--teal);   box-shadow: inset 0 0 0 1px var(--teal-line); }
 
+	/* A download is a standard row: its neutral bar spans the row, edge to edge. */
+	.mr.dl-row::after {
+		content: '';
+		position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+		background: linear-gradient(90deg, var(--text-tertiary) 0%, var(--text-tertiary) var(--p, 0%), transparent var(--p, 0%));
+	}
+	.tg:disabled { opacity: 0.5; cursor: not-allowed; }
 	.tg {
 		--w: 30px; --h: 17px;
 		width: var(--w); height: var(--h);
@@ -366,7 +320,6 @@
 		color: var(--red);
 	}
 
-
 	@media (max-width: 480px) {
 		.mr {
 			grid-template-columns: 28px 1fr auto;
@@ -374,14 +327,12 @@
 				"toggle name action"
 				".      meta action"
 				".      caps action";
-			gap: 4px 10px;
-			padding: 9px 12px;
+			gap: var(--space-1) var(--space-3);
 			align-items: start;
 		}
 		.mname { font-size: var(--text-subhead); line-height: 1.3; padding-top: 2px; }
-		.meta  { font-size: var(--text-footnote); }
+		.meta  { font-size: var(--text-caption); }
 		.caps  { padding-top: 2px; }
-
 		.mr.has-warn {
 			grid-template-areas:
 				"toggle name action"

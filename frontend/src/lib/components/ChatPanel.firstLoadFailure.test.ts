@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ChatPanel from './ChatPanel.svelte';
 import { withEmptyAttentionQueue } from '../__tests__/fixtures/attentionQueue';
+import { withOpenTime } from '../__tests__/fixtures/openTimeServer';
+import type { TurnSummary } from './transcriptRunLabel';
 import { token } from '$lib/stores/auth';
 import { activeThreadId, messages, reasoningEffort, threads } from '$lib/stores/threads';
 import { _resetTurnStateForTests } from '$lib/ws/turnState';
@@ -21,11 +23,13 @@ import { coreSettings } from '$lib/stores/settings';
 
 const originalFetch = globalThis.fetch;
 
+/** What the server holds for the open-time read: the Turns the test's message responses name. */
+let served: Record<string, TurnSummary> = {};
 let host: HTMLElement;
 let component: Record<string, any> | null = null;
 
 function mountChatPanel() {
-	globalThis.fetch = withEmptyAttentionQueue(globalThis.fetch);
+	globalThis.fetch = withOpenTime(withEmptyAttentionQueue(globalThis.fetch), () => served);
 	component = mount(ChatPanel, {
 		target: host,
 		props: { onOpenLightbox: () => {} },
@@ -49,6 +53,7 @@ beforeEach(() => {
 	}
 	vi.spyOn(console, 'error').mockImplementation(() => {});
 	token.set('tok');
+	served = {};
 	threads.set([{ id: 'thread-b', title: 'Thread B' } as never]);
 	activeThreadId.set(null);
 	messages.set([]);
@@ -102,6 +107,7 @@ describe('ChatPanel first-page failure', () => {
 		activeThreadId.set('thread-b');
 		coreSettings.set({ features: { focus_mode: true } } as never);
 		let messageLoads = 0;
+		served = { 'turn-2': { started_at: '2026-09-30T12:00:00Z', ended_at: '2026-09-30T12:04:00Z', status: 'completed', activity_count: 1 } };
 		globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
 			if (url.includes('/messages?')) {
@@ -152,11 +158,13 @@ describe('ChatPanel first-page failure', () => {
 		coreSettings.set({ features: { focus_mode: true } } as never);
 		const summary = (turnId: string) => ({
 			[turnId]: {
-				started_at: '2026-09-30T12:00:00Z', ended_at: '2026-09-30T12:04:00Z',
+				started_at: turnId === 'new-turn' ? '2026-09-30T12:05:00Z' : '2026-09-30T12:00:00Z',
+				ended_at: turnId === 'new-turn' ? '2026-09-30T12:09:00Z' : '2026-09-30T12:04:00Z',
 				status: 'completed', activity_count: 1,
 			},
 		});
 		let messageLoads = 0;
+		served = { ...summary('older-turn'), ...summary('new-turn') };
 		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 			if (!String(input).includes('/messages?')) return { ok: true, status: 200, json: async () => ({}) };
 			messageLoads += 1;

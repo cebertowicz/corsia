@@ -349,10 +349,10 @@ describe('groupModels', () => {
 	it('keeps legacy and CORSIA-managed local oMLX models in distinct picker groups', () => {
 		const groups = groupModels([
 			row({ id: 'legacy', connection: 'omlx', provider: 'omlx', backend: 'network', server_name: 'This Mac' }),
-			row({ id: 'managed', connection: 'omlx', provider: 'omlx', backend: 'network', server_name: "CORSIA's own oMLX" }),
+			row({ id: 'managed', connection: 'omlx', provider: 'omlx', backend: 'network', server_name: 'Local' }),
 		]);
 
-		expect(groups.map(group => group.name)).toEqual(['This Mac', "CORSIA's own oMLX"]);
+		expect(groups.map(group => group.name)).toEqual(['This Mac', 'Local']);
 	});
 
 	it('uses first back only when several accounts are limited', () => {

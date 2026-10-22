@@ -6,6 +6,7 @@ import json
 
 from history.projection import in_read_snapshot
 from infra.focus_rows import NEVER_DRAWN_FILTER
+from infra.turn_errors import apply_error_next_steps
 from infra.queries import get_thread_for_user
 from core.message_display import llm_to_display
 from api.thread_turn_summaries import page_turn_summaries
@@ -99,7 +100,7 @@ def _project_delivery_intents(
         metadata = row.get("metadata")
         if isinstance(metadata, dict):
             metadata.pop("delivery_intent", None)
-        if intents.get(row.get("id")) == "queue_after_turn":
+        if intents.get(str(row.get("id"))) == "queue_after_turn":
             if not isinstance(metadata, dict):
                 metadata = row["metadata"] = {}
             metadata["delivery_intent"] = "queue_after_turn"
@@ -269,6 +270,7 @@ def finish_display(
 ) -> None:
     """Shape projected rows for REST in place."""
     _parse_message_metadata(display)
+    apply_error_next_steps(db, thread_id, display)
     if not include_tool_results:
         _defer_tool_results(display)
     _project_delivery_intents(db, thread_id, display)

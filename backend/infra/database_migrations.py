@@ -192,6 +192,9 @@ from infra.migration_132_to_133_review_forks import migrate_132_to_133
 from infra.migration_133_to_134_doc_stranded_suggestions import migrate_133_to_134
 from infra.migration_134_to_135_doc_decision_bulk import migrate_134_to_135
 from infra.migration_135_to_136_event_rules import migrate_135_to_136
+from infra.migration_136_to_137_event_intake import migrate_136_to_137
+from infra.migration_137_to_138_plan_intent import migrate_137_to_138
+from infra.migration_138_to_139_rule_runs import migrate_138_to_139
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -812,6 +815,9 @@ MIGRATIONS[132] = migrate_132_to_133
 MIGRATIONS[133] = migrate_133_to_134
 MIGRATIONS[134] = migrate_134_to_135
 MIGRATIONS[135] = migrate_135_to_136
+MIGRATIONS[136] = migrate_136_to_137
+MIGRATIONS[137] = migrate_137_to_138
+MIGRATIONS[138] = migrate_138_to_139
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

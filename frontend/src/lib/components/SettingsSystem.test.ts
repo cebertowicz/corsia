@@ -100,7 +100,8 @@ describe('SettingsSystem', () => {
 			host_access_reviewer_message: "Using the requesting agent's model.",
 		});
 		component = mount(SettingsSystem, { target: host });
-		expect(host.textContent).toContain("Requesting agent's model");
+		expect(host.querySelector('[data-settings-row="Reviewer model"] .sub')?.textContent).toBe("Using the requesting agent's model.");
+		expect(host.querySelector('[data-settings-row="Reviewer model"] .sub.failed')).toBeNull();
 		expect(host.textContent).not.toContain('Not configured');
 	});
 
@@ -231,7 +232,7 @@ describe('SettingsSystem', () => {
 
 		const select = host.querySelector<HTMLSelectElement>('#host-access-reviewer-model');
 		expect(select?.value).toBe('summary-test-sonnet');
-		expect(host.textContent).toContain('Host Access Review');
+		expect(host.textContent).toContain('Host access review');
 		expect(host.textContent).toContain('Ready');
 		expect(host.textContent).not.toContain('Core Agent');
 

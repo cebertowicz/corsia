@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from loguru import logger
 
-from automation.continuation import admission, settlement, triggers
+from automation.continuation import settlement, triggers
 from automation.continuation.models import StaleContinuation
 from infra.database import TransactionOwnershipError, write_transaction
 from infra.db_async import run_in_db_unless_owned
@@ -104,52 +104,6 @@ def settle_without_delivery(
         record_result(
             results, request.outcome, trigger.thread_id, kind=trigger.kind,
         )
-
-
-def defer_trigger(trigger, reason, now_dt, source, *, db, results) -> None:
-    """Apply bounded deferral or terminate an exhausted trigger.
-
-    A busy owner (``thread_unavailable``) is not a capacity limit: it retries
-    at the base interval and never spends the deferral budget, so a long Turn
-    cannot stall the wake. The source's staleness check still cancels it.
-    """
-
-    now = now_dt.isoformat()
-    owner_busy = reason == "thread_unavailable"
-    if not owner_busy and trigger.deferrals >= admission.MAX_DEFERRALS:
-        with write_transaction(db, scope="continuation_claim") as connection:
-            if not triggers.claim(
-                trigger.id,
-                idempotency_key=f"stalled:{trigger.id}",
-                db=connection,
-                now=now,
-            ):
-                return
-        settled = settlement.settle_claimed(
-            trigger.id,
-            "stalled",
-            "deferral_exhausted",
-            source,
-            db=db,
-            now=now,
-        )
-        if settled is not None:
-            results["stalled"].append(trigger.thread_id)
-        return
-    due = admission.deferred_until(
-        trigger.id, 1 if owner_busy else trigger.deferrals + 1, now_dt,
-    )
-    changed = settlement.defer_with_source(
-        trigger,
-        reason,
-        due.isoformat(),
-        source,
-        db=db,
-        now=now,
-        count_deferral=not owner_busy,
-    )
-    if changed:
-        results["skipped"].append(trigger.thread_id)
 
 
 def _claim_for_delivery(trigger, key: str, *, db, now: str) -> bool:

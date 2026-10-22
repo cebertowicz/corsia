@@ -19,7 +19,7 @@ export class DocFeedbackError extends Error {
 	}
 }
 
-async function postFeedback(action: 'send' | 'leave' | 'return' | 'retry', artifactId: string, keepalive = false): Promise<DocFeedbackResult> {
+async function postFeedback(action: 'send' | 'retry', artifactId: string, keepalive = false): Promise<DocFeedbackResult> {
 	const res = await fetch(`/api/doc-feedback/${action}`, {
 		method: 'POST',
 		headers: {
@@ -35,15 +35,6 @@ async function postFeedback(action: 'send' | 'leave' | 'return' | 'retry', artif
 
 export function sendDocFeedback(artifactId: string) {
 	return postFeedback('send', artifactId);
-}
-
-export function leaveDocFeedback(artifactId: string) {
-	return postFeedback('leave', artifactId, true);
-}
-
-/** The user is looking at the document: cancel leave grace. Reply markers clear per thread, through `/viewed`. */
-export function returnDocFeedback(artifactId: string) {
-	return postFeedback('return', artifactId);
 }
 
 export function retryDocFeedback(artifactId: string) {

@@ -786,7 +786,7 @@ describe('ChatPanel host-access scope', () => {
 					}),
 				} as Response);
 			}
-			if (init?.method === 'POST') {
+			if (init?.method === 'POST' && /\/api\/host-access\/leases\/[^/]+\/(approve|reject)$/.test(String(input))) {
 				decisionCount += 1;
 				return decisionCount === 1
 					? firstDecision

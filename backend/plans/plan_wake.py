@@ -38,13 +38,17 @@ ASK_RELEASED = "ask_released"
 CHILD_RETURNED = "child_returned"
 #: A submission this thread made or returned was rejected; it now holds the revision.
 REVISION_REQUESTED = "revision_requested"
+#: A canonical task's requirements changed while this thread has live work under it.
+INTENT_REVISED = "intent_revised"
+#: The person's new words may bear on a running task this thread owns (``plans.person_input``).
+INTENT_INPUT = "intent_input"
 #: A task one of this thread's tasks depends on settled: in another plan, or
 #: failed or closed by someone else in its own (``plans.cross_plan``).
 PREREQUISITE_SETTLED = "prerequisite_settled"
 #: A conductor-added task in another agent's plan reached a terminal outcome.
 CONDUCTOR_TASK_SETTLED = "conductor_task_settled"
 
-def wake_id(kind: str, subject_id: str, revision: int, about: str | None = None) -> str:
+def wake_id(kind: str, subject_id: str, revision: int | str, about: str | None = None) -> str:
     """The durable identity of one wake, so a reader can ask whether it was sent."""
     return f"plan-wake:{kind}:{subject_id}:{revision}" + (f":{about}" if about else "")
 
@@ -114,7 +118,7 @@ def append(
     recipient: str,
     kind: str,
     subject_id: str,
-    revision: int,
+    revision: int | str,
     plan_id: str,
     content: str,
     delegated_step_id: str | None = None,
@@ -282,6 +286,13 @@ def notify_revision(
                 },
             ),
         )
+
+
+def notify_intent_revised(db, node_id: str, *, causing_executor: str | None) -> None:
+    """Tell live workers that their canonical task's intent changed."""
+    from plans import plan_wake_intent
+
+    plan_wake_intent.notify(db, node_id, causing_executor=causing_executor)
 
 
 def notify_selected(

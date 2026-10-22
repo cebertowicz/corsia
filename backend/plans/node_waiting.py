@@ -6,7 +6,8 @@ is open and at least one of these holds:
 
 - an armed watch (every plan watch is agent-, external-, event- or
   deadline-owned: a blocker only the user clears stays a hold, never a watch,
-  ``plans.blocked_wait``);
+  ``plans.blocked_wait``), except a task its agent set aside
+  (``plans.scheduled_wait``): that is the agent's own choice, not a wait;
 - an unmet dependency: an edge present while its prerequisite is not accepted;
 - ``review_requested`` while the node links a registered GitHub pull request.
 
@@ -142,9 +143,13 @@ def _read(connection, ids: list[str], rows_in: Callable) -> dict[str, dict]:
     queries = (
         ("live", "SELECT node_id,depends_on_node_id,created_at FROM plan_node_dependencies "
                  "WHERE node_id IN ({marks})"),
-        ("watches", "SELECT plan_node_id AS node_id,status,armed_at,"
-                    "COALESCE(resolved_at,expired_at,CASE WHEN status<>'armed' THEN updated_at END)"
-                    " AS ended_at FROM expected_event_watches WHERE plan_node_id IN ({marks})"),
+        ("watches", "SELECT w.plan_node_id AS node_id,w.status,w.armed_at,"
+                    "COALESCE(w.resolved_at,w.expired_at,CASE WHEN w.status<>'armed' THEN w.updated_at END)"
+                    " AS ended_at FROM expected_event_watches w WHERE w.plan_node_id IN ({marks})"
+                    # A set-aside task (operator_scheduled.is_set_aside) is not waiting.
+                    " AND NOT EXISTS (SELECT 1 FROM plan_node_events e WHERE e.node_id=w.plan_node_id"
+                    " AND e.event='watch_armed' AND json_extract(e.payload_json,'$.watch_id')=w.id"
+                    " AND json_extract(e.payload_json,'$.scheduled.reason') IS NOT NULL)"),
         ("holds", "SELECT node_id,created_at,cleared_at FROM plan_node_holds "
                   "WHERE owner_kind='user' AND node_id IN ({marks})"),
     )
@@ -268,4 +273,42 @@ def own_waiting_intervals(
             user_time,
         )
         result[node_id] = union(waited)
+    return result
+
+
+def thread_intervals(
+    connection, thread_ids, since: datetime, until: datetime, rows_in: Callable,
+) -> dict[str, list[Interval]]:
+    """Each thread's waiting intervals within ``[since, until]``: the union over its own plan's nodes.
+
+    Only the thread's own plan counts; a caller wanting delegated work passes
+    the descendant threads too. A wait still open at ``until`` ends there, and
+    a thread with no waiting reads ``[]``. A node made after ``until``, or
+    settled and last touched before ``since``, cannot overlap the window, so
+    it is skipped before the interval reads.
+    """
+    threads = sorted({str(value) for value in thread_ids})
+    result: dict[str, list[Interval]] = {thread_id: [] for thread_id in threads}
+    start, end = since.timestamp(), until.timestamp()
+    if not threads or end <= start:
+        return result
+    owner: dict[str, str] = {}
+    for row in rows_in(
+        connection,
+        """SELECT n.id,n.state,n.created_at,n.updated_at,p.owner_id FROM plans p
+           JOIN plan_nodes n ON n.plan_id=p.id
+           WHERE p.owner_kind='thread' AND p.owner_id IN ({marks})""",
+        threads,
+    ):
+        made, touched = _at(row["created_at"]), _at(row["updated_at"])
+        if made is not None and made >= end:
+            continue
+        if str(row["state"]) in _TERMINAL_STATES and touched is not None and touched <= start:
+            continue
+        owner[str(row["id"])] = str(row["owner_id"])
+    found: dict[str, list[Interval]] = defaultdict(list)
+    for node_id, waited in own_waiting_intervals(connection, sorted(owner), until, rows_in).items():
+        found[owner[node_id]] += waited
+    for thread_id, waited in found.items():
+        result[thread_id] = intersect(waited, [(start, end)])
     return result

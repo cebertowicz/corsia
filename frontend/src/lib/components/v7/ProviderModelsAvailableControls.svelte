@@ -20,18 +20,17 @@
 {/if}
 
 <style>
+	/* A text action, like the offer's "Show all". */
 	.show-more {
-		display: block; width: 100%;
-		text-align: center;
-		color: var(--text-tertiary);
-		font-size: var(--text-footnote);
-		padding: calc(var(--space-2) + var(--space-1) / 2);
-		border-top: 1px solid var(--border-subtle);
-		background: transparent;
-		border-left: 0; border-right: 0; border-bottom: 0;
+		display: block;
+		margin-left: calc(var(--space-2) + var(--project-mark-size) + var(--space-3));
+		margin-right: var(--space-2);
+		padding: var(--space-1) 0;
+		border: 0; background: none;
+		color: var(--accent-text);
+		font: inherit; font-size: var(--text-footnote);
 		cursor: pointer;
-		font-family: inherit;
-		transition: all var(--dur-tight) var(--ease-snap);
 	}
-	.show-more:hover { color: var(--text-secondary); background: var(--bg-secondary); }
+	.show-more:hover { text-decoration: underline; }
+	.show-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
 </style>

@@ -83,8 +83,7 @@ def _returned(db, *titles: str, still_running: bool = False):
         service.transition_node(running.id, "active", actor_id="worker", db=db)
     db.commit()
     asyncio.run(runner.sweep(
-        NOW, db=db, sources=[HarvestSource()],
-        is_idle=lambda _thread: True, deliver=AsyncMock(return_value=True),
+        NOW, db=db, sources=[HarvestSource()], deliver=AsyncMock(return_value=True),
     ))
     return parent_plan, delegated, plan, leaves
 

@@ -13,7 +13,8 @@
 	import { minuteClock } from '$lib/time';
 	import { turnStates } from '$lib/ws/turnState';
 	import { nodeDisplayLabel, nodeDisplayState, nodeStateTone, nodeSublineParts, type ScheduledView } from './planDisplay';
-	import { isScheduledTask } from './planWaits';
+	import { isOutsideWait, isScheduledTask } from './planWaits';
+	import ThreadWaitingMark from '$lib/components/ThreadWaitingMark.svelte';
 	import SnoozeClock from './SnoozeClock.svelte';
 	import { planLiveStep } from './planLiveStep';
 	import { createLiveLine } from './liveLine.svelte';
@@ -21,12 +22,14 @@
 
 	// A branch row in the tree carries its count on its expand control instead.
 	// threads, moves: this row's rolled work (`rolledLive`); carriedBelow: what rows rendered under it already show.
-	let { node, isNext = false, showProgress = true, detailsOpen = false, threads = [], moves = false, carriedBelow = [], scheduledView }: { node: OperatorNode; isNext?: boolean; showProgress?: boolean; detailsOpen?: boolean; threads?: readonly string[]; moves?: boolean; carriedBelow?: readonly string[]; scheduledView?: ScheduledView } = $props();
+	let { node, isNext = false, showProgress = true, detailsOpen = false, threads = [], moves = false, owners, carriedBelow = [], scheduledView }: { node: OperatorNode; isNext?: boolean; showProgress?: boolean; detailsOpen?: boolean; threads?: readonly string[]; moves?: boolean; owners?: ReadonlyMap<string, OperatorNode>; carriedBelow?: readonly string[]; scheduledView?: ScheduledView } = $props();
 
 	const state = $derived(nodeDisplayState(node));
 	const tone = $derived(nodeStateTone(node));
 	// A task the agent set aside until a date wears the snooze clock; other waits keep the dot.
 	const scheduled = $derived(state === 'waiting' && isScheduledTask(node));
+	// An outside wait wears the hourglass, so it no longer reads as an inside wait's dot (EW11).
+	const outsideWait = $derived(state === 'waiting' && !scheduled && isOutsideWait(node));
 	const label = $derived(nodeDisplayLabel(node, isNext));
 	// A narrow row cuts the reason first; a settled row's time stays whole.
 	const subline = $derived(nodeSublineParts(node, $minuteClock, scheduledView));
@@ -58,7 +61,7 @@
 	});
 </script>
 
-<span class="state-icon {state} {tone}" class:spinning={moving} title={label} aria-hidden="true">{#if scheduled}<SnoozeClock />{:else}{symbol}{/if}</span>
+<span class="state-icon {state} {tone}" class:spinning={moving} title={label} aria-hidden="true">{#if scheduled}<SnoozeClock />{:else if outsideWait}<ThreadWaitingMark size={12} />{:else}{symbol}{/if}</span>
 <span class="row-copy">
 	<span class="row-line">
 		<span class="row-title" class:details-open={detailsOpen} title={node.title}>{node.title}</span>
@@ -66,7 +69,7 @@
 		<span class="row-status sr-only">{label}</span>
 	</span>
 	{#if liveStep}
-		<span class="row-subline {state} {tone}"><PlanLiveStep step={liveStep} />{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}</span>
+		<span class="row-subline {state} {tone}"><PlanLiveStep step={liveStep} node={owners?.get(liveStep.threadId) ?? node} />{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}</span>
 	{:else if subline.lead || subline.moment}<span class="row-subline {state} {tone}">{#if subline.lead}<span class="subline-text">{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{subline.lead ? ' · ' : ''}{subline.moment}</span>{/if}</span>{/if}
 </span>
 

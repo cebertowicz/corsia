@@ -22,7 +22,9 @@ from events.platform import DIGESTED, FILTERED, deliver_platform_event_sync
 from events.router import RouteOutcome
 from infra.database import get_db
 from registry import models
-from tests.event_routing_helpers import check_suite_payload, mk_session, pr_payload, register_pr, route
+from tests.event_routing_helpers import (
+    check_suite_payload, mk_session, pr_payload, register_pr, route, read_statements, statements,
+)
 from tools.event_rules import EventRulesTool
 
 REPO = "o/r"
@@ -377,9 +379,9 @@ async def test_webhook_reads_when_routing_chose_no_thread(isolated_db, sent, res
         """DB reads, and calls to the repository lookup (a policy query and git)."""
         rows.clear()
         resolved.clear()
-        with _statements() as seen:
+        with statements() as seen:
             await route(MERGED, _merged(number, repo=repo))
-        return len(_reads(seen)), len(resolved)
+        return len(read_statements(seen)), len(resolved)
 
     with _without_rules():
         await run(60)
@@ -934,34 +936,6 @@ def test_a_platform_drop_filters_the_writers_delivery_and_keeps_the_wait(isolate
 # -- Scale: reads added per event ------------------------------------------------------------
 
 @contextmanager
-def _statements():
-    """Every statement any pooled connection runs inside the block."""
-    import infra.database as database
-
-    seen: list[str] = []
-    original = database._make_connection
-
-    def _traced(path):
-        conn = original(path)
-        conn.set_trace_callback(seen.append)
-        return conn
-
-    with database._pool_lock:
-        existing = list(database._all_connections)
-    for conn in existing:
-        conn.set_trace_callback(seen.append)
-    database._make_connection = _traced
-    try:
-        yield seen
-    finally:
-        database._make_connection = original
-        with database._pool_lock:
-            current = list(database._all_connections)
-        for conn in current:
-            conn.set_trace_callback(None)
-
-
-@contextmanager
 def _without_rules():
     """The webhook router as it was before rules: no read before the gate, none in it."""
     from events.connectors.github_rules import RuleScope
@@ -970,10 +944,6 @@ def _without_rules():
             patch("events.connectors.github_rules.rule_scope",
                   lambda *a: RuleScope(any_rule=False)):
         yield
-
-
-def _reads(statements: list[str]) -> list[str]:
-    return [s for s in statements if s.lstrip().upper().startswith(("SELECT", "WITH"))]
 
 
 def test_platform_reads_per_event(isolated_db, monkeypatch):
@@ -985,9 +955,9 @@ def test_platform_reads_per_event(isolated_db, monkeypatch):
     _library_owner("owner")
 
     def run(manifest: str) -> list[str]:
-        with _statements() as seen:
+        with statements() as seen:
             deliver_platform_event_sync(library.LIBRARY_CONNECTOR, _library_changed(manifest))
-        return _reads(seen)
+        return read_statements(seen)
 
     with patch("events.platform.rules.evaluate", lambda *_args, **_kwargs: None):
         before = run("warm")  # warms one-time reads
@@ -1016,9 +986,9 @@ async def test_webhook_reads_per_event(isolated_db, sent):
     register_pr(REPO, 7, "owner")
 
     async def run(n: int) -> list[str]:
-        with _statements() as seen:
+        with statements() as seen:
             await route(SYNC, _sync(7, n))
-        return _reads(seen)
+        return read_statements(seen)
 
     with _without_rules():
         await run(0)

@@ -51,7 +51,7 @@ describe('Settings › System with a shell', () => {
 	it('on a computer connected to another, shows who it is connected to and Disconnect confirms first', async () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'remote', name: 'Alex’s Mac mini' };
 		await show();
-		expect(flat(host.querySelector('[data-testid="account-computer"]')?.textContent)).toContain('Connected to Alex’s Mac mini');
+		expect(flat(host.querySelector('[data-settings-row="Computer"]')?.textContent)).toContain('Connected to Alex’s Mac mini');
 		button('Disconnect')?.click(); flushSync();
 		expect(flat(host.textContent)).toContain('Disconnect from Alex’s Mac mini?');
 		expect(flat(host.textContent)).toContain('Your work stays on Alex’s Mac mini. This app signs out and returns to setup.');
@@ -89,14 +89,14 @@ describe('Settings › System with a shell', () => {
 	it('on the computer itself, offers Connect to another computer, which opens the connect screens', async () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'local' };
 		await show();
-		expect(flat(host.querySelector('[data-testid="account-computer"]')?.textContent)).toContain('This computer');
+		expect(flat(host.querySelector('[data-settings-row="Computer"]')?.textContent)).toContain('This computer');
 		button('Connect to another computer')?.click();
 		expect(get(connectOpen)).toBe(true);
 		expect(button('Disconnect')).toBeUndefined();
 	});
 	it('in a browser or the phone app there is no shell, so no Computer row', async () => {
 		await show();
-		expect(host.querySelector('[data-testid="account-computer"]')).toBeNull();
+		expect(host.querySelector('[data-settings-row="Computer"]')).toBeNull();
 		expect(flat(host.textContent)).not.toContain('Connect to another computer');
 	});
 });

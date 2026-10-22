@@ -68,6 +68,7 @@
 </span>
 
 <style>
+	.row-actions:has(:global(.child-wait)) { flex: 1 1 100%; min-width: 0; margin-left: 0; padding-left: 22px; }
 	.row-actions { display: inline-flex; flex: none; flex-wrap: nowrap; justify-content: flex-end; align-items: center; gap: var(--space-2); margin-left: auto; }
 	/* Keep visual furniture centered on a disclosed title's first line while its full 28/44px control remains tappable. */
 	.row-actions.details-open {
@@ -75,17 +76,17 @@
 		transform: translateY(calc((var(--plan-row-line-height) - var(--plan-row-action-height)) * 0.5));
 	}
 	.branch-chevron {
-		display: inline-flex; width: 20px; height: 20px; flex: none;
+		display: inline-flex; width: var(--space-5); height: var(--space-5); flex: none;
 		align-items: center; justify-content: center; color: var(--text-tertiary);
 	}
 	.branch-chevron svg {
-		width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8;
+		width: var(--space-4); height: var(--space-4); fill: none; stroke: currentColor; stroke-width: 1.8;
 		stroke-linecap: round; stroke-linejoin: round; transition: transform var(--dur-tight) var(--ease-snap);
 	}
 	.branch-toggle.expanded .branch-chevron svg { transform: rotate(90deg); }
 	.branch-toggle {
 		display: inline-flex; flex: none; align-items: center; gap: var(--space-1);
-		min-height: 28px; padding: 0 0 0 var(--space-2); border: 0; border-radius: var(--radius-xs);
+		min-height: var(--plan-row-action-height); padding: 0 0 0 var(--space-2); border: 0; border-radius: var(--radius-xs);
 		background: transparent; color: var(--text-tertiary); font: inherit; font-size: var(--text-caption);
 		font-variant-numeric: tabular-nums; cursor: pointer;
 	}
@@ -99,8 +100,6 @@
 		.branch-toggle:hover, .discussion-archive:hover { color: var(--text-primary); background: var(--bg-hover); }
 	}
 	.branch-toggle:focus-visible, .discussion-archive:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-	@media (max-width: 620px) {
-		.branch-toggle, .discussion-archive { min-height: 44px; }
-		.branch-toggle { min-width: 44px; justify-content: flex-end; }
-	}
+	.branch-toggle { min-width: var(--plan-row-action-height); justify-content: flex-end; }
+	@media (max-width: 38.75rem) { .discussion-archive { min-height: var(--touch-target); } }
 </style>

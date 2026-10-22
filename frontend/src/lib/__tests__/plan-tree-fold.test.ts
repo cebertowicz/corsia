@@ -2,13 +2,14 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import PlanTree from '$lib/components/plans/PlanTree.svelte';
 import type { OperatorNode } from '$lib/api/plans';
-import { foldAllCompleted, foldLabel } from '$lib/components/plans/planFoldLevels';
+import { buildFoldLevels, foldAccessibleLabel, foldHasNoFailures, foldLabel } from '$lib/components/plans/planFoldLevels';
+import { NO_HISTORY } from '$lib/components/plans/foldHistory.svelte';
 import { node } from './fixtures/planTreeNode';
 import { withFolds } from './fixtures/planFolds';
 
 /**
  * Journey step 1: at every level of the tree, work the server marks `folded`
- * (finished more than a day ago) gathers into one "N completed" row at the
+ * (finished more than a day ago) gathers into one "N done" row at the
  * bottom of that level, so the level's top row is its current or next item.
  * The row opens in pages of five, newest first; progress is untouched.
  */
@@ -83,9 +84,9 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 			'Open task',
 			'Phase',
 			'Live child',
-			'[2 completed]',
+			'[2 done]',
 			'Just finished',
-			'[2 completed]',
+			'[2 done]',
 		]);
 	});
 
@@ -139,7 +140,7 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 		];
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
-		expect(rendered()).toEqual(['Open task', '[12 completed]']);
+		expect(rendered()).toEqual(['Open task', '[12 done]']);
 		const actions = () => host.querySelector('.fold-row .row-actions')!;
 		// A level never opened draws still; its controls animate only when they move.
 		expect(actions().classList.contains('returned')).toBe(false);
@@ -147,7 +148,7 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 		await press('Show 5');
 		expect(actions().classList.contains('expanded')).toBe(true);
 		expect(rendered()).toEqual([
-			'Open task', 'Done 0', 'Done 1', 'Done 2', 'Done 3', 'Done 4', '[12 completed]',
+			'Open task', 'Done 0', 'Done 1', 'Done 2', 'Done 3', 'Done 4', '[12 done]',
 		]);
 		await press('Show 5 more');
 		expect(rendered()).toHaveLength(12);
@@ -156,12 +157,12 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 		expect([...host.querySelectorAll('button')].some((b) => b.textContent?.includes('more'))).toBe(false);
 
 		await press('Collapse');
-		expect(rendered()).toEqual(['Open task', '[12 completed]']);
+		expect(rendered()).toEqual(['Open task', '[12 done]']);
 		// The return animates like the arrival, so the move back beside the summary never pops.
 		expect(actions().classList.contains('returned')).toBe(true);
 	});
 
-	it('keeps an expanded fold label whole instead of giving it truncation chrome', async () => {
+	it('merges failures and closures into the fold interaction without naming either', async () => {
 		const nodes = [
 			node({ id: 'open', title: 'Open task' }),
 			...Array.from({ length: 19 }, (_, index) => done(`Done ${index}`)),
@@ -173,9 +174,8 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 		await press('Show 5');
 
 		const label = host.querySelector<HTMLElement>('.fold-row .fold-label');
-		expect(label?.textContent?.trim()).toBe('19 completed, 1 failed, 5 closed');
-		expect(label?.className).not.toMatch(/truncate|ellipsis/);
-		expect(label?.style.textOverflow).toBe('');
+		expect(label?.textContent?.trim()).toBe('24 done');
+		expect(label?.textContent).not.toMatch(/failed|closed|completed/);
 	});
 
 	it('shows no fold row inside a collapsed branch', async () => {
@@ -191,7 +191,7 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 		const toggle = host.querySelector<HTMLButtonElement>('.branch-toggle');
 		toggle!.click();
 		await settle();
-		expect(rendered()).toEqual(['Open task', 'Phase', 'Todo child', '[1 completed]']);
+		expect(rendered()).toEqual(['Open task', 'Phase', 'Todo child', '[1 done]']);
 	});
 
 	it('gives a parent whose only children are folded a disclosure that reaches them', async () => {
@@ -207,17 +207,38 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 			toggle.click();
 			await settle();
 		}
-		expect(rendered()).toEqual(['Phase', '[1 completed]']);
+		expect(rendered()).toEqual(['Phase', '[1 done]']);
 	});
 
-	it('names folded outcomes truthfully', () => {
-		expect(foldLabel({ done: 2, failed: 1, closed: 0 })).toBe('2 completed, 1 failed');
-		expect(foldLabel({ done: 0, failed: 0, closed: 1 })).toBe('1 closed');
+	it('names all completed and closed folded work as done with compact visible counts', () => {
+		expect(foldLabel({ done: 0, failed: 0, closed: 0 })).toBe('0 done');
+		expect(foldLabel({ done: 1, failed: 0, closed: 0 })).toBe('1 done');
+		expect(foldLabel({ done: 2, failed: 4, closed: 3 })).toBe('5 done');
+		expect(foldLabel({ done: 999, failed: 1, closed: 0 })).toBe('999 done');
+		expect(foldLabel({ done: 1_219, failed: 0, closed: 0 })).toBe('1.2k done');
+		expect(foldAccessibleLabel({ done: 1_219, failed: 0, closed: 0 })).toBe('1,219 done');
 	});
 
-	it('wears the done mark only when every folded step completed', () => {
-		expect(foldAllCompleted({ done: 2, failed: 0, closed: 0 })).toBe(true);
-		expect(foldAllCompleted({ done: 1, failed: 1, closed: 0 })).toBe(false);
-		expect(foldAllCompleted({ done: 0, failed: 0, closed: 1 })).toBe(false);
+	it('keeps a held failed row out of the fold count while the row remains visible', () => {
+		const heldFailure = done('Unseen failure', { state: 'failed' });
+		const held = new Set([heldFailure.id]);
+		const { levels } = buildFoldLevels({
+			nodes: [heldFailure], held,
+			work: { planId: 'plan-1', levels: [{ parent_id: null, done: 2, failed: 1, closed: 1, more: 0 }] },
+			history: () => NO_HISTORY, maxDepth: 3,
+		});
+
+		expect(heldFailure.folded).toBe(true);
+		expect(held.has(heldFailure.id)).toBe(true);
+		const counts = levels.get('')!.counts;
+		expect(counts).toEqual({ done: 2, failed: 0, closed: 1 });
+		expect(foldLabel(counts)).toBe('3 done');
+		expect(foldLabel(counts)).not.toContain('failed');
+	});
+
+	it('wears the green done mark whenever no seen folded row failed', () => {
+		expect(foldHasNoFailures({ done: 2, failed: 0, closed: 0 })).toBe(true);
+		expect(foldHasNoFailures({ done: 0, failed: 0, closed: 1 })).toBe(true);
+		expect(foldHasNoFailures({ done: 1, failed: 1, closed: 0 })).toBe(false);
 	});
 });

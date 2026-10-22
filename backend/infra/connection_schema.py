@@ -1,5 +1,7 @@
-"""Provider transport and ordered connector event rules."""
+"""Provider transport, ordered connector event rules and event intake receipts."""
 from __future__ import annotations
+
+from infra.event_intake_schema import EVENT_INTAKE_SCHEMA_SQL
 
 CONNECTION_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS connections (
@@ -34,4 +36,4 @@ CONNECTION_SCHEMA_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_connection_rules_match
         ON connection_rules(connector, enabled, precedence, created_at);
-"""
+""" + EVENT_INTAKE_SCHEMA_SQL

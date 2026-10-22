@@ -6,13 +6,12 @@
 <div class="row-msg">{message}</div>
 
 <style>
+	/* A failure is stated in the status text colour, not a box. */
 	.row-msg {
-		margin: var(--space-2) calc(var(--space-4) + var(--space-1) / 2);
-		padding: calc(var(--space-1) + var(--space-1) / 2) calc(var(--space-2) + var(--space-1) / 2);
-		font-size: var(--text-footnote);
-		color: var(--red);
-		background: var(--red-bg);
-		border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
-		border-radius: var(--radius-xs);
+		margin-left: calc(var(--space-2) + var(--project-mark-size) + var(--space-3));
+		margin-right: var(--space-2);
+		padding: var(--space-1) 0;
+		font-size: var(--text-caption);
+		color: var(--red-text);
 	}
 </style>

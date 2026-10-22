@@ -9,6 +9,8 @@
 		name,
 		sub = '',
 		subTone = 'quiet',
+		note = '',
+		wrap = false,
 		trailing = '',
 		chevron = false,
 		ariaLabel,
@@ -27,6 +29,10 @@
 		sub?: string | Snippet;
 		/** A second line stating a status takes that status's text colour (Needs you is `attention`). */
 		subTone?: 'quiet' | 'failed' | 'attention';
+		/** A wrapped line under the second one for a fact about this row, so it stays with the copy when the actions drop below. */
+		note?: string;
+		/** Let a long second line, such as a setting's explanation, wrap instead of ellipsising. */
+		wrap?: boolean;
 		trailing?: string;
 		chevron?: boolean;
 		/** Accessible title when the visual name is a custom snippet. */
@@ -58,8 +64,9 @@
 {#snippet content()}
 	{#if mark}<span class="mark" style:background={mark} aria-hidden="true"></span>{/if}
 	<span class="copy">
-		<span class="name" class:wrap={wrapName} data-wrap-name={wrapName || undefined}>{#if typeof name === 'string'}{name}{:else}{@render name()}{/if}</span>
-		{#if sub}<span class="sub" class:multi={typeof sub !== 'string'} class:failed={subTone === 'failed'} class:attention={subTone === 'attention'}>{#if typeof sub === 'string'}{sub}{:else}{@render sub()}{/if}</span>{/if}
+		<span class="name" class:wrap={wrapName} data-wrap-name={wrapName || undefined} title={typeof name === 'string' ? name : undefined}>{#if typeof name === 'string'}{name}{:else}{@render name()}{/if}</span>
+		{#if sub}<span class="sub" class:multi={typeof sub !== 'string'} class:failed={subTone === 'failed'} class:attention={subTone === 'attention'} class:wrap>{#if typeof sub === 'string'}{sub}{:else}{@render sub()}{/if}</span>{/if}
+		{#if note}<span class="sub wrap" data-row-note>{note}</span>{/if}
 	</span>
 	{#if trailing}<span class="trailing">{trailing}</span>{/if}
 {/snippet}
@@ -99,6 +106,11 @@
 		font: inherit; color: inherit; text-align: left;
 	}
 	.face.open { cursor: pointer; }
+	/* The actions drop below the copy only when the row is too narrow for both, so the second line is never cut to make room.
+	   Dropped or not, they end on the row's content edge, in the same column as every other row's controls. */
+	.settings-row.stack { flex-wrap: wrap; }
+	.stack .face { flex: 1 1 16rem; }
+	.stack .actions { margin-left: auto; }
 	.face:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.mark {
 		flex-shrink: 0;
@@ -111,6 +123,7 @@
 	.name { font-size: var(--text-subhead); color: var(--text-primary); }
 	.name.wrap { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 	.sub { font-size: var(--text-caption); color: var(--text-tertiary); }
+	.sub.wrap { white-space: normal; line-height: 1.45; }
 	/* A drawn second line carries a status and a place; it wraps rather than hiding either. */
 	.sub.multi { white-space: normal; overflow-wrap: anywhere; }
 	.sub.failed { color: var(--red-text); }
@@ -119,10 +132,8 @@
 	.chev { flex-shrink: 0; color: var(--text-tertiary); transition: transform var(--dur-tight); }
 	.settings-row:has(.face[aria-expanded='true']) .chev { transform: rotate(90deg); }
 	@media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
-	/* Preserve the ghost button's symmetric hit area while its fill reaches the row edge. */
-	/* The actions drop below the copy only when the row is too narrow for both, so the second line is never cut to make room. */
-	.settings-row.stack { flex-wrap: wrap; }
-	.stack .face { flex: 1 1 16rem; }
-	.stack .actions { margin-left: auto; }
-	.actions { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-1); padding-right: var(--space-1); margin-right: calc(-1 * var(--button-pad-x-sm)); }
+	/* Controls end on the row's content edge, with the trailing detail and chevron. A trailing
+	   text action keeps its symmetric hit area, so its fill runs out to the row edge instead. */
+	.actions { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-1); padding-right: var(--space-2); }
+	.actions > :global(.btn.ghost:last-child) { margin-right: calc(-1 * var(--button-pad-x-sm)); }
 </style>
