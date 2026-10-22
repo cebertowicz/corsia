@@ -42,12 +42,17 @@ def _call(fn, *args, **kwargs):
         db.close()
 
 
+def _refused(error: AccountError) -> JSONResponse:
+    status = 409 if isinstance(error, PolicyChanged) else 404 if isinstance(error, ProjectNotFound) else 422
+    return JSONResponse(status_code=status, content={"detail": str(error), "code": error.code})
+
+
 async def _run(fn, *args, **kwargs):
+    """Run a policy call whose result the route returns as is; a refusal comes back as the response."""
     try:
         return await run_in_db(_call, fn, *args, **kwargs)
     except AccountError as error:
-        status = 409 if isinstance(error, PolicyChanged) else 404 if isinstance(error, ProjectNotFound) else 422
-        return JSONResponse(status_code=status, content={"detail": str(error), "code": error.code})
+        return _refused(error)
 
 
 @router.get("/provider-policy")
@@ -69,7 +74,7 @@ async def put_use_workspace(project_id: str, body: UseWorkspaceWrite):
 
 @router.get("/projects/{project_id}/cloud-models-off")
 async def get_cloud_models_off(project_id: str):
-    enabled = await _run(project_cloud_models_off, project_id)
+    enabled = await run_in_db(_call, project_cloud_models_off, project_id)
     return {"project_id": project_id, "cloud_models_off": enabled}
 
 
@@ -78,9 +83,12 @@ async def put_cloud_models_off(
     project_id: str, body: CloudModelsOffWrite, user: dict = Depends(require_user),
 ):
     require_person_for_locality(user, subject="project_cloud_models_off", name=project_id)
-    result = await _run(
-        set_project_cloud_models_off, project_id, cloud_models_off=body.cloud_models_off,
-    )
+    try:
+        result = await run_in_db(
+            _call, set_project_cloud_models_off, project_id, cloud_models_off=body.cloud_models_off,
+        )
+    except AccountError as error:
+        return _refused(error)
     # Held heads and every catalog reader depend on this switch: resume what it released.
     notify_models_changed()
     emit_product_event(
