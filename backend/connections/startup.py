@@ -30,12 +30,22 @@ async def startup_harness_discovery() -> list[dict]:
     """Re-ask both catalogs and re-check both sign-ins, once.
 
     Claude Code's sign-in is its catalog session's own result, so no second
-    session runs for an available row. Codex's ``codex login status`` runs at
-    startup in ``seed_builtin_connections`` (before this) and again here, and
-    on the recheck route; its later sign-outs wait for one of them.
+    session runs for an available row. Its check waits for the catalogs:
+    run beside them, a check that signs a row in can finish before the
+    catalog refresh reads that row, which then asks Claude Code a second time.
+    Codex's ``codex login status`` runs at startup in
+    ``seed_builtin_connections`` (before this) and again here, and on the
+    recheck route; its later sign-outs wait for one of them.
     """
+    async def catalogs_then_claude() -> list[dict]:
+        results = await reask_harness_catalogs()
+        if not any(result.get("provider") == "claude-code" for result in results):
+            await check_harness_source("claude-code")
+        return results
+
     outcomes = await asyncio.gather(
-        reask_harness_catalogs(),
-        *(check_harness_source(provider) for provider in HARNESS_PROVIDERS),
+        catalogs_then_claude(),
+        *(check_harness_source(provider) for provider in HARNESS_PROVIDERS
+          if provider != "claude-code"),
     )
     return outcomes[0]
