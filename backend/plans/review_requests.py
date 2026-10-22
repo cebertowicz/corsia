@@ -48,8 +48,8 @@ def settle_review_node(db, node_id: str, *, evidence: str, provenance: str) -> N
             # commits on its own, and a refused submit rolls the activation back.
             # Admission is deliberately not used: selecting the revision would push
             # out the reviewer's current task only to settle it at once. Structured
-            # Plans approved this attempt-less pending -> active step for review
-            # settlement only (corsia#79 at ec416332).
+            # Plans approved this attempt-less pending -> active step for review and
+            # feedback-batch settlement only (corsia#79 at ec416332).
             service._transition(connection, node_id, "active", actor_id=None,
                                 provenance=provenance, verification_result=None, verified_by=None)
         review_evidence.submit(node_id, evidence=evidence, expected_revision=None,

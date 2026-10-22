@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
 from doceditor import comment_actions, comments, feedback_batches
 from infra.database import get_db, write_transaction
-from plans import service
+from plans import admission, admission_attempts, holds, lifecycle, service
 from plans.feedback_nodes import settle_feedback_node
 
 
@@ -124,6 +126,62 @@ def test_a_task_the_owner_already_finished_is_left_alone(isolated_db):
 
         assert _state(db, node_id) == "accepted"
         assert db.execute("SELECT COUNT(*) FROM plan_node_events WHERE node_id=?", (node_id,)).fetchone()[0] == events
+    finally:
+        db.close()
+
+
+def _description_and_events(db, node_id: str) -> tuple[str, list[str]]:
+    node = service.get_node(node_id, db=db)
+    events = [row["event"] for row in db.execute("SELECT event FROM plan_node_events WHERE node_id=?", (node_id,))]
+    return node.description, events
+
+
+def _pause_plan(db, node_id: str) -> None:
+    plan = service.ensure_plan("thread", "owner", db=db)
+    lifecycle.transition(plan.id, "paused", expected_revision=plan.revision, actor_id="owner", provenance="test", db=db)
+    db.commit()
+
+
+def _hold_step(db, node_id: str) -> None:
+    holds.pause(node_id, "Waiting", expected_revision=service._node_row(db, node_id)["revision"],
+                actor_id="owner", provenance="test", db=db)
+    db.commit()
+
+
+@pytest.mark.parametrize("stop", [_pause_plan, _hold_step], ids=["paused_plan", "held_step"])
+def test_a_stopped_task_keeps_its_state_gets_a_note_and_the_resolve_still_commits(isolated_db, stop):
+    db = get_db()
+    try:
+        _, _, plain, node_id, _ = _delivered(db, suggestions=0, comments_=1)
+        before = service.get_node(node_id, db=db)
+        stop(db, node_id)
+        state = _state(db, node_id)
+
+        comments.update(plain[0]["id"], {"resolved": True}, db=db)
+
+        description, events = _description_and_events(db, node_id)
+        assert _state(db, node_id) == state != "accepted"
+        assert f"Comment {plain[0]['id']}: resolved" in description
+        assert "did not settle by itself" in description and before.description in description
+        assert events.count("feedback_settled_while_stopped") == 1
+        assert db.execute("SELECT resolved FROM doc_comments WHERE id=?", (plain[0]["id"],)).fetchone()[0] == 1
+    finally:
+        db.close()
+
+
+def test_the_owners_active_current_task_is_accepted_and_frees_the_slot(isolated_db):
+    db = get_db()
+    try:
+        _, _, plain, node_id, _ = _delivered(db, suggestions=0, comments_=1)
+        admission.make_current(node_id, expected_revision=service._node_row(db, node_id)["revision"],
+                               actor_id="owner", provenance="test", db=db)
+        db.commit()
+        assert [row["node_id"] for row in admission_attempts.current_for_executor(db, "owner")] == [node_id]
+
+        comments.update(plain[0]["id"], {"resolved": True}, db=db)
+
+        assert _state(db, node_id) == "accepted"
+        assert admission_attempts.current_for_executor(db, "owner") == []
     finally:
         db.close()
 
