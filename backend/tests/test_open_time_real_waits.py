@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from infra import open_time
+import infra.open_time as open_time
 from plans import service
 from tests.test_plan_node_waiting import T0, _at, _move, _task, _watch, db  # noqa: F401 - db is the fixture
 

@@ -11,7 +11,7 @@ import sqlite3
 
 import pytest
 
-from infra import open_time
+import infra.open_time as open_time
 from plans import public
 
 DAY = "2026-10-21"

@@ -13,7 +13,8 @@
 	import type { OperatorNode } from '$lib/api/plans';
 	import { openMilliseconds, openTimes, requestOpenTime } from '$lib/openTime';
 	import { createPhraseSwap } from './phraseSwap.svelte';
-	import { FADE_MS, liveStepClock, liveStepLabel, stepOpenQuery, type LiveStep } from './planLiveStep';
+	import { FADE_MS, type LiveStep } from './planLiveStep';
+	import { liveStepClock, liveStepLabel, stepOpenQuery } from './planStepTime';
 
 	let { step, node }: { step: LiveStep; node: OperatorNode } = $props();
 

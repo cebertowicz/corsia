@@ -13,7 +13,7 @@ from functools import partial
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import AwareDatetime, BaseModel, Field
 
-from infra import open_time
+import infra.open_time as open_time
 from infra.auth import require_user
 from infra.database import get_db
 from infra.db_async import run_in_db
