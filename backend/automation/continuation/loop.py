@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from automation.continuation import admission
 from automation.continuation.runner import sweep
-from infra import sweep_wake
+import infra.sweep_wake as sweep_wake
 from infra.db_async import run_in_db
 
 CONTINUATION_SWEEP_INTERVAL = 60

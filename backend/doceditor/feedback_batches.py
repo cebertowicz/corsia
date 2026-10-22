@@ -18,7 +18,7 @@ from doceditor.feedback_state import (
     undelivered_for_document,
     user_feedback_for_document,
 )
-from infra import sweep_wake
+import infra.sweep_wake as sweep_wake
 from infra.database import write_transaction
 from infra.write_effects import after_commit
 

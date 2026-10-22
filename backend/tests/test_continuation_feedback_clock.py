@@ -11,7 +11,7 @@ import pytest
 from automation.continuation import loop
 from doc_feedback_helpers import seed_document, seed_thread
 from doceditor.feedback_batches import record_edit
-from infra import sweep_wake
+import infra.sweep_wake as sweep_wake
 from infra.database import get_db, write_transaction
 
 pytestmark = pytest.mark.asyncio
