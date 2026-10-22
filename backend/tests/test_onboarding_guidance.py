@@ -265,17 +265,135 @@ def test_app_path_sends_the_message_then_eight_steps_and_ends_on_the_handoff():
     titles = re.findall(r"^\d\. \*\*([^*]+)\*\*", steps, flags=re.MULTILINE)
 
     assert app.index("I'm CORSIA, your assistant.") < app.index("## The steps")
-    assert len(titles) == 8
-    assert titles[0] == "About you."
-    assert titles.index("Web search.") < titles.index("Where your work lives.")
-    assert titles.index("Email and calendar.") < titles.index("Where your work lives.")
+    # The doc's order: the other subscription, the one import, Where your work lives, search, About you.
+    assert [title.rstrip(".,") for title in titles] == [
+        "The other subscription", "Bring over from your other tools", "Where your work lives",
+        "Web search", "About you", "Email and calendar", "GitHub for your agents",
+        "Your files, and when agents ask first",
+    ]
     assert "skill `connect-tools`" in steps
-    work_step = steps.split("6. **Where your work lives.**", 1)[1].split("7. **", 1)[0]
+    work_step = steps.split("3. **Where your work lives,**", 1)[1].split("4. **", 1)[0]
     assert not re.search(r"\bsteps? \d", work_step)
     assert app.split("## The hand-off", 1)[1].strip().startswith("After the last step that applies, post exactly `" + HANDOFF + "`")
     assert "follow skill `google-setup`" in steps
     assert "no setup task list" in app
-    assert "Read nothing until a yes" in steps
+    assert "agent-import.md" in steps
+
+
+def _step(number: int) -> str:
+    steps = FIRST_RUN_APP.read_text(encoding="utf-8").split("## The steps, in this order", 1)[1]
+    return re.split(rf"^{number}\. \*\*", steps, maxsplit=1, flags=re.MULTILINE)[1].split(f"\n{number + 1}. **", 1)[0]
+
+
+def test_where_your_work_lives_is_skipped_once_two_apps_are_connected_counting_the_import():
+    work = _step(3)
+
+    assert work.startswith("Where your work lives,** skipped when two or more apps are already connected")
+    assert "counting what the import brought over" in work
+    assert "`GET /api/mcp/servers`" in work
+
+
+def test_where_your_work_lives_never_ends_at_i_cant_and_hands_the_rest_to_helpers():
+    work = _step(3)
+
+    assert "I'll connect the quick ones now, and a helper looks into the rest in the background" in work
+    assert "Connect up to two quick apps now" in work
+    assert "`delegate_task`" in work and "`plan_node_id` `none`" in work
+    assert "never a persistent agent" in work
+    assert "`bound_model` `source` is `omlx`), have one helper at a time" in work
+    assert "up to three at once" in work
+    assert "A helper is looking into [apps]. I'll tell you here what it finds." in work
+    assert "Nothing connects to [app] yet. I'll build a connection after setup and offer it to the shared library, if you OK that." in work
+    assert "two questions are never open at once" in work
+    assert "I can't" not in work.replace('Never end on "I can\'t".', "")
+    # The helper has no corsia_api, so the CORSIA agent adds the app it returns.
+    assert "it has no `corsia_api`" in work
+
+
+def test_without_search_where_your_work_lives_connects_only_what_needs_none():
+    work = _step(3)
+
+    assert "already in Connected apps or its maker lists an MCP server or official CLI you can name without a search" in work
+    assert "`It's on my list.`" in work
+
+
+def test_the_import_is_one_plain_list_with_no_checklist_and_no_ai():
+    import_text = (FIRST_RUN_APP.parent / "agent-import.md").read_text(encoding="utf-8")
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+
+    assert "[x]" not in import_text and "unticked" not in import_text and "untick" not in import_text.replace("never ask the person to tick or untick", "")
+    assert "**Your connected apps**" in import_text and "**Your skills**" in import_text
+    assert "Bring over what your other tools know" in import_text
+    for text in (app, import_text, (FIRST_RUN_APP.parent / "web-search.md").read_text(encoding="utf-8")):
+        assert not re.search(r"\bAI\b", text)
+    # No second ask for the apps: step 2 is the whole import.
+    assert "May I look at [its | their] settings" not in app
+
+
+def test_the_subscription_step_installs_in_the_background_then_signs_in():
+    step = _step(1)
+
+    assert "go straight on to step 2 without waiting for it" in step
+    assert "post the sign-in line below right after they answer the question in front of you" in step
+
+
+def test_github_asks_for_an_account_first_and_answers_the_bot_account_question():
+    step = _step(7)
+
+    assert step.index("Do you have a GitHub account?") < step.index("Should your agents use your account, or have their own?")
+    for reason in ("get the improvements other people make to the skills you use;",
+                   "share an improvement they made to a skill, only when you approve it;"):
+        assert reason in step
+    assert "Their own is allowed. GitHub's terms let each person run one free machine account besides their own." in step
+    assert "Your agents can have their own account. You'd accept GitHub's terms, type its password and enter a code from your email. I never see them." in step
+
+
+def test_the_connect_skill_holds_the_build_later_and_macos_permission_playbooks():
+    skill = (BOOTSTRAP_SKILL.parents[1] / "connect-tools/SKILL.md").read_text(encoding="utf-8")
+
+    assert "## No connection exists yet" in skill
+    assert "offer to share it to the shared library, and only after they say yes" in skill
+    assert "## A macOS permission only the person can grant" in skill
+    assert "System Settings › Privacy & Security › Full Disk Access" in skill
+    assert "every connected app CORSIA runs" in skill
+
+
+def test_about_you_loads_the_look_up_reference_and_keeps_the_profile_rule():
+    step = _step(5)
+
+    assert "Follow `references/look-up-the-person.md`" in step
+    assert "Write only what they said or didn't correct into the workspace `USER.md`" in step
+    assert "their place also sets their time zone" in step
+    assert "Keep only a result that matches their name" not in step
+
+
+def test_the_look_up_reference_carries_the_rules_outcomes_questions_and_examples():
+    ref = (FIRST_RUN_APP.parent / "look-up-the-person.md").read_text(encoding="utf-8")
+
+    for line in (
+        "What's your full name? I'll use it to look you up.",
+        "Looking you up.",
+        "Here's what I found. Tell me if any of it is wrong.",
+        "You keep a low profile online. Good for your privacy, less for me to go on. Here's the little I found, and it may not be you:",
+        "I couldn't search just now.",
+        "`None of these`",
+        "What should I call you, what do you do, and where are you based?",
+        "What are you working toward right now, at work or outside it?",
+        "When I do something for you, should I check with you first or just do it and tell you after? And do you like answers short, or with the reasoning?",
+        "Which city are you in?",
+    ):
+        assert line in ref, line
+    for rule in ("**Group by person.**", "**A group is the person**", "**Narrow before asking.**", "**Never mix.**",
+                 "**Newest wins.**", "Stop at 6 `web_search` calls and 6 `web_fetch` calls", "Read each result's page with `web_fetch`",
+                 "copied from the search result", "people-search or data-broker", "never `Portland or Denver?`",
+                 "Always ask questions 2 and 3, even when the search found plenty", "Never put the full address in a query"):
+        assert rule in ref, rule
+    assert "**That's not me.**" not in ref and '**"That\'s not me."**' in ref
+    examples = ref.split("## Worked examples", 1)[1]
+    assert re.findall(r"^\*\*(\d)\. ([^.]+)\.\*\*", examples, flags=re.MULTILINE) == [
+        ("1", "One clear match"), ("2", "Two people with the same name"), ("3", "A famous namesake"), ("4", "Nothing found")]
+    assert len(ref.split()) < 2000
+    assert not re.search(r"\bAI\b", ref)
 
 
 def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
@@ -287,7 +405,7 @@ def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
 
 def test_app_path_email_step_records_the_email_app_where_the_microsoft_fact_reads_it():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
-    email = app.split("5. **Email and calendar.**", 1)[1].split("6. **Where your work lives", 1)[0]
+    email = app.split("6. **Email and calendar.**", 1)[1].split("7. **GitHub", 1)[0]
     for branch in ("**Gmail or Google:**", "**Outlook:**", "**Both:** Gmail first", "**Something else:**"):
         assert branch in email
     assert "`context/50-USER-PROFILE.md`, `- **Email app:** <Outlook | Other> — <what they said>`" in email

@@ -25,10 +25,23 @@ SESSIONS = ("Claude Code", "Codex")
 GITHUB_OPTIONS = [
     {"id": "A", "label": "Their own account",
      "detail": "I open the browser and fill in the sign-up. You type the password and any code."},
-    {"id": "B", "label": "Post as me",
-     "detail": "I sign the GitHub CLI in to your account. You approve that sign-in in your browser."},
+    {"id": "B", "label": "Use mine",
+     "detail": ("Agents use the GitHub sign-in already on this computer, or I sign the GitHub CLI in "
+                "to your account and you approve that sign-in in your browser.")},
     {"id": "C", "label": "Not now", "detail": "Ask me any time."},
 ]
+GITHUB_NO_ACCOUNT_OPTIONS = [
+    {"id": "A", "label": "Make their account",
+     "detail": "I open the browser and fill in the sign-up. You type the password and any code."},
+    {"id": "B", "label": "Not now", "detail": "Ask me any time."},
+]
+GITHUB_REASONS = (
+    "With an account on GitHub, a free website where people share code and where CORSIA's "
+    "community shares skills, your agents can get the improvements other people make to the "
+    "skills you use, share an improvement they made to a skill, only when you approve it, and "
+    "build what you need when it doesn't exist yet, like a connection to an app or a fix to "
+    "CORSIA, and keep that work there."
+)
 
 
 def _github(sign_up_with: str) -> dict:
@@ -36,17 +49,15 @@ def _github(sign_up_with: str) -> dict:
         "task_title": GITHUB_TASK,
         "title": "How should your agents post on GitHub?",
         "context": (
-            "Agents use GitHub to file issues and feature requests, comment, and send pull "
-            "requests on your repositories, and report to CORSIA when it falls short. They can "
-            "post as you, using your GitHub sign-in, or from their own account, so their posts "
-            "stay separate from yours. Reports to CORSIA are text only and go only with your OK, "
-            "from whichever you choose; until GitHub is set up, they keep the write-up and send "
-            "it once it is. GitHub allows each person one extra machine account for this."
+            GITHUB_REASONS + " Their own account is allowed: GitHub's terms let each person run "
+            "one free machine account besides their own. You accept GitHub's terms for it, and "
+            "you're responsible for what it does. It keeps their posts apart from yours. Reports "
+            "to CORSIA are text only and go only with your OK, from whichever you choose."
         ),
         "tradeoff": (
-            "Posting as you takes one sign-in, and everything agents post shows your name. Their "
-            "own account takes a few minutes in a browser you can watch: I fill in the sign-up "
-            f"with {sign_up_with}, and you type the password and any verification code."
+            "Their own account takes a few minutes in a browser you can watch: I fill in the "
+            f"sign-up with {sign_up_with}, and you type the password and any verification code. "
+            "Using yours takes one sign-in, and everything agents post shows your name."
         ),
         "recommendation": "A",
         "rationale": "You can always tell what you wrote from what an agent wrote.",
@@ -55,7 +66,27 @@ def _github(sign_up_with: str) -> dict:
     }
 
 
+def _github_no_account(sign_up_with: str) -> dict:
+    return {
+        "task_title": GITHUB_TASK,
+        "title": "Make an account for your agents on GitHub?",
+        "context": (
+            GITHUB_REASONS + " Your agents can have their own account. You'd accept GitHub's "
+            "terms, type its password and enter a code from your email. I never see them."
+        ),
+        "tradeoff": (
+            "It takes a few minutes in a browser you can watch: I fill in the sign-up with "
+            f"{sign_up_with}, and you type the password and any verification code."
+        ),
+        "recommendation": "A",
+        "rationale": "You can always tell what you wrote from what an agent wrote.",
+        "options": GITHUB_NO_ACCOUNT_OPTIONS,
+        "other_enabled": True,
+    }
+
+
 EXPECTED_GITHUB = _github("you+agents@gmail.com")
+EXPECTED_GITHUB_NO_ACCOUNT = _github_no_account("you+agents@gmail.com")
 EXPECTED_GITHUB_NO_ADDRESS = _github("the address you give me in chat")
 EXPECTED_FIND_PROJECTS = {
     "task_title": PROJECT_TASK,
@@ -93,7 +124,7 @@ def _facts(web_missing: bool, *, self_check: bool = True,
 def test_exact_decisions_for_every_presence_combination(sessions, web_missing):
     plan = setup.build_plan(_facts(web_missing, sessions=sessions))
 
-    expected = [EXPECTED_GITHUB, *([EXPECTED_FIND_PROJECTS] if sessions else [])]
+    expected = [EXPECTED_GITHUB, EXPECTED_GITHUB_NO_ACCOUNT, *([EXPECTED_FIND_PROJECTS] if sessions else [])]
     assert plan["setup_decisions"] == expected
 
 
@@ -115,7 +146,7 @@ def test_every_payload_passes_plan_decision_validation(sessions, web_missing):
 def test_each_decision_is_raised_from_its_own_task_in_plan_order():
     decisions = setup.build_decisions(_facts(True, sessions=True))
 
-    assert [d["task_title"] for d in decisions] == [GITHUB_TASK, PROJECT_TASK]
+    assert [d["task_title"] for d in decisions] == [GITHUB_TASK, GITHUB_TASK, PROJECT_TASK]
     assert all("pick" not in d for d in decisions)
 
 
@@ -140,6 +171,16 @@ def test_github_never_invents_an_address_for_a_non_gmail_email(email):
 
     assert github == EXPECTED_GITHUB_NO_ADDRESS
     assert "@" not in github["tradeoff"]
+
+
+def test_both_github_decisions_give_the_reasons_and_never_say_ai():
+    both = [d for d in setup.build_decisions(_facts(True)) if d["task_title"] == GITHUB_TASK]
+
+    assert [d["title"] for d in both] == [
+        "How should your agents post on GitHub?", "Make an account for your agents on GitHub?"]
+    assert all(GITHUB_REASONS in d["context"] for d in both)
+    assert "Their own account is allowed" in both[0]["context"]  # the bot-account answer
+    assert "AI" not in " ".join(str(v) for d in both for v in d.values())
 
 
 

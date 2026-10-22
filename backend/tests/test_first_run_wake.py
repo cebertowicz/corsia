@@ -243,6 +243,7 @@ class TestAppPath:
             "first_run_path": "app", "harness_ready": ["codex"], "sources_missing": {},
             "agents_found": ["hermes"], "local_download": {"state": "stopped"},
             "tool_attempts": {"claude_code": {"attempt": "none"}, "codex": {"attempt": "none"}},
+            "pays_for": [],
             "bound_model": None,
             "web_search_ready": False, "github_ready": False, "setup": {"setup_decisions": []},
             "user_profile": {"name": "Pat", "work": None, "place": None, "check_first": None, "answer_style": None},
@@ -288,6 +289,7 @@ class TestAppPath:
         monkeypatch.setattr("llm.local_setup.setup_status", lambda: status)
         monkeypatch.setattr(first_run_wake, "_app_setup_handoff", lambda: {
             "tools": {"claude-code": {"attempt": "none"}, "codex": {"attempt": "install_failed", "cause": "download_unavailable"}},
+            "subscriptions": {"claude-code": False, "codex": True},
         })
         monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
         monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
@@ -302,6 +304,7 @@ class TestAppPath:
             "claude_code": {"attempt": "none"},
             "codex": {"attempt": "install_failed", "cause": "download_unavailable"},
         }
+        assert facts["pays_for"] == ["codex"]
         assert facts["bound_model"] is None
         assert facts["agents_found"] == ["openclaw"]
         assert set(facts) == first_run_wake.APP_FACT_KEYS
@@ -405,7 +408,7 @@ class TestAppPath:
     @pytest.mark.parametrize("failed, expected", [
         ("model_sources", ("harness_ready", "sources_missing", "github_ready")),
         ("local_download", ("local_download",)),
-        ("setup_handoff", ("tool_attempts",)),
+        ("setup_handoff", ("tool_attempts", "pays_for")),
         ("web_search_ready", ("web_search_ready",)),
         ("setup", ("setup",)),
         ("user_profile", ("user_profile",)),
@@ -442,8 +445,7 @@ class TestAppPath:
         facts = await first_run_wake.setup_facts("codex/gpt-5.6-terra", "app")
 
         for name in expected:
-            unavailable_name = "tool_attempts" if failed == "setup_handoff" else name
-            assert facts[name] == {"unavailable": first_run_wake.UNAVAILABLE_READS[unavailable_name]}
+            assert facts[name] == {"unavailable": first_run_wake.UNAVAILABLE_READS[name]}
 
     async def test_app_setup_decisions_omit_projects_consent_and_address(self, monkeypatch):
         from onboarding import first_run_wake, setup_decisions
@@ -453,7 +455,8 @@ class TestAppPath:
 
         decisions = (await first_run_wake._app_setup())["setup_decisions"]
 
-        assert len(decisions) == 1  # GitHub only; no projects consent
+        assert len(decisions) == 2  # both GitHub cards; no projects consent
+        assert {d["task_title"] for d in decisions} == {"Set up GitHub"}
         assert "person@gmail.com" not in json.dumps(decisions)
         assert "Claude Code" not in json.dumps(decisions)
 
@@ -468,8 +471,8 @@ class TestAppPath:
 
         assert "if a local model is connected, make no offer" in local_offer
         assert "download lands in the person's oMLX" not in local_offer
-        assert "When it is empty, leave out the first sentence." in reference
-        assert "if you have a [Claude | ChatGPT] subscription" in reference
+        assert "a tool `pays_for` doesn't list is never offered or mentioned" in reference
+        assert "You said you pay for [Claude | ChatGPT]." in reference
         assert "Setup couldn't install [Claude Code | Codex]: [what went wrong, in plain words]." in reference
         assert "Sign in to [Claude Code | Codex] in Settings › Providers, then tell me when it's done." in reference
         assert "If it shows the source is ready, carry on." in reference
@@ -478,7 +481,7 @@ class TestAppPath:
         assert "Post the news first, as its own message, word for word as below; it never asks anything." in reference
         assert "when your question is still unanswered, end your turn: that question stays open" in reference
         assert "never track a step itself in the plan (no `start`, no `mark_done`" in reference
-        assert "the tasks step 6 makes are follow-up work, so do make them" in reference
+        assert "the tasks steps 3 and 6 make are follow-up work, so do make them" in reference
         assert "already shows that same outcome, say nothing" in reference
         assert "Done for now. Anything I skipped, ask me any time and I'll set it up." in reference
 
