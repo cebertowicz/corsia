@@ -145,7 +145,7 @@ class TestSweep:
             return True
 
         result = await pl.sweep_plan_wakes(
-            _FUTURE, db=db, is_idle=lambda _tid: True, deliver=deliver
+            _FUTURE, db=db, deliver=deliver
         )
 
         assert result["woken"] == [thread_id]
@@ -172,7 +172,6 @@ class TestSweep:
         result = await pl.sweep_plan_wakes(
             _FUTURE,
             db=db,
-            is_idle=lambda _tid: True,
             deliver=lambda *args: calls.append(args),
         )
 
@@ -190,7 +189,6 @@ class TestSweep:
         result = await pl.sweep_plan_wakes(
             _FUTURE,
             db=db,
-            is_idle=lambda _tid: True,
             deliver=lambda *args: calls.append(args),
         )
 
@@ -198,47 +196,55 @@ class TestSweep:
         assert len(calls) == 1
 
     @pytest.mark.asyncio
-    async def test_busy_thread_rearms_without_delivery(self, isolated_db):
+    async def test_busy_thread_is_woken_without_waiting_for_its_turn(self, isolated_db):
         thread_id = mk_session("structured-busy")
         db, _plan_row, _nodes, _wake = _arm(thread_id)
-        calls = []
-
-        result = await pl.sweep_plan_wakes(
-            _FUTURE,
-            db=db,
-            is_idle=lambda _tid: False,
-            deliver=lambda *args: calls.append(args),
-        )
-
-        assert result["skipped"] == [thread_id]
-        assert calls == []
-        assert _armed(thread_id, db)["status"] == "armed"
-        assert _armed(thread_id, db)["deadline"] > _PAST
-
-    @pytest.mark.asyncio
-    async def test_unchanged_signal_stalls_at_bounded_cycle(self, isolated_db):
-        thread_id = mk_session("structured-stall")
-        db, _plan_row, _nodes, _wake = _arm(thread_id)
         db.execute(
-            "UPDATE plan_liveness_wakes SET cycle=? WHERE thread_id=?",
-            (pl.PLAN_WAKE_MAX_CYCLES - 1, thread_id),
+            "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch) "
+            "VALUES ('turn-busy',?,0,'native/model','running','2000-01-01T00:00:00','boot-1')",
+            (thread_id,),
         )
         db.commit()
         calls = []
 
-        result = await pl.sweep_plan_wakes(
-            _FUTURE,
-            db=db,
-            is_idle=lambda _tid: True,
-            deliver=lambda *args: calls.append(args),
-        )
+        async def deliver(*args):
+            calls.append(args)
+            return True
 
-        assert result["stalled"] == [thread_id]
-        assert calls == []
-        assert _armed(thread_id, db)["status"] == "stalled"
-        # An unrelated Turn over the same unchanged state never re-arms the stall.
-        assert pl.on_turn_complete(thread_id, db=db) is None
-        assert _armed(thread_id, db)["status"] == "stalled"
+        result = await pl.sweep_plan_wakes(_FUTURE, db=db, deliver=deliver)
+
+        assert result["woken"] == [thread_id]
+        assert len(calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_no_progress_never_stops_the_wake_and_each_gap_doubles(
+        self, isolated_db, monkeypatch,
+    ):
+        thread_id = mk_session("structured-no-progress")
+        db, _plan_row, _nodes, _wake = _arm(thread_id)
+        clock = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
+        monkeypatch.setattr(pl, "_now", lambda: clock[0])
+        db.execute(
+            "UPDATE plan_liveness_wakes SET deadline=? WHERE thread_id=?",
+            (clock[0].isoformat(), thread_id),
+        )
+        db.commit()
+        calls = []
+
+        async def deliver(*args):
+            calls.append(args)
+            return True
+
+        for cycle in range(1, 8):
+            clock[0] = datetime.fromisoformat(_armed(thread_id, db)["deadline"])
+            result = await pl.sweep_plan_wakes(clock[0].isoformat(), db=db, deliver=deliver)
+            row = _armed(thread_id, db)
+            assert result["woken"] == [thread_id]
+            assert (row["status"], row["cycle"]) == ("armed", cycle)
+            gap = datetime.fromisoformat(row["deadline"]) - clock[0]
+            assert gap == timedelta(seconds=pl.PLAN_WAKE_IDLE_SECONDS * pl.PLAN_WAKE_BACKOFF**cycle)
+
+        assert len(calls) == 7
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("failure", ["exception", "false"])
@@ -254,7 +260,7 @@ class TestSweep:
             return False
 
         result = await pl.sweep_plan_wakes(
-            _FUTURE, db=db, is_idle=lambda _tid: True, deliver=deliver
+            _FUTURE, db=db, deliver=deliver
         )
         current = _armed(thread_id, db)
 
@@ -280,13 +286,13 @@ class TestSweep:
 
         first = asyncio.create_task(
             pl.sweep_plan_wakes(
-                _FUTURE, db=db, is_idle=lambda _tid: True, deliver=deliver
+                _FUTURE, db=db, deliver=deliver
             )
         )
         await entered.wait()
         second = asyncio.create_task(
             pl.sweep_plan_wakes(
-                _FUTURE, db=db, is_idle=lambda _tid: True, deliver=deliver
+                _FUTURE, db=db, deliver=deliver
             )
         )
         # The sweep awaits its system phase before collecting, so let the second

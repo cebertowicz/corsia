@@ -153,33 +153,6 @@ def record_failed_accepted_delivery(
     return corrected
 
 
-def defer(
-    trigger_id: str,
-    *,
-    reason: str,
-    next_attempt_at: str,
-    db,
-    now: str,
-    count_deferral: bool = True,
-) -> bool:
-    """Return one unclaimed trigger to a bounded deferred state.
-
-    ``count_deferral=False`` retries without spending the deferral budget; the
-    runner uses it when the owner is busy, which is not a capacity limit.
-    """
-
-    if reason not in REASONS:
-        raise ValueError(f"invalid continuation reason: {reason}")
-    cursor = db.execute(
-        """UPDATE continuation_triggers
-           SET state='deferred', reason=?, deferrals=deferrals+?,
-               next_attempt_at=?, updated_at=?
-           WHERE id=? AND state IN ('pending','deferred')""",
-        (reason, int(count_deferral), next_attempt_at, now, trigger_id),
-    )
-    return cursor.rowcount == 1
-
-
 def cancel_for_plan(
     plan_id: str,
     owner_thread_id: str,

@@ -165,7 +165,6 @@ async def _sweep(db, sources):
         NOW,
         db=db,
         sources=sources,
-        is_idle=lambda _thread_id: False,
         deliver=deliver,
     )
     await asyncio.sleep(0)

@@ -113,7 +113,7 @@ class WatchExpirySource:
     ) -> tuple[str, str, dict] | None:
         """Expire once, append a node audit, and re-arm T0 after settlement."""
 
-        if trigger.subject_id is None or outcome == "deferred":
+        if trigger.subject_id is None:
             return None
         watch = watches.get_watch(trigger.subject_id, db=db)
         expired = watches.expire_watch(trigger.subject_id, db=db)
