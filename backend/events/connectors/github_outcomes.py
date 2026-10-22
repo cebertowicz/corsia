@@ -155,14 +155,14 @@ def _pr_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
         return [_pr_draft(key, subject, common, f"closed:{closed}", "github.pr.closed", closed)]
     merged_at = shape.timestamp(shape.required(pr, "merged_at"))
     body = shape.body(pr.get("body"))
-    minutes_since_opened = measurements.minutes_between(pr.get("created_at"), pr.get("merged_at"))
+    minutes_since_opened = measurements.minutes_between(pr.get("created_at"), merged_at)
     revert = measurements.reverted_sha(pr.get("title"), body)
     revert_pr = measurements.reverted_pr_number(pr.get("title"), body, repo)
     measurement_attrs: dict[str, Any] = {}
     if minutes_since_opened is not None:
         measurement_attrs["minutes_since_opened"] = minutes_since_opened
     if revert is not None:
-        measurement_attrs["reverts"] = revert
+        measurement_attrs["reverts_sha"] = revert
     if revert_pr is not None:
         measurement_attrs["reverts_pr"] = revert_pr
     drafts = [_pr_draft(

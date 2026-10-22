@@ -156,7 +156,7 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     "github.pr.merged": {
         **_PR_ATTRS, **_PR_DECLARATION_ATTRS,
         "head_ref": id_attr(), "merge_sha": id_attr(), "minutes_since_opened": count_attr(),
-        "reverts": id_attr(), "reverts_pr": id_attr(),
+        "reverts_sha": id_attr(), "reverts_pr": id_attr(),
     },
     "github.pr.introduced_by": {
         "repo": id_attr(), "pr": id_attr(), "introduced_by_pr": id_attr(),

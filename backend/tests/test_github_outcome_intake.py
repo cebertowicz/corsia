@@ -124,6 +124,12 @@ def test_merged_pr_measurement_attributes_are_optional_and_exact():
     primary = drafts_by_name(map_github_outcomes("pull_request", payload))["github.pr.merged"][0]
     assert "minutes_since_opened" not in primary.attributes
 
+    pr["created_at"] = "not-a-timestamp"
+    from events.connectors.github_outcome_input import PayloadRefusal
+
+    with pytest.raises(PayloadRefusal):
+        map_github_outcomes("pull_request", payload)
+
     pr["created_at"] = "2026-09-28T13:00:00Z"
     primary = drafts_by_name(map_github_outcomes("pull_request", payload))["github.pr.merged"][0]
     assert "minutes_since_opened" not in primary.attributes
@@ -142,11 +148,13 @@ def test_merged_pr_revert_sha_requires_local_git_revert_template(title, body, ex
     payload = copy.deepcopy(fixture("pr_introduced_by_merged")["payload"])
     payload["pull_request"].update(title=title, body=body)
     primary = drafts_by_name(map_github_outcomes("pull_request", payload))["github.pr.merged"][0]
-    assert primary.attributes.get("reverts") == expected
+    assert primary.attributes.get("reverts_sha") == expected
 
 
 @pytest.mark.parametrize(("title", "body", "expected"), [
     ('Revert "change"', f"Reverts {REPO.upper()}#42", "42"),
+    ('Revert "change"', f"Reverts {REPO}#0", None),
+    ('Revert "change"', f"Reverts {REPO}#042", "42"),
     ('Revert "change"', "Reverts other/repo#42", None),
     ("Normal change", f"Reverts {REPO}#42", None),
 ])

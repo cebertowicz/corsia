@@ -14,11 +14,10 @@ _REVERTED_PR = re.compile(r"Reverts ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([0-9]+)\b
 
 def minutes_between(start: Any, end: Any) -> int | None:
     """Whole minutes between optional GitHub timestamps, or no fact."""
-    try:
-        start_at = datetime.fromisoformat(shape.timestamp(start).replace("Z", "+00:00"))
-        end_at = datetime.fromisoformat(shape.timestamp(end).replace("Z", "+00:00"))
-    except shape.PayloadRefusal:
+    if start is None or end is None:
         return None
+    start_at = datetime.fromisoformat(shape.timestamp(start).replace("Z", "+00:00"))
+    end_at = datetime.fromisoformat(shape.timestamp(end).replace("Z", "+00:00"))
     minutes = int((end_at - start_at).total_seconds() // 60)
     return minutes if minutes >= 0 else None
 
@@ -38,4 +37,7 @@ def reverted_pr_number(title: Any, body: str, repo: str) -> str | None:
     match = _REVERTED_PR.search(body)
     if match is None or match.group(1).lower() != repo.lower():
         return None
-    return match.group(2)
+    try:
+        return str(shape.reference_number(match.group(2)))
+    except shape.PayloadRefusal:
+        return None
