@@ -563,6 +563,21 @@ def test_terms_only_in_task_intent_or_its_quoted_words_find_prior_words_on_start
     assert "rounding matters" in "\n".join(result["prior_words"])
 
 
+@pytest.mark.parametrize("field", ["intent", "quote"])
+def test_a_task_inheriting_its_intent_reads_the_canonical_intent_and_words_on_start(db, field):
+    from memory.node_start_recall import attach_to_result
+    from tests.plan_execution_helpers import add_task
+
+    canonical = _intent_task(db, **{field: "Include currency conversion rounding"})
+    follow_up = add_task(db, canonical.plan_id, "Prepare ledger export", intent_node_id=canonical.id)
+    db.commit()
+    result = {"node": {"id": follow_up.id}}
+
+    attach_to_result(db, "start", result, caller_thread_id="caller")
+
+    assert "rounding matters" in "\n".join(result["prior_words"])
+
+
 def test_a_task_without_intent_terms_finds_nothing_on_start(db):
     from memory.node_start_recall import attach_to_result
 
