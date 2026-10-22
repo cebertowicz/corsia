@@ -342,10 +342,16 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
             refused = _store(conn, event_type, facts, owner, event_id, stamps)
             if refused is not None:
                 return refused
+        target_filter = None
+        # Only the emit tool knows its sender; a CLI emit names a session, which a hook or script may also claim.
+        if origin == "agent":
+            target_filter = lambda target, _db: (
+                rules.OWN_EMIT if target.thread == producer else None)
         deliveries, plan = deliver_envelope_sync(
             envelope, resolved.declaration,
             (lambda db: _registered_owner_targets(owner, envelope, db)) if owner
             else (lambda db: resolve_targets(envelope, db=db)),
+            target_filter=target_filter,
             repository_projects=projects, db=conn,
         )
         matched = _rules_matched(plan)
