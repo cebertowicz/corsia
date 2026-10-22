@@ -30,15 +30,15 @@ What each heading gets:
 
 A heading with nothing to put under it gets no suggestion.
 
-**On a cloud model** (`bound_model` `source` is not `omlx`): start one helper per heading that has material, all at once. Use `delegate_task` with `model` the one you run on and `plan_node_id` `none`, so the helpers do not take over your task. Each brief is self-contained: the document's path, its one heading, only that heading's material above, the suggestion form above, and that it suggests inside its own heading only, adds nothing the person didn't say and the lookup and import didn't show, runs no web search and asks the person nothing. A helper with nothing to add writes nothing. A helper that fails or returns nothing: write that heading's suggestion yourself.
+**On a cloud model** (`bound_model` `source` is not `omlx`): start one helper per heading that has material, all at once. First add one `About you: <heading>` task to your plan per helper, then call `delegate_task` for each with `model` the one you run on and that task's id as `plan_node_id`. If `delegate_task` refuses the model, keep that task as your own: write that heading yourself, then `mark_done` the task. Each brief is self-contained: the document's path, its one heading, only that heading's material above, the suggestion form above, and that it suggests inside its own heading only, adds nothing the person didn't say and the lookup and import didn't show, runs no web search and asks the person nothing. A helper with nothing to add writes nothing. A helper that returns puts its `About you: <heading>` task up for your review: `accept` it once that heading's suggestion is in. A helper that fails or returns nothing leaves its task active: write that heading's suggestion yourself, then `mark_done` the task.
 
 **On the local model** (`bound_model` `source` is `omlx`): start no helper. Write the suggestions yourself, one heading at a time.
 
 ## 3. Ask for the review, once
 
-When every suggestion is in, add the task `Review your About you doc` to your plan and hold it on the person: `plan_update` `block_node` with `owner_kind` `user`, `reason_key` `review_about_you`, `ask_artifact_id` the document's artifact id (`artifact_resolve` on `shared/about-you.md`) and `reason` `Change anything that's wrong and reject any suggestion that isn't right, then press Approve. It accepts the rest for you.` That ask is what puts Approve in the document; without it the person sees no button. Then post once `I put what I know in your About you doc. Change anything that's wrong and reject any suggestion that isn't right, then press Approve. It accepts the rest for you.`
+When every `About you: <heading>` task is settled and every suggestion is in, add the task `Review your About you doc` to your plan and hold it on the person: `plan_update` `block_node` with `owner_kind` `user`, `reason_key` `review_about_you`, `ask_artifact_id` the document's artifact id (`artifact_resolve` on `shared/about-you.md`) and `reason` `Change anything that's wrong and reject any suggestion that isn't right, then press Approve. It accepts the rest for you.` That ask is what puts Approve in the document; without it the person sees no button. Then post once `I put what I know in your About you doc. Change anything that's wrong and reject any suggestion that isn't right, then press Approve. It accepts the rest for you.`
 
-- When the person's edit leaves a suggestion with nothing to attach to, suggest that line again yourself on the text now in the doc. Never wait on a helper that is still running.
+- Whenever you read the document (on Approve in section 4, or on the person's reply), suggest again yourself, on the text now in the doc, any suggestion that can no longer apply to it. Never wait on a helper that is still running.
 - A comment from the person on a line: answer with a suggested change to that line.
 - "Not now", or they carry on with something else: close that task with the reason that they chose not now, skip to section 5 and write the profile from the chat answers.
 
@@ -48,4 +48,4 @@ First, when any suggestion is still open: accept nothing, remove nothing and wri
 
 ## 5. Write the profile
 
-From the document's final text (or, after "Not now" or a no above, from their chat answers), write what `references/look-up-the-person.md` sections E and F name, in the formats they give: `USER.md` for who they are, and the lines in `context/50-USER-PROFILE.md` for how they like to work. Write what the text says and nothing more.
+From the document's final text (or, after "Not now" or a no above, from their chat answers), write what `references/look-up-the-person.md` sections E and F name, in the formats they give: `USER.md` for who they are (work, place and background), and the lines in `context/50-USER-PROFILE.md` for their time zone, the name they go by and how they like to work. Write what the text says and nothing more.
