@@ -1,4 +1,4 @@
-"""Schema 133 -> 134: the agent-written rule table and its outcome record, nothing seeded."""
+"""Schema 135 -> 136: the agent-written rule table and its outcome record, nothing seeded."""
 from __future__ import annotations
 
 import sqlite3
@@ -8,7 +8,7 @@ import pytest
 from infra.database import initialize_schema
 from infra.database_migrations import migrate_to_current
 from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
-from infra.migration_133_to_134_event_rules import migrate_133_to_134
+from infra.migration_135_to_136_event_rules import migrate_135_to_136
 from infra.schema import SCHEMA_VERSION
 
 _TABLES = ("event_rules", "event_route_decisions")
@@ -29,7 +29,7 @@ def _dev_133() -> sqlite3.Connection:
     db = _fresh()
     for table in _TABLES:
         db.execute(f"DROP TABLE {table}")
-    db.execute("PRAGMA user_version=133")
+    db.execute("PRAGMA user_version=135")
     db.commit()
     return db
 
@@ -38,7 +38,7 @@ def test_upgrade_from_133_matches_a_fresh_install_and_seeds_nothing(tmp_path):
     fresh = _fresh()
     upgraded = _dev_133()
     result = migrate_to_current(upgraded, SCHEMA_VERSION)
-    assert (result.migrated, result.from_version, result.to_version) == (True, 133, 134)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 135, 136)
     assert [tuple(r) for r in upgraded.execute(_OBJECTS)] == [tuple(r) for r in fresh.execute(_OBJECTS)]
     for table in _TABLES:
         assert upgraded.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -47,8 +47,8 @@ def test_upgrade_from_133_matches_a_fresh_install_and_seeds_nothing(tmp_path):
 
 def test_the_migration_is_guarded_and_repeatable():
     db = sqlite3.connect(":memory:")
-    migrate_133_to_134(db)
-    migrate_133_to_134(db)
+    migrate_135_to_136(db)
+    migrate_135_to_136(db)
     plain = sqlite3.connect(":memory:")
     plain.executescript(EVENT_RULE_SCHEMA_SQL)
     assert db.execute(_OBJECTS).fetchall() == plain.execute(_OBJECTS).fetchall()

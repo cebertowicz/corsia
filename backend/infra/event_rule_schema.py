@@ -1,6 +1,6 @@
 """Agent-written event rules and the record of what each one did.
 
-Shared by fresh installs and migration 134. ``event_rules`` holds only rules an
+Shared by fresh installs and migration 136. ``event_rules`` holds only rules an
 agent wrote through the ``event_rules`` tool: no row is seeded, and today's
 routing stays in code. ``event_route_decisions`` is the one outcome record for
 those rules; the tool's list, explain and the hourly wake budget read it.
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 # Fixed-size checks keep a malformed test out of storage: at most four AND-ed
 # tests, each naming a field and one of the five operators. These literals copy
-# events.rules on purpose: migration 134's DDL must not move when that code does,
+# events.rules on purpose: migration 136's DDL must not move when that code does,
 # and test_event_rule_schema_matches_rules fails when the two disagree.
 _MATCH_CHECKS = " AND ".join(
     f"(json_array_length(\"match\") <= {i} OR COALESCE(("
