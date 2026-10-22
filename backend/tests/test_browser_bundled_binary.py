@@ -56,8 +56,23 @@ def test_a_bundled_script_is_still_refused(tmp_path, monkeypatch):
     bundled.write_text("#!/usr/bin/env node\n")
     bundled.chmod(0o755)
     monkeypatch.setattr(cli, "app_bundle_root", lambda: bundle)
-    with pytest.raises(cli.identity.BrowserIdentityError, match="not a script or launcher"):
+    with pytest.raises(cli.identity.BrowserIdentityError, match="not a script or launcher") as refused:
         cli.resolve_native("agent-browser")
+    assert "it is the agent-browser bundled with this app" in str(refused.value)
+
+
+def test_a_source_install_names_the_copy_on_path_when_it_rejects_it(tmp_path, monkeypatch):
+    script = tmp_path / "agent-browser"
+    script.write_text("#!/usr/bin/env node\n")
+    script.chmod(0o755)
+    monkeypatch.setattr(cli, "app_bundle_root", lambda: None)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    with pytest.raises(cli.identity.BrowserIdentityError) as refused:
+        cli.resolve_native("agent-browser")
+    assert "it is the agent-browser on PATH" in str(refused.value)
+    with pytest.raises(cli.identity.BrowserIdentityError) as wrong_version:
+        cli.admitted_version("agent-browser 0.28.1")
+    assert "it is the agent-browser on PATH" in str(wrong_version.value)
 
 
 def test_a_packaged_app_is_never_told_to_use_npm(tmp_path, monkeypatch):
@@ -70,6 +85,8 @@ def test_a_packaged_app_is_never_told_to_use_npm(tmp_path, monkeypatch):
         cli.admitted_version("agent-browser 0.28.1")
     for error in (missing.value, wrong_version.value):
         assert "npm" not in str(error) and "reinstall or update CORSIA" in str(error)
+        assert "damaged" not in str(error)  # a missing copy and a rejected one tell the same story
+    assert "it is the agent-browser bundled with this app" in str(wrong_version.value)
 
 
 @pytest.mark.asyncio

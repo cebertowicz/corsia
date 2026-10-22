@@ -47,7 +47,7 @@ def test_safehouse_subprocess_env_strips_control_and_provider_secrets(
 
     env = shell_guard.safehouse_subprocess_env("thread-1")
 
-    assert env["PATH"].endswith(":/usr/bin:/bin")  # CORSIA's tools come first; the inherited PATH stays
+    assert env["PATH"].startswith("/usr/bin:/bin:")  # the inherited PATH keeps its order; CORSIA's tools come after
     assert env["SSH_AUTH_SOCK"] == "/private/tmp/agent.sock"
     assert env["CORSIA_THREAD_ID"] == "thread-1"
     assert "SAFEHOUSE_ADD_DIRS" not in env

@@ -102,10 +102,6 @@ def _stub_process(
         "_process_creation_fingerprint",
         lambda _pid: "test-fingerprint",
     )
-    async def no_fetch(_command):
-        return None
-
-    monkeypatch.setattr(shell_module.agent_shell_tools, "prepare_for_command", no_fetch)
     monkeypatch.setattr(shell_module, "list_registered_repo_policies", lambda: [])
     monkeypatch.setattr(shell_module, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell_module, "safehouse_version_error", lambda: None)

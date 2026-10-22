@@ -29,10 +29,7 @@ _SOURCE_INSTALL_HINT = (
     "install a supported build with `npm install -g agent-browser@0.31`, "
     "run `agent-browser install`, and make sure PATH selects it"
 )
-_PACKAGED_INSTALL_HINT = (
-    "the browser tool ships inside the CORSIA app, so this copy is damaged; "
-    "reinstall or update CORSIA to restore it"
-)
+_PACKAGED_INSTALL_HINT = "reinstall or update CORSIA to restore its bundled copy"
 WAIT_TIMED_OUT = "Wait timed out; the browser session is still running. Take a snapshot to see the page."
 CHROME_INSTALL_TIMEOUT = 600.0
 # Each family's producer contract was verified against the real native build.
@@ -98,7 +95,7 @@ def admitted_version(output: str) -> str:
         ) from exc
     found = f"agent-browser {match[1]} is" if match is not None else "the installed agent-browser reports an unrecognized version and is"
     raise identity.BrowserIdentityError(
-        f"{found} not a supported native agent-browser version ({policy}); {install_hint()}"
+        f"{found} not a supported native agent-browser version ({policy}); it is {_origin()}; {install_hint()}"
     )
 
 
@@ -116,9 +113,14 @@ def install_hint() -> str:
     return _PACKAGED_INSTALL_HINT if app_bundle_root() is not None else _SOURCE_INSTALL_HINT
 
 
+def _origin() -> str:
+    """Which copy a rejection is about: a packaged app runs only its own, a source install uses PATH."""
+    return "the agent-browser bundled with this app" if app_bundle_root() is not None else "the agent-browser on PATH"
+
+
 def _not_installed() -> str:
     if app_bundle_root() is not None:
-        return "agent-browser is missing from this app; reinstall or update CORSIA to restore it"
+        return f"agent-browser is missing from this app; {install_hint()}"
     return f"agent-browser is not installed or not on PATH; {install_hint()}"
 
 
@@ -144,6 +146,7 @@ def chrome_executable() -> tuple[str | None, Literal["env", "system", "default"]
 
 def chrome_download_missing() -> bool:
     """Whether agent-browser has no Chrome for Testing in the person's home yet."""
+    # Tied to the layout of the bundled agent-browser 0.31.2; recheck it when that pin moves.
     return next(iter((Path.home() / ".agent-browser" / "browsers").glob("chrome-*")), None) is None
 
 
@@ -177,7 +180,7 @@ def resolve_native(binary: str) -> tuple[str, str]:
     except (OSError, ValueError) as exc:
         raise identity.BrowserIdentityError(
             "agent-browser must resolve to the native agent-browser executable, "
-            f"not a script or launcher; {install_hint()}"
+            f"not a script or launcher; it is {_origin()}; {install_hint()}"
         ) from exc
 
 

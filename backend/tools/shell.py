@@ -424,11 +424,11 @@ class BashTool(Tool):
                 working_dir,
                 leased=leased,
                 policies=policies,
-                thread_id=thread_id,
-                path_allowed=is_path_allowed,
+                thread_id=thread_id, path_allowed=is_path_allowed,
             )
-            if denial := cwd_denial or await agent_shell_tools.prepare_for_command(command):
-                return denial
+            if cwd_denial is not None:
+                return cwd_denial
+            await agent_shell_tools.wait_for_prefetch()
             envelope = execution_envelope_for_consumed_action(
                 consumed,
                 leased=leased, thread_id=thread_id,
@@ -467,7 +467,7 @@ class BashTool(Tool):
             if owned.timed_out:
                 return f"Error: Command timed out after {effective_timeout} seconds"
 
-            output_parts, stdout_text, stderr_text = await agent_shell_tools.noted_output(owned, foreground_output_parts(owned))
+            output_parts, stdout_text, stderr_text = foreground_output_parts(owned)
             combined_output = stdout_text + stderr_text
             if owned.returncode != 0 and not leased and is_sandbox_denial(
                 combined_output,

@@ -1,6 +1,8 @@
-"""An agent's shell finds CORSIA's Python, Node, uv and gh first, fetching a missing one on first use."""
+"""An agent's shell keeps the person's tools first and finds CORSIA's Python, Node, uv and gh after them."""
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -14,6 +16,8 @@ from tools import managed_runtime, shell as shell_module
 from tools.managed_runtime import ManagedRuntimeDownloadError
 from tools.shell_environment import safehouse_subprocess_env, shell_env_pass_names
 
+_MANAGED_COMMANDS = managed_runtime.COMMAND_RUNTIME
+
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
@@ -21,7 +25,9 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     # A fresh Mac has none of these; a runner or developer machine may, which must not change what is fetched.
     real_which = shutil.which
-    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: None if name in managed_runtime.COMMAND_RUNTIME else real_which(name, *a, **k))
+    monkeypatch.setattr(shutil, "which", lambda name, mode=os.F_OK, path=None: (
+        None if path is None and name in _MANAGED_COMMANDS else real_which(name, mode, path)))
+    monkeypatch.setattr(agent_shell_tools, "_prefetch", None, raising=False)
     return tmp_path
 
 
@@ -29,21 +35,50 @@ def _runtime_dir(kind: str, home: Path) -> str:
     return str(managed_runtime.runtime_bin_dir(kind, root=home / "Library" / "Caches" / "com.cebertowicz.corsia" / "runtimes"))
 
 
-def test_shell_path_leads_with_the_pinned_runtimes_even_before_they_are_fetched(home):
-    parts = safehouse_subprocess_env("thread-1")["PATH"].split(":")
-    assert parts[:3] == [_runtime_dir("node", home), _runtime_dir("uv", home), _runtime_dir("gh", home)]
-    assert parts[3:] == ["/usr/bin", "/bin"]
+def _pin_dirs(home: Path) -> list[str]:
+    return [_runtime_dir(kind, home) for kind in ("node", "uv", "gh")]
 
 
-def test_bundled_python_comes_first_and_a_projects_own_python_choice_is_left_alone(home, monkeypatch):
+def _bundle(home: Path, monkeypatch) -> Path:
     bundle = home / "CORSIA.app"
     python = bundle / "Contents" / "Resources" / "python" / "bin" / "python3"
     python.parent.mkdir(parents=True)
     python.write_text("")
     monkeypatch.setattr(agent_shell_tools, "app_bundle_root", lambda: bundle)
+    return python.parent
+
+
+def _executable(directory: Path, name: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    path.write_text("#!/bin/sh\n")
+    path.chmod(0o755)
+    return path
+
+
+def test_the_persons_path_keeps_its_order_and_the_pinned_runtimes_come_last(home, monkeypatch):
+    monkeypatch.setenv("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
+    parts = safehouse_subprocess_env("thread-1")["PATH"].split(":")
+    assert parts == ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", *_pin_dirs(home)]
+
+
+def test_bundled_python_sits_before_usr_bin_so_the_persons_python_wins_and_the_clt_stub_loses(home, monkeypatch):
+    python_dir = _bundle(home, monkeypatch)
+    monkeypatch.setenv("PATH", "/opt/homebrew/bin:/usr/bin:/bin")
     env = safehouse_subprocess_env("thread-1")
-    assert env["PATH"].split(":")[0] == str(python.parent)
-    assert not {"UV_PYTHON", "UV_NO_MANAGED_PYTHON"} & set(env)
+    assert env["PATH"].split(":") == ["/opt/homebrew/bin", str(python_dir), "/usr/bin", "/bin", *_pin_dirs(home)]
+    assert not {"UV_PYTHON", "UV_NO_MANAGED_PYTHON"} & set(env)  # a project's own Python choice is left alone
+    monkeypatch.setenv("PATH", "/bin")  # no /usr/bin to precede: the app's Python still lands before the pins
+    assert safehouse_subprocess_env("thread-1")["PATH"].split(":") == ["/bin", str(python_dir), *_pin_dirs(home)]
+
+
+def test_a_node_the_person_has_wins_and_on_a_bare_path_the_pin_resolves(home, monkeypatch):
+    pin = _executable(Path(_runtime_dir("node", home)), "node")
+    theirs = _executable(home / "theirs", "node")
+    monkeypatch.setenv("PATH", f"{theirs.parent}:/usr/bin:/bin")
+    assert shutil.which("node", path=safehouse_subprocess_env("thread-1")["PATH"]) == str(theirs)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    assert shutil.which("node", path=safehouse_subprocess_env("thread-1")["PATH"]) == str(pin)
 
 
 def test_package_caches_are_writable_and_never_the_runtime_folder_or_home(home):
@@ -58,58 +93,66 @@ def test_package_caches_are_writable_and_never_the_runtime_folder_or_home(home):
     assert not {env[name] for name in agent_shell_tools.ENV_NAMES} & {other[name] for name in agent_shell_tools.ENV_NAMES}
 
 
+async def _prefetched(monkeypatch, ensure) -> None:
+    monkeypatch.setattr(agent_shell_tools, "ensure_runtime", ensure)
+    agent_shell_tools.start_prefetch()
+    await agent_shell_tools.wait_for_prefetch()
+
+
+@pytest.mark.asyncio
+async def test_the_packaged_app_fetches_each_missing_runtime_once_at_startup(home, monkeypatch):
+    _bundle(home, monkeypatch)
+    fetched = []
+    await _prefetched(monkeypatch, fetched.append)
+    assert fetched == ["node", "uv", "gh"]
+    agent_shell_tools.start_prefetch()  # a second start never fetches again
+    await agent_shell_tools.wait_for_prefetch()
+    assert fetched == ["node", "uv", "gh"]
+
+
 @pytest.mark.asyncio
 async def test_a_tool_the_person_already_has_is_never_fetched(home, monkeypatch):
-    fetch = AsyncMock()
-    monkeypatch.setattr(agent_shell_tools, "ensure_runtime", lambda kind: fetch(kind))
-    monkeypatch.setattr(agent_shell_tools.shutil, "which", lambda name: "/usr/local/bin/" + name)
-    assert await agent_shell_tools.prepare_for_command("node -v && gh --version") is None
-    fetch.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("command,fetched", [
-    ("gh --version", {"gh"}),
-    ("cd app && npm install left-pad && FOO=1 npx tsc", {"node"}),
-    ("uvx ruff --version | head -1", {"uv"}),
-    ("ls; gh api user && node -v", {"gh", "node"}),
-    ("echo gh node npm; grep -r node README.md; git commit -m 'use npx'", set()),
-])
-async def test_first_use_fetches_only_the_runtimes_the_command_runs(home, monkeypatch, command, fetched):
-    ensure = []
-    monkeypatch.setattr(agent_shell_tools, "ensure_runtime", lambda kind: ensure.append(kind))
-    assert await agent_shell_tools.prepare_for_command(command) is None
-    assert set(ensure) == fetched
+    _bundle(home, monkeypatch)
+    real_which = shutil.which
+    monkeypatch.setattr(shutil, "which", lambda name, mode=os.F_OK, path=None: (
+        "/usr/local/bin/" + name if name in ("node", "npm", "npx") else real_which(name, mode, path)))
+    fetched = []
+    await _prefetched(monkeypatch, fetched.append)
+    assert fetched == ["uv", "gh"]
 
 
 @pytest.mark.asyncio
 async def test_an_installed_runtime_is_not_fetched_again(home, monkeypatch):
-    monkeypatch.setattr(agent_shell_tools, "runtime_is_installed", lambda kind: True)
-    monkeypatch.setattr(agent_shell_tools, "ensure_runtime", lambda kind: pytest.fail("fetched an installed runtime"))
-    assert await agent_shell_tools.prepare_for_command("gh --version") is None
+    _bundle(home, monkeypatch)
+    monkeypatch.setattr(agent_shell_tools, "runtime_fetch_plan", lambda command: None)
+    await _prefetched(monkeypatch, lambda kind: pytest.fail("fetched an installed runtime"))
 
 
 @pytest.mark.asyncio
-async def test_a_failed_fetch_refuses_the_command_with_the_reason(home, monkeypatch):
+async def test_a_source_run_fetches_nothing(home, monkeypatch):
+    monkeypatch.setattr(agent_shell_tools, "app_bundle_root", lambda: None)
+    await _prefetched(monkeypatch, lambda kind: pytest.fail("a source run fetched a runtime"))
+    assert agent_shell_tools.prefetch_task() is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_fetch_is_logged_once_per_runtime_and_shells_still_run(home, monkeypatch, caplog):
+    _bundle(home, monkeypatch)
+    attempts = []
+
     def fail(kind):
+        attempts.append(kind)
         raise ManagedRuntimeDownloadError("download failed: URLError")
-    monkeypatch.setattr(agent_shell_tools, "ensure_runtime", fail)
-    message = await agent_shell_tools.prepare_for_command("gh --version")
-    assert message.startswith("Error: CORSIA could not install gh") and "URLError" not in message
-    assert "internet" not in message  # the cause is not known, so none is named
+
+    with caplog.at_level(logging.WARNING, logger=agent_shell_tools.logger.name):
+        await _prefetched(monkeypatch, fail)
+        await agent_shell_tools.wait_for_prefetch()  # shells after the failure wait for nothing and never retry
+    assert attempts == ["node", "uv", "gh"]
+    assert sum("could not install" in record.getMessage() for record in caplog.records) == 3
 
 
 @pytest.mark.asyncio
-async def test_a_script_that_runs_a_missing_tool_gets_it_fetched_for_the_next_try(home, monkeypatch):
-    ensure = []
-    monkeypatch.setattr(agent_shell_tools, "ensure_runtime", lambda kind: ensure.append(kind))
-    note = await agent_shell_tools.note_after_not_found("./build.sh: line 4: npm: command not found")
-    assert ensure == ["node"] and "Run the command again" in note
-    assert await agent_shell_tools.note_after_not_found("make: git: command not found") is None
-
-
-@pytest.mark.asyncio
-async def test_bash_fetches_before_it_spawns_and_spawns_with_the_tool_path(home, monkeypatch):
+async def test_bash_waits_for_the_prefetch_before_it_spawns_and_spawns_with_the_tool_path(home, monkeypatch):
     for name, value in {
         "bind_agent_account": AsyncMock(return_value=None),
         "load_shell_repo_policies": lambda *args: ([], []),
@@ -121,19 +164,22 @@ async def test_bash_fetches_before_it_spawns_and_spawns_with_the_tool_path(home,
     }.items():
         monkeypatch.setattr(shell_module, name, value)
     monkeypatch.setattr("tools.host_access_gate.consume_current_action_permit", AsyncMock(return_value=None))
-    spawn = AsyncMock(side_effect=RuntimeError("stop"))
+    order = []
+
+    async def waited():
+        order.append("wait")
+
+    async def spawned(*args, **kwargs):
+        order.append("spawn")
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(agent_shell_tools, "wait_for_prefetch", waited)
+    spawn = AsyncMock(side_effect=spawned)
     monkeypatch.setattr(shell_module.PROCESS_OWNER, "spawn", spawn)
     context = {"_thread_id": "thread-1", "_host_access_turn_identity": TurnIdentity("turn-1", 1)}
-    tool = shell_module.BashTool(working_dir=str(home))
-
-    monkeypatch.setattr(agent_shell_tools, "prepare_for_command", AsyncMock(return_value="Error: no network"))
-    assert await tool.execute("gh --version", **context) == "Error: no network"
-    spawn.assert_not_awaited()
-
-    monkeypatch.setattr(agent_shell_tools, "prepare_for_command", AsyncMock(return_value=None))
-    await tool.execute("gh --version", **dict(context))
-    assert spawn.await_args.kwargs["env"]["PATH"].split(":")[:3] == [
-        _runtime_dir("node", home), _runtime_dir("uv", home), _runtime_dir("gh", home)]
+    await shell_module.BashTool(working_dir=str(home)).execute("gh --version", **context)
+    assert order == ["wait", "spawn"]
+    assert spawn.await_args.kwargs["env"]["PATH"].split(":")[-3:] == _pin_dirs(home)
 
 
 def _protected_argv(tmp_path, monkeypatch, *, leased: bool = False) -> list[str]:
