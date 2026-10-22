@@ -18,7 +18,7 @@ let component: ReturnType<typeof mount> | null = null;
 let invoke: ReturnType<typeof vi.fn>;
 const flat = (text: string | null | undefined) => (text ?? '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
 const button = (label: string) => Array.from(host.querySelectorAll('button')).find((b) => flat(b.textContent) === label);
-const devicesBody = { enabled: true, listening: { port: 47901 }, announced_name: 'Studio', local_hostname: 'studio.local', computer_name: 'Studio Mac', lan_addresses: ['192.168.1.20'], code: { state: 'none' } };
+const devicesBody = { enabled: true, listening: { port: 47901 }, announced_name: 'Studio', local_hostname: 'studio.local', computer_name: 'Studio Mac', lan_addresses: ['192.168.1.20'], code: { state: 'none' }, read_only: false };
 
 async function show() {
 	component = mount(SettingsSystem, { target: host, props: { systemStatus: {} } });
@@ -86,9 +86,18 @@ describe('Settings › System with a shell', () => {
 		expect(flat(host.querySelector('[data-testid="devices-row"]')?.textContent)).toContain('Manage connections on Studio itself.');
 		expect(host.querySelector('button[aria-label="Let other devices connect"]')).toBeNull();
 	});
-	it('on the computer itself, offers Connect to another computer, which opens the connect screens', async () => {
+	it('hides Connect to another computer while this host accepts devices, and restores it when the switch turns off', async () => {
 		(window as unknown as Record<string, unknown>).__CORSIA_SHELL__ = { mode: 'local' };
+		vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			const enabled = init?.method === 'PUT' ? false : true;
+			return new Response(JSON.stringify({ ...devicesBody, enabled }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+		}));
 		await show();
+		expect(host.querySelector('[data-settings-row="Computer"]')).toBeNull();
+		expect(button('Connect to another computer')).toBeUndefined();
+
+		host.querySelector<HTMLButtonElement>('button[aria-label="Let other devices connect"]')?.click();
+		await settle();
 		expect(flat(host.querySelector('[data-settings-row="Computer"]')?.textContent)).toContain('This computer');
 		button('Connect to another computer')?.click();
 		expect(get(connectOpen)).toBe(true);

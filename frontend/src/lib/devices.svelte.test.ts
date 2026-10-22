@@ -8,7 +8,7 @@ const settle = () => vi.advanceTimersByTimeAsync(0);
 
 const api = (patch: Partial<DevicesApi> = {}): DevicesApi => ({
 	enabled: true, listening: { port: 47901 }, announced_name: 'Studio', local_hostname: 'studio.local', computer_name: 'Studio Mac',
-	lan_addresses: ['192.168.1.20'], code: { state: 'none' }, ...patch,
+	lan_addresses: ['192.168.1.20'], code: { state: 'none' }, read_only: false, ...patch,
 });
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -39,7 +39,8 @@ describe('viewFromApi', () => {
 			expect(viewFromApi(api({ enabled: false, listening: { error: 'Permission denied', reason }, announced_name: null }), false).listener).toBe('unavailable');
 		}
 	});
-	it('is read-only when told so, and when an active code arrives without its characters (G11)', () => {
+	it('is read-only when the server says this is not the host page, when told so, and when an active code arrives without its characters (G11)', () => {
+		expect(viewFromApi(api({ read_only: true }), false).readOnly).toBe(true);
 		expect(viewFromApi(api(), true).readOnly).toBe(true);
 		const seen = viewFromApi(api({ code: { state: 'active', expires_in_seconds: 300 } }), false);
 		expect(seen).toMatchObject({ readOnly: true, pairing: 'idle', code: null });

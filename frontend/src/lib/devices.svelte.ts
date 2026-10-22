@@ -17,6 +17,8 @@ export type DevicesApi = {
 	computer_name: string;
 	lan_addresses: string[];
 	code: { state: 'none' | 'active' | 'paused'; expires_in_seconds?: number | null; value?: string };
+	/** Whether the server says this caller is not the host's direct loopback page. */
+	read_only: boolean;
 	/** The saved outside address, `host` or `host:port` (always reached over https). */
 	outside_address?: string | null;
 };
@@ -59,7 +61,7 @@ function listenerOf(api: DevicesApi): DevicesView['listener'] {
 
 export function viewFromApi(api: DevicesApi, forcedReadOnly: boolean, hostNameOverride?: string): DevicesView {
 	// The code's characters come only over direct loopback (G11): an active code without them is a connected computer's view.
-	const readOnly = forcedReadOnly || (api.code.state === 'active' && !api.code.value);
+	const readOnly = forcedReadOnly || api.read_only || (api.code.state === 'active' && !api.code.value);
 	const code = api.code.state === 'active' ? api.code.value ?? null : null;
 	return {
 		load: 'ready',

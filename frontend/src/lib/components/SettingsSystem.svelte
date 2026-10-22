@@ -85,6 +85,7 @@
 
 	let accountConfirm = $state<'logout' | 'disconnect' | null>(null);
 	let accountInProgress = $state(false);
+	let deviceConnectionsEnabled = $state<boolean | null>(null);
 	// Only the desktop app can connect to, or leave, another computer; a browser and the phone app have no shell.
 	const shell = shellInfo();
 	const remoteName = shell?.mode === 'remote' ? shell.name : null;
@@ -195,14 +196,14 @@
 				<span class="confirm-detail">Your work stays on {remoteName}. This app signs out and returns to setup.</span>
 			</div>
 		{/if}
-	{:else if shell}
+	{:else if shell && deviceConnectionsEnabled === false}
 		<SettingsRow name="Computer" sub="This computer">
 			{#snippet actions()}<Button variant="ghost" size="sm" onclick={() => connectOpen.set(true)}>Connect to another computer</Button>{/snippet}
 		</SettingsRow>
 	{/if}
 </SettingsGroup>
 
-<SettingsDevices />
+<SettingsDevices onConnectionState={(enabled) => deviceConnectionsEnabled = enabled} />
 
 {#if systemStatus?.memory}
 	<SettingsGroup label="Resources">
