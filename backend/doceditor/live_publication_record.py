@@ -22,6 +22,8 @@ class WriteActor:
     user_id: str | None = None
     #: The provider call behind an agent write, which its streamed preview was keyed by.
     call_id: str | None = None
+    #: The write applies suggestions the person accepted, so its words are the helpers', not the person's edit.
+    suggestion_accept: bool = False
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,7 @@ class Publication:
     prior_mirror: bytes
     decision: dict
     ranges: dict[str, tuple[int, int]] | None = None
+    suggestion_accept: bool = False
 
     @staticmethod
     def decision_for(path: Path, shared: SharedTarget | None, authority: WriteAuthority | None = None) -> dict:
