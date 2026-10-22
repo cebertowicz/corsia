@@ -2,10 +2,10 @@ import type { SetupAttempt } from './setupConnect.svelte';
 export type SetupPicks = { claude: boolean; chatgpt: boolean };
 export type SetupHandoff = { tools: Record<string, SetupAttempt> };
 
-/** First-run setup progress, which the backend owns: the app reads it to resume and reports changes to it. */
+/** First-run setup progress, which the backend owns: the app reads the eligibility facts and reports changes to it. */
 export type SetupProgress = {
 	setup_completed: boolean;
-	/** Where to reopen an unfinished setup: Connect an AI, or the oMLX question inside it. */
+	/** Where an unfinished setup stands: Connect an AI, or the oMLX question inside it. */
 	step: 'models' | 'local-consent' | null;
 	local_ai: boolean | null;
 	/** What they said they pay for (Claude, ChatGPT), or null when nothing was recorded. */
@@ -46,5 +46,24 @@ export async function recordSetupProgress(change: SetupProgressChange, sessionTo
 		return response.ok;
 	} catch {
 		return false;
+	}
+}
+
+/** What starting an unfinished app-made setup over did: nothing (a guard refused) or a full reset. */
+export type SetupReset = { reset: boolean; refused: string | null; default_work_folder: string | null };
+
+/**
+ * Ask the backend to start the signed-in person's unfinished setup over. It resets only an account the app's own setup
+ * made that nobody has used yet; any other install answers `reset: false` and is left exactly as it was. Null when unreadable.
+ */
+export async function resetUnfinishedSetup(sessionToken: string | null): Promise<SetupReset | null> {
+	if (!sessionToken) return null;
+	try {
+		const response = await fetch('/api/setup/reset-unfinished', { method: 'POST', headers: { Authorization: `Bearer ${sessionToken}` } });
+		if (!response.ok) return null;
+		const result = await response.json();
+		return typeof result?.reset === 'boolean' ? result as SetupReset : null;
+	} catch {
+		return null;
 	}
 }

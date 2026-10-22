@@ -124,11 +124,12 @@ def _credentials(username: str, password: str) -> tuple[str, str]:
 def _create_account(
     name: str, encoded: str, *, db: sqlite3.Connection | None, first_run_wake: bool,
     require_first: bool = False, first_run_path: str = "script", claim_data_owner: bool = False,
-    before_commit=None,
+    before_commit=None, created_files: dict[str, str] | None = None,
 ):
     """Insert the account (and the first one's CORSIA agent) in one transaction.
 
-    ``before_commit`` runs as its last step. Returns the effects owed after
+    ``before_commit`` runs as its last step. ``created_files`` maps each work-folder file this
+    setup creates to its digest, for the app path's creation marker. Returns the effects owed after
     the commit, for the caller to run once it has seen the commit succeed.
     """
     if first_run_path not in {"app", "script"}:
@@ -158,7 +159,7 @@ def _create_account(
             conductor_id = ensure_corsia_agent(name, model=None, db=conn)
             from infra.setup_progress import start_after_account
 
-            start_after_account(first_run_path, db=conn)
+            start_after_account(first_run_path, db=conn, user_id=name, created_files=created_files)
             if not data_owners_without_accounts(conn):
                 from infra import config
                 from registry.shared_ownership_assignment import enforce_scaffold_ownership
@@ -238,6 +239,10 @@ def create_first_account(
             name, encoded, db=None, first_run_wake=first_run_wake, require_first=True,
             first_run_path=first_run_path, claim_data_owner=True,
             before_commit=staged.publish if staged else None,
+            created_files=(
+                {user_profile.PROFILE_RELATIVE_PATH.as_posix(): staged.created_sha256}
+                if staged and staged.created_sha256 else None
+            ),
         )
     except BaseException:
         if staged:

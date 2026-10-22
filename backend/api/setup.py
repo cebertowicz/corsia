@@ -24,7 +24,7 @@ from api.setup_requests import FirstAccountRequest, LocalDownloadRequest, SetupP
 from core.corrections_asset_download import FLIGHT as CLASSIFIER_DOWNLOAD
 from core.corrections_asset_download import public_state as classifier_state
 from infra import account_validation, accounts, config, setup_progress
-from infra.auth import authenticate, require_user, token_from_request
+from infra.auth import authenticate, is_person_session, require_user, require_user_header_only, token_from_request
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
 from infra.time import utc_storage_iso_to_api
@@ -219,6 +219,17 @@ async def setup_progress_update(request: Request, authorization: str | None = He
     except setup_progress.SetupProgressError:
         return Response(status_code=422)
     return {"ok": True}
+
+
+@router.post("/reset-unfinished", response_model=None)
+async def reset_unfinished_setup(user: dict = Depends(require_user_header_only)) -> dict | Response:
+    """Start an unfinished app-made setup over, or say which guard refused (the person's data is untouched then)."""
+    from onboarding.setup_reset import reset_unfinished_setup as reset
+
+    if not is_person_session(user):  # a machine token never starts someone's setup over
+        return JSONResponse(status_code=403, content={"detail": "Only the signed-in person can start setup over."})
+    result = await run_in_db(reset, user["id"])
+    return {"reset": result.reset, "refused": result.refused, "default_work_folder": result.default_work_folder}
 
 
 @router.post("/report", response_model=None)

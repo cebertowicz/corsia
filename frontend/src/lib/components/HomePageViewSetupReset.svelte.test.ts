@@ -1,12 +1,13 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HomePageView from './HomePageView.svelte';
+import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 
-const seen = vi.hoisted(() => ({ resume: [] as boolean[] }));
+const seen = vi.hoisted(() => ({ mounts: 0 }));
 
 vi.mock('./SetupScreen.svelte', () => ({
-	default: (_anchor: unknown, props: { resume?: boolean }) => { seen.resume.push(Boolean(props.resume)); },
+	default: () => { seen.mounts += 1; },
 }));
 vi.mock('./LoginScreen.svelte', () => ({ default: () => {} }));
 vi.mock('./HomeShell.svelte', () => ({ default: () => {} }));
@@ -17,8 +18,8 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
-let progress: Record<string, unknown> | null;
-let reads: number;
+let answer: Record<string, unknown> | null;
+let posts: number;
 
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); flushSync(); }
 
@@ -41,11 +42,11 @@ async function open(isAuthenticated: boolean) {
 }
 
 beforeEach(() => {
-	seen.resume = []; reads = 0; progress = null;
+	seen.mounts = 0; posts = 0; answer = null;
 	token.set('session');
 	vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true, addEventListener: () => {}, removeEventListener: () => {} })));
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-		if (String(input) === '/api/setup/progress') { reads += 1; return progress ? json(progress) : json({}, 500); }
+		if (String(input) === '/api/setup/reset-unfinished') { posts += 1; return answer ? json(answer) : json({}, 500); }
 		return json({});
 	}));
 	host = document.createElement('div'); document.body.appendChild(host);
@@ -57,33 +58,46 @@ afterEach(async () => {
 	host.remove(); token.set(null); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
-describe('HomePageView setup resume', () => {
-	it('reopens setup, as a resume, for a signed-in person whose setup is unfinished', async () => {
-		progress = { setup_completed: false, step: 'models', local_ai: null };
+describe('HomePageView unfinished setup', () => {
+	it('starts over at the setup flow, signed out, when the backend reset an unfinished app-made setup', async () => {
+		answer = { reset: true, refused: null, default_work_folder: null };
 		await open(true);
 
-		expect(seen.resume).toContain(true);
+		expect(seen.mounts).toBeGreaterThan(0);
+		expect(get(token)).toBeNull();
 	});
 
-	it('never opens setup for a signed-in person whose setup is finished', async () => {
-		progress = { setup_completed: true, step: null, local_ai: null };
+	it('restores the default work folder through the shell when the backend names one', async () => {
+		const invoke = vi.fn(async () => undefined);
+		vi.stubGlobal('__TAURI_INTERNALS__', { invoke });
+		answer = { reset: true, refused: null, default_work_folder: '/home/person/CORSIA' };
 		await open(true);
 
-		expect(reads).toBe(1);
-		expect(seen.resume).toEqual([]);
+		expect(invoke).toHaveBeenCalledWith('configure_work_folder', { path: '/home/person/CORSIA' });
+		expect(seen.mounts).toBeGreaterThan(0);
 	});
 
-	it('leaves the app alone when the record cannot be read, so a failed read never locks out a finished install', async () => {
+	it.each(['not_created_by_app', 'in_use', 'no_unfinished_setup'])('leaves the app and the session alone when the backend refuses (%s)', async (refused) => {
+		answer = { reset: false, refused, default_work_folder: null };
 		await open(true);
 
-		expect(seen.resume).toEqual([]);
+		expect(posts).toBe(1);
+		expect(seen.mounts).toBe(0);
+		expect(get(token)).toBe('session');
+	});
+
+	it('leaves the app alone when the answer cannot be read, so a failed read never locks out a finished install', async () => {
+		await open(true);
+
+		expect(seen.mounts).toBe(0);
+		expect(get(token)).toBe('session');
 	});
 
 	it('asks nothing of the backend while signed out', async () => {
-		progress = { setup_completed: false, step: 'models', local_ai: null };
+		answer = { reset: true, refused: null, default_work_folder: null };
 		await open(false);
 
-		expect(reads).toBe(0);
-		expect(seen.resume).toEqual([]);
+		expect(posts).toBe(0);
+		expect(seen.mounts).toBe(0);
 	});
 });

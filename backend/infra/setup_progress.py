@@ -19,6 +19,8 @@ from infra.database import write_transaction
 from infra.settings import get_setting, set_setting
 
 KEY = "setup_progress"
+#: The record field marking an account the app's own setup path created.
+CREATED_BY_APP = "created_by_app"
 #: Steps after the account exists: Connect an AI, and the existing-oMLX question inside it.
 STEPS = frozenset({"models", "local-consent"})
 #: What the person says they pay for: the two subscriptions.
@@ -48,11 +50,21 @@ def view(*, db: sqlite3.Connection | None = None) -> dict:
     }
 
 
-def start_after_account(first_run_path: str | None, *, db: sqlite3.Connection) -> None:
-    """The first account was made in the app: setup is now at Connect an AI, with any earlier choice kept."""
+def start_after_account(
+    first_run_path: str | None, *, db: sqlite3.Connection, user_id: str, created_files: dict[str, str] | None = None,
+) -> None:
+    """The first account was made in the app: setup is now at Connect an AI, with any earlier choice kept.
+
+    The record also gets the creation marker: who the app made, in which work folder, and the digest of each
+    file it created there. Only an install with this marker can have an unfinished setup reset
+    (``onboarding.setup_reset``); an adopted, taken-over or older install never has one.
+    """
     if first_run_path != "app":
         return
-    set_setting(KEY, {**(read(db=db) or {}), "step": "models"}, db=db)
+    from infra import config
+
+    marker = {"user_id": user_id, "workspace": str(config.WORKSPACE), "files": dict(created_files or {})}
+    set_setting(KEY, {**(read(db=db) or {}), "step": "models", CREATED_BY_APP: marker}, db=db)
 
 
 def update(

@@ -26,7 +26,7 @@ def test_setup_poll_and_source_read_budget(isolated_db, monkeypatch, tmp_path, c
     app.include_router(setup.router)
     app.dependency_overrides[setup.require_user] = lambda: {}
     with database.get_db() as db:
-        setup_progress.start_after_account("app", db=db)  # an account was just made: setup is unfinished and resumable
+        setup_progress.start_after_account("app", db=db, user_id="ada")  # an account was just made: setup is unfinished and resumable
         db.commit()
     base_url = f"http://127.0.0.1:{DEFAULT_BACKEND_PORT}"
     client = TestClient(app, base_url=base_url, client=("127.0.0.1", 50100))
