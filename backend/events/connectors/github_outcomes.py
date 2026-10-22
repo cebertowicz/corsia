@@ -34,7 +34,7 @@ from typing import Any
 
 from events.connectors.github_ownership import declared_owner_thread_ids
 from events.connectors import github_outcome_input as shape
-from events.connectors.github_outcome_measurements import minutes_between, reverted_sha
+from events.connectors import github_outcome_measurements as measurements
 from infra.outcome_event_attributes import ISSUE_KIND_VALUES, PRIORITY_VALUES
 
 _INTRODUCED_BY = re.compile(r"^[ \t>*_-]*introduced[ \t]+by[ \t]+#(\d+)\b", re.I | re.M)
@@ -155,13 +155,16 @@ def _pr_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
         return [_pr_draft(key, subject, common, f"closed:{closed}", "github.pr.closed", closed)]
     merged_at = shape.timestamp(shape.required(pr, "merged_at"))
     body = shape.body(pr.get("body"))
-    minutes_since_opened = minutes_between(pr.get("created_at"), pr.get("merged_at"))
-    revert = reverted_sha(pr.get("title"), body)
+    minutes_since_opened = measurements.minutes_between(pr.get("created_at"), pr.get("merged_at"))
+    revert = measurements.reverted_sha(pr.get("title"), body)
+    revert_pr = measurements.reverted_pr_number(pr.get("title"), body, repo)
     measurement_attrs: dict[str, Any] = {}
     if minutes_since_opened is not None:
         measurement_attrs["minutes_since_opened"] = minutes_since_opened
     if revert is not None:
         measurement_attrs["reverts"] = revert
+    if revert_pr is not None:
+        measurement_attrs["reverts_pr"] = revert_pr
     drafts = [_pr_draft(
         key, subject, common, "merged", "github.pr.merged", merged_at,
         head_ref=shape.text(shape.required(shape.mapping(pr["head"]), "ref")),
@@ -241,10 +244,6 @@ def _workflow_run_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraf
         attrs["head_branch"] = shape.text(run["head_branch"])
     if len(prs) == 1:
         attrs["pr"] = str(prs[0])
-    if attempt == 1:
-        queue_minutes = minutes_between(run.get("created_at"), run.get("run_started_at"))
-        if queue_minutes is not None:
-            attrs["queue_minutes"] = queue_minutes
     return [OutcomeDraft(
         f"github:workflow_run:{repo}:{run_id}:attempt:{attempt}",
         "github.workflow_run.completed", updated,

@@ -124,6 +124,10 @@ def test_merged_pr_measurement_attributes_are_optional_and_exact():
     primary = drafts_by_name(map_github_outcomes("pull_request", payload))["github.pr.merged"][0]
     assert "minutes_since_opened" not in primary.attributes
 
+    pr["created_at"] = "2026-09-28T13:00:00Z"
+    primary = drafts_by_name(map_github_outcomes("pull_request", payload))["github.pr.merged"][0]
+    assert "minutes_since_opened" not in primary.attributes
+
 
 _REVERT_SHA = "a" * 40
 
@@ -134,11 +138,23 @@ _REVERT_SHA = "a" * 40
     ('Revert "change"', f"This reverts commit {'a' * 39}.", None),
     ("Normal change", f"This reverts commit {_REVERT_SHA}.", None),
 ])
-def test_merged_pr_revert_attribute_requires_github_template(title, body, expected):
+def test_merged_pr_revert_sha_requires_local_git_revert_template(title, body, expected):
     payload = copy.deepcopy(fixture("pr_introduced_by_merged")["payload"])
     payload["pull_request"].update(title=title, body=body)
     primary = drafts_by_name(map_github_outcomes("pull_request", payload))["github.pr.merged"][0]
     assert primary.attributes.get("reverts") == expected
+
+
+@pytest.mark.parametrize(("title", "body", "expected"), [
+    ('Revert "change"', f"Reverts {REPO.upper()}#42", "42"),
+    ('Revert "change"', "Reverts other/repo#42", None),
+    ("Normal change", f"Reverts {REPO}#42", None),
+])
+def test_merged_pr_revert_button_attribute_requires_same_repo(title, body, expected):
+    payload = copy.deepcopy(fixture("pr_introduced_by_merged")["payload"])
+    payload["pull_request"].update(title=title, body=body)
+    primary = drafts_by_name(map_github_outcomes("pull_request", payload))["github.pr.merged"][0]
+    assert primary.attributes.get("reverts_pr") == expected
 
 
 def test_workflow_run_key_is_run_id_plus_attempt():
@@ -161,26 +177,6 @@ def test_workflow_run_key_is_run_id_plus_attempt():
     assert red.attributes["conclusion"] == "failure"
     assert red.attributes["event"] == "workflow_dispatch"
 
-
-def test_workflow_run_queue_minutes_is_first_attempt_only_and_optional():
-    payload = copy.deepcopy(fixture("workflow_run_success")["payload"])
-    payload["workflow_run"]["created_at"] = "2026-10-01T08:45:06Z"
-    (first,) = map_github_outcomes("workflow_run", payload)
-    assert first.attributes["queue_minutes"] == 6
-
-    retry = copy.deepcopy(fixture("workflow_run_attempt2")["payload"])
-    retry["workflow_run"]["created_at"] = "2026-10-01T00:00:00Z"
-    (second,) = map_github_outcomes("workflow_run", retry)
-    assert "queue_minutes" not in second.attributes
-
-    for run_started_at in (None, "not-a-timestamp"):
-        optional = copy.deepcopy(payload)
-        if run_started_at is None:
-            del optional["workflow_run"]["run_started_at"]
-        else:
-            optional["workflow_run"]["run_started_at"] = run_started_at
-        (draft,) = map_github_outcomes("workflow_run", optional)
-        assert "queue_minutes" not in draft.attributes
 
 
 _MALFORMED_ATTEMPTS: list[Any] = [
