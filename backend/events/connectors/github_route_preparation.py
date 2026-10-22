@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from events.connectors.github_rules import RuleScope
     from events.router import RouteResult
 
 
@@ -64,6 +65,7 @@ def _prepare_route(
     payload: dict[str, Any],
     identity: Any,
     selected_pr: dict[str, Any] | None,
+    scope: RuleScope | None = None,
 ) -> None:
     """Perform each canonical write in the original noninterleaved stage order."""
     from events import router
@@ -93,7 +95,8 @@ def _prepare_route(
     if isinstance(selected, router.RouteResult):
         prepared.result = selected
         # Routing chose no thread; rules may still add recipients, never change this result.
-        apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state)
+        apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state,
+                           scope=scope)
         return
     thread_id, wake_reason = selected
     summary, details = router._summarize(internal_event, payload, external_id)
@@ -110,7 +113,8 @@ def _prepare_route(
     prepared.summary, prepared.details, prepared.chip = summary, details, chip
     prepared.notice = router.github_pr_notice.notice_for_routed_event(thread_id, identity)
     # Routing has decided; agent-written rules add recipients or drop or annotate this one.
-    apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state, wake_reason)
+    apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state, wake_reason,
+                       scope)
 
 
 async def release_notice_off_loop(thread_id: str, identity: Any) -> None:
@@ -145,13 +149,17 @@ async def prepare_route_ordered(
 ) -> PreparedRoute:
     """Join the exact DB unit and recover committed effects before leaving its gate."""
     from events import router
+    from events.connectors.github_rules import rule_scope
     from infra.db_async import run_in_db
     from subagents.runtime_guard import join_task_through_cancellation
 
+    # Like the check suite's pull request, read before the gate: the projects
+    # tracking the repository run git, which must never hold every webhook's turn.
+    scope = await asyncio.to_thread(rule_scope, internal_event, payload, selected_pr)
     async with _preparation_gate():
         unit = _Preparation()
         preparation = asyncio.create_task(run_in_db(
-            _prepare_route, unit, internal_event, payload, identity, selected_pr,
+            _prepare_route, unit, internal_event, payload, identity, selected_pr, scope,
         ))
         cancellation = None
         try:

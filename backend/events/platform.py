@@ -10,8 +10,9 @@ sink. Everything is keyed on ``event_id`` (per target), so a repeat is a no-op.
 It names no connector (the no-bespoke-router guard keeps it that way).
 
 Rules agents wrote (``events.rules``) add to that decision after it is made, on
-this path and on the webhook router's: each recipient a rule adds passes the
-caller's own target filter and is delivered here, whatever the event's source.
+this path and on the webhook router's (``events.webhook_rules``): each recipient
+a rule adds passes the caller's own target filter and is delivered here,
+whatever the event's source.
 """
 
 from __future__ import annotations
@@ -22,13 +23,13 @@ from dataclasses import dataclass, replace
 from collections.abc import Iterable
 from typing import Any, Callable
 
-from events import dead_letter, rule_reads, rules
+from events import dead_letter, rules
 from events.connectors import EventTypeDecl, get_manifest
 from events.delivery import enqueue_event_wake
 from events.disposition import delivery_disposition
 from events.envelope import EventEnvelope, normalize
 from events.resolve import Target, lifecycle, resolve_targets
-from infra.database import get_db, write_transaction
+from infra.database import write_transaction
 from infra.db_async import run_in_db_unless_owned
 from infra.passive_changes import append_thread_context_note
 from infra.product_events import emit_product_event
@@ -259,55 +260,6 @@ def emit_route_events(envelope: EventEnvelope, deliveries: Iterable[PlatformDeli
                 "reason": delivery.reason,
             },
         )
-
-
-def apply_webhook_rules_sync(
-    envelope: EventEnvelope, watch_event: str, targets: list[Target], *, ends_artifact: bool,
-) -> rules.RulePlan | None:
-    """Rules for one webhook event: deliver what they add, return what rides.
-
-    ``targets`` are the router's own decision; it keeps its delivery to the routed
-    thread, and this returns the plan so it can drop that delivery or add the
-    rules' notes to it. One read when no rule for the type in the event's project
-    matches; the write transaction opens only when one does. With no owner and
-    nothing routed, the projects tracking the event's repository are read first,
-    and only when a self-rule for the type exists (it runs git, so outside the
-    transaction).
-    """
-    event = rule_event(envelope, watch_event, ends_artifact=ends_artifact)
-    anchor = rules.routed(targets)[2]
-    if anchor is None:
-        event = replace(event, repository_projects=rule_reads.unrouted_projects(
-            event.connector, event.event_type, envelope.facts))
-        if not event.repository_projects:
-            return None
-    reader = get_db()
-    try:
-        if not any(rules.matches(rule, event.facts) for rule in rules.lookup(
-                reader, event.connector, event.event_type, anchor, event.repository_projects)):
-            return None
-    finally:
-        reader.close()
-    decl = get_manifest(event.connector).decl(event.event_type)
-    with write_transaction(None, scope="apply_webhook_rules") as conn:
-        plan = rules.evaluate(conn, event, targets)
-        if plan is None:
-            return None
-        added, outcomes = deliver_rule_adds(conn, envelope, decl, plan)
-        rules.record(conn, event, [*plan.settled, *outcomes])
-        emit_route_events(envelope, added)
-        return plan
-
-
-def record_rule_ride_sync(plan: rules.RulePlan, thread: str, delivered: bool) -> None:
-    """Record the rules that rode the router's own delivery; it resolved the watches."""
-    delivery = plan.rides.get(thread)
-    if delivery is None:
-        return
-    with write_transaction(None, scope="record_rule_ride") as conn:
-        outcomes = settle_rule_delivery(
-            conn, plan, thread, delivery, WOKE if delivered else DEAD_LETTERED, ride=True)
-        rules.record(conn, plan.event, outcomes)
 
 
 def deliver_platform_event_sync(

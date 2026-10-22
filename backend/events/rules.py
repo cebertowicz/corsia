@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from events import rule_reads
+from events.rule_match import matches, repository_fact
 from events.disposition import WAKE as TABLE_WAKE, disposition
 from events.resolve import Target, lifecycle
 from registry.retirement_predicate import identity_ended
@@ -56,6 +57,7 @@ PAUSED = "paused"
 NEVER_WAKES = "this recipient never wakes for this artifact"
 OTHER_OWNER = "the registered owner is another agent"
 OUT_OF_PROJECT = "recipient outside the rule's project"
+LOOKUP_FAILED = "repository lookup failed"
 
 WAKES_PER_HOUR = 1
 RETENTION = timedelta(days=30)
@@ -200,37 +202,9 @@ def self_on_repository(rule: Rule) -> bool:
     project tracks that repository, and no one else is reached."""
     if rule.action != DELIVER or thread_target(rule.to) != rule.created_by:
         return False
-    from events.connectors import get_manifest
-
-    fact = get_manifest(rule.connector).repository_fact
-    return any(test["field"] == fact and test["op"] in NAMING for test in rule.match)
-
-
-def _same(actual: Any, expected: Any) -> bool:
-    if isinstance(expected, str) and not isinstance(actual, str) and actual is not None:
-        return str(actual) == expected
-    return actual == expected
-
-
-def test_matches(test: Mapping[str, Any], facts: Mapping[str, Any]) -> bool:
-    actual = facts.get(test["field"])
-    op = test["op"]
-    if op == "present":
-        return actual is not None
-    value = test.get("value")
-    if op == "eq":
-        return actual is not None and _same(actual, value)
-    if op == "not_eq":
-        return not _same(actual, value)
-    if op == "in":
-        return actual is not None and any(_same(actual, item) for item in value or ())
-    if op == "prefix":
-        return isinstance(actual, str) and isinstance(value, str) and actual.startswith(value)
-    return False
-
-
-def matches(rule: Rule, facts: Mapping[str, Any]) -> bool:
-    return all(test_matches(test, facts) for test in rule.match)
+    fact = repository_fact(rule.connector)
+    return fact is not None and any(
+        test["field"] == fact and test["op"] in NAMING for test in rule.match)
 
 
 def thread_target(to: str) -> str | None:
@@ -299,15 +273,14 @@ def _settle_unreachable(
     return current
 
 
-def _wake_for(
-    db: sqlite3.Connection, rule: Rule, thread: str, row: Mapping[str, Any],
-    routed_here: Target | None, artifact_lifecycle: str,
-) -> tuple[bool, str | None, int]:
-    """Whether this rule wakes the thread, why not, and its capped count.
+def _wake_guard(
+    rule: Rule, thread: str, row: Mapping[str, Any], routed_here: Target | None,
+    artifact_lifecycle: str,
+) -> tuple[bool, str | None, int] | None:
+    """Why this rule can't wake the thread, or ``None`` while it still asks.
 
-    The disposition table answers whether this recipient can wake at all; the
-    rule's own guards are 4.4 (an agent's ``registered_owner`` rule wakes only
-    itself or its temporary workers), R7 (pause) and R9 (hourly budget).
+    The disposition table answers whether this recipient can wake at all; 4.4:
+    an agent's ``registered_owner`` rule wakes only itself or its temporary workers.
     """
     if rule.mode != WAKE:
         return False, None, 0
@@ -322,13 +295,27 @@ def _wake_for(
     if (rule.to == REGISTERED_OWNER and thread != rule.created_by
             and row["spawned_by"] != rule.created_by):
         return False, OTHER_OWNER, 0  # 4.4
-    if _paused(db, thread):
-        return False, PAUSED, 0  # R7
-    spent, capped = rule_reads.wake_budget(
-        db, rule.id, thread, cap=WAKE_CAP, since=_iso(_now() - timedelta(hours=1)))
-    if spent >= WAKES_PER_HOUR:
-        return False, WAKE_CAP, capped + 1  # R9
-    return True, None, 0
+    return None
+
+
+def _wakes(
+    db: sqlite3.Connection, asking: Mapping[str, list[str]],
+) -> dict[str, tuple[bool, str | None, int]]:
+    """R7 and R9 for the rules still asking to wake each thread: whether each wakes,
+    why not, and its capped count. Pause and the hourly budget are read once per
+    thread, however many of its rules ask."""
+    answers: dict[str, tuple[bool, str | None, int]] = {}
+    since = _iso(_now() - timedelta(hours=1))
+    for thread, rule_ids in asking.items():
+        if _paused(db, thread):
+            answers.update({rule_id: (False, PAUSED, 0) for rule_id in rule_ids})
+            continue
+        budgets = rule_reads.wake_budgets(db, rule_ids, thread, cap=WAKE_CAP, since=since)
+        for rule_id in rule_ids:
+            spent, capped = budgets.get(rule_id, (0, 0))
+            answers[rule_id] = ((False, WAKE_CAP, capped + 1) if spent >= WAKES_PER_HOUR
+                                else (True, None, 0))
+    return answers
 
 
 def evaluate(
@@ -361,6 +348,9 @@ def evaluate(
         db, [*recipients.values(), *(rule.created_by for rule in rules)])
     rules = _settle_unreachable(plan, rules, recipients, threads)
     dropped_by = _apply_drops(plan, rules, by_thread, recipients)
+    delivering: list[tuple[Rule, str, Target | None]] = []
+    answers: dict[str, tuple[bool, str | None, int]] = {}
+    asking: dict[str, list[str]] = {}
     for rule in (rule for rule in rules if rule.action == DELIVER):
         thread = recipients[rule.id]
         if thread is None:
@@ -369,13 +359,18 @@ def evaluate(
             plan.settled.append(Outcome(
                 rule.id, thread, DROPPED, reason=f"dropped by rule {dropped_by[thread]}"))
             continue
-        routed_here = by_thread.get(thread)
-        wake, reason, since_wake = _wake_for(
-            db, rule, thread, threads[thread], routed_here, plan.lifecycle)
+        delivering.append((rule, thread, by_thread.get(thread)))
+        answer = _wake_guard(rule, thread, threads[thread], by_thread.get(thread), plan.lifecycle)
+        if answer is None:
+            asking.setdefault(thread, []).append(rule.id)
+        else:
+            answers[rule.id] = answer
+    answers.update(_wakes(db, asking))
+    for rule, thread, routed_here in delivering:
         target = plan.rides if routed_here else plan.adds
         delivery = target.setdefault(thread, Delivery(
             routed_wake=bool(routed_here and routed_here.disposition == "owner_wake")))
-        delivery.add(rule, wake, reason, since_wake)
+        delivery.add(rule, *answers[rule.id])
     return plan
 
 

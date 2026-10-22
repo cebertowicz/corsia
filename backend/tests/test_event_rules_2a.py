@@ -381,7 +381,7 @@ async def test_webhook_reads_when_routing_chose_no_thread(isolated_db, sent, res
             await route(MERGED, _merged(number, repo=repo))
         return len(_reads(seen)), len(resolved)
 
-    with patch("events.connectors.github_rules.apply_routed_rules", lambda *a, **k: None):
+    with _without_rules():
         await run(60)
         before, _ = await run(61)
     no_rule = await run(62)
@@ -430,15 +430,19 @@ async def test_an_unrouted_event_with_no_self_rule_never_looks_up_its_repository
     await route(MERGED, _merged(70))
 
     assert resolved == [] and _decisions() == []
-    # That read, and the project-scoped lookup, both search the one type index.
-    for query, args in (
-            ("SELECT 1 FROM event_rules WHERE connector=? AND event_type=? AND enabled=1 "
-             "AND action='deliver' AND \"to\"='thread:' || created_by LIMIT 1", ()),
-            ("SELECT * FROM event_rules WHERE scope=? || (SELECT project_id FROM threads "
-             "WHERE id=?) AND connector=? AND event_type=? AND enabled=1 ORDER BY created_at, id",
-             ("project:", "a"))):
-        [plan, *_] = _rows(f"EXPLAIN QUERY PLAN {query}", *args, "github", "pr.merged")
-        assert "USING INDEX idx_event_rules_type (connector=?" in plan["detail"]
+    # Both probes of that read, and the project-scoped lookup, search the one type index.
+    from events import rule_reads
+
+    probes = (f"SELECT EXISTS(SELECT 1 {rule_reads._TYPE_RULES}), "
+              f"EXISTS(SELECT 1 {rule_reads._SELF_RULES})")
+    scans = [row["detail"] for row in _rows(f"EXPLAIN QUERY PLAN {probes}", *("github", "pr.merged") * 2)
+             if "event_rules" in row["detail"]]
+    assert len(scans) == 2 and all("INDEX idx_event_rules_type (connector=?" in s for s in scans)
+    [plan, *_] = _rows(
+        "EXPLAIN QUERY PLAN SELECT * FROM event_rules WHERE scope=? || (SELECT project_id FROM "
+        "threads WHERE id=?) AND connector=? AND event_type=? AND enabled=1 ORDER BY created_at, id",
+        "project:", "a", "github", "pr.merged")
+    assert "USING INDEX idx_event_rules_type (connector=?" in plan["detail"]
 
 
 # -- Burst -----------------------------------------------------------------------------------
@@ -733,7 +737,7 @@ def _suite(number: int) -> dict:
     (SYNC, _sync(7, 1)), ("webhook.github.check_suite_completed", _suite(7))])
 async def test_the_rule_events_artifact_is_the_one_routing_resolved(
         isolated_db, sent, monkeypatch, internal_event, payload):
-    from events import platform
+    from events import webhook_rules
 
     monkeypatch.setattr("reviewer.gh_helpers.get_prs_for_sha", lambda *_args: [
         {"number": 7, "state": "open", "base_ref": "dev", "head_ref": "f", "head_sha": "sha-s"}])
@@ -741,8 +745,11 @@ async def test_the_rule_events_artifact_is_the_one_routing_resolved(
     _project(P)
     _agent("owner")
     register_pr(REPO, 7, "owner")
+    for event_type in ("pr.synchronize", "check.completed"):  # rules are read only when one exists
+        await _tool("owner", operation="create", connector="github", event_type=event_type,
+                    match=[{"field": "repo", "op": "eq", "value": "x/y"}])
     seen: list[tuple[dict | None, dict | None]] = []
-    real = platform.apply_webhook_rules_sync
+    real = webhook_rules.apply_webhook_rules_sync
 
     def capture(envelope, watch_event, targets, **kwargs):
         identity = next(t.routing_state for t in targets if t.routing_state)["identity"]
@@ -947,6 +954,17 @@ def _statements():
             conn.set_trace_callback(None)
 
 
+@contextmanager
+def _without_rules():
+    """The webhook router as it was before rules: no read before the gate, none in it."""
+    from events.connectors.github_rules import RuleScope
+
+    with patch("events.connectors.github_rules.apply_routed_rules", lambda *a, **k: None), \
+            patch("events.connectors.github_rules.rule_scope",
+                  lambda *a: RuleScope(any_rule=False)):
+        yield
+
+
 def _reads(statements: list[str]) -> list[str]:
     return [s for s in statements if s.lstrip().upper().startswith(("SELECT", "WITH"))]
 
@@ -995,7 +1013,7 @@ async def test_webhook_reads_per_event(isolated_db, sent):
             await route(SYNC, _sync(7, n))
         return _reads(seen)
 
-    with patch("events.connectors.github_rules.apply_routed_rules", lambda *a, **k: None):
+    with _without_rules():
         await run(0)
         before = await run(1)
     no_rule = await run(2)
@@ -1005,9 +1023,11 @@ async def test_webhook_reads_per_event(isolated_db, sent):
     await _tool("watcher", operation="create", connector="github", event_type="pr.synchronize")
     matched = await run(4)
 
+    # No rule for the type: the one read before the gate, and none in it.
     assert len(no_rule) - len(before) == 1
     assert len([s for s in no_rule if "event_rules" in s]) == 1
-    assert len(unmatched) - len(before) == 1
+    # A rule for the type: that read, then its project's rules.
+    assert len(unmatched) - len(before) == 2
     print(f"webhook reads: dev={len(before)} no_rule=+{len(no_rule) - len(before)} "
           f"unmatched=+{len(unmatched) - len(before)} matched=+{len(matched) - len(before)}")
 

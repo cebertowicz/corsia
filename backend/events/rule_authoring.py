@@ -23,18 +23,19 @@ from typing import Any
 
 from events import rules
 from events.connectors import EventTypeDecl, get_manifest
+from events.rule_match import matches
 from infra.queries import thread_available_sql
 
 _EXPLAIN_LIMIT = 50
 
 
 def _prune_disabled(db: sqlite3.Connection, scope: str, now: str) -> None:
-    """Keep disabled rules briefly for inspection, then discard them in their own scope."""
+    """Keep disabled rules briefly for inspection, then discard them, and what
+    they did, in their own scope."""
     cutoff = (datetime.fromisoformat(now) - rules.RETENTION).isoformat()
-    db.execute(
-        "DELETE FROM event_rules WHERE scope=? AND enabled=0 AND updated_at<?",
-        (scope, cutoff),
-    )
+    stale = "SELECT id FROM event_rules WHERE scope=? AND enabled=0 AND updated_at<?"
+    db.execute(f"DELETE FROM event_route_decisions WHERE rule_id IN ({stale})", (scope, cutoff))
+    db.execute(f"DELETE FROM event_rules WHERE id IN ({stale})", (scope, cutoff))
 
 
 class RuleRefused(ValueError):
@@ -289,7 +290,7 @@ def dry_run(
     return [
         {**_shape(rule), "would": _would(rule)}
         for rule in rules.lookup(db, connector, decl.event_type, caller)
-        if rules.matches(rule, facts)
+        if matches(rule, facts)
     ]
 
 
