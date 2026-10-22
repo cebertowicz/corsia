@@ -88,8 +88,11 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
 
     assert "I'll set up your own private Google project in a browser you can watch" in steps
     assert "Google will also ask for your Drive, Docs and Sheets, so you won't have to sign in again later." in steps
-    for api in ("Gmail API", "Google Calendar API", "Google Drive API", "Google Docs API", "Google Sheets API"):
-        assert api in steps
+    enable_link = "https://console.cloud.google.com/flows/enableapi?apiid="
+    assert enable_link in steps
+    enabled = steps.split(enable_link, 1)[1].split("`", 1)[0].split(",")
+    assert enabled == ["gmail.googleapis.com", "calendar-json.googleapis.com", "drive.googleapis.com",
+                       "docs.googleapis.com", "sheets.googleapis.com"]
     assert '"Go to CORSIA (unsafe)"' in steps
     assert "a project left in Testing stops letting me in after 7 days. Go ahead?" in steps
     assert "`Ask me any time to connect your email.`" in steps
