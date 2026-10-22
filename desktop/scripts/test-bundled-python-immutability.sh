@@ -16,8 +16,12 @@ readonly RESOURCES="$APP/Contents/Resources"
 readonly PYTHON_ROOT="$RESOURCES/python"
 readonly PYTHON="$PYTHON_ROOT/bin/python3"
 readonly BACKEND_PACKAGES="$PYTHON_ROOT/backend-packages"
+readonly OMLX_PACKAGES="$PYTHON_ROOT/omlx-packages"
+readonly BACKEND_ROOT="$RESOURCES/backend"
 [ -x "$PYTHON" ] || { echo "error: bundled Python is missing: $PYTHON" >&2; exit 1; }
 [ -d "$BACKEND_PACKAGES" ] || { echo "error: bundled site-packages are missing: $BACKEND_PACKAGES" >&2; exit 1; }
+[ -d "$OMLX_PACKAGES" ] || { echo "error: bundled MLX packages are missing: $OMLX_PACKAGES" >&2; exit 1; }
+[ -d "$BACKEND_ROOT" ] || { echo "error: bundled backend is missing: $BACKEND_ROOT" >&2; exit 1; }
 
 snapshot() {
   # The mtime/mode list makes the required before/after file inventory readable;
@@ -30,24 +34,31 @@ snapshot() {
   }
 }
 
+# Packaging and installation can reset source mtimes. Do that before the
+# baseline snapshot: unchecked-hash bytecode must remain usable and read-only.
+find "$RESOURCES" -type f -name '*.py' -exec touch {} +
+printf 'bundled-python-mtime-reset=simulated\n'
+
 readonly BEFORE="$TEMP_ROOT/before"
 readonly AFTER="$TEMP_ROOT/after"
 snapshot > "$BEFORE"
 
-python_sources="$(find "$PYTHON_ROOT" -type f -name '*.py' | wc -l | tr -d ' ')"
-python_bytecode="$(find "$PYTHON_ROOT" -type f -name '*.pyc' | wc -l | tr -d ' ')"
+python_sources="$(find "$RESOURCES" -type f -name '*.py' | wc -l | tr -d ' ')"
+python_bytecode="$(find "$RESOURCES" -type f -name '*.pyc' | wc -l | tr -d ' ')"
 printf 'bundled-python-py=%s\n' "$python_sources"
 printf 'bundled-python-pyc=%s\n' "$python_bytecode"
 
 env -i PATH="/usr/bin:/bin:/usr/sbin:/sbin" "$PYTHON" -I -c '
 import sys
-sys.path.insert(0, sys.argv[1])
+sys.path[:0] = sys.argv[1:]
 import sitecustomize
 import json
 import ssl
 import fastapi
-print("bundled-python-imports=sitecustomize,json,ssl,fastapi")
-' "$BACKEND_PACKAGES"
+import mlx
+import core
+print("bundled-python-imports=sitecustomize,json,ssl,fastapi,mlx,core")
+' "$BACKEND_PACKAGES" "$OMLX_PACKAGES" "$BACKEND_ROOT"
 
 snapshot > "$AFTER"
 if ! cmp -s "$BEFORE" "$AFTER"; then

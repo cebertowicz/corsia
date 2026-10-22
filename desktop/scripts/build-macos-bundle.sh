@@ -172,14 +172,19 @@ fetch_verified "$OMLX_URL" "$BUILD_ROOT/downloads/$OMLX_WHEEL" "$OMLX_SHA256"
 PYTHONPATH="$BUNDLE_ROOT/python/backend-packages" "$PYTHON" -m pip check
 PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 
-# Nothing may write bytecode into the signed bundle: an added __pycache__ breaks
-# its seal, and Update refuses to stage from an app whose seal is broken. Python
-# imports sitecustomize before it can set dont_write_bytecode, so precompile every
-# source in the runtime (including sitecustomize) before the app is signed.
+# sitecustomize is a runtime guard for code that is not Python source.
 printf 'import sys\nsys.dont_write_bytecode = True\n' \
   >"$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/sitecustomize.py"
-"$PYTHON" -m compileall -q -f "$BUNDLE_ROOT/python"
-"$PYTHON" - "$BUNDLE_ROOT/python" <<'PY'
+
+build_git_runtime
+fetch_agent_browser
+fetch_safehouse
+rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
+# Nothing may write bytecode into the signed bundle: an added __pycache__ breaks
+# its seal. Compile every packaged source, including sitecustomize and the backend,
+# with unchecked hashes so a later mtime change cannot make a cache stale.
+"$PYTHON" -m compileall -q -f --invalidation-mode unchecked-hash "$BUNDLE_ROOT"
+"$PYTHON" - "$BUNDLE_ROOT" <<'PY'
 from importlib.util import cache_from_source
 from pathlib import Path
 import sys
@@ -194,11 +199,6 @@ if missing:
 print(f"bundled-python-py={len(sources)}")
 print(f"bundled-python-pyc={sum(1 for _ in root.rglob('*.pyc'))}")
 PY
-
-build_git_runtime
-fetch_agent_browser
-fetch_safehouse
-rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
 (
   cd "$ROOT/frontend"
   npm ci

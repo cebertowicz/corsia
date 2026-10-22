@@ -23,10 +23,8 @@ from tools.managed_runtime import (
 
 logger = logging.getLogger(__name__)
 # Environment names a shell child needs from CORSIA, passed through the sandbox by name.
-# The bundled interpreter is read-only, so agent commands must never try to add
-# bytecode beside its sources when they resolve Python from PATH.
 CACHE_ENV_NAMES = ("npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR")
-ENV_NAMES = (*CACHE_ENV_NAMES, "PYTHONDONTWRITEBYTECODE")
+ENV_NAMES = CACHE_ENV_NAMES
 _prefetch: asyncio.Task | None = None
 
 
@@ -63,7 +61,6 @@ def shell_environment(path: str, thread_id: str | None) -> dict[str, str]:
         "npm_config_cache": str(cache / "npm"),
         "PIP_CACHE_DIR": str(cache / "pip"),
         "UV_CACHE_DIR": str(cache / "uv"),
-        "PYTHONDONTWRITEBYTECODE": "1",
     }
 
 
