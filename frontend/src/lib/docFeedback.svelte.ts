@@ -1,8 +1,6 @@
-import { onDestroy, untrack } from 'svelte';
+import { untrack } from 'svelte';
 import {
-	leaveDocFeedback,
 	retryDocFeedback,
-	returnDocFeedback,
 	sendDocFeedback,
 	type DocFeedbackResult,
 	type UndeliveredBatch,
@@ -33,9 +31,7 @@ export class DocFeedback {
 	undelivered = $state<UndeliveredBatch[]>([]);
 	sending = $state(false);
 	retrying = $state(false);
-	leaveSent = $state(false);
 	feedback = $state<CommentFeedback | null>(null);
-	countdownNow = $state(Date.now());
 	/** How many comments the last Send delivered, while it says so; 0 otherwise. */
 	sent = $state(0);
 	/** The last Send ended in a batch not delivered: Retry takes Send's place at once, so Send does not close beside it. */
@@ -56,40 +52,28 @@ export class DocFeedback {
 	readonly sendLabel = $derived(
 		`Send ${this.pendingCount} comment${this.pendingCount === 1 ? '' : 's'}${this.ownerName ? ` to ${this.ownerName}` : ''}`,
 	);
-	readonly graceDeadline = $derived(this.feedback?.grace_closes_at ?? null);
-	readonly graceMinutes = $derived.by(() => {
-		if (!this.graceDeadline) return null;
-		return Math.max(0, Math.ceil((Date.parse(this.graceDeadline) - this.countdownNow) / 60_000));
-	});
-	readonly sendingGrace = $derived(this.pendingCount > 0 && this.graceMinutes !== null);
-	readonly graceText = $derived(`Sending to ${this.ownerName ?? 'the owner'} in ${this.graceMinutes} min`);
 	readonly sentText = $derived(`${this.sent} comment${this.sent === 1 ? '' : 's'} sent${this.ownerName ? ` to ${this.ownerName}` : ''}`);
 	/** The drawer's line for comments typed but not yet sent, or null when none wait. */
 	readonly unsent = $derived.by(() => {
 		if (!this.pendingCount) return null;
 		const count = `${this.pendingCount} message${this.pendingCount === 1 ? '' : 's'} not sent yet`;
-		const owner = this.ownerName ?? 'the owner';
-		if (this.sendingGrace) return { before: `${count} · sending to `, owner, after: ` in ${this.graceMinutes} min` };
-		return { before: `${count} · ${this.pendingCount === 1 ? 'it goes' : 'they go'} to `, owner, after: ' when you leave.' };
+		return { before: `${count} · ${this.pendingCount === 1 ? 'it goes' : 'they go'} to `, owner: this.ownerName ?? 'the owner', after: ' in a few seconds.' };
 	});
 
-	/** Another document (or tab) is shown: leave the one before, and start afresh. */
+	/** Another document (or tab) is shown: start afresh. */
 	show(artifactId: string | null, targetInstanceId: string | null) {
 		if (this.artifactId === artifactId && this.targetInstanceId === targetInstanceId) return;
-		this.leave();
 		this.confirmSent(0);
 		this.artifactId = artifactId;
 		this.targetInstanceId = targetInstanceId;
 		this.pendingCount = 0;
 		this.undelivered = [];
-		this.leaveSent = false;
 		this.feedback = null;
 	}
 
+	/** A person's comment is delivered as it is made, so it leaves nothing unsent; only a stale "sent" line goes. */
 	commentCreated() {
 		this.confirmSent(0);
-		this.pendingCount += 1;
-		this.leaveSent = false;
 	}
 
 	sync(id: string, current: CommentFeedback) {
@@ -98,12 +82,7 @@ export class DocFeedback {
 		this.pendingCount = current.open_count;
 		this.undelivered = current.undelivered_batches;
 		if (this.pendingCount > 0) {
-			this.leaveSent = false;
 			this.confirmSent(0);
-		}
-		// Only a visible document counts as the user returning; a refresh in a hidden tab must not.
-		if (document.visibilityState === 'visible' && !current.grace_closes_at) {
-			void returnDocFeedback(id).catch((error) => console.error('feedback return failed', error));
 		}
 	}
 
@@ -152,23 +131,11 @@ export class DocFeedback {
 			this.retrying = false;
 		}
 	};
-
-	leave = () => {
-		const id = this.artifactId;
-		if (!id || this.pendingCount === 0 || this.leaveSent) return;
-		this.leaveSent = true;
-		this.pendingCount = 0;
-		void leaveDocFeedback(id).then((result) => this.applyResult(id, result)).catch((error) => {
-			this.leaveSent = false;
-			console.error('feedback leave failed', error);
-		});
-	};
 }
 
 /**
  * The batch for the target `of()` names, held for as long as the calling component (the open tab) is mounted, so
- * reloading what the tab shows is not leaving it. Leaving is another target, a hidden browser tab, closing the page,
- * or the component going. `onReturn` runs when the browser tab shows again. Call while the component initialises.
+ * reloading what the tab shows is not switching it. `onReturn` runs when the browser tab shows again. Call while the component initialises.
  */
 export function holdDocFeedback(
 	of: () => { artifactId: string | null; targetInstanceId: string | null },
@@ -180,22 +147,11 @@ export function holdDocFeedback(
 		untrack(() => feedback.show(artifactId, targetInstanceId));
 	});
 	$effect(() => {
-		if (!feedback.graceDeadline) return;
-		const timer = setInterval(() => { feedback.countdownNow = Date.now(); }, 30_000);
-		return () => clearInterval(timer);
-	});
-	$effect(() => {
 		const visibility = () => {
-			if (document.visibilityState === 'hidden') feedback.leave();
 			if (document.visibilityState === 'visible') onReturn?.();
 		};
 		window.addEventListener('visibilitychange', visibility);
-		window.addEventListener('beforeunload', feedback.leave);
-		return () => {
-			window.removeEventListener('visibilitychange', visibility);
-			window.removeEventListener('beforeunload', feedback.leave);
-		};
+		return () => window.removeEventListener('visibilitychange', visibility);
 	});
-	onDestroy(feedback.leave);
 	return feedback;
 }

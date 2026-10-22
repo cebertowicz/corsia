@@ -11,7 +11,7 @@ import pytest
 from doc_feedback_helpers import add_comment, batches, seed_document, seed_thread
 from doceditor import feedback_batches
 from doceditor.document_scope import MAX_TEXT_BYTES
-from infra.database import get_db
+from infra.database import get_db, write_transaction
 from plans import admission, service
 from plans.feedback_nodes import (
     COMMENT_ACCEPTANCE,
@@ -56,18 +56,20 @@ def _edit(
     recipient: str = "owner",
     at: str = T0,
 ) -> str:
-    batch_id = feedback_batches.record_edit(
-        db,
-        artifact_id=artifact_id,
-        recipient_id=recipient,
-        author_kind=author_kind,
-        author_id=author_id,
-        actor_display=display,
-        path=PATH,
-        before=before,
-        after=after,
-        at=at,
-    )
+    db.commit()
+    with write_transaction(db, scope="test_record_edit") as connection:
+        batch_id = feedback_batches.record_edit(
+            connection,
+            artifact_id=artifact_id,
+            recipient_id=recipient,
+            author_kind=author_kind,
+            author_id=author_id,
+            actor_display=display,
+            path=PATH,
+            before=before,
+            after=after,
+            at=at,
+        )
     _set_current(db, artifact_id, after)
     db.commit()
     return batch_id
@@ -243,10 +245,12 @@ def test_content_event_routes_to_edit_writer_without_passive_artifact_note(isola
             authority=_conductor_edit("owner"),
         )
 
-        record_post_write_events(
-            shared, artifact, before=b"old\n", after=b"new\n",
-            actor_thread_id="author", db=db,
-        )
+        db.commit()
+        with write_transaction(db, scope="test_record_post_write_events") as connection:
+            record_post_write_events(
+                shared, artifact, before=b"old\n", after=b"new\n",
+                actor_thread_id="author", db=connection,
+            )
 
         assert db.execute("SELECT COUNT(*) FROM doc_feedback_edit_items").fetchone()[0] == 1
         assert db.execute(

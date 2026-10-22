@@ -112,6 +112,7 @@ def create_with_status(
     region: tuple[float, float, float, float] | None = None,
     image_rev: str | None = None,
     image_src: str | None = None,
+    announce: bool = True,
     db=None,
 ) -> tuple[dict[str, Any], bool]:
     """Insert a comment and return its row plus whether this call created it.
@@ -165,10 +166,10 @@ def create_with_status(
         if created:
             # Only a new top-level agent comment names itself; replies, suggestions and user comments do not.
             named = author_kind == "agent" and author_thread_id and not parent_id and replacement is None
-            comment_notifications.announce_after_commit(
-                connection, artifact_id,
-                comment_id=cid if named else None, author_thread_id=author_thread_id if named else None,
-            )
+            if announce:  # a person's comment is announced by its delivery instead
+                comment_notifications.announce_after_commit(
+                    connection, artifact_id, comment_id=cid if named else None,
+                    author_thread_id=author_thread_id if named else None)
             if region is not None:
                 live_events.region_after_commit(connection, "placed", artifact_id, w, h, author_kind=author_kind)
         return r, created

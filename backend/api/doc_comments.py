@@ -144,6 +144,10 @@ async def create_comment(artifact_id: str, token: str, body: CommentCreate):
             409,
             "client_id collides with another artifact's comment — re-mint and retry",
         ) from exc
+    if feedback["woken"]:
+        from plans import public
+
+        await public.drive_threads(feedback["woken"])
     return {"comment": row, **feedback}
 
 
@@ -165,11 +169,7 @@ def _user_feedback_write(user_id: str, artifact_id: str, action: str) -> dict:
                     artifact_id=artifact_id,
                     reason="send",
                 )
-            elif action == "leave":
-                feedback_batches.mark_user_left(connection, artifact_id)
-            elif action == "return":
-                feedback_batches.mark_user_returned(connection, artifact_id)
-            else:
+            elif action == "retry":
                 woken = feedback_batches.retry_for_document(
                     connection,
                     author_kind="user",
@@ -202,25 +202,6 @@ async def send_user_feedback(
 ):
     """Close and deliver the user's open batches for one document."""
     return await _user_feedback_action(user["id"], body, "send")
-
-
-@router.post("/doc-feedback/leave")
-async def leave_user_feedback(
-    body: FeedbackDocumentAction, user: dict = Depends(require_user_header_only),
-):
-    """Start the user's leave grace period for one document."""
-    return await _user_feedback_action(user["id"], body, "leave")
-
-
-@router.post("/doc-feedback/return")
-async def return_user_feedback(
-    body: FeedbackDocumentAction, user: dict = Depends(require_user_header_only),
-):
-    """Record that the user is looking at the document again: cancel leave grace.
-
-    Reply markers are not touched here; each clears only when its thread's reply is shown (the /viewed stamp).
-    """
-    return await _user_feedback_action(user["id"], body, "return")
 
 
 @router.post("/doc-feedback/retry")

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { loginByUrl } from '../support/corsia';
-import { visibleHeaderSends } from '../support/docFeedbackFooter';
+import { leaveUnsent, visibleHeaderSends } from '../support/docFeedbackFooter';
 import { journey, type Case, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled } from '../support/reviewFixtures';
 
 /**
@@ -264,8 +264,8 @@ journey('approve a plain ask from the reading', ALL, async ({ page, request, inf
 journey('approve with changes after two comments', ALL, async ({ page, request, info, mode, theme }) => {
 	const doc = await seed(request, `Review changes ${mode} ${theme}`);
 	raiseAsk(doc.threadId, doc.artifactId, 'Check the ring order.');
-	await comment(request, doc, 'Ring two should wait.', 2);
-	await comment(request, doc, 'Add a rollback line.', 5);
+	const waiting = [await comment(request, doc, 'Ring two should wait.', 2), await comment(request, doc, 'Add a rollback line.', 5)];
+	for (const id of waiting) await leaveUnsent(request, id);
 	await open(page, doc, mode, theme);
 	const approve = bar(page).getByRole('button', { name: 'Approve with changes', exact: true });
 	await expect(approve).toBeVisible();
@@ -428,7 +428,9 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 ], async ({ page, request, info, mode, theme }) => {
 	const doc = await seed(request, `Review unsent ${mode} ${theme}`);
 	const notes = ['Ring two should wait.', 'Add a rollback line.', 'Name the owner of ring three.', 'Link the rollout dashboard.', 'Confirm the rollback owner.', 'Add the incident channel.'];
-	for (const [index, note] of notes.entries()) await comment(request, doc, note, index * 2 + 2);
+	const waiting: string[] = [];
+	for (const [index, note] of notes.entries()) waiting.push(await comment(request, doc, note, index * 2 + 2));
+	for (const id of waiting) await leaveUnsent(request, id);
 	await open(page, doc, mode, theme);
 	// The header keeps only the pill's unsent dot; Send now is in the drawer.
 	await expect(page.locator('.comment-status .unsent-dot')).toBeVisible();
@@ -436,7 +438,7 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 	await page.getByRole('button', { name: /^6 open threads, 6 messages not sent yet$/ }).click();
 	const drawer = page.getByRole('region', { name: 'Document comments' });
 	const footer = drawer.locator('[data-drawer-unsent]');
-	await expect(footer.getByRole('status')).toHaveText(`6 messages not sent yet · they go to ${doc.title} when you leave.`);
+	await expect(footer.getByRole('status')).toHaveText(`6 messages not sent yet · they go to ${doc.title} in a few seconds.`);
 	const send = footer.getByRole('button', { name: 'Send now', exact: true });
 	await expect(send).toBeVisible();
 	await settled(page);

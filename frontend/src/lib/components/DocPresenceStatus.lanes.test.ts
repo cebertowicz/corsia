@@ -15,7 +15,7 @@ vi.mock('$lib/api/docs', async (original) => ({
 	...await original<typeof import('$lib/api/docs')>(),
 	fetchComments: async () => {
 		if (wire.failNext) { wire.failNext = false; throw new Error('offline'); }
-		return { comments: wire.rows, feedback: { open_count: 0, owner_label: null, grace_closes_at: null, undelivered_batches: [] } };
+		return { comments: wire.rows, feedback: { open_count: 0, owner_label: null, undelivered_batches: [] } };
 	},
 }));
 

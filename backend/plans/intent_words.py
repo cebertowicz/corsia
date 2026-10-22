@@ -196,13 +196,13 @@ def document_comment_words(items: Iterable[dict[str, Any]]) -> list[dict[str, st
             "source_id": str(item["id"]),
             "quote": bounded_text(str(item["body"]), MAX_QUOTE_BYTES),
         }
-        for item in items if item["kind"] == "comment"
+        for item in items if item["kind"] == "comment" and str(item["body"]).strip()
     ]
 
 
 def document_comment_intent(items: Iterable[dict[str, Any]]) -> str:
     """Make one bounded task reading from loaded person document comments."""
-    comments = [str(item["body"]) for item in items if item["kind"] == "comment"]
+    comments = [str(item["body"]) for item in items if item["kind"] == "comment" and str(item["body"]).strip()]
     return validate_intent(bounded_text(
         "User document feedback: " + "\n".join(comments), MAX_INTENT_BYTES,
     ))

@@ -191,7 +191,7 @@ describe('prepared comment arrivals', () => {
 				{ id: 'first', author: 'Agent', author_kind: 'agent', body: 'First body', anchor_text: 'one', from_off: 0, to_off: 3, resolved: false, replies: [], created_at: '2026-09-30T05:00:00Z' },
 				{ id: 'second', author: 'Agent', author_kind: 'agent', body: 'Second body', anchor_text: 'two', from_off: 4, to_off: 7, resolved: false, replies: [], created_at: '2026-09-30T05:00:01Z' },
 			],
-			feedback: { open_count: 2, owner_label: null, grace_closes_at: null, undelivered_batches: [] },
+			feedback: { open_count: 2, owner_label: null, undelivered_batches: [] },
 		});
 		const arrival = await prepareCommentArrival('artifact', 'first');
 		expect(get(docComments).artifact).toBeUndefined();
