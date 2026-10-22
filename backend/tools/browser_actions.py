@@ -54,7 +54,7 @@ class BrowserClickTool(Tool):
         "These actions work alongside the person. Never click what would show a password, key or code "
         "(such as creating or revealing a key) or grant access (an Allow or consent button): "
         "post_update the person to click it, then watch only the page's URL and title. Only a skill "
-        "that saves a key unseen may have you click to show it yourself.\n\n"
+        "that saves the password, key or code unseen may have you click to show it yourself.\n\n"
         "USE THIS to:\n"
         "- Click buttons, links, checkboxes\n"
         "- Navigate between pages\n"
