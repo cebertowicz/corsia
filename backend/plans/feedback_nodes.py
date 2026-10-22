@@ -268,16 +268,9 @@ def create_review_node(db, reviewer_thread_id: str, request: Any) -> FeedbackNod
 def _requesting_intent(db, request) -> str | None:
     """Resolve an optional review-request task to its canonical intent node.
 
-    The reference is another lane's column, so an unknown node leaves the
-    review without intent rather than losing the review.
+    A failed read fails the escalation, as it fails the fork start.
     """
-    try:
-        requesting_node_id = request["requesting_node_id"]
-    except (IndexError, KeyError):
-        return None
+    requesting_node_id = request["requesting_node_id"]
     if not requesting_node_id:
         return None
-    try:
-        return str(intent_words.canonical(db, str(requesting_node_id))["id"])
-    except service.PlanError:
-        return None
+    return str(intent_words.canonical(db, str(requesting_node_id))["id"])

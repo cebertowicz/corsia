@@ -22,22 +22,3 @@ def test_a_request_without_a_requesting_task_leaves_the_review_without_intent(re
     escalated = reviews.escalate_fork(db, _ask(aid)["id"])
     assert escalated["node_id"] is not None
     assert public.get_node(escalated["node_id"], db=db).intent_node_id is None
-
-
-def _request(aid: str, request_id: str, **extra) -> dict:
-    return {"id": request_id, "artifact_id": aid, "requester_display": "Requester", "note": None, **extra}
-
-
-def test_an_unknown_requesting_task_still_creates_the_review(review_env):
-    db, aid = review_env
-    created = public.create_review_node(db, "reviewer", _request(aid, "r-gone", requesting_node_id="gone"))
-    db.commit()
-    assert created.created
-    assert public.get_node(created.node_id, db=db).intent_node_id is None
-
-
-def test_a_request_with_no_requesting_column_still_creates_the_review(review_env):
-    db, aid = review_env
-    created = public.create_review_node(db, "reviewer", _request(aid, "r-old"))
-    db.commit()
-    assert public.get_node(created.node_id, db=db).intent_node_id is None
