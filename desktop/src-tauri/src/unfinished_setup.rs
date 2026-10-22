@@ -61,6 +61,9 @@ pub enum Launch {
     Wipe(Marker),
     /// A marker the shell cannot trust: nothing is wiped, and the reason belongs in the log.
     Untrusted(String),
+    /// A marker that is not valid JSON: nothing can use it, so the launch removes it (`discard_marker`) and the
+    /// install goes on unmarked.
+    Damaged(String),
 }
 
 fn state_dir_in(app_dir: &Path) -> PathBuf {
@@ -82,6 +85,8 @@ fn exists(path: &Path) -> Result<bool, String> {
 /// existing state folder with content, or one that is a link, is not one this first run made.
 pub fn mark(app_dir: &Path, workspace: &Path) -> Result<bool, String> {
     let state_dir = state_dir_in(app_dir);
+    fs::create_dir_all(app_dir)
+        .map_err(|error| format!("could not create {}: {error}", app_dir.display()))?;
     if exists(&state_dir)? {
         let metadata = fs::symlink_metadata(&state_dir)
             .map_err(|error| format!("could not check {}: {error}", state_dir.display()))?;
@@ -127,6 +132,11 @@ pub fn mark(app_dir: &Path, workspace: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Remove a marker nothing can use, so the backend never has to guess about it.
+pub fn discard_marker(app_dir: &Path) -> Result<(), String> {
+    remove_if_present(&app_dir.join(MARKER_FILE))
+}
+
 /// Decide what this launch does, reading only.
 pub fn at_launch(app_dir: &Path) -> Launch {
     let path = app_dir.join(MARKER_FILE);
@@ -137,7 +147,7 @@ pub fn at_launch(app_dir: &Path) -> Launch {
     };
     let marker: Marker = match serde_json::from_slice(&bytes) {
         Ok(marker) => marker,
-        Err(error) => return Launch::Untrusted(format!("{} is damaged: {error}", path.display())),
+        Err(error) => return Launch::Damaged(format!("{} is damaged: {error}", path.display())),
     };
     let expected = state_dir_in(app_dir);
     // The marker names the one folder it may wipe, and the install must still use exactly that folder: an
@@ -180,8 +190,11 @@ fn removable(workspace: &Path, relative: &str) -> Option<PathBuf> {
 }
 
 fn digest_of(path: &Path) -> Result<String, String> {
-    let bytes = fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
-    Ok(Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect())
+    let read_error = |error: std::io::Error| format!("could not read {}: {error}", path.display());
+    let mut file = fs::File::open(path).map_err(read_error)?;
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher).map_err(read_error)?;
+    Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 fn remove_if_present(path: &Path) -> Result<(), String> {
@@ -423,6 +436,22 @@ mod tests {
     }
 
     #[test]
+    fn marking_a_computer_with_no_app_folder_yet_makes_the_folder_and_marks() {
+        let home = Home::new("nofolder");
+        let app_dir = home.0.join("fresh").join("app");
+        assert!(mark(&app_dir, &home.workspace()).unwrap());
+        assert!(app_dir.join(MARKER_FILE).is_file());
+    }
+
+    #[test]
+    fn a_marker_that_cannot_be_written_is_an_error_not_a_silent_skip() {
+        let home = Home::new("unwritable");
+        let app_dir = home.0.join("blocked");
+        fs::write(&app_dir, b"a file where the folder should be").unwrap();
+        assert!(mark(&app_dir, &home.workspace()).is_err());
+    }
+
+    #[test]
     fn a_new_empty_state_root_is_marked() {
         let home = Home::new("empty");
         let app_dir = home.app_dir();
@@ -474,7 +503,9 @@ mod tests {
         fs::write(app_dir.join(MARKER_FILE), serde_json::to_vec(&marker).unwrap()).unwrap();
         assert!(matches!(at_launch(&app_dir), Launch::Untrusted(_)));
         fs::write(app_dir.join(MARKER_FILE), b"{ not json").unwrap();
-        assert!(matches!(at_launch(&app_dir), Launch::Untrusted(_)));
+        assert!(matches!(at_launch(&app_dir), Launch::Damaged(_)));
+        discard_marker(&app_dir).unwrap();
+        assert_eq!(at_launch(&app_dir), Launch::Nothing, "a damaged marker is removed and the install goes on unmarked");
         assert!(app_dir.join("state").join("corsia.db").exists());
     }
 

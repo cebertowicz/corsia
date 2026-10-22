@@ -30,13 +30,10 @@ commit while a wipe marker might still be on disk.
 from __future__ import annotations
 
 import json
-import logging
 import os
 from pathlib import Path
 
 from infra import config
-
-logger = logging.getLogger(__name__)
 
 #: The marker's name in the app folder. Held equal to ``MARKER_FILE`` in the shell by a parity test.
 MARKER_FILE = "setup-unfinished"
@@ -49,16 +46,15 @@ def marker_path() -> Path:
 def _own_marker() -> dict | None:
     """The marker this install's shell wrote for this state root, else ``None``.
 
-    Raises ``OSError`` when a marker may exist but cannot be read. A marker that is not valid JSON is one the
-    shell will not trust either, so it counts as not ours.
+    Raises ``OSError`` when a marker may exist but cannot be read or understood, so finishing can never commit
+    while a wipe marker might still be on disk. The shell removes a damaged marker at its next launch.
     """
     try:
         data = json.loads(marker_path().read_bytes())
     except FileNotFoundError:
         return None
-    except ValueError:
-        logger.warning("The unfinished-setup marker is damaged; it is left as it is", exc_info=True)
-        return None
+    except ValueError as error:
+        raise OSError("the unfinished-setup marker is damaged") from error
     state_dir = data.get("state_dir") if isinstance(data, dict) else None
     if not isinstance(state_dir, str) or Path(state_dir).resolve() != config.STATE_ROOT.resolve():
         return None

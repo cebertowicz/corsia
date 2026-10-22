@@ -158,11 +158,14 @@ def test_a_marker_that_cannot_be_read_refuses_the_finish_instead_of_passing_for_
     assert _completed()
 
 
-def test_a_damaged_marker_is_left_alone_because_the_shell_will_not_wipe_on_it_either(app):
+def test_a_damaged_marker_refuses_the_finish_and_the_next_account_instead_of_passing_for_none(app):
     _first_account()
     (app / setup_marker.MARKER_FILE).write_text("{not json", encoding="utf-8")
-    setup_progress.update(completed=True)
-    assert _completed()
+    with pytest.raises(setup_progress.SetupProgressError):
+        setup_progress.update(completed=True)
+    assert not _completed()
+    with pytest.raises(OSError):
+        setup_marker.record_created_file("context/x.md", "0" * 64)
     assert (app / setup_marker.MARKER_FILE).read_text(encoding="utf-8") == "{not json"
 
 

@@ -358,9 +358,18 @@ fn unregister_service() -> Result<(), String> {
 /// Returns the work folder that setup made, so planning the new first run reuses it.
 fn start_over_if_unfinished(app_dir: &Path) -> Result<Option<PathBuf>, String> {
     const COULDNT_START_OVER: &str =
-        "Couldn’t start setup over. Quit CORSIA and open it again. If that doesn’t help, restart your computer.";
+        "Couldn’t start setup over. Quit and reopen CORSIA to try again.";
     match unfinished_setup::at_launch(app_dir) {
         unfinished_setup::Launch::Nothing => Ok(None),
+        unfinished_setup::Launch::Damaged(reason) => {
+            // Nothing can trust it, so it only gets in the way: this install is simply not marked.
+            log::error!("a damaged unfinished-setup marker was removed: {reason}");
+            unfinished_setup::discard_marker(app_dir).map_err(|error| {
+                log::error!("could not remove the damaged marker: {error}");
+                COULDNT_START_OVER.to_owned()
+            })?;
+            Ok(None)
+        }
         unfinished_setup::Launch::Untrusted(reason) => {
             log::error!("an unfinished-setup marker was left alone: {reason}");
             Ok(None)
@@ -601,6 +610,16 @@ fn start_service<R: tauri::Runtime>(
     }
     let port = port_for_startup(&first_run, first_run::recorded_port(&app_dir))?;
     if let first_run::FirstRun::Fresh { workspace } = first_run {
+        // Marked before anything is written, so a marker that can't be written refuses the launch and leaves the
+        // computer as it was. Only a first run that makes the state folder marks it; `false` means it was not new.
+        match unfinished_setup::mark(&app_dir, &workspace) {
+            Ok(true) => {}
+            Ok(false) => log::info!("the state folder was not new, so setup is not marked unfinished"),
+            Err(error) => {
+                log::error!("could not mark setup as unfinished: {error}");
+                return Err("Couldn’t start setup. Quit and reopen CORSIA to try again.".into());
+            }
+        }
         let resources = bundled_resource_dir(app).ok();
         first_run::apply(&workspace, &app_dir, port, |path| {
             first_run::git_init(
@@ -609,12 +628,6 @@ fn start_service<R: tauri::Runtime>(
                 first_run::command_line_tools_installed,
             )
         })?;
-        // Only a first run that made the state folder marks it; a failed mark just means no wipe later.
-        match unfinished_setup::mark(&app_dir, &workspace) {
-            Ok(true) => {}
-            Ok(false) => log::info!("the state folder was not new, so setup is not marked unfinished"),
-            Err(error) => log::warn!("could not mark setup as unfinished: {error}"),
-        }
     }
     *service
         .app_dir
