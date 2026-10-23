@@ -385,20 +385,28 @@ const LOCAL_SERVICE_PERMISSIONS: &[&str] = &[
     "allow-save-setup-report",
     "allow-start-window-drag",
 ];
+const LOCAL_SERVICE_EXTERNAL_URL_SCOPES: &[&str] = &["http://*", "https://*"];
 
-/// Lets the page the local service serves at this exact origin call its commands. The app's command ACL refuses every
-/// origin it does not name, and the service page is not the startup shell, so without this the first-run folder
-/// choice and the Connect to another computer screens are refused.
+/// Lets the page the local service serves at this exact origin call its commands and open safe external links. The app's
+/// command ACL refuses every origin it does not name, and the service page is not the startup shell, so without this the
+/// first-run folder choice, Connect to another computer screens, and chat sign-in links are refused.
 fn grant_local_service_origin<R: tauri::Runtime>(app: &tauri::AppHandle<R>, service: &AppServiceState, port: u16) -> Result<(), String> {
     let mut granted = service.granted_local_ports.lock().unwrap_or_else(PoisonError::into_inner);
     if granted.contains(&port) {
         return Ok(());
     }
-    let capability = LOCAL_SERVICE_PERMISSIONS.iter().fold(
-        CapabilityBuilder::new(format!("local-service-origin-{port}")).remote(service_url(port)).window("main"),
-        |capability, permission| capability.permission(*permission),
-    );
-    app.add_capability(capability).map_err(|error| format!("could not grant local service commands: {error}"))?;
+    let capability = LOCAL_SERVICE_PERMISSIONS
+        .iter()
+        .fold(
+            CapabilityBuilder::new(format!("local-service-origin-{port}")).remote(service_url(port)).window("main"),
+            |capability, permission| capability.permission(*permission),
+        )
+        .permission_scoped(
+            "opener:allow-open-url",
+            LOCAL_SERVICE_EXTERNAL_URL_SCOPES.iter().map(|url| serde_json::json!({ "url": url })).collect::<Vec<_>>(),
+            Vec::<serde_json::Value>::new(),
+        );
+    app.add_capability(capability).map_err(|error| format!("could not grant local service permissions: {error}"))?;
     granted.insert(port);
     Ok(())
 }
@@ -2235,6 +2243,21 @@ mod tests {
                 let refusal = invoke_from(&webview, command, other).unwrap_err();
                 assert!(refusal.to_string().contains("not allowed"), "{command} was not ACL-refused from {other}: {refusal}");
             }
+        }
+    }
+
+    #[test]
+    fn the_local_service_origin_can_open_http_links_but_no_other_remote_origin_can() {
+        let (_app, webview) = service_origin_app(47895);
+        let command = "plugin:opener|open_url";
+        let local_error = invoke_from(&webview, command, &service_url(47895)).unwrap_err();
+        assert!(
+            !local_error.to_string().contains("not allowed"),
+            "{command} was ACL-refused from the local service origin: {local_error}"
+        );
+        for other in ["http://127.0.0.1:47896", "http://localhost:47895", "https://127.0.0.1:47895", "http://studio.example:47895", "http://127.0.0.1"] {
+            let refusal = invoke_from(&webview, command, other).unwrap_err();
+            assert!(refusal.to_string().contains("not allowed"), "{command} was not ACL-refused from {other}: {refusal}");
         }
     }
 

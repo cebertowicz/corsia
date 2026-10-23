@@ -10,6 +10,7 @@ import { toasts } from '$lib/stores/toast';
 import { documentLinkTarget } from '$lib/cm/markdown-link';
 import { uiScope } from '$lib/stores/uiScope';
 import { SETTINGS_SECTIONS, requestSettingsSection, type SettingsSection } from '$lib/stores/settingsNavigation';
+import { hasTauriInvoke } from '$lib/tauriShell';
 
 export interface LinkResolverDeps {
 	activeThreadId: () => string | null;
@@ -107,7 +108,7 @@ function hasScheme(href: string): boolean {
 
 /** Opens an external link in the correct host without changing web navigation. */
 export async function openExternalUrl(href: string): Promise<void> {
-	if (document.documentElement.dataset.shell === 'tauri') {
+	if (hasTauriInvoke()) {
 		await openUrl(href);
 		return;
 	}
@@ -203,7 +204,7 @@ function defaultDeps(): LinkResolverDeps {
 		openArtifact: openArtifactTab,
 		showError: (message) => toasts.show(message, 'error'),
 		openExternal: openExternalUrl,
-		isTauri: () => document.documentElement.dataset.shell === 'tauri',
+		isTauri: hasTauriInvoke,
 		origin: () => window.location.origin,
 		openSettings: requestSettingsSection,
 		// The page serves this request through its one thread selector (source `link`).
