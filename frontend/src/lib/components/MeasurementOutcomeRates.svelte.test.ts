@@ -98,7 +98,7 @@ describe('MeasurementOutcomeRates', () => {
 		expect(text(minutes.querySelector('.stat'))).toContain('6.0 minutes per outcome');
 		expect(text(minutes.querySelector('.stat'))).toContain('low n');
 		expect(text(minutes.querySelector('.asks'))).toBe('Asks are not recorded per agent yet. All agents together: – asks per outcome, n/a.');
-		expect(text(firstTry)).toContain('No measurements in this project or workspace.');
+		expect(text(firstTry)).toContain('Not yet measured for this scope.');
 		expect(firstTry.querySelector('svg')).toBeNull();
 	});
 

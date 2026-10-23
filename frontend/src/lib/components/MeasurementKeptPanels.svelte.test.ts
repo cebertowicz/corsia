@@ -54,7 +54,6 @@ function render(rows: Record<Series, MeasurementRow[]>, period = daysPeriod(day(
 const card = (id: string) => host.querySelector(`#${id}-title`)!.closest('section')!;
 
 describe('kept charts on Days', () => {
-
 	for (const [id, label] of [['outcomes', 'Outcomes'], ['asks', 'Asks'], ['rejections', 'Rejections'], ['tokens', 'Fresh tokens']] as const) {
 		it(`${label} reads BY DAY with a bar per day and the 7-day moving average`, () => {
 			render(allDays());
