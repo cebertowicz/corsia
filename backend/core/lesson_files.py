@@ -52,6 +52,14 @@ HOLD_REASONS = {
 }
 
 
+def has_section(text: str, section: str) -> bool:
+    """Whether Markdown ``text`` already has a heading named ``section``, casefolded."""
+    wanted = section.lstrip("#").strip().casefold()
+    return any(
+        line.lstrip("#").strip().casefold() == wanted for line in text.splitlines() if line.startswith("#")
+    )
+
+
 @dataclass(frozen=True)
 class TrialFile:
     """One valid trial skill as read from its text."""

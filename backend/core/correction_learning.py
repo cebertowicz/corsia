@@ -22,6 +22,28 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def manifest_paths(db: sqlite3.Connection, manifest_id: str | None) -> list[str]:
+    """Canonical file paths one context manifest delivered; generated rows have none."""
+    from infra.config import WORKSPACE
+    from tools.filesystem_gate import canonical_target_path
+
+    row = db.execute("SELECT entries_json FROM context_manifests WHERE id=?", (manifest_id,)).fetchone()
+    try:
+        entries = json.loads(row[0]) if row else []
+    except (TypeError, ValueError):
+        entries = []
+    found: list[str] = []
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict) or entry.get("version_kind") == "generated":
+            continue
+        path = entry.get("path")
+        if isinstance(path, str) and path:
+            resolved = canonical_target_path(path, workspace=WORKSPACE)
+            if resolved not in found:
+                found.append(resolved)
+    return found
+
+
 def loaded_targets(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
     """Return distinct file paths delivered or read in the active turn.
 
@@ -38,22 +60,7 @@ def loaded_targets(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
     ).fetchone()
     if turn is None:
         return ()
-    found: list[str] = []
-    manifest_id = turn["context_manifest_id"]
-    if manifest_id:
-        row = db.execute("SELECT entries_json FROM context_manifests WHERE id=?", (manifest_id,)).fetchone()
-        try:
-            entries = json.loads(row["entries_json"]) if row else []
-        except (TypeError, ValueError):
-            entries = []
-        for entry in entries if isinstance(entries, list) else []:
-            if not isinstance(entry, dict) or entry.get("version_kind") == "generated":
-                continue
-            path = entry.get("path")
-            if isinstance(path, str) and path:
-                resolved = canonical_target_path(path, workspace=WORKSPACE)
-                if resolved not in found:
-                    found.append(resolved)
+    found = manifest_paths(db, turn["context_manifest_id"])
     for row in db.execute("SELECT path FROM guidance_loads WHERE turn_id=? ORDER BY created_at,id", (turn["id"],)):
         path = canonical_target_path(str(row["path"]), workspace=WORKSPACE)
         if path not in found:

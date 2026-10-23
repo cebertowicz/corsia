@@ -132,11 +132,7 @@ def _additive_only(decision: Decision) -> None:
         raise TrialRefused("non-additive", (
             f"{decision.target_file} could not be read, so a trial cannot show it only adds a section"
         )) from None
-    section = str(decision.target_section).lstrip("#").strip().casefold()
-    headings = {
-        line.lstrip("#").strip().casefold() for line in text.splitlines() if line.startswith("#")
-    }
-    if section in headings:
+    if lesson_files.has_section(text, str(decision.target_section)):
         raise TrialRefused("non-additive", (
             f"{decision.target_file} is already in context and has a '{decision.target_section}' "
             "section; a trial there may only add a new section, so name a new target_section "

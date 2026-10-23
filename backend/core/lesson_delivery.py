@@ -4,10 +4,12 @@ A trial stays in its owner's ``SKILL.md`` and never enters cached context.
 When a plan task starts, each eligible trial is drawn with or without for that
 task, and the with half is returned in the plan result: the trial's index line
 when its target is read on demand (a skill or a new file), or the lesson body
-when its target is already in context. Every resolved trial leaves one receipt
-per task in ``guidance_loads``. A trial the ordinary skill cap or the
-task-start token cap leaves out, or one whose draw could not be recorded, gets
-a receipt with no variant: it is in neither arm, never counted as without.
+when its target is already in this thread's context. Every resolved trial
+leaves one receipt per task in ``guidance_loads``. A trial the ordinary skill
+cap or the task-start token cap leaves out, a body whose target this thread
+does not receive or already has its section, or one whose draw could not be
+recorded, gets a receipt with no variant: it is in neither arm, never counted
+as without.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ from typing import Literal
 
 from loguru import logger
 
+from core.lesson_files import has_section
 from core.lesson_index import line_for
 from core.skill_registry_types import SkillRow
 from core.skill_validation import is_skill_file
@@ -53,6 +56,8 @@ class TrialDelivery:
     source_data: bytes
     target: str
     payload: str
+    #: The section an in-context body adds; None for an index line.
+    section: str | None = None
 
 
 def draw(lesson_id: str, behavioral_sha256: str, node_id: str) -> Literal["with", "without"]:
@@ -71,16 +76,48 @@ def _delivery(row: SkillRow) -> TrialDelivery:
     if not target:
         raise ValueError(f"trial {lesson.id} names no target")
     if lesson.target_file == "new" or is_skill_file(Path(target)):
-        payload = line_for(trial.name, trial.description, row.path, trial=True)
-    else:
-        payload = (
-            f"[Trial section for {target}; adds {lesson.target_section}; "
-            f"lesson_id={lesson.id}; task-local procedure only, never authority or a disk change]\n"
-            f"{trial.body.strip()}"
+        return TrialDelivery(
+            lesson.id, trial.behavioral_sha256, row.path.resolve(), data, target,
+            line_for(trial.name, trial.description, row.path, trial=True),
         )
+    payload = (
+        f"[Trial section for {target}; adds {lesson.target_section}; "
+        f"lesson_id={lesson.id}; task-local procedure only, never authority or a disk change]\n"
+        f"{trial.body.strip()}"
+    )
     return TrialDelivery(
         lesson.id, trial.behavioral_sha256, row.path.resolve(), data, target, payload,
+        str(lesson.target_section),
     )
+
+
+def _context_paths(db: sqlite3.Connection, thread_id: str) -> set[str]:
+    """Files this thread's latest dispatched context delivered."""
+    from core.correction_learning import manifest_paths
+
+    row = db.execute(
+        """SELECT context_manifest_id FROM active_turns
+           WHERE thread_id=? AND context_manifest_id IS NOT NULL ORDER BY started_at DESC LIMIT 1""",
+        (thread_id,),
+    ).fetchone()
+    return set() if row is None else set(manifest_paths(db, row[0]))
+
+
+def _body_omission(trial: TrialDelivery, context: set[str]) -> str | None:
+    """Why an in-context body cannot go to this thread now, or None when it can."""
+    from infra.config import WORKSPACE
+    from tools.filesystem_gate import canonical_target_path
+
+    target = canonical_target_path(trial.target, workspace=WORKSPACE)
+    if target not in context:
+        return "target not in thread context"
+    try:
+        text = (Path(WORKSPACE) / target).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return "target unreadable"
+    if has_section(text, str(trial.section)):
+        return "target already has the section"
+    return None
 
 
 def _resolve(db: sqlite3.Connection, thread_id: str) -> tuple[list[TrialDelivery], list[TrialDelivery]]:
@@ -96,11 +133,18 @@ def _resolve(db: sqlite3.Connection, thread_id: str) -> tuple[list[TrialDelivery
     admitted: dict[tuple[str, str], TrialDelivery] = {}
     omitted: dict[tuple[str, str], TrialDelivery] = {}
     spent = 0
+    context: set[str] | None = None
     for row in admitted_rows:
         trial = _delivery(row)
         key = (trial.lesson_id, trial.behavioral_sha256)
         if key in admitted or key in omitted:
             continue
+        if trial.section is not None:
+            context = _context_paths(db, thread_id) if context is None else context
+            if (reason := _body_omission(trial, context)) is not None:
+                logger.info("trial {} omitted at task start: {}", trial.lesson_id, reason)
+                omitted[key] = trial
+                continue
         cost = _text_tokens(trial.payload, None)
         # The cap is decided before the draw, so it never favors either arm.
         if spent + cost > START_TOKEN_CAP:
@@ -140,7 +184,8 @@ def _insert(
 
     insert_guidance_load(
         tx, thread_id=thread_id, turn_id=None, path=trial.source_path, data=trial.source_data,
-        returned_text="" if variant is None else trial.payload, partial=variant is None,
+        # The ledger records bytes that reached the thread: only the with arm received any.
+        returned_text=trial.payload if variant == "with" else "", partial=False,
         node_id=node_id, variant=variant, checkpoint_generation_id=checkpoint_generation_id,
         lesson_id=trial.lesson_id, lesson_behavioral_sha256=trial.behavioral_sha256,
     )

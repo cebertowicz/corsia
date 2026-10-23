@@ -76,6 +76,17 @@ def _rows(monkeypatch, admitted: list[SkillRow], capped: list[SkillRow] | None =
     )
 
 
+def _in_context(monkeypatch, tmp_path: Path, text: str = "# Rules\n", *, delivered: bool = True) -> None:
+    """Make AGENTS.md a file this thread's context delivered (or not), with ``text``."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+    (workspace / "AGENTS.md").write_text(text, encoding="utf-8")
+    monkeypatch.setattr("infra.config.WORKSPACE", workspace)
+    monkeypatch.setattr(
+        "core.lesson_delivery._context_paths", lambda *_args: {"AGENTS.md"} if delivered else set(),
+    )
+
+
 def test_read_file_description_does_not_duplicate_trial_marker_protocol():
     from tools.filesystem_rw import ReadFileTool
 
@@ -121,6 +132,7 @@ def test_skill_and_new_targets_get_an_index_line_and_in_context_targets_get_the_
 ):
     skill, in_context = _row(tmp_path, 1), _row(tmp_path, 2, target_file="AGENTS.md")
     _rows(monkeypatch, [skill, in_context])
+    _in_context(monkeypatch, tmp_path)
 
     admitted, omitted = _resolve(db, "thread")
 
@@ -129,6 +141,40 @@ def test_skill_and_new_targets_get_an_index_line_and_in_context_targets_get_the_
     assert admitted[1].target == "AGENTS.md"
     assert admitted[1].payload.startswith("[Trial section for AGENTS.md; adds Trial check 2;")
     assert admitted[1].payload.endswith("Check Check Check Check")
+
+
+@pytest.mark.parametrize(("text", "delivered"), [
+    ("# Rules\n", False),
+    ("# Rules\n\n## trial CHECK 2\n", True),
+])
+def test_a_body_is_omitted_unless_its_target_is_in_context_without_the_section(
+    db, tmp_path, monkeypatch, text, delivered,
+):
+    _rows(monkeypatch, [_row(tmp_path, 2, target_file="AGENTS.md")])
+    _in_context(monkeypatch, tmp_path, text, delivered=delivered)
+
+    admitted, omitted = _resolve(db, "thread")
+
+    assert admitted == []
+    assert [trial.target for trial in omitted] == ["AGENTS.md"]
+
+
+def test_context_paths_read_the_threads_latest_manifest(db):
+    from core.lesson_delivery import _context_paths
+
+    for turn, manifest, started in (("t1", "m1", "1"), ("t2", "m2", "2")):
+        db.execute(
+            "INSERT INTO context_manifests (id,harness,entries_json,entry_count,created_at) VALUES (?,'h',?,1,'t')",
+            (manifest, f'[{{"path": "context/{manifest}.md", "version_kind": "raw"}}]'),
+        )
+        db.execute(
+            "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch,"
+            "context_manifest_id) VALUES (?,'thread',0,'m','completed',?,'b',?)",
+            (turn, started, manifest),
+        )
+
+    assert _context_paths(db, "thread") == {"context/m2.md"}
+    assert _context_paths(db, "other") == set()
 
 
 def test_start_trials_returns_and_records_the_with_half(db, monkeypatch):
@@ -154,9 +200,12 @@ def test_start_trials_records_both_halves_once_per_task(db, monkeypatch):
 
     assert [len(run) for run in returned["with"]] == [1, 1]
     assert returned["without"] == [[], []]
-    rows = db.execute("SELECT node_id,variant FROM guidance_loads ORDER BY variant").fetchall()
+    rows = db.execute("SELECT node_id,variant,delivered_sha256 FROM guidance_loads ORDER BY variant").fetchall()
     # The without task follows a with task on the same thread, so it is a crossover.
-    assert [tuple(row) for row in rows] == [(halves["without"], "crossover"), (halves["with"], "with")]
+    assert [tuple(row) for row in rows] == [
+        (halves["without"], "crossover", hashlib.sha256(b"").hexdigest()),
+        (halves["with"], "with", hashlib.sha256(trial.payload.encode()).hexdigest()),
+    ]
 
 
 def test_a_without_draw_is_recorded_and_a_crossover_needs_the_same_thread(db, monkeypatch):
@@ -172,6 +221,9 @@ def test_a_without_draw_is_recorded_and_a_crossover_needs_the_same_thread(db, mo
     assert sorted(tuple(row) for row in rows) == [
         ("other-thread", "without"), ("thread", "crossover"), ("thread", "with"),
     ]
+    assert db.execute(
+        "SELECT delivered_sha256 FROM guidance_loads WHERE variant='without'"
+    ).fetchone()[0] == hashlib.sha256(b"").hexdigest()
 
 
 def test_an_omitted_trial_gets_one_receipt_with_no_variant(db, monkeypatch):
@@ -185,13 +237,14 @@ def test_an_omitted_trial_gets_one_receipt_with_no_variant(db, monkeypatch):
     ).fetchall()
     assert [tuple(row) for row in rows] == [(
         "node", None, "omitted", hashlib.sha256(b"trial source").hexdigest(),
-        hashlib.sha256(b"").hexdigest(), 1,
+        hashlib.sha256(b"").hexdigest(), 0,
     )]
 
 
 def test_the_token_cap_omits_trials_past_it_before_the_draw(db, tmp_path, monkeypatch):
     rows = [_row(tmp_path, number, target_file="AGENTS.md", words=120) for number in range(12)]
     _rows(monkeypatch, rows)
+    _in_context(monkeypatch, tmp_path)
 
     admitted, omitted = _resolve(db, "thread")
 
