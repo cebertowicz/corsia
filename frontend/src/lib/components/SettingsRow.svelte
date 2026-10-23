@@ -112,9 +112,9 @@
 	.stack .face { flex: 1 1 16rem; }
 	.stack .actions { margin-left: auto; }
 	.face:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	/* An opening row's hover fill takes in the chevron, so its focus ring does too. */
-	.with-chev:has(.face:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
-	.with-chev .face:focus-visible { outline: none; }
+	/* An opening row's hover fill takes in the chevron, so its focus ring does too, unless the row carries its own button. */
+	.with-chev:not(:has(> .actions button)):has(.face:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+	.with-chev:not(:has(> .actions button)) .face:focus-visible { outline: none; }
 	.mark {
 		flex-shrink: 0;
 		width: var(--project-mark-size); height: var(--project-mark-size);

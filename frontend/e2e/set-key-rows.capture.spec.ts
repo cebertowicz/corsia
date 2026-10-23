@@ -68,9 +68,17 @@ test.describe('Set key from Connected apps capture', () => {
 				await (viewport > 768 ? page.getByRole('button', { name: 'Connected apps' }) : page.getByRole('button', { name: 'Apps' })).click();
 				await expect(page.getByRole('button', { name: /Stripe Needs a key/ })).toBeVisible();
 				await page.screenshot({ path: join(outputDir, `key-rows-closed-${viewport}-${theme}.png`), fullPage: true, animations: 'disabled' });
+				// A closed row that carries its own Set key button keeps the focus ring on its face, so the ring never encloses that button.
+				const stripeFace = page.locator('[data-settings-row="Stripe"] button.face');
+				await stripeFace.focus();
+				await page.keyboard.press('Tab');
+				await page.keyboard.press('Shift+Tab');
+				await expect(stripeFace).toBeFocused();
+				await expect(stripeFace).toHaveCSS('outline-style', 'solid');
+				await expect(page.locator('[data-settings-row="Stripe"]')).toHaveCSS('outline-style', 'none');
 
 				await page.getByRole('button', { name: /Stripe/ }).click();
-				await expect(page.getByText('Then press Set key next to Stripe.')).toBeVisible();
+				await expect(page.getByText('Create one in your Stripe settings, then press Set key.')).toBeVisible();
 				await page.getByRole('button', { name: /Sentry/ }).click();
 				await expect(page.getByText("Sentry didn't accept its key.")).toBeVisible();
 				await page.screenshot({ path: join(outputDir, `key-rows-open-${viewport}-${theme}.png`), fullPage: true, animations: 'disabled' });
@@ -79,38 +87,16 @@ test.describe('Set key from Connected apps capture', () => {
 				const headerBack = page.locator('.shell-header .h-back');
 				const sentryCard = page.locator('[data-key-entry="mcp-sentry-token-456"]');
 				await expect(headerBack).toHaveAccessibleName('Connected apps');
-				const sentryAction = sentryCard.getByRole('button', { name: 'Replace' });
-				const sentryActions = sentryCard.locator('.card-actions');
-				await expect(sentryAction).toBeFocused();
-				await expect(sentryActions).toHaveClass(/arrival/);
-				expect(await sentryAction.evaluate((element) => getComputedStyle(element).animationName.includes('key-action-arrival'))).toBe(true);
+				// Set key lands on that key's Set form with its field focused, ready to paste.
+				await expect(sentryCard.getByLabel('Key')).toBeFocused();
 				await page.screenshot({ path: join(outputDir, `key-card-selected-${viewport}-${theme}.png`), fullPage: true, animations: 'disabled' });
-				await page.waitForTimeout(120);
-				await expect(sentryAction).toBeFocused();
-				await expect(sentryActions).toHaveClass(/arrival/);
-				if (theme === 'light') {
-					const frozenPulse = await page.addStyleTag({ content: '.card-actions.arrival .btn.primary { animation: none !important; opacity: 0.72 !important; transform: scale(0.96) !important; }' });
-					await page.screenshot({ path: join(outputDir, `key-card-arrival-mid-pulse-${viewport}-light.png`), fullPage: true });
-					await frozenPulse.evaluate((style) => style.remove());
-				}
-				await page.waitForTimeout(1080);
-				await expect(sentryAction).toBeFocused();
-				await expect(sentryActions).not.toHaveClass(/arrival/);
-				if (theme === 'light') {
-					await page.screenshot({ path: join(outputDir, `key-card-arrival-settled-${viewport}-light.png`), fullPage: true, animations: 'disabled' });
-				}
-				await expect(sentryCard).not.toHaveClass(/focused/);
-
-				await sentryCard.getByRole('button', { name: 'Replace' }).click();
-				await expect(sentryCard.getByLabel('Key')).toBeVisible();
-				if (theme === 'light') {
-					await page.screenshot({ path: join(outputDir, `key-card-entry-open-${viewport}-light.png`), fullPage: true, animations: 'disabled' });
-				}
+				await page.waitForTimeout(1200);
+				await expect(sentryCard.getByLabel('Key')).toBeFocused();
 				await sentryCard.getByRole('button', { name: 'Cancel' }).click();
 
 				sentryState = 'connecting';
 				await sentryCard.getByRole('button', { name: 'Replace' }).click();
-				await page.getByLabel('Key').fill('prototype-only-value');
+				await page.getByLabel('Key', { exact: true }).fill('prototype-only-value');
 				await page.getByLabel('CORSIA password').fill('prototype-password');
 				await sentryCard.getByRole('button', { name: 'Save' }).click();
 				await expect(page.getByText('Saved. Reconnecting Sentry…')).toBeVisible();
@@ -123,14 +109,14 @@ test.describe('Set key from Connected apps capture', () => {
 
 				sentryState = 'token_rejected';
 				await sentryCard.getByRole('button', { name: 'Replace' }).click();
-				await page.getByLabel('Key').fill('prototype-only-value');
+				await page.getByLabel('Key', { exact: true }).fill('prototype-only-value');
 				await page.getByLabel('CORSIA password').fill('prototype-password');
 				await sentryCard.getByRole('button', { name: 'Save' }).click();
 				await expect(page.getByText("Sentry didn't accept this key.")).toBeVisible();
 				await page.screenshot({ path: join(outputDir, `key-rejected-${viewport}-${theme}.png`), fullPage: true, animations: 'disabled' });
 
 				await sentryCard.getByRole('button', { name: 'Replace' }).click();
-				await page.getByLabel('Key').fill('prototype-only-value');
+				await page.getByLabel('Key', { exact: true }).fill('prototype-only-value');
 				await page.getByLabel('CORSIA password').fill('prototype-password');
 				failSave = true;
 				await sentryCard.getByRole('button', { name: 'Save' }).click();
@@ -155,7 +141,7 @@ test.describe('Set key from Connected apps capture', () => {
 				await page.getByRole('dialog').getByRole('button', { name: 'Set key' }).click();
 				const stripeCard = page.locator('[data-key-entry="mcp-stripe-api-key-123"]');
 				await expect(page.locator('.shell-header .h-back')).toHaveAccessibleName('Connected apps');
-				await expect(stripeCard.getByRole('button', { name: 'Set' })).toBeFocused();
+				await expect(stripeCard.getByLabel('Key', { exact: true })).toBeFocused();
 				await page.screenshot({ path: join(outputDir, `connect-result-key-${viewport}-${theme}.png`), fullPage: true, animations: 'disabled' });
 
 				await page.locator('.shell-header .h-back').click();
@@ -164,9 +150,9 @@ test.describe('Set key from Connected apps capture', () => {
 				const primaryLinearCard = page.locator('[data-key-entry="mcp-linear-primary-key-111"]');
 				const secondaryLinearCard = page.locator('[data-key-entry="mcp-linear-secondary-key-222"]');
 				// `openKey` selects the first unset descriptor in server order (`find(!set) ?? refs[0]`).
-				await expect(primaryLinearCard.getByRole('heading', { name: 'Linear key: LINEAR_PRIMARY_KEY' })).toBeVisible();
-				await expect(primaryLinearCard.getByRole('button', { name: 'Set' })).toBeFocused();
-				await expect(secondaryLinearCard.getByRole('heading', { name: 'Linear key: LINEAR_SECONDARY_KEY' })).toBeVisible();
+				await expect(primaryLinearCard.getByTitle('Linear key: LINEAR_PRIMARY_KEY', { exact: true })).toBeVisible();
+				await expect(primaryLinearCard.getByLabel('Key', { exact: true })).toBeFocused();
+				await expect(secondaryLinearCard.getByTitle('Linear key: LINEAR_SECONDARY_KEY', { exact: true })).toBeVisible();
 				if (theme === 'light') {
 					await page.screenshot({ path: join(outputDir, `key-cards-two-missing-selected-${viewport}-light.png`), fullPage: true, animations: 'disabled' });
 				}

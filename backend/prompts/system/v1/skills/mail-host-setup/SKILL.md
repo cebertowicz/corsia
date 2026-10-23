@@ -17,4 +17,4 @@ Only the designated CORSIA thread runs this. Never ask for, type, read, print or
 
 ## After an update
 
-When a System-change notice adds this skill: if the profile says `Email app: Other`, offer once (step 3, after asking for the address), then go on from step 4; record the notice as handled and never offer again. Otherwise just record it as handled.
+When a System-change notice adds this skill: if the profile says `Email app: Other`, offer once (step 3, after asking for the address), then go on from step 4; record the notice `deferred` while the offer is open, `acted` once the account is added, or `not_applicable` if they say not now, and never offer again. Otherwise record it `not_applicable`.

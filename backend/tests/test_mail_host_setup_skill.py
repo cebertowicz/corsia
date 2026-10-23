@@ -45,8 +45,9 @@ def test_a_system_change_notice_that_adds_the_skill_is_handled_once() -> None:
     assert "a System-change notice adds this skill" in SKILL.split("---")[1]
     after = SKILL.split("## After an update", 1)[1]
     assert "When a System-change notice adds this skill: if the profile says `Email app: Other`, offer once" in after
-    assert "record the notice as handled and never offer again" in after
-    assert "Otherwise just record it as handled." in after
+    # Every exit names its bulletin_disposition state: open offer, account added, declined, or no offer due.
+    assert "record the notice `deferred` while the offer is open, `acted` once the account is added, or `not_applicable` if they say not now, and never offer again" in after
+    assert "Otherwise record it `not_applicable`." in after
 
 
 def test_every_tool_the_skill_names_exists_and_is_loaded_through_the_pack_it_lives_in() -> None:
