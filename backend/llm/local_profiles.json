@@ -1,6 +1,6 @@
 {
   "managed_global_settings": {
-    "max_concurrent_requests": 1,
+    "max_concurrent_requests": 2,
     "prefill_priority": "context"
   },
   "model_settings": {
