@@ -597,6 +597,21 @@ describe('ConnectedAppsSettings', () => {
 		expect(titles.every((title) => title?.endsWith('@example.com'))).toBe(true);
 	});
 
+	it('fits the local part to what the provider and a long domain want, not to the width the row already squeezed them to', async () => {
+		const account = { ...googleAccount, id: 'long-host', address: 'abcdefghijklmnopqrstuvwxyz@very-long-mail-host-name-for-testing.example.test' };
+		vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.classList.contains('account-closed-name') ? 296 : 0; });
+		// The row has shrunk the domain to 40px (it ends in an ellipsis), but its text wants 250px.
+		vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.classList.contains('account-domain') ? 250 : 0; });
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function(this: HTMLElement) {
+			const width = this.classList.contains('account-provider') ? 56 : this.classList.contains('account-domain') ? 40 : this.classList.contains('account-closed-name') ? 296 : 0;
+			return { width, right: width } as DOMRect;
+		});
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: [account] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('.account-local-prefix')?.textContent).not.toBe('abcdefghijklmnopqrstuvwxyz'));
+		expect((host.querySelector('.account-local-prefix')?.textContent ?? '').length).toBeLessThanOrEqual(1);
+	});
+
 	it('keeps account rows visible with the approved offline message after a failed refresh', async () => {
 		let calls = 0;
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {

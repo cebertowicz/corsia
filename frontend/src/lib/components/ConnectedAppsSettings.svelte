@@ -211,7 +211,9 @@
 				const providerStyle = getComputedStyle(provider);
 				const providerGap = Number.parseFloat(providerStyle.marginInlineEnd) || 0;
 				const prefixStyle = getComputedStyle(prefix);
-				const base = node.clientWidth - provider.getBoundingClientRect().width - providerGap - domain.getBoundingClientRect().width;
+				// Provider and domain may be shrunk by the row (ellipsis), so measure what they want, not what they got.
+				const natural = (el: HTMLElement) => Math.max(el.getBoundingClientRect().width, el.scrollWidth);
+				const base = node.clientWidth - natural(provider) - providerGap - natural(domain);
 				const withSuffix = Math.max(0, base - width(parts.localSuffix, getComputedStyle(suffix)));
 				// With too little room left for even the start of the name, the suffix goes first.
 				const dropSuffix = parts.localSuffix !== '' && withSuffix < width(`${[...parts.localPrefix].slice(0, 4).join('')}…`, prefixStyle);
@@ -385,7 +387,9 @@
 	.account-closed-name, .account-open-name { min-width: 0; font-size: var(--text-subhead); color: var(--text-primary); }
 	.account-closed-name { display: flex; overflow: hidden; white-space: nowrap; }
 	.account-provider, .account-local-prefix, .account-local-suffix, .account-domain { flex: 0 0 auto; }
-	.account-provider { margin-inline-end: var(--space-1); }
+	/* When provider and domain alone outgrow the row, the domain gives way first, then the provider, each ending in an ellipsis. */
+	.account-provider { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; margin-inline-end: var(--space-1); }
+	.account-domain { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 	.account-local-prefix { overflow: hidden; text-overflow: clip; }
 	.account-open-name { overflow-wrap: anywhere; }
 	.account-action { position: relative; display: inline-flex; }
