@@ -179,7 +179,7 @@ describe('SetupScreen', () => {
 
 	it('keeps the shell-owned default when a protected folder is replaced', async () => {
 		const invoke = vi.fn(async (command: string) => command === 'choose_work_folder'
-			? { state: 'ready', path: '/Users/ada/Documents', protected_folder: { kind: 'personal_folder', folder: 'Documents' } }
+			? { state: 'ready', path: '/fixture/Documents', protected_folder: { kind: 'personal_folder', folder: 'Documents' } }
 			: undefined);
 		Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
 		await openAccount(); button('Change')?.click(); await settle();
