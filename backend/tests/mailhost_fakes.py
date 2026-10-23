@@ -263,10 +263,10 @@ class FakeSmtp(_LineServer):
                 conn.send("250 OK")
             elif verb == "DATA":
                 conn.send("354 go ahead")
-                lines: list[bytes] = []
+                body: list[bytes] = []
                 while (data_line := conn.readline()) not in (None, b"."):
-                    lines.append(data_line)
-                self.sent.append((recipients[:], b"\r\n".join(lines)))
+                    body.append(data_line)
+                self.sent.append((recipients[:], b"\r\n".join(body)))
                 recipients.clear()
                 conn.send("250 queued")
             elif verb == "QUIT":
