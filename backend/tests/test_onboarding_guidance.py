@@ -301,7 +301,7 @@ def test_where_your_work_lives_rechecks_connected_apps_after_import():
     work = _step(3)
 
     assert work.startswith("Where your work lives,** skipped when `connected_app_count` is two or more")
-    assert "After step 2, read `corsia_api` `GET /api/mcp/servers`" in work
+    assert "After the import step, read `corsia_api` `GET /api/mcp/servers`" in work
     assert "using its connected apps" in work
     assert "imported apps count too" in work
 

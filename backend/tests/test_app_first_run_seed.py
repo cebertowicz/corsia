@@ -231,6 +231,8 @@ def test_applicable_steps_and_completion_cache_reconcile_conditionals(
         "setup": {"setup_decisions": []},
     }
     steps = applicable_steps(facts)
+    connections = next(step for step in applicable_steps({}) if step["step_number"] == 3)
+    assert "or you chose not now" in connections["acceptance_criteria"]
     assert [(step["step_number"], step["title"], step.get("vendor")) for step in steps] == [
         (1, "Add your second subscription", "claude_code"),
         (2, "Bring over what your other tools know", None),
@@ -241,13 +243,13 @@ def test_applicable_steps_and_completion_cache_reconcile_conditionals(
         (9, "Hand over to your agents", None),
     ]
     assert [step["acceptance_criteria"] for step in steps] == [
-        "you connected your Claude subscription or chose not now",
+        "you connected your Claude subscription, or chose not now",
         "you chose whether to bring over what your other tools know",
-        "web search works or you chose not now",
+        "web search works, or you chose not now",
         "CORSIA knows enough about you to help, or you chose not now",
         "you chose whether to use or share community improvements, or chose not now",
         "CORSIA explained how file access and approval work",
-        "CORSIA asked what you would like help with next",
+        "CORSIA asked what you'd like help with next",
     ]
 
     accounts.create_first_account("newcomer", PASSWORD, full_name="New Comer", first_run_path="app")

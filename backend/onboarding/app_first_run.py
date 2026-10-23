@@ -89,7 +89,7 @@ def applicable_steps(
         product = "Claude" if vendor == "claude_code" else "ChatGPT"
         steps.append(_step(
             1, "Add your second subscription",
-            f"you connected your {product} subscription or chose not now",
+            f"you connected your {product} subscription, or chose not now",
             vendor=vendor,
         ))
     if _has_import_step(facts):
@@ -100,12 +100,12 @@ def applicable_steps(
     if connected_app_count < 2:
         steps.append(_step(
             3, "Where your work lives",
-            "you named the apps where you work, and each connection is finished or skipped",
+            "you named the apps where you work and each connection is finished or skipped, or you chose not now",
         ))
     if facts.get("web_search_ready") is not True:
         steps.append(_step(
             4, "Web search",
-            "web search works or you chose not now",
+            "web search works, or you chose not now",
         ))
     steps.extend((
         _step(
@@ -126,7 +126,7 @@ def applicable_steps(
         ),
         _step(
             9, "Hand over to your agents",
-            "CORSIA asked what you would like help with next",
+            "CORSIA asked what you'd like help with next",
         ),
     ))
     return tuple(steps)
