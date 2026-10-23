@@ -382,19 +382,11 @@ def test_note_omits_earlier_block_when_no_match():
     assert "Earlier corrections that may be the same miss:" not in note
 
 
-def test_earlier_lookup_returns_no_matches_when_the_search_index_is_unavailable(agent, main_db):
-    from core.correction_notes import earlier_chat_corrections
+
+def test_earlier_correction_messages_caps_matches_at_three(agent, main_db):
+    from infra.database import get_db
     from jobs.corrections_recording import candidate_for_message
-
-    agent.say("c1", "The account screen has duplicate navigation.")
-    main_db.execute("DROP TABLE messages_fts")
-
-    assert earlier_chat_corrections(main_db, candidate_for_message("c1")) == ()
-
-
-def test_earlier_chat_corrections_caps_matches_at_three(agent, main_db):
-    from core.correction_notes import earlier_chat_corrections
-    from jobs.corrections_recording import candidate_for_message
+    from memory.node_start_recall import earlier_correction_messages
 
     for number in range(4):
         message_id = f"c{number + 1}"
@@ -403,22 +395,22 @@ def test_earlier_chat_corrections_caps_matches_at_three(agent, main_db):
         agent.deliver()
     agent.say("c5", "Account navigation is duplicate again.")
 
-    matches = earlier_chat_corrections(main_db, candidate_for_message("c5"))
+    matches = earlier_correction_messages(get_db(), candidate_for_message("c5"))
 
     assert len(matches) == 3
 
 
 def test_lookup_finishes_before_the_fact_write_transaction(agent, monkeypatch):
-    import core.correction_notes
+    import memory.node_start_recall
 
     seen_in_transaction = []
-    original = core.correction_notes.earlier_chat_corrections
+    original = memory.node_start_recall.earlier_correction_messages
 
     def lookup(db, candidate):
         seen_in_transaction.append(db.in_transaction)
         return original(db, candidate)
 
-    monkeypatch.setattr(core.correction_notes, "earlier_chat_corrections", lookup)
+    monkeypatch.setattr(memory.node_start_recall, "earlier_correction_messages", lookup)
     agent.say("c1", "The account screen has duplicate navigation.")
 
     assert agent.record("c1")

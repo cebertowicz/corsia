@@ -63,15 +63,16 @@ def _record_fact(
 
     A new correction queues its triage note in the same transaction.
     """
-    from core.correction_notes import earlier_chat_corrections, queue_correction_note
+    from core.correction_notes import queue_correction_note
     from infra.database import get_db, write_transaction
     from infra.outcome_events import record_outcome_event
+    from memory.node_start_recall import earlier_correction_messages
 
     attributes = fact_attributes(candidate, classification, version)
     if set(attributes) != set(FACT_KEYS):
         raise RuntimeError("correction fact attributes are incomplete")
     # The FTS read must finish before this fact and its note share a write transaction.
-    earlier = earlier_chat_corrections(get_db(), candidate) if classification["label"] == LABEL_CORRECTION else ()
+    earlier = earlier_correction_messages(get_db(), candidate) if classification["label"] == LABEL_CORRECTION else ()
     with write_transaction(None, scope="record_correction_fact") as db:
         result = record_outcome_event(
             db,

@@ -6,6 +6,7 @@ operation's outcome: failures are logged and simply omit the optional block.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -18,7 +19,8 @@ from loguru import logger as log
 
 from core.correction_notes import local_clock
 from core.corrections_recording import (
-    decision_answer_arrived_at_sql,
+    CORRECTION_EVENT,
+    CorrectionCandidate,
     is_owner_authored_message,
     owner_message_sql_predicate,
 )
@@ -27,7 +29,7 @@ from infra.product_events import emit_product_event
 from llm.locality import cloud_off_project_ids
 from memory.checkpoint_search import caller_user_id
 from memory.node_text import node_text as _node_text
-from memory.task_match import Match, NodeText, TaskTerms, first_term_at, match, task_terms
+from memory.task_match import Match, NodeText, TaskTerms, match, task_terms
 
 MAX_HITS = 3
 SOURCE_CANDIDATES = 100
@@ -48,6 +50,26 @@ class _Hit:
     line: str
 
 
+@dataclass(frozen=True)
+class EarlierCorrection:
+    """A prior correction message selected by the canonical message reader."""
+
+    thread_title: str
+    created_at: str
+    content: str
+
+
+@dataclass(frozen=True)
+class _MessageHit:
+    message_id: str
+    thread_id: str
+    thread_title: str
+    created_at: str
+    content: str
+    matched: Match
+    kind: str = "message"
+
+
 def related(
     db: sqlite3.Connection,
     text: NodeText,
@@ -64,6 +86,29 @@ def related(
         return []
     _log(reason, trigger, hits, started, caller_thread_id)
     return [_HEADER, *(hit.line for hit in hits)] if hits else []
+
+
+def earlier_correction_messages(
+    db: sqlite3.Connection, candidate: CorrectionCandidate,
+) -> tuple[EarlierCorrection, ...]:
+    """Return up to three related, earlier correction messages for one chat correction.
+
+    This is the correction-note mode of the canonical message reader. It keeps
+    its user, purge, locality, owner and delivery filters while the candidate's
+    timestamp supplies the visibility boundary instead of a plan-start cutoff.
+    """
+    started = perf_counter()
+    trigger = "correction_note"
+    if candidate.source_kind != "message":
+        _log("not_message", trigger, [], started, candidate.thread_id)
+        return ()
+    try:
+        reason, hits = _earlier_correction_messages(db, candidate)
+    except Exception as exc:  # noqa: BLE001 - advisory context must not fail a fact write
+        _log_error(trigger, exc, started, candidate.thread_id)
+        return ()
+    _log(reason, trigger, hits, started, candidate.thread_id)
+    return tuple(EarlierCorrection(hit.thread_title, hit.created_at, hit.content) for hit in hits)
 
 
 def attach_to_result(
@@ -133,10 +178,12 @@ def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]
     cloud_off = cloud_off_project_ids(db=db)
     _ensure_functions(db)
 
-    candidates = [*_message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff),
-                  *_comment_candidates(db, terms, user_id, caller, cloud_off, cutoff),
-                  *_decision_candidates(db, terms, user_id, caller, cloud_off, cutoff),
-                  *_rule_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff)]
+    from memory.node_start_other_sources import candidates as other_candidates
+
+    candidates = [
+        *_message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff),
+        *other_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff, SOURCE_CANDIDATES),
+    ]
     if not candidates:
         return "below_floor", []
     # Scores are primary, then newest sources, then direct person words ahead of a rule.
@@ -152,6 +199,29 @@ def _related(db, text: NodeText, caller_thread_id: str) -> tuple[str, list[_Hit]
         rules += hit.kind == "rule"
         if len(kept) == MAX_HITS:
             break
+    kept.sort(key=lambda hit: _newest_first(hit.created_at))
+    return "delivered", kept
+
+
+def _earlier_correction_messages(
+    db: sqlite3.Connection, candidate: CorrectionCandidate,
+) -> tuple[str, list[_MessageHit]]:
+    terms = task_terms(NodeText(candidate.content))
+    if len(terms.terms) < 2 or not terms.title_terms:
+        return "no_terms", []
+    user_id = caller_user_id(db, candidate.thread_id)
+    caller = db.execute("SELECT project_id,local_only FROM threads WHERE id=?", (candidate.thread_id,)).fetchone()
+    if user_id is None or caller is None:
+        return "unresolved_caller", []
+    _ensure_functions(db)
+    hits = _message_matches(
+        db, terms, user_id, candidate.thread_id, caller, cloud_off_project_ids(db=db), cutoff=None,
+        before=(candidate.created_at, candidate.source_id), correction_only=True, exclude_live_caller=False,
+    )
+    if not hits:
+        return "below_floor", []
+    hits.sort(key=lambda hit: (-hit.matched.shared, -hit.matched.title_shared, _newest_first(hit.created_at)))
+    kept = hits[:MAX_HITS]
     kept.sort(key=lambda hit: _newest_first(hit.created_at))
     return "delivered", kept
 
@@ -242,128 +312,61 @@ def source_reaches_thread(db: sqlite3.Connection, source_thread_id: str, recipie
 
 
 def _message_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[_Hit]:
+    from memory.node_start_other_sources import _excerpt
+
+    rows = _message_matches(
+        db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff=cutoff,
+    )
+    return [
+        _Hit(
+            row.matched, row.created_at, "message",
+            f'{local_clock(row.created_at)} · message in “{row.thread_title}” · “{_excerpt(row.matched)}” '
+            f'→ get_thread_history(thread_id="{row.thread_id}")',
+        )
+        for row in rows
+    ]
+
+
+def _message_matches(
+    db, terms, user_id, caller_thread_id, caller, cloud_off, *, cutoff: str | None,
+    before: tuple[str, str] | None = None, correction_only: bool = False, exclude_live_caller: bool = True,
+) -> list[_MessageHit]:
+    """Read eligible messages through the shared FTS, scope, owner and matcher path."""
     owner_filter, owner_params = _positional(*owner_message_sql_predicate("m"))
     source_scope, source_params = _source_scope("t", "m.created_at", caller, cloud_off, cutoff)
-    caller_cut = current_installed_through_seq(caller_thread_id, db=db) or 0
+    caller_cut = current_installed_through_seq(caller_thread_id, db=db) or 0 if exclude_live_caller else None
     matching, match_params = _matching("m.content", terms)
+    cutoff_filter = "AND (m.thread_id<>? OR m.seq IS NOT NULL AND m.seq<=?)" if caller_cut is not None else ""
+    cutoff_params: list[object] = [caller_thread_id, caller_cut] if caller_cut is not None else []
+    before_filter = "AND (m.created_at < ? OR (m.created_at=? AND m.id < ?))" if before else ""
+    before_params: list[object] = [before[0], before[0], before[1]] if before else []
+    correction_filter = (
+        "AND EXISTS (SELECT 1 FROM outcome_events e WHERE e.subject_key='message:' || m.id "
+        "AND e.event_name=? AND e.retracted_at IS NULL)" if correction_only else ""
+    )
+    correction_params: list[object] = [CORRECTION_EVENT] if correction_only else []
     rows = db.execute(
         f"""SELECT m.id,m.thread_id,m.content,m.created_at,t.title
             FROM messages_fts JOIN messages m ON m.rowid=messages_fts.rowid
             JOIN threads t ON t.id=m.thread_id
             WHERE messages_fts MATCH ? AND {owner_filter} AND m.delivery_state='delivered'
               AND {_owned_threads('t')} {source_scope}
-              AND (m.thread_id<>? OR m.seq IS NOT NULL AND m.seq<=?)
+              {cutoff_filter} {before_filter} {correction_filter}
               AND {_OWNER_FUNCTION}(m.role,m.content,m.metadata) {matching}
             ORDER BY m.created_at DESC LIMIT ?""",
-        [_fts_title(terms), *owner_params, user_id, *source_params,
-         caller_thread_id, caller_cut, *match_params, SOURCE_CANDIDATES],
+        [_fts_title(terms), *owner_params, user_id, *source_params, *cutoff_params,
+         *before_params, *correction_params, *match_params, SOURCE_CANDIDATES],
     ).fetchall()
-    hits = []
+    hits: list[_MessageHit] = []
     for row in rows:
         found = match(terms, str(row["content"]))
         if found:
-            line = f'{local_clock(str(row["created_at"]))} · message in “{row["title"]}” · “{_excerpt(found)}” → get_thread_history(thread_id="{row["thread_id"]}")'
-            hits.append(_Hit(found, str(row["created_at"]), "message", line))
+            hits.append(_MessageHit(
+                str(row["id"]), str(row["thread_id"]), str(row["title"] or "Untitled thread"),
+                str(row["created_at"]), str(row["content"]), found,
+            ))
     return hits
 
-
-def _comment_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[_Hit]:
-    from core.correction_targets import comment_target_sql
-
-    source_scope, source_params = _source_scope("t", "c.created_at", caller, cloud_off, cutoff)
-    matching, match_params = _matching("c.body", terms)
-    rows = db.execute(
-        f"""SELECT c.id,c.artifact_id,c.body,c.created_at,ai.title,ai.path
-            FROM doc_comments c JOIN threads t ON t.id=({comment_target_sql('c')})
-            LEFT JOIN artifact_identities ai ON ai.id=c.artifact_id
-            WHERE c.author_kind='user' AND {_owned_threads('t')} {source_scope} {matching}
-            ORDER BY c.created_at DESC,c.id DESC LIMIT ?""",
-        [user_id, *source_params, *match_params, SOURCE_CANDIDATES],
-    ).fetchall()
-    hits = []
-    for row in rows:
-        found = match(terms, str(row["body"]))
-        if found:
-            about = row["title"] or row["path"] or row["artifact_id"]
-            line = f'{local_clock(str(row["created_at"]))} · comment on “{about}” · “{_excerpt(found)}”'
-            hits.append(_Hit(found, str(row["created_at"]), "comment", line))
-    return hits
-
-
-def _decision_candidates(db, terms, user_id, caller, cloud_off, cutoff) -> list[_Hit]:
-    from plans.public import DECISION_TYPE
-
-    answer = "json_extract(ai.metadata,'$.plan_decision.answer.text')"
-    answered_at = decision_answer_arrived_at_sql("ai")
-    source_scope, source_params = _source_scope("t", answered_at, caller, cloud_off, cutoff)
-    matching, match_params = _matching(answer, terms)
-    rows = db.execute(
-        f"""SELECT ai.external_id,json_extract(ai.metadata,'$.plan_decision.title') AS title,
-                   {answer} AS answer,{answered_at} AS answered_at
-            FROM artifact_identities ai
-            JOIN threads t ON t.id=json_extract(ai.metadata,'$.plan_decision.thread_id')
-            WHERE ai.integration='local' AND ai.type=? AND ai.state='active'
-              AND json_extract(ai.metadata,'$.plan_decision.state')='answered'
-              AND json_type(ai.metadata,'$.plan_decision.answer.text')='text'
-              AND {_owned_threads('t')} {source_scope} {matching}
-            ORDER BY answered_at DESC LIMIT ?""",
-        [DECISION_TYPE, user_id, *source_params, *match_params, SOURCE_CANDIDATES],
-    ).fetchall()
-    hits = []
-    for row in rows:
-        text, created_at = str(row["answer"]), str(row["answered_at"])
-        found = match(terms, text)
-        if found:
-            line = f'{local_clock(created_at)} · answer to decision “{row["title"] or row["external_id"]}” · “{_excerpt(found)}”'
-            hits.append(_Hit(found, created_at, "decision", line))
-    return hits
-
-
-def _rule_candidates(db, terms, user_id, caller_thread_id, caller, cloud_off, cutoff) -> list[_Hit]:
-    # Both rule fields are statement entries (core.continuity_types), so the statement is the rule's text.
-    statement = "json_extract(ce.body,'$.statement')"
-    source_scope, source_params = _source_scope("t", "ce.updated_at", caller, cloud_off, cutoff)
-    fields = sorted(RULE_FIELDS)
-    matching, match_params = _matching(statement, terms)
-    rows = db.execute(
-        f"""WITH top AS (
-              SELECT ce.thread_id,ce.history_epoch,ce.entry_id,ce.revision,ce.updated_at,{statement} AS statement
-              FROM continuity_entries ce JOIN threads t ON t.id=ce.thread_id
-              WHERE {_owned_threads('t')} AND ce.state='active'
-                AND ce.field IN (?,?)
-                AND EXISTS (SELECT 1 FROM json_each(ce.body,'$.source_refs')
-                            WHERE json_extract(value,'$.kind')='user')
-                AND NOT (ce.thread_id=? AND ce.history_epoch=t.history_epoch)
-                {source_scope} {matching}
-              ORDER BY ce.updated_at DESC LIMIT ?)
-            SELECT top.*,checkpoints.id AS checkpoint_id
-            FROM top LEFT JOIN checkpoint_entry_search entry_index
-              ON entry_index.thread_id=top.thread_id AND entry_index.history_epoch=top.history_epoch
-             AND entry_index.entry_id=top.entry_id AND entry_index.revision=top.revision
-            LEFT JOIN checkpoints ON checkpoints.generation_order=entry_index.last_generation_order
-            ORDER BY top.updated_at DESC""",
-        [user_id, *fields, caller_thread_id, *source_params, *match_params, SOURCE_CANDIDATES],
-    ).fetchall()
-    hits = []
-    for row in rows:
-        found = match(terms, str(row["statement"] or ""))
-        if found:
-            pointer = f' → get_checkpoints(checkpoint_id="{row["checkpoint_id"]}")' if row["checkpoint_id"] else ""
-            line = f'{local_clock(str(row["updated_at"]))} · rule an agent recorded from their words (thread {str(row["thread_id"])[:8]}) · “{_excerpt(found)}”{pointer}'
-            hits.append(_Hit(found, str(row["updated_at"]), "rule", line))
-    return hits
-
-
-def _excerpt(found: Match) -> str:
-    text = " ".join(found.span.split())
-    if len(text) <= 280:
-        return text
-    first = first_term_at(found.matched_terms, text)
-    start = max(0, min(first - 120, len(text) - 277))
-    end = min(len(text), start + 277)
-    prefix = "…" if start else ""
-    suffix = "…" if end < len(text) else ""
-    return prefix + text[start:end].strip() + suffix
 
 
 def _newest_first(created_at: str) -> float:
@@ -374,11 +377,11 @@ def _newest_first(created_at: str) -> float:
         return 0
 
 
-def _kind_counts(hits: list[_Hit]) -> str:
+def _kind_counts(hits: Sequence[_Hit | _MessageHit]) -> str:
     return ",".join(f"{kind}:{sum(hit.kind == kind for hit in hits)}" for kind in ("message", "comment", "decision", "rule"))
 
 
-def _log(reason: str, trigger: str, hits: list[_Hit], started: float, thread_id: str) -> None:
+def _log(reason: str, trigger: str, hits: Sequence[_Hit | _MessageHit], started: float, thread_id: str) -> None:
     ms = (perf_counter() - started) * 1000
     log.info("prior_words reason={} trigger={} hits={} kinds={} ms={:.1f}", reason, trigger, len(hits), _kind_counts(hits), ms)
     _emit(reason, trigger, hits, ms, thread_id)
@@ -390,7 +393,7 @@ def _log_error(trigger: str, exc: Exception, started: float, thread_id: str) -> 
     _emit("error", trigger, [], ms, thread_id)
 
 
-def _emit(reason: str, trigger: str, hits: list[_Hit], ms: float, thread_id: str) -> None:
+def _emit(reason: str, trigger: str, hits: Sequence[_Hit | _MessageHit], ms: float, thread_id: str) -> None:
     """Record each lookup's outcome as counts only; no words leave the lookup."""
     emit_product_event("prior_words", reason, thread_id=thread_id, properties={
         "trigger": trigger, "hits": len(hits), "kinds": _kind_counts(hits), "ms": round(ms, 1),
